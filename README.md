@@ -1,18 +1,14 @@
-# Experimently
+# Experimentation Platform
 
 > **Enterprise-grade experimentation platform for A/B testing and feature flags**
 
 A production-ready, scalable platform for A/B testing and feature management with real-time evaluation, automated safety monitoring, and comprehensive analytics.
 
-**Website**: [getexperimently.com](https://getexperimently.com)
-**Contact**: hello@getexperimently.com
-**Documentation**: [docs.getexperimently.com](https://docs.getexperimently.com)
-
 ---
 
 ## 🎯 Overview
 
-Experimently is a commercial experimentation platform that enables teams to make data-driven decisions through robust A/B testing and feature flag management. Built on AWS with enterprise-grade reliability and performance.
+An enterprise experimentation platform that enables teams to make data-driven decisions through robust A/B testing and feature flag management. Built on AWS with enterprise-grade reliability and performance.
 
 ### Key Capabilities
 
@@ -99,20 +95,19 @@ Built using modern, scalable architecture leveraging AWS services:
 
 ### For Evaluation
 
-Interested in using Experimently for your organization?
+Interested in using this platform for your organization?
 
 1. **Explore the Public Preview**: See [sample audit logs, metrics, and examples](public-preview/)
-2. **Schedule a Demo**: [getexperimently.com/demo](https://getexperimently.com/demo)
-3. **Request Trial Access**: Contact hello@getexperimently.com
-4. **View Pricing**: [getexperimently.com/pricing](https://getexperimently.com/pricing)
+2. **Review the Documentation**: Check the [docs](docs/) directory for comprehensive guides
+3. **Run Locally**: Follow the setup instructions in CLAUDE.md for local development
 
-### For Licensed Users
+### For Deployment
 
-Contact hello@getexperimently.com for:
-- Commercial license agreements
-- Deployment documentation
-- SDK access and integration guides
-- Enterprise support options
+Refer to the documentation for:
+- Deployment configuration
+- Infrastructure setup with AWS CDK
+- SDK integration guides
+- Configuration options
 
 ---
 
@@ -122,8 +117,7 @@ Contact hello@getexperimently.com for:
 - **[Architecture Overview](public-preview/architecture/system-overview.md)**: System design
 - **[Advanced Targeting Examples](public-preview/examples/advanced-targeting-rules.json)**: Real-world use cases
 - **[Performance Benchmarks](public-preview/metrics/performance/)**: Scale and reliability metrics
-
-For complete documentation, visit [docs.getexperimently.com](https://docs.getexperimently.com)
+- **[Development Guide](CLAUDE.md)**: Complete development guidelines and best practices
 
 ---
 
@@ -202,13 +196,12 @@ From our production deployment (December 2024):
 
 ---
 
-## 📞 Contact & Support
+## 📞 Support
 
-- **Website**: [getexperimently.com](https://getexperimently.com)
-- **Sales Inquiries**: hello@getexperimently.com
-- **Enterprise Support**: enterprise@getexperimently.com
-- **Documentation**: [docs.getexperimently.com](https://docs.getexperimently.com)
-- **Schedule Demo**: [getexperimently.com/demo](https://getexperimently.com/demo)
+For questions and issues:
+- Check the [documentation](docs/) directory
+- Review [CLAUDE.md](CLAUDE.md) for development guidelines
+- Explore the [public preview](public-preview/) examples
 
 ---
 
@@ -218,20 +211,16 @@ This repository contains:
 
 1. **Public Preview Materials** (`public-preview/` directory): Sample audit logs, metrics, and examples provided for evaluation purposes only.
 
-2. **Platform Source Code**: Proprietary software requiring a commercial license for production use.
-
-**The Experimently platform is commercial software.** Source code is visible for auditing and evaluation, but requires a valid commercial license for deployment and production use.
+2. **Platform Source Code**: Available for evaluation and development purposes.
 
 See [LICENSE.txt](LICENSE.txt) for complete terms.
 
-For licensing inquiries: hello@getexperimently.com
-
 ---
 
-## 🌟 Why Experimently?
+## 🌟 Key Differentiators
 
-| Feature | Experimently | Alternatives |
-|---------|-------------|--------------|
+| Feature | This Platform | Typical Alternatives |
+|---------|---------------|---------------------|
 | **Advanced Targeting** | 20+ operators (semver, geo, time, JSON path) | Basic operators only |
 | **Safety Monitoring** | Automated rollback with configurable thresholds | Manual monitoring |
 | **Statistical Methods** | Bayesian + Frequentist analysis | Single method |
@@ -242,5 +231,3 @@ For licensing inquiries: hello@getexperimently.com
 | **Customization** | Full platform access | Limited APIs |
 
 ---
-
-**© 2024 Experimently. All rights reserved.**
