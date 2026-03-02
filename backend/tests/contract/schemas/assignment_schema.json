@@ -1,0 +1,14 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AssignmentResponse",
+  "type": "object",
+  "required": ["id", "experiment_id", "variant_id", "user_id"],
+  "properties": {
+    "id": {"type": "string", "format": "uuid"},
+    "experiment_id": {"type": "string", "format": "uuid"},
+    "variant_id": {"type": "string", "format": "uuid"},
+    "user_id": {"type": "string"},
+    "context": {"type": ["object", "null"]},
+    "created_at": {"type": "string", "format": "date-time"}
+  }
+}

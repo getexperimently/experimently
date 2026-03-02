@@ -1,0 +1,19 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ExperimentResponse",
+  "type": "object",
+  "required": ["id", "name", "status", "owner_id"],
+  "properties": {
+    "id": {"type": "string", "format": "uuid"},
+    "name": {"type": "string", "minLength": 1},
+    "description": {"type": ["string", "null"]},
+    "hypothesis": {"type": ["string", "null"]},
+    "status": {"type": "string", "enum": ["draft", "active", "paused", "completed", "archived"]},
+    "experiment_type": {"type": "string", "enum": ["a_b", "multivariate", "split_url", "bandit"]},
+    "owner_id": {"type": "string", "format": "uuid"},
+    "start_date": {"type": ["string", "null"], "format": "date-time"},
+    "end_date": {"type": ["string", "null"], "format": "date-time"},
+    "created_at": {"type": "string", "format": "date-time"},
+    "updated_at": {"type": "string", "format": "date-time"}
+  }
+}
