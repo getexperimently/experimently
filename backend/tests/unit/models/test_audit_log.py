@@ -26,9 +26,10 @@ class TestAuditLogModel:
     def test_create_audit_log_with_required_fields(self, db_session: Session):
         """Test creating an audit log with only required fields."""
         # Create a test user first
+        uid = str(uuid4())[:8]
         user = User(
-            username="testuser",
-            email="test@example.com",
+            username=f"testuser_{uid}",
+            email=f"test_{uid}@example.com",
             hashed_password="$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW",
             role=UserRole.DEVELOPER,
         )
@@ -62,9 +63,10 @@ class TestAuditLogModel:
     def test_create_audit_log_with_all_fields(self, db_session: Session):
         """Test creating an audit log with all fields."""
         # Create a test user first
+        uid = str(uuid4())[:8]
         user = User(
-            username="testuser",
-            email="test@example.com",
+            username=f"testuser_{uid}",
+            email=f"test_{uid}@example.com",
             hashed_password="$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW",
             role=UserRole.ADMIN,
         )
@@ -196,9 +198,10 @@ class TestAuditLogModel:
     def test_audit_log_to_dict_method(self, db_session: Session):
         """Test the to_dict method for converting audit log to dictionary."""
         # Create a test user first
+        uid = str(uuid4())[:8]
         user = User(
-            username="todictuser",
-            email="test@example.com",
+            username=f"todictuser_{uid}",
+            email=f"todict_{uid}@example.com",
             hashed_password="$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW",
             role=UserRole.DEVELOPER,
         )
@@ -210,7 +213,7 @@ class TestAuditLogModel:
 
         audit_log = AuditLog(
             user_id=user.id,
-            user_email="test@example.com",
+            user_email=user.email,
             action_type=ActionType.TOGGLE_ENABLE.value,
             entity_type=EntityType.FEATURE_FLAG.value,
             entity_id=entity_id,
@@ -231,7 +234,7 @@ class TestAuditLogModel:
         assert isinstance(audit_dict, dict)
         assert audit_dict["id"] == str(audit_log.id)
         assert audit_dict["user_id"] == str(user.id)
-        assert audit_dict["user_email"] == "test@example.com"
+        assert audit_dict["user_email"] == user.email
         assert audit_dict["action_type"] == ActionType.TOGGLE_ENABLE.value
         assert audit_dict["entity_type"] == EntityType.FEATURE_FLAG.value
         assert audit_dict["entity_id"] == str(entity_id)
