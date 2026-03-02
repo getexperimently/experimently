@@ -1,9 +1,23 @@
+import React from 'react';
+import { useRouter } from 'next/router';
+import { ResultsDashboard } from '@/components/results/ResultsDashboard/ResultsDashboard';
+
 export default function ResultDetailPage() {
+  const { query } = useRouter();
+  const id = query.id as string | undefined;
+
+  if (!id) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-50">
+        <div className="animate-pulse text-slate-400">Loading...</div>
+      </div>
+    );
+  }
+
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-50">
-      <div className="text-center">
-        <h1 className="text-4xl font-bold text-slate-900 mb-4">Result Details</h1>
-        <p className="text-slate-600">Coming soon - Result details page</p>
+    <div className="min-h-screen bg-slate-50">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <ResultsDashboard experimentId={id} />
       </div>
     </div>
   );
