@@ -25,6 +25,7 @@ class Event(Base, BaseModel):
     __tablename__ = "events"
 
     event_type = Column(String(100), nullable=False, index=True)
+    event_name = Column(String(255), nullable=True, index=True)
     user_id = Column(
         String(255), nullable=False, index=True
     )  # External user identifier
