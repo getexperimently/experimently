@@ -86,7 +86,7 @@ export function CreateRoleModal({
             {isEditMode ? 'Edit Role' : 'Create Role'}
           </h2>
           <button
-            data-testid="modal-cancel-button"
+            data-testid="modal-close-x-button"
             type="button"
             onClick={onClose}
             className="text-slate-400 hover:text-slate-600 transition-colors"
