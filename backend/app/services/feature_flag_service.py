@@ -264,7 +264,10 @@ class FeatureFlagService:
 
         try:
             # If flag is not active, return False
-            if flag.status != FeatureFlagStatus.ACTIVE.value:
+            # Handle both enum member (FeatureFlagStatus.ACTIVE) and string value ("ACTIVE")
+            # SQLAlchemy returns the enum member when reading from the DB column,
+            # but some code paths store the raw string value.
+            if flag.status not in (FeatureFlagStatus.ACTIVE, FeatureFlagStatus.ACTIVE.value):
                 result = False
                 return result
 
