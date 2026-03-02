@@ -16,6 +16,7 @@ from stacks.elasticache_redis_stack import (
 from stacks.authentication_stack import AuthenticationStack
 from stacks.fargate_service_stack import FargateServiceStack
 from stacks.migration_task_stack import MigrationTaskStack
+from stacks.dynamodb_counters_stack import DynamoDBCountersStack
 
 # Environment determination
 env_name = os.environ.get("ENVIRONMENT", "dev")
@@ -38,6 +39,14 @@ vpc_stack = VpcStack(app, f"experimentation-vpc-{env_name}", env=env)
 # Create the DynamoDB tables stack
 dynamodb_stack = DynamoDBTablesStack(
     app, f"experimentation-dynamodb-{env_name}", environment=env_name, env=env
+)
+
+# P2-B: Real-time counters DynamoDB table
+dynamodb_counters_stack = DynamoDBCountersStack(
+    app,
+    f"experimentation-dynamodb-counters-{env_name}",
+    environment=env_name,
+    env=env,
 )
 
 # Create the enhanced database stack (with improved Aurora PostgreSQL)
