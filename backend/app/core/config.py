@@ -50,8 +50,25 @@ class Settings(BaseSettings):
     FIRST_SUPERUSER: EmailStr = "admin@example.com"
     FIRST_SUPERUSER_PASSWORD: str = "admin"
 
+    # Scheduler notification and health settings
+    NOTIFICATION_WEBHOOK_URL: str = ""
+    SCHEDULER_MAX_RETRIES: int = 3
+    SCHEDULER_RETRY_DELAY_SECONDS: int = 60
+    SCHEDULER_HISTORY_RETENTION_DAYS: int = 30
+
     # DynamoDB settings
     DYNAMODB_COUNTERS_TABLE: str = "experiment-counters"
+
+    # AWS region
+    AWS_REGION: str = "us-east-1"
+
+    # Glue / ETL settings (P3-A)
+    GLUE_ETL_JOB_NAME: str = "experimentation-events-etl"
+    GLUE_METRICS_JOB_NAME: str = "experimentation-metrics-etl"
+    GLUE_DATABASE: str = "experimentation"
+    GLUE_EVENTS_TABLE: str = "raw_events"
+    ATHENA_OUTPUT_BUCKET: str = "s3://experimentation-athena-results/"
+    GLUE_CRAWLER_NAME: str = "experimentation-crawler"
 
     # Cognito settings
     COGNITO_GROUP_ROLE_MAPPING: Dict[str, str] = {
