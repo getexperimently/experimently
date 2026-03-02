@@ -1,0 +1,82 @@
+name: Audience Segmentation API Tests (P3-C)
+
+on:
+  push:
+    paths:
+      - 'backend/app/models/segment.py'
+      - 'backend/app/schemas/segment.py'
+      - 'backend/app/services/audience_service.py'
+      - 'backend/app/api/v1/endpoints/segments.py'
+      - 'backend/tests/unit/schemas/test_segment_schemas.py'
+      - 'backend/tests/unit/services/test_audience_service.py'
+      - 'backend/tests/unit/api/test_segment_endpoints.py'
+  pull_request:
+    paths:
+      - 'backend/app/**'
+      - 'backend/tests/unit/**'
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: Audience Segmentation Unit Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r backend/requirements.txt
+
+      - name: Run schema tests
+        env:
+          APP_ENV: test
+          TESTING: "true"
+        run: |
+          python -m pytest \
+            backend/tests/unit/schemas/test_segment_schemas.py \
+            -v --tb=short
+
+      - name: Run service tests
+        env:
+          APP_ENV: test
+          TESTING: "true"
+        run: |
+          python -m pytest \
+            backend/tests/unit/services/test_audience_service.py \
+            -v --tb=short
+
+      - name: Run endpoint tests
+        env:
+          APP_ENV: test
+          TESTING: "true"
+        run: |
+          python -m pytest \
+            backend/tests/unit/api/test_segment_endpoints.py \
+            -v --tb=short
+
+      - name: Run full segment test suite
+        env:
+          APP_ENV: test
+          TESTING: "true"
+        run: |
+          python -m pytest \
+            backend/tests/unit/schemas/test_segment_schemas.py \
+            backend/tests/unit/services/test_audience_service.py \
+            backend/tests/unit/api/test_segment_endpoints.py \
+            -v --tb=short \
+            --junitxml=segment-test-results.xml
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: segment-test-results
+          path: segment-test-results.xml
+          retention-days: 7

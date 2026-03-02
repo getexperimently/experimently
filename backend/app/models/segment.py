@@ -1,5 +1,7 @@
 # Segmentation models
-from sqlalchemy import Column, String, Text, ForeignKey
+import enum
+
+from sqlalchemy import Column, String, Text, ForeignKey, Enum as SQLAEnum
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
 from sqlalchemy.ext.declarative import declared_attr
@@ -8,13 +10,27 @@ from .base import Base, BaseModel
 from backend.app.core.database_config import get_schema_name
 
 
+class SegmentStatus(enum.Enum):
+    """Segment lifecycle status."""
+
+    ACTIVE = "active"
+    INACTIVE = "inactive"
+    ARCHIVED = "archived"
+
+
 class Segment(Base, BaseModel):
     """User segment model for targeting rules."""
 
     __tablename__ = "segments"
 
-    name = Column(String(100), nullable=False)
+    name = Column(String(128), nullable=False)
     description = Column(Text)
+    status = Column(
+        SQLAEnum(SegmentStatus),
+        default=SegmentStatus.ACTIVE,
+        nullable=False,
+        index=True,
+    )
     owner_id = Column(
         UUID(as_uuid=True),
         ForeignKey(f"{get_schema_name()}.users.id", ondelete="SET NULL"),
