@@ -292,11 +292,9 @@ async def get_experiment(
         # Check cache first if enabled
         if cache_control.enabled and cache_control.redis:
             cache_key = f"experiment:{experiment_id}"
-            cached_data = cache_control.redis.get(cache_key)
+            cached_data = await cache_control.redis.get(cache_key)
             if cached_data:
-                from pydantic import parse_raw_as
-
-                return parse_raw_as(ExperimentResponse, cached_data)
+                return ExperimentResponse.model_validate_json(cached_data)
 
         # Create experiment service
         experiment_service = ExperimentService(db)
@@ -359,7 +357,7 @@ async def get_experiment(
 
         # Cache result if enabled
         if cache_control.enabled and cache_control.redis:
-            cache_control.redis.setex(
+            await cache_control.redis.setex(
                 f"experiment:{experiment_id}",
                 3600,  # Cache for 1 hour
                 response.model_dump_json(),
@@ -1025,24 +1023,20 @@ async def get_experiment_results(
         # Try to get from cache if enabled
         if cache_control.enabled and cache_control.redis:
             cache_key = f"experiment_results:{experiment_id}"
-            cached_data = cache_control.redis.get(cache_key)
+            cached_data = await cache_control.redis.get(cache_key)
             if cached_data:
-                from pydantic import parse_raw_as
+                return ExperimentResults.model_validate_json(cached_data)
 
-                return parse_raw_as(ExperimentResults, cached_data)
-
-        # Create experiment service
-        experiment_service = ExperimentService(db)
-
-        # Calculate results
-        results = experiment_service.calculate_results(experiment_id)
+        # Calculate results using the analysis service
+        analysis_service = AnalysisService(db)
+        results = analysis_service.get_experiment_results(experiment_id)
 
         # Cache results if enabled
         if cache_control.enabled and cache_control.redis:
-            cache_control.redis.setex(
+            await cache_control.redis.setex(
                 f"experiment_results:{experiment_id}",
                 3600,  # Cache for 1 hour
-                results.json(),
+                results.model_dump_json() if hasattr(results, "model_dump_json") else str(results),
             )
 
         return results
@@ -1249,7 +1243,7 @@ async def get_daily_experiment_results(
         if cache_control.enabled and cache_control.redis:
             metric_part = f":{metric_id}" if metric_id else ""
             cache_key = f"experiment_daily_results:{experiment_id}{metric_part}"
-            cached_data = cache_control.redis.get(cache_key)
+            cached_data = await cache_control.redis.get(cache_key)
             if cached_data:
                 import json
 
@@ -1348,7 +1342,7 @@ async def get_segmented_experiment_results(
             cache_key = (
                 f"experiment_segmented_results:{experiment_id}:{segment_by}{metric_part}"
             )
-            cached_data = cache_control.redis.get(cache_key)
+            cached_data = await cache_control.redis.get(cache_key)
             if cached_data:
                 import json
 
