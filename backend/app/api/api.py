@@ -21,6 +21,7 @@ from backend.app.api.v1.endpoints import (
     metrics,
     safety,
     audit_logs,
+    export,
 )
 
 # Import the sample size calculator router
@@ -61,6 +62,9 @@ api_router_v1.include_router(
 
 # Add new utility endpoints
 api_router_v1.include_router(sample_size_router, prefix="/utils", tags=["Utilities"])
+
+# EP-020: Data Export & Reporting
+api_router_v1.include_router(export.router, prefix="/export", tags=["Export"])
 
 # Main API router that includes versioned routers
 api_router = APIRouter()
@@ -123,5 +127,13 @@ tags_metadata = [
     {
         "name": "Audit Logs",
         "description": "Operations for querying audit logs and tracking system activity",
+    },
+    {
+        "name": "Export",
+        "description": "Operations for exporting experiment and feature flag data as CSV or JSON",
+    },
+    {
+        "name": "Reports",
+        "description": "Operations for generating platform and experiment summary reports",
     },
 ]
