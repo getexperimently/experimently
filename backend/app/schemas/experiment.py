@@ -182,7 +182,7 @@ class VariantBase(BaseModel):
 class ExperimentBase(BaseModel):
     """Base model for experiment data."""
 
-    name: str = Field(..., min_length=1, max_length=255, description="Experiment name")
+    name: str = Field(..., min_length=1, max_length=100, description="Experiment name")
     description: Optional[str] = Field(None, max_length=2000, description="Experiment description")
     hypothesis: Optional[str] = Field(None, max_length=2000, description="Experiment hypothesis")
     experiment_type: ExperimentType = Field(

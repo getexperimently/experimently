@@ -590,6 +590,11 @@ def apply_operator(
             # Parse actual_value to datetime
             dt = _parse_datetime(actual_value)
 
+            # If a value was provided but couldn't be parsed, it's invalid
+            if actual_value is not None and dt is None:
+                logger.warning(f"TIME_WINDOW: invalid datetime value: {actual_value!r}")
+                return False
+
             # Validate expected_value is a dict
             if not isinstance(expected_value, dict):
                 logger.warning(f"TIME_WINDOW operator requires dict configuration, got {type(expected_value)}")
