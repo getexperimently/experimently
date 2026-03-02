@@ -68,7 +68,13 @@ def contract_engine(test_db):
     creates a new engine with its own connection pool. This prevents stale
     connections from E2E tests (which commit freely) from corrupting the
     contract tests' db_session transaction wrappers.
+
+    Disposes the app engine at fixture start to clear any idle app connections
+    that might conflict with the contract tests' own pool.
     """
+    from backend.app.db.session import engine as app_engine
+    app_engine.dispose()
+
     db_url = os.environ.get("TEST_DATABASE_URL", DEFAULT_TEST_DB_URL)
     engine = create_engine(
         db_url,
