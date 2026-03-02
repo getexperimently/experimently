@@ -478,6 +478,230 @@ class AnalysisService:
             "p_value": best_variant["p_value"],
         }
 
+    # -----------------------------------------------------------------------
+    # EP-016 Statistical Helper Methods
+    # -----------------------------------------------------------------------
+
+    @staticmethod
+    def _effect_size_label(abs_effect: float) -> str:
+        """Map absolute effect size to a human-readable label (EP-016 thresholds)."""
+        if abs_effect < 0.2:
+            return "negligible"
+        elif abs_effect < 0.5:
+            return "small"
+        elif abs_effect < 0.8:
+            return "medium"
+        else:
+            return "large"
+
+    def select_statistical_test(
+        self,
+        metric_type: str,
+        control_size: int,
+        treatment_size: int,
+    ) -> str:
+        """Select the most appropriate statistical test.
+
+        Returns 'fisher_exact' for small samples (n < 30), 'z_test' for
+        conversion metrics with large samples, and 'welch_t_test' for
+        continuous metrics (revenue, duration, count, custom).
+        """
+        if min(control_size, treatment_size) < 30:
+            return "fisher_exact"
+        if metric_type == "conversion":
+            return "z_test"
+        return "welch_t_test"
+
+    def z_test_proportions(
+        self,
+        control_conversions: int,
+        control_size: int,
+        treatment_conversions: int,
+        treatment_size: int,
+    ) -> float:
+        """Two-proportion z-test (pooled). Returns the two-tailed p-value.
+
+        Formula:
+            pooled_p = (x_c + x_t) / (n_c + n_t)
+            se = sqrt(pooled_p * (1 - pooled_p) * (1/n_c + 1/n_t))
+            z = (p_t - p_c) / se
+            p = 2 * (1 - Phi(|z|))
+        """
+        if control_size <= 0 or treatment_size <= 0:
+            return 1.0
+
+        p_c = control_conversions / control_size
+        p_t = treatment_conversions / treatment_size
+        total = control_size + treatment_size
+        pooled_p = (control_conversions + treatment_conversions) / total
+
+        se = math.sqrt(pooled_p * (1.0 - pooled_p) * (1.0 / control_size + 1.0 / treatment_size))
+        if se == 0.0:
+            return 1.0
+
+        z = (p_t - p_c) / se
+        p_value = 2.0 * (1.0 - float(stats.norm.cdf(abs(z))))
+        return min(1.0, max(0.0, p_value))
+
+    def welch_t_test(
+        self,
+        control_values: List[float],
+        treatment_values: List[float],
+    ) -> float:
+        """Welch's t-test for two independent groups (unequal variances).
+
+        Returns the two-tailed p-value. Returns NaN when the within-group
+        variance is zero (identical data), which callers should handle.
+        """
+        result = stats.ttest_ind(control_values, treatment_values, equal_var=False)
+        return float(result.pvalue)
+
+    def cohens_h(
+        self,
+        p1: float,
+        p2: float,
+    ) -> Tuple[float, str]:
+        """Cohen's h effect size for two proportions.
+
+        h = 2 * arcsin(sqrt(p2)) - 2 * arcsin(sqrt(p1))
+
+        Positive h means p2 > p1 (treatment outperforms control when called
+        as cohens_h(p_control, p_treatment)).
+
+        Labels (EP-016): negligible < 0.2, small < 0.5, medium < 0.8, large >= 0.8
+        """
+        phi1 = 2.0 * math.asin(math.sqrt(max(0.0, min(1.0, p1))))
+        phi2 = 2.0 * math.asin(math.sqrt(max(0.0, min(1.0, p2))))
+        h = phi2 - phi1
+        label = self._effect_size_label(abs(h))
+        return (h, label)
+
+    def cohens_d(
+        self,
+        control_values: List[float],
+        treatment_values: List[float],
+    ) -> Tuple[float, str]:
+        """Cohen's d effect size for two groups of continuous measurements.
+
+        d = (mean_treatment - mean_control) / pooled_std
+        pooled_std = sqrt((std_c^2 + std_t^2) / 2)
+
+        When pooled_std == 0 (constant data in both groups), d is set to
+        +inf / -inf based on the direction of the mean difference (or 0.0
+        when both means are equal).
+
+        Labels (EP-016): negligible < 0.2, small < 0.5, medium < 0.8, large >= 0.8
+        """
+        arr_c = np.array(control_values, dtype=float)
+        arr_t = np.array(treatment_values, dtype=float)
+
+        mean_c = float(np.mean(arr_c))
+        mean_t = float(np.mean(arr_t))
+
+        std_c = float(np.std(arr_c, ddof=1)) if len(arr_c) > 1 else 0.0
+        std_t = float(np.std(arr_t, ddof=1)) if len(arr_t) > 1 else 0.0
+
+        pooled_std = math.sqrt((std_c ** 2 + std_t ** 2) / 2.0)
+
+        if pooled_std == 0.0:
+            if mean_t > mean_c:
+                d = float("inf")
+            elif mean_t < mean_c:
+                d = float("-inf")
+            else:
+                d = 0.0
+        else:
+            d = (mean_t - mean_c) / pooled_std
+
+        label = self._effect_size_label(abs(d))
+        return (d, label)
+
+    def wilson_confidence_interval(
+        self,
+        successes: int,
+        total: int,
+        confidence_level: float = 0.95,
+    ) -> Tuple[float, float]:
+        """Wilson score confidence interval for a proportion.
+
+        Preferred over the normal approximation because it stays within
+        [0, 1] and has better coverage for extreme proportions (p near 0 or 1).
+
+        Returns (lower, upper) both clamped to [0, 1].
+        """
+        if total <= 0:
+            return (0.0, 1.0)
+
+        z = float(stats.norm.ppf((1.0 + confidence_level) / 2.0))
+        z2 = z * z
+        n = float(total)
+        p_hat = successes / n
+
+        center = (p_hat + z2 / (2.0 * n)) / (1.0 + z2 / n)
+        margin = (
+            z * math.sqrt(p_hat * (1.0 - p_hat) / n + z2 / (4.0 * n * n))
+            / (1.0 + z2 / n)
+        )
+
+        lower = max(0.0, center - margin)
+        upper = min(1.0, center + margin)
+        return (lower, upper)
+
+    def apply_bonferroni_correction(
+        self,
+        p_value: float,
+        n_tests: int,
+    ) -> float:
+        """Apply Bonferroni correction to a p-value.
+
+        Corrected p = min(p * n_tests, 1.0).  Controls the family-wise
+        error rate (FWER) for multiple comparisons.
+        """
+        return min(p_value * n_tests, 1.0)
+
+    def calculate_required_sample_size(
+        self,
+        baseline_rate: float,
+        minimum_detectable_effect: float,
+        alpha: float = 0.05,
+        power: float = 0.80,
+    ) -> int:
+        """Calculate the required sample size per variant (two-proportion z-test).
+
+        Uses the two-sided formula from EP-016:
+            n = (z_alpha * sqrt(2*p_bar*(1-p_bar)) + z_beta * sqrt(p1*(1-p1) + p2*(1-p2)))^2
+                / (p2 - p1)^2
+
+        Args:
+            baseline_rate: Control group conversion rate (p1).
+            minimum_detectable_effect: Absolute change in proportion (p2 = p1 + mde).
+            alpha: Type I error rate (1 - confidence_level).
+            power: Desired statistical power (1 - beta).
+
+        Returns:
+            Minimum observations per variant, rounded up to the nearest integer.
+        """
+        p1 = baseline_rate
+        p2 = p1 + minimum_detectable_effect
+        p2 = min(max(p2, 1e-9), 1.0 - 1e-9)
+
+        p_bar = (p1 + p2) / 2.0
+
+        z_alpha = float(stats.norm.ppf(1.0 - alpha / 2.0))
+        z_beta = float(stats.norm.ppf(power))
+
+        numerator = (
+            z_alpha * math.sqrt(2.0 * p_bar * (1.0 - p_bar))
+            + z_beta * math.sqrt(p1 * (1.0 - p1) + p2 * (1.0 - p2))
+        ) ** 2
+        denominator = (p2 - p1) ** 2
+
+        if denominator == 0.0:
+            return 1
+
+        n = math.ceil(numerator / denominator)
+        return max(1, n)
+
     def get_segmented_results(
         self,
         experiment_id: Union[str, UUID],
