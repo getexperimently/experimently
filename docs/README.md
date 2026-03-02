@@ -2,6 +2,15 @@
 
 This directory contains documentation for the experimentation platform project.
 
+## Start Here
+
+| Guide | Audience | Description |
+|-------|----------|-------------|
+| [Quick Start](getting-started/quick-start.md) | Everyone | Zero to first experiment in 30 minutes |
+| [User Guide](guides/user-guide.md) | Product / Analysts | How to design, run, and interpret experiments |
+| [Technical Guide](architecture/technical-guide.md) | Engineers | Architecture, data models, implementation details |
+| [Testing Guide](development/testing-guide.md) | Engineers | Writing and running tests |
+
 ## Contents
 
 - [Issue Fixes](issue_fixes/index.md) - Documentation of issues fixed and improvements made to the platform
@@ -10,10 +19,6 @@ This directory contains documentation for the experimentation platform project.
   - [Feature Flag Testing](issue_fixes/feature_flag_testing.md)
   - [Experiment Testing](issue_fixes/experiment_testing.md)
   - And more...
-
-## Getting Started
-
-For installation instructions and getting started with the experimentation platform, please refer to the main [README.md](../README.md) file at the root of the repository.
 
 ## Directory Structure
 

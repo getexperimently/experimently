@@ -46,6 +46,7 @@ faker==19.6.2
 factory-boy==3.3.0
 freezegun==1.2.2
 moto==4.2.2
+jsonschema==4.19.2
 
 # Statistical Analysis
 numpy==1.25.2
