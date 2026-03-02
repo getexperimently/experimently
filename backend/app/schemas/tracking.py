@@ -13,11 +13,11 @@ from pydantic import BaseModel, Field, field_validator, model_validator, ConfigD
 class EventBase(BaseModel):
     """Base model for event data."""
     event_name: str = Field(..., min_length=1, max_length=100)
-    user_id: Optional[str] = None
-    session_id: Optional[str] = None
-    experiment_id: Optional[str] = None
-    feature_flag_id: Optional[str] = None
-    variant_id: Optional[str] = None
+    user_id: Optional[str] = Field(None, max_length=255)
+    session_id: Optional[str] = Field(None, max_length=255)
+    experiment_id: Optional[str] = Field(None, max_length=255)
+    feature_flag_id: Optional[str] = Field(None, max_length=255)
+    variant_id: Optional[str] = Field(None, max_length=255)
     metadata: Optional[Dict[str, Any]] = None
     timestamp: Optional[datetime] = None
 
@@ -47,11 +47,11 @@ class EventResponse(EventBase):
 
 class AssignmentBase(BaseModel):
     """Base model for assignment data."""
-    user_id: Optional[str] = None
-    session_id: Optional[str] = None
-    experiment_id: Optional[str] = None
-    feature_flag_id: Optional[str] = None
-    variant_id: Optional[str] = None
+    user_id: Optional[str] = Field(None, max_length=255)
+    session_id: Optional[str] = Field(None, max_length=255)
+    experiment_id: Optional[str] = Field(None, max_length=255)
+    feature_flag_id: Optional[str] = Field(None, max_length=255)
+    variant_id: Optional[str] = Field(None, max_length=255)
     metadata: Optional[Dict[str, Any]] = None
     timestamp: Optional[datetime] = None
 
@@ -121,8 +121,8 @@ class ExperimentResults(BaseModel):
 
 class AssignmentRequest(BaseModel):
     """Model for requesting a variant assignment."""
-    experiment_key: str = Field(..., min_length=1, description="Experiment identifier")
-    user_id: str = Field(..., min_length=1, description="User identifier")
+    experiment_key: str = Field(..., min_length=1, max_length=100, description="Experiment identifier")
+    user_id: str = Field(..., min_length=1, max_length=255, description="User identifier")
     context: Optional[Dict[str, Any]] = Field(None, description="User context for targeting")
 
     model_config = ConfigDict(
@@ -145,7 +145,7 @@ class EventRequest(BaseModel):
     """Model for tracking an event."""
     experiment_id: Optional[UUID4] = None
     feature_flag_id: Optional[UUID4] = None
-    event_type: str
+    event_type: str = Field(..., min_length=1, max_length=100)
     event_data: Optional[Dict] = None
     timestamp: Optional[datetime] = None
 
@@ -237,8 +237,8 @@ class EventQueryParams(BaseModel):
     """Model for querying events."""
     experiment_id: Optional[UUID4] = Field(None, description="Filter by experiment ID")
     feature_flag_id: Optional[UUID4] = Field(None, description="Filter by feature flag ID")
-    user_id: Optional[str] = Field(None, description="Filter by user ID")
-    event_type: Optional[str] = Field(None, description="Filter by event type")
+    user_id: Optional[str] = Field(None, max_length=255, description="Filter by user ID")
+    event_type: Optional[str] = Field(None, max_length=100, description="Filter by event type")
     start_date: Optional[datetime] = Field(None, description="Filter events after this date")
     end_date: Optional[datetime] = Field(None, description="Filter events before this date")
     limit: int = Field(100, ge=1, le=1000, description="Maximum number of events to return")

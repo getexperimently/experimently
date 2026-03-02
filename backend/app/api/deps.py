@@ -341,7 +341,7 @@ def get_api_key(
 
     # Get API key from database
     api_key = db.query(APIKey).filter(APIKey.key == api_key_header).first()
-    if not api_key or not api_key.is_active:
+    if not api_key or not api_key.is_valid:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid API Key",

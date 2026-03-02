@@ -8,8 +8,11 @@ and sensible defaults.
 import os
 import secrets
 from typing import Any, Dict, List, Optional, Union
-from pydantic import field_validator, AnyHttpUrl, EmailStr, PostgresDsn, RedisDsn, ValidationInfo
+from pydantic import field_validator, model_validator, AnyHttpUrl, EmailStr, PostgresDsn, RedisDsn, ValidationInfo
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Minimum acceptable length for SECRET_KEY in non-test environments
+_MIN_SECRET_KEY_LENGTH = 32
 
 
 class Settings(BaseSettings):
@@ -18,9 +21,12 @@ class Settings(BaseSettings):
     PROJECT_NAME: str = "Experimentation Platform"
     VERSION: str = "1.0.0"
     API_V1_STR: str = "/api/v1"
-    SECRET_KEY: str = "default-secret-key-for-testing"  # Default for testing
+    SECRET_KEY: str = "default-secret-key-for-testing"  # Default for testing only
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 8  # 8 days
     BACKEND_CORS_ORIGINS: List[AnyHttpUrl] = []
+    # CORS_ORIGINS is a plain-string list version of BACKEND_CORS_ORIGINS that
+    # can also be set via env var as a comma-separated string.
+    CORS_ORIGINS: List[str] = []
     ENVIRONMENT: str = "dev"
     DEBUG: bool = False
 
@@ -68,6 +74,43 @@ class Settings(BaseSettings):
         elif isinstance(v, (list, str)):
             return v
         raise ValueError(v)
+
+    @field_validator("CORS_ORIGINS", mode="before")
+    @classmethod
+    def assemble_cors_origins_plain(cls, v: Union[str, List[str]]) -> List[str]:
+        """Parse plain CORS origins list from comma-separated string or list."""
+        if isinstance(v, str) and v:
+            return [i.strip() for i in v.split(",") if i.strip()]
+        if isinstance(v, list):
+            return v
+        return []
+
+    @field_validator("SECRET_KEY")
+    @classmethod
+    def validate_secret_key(cls, v: str, info: ValidationInfo) -> str:
+        """
+        Ensure the SECRET_KEY is sufficiently long in non-test environments.
+
+        A short or default key in production is a critical security vulnerability.
+        Tests are explicitly excluded so the test suite can run without real keys.
+        """
+        environment = (info.data or {}).get("ENVIRONMENT", "dev")
+        is_testing = os.getenv("TESTING", "").lower() in ("1", "true", "yes")
+        if not is_testing and environment == "prod":
+            weak_defaults = {
+                "default-secret-key-for-testing",
+                "secret",
+                "changeme",
+                "password",
+                "supersecret",
+            }
+            if v in weak_defaults or len(v) < _MIN_SECRET_KEY_LENGTH:
+                raise ValueError(
+                    f"SECRET_KEY must be at least {_MIN_SECRET_KEY_LENGTH} characters "
+                    "and must not be a well-known default value in production. "
+                    "Generate one with: python -c \"import secrets; print(secrets.token_hex(32))\""
+                )
+        return v
 
     @field_validator("DATABASE_URI", mode="before")
     @classmethod

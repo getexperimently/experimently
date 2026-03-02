@@ -1,0 +1,12 @@
+title = "Experimentation Platform Gitleaks Config"
+
+[allowlist]
+  description = "Allowlist"
+  regexes = [
+    '''HASHED_PASSWORD = "\$2b\$12\$.*"''',  # bcrypt hashes in test files are OK
+    '''mock.*token''',                         # mock tokens in tests
+  ]
+  paths = [
+    '''backend/tests/''',
+    '''frontend/src/tests/''',
+  ]
