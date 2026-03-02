@@ -16,6 +16,7 @@ from backend.app.models.experiment import Experiment, Variant, Metric, Experimen
 from backend.app.models.event import Event, EventType
 from backend.app.models.assignment import Assignment
 from backend.app.core.config import settings
+from backend.app.core.database_config import get_schema_name
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +36,15 @@ class AnalysisService:
         """Initialize with a database session."""
         self.db = db
 
+    @staticmethod
+    def _parse_dt(value) -> datetime:
+        """Parse a datetime value that may be a datetime object or ISO string."""
+        if isinstance(value, datetime):
+            return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value
+        if isinstance(value, str):
+            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        raise ValueError(f"Cannot parse datetime from {type(value)}: {value!r}")
+
     def get_experiment_results(self, experiment_id: Union[str, UUID]) -> Dict[str, Any]:
         """
         Get comprehensive results for an experiment.
@@ -48,7 +58,7 @@ class AnalysisService:
         # Get experiment with variants and metrics
         experiment = (
             self.db.query(Experiment)
-            .options(joinedload(Experiment.variants), joinedload(Experiment.metrics))
+            .options(joinedload(Experiment.variants), joinedload(Experiment.metric_definitions))
             .filter(Experiment.id == experiment_id)
             .first()
         )
@@ -58,7 +68,7 @@ class AnalysisService:
 
         # Calculate results for each metric
         metrics_results = []
-        for metric in experiment.metrics:
+        for metric in experiment.metric_definitions:
             metric_result = self.calculate_metric_results(experiment, metric)
             metrics_results.append(metric_result)
 
@@ -243,13 +253,13 @@ class AnalysisService:
         """
         # Get start and end dates
         start_date = experiment.start_date
-        end_date = experiment.end_date or datetime.now(timezone.utc).isoformat()
+        end_date = experiment.end_date
 
         # Calculate experiment duration in days
         if start_date:
             try:
-                start_dt = datetime.fromisoformat(start_date.replace("Z", "+00:00"))
-                end_dt = datetime.fromisoformat(end_date.replace("Z", "+00:00"))
+                start_dt = self._parse_dt(experiment.start_date)
+                end_dt = self._parse_dt(experiment.end_date) if experiment.end_date else datetime.now(timezone.utc)
                 duration_days = (end_dt - start_dt).days
             except (ValueError, TypeError):
                 duration_days = None
@@ -311,7 +321,7 @@ class AnalysisService:
         # Get experiment with variants and metrics
         experiment = (
             self.db.query(Experiment)
-            .options(joinedload(Experiment.variants), joinedload(Experiment.metrics))
+            .options(joinedload(Experiment.variants), joinedload(Experiment.metric_definitions))
             .filter(Experiment.id == experiment_id)
             .first()
         )
@@ -323,9 +333,9 @@ class AnalysisService:
         if not experiment.start_date:
             return []
 
-        start_dt = datetime.fromisoformat(experiment.start_date.replace("Z", "+00:00"))
+        start_dt = self._parse_dt(experiment.start_date)
         end_dt = (
-            datetime.fromisoformat(experiment.end_date.replace("Z", "+00:00"))
+            self._parse_dt(experiment.end_date)
             if experiment.end_date
             else datetime.now(timezone.utc)
         )
@@ -340,7 +350,7 @@ class AnalysisService:
         # Filter metrics if metric_id is provided
         metrics = [
             m
-            for m in experiment.metrics
+            for m in experiment.metric_definitions
             if not metric_id or str(m.id) == str(metric_id)
         ]
 
@@ -400,8 +410,8 @@ class AnalysisService:
                             Event.variant_id == variant.id,
                             Event.event_type == EventType.CONVERSION.value,
                             Event.event_name == metric.event_name,
-                            Event.timestamp >= date_start.isoformat(),
-                            Event.timestamp <= date_end.isoformat(),
+                            Event.created_at >= date_start.isoformat(),
+                            Event.created_at <= date_end.isoformat(),
                         )
                         .scalar()
                         or 0
@@ -488,7 +498,7 @@ class AnalysisService:
         # Get experiment with variants and metrics
         experiment = (
             self.db.query(Experiment)
-            .options(joinedload(Experiment.variants), joinedload(Experiment.metrics))
+            .options(joinedload(Experiment.variants), joinedload(Experiment.metric_definitions))
             .filter(Experiment.id == experiment_id)
             .first()
         )
@@ -499,22 +509,23 @@ class AnalysisService:
         # Filter metrics if metric_id is provided
         metrics = [
             m
-            for m in experiment.metrics
+            for m in experiment.metric_definitions
             if not metric_id or str(m.id) == str(metric_id)
         ]
 
         if not metrics:
             return {"segments": []}
 
-        # Get segment values from event properties
+        # Get segment values from event metadata
+        schema = get_schema_name()
         segment_values_query = text(
             f"""
-            SELECT DISTINCT jsonb_extract_path_text(properties, :segment_key) as segment_value
-            FROM events
+            SELECT DISTINCT jsonb_extract_path_text(event_metadata, :segment_key) as segment_value
+            FROM {schema}.events
             WHERE experiment_id = :experiment_id
-            AND properties ? :segment_key
-            AND jsonb_extract_path_text(properties, :segment_key) IS NOT NULL
-            AND jsonb_extract_path_text(properties, :segment_key) != ''
+            AND event_metadata ? :segment_key
+            AND jsonb_extract_path_text(event_metadata, :segment_key) IS NOT NULL
+            AND jsonb_extract_path_text(event_metadata, :segment_key) != ''
         """
         )
 
@@ -546,12 +557,12 @@ class AnalysisService:
                     segment_assignments_query = text(
                         f"""
                         SELECT COUNT(DISTINCT a.user_id)
-                        FROM assignments a
-                        JOIN events e ON a.user_id = e.user_id AND a.experiment_id = e.experiment_id
+                        FROM {schema}.assignments a
+                        JOIN {schema}.events e ON a.user_id = e.user_id AND a.experiment_id = e.experiment_id
                         WHERE a.experiment_id = :experiment_id
                         AND a.variant_id = :variant_id
-                        AND e.properties ? :segment_key
-                        AND jsonb_extract_path_text(e.properties, :segment_key) = :segment_value
+                        AND e.event_metadata ? :segment_key
+                        AND jsonb_extract_path_text(e.event_metadata, :segment_key) = :segment_value
                     """
                     )
 
@@ -572,13 +583,13 @@ class AnalysisService:
                     segment_conversions_query = text(
                         f"""
                         SELECT COUNT(*)
-                        FROM events
+                        FROM {schema}.events
                         WHERE experiment_id = :experiment_id
                         AND variant_id = :variant_id
                         AND event_type = :event_type
                         AND event_name = :event_name
-                        AND properties ? :segment_key
-                        AND jsonb_extract_path_text(properties, :segment_key) = :segment_value
+                        AND event_metadata ? :segment_key
+                        AND jsonb_extract_path_text(event_metadata, :segment_key) = :segment_value
                     """
                     )
 
