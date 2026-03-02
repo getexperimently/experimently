@@ -214,6 +214,28 @@ class ProdSettings(Settings):
 
     model_config = SettingsConfigDict(env_file=".env.prod", case_sensitive=True, extra="allow")
 
+    def get_db_url(self) -> str:
+        """
+        Get the database URL, loading from Secrets Manager if needed.
+
+        In production with ECS, POSTGRES_PASSWORD is injected directly
+        from Secrets Manager as an env var by the task definition.
+        This method is a fallback for non-ECS production deployments
+        where the password was not injected via env var.
+        """
+        if self.ENVIRONMENT == "prod" and not self.POSTGRES_PASSWORD:
+            try:
+                from backend.app.core.secrets import get_secret, build_secret_name
+                password = get_secret(build_secret_name("db-password"))
+                return (
+                    f"postgresql://{self.POSTGRES_USER}:{password}"
+                    f"@{self.POSTGRES_SERVER}:{self.POSTGRES_PORT}"
+                    f"/{self.POSTGRES_DB}"
+                )
+            except Exception:
+                pass  # Fall through to standard URL construction
+        return str(self.SQLALCHEMY_DATABASE_URI)
+
 
 # Select settings based on environment
 environment = os.getenv("APP_ENV", "dev").lower()

@@ -14,6 +14,8 @@ from stacks.elasticache_redis_stack import (
     ElastiCacheRedisStack,
 )  # Import the Redis stack
 from stacks.authentication_stack import AuthenticationStack
+from stacks.fargate_service_stack import FargateServiceStack
+from stacks.migration_task_stack import MigrationTaskStack
 
 # Environment determination
 env_name = os.environ.get("ENVIRONMENT", "dev")
@@ -89,6 +91,43 @@ monitoring_stack = MonitoringStack(
     app, f"experimentation-monitoring-{env_name}", vpc=vpc_stack.vpc, env=env
 )
 monitoring_stack.add_dependency(vpc_stack)
+
+# ---------------------------------------------------------------------------
+# EP-019: Production Deployment — ECS Fargate + ALB + Blue/Green + Migrations
+# ---------------------------------------------------------------------------
+
+# Optional: supply an ACM certificate ARN via the CERTIFICATE_ARN environment
+# variable. Without this the HTTPS listeners cannot be created; the parameter
+# defaults to None which produces a listener without a certificate (suitable
+# only for development/testing stacks where certificate validation is not
+# required).
+certificate_arn = os.environ.get("CERTIFICATE_ARN", None)
+
+# Fargate service stack: ALB, blue/green CodeDeploy, auto-scaling
+fargate_stack = FargateServiceStack(
+    app,
+    f"experimentation-fargate-{env_name}",
+    vpc=vpc_stack.vpc,
+    ecs_cluster=compute_stack.ecs_cluster,
+    ecs_security_group=compute_stack.ecs_security_group,
+    env_name=env_name,
+    certificate_arn=certificate_arn,
+    env=env,
+)
+fargate_stack.add_dependency(compute_stack)
+fargate_stack.add_dependency(database_stack)
+fargate_stack.add_dependency(redis_stack)
+
+# Migration task stack: one-shot Fargate task for Alembic migrations
+migration_stack = MigrationTaskStack(
+    app,
+    f"experimentation-migrations-{env_name}",
+    ecs_cluster=compute_stack.ecs_cluster,
+    env_name=env_name,
+    env=env,
+)
+migration_stack.add_dependency(fargate_stack)
+migration_stack.add_dependency(database_stack)
 
 
 app.synth()

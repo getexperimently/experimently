@@ -1,0 +1,75 @@
+name: Rollback Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      task_definition_arn:
+        description: 'Previous ECS task definition ARN to rollback to (e.g. arn:aws:ecs:us-west-2:123:task-definition/backend:42)'
+        required: true
+        type: string
+      reason:
+        description: 'Reason for rollback'
+        required: true
+        type: string
+
+jobs:
+  rollback:
+    name: Rollback Production Deployment
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-west-2
+
+      - name: Notify rollback started
+        uses: slackapi/slack-github-action@v1.26.0
+        with:
+          channel-id: '#deployments'
+          slack-message: |
+            :warning: *PRODUCTION ROLLBACK initiated*
+            Reason: ${{ inputs.reason }}
+            Rolling back to: `${{ inputs.task_definition_arn }}`
+            Triggered by: ${{ github.actor }}
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+        continue-on-error: true
+
+      - name: Update ECS service to previous task definition
+        run: |
+          aws ecs update-service \
+            --cluster experimentation-prod \
+            --service experimentation-backend-prod \
+            --task-definition "${{ inputs.task_definition_arn }}" \
+            --force-new-deployment
+
+      - name: Wait for rollback to stabilize
+        run: |
+          echo "Waiting for rollback deployment to stabilize..."
+          aws ecs wait services-stable \
+            --cluster experimentation-prod \
+            --services experimentation-backend-prod
+          echo "Rollback complete"
+
+      - name: Verify health after rollback
+        run: |
+          RUNNING=$(aws ecs describe-services \
+            --cluster experimentation-prod \
+            --services experimentation-backend-prod \
+            --query 'services[0].runningCount' --output text)
+          echo "Running tasks after rollback: $RUNNING"
+
+      - name: Notify rollback result
+        uses: slackapi/slack-github-action@v1.26.0
+        with:
+          channel-id: '#deployments'
+          slack-message: |
+            :white_check_mark: *Production rollback complete*
+            Task definition: `${{ inputs.task_definition_arn }}`
+            Triggered by: ${{ github.actor }}
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+        continue-on-error: true

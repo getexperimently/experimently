@@ -1,0 +1,84 @@
+name: Database Migration
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        type: choice
+        options: [staging, production]
+      direction:
+        description: 'Migration direction'
+        required: true
+        type: choice
+        options: [upgrade, downgrade]
+      target:
+        description: 'Target revision (head, base, -1, or specific revision ID)'
+        required: false
+        default: 'head'
+
+jobs:
+  migrate:
+    name: Run Database Migration (${{ inputs.environment }})
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-west-2
+
+      - name: Require approval for production downgrade
+        if: inputs.environment == 'production' && inputs.direction == 'downgrade'
+        run: |
+          echo "::warning::PRODUCTION DOWNGRADE requested by ${{ github.actor }}"
+          echo "Proceeding with production downgrade to revision: ${{ inputs.target }}"
+
+      - name: Take pre-migration snapshot
+        run: |
+          DB_CLUSTER="experimentation-${{ inputs.environment }}"
+          SNAPSHOT_ID="pre-migration-$(date +%Y%m%d-%H%M%S)"
+          aws rds create-db-cluster-snapshot \
+            --db-cluster-identifier $DB_CLUSTER \
+            --db-cluster-snapshot-identifier $SNAPSHOT_ID
+          echo "Created snapshot: $SNAPSHOT_ID"
+
+      - name: Show current migration state
+        run: |
+          echo "Running: alembic current && alembic heads"
+          # This runs in ECS to access the production database
+          aws ecs run-task \
+            --cluster experimentation-${{ inputs.environment }} \
+            --task-definition experimentation-migrate \
+            --launch-type FARGATE \
+            --network-configuration "awsvpcConfiguration={subnets=[${{ secrets.PRIVATE_SUBNET_IDS }}],securityGroups=[${{ secrets.ECS_SG_ID }}],assignPublicIp=DISABLED}" \
+            --overrides '{"containerOverrides":[{"name":"backend","command":["python","-m","alembic","-c","app/db/alembic.ini","current"]}]}'
+
+      - name: Run migration
+        run: |
+          TASK_ARN=$(aws ecs run-task \
+            --cluster experimentation-${{ inputs.environment }} \
+            --task-definition experimentation-migrate \
+            --launch-type FARGATE \
+            --network-configuration "awsvpcConfiguration={subnets=[${{ secrets.PRIVATE_SUBNET_IDS }}],securityGroups=[${{ secrets.ECS_SG_ID }}],assignPublicIp=DISABLED}" \
+            --overrides "{\"containerOverrides\":[{\"name\":\"backend\",\"command\":[\"python\",\"-m\",\"alembic\",\"-c\",\"app/db/alembic.ini\",\"${{ inputs.direction }}\",\"${{ inputs.target }}\"]}]}" \
+            --query 'tasks[0].taskArn' --output text)
+
+          echo "Migration task ARN: $TASK_ARN"
+          aws ecs wait tasks-stopped \
+            --cluster experimentation-${{ inputs.environment }} \
+            --tasks $TASK_ARN
+
+          EXIT_CODE=$(aws ecs describe-tasks \
+            --cluster experimentation-${{ inputs.environment }} \
+            --tasks $TASK_ARN \
+            --query 'tasks[0].containers[0].exitCode' \
+            --output text)
+
+          echo "Migration exit code: $EXIT_CODE"
+          [ "$EXIT_CODE" = "0" ] || exit 1

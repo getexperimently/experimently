@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.coverage
+htmlcov/
+venv/
+*.egg-info/
+.mypy_cache/
+
+# Test files (don't include in production image)
+tests/
+*.test.py
+
+# Development files
+.env
+.env.*
+!.env.example
+*.log
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+
+# Documentation
+docs/
+*.md
