@@ -37,6 +37,10 @@ from .metrics.metric import (
     AggregationPeriod,
 )
 from .audit_log import AuditLog, ActionType, EntityType
+from .mutual_exclusion_group import MutualExclusionGroup, MutualExclusionGroupStatus
+from .global_holdout import GlobalHoldout
+from .bandit_state import BanditState
+from .warehouse_connection import WarehouseConnection
 
 # Explicitly list all models that should be part of the base metadata
 __all__ = [
@@ -76,6 +80,11 @@ __all__ = [
     "AuditLog",
     "ActionType",
     "EntityType",
+    "MutualExclusionGroup",
+    "MutualExclusionGroupStatus",
+    "GlobalHoldout",
+    "BanditState",
+    "WarehouseConnection",
 ]
 
 # Remove or comment out any premature configuration

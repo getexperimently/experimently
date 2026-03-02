@@ -16,7 +16,7 @@ on:
         default: 'http://localhost:8000'
         required: false
       test_type:
-        description: 'Test type to run (baseline, spike, endurance)'
+        description: 'Test type to run'
         default: 'baseline'
         required: false
         type: choice
@@ -24,6 +24,9 @@ on:
           - baseline
           - spike
           - endurance
+          - crud
+          - db_stress
+          - breakpoint
   schedule:
     # Run weekly on Monday at 02:00 UTC
     - cron: '0 2 * * 1'
@@ -128,10 +131,13 @@ jobs:
         run: |
           TEST_TYPE="${{ github.event.inputs.test_type || 'baseline' }}"
           case "$TEST_TYPE" in
-            baseline)  FILE="backend/tests/performance/locustfiles/api_load_test.py" ;;
-            spike)     FILE="backend/tests/performance/locustfiles/spike_test.py" ;;
-            endurance) FILE="backend/tests/performance/locustfiles/endurance_test.py" ;;
-            *)         FILE="backend/tests/performance/locustfiles/api_load_test.py" ;;
+            baseline)   FILE="backend/tests/performance/locustfiles/api_load_test.py" ;;
+            spike)      FILE="backend/tests/performance/locustfiles/spike_test.py" ;;
+            endurance)  FILE="backend/tests/performance/locustfiles/endurance_test.py" ;;
+            crud)       FILE="backend/tests/performance/locustfiles/crud_load_test.py" ;;
+            db_stress)  FILE="backend/tests/performance/locustfiles/db_stress_test.py" ;;
+            breakpoint) FILE="backend/tests/performance/locustfiles/breakpoint_test.py" ;;
+            *)          FILE="backend/tests/performance/locustfiles/api_load_test.py" ;;
           esac
           echo "locustfile=$FILE" >> "$GITHUB_OUTPUT"
           echo "Using locustfile: $FILE"

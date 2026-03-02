@@ -9,8 +9,10 @@ import os
 import logging
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
+from sqlalchemy import event as sa_event
 from sqlalchemy.orm import sessionmaker, scoped_session, Session
 from sqlalchemy.orm import configure_mappers
+from sqlalchemy.pool import NullPool
 
 from backend.app.main import app
 from backend.app.db.session import get_db, Base, init_db
@@ -25,8 +27,18 @@ from unittest.mock import patch, MagicMock, AsyncMock
 
 logger = logging.getLogger(__name__)
 
-# Default test database URL
-DEFAULT_TEST_DB_URL = "postgresql://postgres:postgres@localhost:5432/experimentation_test"
+# ---------------------------------------------------------------------------
+# Per-process database name
+# ---------------------------------------------------------------------------
+# Each pytest process gets its own database named
+# "experimentation_test_<pid>".  This prevents concurrent test sessions from
+# sharing-and trampling-each other's database (each session runs
+# DROP DATABASE + CREATE DATABASE in its test_db fixture setup/teardown).
+_PID = os.getpid()
+_TEST_DB_NAME = f"experimentation_test_{_PID}"
+_BASE_DB_URL = "postgresql://postgres:postgres@localhost:5432"
+DEFAULT_TEST_DB_URL = f"{_BASE_DB_URL}/{_TEST_DB_NAME}"
+
 
 @pytest.fixture(scope="session", autouse=True)
 def configure_all_mappers():
@@ -40,9 +52,9 @@ def setup_test_environment():
     # Set environment variables for testing
     os.environ["APP_ENV"] = "test"
     os.environ["TESTING"] = "true"
-    os.environ["POSTGRES_DB"] = "experimentation_test"
+    os.environ["POSTGRES_DB"] = _TEST_DB_NAME
     os.environ["POSTGRES_SCHEMA"] = "test_experimentation"
-    os.environ["POSTGRES_SERVER"] = "localhost"  # Changed from experimentation-postgres to localhost
+    os.environ["POSTGRES_SERVER"] = "localhost"
     os.environ["DATABASE_URI"] = DEFAULT_TEST_DB_URL
 
     # Initialize test settings
@@ -65,46 +77,86 @@ def setup_test_environment():
 
 @pytest.fixture(scope="session")
 def test_db():
-    """Create test database and schema."""
-    # Update to use the local PostgreSQL port
-    db_url = os.environ.get("TEST_DATABASE_URL", DEFAULT_TEST_DB_URL)
+    """Create a per-process test database and schema.
+
+    Using a PID-unique database name (experimentation_test_<pid>) means
+    concurrent pytest processes never share or drop each other's database.
+
+    The production engine (session.py) uses a QueuePool(pool_size=20) that
+    is created at module-import time.  We dispose it here so that its idle
+    connections are closed before pg_terminate_backend() runs in the setup
+    block.  Without disposal, those pool connections are killed by
+    pg_terminate_backend() and then the pool tries to roll them back on
+    return, generating 'server closed the connection unexpectedly' tracebacks
+    that cascade through subsequent NullPool checkouts.
+    """
+    # Dispose the production engine pool to prevent interference.
+    try:
+        from backend.app.db.session import engine as _prod_engine
+        _prod_engine.dispose()
+        logger.info("Disposed production engine pool before test_db setup")
+    except Exception as _e:
+        logger.warning("Could not dispose production engine: %s", _e)
+
+    db_url = DEFAULT_TEST_DB_URL
     max_retries = 3
     retry_count = 0
 
     while retry_count < max_retries:
         try:
-            # Connect to default database to create test database
-            temp_engine = create_engine(
-                db_url.replace("experimentation_test", "postgres"),
-                pool_pre_ping=True  # Add connection health check
+            # Use a raw psycopg2 connection with autocommit=True for all
+            # database-level DDL (DROP DATABASE / CREATE DATABASE).
+            # These statements cannot run inside a transaction block in
+            # PostgreSQL, so we must use autocommit mode.
+            import psycopg2
+            from urllib.parse import urlparse
+
+            parsed = urlparse(db_url)
+            admin_conn = psycopg2.connect(
+                host=parsed.hostname,
+                port=parsed.port or 5432,
+                user=parsed.username,
+                password=parsed.password,
+                dbname="postgres",
+            )
+            admin_conn.autocommit = True
+            admin_cur = admin_conn.cursor()
+
+            # Kill any existing connections to this process's test database
+            # so that DROP DATABASE does not fail with "other users are
+            # connected".  This is a no-op when the DB does not exist yet.
+            admin_cur.execute(
+                """
+                SELECT pg_terminate_backend(pid)
+                FROM pg_stat_activity
+                WHERE datname = %s
+                  AND pid <> pg_backend_pid()
+                """,
+                (_TEST_DB_NAME,),
             )
 
-            # Test the connection
-            with temp_engine.connect() as conn:
-                conn.execute(text("SELECT 1"))
-                conn.execute(text("COMMIT"))
+            # Drop and recreate the test database.
+            admin_cur.execute(f"DROP DATABASE IF EXISTS {_TEST_DB_NAME}")
+            admin_cur.execute(f"CREATE DATABASE {_TEST_DB_NAME}")
 
-                # Force close all connections to the test database
-                conn.execute(text("""
-                    SELECT pg_terminate_backend(pg_stat_activity.pid)
-                    FROM pg_stat_activity
-                    WHERE pg_stat_activity.datname = 'experimentation_test'
-                    AND pid <> pg_backend_pid()
-                """))
-                conn.execute(text("COMMIT"))
+            admin_cur.close()
+            admin_conn.close()
 
-                # Now drop and recreate the database
-                conn.execute(text("DROP DATABASE IF EXISTS experimentation_test"))
-                conn.execute(text("CREATE DATABASE experimentation_test"))
-                conn.execute(text("COMMIT"))
+            # Create engine for test database.
+            # NullPool ensures each db_session.connect() gets a brand-new
+            # DBAPI connection that is closed (never returned to a pool)
+            # when session.close() is called.
+            engine = create_engine(db_url, poolclass=NullPool)
 
-            # Create engine for test database with health check
-            engine = create_engine(
-                db_url,
-                pool_pre_ping=True,  # Add connection health check
-                pool_size=5,  # Limit pool size for tests
-                max_overflow=10
-            )
+            # Register a session-scoped "connect" event so that every new
+            # DBAPI connection automatically has search_path set to the test
+            # schema.  This fires once per connection checkout (every
+            # statement with NullPool).
+            @sa_event.listens_for(engine, "connect")
+            def set_schema_search_path(dbapi_conn, connection_record):
+                cursor = dbapi_conn.cursor()
+                cursor.execute("SET search_path TO test_experimentation")
+                cursor.close()
 
             # Test the connection to the new database
             with engine.connect() as conn:
@@ -124,8 +176,22 @@ def test_db():
                 conn.execute(text(f"SET search_path TO {schema_name}"))
                 conn.execute(text("COMMIT"))
 
-                # Import all models to ensure they are registered with the metadata
-                from backend.app.models import user, experiment, feature_flag, event, assignment
+                # Import ALL models to ensure they are registered with the
+                # metadata before create_all runs.  Missing imports cause
+                # create_all to fail, which triggers the retry loop.
+                import backend.app.models.user  # noqa: F401
+                import backend.app.models.experiment  # noqa: F401
+                import backend.app.models.feature_flag  # noqa: F401
+                import backend.app.models.event  # noqa: F401
+                import backend.app.models.assignment  # noqa: F401
+                import backend.app.models.safety  # noqa: F401
+                import backend.app.models.audit_log  # noqa: F401
+                import backend.app.models.segment  # noqa: F401
+                import backend.app.models.rollout_schedule  # noqa: F401
+                import backend.app.models.report  # noqa: F401
+                import backend.app.models.api_key  # noqa: F401
+                import backend.app.models.scheduler_run  # noqa: F401
+                import backend.app.models.custom_role  # noqa: F401
 
                 # Set schema for all tables
                 Base.metadata.schema = schema_name
@@ -144,28 +210,42 @@ def test_db():
             retry_count += 1
             logger.error(f"Attempt {retry_count} failed to set up test database: {e}")
             if retry_count == max_retries:
-                pytest.fail(f"Failed to set up test database after {max_retries} attempts: {e}")
+                pytest.fail(
+                    f"Failed to set up test database after {max_retries} attempts: {e}"
+                )
             import time
             time.sleep(2)  # Wait before retrying
 
     yield engine
 
+    # Teardown: drop the per-process test database.
     try:
-        # Cleanup after all tests
-        with temp_engine.connect() as conn:
-            conn.execute(text("COMMIT"))
+        import psycopg2
+        from urllib.parse import urlparse
 
-            # Force close all connections again before final cleanup
-            conn.execute(text("""
-                SELECT pg_terminate_backend(pg_stat_activity.pid)
-                FROM pg_stat_activity
-                WHERE pg_stat_activity.datname = 'experimentation_test'
-                AND pid <> pg_backend_pid()
-            """))
-            conn.execute(text("COMMIT"))
+        parsed = urlparse(db_url)
+        cleanup_conn = psycopg2.connect(
+            host=parsed.hostname,
+            port=parsed.port or 5432,
+            user=parsed.username,
+            password=parsed.password,
+            dbname="postgres",
+        )
+        cleanup_conn.autocommit = True
+        cleanup_cur = cleanup_conn.cursor()
 
-            conn.execute(text("DROP DATABASE IF EXISTS experimentation_test"))
-            conn.execute(text("COMMIT"))
+        cleanup_cur.execute(
+            """
+            SELECT pg_terminate_backend(pid)
+            FROM pg_stat_activity
+            WHERE datname = %s
+              AND pid <> pg_backend_pid()
+            """,
+            (_TEST_DB_NAME,),
+        )
+        cleanup_cur.execute(f"DROP DATABASE IF EXISTS {_TEST_DB_NAME}")
+        cleanup_cur.close()
+        cleanup_conn.close()
 
     except Exception as e:
         logger.error(f"Error during test database cleanup: {e}")
@@ -174,24 +254,53 @@ def test_db():
 
 @pytest.fixture(scope="function")
 def db_session(test_db):
-    """Create a fresh database session for a test."""
-    connection = test_db.connect()
-    transaction = connection.begin()
+    """Create a fresh database session for a test.
 
-    # Create session bound to this connection
-    Session = sessionmaker(bind=connection)
+    The session is bound directly to the NullPool engine so that after each
+    commit() the session acquires a fresh DBAPI connection on its next DML.
+
+    expire_on_commit=False prevents SQLAlchemy from expiring all loaded
+    objects after a commit().  Without this, attributes like
+    user.is_superuser trigger a reload SELECT on the next access, which
+    opens a new NullPool connection that may fail if the prior commit
+    already closed the underlying DBAPI connection.
+
+    We do NOT truncate tables in teardown.  TRUNCATE TABLE ... CASCADE holds
+    AccessExclusiveLock on every table in the cascade set.  When pytest
+    runs the teardown of one function-scoped fixture while setting up the
+    next (which can happen when asyncio test fixtures overlap in the event
+    loop), the TRUNCATE and the new test's INSERT deadlock against each
+    other.  Since all test data uses UUID primary keys and unique per-test
+    suffixes, there is no data contamination between tests.  The entire
+    database is dropped and recreated at the start of every pytest session
+    (in test_db), so accumulated rows are discarded after each full run.
+    """
+    Session = sessionmaker(
+        bind=test_db,
+        autocommit=False,
+        autoflush=False,
+        expire_on_commit=False,  # prevent reload SELECTs after commit()
+    )
     session = Session()
 
-    # Set schema for the session
+    # Set schema search path for the initial connection.
+    # The engine-level "connect" event (registered in test_db) re-applies
+    # search_path on every new NullPool connection checkout automatically.
     session.execute(text("SET search_path TO test_experimentation"))
-    session.commit()
 
     try:
         yield session
     finally:
-        session.close()
-        transaction.rollback()
-        connection.close()
+        # Rollback any uncommitted work left by the test.
+        try:
+            session.rollback()
+        except Exception:
+            pass
+
+        try:
+            session.close()
+        except Exception:
+            pass
 
 
 @pytest.fixture

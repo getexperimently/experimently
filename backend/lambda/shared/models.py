@@ -158,6 +158,64 @@ class EventData(BaseModel):
     )
 
 
+class MutualExclusionGroupConfig(BaseModel):
+    """
+    Configuration for a mutual exclusion group.
+
+    Ensures that users are assigned to at most one experiment within the group.
+    Traffic is divided among experiments based on equal slotting within the
+    group's overall traffic allocation.
+    """
+    group_id: str = Field(..., description="Unique group identifier used as hash salt")
+    traffic_allocation: float = Field(..., ge=0.0, le=1.0, description="Overall traffic allocation for the group (0.0-1.0)")
+    experiment_ids: List[str] = Field(..., description="Sorted list of active experiment IDs in the group")
+
+
+class GlobalHoldoutConfig(BaseModel):
+    """
+    Configuration for a global holdout group.
+
+    A percentage of users are held out from all experiments to serve as a
+    platform-wide control group.
+    """
+    holdout_percentage: int = Field(..., ge=1, le=20, description="Holdout percentage (1-20)")
+    is_active: bool = Field(default=True, description="Whether holdout is currently active")
+
+
+class BanditWeightsConfig(BaseModel):
+    """
+    MAB weights fetched from DynamoDB for dynamic traffic allocation.
+
+    Stored in the ``bandit-weights`` DynamoDB table so that Lambda
+    assignment functions can use them without calling PostgreSQL.
+    """
+
+    experiment_id: str = Field(..., description="Experiment identifier")
+    algorithm: str = Field(
+        ...,
+        description="Optimization algorithm: 'thompson_sampling' | 'ucb1' | 'epsilon_greedy'",
+    )
+    weights: Dict[str, float] = Field(
+        ...,
+        description="Variant traffic weights: {variant_id: weight} — values sum to 1.0",
+    )
+    last_updated: Optional[str] = Field(
+        default=None,
+        description="ISO-8601 timestamp of last weight update",
+    )
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "experiment_id": "exp_123",
+                "algorithm": "thompson_sampling",
+                "weights": {"control": 0.3, "treatment": 0.7},
+                "last_updated": "2026-01-01T00:00:00Z",
+            }
+        }
+    )
+
+
 class LambdaResponse(BaseModel):
     """
     Standard Lambda response model.

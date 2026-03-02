@@ -5,12 +5,15 @@ These fixtures extend the root conftest.py fixtures with
 integration-specific helpers: additional user roles, factory
 functions for creating test data, and role-specific API clients.
 """
+import os
 import pytest
 import uuid
 from typing import Callable, Optional
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
-from sqlalchemy.orm import Session
+from sqlalchemy import create_engine, text
+from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import NullPool
 
 from backend.app.main import app
 from backend.app.api import deps
@@ -23,7 +26,10 @@ from backend.app.models.feature_flag import FeatureFlag, FeatureFlagStatus
 from backend.app.models.event import Event
 from backend.app.models.assignment import Assignment
 
+DEFAULT_TEST_DB_URL = "postgresql://postgres:postgres@localhost:5432/experimentation_test"
+
 HASHED_PASSWORD = "$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW"
+DEFAULT_TEST_DB_URL = "postgresql://postgres:postgres@localhost:5432/experimentation_test"
 
 
 # ---------------------------------------------------------------------------
@@ -34,10 +40,9 @@ HASHED_PASSWORD = "$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW"
 def admin_user(db_session: Session) -> User:
     """Create an admin user for integration tests.
 
-    Uses a unique suffix to avoid unique-key conflicts when the DB connection
-    isolation mechanism does not properly roll back committed data from prior
-    tests (known infrastructure limitation: session.commit() in conftest
-    deassociates the outer transaction's rollback).
+    Uses commit() so the user row is visible to the separate per-request
+    DB sessions created by make_client_for_user (NullPool = new connection
+    per request, which cannot see uncommitted rows from db_session).
     """
     suffix = uuid.uuid4().hex[:8]
     user = User(
@@ -286,13 +291,34 @@ def make_assignment(db_session: Session) -> Callable:
 # ---------------------------------------------------------------------------
 
 def make_client_for_user(db_session: Session, user: User) -> TestClient:
-    """Create a TestClient authenticated as the given user."""
+    """Create a TestClient authenticated as the given user.
+
+    Each API request gets its own short-lived SQLAlchemy session from the test
+    engine.  Using a fresh session per request (rather than the test fixture's
+    db_session) prevents state corruption that occurs when the same session is
+    shared between the test setup code (which commits via db_session.commit())
+    and the endpoint handler (which also commits and then refreshes ORM objects).
+    With NullPool, every commit() closes the underlying DBAPI connection; a
+    shared session that has been committed many times can end up with expired
+    objects that can no longer be refreshed, producing
+    "Could not refresh instance" errors.
+    """
+    # Build a sessionmaker that shares the same NullPool engine as the test DB.
+    # We need the engine, not just the session, so we read it from db_session's bind.
+    _engine = db_session.get_bind()
+    _SessionFactory = sessionmaker(bind=_engine, autocommit=False, autoflush=False)
 
     def override_get_db():
+        """Yield a fresh session per API request."""
+        session = _SessionFactory()
+        session.execute(text("SET search_path TO test_experimentation"))
         try:
-            yield db_session
+            yield session
         finally:
-            pass
+            try:
+                session.close()
+            except Exception:
+                pass
 
     async def override_get_current_user():
         return user
@@ -345,5 +371,13 @@ def developer_client(db_session: Session, developer_user: User, monkeypatch) -> 
 def analyst_client(db_session: Session, analyst_user: User, monkeypatch) -> TestClient:
     """Create a TestClient authenticated as the analyst_user."""
     test_client = make_client_for_user(db_session, analyst_user)
+    yield test_client
+    app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def viewer_client(db_session: Session, viewer_user: User, monkeypatch) -> TestClient:
+    """Create a TestClient authenticated as the viewer_user."""
+    test_client = make_client_for_user(db_session, viewer_user)
     yield test_client
     app.dependency_overrides.clear()

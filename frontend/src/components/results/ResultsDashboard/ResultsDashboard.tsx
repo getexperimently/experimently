@@ -4,18 +4,23 @@ import {
   ExperimentResultsResponse,
   DailyResultsResponse,
   SampleSizeResult,
+  DimensionalBreakdownResponse,
 } from '@/types/results';
+import { SequentialTestingResponse } from '@/types/sequential';
 import { ExperimentSummary } from './ExperimentSummary';
 import { SampleSizeMeter } from './SampleSizeMeter';
 import { ConversionChart } from '@/components/results/Visualizations/ConversionChart';
 import { TrendChart } from '@/components/results/Visualizations/TrendChart';
 import { MetricComparisonTable } from '@/components/results/MetricComparison/MetricComparisonTable';
+import { SequentialMonitor } from '@/components/results/Sequential/SequentialMonitor';
+import { BreakdownSelector } from '@/components/results/Breakdowns/BreakdownSelector';
+import { SegmentComparisonTable } from '@/components/results/Breakdowns/SegmentComparisonTable';
 
 interface ResultsDashboardProps {
   experimentId: string;
 }
 
-type Tab = 'overview' | 'trends' | 'sample-size';
+type Tab = 'overview' | 'trends' | 'sample-size' | 'sequential' | 'breakdowns';
 
 function LoadingSkeleton() {
   return (
@@ -32,9 +37,14 @@ export function ResultsDashboard({ experimentId }: ResultsDashboardProps) {
   const [results, setResults] = useState<ExperimentResultsResponse | null>(null);
   const [daily, setDaily] = useState<DailyResultsResponse | null>(null);
   const [sampleSize, setSampleSize] = useState<SampleSizeResult | null>(null);
+  const [sequential, setSequential] = useState<SequentialTestingResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>('overview');
+  // Issue #28: Breakdown state
+  const [selectedBreakdown, setSelectedBreakdown] = useState<string | null>(null);
+  const [breakdown, setBreakdown] = useState<DimensionalBreakdownResponse | null>(null);
+  const [breakdownLoading, setBreakdownLoading] = useState(false);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
@@ -48,6 +58,19 @@ export function ResultsDashboard({ experimentId }: ResultsDashboardProps) {
       setResults(r);
       setDaily(d);
       setSampleSize(s);
+
+      // Fetch sequential data if available (inline or via dedicated endpoint)
+      if (r.sequential_testing) {
+        setSequential(r.sequential_testing);
+      } else {
+        // Try dedicated endpoint — swallow errors for non-sequential experiments
+        try {
+          const seq = await ResultsService.getSequentialResults(experimentId);
+          setSequential(seq);
+        } catch {
+          setSequential(null);
+        }
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load results');
     } finally {
@@ -55,9 +78,31 @@ export function ResultsDashboard({ experimentId }: ResultsDashboardProps) {
     }
   }, [experimentId]);
 
+  // Issue #28: Fetch breakdown when dimension changes
+  const fetchBreakdown = useCallback(async (dim: string | null) => {
+    if (!dim) {
+      setBreakdown(null);
+      return;
+    }
+    setBreakdownLoading(true);
+    try {
+      const r = await ResultsService.getResults(experimentId, { breakdown: dim });
+      setBreakdown(r.breakdown ?? null);
+    } catch {
+      setBreakdown(null);
+    } finally {
+      setBreakdownLoading(false);
+    }
+  }, [experimentId]);
+
   useEffect(() => {
     fetchAll();
   }, [fetchAll]);
+
+  // Issue #28: fetch breakdown when selectedBreakdown changes
+  useEffect(() => {
+    fetchBreakdown(selectedBreakdown);
+  }, [selectedBreakdown, fetchBreakdown]);
 
   if (loading) return <LoadingSkeleton />;
 
@@ -87,6 +132,8 @@ export function ResultsDashboard({ experimentId }: ResultsDashboardProps) {
     { id: 'overview', label: 'Overview' },
     { id: 'trends', label: 'Trends' },
     { id: 'sample-size', label: 'Sample Size' },
+    ...(sequential ? [{ id: 'sequential' as Tab, label: 'Sequential' }] : []),
+    { id: 'breakdowns', label: 'Breakdowns' },
   ];
 
   return (
@@ -166,6 +213,55 @@ export function ResultsDashboard({ experimentId }: ResultsDashboardProps) {
               Sample Size Analysis
             </h3>
             <SampleSizeMeter data={sampleSize} />
+          </section>
+        )}
+
+        {activeTab === 'sequential' && sequential && (
+          <section aria-label="Sequential testing">
+            <h3 className="text-base font-semibold text-slate-800 mb-4">
+              Sequential Testing Monitor
+            </h3>
+            <SequentialMonitor data={sequential} />
+          </section>
+        )}
+
+        {/* Issue #28: Breakdowns tab */}
+        {activeTab === 'breakdowns' && (
+          <section aria-label="Segment breakdowns">
+            <div className="space-y-6">
+              <div>
+                <h3 className="text-base font-semibold text-slate-800 mb-4">
+                  Segment Breakdowns
+                </h3>
+                <BreakdownSelector
+                  value={selectedBreakdown}
+                  onChange={setSelectedBreakdown}
+                />
+              </div>
+
+              {breakdownLoading && (
+                <div className="animate-pulse space-y-2">
+                  <div className="h-8 bg-slate-200 rounded w-full" />
+                  <div className="h-48 bg-slate-200 rounded w-full" />
+                </div>
+              )}
+
+              {!breakdownLoading && breakdown && (
+                <SegmentComparisonTable breakdown={breakdown} />
+              )}
+
+              {!breakdownLoading && !breakdown && selectedBreakdown && (
+                <p className="text-sm text-slate-500">
+                  No breakdown data available for the selected dimension.
+                </p>
+              )}
+
+              {!selectedBreakdown && (
+                <p className="text-sm text-slate-500">
+                  Select a dimension above to view segment-level results.
+                </p>
+              )}
+            </div>
           </section>
         )}
       </div>

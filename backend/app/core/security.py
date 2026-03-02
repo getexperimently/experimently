@@ -82,3 +82,38 @@ def decode_token(token: str) -> dict:
         "iat": 0,
         "email": "user@example.com"
     }
+
+
+def hash_api_key(api_key: str) -> str:
+    """
+    Hash an API key using SHA-256 for secure storage.
+
+    Unlike passwords, API keys need fast lookup (not bcrypt) but must not
+    be stored in plaintext. SHA-256 provides a one-way hash suitable for
+    API key verification with constant-time comparison.
+
+    Args:
+        api_key: The plaintext API key to hash.
+
+    Returns:
+        Hex-encoded SHA-256 hash of the key.
+    """
+    import hashlib
+    return hashlib.sha256(api_key.encode("utf-8")).hexdigest()
+
+
+def verify_api_key(plaintext_key: str, hashed_key: str) -> bool:
+    """
+    Verify an API key against its stored hash using constant-time comparison.
+
+    Args:
+        plaintext_key: The plaintext API key from the request.
+        hashed_key: The stored SHA-256 hash to compare against.
+
+    Returns:
+        True if the key matches, False otherwise.
+    """
+    import hashlib
+    import hmac
+    computed = hashlib.sha256(plaintext_key.encode("utf-8")).hexdigest()
+    return hmac.compare_digest(computed, hashed_key)

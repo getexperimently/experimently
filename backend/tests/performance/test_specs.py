@@ -9,6 +9,8 @@ import pytest
 from backend.tests.performance.specs.performance_targets import (
     PERFORMANCE_TARGETS,
     PerformanceTarget,
+    TARGET_GROUPS,
+    TargetGroup,
 )
 
 
@@ -122,3 +124,121 @@ def test_all_targets_use_api_v1_prefix_or_root():
             assert target.endpoint.startswith("/api/v1/"), (
                 f"{name}: business endpoints must use /api/v1/ prefix, got '{target.endpoint}'"
             )
+
+
+# ---------------------------------------------------------------------------
+# New tests for expanded targets and target groups
+# ---------------------------------------------------------------------------
+
+
+def test_crud_endpoints_have_targets():
+    """All CRUD endpoints must have defined performance targets."""
+    crud_keys = {
+        "create_experiment",
+        "update_experiment",
+        "create_feature_flag",
+        "update_feature_flag",
+        "delete_experiment",
+    }
+    assert crud_keys.issubset(set(PERFORMANCE_TARGETS.keys())), (
+        f"Missing CRUD targets: {crud_keys - set(PERFORMANCE_TARGETS.keys())}"
+    )
+
+
+def test_crud_endpoints_are_slower_than_evaluation():
+    """CRUD operations involve DB writes and should have higher latency targets than flag evaluation."""
+    evaluate_flag = PERFORMANCE_TARGETS["evaluate_flag"]
+    crud_keys = [
+        "create_experiment",
+        "update_experiment",
+        "create_feature_flag",
+        "update_feature_flag",
+        "delete_experiment",
+    ]
+    for key in crud_keys:
+        target = PERFORMANCE_TARGETS[key]
+        assert target.p95_ms > evaluate_flag.p95_ms, (
+            f"{key} p95 ({target.p95_ms}ms) should be > evaluate_flag p95 ({evaluate_flag.p95_ms}ms)"
+        )
+
+
+def test_bulk_operations_have_relaxed_targets():
+    """Bulk operations process multiple items and should allow higher latency."""
+    bulk_toggle = PERFORMANCE_TARGETS["bulk_flag_toggle"]
+    single_update = PERFORMANCE_TARGETS["update_feature_flag"]
+    assert bulk_toggle.p95_ms > single_update.p95_ms, (
+        f"bulk_flag_toggle p95 ({bulk_toggle.p95_ms}ms) should be > "
+        f"update_feature_flag p95 ({single_update.p95_ms}ms)"
+    )
+    assert bulk_toggle.min_rps <= single_update.min_rps, (
+        f"bulk_flag_toggle min_rps ({bulk_toggle.min_rps}) should be <= "
+        f"update_feature_flag min_rps ({single_update.min_rps})"
+    )
+
+
+def test_target_groups_cover_all_targets():
+    """Every target must appear in at least one target group."""
+    grouped_keys: set[str] = set()
+    for group in TARGET_GROUPS.values():
+        grouped_keys.update(group.target_keys)
+    missing = set(PERFORMANCE_TARGETS.keys()) - grouped_keys
+    assert not missing, f"Targets not in any group: {missing}"
+
+
+def test_target_groups_are_non_empty():
+    """No target group should be empty."""
+    for group_name, group in TARGET_GROUPS.items():
+        assert len(group.target_keys) > 0, f"Target group '{group_name}' has no targets"
+
+
+def test_write_endpoints_use_post_or_put_or_delete():
+    """CRUD write targets must use POST, PUT, or DELETE methods."""
+    write_keys = [
+        "create_experiment",
+        "update_experiment",
+        "create_feature_flag",
+        "update_feature_flag",
+        "delete_experiment",
+        "bulk_flag_toggle",
+    ]
+    for key in write_keys:
+        target = PERFORMANCE_TARGETS[key]
+        assert target.method in {"POST", "PUT", "DELETE"}, (
+            f"{key}: write endpoint must use POST/PUT/DELETE, got '{target.method}'"
+        )
+
+
+def test_read_endpoints_use_get():
+    """Read-only targets should use the GET method."""
+    read_keys = ["list_experiments", "get_experiment_results", "evaluate_flag", "health"]
+    for key in read_keys:
+        target = PERFORMANCE_TARGETS[key]
+        assert target.method == "GET", (
+            f"{key}: read endpoint must use GET, got '{target.method}'"
+        )
+
+
+def test_all_targets_have_unique_endpoints():
+    """No two targets should share the same (endpoint, method) combination."""
+    seen: set[tuple[str, str]] = set()
+    for name, target in PERFORMANCE_TARGETS.items():
+        pair = (target.endpoint, target.method)
+        assert pair not in seen, (
+            f"{name}: duplicate (endpoint, method) pair: {pair}"
+        )
+        seen.add(pair)
+
+
+def test_batch_evaluate_has_higher_latency_than_single():
+    """Batch flag evaluation processes multiple flags and must allow higher latency."""
+    single = PERFORMANCE_TARGETS["evaluate_flag"]
+    batch = PERFORMANCE_TARGETS["batch_evaluate_flags"]
+    assert batch.p50_ms > single.p50_ms, (
+        f"batch p50 ({batch.p50_ms}ms) should be > single p50 ({single.p50_ms}ms)"
+    )
+    assert batch.p95_ms > single.p95_ms, (
+        f"batch p95 ({batch.p95_ms}ms) should be > single p95 ({single.p95_ms}ms)"
+    )
+    assert batch.p99_ms > single.p99_ms, (
+        f"batch p99 ({batch.p99_ms}ms) should be > single p99 ({single.p99_ms}ms)"
+    )

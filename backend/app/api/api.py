@@ -28,6 +28,14 @@ from backend.app.api.v1.endpoints import (
     etl,
     scheduler_health,
     segments,
+    mutual_exclusion_groups,
+    global_holdout,
+    bandit,
+    interactions,
+    ai_design,
+    mcp,
+    experiment_wizard,
+    warehouse,
 )
 
 # Import the sample size calculator router
@@ -94,6 +102,45 @@ api_router_v1.include_router(
 # P3-C: Audience Segmentation API
 api_router_v1.include_router(
     segments.router, prefix="/segments", tags=["Segments"]
+)
+
+# EP-022: Mutual Exclusion Groups & Global Holdout
+api_router_v1.include_router(
+    mutual_exclusion_groups.router, prefix="/mutual-exclusion-groups",
+    tags=["Mutual Exclusion Groups"]
+)
+api_router_v1.include_router(
+    global_holdout.router, prefix="/holdout", tags=["Global Holdout"]
+)
+
+# Issue #22: Multi-Armed Bandit (MAB) endpoints
+api_router_v1.include_router(
+    bandit.router, prefix="/bandit", tags=["Bandit"]
+)
+
+# Issue #25: Cross-Experiment Interaction Detection & Analysis
+api_router_v1.include_router(
+    interactions.router, prefix="/interactions", tags=["Interactions"]
+)
+
+# Issue #23: AI-Powered Experiment Design & Recommendations
+api_router_v1.include_router(
+    ai_design.router, prefix="/ai", tags=["AI Design"]
+)
+
+# Issue #23: MCP (Model Context Protocol) server for AI agent access
+api_router_v1.include_router(
+    mcp.router, prefix="/mcp", tags=["MCP"]
+)
+
+# Issue #27: No-Code Visual Experiment Wizard (EP-003 Extension)
+api_router_v1.include_router(
+    experiment_wizard.router, prefix="/wizard", tags=["Experiment Wizard"]
+)
+
+# Issue #26: POST-MVP Warehouse-Native Analytics (Snowflake / BigQuery / Redshift)
+api_router_v1.include_router(
+    warehouse.router, prefix="/warehouse", tags=["Warehouse"]
 )
 
 # Main API router that includes versioned routers
@@ -185,5 +232,37 @@ tags_metadata = [
     {
         "name": "Segments",
         "description": "Operations for creating and managing audience segments and evaluating user membership",
+    },
+    {
+        "name": "Mutual Exclusion Groups",
+        "description": "Operations for managing mutual exclusion groups that prevent users from being in conflicting experiments",
+    },
+    {
+        "name": "Global Holdout",
+        "description": "Operations for managing global holdout configurations that reserve a percentage of users from all experiments",
+    },
+    {
+        "name": "Interactions",
+        "description": "Cross-experiment interaction detection: overlap analysis, statistical interaction tests, novelty effect detection, and SUTVA violation checks",
+    },
+    {
+        "name": "AI Design",
+        "description": "AI-powered experiment design assistant, results interpretation, sample size calculator, and experiment template library",
+    },
+    {
+        "name": "MCP",
+        "description": "Model Context Protocol server — exposes platform APIs to AI coding assistants and agents",
+    },
+    {
+        "name": "Experiment Wizard",
+        "description": "No-code step-by-step wizard for non-technical users to design and launch experiments",
+    },
+    {
+        "name": "Warehouse",
+        "description": (
+            "Warehouse-Native Analytics: manage Snowflake, BigQuery, and Redshift "
+            "connections, generate experiment analysis SQL, and sync results directly "
+            "from customer data warehouses. Credentials stored encrypted."
+        ),
     },
 ]

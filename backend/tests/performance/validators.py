@@ -10,7 +10,7 @@ input — no interpolation between adjacent values).
 """
 import csv
 from dataclasses import dataclass, field
-from typing import List
+from typing import List, Optional
 
 import numpy as np
 
@@ -319,3 +319,159 @@ def generate_report(results: List[ValidationResult]) -> str:
     lines.append("=" * 60)
 
     return "\n".join(lines)
+
+
+@dataclass
+class BreakpointResult:
+    """
+    Result of analyzing a breakpoint/capacity limit test.
+
+    Attributes:
+        max_users: Maximum concurrent users before degradation
+        breaking_rps: RPS at the point of degradation
+        breaking_error_rate: Error rate at the breaking point (0.0 to 1.0)
+        breaking_p99: P99 latency at the breaking point in milliseconds
+        stages_completed: Number of ramp stages completed before breaking
+    """
+
+    max_users: int
+    breaking_rps: float
+    breaking_error_rate: float
+    breaking_p99: float
+    stages_completed: int
+
+
+def analyze_breakpoint(
+    csv_history_path: str,
+    error_rate_threshold: float = 0.05,
+    p99_threshold_ms: float = 2000.0,
+) -> BreakpointResult:
+    """
+    Analyze a Locust history CSV to find the system's breaking point.
+
+    The breaking point is defined as the first moment where:
+    - Error rate exceeds error_rate_threshold (default 5%), OR
+    - P99 latency exceeds p99_threshold_ms (default 2000ms)
+
+    The history CSV has per-second rows with columns: Timestamp, User Count,
+    Type, Name, Requests/s, Failures/s, 50%, 95%, 99%, etc.
+
+    Args:
+        csv_history_path: Path to the Locust full history CSV.
+        error_rate_threshold: Error rate threshold (0.0 to 1.0).
+        p99_threshold_ms: P99 latency threshold in milliseconds.
+
+    Returns:
+        BreakpointResult with the detected breaking point data.
+
+    Raises:
+        FileNotFoundError: If csv_history_path does not exist.
+    """
+    import os
+
+    if not os.path.exists(csv_history_path):
+        raise FileNotFoundError(f"History CSV not found: {csv_history_path}")
+
+    max_users = 0
+    breaking_rps = 0.0
+    breaking_error_rate = 0.0
+    breaking_p99 = 0.0
+    stages_completed = 0
+    last_user_count = 0
+
+    with open(csv_history_path, newline="") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            name = row.get("Name", "").strip()
+            # Only look at "Aggregated" rows for overall system metrics
+            if name != "Aggregated":
+                continue
+
+            user_count = int(row.get("User Count", "0") or "0")
+            rps = float(row.get("Requests/s", "0") or "0")
+            failures_per_s = float(row.get("Failures/s", "0") or "0")
+            p99 = float(row.get("99%", "0") or "0")
+
+            # Calculate error rate for this time window
+            error_rate = failures_per_s / rps if rps > 0 else 0.0
+
+            # Track stage transitions (user count increases)
+            if user_count > last_user_count:
+                stages_completed += 1
+                last_user_count = user_count
+
+            # Check for breaking point
+            if error_rate > error_rate_threshold or p99 > p99_threshold_ms:
+                return BreakpointResult(
+                    max_users=user_count,
+                    breaking_rps=rps,
+                    breaking_error_rate=error_rate,
+                    breaking_p99=p99,
+                    stages_completed=stages_completed,
+                )
+
+            # Track the highest stable values
+            if user_count > max_users:
+                max_users = user_count
+            breaking_rps = max(breaking_rps, rps)
+            breaking_p99 = max(breaking_p99, p99)
+
+    # If no breaking point was found, the system handled all stages
+    return BreakpointResult(
+        max_users=max_users,
+        breaking_rps=breaking_rps,
+        breaking_error_rate=0.0,
+        breaking_p99=breaking_p99,
+        stages_completed=stages_completed,
+    )
+
+
+def generate_enhanced_report(
+    results: List[ValidationResult],
+    breakpoint: Optional[BreakpointResult] = None,
+    capacity_report: Optional[str] = None,
+) -> str:
+    """
+    Generate an enhanced performance report with optional breakpoint and capacity data.
+
+    Extends the base generate_report() with additional sections when breakpoint
+    analysis or capacity planning data is available.
+
+    Args:
+        results: List of ValidationResult objects.
+        breakpoint: Optional BreakpointResult from breakpoint analysis.
+        capacity_report: Optional pre-formatted capacity planning report string.
+
+    Returns:
+        A formatted multi-line string report.
+    """
+    # Start with the base report
+    report = generate_report(results)
+
+    sections: List[str] = [report]
+
+    # Add breakpoint analysis section
+    if breakpoint is not None:
+        bp_lines: List[str] = [
+            "",
+            "=" * 60,
+            "BREAKPOINT ANALYSIS",
+            "=" * 60,
+            f"Max stable users    : {breakpoint.max_users}",
+            f"Breaking RPS        : {breakpoint.breaking_rps:.1f}",
+            f"Breaking error rate : {breakpoint.breaking_error_rate:.2%}",
+            f"Breaking p99        : {breakpoint.breaking_p99:.0f}ms",
+            f"Stages completed    : {breakpoint.stages_completed}",
+        ]
+        if breakpoint.breaking_error_rate == 0.0:
+            bp_lines.append("Status: System handled all load stages without degradation")
+        else:
+            bp_lines.append("Status: Degradation detected — consider scaling")
+        bp_lines.append("=" * 60)
+        sections.append("\n".join(bp_lines))
+
+    # Add capacity planning section
+    if capacity_report is not None:
+        sections.append("\n" + capacity_report)
+
+    return "\n".join(sections)

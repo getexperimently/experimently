@@ -33,7 +33,7 @@ jobs:
       - name: Run Safety (dependency CVE check)
         run: |
           safety check -r backend/requirements.txt --output text
-        continue-on-error: true  # Don't block on dependency issues (has remediation plan)
+        continue-on-error: false
 
       - name: Upload Bandit report
         uses: actions/upload-artifact@v4
@@ -82,7 +82,7 @@ jobs:
             --error \
             --json \
             --output semgrep-report.json \
-            backend/app/ || true
+            backend/app/
 
       - name: Upload Semgrep results
         uses: actions/upload-artifact@v4
@@ -103,3 +103,51 @@ jobs:
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  container-security:
+    name: Container Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Trivy
+        run: |
+          sudo apt-get install -y wget apt-transport-https gnupg lsb-release
+          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | gpg --dearmor | sudo tee /usr/share/keyrings/trivy.gpg > /dev/null
+          echo "deb [signed-by=/usr/share/keyrings/trivy.gpg] https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | sudo tee /etc/apt/sources.list.d/trivy.list
+          sudo apt-get update
+          sudo apt-get install -y trivy
+
+      - name: Scan filesystem for vulnerabilities
+        run: |
+          trivy fs --severity HIGH,CRITICAL --exit-code 1 --format table backend/
+        continue-on-error: false
+
+      - name: Generate SBOM
+        run: |
+          trivy fs --format cyclonedx --output sbom.json backend/
+
+      - name: Upload SBOM
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sbom-report
+          path: sbom.json
+          retention-days: 90
+
+  security-summary:
+    name: Security Scan Summary
+    runs-on: ubuntu-latest
+    needs: [python-security, frontend-security, semgrep, secret-detection, container-security]
+    if: always()
+    steps:
+      - name: Check security scan results
+        run: |
+          if [ "${{ needs.python-security.result }}" == "failure" ] || \
+             [ "${{ needs.semgrep.result }}" == "failure" ] || \
+             [ "${{ needs.secret-detection.result }}" == "failure" ] || \
+             [ "${{ needs.container-security.result }}" == "failure" ]; then
+            echo "::error::One or more security scans failed"
+            exit 1
+          fi
+          echo "All security scans passed"

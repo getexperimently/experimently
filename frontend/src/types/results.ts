@@ -1,3 +1,33 @@
+import { SequentialTestingResponse } from './sequential';
+
+// Issue #28: Dimensional breakdown types
+export interface SegmentVariantResult {
+  variant_id: string;
+  variant_name: string;
+  is_control: boolean;
+  sample_size: number;
+  conversions: number | null;
+  mean: number;
+  confidence_interval: [number, number] | null;
+  p_value: number | null;
+  is_significant: boolean;
+}
+
+export interface SegmentBreakdown {
+  segment_value: string;
+  sample_size: number;
+  variants: SegmentVariantResult[];
+}
+
+export interface DimensionalBreakdownResponse {
+  dimension: string;
+  is_exploratory: boolean;
+  adjusted_alpha: number;
+  has_heterogeneous_effects: boolean;
+  hte_warning: string | null;
+  segments: SegmentBreakdown[];
+}
+
 export type RecommendationAction =
   | 'SHIP_VARIANT'
   | 'KEEP_CONTROL'
@@ -53,6 +83,9 @@ export interface ExperimentResultsResponse {
   computed_at: string;
   summary: ExperimentSummaryData;
   metrics: MetricResult[];
+  sequential_testing?: SequentialTestingResponse | null;
+  // Issue #28: Dimensional breakdown (null when not requested)
+  breakdown?: DimensionalBreakdownResponse | null;
 }
 
 export interface DailyDataPoint {

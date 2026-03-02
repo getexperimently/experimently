@@ -211,7 +211,7 @@ class TestFeatureFlagEndpoints:
         data = response.json()
         assert data["key"] == unique_key
         assert data["name"] == TEST_FLAG_NAME
-        assert data["status"] == FeatureFlagStatus.INACTIVE.value
+        assert data["status"] == FeatureFlagStatus.INACTIVE.value.lower()
         assert data["rollout_percentage"] == 50
 
         # Clean up the dependency override
@@ -404,7 +404,7 @@ class TestFeatureFlagEndpoints:
 
         assert response.status_code == 200
         data = response.json()
-        assert data["status"] == FeatureFlagStatus.ACTIVE.value
+        assert data["status"] == FeatureFlagStatus.ACTIVE.value.lower()
 
         # Clean up
         app.dependency_overrides.pop(deps.get_db, None)
@@ -450,7 +450,7 @@ class TestFeatureFlagEndpoints:
 
         assert response.status_code == 200
         data = response.json()
-        assert data["status"] == FeatureFlagStatus.INACTIVE.value
+        assert data["status"] == FeatureFlagStatus.INACTIVE.value.lower()
 
         # Clean up
         app.dependency_overrides.pop(deps.get_db, None)
@@ -624,7 +624,7 @@ class TestFeatureFlagEndpoints:
                     "rollout_percentage": flag.rollout_percentage,
                     "targeting_rules": flag.targeting_rules,
                     "variants": [flag.variants] if flag.variants else [],
-                    "owner_id": 12345,  # Use an integer instead of UUID string
+                    "owner_id": str(flag.owner_id),
                     "created_at": flag.created_at,
                     "updated_at": flag.updated_at,
                     "tags": flag.tags,
@@ -703,7 +703,7 @@ class TestFeatureFlagEndpoints:
                     "rollout_percentage": flag.rollout_percentage,
                     "targeting_rules": flag.targeting_rules,
                     "variants": [flag.variants] if flag.variants else [],
-                    "owner_id": 12345,  # Use an integer instead of UUID string
+                    "owner_id": str(flag.owner_id),
                     "created_at": flag.created_at,
                     "updated_at": flag.updated_at,
                     "tags": flag.tags,

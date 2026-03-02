@@ -14,7 +14,7 @@ import uuid
 sys.path.insert(0, str(Path(__file__).parent.parent / "shared"))
 
 from consistent_hash import get_hasher
-from models import ExperimentConfig, ExperimentStatus, Assignment
+from models import ExperimentConfig, ExperimentStatus, Assignment, MutualExclusionGroupConfig, GlobalHoldoutConfig, BanditWeightsConfig
 from utils import get_dynamodb_resource, get_logger, get_env_variable
 
 logger = get_logger(__name__)
@@ -99,11 +99,67 @@ class AssignmentService:
         # All rules matched
         return True
 
+    def check_global_holdout(
+        self,
+        user_id: str,
+        holdout_config: Optional[GlobalHoldoutConfig]
+    ) -> bool:
+        """
+        Check if user is in the global holdout group (should be excluded).
+
+        Args:
+            user_id: User identifier
+            holdout_config: Global holdout configuration
+
+        Returns:
+            True if user is in the holdout group (should be excluded), False otherwise
+        """
+        if not holdout_config or not holdout_config.is_active:
+            return False
+        bucket = self.hasher.get_bucket(user_id, "global_holdout_v1", num_buckets=100)
+        return bucket < holdout_config.holdout_percentage
+
+    def check_mutual_exclusion(
+        self,
+        user_id: str,
+        experiment_id: str,
+        exclusion_config: Optional[MutualExclusionGroupConfig]
+    ) -> bool:
+        """
+        Check if user should be excluded from this experiment due to mutual exclusion.
+
+        Returns False (not excluded) if no config or if user is selected for this experiment.
+
+        Args:
+            user_id: User identifier
+            experiment_id: The experiment to check eligibility for
+            exclusion_config: Mutual exclusion group configuration
+
+        Returns:
+            True if user should be excluded from this experiment, False if eligible
+        """
+        if not exclusion_config:
+            return False
+        hash_value = self.hasher.get_normalized_hash(user_id, exclusion_config.group_id)
+        if hash_value >= exclusion_config.traffic_allocation:
+            return True  # User excluded from entire group
+        # Distribute among experiments
+        experiments = sorted(exclusion_config.experiment_ids)
+        slot_size = exclusion_config.traffic_allocation / len(experiments) if experiments else 0
+        cumulative = 0.0
+        for exp_id in experiments:
+            cumulative += slot_size
+            if hash_value < cumulative:
+                return exp_id != experiment_id  # Excluded if not selected for this experiment
+        return True  # Fallback: excluded
+
     def assign_variant(
         self,
         user_id: str,
         experiment_config: ExperimentConfig,
-        context: Optional[Dict[str, Any]] = None
+        context: Optional[Dict[str, Any]] = None,
+        holdout_config: Optional[GlobalHoldoutConfig] = None,
+        exclusion_config: Optional[MutualExclusionGroupConfig] = None
     ) -> Optional[str]:
         """
         Assign a user to a variant using consistent hashing.
@@ -112,9 +168,12 @@ class AssignmentService:
             user_id: Unique user identifier
             experiment_config: Experiment configuration
             context: Optional user context for targeting rules
+            holdout_config: Optional global holdout configuration
+            exclusion_config: Optional mutual exclusion group configuration
 
         Returns:
-            Variant key if user is assigned, None if excluded by traffic allocation
+            Variant key if user is assigned, None if excluded by holdout,
+            mutual exclusion, targeting rules, or traffic allocation
 
         Raises:
             ValueError: If user_id is None or empty
@@ -132,6 +191,28 @@ class AssignmentService:
                 extra={
                     'experiment_id': experiment_config.experiment_id,
                     'status': experiment_config.status
+                }
+            )
+            return None
+
+        # Check global holdout
+        if self.check_global_holdout(user_id, holdout_config):
+            logger.info(
+                f"User excluded by global holdout",
+                extra={
+                    'user_id': user_id,
+                    'experiment_id': experiment_config.experiment_id
+                }
+            )
+            return None
+
+        # Check mutual exclusion
+        if self.check_mutual_exclusion(user_id, experiment_config.experiment_id, exclusion_config):
+            logger.info(
+                f"User excluded by mutual exclusion",
+                extra={
+                    'user_id': user_id,
+                    'experiment_id': experiment_config.experiment_id
                 }
             )
             return None
@@ -488,11 +569,195 @@ class AssignmentService:
             )
             return None
 
+    # ------------------------------------------------------------------
+    # MAB (Multi-Armed Bandit) helpers
+    # ------------------------------------------------------------------
+
+    def get_bandit_weights(
+        self,
+        experiment_id: str,
+        algorithm: str = "thompson_sampling",
+    ) -> Optional[BanditWeightsConfig]:
+        """
+        Fetch MAB variant weights from DynamoDB ``bandit-weights`` table.
+
+        The table is keyed on ``experiment_id`` and written by the
+        BanditScheduler every 15 minutes.
+
+        Parameters
+        ----------
+        experiment_id:
+            Experiment identifier.
+        algorithm:
+            Algorithm name for logging / fallback metadata.
+
+        Returns
+        -------
+        BanditWeightsConfig | None
+            Parsed config if found, ``None`` on table miss or error.
+        """
+        bandit_table_name = get_env_variable(
+            "BANDIT_WEIGHTS_TABLE", default="experimently-bandit-weights"
+        )
+
+        try:
+            dynamodb = get_dynamodb_resource()
+            table = dynamodb.Table(bandit_table_name)
+            response = table.get_item(Key={"experiment_id": experiment_id})
+
+            if "Item" not in response:
+                logger.info(
+                    f"No bandit weights found for experiment: {experiment_id}"
+                )
+                return None
+
+            item = response["Item"]
+            return BanditWeightsConfig(
+                experiment_id=item["experiment_id"],
+                algorithm=item.get("algorithm", algorithm),
+                weights={k: float(v) for k, v in item.get("weights", {}).items()},
+                last_updated=item.get("last_updated"),
+            )
+
+        except Exception as exc:
+            logger.warning(
+                f"Failed to fetch bandit weights for {experiment_id}: {exc}"
+            )
+            return None
+
+    def get_weighted_variant(
+        self,
+        user_id: str,
+        experiment: ExperimentConfig,
+        bandit_weights: Optional[BanditWeightsConfig],
+    ) -> Optional[str]:
+        """
+        Assign a variant using MAB weights (or uniform if no weights available).
+
+        Uses the same consistent-hashing approach as ``assign_variant`` but
+        maps the hash into weighted intervals derived from ``bandit_weights``
+        instead of the static per-variant ``allocation`` values.
+
+        The assignment is deterministic: the same ``(user_id, experiment_id)``
+        pair always produces the same variant, regardless of when weights were
+        last updated.
+
+        Parameters
+        ----------
+        user_id:
+            Unique user identifier.
+        experiment:
+            Experiment configuration (used for salt / key).
+        bandit_weights:
+            MAB weights from DynamoDB.  Falls back to uniform allocation
+            when ``None``.
+
+        Returns
+        -------
+        str | None
+            Variant key, or ``None`` if user excluded by traffic allocation.
+        """
+        if bandit_weights is None or not bandit_weights.weights:
+            # Fall back to uniform / static allocation
+            return self.assign_variant(user_id, experiment)
+
+        # Build variant list from bandit weights, preserving variant order
+        variants_from_weights = [
+            {"key": key, "allocation": float(weight)}
+            for key, weight in bandit_weights.weights.items()
+        ]
+
+        # Normalise weights in case they don't sum to exactly 1.0
+        total = sum(v["allocation"] for v in variants_from_weights)
+        if total <= 0:
+            return self.assign_variant(user_id, experiment)
+        for v in variants_from_weights:
+            v["allocation"] = v["allocation"] / total
+
+        # Use consistent hashing with the normalised bandit weights
+        variant = self.hasher.assign_variant(
+            user_id=user_id,
+            experiment_key=experiment.key,
+            variants=variants_from_weights,
+            traffic_allocation=experiment.traffic_allocation,
+            salt=experiment.salt,
+        )
+
+        if variant:
+            logger.info(
+                "MAB weighted assignment",
+                extra={
+                    "user_id": user_id,
+                    "experiment_id": experiment.experiment_id,
+                    "variant": variant,
+                    "algorithm": bandit_weights.algorithm,
+                },
+            )
+
+        return variant
+
+    def assign_variant_mab(
+        self,
+        user_id: str,
+        experiment_config: ExperimentConfig,
+        context: Optional[Dict[str, Any]] = None,
+        holdout_config: Optional[GlobalHoldoutConfig] = None,
+        exclusion_config: Optional[MutualExclusionGroupConfig] = None,
+        bandit_weights: Optional[BanditWeightsConfig] = None,
+    ) -> Optional[str]:
+        """
+        Full assignment flow with MAB weight support.
+
+        Follows the same pipeline as ``assign_variant``:
+        holdout → mutual-exclusion → targeting-rules → weighted assignment
+
+        Parameters
+        ----------
+        bandit_weights:
+            When provided, uses MAB-weighted selection instead of uniform.
+            Falls back to uniform allocation when ``None``.
+
+        Returns
+        -------
+        str | None
+            Variant key if assigned, ``None`` if excluded.
+        """
+        # Validate
+        if user_id is None:
+            raise ValueError("user_id cannot be None")
+        if not user_id or not user_id.strip():
+            raise ValueError("user_id cannot be empty")
+
+        if not self.validate_experiment_config(experiment_config):
+            return None
+
+        # Step 1: Global holdout
+        if self.check_global_holdout(user_id, holdout_config):
+            return None
+
+        # Step 2: Mutual exclusion
+        if self.check_mutual_exclusion(
+            user_id, experiment_config.experiment_id, exclusion_config
+        ):
+            return None
+
+        # Step 3: Targeting rules
+        if experiment_config.targeting_rules:
+            if not self.evaluate_targeting_rules(
+                experiment_config.targeting_rules, context
+            ):
+                return None
+
+        # Step 4: MAB-weighted assignment (or fallback to uniform)
+        return self.get_weighted_variant(user_id, experiment_config, bandit_weights)
+
     def get_or_create_assignment(
         self,
         user_id: str,
         experiment_config: ExperimentConfig,
-        context: Optional[Dict[str, Any]] = None
+        context: Optional[Dict[str, Any]] = None,
+        holdout_config: Optional[GlobalHoldoutConfig] = None,
+        exclusion_config: Optional[MutualExclusionGroupConfig] = None
     ) -> Optional[Assignment]:
         """
         Get existing assignment or create new one if doesn't exist.
@@ -501,6 +766,8 @@ class AssignmentService:
             user_id: User identifier
             experiment_config: Experiment configuration
             context: Optional user context
+            holdout_config: Optional global holdout configuration
+            exclusion_config: Optional mutual exclusion group configuration
 
         Returns:
             Assignment if user is assigned, None if excluded
@@ -511,7 +778,11 @@ class AssignmentService:
             return existing
 
         # Create new assignment
-        variant = self.assign_variant(user_id, experiment_config, context)
+        variant = self.assign_variant(
+            user_id, experiment_config, context,
+            holdout_config=holdout_config,
+            exclusion_config=exclusion_config
+        )
 
         # User excluded by traffic allocation
         if variant is None:
