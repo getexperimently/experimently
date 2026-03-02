@@ -25,6 +25,9 @@ from backend.app.api.v1.endpoints import (
     bulk_toggle,
     rbac,
     realtime_counters,
+    etl,
+    scheduler_health,
+    segments,
 )
 
 # Import the sample size calculator router
@@ -78,6 +81,19 @@ api_router_v1.include_router(rbac.router, prefix="/rbac", tags=["RBAC"])
 # P2-B: Real-time Counters in DynamoDB
 api_router_v1.include_router(
     realtime_counters.router, prefix="/counters", tags=["Real-time Counters"]
+)
+
+# P3-A: ETL & Glue Jobs for S3 Data Lake
+api_router_v1.include_router(etl.router, prefix="/etl", tags=["ETL"])
+
+# P3-B: Scheduler Enhancements — health, history, and notifications
+api_router_v1.include_router(
+    scheduler_health.router, prefix="/scheduler", tags=["Scheduler Health"]
+)
+
+# P3-C: Audience Segmentation API
+api_router_v1.include_router(
+    segments.router, prefix="/segments", tags=["Segments"]
 )
 
 # Main API router that includes versioned routers
@@ -157,5 +173,17 @@ tags_metadata = [
     {
         "name": "Real-time Counters",
         "description": "Real-time DynamoDB atomic counters for experiment assignments, events, and conversions",
+    },
+    {
+        "name": "ETL",
+        "description": "Operations for managing AWS Glue ETL jobs, Athena queries, S3 partitions, and Glue crawlers",
+    },
+    {
+        "name": "Scheduler Health",
+        "description": "Operations for monitoring background scheduler health, run history, and webhook notifications",
+    },
+    {
+        "name": "Segments",
+        "description": "Operations for creating and managing audience segments and evaluating user membership",
     },
 ]
