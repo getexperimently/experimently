@@ -1,0 +1,44 @@
+name: Cognito Integration Tests
+on:
+  push:
+    paths:
+      - 'backend/app/services/auth_service.py'
+      - 'backend/app/api/v1/endpoints/auth.py'
+      - 'backend/tests/integration/auth/**'
+  pull_request:
+    paths:
+      - 'backend/app/**'
+  workflow_dispatch:
+
+jobs:
+  cognito-integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: |
+          cd backend
+          pip install -r requirements.txt
+      - name: Run Cognito integration tests
+        env:
+          APP_ENV: test
+          TESTING: "true"
+          AWS_DEFAULT_REGION: us-east-1
+          AWS_ACCESS_KEY_ID: testing
+          AWS_SECRET_ACCESS_KEY: testing
+          AWS_SECURITY_TOKEN: testing
+          AWS_SESSION_TOKEN: testing
+        run: |
+          python -m pytest backend/tests/integration/auth/ -v \
+            --tb=short \
+            -m "not slow" \
+            --junit-xml=test-results/cognito-integration.xml
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cognito-test-results
+          path: test-results/
