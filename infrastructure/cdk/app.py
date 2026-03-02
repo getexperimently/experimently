@@ -17,6 +17,7 @@ from stacks.authentication_stack import AuthenticationStack
 from stacks.fargate_service_stack import FargateServiceStack
 from stacks.migration_task_stack import MigrationTaskStack
 from stacks.dynamodb_counters_stack import DynamoDBCountersStack
+from stacks.glue_etl_stack import GlueETLStack
 
 # Environment determination
 env_name = os.environ.get("ENVIRONMENT", "dev")
@@ -137,6 +138,17 @@ migration_stack = MigrationTaskStack(
 )
 migration_stack.add_dependency(fargate_stack)
 migration_stack.add_dependency(database_stack)
+
+
+# P3-A: ETL & Glue Jobs for S3 Data Lake
+glue_etl_stack = GlueETLStack(
+    app,
+    f"experimentation-glue-etl-{env_name}",
+    data_lake_bucket=analytics_stack.data_lake_bucket,
+    env_name=env_name,
+    env=env,
+)
+glue_etl_stack.add_dependency(analytics_stack)
 
 
 app.synth()
