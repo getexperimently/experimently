@@ -340,6 +340,115 @@ class AuditService:
         return audit_logs
 
     @staticmethod
+    def compute_diff(old_data: dict, new_data: dict) -> list:
+        """
+        Compute structured diff between two state dicts.
+
+        Returns a list of dicts with keys:
+            - field: str
+            - old_value: Any
+            - new_value: Any
+            - changed: bool
+
+        Only includes fields whose values differ between old_data and new_data.
+        Results are sorted alphabetically by field name.
+        """
+        diffs = []
+        all_keys = set(old_data.keys()) | set(new_data.keys())
+        for key in sorted(all_keys):
+            old_val = old_data.get(key)
+            new_val = new_data.get(key)
+            if old_val != new_val:
+                diffs.append(
+                    {
+                        "field": key,
+                        "old_value": old_val,
+                        "new_value": new_val,
+                        "changed": True,
+                    }
+                )
+        return diffs
+
+    @staticmethod
+    def get_flag_change_history(
+        db: Session,
+        flag_id: UUID,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> Tuple[List[AuditLog], int]:
+        """
+        Get all audit log entries for a specific feature flag, ordered by
+        timestamp descending (most recent first).
+
+        Args:
+            db: Database session
+            flag_id: UUID of the feature flag
+            limit: Maximum number of records to return
+            offset: Number of records to skip (for pagination)
+
+        Returns:
+            Tuple[List[AuditLog], int]: (audit logs, total count)
+        """
+        query = db.query(AuditLog).filter(AuditLog.entity_id == flag_id)
+
+        total_count = query.count()
+
+        audit_logs = (
+            query.order_by(desc(AuditLog.timestamp))
+            .offset(offset)
+            .limit(limit)
+            .all()
+        )
+
+        logger.info(
+            f"Retrieved {len(audit_logs)} history entries for feature flag {flag_id} "
+            f"(total {total_count})"
+        )
+
+        return audit_logs, total_count
+
+    @staticmethod
+    async def log_bulk_toggle(
+        db: Session,
+        user_id: UUID,
+        user_email: str,
+        flag_ids: List[UUID],
+        action: str,
+        results: List[dict],
+        reason: Optional[str] = None,
+    ) -> List[UUID]:
+        """
+        Create one audit log entry per flag in a bulk toggle operation.
+
+        Args:
+            db: Database session
+            user_id: ID of the user performing the action
+            user_email: Email of the user performing the action
+            flag_ids: List of feature flag UUIDs
+            action: Action string, e.g. "toggle_enable" or "toggle_disable"
+            results: List of dicts with keys: flag_id, flag_name, old_status, new_status
+            reason: Optional reason for the bulk operation
+
+        Returns:
+            List[UUID]: List of audit log IDs created (one per flag)
+        """
+        log_ids = []
+        for result in results:
+            log_id = await AuditService.log_toggle_operation(
+                db=db,
+                user_id=user_id,
+                user_email=user_email,
+                action_type=action,
+                entity_id=UUID(result["flag_id"]) if isinstance(result["flag_id"], str) else result["flag_id"],
+                entity_name=result.get("flag_name", ""),
+                old_value=result.get("old_status", ""),
+                new_value=result.get("new_status", ""),
+                reason=reason,
+            )
+            log_ids.append(log_id)
+        return log_ids
+
+    @staticmethod
     def get_audit_stats(
         db: Session,
         from_date: Optional[datetime] = None,
