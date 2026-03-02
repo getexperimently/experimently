@@ -1,8 +1,8 @@
 # Gap Analysis: Development Plan vs Created Tickets
 
-**Date:** 2025-12-16
+**Date:** 2026-03-01 *(updated — original: 2025-12-16)*
 **Status:** 🟡 Gaps Identified
-**Source:** [12-Week Development Plan](../development/development-plan.md)
+**Source:** [Development Status](../development/development-plan.md)
 
 ---
 
@@ -41,65 +41,64 @@
 ---
 
 ### Phase 2: Core Backend Services (Weeks 2-5)
-**Status:** ✅ ~90% Complete
+**Status:** 🟡 ~70% Complete
 
 | Item | Status | Coverage |
 |------|--------|----------|
 | Experiment CRUD | ✅ Complete | Existing |
 | Variant Management | ✅ Complete | Existing |
-| Targeting Rules Engine | 🟡 Basic exists | **EP-001** enhances |
+| Targeting Rules Engine | ✅ Complete | **EP-001** done (20+ operators, 131 tests) |
 | Scheduling Mechanisms | ✅ Complete | Existing |
 | Feature Flag CRUD | ✅ Complete | Existing |
 | Rollout Functionality | ✅ Complete | Existing |
 | Toggle with Audit Logging | ✅ Complete | Existing |
-| Metric Definition System | ✅ Complete | Existing |
-| Statistical Analysis | ✅ Complete | Existing |
-| Results Calculation | ✅ Complete | Existing |
-| Data Aggregation | ✅ Complete | Existing |
+| Metric Definition System | ❌ Missing | **❌ GAP — No metric definition system built** |
+| Statistical Analysis | ❌ Missing | **❌ GAP — No t-test/z-test/Bayesian engine** |
+| Results Calculation | ❌ Missing | **❌ GAP — No results calculation service** |
+| Data Aggregation | ❌ Missing | **❌ GAP — No data aggregation pipeline** |
 
-**Gap Assessment:** ✅ No gaps - EP-001 enhances existing rules engine
+**Gap Assessment:** ❌ Critical gaps — analytics/metrics layer is entirely missing. This is the largest blocker to production usefulness.
 
 ---
 
 ### Phase 3: Real-time Services (Weeks 4-6)
-**Status:** 🟡 ~40% Complete (Infrastructure exists, Lambda code missing)
+**Status:** ✅ ~95% Complete (EP-010 all 4 phases done)
 
 | Item | Status | Coverage |
 |------|--------|----------|
-| Lambda Assignment Service | ❌ Missing | **EP-010** ✅ |
-| Consistent Hashing Algorithm | ❌ Missing | **EP-010** ✅ |
-| Caching Layer | ❌ Missing | **EP-010** ✅ |
-| Segmentation Evaluation | ❌ Missing | **EP-010** ✅ (as targeting rules) |
-| **Override Management** | ❌ Missing | **❌ GAP #1** |
-| Event Processing Lambda | ❌ Missing | **EP-010** ✅ |
-| Kinesis Streams Setup | ✅ Complete | Existing (CDK) |
-| Event Validation/Enrichment | ❌ Missing | **EP-010** ✅ |
-| DynamoDB Real-time Counters | ❌ Missing | **EP-010** ✅ |
-| S3 Data Lake Storage | ✅ Complete | Existing (CDK) |
-| **Basic ETL Process** | ❌ Missing | **⚠️ GAP #2** (partial in EP-010) |
+| Lambda Assignment Service | ✅ Complete | EP-010 Phase 2 (45+ tests) |
+| Consistent Hashing Algorithm | ✅ Complete | `backend/lambda/shared/consistent_hash.py` |
+| Caching Layer | ✅ Complete | DynamoDB + in-memory cache |
+| Segmentation Evaluation | ✅ Complete | Rules engine integration |
+| Override Management | ✅ Complete | Feature flag lambda handler |
+| Event Processing Lambda | ✅ Complete | EP-010 Phase 3 |
+| Kinesis Streams Setup | ✅ Complete | CDK + Lambda integration |
+| Event Validation/Enrichment | ✅ Complete | EP-010 Phase 3 |
+| Feature Flag Evaluation Lambda | ✅ Complete | EP-010 Phase 4 (71 tests, 92% coverage) |
+| DynamoDB Real-time Counters | ❌ Missing | **⚠️ GAP #1** — not yet wired to analytics |
+| S3 Data Lake Storage | 🟡 Partial | CDK defined, ETL pipeline not built |
+| **Basic ETL Process** | ❌ Missing | **⚠️ GAP #2** (Kinesis → S3 → OpenSearch pipeline) |
 
 **Gaps Identified:**
 
-#### ❌ GAP #1: Override Management for Experiments
-**Missing:** Ability to override experiment assignments for specific users
-- Admin can force-assign users to specific variants
-- QA testing capability
-- VIP user management
+#### ⚠️ GAP #1: DynamoDB Real-time Counters for Analytics
+**Missing:** Wiring of Lambda event tracking into real-time analytics counters
+- Counters written by Lambda but no aggregation service reads them
+- No connection to metrics/results layer
 
-**Priority:** Medium (Priority 2 feature)
-**Estimate:** 2 days
-**Should be added to:** EP-010 or separate ticket
+**Priority:** High — blocks analytics
+**Estimate:** 2-3 days
+**Should be added to:** Analytics epic
 
-#### ⚠️ GAP #2: Advanced ETL Process
-**Partial Coverage:** EP-010 covers basic S3 archival, but not full ETL
+#### ⚠️ GAP #2: ETL Process
+**Partial Coverage:** Kinesis streams exist but no pipeline to S3/OpenSearch
 - Transform and aggregate data
 - Load to analytics database
 - Scheduled batch processing
-- Data quality checks
 
-**Priority:** Low-Medium (nice-to-have for MVP)
+**Priority:** Medium
 **Estimate:** 3-5 days
-**Recommendation:** Post-MVP or extend EP-010
+**Recommendation:** Part of analytics epic
 
 ---
 
@@ -378,5 +377,5 @@ Add missing items to existing tickets:
 
 ---
 
-**Last Updated:** 2025-12-16
-**Next Action:** Review gaps with team and decide on Option 1, 2, or 3
+**Last Updated:** 2026-03-01
+**Next Action:** Analytics & Metrics Engine is the #1 priority — EP-001 and EP-010 are complete; focus shifts to results/statistical analysis layer
