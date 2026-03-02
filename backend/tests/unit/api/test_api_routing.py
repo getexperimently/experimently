@@ -102,9 +102,11 @@ class TestAPIRouting:
         openapi_schema = test_client.get("/api/v1/openapi.json").json()
 
         # Check tags for specific routes (exclude export routes that use the
-        # "Export" tag even if the path contains /experiments)
+        # "Export" tag even if the path contains /experiments, and exclude
+        # segment sub-routes like /segments/{id}/experiments which use the
+        # "Segments" tag)
         for path, methods in openapi_schema["paths"].items():
-            if "/experiments" in path and "/export/" not in path:
+            if "/experiments" in path and "/export/" not in path and "/segments/" not in path:
                 for method in methods.values():
                     assert "Experiments" in method["tags"], f"Experiments tag missing for {path}"
             elif "/tracking" in path:
