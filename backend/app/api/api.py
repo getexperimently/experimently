@@ -22,6 +22,7 @@ from backend.app.api.v1.endpoints import (
     safety,
     audit_logs,
     export,
+    bulk_toggle,
 )
 
 # Import the sample size calculator router
@@ -65,6 +66,9 @@ api_router_v1.include_router(sample_size_router, prefix="/utils", tags=["Utiliti
 
 # EP-020: Data Export & Reporting
 api_router_v1.include_router(export.router, prefix="/export", tags=["Export"])
+
+# P1-B: Advanced Toggle Features & Audit Logging
+api_router_v1.include_router(bulk_toggle.router, prefix="", tags=["Advanced Toggle"])
 
 # Main API router that includes versioned routers
 api_router = APIRouter()
