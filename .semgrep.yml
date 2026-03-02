@@ -1,0 +1,28 @@
+rules:
+  - id: no-hardcoded-secrets
+    patterns:
+      - pattern: $KEY = "..."
+    message: "Potential hardcoded secret in $KEY"
+    languages: [python]
+    severity: ERROR
+    metadata:
+      category: security
+      owasp: "A02:2021 - Cryptographic Failures"
+
+  - id: no-print-sensitive-data
+    patterns:
+      - pattern: print($X)
+      - pattern: logger.debug($X)
+    message: "Ensure no sensitive data in logs"
+    languages: [python]
+    severity: WARNING
+
+  - id: sql-string-format
+    patterns:
+      - pattern: db.execute(f"...{$VAR}...")
+      - pattern: db.execute("..." % $VAR)
+    message: "Possible SQL injection — use parameterized queries"
+    languages: [python]
+    severity: ERROR
+    metadata:
+      owasp: "A03:2021 - Injection"

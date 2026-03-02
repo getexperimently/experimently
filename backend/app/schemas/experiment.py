@@ -179,9 +179,9 @@ class VariantBase(BaseModel):
 class ExperimentBase(BaseModel):
     """Base model for experiment data."""
 
-    name: str = Field(..., min_length=1, max_length=100, description="Experiment name")
-    description: Optional[str] = Field(None, description="Experiment description")
-    hypothesis: Optional[str] = Field(None, description="Experiment hypothesis")
+    name: str = Field(..., min_length=1, max_length=255, description="Experiment name")
+    description: Optional[str] = Field(None, max_length=2000, description="Experiment description")
+    hypothesis: Optional[str] = Field(None, max_length=2000, description="Experiment hypothesis")
     experiment_type: ExperimentType = Field(
         ExperimentType.A_B, description="Type of experiment"
     )
@@ -272,10 +272,10 @@ class ExperimentUpdate(BaseModel):
     """Model for updating an experiment."""
 
     name: Optional[str] = Field(
-        None, min_length=1, max_length=100, description="Experiment name"
+        None, min_length=1, max_length=255, description="Experiment name"
     )
-    description: Optional[str] = Field(None, description="Experiment description")
-    hypothesis: Optional[str] = Field(None, description="Experiment hypothesis")
+    description: Optional[str] = Field(None, max_length=2000, description="Experiment description")
+    hypothesis: Optional[str] = Field(None, max_length=2000, description="Experiment hypothesis")
     status: Optional[ExperimentStatus] = Field(None, description="Experiment status")
     experiment_type: Optional[ExperimentType] = Field(
         None, description="Type of experiment"

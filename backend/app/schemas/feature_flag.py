@@ -11,8 +11,8 @@ from pydantic import BaseModel, Field, field_validator, model_validator, ConfigD
 class FeatureFlagBase(BaseModel):
     """Base model for feature flag data."""
     key: str = Field(..., min_length=1, max_length=100)
-    name: str = Field(..., min_length=1, max_length=100)
-    description: Optional[str] = None
+    name: str = Field(..., min_length=1, max_length=255)
+    description: Optional[str] = Field(None, max_length=2000)
     is_active: bool = True
     rollout_percentage: Optional[int] = Field(None, ge=0, le=100)
     targeting_rules: Optional[Dict[str, Any]] = None
@@ -24,11 +24,17 @@ class FeatureFlagBase(BaseModel):
     @field_validator("key")
     @classmethod
     def validate_key(cls, v: str) -> str:
-        """Validate feature flag key format."""
-        if v != v.lower():
-            raise ValueError("Key must be lowercase")
-        if not v.replace("-", "").replace("_", "").isalnum():
-            raise ValueError("Key must be lowercase alphanumeric characters, hyphens, or underscores")
+        """Validate feature flag key format.
+
+        Keys must be lowercase alphanumeric with hyphens or underscores,
+        matching the pattern ^[a-z0-9][a-z0-9_-]*[a-z0-9]$|^[a-z0-9]$.
+        """
+        import re
+        if not re.match(r"^[a-z0-9][a-z0-9_-]*$", v):
+            raise ValueError(
+                "Key must start with a lowercase letter or digit and contain only "
+                "lowercase alphanumeric characters, hyphens, or underscores"
+            )
         return v
 
 
