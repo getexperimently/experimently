@@ -17,6 +17,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from backend.app.api.api import api_router
 from backend.app.core.config import settings
 from backend.app.middleware.security_middleware import SecurityHeadersMiddleware
+from backend.app.middleware.rate_limiter import RateLimitMiddleware
 from backend.app.middleware.logging_middleware import LoggingMiddleware, RequestLoggingMiddleware
 from backend.app.middleware.error_middleware import ErrorMiddleware
 from backend.app.middleware.metrics_middleware import MetricsMiddleware
@@ -38,14 +39,24 @@ app = FastAPI(
     openapi_url=f"{settings.API_V1_STR}/openapi.json",
 )
 
-# Add CORS middleware
+# Add CORS middleware — restrict methods and headers to what the API actually needs
+cors_origins = [str(origin) for origin in settings.BACKEND_CORS_ORIGINS]
+if not cors_origins:
+    # Fall back to a safe default; wildcard is never used
+    cors_origins = ["http://localhost:3000"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[str(origin) for origin in settings.BACKEND_CORS_ORIGINS],
+    allow_origins=cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
+    allow_headers=["Authorization", "Content-Type", "X-API-Key"],
+    expose_headers=["X-Request-ID", "X-RateLimit-Limit", "X-RateLimit-Remaining"],
 )
+
+# Add rate limiting middleware — applied before security headers so that
+# rate-limit responses still carry the security header set
+app.add_middleware(RateLimitMiddleware, enabled=True)
 
 # Add security headers middleware
 app.add_middleware(SecurityHeadersMiddleware)

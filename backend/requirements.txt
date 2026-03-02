@@ -1,10 +1,10 @@
 # API Framework
-fastapi==0.103.1
+fastapi==0.115.12
 uvicorn==0.23.2
 pydantic==2.10.6
 pydantic-settings==2.0.3
 email-validator==2.0.0.post2
-python-multipart==0.0.6
+python-multipart==0.0.22
 python-jose==3.3.0
 passlib==1.7.4
 bcrypt==4.3.0
@@ -57,10 +57,10 @@ statsmodels==0.14.0
 # Utilities
 python-dateutil==2.8.2
 PyYAML==6.0.1
-Jinja2==3.1.2
+Jinja2==3.1.6
 tenacity==8.2.3
 structlog==23.1.0
-orjson==3.9.5
+orjson==3.10.18
 ujson==5.8.0
 
 # Monitoring & Tracing
