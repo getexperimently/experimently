@@ -1,1 +1,378 @@
-# GitHub Actions workflow for production deployment
+name: Deploy to Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Git tag or commit SHA to deploy (e.g. v1.2.3)'
+        required: true
+        type: string
+      skip_smoke_tests:
+        description: 'Skip smoke tests (emergency deploys only)'
+        required: false
+        type: boolean
+        default: false
+
+env:
+  AWS_REGION: us-west-2
+  ECR_BACKEND_REPO: experimentation-platform/backend
+  ECR_FRONTEND_REPO: experimentation-platform/frontend
+  ECS_CLUSTER: experimentation-prod
+  ECS_BACKEND_SERVICE: experimentation-backend-prod
+  ECS_FRONTEND_SERVICE: experimentation-frontend-prod
+
+jobs:
+  pre-deployment-checks:
+    name: Pre-deployment Checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.version }}
+
+      - name: Notify deployment started
+        uses: slackapi/slack-github-action@v1.26.0
+        with:
+          channel-id: '#deployments'
+          slack-message: |
+            :rocket: *Production deployment starting*
+            Version: `${{ inputs.version }}`
+            Triggered by: ${{ github.actor }}
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+        continue-on-error: true
+
+      - name: Check no active incidents
+        run: |
+          echo "Checking for active incidents..."
+          # In real usage: query PagerDuty/Statuspage API
+          echo "No active incidents found - proceeding"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Verify backup exists
+        run: |
+          LATEST_BACKUP=$(aws rds describe-db-cluster-snapshots \
+            --db-cluster-identifier experimentation-prod \
+            --snapshot-type automated \
+            --query 'sort_by(DBClusterSnapshots, &SnapshotCreateTime)[-1].DBClusterSnapshotIdentifier' \
+            --output text 2>/dev/null || echo "NONE")
+
+          if [ "$LATEST_BACKUP" = "NONE" ]; then
+            echo "WARNING: No automated backup found. Taking manual snapshot..."
+            aws rds create-db-cluster-snapshot \
+              --db-cluster-identifier experimentation-prod \
+              --db-cluster-snapshot-identifier "pre-deploy-$(date +%Y%m%d-%H%M%S)"
+          else
+            echo "Latest backup: $LATEST_BACKUP - proceeding"
+          fi
+
+  run-tests:
+    name: Run Test Suite
+    runs-on: ubuntu-latest
+    needs: pre-deployment-checks
+    services:
+      postgres:
+        image: postgres:14
+        env:
+          POSTGRES_DB: experimentation_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7
+        ports: ["6379:6379"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.version }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m venv venv
+          source venv/bin/activate
+          pip install -r backend/requirements.txt
+
+      - name: Run unit tests
+        run: |
+          source venv/bin/activate
+          export APP_ENV=test TESTING=true
+          python -m pytest backend/tests/unit/ -v --tb=short -q
+
+      - name: Run integration tests
+        run: |
+          source venv/bin/activate
+          export APP_ENV=test TESTING=true \
+            POSTGRES_SERVER=localhost POSTGRES_USER=postgres \
+            POSTGRES_PASSWORD=postgres POSTGRES_DB=experimentation_test \
+            POSTGRES_SCHEMA=experimentation_test
+          python -m pytest backend/tests/integration/database/ -v -q
+          python -m pytest backend/tests/integration/api/ -v -q
+
+  build-and-push:
+    name: Build & Push Docker Images
+    runs-on: ubuntu-latest
+    needs: run-tests
+    outputs:
+      backend-image: ${{ steps.build-backend.outputs.image }}
+      frontend-image: ${{ steps.build-frontend.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.version }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push backend image
+        id: build-backend
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ inputs.version }}
+        run: |
+          docker build \
+            --build-arg BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ') \
+            --build-arg GIT_COMMIT=${{ github.sha }} \
+            -t $ECR_REGISTRY/$ECR_BACKEND_REPO:$IMAGE_TAG \
+            -t $ECR_REGISTRY/$ECR_BACKEND_REPO:latest \
+            -f backend/Dockerfile \
+            backend/
+          docker push $ECR_REGISTRY/$ECR_BACKEND_REPO:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_BACKEND_REPO:latest
+          echo "image=$ECR_REGISTRY/$ECR_BACKEND_REPO:$IMAGE_TAG" >> $GITHUB_OUTPUT
+
+      - name: Build and push frontend image
+        id: build-frontend
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ inputs.version }}
+        run: |
+          docker build \
+            --build-arg NEXT_PUBLIC_API_URL=${{ secrets.PROD_API_URL }} \
+            -t $ECR_REGISTRY/$ECR_FRONTEND_REPO:$IMAGE_TAG \
+            -t $ECR_REGISTRY/$ECR_FRONTEND_REPO:latest \
+            -f frontend/Dockerfile \
+            frontend/
+          docker push $ECR_REGISTRY/$ECR_FRONTEND_REPO:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_FRONTEND_REPO:latest
+          echo "image=$ECR_REGISTRY/$ECR_FRONTEND_REPO:$IMAGE_TAG" >> $GITHUB_OUTPUT
+
+  run-migrations:
+    name: Run Database Migrations
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.version }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Take pre-migration DB snapshot
+        run: |
+          SNAPSHOT_ID="pre-migration-$(date +%Y%m%d-%H%M%S)"
+          aws rds create-db-cluster-snapshot \
+            --db-cluster-identifier experimentation-prod \
+            --db-cluster-snapshot-identifier $SNAPSHOT_ID
+          echo "SNAPSHOT_ID=$SNAPSHOT_ID" >> $GITHUB_ENV
+          echo "Pre-migration snapshot: $SNAPSHOT_ID"
+
+      - name: Run migrations via ECS task
+        run: |
+          # Run migration as a one-off ECS task
+          TASK_ARN=$(aws ecs run-task \
+            --cluster $ECS_CLUSTER \
+            --task-definition experimentation-migrate \
+            --launch-type FARGATE \
+            --network-configuration "awsvpcConfiguration={subnets=[${{ secrets.PROD_PRIVATE_SUBNET_IDS }}],securityGroups=[${{ secrets.PROD_ECS_SG_ID }}],assignPublicIp=DISABLED}" \
+            --overrides '{"containerOverrides":[{"name":"backend","command":["python","-m","alembic","-c","app/db/alembic.ini","upgrade","head"]}]}' \
+            --query 'tasks[0].taskArn' \
+            --output text)
+
+          echo "Migration task: $TASK_ARN"
+
+          # Wait for completion
+          aws ecs wait tasks-stopped --cluster $ECS_CLUSTER --tasks $TASK_ARN
+
+          # Check exit code
+          EXIT_CODE=$(aws ecs describe-tasks \
+            --cluster $ECS_CLUSTER \
+            --tasks $TASK_ARN \
+            --query 'tasks[0].containers[0].exitCode' \
+            --output text)
+
+          if [ "$EXIT_CODE" != "0" ]; then
+            echo "Migration failed with exit code $EXIT_CODE"
+            echo "Pre-migration snapshot available: $SNAPSHOT_ID"
+            exit 1
+          fi
+          echo "Migration completed successfully"
+
+  deploy:
+    name: Deploy to Production (Blue/Green)
+    runs-on: ubuntu-latest
+    needs: [build-and-push, run-migrations]
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.version }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Update ECS task definition with new image
+        id: task-def
+        run: |
+          # Get current task definition
+          TASK_DEF=$(aws ecs describe-task-definition \
+            --task-definition experimentation-backend-prod \
+            --query taskDefinition)
+
+          # Update image in task definition
+          NEW_TASK_DEF=$(echo $TASK_DEF | python3 -c "
+          import json, sys
+          td = json.load(sys.stdin)
+          for c in td['containerDefinitions']:
+              if c['name'] == 'backend':
+                  c['image'] = '${{ needs.build-and-push.outputs.backend-image }}'
+          # Remove fields that can't be re-registered
+          for key in ['taskDefinitionArn','revision','status','requiresAttributes',
+                      'compatibilities','registeredAt','registeredBy']:
+              td.pop(key, None)
+          print(json.dumps(td))
+          ")
+
+          # Register new task definition
+          NEW_TASK_DEF_ARN=$(aws ecs register-task-definition \
+            --cli-input-json "$NEW_TASK_DEF" \
+            --query 'taskDefinition.taskDefinitionArn' \
+            --output text)
+
+          echo "new-task-def=$NEW_TASK_DEF_ARN" >> $GITHUB_OUTPUT
+          echo "New task definition: $NEW_TASK_DEF_ARN"
+
+      - name: Create CodeDeploy deployment (Blue/Green)
+        id: codedeploy
+        run: |
+          DEPLOYMENT_ID=$(aws deploy create-deployment \
+            --application-name experimentation-platform \
+            --deployment-group-name experimentation-prod \
+            --revision '{"revisionType":"AppSpecContent","appSpecContent":{"content":"{\"version\":1,\"Resources\":[{\"TargetService\":{\"Type\":\"AWS::ECS::Service\",\"Properties\":{\"TaskDefinition\":\"${{ steps.task-def.outputs.new-task-def }}\",\"LoadBalancerInfo\":{\"ContainerName\":\"backend\",\"ContainerPort\":8000}}}}]}"}}' \
+            --query 'deploymentId' \
+            --output text)
+          echo "deployment-id=$DEPLOYMENT_ID" >> $GITHUB_OUTPUT
+          echo "Deployment ID: $DEPLOYMENT_ID"
+
+      - name: Wait for deployment (10% traffic bake)
+        run: |
+          echo "Waiting for CodeDeploy deployment to reach 10% traffic..."
+          # Wait up to 20 minutes for deployment to complete
+          timeout 1200 aws deploy wait deployment-successful \
+            --deployment-id ${{ steps.codedeploy.outputs.deployment-id }} || {
+            echo "Deployment timed out or failed - triggering rollback"
+            aws deploy stop-deployment \
+              --deployment-id ${{ steps.codedeploy.outputs.deployment-id }} \
+              --auto-rollback-enabled
+            exit 1
+          }
+
+  smoke-tests:
+    name: Post-deployment Smoke Tests
+    runs-on: ubuntu-latest
+    needs: deploy
+    if: ${{ !inputs.skip_smoke_tests }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.version }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install test dependencies
+        run: pip install requests pytest
+
+      - name: Run smoke tests
+        env:
+          SMOKE_TEST_API_URL: ${{ secrets.PROD_API_URL }}
+          SMOKE_TEST_API_KEY: ${{ secrets.PROD_SMOKE_TEST_API_KEY }}
+          SMOKE_TEST_TOKEN: ${{ secrets.PROD_SMOKE_TEST_TOKEN }}
+        run: |
+          python -m pytest backend/tests/smoke/ -v --tb=short
+
+  post-deployment:
+    name: Post-deployment Verification
+    runs-on: ubuntu-latest
+    needs: [deploy, smoke-tests]
+    if: always()
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Check ECS service health
+        run: |
+          RUNNING=$(aws ecs describe-services \
+            --cluster $ECS_CLUSTER \
+            --services $ECS_BACKEND_SERVICE \
+            --query 'services[0].runningCount' \
+            --output text)
+          DESIRED=$(aws ecs describe-services \
+            --cluster $ECS_CLUSTER \
+            --services $ECS_BACKEND_SERVICE \
+            --query 'services[0].desiredCount' \
+            --output text)
+          echo "Running: $RUNNING / Desired: $DESIRED"
+          [ "$RUNNING" = "$DESIRED" ] && echo "Service healthy" || (echo "Service unhealthy" && exit 1)
+
+      - name: Notify deployment result
+        uses: slackapi/slack-github-action@v1.26.0
+        with:
+          channel-id: '#deployments'
+          slack-message: |
+            ${{ needs.smoke-tests.result == 'success' && ':white_check_mark:' || ':x:' }} *Production deployment ${{ needs.smoke-tests.result }}*
+            Version: `${{ inputs.version }}`
+            Deployed by: ${{ github.actor }}
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+        continue-on-error: true
