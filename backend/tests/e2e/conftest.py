@@ -64,7 +64,14 @@ def e2e_engine(test_db):
     separate engine with NullPool so every session gets a brand-new DBAPI
     connection. This prevents stale pooled connections from causing
     'server closed the connection' errors across tests.
+
+    Also disposes the app's own connection pool at the start of the fixture to
+    ensure no idle connections from the app engine (created during previous test
+    runs or earlier in this pytest session) interfere with the E2E tests.
     """
+    from backend.app.db.session import engine as app_engine
+    app_engine.dispose()
+
     db_url = os.environ.get("TEST_DATABASE_URL", DEFAULT_TEST_DB_URL)
     engine = create_engine(db_url, poolclass=NullPool)
     yield engine

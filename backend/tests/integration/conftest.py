@@ -32,10 +32,17 @@ HASHED_PASSWORD = "$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW"
 
 @pytest.fixture
 def admin_user(db_session: Session) -> User:
-    """Create an admin user for integration tests."""
+    """Create an admin user for integration tests.
+
+    Uses a unique suffix to avoid unique-key conflicts when the DB connection
+    isolation mechanism does not properly roll back committed data from prior
+    tests (known infrastructure limitation: session.commit() in conftest
+    deassociates the outer transaction's rollback).
+    """
+    suffix = uuid.uuid4().hex[:8]
     user = User(
-        username="admin_int",
-        email="admin@int.test",
+        username=f"admin_int_{suffix}",
+        email=f"admin_{suffix}@int.test",
         full_name="Admin Integration User",
         hashed_password=HASHED_PASSWORD,
         is_active=True,
@@ -51,9 +58,10 @@ def admin_user(db_session: Session) -> User:
 @pytest.fixture
 def developer_user(db_session: Session) -> User:
     """Create a developer user for integration tests."""
+    suffix = uuid.uuid4().hex[:8]
     user = User(
-        username="dev_int",
-        email="dev@int.test",
+        username=f"dev_int_{suffix}",
+        email=f"dev_{suffix}@int.test",
         full_name="Developer Integration User",
         hashed_password=HASHED_PASSWORD,
         is_active=True,
@@ -69,9 +77,10 @@ def developer_user(db_session: Session) -> User:
 @pytest.fixture
 def analyst_user(db_session: Session) -> User:
     """Create an analyst user for integration tests."""
+    suffix = uuid.uuid4().hex[:8]
     user = User(
-        username="analyst_int",
-        email="analyst@int.test",
+        username=f"analyst_int_{suffix}",
+        email=f"analyst_{suffix}@int.test",
         full_name="Analyst Integration User",
         hashed_password=HASHED_PASSWORD,
         is_active=True,
@@ -87,9 +96,10 @@ def analyst_user(db_session: Session) -> User:
 @pytest.fixture
 def viewer_user(db_session: Session) -> User:
     """Create a viewer user for integration tests."""
+    suffix = uuid.uuid4().hex[:8]
     user = User(
-        username="viewer_int",
-        email="viewer@int.test",
+        username=f"viewer_int_{suffix}",
+        email=f"viewer_{suffix}@int.test",
         full_name="Viewer Integration User",
         hashed_password=HASHED_PASSWORD,
         is_active=True,
