@@ -23,6 +23,8 @@ from backend.app.api.v1.endpoints import (
     audit_logs,
     export,
     bulk_toggle,
+    rbac,
+    realtime_counters,
 )
 
 # Import the sample size calculator router
@@ -69,6 +71,14 @@ api_router_v1.include_router(export.router, prefix="/export", tags=["Export"])
 
 # P1-B: Advanced Toggle Features & Audit Logging
 api_router_v1.include_router(bulk_toggle.router, prefix="", tags=["Advanced Toggle"])
+
+# P2-A: RBAC Post-MVP Enhancements
+api_router_v1.include_router(rbac.router, prefix="/rbac", tags=["RBAC"])
+
+# P2-B: Real-time Counters in DynamoDB
+api_router_v1.include_router(
+    realtime_counters.router, prefix="/counters", tags=["Real-time Counters"]
+)
 
 # Main API router that includes versioned routers
 api_router = APIRouter()
@@ -139,5 +149,13 @@ tags_metadata = [
     {
         "name": "Reports",
         "description": "Operations for generating platform and experiment summary reports",
+    },
+    {
+        "name": "RBAC",
+        "description": "Operations for managing custom roles, permission delegation, and effective permission resolution",
+    },
+    {
+        "name": "Real-time Counters",
+        "description": "Real-time DynamoDB atomic counters for experiment assignments, events, and conversions",
     },
 ]
