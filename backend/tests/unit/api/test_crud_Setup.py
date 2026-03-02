@@ -43,10 +43,13 @@ def test_application_setup():
 
 def test_api_endpoints():
     """Test API endpoints are properly mounted."""
-    # Test health check endpoint (directly mounted on app)
+    # Test health check endpoint (directly mounted on app).
+    # EP-013 enhanced health check returns 200 when all sub-checks pass or
+    # 503 when DB/Redis are unavailable (common in unit-test environments).
     health_response = client.get("/health")
     print(f"\nHealth endpoint: {health_response.status_code}")
-    assert health_response.status_code == 200, "Health endpoint should be accessible"
+    assert health_response.status_code in (200, 503), "Health endpoint should be accessible"
+    assert "status" in health_response.json()
 
     # Test API documentation endpoints
     docs_endpoints = [

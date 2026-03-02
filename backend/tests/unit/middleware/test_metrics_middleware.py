@@ -1,206 +1,161 @@
+"""
+Unit tests for backend/app/middleware/metrics_middleware.py
+
+Covers:
+- normalize_path: UUID replacement, no-op for non-UUIDs, multiple UUIDs
+- PrometheusMetricsMiddleware records metrics on successful requests
+- Status code and duration are forwarded correctly
+"""
+
 import pytest
-from unittest.mock import Mock, patch
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from starlette.testclient import TestClient
-from starlette.responses import Response
-from backend.app.middleware.metrics_middleware import MetricsMiddleware
-from backend.app.utils.aws_client import AWSClient
+from starlette.responses import JSONResponse
 
-class TestMetricsMiddleware:
-    @pytest.fixture
-    def app(self):
-        app = FastAPI()
-        return app
+# ---------------------------------------------------------------------------
+# normalize_path tests (pure function — no side-effects)
+# ---------------------------------------------------------------------------
 
-    @pytest.fixture
-    def mock_aws_client(self, mocker):
-        mock_client = mocker.Mock(spec=AWSClient)
-        mock_client.send_metric.return_value = True
-        return mock_client
 
-    @pytest.fixture
-    def middleware(self, app, mock_aws_client):
-        return MetricsMiddleware(
-            app=app,
-            aws_client=mock_aws_client,
-            enable_metrics=True,
-            namespace="TestNamespace"
-        )
+def test_normalize_path_replaces_uuid():
+    from backend.app.middleware.prometheus_metrics_middleware import normalize_path
 
-    @pytest.fixture
-    def disabled_middleware(self, app, mock_aws_client):
-        return MetricsMiddleware(
-            app=app,
-            aws_client=mock_aws_client,
-            enable_metrics=False
-        )
+    path = "/api/v1/experiments/550e8400-e29b-41d4-a716-446655440000/results"
+    result = normalize_path(path)
+    assert result == "/api/v1/experiments/{id}/results"
 
-    @pytest.fixture
-    def custom_namespace_middleware(self, app, mock_aws_client):
-        return MetricsMiddleware(
-            app=app,
-            aws_client=mock_aws_client,
-            enable_metrics=True,
-            namespace="CustomNamespace"
-        )
 
-    @pytest.fixture
-    def mock_request(self):
-        request = Mock(spec=Request)
-        request.url.path = "/test"
-        request.method = "GET"
-        return request
+def test_normalize_path_leaves_non_uuid_intact():
+    from backend.app.middleware.prometheus_metrics_middleware import normalize_path
 
-    @pytest.fixture
-    def mock_response(self):
-        response = Mock(spec=Response)
-        response.status_code = 200
-        return response
+    path = "/api/v1/feature-flags/evaluate/my-feature-key"
+    result = normalize_path(path)
+    assert result == "/api/v1/feature-flags/evaluate/my-feature-key"
 
-    @pytest.fixture
-    def mock_call_next(self, mock_response):
-        async def call_next(request):
-            return mock_response
-        return call_next
 
-    @pytest.mark.asyncio
-    async def test_successful_request(self, middleware, mock_aws_client, mocker):
-        """Test that metrics are collected and sent for successful requests."""
-        app = FastAPI()
-        app.add_middleware(MetricsMiddleware,
-            aws_client=mock_aws_client,
-            enable_metrics=True,
-            namespace="TestNamespace"
-        )
-        client = TestClient(app)
+def test_normalize_path_multiple_uuids():
+    from backend.app.middleware.prometheus_metrics_middleware import normalize_path
 
-        response = client.get("/test")
-        assert response.status_code == 404  # No route defined
+    path = (
+        "/api/v1/users/550e8400-e29b-41d4-a716-446655440000"
+        "/experiments/660e8400-e29b-41d4-a716-446655440001"
+    )
+    result = normalize_path(path)
+    assert result == "/api/v1/users/{id}/experiments/{id}"
 
-        # Verify metrics were sent
-        assert mock_aws_client.send_metric.call_count >= 3  # RequestTime, MemoryUsage, CPUUsage
-        mock_aws_client.send_metric.assert_any_call(
-            namespace="TestNamespace",
-            metric_name="RequestTime",
-            value=mocker.ANY,
-            unit="Milliseconds",
-            dimensions={"Path": "/test", "Method": "GET", "StatusCode": "404"}
-        )
 
-    @pytest.mark.asyncio
-    async def test_request_with_error(self, middleware, mock_aws_client):
-        """Test that error metrics are collected and sent."""
-        app = FastAPI()
-        app.add_middleware(MetricsMiddleware,
-            aws_client=mock_aws_client,
-            enable_metrics=True,
-            namespace="TestNamespace"
-        )
+def test_normalize_path_no_uuid():
+    from backend.app.middleware.prometheus_metrics_middleware import normalize_path
 
-        @app.get("/error")
-        async def error_route():
-            raise ValueError("Test error")
+    path = "/api/v1/health"
+    assert normalize_path(path) == "/api/v1/health"
 
-        client = TestClient(app)
-        with pytest.raises(ValueError):
-            response = client.get("/error")
 
-        # Verify error metrics were sent
-        assert mock_aws_client.send_metric.call_count >= 2  # Errors and ErrorRequestTime
-        mock_aws_client.send_metric.assert_any_call(
-            namespace="TestNamespace",
-            metric_name="Errors",
-            value=1,
-            unit="Count",
-            dimensions={"Path": "/error", "Method": "GET", "ErrorType": "ValueError"}
-        )
+def test_normalize_path_root():
+    from backend.app.middleware.prometheus_metrics_middleware import normalize_path
 
-    @pytest.mark.asyncio
-    async def test_aws_client_error(self, middleware, mock_aws_client):
-        """Test handling of AWS client errors."""
-        # Set up the mock to raise an exception
-        mock_aws_client.send_metric.side_effect = Exception("AWS Error")
+    assert normalize_path("/") == "/"
 
-        app = FastAPI()
 
-        @app.get("/test")
-        async def test_endpoint():
-            return {"message": "test"}
+# ---------------------------------------------------------------------------
+# PrometheusMetricsMiddleware integration-style tests (in-process)
+# ---------------------------------------------------------------------------
 
-        # Add middleware with error handling
-        app.add_middleware(
-            MetricsMiddleware,
-            aws_client=mock_aws_client,
-            enable_metrics=True,
-            namespace="TestNamespace"
-        )
 
-        # Create test client and make request
-        client = TestClient(app)
-        response = client.get("/test")
+@pytest.mark.asyncio
+async def test_metrics_middleware_records_on_success(mocker):
+    """record_request is called once for a successful response."""
+    mock_record = mocker.patch(
+        "backend.app.middleware.prometheus_metrics_middleware.record_request"
+    )
 
-        # Request should succeed despite AWS error
-        assert response.status_code == 200
-        assert response.json() == {"message": "test"}
+    app = FastAPI()
 
-        # Verify AWS client was called
-        assert mock_aws_client.send_metric.called
+    @app.get("/ping")
+    async def ping():
+        return {"pong": True}
 
-        # Verify metrics were attempted to be sent
-        calls = mock_aws_client.send_metric.call_args_list
-        assert len(calls) > 0
-        assert calls[0][1]["namespace"] == "TestNamespace"
-        assert calls[0][1]["metric_name"] == "RequestTime"
+    from backend.app.middleware.prometheus_metrics_middleware import PrometheusMetricsMiddleware
 
-    @pytest.mark.asyncio
-    async def test_metrics_collection_disabled(self, disabled_middleware, mock_aws_client):
-        """Test that no metrics are collected when disabled."""
-        app = FastAPI()
-        app.add_middleware(MetricsMiddleware,
-            aws_client=mock_aws_client,
-            enable_metrics=False,
-            namespace="TestNamespace"
-        )
-        client = TestClient(app)
+    app.add_middleware(PrometheusMetricsMiddleware)
+    client = TestClient(app)
 
-        response = client.get("/test")
-        assert response.status_code == 404  # No route defined
-        mock_aws_client.send_metric.assert_not_called()
+    response = client.get("/ping")
+    assert response.status_code == 200
 
-    @pytest.mark.asyncio
-    async def test_custom_metric_namespace(self, custom_namespace_middleware, mock_aws_client, mocker):
-        """Test using a custom metric namespace."""
-        app = FastAPI()
-        app.add_middleware(MetricsMiddleware,
-            aws_client=mock_aws_client,
-            enable_metrics=True,
-            namespace="CustomNamespace"
-        )
-        client = TestClient(app)
+    mock_record.assert_called_once()
+    call_kwargs = mock_record.call_args.kwargs
+    assert call_kwargs["status_code"] == 200
+    assert call_kwargs["duration"] > 0
+    assert call_kwargs["method"] == "GET"
 
-        response = client.get("/test")
-        assert response.status_code == 404  # No route defined
 
-        # Verify metrics were sent with custom namespace
-        mock_aws_client.send_metric.assert_any_call(
-            namespace="CustomNamespace",
-            metric_name="RequestTime",
-            value=mocker.ANY,
-            unit="Milliseconds",
-            dimensions={"Path": "/test", "Method": "GET", "StatusCode": "404"}
-        )
+@pytest.mark.asyncio
+async def test_metrics_middleware_records_404(mocker):
+    """record_request is called even when the route is not found (404)."""
+    mock_record = mocker.patch(
+        "backend.app.middleware.prometheus_metrics_middleware.record_request"
+    )
 
-    @pytest.mark.asyncio
-    async def test_test_environment(self, middleware, mock_aws_client):
-        """Test metrics collection in test environment."""
-        app = FastAPI()
-        app.add_middleware(MetricsMiddleware,
-            aws_client=mock_aws_client,
-            enable_metrics=True,
-            namespace="TestNamespace"
-        )
-        client = TestClient(app)
+    app = FastAPI()
+    from backend.app.middleware.prometheus_metrics_middleware import PrometheusMetricsMiddleware
 
-        response = client.get("/test")
-        assert response.status_code == 404  # No route defined
-        mock_aws_client.send_metric.assert_called()
+    app.add_middleware(PrometheusMetricsMiddleware)
+    client = TestClient(app)
+
+    response = client.get("/nonexistent-route")
+    assert response.status_code == 404
+
+    mock_record.assert_called_once()
+    call_kwargs = mock_record.call_args.kwargs
+    assert call_kwargs["status_code"] == 404
+
+
+@pytest.mark.asyncio
+async def test_metrics_middleware_normalizes_uuid_path(mocker):
+    """Paths with UUIDs are normalised before being passed to record_request."""
+    mock_record = mocker.patch(
+        "backend.app.middleware.prometheus_metrics_middleware.record_request"
+    )
+
+    app = FastAPI()
+
+    @app.get("/api/v1/experiments/{experiment_id}")
+    async def get_experiment(experiment_id: str):
+        return {"id": experiment_id}
+
+    from backend.app.middleware.prometheus_metrics_middleware import PrometheusMetricsMiddleware
+
+    app.add_middleware(PrometheusMetricsMiddleware)
+    client = TestClient(app)
+
+    client.get("/api/v1/experiments/550e8400-e29b-41d4-a716-446655440000")
+
+    mock_record.assert_called_once()
+    call_kwargs = mock_record.call_args.kwargs
+    assert call_kwargs["endpoint"] == "/api/v1/experiments/{id}"
+
+
+@pytest.mark.asyncio
+async def test_metrics_middleware_records_post(mocker):
+    """POST requests are tracked correctly."""
+    mock_record = mocker.patch(
+        "backend.app.middleware.prometheus_metrics_middleware.record_request"
+    )
+
+    app = FastAPI()
+
+    @app.post("/api/v1/events")
+    async def create_event():
+        return {"created": True}
+
+    from backend.app.middleware.prometheus_metrics_middleware import PrometheusMetricsMiddleware
+
+    app.add_middleware(PrometheusMetricsMiddleware)
+    client = TestClient(app)
+
+    response = client.post("/api/v1/events", json={})
+    assert response.status_code == 200
+
+    mock_record.assert_called_once()
+    assert mock_record.call_args.kwargs["method"] == "POST"
