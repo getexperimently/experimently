@@ -76,6 +76,16 @@ export interface SchedulerRun {
   error_message?: string;
 }
 
+export interface ApiKey {
+  id: string;
+  name: string;
+  prefix: string;
+  created_by: string;
+  created_at: string;
+  last_used?: string;
+  is_active: boolean;
+}
+
 export interface AdminStats {
   total_experiments: number;
   active_experiments: number;
