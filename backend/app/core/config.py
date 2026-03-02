@@ -50,6 +50,9 @@ class Settings(BaseSettings):
     FIRST_SUPERUSER: EmailStr = "admin@example.com"
     FIRST_SUPERUSER_PASSWORD: str = "admin"
 
+    # DynamoDB settings
+    DYNAMODB_COUNTERS_TABLE: str = "experiment-counters"
+
     # Cognito settings
     COGNITO_GROUP_ROLE_MAPPING: Dict[str, str] = {
         "Admins": "admin",
