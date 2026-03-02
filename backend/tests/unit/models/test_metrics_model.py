@@ -1,5 +1,6 @@
 """Unit tests for metrics models."""
 import uuid
+from uuid import uuid4
 from datetime import datetime, timezone
 
 import pytest
@@ -38,8 +39,9 @@ def test_aggregation_period_enum_values():
 def test_raw_metric_model(db_session):
     """Test creating and querying a RawMetric."""
     # Create a test feature flag
+    uid = str(uuid4())[:8]
     feature_flag = FeatureFlag(
-        key="test-flag",
+        key=f"test-flag-{uid}",
         name="Test Flag",
         description="A test flag",
         status="ACTIVE",
@@ -93,8 +95,9 @@ def test_raw_metric_model(db_session):
 def test_aggregated_metric_model(db_session):
     """Test creating and querying an AggregatedMetric."""
     # Create a test feature flag
+    uid = str(uuid4())[:8]
     feature_flag = FeatureFlag(
-        key="test-flag",
+        key=f"test-flag-{uid}",
         name="Test Flag",
         description="A test flag",
         status="ACTIVE",
@@ -150,8 +153,9 @@ def test_aggregated_metric_model(db_session):
 def test_aggregated_metric_unique_constraint(db_session):
     """Test that AggregatedMetric has a unique constraint on key fields."""
     # Create a test feature flag
+    uid = str(uuid4())[:8]
     feature_flag = FeatureFlag(
-        key="test-flag",
+        key=f"test-flag-{uid}",
         name="Test Flag",
         description="A test flag",
         status="ACTIVE",
@@ -201,8 +205,9 @@ def test_aggregated_metric_unique_constraint(db_session):
 def test_error_log_model(db_session):
     """Test creating and querying an ErrorLog."""
     # Create a test feature flag
+    uid = str(uuid4())[:8]
     feature_flag = FeatureFlag(
-        key="test-flag",
+        key=f"test-flag-{uid}",
         name="Test Flag",
         description="A test flag",
         status="ACTIVE",
@@ -298,8 +303,9 @@ def test_aggregated_metric_default_count(db_session):
 def test_feature_flag_metrics_relationship(db_session):
     """Test the relationship between FeatureFlag and metrics models."""
     # Create a test feature flag
+    uid = str(uuid4())[:8]
     feature_flag = FeatureFlag(
-        key="test-flag",
+        key=f"test-flag-{uid}",
         name="Test Flag",
         description="A test flag",
         status="ACTIVE",
