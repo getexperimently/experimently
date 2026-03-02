@@ -356,9 +356,12 @@ class TestFeatureFlagToggleEndpoints:
             return uuid4()
 
         # Override dependencies with cache enabled
+        # Use SimpleNamespace so attribute access (cache_control.enabled) works
+        import types
+        mock_cache = types.SimpleNamespace(enabled=True, redis=mock_redis)
         app.dependency_overrides[deps.get_current_active_user] = lambda: mock_user
         app.dependency_overrides[deps.get_db] = lambda: mock_db
-        app.dependency_overrides[deps.get_cache_control] = lambda: {"enabled": True, "redis": mock_redis}
+        app.dependency_overrides[deps.get_cache_control] = lambda: mock_cache
 
         # Mock audit service
         with patch("backend.app.services.audit_service.AuditService.log_action", side_effect=mock_log_action):

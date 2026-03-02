@@ -33,8 +33,7 @@ class FeatureFlagBase(BaseModel):
         import re
         if not re.match(r"^[a-z0-9][a-z0-9_-]*$", v):
             raise ValueError(
-                "Key must start with a lowercase letter or digit and contain only "
-                "lowercase alphanumeric characters, hyphens, or underscores"
+                "Key must be lowercase alphanumeric characters, hyphens, or underscores only"
             )
         return v
 

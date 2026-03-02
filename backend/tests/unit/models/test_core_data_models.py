@@ -293,16 +293,19 @@ def test_user_role_relationship(db_session):
     if "sqlite" in str(db_session.bind.engine.url):
         pytest.skip("Skipping relationship test with SQLite")
 
+    import uuid as _uuid
+    uid = str(_uuid.uuid4())[:8]
+
     # Create a user
     user = User(
-        username="testuser",
-        email="test@example.com",
+        username=f"testuser_{uid}",
+        email=f"test_{uid}@example.com",
         hashed_password="hashedpassword",
         full_name="Test User",
     )
 
     # Create a role
-    role = Role(name="Admin", description="Administrator role")
+    role = Role(name=f"Admin_{uid}", description="Administrator role")
 
     # Associate role with user
     user.roles.append(role)
@@ -313,13 +316,13 @@ def test_user_role_relationship(db_session):
     db_session.commit()
 
     # Retrieve from database and verify relationship
-    retrieved_user = db_session.query(User).filter_by(username="testuser").first()
+    retrieved_user = db_session.query(User).filter_by(username=f"testuser_{uid}").first()
     assert len(retrieved_user.roles) == 1
-    assert retrieved_user.roles[0].name == "Admin"
+    assert retrieved_user.roles[0].name == f"Admin_{uid}"
 
-    retrieved_role = db_session.query(Role).filter_by(name="Admin").first()
+    retrieved_role = db_session.query(Role).filter_by(name=f"Admin_{uid}").first()
     assert len(retrieved_role.users) == 1
-    assert retrieved_role.users[0].username == "testuser"
+    assert retrieved_role.users[0].username == f"testuser_{uid}"
 
 
 def test_experiment_variant_relationship(db_session):
