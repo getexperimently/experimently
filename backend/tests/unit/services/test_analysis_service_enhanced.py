@@ -376,13 +376,13 @@ class TestCohensH:
         """
         |h| ≥ 0.8 is classified as a 'large' effect.
 
-        p1=0.10, p2≈0.40 gives |h| ≈ 0.9 (pre-computed).
+        p1=0.10, p2=0.50 gives |h| ≈ 0.927 (pre-computed).
         """
         service = _make_service()
-        # Pre-computed: h ≈ 0.90 for p1=0.10, p2=0.40
-        _h, label = service.cohens_h(p1=0.10, p2=0.40)
+        # Pre-computed: h ≈ 0.927 for p1=0.10, p2=0.50
+        _h, label = service.cohens_h(p1=0.10, p2=0.50)
         assert label == "large", (
-            f"Expected label='large' for |h|≈0.9, got '{label}'"
+            f"Expected label='large' for |h|≈0.927, got '{label}'"
         )
 
 
