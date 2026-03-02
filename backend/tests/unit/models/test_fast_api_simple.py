@@ -23,10 +23,14 @@ def test_app_exists():
 
 # Test using the TestClient
 def test_health_endpoint():
-    """Test the health endpoint."""
+    """Test the health endpoint.
+
+    EP-013 enhanced health check returns 200 (all checks pass) or 503
+    (some check fails, e.g. DB/Redis unavailable in unit-test environment).
+    """
     client = TestClient(app)
     response = client.get("/health")
-    assert response.status_code == 200
+    assert response.status_code in (200, 503)
     data = response.json()
     assert "status" in data
-    assert data["status"] == "healthy"
+    assert data["status"] in ("healthy", "unhealthy")

@@ -518,3 +518,199 @@ class MonitoringStack(Stack):
 
         # Add widgets to application dashboard
         app_dashboard.add_widgets(app_widget, event_widget)
+
+        # ---------------------------------------------------------------
+        # EP-013: Prometheus / application-level metrics section
+        # These widgets surface metrics emitted by the FastAPI app via
+        # backend/app/core/metrics.py and scraped into CloudWatch via the
+        # CloudWatch agent or a Prometheus remote-write adapter.
+        # ---------------------------------------------------------------
+
+        # Request rate and error rate (HTTP metrics from the FastAPI app)
+        prometheus_http_widget = cloudwatch.GraphWidget(
+            title="HTTP Request Rate & Error Rate (app)",
+            left=[
+                cloudwatch.Metric(
+                    namespace="ExperimentationPlatform/Prometheus",
+                    metric_name="http_requests_total",
+                    dimensions_map={"method": "GET"},
+                    statistic="Sum",
+                    period=Duration.minutes(1),
+                    label="GET requests/min",
+                ),
+                cloudwatch.Metric(
+                    namespace="ExperimentationPlatform/Prometheus",
+                    metric_name="http_requests_total",
+                    dimensions_map={"method": "POST"},
+                    statistic="Sum",
+                    period=Duration.minutes(1),
+                    label="POST requests/min",
+                ),
+            ],
+            right=[
+                cloudwatch.Metric(
+                    namespace="ExperimentationPlatform/Prometheus",
+                    metric_name="http_requests_total",
+                    dimensions_map={"status_code": "500"},
+                    statistic="Sum",
+                    period=Duration.minutes(1),
+                    label="5xx errors/min",
+                ),
+            ],
+        )
+
+        # Latency widget (p50 / p95 / p99)
+        prometheus_latency_widget = cloudwatch.GraphWidget(
+            title="Request Latency (app p50/p95/p99)",
+            left=[
+                cloudwatch.Metric(
+                    namespace="ExperimentationPlatform/Prometheus",
+                    metric_name="http_request_duration_seconds",
+                    statistic="p50",
+                    period=Duration.minutes(1),
+                    label="p50 latency (s)",
+                ),
+                cloudwatch.Metric(
+                    namespace="ExperimentationPlatform/Prometheus",
+                    metric_name="http_request_duration_seconds",
+                    statistic="p95",
+                    period=Duration.minutes(1),
+                    label="p95 latency (s)",
+                ),
+                cloudwatch.Metric(
+                    namespace="ExperimentationPlatform/Prometheus",
+                    metric_name="http_request_duration_seconds",
+                    statistic="p99",
+                    period=Duration.minutes(1),
+                    label="p99 latency (s)",
+                ),
+            ],
+        )
+
+        # Active experiments gauge
+        active_experiments_widget = cloudwatch.GraphWidget(
+            title="Active Experiments",
+            left=[
+                cloudwatch.Metric(
+                    namespace="ExperimentationPlatform/Prometheus",
+                    metric_name="active_experiments_gauge",
+                    statistic="Maximum",
+                    period=Duration.minutes(5),
+                    label="Active experiments",
+                ),
+            ],
+        )
+
+        # Cache hit ratio (cache hits / (hits + misses))
+        cache_hit_rate_widget = cloudwatch.GraphWidget(
+            title="Cache Hit Ratio",
+            left=[
+                cloudwatch.MathExpression(
+                    expression="hits / (hits + misses) * 100",
+                    using_metrics={
+                        "hits": cloudwatch.Metric(
+                            namespace="ExperimentationPlatform/Prometheus",
+                            metric_name="cache_hits_total",
+                            statistic="Sum",
+                            period=Duration.minutes(1),
+                        ),
+                        "misses": cloudwatch.Metric(
+                            namespace="ExperimentationPlatform/Prometheus",
+                            metric_name="cache_misses_total",
+                            statistic="Sum",
+                            period=Duration.minutes(1),
+                        ),
+                    },
+                    label="Cache hit ratio (%)",
+                    period=Duration.minutes(1),
+                ),
+            ],
+        )
+
+        # Feature flag evaluations
+        flag_eval_widget = cloudwatch.GraphWidget(
+            title="Feature Flag Evaluations",
+            left=[
+                cloudwatch.Metric(
+                    namespace="ExperimentationPlatform/Prometheus",
+                    metric_name="feature_flag_evaluations_total",
+                    statistic="Sum",
+                    period=Duration.minutes(1),
+                    label="Flag evaluations/min",
+                ),
+            ],
+        )
+
+        # Add EP-013 widgets to the application dashboard
+        app_dashboard.add_widgets(
+            prometheus_http_widget,
+            prometheus_latency_widget,
+            active_experiments_widget,
+            cache_hit_rate_widget,
+            flag_eval_widget,
+        )
+
+        # ---------------------------------------------------------------
+        # EP-013: Application-level alarms (from CLOUDWATCH_ALARMS spec)
+        # ---------------------------------------------------------------
+
+        # High error rate alarm (>1% 5xx)
+        high_error_rate_alarm = cloudwatch.Alarm(
+            self,
+            "HighErrorRateAlarm",
+            metric=cloudwatch.Metric(
+                namespace="ExperimentationPlatform/Prometheus",
+                metric_name="http_requests_total",
+                dimensions_map={"status_code": "500"},
+                statistic="Sum",
+                period=Duration.minutes(1),
+            ),
+            evaluation_periods=2,
+            threshold=10,
+            comparison_operator=cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+            alarm_description="High 5xx error rate detected in the FastAPI application",
+            alarm_name="AppHighErrorRate",
+        )
+        high_error_rate_alarm.add_alarm_action(
+            cloudwatch_actions.SnsAction(self.alerts_topic)
+        )
+
+        # High p99 latency alarm (>2 s)
+        high_latency_alarm = cloudwatch.Alarm(
+            self,
+            "HighLatencyP99Alarm",
+            metric=cloudwatch.Metric(
+                namespace="ExperimentationPlatform/Prometheus",
+                metric_name="http_request_duration_seconds",
+                statistic="p99",
+                period=Duration.minutes(1),
+            ),
+            evaluation_periods=3,
+            threshold=2.0,
+            comparison_operator=cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+            alarm_description="p99 request latency exceeded 2 seconds",
+            alarm_name="AppHighLatencyP99",
+        )
+        high_latency_alarm.add_alarm_action(
+            cloudwatch_actions.SnsAction(self.alerts_topic)
+        )
+
+        # High active experiments alarm (>100)
+        high_active_experiments_alarm = cloudwatch.Alarm(
+            self,
+            "HighActiveExperimentsAlarm",
+            metric=cloudwatch.Metric(
+                namespace="ExperimentationPlatform/Prometheus",
+                metric_name="active_experiments_gauge",
+                statistic="Maximum",
+                period=Duration.minutes(5),
+            ),
+            evaluation_periods=1,
+            threshold=100,
+            comparison_operator=cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+            alarm_description="More than 100 concurrent active experiments",
+            alarm_name="AppHighActiveExperiments",
+        )
+        high_active_experiments_alarm.add_alarm_action(
+            cloudwatch_actions.SnsAction(self.alerts_topic)
+        )
