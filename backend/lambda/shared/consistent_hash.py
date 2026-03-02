@@ -117,6 +117,20 @@ class ConsistentHasher:
 
         return hash_value
 
+    def get_normalized_hash(self, user_id: str, salt: str) -> float:
+        """
+        Hash user_id with salt and normalize to [0, 1).
+
+        Args:
+            user_id: User identifier
+            salt: Salt string for hash calculation
+
+        Returns:
+            Normalized hash value in range [0, 1)
+        """
+        hash_value = self._hash(user_id, salt)
+        return hash_value / (self.MAX_HASH_VALUE + 1)
+
     def get_bucket(
         self,
         user_id: str,

@@ -5,7 +5,7 @@ This module defines the request and response schemas for authentication operatio
 """
 
 from typing import Dict, Any, Optional
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 
 class SignUpRequest(BaseModel):
@@ -16,6 +16,18 @@ class SignUpRequest(BaseModel):
     email: EmailStr
     given_name: str = Field(..., min_length=1, max_length=50)
     family_name: str = Field(..., min_length=1, max_length=50)
+
+    @field_validator("password")
+    @classmethod
+    def validate_password_strength(cls, v: str) -> str:
+        """Enforce password strength: must contain uppercase, lowercase, and digit."""
+        if not any(c.isupper() for c in v):
+            raise ValueError("Password must contain at least one uppercase letter")
+        if not any(c.islower() for c in v):
+            raise ValueError("Password must contain at least one lowercase letter")
+        if not any(c.isdigit() for c in v):
+            raise ValueError("Password must contain at least one digit")
+        return v
 
 
 class SignUpResponse(BaseModel):
@@ -68,6 +80,18 @@ class ConfirmForgotPasswordRequest(BaseModel):
     username: str
     confirmation_code: str
     new_password: str = Field(..., min_length=8, max_length=100)
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_password_strength(cls, v: str) -> str:
+        """Enforce password strength: must contain uppercase, lowercase, and digit."""
+        if not any(c.isupper() for c in v):
+            raise ValueError("Password must contain at least one uppercase letter")
+        if not any(c.islower() for c in v):
+            raise ValueError("Password must contain at least one lowercase letter")
+        if not any(c.isdigit() for c in v):
+            raise ValueError("Password must contain at least one digit")
+        return v
 
 
 class ConfirmForgotPasswordResponse(BaseModel):

@@ -99,8 +99,22 @@ class ErrorMiddleware(BaseHTTPMiddleware):
         except Exception as e:
             logger.error(f"Failed to send error metrics to CloudWatch: {str(e)}")
 
+    # Headers that contain sensitive values and must be masked in logs
+    _SENSITIVE_HEADER_PATTERNS = {"authorization", "cookie", "x-api-key", "token", "secret"}
+
+    def _mask_headers(self, headers: dict) -> dict:
+        """Mask sensitive header values for safe logging."""
+        masked = {}
+        for key, value in headers.items():
+            key_lower = key.lower()
+            if any(pattern in key_lower for pattern in self._SENSITIVE_HEADER_PATTERNS):
+                masked[key] = "***REDACTED***"
+            else:
+                masked[key] = value
+        return masked
+
     def _log_error(self, request: Request, error: Exception) -> None:
-        """Log detailed error information."""
+        """Log detailed error information with sensitive data masked."""
         error_details = {
             "path": str(request.url.path),
             "method": request.method,
@@ -109,11 +123,11 @@ class ErrorMiddleware(BaseHTTPMiddleware):
             "timestamp": datetime.utcnow().isoformat()
         }
 
-        # Add request context if available
+        # Add request context if available, with sensitive headers masked
         try:
             error_details.update({
                 "client_host": request.client.host,
-                "headers": dict(request.headers),
+                "headers": self._mask_headers(dict(request.headers)),
                 "query_params": dict(request.query_params)
             })
         except Exception:

@@ -104,9 +104,10 @@ class TestAPIRouting:
         # Check tags for specific routes (exclude export routes that use the
         # "Export" tag even if the path contains /experiments, and exclude
         # segment sub-routes like /segments/{id}/experiments which use the
-        # "Segments" tag)
+        # "Segments" tag, and exclude mutual-exclusion-group sub-routes which
+        # use the "Mutual Exclusion Groups" tag)
         for path, methods in openapi_schema["paths"].items():
-            if "/experiments" in path and "/export/" not in path and "/segments/" not in path:
+            if "/experiments" in path and "/export/" not in path and "/segments/" not in path and "/mutual-exclusion-groups/" not in path:
                 for method in methods.values():
                     assert "Experiments" in method["tags"], f"Experiments tag missing for {path}"
             elif "/tracking" in path:

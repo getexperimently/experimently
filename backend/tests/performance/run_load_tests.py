@@ -69,6 +69,17 @@ _CSV_STATS_SUFFIX = "_stats.csv"
 # ---------------------------------------------------------------------------
 
 
+# Convenience mapping from profile name to locustfile
+_PROFILE_LOCUSTFILES: dict[str, str] = {
+    "baseline": str(_THIS_DIR / "locustfiles" / "api_load_test.py"),
+    "spike": str(_THIS_DIR / "locustfiles" / "spike_test.py"),
+    "endurance": str(_THIS_DIR / "locustfiles" / "endurance_test.py"),
+    "crud": str(_THIS_DIR / "locustfiles" / "crud_load_test.py"),
+    "db-stress": str(_THIS_DIR / "locustfiles" / "db_stress_test.py"),
+    "breakpoint": str(_THIS_DIR / "locustfiles" / "breakpoint_test.py"),
+}
+
+
 def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     """Parse command-line arguments for the load test runner."""
     parser = argparse.ArgumentParser(
@@ -98,9 +109,16 @@ def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
         help="Test duration (e.g. 60s, 2m, 5m)",
     )
     parser.add_argument(
+        "--profile",
+        choices=list(_PROFILE_LOCUSTFILES.keys()),
+        default=None,
+        help="Test profile (convenience alias for --locustfile): "
+        + ", ".join(_PROFILE_LOCUSTFILES.keys()),
+    )
+    parser.add_argument(
         "--locustfile",
         default=str(_DEFAULT_LOCUSTFILE),
-        help="Path to the Locust test file to run",
+        help="Path to the Locust test file to run (overridden by --profile if set)",
     )
     parser.add_argument(
         "--csv-prefix",
@@ -119,7 +137,13 @@ def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
         default=8001,
         help="Port for the local test server (used with --start-server)",
     )
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+
+    # Resolve --profile to a locustfile path (profile takes precedence)
+    if args.profile is not None:
+        args.locustfile = _PROFILE_LOCUSTFILES[args.profile]
+
+    return args
 
 
 # ---------------------------------------------------------------------------

@@ -92,8 +92,8 @@ class AuditLog(Base, BaseModel):
     entity_name = Column(String(255), nullable=False)
 
     # Change tracking
-    old_value = Column(String(50), nullable=True)
-    new_value = Column(String(50), nullable=True)
+    old_value = Column(Text, nullable=True)
+    new_value = Column(Text, nullable=True)
 
     # Additional context
     reason = Column(Text, nullable=True)

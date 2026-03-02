@@ -14,6 +14,9 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from backend.app.schemas.dimensional import DimensionalBreakdownResponse
+from backend.app.schemas.sequential import SequentialTestingResponse
+
 
 # ---------------------------------------------------------------------------
 # Enumerations
@@ -404,6 +407,24 @@ class ExperimentResultsResponse(BaseModel):
     metrics: List[MetricResult] = Field(
         ...,
         description="Full per-metric statistical results.",
+    )
+
+    # EP-021: Sequential testing (backward compatible — null for non-sequential)
+    sequential_testing: Optional[SequentialTestingResponse] = Field(
+        None,
+        description=(
+            "Sequential testing analysis data (mSPRT, confidence sequences, "
+            "evidence trajectory). Null when sequential testing is not enabled."
+        ),
+    )
+
+    # Issue #28: Dimensional breakdown (backward compatible — null when not requested)
+    breakdown: Optional[DimensionalBreakdownResponse] = Field(
+        None,
+        description=(
+            "Dimensional breakdown of results by user segment. "
+            "Populated only when the ?breakdown=<dimension> query parameter is supplied."
+        ),
     )
 
     @field_validator("confidence_level", mode="before")

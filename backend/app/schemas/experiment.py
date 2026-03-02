@@ -18,6 +18,9 @@ from pydantic import (
     UUID4,
 )
 
+from backend.app.schemas.variance_reduction import VarianceReductionConfig
+from backend.app.schemas.bandit import OptimizationType
+
 
 class ExperimentStatus(str, Enum):
     """Experiment status enum."""
@@ -191,6 +194,33 @@ class ExperimentBase(BaseModel):
     tags: Optional[List[str]] = Field(None, description="Tags for categorization")
 
 
+class SequentialTestingConfigInput(BaseModel):
+    """Configuration for enabling sequential testing on an experiment."""
+
+    method: str = Field(
+        default="msprt",
+        pattern="^(msprt|always_valid)$",
+        description="Sequential testing method: 'msprt' or 'always_valid'.",
+    )
+    tau_squared: float = Field(
+        default=0.001,
+        gt=0.0,
+        le=1.0,
+        description="mSPRT mixing parameter.",
+    )
+    spending_function: str = Field(
+        default="obrien_fleming",
+        pattern="^(obrien_fleming|pocock)$",
+        description="Alpha spending function.",
+    )
+    planned_looks: int = Field(
+        default=10,
+        ge=1,
+        le=100,
+        description="Number of planned interim analyses.",
+    )
+
+
 class ExperimentCreate(ExperimentBase):
     """Model for creating a new experiment."""
 
@@ -201,6 +231,26 @@ class ExperimentCreate(ExperimentBase):
         ..., min_length=1, description="Experiment variants"
     )
     metrics: List[MetricBase] = Field(..., min_length=1, description="Metrics to track")
+
+    # EP-021: Sequential testing
+    sequential_testing_enabled: bool = Field(
+        default=False, description="Enable sequential testing (mSPRT early stopping)."
+    )
+    sequential_testing_config: Optional[SequentialTestingConfigInput] = Field(
+        default=None, description="Sequential testing configuration.",
+    )
+
+    # Issue #21: CUPED variance reduction
+    variance_reduction_config: Optional[VarianceReductionConfig] = Field(
+        default=None,
+        description="CUPED / Winsorization variance-reduction configuration.",
+    )
+
+    # Issue #22: MAB optimization type
+    optimization_type: OptimizationType = Field(
+        default=OptimizationType.FIXED,
+        description="Traffic optimization algorithm (default: fixed A/B split).",
+    )
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -292,6 +342,26 @@ class ExperimentUpdate(BaseModel):
         None, description="Scheduling configuration for automatic activation/completion"
     )
 
+    # EP-021: Sequential testing
+    sequential_testing_enabled: Optional[bool] = Field(
+        default=None, description="Enable or disable sequential testing."
+    )
+    sequential_testing_config: Optional[SequentialTestingConfigInput] = Field(
+        default=None, description="Sequential testing configuration.",
+    )
+
+    # Issue #21: CUPED variance reduction
+    variance_reduction_config: Optional[VarianceReductionConfig] = Field(
+        default=None,
+        description="CUPED / Winsorization variance-reduction configuration.",
+    )
+
+    # Issue #22: MAB optimization type
+    optimization_type: Optional[OptimizationType] = Field(
+        default=None,
+        description="Traffic optimization algorithm.",
+    )
+
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
@@ -376,6 +446,20 @@ class ExperimentResponse(BaseModel):
     updated_at: datetime
     variants: List[VariantResponse]
     metrics: List[MetricResponse]
+
+    # EP-021: Sequential testing
+    sequential_testing_enabled: bool = False
+    sequential_testing_method: Optional[str] = None
+    sequential_testing_config: Optional[Dict[str, Any]] = None
+
+    # EP-022: Mutual exclusion group
+    mutual_exclusion_group_id: Optional[UUID4] = None
+
+    # Issue #21: CUPED variance reduction
+    variance_reduction_config: Optional[Dict[str, Any]] = None
+
+    # Issue #22: MAB optimization type
+    optimization_type: OptimizationType = OptimizationType.FIXED
 
     model_config = ConfigDict(from_attributes=True)
 

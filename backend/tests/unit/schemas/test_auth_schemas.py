@@ -44,7 +44,7 @@ class TestAuthSchemasValidation:
         """Test SignUpRequest schema with valid data."""
         data = {
             "username": "testuser",
-            "password": "securepassword123",
+            "password": "SecurePassword123",
             "email": "user@example.com",
             "given_name": "Test",
             "family_name": "User"
