@@ -18,10 +18,8 @@ Architecture note on transaction isolation:
   - Tests that depend on `db_session` after API writes are avoided.
 
 Known application bugs documented in tests:
-  1. POST /feature-flags/ — cache_control.get() bug causes 500 after successful create
   2. GET /feature-flags/ (list) — FeatureFlagReadExtended.id is str but gets UUID → 500
-  3. POST /feature-flags/{id}/toggle|enable|disable — AuditService passes enum not .value → 500
-  4. evaluate_flag() — status comparison uses str not enum when checking ACTIVE
+  (Bugs 1, 3, 4 have been fixed)
 """
 import pytest
 
@@ -202,7 +200,7 @@ class TestFeatureFlagsGet:
         response = admin_client.get(f"/api/v1/feature-flags/{flag.id}")
         assert response.status_code == 200, response.text
         data = response.json()
-        assert data["status"] in ("ACTIVE", FeatureFlagStatus.ACTIVE.value)
+        assert data["status"] in ("active", "ACTIVE", FeatureFlagStatus.ACTIVE.value)
 
     def test_get_feature_flag_rollout_percentage_is_correct(
         self, admin_client, make_feature_flag
@@ -335,7 +333,7 @@ class TestFeatureFlagsUpdate:
         )
         assert response.status_code == 200, response.text
         data = response.json()
-        assert data["status"] in ("ACTIVE", FeatureFlagStatus.ACTIVE.value)
+        assert data["status"] in ("active", "ACTIVE", FeatureFlagStatus.ACTIVE.value)
 
     def test_update_then_get_reflects_new_name(self, admin_client, make_feature_flag):
         """After a PUT update, a subsequent GET reflects the new name."""
@@ -387,7 +385,7 @@ class TestFeatureFlagsActivateDeactivate:
         response = admin_client.post(f"/api/v1/feature-flags/{flag.id}/activate")
         assert response.status_code == 200, response.text
         data = response.json()
-        assert data["status"] in ("ACTIVE", FeatureFlagStatus.ACTIVE.value)
+        assert data["status"] in ("active", "ACTIVE", FeatureFlagStatus.ACTIVE.value)
 
     def test_deactivate_active_flag(self, admin_client, make_feature_flag):
         """Admin can deactivate an ACTIVE flag via the /deactivate endpoint."""
@@ -399,7 +397,7 @@ class TestFeatureFlagsActivateDeactivate:
         response = admin_client.post(f"/api/v1/feature-flags/{flag.id}/deactivate")
         assert response.status_code == 200, response.text
         data = response.json()
-        assert data["status"] in ("INACTIVE", FeatureFlagStatus.INACTIVE.value)
+        assert data["status"] in ("inactive", "INACTIVE", FeatureFlagStatus.INACTIVE.value)
 
     def test_activate_response_contains_expected_fields(
         self, admin_client, make_feature_flag

@@ -86,6 +86,37 @@ class Experiment(Base, BaseModel):
     metrics = Column(JSONB)  # Metrics to track
     tags = Column(JSONB)  # For categorization
 
+    # Issue #22: MAB optimization type
+    optimization_type = Column(
+        SQLAEnum(
+            "fixed", "thompson_sampling", "ucb1", "epsilon_greedy",
+            name="optimization_type_enum",
+        ),
+        nullable=False,
+        default="fixed",
+    )
+
+    # EP-021: Sequential testing configuration
+    sequential_testing_enabled = Column(Boolean, default=False, nullable=False)
+    sequential_testing_method = Column(
+        SQLAEnum("msprt", "always_valid", name="sequential_testing_method_enum"),
+        nullable=True,
+    )
+    sequential_testing_config = Column(JSONB, nullable=True)
+
+    # Issue #21: CUPED variance reduction configuration
+    variance_reduction_config = Column(JSONB, nullable=True)
+
+    # EP-022: Mutual exclusion group membership
+    mutual_exclusion_group_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            f"{get_schema_name()}.mutual_exclusion_groups.id",
+            ondelete="SET NULL",
+        ),
+        nullable=True,
+    )
+
     # Relationships
     owner = relationship("User", back_populates="experiments")
     variants = relationship(
@@ -104,6 +135,16 @@ class Experiment(Base, BaseModel):
     # Add assignments relationship
     assignments = relationship(
         "Assignment", back_populates="experiment", cascade="all, delete-orphan"
+    )
+
+    # EP-022: Mutual exclusion group relationship
+    mutual_exclusion_group = relationship(
+        "MutualExclusionGroup", back_populates="experiments"
+    )
+
+    # Issue #22: MAB bandit state (one-to-one)
+    bandit_state = relationship(
+        "BanditState", back_populates="experiment", uselist=False
     )
 
     @declared_attr

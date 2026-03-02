@@ -55,6 +55,9 @@ if _monitoring_imports_ok:
 # Standard-library logger (used by the existing schedulers etc.)
 logger = logging.getLogger(__name__)
 
+# Maximum request body size (1 MB) — prevents DoS via oversized payloads
+MAX_REQUEST_BODY_SIZE: int = 1_048_576  # 1 MB
+
 # Create FastAPI application
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -201,13 +204,23 @@ async def health_check() -> JSONResponse:
         checks["disk"] = {"status": "unhealthy", "error": str(exc)}
         overall_healthy = False
 
-    body = {
+    body: dict = {
         "status": "healthy" if overall_healthy else "unhealthy",
-        "version": settings.VERSION,
-        "environment": settings.ENVIRONMENT,
         "timestamp": datetime.now(timezone.utc).isoformat(),
-        "checks": checks,
     }
+
+    # Only expose detailed check info and environment in non-production
+    if settings.ENVIRONMENT != "prod":
+        body["version"] = settings.VERSION
+        body["environment"] = settings.ENVIRONMENT
+        body["checks"] = checks
+    else:
+        # In production, only expose aggregate status — no internal details
+        body["checks"] = {
+            name: {"status": data.get("status", "unknown")}
+            for name, data in checks.items()
+        }
+
     return JSONResponse(content=body, status_code=200 if overall_healthy else 503)
 
 

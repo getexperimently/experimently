@@ -76,7 +76,7 @@ class RolloutService:
             owner_id=owner_id,
             start_date=data.start_date,
             end_date=data.end_date,
-            metadata=data.metadata,
+            config_data=data.config_data,
             max_percentage=data.max_percentage,
             min_stage_duration=data.min_stage_duration,
             status=RolloutScheduleStatus.DRAFT,

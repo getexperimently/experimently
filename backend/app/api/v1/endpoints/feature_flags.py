@@ -252,7 +252,7 @@ async def create_feature_flag(
             "key": feature_flag.key,
             "name": feature_flag.name,
             "description": feature_flag.description,
-            "status": feature_flag.status,
+            "status": feature_flag.status.value.lower() if hasattr(feature_flag.status, 'value') else str(feature_flag.status).lower(),
             "owner_id": str(feature_flag.owner_id) if feature_flag.owner_id else None,
             "targeting_rules": feature_flag.targeting_rules,
             "rollout_percentage": feature_flag.rollout_percentage,
@@ -266,10 +266,13 @@ async def create_feature_flag(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
     # Invalidate cache if enabled
-    if cache_control.get("enabled") and cache_control.get("redis"):
-        pattern = f"feature_flags:{current_user.id}:*"
-        for key in cache_control.get("redis").scan_iter(match=pattern):
-            cache_control.get("redis").delete(key)
+    try:
+        if cache_control.enabled and cache_control.redis:
+            pattern = f"feature_flags:{current_user.id}:*"
+            for key in cache_control.redis.scan_iter(match=pattern):
+                cache_control.redis.delete(key)
+    except Exception as cache_error:
+        logger.warning(f"Cache invalidation failed for create operation: {str(cache_error)}")
 
     return response_dict
 
@@ -565,15 +568,15 @@ async def activate_feature_flag(
         )
 
     # Check if feature flag is already active
-    if flag.status == FeatureFlagStatus.ACTIVE.value:
+    if flag.status in (FeatureFlagStatus.ACTIVE, FeatureFlagStatus.ACTIVE.value):
         return {
             "id": str(flag.id),
             "key": flag.key,
             "name": flag.name,
             "description": flag.description,
-            "status": flag.status,
-            "rollout_percentage": flag.percentage,
-            "targeting_rules": flag.rules,
+            "status": "active",
+            "rollout_percentage": flag.rollout_percentage,
+            "targeting_rules": flag.targeting_rules,
             "owner_id": str(flag.owner_id),
             "created_at": flag.created_at,
             "updated_at": flag.updated_at,
@@ -639,15 +642,15 @@ async def deactivate_feature_flag(
         )
 
     # Check if feature flag is already inactive
-    if flag.status == FeatureFlagStatus.INACTIVE.value:
+    if flag.status in (FeatureFlagStatus.INACTIVE, FeatureFlagStatus.INACTIVE.value):
         return {
             "id": str(flag.id),
             "key": flag.key,
             "name": flag.name,
             "description": flag.description,
-            "status": flag.status,
-            "rollout_percentage": flag.percentage,
-            "targeting_rules": flag.rules,
+            "status": "inactive",
+            "rollout_percentage": flag.rollout_percentage,
+            "targeting_rules": flag.targeting_rules,
             "owner_id": str(flag.owner_id),
             "created_at": flag.created_at,
             "updated_at": flag.updated_at,
@@ -859,15 +862,15 @@ async def toggle_feature_flag(
 
         # Invalidate cache if enabled (don't fail if cache invalidation fails)
         try:
-            if cache_control.get("enabled") and cache_control.get("redis"):
+            if cache_control.enabled and cache_control.redis:
                 # Delete specific feature flag cache
                 flag_cache_key = f"feature_flag:{flag_id}"
-                cache_control.get("redis").delete(flag_cache_key)
+                cache_control.redis.delete(flag_cache_key)
 
                 # Delete feature flag list caches
                 pattern = f"feature_flags:*"
-                for key in cache_control.get("redis").scan_iter(match=pattern):
-                    cache_control.get("redis").delete(key)
+                for key in cache_control.redis.scan_iter(match=pattern):
+                    cache_control.redis.delete(key)
         except Exception as cache_error:
             # Log cache error but don't fail the toggle operation
             logger.warning(f"Cache invalidation failed for toggle operation: {str(cache_error)}")
@@ -958,12 +961,15 @@ async def enable_feature_flag(
         )
 
         # Invalidate cache if enabled
-        if cache_control.get("enabled") and cache_control.get("redis"):
-            flag_cache_key = f"feature_flag:{flag_id}"
-            cache_control.get("redis").delete(flag_cache_key)
-            pattern = f"feature_flags:*"
-            for key in cache_control.get("redis").scan_iter(match=pattern):
-                cache_control.get("redis").delete(key)
+        try:
+            if cache_control.enabled and cache_control.redis:
+                flag_cache_key = f"feature_flag:{flag_id}"
+                cache_control.redis.delete(flag_cache_key)
+                pattern = f"feature_flags:*"
+                for key in cache_control.redis.scan_iter(match=pattern):
+                    cache_control.redis.delete(key)
+        except Exception as cache_error:
+            logger.warning(f"Cache invalidation failed for enable operation: {str(cache_error)}")
 
         return ToggleResponse(
             id=flag.id,
@@ -1051,12 +1057,15 @@ async def disable_feature_flag(
         )
 
         # Invalidate cache if enabled
-        if cache_control.get("enabled") and cache_control.get("redis"):
-            flag_cache_key = f"feature_flag:{flag_id}"
-            cache_control.get("redis").delete(flag_cache_key)
-            pattern = f"feature_flags:*"
-            for key in cache_control.get("redis").scan_iter(match=pattern):
-                cache_control.get("redis").delete(key)
+        try:
+            if cache_control.enabled and cache_control.redis:
+                flag_cache_key = f"feature_flag:{flag_id}"
+                cache_control.redis.delete(flag_cache_key)
+                pattern = f"feature_flags:*"
+                for key in cache_control.redis.scan_iter(match=pattern):
+                    cache_control.redis.delete(key)
+        except Exception as cache_error:
+            logger.warning(f"Cache invalidation failed for disable operation: {str(cache_error)}")
 
         return ToggleResponse(
             id=flag.id,

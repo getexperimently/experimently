@@ -5,6 +5,7 @@ Feature flag schema models for validation and serialization.
 
 from datetime import datetime
 from typing import Optional, Dict, Any, List, Union
+from uuid import UUID
 from pydantic import BaseModel, Field, field_validator, model_validator, ConfigDict
 
 
@@ -53,7 +54,7 @@ class FeatureFlagUpdate(FeatureFlagBase):
 
 class FeatureFlagInDBBase(FeatureFlagBase):
     """Base model for feature flags in DB."""
-    id: str
+    id: UUID
     created_at: datetime
     updated_at: datetime
 
@@ -86,7 +87,7 @@ class FeatureFlagReadExtended(FeatureFlagInDBBase):
     Extended feature flag read model with additional information.
     Used for detailed feature flag reads.
     """
-    owner_id: Optional[int] = None
+    owner_id: Optional[UUID] = None
     metrics: Optional[List[Dict[str, Any]]] = None
     variants: Optional[List[Dict[str, Any]]] = None
     last_evaluated: Optional[datetime] = None

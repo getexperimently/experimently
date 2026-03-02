@@ -21,14 +21,14 @@ class Settings(BaseSettings):
     PROJECT_NAME: str = "Experimentation Platform"
     VERSION: str = "1.0.0"
     API_V1_STR: str = "/api/v1"
+    ENVIRONMENT: str = "dev"
+    DEBUG: bool = False
     SECRET_KEY: str = "default-secret-key-for-testing"  # Default for testing only
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 8  # 8 days
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60  # 1 hour
     BACKEND_CORS_ORIGINS: List[AnyHttpUrl] = []
     # CORS_ORIGINS is a plain-string list version of BACKEND_CORS_ORIGINS that
     # can also be set via env var as a comma-separated string.
     CORS_ORIGINS: List[str] = []
-    ENVIRONMENT: str = "dev"
-    DEBUG: bool = False
 
     # Database settings
     POSTGRES_SERVER: str = "localhost"
@@ -82,7 +82,7 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(
         case_sensitive=True,
-        extra="allow"  # Allow extra fields
+        extra="ignore"  # Ignore unknown fields to catch typos
     )
 
     @field_validator("BACKEND_CORS_ORIGINS")
@@ -129,6 +129,21 @@ class Settings(BaseSettings):
                     f"SECRET_KEY must be at least {_MIN_SECRET_KEY_LENGTH} characters "
                     "and must not be a well-known default value in production. "
                     "Generate one with: python -c \"import secrets; print(secrets.token_hex(32))\""
+                )
+        return v
+
+    @field_validator("FIRST_SUPERUSER_PASSWORD")
+    @classmethod
+    def validate_superuser_password(cls, v: str, info: ValidationInfo) -> str:
+        """Reject weak default superuser passwords in production."""
+        environment = (info.data or {}).get("ENVIRONMENT", "dev")
+        is_testing = os.getenv("TESTING", "").lower() in ("1", "true", "yes")
+        if not is_testing and environment == "prod":
+            weak_defaults = {"admin", "password", "changeme", "admin123", ""}
+            if v in weak_defaults or len(v) < 8:
+                raise ValueError(
+                    "FIRST_SUPERUSER_PASSWORD must be at least 8 characters "
+                    "and must not be a well-known default in production."
                 )
         return v
 
@@ -200,7 +215,7 @@ class DevSettings(Settings):
     POSTGRES_PASSWORD: str = "postgres"
     POSTGRES_DB: str = "experimentation"
 
-    model_config = SettingsConfigDict(env_file=".env.dev", case_sensitive=True, extra="allow")
+    model_config = SettingsConfigDict(env_file=".env.dev", case_sensitive=True, extra="ignore")
 
 
 class TestSettings(Settings):
@@ -220,7 +235,7 @@ class TestSettings(Settings):
     CACHE_ENABLED: bool = False
     CACHE_CONTROL: Dict[str, Any] = {"enabled": False, "redis": None, "ttl": 3600}
 
-    model_config = SettingsConfigDict(env_file=".env.test", case_sensitive=True, extra="allow")
+    model_config = SettingsConfigDict(env_file=".env.test", case_sensitive=True, extra="ignore")
 
 
 class ProdSettings(Settings):
@@ -232,7 +247,7 @@ class ProdSettings(Settings):
     CACHE_ENABLED: bool = True
     CACHE_CONTROL: Dict[str, Any] = {"enabled": True, "redis": None, "ttl": 3600}
 
-    model_config = SettingsConfigDict(env_file=".env.prod", case_sensitive=True, extra="allow")
+    model_config = SettingsConfigDict(env_file=".env.prod", case_sensitive=True, extra="ignore")
 
     def get_db_url(self) -> str:
         """

@@ -458,7 +458,7 @@ class FeatureFlagService:
             "name": flag.name,
             "key": flag.key,
             "description": flag.description,
-            "status": flag.status,
+            "status": flag.status.value.lower() if hasattr(flag.status, 'value') else str(flag.status).lower(),
             "rollout_percentage": flag.rollout_percentage,
             "rules": flag.targeting_rules,
             "owner_id": str(flag.owner_id),

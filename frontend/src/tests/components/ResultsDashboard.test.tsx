@@ -7,6 +7,7 @@ import {
   ExperimentResultsResponse,
   DailyResultsResponse,
   SampleSizeResult,
+  DimensionalBreakdownResponse,
 } from '@/types/results';
 
 jest.mock('@/services/results');
@@ -79,6 +80,33 @@ const mockSampleSize: SampleSizeResult = {
   mde: 0.02,
   confidence_level: 0.95,
   power_target: 0.8,
+};
+
+const mockBreakdown: DimensionalBreakdownResponse = {
+  dimension: 'platform',
+  is_exploratory: true,
+  adjusted_alpha: 0.0167,
+  has_heterogeneous_effects: false,
+  hte_warning: null,
+  segments: [
+    {
+      segment_value: 'ios',
+      sample_size: 300,
+      variants: [
+        {
+          variant_id: 'ctrl',
+          variant_name: 'Control',
+          is_control: true,
+          sample_size: 150,
+          conversions: 15,
+          mean: 0.1,
+          confidence_interval: [0.057, 0.143],
+          p_value: null,
+          is_significant: false,
+        },
+      ],
+    },
+  ],
 };
 
 beforeEach(() => {
@@ -194,6 +222,88 @@ describe('ResultsDashboard', () => {
 
     await waitFor(() =>
       expect(screen.getByTestId('experiment-summary')).toBeInTheDocument()
+    );
+  });
+
+  // Issue #28: Breakdowns tab tests
+  it('renders Breakdowns tab in the tab list', async () => {
+    mockGetResults.mockResolvedValue(mockResults);
+    mockGetDailyResults.mockResolvedValue(mockDaily);
+    mockGetSampleSize.mockResolvedValue(mockSampleSize);
+
+    render(<ResultsDashboard experimentId="exp-1" />);
+    await waitFor(() => screen.getByRole('tablist'));
+
+    expect(screen.getByRole('tab', { name: /breakdowns/i })).toBeInTheDocument();
+  });
+
+  it('switches to the Breakdowns tab and renders the dimension selector', async () => {
+    mockGetResults.mockResolvedValue(mockResults);
+    mockGetDailyResults.mockResolvedValue(mockDaily);
+    mockGetSampleSize.mockResolvedValue(mockSampleSize);
+
+    render(<ResultsDashboard experimentId="exp-1" />);
+    await waitFor(() => screen.getByRole('tablist'));
+
+    await userEvent.click(screen.getByRole('tab', { name: /breakdowns/i }));
+
+    expect(screen.getByTestId('breakdown-selector')).toBeInTheDocument();
+  });
+
+  it('shows prompt to select a dimension when no dimension is selected', async () => {
+    mockGetResults.mockResolvedValue(mockResults);
+    mockGetDailyResults.mockResolvedValue(mockDaily);
+    mockGetSampleSize.mockResolvedValue(mockSampleSize);
+
+    render(<ResultsDashboard experimentId="exp-1" />);
+    await waitFor(() => screen.getByRole('tablist'));
+    await userEvent.click(screen.getByRole('tab', { name: /breakdowns/i }));
+
+    expect(
+      screen.getByText(/select a dimension above to view segment-level results/i)
+    ).toBeInTheDocument();
+  });
+
+  it('fetches breakdown and renders SegmentComparisonTable when a dimension is selected', async () => {
+    mockGetResults
+      .mockResolvedValueOnce(mockResults)
+      // second call with breakdown param returns breakdown data
+      .mockResolvedValueOnce({ ...mockResults, breakdown: mockBreakdown });
+    mockGetDailyResults.mockResolvedValue(mockDaily);
+    mockGetSampleSize.mockResolvedValue(mockSampleSize);
+
+    render(<ResultsDashboard experimentId="exp-1" />);
+    await waitFor(() => screen.getByRole('tablist'));
+    await userEvent.click(screen.getByRole('tab', { name: /breakdowns/i }));
+
+    await userEvent.selectOptions(
+      screen.getByTestId('breakdown-selector'),
+      'platform'
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId('segment-comparison-table')).toBeInTheDocument()
+    );
+  });
+
+  it('calls getResults with breakdown param when a dimension is selected', async () => {
+    mockGetResults
+      .mockResolvedValueOnce(mockResults)
+      .mockResolvedValueOnce({ ...mockResults, breakdown: mockBreakdown });
+    mockGetDailyResults.mockResolvedValue(mockDaily);
+    mockGetSampleSize.mockResolvedValue(mockSampleSize);
+
+    render(<ResultsDashboard experimentId="exp-1" />);
+    await waitFor(() => screen.getByRole('tablist'));
+    await userEvent.click(screen.getByRole('tab', { name: /breakdowns/i }));
+
+    await userEvent.selectOptions(
+      screen.getByTestId('breakdown-selector'),
+      'country'
+    );
+
+    await waitFor(() =>
+      expect(mockGetResults).toHaveBeenCalledWith('exp-1', { breakdown: 'country' })
     );
   });
 });

@@ -53,10 +53,11 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         if "x-powered-by" in response.headers:
             del response.headers["x-powered-by"]
 
-        # HSTS — always add; enforcement is at the load balancer layer in prod
-        response.headers["Strict-Transport-Security"] = (
-            "max-age=31536000; includeSubDomains; preload"
-        )
+        # HSTS — only in non-dev environments to avoid local HTTPS issues
+        if settings.ENVIRONMENT != "dev":
+            response.headers["Strict-Transport-Security"] = (
+                "max-age=31536000; includeSubDomains; preload"
+            )
 
         # Content Security Policy — strict for an API-only service
         # No scripts, no styles, no frames; only direct API responses
