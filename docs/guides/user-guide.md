@@ -363,6 +363,76 @@ OR:
 
 ---
 
+## Advanced Statistical Methods
+
+### Sequential Testing — Stop Experiments Early
+
+Standard A/B tests require a fixed sample size decided upfront. Sequential testing lets you monitor results continuously and stop as soon as you have enough evidence — without inflating your false positive rate.
+
+**When to use it:** When you need results faster, or when you need to stop early if a variant is performing significantly worse.
+
+Access via the **Sequential** tab on any experiment results page, or via:
+```
+GET /api/v1/results/{experiment_id}/sequential
+```
+
+The platform uses **mSPRT** (mixture Sequential Probability Ratio Test). When `recommended_action` is `stop_for_effect` or `stop_for_futility`, it is safe to stop. See the [Sequential Testing Guide](../api/sequential-testing.md) for details.
+
+---
+
+### CUPED — Reach Significance Faster
+
+CUPED reduces result noise by adjusting for each user's pre-experiment behavior. This typically cuts the required sample size by 20–40%.
+
+**When to use it:** When you have historical metric data for your users (e.g., prior revenue, prior sessions). Works best when the covariate is strongly correlated with the outcome.
+
+Access via the **CUPED** tab on any experiment results page, or via:
+```
+GET /api/v1/results/{experiment_id}/cuped
+```
+
+See the [CUPED Guide](../api/cuped.md) for covariate selection guidance.
+
+---
+
+### Dimensional Analysis — Did the Effect Vary by Segment?
+
+After an experiment concludes, use dimensional analysis to understand whether the treatment worked differently for different groups (mobile vs desktop, new vs returning users, etc.).
+
+**Important:** Segment findings are always exploratory. Use them to generate hypotheses for follow-up experiments, not as final conclusions.
+
+Access via the **Breakdowns** tab on any experiment results page, or via:
+```
+GET /api/v1/results/{experiment_id}/breakdown?dimension=device
+```
+
+See the [Dimensional Analysis Guide](../api/dimensional-analysis.md).
+
+---
+
+### Multi-Armed Bandit — Maximize Conversions During the Experiment
+
+A bandit experiment automatically shifts traffic toward the better-performing variant as data accumulates. Use this when maximizing conversions during the experiment matters more than getting precise effect size estimates.
+
+**When to use it:** Short-lived promotions, content recommendations, or situations where you have many variants to test quickly.
+
+Set `optimization_type` to `thompson_sampling`, `ucb1`, or `epsilon_greedy` when creating an experiment. See the [Multi-Armed Bandit Guide](../api/multi-armed-bandit.md).
+
+---
+
+### Interaction Detection — Are Your Experiments Interfering?
+
+When multiple experiments run simultaneously on overlapping user populations, they can distort each other's results. Run an interaction scan to check.
+
+Access via:
+```
+GET /api/v1/interactions/scan
+```
+
+If high-risk pairs are found, add the experiments to a [Mutual Exclusion Group](../api/mutual-exclusion-groups.md) to prevent overlap in future runs. See the [Interaction Detection Guide](../api/interaction-detection.md).
+
+---
+
 ## Getting Help
 
 - **API Documentation**: http://localhost:8000/docs
