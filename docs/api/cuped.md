@@ -1,4 +1,4 @@
-# CUPED Variance Reduction (Issue #21)
+# CUPED Variance Reduction
 
 CUPED (Controlled-experiment Using Pre-Experiment Data) reduces the variance of your metric estimates by adjusting for pre-experiment behavior. Lower variance means you reach statistical significance with fewer users — typically 20–40% fewer, depending on how predictive the covariate is.
 

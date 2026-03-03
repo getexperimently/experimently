@@ -1524,13 +1524,13 @@ DELETE /api/v1/counters/{experiment_id}            — Reset counters (ADMIN)
 
 ---
 
-## EP-031 to EP-036: New Endpoints
+## Additional Endpoints
 
-The following endpoints were added in epics EP-031 through EP-036. See the dedicated reference pages linked below for full request/response schemas, authentication requirements, and code examples.
+The following endpoints extend the core API. See the dedicated reference pages linked below for full request/response schemas, authentication requirements, and code examples.
 
 ---
 
-### Compliance Audit Logging (EP-033)
+### Compliance Audit Logging
 
 See [Compliance API Reference](compliance.md) for full documentation.
 
@@ -1551,7 +1551,7 @@ All audit events carry an HMAC-SHA256 `signature` field and responses include an
 
 ---
 
-### Third-Party Integrations (EP-034)
+### Third-Party Integrations
 
 See [Integrations API Reference](integrations.md) for full documentation.
 
@@ -1579,7 +1579,7 @@ Supported `IntegrationType` values: `JIRA`, `SALESFORCE`, `GITHUB`.
 
 ---
 
-### Bayesian Experimentation (EP-035)
+### Bayesian Experimentation
 
 See [Bayesian API Reference](bayesian.md) for full documentation.
 
@@ -1607,7 +1607,7 @@ The `bayesian_results` block includes: `posterior_alpha`, `posterior_beta`, `pos
 
 ---
 
-### Server-Side Split URL Testing (EP-036)
+### Server-Side Split URL Testing
 
 See [Split URL API Reference](split-url.md) for full documentation.
 
@@ -1646,16 +1646,16 @@ All weights must be integers (0-100) and must sum to exactly 100.
 
 ---
 
-### Java SDK (EP-031)
+### Java SDK
 
 The Java SDK and Spring Boot starter are distributed as Maven/Gradle artifacts. No new backend API endpoints are introduced; the SDK communicates with the existing experiment assignment and feature flag evaluation endpoints.
 
-See [SDK Integration Guide](../sdk-guide.md#java-sdk-ep-031) for installation, Spring Boot auto-configuration (`@EnableExperimentation`), and the Spring Boot properties reference (`experimentation.api-url`, `experimentation.api-key`, `experimentation.cache-ttl-seconds`, `experimentation.cache-max-size`).
+See [SDK Integration Guide](../sdk-guide.md#java-sdk) for installation, Spring Boot auto-configuration (`@EnableExperimentation`), and the Spring Boot properties reference (`experimentation.api-url`, `experimentation.api-key`, `experimentation.cache-ttl-seconds`, `experimentation.cache-max-size`).
 
 ---
 
-### React SDK (EP-032)
+### React SDK
 
 The React SDK is distributed as an npm package (`@experimentation/react-sdk`). No new backend API endpoints are introduced; the SDK consumes the existing assignment and feature flag endpoints.
 
-See [SDK Integration Guide](../sdk-guide.md#react-sdk-ep-032) for `ExperimentationProvider` setup, all hooks (`useFeatureFlag`, `useExperiment`, `useTrackEvent`, `useVariant`, `useMultipleFlags`), the `withExperimentation` HOC, and SSR/Next.js `ServerClient` usage.
+See [SDK Integration Guide](../sdk-guide.md#react-sdk) for `ExperimentationProvider` setup, all hooks (`useFeatureFlag`, `useExperiment`, `useTrackEvent`, `useVariant`, `useMultipleFlags`), the `withExperimentation` HOC, and SSR/Next.js `ServerClient` usage.

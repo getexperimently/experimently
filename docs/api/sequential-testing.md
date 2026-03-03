@@ -1,4 +1,4 @@
-# Sequential Testing & Early Stopping (EP-021)
+# Sequential Testing & Early Stopping
 
 Sequential testing lets you continuously monitor experiment results and stop as soon as you have enough evidence — without inflating your false positive rate. Unlike fixed-horizon A/B tests that require a predetermined sample size, sequential methods maintain valid error rates even when you peek at results repeatedly.
 

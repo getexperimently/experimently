@@ -1,4 +1,4 @@
-# Mutual Exclusion Groups & Global Holdout (EP-022)
+# Mutual Exclusion Groups & Global Holdout
 
 Mutual exclusion groups prevent users from being enrolled in multiple conflicting experiments simultaneously. A global holdout reserves a clean control group that is excluded from all experiments, enabling long-term measurement of cumulative experiment impact.
 

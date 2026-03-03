@@ -1,4 +1,4 @@
-# MCP Server Integration (Issue #23)
+# MCP Server Integration
 
 The platform exposes a Model Context Protocol (MCP) server that allows AI coding assistants and agents (e.g. Claude, Cursor, GitHub Copilot) to interact with the experimentation platform directly from an IDE or chat interface.
 

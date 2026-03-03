@@ -1,4 +1,4 @@
-# Warehouse-Native Analytics (Issue #26)
+# Warehouse-Native Analytics
 
 Warehouse-native analytics lets you run experiment analysis directly against your existing data warehouse (Snowflake, BigQuery, or Redshift) instead of relying solely on events tracked through the platform's ingestion pipeline. This is useful when your source-of-truth metrics already live in the warehouse, or when you need to analyze large datasets that are impractical to re-ingest.
 
