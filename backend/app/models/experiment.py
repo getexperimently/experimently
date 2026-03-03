@@ -117,6 +117,11 @@ class Experiment(Base, BaseModel):
         nullable=True,
     )
 
+    # EP-035: Bayesian experimentation columns
+    bayesian_enabled = Column(Boolean, default=False, nullable=False)
+    bayesian_config = Column(JSONB, nullable=True)  # BayesianConfig serialized as JSON
+    bayesian_decision = Column(String(32), nullable=True)  # BayesianDecision value
+
     # Relationships
     owner = relationship("User", back_populates="experiments")
     variants = relationship(
