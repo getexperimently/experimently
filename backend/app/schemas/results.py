@@ -14,6 +14,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from backend.app.schemas.bayesian import BayesianResultsResponse
 from backend.app.schemas.dimensional import DimensionalBreakdownResponse
 from backend.app.schemas.sequential import SequentialTestingResponse
 
@@ -424,6 +425,16 @@ class ExperimentResultsResponse(BaseModel):
         description=(
             "Dimensional breakdown of results by user segment. "
             "Populated only when the ?breakdown=<dimension> query parameter is supplied."
+        ),
+    )
+
+    # EP-035 Batch 2: Bayesian results (backward compatible — null when not enabled)
+    bayesian_results: Optional[BayesianResultsResponse] = Field(
+        None,
+        description=(
+            "Bayesian inference results including posterior distributions, "
+            "probability to be best, expected loss, and stopping decision. "
+            "Null when bayesian_enabled=False on the experiment."
         ),
     )
 
