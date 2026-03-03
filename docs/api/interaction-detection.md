@@ -1,4 +1,4 @@
-# Experiment Interaction Detection (Issue #25)
+# Experiment Interaction Detection
 
 When multiple experiments run simultaneously and share users, they can interfere with each other. Interaction detection identifies experiment pairs with significant user overlap and tests whether the simultaneous exposure is distorting results.
 

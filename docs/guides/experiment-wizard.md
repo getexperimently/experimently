@@ -1,4 +1,4 @@
-# No-Code Experiment Wizard (Issue #27)
+# No-Code Experiment Wizard
 
 The experiment wizard is a 5-step guided interface for designing and launching experiments without writing code or calling the API directly. It is intended for product managers, analysts, and other non-technical users.
 

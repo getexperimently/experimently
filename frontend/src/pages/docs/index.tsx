@@ -111,16 +111,6 @@ const sections = [
       { label: 'Interaction Detection', href: '/docs/guides/interaction-detection', desc: 'Detect and handle experiment interactions' },
     ],
   },
-  {
-    category: 'Changelog',
-    icon: '📋',
-    description: 'What\'s new in each release.',
-    links: [
-      { label: 'Latest Release', href: '/docs/changelog', desc: 'EP-036: Split URL, Java SDK, React SDK, Compliance' },
-      { label: 'Release Notes', href: '/docs/changelog#all', desc: 'Full version history' },
-      { label: 'Roadmap', href: '/docs/roadmap', desc: 'What\'s coming next' },
-    ],
-  },
 ];
 
 const quickLinks = [

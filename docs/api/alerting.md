@@ -1,4 +1,4 @@
-# Slack & Email Alerting (EP-030)
+# Slack & Email Alerting
 
 The alerting system sends notifications to Slack channels and email addresses when significant platform events occur: safety rollbacks, experiment lifecycle changes, rollout stage advances, and custom alerts.
 

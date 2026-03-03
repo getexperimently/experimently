@@ -189,7 +189,7 @@ const client = new ExperimentationClient({
 
 ---
 
-## Java SDK (EP-031)
+## Java SDK
 
 ### Installation
 
@@ -407,7 +407,7 @@ experimentation:
 
 ---
 
-## React SDK (EP-032)
+## React SDK
 
 ### Installation
 

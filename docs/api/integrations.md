@@ -1,6 +1,6 @@
-# Third-Party Integrations API (EP-034)
+# Third-Party Integrations API
 
-This document describes the third-party integrations endpoints introduced in EP-034. The platform supports bidirectional sync with Jira, Salesforce, and GitHub, enabling experiment lifecycle events to flow into your existing tooling.
+This document describes the third-party integrations endpoints. The platform supports bidirectional sync with Jira, Salesforce, and GitHub, enabling experiment lifecycle events to flow into your existing tooling.
 
 ---
 

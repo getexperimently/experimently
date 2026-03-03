@@ -1,4 +1,4 @@
-# Multi-Armed Bandit (Issue #22)
+# Multi-Armed Bandit
 
 Multi-armed bandit (MAB) experiments dynamically reallocate traffic toward better-performing variants as data accumulates, rather than maintaining fixed allocations throughout the experiment. This maximizes reward during the experiment itself at the cost of some statistical power.
 

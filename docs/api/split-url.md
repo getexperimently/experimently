@@ -1,6 +1,6 @@
-# Server-Side Split URL Testing API (EP-036)
+# Server-Side Split URL Testing API
 
-This document describes the server-side split URL testing feature introduced in EP-036. Split URL experiments redirect different user segments to distinct URLs (e.g., `/checkout-v1` vs `/checkout-v2`) using Lambda@Edge at the CloudFront layer, providing zero-latency variant delivery and persistent cookie-based assignment.
+This document describes the server-side split URL testing feature. Split URL experiments redirect different user segments to distinct URLs (e.g., `/checkout-v1` vs `/checkout-v2`) using Lambda@Edge at the CloudFront layer, providing zero-latency variant delivery and persistent cookie-based assignment.
 
 ---
 
