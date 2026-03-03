@@ -17,6 +17,14 @@ from backend.app.models.event import Event, EventType
 from backend.app.models.assignment import Assignment
 from backend.app.core.config import settings
 from backend.app.core.database_config import get_schema_name
+from backend.app.schemas.bayesian import (
+    BayesianConfig,
+    BayesianDecision,
+    BayesianPosteriorResult,
+    BayesianResultsResponse,
+    BayesianVariantResult,
+)
+from backend.app.services.bayesian_service import BayesianService
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +83,56 @@ class AnalysisService:
         # Calculate overall summary statistics
         summary = self.calculate_experiment_summary(experiment)
 
+        # EP-035 Batch 2: Compute Bayesian results if enabled
+        bayesian_results = None
+        if getattr(experiment, "bayesian_enabled", False) and getattr(experiment, "bayesian_config", None):
+            try:
+                # Build per-variant metrics_data: variant_id -> {conversions, total}
+                metrics_data: Dict[str, Dict[str, int]] = {}
+                for variant in experiment.variants:
+                    vid = str(variant.id)
+                    total = (
+                        self.db.query(func.count(Assignment.id))
+                        .filter(
+                            Assignment.experiment_id == experiment.id,
+                            Assignment.variant_id == variant.id,
+                        )
+                        .scalar()
+                        or 0
+                    )
+                    # Use primary metric conversions if available, else 0
+                    primary_metric = next(
+                        (m for m in experiment.metric_definitions if m.is_primary),
+                        experiment.metric_definitions[0] if experiment.metric_definitions else None,
+                    )
+                    if primary_metric:
+                        convs = (
+                            self.db.query(func.count(Event.id))
+                            .filter(
+                                Event.experiment_id == experiment.id,
+                                Event.variant_id == variant.id,
+                                Event.event_type == EventType.CONVERSION.value,
+                                Event.event_name == primary_metric.event_name,
+                            )
+                            .scalar()
+                            or 0
+                        )
+                    else:
+                        convs = 0
+                    metrics_data[vid] = {"conversions": convs, "total": total}
+
+                bayesian_response = self._compute_bayesian_results(experiment, metrics_data)
+
+                # Persist the decision back to the experiment record
+                if bayesian_response.decision is not None:
+                    experiment.bayesian_decision = bayesian_response.decision.value
+                    self.db.add(experiment)
+                    self.db.flush()
+
+                bayesian_results = bayesian_response
+            except Exception as exc:
+                logger.warning("Bayesian analysis failed (non-critical): %s", exc)
+
         # Return formatted results
         return {
             "experiment_id": str(experiment_id),
@@ -88,6 +146,7 @@ class AnalysisService:
             "end_date": experiment.end_date,
             "metrics_results": metrics_results,
             "summary": summary,
+            "bayesian_results": bayesian_results,
         }
 
     def calculate_metric_results(
@@ -477,6 +536,88 @@ class AnalysisService:
             "conversion_rate": best_variant["conversion_rate"],
             "p_value": best_variant["p_value"],
         }
+
+    # -----------------------------------------------------------------------
+    # EP-035 Batch 2: Bayesian Analysis Helper
+    # -----------------------------------------------------------------------
+
+    def _compute_bayesian_results(
+        self,
+        experiment: Experiment,
+        metrics_data: Dict[str, Dict[str, int]],
+    ) -> BayesianResultsResponse:
+        """Compute Bayesian inference results for all variants.
+
+        Args:
+            experiment: Experiment ORM object with bayesian_config populated.
+            metrics_data: Mapping of variant_id (str) ->
+                {'conversions': int, 'total': int}.
+
+        Returns:
+            BayesianResultsResponse with posterior distributions, PtBB,
+            expected loss, and a BayesianDecision.
+        """
+        # Load BayesianConfig from the JSONB column
+        raw_config = experiment.bayesian_config or {}
+        if isinstance(raw_config, str):
+            raw_config = json.loads(raw_config)
+
+        try:
+            config = BayesianConfig(**raw_config)
+        except Exception:
+            config = BayesianConfig()
+
+        service = BayesianService(config)
+
+        # Build ordered list of variant observations matching experiment.variants order
+        variant_observations = []
+        variant_keys = []
+        for variant in experiment.variants:
+            vid = str(variant.id)
+            obs = metrics_data.get(vid, {"conversions": 0, "total": 0})
+            variant_observations.append(obs)
+            variant_keys.append(variant.name)
+
+        # Run full Bayesian analysis
+        analysis = service.analyze(variant_observations)
+
+        posteriors = analysis["posteriors"]
+        credible_intervals = analysis["credible_intervals"]
+        ptbb = analysis["probability_to_be_best"]
+        losses = analysis["expected_loss"]
+        decision: BayesianDecision = analysis["decision"]
+
+        # Build per-variant results
+        variant_results: List[BayesianVariantResult] = []
+        for i, (variant, posterior, ci, p, loss) in enumerate(
+            zip(experiment.variants, posteriors, credible_intervals, ptbb, losses)
+        ):
+            alpha = float(posterior["alpha"])
+            beta_val = float(posterior["beta"])
+            mean = alpha / (alpha + beta_val)
+
+            posterior_result = BayesianPosteriorResult(
+                alpha=alpha,
+                beta=beta_val,
+                mean=mean,
+                credible_interval_lower=float(ci[0]),
+                credible_interval_upper=float(ci[1]),
+            )
+
+            variant_results.append(
+                BayesianVariantResult(
+                    variant_key=variant.name,
+                    posterior=posterior_result,
+                    probability_to_be_best=float(p),
+                    expected_loss=float(loss),
+                )
+            )
+
+        return BayesianResultsResponse(
+            is_enabled=True,
+            decision=decision,
+            variant_results=variant_results,
+        )
 
     # -----------------------------------------------------------------------
     # EP-016 Statistical Helper Methods
