@@ -42,6 +42,8 @@ from backend.app.core.config import settings
 from backend.app.core.security import get_password_hash
 from backend.app.crud import crud_user, crud_feature_flag
 from backend.app.core.permissions import ResourceType, Action, check_permission
+from backend.app.services.audit_log_service import AuditLogService
+from backend.app.models.compliance_audit_event import AuditAction, AuditOutcome
 
 # Setup logger
 logger = logging.getLogger(__name__)
@@ -265,6 +267,20 @@ async def create_feature_flag(
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
+    # Compliance audit logging (non-fatal — do not fail the request if this fails)
+    try:
+        audit = AuditLogService(db)
+        audit.log(
+            action=AuditAction.CREATE,
+            resource_type="feature_flag",
+            outcome=AuditOutcome.SUCCESS,
+            resource_id=response_dict.get("id"),
+            actor_id=str(current_user.id) if current_user else None,
+            new_value={"key": response_dict.get("key"), "name": response_dict.get("name")},
+        )
+    except Exception as audit_error:
+        logger.warning(f"Compliance audit logging failed for feature_flag create: {audit_error}")
+
     # Invalidate cache if enabled
     try:
         if cache_control.enabled and cache_control.redis:
@@ -410,11 +426,40 @@ async def update_feature_flag(
                 detail=f"Feature flag with key '{feature_flag_in.key}' already exists",
             )
 
+    # Capture pre-update state for audit trail
+    old_flag_snapshot = {
+        "key": flag.key,
+        "name": flag.name,
+        "status": str(flag.status),
+        "rollout_percentage": flag.rollout_percentage,
+    }
+
     # Update feature flag
     try:
         updated_flag = feature_flag_service.update_feature_flag(flag, feature_flag_in)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+    # Compliance audit logging (non-fatal)
+    try:
+        new_flag_snapshot = {
+            "key": updated_flag.get("key") if isinstance(updated_flag, dict) else getattr(updated_flag, "key", None),
+            "name": updated_flag.get("name") if isinstance(updated_flag, dict) else getattr(updated_flag, "name", None),
+            "status": str(updated_flag.get("status") if isinstance(updated_flag, dict) else getattr(updated_flag, "status", None)),
+            "rollout_percentage": updated_flag.get("rollout_percentage") if isinstance(updated_flag, dict) else getattr(updated_flag, "rollout_percentage", None),
+        }
+        audit = AuditLogService(db)
+        audit.log(
+            action=AuditAction.UPDATE,
+            resource_type="feature_flag",
+            outcome=AuditOutcome.SUCCESS,
+            resource_id=str(flag_id),
+            actor_id=str(current_user.id) if current_user else None,
+            old_value=old_flag_snapshot,
+            new_value=new_flag_snapshot,
+        )
+    except Exception as audit_error:
+        logger.warning(f"Compliance audit logging failed for feature_flag update: {audit_error}")
 
     # Invalidate cache if enabled
     if cache_control.enabled and cache_control.redis:
@@ -507,11 +552,33 @@ async def delete_feature_flag(
             detail="You must be the owner or a superuser to delete this feature flag",
         )
 
+    # Capture flag info before deletion for audit trail
+    deleted_flag_snapshot = {
+        "key": flag.key,
+        "name": flag.name,
+        "status": str(flag.status),
+    }
+    deleted_flag_id = str(flag.id)
+
     # Create feature flag service
     feature_flag_service = FeatureFlagService(db)
 
     # Delete feature flag
     feature_flag_service.delete_feature_flag(flag)
+
+    # Compliance audit logging (non-fatal)
+    try:
+        audit = AuditLogService(db)
+        audit.log(
+            action=AuditAction.DELETE,
+            resource_type="feature_flag",
+            outcome=AuditOutcome.SUCCESS,
+            resource_id=deleted_flag_id,
+            actor_id=str(current_user.id) if current_user else None,
+            old_value=deleted_flag_snapshot,
+        )
+    except Exception as audit_error:
+        logger.warning(f"Compliance audit logging failed for feature_flag delete: {audit_error}")
 
     # Invalidate cache if enabled
     if cache_control.enabled and cache_control.redis:

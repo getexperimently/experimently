@@ -40,6 +40,8 @@ from backend.app.services.analysis_service import AnalysisService
 from backend.app.core.logging import logger
 from backend.app.core.permissions import check_permission, ResourceType, Action, get_permission_error_message, check_ownership
 from backend.app.core.scheduler import experiment_scheduler
+from backend.app.services.audit_log_service import AuditLogService
+from backend.app.models.compliance_audit_event import AuditAction, AuditOutcome
 
 # Create router with tag for documentation grouping
 router = APIRouter(
@@ -241,6 +243,22 @@ async def create_experiment(
             user_id=current_user.id,  # Add the user_id parameter
         )
 
+        # Compliance audit logging (non-fatal)
+        try:
+            exp_id = getattr(experiment, "id", None)
+            exp_name = getattr(experiment, "name", None)
+            audit = AuditLogService(db)
+            audit.log(
+                action=AuditAction.CREATE,
+                resource_type="experiment",
+                outcome=AuditOutcome.SUCCESS,
+                resource_id=str(exp_id) if exp_id else None,
+                actor_id=str(current_user.id) if current_user else None,
+                new_value={"name": exp_name},
+            )
+        except Exception as _audit_err:
+            logger.warning(f"Compliance audit logging failed for experiment create: {_audit_err}")
+
         # Invalidate cache if enabled
         if cache_control.enabled and cache_control.redis:
             pattern = f"experiments:{current_user.id}:*"
@@ -440,11 +458,32 @@ async def update_experiment(
                         detail=f"Cannot update {field} for experiments in {experiment.status.value} status"
                     )
 
+        # Capture pre-update snapshot for audit trail
+        old_exp_snapshot = {
+            "name": experiment.name,
+            "status": str(experiment.status),
+        }
+
         # Create experiment service
         experiment_service = ExperimentService(db)
 
         # Update experiment
         updated_experiment = experiment_service.update_experiment(experiment, update_data)
+
+        # Compliance audit logging (non-fatal)
+        try:
+            audit = AuditLogService(db)
+            audit.log(
+                action=AuditAction.UPDATE,
+                resource_type="experiment",
+                outcome=AuditOutcome.SUCCESS,
+                resource_id=str(experiment_id),
+                actor_id=str(current_user.id) if current_user else None,
+                old_value=old_exp_snapshot,
+                new_value={"name": getattr(updated_experiment, "name", None)},
+            )
+        except Exception as _audit_err:
+            logger.warning(f"Compliance audit logging failed for experiment update: {_audit_err}")
 
         # Invalidate cache if enabled
         if cache_control.enabled and cache_control.redis:
@@ -600,9 +639,30 @@ async def delete_experiment(
             detail="Cannot delete experiments that are not in DRAFT status",
         )
 
+    # Capture experiment info before deletion for audit trail
+    deleted_exp_snapshot = {
+        "name": experiment.name,
+        "status": str(experiment.status),
+    }
+    deleted_exp_id = str(experiment.id)
+
     # Delete experiment
     db.delete(experiment)
     db.commit()
+
+    # Compliance audit logging (non-fatal)
+    try:
+        audit = AuditLogService(db)
+        audit.log(
+            action=AuditAction.DELETE,
+            resource_type="experiment",
+            outcome=AuditOutcome.SUCCESS,
+            resource_id=deleted_exp_id,
+            actor_id=str(current_user.id) if current_user else None,
+            old_value=deleted_exp_snapshot,
+        )
+    except Exception as _audit_err:
+        logger.warning(f"Compliance audit logging failed for experiment delete: {_audit_err}")
 
     # Invalidate cache if enabled
     if cache_control.enabled and cache_control.redis:
