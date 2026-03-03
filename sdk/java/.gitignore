@@ -1,0 +1,19 @@
+# Maven build output
+target/
+
+# Java compiled class files
+*.class
+
+# Maven wrapper
+.mvn/wrapper/maven-wrapper.jar
+
+# IDE files
+.idea/
+*.iml
+.eclipse/
+.classpath
+.project
+.settings/
+
+# macOS
+.DS_Store

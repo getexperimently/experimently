@@ -4,13 +4,26 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
-    <groupId>com.experimentationplatform</groupId>
-    <artifactId>experimentation-sdk</artifactId>
-    <version>1.0.0</version>
-    <packaging>jar</packaging>
+    <!-- ═══════════════════════════════════════════════════════════════
+         Parent / aggregator POM.
+         - Module "." (this directory) produces the core SDK jar.
+         - Module "spring-boot-starter" produces the auto-config starter.
+         ═══════════════════════════════════════════════════════════════ -->
 
-    <name>Experimentation Platform Java SDK</name>
-    <description>Java/JVM client SDK for the Experimentation Platform</description>
+    <groupId>com.experimentationplatform</groupId>
+    <artifactId>experimentation-java-sdk-parent</artifactId>
+    <version>1.0.0</version>
+    <packaging>pom</packaging>
+
+    <name>Experimentation Platform Java SDK — Parent</name>
+    <description>Parent POM for the Experimentation Platform Java SDK and Spring Boot starter</description>
+
+    <modules>
+        <!-- Core SDK (the original single-module project, now a sub-module) -->
+        <module>core</module>
+        <!-- Spring Boot auto-configuration starter -->
+        <module>spring-boot-starter</module>
+    </modules>
 
     <properties>
         <maven.compiler.source>11</maven.compiler.source>
@@ -20,42 +33,6 @@
         <mockito.version>5.6.0</mockito.version>
         <jackson.version>2.15.2</jackson.version>
     </properties>
-
-    <dependencies>
-        <!-- HTTP Client -->
-        <dependency>
-            <groupId>com.squareup.okhttp3</groupId>
-            <artifactId>okhttp</artifactId>
-            <version>4.12.0</version>
-        </dependency>
-
-        <!-- JSON -->
-        <dependency>
-            <groupId>com.fasterxml.jackson.core</groupId>
-            <artifactId>jackson-databind</artifactId>
-            <version>${jackson.version}</version>
-        </dependency>
-
-        <!-- Testing -->
-        <dependency>
-            <groupId>org.junit.jupiter</groupId>
-            <artifactId>junit-jupiter</artifactId>
-            <version>${junit.version}</version>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.mockito</groupId>
-            <artifactId>mockito-core</artifactId>
-            <version>${mockito.version}</version>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>com.squareup.okhttp3</groupId>
-            <artifactId>mockwebserver</artifactId>
-            <version>4.12.0</version>
-            <scope>test</scope>
-        </dependency>
-    </dependencies>
 
     <build>
         <plugins>
