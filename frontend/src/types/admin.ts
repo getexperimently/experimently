@@ -108,6 +108,40 @@ export interface AuditLogListResponse {
   limit: number;
 }
 
+export type NotificationChannel = 'slack' | 'email' | 'webhook';
+export type NotificationStatus = 'sent' | 'failed' | 'skipped';
+
+export interface NotificationPreference {
+  id: string;
+  user_id: string;
+  notify_experiment_started: boolean;
+  notify_experiment_completed: boolean;
+  notify_safety_rollback: boolean;
+  notify_rollout_advanced: boolean;
+  slack_channel: string | null;
+  email_override: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface NotificationDeliveryLog {
+  id: string;
+  event_type: string;
+  channel: NotificationChannel;
+  recipient: string;
+  subject: string | null;
+  status: NotificationStatus;
+  error_message: string | null;
+  created_at: string;
+}
+
+export interface NotificationDeliveryLogListResponse {
+  items: NotificationDeliveryLog[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
 export const ROLE_COLORS: Record<UserRole, string> = {
   ADMIN: 'bg-red-100 text-red-800',
   DEVELOPER: 'bg-blue-100 text-blue-800',
