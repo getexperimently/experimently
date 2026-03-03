@@ -1521,3 +1521,141 @@ POST /api/v1/counters/{experiment_id}/increment    — Increment counter
 POST /api/v1/counters/{experiment_id}/bulk         — Bulk counter update
 DELETE /api/v1/counters/{experiment_id}            — Reset counters (ADMIN)
 ```
+
+---
+
+## EP-031 to EP-036: New Endpoints
+
+The following endpoints were added in epics EP-031 through EP-036. See the dedicated reference pages linked below for full request/response schemas, authentication requirements, and code examples.
+
+---
+
+### Compliance Audit Logging (EP-033)
+
+See [Compliance API Reference](compliance.md) for full documentation.
+
+Minimum role: **ANALYST** for read; **ADMIN** for export and reports.
+
+```
+GET /api/v1/compliance/audit-events                — List audit events (paginated, filterable)
+GET /api/v1/compliance/reports/soc2                — Rolling 365-day SOC 2 compliance report (ADMIN)
+GET /api/v1/compliance/reports/iso27001            — Rolling 730-day ISO 27001 compliance report (ADMIN)
+GET /api/v1/compliance/export                      — Streaming export in JSON or CSV format (ADMIN)
+```
+
+**Key query parameters for `audit-events`**: `page`, `page_size`, `action`, `resource_type`, `actor_id`, `start_date`, `end_date`
+
+**Key query parameters for `export`**: `format` (`json`|`csv`), `action`, `resource_type`, `actor_id`, `start_date`, `end_date`
+
+All audit events carry an HMAC-SHA256 `signature` field and responses include an `X-Audit-Signature` header. See [Compliance API Reference](compliance.md) for signature verification details.
+
+---
+
+### Third-Party Integrations (EP-034)
+
+See [Integrations API Reference](integrations.md) for full documentation.
+
+Minimum role: **ANALYST** for read; **DEVELOPER** for create/update/delete.
+
+**Integration CRUD**:
+
+```
+POST   /api/v1/integrations               — Create integration (DEVELOPER+)
+GET    /api/v1/integrations               — List integrations (ANALYST+)
+GET    /api/v1/integrations/{id}          — Get integration details (ANALYST+)
+PUT    /api/v1/integrations/{id}          — Update integration config (DEVELOPER+)
+DELETE /api/v1/integrations/{id}          — Deactivate integration (DEVELOPER+)
+```
+
+**Webhook receivers**:
+
+```
+POST /api/v1/integrations/{id}/webhook/jira        — Receive Jira issue events
+POST /api/v1/integrations/{id}/webhook/salesforce  — Receive Salesforce outbound messages
+POST /api/v1/integrations/{id}/webhook/github      — Receive GitHub events (HMAC-SHA256 validated)
+```
+
+Supported `IntegrationType` values: `JIRA`, `SALESFORCE`, `GITHUB`.
+
+---
+
+### Bayesian Experimentation (EP-035)
+
+See [Bayesian API Reference](bayesian.md) for full documentation.
+
+Bayesian analysis is enabled per-experiment by adding fields to the standard experiment create/update request body:
+
+| Field | Type | Description |
+|---|---|---|
+| `bayesian_enabled` | `boolean` | Enables Bayesian posterior computation for this experiment |
+| `bayesian_config.prior_alpha` | `float` | Alpha parameter of the Beta prior (must be > 0) |
+| `bayesian_config.prior_beta` | `float` | Beta parameter of the Beta prior (must be > 0) |
+| `bayesian_config.rope_low` | `float` | Lower bound of the Region of Practical Equivalence |
+| `bayesian_config.rope_high` | `float` | Upper bound of the Region of Practical Equivalence |
+| `bayesian_config.minimum_bayes_factor` | `float` | BF10 threshold that triggers the stopping rule |
+| `bayesian_config.credible_interval_width` | `float` | Credible interval width (e.g., `0.95` for 95% HDI) |
+
+When `bayesian_enabled` is `true`, the existing results endpoint returns an additional `bayesian_results` block:
+
+```
+GET /api/v1/results/{experiment_id}    — Augmented with bayesian_results block
+```
+
+The `bayesian_results` block includes: `posterior_alpha`, `posterior_beta`, `posterior_mean`, `credible_interval`, `bayes_factor`, `probability_of_superiority`, `decision` (`BayesianDecision` enum), and `stopped_early`.
+
+`BayesianDecision` values: `ACCEPT_NULL`, `ACCEPT_ALTERNATIVE`, `INCONCLUSIVE`, `ROPE_ACCEPT`.
+
+---
+
+### Server-Side Split URL Testing (EP-036)
+
+See [Split URL API Reference](split-url.md) for full documentation.
+
+Split URL experiments use `experiment_type: SPLIT_URL` and require a `split_url_config` in the request body. Variant assignment and URL redirection are handled by Lambda@Edge at the CloudFront layer.
+
+**Experiment management** uses the existing experiment CRUD endpoints with `experiment_type=SPLIT_URL`:
+
+```
+POST /api/v1/experiments/              — Create split URL experiment (set experiment_type=SPLIT_URL)
+PUT  /api/v1/experiments/{id}          — Update split URL config
+GET  /api/v1/experiments/{id}          — Returns split_url_config in response
+```
+
+**Split URL-specific endpoint**:
+
+```
+GET /api/v1/experiments/{experiment_id}/split-url/preview  — Preview variant assignment for a user (dev/QA)
+```
+
+Query parameters for preview: `user_id` (required), `attributes` (optional JSON object).
+
+**`SplitUrlConfig` schema** (`split_url_config` field):
+
+```json
+{
+  "variants": [
+    { "url": "https://example.com/page-v1", "weight": 50 },
+    { "url": "https://example.com/page-v2", "weight": 50 }
+  ]
+}
+```
+
+All weights must be integers (0-100) and must sum to exactly 100.
+
+**Lambda@Edge behaviour**: On each request the edge function reads the cookie `exp_{experiment_key}`. If absent, it hashes `user_id` to assign a variant, then returns a `302 Found` redirect to the variant URL and sets a 1-year `Set-Cookie` header for persistence.
+
+---
+
+### Java SDK (EP-031)
+
+The Java SDK and Spring Boot starter are distributed as Maven/Gradle artifacts. No new backend API endpoints are introduced; the SDK communicates with the existing experiment assignment and feature flag evaluation endpoints.
+
+See [SDK Integration Guide](../sdk-guide.md#java-sdk-ep-031) for installation, Spring Boot auto-configuration (`@EnableExperimentation`), and the Spring Boot properties reference (`experimentation.api-url`, `experimentation.api-key`, `experimentation.cache-ttl-seconds`, `experimentation.cache-max-size`).
+
+---
+
+### React SDK (EP-032)
+
+The React SDK is distributed as an npm package (`@experimentation/react-sdk`). No new backend API endpoints are introduced; the SDK consumes the existing assignment and feature flag endpoints.
+
+See [SDK Integration Guide](../sdk-guide.md#react-sdk-ep-032) for `ExperimentationProvider` setup, all hooks (`useFeatureFlag`, `useExperiment`, `useTrackEvent`, `useVariant`, `useMultipleFlags`), the `withExperimentation` HOC, and SSR/Next.js `ServerClient` usage.
