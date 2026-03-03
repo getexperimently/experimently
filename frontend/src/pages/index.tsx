@@ -5,7 +5,7 @@ export default function Home() {
     <>
       <Head>
         <title>Experimently - Modern Experimentation Platform</title>
-        <meta name="description" content="The modern product experimentation platform. Ship features faster with A/B testing and feature flags." />
+        <meta name="description" content="The modern product experimentation platform. A/B testing, feature flags, sequential testing, CUPED, and AI-powered experiment design — all in one platform." />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <link rel="icon" href="/favicon.ico" />
       </Head>
@@ -21,7 +21,7 @@ export default function Home() {
                 </span>
                 <div className="hidden lg:flex items-center gap-8">
                   <a href="#features" className="text-gray-600 hover:text-gray-900 text-sm font-medium transition">Features</a>
-                  <a href="#customers" className="text-gray-600 hover:text-gray-900 text-sm font-medium transition">Customers</a>
+                  <a href="#compare" className="text-gray-600 hover:text-gray-900 text-sm font-medium transition">Compare</a>
                   <a href="#pricing" className="text-gray-600 hover:text-gray-900 text-sm font-medium transition">Pricing</a>
                   <a href="https://docs.getexperimently.com" className="text-gray-600 hover:text-gray-900 text-sm font-medium transition">Docs</a>
                 </div>
@@ -43,7 +43,7 @@ export default function Home() {
           <div className="max-w-5xl mx-auto text-center">
             <div className="inline-flex items-center gap-2 bg-blue-50 text-blue-700 px-4 py-2 rounded-full text-sm font-medium mb-8">
               <span className="w-2 h-2 bg-blue-600 rounded-full"></span>
-              Now processing 1B+ events daily
+              Now processing 1B+ events daily · Free Preview available
             </div>
             <h1 className="text-5xl md:text-6xl lg:text-7xl font-bold text-gray-900 mb-6 leading-tight">
               The modern product
@@ -51,18 +51,17 @@ export default function Home() {
               experimentation platform
             </h1>
             <p className="text-xl md:text-2xl text-gray-600 mb-10 max-w-3xl mx-auto leading-relaxed">
-              Ship features faster with confidence. A/B testing, feature flags, and analytics
-              for teams that move fast.
+              Sequential testing, CUPED variance reduction, multi-armed bandits, and AI-powered experiment design — enterprise statistics at every tier.
             </p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
               <a href="https://app.getexperimently.com/signup" className="bg-blue-600 text-white px-8 py-4 rounded-lg text-base font-semibold hover:bg-blue-700 transition shadow-sm">
                 Start experimenting free
               </a>
-              <a href="#demo" className="bg-white border-2 border-gray-200 text-gray-900 px-8 py-4 rounded-lg text-base font-semibold hover:border-gray-300 transition">
-                See how it works
+              <a href="#features" className="bg-white border-2 border-gray-200 text-gray-900 px-8 py-4 rounded-lg text-base font-semibold hover:border-gray-300 transition">
+                Explore features
               </a>
             </div>
-            <p className="text-sm text-gray-500 mt-6">Free 14-day trial · No credit card required</p>
+            <p className="text-sm text-gray-500 mt-6">Free Preview · All features included · No credit card required</p>
           </div>
         </section>
 
@@ -83,22 +82,9 @@ export default function Home() {
                 <div className="text-sm text-gray-600">Uptime SLA</div>
               </div>
               <div className="text-center">
-                <div className="text-4xl font-bold text-gray-900 mb-2">10K+</div>
-                <div className="text-sm text-gray-600">Experiments run</div>
+                <div className="text-4xl font-bold text-gray-900 mb-2">20–40%</div>
+                <div className="text-sm text-gray-600">Sample size reduction via CUPED</div>
               </div>
-            </div>
-          </div>
-        </section>
-
-        {/* Trusted By Section */}
-        <section className="py-16 px-6">
-          <div className="max-w-6xl mx-auto">
-            <p className="text-center text-sm font-medium text-gray-500 mb-8">TRUSTED BY MODERN TEAMS</p>
-            <div className="flex flex-wrap justify-center items-center gap-12 opacity-40">
-              <div className="text-2xl font-bold text-gray-400">Acme Inc</div>
-              <div className="text-2xl font-bold text-gray-400">TechCorp</div>
-              <div className="text-2xl font-bold text-gray-400">StartupXYZ</div>
-              <div className="text-2xl font-bold text-gray-400">DataFlow</div>
             </div>
           </div>
         </section>
@@ -111,12 +97,14 @@ export default function Home() {
                 Everything you need to experiment
               </h2>
               <p className="text-xl text-gray-600 max-w-2xl mx-auto">
-                From feature flags to advanced statistical analysis, all in one platform
+                From feature flags to enterprise-grade statistical methods — all included
               </p>
             </div>
 
-            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
-              {/* Feature 1 */}
+            {/* Core Features */}
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-6">Core Platform</p>
+            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8 mb-16">
+              {/* A/B Testing */}
               <div className="bg-white p-8 rounded-2xl border border-gray-100 hover:shadow-lg hover:border-gray-200 transition">
                 <div className="w-12 h-12 bg-blue-100 rounded-xl flex items-center justify-center mb-6">
                   <svg className="w-6 h-6 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -125,11 +113,11 @@ export default function Home() {
                 </div>
                 <h3 className="text-xl font-semibold text-gray-900 mb-3">A/B Testing</h3>
                 <p className="text-gray-600 leading-relaxed">
-                  Run multivariate experiments with statistical rigor. Built-in significance testing and confidence intervals.
+                  Run multivariate experiments with statistical rigor. Built-in significance testing, confidence intervals, and automated SHIP / KEEP / CONTINUE recommendations.
                 </p>
               </div>
 
-              {/* Feature 2 */}
+              {/* Feature Flags */}
               <div className="bg-white p-8 rounded-2xl border border-gray-100 hover:shadow-lg hover:border-gray-200 transition">
                 <div className="w-12 h-12 bg-indigo-100 rounded-xl flex items-center justify-center mb-6">
                   <svg className="w-6 h-6 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -138,11 +126,11 @@ export default function Home() {
                 </div>
                 <h3 className="text-xl font-semibold text-gray-900 mb-3">Feature Flags</h3>
                 <p className="text-gray-600 leading-relaxed">
-                  Deploy safely with gradual rollouts and targeting. Kill switch protection for instant rollback.
+                  Deploy safely with gradual rollouts, staged schedules, and kill switches. Bulk toggle, SSE audit stream, and full change history included.
                 </p>
               </div>
 
-              {/* Feature 3 */}
+              {/* Real-time Analytics */}
               <div className="bg-white p-8 rounded-2xl border border-gray-100 hover:shadow-lg hover:border-gray-200 transition">
                 <div className="w-12 h-12 bg-purple-100 rounded-xl flex items-center justify-center mb-6">
                   <svg className="w-6 h-6 text-purple-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -151,24 +139,24 @@ export default function Home() {
                 </div>
                 <h3 className="text-xl font-semibold text-gray-900 mb-3">Real-time Analytics</h3>
                 <p className="text-gray-600 leading-relaxed">
-                  See results as they happen. Real-time dashboards with drill-down capabilities and custom metrics.
+                  See results as they happen. Trend charts, cumulative and daily views, sample size meters, and days-to-significance estimates.
                 </p>
               </div>
 
-              {/* Feature 4 */}
+              {/* Safety First */}
               <div className="bg-white p-8 rounded-2xl border border-gray-100 hover:shadow-lg hover:border-gray-200 transition">
                 <div className="w-12 h-12 bg-green-100 rounded-xl flex items-center justify-center mb-6">
                   <svg className="w-6 h-6 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
                   </svg>
                 </div>
-                <h3 className="text-xl font-semibold text-gray-900 mb-3">Safety First</h3>
+                <h3 className="text-xl font-semibold text-gray-900 mb-3">Safety Monitoring</h3>
                 <p className="text-gray-600 leading-relaxed">
-                  Automated guardrails monitor error rates and performance. Auto-rollback on anomaly detection.
+                  Automated guardrails monitor error rates and performance. Auto-rollback on anomaly detection protects your users from bad releases.
                 </p>
               </div>
 
-              {/* Feature 5 */}
+              {/* Advanced Targeting */}
               <div className="bg-white p-8 rounded-2xl border border-gray-100 hover:shadow-lg hover:border-gray-200 transition">
                 <div className="w-12 h-12 bg-orange-100 rounded-xl flex items-center justify-center mb-6">
                   <svg className="w-6 h-6 text-orange-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -177,11 +165,11 @@ export default function Home() {
                 </div>
                 <h3 className="text-xl font-semibold text-gray-900 mb-3">Advanced Targeting</h3>
                 <p className="text-gray-600 leading-relaxed">
-                  Target by user attributes, behavior, location, device, and custom segments with powerful rules engine.
+                  20+ targeting operators including semantic versioning, geo-distance, time windows, and JSON path. Rules engine evaluates 125K+ ops/sec.
                 </p>
               </div>
 
-              {/* Feature 6 */}
+              {/* Developer First */}
               <div className="bg-white p-8 rounded-2xl border border-gray-100 hover:shadow-lg hover:border-gray-200 transition">
                 <div className="w-12 h-12 bg-pink-100 rounded-xl flex items-center justify-center mb-6">
                   <svg className="w-6 h-6 text-pink-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -190,7 +178,132 @@ export default function Home() {
                 </div>
                 <h3 className="text-xl font-semibold text-gray-900 mb-3">Developer First</h3>
                 <p className="text-gray-600 leading-relaxed">
-                  SDKs for JavaScript, Python, Go, and more. RESTful APIs and comprehensive documentation.
+                  SDKs for JavaScript and Python. RESTful APIs with OpenAPI docs. RBAC with custom roles — ADMIN, DEVELOPER, ANALYST, VIEWER.
+                </p>
+              </div>
+            </div>
+
+            {/* Advanced Stats Features */}
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-6">Advanced Statistical Methods</p>
+            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8 mb-16">
+              {/* Sequential Testing */}
+              <div className="bg-gradient-to-br from-blue-50 to-indigo-50 p-8 rounded-2xl border border-blue-100 hover:shadow-lg transition">
+                <div className="w-12 h-12 bg-blue-600 rounded-xl flex items-center justify-center mb-6">
+                  <svg className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                </div>
+                <h3 className="text-xl font-semibold text-gray-900 mb-3">Sequential Testing</h3>
+                <p className="text-gray-600 leading-relaxed">
+                  mSPRT-based early stopping with always-valid confidence intervals. Stop experiments early when you have evidence, without inflating false positive rates. Alpha spending via O'Brien-Fleming and Pocock boundaries.
+                </p>
+              </div>
+
+              {/* CUPED */}
+              <div className="bg-gradient-to-br from-purple-50 to-pink-50 p-8 rounded-2xl border border-purple-100 hover:shadow-lg transition">
+                <div className="w-12 h-12 bg-purple-600 rounded-xl flex items-center justify-center mb-6">
+                  <svg className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z" />
+                  </svg>
+                </div>
+                <h3 className="text-xl font-semibold text-gray-900 mb-3">CUPED Variance Reduction</h3>
+                <p className="text-gray-600 leading-relaxed">
+                  Reach significance 20–40% faster using pre-experiment covariate adjustment (OLS θ). Winsorization handles outliers. Works for both conversion and numeric metrics.
+                </p>
+              </div>
+
+              {/* Multi-Armed Bandit */}
+              <div className="bg-gradient-to-br from-green-50 to-teal-50 p-8 rounded-2xl border border-green-100 hover:shadow-lg transition">
+                <div className="w-12 h-12 bg-green-600 rounded-xl flex items-center justify-center mb-6">
+                  <svg className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                </div>
+                <h3 className="text-xl font-semibold text-gray-900 mb-3">Multi-Armed Bandit</h3>
+                <p className="text-gray-600 leading-relaxed">
+                  Maximize conversions during experiments. Choose Thompson Sampling, UCB1, or Epsilon-Greedy. Background scheduler auto-reallocates traffic to winning variants.
+                </p>
+              </div>
+
+              {/* Interaction Detection */}
+              <div className="bg-gradient-to-br from-yellow-50 to-orange-50 p-8 rounded-2xl border border-yellow-100 hover:shadow-lg transition">
+                <div className="w-12 h-12 bg-yellow-600 rounded-xl flex items-center justify-center mb-6">
+                  <svg className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                </div>
+                <h3 className="text-xl font-semibold text-gray-900 mb-3">Interaction Detection</h3>
+                <p className="text-gray-600 leading-relaxed">
+                  Detect cross-experiment interference before it corrupts your results. Jaccard overlap analysis, chi-squared interaction tests, novelty effect detection, and SUTVA violation alerts.
+                </p>
+              </div>
+
+              {/* AI Experiment Design */}
+              <div className="bg-gradient-to-br from-indigo-50 to-blue-50 p-8 rounded-2xl border border-indigo-100 hover:shadow-lg transition">
+                <div className="w-12 h-12 bg-indigo-600 rounded-xl flex items-center justify-center mb-6">
+                  <svg className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                  </svg>
+                </div>
+                <h3 className="text-xl font-semibold text-gray-900 mb-3">AI Experiment Design</h3>
+                <p className="text-gray-600 leading-relaxed">
+                  Claude API–powered hypothesis generation and design suggestions. MCP Server integrates with Claude Code, Cursor, and other coding assistants so your AI tools can design and interpret experiments.
+                </p>
+              </div>
+
+              {/* Warehouse Analytics */}
+              <div className="bg-gradient-to-br from-gray-50 to-slate-50 p-8 rounded-2xl border border-gray-100 hover:shadow-lg transition">
+                <div className="w-12 h-12 bg-gray-700 rounded-xl flex items-center justify-center mb-6">
+                  <svg className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582 4-8 4" />
+                  </svg>
+                </div>
+                <h3 className="text-xl font-semibold text-gray-900 mb-3">Warehouse-Native Analytics</h3>
+                <p className="text-gray-600 leading-relaxed">
+                  Query experiment results directly in Snowflake, BigQuery, or Redshift. SQL-sanitized sync keeps your warehouse as the source of truth.
+                </p>
+              </div>
+            </div>
+
+            {/* Additional Features */}
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-6">Traffic Management & Governance</p>
+            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
+              {/* Mutual Exclusion */}
+              <div className="bg-white p-8 rounded-2xl border border-gray-100 hover:shadow-lg hover:border-gray-200 transition">
+                <div className="w-12 h-12 bg-red-100 rounded-xl flex items-center justify-center mb-6">
+                  <svg className="w-6 h-6 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+                  </svg>
+                </div>
+                <h3 className="text-xl font-semibold text-gray-900 mb-3">Mutual Exclusion Groups</h3>
+                <p className="text-gray-600 leading-relaxed">
+                  Prevent experiment contamination using consistent-hashing traffic partitioning. Global holdout groups measure the cumulative impact of your entire experimentation program.
+                </p>
+              </div>
+
+              {/* Dimensional Analysis */}
+              <div className="bg-white p-8 rounded-2xl border border-gray-100 hover:shadow-lg hover:border-gray-200 transition">
+                <div className="w-12 h-12 bg-teal-100 rounded-xl flex items-center justify-center mb-6">
+                  <svg className="w-6 h-6 text-teal-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+                  </svg>
+                </div>
+                <h3 className="text-xl font-semibold text-gray-900 mb-3">Dimensional Analysis</h3>
+                <p className="text-gray-600 leading-relaxed">
+                  Break down results by device, country, plan, or any user attribute. Bonferroni-corrected per-segment analysis with heterogeneous treatment effect (HTE) detection.
+                </p>
+              </div>
+
+              {/* Audit Logging */}
+              <div className="bg-white p-8 rounded-2xl border border-gray-100 hover:shadow-lg hover:border-gray-200 transition">
+                <div className="w-12 h-12 bg-gray-100 rounded-xl flex items-center justify-center mb-6">
+                  <svg className="w-6 h-6 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+                  </svg>
+                </div>
+                <h3 className="text-xl font-semibold text-gray-900 mb-3">Audit Logging & RBAC</h3>
+                <p className="text-gray-600 leading-relaxed">
+                  Immutable audit trail with real-time SSE stream. Custom RBAC roles, direct permission grants, and effective permissions resolution for enterprise governance.
                 </p>
               </div>
             </div>
@@ -218,12 +331,28 @@ export default function Home() {
                 <div className="text-sm text-gray-500">Data Warehouse</div>
               </div>
               <div className="bg-white p-8 rounded-xl border border-gray-200 text-center">
+                <div className="text-2xl font-bold text-gray-400 mb-2">BigQuery</div>
+                <div className="text-sm text-gray-500">Data Warehouse</div>
+              </div>
+              <div className="bg-white p-8 rounded-xl border border-gray-200 text-center">
+                <div className="text-2xl font-bold text-gray-400 mb-2">Redshift</div>
+                <div className="text-sm text-gray-500">Data Warehouse</div>
+              </div>
+              <div className="bg-white p-8 rounded-xl border border-gray-200 text-center">
                 <div className="text-2xl font-bold text-gray-400 mb-2">Segment</div>
                 <div className="text-sm text-gray-500">CDP Integration</div>
               </div>
               <div className="bg-white p-8 rounded-xl border border-gray-200 text-center">
                 <div className="text-2xl font-bold text-gray-400 mb-2">Slack</div>
                 <div className="text-sm text-gray-500">Notifications</div>
+              </div>
+              <div className="bg-white p-8 rounded-xl border border-gray-200 text-center">
+                <div className="text-2xl font-bold text-gray-400 mb-2">SendGrid</div>
+                <div className="text-sm text-gray-500">Email Alerts</div>
+              </div>
+              <div className="bg-white p-8 rounded-xl border border-gray-200 text-center">
+                <div className="text-2xl font-bold text-gray-400 mb-2">Claude</div>
+                <div className="text-sm text-gray-500">AI Design via MCP</div>
               </div>
             </div>
           </div>
@@ -251,123 +380,145 @@ export default function Home() {
 
 const client = new Experimently('YOUR_API_KEY');
 
-// Check if feature is enabled
-const isEnabled = await client.isEnabled('new-checkout', userId);
+// Get experiment variant (with CUPED + sequential testing)
+const variant = await client.getVariant('checkout-redesign', userId);
 
-if (isEnabled) {
+if (variant === 'new-flow') {
   // Show new checkout flow
 }
 
 // Track conversion event
 client.track('purchase_completed', userId, {
   revenue: 99.99
+});
+
+// Check feature flag with targeting rules
+const isEnabled = await client.isEnabled('new-checkout', userId, {
+  country: 'US',
+  plan: 'enterprise',
+  app_version: '3.2.1'
 });`}</code>
               </pre>
             </div>
           </div>
         </section>
 
-        {/* Pricing Section */}
-        <section id="pricing" className="py-24 px-6 bg-gray-50 border-t border-gray-100">
+        {/* Competitor Comparison Section */}
+        <section id="compare" className="py-24 px-6 bg-gray-50 border-t border-gray-100">
           <div className="max-w-7xl mx-auto">
+            <div className="text-center mb-16">
+              <h2 className="text-4xl md:text-5xl font-bold text-gray-900 mb-4">
+                How we compare
+              </h2>
+              <p className="text-xl text-gray-600 max-w-3xl mx-auto">
+                Enterprise-grade statistical methods at every tier — without the enterprise price tag
+              </p>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b-2 border-gray-200">
+                    <th className="text-left py-4 px-4 font-semibold text-gray-700 w-64">Feature</th>
+                    <th className="text-center py-4 px-4 font-bold text-blue-600 bg-blue-50 rounded-t-lg">Experimently</th>
+                    <th className="text-center py-4 px-4 font-semibold text-gray-600">Optimizely</th>
+                    <th className="text-center py-4 px-4 font-semibold text-gray-600">Statsig*</th>
+                    <th className="text-center py-4 px-4 font-semibold text-gray-600">Amplitude</th>
+                    <th className="text-center py-4 px-4 font-semibold text-gray-600">LaunchDarkly</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {[
+                    ['A/B / Multivariate Testing', '✅', '✅', '✅', '✅', '⚠️ Add-on'],
+                    ['Feature Flags', '✅', '✅', '✅', '✅', '✅'],
+                    ['Sequential Testing (mSPRT)', '✅', '✅', '✅', '✅', '❌'],
+                    ['CUPED Variance Reduction', '✅ (binary + numeric)', '⚠️ Numeric only', '✅', '✅', '⚠️ Add-on'],
+                    ['Multi-Armed Bandit', '✅ (3 algorithms)', '✅', '✅', '✅', '❌'],
+                    ['Interaction Detection', '✅', '⚠️ Partial', '❌', '❌', '❌'],
+                    ['Mutual Exclusion Groups', '✅', '⚠️ Partial', '✅', '⚠️ Partial', '❌'],
+                    ['Global Holdout Group', '✅', '✅', '⚠️', '❌', '❌'],
+                    ['Dimensional Analysis', '✅ + Bonferroni', '⚠️ Partial', '✅', '⚠️ Partial', '❌'],
+                    ['No-Code Experiment Wizard', '✅', '✅', '⚠️', '✅ (Web)', '❌'],
+                    ['AI Experiment Design', '✅ (Claude + MCP)', '✅ (Opal AI)', '❌', '❌', '❌'],
+                    ['Warehouse Analytics', '✅ (3 warehouses)', '✅', '✅', '✅ (Snowflake)', '❌'],
+                    ['Audit Log + SSE Stream', '✅', '⚠️', '⚠️', '❌', '✅'],
+                    ['Deploy in Your AWS Account', '✅', '❌', '❌', '❌', '❌'],
+                    ['Pricing (entry)', '🎉 Free Preview', '$36K+/year', 'Free → $150+/mo', 'Free → Custom', 'Free → $20K+/year'],
+                  ].map(([feature, ...cols], i) => (
+                    <tr key={i} className={i % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                      <td className="py-3.5 px-4 font-medium text-gray-700">{feature}</td>
+                      <td className="py-3.5 px-4 text-center bg-blue-50 font-medium text-gray-900">{cols[0]}</td>
+                      <td className="py-3.5 px-4 text-center text-gray-600">{cols[1]}</td>
+                      <td className="py-3.5 px-4 text-center text-gray-600">{cols[2]}</td>
+                      <td className="py-3.5 px-4 text-center text-gray-600">{cols[3]}</td>
+                      <td className="py-3.5 px-4 text-center text-gray-600">{cols[4]}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p className="text-xs text-gray-400 mt-4 text-center">
+              * Statsig acquired by OpenAI for $1.1B in September 2025. Future roadmap subject to change. ⚠️ = Partial or enterprise-only feature.
+            </p>
+            <div className="text-center mt-8">
+              <a href="/docs/go-to-market/competitor-comparison" className="text-blue-600 hover:text-blue-700 text-sm font-medium">
+                View full detailed comparison →
+              </a>
+            </div>
+          </div>
+        </section>
+
+        {/* Pricing Section */}
+        <section id="pricing" className="py-24 px-6 bg-white border-t border-gray-100">
+          <div className="max-w-5xl mx-auto">
             <div className="text-center mb-16">
               <h2 className="text-4xl md:text-5xl font-bold text-gray-900 mb-4">
                 Simple, transparent pricing
               </h2>
               <p className="text-xl text-gray-600">
-                Start free, scale as you grow
+                Start free with everything included. Enterprise pricing coming soon.
               </p>
             </div>
 
-            <div className="grid md:grid-cols-3 gap-8 max-w-6xl mx-auto">
-              {/* Starter */}
-              <div className="bg-white rounded-2xl border-2 border-gray-200 p-8">
+            <div className="grid md:grid-cols-2 gap-8 max-w-3xl mx-auto">
+              {/* Free Preview */}
+              <div className="bg-white rounded-2xl border-2 border-blue-600 p-8 relative shadow-xl">
+                <div className="absolute -top-4 left-1/2 -translate-x-1/2 bg-blue-600 text-white px-4 py-1 rounded-full text-sm font-semibold">
+                  Available Now
+                </div>
                 <div className="mb-8">
-                  <h3 className="text-2xl font-bold text-gray-900 mb-2">Starter</h3>
-                  <p className="text-gray-600 mb-6">For small teams getting started</p>
+                  <h3 className="text-2xl font-bold text-gray-900 mb-2">Free Preview</h3>
+                  <p className="text-gray-600 mb-6">All features included during preview</p>
                   <div className="flex items-baseline">
                     <span className="text-5xl font-bold text-gray-900">$0</span>
                     <span className="text-gray-600 ml-2">/month</span>
                   </div>
                 </div>
                 <ul className="space-y-4 mb-8">
-                  <li className="flex items-start gap-3">
-                    <svg className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                    </svg>
-                    <span className="text-gray-700">Up to 3 experiments</span>
-                  </li>
-                  <li className="flex items-start gap-3">
-                    <svg className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                    </svg>
-                    <span className="text-gray-700">10K events/month</span>
-                  </li>
-                  <li className="flex items-start gap-3">
-                    <svg className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                    </svg>
-                    <span className="text-gray-700">Basic feature flags</span>
-                  </li>
-                  <li className="flex items-start gap-3">
-                    <svg className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                    </svg>
-                    <span className="text-gray-700">Community support</span>
-                  </li>
-                </ul>
-                <a href="https://app.getexperimently.com/signup" className="block w-full text-center bg-gray-100 text-gray-900 px-6 py-3.5 rounded-lg font-semibold hover:bg-gray-200 transition">
-                  Get started
-                </a>
-              </div>
-
-              {/* Pro */}
-              <div className="bg-white rounded-2xl border-2 border-blue-600 p-8 relative shadow-xl">
-                <div className="absolute -top-4 left-1/2 -translate-x-1/2 bg-blue-600 text-white px-4 py-1 rounded-full text-sm font-semibold">
-                  Most Popular
-                </div>
-                <div className="mb-8">
-                  <h3 className="text-2xl font-bold text-gray-900 mb-2">Pro</h3>
-                  <p className="text-gray-600 mb-6">For growing teams</p>
-                  <div className="flex items-baseline">
-                    <span className="text-5xl font-bold text-gray-900">$99</span>
-                    <span className="text-gray-600 ml-2">/month</span>
-                  </div>
-                </div>
-                <ul className="space-y-4 mb-8">
-                  <li className="flex items-start gap-3">
-                    <svg className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                    </svg>
-                    <span className="text-gray-700">Unlimited experiments</span>
-                  </li>
-                  <li className="flex items-start gap-3">
-                    <svg className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                    </svg>
-                    <span className="text-gray-700">1M events/month</span>
-                  </li>
-                  <li className="flex items-start gap-3">
-                    <svg className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                    </svg>
-                    <span className="text-gray-700">Advanced targeting</span>
-                  </li>
-                  <li className="flex items-start gap-3">
-                    <svg className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                    </svg>
-                    <span className="text-gray-700">Priority support</span>
-                  </li>
-                  <li className="flex items-start gap-3">
-                    <svg className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                    </svg>
-                    <span className="text-gray-700">SSO integration</span>
-                  </li>
+                  {[
+                    'Unlimited A/B experiments',
+                    'Feature flags with staged rollouts',
+                    'Sequential testing (mSPRT)',
+                    'CUPED variance reduction',
+                    'Multi-armed bandit (3 algorithms)',
+                    'Interaction detection',
+                    'Mutual exclusion groups',
+                    'AI experiment design (Claude API)',
+                    'Warehouse analytics (Snowflake, BigQuery, Redshift)',
+                    'Full audit log + SSE stream',
+                    'Custom RBAC roles',
+                    'Slack + email alerting',
+                  ].map((item, i) => (
+                    <li key={i} className="flex items-start gap-3">
+                      <svg className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                      </svg>
+                      <span className="text-gray-700">{item}</span>
+                    </li>
+                  ))}
                 </ul>
                 <a href="https://app.getexperimently.com/signup" className="block w-full text-center bg-blue-600 text-white px-6 py-3.5 rounded-lg font-semibold hover:bg-blue-700 transition shadow-sm">
-                  Start free trial
+                  Start for free
                 </a>
               </div>
 
@@ -375,47 +526,40 @@ client.track('purchase_completed', userId, {
               <div className="bg-white rounded-2xl border-2 border-gray-200 p-8">
                 <div className="mb-8">
                   <h3 className="text-2xl font-bold text-gray-900 mb-2">Enterprise</h3>
-                  <p className="text-gray-600 mb-6">For large organizations</p>
+                  <p className="text-gray-600 mb-6">Commercial pricing — coming soon</p>
                   <div className="flex items-baseline">
-                    <span className="text-5xl font-bold text-gray-900">Custom</span>
+                    <span className="text-4xl font-bold text-gray-900">TBD</span>
                   </div>
                 </div>
                 <ul className="space-y-4 mb-8">
-                  <li className="flex items-start gap-3">
-                    <svg className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                    </svg>
-                    <span className="text-gray-700">Unlimited everything</span>
-                  </li>
-                  <li className="flex items-start gap-3">
-                    <svg className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                    </svg>
-                    <span className="text-gray-700">Dedicated support</span>
-                  </li>
-                  <li className="flex items-start gap-3">
-                    <svg className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                    </svg>
-                    <span className="text-gray-700">SLA guarantee</span>
-                  </li>
-                  <li className="flex items-start gap-3">
-                    <svg className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                    </svg>
-                    <span className="text-gray-700">Custom contracts</span>
-                  </li>
-                  <li className="flex items-start gap-3">
-                    <svg className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                    </svg>
-                    <span className="text-gray-700">On-premise option</span>
-                  </li>
+                  {[
+                    'Everything in Free Preview',
+                    'Deploy to your own AWS account',
+                    'Data stays in your infrastructure',
+                    'SOC 2 / ISO 27001 compliance',
+                    'HIPAA BAA available',
+                    'Dedicated support + SLA',
+                    'Custom contracts',
+                    'Volume pricing',
+                  ].map((item, i) => (
+                    <li key={i} className="flex items-start gap-3">
+                      <svg className="w-5 h-5 text-gray-400 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                      </svg>
+                      <span className="text-gray-700">{item}</span>
+                    </li>
+                  ))}
                 </ul>
                 <a href="mailto:hello@getexperimently.com" className="block w-full text-center bg-gray-100 text-gray-900 px-6 py-3.5 rounded-lg font-semibold hover:bg-gray-200 transition">
-                  Contact sales
+                  Contact us
                 </a>
               </div>
+            </div>
+
+            <div className="text-center mt-10 p-6 bg-blue-50 rounded-2xl max-w-3xl mx-auto">
+              <p className="text-blue-800 font-medium">
+                🎉 We&apos;re in Free Preview — all enterprise features are available at no cost while we finalize commercial pricing. Lock in early access by signing up now.
+              </p>
             </div>
           </div>
         </section>
@@ -427,17 +571,17 @@ client.track('purchase_completed', userId, {
               Start experimenting today
             </h2>
             <p className="text-xl text-blue-100 mb-10">
-              Join thousands of teams shipping features faster with data-driven decisions
+              Sequential testing, CUPED, and AI design — all free during preview. No credit card needed.
             </p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
               <a href="https://app.getexperimently.com/signup" className="bg-white text-blue-600 px-8 py-4 rounded-lg text-lg font-semibold hover:bg-gray-50 transition shadow-lg">
-                Start free trial
+                Start free — all features included
               </a>
               <a href="mailto:hello@getexperimently.com" className="bg-blue-700 text-white px-8 py-4 rounded-lg text-lg font-semibold hover:bg-blue-800 transition border-2 border-blue-500">
-                Talk to sales
+                Talk to the team
               </a>
             </div>
-            <p className="text-blue-100 mt-6">14-day free trial · No credit card required</p>
+            <p className="text-blue-100 mt-6">Free Preview · No credit card required · All features unlocked</p>
           </div>
         </section>
 
@@ -450,7 +594,7 @@ client.track('purchase_completed', userId, {
                   Experimently
                 </span>
                 <p className="text-gray-400 mb-6 max-w-sm">
-                  The modern product experimentation platform for teams that move fast.
+                  The modern product experimentation platform with enterprise-grade statistics at every tier.
                 </p>
                 <div className="flex gap-4">
                   <a href="#" className="text-gray-400 hover:text-white transition">
@@ -469,6 +613,7 @@ client.track('purchase_completed', userId, {
                 <h4 className="font-semibold text-white mb-4">Product</h4>
                 <ul className="space-y-3 text-gray-400">
                   <li><a href="#features" className="hover:text-white transition">Features</a></li>
+                  <li><a href="#compare" className="hover:text-white transition">Compare</a></li>
                   <li><a href="#pricing" className="hover:text-white transition">Pricing</a></li>
                   <li><a href="https://docs.getexperimently.com" className="hover:text-white transition">Documentation</a></li>
                   <li><a href="https://api.getexperimently.com" className="hover:text-white transition">API</a></li>
@@ -499,7 +644,7 @@ client.track('purchase_completed', userId, {
             <div className="border-t border-gray-800 pt-8">
               <div className="flex flex-col md:flex-row justify-between items-center gap-4">
                 <p className="text-gray-400 text-sm">
-                  © 2025 Experimently. All rights reserved.
+                  © 2026 Experimently. All rights reserved.
                 </p>
                 <p className="text-gray-500 text-sm">
                   Built with ❤️ for modern product teams
