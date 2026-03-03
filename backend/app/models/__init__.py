@@ -37,6 +37,7 @@ from .metrics.metric import (
     AggregationPeriod,
 )
 from .audit_log import AuditLog, ActionType, EntityType
+from .integration_config import IntegrationConfig, IntegrationType as IntegrationTypeEnum
 from .mutual_exclusion_group import MutualExclusionGroup, MutualExclusionGroupStatus
 from .global_holdout import GlobalHoldout
 from .bandit_state import BanditState
@@ -90,6 +91,8 @@ __all__ = [
     "NotificationDeliveryLog",
     "NotificationChannel",
     "NotificationStatus",
+    "IntegrationConfig",
+    "IntegrationTypeEnum",
 ]
 
 # Remove or comment out any premature configuration
