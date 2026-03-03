@@ -38,6 +38,7 @@ from backend.app.api.v1.endpoints import (
     warehouse,
     notifications,
     compliance,
+    integrations,
 )
 
 # Import the sample size calculator router
@@ -153,6 +154,11 @@ api_router_v1.include_router(
 # EP-033: Compliance Audit Logging
 api_router_v1.include_router(
     compliance.router, prefix="/compliance", tags=["Compliance"]
+)
+
+# EP-034: Integration Config Management (Salesforce / Jira / GitHub)
+api_router_v1.include_router(
+    integrations.router, prefix="/integrations", tags=["Integrations"]
 )
 
 # Main API router that includes versioned routers
