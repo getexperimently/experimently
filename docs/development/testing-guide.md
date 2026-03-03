@@ -14,6 +14,11 @@ The platform uses a multi-layer testing strategy:
 | Contract | `backend/tests/contract/` | Validate API response shapes | Fast |
 | Frontend | `frontend/src/tests/` | Test React components | Fast |
 
+> **New features (EP-031–036):** See [`docs/testing/integration-testing-plan.md`](../testing/integration-testing-plan.md)
+> for the full integration testing plan covering Java/JVM SDK, React SDK, SOC 2 / ISO 27001
+> audit logging, Salesforce/Jira/GitHub integrations, Full Bayesian, and Split URL Testing.
+> That document includes test file layouts, key scenarios, fixture definitions, and CI workflow additions.
+
 ---
 
 ## Environment Setup
