@@ -346,6 +346,7 @@ def get_experiment_results(
             metrics=metrics_data,
             sequential_testing=result.get("sequential_testing"),
             breakdown=breakdown_response,
+            bayesian_results=result.get("bayesian_results"),
         )
     except Exception as exc:
         raise HTTPException(

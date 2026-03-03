@@ -81,7 +81,9 @@ class ExperimentScheduler:
 
         This checks for:
         1. Experiments in DRAFT or PAUSED status that should be activated
-        2. Experiments in ACTIVE status that should be completed
+        2. Experiments in ACTIVE status that should be completed (time-based)
+        3. Experiments in ACTIVE status that should be stopped due to
+           bayesian_decision being STOP_WINNER or STOP_FUTILE (EP-035 Batch 2)
         """
         logger.info("Processing scheduled experiments")
 
@@ -160,9 +162,59 @@ class ExperimentScheduler:
             if completed_count > 0:
                 db.commit()
 
+            # EP-035 Batch 2: Stop ACTIVE experiments where bayesian_decision
+            # is STOP_WINNER or STOP_FUTILE (Bayesian stopping rules triggered).
+            bayesian_stopped_count = 0
+            try:
+                _bayesian_stop_decisions = ("STOP_WINNER", "STOP_FUTILE")
+                experiments_to_bayesian_stop = db.query(Experiment).filter(
+                    and_(
+                        Experiment.status == ExperimentStatus.ACTIVE,
+                        Experiment.bayesian_decision.in_(_bayesian_stop_decisions),
+                    )
+                ).all()
+
+                for experiment in experiments_to_bayesian_stop:
+                    try:
+                        experiment.status = ExperimentStatus.COMPLETED
+                        experiment.updated_at = current_time
+                        db.add(experiment)
+                        bayesian_stopped_count += 1
+                        logger.info(
+                            f"Bayesian stopping experiment: {experiment.id} - "
+                            f"{experiment.name} "
+                            f"(bayesian_decision: {experiment.bayesian_decision})"
+                        )
+                        try:
+                            self._notification_service.notify_experiment_ended(
+                                experiment_id=str(experiment.id),
+                                experiment_name=experiment.name,
+                            )
+                        except Exception as exc:
+                            logger.warning(
+                                "Notification failed (non-critical): %s", exc
+                            )
+                    except Exception as e:
+                        logger.error(
+                            f"Error bayesian-stopping experiment {experiment.id}: "
+                            f"{str(e)}"
+                        )
+
+                if bayesian_stopped_count > 0:
+                    db.commit()
+            except Exception as e:
+                logger.error(
+                    f"Error processing bayesian stopping rules: {str(e)}"
+                )
+
             # Log the results
-            if activated_count > 0 or completed_count > 0:
-                logger.info(f"Updated {activated_count} experiments to ACTIVE and {completed_count} to COMPLETED")
+            total_completed = completed_count + bayesian_stopped_count
+            if activated_count > 0 or total_completed > 0:
+                logger.info(
+                    f"Updated {activated_count} experiments to ACTIVE, "
+                    f"{completed_count} to COMPLETED (time-based), "
+                    f"{bayesian_stopped_count} to COMPLETED (bayesian stopping)"
+                )
             else:
                 logger.info("No experiments required scheduling updates")
 
