@@ -1,6 +1,6 @@
-# Bayesian Experimentation API (EP-035)
+# Bayesian Experimentation API
 
-This document describes the Full Bayesian experimentation support introduced in EP-035. When Bayesian analysis is enabled on an experiment, the results endpoint returns a `bayesian_results` block alongside the existing frequentist statistics.
+This document describes the full Bayesian experimentation support. When Bayesian analysis is enabled on an experiment, the results endpoint returns a `bayesian_results` block alongside the existing frequentist statistics.
 
 ---
 

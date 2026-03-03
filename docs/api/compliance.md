@@ -1,6 +1,6 @@
-# Compliance Audit Logging API (EP-033)
+# Compliance Audit Logging API
 
-This document describes the compliance audit logging endpoints introduced in EP-033. The system provides SOC 2 Type II and ISO 27001-aligned audit trails with HMAC-SHA256 tamper-evident signing for all platform events.
+This document describes the compliance audit logging endpoints. The system provides SOC 2 Type II and ISO 27001-aligned audit trails with HMAC-SHA256 tamper-evident signing for all platform events.
 
 ---
 

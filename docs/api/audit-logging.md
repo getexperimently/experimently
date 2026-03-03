@@ -1,4 +1,4 @@
-# Audit Logging & Bulk Toggle (P1-B)
+# Audit Logging & Bulk Toggle
 
 The platform maintains a complete audit trail of all system actions — experiment state changes, feature flag toggles, permission grants, user management operations, and more. Audit logs are immutable and append-only.
 

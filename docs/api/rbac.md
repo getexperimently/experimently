@@ -1,4 +1,4 @@
-# RBAC Post-MVP API Reference (P2-A)
+# RBAC API Reference
 
 ## Overview
 
