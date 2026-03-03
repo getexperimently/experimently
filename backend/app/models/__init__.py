@@ -37,12 +37,13 @@ from .metrics.metric import (
     AggregationPeriod,
 )
 from .audit_log import AuditLog, ActionType, EntityType
-from .integration_config import IntegrationConfig, IntegrationType as IntegrationTypeEnum
+from .compliance_audit_event import ComplianceAuditEvent, AuditAction, AuditOutcome
 from .mutual_exclusion_group import MutualExclusionGroup, MutualExclusionGroupStatus
 from .global_holdout import GlobalHoldout
 from .bandit_state import BanditState
 from .warehouse_connection import WarehouseConnection
 from .notification import NotificationPreference, NotificationDeliveryLog, NotificationChannel, NotificationStatus
+from .integration_config import IntegrationConfig, IntegrationType as IntegrationTypeEnum
 
 # Explicitly list all models that should be part of the base metadata
 __all__ = [
@@ -82,6 +83,9 @@ __all__ = [
     "AuditLog",
     "ActionType",
     "EntityType",
+    "ComplianceAuditEvent",
+    "AuditAction",
+    "AuditOutcome",
     "MutualExclusionGroup",
     "MutualExclusionGroupStatus",
     "GlobalHoldout",
