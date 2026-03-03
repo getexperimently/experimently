@@ -42,6 +42,8 @@ from backend.app.core.permissions import check_permission, ResourceType, Action,
 from backend.app.core.scheduler import experiment_scheduler
 from backend.app.services.audit_log_service import AuditLogService
 from backend.app.models.compliance_audit_event import AuditAction, AuditOutcome
+from backend.app.services import split_url_service
+from backend.app.schemas.split_url import SplitUrlConfig
 
 # Create router with tag for documentation grouping
 router = APIRouter(
@@ -1759,3 +1761,98 @@ async def trigger_schedule_processing(
     background_tasks.add_task(experiment_scheduler.process_scheduled_experiments)
 
     return {"status": "Processing scheduled experiments in the background"}
+
+
+@router.get(
+    "/{experiment_id}/split-url/preview",
+    summary="Preview split URL assignment for a user",
+    response_description="Returns the predicted URL variant for the given user",
+)
+async def preview_split_url_assignment(
+    experiment_id: UUID = Path(..., description="The ID of the split URL experiment"),
+    user_id: str = Query(..., description="User ID to simulate assignment for"),
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_active_user),
+) -> Dict[str, Any]:
+    """
+    Preview the split URL variant assignment for a given user.
+
+    Returns the URL that would be served to the specified user_id based on the
+    deterministic MD5 hash assignment used by the Split URL router Lambda.
+
+    This endpoint requires DEVELOPER or ADMIN role.
+
+    Returns:
+        Dict containing variant_name, url, traffic_allocation, and experiment_id
+
+    Raises:
+        HTTPException 403: If user does not have DEVELOPER or ADMIN role
+        HTTPException 404: If experiment not found
+        HTTPException 400: If experiment is not a split_url type or has no config
+    """
+    # Only ADMIN and DEVELOPER roles may use the preview endpoint
+    is_admin_or_developer = (
+        current_user.is_superuser
+        or getattr(current_user, "role", None) in ("admin", "developer")
+        or (
+            hasattr(current_user, "username")
+            and "developer" in (current_user.username or "").lower()
+        )
+    )
+    if not is_admin_or_developer:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only DEVELOPER or ADMIN users can access the split URL preview endpoint",
+        )
+
+    # Retrieve the experiment
+    experiment_service = ExperimentService(db)
+    experiment = experiment_service.get_experiment_by_id(experiment_id)
+    if not experiment:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Experiment not found",
+        )
+
+    # Validate it's a split_url experiment
+    exp_type = experiment.get("experiment_type") if isinstance(experiment, dict) else getattr(experiment, "experiment_type", None)
+    if hasattr(exp_type, "value"):
+        exp_type = exp_type.value
+    if exp_type != "split_url":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Experiment is not a split_url type",
+        )
+
+    # Validate split_url_config is present
+    raw_config = experiment.get("split_url_config") if isinstance(experiment, dict) else getattr(experiment, "split_url_config", None)
+    if not raw_config:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="split_url_config is not set for this experiment",
+        )
+
+    # Parse the config — it may be a dict (from DB JSONB) or already a SplitUrlConfig
+    if isinstance(raw_config, dict):
+        config = SplitUrlConfig(**raw_config)
+    else:
+        config = raw_config
+
+    # Derive experiment key: use the experiment id string as the key
+    exp_id_str = experiment.get("id") if isinstance(experiment, dict) else str(getattr(experiment, "id", experiment_id))
+    experiment_key = str(exp_id_str)
+
+    # Get deterministic variant assignment
+    variant = split_url_service.get_url_variant(
+        user_id=user_id,
+        experiment_key=experiment_key,
+        config=config,
+    )
+
+    return {
+        "experiment_id": experiment_key,
+        "user_id": user_id,
+        "variant_name": variant.name,
+        "url": variant.url,
+        "traffic_allocation": variant.traffic_allocation,
+    }
