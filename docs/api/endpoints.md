@@ -1269,3 +1269,255 @@ export default async function handler(
   }
 }
 ```
+
+---
+
+## Advanced Analytics Endpoints
+
+### Sequential Testing
+
+See [Sequential Testing Guide](sequential-testing.md) for full documentation.
+
+```
+GET /api/v1/results/{experiment_id}/sequential
+```
+Returns mSPRT analysis, always-valid confidence intervals, alpha spending schedule, and early stopping recommendation.
+
+**Query params:** `method` (`msprt`|`always_valid`), `alpha` (default `0.05`), `spending_function`, `num_looks`
+
+---
+
+### CUPED Variance Reduction
+
+See [CUPED Guide](cuped.md) for full documentation.
+
+```
+GET /api/v1/results/{experiment_id}/cuped
+```
+Returns CUPED-adjusted effect estimates and variance reduction percentage.
+
+**Query params:** `winsorize` (bool), `lower_pct` (default `0.01`), `upper_pct` (default `0.99`)
+
+---
+
+### Dimensional Analysis / Segment Breakdown
+
+See [Dimensional Analysis Guide](dimensional-analysis.md) for full documentation.
+
+```
+GET /api/v1/results/{experiment_id}/breakdown
+```
+Returns per-segment statistics with Bonferroni-corrected significance thresholds.
+
+**Query params:** `dimension` (required), `metric_id`, `base_alpha` (default `0.05`)
+
+---
+
+### Multi-Armed Bandit
+
+See [Multi-Armed Bandit Guide](multi-armed-bandit.md) for full documentation.
+
+```
+GET  /api/v1/bandit/{experiment_id}           — Current variant weights and stats
+POST /api/v1/bandit/{experiment_id}/update    — Trigger weight recalculation (DEVELOPER+)
+PUT  /api/v1/bandit/{experiment_id}/weights   — Override weights manually (ADMIN)
+```
+
+---
+
+### Interaction Detection
+
+See [Interaction Detection Guide](interaction-detection.md) for full documentation.
+
+```
+GET /api/v1/interactions/scan                          — Scan all active experiments
+GET /api/v1/interactions/{exp_a_id}/{exp_b_id}         — Full pairwise analysis
+GET /api/v1/interactions/{exp_a_id}/{exp_b_id}/novelty — Novelty-effect sub-analysis
+```
+
+Access: DEVELOPER and above (VIEWER returns 403).
+
+---
+
+## Platform Management Endpoints
+
+### Mutual Exclusion Groups
+
+See [Mutual Exclusion Groups Guide](mutual-exclusion-groups.md) for full documentation.
+
+```
+GET    /api/v1/mutual-exclusion-groups                              — List groups
+POST   /api/v1/mutual-exclusion-groups                              — Create group (DEVELOPER+)
+GET    /api/v1/mutual-exclusion-groups/{group_id}                   — Get group
+PUT    /api/v1/mutual-exclusion-groups/{group_id}                   — Update group (DEVELOPER+)
+DELETE /api/v1/mutual-exclusion-groups/{group_id}                   — Archive group (ADMIN)
+POST   /api/v1/mutual-exclusion-groups/{group_id}/experiments       — Add experiment
+DELETE /api/v1/mutual-exclusion-groups/{group_id}/experiments/{eid} — Remove experiment
+```
+
+---
+
+### Global Holdout
+
+See [Mutual Exclusion Groups Guide](mutual-exclusion-groups.md) for full documentation.
+
+```
+GET  /api/v1/holdout              — Get active holdout
+GET  /api/v1/holdout/all          — List all holdouts (ADMIN)
+POST /api/v1/holdout              — Create holdout (ADMIN)
+PUT  /api/v1/holdout/{id}         — Update holdout (ADMIN)
+GET  /api/v1/holdout/check/{uid}  — Check if user is in holdout
+```
+
+---
+
+### Warehouse-Native Analytics
+
+See [Warehouse Analytics Guide](warehouse-analytics.md) for full documentation.
+
+```
+GET    /api/v1/warehouse/connections          — List connections (DEVELOPER+)
+POST   /api/v1/warehouse/connections          — Create connection (DEVELOPER+)
+GET    /api/v1/warehouse/connections/{id}     — Get connection
+DELETE /api/v1/warehouse/connections/{id}     — Delete connection (DEVELOPER+)
+POST   /api/v1/warehouse/connections/test     — Test credentials (DEVELOPER+)
+POST   /api/v1/warehouse/sync/{experiment_id} — Trigger warehouse sync (DEVELOPER+)
+```
+
+---
+
+### Experiment Wizard
+
+See [Experiment Wizard Guide](../guides/experiment-wizard.md) for full documentation.
+
+```
+POST /api/v1/wizard/drafts              — Create draft
+GET  /api/v1/wizard/drafts              — List my drafts
+GET  /api/v1/wizard/drafts/{id}         — Get draft
+PUT  /api/v1/wizard/drafts/{id}         — Update draft step
+POST /api/v1/wizard/drafts/{id}/validate — Validate draft
+POST /api/v1/wizard/drafts/{id}/submit   — Submit → create experiment
+```
+
+---
+
+### Rollout Schedules
+
+```
+POST   /api/v1/rollout-schedules                      — Create schedule
+GET    /api/v1/rollout-schedules                      — List schedules
+GET    /api/v1/rollout-schedules/{id}                 — Get schedule
+PUT    /api/v1/rollout-schedules/{id}                 — Update schedule
+DELETE /api/v1/rollout-schedules/{id}                 — Delete schedule
+POST   /api/v1/rollout-schedules/{id}/activate        — Activate
+POST   /api/v1/rollout-schedules/{id}/pause           — Pause
+POST   /api/v1/rollout-schedules/{id}/cancel          — Cancel
+POST   /api/v1/rollout-schedules/{id}/stages          — Add stage
+PUT    /api/v1/rollout-schedules/stages/{stage_id}    — Update stage
+DELETE /api/v1/rollout-schedules/stages/{stage_id}    — Delete stage
+POST   /api/v1/rollout-schedules/stages/{stage_id}/advance — Manual advance
+```
+
+---
+
+### Audit Logs & Bulk Toggle
+
+See [Audit Logging Guide](audit-logging.md) for full documentation.
+
+```
+GET  /api/v1/audit-logs                   — Query audit logs (ANALYST+)
+GET  /api/v1/audit-logs/{id}              — Get single log entry (ANALYST+)
+GET  /api/v1/audit-logs/stats             — Aggregate stats (ANALYST+)
+GET  /api/v1/audit-logs/stream            — SSE real-time stream (ANALYST+)
+POST /api/v1/feature-flags/bulk-toggle    — Bulk enable/disable/archive (DEVELOPER+)
+GET  /api/v1/feature-flags/{id}/history   — Flag change history (ANALYST+)
+```
+
+---
+
+### Safety Monitoring
+
+```
+GET  /api/v1/safety/settings              — Get safety config (ADMIN)
+PUT  /api/v1/safety/settings              — Update safety config (ADMIN)
+GET  /api/v1/safety/feature-flags/{id}    — Get flag safety config
+PUT  /api/v1/safety/feature-flags/{id}    — Update flag safety config (DEVELOPER+)
+POST /api/v1/safety/rollback/{flag_id}    — Trigger manual rollback (DEVELOPER+)
+GET  /api/v1/safety/rollback-history      — Rollback history (ANALYST+)
+```
+
+---
+
+### Audience Segments
+
+```
+POST   /api/v1/segments              — Create segment (DEVELOPER+)
+GET    /api/v1/segments              — List segments
+GET    /api/v1/segments/{id}         — Get segment
+PUT    /api/v1/segments/{id}         — Update segment (DEVELOPER+)
+DELETE /api/v1/segments/{id}         — Delete segment (DEVELOPER+)
+POST   /api/v1/segments/{id}/evaluate — Evaluate segment membership
+```
+
+---
+
+### Notifications & Alerting
+
+See [Alerting Guide](alerting.md) for full documentation.
+
+```
+GET  /api/v1/notifications/preferences         — Get my preferences
+PUT  /api/v1/notifications/preferences         — Update my preferences
+GET  /api/v1/notifications/admin/preferences   — List all (ADMIN)
+GET  /api/v1/notifications/delivery-log        — Delivery history (ADMIN)
+POST /api/v1/notifications/test                — Send test notification (DEVELOPER+)
+```
+
+---
+
+### AI Design & MCP
+
+See [MCP Server Guide](../mcp-server.md) for full documentation.
+
+```
+POST /api/v1/ai/design                    — AI experiment design suggestion
+POST /api/v1/ai/interpret/{experiment_id} — AI results interpretation
+GET  /api/v1/ai/sample-size               — Sample size calculator
+GET  /api/v1/ai/templates                 — List experiment templates
+GET  /api/v1/ai/templates/{id}            — Get template
+GET  /api/v1/mcp/manifest                 — MCP tool manifest (public)
+```
+
+---
+
+### Scheduler Health
+
+```
+GET /api/v1/scheduler/health          — Scheduler health summary
+GET /api/v1/scheduler/jobs            — List scheduled jobs and last run times
+GET /api/v1/scheduler/jobs/{job_name} — Get specific job status
+POST /api/v1/scheduler/jobs/{job_name}/trigger — Manual trigger (ADMIN)
+```
+
+---
+
+### ETL / Glue Jobs
+
+```
+GET  /api/v1/etl/jobs                 — List ETL job runs
+POST /api/v1/etl/jobs/{job_name}/run  — Trigger ETL job (ADMIN)
+GET  /api/v1/etl/jobs/{run_id}        — Get job run status
+GET  /api/v1/etl/jobs/{run_id}/logs   — Get job logs
+POST /api/v1/etl/jobs/{run_id}/cancel — Cancel running job (ADMIN)
+```
+
+---
+
+### Real-time DynamoDB Counters
+
+```
+GET  /api/v1/counters/{experiment_id}              — Get experiment counters
+POST /api/v1/counters/{experiment_id}/increment    — Increment counter
+POST /api/v1/counters/{experiment_id}/bulk         — Bulk counter update
+DELETE /api/v1/counters/{experiment_id}            — Reset counters (ADMIN)
+```
