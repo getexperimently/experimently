@@ -122,6 +122,12 @@ class Experiment(Base, BaseModel):
     bayesian_config = Column(JSONB, nullable=True)  # BayesianConfig serialized as JSON
     bayesian_decision = Column(String(32), nullable=True)  # BayesianDecision value
 
+    # EP-036: Split URL testing configuration
+    # Example: {"variants": [{"url": "https://example.com/a", "traffic_allocation": 50},
+    #                         {"url": "https://example.com/b", "traffic_allocation": 50}],
+    #           "cookie_name": "split_url_exp_key"}
+    split_url_config = Column(JSONB, nullable=True)
+
     # Relationships
     owner = relationship("User", back_populates="experiments")
     variants = relationship(
