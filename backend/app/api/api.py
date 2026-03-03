@@ -37,6 +37,7 @@ from backend.app.api.v1.endpoints import (
     experiment_wizard,
     warehouse,
     notifications,
+    compliance,
 )
 
 # Import the sample size calculator router
@@ -147,6 +148,11 @@ api_router_v1.include_router(
 # EP-030: Notification preferences and delivery log
 api_router_v1.include_router(
     notifications.router, prefix="/notifications", tags=["Notifications"]
+)
+
+# EP-033: Compliance Audit Logging
+api_router_v1.include_router(
+    compliance.router, prefix="/compliance", tags=["Compliance"]
 )
 
 # Main API router that includes versioned routers
@@ -269,6 +275,14 @@ tags_metadata = [
             "Warehouse-Native Analytics: manage Snowflake, BigQuery, and Redshift "
             "connections, generate experiment analysis SQL, and sync results directly "
             "from customer data warehouses. Credentials stored encrypted."
+        ),
+    },
+    {
+        "name": "Compliance",
+        "description": (
+            "SOC 2 Type 2 / ISO 27001 compliance audit trail. "
+            "HMAC-signed, append-only events with configurable retention. "
+            "Accessible to ADMIN and ANALYST roles only."
         ),
     },
 ]
