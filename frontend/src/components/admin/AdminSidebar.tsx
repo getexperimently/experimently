@@ -16,6 +16,7 @@ const NAV_ITEMS: NavItem[] = [
   { label: 'Safety', href: '/admin/safety', testId: 'nav-item-safety', icon: '🛡️' },
   { label: 'Scheduler', href: '/admin/scheduler', testId: 'nav-item-scheduler', icon: '⏰' },
   { label: 'API Keys', href: '/admin/api-keys', testId: 'nav-item-api-keys', icon: '🗝️' },
+  { label: 'Notifications', href: '/admin/notifications', testId: 'nav-item-notifications', icon: '🔔' },
 ];
 
 interface AdminSidebarProps {

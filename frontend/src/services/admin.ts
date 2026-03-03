@@ -4,6 +4,9 @@ import {
   AuditLogListResponse,
   CustomRole,
   FlagSafetyStatus,
+  NotificationChannel,
+  NotificationDeliveryLogListResponse,
+  NotificationPreference,
   SafetySettings,
   SchedulerHealth,
   SchedulerRun,
@@ -226,6 +229,49 @@ export const AdminService = {
     if (!response.ok) {
       throw new Error(`Failed to fetch scheduler history: ${response.statusText}`);
     }
+    return response.json();
+  },
+
+  // Notification preferences
+  async getMyNotificationPrefs(): Promise<NotificationPreference> {
+    const response = await fetch(`${API_URL}/api/v1/notifications/preferences`);
+    if (!response.ok) throw new Error(`Failed to fetch notification preferences: ${response.statusText}`);
+    return response.json();
+  },
+
+  async updateMyNotificationPrefs(data: Partial<NotificationPreference>): Promise<NotificationPreference> {
+    const response = await fetch(`${API_URL}/api/v1/notifications/preferences`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    if (!response.ok) throw new Error(`Failed to update notification preferences: ${response.statusText}`);
+    return response.json();
+  },
+
+  async getNotificationDeliveryLog(params?: {
+    page?: number;
+    limit?: number;
+    event_type?: string;
+    status?: string;
+  }): Promise<NotificationDeliveryLogListResponse> {
+    const url = new URL(`${API_URL}/api/v1/notifications/delivery-log`);
+    if (params?.page !== undefined) url.searchParams.set('page', String(params.page));
+    if (params?.limit !== undefined) url.searchParams.set('limit', String(params.limit));
+    if (params?.event_type) url.searchParams.set('event_type', params.event_type);
+    if (params?.status) url.searchParams.set('status', params.status);
+    const response = await fetch(url.toString());
+    if (!response.ok) throw new Error(`Failed to fetch delivery log: ${response.statusText}`);
+    return response.json();
+  },
+
+  async sendTestNotification(channel: NotificationChannel, message: string, recipient?: string): Promise<{ success: boolean; channel: string; message: string }> {
+    const response = await fetch(`${API_URL}/api/v1/notifications/test`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ channel, message, recipient }),
+    });
+    if (!response.ok) throw new Error(`Failed to send test notification: ${response.statusText}`);
     return response.json();
   },
 };

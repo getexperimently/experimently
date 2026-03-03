@@ -15,6 +15,7 @@ from sqlalchemy import and_
 from backend.app.db.session import SessionLocal
 from backend.app.models.feature_flag import FeatureFlag, FeatureFlagStatus
 from backend.app.services.safety_service import SafetyService
+from backend.app.services.notification_service import NotificationService
 from backend.app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -33,6 +34,7 @@ class SafetyScheduler:
         self.interval_minutes = interval_minutes
         self.is_running = False
         self.task: Optional[asyncio.Task] = None
+        self._notification_service = NotificationService()
 
     async def start(self):
         """Start the scheduler."""
@@ -145,6 +147,14 @@ class SafetyScheduler:
 
                         if rollback_result.success:
                             logger.info(f"Successfully rolled back feature flag {feature_flag.key}: {rollback_result.message}")
+                            try:
+                                self._notification_service.notify_safety_rollback(
+                                    feature_flag_id=str(feature_flag.id),
+                                    feature_flag_name=feature_flag.key,
+                                    reason=trigger_reason,
+                                )
+                            except Exception as exc:
+                                logger.warning("Notification failed (non-critical): %s", exc)
                         else:
                             logger.error(f"Failed to roll back feature flag {feature_flag.key}: {rollback_result.message}")
 

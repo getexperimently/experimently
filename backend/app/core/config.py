@@ -56,6 +56,11 @@ class Settings(BaseSettings):
     SCHEDULER_RETRY_DELAY_SECONDS: int = 60
     SCHEDULER_HISTORY_RETENTION_DAYS: int = 30
 
+    # Slack notification settings
+    SLACK_BOT_TOKEN: str = ""
+    SLACK_DEFAULT_CHANNEL: str = "#platform-alerts"
+    SLACK_ENABLED: bool = False
+
     # DynamoDB settings
     DYNAMODB_COUNTERS_TABLE: str = "experiment-counters"
 
@@ -69,6 +74,17 @@ class Settings(BaseSettings):
     GLUE_EVENTS_TABLE: str = "raw_events"
     ATHENA_OUTPUT_BUCKET: str = "s3://experimentation-athena-results/"
     GLUE_CRAWLER_NAME: str = "experimentation-crawler"
+
+    # Email / notification settings (EP-030)
+    EMAIL_ENABLED: bool = False
+    SENDGRID_API_KEY: str = ""
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 587
+    SMTP_USERNAME: str = ""
+    SMTP_PASSWORD: str = ""
+    EMAIL_FROM_ADDRESS: str = "platform@example.com"
+    EMAIL_FROM_NAME: str = "Experimentation Platform"
+    NOTIFICATION_ADMIN_EMAILS: List[str] = []
 
     # Cognito settings
     COGNITO_GROUP_ROLE_MAPPING: Dict[str, str] = {

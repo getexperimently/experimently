@@ -21,6 +21,7 @@ from backend.app.models.rollout_schedule import (
     RolloutStageStatus,
     TriggerType
 )
+from backend.app.services.notification_service import NotificationService
 from backend.app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -39,6 +40,7 @@ class RolloutScheduler:
         self.interval_minutes = interval_minutes
         self.is_running = False
         self.task: Optional[asyncio.Task] = None
+        self._notification_service = NotificationService()
 
     async def start(self):
         """Start the scheduler."""
@@ -316,6 +318,14 @@ class RolloutScheduler:
                 f"Activated stage {stage.id} ({stage.name}) in schedule {schedule.id} - "
                 f"Updated feature flag {feature_flag.key} to {stage.target_percentage}% rollout"
             )
+            try:
+                self._notification_service.notify_rollout_advanced(
+                    feature_flag_id=str(schedule.feature_flag_id),
+                    stage_name=stage.name,
+                    new_percentage=stage.target_percentage,
+                )
+            except Exception as exc:
+                logger.warning("Notification failed (non-critical): %s", exc)
             return True
 
         except Exception as e:

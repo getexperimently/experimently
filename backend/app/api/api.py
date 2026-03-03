@@ -36,6 +36,7 @@ from backend.app.api.v1.endpoints import (
     mcp,
     experiment_wizard,
     warehouse,
+    notifications,
 )
 
 # Import the sample size calculator router
@@ -141,6 +142,11 @@ api_router_v1.include_router(
 # Issue #26: POST-MVP Warehouse-Native Analytics (Snowflake / BigQuery / Redshift)
 api_router_v1.include_router(
     warehouse.router, prefix="/warehouse", tags=["Warehouse"]
+)
+
+# EP-030: Notification preferences and delivery log
+api_router_v1.include_router(
+    notifications.router, prefix="/notifications", tags=["Notifications"]
 )
 
 # Main API router that includes versioned routers

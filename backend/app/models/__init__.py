@@ -41,6 +41,7 @@ from .mutual_exclusion_group import MutualExclusionGroup, MutualExclusionGroupSt
 from .global_holdout import GlobalHoldout
 from .bandit_state import BanditState
 from .warehouse_connection import WarehouseConnection
+from .notification import NotificationPreference, NotificationDeliveryLog, NotificationChannel, NotificationStatus
 
 # Explicitly list all models that should be part of the base metadata
 __all__ = [
@@ -85,6 +86,10 @@ __all__ = [
     "GlobalHoldout",
     "BanditState",
     "WarehouseConnection",
+    "NotificationPreference",
+    "NotificationDeliveryLog",
+    "NotificationChannel",
+    "NotificationStatus",
 ]
 
 # Remove or comment out any premature configuration
