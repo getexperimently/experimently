@@ -20,6 +20,7 @@ from pydantic import (
 
 from backend.app.schemas.variance_reduction import VarianceReductionConfig
 from backend.app.schemas.bandit import OptimizationType
+from backend.app.schemas.split_url import SplitUrlConfig
 
 
 class ExperimentStatus(str, Enum):
@@ -252,6 +253,12 @@ class ExperimentCreate(ExperimentBase):
         description="Traffic optimization algorithm (default: fixed A/B split).",
     )
 
+    # EP-036: Split URL testing configuration
+    split_url_config: Optional[SplitUrlConfig] = Field(
+        default=None,
+        description="Split URL experiment configuration (required when experiment_type=split_url).",
+    )
+
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
@@ -362,6 +369,12 @@ class ExperimentUpdate(BaseModel):
         description="Traffic optimization algorithm.",
     )
 
+    # EP-036: Split URL testing configuration
+    split_url_config: Optional[SplitUrlConfig] = Field(
+        default=None,
+        description="Split URL experiment configuration.",
+    )
+
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
@@ -460,6 +473,9 @@ class ExperimentResponse(BaseModel):
 
     # Issue #22: MAB optimization type
     optimization_type: OptimizationType = OptimizationType.FIXED
+
+    # EP-036: Split URL testing configuration
+    split_url_config: Optional[Dict[str, Any]] = None
 
     model_config = ConfigDict(from_attributes=True)
 
