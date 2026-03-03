@@ -5,6 +5,7 @@ import Head from 'next/head';
 import { GetStaticPaths, GetStaticProps } from 'next';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import type { ComponentPropsWithoutRef } from 'react';
 
 const SLUG_TO_FILE: Record<string, string> = {
   // Getting Started
@@ -121,10 +122,74 @@ const SLUG_TITLES: Record<string, string> = {
   'guides/interaction-detection': 'Interaction Detection',
 };
 
+// Reverse map: doc file path → canonical /docs/<slug>
+const FILE_TO_SLUG: Record<string, string> = {
+  'getting-started/quick-start.md':        'quick-start',
+  'getting-started/concepts.md':           'concepts',
+  'getting-started/architecture.md':       'architecture',
+  'getting-started/faq.md':               'faq',
+  'feature-flags/create.md':              'feature-flags/create',
+  'Enhanced_Rules_Engine_Reference.md':    'feature-flags/targeting',
+  'feature-flags/rollouts.md':            'feature-flags/rollouts',
+  'feature-flags/safety.md':              'feature-flags/safety',
+  'guides/user-guide.md':                 'experiments/run',
+  'api/sequential-testing.md':            'experiments/statistics',
+  'api/cuped.md':                         'experiments/cuped',
+  'api/multi-armed-bandit.md':            'experiments/mab',
+  'api/split-url.md':                     'experiments/split-url',
+  'api/mutual-exclusion-groups.md':       'experiments/exclusion',
+  'sdk/javascript.md':                    'sdks/javascript',
+  'sdk-guide.md':                         'sdks/python',
+  'sdk/java.md':                          'sdks/java',
+  'sdk/react.md':                         'sdks/react',
+  'mcp-server.md':                        'sdks/mcp',
+  'api/auth.md':                          'api-reference/auth',
+  'api/endpoints.md':                     'api-reference/endpoints',
+  'api/compliance.md':                    'api-reference/compliance',
+  'api/integrations.md':                  'api-reference/integrations',
+  'integrations/aws.md':                  'integrations/aws',
+  'api/warehouse-analytics.md':           'integrations/warehouses',
+  'integrations/salesforce.md':           'integrations/salesforce',
+  'integrations/github.md':               'integrations/github',
+  'api/alerting.md':                      'integrations/notifications',
+  'api/audit-logging.md':                 'security/audit-logging',
+  'api/rbac.md':                          'security/rbac',
+  'security/api-keys.md':                 'security/api-keys',
+  'self-hosting/cdk.md':                  'self-hosting/cdk',
+  'getting-started/docker-guide.md':      'self-hosting/docker',
+  'getting-started/environment-setup.md': 'self-hosting/env',
+  'self-hosting/migrations.md':           'self-hosting/migrations',
+  'self-hosting/monitoring.md':           'self-hosting/monitoring',
+  'api/bayesian.md':                      'guides/bayesian',
+  'guides/experiment-wizard.md':          'guides/no-code-builder',
+  'api/interaction-detection.md':         'guides/interaction-detection',
+};
+
+function resolveHref(href: string, currentFile: string): string {
+  if (!href || href.startsWith('http') || href.startsWith('mailto:') || href.startsWith('#')) {
+    return href;
+  }
+  if (!href.endsWith('.md')) {
+    return href;
+  }
+  // Resolve relative path from currentFile's directory
+  const dir = currentFile.includes('/') ? currentFile.substring(0, currentFile.lastIndexOf('/') + 1) : '';
+  const parts = (dir + href).split('/');
+  const resolved: string[] = [];
+  for (const part of parts) {
+    if (part === '..') resolved.pop();
+    else if (part !== '.') resolved.push(part);
+  }
+  const resolvedPath = resolved.join('/');
+  const slug = FILE_TO_SLUG[resolvedPath];
+  return slug ? `/docs/${slug}` : `/docs/${resolvedPath.replace(/\.md$/, '')}`;
+}
+
 interface Props {
   slug: string;
   title: string;
   content: string;
+  currentFile: string;
 }
 
 export const getStaticPaths: GetStaticPaths = () => {
@@ -150,10 +215,10 @@ export const getStaticProps: GetStaticProps<Props> = ({ params }) => {
     content = `# ${title}\n\nDocumentation coming soon. [Contact us](mailto:hello@getexperimently.com) if you need help.`;
   }
 
-  return { props: { slug, title, content } };
+  return { props: { slug, title, content, currentFile: relFile } };
 };
 
-export default function DocPage({ slug, title, content }: Props) {
+export default function DocPage({ slug, title, content, currentFile }: Props) {
   const breadcrumbs = slug.split('/');
 
   return (
@@ -197,7 +262,18 @@ export default function DocPage({ slug, title, content }: Props) {
 
         <div className="max-w-4xl mx-auto px-6 lg:px-8 py-12">
           <article className="prose prose-gray prose-headings:font-semibold prose-a:text-blue-600 max-w-none">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm]}
+              components={{
+                a: ({ href, children, ...props }: ComponentPropsWithoutRef<'a'>) => {
+                  const resolved = resolveHref(href ?? '', currentFile);
+                  if (resolved.startsWith('/')) {
+                    return <Link href={resolved} className="text-blue-600 hover:text-blue-700">{children}</Link>;
+                  }
+                  return <a href={resolved} target="_blank" rel="noopener noreferrer" {...props}>{children}</a>;
+                },
+              }}
+            >
               {content}
             </ReactMarkdown>
           </article>
