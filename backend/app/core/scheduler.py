@@ -14,6 +14,7 @@ from sqlalchemy import and_, or_
 
 from backend.app.db.session import SessionLocal
 from backend.app.models.experiment import Experiment, ExperimentStatus
+from backend.app.services.notification_service import NotificationService
 from backend.app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -31,6 +32,7 @@ class ExperimentScheduler:
         self.interval_minutes = interval_minutes
         self.is_running = False
         self.task: Optional[asyncio.Task] = None
+        self._notification_service = NotificationService()
 
     async def start(self):
         """Start the scheduler."""
@@ -109,6 +111,13 @@ class ExperimentScheduler:
                         f"Activating experiment: {experiment.id} - {experiment.name} "
                         f"(scheduled start: {experiment.start_date})"
                     )
+                    try:
+                        self._notification_service.notify_experiment_started(
+                            experiment_id=str(experiment.id),
+                            experiment_name=experiment.name,
+                        )
+                    except Exception as exc:
+                        logger.warning("Notification failed (non-critical): %s", exc)
                 except Exception as e:
                     logger.error(f"Error activating experiment {experiment.id}: {str(e)}")
 
@@ -137,6 +146,13 @@ class ExperimentScheduler:
                         f"Completing experiment: {experiment.id} - {experiment.name} "
                         f"(scheduled end: {experiment.end_date})"
                     )
+                    try:
+                        self._notification_service.notify_experiment_ended(
+                            experiment_id=str(experiment.id),
+                            experiment_name=experiment.name,
+                        )
+                    except Exception as exc:
+                        logger.warning("Notification failed (non-critical): %s", exc)
                 except Exception as e:
                     logger.error(f"Error completing experiment {experiment.id}: {str(e)}")
 

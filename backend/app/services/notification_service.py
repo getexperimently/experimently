@@ -1,9 +1,8 @@
 """
-Notification service for scheduler webhook notifications.
+Notification service — orchestrates Slack, Email, and Webhook channels.
 
-Sends structured event payloads to configured webhook URLs (e.g. Slack, Teams)
-when significant scheduler events occur such as experiments starting/ending,
-safety rollbacks, or rollout stage advances.
+Sends structured event payloads on key platform events such as experiments
+starting/ending, safety rollbacks, and rollout stage advances.
 
 All methods swallow exceptions so that notification failures never disrupt
 the primary scheduler logic.
@@ -11,6 +10,7 @@ the primary scheduler logic.
 
 import logging
 from datetime import datetime, timezone
+from typing import Optional
 
 import httpx
 
@@ -21,27 +21,73 @@ logger = logging.getLogger(__name__)
 
 
 class NotificationService:
-    """Handles webhook-based notifications for scheduler events."""
+    """Orchestrates Slack, Email, and Webhook notifications for scheduler events."""
 
     def __init__(self):
         self._webhook_url = getattr(settings, "NOTIFICATION_WEBHOOK_URL", "")
+        # Lazy-load notifiers to avoid import errors if SDKs are missing
+        self._slack = self._make_slack_notifier()
+        self._email = self._make_email_notifier()
 
     # ------------------------------------------------------------------
-    # Core send method
+    # Notifier factories (safe even if notifier modules are missing)
+    # ------------------------------------------------------------------
+
+    def _make_slack_notifier(self):
+        try:
+            from backend.app.services.slack_notifier import SlackNotifier
+            return SlackNotifier()
+        except Exception:
+            return _NullNotifier()
+
+    def _make_email_notifier(self):
+        try:
+            from backend.app.services.email_notifier import EmailNotifier
+            return EmailNotifier()
+        except Exception:
+            return _NullNotifier()
+
+    # ------------------------------------------------------------------
+    # Delivery log helper
+    # ------------------------------------------------------------------
+
+    def _log_delivery(
+        self,
+        db,
+        *,
+        event_type: str,
+        channel,
+        recipient: str,
+        status,
+        subject: Optional[str] = None,
+        error_message: Optional[str] = None,
+        payload: Optional[dict] = None,
+    ) -> None:
+        """Record a delivery attempt in the database. Silently skips if db is None."""
+        if db is None:
+            return
+        try:
+            from backend.app.models.notification import NotificationDeliveryLog
+            record = NotificationDeliveryLog(
+                event_type=event_type,
+                channel=channel,
+                recipient=recipient,
+                subject=subject,
+                status=status,
+                error_message=error_message,
+                payload=payload,
+            )
+            db.add(record)
+            db.commit()
+        except Exception as exc:
+            logger.warning("Failed to log notification delivery: %s", exc)
+
+    # ------------------------------------------------------------------
+    # Core webhook send
     # ------------------------------------------------------------------
 
     def send_webhook(self, url: str, event: NotificationEvent) -> bool:
-        """
-        POST a NotificationEvent as JSON to the given webhook URL.
-
-        Args:
-            url: Fully-qualified webhook URL.
-            event: The event payload to send.
-
-        Returns:
-            True if the server responded with a 2xx status code, False otherwise.
-            Exceptions (connection errors, timeouts) are swallowed and return False.
-        """
+        """POST a NotificationEvent as JSON to the given webhook URL."""
         try:
             payload = event.model_dump()
             response = httpx.post(url, json=payload, timeout=5)
@@ -63,16 +109,12 @@ class NotificationService:
             logger.error("Webhook notification error for url=%s: %s", url, exc)
             return False
 
-    # ------------------------------------------------------------------
-    # Convenience notification helpers
-    # ------------------------------------------------------------------
-
     def _send(self, event: NotificationEvent) -> bool:
         """Send an event to the configured webhook URL, if set."""
         url = self._webhook_url
         if not url:
             logger.debug(
-                "Notification skipped (NOTIFICATION_WEBHOOK_URL not configured): event_type=%s",
+                "Webhook skipped (NOTIFICATION_WEBHOOK_URL not configured): event_type=%s",
                 event.event_type,
             )
             return False
@@ -81,128 +123,200 @@ class NotificationService:
     def _now_iso(self) -> str:
         return datetime.now(timezone.utc).isoformat()
 
+    # ------------------------------------------------------------------
+    # Convenience notification helpers
+    # ------------------------------------------------------------------
+
     def notify_experiment_started(
         self,
         experiment_id: str,
         experiment_name: str,
+        owner_email: Optional[str] = None,
+        db=None,
     ) -> bool:
-        """
-        Send a notification that an experiment has been automatically started
-        by the scheduler.
+        """Notify all channels that an experiment has been automatically started."""
+        try:
+            event = NotificationEvent(
+                event_type="experiment_started",
+                experiment_id=experiment_id,
+                new_status="active",
+                message=f"Experiment '{experiment_name}' has been started automatically.",
+                timestamp=self._now_iso(),
+                metadata={"experiment_name": experiment_name},
+            )
+            webhook_ok = self._send(event)
 
-        Args:
-            experiment_id: The experiment's unique identifier.
-            experiment_name: Human-readable name of the experiment.
+            # Slack
+            try:
+                self._slack.send_experiment_started(
+                    experiment_name=experiment_name,
+                    owner_email=owner_email,
+                )
+            except Exception as exc:
+                logger.warning("Slack experiment_started failed: %s", exc)
 
-        Returns:
-            True if the webhook was sent and acknowledged, False otherwise.
-        """
-        event = NotificationEvent(
-            event_type="experiment_started",
-            experiment_id=experiment_id,
-            new_status="active",
-            message=f"Experiment '{experiment_name}' has been started automatically.",
-            timestamp=self._now_iso(),
-            metadata={"experiment_name": experiment_name},
-        )
-        return self._send(event)
+            # Email
+            if owner_email:
+                try:
+                    self._email.send_experiment_started_email(
+                        experiment_name=experiment_name,
+                        owner_email=owner_email,
+                    )
+                except Exception as exc:
+                    logger.warning("Email experiment_started failed: %s", exc)
+
+            return webhook_ok
+        except Exception as exc:
+            logger.error("notify_experiment_started error: %s", exc)
+            return False
 
     def notify_experiment_ended(
         self,
         experiment_id: str,
         experiment_name: str,
-        winning_variant: str = None,
+        winning_variant: Optional[str] = None,
+        owner_email: Optional[str] = None,
+        db=None,
     ) -> bool:
-        """
-        Send a notification that an experiment has been automatically ended
-        (completed) by the scheduler.
+        """Notify all channels that an experiment has been completed."""
+        try:
+            msg = f"Experiment '{experiment_name}' has been completed automatically."
+            metadata = {"experiment_name": experiment_name}
+            if winning_variant:
+                msg += f" Winning variant: {winning_variant}."
+                metadata["winning_variant"] = winning_variant
 
-        Args:
-            experiment_id: The experiment's unique identifier.
-            experiment_name: Human-readable name of the experiment.
-            winning_variant: Optional name of the winning variant.
+            event = NotificationEvent(
+                event_type="experiment_ended",
+                experiment_id=experiment_id,
+                old_status="active",
+                new_status="completed",
+                message=msg,
+                timestamp=self._now_iso(),
+                metadata=metadata,
+            )
+            webhook_ok = self._send(event)
 
-        Returns:
-            True if the webhook was sent and acknowledged, False otherwise.
-        """
-        msg = f"Experiment '{experiment_name}' has been completed automatically."
-        metadata = {"experiment_name": experiment_name}
-        if winning_variant:
-            msg += f" Winning variant: {winning_variant}."
-            metadata["winning_variant"] = winning_variant
+            # Slack
+            try:
+                self._slack.send_experiment_completed(
+                    experiment_name=experiment_name,
+                    winner=winning_variant,
+                )
+            except Exception as exc:
+                logger.warning("Slack experiment_ended failed: %s", exc)
 
-        event = NotificationEvent(
-            event_type="experiment_ended",
-            experiment_id=experiment_id,
-            old_status="active",
-            new_status="completed",
-            message=msg,
-            timestamp=self._now_iso(),
-            metadata=metadata,
-        )
-        return self._send(event)
+            # Email
+            if owner_email:
+                try:
+                    self._email.send_experiment_completed_email(
+                        experiment_name=experiment_name,
+                        owner_email=owner_email,
+                        winner=winning_variant,
+                    )
+                except Exception as exc:
+                    logger.warning("Email experiment_ended failed: %s", exc)
+
+            return webhook_ok
+        except Exception as exc:
+            logger.error("notify_experiment_ended error: %s", exc)
+            return False
 
     def notify_safety_rollback(
         self,
         feature_flag_id: str,
         feature_flag_name: str,
         reason: str,
+        error_rate: float = 0.0,
+        threshold: float = 0.0,
+        db=None,
     ) -> bool:
-        """
-        Send a notification that a feature flag has been automatically rolled
-        back by the safety monitoring scheduler.
+        """Notify all channels that a feature flag was automatically rolled back."""
+        try:
+            event = NotificationEvent(
+                event_type="safety_rollback",
+                feature_flag_id=feature_flag_id,
+                message=(
+                    f"Feature flag '{feature_flag_name}' was automatically rolled back. "
+                    f"Reason: {reason}"
+                ),
+                timestamp=self._now_iso(),
+                metadata={
+                    "feature_flag_name": feature_flag_name,
+                    "reason": reason,
+                    "error_rate": error_rate,
+                    "threshold": threshold,
+                },
+            )
+            webhook_ok = self._send(event)
 
-        Args:
-            feature_flag_id: The feature flag's unique identifier.
-            feature_flag_name: Human-readable name of the feature flag.
-            reason: Human-readable description of why the rollback occurred.
+            # Slack
+            try:
+                self._slack.send_safety_rollback_alert(
+                    flag_name=feature_flag_name,
+                    error_rate=error_rate,
+                    threshold=threshold,
+                    reason=reason,
+                )
+            except Exception as exc:
+                logger.warning("Slack safety_rollback failed: %s", exc)
 
-        Returns:
-            True if the webhook was sent and acknowledged, False otherwise.
-        """
-        event = NotificationEvent(
-            event_type="safety_rollback",
-            feature_flag_id=feature_flag_id,
-            message=(
-                f"Feature flag '{feature_flag_name}' was automatically rolled back. "
-                f"Reason: {reason}"
-            ),
-            timestamp=self._now_iso(),
-            metadata={
-                "feature_flag_name": feature_flag_name,
-                "reason": reason,
-            },
-        )
-        return self._send(event)
+            return webhook_ok
+        except Exception as exc:
+            logger.error("notify_safety_rollback error: %s", exc)
+            return False
 
     def notify_rollout_advanced(
         self,
         feature_flag_id: str,
         stage_name: str,
         new_percentage: int,
+        from_percentage: int = 0,
+        db=None,
     ) -> bool:
-        """
-        Send a notification that a rollout schedule has advanced to a new stage.
+        """Notify all channels that a rollout schedule has advanced to a new stage."""
+        try:
+            event = NotificationEvent(
+                event_type="rollout_advanced",
+                feature_flag_id=feature_flag_id,
+                message=(
+                    f"Rollout advanced to stage '{stage_name}' — "
+                    f"feature flag is now at {new_percentage}% rollout."
+                ),
+                timestamp=self._now_iso(),
+                metadata={
+                    "stage_name": stage_name,
+                    "new_percentage": new_percentage,
+                    "from_percentage": from_percentage,
+                },
+            )
+            webhook_ok = self._send(event)
 
-        Args:
-            feature_flag_id: The feature flag's unique identifier.
-            stage_name: Name of the newly activated rollout stage.
-            new_percentage: The rollout percentage now applied to the feature flag.
+            # Slack
+            try:
+                self._slack.send_rollout_advanced(
+                    flag_name=feature_flag_id,
+                    from_pct=from_percentage,
+                    to_pct=new_percentage,
+                    stage_name=stage_name,
+                )
+            except Exception as exc:
+                logger.warning("Slack rollout_advanced failed: %s", exc)
 
-        Returns:
-            True if the webhook was sent and acknowledged, False otherwise.
-        """
-        event = NotificationEvent(
-            event_type="rollout_advanced",
-            feature_flag_id=feature_flag_id,
-            message=(
-                f"Rollout advanced to stage '{stage_name}' — "
-                f"feature flag is now at {new_percentage}% rollout."
-            ),
-            timestamp=self._now_iso(),
-            metadata={
-                "stage_name": stage_name,
-                "new_percentage": new_percentage,
-            },
-        )
-        return self._send(event)
+            return webhook_ok
+        except Exception as exc:
+            logger.error("notify_rollout_advanced error: %s", exc)
+            return False
+
+
+# ---------------------------------------------------------------------------
+# Null notifier — used when SDK is unavailable
+# ---------------------------------------------------------------------------
+
+class _NullNotifier:
+    """No-op notifier that returns False for all calls."""
+
+    def __getattr__(self, name):
+        def _noop(*args, **kwargs):
+            return False
+        return _noop
