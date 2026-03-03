@@ -27,10 +27,10 @@ export default function Home() {
                 </div>
               </div>
               <div className="flex items-center gap-4">
-                <a href="https://app.getexperimently.com/login" className="text-gray-600 hover:text-gray-900 text-sm font-medium">
+                <a href="/experiments" className="text-gray-600 hover:text-gray-900 text-sm font-medium">
                   Sign in
                 </a>
-                <a href="https://app.getexperimently.com/signup" className="bg-blue-600 text-white px-5 py-2.5 rounded-lg text-sm font-medium hover:bg-blue-700 transition">
+                <a href="/docs/quick-start" className="bg-blue-600 text-white px-5 py-2.5 rounded-lg text-sm font-medium hover:bg-blue-700 transition">
                   Get started free
                 </a>
               </div>
@@ -57,7 +57,7 @@ export default function Home() {
               Java, Python, React &amp; JS SDKs &nbsp;·&nbsp; SOC 2 compliant &nbsp;·&nbsp; Deploy to your AWS
             </p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
-              <a href="https://app.getexperimently.com/signup" className="bg-blue-600 text-white px-8 py-4 rounded-lg text-base font-semibold hover:bg-blue-700 transition shadow-sm">
+              <a href="/docs/quick-start" className="bg-blue-600 text-white px-8 py-4 rounded-lg text-base font-semibold hover:bg-blue-700 transition shadow-sm">
                 Start experimenting free
               </a>
               <a href="#features" className="bg-white border-2 border-gray-200 text-gray-900 px-8 py-4 rounded-lg text-base font-semibold hover:border-gray-300 transition">
@@ -725,7 +725,7 @@ enabled = client.is_enabled(
                     </li>
                   ))}
                 </ul>
-                <a href="https://app.getexperimently.com/signup" className="block w-full text-center bg-blue-600 text-white px-6 py-3.5 rounded-lg font-semibold hover:bg-blue-700 transition shadow-sm">
+                <a href="/docs/quick-start" className="block w-full text-center bg-blue-600 text-white px-6 py-3.5 rounded-lg font-semibold hover:bg-blue-700 transition shadow-sm">
                   Start for free
                 </a>
               </div>
@@ -782,7 +782,7 @@ enabled = client.is_enabled(
               Sequential testing, CUPED, Bayesian stats, Java/React/JS SDKs, and AI design — all free during preview. No credit card needed.
             </p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
-              <a href="https://app.getexperimently.com/signup" className="bg-white text-blue-600 px-8 py-4 rounded-lg text-lg font-semibold hover:bg-gray-50 transition shadow-lg">
+              <a href="/docs/quick-start" className="bg-white text-blue-600 px-8 py-4 rounded-lg text-lg font-semibold hover:bg-gray-50 transition shadow-lg">
                 Start free — all features included
               </a>
               <a href="mailto:hello@getexperimently.com" className="bg-blue-700 text-white px-8 py-4 rounded-lg text-lg font-semibold hover:bg-blue-800 transition border-2 border-blue-500">

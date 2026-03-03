@@ -142,10 +142,10 @@ export default function DocsIndex() {
                 <span className="text-sm font-medium text-gray-600">Documentation</span>
               </div>
               <div className="flex items-center gap-4">
-                <a href="https://app.getexperimently.com/login" className="text-gray-600 hover:text-gray-900 text-sm font-medium">
+                <a href="/experiments" className="text-gray-600 hover:text-gray-900 text-sm font-medium">
                   Sign in
                 </a>
-                <a href="https://app.getexperimently.com/signup" className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition">
+                <a href="/docs/quick-start" className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition">
                   Get started free
                 </a>
               </div>
