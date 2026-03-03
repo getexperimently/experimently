@@ -67,6 +67,11 @@ class Settings(BaseSettings):
     # AWS region
     AWS_REGION: str = "us-east-1"
 
+    # Compliance audit settings (EP-033)
+    AUDIT_HMAC_KEY: str = "dev-audit-key-change-in-production"
+    AUDIT_RETENTION_DAYS_SOC2: int = 365    # 12 months
+    AUDIT_RETENTION_DAYS_ISO27001: int = 730  # 24 months
+
     # Glue / ETL settings (P3-A)
     GLUE_ETL_JOB_NAME: str = "experimentation-events-etl"
     GLUE_METRICS_JOB_NAME: str = "experimentation-metrics-etl"
