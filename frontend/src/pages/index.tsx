@@ -22,7 +22,6 @@ export default function Home() {
                 <div className="hidden lg:flex items-center gap-8">
                   <a href="#features" className="text-gray-600 hover:text-gray-900 text-sm font-medium transition">Features</a>
                   <a href="#compare" className="text-gray-600 hover:text-gray-900 text-sm font-medium transition">Compare</a>
-                  <a href="#pricing" className="text-gray-600 hover:text-gray-900 text-sm font-medium transition">Pricing</a>
                   <a href="/docs" className="text-gray-600 hover:text-gray-900 text-sm font-medium transition">Docs</a>
                 </div>
               </div>
@@ -51,7 +50,7 @@ export default function Home() {
               experimentation platform
             </h1>
             <p className="text-xl md:text-2xl text-gray-600 mb-10 max-w-3xl mx-auto leading-relaxed">
-              Sequential testing, CUPED variance reduction, multi-armed bandits, and AI-powered experiment design — enterprise statistics at every tier.
+              Sequential testing, CUPED variance reduction, multi-armed bandits, and AI-powered experiment design — all completely free.
             </p>
             <p className="text-sm text-gray-500 mb-6 font-medium tracking-wide">
               Java, Python, React &amp; JS SDKs &nbsp;·&nbsp; SOC 2 compliant &nbsp;·&nbsp; Deploy to your AWS
@@ -64,7 +63,7 @@ export default function Home() {
                 Explore features
               </a>
             </div>
-            <p className="text-sm text-gray-500 mt-6">Free Preview · All features included · No credit card required</p>
+            <p className="text-sm text-gray-500 mt-6">Free Preview · All features included · Self-hosted on your AWS</p>
           </div>
         </section>
 
@@ -607,7 +606,7 @@ enabled = client.is_enabled(
                 How we compare
               </h2>
               <p className="text-xl text-gray-600 max-w-3xl mx-auto">
-                Enterprise-grade statistical methods at every tier — without the enterprise price tag
+                Enterprise-grade statistical methods — self-hosted, no price tag
               </p>
             </div>
 
@@ -670,104 +669,54 @@ enabled = client.is_enabled(
           </div>
         </section>
 
-        {/* Pricing Section */}
-        <section id="pricing" className="py-24 px-6 bg-white border-t border-gray-100">
-          <div className="max-w-5xl mx-auto">
-            <div className="text-center mb-16">
-              <h2 className="text-4xl md:text-5xl font-bold text-gray-900 mb-4">
-                Simple, transparent pricing
-              </h2>
-              <p className="text-xl text-gray-600">
-                Start free with everything included. Enterprise pricing coming soon.
-              </p>
-            </div>
+        {/* Free & Open Source Section */}
+        <section className="py-24 px-6 bg-white border-t border-gray-100">
+          <div className="max-w-4xl mx-auto text-center">
+            <h2 className="text-4xl md:text-5xl font-bold text-gray-900 mb-4">
+              Free Preview
+            </h2>
+            <p className="text-xl text-gray-600 mb-12">
+              Every feature is available — self-host on your own AWS account at no cost.
+            </p>
 
-            <div className="grid md:grid-cols-2 gap-8 max-w-3xl mx-auto">
-              {/* Free Preview */}
-              <div className="bg-white rounded-2xl border-2 border-blue-600 p-8 relative shadow-xl">
-                <div className="absolute -top-4 left-1/2 -translate-x-1/2 bg-blue-600 text-white px-4 py-1 rounded-full text-sm font-semibold">
-                  Available Now
+            <div className="bg-white rounded-2xl border-2 border-blue-600 p-10 shadow-xl max-w-2xl mx-auto">
+              <div className="mb-8">
+                <div className="flex items-baseline justify-center">
+                  <span className="text-6xl font-bold text-gray-900">$0</span>
+                  <span className="text-gray-600 ml-2 text-xl">/month</span>
                 </div>
-                <div className="mb-8">
-                  <h3 className="text-2xl font-bold text-gray-900 mb-2">Free Preview</h3>
-                  <p className="text-gray-600 mb-6">All features included during preview</p>
-                  <div className="flex items-baseline">
-                    <span className="text-5xl font-bold text-gray-900">$0</span>
-                    <span className="text-gray-600 ml-2">/month</span>
-                  </div>
-                </div>
-                <ul className="space-y-4 mb-8">
-                  {[
-                    'Unlimited A/B experiments',
-                    'Feature flags with staged rollouts',
-                    'Sequential testing (mSPRT)',
-                    'CUPED variance reduction',
-                    'Multi-armed bandit (3 algorithms)',
-                    'Full Bayesian (BF10, Monte Carlo, credible intervals)',
-                    'Split URL testing via Lambda@Edge',
-                    'Interaction detection',
-                    'Mutual exclusion groups',
-                    'AI experiment design (Claude API)',
-                    'Warehouse analytics (Snowflake, BigQuery, Redshift)',
-                    'Java SDK + Spring Boot starter',
-                    'React SDK (hooks, HOC, SSR)',
-                    'Jira, Salesforce & GitHub integrations',
-                    'SOC 2 / ISO 27001 compliance reports (HMAC-signed)',
-                    'Full audit log + SSE stream',
-                    'Custom RBAC roles',
-                    'Slack + email alerting',
-                  ].map((item, i) => (
-                    <li key={i} className="flex items-start gap-3">
-                      <svg className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                      </svg>
-                      <span className="text-gray-700">{item}</span>
-                    </li>
-                  ))}
-                </ul>
-                <a href="/docs/quick-start" className="block w-full text-center bg-blue-600 text-white px-6 py-3.5 rounded-lg font-semibold hover:bg-blue-700 transition shadow-sm">
-                  Start for free
-                </a>
+                <p className="text-gray-500 mt-2">Self-hosted on your AWS account — you own your data</p>
               </div>
-
-              {/* Enterprise */}
-              <div className="bg-white rounded-2xl border-2 border-gray-200 p-8">
-                <div className="mb-8">
-                  <h3 className="text-2xl font-bold text-gray-900 mb-2">Enterprise</h3>
-                  <p className="text-gray-600 mb-6">Commercial pricing — coming soon</p>
-                  <div className="flex items-baseline">
-                    <span className="text-4xl font-bold text-gray-900">TBD</span>
+              <div className="grid sm:grid-cols-2 gap-3 mb-10 text-left">
+                {[
+                  'Unlimited A/B experiments',
+                  'Feature flags with staged rollouts',
+                  'Sequential testing (mSPRT)',
+                  'CUPED variance reduction',
+                  'Multi-armed bandit (3 algorithms)',
+                  'Full Bayesian (BF10, Monte Carlo)',
+                  'Split URL testing via Lambda@Edge',
+                  'Interaction detection',
+                  'AI experiment design (Claude API)',
+                  'Warehouse analytics (Snowflake, BigQuery)',
+                  'Java SDK + Spring Boot starter',
+                  'React SDK (hooks, HOC, SSR)',
+                  'Jira, Salesforce & GitHub integrations',
+                  'SOC 2 / ISO 27001 compliance reports',
+                  'Full audit log + custom RBAC roles',
+                  'Slack + email alerting',
+                ].map((item, i) => (
+                  <div key={i} className="flex items-center gap-3">
+                    <svg className="w-5 h-5 text-blue-600 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                    </svg>
+                    <span className="text-gray-700 text-sm">{item}</span>
                   </div>
-                </div>
-                <ul className="space-y-4 mb-8">
-                  {[
-                    'Everything in Free Preview',
-                    'Deploy to your own AWS account',
-                    'Data stays in your infrastructure',
-                    'SOC 2 / ISO 27001 compliance',
-                    'HIPAA BAA available',
-                    'Dedicated support + SLA',
-                    'Custom contracts',
-                    'Volume pricing',
-                  ].map((item, i) => (
-                    <li key={i} className="flex items-start gap-3">
-                      <svg className="w-5 h-5 text-gray-400 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                      </svg>
-                      <span className="text-gray-700">{item}</span>
-                    </li>
-                  ))}
-                </ul>
-                <a href="mailto:hello@getexperimently.com" className="block w-full text-center bg-gray-100 text-gray-900 px-6 py-3.5 rounded-lg font-semibold hover:bg-gray-200 transition">
-                  Contact us
-                </a>
+                ))}
               </div>
-            </div>
-
-            <div className="text-center mt-10 p-6 bg-blue-50 rounded-2xl max-w-3xl mx-auto">
-              <p className="text-blue-800 font-medium">
-                🎉 We&apos;re in Free Preview — all enterprise features are available at no cost while we finalize commercial pricing. Lock in early access by signing up now.
-              </p>
+              <a href="/docs/quick-start" className="block w-full text-center bg-blue-600 text-white px-6 py-4 rounded-lg font-semibold hover:bg-blue-700 transition shadow-sm text-lg">
+                Get started — deploy to your AWS
+              </a>
             </div>
           </div>
         </section>
@@ -779,7 +728,7 @@ enabled = client.is_enabled(
               Start experimenting today
             </h2>
             <p className="text-xl text-blue-100 mb-10">
-              Sequential testing, CUPED, Bayesian stats, Java/React/JS SDKs, and AI design — all free during preview. No credit card needed.
+              Sequential testing, CUPED, Bayesian stats, Java/React/JS SDKs, and AI design — all completely free. Deploy to your own AWS.
             </p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
               <a href="/docs/quick-start" className="bg-white text-blue-600 px-8 py-4 rounded-lg text-lg font-semibold hover:bg-gray-50 transition shadow-lg">
@@ -789,7 +738,7 @@ enabled = client.is_enabled(
                 Talk to the team
               </a>
             </div>
-            <p className="text-blue-100 mt-6">Free Preview · No credit card required · All features unlocked</p>
+            <p className="text-blue-100 mt-6">Free Preview · Self-hosted · All features included</p>
           </div>
         </section>
 
@@ -802,7 +751,7 @@ enabled = client.is_enabled(
                   Experimently
                 </span>
                 <p className="text-gray-400 mb-6 max-w-sm">
-                  The modern product experimentation platform with enterprise-grade statistics at every tier.
+                  The modern product experimentation platform. Self-hosted, free, and open for everyone.
                 </p>
                 <div className="flex gap-4">
                   <a href="#" className="text-gray-400 hover:text-white transition">
