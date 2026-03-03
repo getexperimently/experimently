@@ -59,11 +59,12 @@ export function EvidenceRatioChart({
             tick={{ fontSize: 12 }}
           />
           <Tooltip
-            formatter={(value: number, name: string) => {
-              if (name === 'Lambda Ratio') return [value.toFixed(3), name];
-              return [value, name];
+            formatter={(value: number | undefined, name: string | undefined) => {
+              if (value === undefined) return ['', name ?? ''];
+              if (name === 'Lambda Ratio') return [(value as number).toFixed(3), name];
+              return [value, name ?? ''];
             }}
-            labelFormatter={(label: number) => `Sample size: ${label}`}
+            labelFormatter={(label: React.ReactNode) => `Sample size: ${label}`}
           />
           <Legend />
           <ReferenceLine
