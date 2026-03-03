@@ -1,190 +1,143 @@
 # Experimentation Platform Documentation
 
-This directory contains documentation for the experimentation platform project.
-
 ## Start Here
 
 | Guide | Audience | Description |
 |-------|----------|-------------|
 | [Quick Start](getting-started/quick-start.md) | Everyone | Zero to first experiment in 30 minutes |
-| [User Guide](guides/user-guide.md) | Product / Analysts | How to design, run, and interpret experiments |
+| [User Guide](guides/user-guide.md) | Product / Analysts | Designing, running, and interpreting experiments |
 | [Technical Guide](architecture/technical-guide.md) | Engineers | Architecture, data models, implementation details |
+| [SDK Guide](sdk-guide.md) | Engineers | Integrating the Python and JavaScript SDKs |
 | [Testing Guide](development/testing-guide.md) | Engineers | Writing and running tests |
 
-## Contents
+---
 
-- [Issue Fixes](issue_fixes/index.md) - Documentation of issues fixed and improvements made to the platform
-  - [Logging System Improvements](issue_fixes/logging_system_improvements.md)
-  - [Logging Middleware and CloudWatch Integration](issue_fixes/logging_middleware_fixes.md)
-  - [Feature Flag Testing](issue_fixes/feature_flag_testing.md)
-  - [Experiment Testing](issue_fixes/experiment_testing.md)
-  - And more...
+## API Reference
 
-## Directory Structure
+| Doc | Description |
+|-----|-------------|
+| [Endpoints](api/endpoints.md) | Complete REST API reference |
+| [API Specs](api/specs.md) | OpenAPI request/response schemas |
+| [RBAC](api/rbac.md) | Role-based access control API |
+| [Data Export](api/data-export.md) | CSV/JSON streaming export endpoints |
 
-```
-docs/
-├── getting-started/           # Getting started guides
-│   ├── environment-setup.md
-│   ├── docker-guide.md
-│   └── requirements.md
-│
-├── architecture/             # Architecture and design docs
-│   ├── overview.md
-│   ├── models.md
-│   └── infrastructure/
-│
-├── api/                     # API documentation
-│   ├── endpoints.md
-│   ├── authentication.md
-│   └── specs.md
-│
-├── development/             # Development guides
-│   ├── guidelines.md
-│   ├── database/
-│   │   ├── migrations.md
-│   │   ├── usage.md
-│   │   └── backup.md
-│   └── dependency-injection.md
-│
-├── auth/                    # Authentication documentation
-│   ├── flow.md
-│   ├── environment.md
-│   └── user-guide.md
-│
-└── issue-fixes/            # Issue fixes and troubleshooting
-    └── request-validation.md
-```
+### Advanced Analytics APIs
+| Doc | Description |
+|-----|-------------|
+| [Sequential Testing](api/sequential-testing.md) | mSPRT early stopping, always-valid confidence intervals |
+| [CUPED](api/cuped.md) | Variance reduction using pre-experiment covariates |
+| [Multi-Armed Bandit](api/multi-armed-bandit.md) | Thompson Sampling, UCB1, Epsilon-Greedy algorithms |
+| [Dimensional Analysis](api/dimensional-analysis.md) | Segment breakdowns with Bonferroni correction |
+| [Interaction Detection](api/interaction-detection.md) | Cross-experiment overlap and interference detection |
 
-## Quick Links
+### Platform Capabilities
+| Doc | Description |
+|-----|-------------|
+| [Mutual Exclusion & Holdout](api/mutual-exclusion-groups.md) | Prevent experiment conflicts, global holdout configuration |
+| [Warehouse Analytics](api/warehouse-analytics.md) | Snowflake, BigQuery, Redshift connector setup and sync |
+| [Audit Logging & Bulk Toggle](api/audit-logging.md) | Audit trail, SSE stream, bulk feature flag operations |
+| [Alerting](api/alerting.md) | Slack and email notifications for platform events |
 
-### Getting Started
-- [Environment Setup Guide](getting-started/environment-setup.md)
-- [Docker Guide](getting-started/docker-guide.md)
-- [Requirements](getting-started/requirements.md)
+### Developer & Integration Guides
+| Doc | Description |
+|-----|-------------|
+| [MCP Server](mcp-server.md) | AI coding assistant integration, experiment design tools |
+| [Experiment Wizard](guides/experiment-wizard.md) | No-code 5-step experiment builder |
 
-### API Documentation
-- [API Endpoints](api/endpoints.md)
-- [API Specifications](api/specs.md)
-- [Authentication](api/authentication.md)
+---
 
-### Development
-- [Development Guidelines](development/guidelines.md)
-- [Database Migrations](development/database/migrations.md)
-- [Database Usage](development/database/usage.md)
+## Getting Started
 
-### Architecture
-- [Architecture Overview](architecture/overview.md)
-- [Models Documentation](architecture/models.md)
-- [Infrastructure](architecture/infrastructure/)
+- [Quick Start](getting-started/quick-start.md) — full setup in 30 minutes
+- [Requirements](getting-started/requirements.md) — Python, Node.js, Docker, AWS CLI versions
+- [Environment Setup](getting-started/environment-setup.md) — `.env` configuration
+- [Docker Guide](getting-started/docker-guide.md) — local Postgres, Redis, LocalStack
+- [Python Virtual Environment](getting-started/python-virtual-env-setup.md)
+- [Pre-commit Hooks](getting-started/pre-commit-hooks.md)
+- [VSCode Settings](getting-started/vscode-settings.md)
 
-### Authentication
-- [Auth Flow](auth/flow.md)
-- [Environment Variables](auth/environment.md)
-- [User Guide](auth/user-guide.md)
+---
 
-## Common Workflows
+## Architecture
 
-### 1. Setting Up Development Environment
-1. Check [Requirements](getting-started/requirements.md)
-2. Follow [Environment Setup](getting-started/environment-setup.md)
-3. Use [Docker Guide](getting-started/docker-guide.md) for container setup
-4. Review [Development Guidelines](development/guidelines.md)
+- [Overview](architecture/overview.md) — AWS architecture, component diagram
+- [Technical Guide](architecture/technical-guide.md) — implementation details, subsystems
+- [Models](architecture/models.md) — SQLAlchemy data model reference
+- [Models Overview](architecture/models-overview.md) — quick reference for entity relationships
 
-### 2. API Integration
-1. Review [API Overview](api/README.md)
-2. Check [Authentication](api/authentication.md)
-3. Use [API Endpoints](api/endpoints.md) for implementation
-4. Follow [API Specifications](api/specs.md) for details
+---
 
-### 3. Database Management
-1. Follow [Migrations Guide](development/database/migrations.md)
-2. Review [Database Usage](development/database/usage.md)
-3. Implement [Backup Procedures](development/database/backup.md)
-4. Check [Models Documentation](architecture/models.md)
+## Authentication
 
-### 4. Authentication Setup
-1. Review [Auth Flow](auth/flow.md)
-2. Configure [Environment Variables](auth/environment.md)
-3. Follow [User Guide](auth/user-guide.md)
-4. Check [Developer Guide](auth/auth-developer-docs.md)
+- [Auth Developer Docs](auth/auth-developer-docs.md) — Cognito JWT, middleware, auth service
+- [Auth Flow Diagrams](auth/flow.md) — registration, login, password reset, token refresh
+- [Auth Environment Variables](auth/auth-environment-variables.md) — Cognito configuration
+- [Auth User Guide](auth/auth-user-guide.md) — registration, login, password policies
+- [Cognito Testing](auth/cognito-auth-testing.md) — testing auth locally
 
-## Related Documentation
+---
 
-### Architecture & Design
-- [System Overview](architecture/overview.md)
-- [Data Models](architecture/models.md)
-- [Infrastructure Setup](architecture/infrastructure/)
+## Development
 
-### Development & Implementation
-- [Coding Standards](development/guidelines.md)
-- [Dependency Injection](development/dependency-injection.md)
-- [Database Management](development/database/)
+- [Guidelines](development/guidelines.md) — coding standards, git workflow, TDD
+- [Testing Guide](development/testing-guide.md) — unit, integration, E2E, contract tests
+- [Dependency Injection](development/dependency-injection.md) — FastAPI deps.py patterns
+- [Workflow Explanation](development/workflow-explanation.md) — GitHub Actions CI
+- [Database Migrations](development/database/migrations.md) — Alembic workflow
+- [Database Usage](development/database/usage.md) — Aurora, DynamoDB, Redis patterns
+- [Database Backup](development/database/backup.md) — backup and recovery procedures
 
-### Security & Authentication
-- [Auth Implementation](auth/auth-developer-docs.md)
-- [Security Best Practices](auth/flow.md#security)
-- [User Management](auth/user-guide.md)
+---
 
-## Documentation Sections
+## Deployment & Operations
 
-### Architecture
-- [System Architecture](architecture/system-architecture.md)
-- [Component Diagrams](architecture/component-diagrams.md)
-- [Data Flow](architecture/data-flow.md)
+- [Deployment Guide](deployment/deployment-guide.md) — ECS Fargate, Blue/Green deployment
+- [Launch Checklist](deployment/launch-checklist.md) — pre-launch go/no-go checklist
+- [Rollback Runbook](deployment/rollback-runbook.md) — rollback decision tree and procedures
+- [Disaster Recovery](deployment/disaster-recovery.md) — RTO/RPO, failure scenarios
+- [Secrets Management](deployment/secrets-management.md) — AWS Secrets Manager, rotation
+- [Route 53 Setup](deployment/AWS_ROUTE53_DEPLOYMENT.md) — DNS configuration
 
-### API
-- [API Reference](api/reference.md)
-- [Authentication](api/authentication.md)
-- [Rate Limiting](api/rate-limiting.md)
+---
 
-### Getting Started
-- [Quick Start Guide](getting-started/quick-start.md)
-- [Installation](getting-started/installation.md)
-- [Configuration](getting-started/configuration.md)
+## Security
 
-### Development
-- [Development Setup](development/setup.md)
-- [Coding Standards](development/coding-standards.md)
-- [Testing Guide](development/testing.md)
-- [CI/CD Pipeline](development/cicd.md)
+- [Security Architecture](security-architecture.md) — system security design
+- [Security Audit Report](security/security-audit-report.md) — EP-018 audit findings
+- [Threat Model](security/threat-model.md) — threat scenarios and countermeasures
+- [Security Policies](security/security-policies.md) — access control, data protection
+- [Hardening Changes](security/hardening-changes.md) — WAF, headers, rate limiting
+- [GDPR Compliance](security/gdpr-compliance-checklist.md) — data privacy checklist
+- [Incident Response](security/incident-response-plan.md) — severity levels, response process
 
-### Infrastructure
-- [AWS Resources](infrastructure/aws-resources.md)
-- [CDK Deployment](infrastructure/cdk-deployment.md)
-- [Database Setup](infrastructure/database-setup.md)
+---
 
-### Authentication
-- [Authentication Flow](auth/authentication-flow.md)
-- [Authorization](auth/authorization.md)
-- [User Management](auth/user-management.md)
+## Monitoring
 
-### Monitoring and Error Tracking
-- [Monitoring Overview](monitoring/monitoring-overview.md)
-- [Setup Guide](monitoring/setup-guide.md)
-- [Dashboard Reference](monitoring/dashboard-reference.md)
-- [Log Insights Queries](monitoring/log-insights-queries.md)
-- [Troubleshooting Guide](monitoring/troubleshooting-guide.md)
+- [Monitoring Guide](monitoring/monitoring-guide.md) — Prometheus, structured logging, CloudWatch
+- [Setup Guide](monitoring/setup-guide.md) — initial monitoring setup
+- [Dashboard Reference](monitoring/dashboard-reference.md) — CloudWatch dashboard widgets
+- [Log Insights Queries](monitoring/log-insights-queries.md) — common query patterns
+- [Troubleshooting](monitoring/troubleshooting-guide.md) — missing metrics, slow queries, alerts
 
-## Contributing to Documentation
+---
 
-1. Place new documentation in the appropriate subdirectory
-2. Update the relevant index files to link to your new documentation
-3. Follow the established markdown formatting patterns
+## Infrastructure
 
-## Documentation Style Guide
+- [Aurora PostgreSQL](infrastructure/aurora-postgres-readme.md) — RDS CDK stack
+- [DynamoDB](infrastructure/dynamodb-readme.md) — table schemas, access patterns
+- [Redis / ElastiCache](infrastructure/redis-summary.md) — caching strategy
+- [CloudWatch Setup](infrastructure/cloudwatch-setup.md) — log groups, agent config
+- [IAM Setup](infrastructure/aws-iam-setup.md) — roles and permissions
+- [Network Security](infrastructure/network-security-readme.md) — VPC, WAF, ALB
+- [VPC Stack](infrastructure/vpc-stack-implementation.md) — CDK networking stack
 
-1. Use Markdown for all documentation files
-2. Include a clear title and description at the top of each file
-3. Use proper heading hierarchy (h1, h2, h3)
-4. Include code examples with proper syntax highlighting
-5. Add cross-references to related documentation
-6. Keep files focused and concise
-7. Update the table of contents when adding new sections
+---
 
-## Need Help?
+## Go-to-Market
 
-- Check the [Getting Started Guide](getting-started/README.md)
-- Review the [Development Documentation](development/README.md)
-- See the [API Documentation](api/README.md)
-- Contact the documentation team for assistance
+- [GTM Strategy](go-to-market/GTM_STRATEGY.md)
+- [Design Partner Playbook](go-to-market/design-partner-playbook.md)
+- [Messaging Framework](go-to-market/messaging-framework.md)
+- [GTM Metrics Dashboard](go-to-market/metrics-dashboard.md)
+- [Zero-Budget Tactics](go-to-market/zero-budget-tactics.md)

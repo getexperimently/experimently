@@ -300,3 +300,44 @@ This architecture addresses all core requirements from the project specification
     - Offers robust statistical analysis
     - Provides visualizations and dashboards
     - Implements automated significance calculations
+
+---
+
+## Post-MVP Components
+
+The following capabilities were added after the initial platform release. See the linked docs for full details.
+
+### Advanced Statistical Methods
+
+| Component | Description | Doc |
+|-----------|-------------|-----|
+| Sequential Testing (EP-021) | mSPRT continuous monitoring, always-valid CIs, alpha spending (O'Brien-Fleming, Pocock) | [sequential-testing.md](../api/sequential-testing.md) |
+| CUPED Variance Reduction (#21) | Pre-experiment covariate adjustment (OLS θ), Winsorization, 20–40% variance reduction | [cuped.md](../api/cuped.md) |
+| Multi-Armed Bandit (#22) | Thompson Sampling, UCB1, Epsilon-Greedy; background MAB scheduler | [multi-armed-bandit.md](../api/multi-armed-bandit.md) |
+| Dimensional Analysis (#28) | Per-segment breakdowns with Bonferroni correction, HTE detection | [dimensional-analysis.md](../api/dimensional-analysis.md) |
+| Interaction Detection (#25) | Jaccard overlap, chi-squared interaction test, novelty effects, SUTVA violation detection | [interaction-detection.md](../api/interaction-detection.md) |
+
+### Traffic Management
+
+| Component | Description | Doc |
+|-----------|-------------|-----|
+| Mutual Exclusion Groups (EP-022) | Consistent-hashing traffic partitioning to prevent cross-experiment contamination | [mutual-exclusion-groups.md](../api/mutual-exclusion-groups.md) |
+| Global Holdout (EP-022) | Platform-wide clean control group for cumulative impact measurement | [mutual-exclusion-groups.md](../api/mutual-exclusion-groups.md) |
+
+### Data & Integrations
+
+| Component | Description | Doc |
+|-----------|-------------|-----|
+| Warehouse-Native Analytics (#26) | Snowflake, BigQuery, Redshift connectors; SQL-sanitized sync | [warehouse-analytics.md](../api/warehouse-analytics.md) |
+| Real-time DynamoDB Counters (P2-B) | Atomic ADD operations, bulk counter updates, Lambda integration | [dynamodb-readme.md](../infrastructure/dynamodb-readme.md) |
+
+### Platform Experience
+
+| Component | Description | Doc |
+|-----------|-------------|-----|
+| No-Code Experiment Wizard (#27) | 5-step guided experiment builder for non-technical users | [experiment-wizard.md](../guides/experiment-wizard.md) |
+| AI Experiment Design (#23) | Claude API–powered design suggestions, results interpretation, MCP server | [mcp-server.md](../mcp-server.md) |
+| Audit Logging & Bulk Toggle (P1-B) | Immutable audit trail, SSE real-time stream, bulk flag operations | [audit-logging.md](../api/audit-logging.md) |
+| RBAC Post-MVP (P2-A) | Custom roles, direct permission grants, effective permissions resolution | [rbac.md](../api/rbac.md) |
+| Slack / Email Alerting (EP-030) | Event-driven notifications via Slack Block Kit and SendGrid/SMTP | [alerting.md](../api/alerting.md) |
+| Admin UI (EP-029) | React admin panel for users, roles, audit logs, notifications, and resource management | — |
