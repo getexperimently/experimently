@@ -38,6 +38,15 @@ const sections = [
     ],
   },
   {
+    category: 'LLM / AI Model Evaluation',
+    icon: '🤖',
+    description: 'Compare prompt versions, model variants, and agent configs against real business metrics.',
+    links: [
+      { label: 'Overview', href: '/docs/llm-evaluation/overview', desc: 'What LLM evaluation is and why it matters' },
+      { label: 'Quick Start', href: '/docs/llm-evaluation/quickstart', desc: 'Compare GPT-4o vs Claude Sonnet in 5 minutes' },
+    ],
+  },
+  {
     category: 'SDKs',
     icon: '📦',
     description: 'Client libraries for every major language and framework.',

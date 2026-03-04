@@ -44,6 +44,15 @@ from .bandit_state import BanditState
 from .warehouse_connection import WarehouseConnection
 from .notification import NotificationPreference, NotificationDeliveryLog, NotificationChannel, NotificationStatus
 from .integration_config import IntegrationConfig, IntegrationType as IntegrationTypeEnum
+from .llm_experiment import (
+    LLMExperiment,
+    LLMVariant,
+    LLMEvaluation,
+    LLMExperimentStatus,
+    LLMTaskType,
+    LLMEvaluationMetric,
+    LLMProvider,
+)
 
 # Explicitly list all models that should be part of the base metadata
 __all__ = [
@@ -97,6 +106,13 @@ __all__ = [
     "NotificationStatus",
     "IntegrationConfig",
     "IntegrationTypeEnum",
+    "LLMExperiment",
+    "LLMVariant",
+    "LLMEvaluation",
+    "LLMExperimentStatus",
+    "LLMTaskType",
+    "LLMEvaluationMetric",
+    "LLMProvider",
 ]
 
 # Remove or comment out any premature configuration

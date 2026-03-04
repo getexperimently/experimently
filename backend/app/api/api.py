@@ -43,6 +43,8 @@ from backend.app.api.v1.endpoints import (
     warehouse_databricks,
     post_stratification,
     openfeature,
+    llm_experiments,
+    llm_proxy,
 )
 
 # Import the sample size calculator router
@@ -183,6 +185,14 @@ api_router_v1.include_router(
 # EP-044: OpenFeature Provider endpoints
 api_router_v1.include_router(
     openfeature.router, prefix="/openfeature", tags=["OpenFeature"]
+)
+
+# EP-046: LLM/AI Model Evaluation
+api_router_v1.include_router(
+    llm_experiments.router, prefix="/llm-experiments", tags=["LLM Experiments"]
+)
+api_router_v1.include_router(
+    llm_proxy.router, prefix="/llm-experiments", tags=["LLM Proxy"]
 )
 
 # Main API router that includes versioned routers
