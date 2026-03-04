@@ -275,6 +275,38 @@ export default function Home() {
               </div>
             </div>
 
+            {/* LLM / AI Model Evaluation */}
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-6">LLM / AI Model Evaluation</p>
+            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8 mb-16">
+              <div className="bg-gradient-to-br from-violet-50 to-fuchsia-50 p-8 rounded-2xl border border-violet-100 hover:shadow-lg transition col-span-full lg:col-span-2">
+                <div className="w-12 h-12 bg-violet-600 rounded-xl flex items-center justify-center mb-6">
+                  <svg className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17H3a2 2 0 01-2-2V5a2 2 0 012-2h14a2 2 0 012 2v10a2 2 0 01-2 2h-2" />
+                  </svg>
+                </div>
+                <div className="inline-block bg-violet-100 text-violet-700 text-xs font-semibold px-3 py-1 rounded-full mb-3">OSS exclusive</div>
+                <h3 className="text-xl font-semibold text-gray-900 mb-3">LLM/AI Model Evaluation</h3>
+                <p className="text-gray-600 leading-relaxed">
+                  Compare prompt versions, model variants (GPT-4o vs Claude vs Gemini), agent configs, and system prompts against real business metrics. Consistent-hash assignment ensures reproducibility. Built-in cost estimation, latency tracking, human rating collection, and LLM-as-judge automated scoring. The only OSS experimentation platform with native LLM experiment support.
+                </p>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {['GPT-4o', 'Claude 3.5 Sonnet', 'Gemini 1.5 Pro', 'Mistral', 'Local / Ollama'].map(m => (
+                    <span key={m} className="bg-white border border-violet-200 text-violet-700 text-xs px-2.5 py-1 rounded-full">{m}</span>
+                  ))}
+                </div>
+              </div>
+              <div className="bg-white p-8 rounded-2xl border border-gray-100 hover:shadow-lg hover:border-gray-200 transition">
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">LLM-as-Judge Scoring</h3>
+                <ul className="space-y-2 text-sm text-gray-600">
+                  <li className="flex items-start gap-2"><span className="text-violet-600 mt-0.5">✓</span>Use Claude to automatically score responses 0–1</li>
+                  <li className="flex items-start gap-2"><span className="text-violet-600 mt-0.5">✓</span>Custom criteria: helpfulness, accuracy, safety, empathy</li>
+                  <li className="flex items-start gap-2"><span className="text-violet-600 mt-0.5">✓</span>Welch t-test p-values and Cohen&apos;s d effect size</li>
+                  <li className="flex items-start gap-2"><span className="text-violet-600 mt-0.5">✓</span>95% confidence intervals on all metrics</li>
+                  <li className="flex items-start gap-2"><span className="text-violet-600 mt-0.5">✓</span>Per-token cost breakdown by provider and model</li>
+                </ul>
+              </div>
+            </div>
+
             {/* Additional Features */}
             <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-6">Traffic Management & Governance</p>
             <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
@@ -684,6 +716,7 @@ enabled = client.is_enabled(
                     ['Dimensional Analysis + HTE', '✅ + Bonferroni', '✅', '✅', '✅', '⚠️ Partial', '❌'],
                     ['Warehouse-Native Analytics', '✅ (3 warehouses)', '✅ + Databricks', '✅ + ClickHouse', '✅', '✅', '❌'],
                     ['Split URL Testing (Lambda@Edge)', '✅', '❌', '❌', '❌', '✅', '❌'],
+                    ['LLM/AI Experiment Support', '✅ Native (EP-046)', '⚠️ Beta', '❌', '❌', '❌', '❌'],
                     ['AI Experiment Design', '✅ Claude + MCP', '✅ LLM eval', '✅ MCP (beta)', '❌', '✅ Opal AI', '❌'],
                     ['Enterprise SSO (free tier)', '✅ 🎉', '❌ Enterprise', '❌ Enterprise', '⚠️ Enterprise', '⚠️ Enterprise', '⚠️ Enterprise'],
                     ['Java SDK', '✅ Spring Boot', '✅', '✅', '✅', '✅', '✅'],

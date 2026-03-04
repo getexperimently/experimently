@@ -49,6 +49,10 @@ const SLUG_TO_FILE: Record<string, string> = {
   'api-reference/integrations':    'api/integrations.md',
   'api-reference/endpoints':       'api/endpoints.md',
 
+  // LLM / AI Model Evaluation
+  'llm-evaluation/overview':       'llm-evaluation/overview.md',
+  'llm-evaluation/quickstart':     'llm-evaluation/quickstart.md',
+
   // Integrations
   'integrations/aws':              'integrations/aws.md',
   'integrations/warehouses':       'api/warehouse-analytics.md',
