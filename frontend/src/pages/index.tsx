@@ -88,8 +88,8 @@ export default function Home() {
                 <div className="text-sm text-gray-600">Sample size reduction via CUPED</div>
               </div>
               <div className="text-center">
-                <div className="text-4xl font-bold text-gray-900 mb-2">7</div>
-                <div className="text-sm text-gray-600">SDK languages (Python, JS, Java, React, Go, iOS, Android)</div>
+                <div className="text-4xl font-bold text-gray-900 mb-2">9</div>
+                <div className="text-sm text-gray-600">SDK languages (Python, JS, Java, React, Go, iOS, Android, Flutter, React Native)</div>
               </div>
               <div className="text-center">
                 <div className="text-3xl font-bold text-gray-900 mb-2">SOC 2</div>
@@ -843,6 +843,8 @@ enabled = client.is_enabled(
                   <li><a href="/docs/sdks/go" className="hover:text-white transition">Go SDK</a></li>
                   <li><a href="/docs/sdks/ios" className="hover:text-white transition">iOS Swift SDK</a></li>
                   <li><a href="/docs/sdks/android" className="hover:text-white transition">Android Kotlin SDK</a></li>
+                  <li><a href="/docs/sdks/flutter" className="hover:text-white transition">Flutter SDK</a></li>
+                  <li><a href="/docs/sdks/react-native" className="hover:text-white transition">React Native SDK</a></li>
                   <li><a href="/docs/sdks/mcp" className="hover:text-white transition">MCP Server</a></li>
                 </ul>
               </div>

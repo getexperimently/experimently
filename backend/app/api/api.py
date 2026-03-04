@@ -40,6 +40,9 @@ from backend.app.api.v1.endpoints import (
     compliance,
     integrations,
     sso,
+    warehouse_databricks,
+    post_stratification,
+    openfeature,
 )
 
 # Import the sample size calculator router
@@ -165,6 +168,21 @@ api_router_v1.include_router(
 # EP-037: SSO/SAML & OIDC Enterprise Authentication
 api_router_v1.include_router(
     sso.router, prefix="/auth/sso", tags=["SSO"]
+)
+
+# EP-041: Databricks Warehouse Connector
+api_router_v1.include_router(
+    warehouse_databricks.router, prefix="/warehouse/databricks", tags=["Warehouse"]
+)
+
+# EP-043: Post-Stratification & Benjamini-Hochberg FDR Correction
+api_router_v1.include_router(
+    post_stratification.router, prefix="/results", tags=["Results"]
+)
+
+# EP-044: OpenFeature Provider endpoints
+api_router_v1.include_router(
+    openfeature.router, prefix="/openfeature", tags=["OpenFeature"]
 )
 
 # Main API router that includes versioned routers

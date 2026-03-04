@@ -91,6 +91,14 @@ class Settings(BaseSettings):
     EMAIL_FROM_NAME: str = "Experimentation Platform"
     NOTIFICATION_ADMIN_EMAILS: List[str] = []
 
+    # EP-041: Databricks warehouse connector
+    DATABRICKS_HOST: str = ""
+    DATABRICKS_HTTP_PATH: str = ""
+    DATABRICKS_TOKEN: str = ""
+    DATABRICKS_CATALOG: str = "main"
+    DATABRICKS_SCHEMA: str = "default"
+    DATABRICKS_TIMEOUT_SECONDS: int = 30
+
     # SSO / SAML / OIDC settings (EP-037)
     SSO_ENABLED: bool = True
     SAML_SP_ENTITY_ID: str = "https://experimentation-platform.example.com"
