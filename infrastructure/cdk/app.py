@@ -20,7 +20,18 @@ from stacks.dynamodb_counters_stack import DynamoDBCountersStack
 from stacks.glue_etl_stack import GlueETLStack
 
 # Environment determination
+VALID_ENVIRONMENTS = ["dev", "staging", "prod", "demo"]
 env_name = os.environ.get("ENVIRONMENT", "dev")
+if env_name not in VALID_ENVIRONMENTS:
+    raise ValueError(
+        f"Invalid ENVIRONMENT '{env_name}'. Must be one of: {', '.join(VALID_ENVIRONMENTS)}"
+    )
+
+# Demo environment uses smaller instance sizing to reduce cost
+is_demo = env_name == "demo"
+db_instance_size = "db.t3.small" if is_demo else "db.t3.medium"
+cache_node_type = "cache.t3.micro" if is_demo else "cache.t3.small"
+fargate_desired_count = 1 if is_demo else 2
 
 # Define CDK environment (account and region)
 account = os.environ.get("CDK_DEFAULT_ACCOUNT", "214117827798")

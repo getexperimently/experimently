@@ -53,7 +53,7 @@ export default function Home() {
               Sequential testing, CUPED variance reduction, multi-armed bandits, and AI-powered experiment design — all completely free.
             </p>
             <p className="text-sm text-gray-500 mb-6 font-medium tracking-wide">
-              Java, Python, React &amp; JS SDKs &nbsp;·&nbsp; SOC 2 compliant &nbsp;·&nbsp; Deploy to your AWS
+              Java, Python, React, JS, Go, iOS &amp; Android SDKs &nbsp;·&nbsp; SOC 2 compliant &nbsp;·&nbsp; Enterprise SSO &nbsp;·&nbsp; Deploy to your AWS
             </p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
               <a href="/docs/quick-start" className="bg-blue-600 text-white px-8 py-4 rounded-lg text-base font-semibold hover:bg-blue-700 transition shadow-sm">
@@ -88,8 +88,8 @@ export default function Home() {
                 <div className="text-sm text-gray-600">Sample size reduction via CUPED</div>
               </div>
               <div className="text-center">
-                <div className="text-4xl font-bold text-gray-900 mb-2">5</div>
-                <div className="text-sm text-gray-600">SDK languages (Python, JS, Java, React, Go)</div>
+                <div className="text-4xl font-bold text-gray-900 mb-2">7</div>
+                <div className="text-sm text-gray-600">SDK languages (Python, JS, Java, React, Go, iOS, Android)</div>
               </div>
               <div className="text-center">
                 <div className="text-3xl font-bold text-gray-900 mb-2">SOC 2</div>
@@ -188,7 +188,7 @@ export default function Home() {
                 </div>
                 <h3 className="text-xl font-semibold text-gray-900 mb-3">Developer First</h3>
                 <p className="text-gray-600 leading-relaxed">
-                  SDKs for Python, JavaScript, Java, and React. RESTful APIs with OpenAPI docs. RBAC with custom roles — ADMIN, DEVELOPER, ANALYST, VIEWER.
+                  SDKs for Python, JavaScript, Java, React, Go, iOS (Swift), and Android (Kotlin). RESTful APIs with OpenAPI docs. RBAC with custom roles — ADMIN, DEVELOPER, ANALYST, VIEWER.
                 </p>
               </div>
             </div>
@@ -345,6 +345,39 @@ export default function Home() {
                 </p>
               </div>
 
+              {/* Go SDK */}
+              <div className="bg-white p-8 rounded-2xl border border-gray-100 hover:shadow-lg hover:border-gray-200 transition">
+                <div className="w-12 h-12 bg-sky-100 rounded-xl flex items-center justify-center mb-6">
+                  <span className="text-sky-700 font-bold text-lg">Go</span>
+                </div>
+                <h3 className="text-xl font-semibold text-gray-900 mb-3">Go SDK</h3>
+                <p className="text-gray-600 leading-relaxed">
+                  Native Go client for microservices and CLIs. Zero external dependencies, context-aware API, goroutine-safe concurrent evaluation with built-in LRU caching.
+                </p>
+              </div>
+
+              {/* iOS Swift SDK */}
+              <div className="bg-white p-8 rounded-2xl border border-gray-100 hover:shadow-lg hover:border-gray-200 transition">
+                <div className="w-12 h-12 bg-gray-100 rounded-xl flex items-center justify-center mb-6">
+                  <span className="text-gray-700 font-bold text-lg"></span>
+                </div>
+                <h3 className="text-xl font-semibold text-gray-900 mb-3">iOS Swift SDK</h3>
+                <p className="text-gray-600 leading-relaxed">
+                  Native Swift SDK for iOS 14+ and macOS 11+. Modern async/await API, offline fallback with local cache, and SwiftUI-ready feature flag bindings.
+                </p>
+              </div>
+
+              {/* Android Kotlin SDK */}
+              <div className="bg-white p-8 rounded-2xl border border-gray-100 hover:shadow-lg hover:border-gray-200 transition">
+                <div className="w-12 h-12 bg-green-100 rounded-xl flex items-center justify-center mb-6">
+                  <span className="text-green-700 font-bold text-lg">🤖</span>
+                </div>
+                <h3 className="text-xl font-semibold text-gray-900 mb-3">Android Kotlin SDK</h3>
+                <p className="text-gray-600 leading-relaxed">
+                  Native Kotlin SDK for Android (minSdk 21). Coroutines-first API, OkHttp client, offline persistence, and Jetpack Compose usage examples included.
+                </p>
+              </div>
+
               {/* Third-party Integrations */}
               <div className="bg-white p-8 rounded-2xl border border-gray-100 hover:shadow-lg hover:border-gray-200 transition">
                 <div className="w-12 h-12 bg-blue-100 rounded-xl flex items-center justify-center mb-6">
@@ -394,6 +427,19 @@ export default function Home() {
                 <h3 className="text-xl font-semibold text-gray-900 mb-3">No-Code Experiment Builder</h3>
                 <p className="text-gray-600 leading-relaxed">
                   5-step guided wizard for experiment creation — define hypotheses, set variants, choose metrics, configure targeting, and launch — all without writing a line of code.
+                </p>
+              </div>
+
+              {/* Enterprise SSO */}
+              <div className="bg-white p-8 rounded-2xl border border-gray-100 hover:shadow-lg hover:border-gray-200 transition">
+                <div className="w-12 h-12 bg-indigo-100 rounded-xl flex items-center justify-center mb-6">
+                  <svg className="w-6 h-6 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+                  </svg>
+                </div>
+                <h3 className="text-xl font-semibold text-gray-900 mb-3">Enterprise SSO</h3>
+                <p className="text-gray-600 leading-relaxed">
+                  SAML 2.0 and OIDC/OAuth2 for Okta, Azure AD, Google Workspace, GitHub, and OneLogin. Centralized identity management with role mapping from your IdP groups.
                 </p>
               </div>
             </div>
@@ -468,10 +514,10 @@ export default function Home() {
                 Simple to integrate
               </h2>
               <p className="text-lg text-gray-600">
-                Get started in minutes — SDKs for Python, JavaScript, Java, and React
+                Get started in minutes — SDKs for Python, JavaScript, Java, React, Go, iOS, and Android
               </p>
               <div className="flex flex-wrap justify-center gap-2 mt-4">
-                {['JavaScript', 'Python', 'Java', 'React'].map((lang) => (
+                {['JavaScript', 'Python', 'Java', 'React', 'Go', 'iOS (Swift)', 'Android (Kotlin)'].map((lang) => (
                   <span key={lang} className="bg-gray-100 text-gray-700 px-3 py-1 rounded-full text-sm font-medium">{lang}</span>
                 ))}
               </div>
@@ -641,6 +687,9 @@ enabled = client.is_enabled(
                     ['Jira / Salesforce / GitHub Integration', '✅', '⚠️ Partial', '❌', '❌', '⚠️ Partial'],
                     ['Java SDK', '✅ (Spring Boot starter)', '✅', '✅', '⚠️', '✅'],
                     ['React SDK (hooks + SSR)', '✅', '✅', '✅', '⚠️', '✅'],
+                    ['Native Go SDK', '✅', '❌', '✅', '❌', '✅'],
+                    ['Native iOS & Android SDKs', '✅', '⚠️ Partial', '✅', '❌', '✅'],
+                    ['Enterprise SSO (SAML 2.0 + OIDC)', '✅', '✅', '⚠️ Enterprise', '⚠️ Enterprise', '✅'],
                     ['SOC 2 / ISO 27001 Compliance Export', '✅ (HMAC-signed)', '✅', '⚠️ Enterprise', '⚠️ Enterprise', '✅'],
                     ['Audit Log + SSE Stream', '✅', '⚠️', '⚠️', '❌', '✅'],
                     ['Deploy in Your AWS Account', '✅', '❌', '❌', '❌', '❌'],
@@ -701,6 +750,10 @@ enabled = client.is_enabled(
                   'Warehouse analytics (Snowflake, BigQuery)',
                   'Java SDK + Spring Boot starter',
                   'React SDK (hooks, HOC, SSR)',
+                  'Go SDK (zero deps, goroutine-safe)',
+                  'iOS Swift SDK (async/await, offline)',
+                  'Android Kotlin SDK (Coroutines, Compose)',
+                  'Enterprise SSO (SAML 2.0 + OIDC)',
                   'Jira, Salesforce & GitHub integrations',
                   'SOC 2 / ISO 27001 compliance reports',
                   'Full audit log + custom RBAC roles',
@@ -728,7 +781,7 @@ enabled = client.is_enabled(
               Start experimenting today
             </h2>
             <p className="text-xl text-blue-100 mb-10">
-              Sequential testing, CUPED, Bayesian stats, Java/React/JS SDKs, and AI design — all completely free. Deploy to your own AWS.
+              Sequential testing, CUPED, Bayesian stats, Java/React/JS/Go/iOS/Android SDKs, Enterprise SSO, and AI design — all completely free. Deploy to your own AWS.
             </p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
               <a href="/docs/quick-start" className="bg-white text-blue-600 px-8 py-4 rounded-lg text-lg font-semibold hover:bg-gray-50 transition shadow-lg">
@@ -786,6 +839,9 @@ enabled = client.is_enabled(
                   <li><a href="/docs/sdks/python" className="hover:text-white transition">Python SDK</a></li>
                   <li><a href="/docs/sdks/java" className="hover:text-white transition">Java SDK</a></li>
                   <li><a href="/docs/sdks/react" className="hover:text-white transition">React SDK</a></li>
+                  <li><a href="/docs/sdks/go" className="hover:text-white transition">Go SDK</a></li>
+                  <li><a href="/docs/sdks/ios" className="hover:text-white transition">iOS Swift SDK</a></li>
+                  <li><a href="/docs/sdks/android" className="hover:text-white transition">Android Kotlin SDK</a></li>
                   <li><a href="/docs/sdks/mcp" className="hover:text-white transition">MCP Server</a></li>
                 </ul>
               </div>
