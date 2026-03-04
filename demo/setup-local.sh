@@ -1,0 +1,246 @@
+#!/usr/bin/env bash
+# =============================================================================
+# Experimently — Local Demo Bootstrap
+# Usage: ./demo/setup-local.sh
+# =============================================================================
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+DEMO_DIR="$REPO_ROOT/demo"
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+BOLD='\033[1m'
+NC='\033[0m'
+
+log()  { echo -e "${BLUE}[demo]${NC} $*"; }
+ok()   { echo -e "${GREEN}[demo]${NC} $*"; }
+warn() { echo -e "${YELLOW}[demo]${NC} $*"; }
+err()  { echo -e "${RED}[demo] ERROR:${NC} $*" >&2; }
+
+# ---------------------------------------------------------------------------
+# 1. Banner
+# ---------------------------------------------------------------------------
+echo ""
+echo -e "${BOLD}╔══════════════════════════════════════════════╗${NC}"
+echo -e "${BOLD}║  Experimently Demo — Local Setup              ║${NC}"
+echo -e "${BOLD}╚══════════════════════════════════════════════╝${NC}"
+echo ""
+
+# ---------------------------------------------------------------------------
+# 2. Prerequisite checks
+# ---------------------------------------------------------------------------
+log "Checking prerequisites..."
+MISSING=()
+command -v docker   >/dev/null 2>&1 || MISSING+=("docker")
+command -v python3  >/dev/null 2>&1 || MISSING+=("python3")
+command -v node     >/dev/null 2>&1 || MISSING+=("node")
+command -v npm      >/dev/null 2>&1 || MISSING+=("npm")
+
+if [[ ${#MISSING[@]} -gt 0 ]]; then
+    err "Missing required tools: ${MISSING[*]}"
+    err "Please install them and re-run this script."
+    exit 1
+fi
+ok "All prerequisites present."
+
+# ---------------------------------------------------------------------------
+# 3. Setup directories
+# ---------------------------------------------------------------------------
+mkdir -p "$DEMO_DIR/.pids" "$DEMO_DIR/.logs"
+
+# ---------------------------------------------------------------------------
+# 4. Environment file
+# ---------------------------------------------------------------------------
+cd "$REPO_ROOT"
+if [[ ! -f ".env" ]]; then
+    if [[ -f ".env.example" ]]; then
+        cp .env.example .env
+        log "Created .env from .env.example"
+    else
+        # Create a minimal .env
+        cat > .env <<'EOF'
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/experimentation
+POSTGRES_SERVER=localhost
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=postgres
+POSTGRES_DB=experimentation
+POSTGRES_SCHEMA=experimentation
+REDIS_HOST=localhost
+REDIS_PORT=6379
+SECRET_KEY=demo_secret_key_change_in_production_32chars
+ENVIRONMENT=development
+LOG_LEVEL=INFO
+CORS_ORIGINS=http://localhost:3000,http://localhost:8000
+FIRST_SUPERUSER=admin@demo.com
+FIRST_SUPERUSER_PASSWORD=Demo1234!
+AUDIT_HMAC_KEY=demo_hmac_key_change_in_production
+EOF
+        log "Created minimal .env"
+    fi
+fi
+
+# ---------------------------------------------------------------------------
+# 5. Start Docker services (Postgres + Redis)
+# ---------------------------------------------------------------------------
+log "Starting Docker services (postgres, redis)..."
+docker-compose up -d postgres redis
+
+# ---------------------------------------------------------------------------
+# 6. Wait for PostgreSQL to be ready
+# ---------------------------------------------------------------------------
+log "Waiting for PostgreSQL to be ready..."
+MAX_WAIT=30
+WAITED=0
+until docker-compose exec -T postgres pg_isready -U postgres -q 2>/dev/null; do
+    WAITED=$((WAITED + 1))
+    if [[ $WAITED -ge $MAX_WAIT ]]; then
+        err "PostgreSQL did not become ready within ${MAX_WAIT}s."
+        exit 1
+    fi
+    sleep 1
+done
+ok "PostgreSQL is ready."
+
+# ---------------------------------------------------------------------------
+# 7. Python virtual environment + dependencies
+# ---------------------------------------------------------------------------
+if [[ ! -d "$REPO_ROOT/venv" ]]; then
+    log "Creating Python virtual environment..."
+    python3 -m venv "$REPO_ROOT/venv"
+fi
+
+log "Installing Python dependencies..."
+source "$REPO_ROOT/venv/bin/activate"
+pip install -r "$REPO_ROOT/backend/requirements.txt" -q
+
+# ---------------------------------------------------------------------------
+# 8. Database migrations
+# ---------------------------------------------------------------------------
+log "Running database migrations..."
+cd "$REPO_ROOT"
+export APP_ENV=development
+export POSTGRES_DB=experimentation
+export POSTGRES_SCHEMA=experimentation
+export POSTGRES_SERVER=localhost
+export POSTGRES_USER=postgres
+export POSTGRES_PASSWORD=postgres
+
+python -m alembic -c backend/app/db/alembic.ini upgrade head
+ok "Migrations complete."
+
+# ---------------------------------------------------------------------------
+# 9. Seed demo data
+# ---------------------------------------------------------------------------
+log "Seeding demo data (100K+ events — this takes ~60s)..."
+python backend/scripts/seed_demo_data.py
+ok "Demo data seeded."
+
+# ---------------------------------------------------------------------------
+# 10. Start backend API
+# ---------------------------------------------------------------------------
+log "Starting backend API on port 8000..."
+cd "$REPO_ROOT"
+nohup python -m uvicorn backend.app.main:app \
+    --host 0.0.0.0 --port 8000 \
+    > "$DEMO_DIR/.logs/backend.log" 2>&1 &
+echo $! > "$DEMO_DIR/.pids/backend.pid"
+log "Backend PID: $(cat "$DEMO_DIR/.pids/backend.pid")"
+
+# ---------------------------------------------------------------------------
+# 11. Wait for backend health check
+# ---------------------------------------------------------------------------
+log "Waiting for backend API to be healthy..."
+MAX_WAIT=30
+WAITED=0
+until curl -sf http://localhost:8000/health >/dev/null 2>&1; do
+    WAITED=$((WAITED + 1))
+    if [[ $WAITED -ge $MAX_WAIT ]]; then
+        err "Backend did not become healthy within ${MAX_WAIT}s."
+        err "Check logs: $DEMO_DIR/.logs/backend.log"
+        exit 1
+    fi
+    sleep 1
+done
+ok "Backend API is healthy."
+
+# ---------------------------------------------------------------------------
+# 12. Create demo API key
+# ---------------------------------------------------------------------------
+log "Creating demo API key..."
+API_KEY_RESPONSE=$(curl -sf -X POST http://localhost:8000/api/v1/tracking/demo-key \
+    -H "Content-Type: application/json" \
+    -d '{"name":"demo-simulator","email":"admin@demo.com","password":"Demo1234!"}' 2>/dev/null || echo "")
+
+# Fallback: use the admin endpoint if demo-key doesn't exist
+if [[ -z "$API_KEY_RESPONSE" ]]; then
+    # Login to get a token
+    LOGIN_RESPONSE=$(curl -sf -X POST http://localhost:8000/api/v1/auth/demo-login \
+        -H "Content-Type: application/json" \
+        -d '{"email":"admin@demo.com","password":"Demo1234!"}' 2>/dev/null || echo "{}")
+
+    TOKEN=$(echo "$LOGIN_RESPONSE" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('access_token',''))" 2>/dev/null || echo "")
+
+    if [[ -n "$TOKEN" ]]; then
+        API_KEY_RESPONSE=$(curl -sf -X POST http://localhost:8000/api/v1/api-keys \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer $TOKEN" \
+            -d '{"name":"demo-simulator","description":"Live event simulator key","scopes":"read,write"}' 2>/dev/null || echo "")
+        DEMO_API_KEY=$(echo "$API_KEY_RESPONSE" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('key',d.get('api_key','demo-fallback-key')))" 2>/dev/null || echo "demo-fallback-key")
+    else
+        DEMO_API_KEY="demo-fallback-key"
+    fi
+else
+    DEMO_API_KEY=$(echo "$API_KEY_RESPONSE" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('key',d.get('api_key','demo-fallback-key')))" 2>/dev/null || echo "demo-fallback-key")
+fi
+
+echo "$DEMO_API_KEY" > "$DEMO_DIR/.demo_api_key"
+ok "Demo API key saved to demo/.demo_api_key"
+
+# ---------------------------------------------------------------------------
+# 13. Start frontend
+# ---------------------------------------------------------------------------
+log "Installing frontend dependencies..."
+cd "$REPO_ROOT/frontend"
+npm install --silent
+
+log "Starting frontend on port 3000..."
+nohup npm run dev \
+    > "$REPO_ROOT/demo/.logs/frontend.log" 2>&1 &
+echo $! > "$REPO_ROOT/demo/.pids/frontend.pid"
+log "Frontend PID: $(cat "$REPO_ROOT/demo/.pids/frontend.pid")"
+
+# ---------------------------------------------------------------------------
+# 14. Start live event simulator
+# ---------------------------------------------------------------------------
+log "Starting live event simulator..."
+source "$REPO_ROOT/venv/bin/activate"
+cd "$REPO_ROOT"
+nohup python backend/scripts/simulate_live_events.py \
+    --api-url http://localhost:8000 \
+    --api-key "$(cat "$DEMO_DIR/.demo_api_key")" \
+    --rate 5 \
+    > "$DEMO_DIR/.logs/simulator.log" 2>&1 &
+echo $! > "$DEMO_DIR/.pids/simulator.pid"
+ok "Simulator PID: $(cat "$DEMO_DIR/.pids/simulator.pid")"
+
+# ---------------------------------------------------------------------------
+# 15. Success banner
+# ---------------------------------------------------------------------------
+echo ""
+echo -e "${GREEN}${BOLD}╔════════════════════════════════════════╗${NC}"
+echo -e "${GREEN}${BOLD}║  Experimently Demo — Ready!            ║${NC}"
+echo -e "${GREEN}${BOLD}║                                        ║${NC}"
+echo -e "${GREEN}${BOLD}║  Frontend:   http://localhost:3000     ║${NC}"
+echo -e "${GREEN}${BOLD}║  API Docs:   http://localhost:8000/docs║${NC}"
+echo -e "${GREEN}${BOLD}║  Admin:      admin@demo.com            ║${NC}"
+echo -e "${GREEN}${BOLD}║  Password:   Demo1234!                 ║${NC}"
+echo -e "${GREEN}${BOLD}║                                        ║${NC}"
+echo -e "${GREEN}${BOLD}║  Live events streaming in background   ║${NC}"
+echo -e "${GREEN}${BOLD}║  Logs: demo/.logs/                     ║${NC}"
+echo -e "${GREEN}${BOLD}║  Stop: ./demo/teardown-local.sh        ║${NC}"
+echo -e "${GREEN}${BOLD}╚════════════════════════════════════════╝${NC}"
+echo ""

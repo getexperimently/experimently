@@ -91,6 +91,18 @@ class Settings(BaseSettings):
     EMAIL_FROM_NAME: str = "Experimentation Platform"
     NOTIFICATION_ADMIN_EMAILS: List[str] = []
 
+    # SSO / SAML / OIDC settings (EP-037)
+    SSO_ENABLED: bool = True
+    SAML_SP_ENTITY_ID: str = "https://experimentation-platform.example.com"
+    SAML_SP_ACS_URL: str = "https://experimentation-platform.example.com/auth/sso/saml/acs"
+    OIDC_GOOGLE_CLIENT_ID: str = ""
+    OIDC_GOOGLE_CLIENT_SECRET: str = ""
+    OIDC_GITHUB_CLIENT_ID: str = ""
+    OIDC_GITHUB_CLIENT_SECRET: str = ""
+    OIDC_MICROSOFT_CLIENT_ID: str = ""
+    OIDC_MICROSOFT_CLIENT_SECRET: str = ""
+    SSO_STATE_SECRET: str = "sso-state-secret-change-in-prod"
+
     # Cognito settings
     COGNITO_GROUP_ROLE_MAPPING: Dict[str, str] = {
         "Admins": "admin",
