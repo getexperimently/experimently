@@ -91,6 +91,14 @@ class Settings(BaseSettings):
     EMAIL_FROM_NAME: str = "Experimentation Platform"
     NOTIFICATION_ADMIN_EMAILS: List[str] = []
 
+    # EP-046: LLM/AI Model Evaluation
+    LLM_OPENAI_API_KEY: str = ""
+    LLM_ANTHROPIC_API_KEY: str = ""
+    LLM_GOOGLE_API_KEY: str = ""
+    LLM_DEFAULT_JUDGE_MODEL: str = "claude-3-5-sonnet-20241022"
+    LLM_MAX_TOKENS_DEFAULT: int = 1000
+    LLM_TEMPERATURE_DEFAULT: float = 0.7
+
     # EP-041: Databricks warehouse connector
     DATABRICKS_HOST: str = ""
     DATABRICKS_HTTP_PATH: str = ""
