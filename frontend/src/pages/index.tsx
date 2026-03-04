@@ -662,38 +662,38 @@ enabled = client.is_enabled(
                   <tr className="border-b-2 border-gray-200">
                     <th className="text-left py-4 px-4 font-semibold text-gray-700 w-64">Feature</th>
                     <th className="text-center py-4 px-4 font-bold text-blue-600 bg-blue-50 rounded-t-lg">Experimently</th>
-                    <th className="text-center py-4 px-4 font-semibold text-gray-600">Optimizely</th>
+                    <th className="text-center py-4 px-4 font-semibold text-gray-600">Eppo†</th>
+                    <th className="text-center py-4 px-4 font-semibold text-gray-600">GrowthBook</th>
                     <th className="text-center py-4 px-4 font-semibold text-gray-600">Statsig*</th>
-                    <th className="text-center py-4 px-4 font-semibold text-gray-600">Amplitude</th>
+                    <th className="text-center py-4 px-4 font-semibold text-gray-600">Optimizely</th>
                     <th className="text-center py-4 px-4 font-semibold text-gray-600">LaunchDarkly</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
                   {[
-                    ['A/B / Multivariate Testing', '✅', '✅', '✅', '✅', '⚠️ Add-on'],
-                    ['Feature Flags', '✅', '✅', '✅', '✅', '✅'],
-                    ['Sequential Testing (mSPRT)', '✅', '✅', '✅', '✅', '❌'],
-                    ['CUPED Variance Reduction', '✅ (binary + numeric)', '⚠️ Numeric only', '✅', '✅', '⚠️ Add-on'],
-                    ['Multi-Armed Bandit', '✅ (3 algorithms)', '✅', '✅', '✅', '❌'],
-                    ['Full Bayesian (BF10 + Monte Carlo)', '✅', '❌', '⚠️ Partial', '❌', '❌'],
-                    ['Split URL Testing (Lambda@Edge)', '✅', '✅', '❌', '❌', '❌'],
-                    ['Interaction Detection', '✅', '⚠️ Partial', '❌', '❌', '❌'],
-                    ['Mutual Exclusion Groups', '✅', '⚠️ Partial', '✅', '⚠️ Partial', '❌'],
-                    ['Global Holdout Group', '✅', '✅', '⚠️', '❌', '❌'],
-                    ['Dimensional Analysis', '✅ + Bonferroni', '⚠️ Partial', '✅', '⚠️ Partial', '❌'],
-                    ['No-Code Experiment Wizard', '✅', '✅', '⚠️', '✅ (Web)', '❌'],
-                    ['AI Experiment Design', '✅ (Claude + MCP)', '✅ (Opal AI)', '❌', '❌', '❌'],
-                    ['Warehouse Analytics', '✅ (3 warehouses)', '✅', '✅', '✅ (Snowflake)', '❌'],
-                    ['Jira / Salesforce / GitHub Integration', '✅', '⚠️ Partial', '❌', '❌', '⚠️ Partial'],
-                    ['Java SDK', '✅ (Spring Boot starter)', '✅', '✅', '⚠️', '✅'],
-                    ['React SDK (hooks + SSR)', '✅', '✅', '✅', '⚠️', '✅'],
-                    ['Native Go SDK', '✅', '❌', '✅', '❌', '✅'],
-                    ['Native iOS & Android SDKs', '✅', '⚠️ Partial', '✅', '❌', '✅'],
-                    ['Enterprise SSO (SAML 2.0 + OIDC)', '✅', '✅', '⚠️ Enterprise', '⚠️ Enterprise', '✅'],
-                    ['SOC 2 / ISO 27001 Compliance Export', '✅ (HMAC-signed)', '✅', '⚠️ Enterprise', '⚠️ Enterprise', '✅'],
-                    ['Audit Log + SSE Stream', '✅', '⚠️', '⚠️', '❌', '✅'],
-                    ['Deploy in Your AWS Account', '✅', '❌', '❌', '❌', '❌'],
-                    ['Pricing (entry)', '🎉 Free Preview', '$36K+/year', 'Free → $150+/mo', 'Free → Custom', 'Free → $20K+/year'],
+                    // [Feature, Experimently, Eppo, GrowthBook, Statsig, Optimizely, LaunchDarkly]
+                    ['A/B / Multivariate Testing', '✅', '✅', '✅', '✅', '✅', '⚠️ Add-on'],
+                    ['Feature Flags', '✅', '✅', '✅', '✅', '✅', '✅'],
+                    ['Sequential Testing (mSPRT)', '✅', '✅ (default)', '✅', '✅', '✅', '❌'],
+                    ['CUPED Variance Reduction', '✅ (binary + numeric)', '✅ CUPED++', '✅', '✅', '⚠️ Numeric only', '⚠️ Add-on'],
+                    ['Multi-Armed Bandit', '✅ (3 algorithms)', '✅ AI bandits', '❌', '✅', '✅', '❌'],
+                    ['Full Bayesian (BF10 + Monte Carlo)', '✅', '✅', '✅', '⚠️ Partial', '❌', '❌'],
+                    ['Interaction Detection', '✅ (SUTVA, Jaccard)', '⚠️ Partial', '❌', '❌', '⚠️ Partial', '❌'],
+                    ['Mutual Exclusion Groups', '✅', '✅', '⚠️', '✅', '⚠️ Partial', '❌'],
+                    ['Global Holdout Group', '✅', '✅', '⚠️', '⚠️', '✅', '❌'],
+                    ['Dimensional Analysis + HTE', '✅ + Bonferroni', '✅', '✅', '✅', '⚠️ Partial', '❌'],
+                    ['Warehouse-Native Analytics', '✅ (3 warehouses)', '✅ + Databricks', '✅ + ClickHouse', '✅', '✅', '❌'],
+                    ['Split URL Testing (Lambda@Edge)', '✅', '❌', '❌', '❌', '✅', '❌'],
+                    ['AI Experiment Design', '✅ Claude + MCP', '✅ LLM eval', '✅ MCP (beta)', '❌', '✅ Opal AI', '❌'],
+                    ['Enterprise SSO (free tier)', '✅ 🎉', '❌ Enterprise', '❌ Enterprise', '⚠️ Enterprise', '⚠️ Enterprise', '⚠️ Enterprise'],
+                    ['Java SDK', '✅ Spring Boot', '✅', '✅', '✅', '✅', '✅'],
+                    ['Go SDK', '✅', '✅', '✅', '✅', '✅', '✅'],
+                    ['iOS + Android SDKs', '✅', '✅ + RN + Flutter', '✅ + Flutter + Roku', '✅', '✅', '✅'],
+                    ['Self-host in your AWS account', '✅ CDK', '❌ SaaS only', '✅ Docker', '❌', '❌', '❌'],
+                    ['Audit Log + SSE Stream', '✅ HMAC-signed', '✅', '✅', '⚠️', '⚠️', '✅'],
+                    ['Jira / Salesforce / GitHub', '✅', '⚠️', '⚠️', '❌', '✅', '⚠️ Partial'],
+                    ['Vendor independence', '✅ Independent', '⚠️ Acquired by Datadog', '✅ Series A', '⚠️ Acquired by OpenAI', '⚠️ PE-backed', '✅'],
+                    ['Pricing (entry)', '🎉 Free Preview', '~$42K/yr avg', '$0 → $40/user/mo', 'Free → usage', '$36K+/year', '$0 → $20K+/yr'],
                   ].map(([feature, ...cols], i) => (
                     <tr key={i} className={i % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
                       <td className="py-3.5 px-4 font-medium text-gray-700">{feature}</td>
@@ -702,13 +702,14 @@ enabled = client.is_enabled(
                       <td className="py-3.5 px-4 text-center text-gray-600">{cols[2]}</td>
                       <td className="py-3.5 px-4 text-center text-gray-600">{cols[3]}</td>
                       <td className="py-3.5 px-4 text-center text-gray-600">{cols[4]}</td>
+                      <td className="py-3.5 px-4 text-center text-gray-600">{cols[5]}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
             <p className="text-xs text-gray-400 mt-4 text-center">
-              * Statsig acquired by OpenAI for $1.1B in September 2025. Future roadmap subject to change. ⚠️ = Partial or enterprise-only feature.
+              * Statsig acquired by OpenAI ($1.1B, Sept 2025). † Eppo acquired by Datadog (~$220M, May 2025). Future roadmaps subject to change. ⚠️ = Partial or enterprise-only.
             </p>
             <div className="text-center mt-8">
               <a href="#compare" className="text-blue-600 hover:text-blue-700 text-sm font-medium">
