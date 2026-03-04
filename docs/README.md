@@ -46,6 +46,19 @@
 
 ---
 
+## SDKs
+
+| SDK | Description |
+|-----|-------------|
+| [SDK Guide](sdk-guide.md) | Python and JavaScript SDK overview |
+| [Java SDK](sdk/java.md) | JVM SDK with Spring Boot auto-configuration, LRU cache, MD5 hashing |
+| [React SDK](sdk/react.md) | React hooks, context provider, HOC, SSR/Next.js support |
+| [Go SDK](sdk/go.md) | Go SDK with local evaluation, context cancellation, goroutine safety |
+| [iOS SDK](sdk/ios.md) | Swift SDK with async/await, offline fallback, SwiftUI integration |
+| [Android SDK](sdk/android.md) | Kotlin SDK with Coroutines, OkHttp, Compose integration |
+
+---
+
 ## Getting Started
 
 - [Quick Start](getting-started/quick-start.md) — full setup in 30 minutes
@@ -74,6 +87,7 @@
 - [Auth Environment Variables](auth/auth-environment-variables.md) — Cognito configuration
 - [Auth User Guide](auth/auth-user-guide.md) — registration, login, password policies
 - [Cognito Testing](auth/cognito-auth-testing.md) — testing auth locally
+- [Enterprise SSO](auth/sso.md) — SAML 2.0 and OIDC setup for Okta, Azure AD, Google, GitHub
 
 ---
 

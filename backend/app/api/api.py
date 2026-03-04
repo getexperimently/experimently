@@ -39,6 +39,7 @@ from backend.app.api.v1.endpoints import (
     notifications,
     compliance,
     integrations,
+    sso,
 )
 
 # Import the sample size calculator router
@@ -159,6 +160,11 @@ api_router_v1.include_router(
 # EP-034: Integration Config Management (Salesforce / Jira / GitHub)
 api_router_v1.include_router(
     integrations.router, prefix="/integrations", tags=["Integrations"]
+)
+
+# EP-037: SSO/SAML & OIDC Enterprise Authentication
+api_router_v1.include_router(
+    sso.router, prefix="/auth/sso", tags=["SSO"]
 )
 
 # Main API router that includes versioned routers

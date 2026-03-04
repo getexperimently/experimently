@@ -46,6 +46,9 @@ const sections = [
       { label: 'Python SDK', href: '/docs/sdks/python', desc: 'Server-side Python integration' },
       { label: 'Java SDK', href: '/docs/sdks/java', desc: 'Spring Boot auto-configuration, consistent hash bucketing' },
       { label: 'React SDK', href: '/docs/sdks/react', desc: 'Hooks, HOC, SSR support via ServerClient' },
+      { label: 'Go SDK', href: '/docs/sdks/go', desc: 'Native Go client for microservices and CLIs. Zero dependencies, context-aware, goroutine-safe.' },
+      { label: 'iOS Swift SDK', href: '/docs/sdks/ios', desc: 'Native Swift SDK for iOS 14+ and macOS 11+. Async/await API, offline fallback.' },
+      { label: 'Android Kotlin SDK', href: '/docs/sdks/android', desc: 'Native Kotlin SDK for Android (minSdk 21). Coroutines, OkHttp, Compose examples.' },
       { label: 'MCP Server', href: '/docs/sdks/mcp', desc: 'AI-powered experiment design via Model Context Protocol' },
     ],
   },
@@ -85,6 +88,7 @@ const sections = [
       { label: 'Audit Logging', href: '/docs/security/audit-logging', desc: 'HMAC-SHA256 tamper-proof audit trail' },
       { label: 'RBAC', href: '/docs/security/rbac', desc: 'Role-based access control: Admin, Developer, Analyst, Viewer' },
       { label: 'API Key Management', href: '/docs/security/api-keys', desc: 'Scoped keys, rotation, revocation' },
+      { label: 'Enterprise SSO', href: '/docs/auth/sso', desc: 'SAML 2.0, OIDC/OAuth2 for Okta, Azure AD, Google Workspace, GitHub, and OneLogin.' },
     ],
   },
   {

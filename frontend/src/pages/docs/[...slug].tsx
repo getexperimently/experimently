@@ -33,6 +33,9 @@ const SLUG_TO_FILE: Record<string, string> = {
   'sdks/python':                   'sdk-guide.md',
   'sdks/java':                     'sdk/java.md',
   'sdks/react':                    'sdk/react.md',
+  'sdks/go':                       'sdk/go.md',
+  'sdks/ios':                      'sdk/ios.md',
+  'sdks/android':                  'sdk/android.md',
   'sdks/mcp':                      'mcp-server.md',
 
   // API Reference
@@ -50,6 +53,9 @@ const SLUG_TO_FILE: Record<string, string> = {
   'integrations/salesforce':       'integrations/salesforce.md',
   'integrations/github':           'integrations/github.md',
   'integrations/notifications':    'api/alerting.md',
+
+  // Auth
+  'auth/sso':                      'auth/sso.md',
 
   // Security & Compliance
   'security/soc2':                 'api/compliance.md',
@@ -92,7 +98,11 @@ const SLUG_TITLES: Record<string, string> = {
   'sdks/python': 'Python SDK',
   'sdks/java': 'Java SDK',
   'sdks/react': 'React SDK',
+  'sdks/go': 'Go SDK',
+  'sdks/ios': 'iOS Swift SDK',
+  'sdks/android': 'Android Kotlin SDK',
   'sdks/mcp': 'MCP Server',
+  'auth/sso': 'Enterprise SSO / SAML',
   'api-reference/auth': 'Authentication',
   'api-reference/experiments': 'Experiments API',
   'api-reference/feature-flags': 'Feature Flags API',
@@ -142,7 +152,11 @@ const FILE_TO_SLUG: Record<string, string> = {
   'sdk-guide.md':                         'sdks/python',
   'sdk/java.md':                          'sdks/java',
   'sdk/react.md':                         'sdks/react',
+  'sdk/go.md':                            'sdks/go',
+  'sdk/ios.md':                           'sdks/ios',
+  'sdk/android.md':                       'sdks/android',
   'mcp-server.md':                        'sdks/mcp',
+  'auth/sso.md':                          'auth/sso',
   'api/auth.md':                          'api-reference/auth',
   'api/endpoints.md':                     'api-reference/endpoints',
   'api/compliance.md':                    'api-reference/compliance',

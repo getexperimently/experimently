@@ -192,6 +192,7 @@ def test_db():
                 import backend.app.models.api_key  # noqa: F401
                 import backend.app.models.scheduler_run  # noqa: F401
                 import backend.app.models.custom_role  # noqa: F401
+                import backend.app.models.sso_config  # noqa: F401
 
                 # Set schema for all tables
                 Base.metadata.schema = schema_name

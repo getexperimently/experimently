@@ -38,6 +38,14 @@ This directory contains documentation related to authentication and authorizatio
    - Mock configurations
    - Test data setup
 
+6. [Enterprise SSO](sso.md)
+   - SAML 2.0 setup (Okta, Azure AD, OneLogin, Auth0)
+   - OIDC setup (Google Workspace, GitHub, Microsoft, Auth0)
+   - JIT user provisioning
+   - Group-to-role mapping
+   - Enforced SSO configuration
+   - Environment variables reference
+
 ## Common Tasks
 
 1. **User Management**
@@ -54,6 +62,14 @@ This directory contains documentation related to authentication and authorizatio
    - [Best Practices](auth-developer-docs.md#security)
    - [Token Management](flow.md#token-management)
    - [MFA Setup](user-guide.md#mfa-setup)
+
+4. **Enterprise SSO**
+   - [Okta SAML Setup](sso.md#okta-saml-20)
+   - [Azure AD Setup](sso.md#azure-active-directory-saml)
+   - [Google OIDC Setup](sso.md#google-workspace-oidc)
+   - [GitHub OIDC Setup](sso.md#github-oidc)
+   - [Role Mapping](sso.md#group-to-role-mapping)
+   - [Enforced SSO](sso.md#enforced-sso)
 
 ## Need Help?
 
