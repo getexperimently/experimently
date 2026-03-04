@@ -49,7 +49,10 @@ const sections = [
       { label: 'Go SDK', href: '/docs/sdks/go', desc: 'Native Go client for microservices and CLIs. Zero dependencies, context-aware, goroutine-safe.' },
       { label: 'iOS Swift SDK', href: '/docs/sdks/ios', desc: 'Native Swift SDK for iOS 14+ and macOS 11+. Async/await API, offline fallback.' },
       { label: 'Android Kotlin SDK', href: '/docs/sdks/android', desc: 'Native Kotlin SDK for Android (minSdk 21). Coroutines, OkHttp, Compose examples.' },
+      { label: 'Flutter SDK', href: '/docs/sdks/flutter', desc: 'Dart SDK for Flutter (iOS, Android, Web, Desktop). Offline fallback, consistent hashing.' },
+      { label: 'React Native SDK', href: '/docs/sdks/react-native', desc: 'useFlag and useExperiment hooks, Provider, AsyncStorage offline support.' },
       { label: 'MCP Server', href: '/docs/sdks/mcp', desc: 'AI-powered experiment design via Model Context Protocol' },
+      { label: 'OpenFeature Provider', href: '/docs/sdks/openfeature', desc: 'CNCF-standard OpenFeature provider for TypeScript and Python — swap vendors without changing app code' },
     ],
   },
   {
@@ -72,6 +75,7 @@ const sections = [
     links: [
       { label: 'AWS', href: '/docs/integrations/aws', desc: 'ECS, Lambda, CloudFront, DynamoDB' },
       { label: 'Data Warehouses', href: '/docs/integrations/warehouses', desc: 'Snowflake, BigQuery, Redshift — warehouse-native analytics' },
+      { label: 'Databricks', href: '/docs/integrations/databricks', desc: 'Databricks SQL warehouse connector — read-only analytics via Unity Catalog' },
       { label: 'Jira', href: '/docs/integrations/jira', desc: 'Sync experiment status, auto-create issues' },
       { label: 'Salesforce', href: '/docs/integrations/salesforce', desc: 'OAuth2 integration, webhook sync' },
       { label: 'GitHub', href: '/docs/integrations/github', desc: 'HMAC-signed webhooks, PR linking' },

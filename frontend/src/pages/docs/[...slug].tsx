@@ -36,7 +36,10 @@ const SLUG_TO_FILE: Record<string, string> = {
   'sdks/go':                       'sdk/go.md',
   'sdks/ios':                      'sdk/ios.md',
   'sdks/android':                  'sdk/android.md',
+  'sdks/flutter':                  'sdk/flutter.md',
+  'sdks/react-native':             'sdk/react-native.md',
   'sdks/mcp':                      'mcp-server.md',
+  'sdks/openfeature':              'sdk/openfeature.md',
 
   // API Reference
   'api-reference/auth':            'api/auth.md',
@@ -49,6 +52,7 @@ const SLUG_TO_FILE: Record<string, string> = {
   // Integrations
   'integrations/aws':              'integrations/aws.md',
   'integrations/warehouses':       'api/warehouse-analytics.md',
+  'integrations/databricks':       'warehouse/databricks.md',
   'integrations/jira':             'api/integrations.md',
   'integrations/salesforce':       'integrations/salesforce.md',
   'integrations/github':           'integrations/github.md',
@@ -77,6 +81,10 @@ const SLUG_TO_FILE: Record<string, string> = {
   'guides/warehouse-analytics':    'api/warehouse-analytics.md',
   'guides/no-code-builder':        'guides/experiment-wizard.md',
   'guides/interaction-detection':  'api/interaction-detection.md',
+
+  // EP-043: Post-Stratification & BH FDR Correction
+  'statistics/post-stratification': 'statistics/post-stratification.md',
+  'statistics/fdr-correction':      'statistics/fdr-correction.md',
 };
 
 const SLUG_TITLES: Record<string, string> = {
@@ -94,6 +102,8 @@ const SLUG_TITLES: Record<string, string> = {
   'experiments/mab': 'Multi-Armed Bandits',
   'experiments/split-url': 'Split URL Testing',
   'experiments/exclusion': 'Mutual Exclusion Groups',
+  'statistics/post-stratification': 'Post-Stratification Variance Reduction',
+  'statistics/fdr-correction': 'Benjamini-Hochberg FDR Correction',
   'sdks/javascript': 'JavaScript SDK',
   'sdks/python': 'Python SDK',
   'sdks/java': 'Java SDK',
@@ -101,7 +111,10 @@ const SLUG_TITLES: Record<string, string> = {
   'sdks/go': 'Go SDK',
   'sdks/ios': 'iOS Swift SDK',
   'sdks/android': 'Android Kotlin SDK',
+  'sdks/flutter': 'Flutter SDK',
+  'sdks/react-native': 'React Native SDK',
   'sdks/mcp': 'MCP Server',
+  'sdks/openfeature': 'OpenFeature Provider',
   'auth/sso': 'Enterprise SSO / SAML',
   'api-reference/auth': 'Authentication',
   'api-reference/experiments': 'Experiments API',
@@ -155,7 +168,10 @@ const FILE_TO_SLUG: Record<string, string> = {
   'sdk/go.md':                            'sdks/go',
   'sdk/ios.md':                           'sdks/ios',
   'sdk/android.md':                       'sdks/android',
+  'sdk/flutter.md':                       'sdks/flutter',
+  'sdk/react-native.md':                  'sdks/react-native',
   'mcp-server.md':                        'sdks/mcp',
+  'sdk/openfeature.md':                   'sdks/openfeature',
   'auth/sso.md':                          'auth/sso',
   'api/auth.md':                          'api-reference/auth',
   'api/endpoints.md':                     'api-reference/endpoints',
