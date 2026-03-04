@@ -1,0 +1,61 @@
+{
+  "name": "@experimentation-platform/react-native-sdk",
+  "version": "0.1.0",
+  "description": "React Native SDK for the Experimentation Platform — feature flags, A/B tests, and event tracking with consistent hashing and AsyncStorage offline fallback.",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/experimentation-platform/sdk"
+  },
+  "keywords": [
+    "experimentation",
+    "feature-flags",
+    "ab-testing",
+    "react-native"
+  ],
+  "license": "MIT",
+  "scripts": {
+    "test": "jest",
+    "test:coverage": "jest --coverage",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src --ext .ts,.tsx"
+  },
+  "dependencies": {
+    "md5": "^2.3.0",
+    "@react-native-async-storage/async-storage": "^1.21.0"
+  },
+  "devDependencies": {
+    "@testing-library/react-native": "^12.0.0",
+    "@types/md5": "^2.3.5",
+    "@types/react": "^18.0.0",
+    "@types/react-native": "^0.73.0",
+    "jest": "^29.0.0",
+    "jest-environment-jsdom": "^29.0.0",
+    "react": "^18.0.0",
+    "react-native": "^0.73.0",
+    "ts-jest": "^29.0.0",
+    "typescript": "^5.0.0"
+  },
+  "peerDependencies": {
+    "react": ">=16.8.0",
+    "react-native": ">=0.65.0"
+  },
+  "jest": {
+    "preset": "react-native",
+    "moduleFileExtensions": ["ts", "tsx", "js", "jsx", "json"],
+    "transform": {
+      "^.+\\.(ts|tsx)$": "ts-jest"
+    },
+    "testMatch": ["**/__tests__/**/*.test.(ts|tsx)"],
+    "setupFilesAfterFramework": [],
+    "moduleNameMapper": {
+      "@react-native-async-storage/async-storage": "<rootDir>/__mocks__/@react-native-async-storage/async-storage.ts"
+    },
+    "globals": {
+      "ts-jest": {
+        "tsconfig": "tsconfig.json"
+      }
+    }
+  }
+}
