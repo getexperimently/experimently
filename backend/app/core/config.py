@@ -107,6 +107,23 @@ class Settings(BaseSettings):
     DATABRICKS_SCHEMA: str = "default"
     DATABRICKS_TIMEOUT_SECONDS: int = 30
 
+    # EP-048: ClickHouse warehouse connector
+    CLICKHOUSE_HOST: str = "localhost"
+    CLICKHOUSE_PORT: int = 8123  # HTTP port (9000 for native)
+    CLICKHOUSE_DATABASE: str = "default"
+    CLICKHOUSE_USER: str = "default"
+    CLICKHOUSE_PASSWORD: str = ""
+    CLICKHOUSE_SECURE: bool = False
+    CLICKHOUSE_TIMEOUT_SECONDS: int = 30
+
+    # EP-048: MySQL warehouse connector
+    MYSQL_HOST: str = "localhost"
+    MYSQL_PORT: int = 3306
+    MYSQL_DATABASE: str = ""
+    MYSQL_USER: str = ""
+    MYSQL_PASSWORD: str = ""
+    MYSQL_TIMEOUT_SECONDS: int = 30
+
     # SSO / SAML / OIDC settings (EP-037)
     SSO_ENABLED: bool = True
     SAML_SP_ENTITY_ID: str = "https://experimentation-platform.example.com"
@@ -254,7 +271,7 @@ class DevSettings(Settings):
 
     ENVIRONMENT: str = "dev"
     LOG_LEVEL: str = "DEBUG"
-    CORS_ORIGINS: List[str] = ["http://localhost:3000", "http://localhost:8000"]
+    CORS_ORIGINS: List[str] = ["http://localhost:3000", "http://localhost:3001", "http://localhost:8000"]
     CACHE_ENABLED: bool = False
     CACHE_CONTROL: Dict[str, Any] = {"enabled": False, "redis": None, "ttl": 3600}
     PROJECT_NAME: str = "Experimentation Platform (Development)"

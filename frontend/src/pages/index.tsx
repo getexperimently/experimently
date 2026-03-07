@@ -22,6 +22,7 @@ export default function Home() {
                 <div className="hidden lg:flex items-center gap-8">
                   <a href="#features" className="text-gray-600 hover:text-gray-900 text-sm font-medium transition">Features</a>
                   <a href="#compare" className="text-gray-600 hover:text-gray-900 text-sm font-medium transition">Compare</a>
+                  <a href="/power-calculator" className="text-gray-600 hover:text-gray-900 text-sm font-medium transition">Power Calculator</a>
                   <a href="/docs" className="text-gray-600 hover:text-gray-900 text-sm font-medium transition">Docs</a>
                 </div>
               </div>
@@ -53,7 +54,7 @@ export default function Home() {
               Sequential testing, CUPED variance reduction, multi-armed bandits, and AI-powered experiment design — all completely free.
             </p>
             <p className="text-sm text-gray-500 mb-6 font-medium tracking-wide">
-              Java, Python, React, JS, Go, iOS &amp; Android SDKs &nbsp;·&nbsp; SOC 2 compliant &nbsp;·&nbsp; Enterprise SSO &nbsp;·&nbsp; Deploy to your AWS
+              Java, Python, React, JS, Go, iOS, Android &amp; Edge SDKs &nbsp;·&nbsp; SOC 2 compliant &nbsp;·&nbsp; Enterprise SSO &nbsp;·&nbsp; Deploy to your AWS
             </p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
               <a href="/docs/quick-start" className="bg-blue-600 text-white px-8 py-4 rounded-lg text-base font-semibold hover:bg-blue-700 transition shadow-sm">
@@ -88,8 +89,8 @@ export default function Home() {
                 <div className="text-sm text-gray-600">Sample size reduction via CUPED</div>
               </div>
               <div className="text-center">
-                <div className="text-4xl font-bold text-gray-900 mb-2">9</div>
-                <div className="text-sm text-gray-600">SDK languages (Python, JS, Java, React, Go, iOS, Android, Flutter, React Native)</div>
+                <div className="text-4xl font-bold text-gray-900 mb-2">10</div>
+                <div className="text-sm text-gray-600">SDK languages (Python, JS, Java, React, Go, iOS, Android, Flutter, React Native, Edge)</div>
               </div>
               <div className="text-center">
                 <div className="text-3xl font-bold text-gray-900 mb-2">SOC 2</div>
@@ -261,6 +262,20 @@ export default function Home() {
                 </p>
               </div>
 
+              {/* Pre-Experiment Power Analysis */}
+              <div className="bg-gradient-to-br from-sky-50 to-blue-50 p-8 rounded-2xl border border-sky-100 hover:shadow-lg transition">
+                <div className="w-12 h-12 bg-sky-600 rounded-xl flex items-center justify-center mb-6">
+                  <svg className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                  </svg>
+                </div>
+                <h3 className="text-xl font-semibold text-gray-900 mb-3">Pre-experiment Power Analysis</h3>
+                <p className="text-gray-600 leading-relaxed">
+                  Answer &ldquo;How long do I need to run this experiment?&rdquo; before you launch. Compute required sample size, MDE, and runtime estimates using the Fleiss z-test formula. Bonferroni correction for multi-variant tests. Interactive power curve chart and AI planning advice via Claude.{' '}
+                  <a href="/power-calculator" className="text-sky-600 hover:text-sky-700 font-medium">Try the calculator →</a>
+                </p>
+              </div>
+
               {/* Warehouse Analytics */}
               <div className="bg-gradient-to-br from-gray-50 to-slate-50 p-8 rounded-2xl border border-gray-100 hover:shadow-lg transition">
                 <div className="w-12 h-12 bg-gray-700 rounded-xl flex items-center justify-center mb-6">
@@ -270,7 +285,7 @@ export default function Home() {
                 </div>
                 <h3 className="text-xl font-semibold text-gray-900 mb-3">Warehouse-Native Analytics</h3>
                 <p className="text-gray-600 leading-relaxed">
-                  Query experiment results directly in Snowflake, BigQuery, or Redshift. SQL-sanitized sync keeps your warehouse as the source of truth.
+                  Query experiment results directly in Snowflake, BigQuery, Redshift, Databricks, ClickHouse, or MySQL. SQL-sanitized sync keeps your warehouse as the source of truth.
                 </p>
               </div>
             </div>
@@ -407,6 +422,19 @@ export default function Home() {
                 <h3 className="text-xl font-semibold text-gray-900 mb-3">Android Kotlin SDK</h3>
                 <p className="text-gray-600 leading-relaxed">
                   Native Kotlin SDK for Android (minSdk 21). Coroutines-first API, OkHttp client, offline persistence, and Jetpack Compose usage examples included.
+                </p>
+              </div>
+
+              {/* Edge SDK */}
+              <div className="bg-white p-8 rounded-2xl border border-gray-100 hover:shadow-lg hover:border-gray-200 transition">
+                <div className="w-12 h-12 bg-orange-100 rounded-xl flex items-center justify-center mb-6">
+                  <svg className="w-6 h-6 text-orange-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                  </svg>
+                </div>
+                <h3 className="text-xl font-semibold text-gray-900 mb-3">Edge SDK</h3>
+                <p className="text-gray-600 leading-relaxed">
+                  Edge-native evaluation for Cloudflare Workers, Vercel Edge, and Deno Deploy. Sub-millisecond flag decisions with pure-JS MD5 consistent hashing — zero Node.js dependencies, zero cold starts.
                 </p>
               </div>
 
@@ -704,6 +732,7 @@ enabled = client.is_enabled(
                 <tbody className="divide-y divide-gray-100">
                   {[
                     // [Feature, Experimently, Eppo, GrowthBook, Statsig, Optimizely, LaunchDarkly]
+                    ['Pre-experiment Power Analysis', '✅ Free tool', '⚠️ Basic', '✅', '⚠️ Basic', '⚠️ Enterprise', '❌'],
                     ['A/B / Multivariate Testing', '✅', '✅', '✅', '✅', '✅', '⚠️ Add-on'],
                     ['Feature Flags', '✅', '✅', '✅', '✅', '✅', '✅'],
                     ['Sequential Testing (mSPRT)', '✅', '✅ (default)', '✅', '✅', '✅', '❌'],
@@ -714,7 +743,7 @@ enabled = client.is_enabled(
                     ['Mutual Exclusion Groups', '✅', '✅', '⚠️', '✅', '⚠️ Partial', '❌'],
                     ['Global Holdout Group', '✅', '✅', '⚠️', '⚠️', '✅', '❌'],
                     ['Dimensional Analysis + HTE', '✅ + Bonferroni', '✅', '✅', '✅', '⚠️ Partial', '❌'],
-                    ['Warehouse-Native Analytics', '✅ (3 warehouses)', '✅ + Databricks', '✅ + ClickHouse', '✅', '✅', '❌'],
+                    ['Warehouse-Native Analytics', '✅ (6 connectors)', '✅ + Databricks', '✅ + ClickHouse', '✅', '✅', '❌'],
                     ['Split URL Testing (Lambda@Edge)', '✅', '❌', '❌', '❌', '✅', '❌'],
                     ['LLM/AI Experiment Support', '✅ Native (EP-046)', '⚠️ Beta', '❌', '❌', '❌', '❌'],
                     ['AI Experiment Design', '✅ Claude + MCP', '✅ LLM eval', '✅ MCP (beta)', '❌', '✅ Opal AI', '❌'],
@@ -781,7 +810,7 @@ enabled = client.is_enabled(
                   'Split URL testing via Lambda@Edge',
                   'Interaction detection',
                   'AI experiment design (Claude API)',
-                  'Warehouse analytics (Snowflake, BigQuery)',
+                  'Warehouse analytics (Snowflake, BigQuery, Redshift, Databricks, ClickHouse, MySQL)',
                   'Java SDK + Spring Boot starter',
                   'React SDK (hooks, HOC, SSR)',
                   'Go SDK (zero deps, goroutine-safe)',

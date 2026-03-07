@@ -1,0 +1,58 @@
+{
+  "name": "@experimentation-platform/edge-sdk",
+  "version": "0.1.0",
+  "description": "Edge-compatible SDK for Cloudflare Workers, Vercel Edge Functions, and Deno Deploy",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./cloudflare": "./src/adapters/cloudflare.ts",
+    "./vercel": "./src/adapters/vercel.ts",
+    "./deno": "./src/adapters/deno.ts"
+  },
+  "scripts": {
+    "test": "jest --testEnvironment node",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "typescript": "^5.0.0",
+    "jest": "^29.0.0",
+    "@types/jest": "^29.0.0",
+    "ts-jest": "^29.0.0"
+  },
+  "keywords": [
+    "experimentation",
+    "feature-flags",
+    "cloudflare-workers",
+    "vercel-edge",
+    "deno",
+    "edge",
+    "a-b-testing",
+    "wintercg"
+  ],
+  "license": "MIT",
+  "jest": {
+    "preset": "ts-jest",
+    "testEnvironment": "node",
+    "testMatch": [
+      "**/__tests__/**/*.test.ts"
+    ],
+    "moduleNameMapper": {
+      "^../src/(.*)$": "<rootDir>/src/$1"
+    },
+    "globals": {
+      "ts-jest": {
+        "tsconfig": {
+          "strict": true,
+          "esModuleInterop": true,
+          "target": "ES2020",
+          "lib": ["ES2020", "DOM"],
+          "moduleResolution": "node"
+        }
+      }
+    }
+  }
+}
