@@ -50,6 +50,8 @@ from backend.app.api.v1.endpoints import (
     power_calculator,
     edge,
     workspaces,
+    hipaa,
+    websocket_results,
 )
 
 # Import the sample size calculator router
@@ -225,6 +227,16 @@ api_router_v1.include_router(
     workspaces.router, prefix="/workspaces", tags=["Workspaces"]
 )
 
+# EP-050: HIPAA Compliance
+api_router_v1.include_router(
+    hipaa.router, prefix="/hipaa", tags=["HIPAA"]
+)
+
+# EP-058: Real-time WebSocket Streaming Results
+api_router_v1.include_router(
+    websocket_results.router, prefix="", tags=["WebSocket Results"]
+)
+
 # Main API router that includes versioned routers
 api_router = APIRouter()
 api_router.include_router(api_router_v1)
@@ -369,6 +381,14 @@ tags_metadata = [
             "EP-057: Multi-Tenant Team Workspaces — create isolated project namespaces, "
             "manage team memberships with role-based access (OWNER/ADMIN/DEVELOPER/ANALYST/VIEWER), "
             "send and accept email invites, and issue scoped workspace API keys."
+        ),
+    },
+    {
+        "name": "HIPAA",
+        "description": (
+            "EP-050: HIPAA Compliance — PHI audit logging, Business Associate Agreement (BAA) "
+            "management, PHI field encryption/decryption, data residency validation, "
+            "and HIPAA readiness status reporting. All endpoints require ADMIN role."
         ),
     },
 ]

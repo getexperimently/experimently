@@ -15,12 +15,14 @@ import { MetricComparisonTable } from '@/components/results/MetricComparison/Met
 import { SequentialMonitor } from '@/components/results/Sequential/SequentialMonitor';
 import { BreakdownSelector } from '@/components/results/Breakdowns/BreakdownSelector';
 import { SegmentComparisonTable } from '@/components/results/Breakdowns/SegmentComparisonTable';
+// EP-058: Real-time WebSocket Streaming Results
+import { LiveResultsPanel } from '@/components/experiments/LiveResultsPanel';
 
 interface ResultsDashboardProps {
   experimentId: string;
 }
 
-type Tab = 'overview' | 'trends' | 'sample-size' | 'sequential' | 'breakdowns';
+type Tab = 'overview' | 'trends' | 'sample-size' | 'sequential' | 'breakdowns' | 'live';
 
 function LoadingSkeleton() {
   return (
@@ -130,6 +132,7 @@ export function ResultsDashboard({ experimentId }: ResultsDashboardProps) {
 
   const TABS: { id: Tab; label: string }[] = [
     { id: 'overview', label: 'Overview' },
+    { id: 'live', label: '⚡ Live' },
     { id: 'trends', label: 'Trends' },
     { id: 'sample-size', label: 'Sample Size' },
     ...(sequential ? [{ id: 'sequential' as Tab, label: 'Sequential' }] : []),
@@ -166,6 +169,13 @@ export function ResultsDashboard({ experimentId }: ResultsDashboardProps) {
 
       {/* Tab panels */}
       <div id={`panel-${activeTab}`} role="tabpanel">
+        {/* EP-058: Live streaming results panel */}
+        {activeTab === 'live' && (
+          <section aria-label="Live streaming results" data-testid="live-tab-panel">
+            <LiveResultsPanel experimentId={experimentId} />
+          </section>
+        )}
+
         {activeTab === 'overview' && (
           <div className="space-y-8">
             {/* No data guard */}

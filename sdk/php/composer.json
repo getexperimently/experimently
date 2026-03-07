@@ -1,0 +1,38 @@
+{
+    "name": "experimently/experimentation-platform-sdk",
+    "description": "PHP SDK for Experimently A/B testing and feature flag platform",
+    "type": "library",
+    "license": "MIT",
+    "keywords": ["a/b testing", "feature flags", "experimentation", "sdk"],
+    "homepage": "https://github.com/experimently/experimentation-platform",
+    "authors": [
+        {
+            "name": "Experimently",
+            "email": "sdk@experimently.io"
+        }
+    ],
+    "require": {
+        "php": ">=8.0",
+        "ext-json": "*",
+        "ext-curl": "*"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^10.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "ExperimentationPlatform\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "ExperimentationPlatform\\Tests\\": "tests/"
+        }
+    },
+    "config": {
+        "sort-packages": true,
+        "optimize-autoloader": true
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}

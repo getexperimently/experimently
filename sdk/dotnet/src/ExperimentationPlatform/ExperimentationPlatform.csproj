@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFrameworks>netstandard2.1;net6.0</TargetFrameworks>
+    <Nullable>enable</Nullable>
+    <LangVersion>10.0</LangVersion>
+    <PackageId>ExperimentationPlatform.SDK</PackageId>
+    <Version>0.1.0</Version>
+    <Authors>Experimentation Platform Team</Authors>
+    <Description>Official .NET/C# SDK for the Experimentation Platform — A/B testing and feature flag evaluation.</Description>
+    <PackageTags>experimentation;feature-flags;ab-testing;sdk</PackageTags>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+</Project>
