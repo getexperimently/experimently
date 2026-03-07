@@ -53,6 +53,14 @@ from .llm_experiment import (
     LLMEvaluationMetric,
     LLMProvider,
 )
+from .workspace import (
+    Workspace,
+    WorkspaceMember,
+    WorkspaceInvite,
+    WorkspaceAPIKey,
+    WorkspacePlan,
+    WorkspaceMemberRole,
+)
 
 # Explicitly list all models that should be part of the base metadata
 __all__ = [
@@ -113,6 +121,12 @@ __all__ = [
     "LLMTaskType",
     "LLMEvaluationMetric",
     "LLMProvider",
+    "Workspace",
+    "WorkspaceMember",
+    "WorkspaceInvite",
+    "WorkspaceAPIKey",
+    "WorkspacePlan",
+    "WorkspaceMemberRole",
 ]
 
 # Remove or comment out any premature configuration

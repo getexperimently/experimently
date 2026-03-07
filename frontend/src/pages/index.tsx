@@ -24,6 +24,7 @@ export default function Home() {
                   <a href="#compare" className="text-gray-600 hover:text-gray-900 text-sm font-medium transition">Compare</a>
                   <a href="/power-calculator" className="text-gray-600 hover:text-gray-900 text-sm font-medium transition">Power Calculator</a>
                   <a href="/docs" className="text-gray-600 hover:text-gray-900 text-sm font-medium transition">Docs</a>
+                  <a href="/workspaces" className="text-gray-600 hover:text-gray-900 text-sm font-medium transition">Workspaces</a>
                 </div>
               </div>
               <div className="flex items-center gap-4">
@@ -502,6 +503,19 @@ export default function Home() {
                   SAML 2.0 and OIDC/OAuth2 for Okta, Azure AD, Google Workspace, GitHub, and OneLogin. Centralized identity management with role mapping from your IdP groups.
                 </p>
               </div>
+
+              {/* Multi-tenant Workspaces */}
+              <div className="bg-white p-8 rounded-2xl border border-gray-100 hover:shadow-lg hover:border-gray-200 transition">
+                <div className="w-12 h-12 bg-blue-100 rounded-xl flex items-center justify-center mb-6">
+                  <svg className="w-6 h-6 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                  </svg>
+                </div>
+                <h3 className="text-xl font-semibold text-gray-900 mb-3">Multi-tenant Workspaces</h3>
+                <p className="text-gray-600 leading-relaxed">
+                  Isolate experiments and feature flags per team, project, or product area. Each workspace has its own members, scoped API keys, and resource limits. Role hierarchy: OWNER, ADMIN, DEVELOPER, ANALYST, VIEWER.
+                </p>
+              </div>
             </div>
           </div>
         </section>
@@ -754,6 +768,7 @@ enabled = client.is_enabled(
                     ['Self-host in your AWS account', '✅ CDK', '❌ SaaS only', '✅ Docker', '❌', '❌', '❌'],
                     ['Audit Log + SSE Stream', '✅ HMAC-signed', '✅', '✅', '⚠️', '⚠️', '✅'],
                     ['Jira / Salesforce / GitHub', '✅', '⚠️', '⚠️', '❌', '✅', '⚠️ Partial'],
+                    ['Team Workspaces / Project Isolation', '✅ Native (EP-057)', '⚠️ Org-level only', '✅ Organizations', '✅ Projects', '⚠️ Enterprise', '✅'],
                     ['Vendor independence', '✅ Independent', '⚠️ Acquired by Datadog', '✅ Series A', '⚠️ Acquired by OpenAI', '⚠️ PE-backed', '✅'],
                     ['Pricing (entry)', '🎉 Free Preview', '~$42K/yr avg', '$0 → $40/user/mo', 'Free → usage', '$36K+/year', '$0 → $20K+/yr'],
                   ].map(([feature, ...cols], i) => (
@@ -821,6 +836,7 @@ enabled = client.is_enabled(
                   'SOC 2 / ISO 27001 compliance reports',
                   'Full audit log + custom RBAC roles',
                   'Slack + email alerting',
+                  'Multi-tenant workspaces (OWNER / ADMIN / DEVELOPER / ANALYST / VIEWER)',
                 ].map((item, i) => (
                   <div key={i} className="flex items-center gap-3">
                     <svg className="w-5 h-5 text-blue-600 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">

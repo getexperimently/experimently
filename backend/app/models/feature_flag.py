@@ -52,6 +52,14 @@ class FeatureFlag(Base, BaseModel):
     variants = Column(JSONB)  # For multivariate flags
     tags = Column(JSONB)  # For categorization
 
+    # EP-057: Multi-Tenant Workspace isolation (nullable for backwards-compatibility)
+    workspace_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey(f"{get_schema_name()}.workspaces.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
     # Relationships
     owner = relationship("User", back_populates="feature_flags")
     overrides = relationship(

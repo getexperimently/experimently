@@ -35,7 +35,8 @@ except ImportError:
 
 
 # OAuth2 scheme for token authentication
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.API_V1_STR}/auth/token")
+# oauth2_scheme is imported from backend.app.core.security (line 11)
+# Do NOT redefine here — the imported version has auto_error=False in dev mode
 
 # API key header extraction
 API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
@@ -130,8 +131,27 @@ def get_token(request: Request) -> str:
     return token
 
 
+def _get_or_create_dev_user(db: Session) -> User:
+    """Return a local dev admin user when Cognito is not configured."""
+    user = db.query(User).filter(User.username == "dev-admin").first()
+    if not user:
+        user = User(
+            username="dev-admin",
+            email="dev@localhost",
+            full_name="Dev Admin",
+            hashed_password="not-a-real-hash",
+            is_active=True,
+            role=UserRole.ADMIN,
+            is_superuser=True,
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+    return user
+
+
 def get_current_user(
-    token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)
+    token: Optional[str] = Depends(oauth2_scheme), db: Session = Depends(get_db)
 ) -> User:
     """
     Get the current authenticated user from the provided JWT token.
@@ -147,6 +167,15 @@ def get_current_user(
     Raises:
         HTTPException: If authentication fails
     """
+    # Dev mode bypass: when Cognito is not configured, return a local admin
+    import os
+    if not os.environ.get("COGNITO_USER_POOL_ID") or not os.environ.get("COGNITO_CLIENT_ID"):
+        try:
+            return _get_or_create_dev_user(db)
+        except Exception as dev_err:
+            logger.error(f"Dev user creation failed: {dev_err}")
+            raise HTTPException(status_code=500, detail=f"Dev auth error: {dev_err}")
+
     try:
         # Get user details and groups from Cognito
         user_data = auth_service.get_user_with_groups(token)
