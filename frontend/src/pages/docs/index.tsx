@@ -62,6 +62,7 @@ const sections = [
       { label: 'React Native SDK', href: '/docs/sdks/react-native', desc: 'useFlag and useExperiment hooks, Provider, AsyncStorage offline support.' },
       { label: 'MCP Server', href: '/docs/sdks/mcp', desc: 'AI-powered experiment design via Model Context Protocol' },
       { label: 'OpenFeature Provider', href: '/docs/sdks/openfeature', desc: 'CNCF-standard OpenFeature provider for TypeScript and Python — swap vendors without changing app code' },
+      { label: 'Edge SDK', href: '/docs/sdks/edge', desc: 'Sub-millisecond evaluation for Cloudflare Workers, Vercel Edge, and Deno Deploy — zero Node.js dependencies, pure-JS MD5 consistent hash' },
     ],
   },
   {
@@ -85,6 +86,8 @@ const sections = [
       { label: 'AWS', href: '/docs/integrations/aws', desc: 'ECS, Lambda, CloudFront, DynamoDB' },
       { label: 'Data Warehouses', href: '/docs/integrations/warehouses', desc: 'Snowflake, BigQuery, Redshift — warehouse-native analytics' },
       { label: 'Databricks', href: '/docs/integrations/databricks', desc: 'Databricks SQL warehouse connector — read-only analytics via Unity Catalog' },
+      { label: 'ClickHouse', href: '/docs/integrations/clickhouse', desc: 'ClickHouse columnar analytics connector — blazing fast OLAP queries' },
+      { label: 'MySQL', href: '/docs/integrations/mysql', desc: 'MySQL / MariaDB connector — parameterised read-only analytics queries' },
       { label: 'Jira', href: '/docs/integrations/jira', desc: 'Sync experiment status, auto-create issues' },
       { label: 'Salesforce', href: '/docs/integrations/salesforce', desc: 'OAuth2 integration, webhook sync' },
       { label: 'GitHub', href: '/docs/integrations/github', desc: 'HMAC-signed webhooks, PR linking' },
@@ -126,6 +129,16 @@ const sections = [
       { label: 'Warehouse-Native Analytics', href: '/docs/guides/warehouse-analytics', desc: 'Query Snowflake/BigQuery directly' },
       { label: 'No-Code Experiment Builder', href: '/docs/guides/no-code-builder', desc: '5-step visual wizard' },
       { label: 'Interaction Detection', href: '/docs/guides/interaction-detection', desc: 'Detect and handle experiment interactions' },
+    ],
+  },
+  {
+    category: 'Statistics Reference',
+    icon: 'S',
+    description: 'Deep dives into the statistical methods used by the platform.',
+    links: [
+      { label: 'Power Analysis & Sample Size', href: '/docs/statistics/power-analysis', desc: 'Pre-experiment planning: MDE, alpha, power, runtime estimation' },
+      { label: 'Post-Stratification', href: '/docs/statistics/post-stratification', desc: 'Variance reduction using post-experiment stratification' },
+      { label: 'FDR Correction', href: '/docs/statistics/fdr-correction', desc: 'Benjamini-Hochberg false discovery rate correction for multiple metrics' },
     ],
   },
 ];

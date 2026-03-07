@@ -98,3 +98,6 @@ authlib==1.3.0
 
 # EP-041: Databricks Warehouse Connector
 databricks-sql-connector==3.3.0
+
+# EP-048: ClickHouse and MySQL Warehouse Connectors
+clickhouse-connect==0.7.0

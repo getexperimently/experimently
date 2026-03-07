@@ -40,6 +40,7 @@ const SLUG_TO_FILE: Record<string, string> = {
   'sdks/react-native':             'sdk/react-native.md',
   'sdks/mcp':                      'mcp-server.md',
   'sdks/openfeature':              'sdk/openfeature.md',
+  'sdks/edge':                     'sdk/edge.md',
 
   // API Reference
   'api-reference/auth':            'api/auth.md',
@@ -57,6 +58,8 @@ const SLUG_TO_FILE: Record<string, string> = {
   'integrations/aws':              'integrations/aws.md',
   'integrations/warehouses':       'api/warehouse-analytics.md',
   'integrations/databricks':       'warehouse/databricks.md',
+  'integrations/clickhouse':       'warehouse/clickhouse.md',
+  'integrations/mysql':            'warehouse/mysql.md',
   'integrations/jira':             'api/integrations.md',
   'integrations/salesforce':       'integrations/salesforce.md',
   'integrations/github':           'integrations/github.md',
@@ -89,6 +92,9 @@ const SLUG_TO_FILE: Record<string, string> = {
   // EP-043: Post-Stratification & BH FDR Correction
   'statistics/post-stratification': 'statistics/post-stratification.md',
   'statistics/fdr-correction':      'statistics/fdr-correction.md',
+
+  // EP-056: Pre-Experiment Power Analysis
+  'statistics/power-analysis':      'statistics/power-analysis.md',
 };
 
 const SLUG_TITLES: Record<string, string> = {
@@ -108,6 +114,7 @@ const SLUG_TITLES: Record<string, string> = {
   'experiments/exclusion': 'Mutual Exclusion Groups',
   'statistics/post-stratification': 'Post-Stratification Variance Reduction',
   'statistics/fdr-correction': 'Benjamini-Hochberg FDR Correction',
+  'statistics/power-analysis': 'Statistical Power Analysis',
   'sdks/javascript': 'JavaScript SDK',
   'sdks/python': 'Python SDK',
   'sdks/java': 'Java SDK',
@@ -119,6 +126,7 @@ const SLUG_TITLES: Record<string, string> = {
   'sdks/react-native': 'React Native SDK',
   'sdks/mcp': 'MCP Server',
   'sdks/openfeature': 'OpenFeature Provider',
+  'sdks/edge': 'Edge SDK (Cloudflare / Vercel / Deno)',
   'auth/sso': 'Enterprise SSO / SAML',
   'api-reference/auth': 'Authentication',
   'api-reference/experiments': 'Experiments API',
@@ -176,6 +184,7 @@ const FILE_TO_SLUG: Record<string, string> = {
   'sdk/react-native.md':                  'sdks/react-native',
   'mcp-server.md':                        'sdks/mcp',
   'sdk/openfeature.md':                   'sdks/openfeature',
+  'sdk/edge.md':                          'sdks/edge',
   'auth/sso.md':                          'auth/sso',
   'api/auth.md':                          'api-reference/auth',
   'api/endpoints.md':                     'api-reference/endpoints',
