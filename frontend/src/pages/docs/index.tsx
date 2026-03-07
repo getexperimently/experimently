@@ -141,6 +141,15 @@ const sections = [
       { label: 'FDR Correction', href: '/docs/statistics/fdr-correction', desc: 'Benjamini-Hochberg false discovery rate correction for multiple metrics' },
     ],
   },
+  {
+    category: 'Team Workspaces',
+    icon: 'W',
+    description: 'Isolate experiments and feature flags per team, project, or product area with role-based access control.',
+    links: [
+      { label: 'Workspace Overview', href: '/docs/workspaces/overview', desc: 'Role hierarchy (OWNER → VIEWER), plan limits, scoped API keys' },
+      { label: 'Quickstart', href: '/docs/workspaces/quickstart', desc: 'Create a workspace, invite your team, and generate a scoped API key' },
+    ],
+  },
 ];
 
 const quickLinks = [
