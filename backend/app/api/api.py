@@ -41,10 +41,14 @@ from backend.app.api.v1.endpoints import (
     integrations,
     sso,
     warehouse_databricks,
+    warehouse_clickhouse,
+    warehouse_mysql,
     post_stratification,
     openfeature,
     llm_experiments,
     llm_proxy,
+    power_calculator,
+    edge,
 )
 
 # Import the sample size calculator router
@@ -177,6 +181,16 @@ api_router_v1.include_router(
     warehouse_databricks.router, prefix="/warehouse/databricks", tags=["Warehouse"]
 )
 
+# EP-048: ClickHouse Warehouse Connector
+api_router_v1.include_router(
+    warehouse_clickhouse.router, prefix="/warehouse/clickhouse", tags=["Warehouse"]
+)
+
+# EP-048: MySQL Warehouse Connector
+api_router_v1.include_router(
+    warehouse_mysql.router, prefix="/warehouse/mysql", tags=["Warehouse"]
+)
+
 # EP-043: Post-Stratification & Benjamini-Hochberg FDR Correction
 api_router_v1.include_router(
     post_stratification.router, prefix="/results", tags=["Results"]
@@ -195,6 +209,16 @@ api_router_v1.include_router(
     llm_proxy.router, prefix="/llm-experiments", tags=["LLM Proxy"]
 )
 
+# EP-056: Pre-Experiment Power Calculator & MDE Estimator
+api_router_v1.include_router(
+    power_calculator.router, prefix="/power", tags=["Power Calculator"]
+)
+
+# EP-047: Edge SDK bootstrap endpoint (Cloudflare Workers / Vercel Edge / Deno Deploy)
+api_router_v1.include_router(
+    edge.router, prefix="/edge", tags=["Edge"]
+)
+
 # Main API router that includes versioned routers
 api_router = APIRouter()
 api_router.include_router(api_router_v1)
@@ -204,6 +228,14 @@ tags_metadata = [
     {
         "name": "Authentication",
         "description": "Operations for user authentication, registration and token management",
+    },
+    {
+        "name": "Power Calculator",
+        "description": (
+            "Pre-experiment statistical power analysis: sample size computation, "
+            "MDE estimation, runtime estimation, power curves, and AI-enhanced "
+            "planning advice. No authentication required."
+        ),
     },
     {
         "name": "Users",
