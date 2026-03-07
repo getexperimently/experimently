@@ -464,6 +464,15 @@ class TestAppStartup:
             "No /power/* paths in OpenAPI schema — power calculator router not registered"
         )
 
+    def test_openapi_schema_includes_workspaces(self, client):
+        """Verify EP-057 workspace endpoints are wired into the schema."""
+        from backend.app.core.config import settings
+        resp = client.get(f"{settings.API_V1_STR}/openapi.json")
+        paths = resp.json().get("paths", {})
+        assert any("/workspaces" in p for p in paths), (
+            "Workspace router not registered — EP-057 endpoints missing from OpenAPI schema"
+        )
+
     def test_settings_loads_without_exception(self):
         """Config must be importable without crashing."""
         from backend.app.core.config import settings

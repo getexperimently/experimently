@@ -95,6 +95,10 @@ const SLUG_TO_FILE: Record<string, string> = {
 
   // EP-056: Pre-Experiment Power Analysis
   'statistics/power-analysis':      'statistics/power-analysis.md',
+
+  // EP-057: Multi-Tenant Team Workspaces
+  'workspaces/overview':            'workspaces/overview.md',
+  'workspaces/quickstart':          'workspaces/quickstart.md',
 };
 
 const SLUG_TITLES: Record<string, string> = {
@@ -115,6 +119,8 @@ const SLUG_TITLES: Record<string, string> = {
   'statistics/post-stratification': 'Post-Stratification Variance Reduction',
   'statistics/fdr-correction': 'Benjamini-Hochberg FDR Correction',
   'statistics/power-analysis': 'Statistical Power Analysis',
+  'workspaces/overview': 'Team Workspaces — Overview',
+  'workspaces/quickstart': 'Team Workspaces — Quickstart',
   'sdks/javascript': 'JavaScript SDK',
   'sdks/python': 'Python SDK',
   'sdks/java': 'Java SDK',
@@ -206,6 +212,8 @@ const FILE_TO_SLUG: Record<string, string> = {
   'api/bayesian.md':                      'guides/bayesian',
   'guides/experiment-wizard.md':          'guides/no-code-builder',
   'api/interaction-detection.md':         'guides/interaction-detection',
+  'workspaces/overview.md':              'workspaces/overview',
+  'workspaces/quickstart.md':            'workspaces/quickstart',
 };
 
 function resolveHref(href: string, currentFile: string): string {

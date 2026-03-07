@@ -49,6 +49,7 @@ from backend.app.api.v1.endpoints import (
     llm_proxy,
     power_calculator,
     edge,
+    workspaces,
 )
 
 # Import the sample size calculator router
@@ -219,6 +220,11 @@ api_router_v1.include_router(
     edge.router, prefix="/edge", tags=["Edge"]
 )
 
+# EP-057: Multi-Tenant Team Workspaces
+api_router_v1.include_router(
+    workspaces.router, prefix="/workspaces", tags=["Workspaces"]
+)
+
 # Main API router that includes versioned routers
 api_router = APIRouter()
 api_router.include_router(api_router_v1)
@@ -355,6 +361,14 @@ tags_metadata = [
             "SOC 2 Type 2 / ISO 27001 compliance audit trail. "
             "HMAC-signed, append-only events with configurable retention. "
             "Accessible to ADMIN and ANALYST roles only."
+        ),
+    },
+    {
+        "name": "Workspaces",
+        "description": (
+            "EP-057: Multi-Tenant Team Workspaces — create isolated project namespaces, "
+            "manage team memberships with role-based access (OWNER/ADMIN/DEVELOPER/ANALYST/VIEWER), "
+            "send and accept email invites, and issue scoped workspace API keys."
         ),
     },
 ]

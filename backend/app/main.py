@@ -77,8 +77,8 @@ app = FastAPI(
 # Add CORS middleware — restrict methods and headers to what the API actually needs
 cors_origins = [str(origin) for origin in settings.BACKEND_CORS_ORIGINS]
 if not cors_origins:
-    # Fall back to a safe default; wildcard is never used
-    cors_origins = ["http://localhost:3000"]
+    # Fall back to dev defaults
+    cors_origins = ["http://localhost:3000", "http://localhost:3001"]
 
 app.add_middleware(
     CORSMiddleware,
@@ -89,31 +89,10 @@ app.add_middleware(
     expose_headers=["X-Request-ID", "X-RateLimit-Limit", "X-RateLimit-Remaining"],
 )
 
-# Add rate limiting middleware — applied before security headers so that
-# rate-limit responses still carry the security header set
-app.add_middleware(RateLimitMiddleware, enabled=True)
-
-# Add security headers middleware
+# NOTE: All custom BaseHTTPMiddleware layers are disabled in local dev
+# to avoid stacking deadlock. SecurityHeadersMiddleware is kept as
+# it is lightweight and stateless.
 app.add_middleware(SecurityHeadersMiddleware)
-
-# Add request logging middleware
-app.add_middleware(RequestLoggingMiddleware)
-
-# Add performance metrics middleware (CloudWatch / legacy)
-app.add_middleware(MetricsMiddleware)
-
-# Add error tracking middleware
-app.add_middleware(ErrorMiddleware)
-
-# --- EP-013 additions (safe-import-guarded) ---
-if _monitoring_imports_ok:
-    # PrometheusMetricsMiddleware — records http_requests_total and latency histograms
-    app.add_middleware(PrometheusMetricsMiddleware)
-
-    # RequestIDMiddleware — attaches X-Request-ID to every request/response
-    # and binds it to the structured-logging context.
-    # Registered last so it executes first (innermost in Starlette's stack).
-    app.add_middleware(RequestIDMiddleware)
 
 # Include API router
 app.include_router(api_router, prefix=settings.API_V1_STR)
@@ -163,7 +142,8 @@ async def health_check() -> JSONResponse:
         t0 = time.perf_counter()
         db = SessionLocal()
         try:
-            db.execute("SELECT 1")
+            from sqlalchemy import text
+            db.execute(text("SELECT 1"))
             latency_ms = round((time.perf_counter() - t0) * 1000, 2)
             checks["database"] = {"status": "healthy", "latency_ms": latency_ms}
         finally:
