@@ -72,6 +72,12 @@ class Settings(BaseSettings):
     AUDIT_RETENTION_DAYS_SOC2: int = 365    # 12 months
     AUDIT_RETENTION_DAYS_ISO27001: int = 730  # 24 months
 
+    # EP-050: HIPAA Compliance settings
+    PHI_ENCRYPTION_KEY: Optional[str] = None
+    HIPAA_ENABLED: bool = False
+    HIPAA_ALLOWED_REGIONS: List[str] = ["us-east-1", "us-west-2"]
+    HIPAA_AUDIT_LOG_RETENTION_YEARS: int = 6
+
     # Glue / ETL settings (P3-A)
     GLUE_ETL_JOB_NAME: str = "experimentation-events-etl"
     GLUE_METRICS_JOB_NAME: str = "experimentation-metrics-etl"
