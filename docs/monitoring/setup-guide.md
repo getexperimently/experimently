@@ -6,7 +6,7 @@ This guide provides detailed instructions for setting up the monitoring and erro
 
 - AWS CLI installed and configured
 - AWS account with appropriate permissions
-- Python 3.9+ environment
+- Python 3.11+ environment
 
 ## Initial Setup
 

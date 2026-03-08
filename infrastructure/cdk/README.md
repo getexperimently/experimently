@@ -6,7 +6,7 @@ This directory contains AWS CDK code for deploying the experimentation platform 
 
 - AWS CLI configured with appropriate credentials
 - Node.js 14.x or later
-- Python 3.9 or later
+- Python 3.11 or later
 - AWS CDK Toolkit installed globally: `npm install -g aws-cdk`
 
 ## Getting Started

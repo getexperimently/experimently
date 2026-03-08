@@ -7,6 +7,13 @@ This module sets up fixtures and configuration for pytest.
 import pytest
 import os
 import logging
+
+# Set Cognito env vars BEFORE importing the app so that
+# oauth2_scheme.auto_error=True (security.py reads these at import time).
+# Without this, unauthenticated requests return 500 instead of 401.
+os.environ.setdefault("COGNITO_USER_POOL_ID", "test-pool-id")
+os.environ.setdefault("COGNITO_CLIENT_ID", "test-client-id")
+
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 from sqlalchemy import event as sa_event
@@ -345,19 +352,21 @@ def client(db_session, monkeypatch):
         mock_decode_token
     )
 
-    # Create a superuser for authentication
-    user = User(
-        username="test_user",
-        email="test@example.com",
-        full_name="Test User",
-        hashed_password="$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW",
-        is_active=True,
-        is_superuser=True,
-        role=UserRole.ADMIN
-    )
-    db_session.add(user)
-    db_session.commit()
-    db_session.refresh(user)
+    # Get or create a superuser for authentication
+    user = db_session.query(User).filter(User.email == "test@example.com").first()
+    if not user:
+        user = User(
+            username="test_user",
+            email="test@example.com",
+            full_name="Test User",
+            hashed_password="$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW",
+            is_active=True,
+            is_superuser=True,
+            role=UserRole.ADMIN
+        )
+        db_session.add(user)
+        db_session.commit()
+        db_session.refresh(user)
 
     # Create both sync and async return functions for user
     async def override_get_current_user():
@@ -400,36 +409,40 @@ def client(db_session, monkeypatch):
 @pytest.fixture
 def normal_user(db_session):
     """Create a normal user for testing."""
-    user = User(
-        username="testuser",
-        email="testuser@example.com",
-        full_name="Test User",
-        hashed_password="$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW",
-        is_active=True,
-        is_superuser=False,
-        role=UserRole.DEVELOPER,
-    )
-    db_session.add(user)
-    db_session.commit()
-    db_session.refresh(user)
+    user = db_session.query(User).filter(User.email == "testuser@example.com").first()
+    if not user:
+        user = User(
+            username="testuser",
+            email="testuser@example.com",
+            full_name="Test User",
+            hashed_password="$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW",
+            is_active=True,
+            is_superuser=False,
+            role=UserRole.DEVELOPER,
+        )
+        db_session.add(user)
+        db_session.commit()
+        db_session.refresh(user)
     return user
 
 
 @pytest.fixture
 def superuser(db_session):
     """Create a superuser for testing."""
-    user = User(
-        username="admin",
-        email="admin@example.com",
-        full_name="Admin User",
-        hashed_password="$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW",
-        is_active=True,
-        is_superuser=True,
-        role=UserRole.ADMIN,
-    )
-    db_session.add(user)
-    db_session.commit()
-    db_session.refresh(user)
+    user = db_session.query(User).filter(User.email == "admin@example.com").first()
+    if not user:
+        user = User(
+            username="admin",
+            email="admin@example.com",
+            full_name="Admin User",
+            hashed_password="$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW",
+            is_active=True,
+            is_superuser=True,
+            role=UserRole.ADMIN,
+        )
+        db_session.add(user)
+        db_session.commit()
+        db_session.refresh(user)
     return user
 
 

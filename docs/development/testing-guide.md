@@ -25,7 +25,7 @@ The platform uses a multi-layer testing strategy:
 
 ### Prerequisites
 
-- Python 3.9+, virtualenv
+- Python 3.11+, virtualenv
 - PostgreSQL (via Docker)
 - Node.js 18+ (for frontend tests)
 

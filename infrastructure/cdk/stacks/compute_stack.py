@@ -61,7 +61,7 @@ class ComputeStack(Stack):
         self.assignment_lambda = lambda_.Function(
             self,
             "AssignmentLambda",
-            runtime=lambda_.Runtime.PYTHON_3_9,
+            runtime=lambda_.Runtime.PYTHON_3_11,
             code=lambda_.Code.from_inline(
                 "def handler(event, context):\n"
                 "    return {\n"
@@ -82,7 +82,7 @@ class ComputeStack(Stack):
         self.event_processor_lambda = lambda_.Function(
             self,
             "EventProcessorLambda",
-            runtime=lambda_.Runtime.PYTHON_3_9,
+            runtime=lambda_.Runtime.PYTHON_3_11,
             code=lambda_.Code.from_inline(
                 "def handler(event, context):\n"
                 "    return {\n"
@@ -103,7 +103,7 @@ class ComputeStack(Stack):
         self.feature_flag_lambda = lambda_.Function(
             self,
             "FeatureFlagLambda",
-            runtime=lambda_.Runtime.PYTHON_3_9,
+            runtime=lambda_.Runtime.PYTHON_3_11,
             code=lambda_.Code.from_inline(
                 "def handler(event, context):\n"
                 "    return {\n"
@@ -167,7 +167,7 @@ class ComputeStack(Stack):
         self.db_access_lambda = lambda_.Function(
             self,
             "DatabaseAccessLambda",
-            runtime=lambda_.Runtime.PYTHON_3_9,
+            runtime=lambda_.Runtime.PYTHON_3_11,
             code=lambda_.Code.from_inline(
                 "def handler(event, context):\n"
                 "    # This is a simplified placeholder\n"

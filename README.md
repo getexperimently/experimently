@@ -56,7 +56,7 @@ Built using modern, scalable architecture leveraging AWS services:
 - **Analytics**: Kinesis → Lambda → OpenSearch pipeline
 - **Infrastructure**: AWS CDK for infrastructure as code
 
-**Technology Stack**: Python 3.9+, FastAPI, SQLAlchemy, Pydantic v2, Next.js, React, TypeScript, PostgreSQL, Redis
+**Technology Stack**: Python 3.11+, FastAPI, SQLAlchemy, Pydantic v2, Next.js, React, TypeScript, PostgreSQL, Redis
 
 [View Architecture Details →](public-preview/architecture/system-overview.md)
 
