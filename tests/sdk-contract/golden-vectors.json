@@ -1,0 +1,101 @@
+{
+  "description": "Cross-SDK contract test vectors for consistent hashing. All SDKs MUST produce identical results for these inputs.",
+  "algorithm": {
+    "name": "MD5 consistent hash",
+    "steps": [
+      "1. Concatenate: '{userId}:{flagKey}'",
+      "2. UTF-8 encode the string",
+      "3. Compute MD5 digest (16 bytes)",
+      "4. Read first 4 bytes as LITTLE-ENDIAN unsigned 32-bit integer",
+      "5. Divide by 2^32 (4294967296) to normalize to [0.0, 1.0)"
+    ],
+    "divisor": 4294967296
+  },
+  "hash_vectors": [
+    {
+      "user_id": "user-123",
+      "flag_key": "my-flag",
+      "md5_hex": "43bc57b1e81dec71c5242122ac05170f",
+      "expected_hash": 0.6927449859213084,
+      "description": "Primary cross-SDK verification vector"
+    },
+    {
+      "user_id": "alice",
+      "flag_key": "dark-mode",
+      "md5_hex": "f2150f094734044dddc127979b83d1b7",
+      "expected_hash": 0.0353864398784935,
+      "description": "Low hash value — included in 5%+ rollouts"
+    },
+    {
+      "user_id": "bob",
+      "flag_key": "new-checkout",
+      "md5_hex": "e56f7625d1ccdac011abaca72825985f",
+      "expected_hash": 0.1463384565431625,
+      "description": "Mid-low hash value"
+    },
+    {
+      "user_id": "user-789",
+      "flag_key": "beta-feature",
+      "md5_hex": "646b3c5041958294b798761b39d85ab0",
+      "expected_hash": 0.3134219283238053,
+      "description": "Mid-range hash value"
+    },
+    {
+      "user_id": "test-user",
+      "flag_key": "flag-key",
+      "md5_hex": "06f409feb98b04ab76e23da04b2627ff",
+      "expected_hash": 0.9923393740318716,
+      "description": "High hash value — excluded from most rollouts"
+    },
+    {
+      "user_id": "",
+      "flag_key": "empty-user",
+      "md5_hex": "0f85b75b4a0156aab6f5ce3bdf517dbf",
+      "expected_hash": 0.3582690393086523,
+      "description": "Empty user ID edge case"
+    },
+    {
+      "user_id": "a",
+      "flag_key": "b",
+      "md5_hex": "d8160c9b3dc20d4e931aeb4f45262155",
+      "expected_hash": 0.6056532170623541,
+      "description": "Minimal single-char inputs"
+    },
+    {
+      "user_id": "user-001",
+      "flag_key": "exp-abc",
+      "md5_hex": "3e2fc3c61a5407cf720f2b690a60af19",
+      "expected_hash": 0.7764157797209918,
+      "description": "Experiment assignment vector 1"
+    },
+    {
+      "user_id": "user-002",
+      "flag_key": "exp-abc",
+      "md5_hex": "08d36a2426879a6777c21cc69cf320b2",
+      "expected_hash": 0.1422550100833178,
+      "description": "Experiment assignment vector 2 — same experiment, different user"
+    }
+  ],
+  "rollout_vectors": [
+    {
+      "user_id": "alice",
+      "flag_key": "dark-mode",
+      "expected_hash": 0.0353864398784935,
+      "rollout_3_percent": false,
+      "rollout_5_percent": true,
+      "rollout_50_percent": true,
+      "rollout_100_percent": true,
+      "description": "Alice's hash is ~3.5%, so included in 5%+ but not 3%"
+    },
+    {
+      "user_id": "test-user",
+      "flag_key": "flag-key",
+      "expected_hash": 0.9923393740318716,
+      "rollout_3_percent": false,
+      "rollout_5_percent": false,
+      "rollout_50_percent": false,
+      "rollout_100_percent": true,
+      "description": "test-user has very high hash — only included at 100%"
+    }
+  ]
+}

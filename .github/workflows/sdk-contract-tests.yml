@@ -1,0 +1,47 @@
+name: SDK Contract Tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tests/sdk-contract/**'
+      - 'sdk/**'
+      - 'backend/lambda/shared/consistent_hash.py'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'tests/sdk-contract/**'
+      - 'sdk/**'
+      - 'backend/lambda/shared/consistent_hash.py'
+
+jobs:
+  python-contract:
+    name: Python SDK Contract Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install pytest
+
+      - name: Run contract tests
+        run: python -m pytest tests/sdk-contract/test_python_sdk.py -v
+
+  javascript-contract:
+    name: JavaScript SDK Contract Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Run contract tests
+        run: node tests/sdk-contract/test_js_sdk.js
