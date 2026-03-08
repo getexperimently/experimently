@@ -22,17 +22,19 @@ from backend.app.core.config import settings
 @pytest.fixture
 def viewer_user(db_session):
     """Create a viewer user for testing."""
-    user = User(
-        username="testviewer",
-        email="viewer@example.com",
-        hashed_password="fakehashedpassword",
-        full_name="Test Viewer",
-        is_active=True,
-        is_superuser=False,
-    )
-    db_session.add(user)
-    db_session.commit()
-    db_session.refresh(user)
+    user = db_session.query(User).filter(User.email == "viewer@example.com").first()
+    if not user:
+        user = User(
+            username="testviewer",
+            email="viewer@example.com",
+            hashed_password="fakehashedpassword",
+            full_name="Test Viewer",
+            is_active=True,
+            is_superuser=False,
+        )
+        db_session.add(user)
+        db_session.commit()
+        db_session.refresh(user)
     return user
 
 

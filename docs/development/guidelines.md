@@ -18,7 +18,7 @@ This document outlines the development standards, workflows, and best practices 
 
 ### Prerequisites
 
--   Python 3.9+
+-   Python 3.11+
 -   Node.js 16+
 -   Docker and Docker Compose
 -   AWS CLI v2

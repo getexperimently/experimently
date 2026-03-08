@@ -968,7 +968,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
-        with: { python-version: '3.9' }
+        with: { python-version: '3.11' }
       - run: pip install -r backend/requirements.txt
       - name: Run migrations
         run: python -m alembic -c app/db/alembic.ini upgrade head
