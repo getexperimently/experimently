@@ -504,3 +504,158 @@ class TestAppStartup:
             + "\n".join(f"  {k}: registered {v}x" for k, v in duplicates.items()) +
             "\nA router may be included twice in api.py — the first registration silently wins."
         )
+
+
+# ===========================================================================
+# 6. Service imports — critical services import without errors
+# ===========================================================================
+
+class TestServiceImports:
+    """
+    Verify that all critical services can be imported without errors.
+    Catches missing dependencies, circular imports, or broken module structure
+    that only surfaces at import time.
+    """
+
+    def test_bayesian_service_imports(self):
+        from backend.app.services.bayesian_service import BayesianService, compute_posterior
+        assert BayesianService is not None
+
+    def test_cuped_service_imports(self):
+        from backend.app.services.cuped_service import CupedService
+        assert CupedService is not None
+
+    def test_sequential_testing_service_imports(self):
+        from backend.app.services.sequential_testing_service import SequentialTestingService
+        assert SequentialTestingService is not None
+
+    def test_bandit_service_imports(self):
+        from backend.app.services.bandit_service import ThompsonSampling, UCB1, EpsilonGreedy
+        assert ThompsonSampling is not None
+        assert UCB1 is not None
+        assert EpsilonGreedy is not None
+
+    def test_llm_experiment_service_imports(self):
+        from backend.app.services.llm_experiment_service import LLMExperimentService
+        assert LLMExperimentService is not None
+
+    def test_llm_analytics_service_imports(self):
+        from backend.app.services.llm_analytics_service import LLMEvaluationAnalyticsService
+        assert LLMEvaluationAnalyticsService is not None
+
+    def test_llm_proxy_service_imports(self):
+        from backend.app.services.llm_proxy_service import LLMProxyService, estimate_cost
+        assert LLMProxyService is not None
+
+    def test_workspace_service_imports(self):
+        from backend.app.services.workspace_service import WorkspaceService
+        assert WorkspaceService is not None
+
+
+# ===========================================================================
+# 7. Model imports — critical models import and have expected structure
+# ===========================================================================
+
+class TestModelImports:
+    """
+    Verify that new feature models import cleanly and have the expected
+    table names and column structure.
+    """
+
+    def test_llm_experiment_model_table_name(self):
+        from backend.app.models.llm_experiment import LLMExperiment
+        assert LLMExperiment.__tablename__ == "llm_experiments"
+
+    def test_llm_variant_model_table_name(self):
+        from backend.app.models.llm_experiment import LLMVariant
+        assert LLMVariant.__tablename__ == "llm_variants"
+
+    def test_llm_evaluation_model_table_name(self):
+        from backend.app.models.llm_experiment import LLMEvaluation
+        assert LLMEvaluation.__tablename__ == "llm_evaluations"
+
+    def test_workspace_model_table_name(self):
+        from backend.app.models.workspace import Workspace
+        assert Workspace.__tablename__ == "workspaces"
+
+    def test_workspace_member_model_table_name(self):
+        from backend.app.models.workspace import WorkspaceMember
+        assert WorkspaceMember.__tablename__ == "workspace_members"
+
+    def test_llm_experiment_enums_exist(self):
+        from backend.app.models.llm_experiment import (
+            LLMExperimentStatus,
+            LLMTaskType,
+            LLMEvaluationMetric,
+            LLMProvider,
+        )
+        assert len(LLMExperimentStatus) >= 4
+        assert len(LLMTaskType) >= 4
+        assert len(LLMProvider) >= 4
+
+    def test_workspace_enums_exist(self):
+        from backend.app.models.workspace import WorkspacePlan, WorkspaceMemberRole
+        assert len(WorkspacePlan) >= 3
+        assert len(WorkspaceMemberRole) >= 5
+
+
+# ===========================================================================
+# 8. OpenAPI schema — new feature endpoints registered
+# ===========================================================================
+
+class TestNewFeatureEndpoints:
+    """
+    Verify that endpoints from recent epics are registered in the OpenAPI
+    schema. These checks complement the TestAppStartup checks above with
+    more specific endpoint validation.
+    """
+
+    def test_openapi_schema_includes_bandit(self, client):
+        """Verify MAB/bandit endpoints are wired (Bayesian served via results)."""
+        from backend.app.core.config import settings
+        resp = client.get(f"{settings.API_V1_STR}/openapi.json")
+        paths = resp.json().get("paths", {})
+        bandit_paths = [p for p in paths if "bandit" in p.lower()]
+        assert bandit_paths, (
+            "No /bandit/* paths in OpenAPI schema — MAB router not registered"
+        )
+
+    def test_openapi_schema_includes_sequential_testing(self, client):
+        """Verify EP-021 sequential testing endpoints are wired."""
+        from backend.app.core.config import settings
+        resp = client.get(f"{settings.API_V1_STR}/openapi.json")
+        paths = resp.json().get("paths", {})
+        seq_paths = [p for p in paths if "sequential" in p.lower()]
+        assert seq_paths, (
+            "No sequential testing paths in OpenAPI schema — EP-021 router not registered"
+        )
+
+    def test_openapi_schema_includes_cuped(self, client):
+        """Verify CUPED variance reduction endpoints are wired."""
+        from backend.app.core.config import settings
+        resp = client.get(f"{settings.API_V1_STR}/openapi.json")
+        paths = resp.json().get("paths", {})
+        cuped_paths = [p for p in paths if "cuped" in p.lower()]
+        assert cuped_paths, (
+            "No CUPED paths in OpenAPI schema — variance reduction router not registered"
+        )
+
+    def test_openapi_schema_includes_compliance(self, client):
+        """Verify EP-033 compliance audit endpoints are wired."""
+        from backend.app.core.config import settings
+        resp = client.get(f"{settings.API_V1_STR}/openapi.json")
+        paths = resp.json().get("paths", {})
+        compliance_paths = [p for p in paths if "compliance" in p.lower() or "audit" in p.lower()]
+        assert compliance_paths, (
+            "No compliance/audit paths in OpenAPI schema — EP-033 router not registered"
+        )
+
+    def test_openapi_schema_includes_integrations(self, client):
+        """Verify EP-034 third-party integration endpoints are wired."""
+        from backend.app.core.config import settings
+        resp = client.get(f"{settings.API_V1_STR}/openapi.json")
+        paths = resp.json().get("paths", {})
+        int_paths = [p for p in paths if "integration" in p.lower()]
+        assert int_paths, (
+            "No integration paths in OpenAPI schema — EP-034 router not registered"
+        )
