@@ -969,7 +969,7 @@ enabled = client.is_enabled(
                   <li><a href="/docs/integrations/warehouses" className="hover:text-white transition">Integrations</a></li>
                   <li><a href="/docs/security/soc2" className="hover:text-white transition">Security &amp; Compliance</a></li>
                   <li><a href="/docs/self-hosting/cdk" className="hover:text-white transition">Self-Hosting</a></li>
-                  <li><a href="/docs/changelog" className="hover:text-white transition">Changelog</a></li>
+                  <li><a href="https://github.com/amarkanday/experimentation-platform/releases" target="_blank" rel="noopener noreferrer" className="hover:text-white transition">Changelog</a></li>
                 </ul>
               </div>
 
@@ -996,19 +996,19 @@ enabled = client.is_enabled(
               <div>
                 <h4 className="font-semibold text-white mb-4">Company</h4>
                 <ul className="space-y-3 text-gray-400">
-                  <li><a href="#about" className="hover:text-white transition">About</a></li>
+                  <li><a href="/#about" className="hover:text-white transition">About</a></li>
                   <li><a href="mailto:hello@getexperimently.com" className="hover:text-white transition">Contact</a></li>
-                  <li><a href="#" className="hover:text-white transition">Careers</a></li>
-                  <li><a href="#" className="hover:text-white transition">Blog</a></li>
+                  <li><a href="https://github.com/amarkanday/experimentation-platform" target="_blank" rel="noopener noreferrer" className="hover:text-white transition">GitHub</a></li>
+                  <li><a href="https://github.com/amarkanday/experimentation-platform/discussions" target="_blank" rel="noopener noreferrer" className="hover:text-white transition">Blog</a></li>
                 </ul>
               </div>
 
               <div>
                 <h4 className="font-semibold text-white mb-4">Legal</h4>
                 <ul className="space-y-3 text-gray-400">
-                  <li><a href="#" className="hover:text-white transition">Privacy</a></li>
-                  <li><a href="#" className="hover:text-white transition">Terms</a></li>
-                  <li><a href="#" className="hover:text-white transition">Security</a></li>
+                  <li><a href="mailto:privacy@getexperimently.com" className="hover:text-white transition">Privacy</a></li>
+                  <li><a href="mailto:legal@getexperimently.com" className="hover:text-white transition">Terms</a></li>
+                  <li><a href="/docs/security/soc2" className="hover:text-white transition">Security</a></li>
                   <li><a href="mailto:support@getexperimently.com" className="hover:text-white transition">Support</a></li>
                 </ul>
               </div>

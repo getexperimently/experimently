@@ -41,6 +41,10 @@ const SLUG_TO_FILE: Record<string, string> = {
   'sdks/mcp':                      'mcp-server.md',
   'sdks/openfeature':              'sdk/openfeature.md',
   'sdks/edge':                     'sdk/edge.md',
+  'sdks/ruby':                     'sdk/ruby.md',
+  'sdks/php':                      'sdk/php.md',
+  'sdks/dotnet':                   'sdk/dotnet.md',
+  'sdks/elixir':                   'sdk/elixir.md',
 
   // API Reference
   'api-reference/auth':            'api/auth.md',
@@ -99,6 +103,13 @@ const SLUG_TO_FILE: Record<string, string> = {
   // EP-057: Multi-Tenant Team Workspaces
   'workspaces/overview':            'workspaces/overview.md',
   'workspaces/quickstart':          'workspaces/quickstart.md',
+
+  // EP-050: HIPAA Compliance
+  'hipaa/overview':                 'hipaa/overview.md',
+
+  // EP-058: WebSocket Streaming
+  'websocket-streaming':            'websocket-streaming.md',
+  'experiments/live-streaming':     'websocket-streaming.md',
 };
 
 const SLUG_TITLES: Record<string, string> = {
@@ -133,6 +144,13 @@ const SLUG_TITLES: Record<string, string> = {
   'sdks/mcp': 'MCP Server',
   'sdks/openfeature': 'OpenFeature Provider',
   'sdks/edge': 'Edge SDK (Cloudflare / Vercel / Deno)',
+  'sdks/ruby': 'Ruby SDK',
+  'sdks/php': 'PHP SDK',
+  'sdks/dotnet': '.NET SDK',
+  'sdks/elixir': 'Elixir SDK',
+  'hipaa/overview': 'HIPAA Compliance',
+  'websocket-streaming': 'Live Results Streaming (WebSocket)',
+  'experiments/live-streaming': 'Live Results Streaming (WebSocket)',
   'auth/sso': 'Enterprise SSO / SAML',
   'api-reference/auth': 'Authentication',
   'api-reference/experiments': 'Experiments API',
@@ -191,6 +209,12 @@ const FILE_TO_SLUG: Record<string, string> = {
   'mcp-server.md':                        'sdks/mcp',
   'sdk/openfeature.md':                   'sdks/openfeature',
   'sdk/edge.md':                          'sdks/edge',
+  'sdk/ruby.md':                          'sdks/ruby',
+  'sdk/php.md':                           'sdks/php',
+  'sdk/dotnet.md':                        'sdks/dotnet',
+  'sdk/elixir.md':                        'sdks/elixir',
+  'hipaa/overview.md':                    'hipaa/overview',
+  'websocket-streaming.md':               'websocket-streaming',
   'auth/sso.md':                          'auth/sso',
   'api/auth.md':                          'api-reference/auth',
   'api/endpoints.md':                     'api-reference/endpoints',
