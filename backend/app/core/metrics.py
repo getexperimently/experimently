@@ -59,6 +59,22 @@ cache_misses_total: Counter = Counter(
     ["cache_type"],
 )
 
+# ---------------------------------------------------------------------------
+# Rate limiting metrics
+# ---------------------------------------------------------------------------
+
+rate_limit_hits_total: Counter = Counter(
+    "rate_limit_hits_total",
+    "Total requests checked by the rate limiter",
+    ["endpoint"],
+)
+
+rate_limit_rejections_total: Counter = Counter(
+    "rate_limit_rejections_total",
+    "Total requests rejected by the rate limiter (HTTP 429)",
+    ["endpoint"],
+)
+
 active_experiments_gauge: Gauge = Gauge(
     "active_experiments_gauge",
     "Number of currently active experiments",
@@ -118,3 +134,13 @@ def record_cache_miss(cache_type: str) -> None:
 def update_active_experiments(count: int) -> None:
     """Set the active-experiments gauge to the given count."""
     active_experiments_gauge.set(count)
+
+
+def record_rate_limit_hit(endpoint: str) -> None:
+    """Increment the rate-limit hits counter."""
+    rate_limit_hits_total.labels(endpoint=endpoint).inc()
+
+
+def record_rate_limit_rejection(endpoint: str) -> None:
+    """Increment the rate-limit rejections counter."""
+    rate_limit_rejections_total.labels(endpoint=endpoint).inc()
