@@ -8,7 +8,13 @@
     "start": "next start",
     "lint": "next lint",
     "test": "jest --watchAll=false",
-    "test:coverage": "jest --watchAll=false --coverage"
+    "test:coverage": "jest --watchAll=false --coverage",
+    "test:e2e": "playwright test",
+    "test:e2e:headed": "playwright test --headed",
+    "test:e2e:ui": "playwright test --ui",
+    "test:visual": "playwright test visual-regression",
+    "test:visual:update": "playwright test visual-regression --update-snapshots",
+    "test:a11y": "playwright test accessibility"
   },
   "dependencies": {
     "@playwright/test": "^1.58.2",
@@ -21,6 +27,7 @@
     "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.10.0",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",

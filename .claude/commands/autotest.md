@@ -1,4 +1,4 @@
-Run the full autonomous testing loop for the Experimently platform.
+Run the full autonomous multi-agent QA pipeline for the Experimently platform.
 
 Usage: /autotest [scenario_name or "all"]
 
@@ -6,137 +6,186 @@ If no scenario is provided, defaults to "ab_test_lifecycle".
 
 ## What This Does
 
-This skill chains four specialized agents in sequence to test the platform
-end-to-end — from realistic data generation through statistical validation,
-with optional auto-repair if anything fails.
+This skill orchestrates 8 specialized agents in a phased pipeline — with parallel
+execution where possible, conditional logic, and a consolidated quality report.
 
 ```
-data-generator → scenario-runner → validator → reviewer → tester → (auto-fixer if failures)
+Pre-flight checks
+  ↓
+Phase 1 (parallel): data-generator + tester (unit tests)
+  ↓
+Phase 2 (sequential): scenario-runner (E2E browser tests, depends on seeded data)
+  ↓
+Phase 3 (parallel): validator (statistics) + reviewer (code review) + contract-tester + a11y-auditor
+  ↓
+Phase 4 (conditional): auto-fixer (only if failures detected)
+  ↓
+Final Report
 ```
+
+## Available Agents
+
+| Agent | Role |
+|-------|------|
+| `data-generator` | Seed statistically realistic experiment data |
+| `tester` | Run unit/integration tests, check coverage |
+| `scenario-runner` | E2E browser tests via Playwright + visual regression |
+| `validator` | Validate statistical correctness of results |
+| `reviewer` | Code review for correctness, security, patterns |
+| `contract-tester` | Cross-SDK golden vector tests |
+| `a11y-auditor` | WCAG 2.1 AA accessibility scans |
+| `auto-fixer` | Diagnose and fix failures |
 
 ## Execution Plan
 
-### Phase 1: Generate Realistic Data
+### Pre-flight Checks
 
-Use the `data-generator` agent to seed the platform with statistically realistic
-scenario data.
+Before launching any agents, verify the environment:
+```bash
+# Backend health
+curl -sf http://localhost:8000/health || echo "BACKEND DOWN"
+# Frontend running
+curl -sf http://localhost:3000 -o /dev/null -w "%{http_code}" || echo "FRONTEND DOWN"
+# Database connected (health endpoint returns DB status)
+curl -sf http://localhost:8000/health | python -m json.tool 2>/dev/null || true
+```
 
-Instructions for data-generator:
-- Run scenario: "$ARGUMENTS" (if empty, use "ab_test_lifecycle")
+If backend is down, STOP and report — most agents need it.
+If frontend is down, mark E2E/visual/a11y phases as SKIPPED but continue with backend-only tests.
+
+### Phase 1: Data Generation + Unit Tests (PARALLEL)
+
+Launch these two agents simultaneously:
+
+**Agent 1: data-generator**
+- Run scenario: "$ARGUMENTS" (default: "ab_test_lifecycle")
 - First do a dry run and print the summary
-- If the platform is running (check health endpoint), seed the data
-- Return: experiment_id (if seeded), user count, event count, expected significance, z-score
+- If the platform is running, seed the data
+- Return: experiment_id, user count, event count, expected significance, z-score
 
-### Phase 2: Simulate User Behavior (UI)
+**Agent 2: tester**
+- Run unit tests for recently changed files
+- Command: `source venv/bin/activate && python -m pytest backend/tests/unit/ -p no:cov -q --tb=short`
+- Check test pass rate
+- Return: passed count, failed count, coverage gaps
 
-Use the `scenario-runner` agent to walk through the dashboard as a real user.
+### Phase 2: E2E Browser Tests (SEQUENTIAL — needs Phase 1 data)
 
-Instructions for scenario-runner:
-- Check if the frontend is running at http://localhost:3000
-- If running: execute the full scenario UI walkthrough matching the scenario name
+**Agent: scenario-runner**
+- Check if frontend is running at http://localhost:3000
+- If running: execute the full scenario UI walkthrough
   - "ab_test_lifecycle" → Scenario 1: A/B Experiment Lifecycle
   - "feature_flag_rollout" → Scenario 2: Feature Flag Gradual Rollout
   - Default → Scenarios 1 + 3 (lifecycle + RBAC check)
+- Run Playwright E2E tests: `cd frontend && npx playwright test --reporter=list`
 - Also run Scenario 3 (RBAC) regardless of which scenario was requested
-- If frontend is not running: skip UI validation and note it in the report
-- Return: steps passed/failed, any unexpected UI states
+- Capture screenshots for visual regression comparison
+- Check for any 500 errors in network requests during scenario execution
+- If frontend not running: skip and note in report
+- Return: steps passed/failed, E2E test results, visual diff count, network errors
 
-### Phase 3: Validate Statistical Correctness
+### Phase 3: Validation + Review + Contracts + A11y (PARALLEL)
 
-Use the `validator` agent to verify results are mathematically correct.
+Launch these four agents simultaneously:
 
-Instructions for validator:
-- Use the experiment_id from Phase 1 (if available)
-- Validate: basic significance, CUPED (if results endpoint supports it), sequential testing status
-- If no experiment_id: validate the data generator's statistical properties directly
-- Return: validation results for each check (pass/fail with values)
+**Agent 1: validator**
+- Use experiment_id from Phase 1 (if available)
+- Validate: basic significance, CUPED, sequential testing status
+- If no experiment_id: validate data generator's statistical properties
+- Return: validation results per check (pass/fail with values)
 
-### Phase 4: Review Recent Code Changes
-
-Use the `reviewer` agent to review any code changed since the last commit.
-
-Instructions for reviewer:
+**Agent 2: reviewer**
 - Run `git diff HEAD~1..HEAD --name-only` to find changed files
-- Review each changed file for correctness, security, and pattern adherence
-- Pay special attention to: import paths, async/sync patterns, RBAC checks
+- Review changed files for correctness, security, pattern adherence
+- Pay attention to: import paths, async/sync patterns, RBAC checks
 - Return: APPROVED / APPROVED WITH SUGGESTIONS / CHANGES REQUESTED
 
-### Phase 5: Check Test Coverage
+**Agent 3: contract-tester**
+- Run Python SDK contract tests: `source venv/bin/activate && python -m pytest tests/sdk-contract/ -v`
+- Run JS SDK contract tests: `node tests/sdk-contract/test_js_sdk.js`
+- Verify cross-SDK hash parity
+- Return: per-SDK pass/fail, any divergences
 
-Use the `tester` agent to verify test coverage for changed code.
+**Agent 4: a11y-auditor**
+- Run accessibility tests: `cd frontend && npx playwright test accessibility --reporter=list`
+- If @axe-core/playwright not installed, install it first
+- Categorize violations by severity
+- Return: violation counts by severity, affected pages
 
-Instructions for tester:
-- For each file changed since last commit, verify a corresponding test file exists
-- Run the relevant tests and report pass/fail count
-- If coverage gaps exist, note them but don't block the autotest run
-- Return: test pass rate, any new coverage gaps
+### Phase 4: Auto-Fix (CONDITIONAL — only if failures exist)
 
-### Phase 6: Auto-Fix Failures (if any)
+If Phases 1-3 produced any failures, launch the auto-fixer agent:
 
-If Phases 2, 3, 4, or 5 produced failures, use the `auto-fixer` agent.
-
-Instructions for auto-fixer:
+**Agent: auto-fixer**
 - Collect all failures from all phases
 - For each failure: diagnose root cause, write minimal fix, verify it passes
-- If auto-fix is not possible, produce a diagnosis report
-- Return: fixed issues, blocked issues (needing human review)
+- If auto-fix not possible, produce diagnosis report
+- Return: fixed count, blocked count (needing human review)
+
+If all phases passed, skip Phase 4.
 
 ## Final Report
 
 After all agents complete, produce a consolidated report:
 
 ```
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  AUTOTEST REPORT — Experimently Platform
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  AUTOTEST REPORT — Experimently Platform (Multi-Agent QA)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 Scenario:      <name>
 Run at:        <timestamp>
-Duration:      <elapsed minutes>
 
-Phase 1 — Data Generation
+Phase 1A — Data Generation
   Status:      PASS / FAIL
   Users:       <n>
   Events:      <n>
   Z-score:     <value> (<significant/not significant>)
 
-Phase 2 — UI Simulation
+Phase 1B — Unit Tests
+  Status:      PASS / FAIL
+  Tests:       <n> passed, <n> failed
+
+Phase 2 — E2E Browser Tests
   Status:      PASS / FAIL / SKIPPED (frontend not running)
-  Steps:       <n>/<total> passed
-  Issues:      <list or "none">
+  Playwright:  <n>/<total> specs passed
+  UI Steps:    <n>/<total> passed
+  Visual Diff: <n> screenshots with changes
+  Network:     <n> errors detected
 
-Phase 3 — Statistical Validation
-  Status:      PASS / FAIL / SKIPPED (no experiment seeded)
+Phase 3A — Statistical Validation
+  Status:      PASS / FAIL / SKIPPED
   Checks:      <n>/<total> passed
-  Issues:      <list or "none">
 
-Phase 4 — Code Review
+Phase 3B — Code Review
   Status:      APPROVED / CHANGES REQUESTED / NO CHANGES
-  Findings:    <summary>
 
-Phase 5 — Test Coverage
-  Status:      PASS / GAPS FOUND
-  Tests run:   <n> passed, <n> failed
-  Gaps:        <list or "none">
+Phase 3C — SDK Contract Tests
+  Status:      PASS / FAIL
+  Python:      <n>/<n> vectors passed
+  JavaScript:  <n>/<n> vectors passed
 
-Phase 6 — Auto-Fix
-  Status:      <N/A / FIXED n issues / BLOCKED>
+Phase 3D — Accessibility Audit
+  Status:      PASS / CONDITIONAL PASS / FAIL
+  Critical:    <n> violations
+  Serious:     <n> violations
+  Pages:       <n>/<total> clean
+
+Phase 4 — Auto-Fix
+  Status:      N/A / FIXED <n> issues / BLOCKED
   Fixed:       <list or "none">
-  Needs review: <list or "none">
+  Needs human: <list or "none">
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 OVERALL: ✓ PASS  |  ✗ FAIL  |  ⚠ PASS WITH WARNINGS
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 
-## Quick Run (all defaults)
+## Quick Run
 
-/autotest
-
-## Specific Scenarios
-
-/autotest ab_test_lifecycle
-/autotest feature_flag_rollout
-/autotest statistical_edge_cases
-/autotest concurrent_experiments
-/autotest all
+/autotest                          — defaults to ab_test_lifecycle
+/autotest ab_test_lifecycle        — full A/B test lifecycle
+/autotest feature_flag_rollout     — feature flag gradual rollout
+/autotest statistical_edge_cases   — edge cases (zero events, Simpson's paradox)
+/autotest concurrent_experiments   — mutual exclusion + interactions
+/autotest all                      — all scenarios
