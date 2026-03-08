@@ -55,7 +55,7 @@ export default function Home() {
               Sequential testing, CUPED variance reduction, multi-armed bandits, and AI-powered experiment design — all completely free.
             </p>
             <p className="text-sm text-gray-500 mb-6 font-medium tracking-wide">
-              Java, Python, React, JS, Go, iOS, Android &amp; Edge SDKs &nbsp;·&nbsp; SOC 2 compliant &nbsp;·&nbsp; Enterprise SSO &nbsp;·&nbsp; Deploy to your AWS
+              Java, Python, React, JS, Go, iOS, Android, Ruby, PHP, .NET, Elixir &amp; Edge SDKs &nbsp;·&nbsp; SOC 2 compliant &nbsp;·&nbsp; Enterprise SSO &nbsp;·&nbsp; Deploy to your AWS
             </p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
               <a href="/docs/quick-start" className="bg-blue-600 text-white px-8 py-4 rounded-lg text-base font-semibold hover:bg-blue-700 transition shadow-sm">
@@ -90,8 +90,8 @@ export default function Home() {
                 <div className="text-sm text-gray-600">Sample size reduction via CUPED</div>
               </div>
               <div className="text-center">
-                <div className="text-4xl font-bold text-gray-900 mb-2">10</div>
-                <div className="text-sm text-gray-600">SDK languages (Python, JS, Java, React, Go, iOS, Android, Flutter, React Native, Edge)</div>
+                <div className="text-4xl font-bold text-gray-900 mb-2">14</div>
+                <div className="text-sm text-gray-600">SDK languages (Python, JS, Java, React, Go, iOS, Android, Flutter, React Native, Edge, Ruby, PHP, .NET, Elixir)</div>
               </div>
               <div className="text-center">
                 <div className="text-3xl font-bold text-gray-900 mb-2">SOC 2</div>
@@ -151,7 +151,7 @@ export default function Home() {
                 </div>
                 <h3 className="text-xl font-semibold text-gray-900 mb-3">Real-time Analytics</h3>
                 <p className="text-gray-600 leading-relaxed">
-                  See results as they happen. Trend charts, cumulative and daily views, sample size meters, and days-to-significance estimates.
+                  See results as they happen. Trend charts, cumulative and daily views, sample size meters, and days-to-significance estimates. Live experiment results stream in real time via WebSocket — LiveResultsPanel with a pulsing &ldquo;LIVE&rdquo; indicator pushes z-test p-values, relative lift, and significance updates continuously as data arrives.
                 </p>
               </div>
 
@@ -364,6 +364,19 @@ export default function Home() {
                   HMAC-SHA256 signed tamper-proof audit trail with real-time SSE stream. SOC 2 Type II &amp; ISO 27001 compliance reports with CSV/JSON export. Custom RBAC roles and effective permissions resolution.
                 </p>
               </div>
+
+              {/* HIPAA Compliance */}
+              <div className="bg-white p-8 rounded-2xl border border-gray-100 hover:shadow-lg hover:border-gray-200 transition">
+                <div className="w-12 h-12 bg-red-100 rounded-xl flex items-center justify-center mb-6">
+                  <svg className="w-6 h-6 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                  </svg>
+                </div>
+                <h3 className="text-xl font-semibold text-gray-900 mb-3">HIPAA Compliance</h3>
+                <p className="text-gray-600 leading-relaxed">
+                  Built for healthcare and HIPAA-covered entities. Fernet AES-128-CBC PHI encryption, 6-year PHIAuditLog retention with complete access tracking, BAA (Business Associate Agreement) management with expiry tracking, data residency controls per organization, and 11 dedicated HIPAA compliance API endpoints.
+                </p>
+              </div>
             </div>
 
             {/* SDK Ecosystem & Integrations */}
@@ -436,6 +449,50 @@ export default function Home() {
                 <h3 className="text-xl font-semibold text-gray-900 mb-3">Edge SDK</h3>
                 <p className="text-gray-600 leading-relaxed">
                   Edge-native evaluation for Cloudflare Workers, Vercel Edge, and Deno Deploy. Sub-millisecond flag decisions with pure-JS MD5 consistent hashing — zero Node.js dependencies, zero cold starts.
+                </p>
+              </div>
+
+              {/* Ruby SDK */}
+              <div className="bg-white border border-gray-200 rounded-xl p-6 hover:shadow-md transition">
+                <div className="flex items-center gap-3 mb-4">
+                  <span className="text-3xl">💎</span>
+                  <h3 className="text-xl font-semibold text-gray-900">Ruby SDK</h3>
+                </div>
+                <p className="text-gray-600 text-sm leading-relaxed">
+                  Native Ruby gem with zero runtime dependencies. Thread-safe Mutex TTL cache, Net::HTTP client, and consistent MD5 hash bucketing.
+                </p>
+              </div>
+
+              {/* PHP SDK */}
+              <div className="bg-white border border-gray-200 rounded-xl p-6 hover:shadow-md transition">
+                <div className="flex items-center gap-3 mb-4">
+                  <span className="text-3xl">🐘</span>
+                  <h3 className="text-xl font-semibold text-gray-900">PHP SDK</h3>
+                </div>
+                <p className="text-gray-600 text-sm leading-relaxed">
+                  Composer package with ext-json and ext-curl only. PSR-compatible, consistent MD5 hash, configurable TTL cache.
+                </p>
+              </div>
+
+              {/* .NET SDK */}
+              <div className="bg-white border border-gray-200 rounded-xl p-6 hover:shadow-md transition">
+                <div className="flex items-center gap-3 mb-4">
+                  <span className="text-3xl">🔷</span>
+                  <h3 className="text-xl font-semibold text-gray-900">.NET SDK</h3>
+                </div>
+                <p className="text-gray-600 text-sm leading-relaxed">
+                  netstandard2.1 + net6.0 multi-target. System.Text.Json, HttpClient wrapper, LRU cache with TTL, and xUnit-tested consistent hashing.
+                </p>
+              </div>
+
+              {/* Elixir SDK */}
+              <div className="bg-white border border-gray-200 rounded-xl p-6 hover:shadow-md transition">
+                <div className="flex items-center gap-3 mb-4">
+                  <span className="text-3xl">⚗️</span>
+                  <h3 className="text-xl font-semibold text-gray-900">Elixir SDK</h3>
+                </div>
+                <p className="text-gray-600 text-sm leading-relaxed">
+                  Hex package using :httpc and Jason. GenServer-backed ETS cache for zero-allocation lookups, fully OTP-compatible, 93 ExUnit tests.
                 </p>
               </div>
 
@@ -588,10 +645,10 @@ export default function Home() {
                 Simple to integrate
               </h2>
               <p className="text-lg text-gray-600">
-                Get started in minutes — SDKs for Python, JavaScript, Java, React, Go, iOS, and Android
+                Get started in minutes — SDKs for Python, JavaScript, Java, React, Go, iOS, Android, Ruby, PHP, .NET, and Elixir
               </p>
               <div className="flex flex-wrap justify-center gap-2 mt-4">
-                {['JavaScript', 'Python', 'Java', 'React', 'Go', 'iOS (Swift)', 'Android (Kotlin)'].map((lang) => (
+                {['JavaScript', 'Python', 'Java', 'React', 'Go', 'iOS (Swift)', 'Android (Kotlin)', 'Ruby', 'PHP', '.NET', 'Elixir'].map((lang) => (
                   <span key={lang} className="bg-gray-100 text-gray-700 px-3 py-1 rounded-full text-sm font-medium">{lang}</span>
                 ))}
               </div>
@@ -762,9 +819,10 @@ enabled = client.is_enabled(
                     ['LLM/AI Experiment Support', '✅ Native (EP-046)', '⚠️ Beta', '❌', '❌', '❌', '❌'],
                     ['AI Experiment Design', '✅ Claude + MCP', '✅ LLM eval', '✅ MCP (beta)', '❌', '✅ Opal AI', '❌'],
                     ['Enterprise SSO (free tier)', '✅ 🎉', '❌ Enterprise', '❌ Enterprise', '⚠️ Enterprise', '⚠️ Enterprise', '⚠️ Enterprise'],
+                    ['HIPAA Compliance (PHI encryption + BAA)', '✅', '✅', '❌', '✅', '❌', '❌'],
                     ['Java SDK', '✅ Spring Boot', '✅', '✅', '✅', '✅', '✅'],
                     ['Go SDK', '✅', '✅', '✅', '✅', '✅', '✅'],
-                    ['iOS + Android SDKs', '✅', '✅ + RN + Flutter', '✅ + Flutter + Roku', '✅', '✅', '✅'],
+                    ['iOS + Android + Ruby + PHP + .NET + Elixir SDKs', '✅', '✅ + RN + Flutter', '✅ + Flutter + Roku', '✅', '✅', '✅'],
                     ['Self-host in your AWS account', '✅ CDK', '❌ SaaS only', '✅ Docker', '❌', '❌', '❌'],
                     ['Audit Log + SSE Stream', '✅ HMAC-signed', '✅', '✅', '⚠️', '⚠️', '✅'],
                     ['Jira / Salesforce / GitHub', '✅', '⚠️', '⚠️', '❌', '✅', '⚠️ Partial'],
@@ -831,6 +889,10 @@ enabled = client.is_enabled(
                   'Go SDK (zero deps, goroutine-safe)',
                   'iOS Swift SDK (async/await, offline)',
                   'Android Kotlin SDK (Coroutines, Compose)',
+                  'Ruby SDK (zero deps, net/http, thread-safe)',
+                  'PHP SDK (composer, ext-curl only)',
+                  '.NET SDK (netstandard2.1+net6.0)',
+                  'Elixir SDK (GenServer+ETS cache, OTP)',
                   'Enterprise SSO (SAML 2.0 + OIDC)',
                   'Jira, Salesforce & GitHub integrations',
                   'SOC 2 / ISO 27001 compliance reports',
@@ -923,6 +985,10 @@ enabled = client.is_enabled(
                   <li><a href="/docs/sdks/android" className="hover:text-white transition">Android Kotlin SDK</a></li>
                   <li><a href="/docs/sdks/flutter" className="hover:text-white transition">Flutter SDK</a></li>
                   <li><a href="/docs/sdks/react-native" className="hover:text-white transition">React Native SDK</a></li>
+                  <li><a href="/docs/sdks/ruby" className="hover:text-white transition">Ruby SDK</a></li>
+                  <li><a href="/docs/sdks/php" className="hover:text-white transition">PHP SDK</a></li>
+                  <li><a href="/docs/sdks/dotnet" className="hover:text-white transition">.NET SDK</a></li>
+                  <li><a href="/docs/sdks/elixir" className="hover:text-white transition">Elixir SDK</a></li>
                   <li><a href="/docs/sdks/mcp" className="hover:text-white transition">MCP Server</a></li>
                 </ul>
               </div>

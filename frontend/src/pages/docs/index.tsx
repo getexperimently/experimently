@@ -35,6 +35,7 @@ const sections = [
       { label: 'Multi-Armed Bandits', href: '/docs/experiments/mab', desc: 'Thompson Sampling, UCB1, Epsilon-Greedy' },
       { label: 'Split URL Testing', href: '/docs/experiments/split-url', desc: 'Server-side URL splitting via Lambda@Edge' },
       { label: 'Mutual Exclusion Groups', href: '/docs/experiments/exclusion', desc: 'Prevent cross-experiment contamination' },
+      { label: 'Live Results Streaming', href: '/docs/websocket-streaming', desc: 'Real-time experiment results via WebSocket — p-values, lift, and significance updated live.' },
     ],
   },
   {
@@ -49,7 +50,7 @@ const sections = [
   {
     category: 'SDKs',
     icon: '📦',
-    description: 'Client libraries for every major language and framework.',
+    description: 'Client libraries for 14 languages and frameworks — from web to mobile to server.',
     links: [
       { label: 'JavaScript SDK', href: '/docs/sdks/javascript', desc: 'Browser and Node.js' },
       { label: 'Python SDK', href: '/docs/sdks/python', desc: 'Server-side Python integration' },
@@ -63,6 +64,10 @@ const sections = [
       { label: 'MCP Server', href: '/docs/sdks/mcp', desc: 'AI-powered experiment design via Model Context Protocol' },
       { label: 'OpenFeature Provider', href: '/docs/sdks/openfeature', desc: 'CNCF-standard OpenFeature provider for TypeScript and Python — swap vendors without changing app code' },
       { label: 'Edge SDK', href: '/docs/sdks/edge', desc: 'Sub-millisecond evaluation for Cloudflare Workers, Vercel Edge, and Deno Deploy — zero Node.js dependencies, pure-JS MD5 consistent hash' },
+      { label: 'Ruby SDK', href: '/docs/sdks/ruby', desc: 'Native Ruby gem, zero runtime dependencies, thread-safe Mutex TTL cache, Net::HTTP, consistent MD5 hash.' },
+      { label: 'PHP SDK', href: '/docs/sdks/php', desc: 'Composer package (ext-json + ext-curl only), PSR-compatible, consistent MD5 hash bucketing.' },
+      { label: '.NET SDK', href: '/docs/sdks/dotnet', desc: 'netstandard2.1 + net6.0, System.Text.Json, HttpClient, LRU cache with TTL, xUnit-tested.' },
+      { label: 'Elixir SDK', href: '/docs/sdks/elixir', desc: 'Hex package with :httpc + Jason, GenServer-backed ETS cache, OTP-compatible, 93 ExUnit tests.' },
     ],
   },
   {
@@ -105,6 +110,7 @@ const sections = [
       { label: 'RBAC', href: '/docs/security/rbac', desc: 'Role-based access control: Admin, Developer, Analyst, Viewer' },
       { label: 'API Key Management', href: '/docs/security/api-keys', desc: 'Scoped keys, rotation, revocation' },
       { label: 'Enterprise SSO', href: '/docs/auth/sso', desc: 'SAML 2.0, OIDC/OAuth2 for Okta, Azure AD, Google Workspace, GitHub, and OneLogin.' },
+      { label: 'HIPAA Compliance', href: '/docs/hipaa/overview', desc: 'PHI encryption (Fernet AES-128-CBC), 6-year audit retention, BAA management, data residency.' },
     ],
   },
   {
@@ -163,7 +169,7 @@ export default function DocsIndex() {
     <>
       <Head>
         <title>Documentation — Experimently</title>
-        <meta name="description" content="Experimently documentation: quick start, SDK guides, API reference, integrations, security and self-hosting." />
+        <meta name="description" content="Experimently documentation: quick start, 14 SDK guides, API reference, integrations, HIPAA compliance, and self-hosting." />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <link rel="icon" href="/favicon.ico" />
       </Head>
