@@ -89,10 +89,16 @@ app.add_middleware(
     expose_headers=["X-Request-ID", "X-RateLimit-Limit", "X-RateLimit-Remaining"],
 )
 
-# NOTE: All custom BaseHTTPMiddleware layers are disabled in local dev
-# to avoid stacking deadlock. SecurityHeadersMiddleware is kept as
-# it is lightweight and stateless.
+# Security headers — lightweight and stateless
 app.add_middleware(SecurityHeadersMiddleware)
+
+# Rate limiter — disabled during tests to avoid interfering with test assertions
+_rate_limit_enabled = os.environ.get("APP_ENV", "dev") not in ("test",)
+app.add_middleware(RateLimitMiddleware, enabled=_rate_limit_enabled)
+
+# Prometheus latency / request-count middleware (EP-013)
+if _monitoring_imports_ok:
+    app.add_middleware(PrometheusMetricsMiddleware)
 
 # Include API router
 app.include_router(api_router, prefix=settings.API_V1_STR)
