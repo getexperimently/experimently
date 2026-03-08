@@ -12,6 +12,8 @@ Expected outcome: treatment shows a detectable lift (p < 0.05) given the
 simulated 18.75% relative improvement over the 8% baseline.
 """
 
+import os
+
 import pytest
 import requests
 
@@ -21,8 +23,9 @@ from backend.tests.realistic.data_generator import make_ab_test_scenario, Platfo
 API_URL = "http://localhost:8000"
 SKIP_REASON = "Realistic scenario tests require a running platform (set RUN_REALISTIC=1)"
 
-pytestmark = pytest.mark.skipif(
-    __import__("os").environ.get("RUN_REALISTIC") != "1",
+# Applied only to tests that make live HTTP requests to the platform.
+needs_platform = pytest.mark.skipif(
+    os.environ.get("RUN_REALISTIC") != "1",
     reason=SKIP_REASON,
 )
 
@@ -49,6 +52,7 @@ class TestABTestLifecycle:
     realistic data.
     """
 
+    @needs_platform
     def test_create_experiment_returns_201(self, api_token):
         """Experiment creation with valid payload returns 201."""
         headers = {"Authorization": f"Bearer {api_token}"}
@@ -77,6 +81,7 @@ class TestABTestLifecycle:
         assert len(data["variants"]) == 2
         assert len(data["metrics"]) == 1
 
+    @needs_platform
     def test_seed_and_retrieve_results(self, api_token):
         """Seed 1k realistic users, retrieve results, assert lift is detectable."""
         scenario = make_ab_test_scenario(seed=42)
@@ -114,7 +119,7 @@ class TestABTestLifecycle:
         scenario = make_ab_test_scenario(seed=42)
         result = scenario.generate()
 
-        expected_events = int(1000 * (scenario.control_cvr + scenario.treatment_cvr) / 2)
+        expected_events = int(scenario.users * (scenario.control_cvr + scenario.treatment_cvr) / 2)
         actual_events = len(result.events)
         tolerance = expected_events * 0.20
 
@@ -123,39 +128,46 @@ class TestABTestLifecycle:
         )
 
     def test_novelty_effect_scenario_produces_day1_spike(self):
-        """Novelty scenario should show higher early CVR decaying over time."""
+        """Novelty scenario should show higher early CVR decaying over time.
+
+        The novelty boost in _effective_cvr decays from the experiment start date
+        (_start_date), not from min(assigned_at).  Users assigned within the first
+        novelty_decay_days of the experiment see a boost; those assigned later do not.
+        We classify users by their assignment time relative to _start_date and then
+        compare the conversion rate of those two cohorts.
+        """
         from backend.tests.realistic.data_generator import make_novelty_scenario
         from datetime import timedelta
 
         scenario = make_novelty_scenario(seed=7)
         result = scenario.generate()
 
-        # Events in day 1 vs later days
-        start = min(u.assigned_at for u in result.users)
-        day1_cutoff = start + timedelta(days=1)
+        # Use the scenario's experiment start date — this is the reference the
+        # novelty decay formula uses (days_since_start from _start_date).
+        experiment_start = scenario._start_date
+        novelty_cutoff = experiment_start + timedelta(days=scenario.novelty_decay_days)
 
-        early_treatment = [
-            e for e in result.events
-            if e.variant_name == "treatment" and e.timestamp <= day1_cutoff
-        ]
-        late_treatment = [
-            e for e in result.events
-            if e.variant_name == "treatment" and e.timestamp > day1_cutoff
-        ]
+        # Build a set of user_ids per cohort for fast lookup
+        early_user_ids = {
+            u.user_id
+            for u in result.users
+            if u.variant_name == "treatment" and u.assigned_at <= novelty_cutoff
+        }
+        late_user_ids = {
+            u.user_id
+            for u in result.users
+            if u.variant_name == "treatment" and u.assigned_at > novelty_cutoff
+        }
 
-        early_treatment_users = [
-            u for u in result.users
-            if u.variant_name == "treatment" and u.assigned_at <= day1_cutoff
-        ]
-        late_treatment_users = [
-            u for u in result.users
-            if u.variant_name == "treatment" and u.assigned_at > day1_cutoff
-        ]
+        early_events = [e for e in result.events if e.user_id in early_user_ids]
+        late_events = [e for e in result.events if e.user_id in late_user_ids]
 
-        if early_treatment_users and late_treatment_users:
-            early_cvr = len(early_treatment) / len(early_treatment_users)
-            late_cvr = len(late_treatment) / len(late_treatment_users)
-            # Day-1 CVR should be higher (novelty boost active)
+        if early_user_ids and late_user_ids:
+            early_cvr = len(early_events) / len(early_user_ids)
+            late_cvr = len(late_events) / len(late_user_ids)
+            # Users assigned during the novelty window should convert at a higher
+            # rate than those assigned after the window has fully decayed.
             assert early_cvr >= late_cvr * 0.9, (
-                f"Expected novelty spike: early CVR {early_cvr:.3f} should exceed late CVR {late_cvr:.3f}"
+                f"Expected novelty spike: early cohort CVR {early_cvr:.3f} should "
+                f"be >= 90% of late cohort CVR {late_cvr:.3f}"
             )
