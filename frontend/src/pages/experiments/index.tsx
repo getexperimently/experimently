@@ -1,13 +1,15 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import Link from 'next/link';
 import {
   Experiment,
   ExperimentStatus,
+  ExperimentListResponse,
   EXPERIMENT_STATUS_LABELS,
   EXPERIMENT_STATUS_COLORS,
   EXPERIMENT_TYPE_LABELS,
 } from '@/types/experiments';
 import { ExperimentsService } from '@/services/experiments';
+import { useApi } from '@/hooks/useApi';
 
 const STATUS_FILTERS: Array<{ label: string; value: ExperimentStatus | 'all' }> = [
   { label: 'All', value: 'all' },
@@ -18,27 +20,14 @@ const STATUS_FILTERS: Array<{ label: string; value: ExperimentStatus | 'all' }> 
 ];
 
 export default function ExperimentsPage() {
-  const [experiments, setExperiments] = useState<Experiment[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<ExperimentStatus | 'all'>('all');
 
-  useEffect(() => {
-    const fetchExperiments = async () => {
-      try {
-        setIsLoading(true);
-        setError(null);
-        const params = statusFilter !== 'all' ? { status: statusFilter } : undefined;
-        const response = await ExperimentsService.list(params);
-        setExperiments(response.items ?? []);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load experiments');
-      } finally {
-        setIsLoading(false);
-      }
-    };
-    fetchExperiments();
-  }, [statusFilter]);
+  const { data, loading: isLoading, error } = useApi<ExperimentListResponse>(
+    () => ExperimentsService.list(statusFilter !== 'all' ? { status: statusFilter } : undefined),
+    [statusFilter],
+  );
+
+  const experiments = data?.items ?? [];
 
   return (
     <div className="min-h-screen bg-slate-50">
