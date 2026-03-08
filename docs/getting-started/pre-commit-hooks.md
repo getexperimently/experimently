@@ -91,7 +91,7 @@ repos:
     rev: v3.10.1
     hooks:
     -   id: pyupgrade
-        args: [--py39-plus]
+        args: [--py311-plus]
 
 # Frontend checks
 -   repo: https://github.com/pre-commit/mirrors-prettier

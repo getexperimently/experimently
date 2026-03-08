@@ -240,10 +240,13 @@ def test_user_role_enum_field(db_session):
     if "sqlite" in str(db_session.bind.engine.url):
         pytest.skip("Skipping role enum test with SQLite")
 
-    # Create users with different roles
+    from uuid import uuid4
+    uid = uuid4().hex[:8]
+
+    # Create users with different roles (unique emails to avoid collisions)
     admin_user = User(
-        username="admin_user",
-        email="admin@example.com",
+        username=f"admin_user_{uid}",
+        email=f"admin_{uid}@example.com",
         hashed_password="hashedpassword",
         full_name="Admin User",
         is_active=True,
@@ -251,8 +254,8 @@ def test_user_role_enum_field(db_session):
     )
 
     analyst_user = User(
-        username="analyst_user",
-        email="analyst@example.com",
+        username=f"analyst_user_{uid}",
+        email=f"analyst_{uid}@example.com",
         hashed_password="hashedpassword",
         full_name="Analyst User",
         is_active=True,
@@ -265,22 +268,22 @@ def test_user_role_enum_field(db_session):
     db_session.commit()
 
     # Retrieve from database and verify roles
-    retrieved_admin = db_session.query(User).filter_by(username="admin_user").first()
+    retrieved_admin = db_session.query(User).filter_by(username=f"admin_user_{uid}").first()
     assert retrieved_admin.role == UserRole.ADMIN
 
-    retrieved_analyst = db_session.query(User).filter_by(username="analyst_user").first()
+    retrieved_analyst = db_session.query(User).filter_by(username=f"analyst_user_{uid}").first()
     assert retrieved_analyst.role == UserRole.ANALYST
 
     # Test default role
     default_user = User(
-        username="default_user",
-        email="default@example.com",
+        username=f"default_user_{uid}",
+        email=f"default_{uid}@example.com",
         hashed_password="hashedpassword"
     )
     db_session.add(default_user)
     db_session.commit()
 
-    retrieved_default = db_session.query(User).filter_by(username="default_user").first()
+    retrieved_default = db_session.query(User).filter_by(username=f"default_user_{uid}").first()
     assert retrieved_default.role == UserRole.VIEWER
 
 
@@ -331,23 +334,25 @@ def test_experiment_variant_relationship(db_session):
     if "sqlite" in str(db_session.bind.engine.url):
         pytest.skip("Skipping relationship test with SQLite")
 
-    # Create a user
+    import uuid as _uuid
+    uid = _uuid.uuid4().hex[:8]
+
+    # Create a user with unique email to avoid collisions
     user = User(
-        username="expuser",
-        email="expuser@example.com",
+        username=f"expuser_{uid}",
+        email=f"expuser_{uid}@example.com",
         hashed_password="hashedpassword",
         full_name="Experiment User",
     )
     db_session.add(user)
     db_session.flush()
 
-    # Create an experiment with explicit ID
-    import uuid
-
-    experiment_id = str(uuid.uuid4())
+    # Create an experiment with explicit ID and unique name
+    experiment_id = str(_uuid.uuid4())
+    exp_name = f"Test Experiment {uid}"
     experiment = Experiment(
-        id=experiment_id,  # Explicitly set ID
-        name="Test Experiment",
+        id=experiment_id,
+        name=exp_name,
         description="A test experiment",
         hypothesis="The test hypothesis",
         status=ExperimentStatus.DRAFT,
@@ -380,19 +385,20 @@ def test_experiment_variant_relationship(db_session):
 
     # Retrieve from database and verify relationship
     retrieved_experiment = (
-        db_session.query(Experiment).filter_by(name="Test Experiment").first()
+        db_session.query(Experiment).filter_by(id=experiment_id).first()
     )
     assert len(retrieved_experiment.variants) == 2
     assert any(v.is_control for v in retrieved_experiment.variants)
     assert any(not v.is_control for v in retrieved_experiment.variants)
 
     # Test cascade delete
+    variant_ids = [v.id for v in retrieved_experiment.variants]
     db_session.delete(retrieved_experiment)
     db_session.commit()
 
-    # Check that variants were also deleted
-    variants = db_session.query(Variant).all()
-    assert len(variants) == 0
+    # Check that this experiment's variants were deleted
+    remaining = db_session.query(Variant).filter(Variant.id.in_(variant_ids)).count()
+    assert remaining == 0
 
 
 def test_experiment_metric_relationship(db_session):
@@ -405,9 +411,10 @@ def test_experiment_metric_relationship(db_session):
     import uuid
 
     experiment_id = str(uuid.uuid4())
+    uid = uuid.uuid4().hex[:8]
     experiment = Experiment(
-        id=experiment_id,  # Explicitly set ID
-        name="Metric Test",
+        id=experiment_id,
+        name=f"Metric Test {uid}",
         description="Testing metrics",
         status=ExperimentStatus.DRAFT,
         experiment_type=ExperimentType.A_B,
@@ -417,7 +424,7 @@ def test_experiment_metric_relationship(db_session):
 
     # Create metrics
     metric1 = Metric(
-        name="Conversion Rate",
+        name=f"Conversion Rate {uid}",
         description="Primary conversion metric",
         event_name="conversion",
         metric_type=MetricType.CONVERSION,
@@ -426,7 +433,7 @@ def test_experiment_metric_relationship(db_session):
     )
 
     metric2 = Metric(
-        name="Revenue",
+        name=f"Revenue {uid}",
         description="Revenue metric",
         event_name="purchase",
         metric_type=MetricType.REVENUE,
@@ -441,7 +448,7 @@ def test_experiment_metric_relationship(db_session):
 
     # Retrieve from database and verify relationship
     retrieved_experiment = (
-        db_session.query(Experiment).filter_by(name="Metric Test").first()
+        db_session.query(Experiment).filter_by(id=experiment_id).first()
     )
     assert len(retrieved_experiment.metric_definitions) == 2
 
@@ -449,15 +456,17 @@ def test_experiment_metric_relationship(db_session):
         m for m in retrieved_experiment.metric_definitions if m.is_primary
     ]
     assert len(primary_metrics) == 1
-    assert primary_metrics[0].name == "Conversion Rate"
+    assert primary_metrics[0].name == f"Conversion Rate {uid}"
 
     # Test cascade delete
     db_session.delete(retrieved_experiment)
     db_session.commit()
 
-    # Check that metrics were also deleted
-    metrics = db_session.query(Metric).all()
-    assert len(metrics) == 0
+    # Check that this experiment's metrics were deleted
+    remaining = db_session.query(Metric).filter(
+        Metric.experiment_id == experiment_id
+    ).count()
+    assert remaining == 0
 
 
 # ============== Alembic Migration Tests ==============

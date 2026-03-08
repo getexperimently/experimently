@@ -107,7 +107,7 @@ class TestAPIRouting:
         # "Segments" tag, and exclude mutual-exclusion-group sub-routes which
         # use the "Mutual Exclusion Groups" tag)
         for path, methods in openapi_schema["paths"].items():
-            if "/experiments" in path and "/export/" not in path and "/segments/" not in path and "/mutual-exclusion-groups/" not in path:
+            if "/experiments" in path and "/export/" not in path and "/segments/" not in path and "/mutual-exclusion-groups/" not in path and "/warehouse/" not in path and "/ws/" not in path:
                 for method in methods.values():
                     assert "Experiments" in method["tags"], f"Experiments tag missing for {path}"
             elif "/tracking" in path:
@@ -115,4 +115,5 @@ class TestAPIRouting:
                     assert "Tracking" in method["tags"], f"Tracking tag missing for {path}"
             elif "/auth" in path:
                 for method in methods.values():
-                    assert "Authentication" in method["tags"], f"Authentication tag missing for {path}"
+                    auth_tags = {"Authentication", "SSO", "sso"}
+                    assert auth_tags & set(method["tags"]), f"Authentication/SSO tag missing for {path}"

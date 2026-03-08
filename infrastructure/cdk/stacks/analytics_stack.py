@@ -177,7 +177,7 @@ class AnalyticsStack(Stack):
         analytics_lambda = lambda_.Function(
             self,
             "AnalyticsLambda",
-            runtime=lambda_.Runtime.PYTHON_3_9,
+            runtime=lambda_.Runtime.PYTHON_3_11,
             code=lambda_.Code.from_inline(
                 """
                 def handler(event, context):

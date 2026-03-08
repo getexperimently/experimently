@@ -7,7 +7,7 @@ This guide explains how to set up and configure a comprehensive GitHub Actions w
 The workflow we've created:
 
 1. **Automates testing** on pull requests and pushes to main
-2. **Tests against multiple Python versions** (3.9 and 3.10)
+2. **Tests against Python 3.11**
 3. **Sets up a PostgreSQL database** for integration tests
 4. **Collects and reports code coverage**
 5. **Publishes detailed test reports** in GitHub's UI
@@ -73,7 +73,7 @@ The workflow tests against multiple Python versions simultaneously:
 ```yaml
 strategy:
   matrix:
-    python-version: ["3.9", "3.10"]
+    python-version: ["3.11"]
 ```
 
 Add more versions as needed.

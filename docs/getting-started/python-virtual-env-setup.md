@@ -119,10 +119,10 @@ NC='\033[0m' # No Color
 
 echo -e "${YELLOW}Setting up Python virtual environment for Experimentation Platform...${NC}"
 
-# Check if Python 3.9+ is installed
+# Check if Python 3.11+ is installed
 python_version=$(python3 --version 2>&1 | awk '{print $2}')
-if [[ $(echo $python_version | cut -d. -f1-2 | sed 's/\.//') -lt 39 ]]; then
-    echo "Python 3.9 or higher is required. You have $python_version"
+if [[ $(echo $python_version | cut -d. -f1-2 | sed 's/\.//') -lt 311 ]]; then
+    echo "Python 3.11 or higher is required. You have $python_version"
     exit 1
 fi
 
@@ -174,18 +174,18 @@ echo -e "${YELLOW}To activate the virtual environment, run:${NC} source venv/bin
 @echo off
 echo Setting up Python virtual environment for Experimentation Platform...
 
-REM Check if Python 3.9+ is installed
+REM Check if Python 3.11+ is installed
 for /f "tokens=2" %%I in ('python --version 2^>^&1') do set python_version=%%I
 for /f "tokens=1,2 delims=." %%a in ("%python_version%") do (
     set major=%%a
     set minor=%%b
 )
 if %major% LSS 3 (
-    echo Python 3.9 or higher is required. You have %python_version%
+    echo Python 3.11 or higher is required. You have %python_version%
     exit /b 1
 )
-if %major%==3 if %minor% LSS 9 (
-    echo Python 3.9 or higher is required. You have %python_version%
+if %major%==3 if %minor% LSS 11 (
+    echo Python 3.11 or higher is required. You have %python_version%
     exit /b 1
 )
 
@@ -244,7 +244,7 @@ echo To activate the virtual environment, run: venv\Scripts\activate
 For pyenv users, create a `.python-version` file:
 
 ```
-3.9.17
+3.11.8
 ```
 
 ### Setup.py (for Development Mode Installation)
@@ -257,7 +257,7 @@ setup(
     version="0.1.0",
     packages=find_packages(),
     include_package_data=True,
-    python_requires=">=3.9",
+    python_requires=">=3.11",
     install_requires=[
         # Base dependencies are read from requirements files
     ],

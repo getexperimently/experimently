@@ -45,7 +45,8 @@ def test_app_routes():
     """Print all registered routes for debugging."""
     print("Available routes:")
     for route in app.routes:
-        print(f"  {route.path} - {route.methods}")
+        methods = getattr(route, "methods", None)
+        print(f"  {route.path} - {methods or 'WebSocket'}")
 
     # Simple assertion to always pass this test
     assert True

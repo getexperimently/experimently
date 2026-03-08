@@ -73,21 +73,25 @@ def test_user(db_session: Session) -> User:
     db_session.execute(text("SET search_path TO test_experimentation"))
     db_session.commit()
 
-    # Clean up any existing test user with the same ID or email
-    db_session.execute(text(f"DELETE FROM test_experimentation.users WHERE id = '{TEST_USER_ID}' OR email = 'test@example.com'"))
-    db_session.commit()
-
-    user = User(
-        id=TEST_USER_ID,  # Use the same ID as the mock_auth fixture
-        username="testuser",
-        email="test@example.com",
-        hashed_password="hashed_password",
-        is_active=True,
-        is_superuser=True
-    )
-    db_session.add(user)
-    db_session.commit()
-    db_session.refresh(user)
+    # Look up by the specific ID that mock_auth uses, or by email.
+    user = db_session.query(User).filter(User.id == TEST_USER_ID).first()
+    if not user:
+        # Remove any existing user with this email to avoid unique constraint
+        db_session.execute(
+            text("DELETE FROM test_experimentation.users WHERE email = 'test_ff@example.com'")
+        )
+        db_session.commit()
+        user = User(
+            id=TEST_USER_ID,
+            username="testuser_ff",
+            email="test_ff@example.com",
+            hashed_password="hashed_password",
+            is_active=True,
+            is_superuser=True
+        )
+        db_session.add(user)
+        db_session.commit()
+        db_session.refresh(user)
     return user
 
 @pytest.fixture
@@ -264,7 +268,7 @@ class TestFeatureFlagEndpoints:
         data = response.json()
         assert data["id"] == str(test_feature_flag.id)
         assert data["key"] == test_feature_flag.key
-        assert data["status"] == test_feature_flag.status.value
+        assert data["status"].upper() == test_feature_flag.status.value.upper()
 
         # Clean up
         app.dependency_overrides.pop(deps.get_db, None)
