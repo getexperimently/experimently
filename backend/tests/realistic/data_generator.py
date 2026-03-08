@@ -361,8 +361,9 @@ class DataScenario:
 class PlatformSeeder:
     """Seeds a running platform instance with scenario data via REST API."""
 
-    def __init__(self, api_url: str, token: str):
+    def __init__(self, api_url: str, token: str, api_key: Optional[str] = None):
         self.api_url = api_url.rstrip("/")
+        self.api_key = api_key
         self.session = requests.Session()
         self.session.headers.update(
             {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
@@ -424,10 +425,28 @@ class PlatformSeeder:
             "variant_id": variant_id,
             "properties": json.dumps(event.properties),
         }
-        resp = self.session.post(f"{self.api_url}/api/v1/events", json=payload)
+        headers: dict[str, str] = {}
+        if self.api_key:
+            headers["X-API-Key"] = self.api_key
+        resp = self.session.post(
+            f"{self.api_url}/api/v1/tracking/events", json=payload, headers=headers
+        )
         # Non-fatal: log and continue
-        if not resp.ok:
-            print(f"  Warning: failed to seed event for {event.user_id}: {resp.status_code}")
+        if resp.status_code in (401, 403):
+            print(
+                f"  Warning: tracking endpoint auth failed for {event.user_id} "
+                f"(status {resp.status_code}) — skipping. "
+                "Provide --api-key to authenticate."
+            )
+        elif resp.status_code == 422:
+            print(
+                f"  Warning: validation error seeding event for {event.user_id}: "
+                f"{resp.text}"
+            )
+        elif not resp.ok:
+            print(
+                f"  Warning: failed to seed event for {event.user_id}: {resp.status_code}"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -574,6 +593,14 @@ def main() -> None:
         help="JWT bearer token for the API",
     )
     parser.add_argument(
+        "--api-key",
+        default=None,
+        help=(
+            "API key for the tracking endpoint (X-API-Key header). "
+            "Required for POST /api/v1/tracking/events."
+        ),
+    )
+    parser.add_argument(
         "--seed",
         type=int,
         default=42,
@@ -600,7 +627,7 @@ def main() -> None:
             if not args.token:
                 print("  --token required to seed API.  Skipping.", file=sys.stderr)
                 continue
-            seeder = PlatformSeeder(args.api_url, args.token)
+            seeder = PlatformSeeder(args.api_url, args.token, api_key=args.api_key)
             seed_result = seeder.seed_scenario(result)
             print(f"  Seeded: {seed_result}")
 
