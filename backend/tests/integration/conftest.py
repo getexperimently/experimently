@@ -17,6 +17,7 @@ from sqlalchemy.pool import NullPool
 
 from backend.app.main import app
 from backend.app.api import deps
+from backend.app.db.session import get_db as _session_get_db
 from backend.app.api.deps import CacheControl
 from backend.app.models.user import User, UserRole
 from backend.app.models.experiment import (
@@ -338,6 +339,7 @@ def make_client_for_user(db_session: Session, user: User) -> TestClient:
         return user
 
     app.dependency_overrides[deps.get_db] = override_get_db
+    app.dependency_overrides[_session_get_db] = override_get_db  # compliance endpoint uses session.get_db directly
     app.dependency_overrides[deps.get_current_user] = override_get_current_user
     app.dependency_overrides[deps.get_current_active_user] = override_get_current_active_user
     app.dependency_overrides[deps.get_current_superuser] = override_get_current_superuser

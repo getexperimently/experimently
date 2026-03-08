@@ -194,6 +194,10 @@ def test_db():
                 import backend.app.models.custom_role  # noqa: F401
                 import backend.app.models.sso_config  # noqa: F401
                 import backend.app.models.workspace  # noqa: F401  EP-057
+                import backend.app.models.compliance_audit_event  # noqa: F401  EP-033
+                import backend.app.models.llm_experiment  # noqa: F401  EP-046
+                import backend.app.models.phi_audit_log  # noqa: F401  EP-050
+                import backend.app.models.baa_config  # noqa: F401  EP-050
 
                 # Set schema for all tables
                 Base.metadata.schema = schema_name

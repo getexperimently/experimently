@@ -16,7 +16,7 @@ class FeatureFlagBase(BaseModel):
     description: Optional[str] = Field(None, max_length=2000)
     is_active: bool = True
     rollout_percentage: Optional[int] = Field(None, ge=0, le=100)
-    targeting_rules: Optional[Dict[str, Any]] = None
+    targeting_rules: Optional[Any] = None
     default_value: Any = False
     tags: Optional[List[str]] = None
 
