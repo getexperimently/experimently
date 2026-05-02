@@ -60,6 +60,14 @@ This directory contains development guidelines, best practices, and technical do
    - [Release Process](workflow-explanation.md#releases)
    - [Environment Management](workflow-explanation.md#environments)
 
+4. **Deterministic Backend Test Profile**
+   - Start test dependencies with Docker Compose:
+     - `docker compose -f docker-compose.test.yml up -d postgres-test redis-test`
+   - Run the standardized backend release checks:
+     - `./scripts/run-backend-tests.sh release`
+   - For full local parity (starts/stops containers automatically):
+     - `EP_TEST_PROFILE=compose ./scripts/run-backend-tests.sh all`
+
 ## Best Practices
 
 1. **Code Quality**
