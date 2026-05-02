@@ -9,6 +9,7 @@ import logging
 import os
 import shutil
 import time
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
 from fastapi import FastAPI
@@ -58,6 +59,36 @@ logger = logging.getLogger(__name__)
 # Maximum request body size (1 MB) — prevents DoS via oversized payloads
 MAX_REQUEST_BODY_SIZE: int = 1_048_576  # 1 MB
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Manage background scheduler lifecycle for the FastAPI app."""
+    logger.info("Starting experiment scheduler")
+    await experiment_scheduler.start()
+
+    logger.info("Starting rollout scheduler")
+    await rollout_scheduler.start()
+
+    logger.info("Starting metrics scheduler")
+    await metrics_scheduler.start()
+
+    logger.info("Starting safety monitoring scheduler")
+    await safety_scheduler.start()
+
+    yield
+
+    logger.info("Stopping experiment scheduler")
+    await experiment_scheduler.stop()
+
+    logger.info("Stopping rollout scheduler")
+    await rollout_scheduler.stop()
+
+    logger.info("Stopping metrics scheduler")
+    await metrics_scheduler.stop()
+
+    logger.info("Stopping safety monitoring scheduler")
+    await safety_scheduler.stop()
+
+
 # Create FastAPI application
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -66,6 +97,7 @@ app = FastAPI(
     docs_url=None,
     redoc_url=None,
     openapi_url=f"{settings.API_V1_STR}/openapi.json",
+    lifespan=lifespan,
 )
 
 # ---------------------------------------------------------------------------
@@ -208,42 +240,6 @@ async def health_check() -> JSONResponse:
         }
 
     return JSONResponse(content=body, status_code=200 if overall_healthy else 503)
-
-
-# ---------------------------------------------------------------------------
-# Startup / shutdown lifecycle
-# ---------------------------------------------------------------------------
-
-@app.on_event("startup")
-async def startup_event() -> None:
-    """Start background tasks on application startup."""
-    logger.info("Starting experiment scheduler")
-    await experiment_scheduler.start()
-
-    logger.info("Starting rollout scheduler")
-    await rollout_scheduler.start()
-
-    logger.info("Starting metrics scheduler")
-    await metrics_scheduler.start()
-
-    logger.info("Starting safety monitoring scheduler")
-    await safety_scheduler.start()
-
-
-@app.on_event("shutdown")
-async def shutdown_event() -> None:
-    """Stop background tasks on application shutdown."""
-    logger.info("Stopping experiment scheduler")
-    await experiment_scheduler.stop()
-
-    logger.info("Stopping rollout scheduler")
-    await rollout_scheduler.stop()
-
-    logger.info("Stopping metrics scheduler")
-    await metrics_scheduler.stop()
-
-    logger.info("Stopping safety monitoring scheduler")
-    await safety_scheduler.stop()
 
 
 # ---------------------------------------------------------------------------
