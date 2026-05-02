@@ -21,8 +21,8 @@ http_requests_total: Counter = Counter(
 http_request_duration_seconds: Histogram = Histogram(
     "http_request_duration_seconds",
     "HTTP request duration in seconds",
-    ["method", "endpoint"],
-    buckets=[0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0],
+    ["method", "endpoint", "status_code"],
+    buckets=[0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0],
 )
 
 # ---------------------------------------------------------------------------
@@ -100,6 +100,7 @@ def record_request(
     http_request_duration_seconds.labels(
         method=method,
         endpoint=endpoint,
+        status_code=status_code,
     ).observe(duration)
 
 
