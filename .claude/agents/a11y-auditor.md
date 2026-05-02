@@ -11,7 +11,7 @@ axe-core via Playwright, and produce actionable compliance reports.
 
 ## Platform URLs
 
-- Frontend: http://localhost:3000
+- Frontend: http://localhost:3100
 - Test command: `cd frontend && npx playwright test accessibility`
 
 ## Pages to Audit
