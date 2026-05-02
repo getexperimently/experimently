@@ -431,11 +431,11 @@ class SafetyService:
 
         if existing_settings:
             # Update existing settings
-            for key, value in settings.dict(exclude_unset=True).items():
+            for key, value in settings.model_dump(exclude_unset=True).items():
                 setattr(existing_settings, key, value)
         else:
             # Create new settings
-            existing_settings = SafetySettings(**settings.dict())
+            existing_settings = SafetySettings(**settings.model_dump())
             self.db.add(existing_settings)
 
         self.db.commit()
@@ -491,11 +491,11 @@ class SafetyService:
 
         if existing_config:
             # Update existing configuration
-            for key, value in config.dict(exclude_unset=True).items():
+            for key, value in config.model_dump(exclude_unset=True).items():
                 setattr(existing_config, key, value)
         else:
             # Create new configuration
-            config_data = config.dict()
+            config_data = config.model_dump()
             existing_config = FeatureFlagSafetyConfig(
                 feature_flag_id=feature_flag_id,
                 **config_data
