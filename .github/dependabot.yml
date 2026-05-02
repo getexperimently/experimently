@@ -1,0 +1,55 @@
+version: 2
+
+updates:
+  # Track GitHub Actions used in workflows. Dependabot opens PRs that pin
+  # actions to commit SHAs and bump them on a schedule, satisfying the
+  # "pin and periodically update GitHub Action versions" requirement of
+  # Phase 3 hardening (#40).
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "github-actions"
+
+  # Backend Python dependencies.
+  - package-ecosystem: "pip"
+    directory: "/backend"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "python"
+    groups:
+      patch-and-minor:
+        update-types:
+          - "patch"
+          - "minor"
+
+  # Frontend Node dependencies.
+  - package-ecosystem: "npm"
+    directory: "/frontend"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "javascript"
+    groups:
+      patch-and-minor:
+        update-types:
+          - "patch"
+          - "minor"
+
+  # Infrastructure (CDK) dependencies.
+  - package-ecosystem: "npm"
+    directory: "/infrastructure"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 3
+    labels:
+      - "dependencies"
+      - "infrastructure"
