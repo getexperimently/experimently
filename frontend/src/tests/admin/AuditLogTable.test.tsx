@@ -150,5 +150,6 @@ describe('AuditLogTable', () => {
     mockListAuditLogs.mockResolvedValue(makePage());
     render(<AuditLogTable />);
     expect(screen.getByTestId('audit-log-table')).toBeInTheDocument();
+    await screen.findByTestId('audit-log-row-log-1');
   });
 });
