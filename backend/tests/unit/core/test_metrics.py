@@ -27,8 +27,23 @@ def test_record_request_observes_histogram(mocker):
 
     record_request("POST", "/api/v1/tracking/assign", 200, 0.045)
 
-    mock_hist.labels.assert_called_with(method="POST", endpoint="/api/v1/tracking/assign")
+    mock_hist.labels.assert_called_with(
+        method="POST",
+        endpoint="/api/v1/tracking/assign",
+        status_code=200,
+    )
     mock_hist.labels.return_value.observe.assert_called_with(0.045)
+
+
+def test_request_duration_histogram_buckets_cover_5ms_to_10s():
+    """Verify the histogram buckets span the SLA-relevant range."""
+    from backend.app.core.metrics import http_request_duration_seconds
+
+    buckets = list(http_request_duration_seconds._upper_bounds)
+    # Buckets include +Inf as the last entry; check explicit boundaries
+    explicit = [b for b in buckets if b != float("inf")]
+    assert min(explicit) <= 0.005, "Lower bound must reach 5ms for fast endpoints"
+    assert max(explicit) >= 10.0, "Upper bound must reach 10s for slow background queries"
 
 
 def test_record_experiment_assignment(mocker):
