@@ -26,6 +26,8 @@ class MockWebSocket {
   }
 
   close() {
+    // Prevent delayed constructor-triggered open from racing after close.
+    this.onopen = null;
     this.closeCalled = true;
     this.readyState = MockWebSocket.CLOSED;
     setTimeout(() => this.onclose?.(), 0);

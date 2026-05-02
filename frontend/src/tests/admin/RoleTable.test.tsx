@@ -79,6 +79,7 @@ describe('RoleTable', () => {
   });
 
   it('clicking delete shows confirmation', async () => {
+    (window.confirm as jest.Mock).mockReturnValue(false);
     mockListRoles.mockResolvedValue(mockRoles);
     mockDeleteRole.mockResolvedValue(undefined);
     render(<RoleTable onEditRole={jest.fn()} />);
@@ -88,6 +89,7 @@ describe('RoleTable', () => {
     const deleteButtons = screen.getAllByTestId('delete-role-button');
     fireEvent.click(deleteButtons[0]);
     expect(window.confirm).toHaveBeenCalled();
+    expect(mockDeleteRole).not.toHaveBeenCalled();
   });
 
   it('delete calls AdminService.deleteRole', async () => {
@@ -106,6 +108,9 @@ describe('RoleTable', () => {
 
     await waitFor(() => {
       expect(mockDeleteRole).toHaveBeenCalledWith('developer-role');
+    });
+    await waitFor(() => {
+      expect(mockListRoles).toHaveBeenCalledTimes(2);
     });
   });
 
@@ -129,5 +134,6 @@ describe('RoleTable', () => {
     mockListRoles.mockResolvedValue(mockRoles);
     render(<RoleTable onEditRole={jest.fn()} />);
     expect(screen.getByTestId('role-table')).toBeInTheDocument();
+    await screen.findByText('developer-role');
   });
 });

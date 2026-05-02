@@ -82,12 +82,14 @@ describe('AdminDashboard', () => {
     mockGetStats.mockResolvedValue(mockStats);
     render(<AdminDashboard />);
     expect(screen.getByTestId('admin-layout')).toBeInTheDocument();
+    await screen.findAllByTestId('stat-tile');
   });
 
   it('renders with data-testid="admin-dashboard"', async () => {
     mockGetStats.mockResolvedValue(mockStats);
     render(<AdminDashboard />);
     expect(screen.getByTestId('admin-dashboard')).toBeInTheDocument();
+    await screen.findAllByTestId('stat-tile');
   });
 
   it('handles zero values correctly', async () => {
