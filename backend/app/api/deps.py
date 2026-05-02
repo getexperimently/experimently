@@ -8,7 +8,7 @@ from jose import jwt
 
 from backend.app.core.config import settings
 from backend.app.core.pagination import Paginator
-from backend.app.core.security import oauth2_scheme
+from backend.app.core.security import oauth2_scheme, hash_api_key
 from backend.app.core.permissions import ResourceType, Action, check_permission, check_ownership, get_permission_error_message
 from backend.app.core.cognito import map_cognito_groups_to_role, should_be_superuser
 from backend.app.db.session import SessionLocal
@@ -314,6 +314,11 @@ def get_experiment_access(
     the specified experiment, checking superuser status, permissions,
     and ownership as needed.
 
+    Called directly from endpoints (positional `experiment` arg). For the
+    dependency-injection variant that fetches the experiment from a path
+    parameter, callers should use `Depends(get_experiment_by_key)` and pass
+    the resolved experiment to this function.
+
     Args:
         experiment: The experiment to check access for
         current_user: The current authenticated user
@@ -368,8 +373,9 @@ def get_api_key(
             headers={"WWW-Authenticate": "APIKey"},
         )
 
-    # Get API key from database
-    api_key = db.query(APIKey).filter(APIKey.key == api_key_header).first()
+    # Look up by hashed key only. API keys must never be stored as plaintext.
+    api_key_hash = hash_api_key(api_key_header)
+    api_key = db.query(APIKey).filter(APIKey.key == api_key_hash).first()
     if not api_key or not api_key.is_valid:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -436,11 +442,6 @@ def get_experiment_by_key(
     # Default check for active status (only if required_status is not specified)
     elif required_status is None and hasattr(experiment, 'status') and experiment.status != ExperimentStatus.ACTIVE:
         raise HTTPException(status_code=400, detail="Inactive experiment")
-
-    cache_enabled = getattr(settings, "CACHE_ENABLED", False)
-    if cache_enabled:
-        experiment_cache = RedisExperimentCache(settings)
-        experiment_cache.clear_experiment_cache(str(experiment.id))
 
     return experiment
 
@@ -635,32 +636,6 @@ async def can_delete_report(
     return True
 
 
-# Update experiment permissions to use the new permission system
-def get_experiment_access(
-    experiment: Experiment = Depends(get_experiment_by_key),
-    current_user: User = Depends(get_current_user),
-) -> Experiment:
-    """Check if user has access to the experiment."""
-    if current_user.is_superuser:
-        return experiment
-
-    # Check if user has permission to read experiments
-    if not check_permission(current_user, ResourceType.EXPERIMENT, Action.READ):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=get_permission_error_message(ResourceType.EXPERIMENT, Action.READ),
-        )
-
-    # Check ownership for non-admin users for modification actions
-    if not check_permission(current_user, ResourceType.EXPERIMENT, Action.UPDATE) and not check_ownership(current_user, experiment):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You don't have permission to access this experiment",
-        )
-
-    return experiment
-
-
 def can_create_experiment(
     current_user: User = Depends(get_current_user),
 ) -> bool:
@@ -674,10 +649,12 @@ def can_create_experiment(
 
 
 def can_update_experiment(
-    experiment: Union[Experiment, Dict[str, Any]] = Depends(get_experiment_access),
+    experiment: Experiment = Depends(get_experiment_by_key),
     current_user: User = Depends(get_current_user),
 ) -> bool:
     """Check if user can update an experiment."""
+    # First gate the request through the standard read/ownership check
+    get_experiment_access(experiment, current_user)
     if not check_permission(current_user, ResourceType.EXPERIMENT, Action.UPDATE):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -687,7 +664,7 @@ def can_update_experiment(
 
 
 def can_delete_experiment(
-    experiment: Union[Experiment, Dict[str, Any]] = Depends(get_experiment_access),
+    experiment: Experiment = Depends(get_experiment_by_key),
     current_user: User = Depends(get_current_user),
 ) -> bool:
     """
@@ -695,10 +672,12 @@ def can_delete_experiment(
 
     WARNING: Do not use this dependency in the delete_experiment endpoint!
     There is a design conflict where this dependency chain requires ACTIVE experiments
-    (via get_experiment_access → get_experiment_by_key) but the delete_experiment
-    endpoint requires experiments to be in DRAFT status. Use inline permission checks
-    in the delete_experiment endpoint instead.
+    (via get_experiment_by_key) but the delete_experiment endpoint requires
+    experiments to be in DRAFT status. Use inline permission checks in the
+    delete_experiment endpoint instead.
     """
+    # Gate through the standard read/ownership check first
+    get_experiment_access(experiment, current_user)
     # Check if user has permission to delete experiments
     if not check_permission(current_user, ResourceType.EXPERIMENT, Action.DELETE):
         raise HTTPException(
