@@ -4,7 +4,6 @@ from fastapi import Depends, HTTPException, status, Header, Request, Query
 from fastapi.security import OAuth2PasswordBearer, APIKeyHeader, HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, SecretStr
-from jose import jwt
 
 from backend.app.core.config import settings
 from backend.app.core.pagination import Paginator

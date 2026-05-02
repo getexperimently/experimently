@@ -143,7 +143,7 @@ def _issue_jwt(user: User) -> str:
     Uses the platform SECRET_KEY as the signing secret.  In production this
     should go through the same Cognito / token infrastructure as regular login.
     """
-    from jose import jwt as jose_jwt
+    import jwt
 
     payload = {
         "sub": str(user.id),
@@ -153,7 +153,7 @@ def _issue_jwt(user: User) -> str:
         "iat": datetime.utcnow(),
         "exp": datetime.utcnow() + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES),
     }
-    token = jose_jwt.encode(payload, settings.SECRET_KEY, algorithm="HS256")
+    token = jwt.encode(payload, settings.SECRET_KEY, algorithm="HS256")
     return token
 
 
