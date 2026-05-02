@@ -11,14 +11,14 @@ at each step, and cross-check that the frontend accurately reflects backend stat
 
 ## Platform URLs
 
-- Frontend: http://localhost:3000
+- Frontend: http://localhost:3100
 - Backend API: http://localhost:8000
 - API Docs: http://localhost:8000/docs
 
 ## Core Scenarios to Run
 
 ### Scenario 1: A/B Experiment Lifecycle (UI)
-1. Navigate to http://localhost:3000
+1. Navigate to http://localhost:3100
 2. Log in as admin (admin@example.com / testpassword123)
 3. Navigate to Experiments → New Experiment
 4. Fill in: Name="Homepage CTA Test", Type=A/B Test
@@ -58,7 +58,7 @@ at each step, and cross-check that the frontend accurately reflects backend stat
 ### Step 1: Check Platform is Running
 ```bash
 curl -s http://localhost:8000/health
-curl -s http://localhost:3000 -o /dev/null -w "%{http_code}"
+curl -s http://localhost:3100 -o /dev/null -w "%{http_code}"
 ```
 If either is down, report clearly and stop.
 

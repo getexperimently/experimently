@@ -45,7 +45,7 @@ Before launching any agents, verify the environment:
 # Backend health
 curl -sf http://localhost:8000/health || echo "BACKEND DOWN"
 # Frontend running
-curl -sf http://localhost:3000 -o /dev/null -w "%{http_code}" || echo "FRONTEND DOWN"
+curl -sf http://localhost:3100 -o /dev/null -w "%{http_code}" || echo "FRONTEND DOWN"
 # Database connected (health endpoint returns DB status)
 curl -sf http://localhost:8000/health | python -m json.tool 2>/dev/null || true
 ```
@@ -72,7 +72,7 @@ Launch these two agents simultaneously:
 ### Phase 2: E2E Browser Tests (SEQUENTIAL — needs Phase 1 data)
 
 **Agent: scenario-runner**
-- Check if frontend is running at http://localhost:3000
+- Check if frontend is running at http://localhost:3100
 - If running: execute the full scenario UI walkthrough
   - "ab_test_lifecycle" → Scenario 1: A/B Experiment Lifecycle
   - "feature_flag_rollout" → Scenario 2: Feature Flag Gradual Rollout
