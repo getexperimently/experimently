@@ -105,10 +105,12 @@ class TestCryptographicFailures:
 
     def test_bcrypt_used_for_password_hashing(self):
         """Password hashing must use bcrypt."""
-        from backend.app.core.security import pwd_context
+        from backend.app.core.security import get_password_hash
 
-        assert "bcrypt" in pwd_context.schemes(), (
-            "Password hashing must use bcrypt"
+        # Bcrypt hashes start with $2a$, $2b$, or $2y$ followed by the rounds.
+        hashed = get_password_hash("probe")
+        assert hashed.startswith(("$2a$", "$2b$", "$2y$")), (
+            "Password hashing must produce a bcrypt-format hash"
         )
 
     def test_password_hash_not_reversible(self):
@@ -116,10 +118,7 @@ class TestCryptographicFailures:
         from backend.app.core.security import get_password_hash
 
         password = "TestPassword123"
-        try:
-            hashed = get_password_hash(password)
-        except (ValueError, RuntimeError):
-            pytest.skip("bcrypt/passlib version incompatibility in test environment")
+        hashed = get_password_hash(password)
         assert hashed != password
         assert len(hashed) > 50  # bcrypt hashes are ~60 chars
 
