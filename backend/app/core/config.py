@@ -321,7 +321,7 @@ class DevSettings(Settings):
 
     ENVIRONMENT: str = "dev"
     LOG_LEVEL: str = "DEBUG"
-    CORS_ORIGINS: List[str] = ["http://localhost:3000", "http://localhost:3001", "http://localhost:8000"]
+    CORS_ORIGINS: List[str] = ["http://localhost:3100", "http://localhost:3000", "http://localhost:3001", "http://localhost:8000"]
     CACHE_ENABLED: bool = False
     CACHE_CONTROL: Dict[str, Any] = {"enabled": False, "redis": None, "ttl": 3600}
     PROJECT_NAME: str = "Experimentation Platform (Development)"
