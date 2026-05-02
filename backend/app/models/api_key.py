@@ -30,9 +30,8 @@ class APIKey(Base, BaseModel):
 
     __tablename__ = "api_keys"
 
-    key = Column(
-        String(100), unique=True, nullable=False, index=True, default=generate_api_key
-    )
+    # Stores SHA-256 hash of the API key (never plaintext).
+    key = Column(String(64), unique=True, nullable=False, index=True)
     name = Column(String(100), nullable=False)
     description = Column(Text, nullable=True)
     is_active = Column(Boolean, default=True, nullable=False)
@@ -57,7 +56,7 @@ class APIKey(Base, BaseModel):
         return ({"schema": get_schema_name()},)
 
     def __repr__(self):
-        return f"<APIKey {self.name} ({self.key[:8]}...)>"
+        return f"<APIKey {self.name}>"
 
     @property
     def is_expired(self) -> bool:
@@ -81,9 +80,14 @@ class APIKey(Base, BaseModel):
     def create_for_user(
         cls, db_session, user_id, name, description=None, scopes=None, expires_at=None
     ):
-        """Create a new API key for a user."""
+        """Create a new API key for a user and return (model, plaintext_key)."""
+        from backend.app.core.security import hash_api_key
+
+        plaintext_key = generate_api_key()
+        key_hash = hash_api_key(plaintext_key)
         api_key = cls(
             user_id=user_id,
+            key=key_hash,
             name=name,
             description=description,
             scopes=scopes,
@@ -92,4 +96,4 @@ class APIKey(Base, BaseModel):
         db_session.add(api_key)
         db_session.commit()
         db_session.refresh(api_key)
-        return api_key
+        return api_key, plaintext_key

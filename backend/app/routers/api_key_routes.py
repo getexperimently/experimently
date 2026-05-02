@@ -69,7 +69,7 @@ def create_api_key(
         expires_at = datetime.utcnow() + timedelta(days=api_key_in.expires_in_days)
 
     # Create the API key
-    api_key = APIKey.create_for_user(
+    api_key, plaintext_key = APIKey.create_for_user(
         db_session=db,
         user_id=current_user.id,
         name=api_key_in.name,
@@ -78,7 +78,17 @@ def create_api_key(
         expires_at=expires_at,
     )
 
-    return api_key
+    return APIKeyResponse(
+        id=str(api_key.id),
+        key=plaintext_key,
+        name=api_key.name,
+        description=api_key.description,
+        scopes=api_key.scopes,
+        is_active=api_key.is_active,
+        expires_at=api_key.expires_at,
+        created_at=api_key.created_at,
+        updated_at=api_key.updated_at,
+    )
 
 
 @router.get("/", response_model=List[APIKeyList])
