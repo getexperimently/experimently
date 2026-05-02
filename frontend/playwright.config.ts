@@ -13,12 +13,12 @@ import { defineConfig, devices } from "@playwright/test";
  *   npx playwright show-report             # view HTML report
  *
  * Environment variables:
- *   PLAYWRIGHT_BASE_URL   — override default frontend URL (default: http://localhost:3000)
+ *   PLAYWRIGHT_BASE_URL   — override default frontend URL (default: http://localhost:3100)
  *   PLAYWRIGHT_API_URL    — backend API URL (default: http://localhost:8000)
  *   PLAYWRIGHT_HEADLESS   — "false" to show browser window (default: "true")
  */
 
-const BASE_URL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3000";
+const BASE_URL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3100";
 const HEADLESS = process.env.PLAYWRIGHT_HEADLESS !== "false";
 
 export default defineConfig({
