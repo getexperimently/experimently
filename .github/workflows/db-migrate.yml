@@ -23,14 +23,16 @@ jobs:
     name: Run Database Migration (${{ inputs.environment }})
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment }}
+    permissions:
+      id-token: write
+      contents: read
     steps:
       - uses: actions/checkout@v4
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          role-to-assume: ${{ inputs.environment == 'production' && secrets.PROD_AWS_ROLE_ARN || secrets.STAGING_AWS_ROLE_ARN }}
           aws-region: us-west-2
 
       - name: Require approval for production downgrade
