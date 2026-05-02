@@ -6,8 +6,9 @@ This module provides functions for password hashing, token generation,
 and other security-related operations.
 
 Security notes:
-- Password hashing uses bcrypt via passlib.  The default bcrypt work factor
-  (12 rounds) is used, which meets current best practices.
+- Password hashing uses bcrypt directly (work factor 12, current best
+  practice). The previous passlib wrapper was abandoned upstream and
+  incompatible with bcrypt >= 4.1.
 - JWT validation in production is delegated entirely to AWS Cognito via
   CognitoAuthService.  The decode_token() function below is a stub used
   only in test mocking scenarios.  It MUST NOT be used for real token
@@ -15,15 +16,14 @@ Security notes:
 """
 
 import logging
-from passlib.context import CryptContext
+import bcrypt
 from fastapi.security import OAuth2PasswordBearer
 from backend.app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-# Create password context for hashing — bcrypt with automatic deprecation handling
-# The effective work factor is 12 rounds (passlib default), which is appropriate.
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# Bcrypt work factor; 12 rounds is the current best-practice default.
+_BCRYPT_ROUNDS = 12
 
 # OAuth2 password bearer scheme for token authentication
 import os as _os
@@ -39,23 +39,31 @@ def get_password_hash(password: str) -> str:
         password: Plain text password
 
     Returns:
-        Hashed password
+        Hashed password (bcrypt-format str)
     """
-    return pwd_context.hash(password)
+    salt = bcrypt.gensalt(rounds=_BCRYPT_ROUNDS)
+    return bcrypt.hashpw(password.encode("utf-8"), salt).decode("utf-8")
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """
-    Verify a password against a hash.
+    Verify a password against a bcrypt hash.
 
     Args:
         plain_password: Plain text password
-        hashed_password: Hashed password
+        hashed_password: Bcrypt hash (as produced by get_password_hash)
 
     Returns:
         True if password matches hash, False otherwise
     """
-    return pwd_context.verify(plain_password, hashed_password)
+    try:
+        return bcrypt.checkpw(
+            plain_password.encode("utf-8"),
+            hashed_password.encode("utf-8"),
+        )
+    except (ValueError, TypeError):
+        # Malformed hash — treat as a non-match rather than raising.
+        return False
 
 def decode_token(token: str) -> dict:
     """

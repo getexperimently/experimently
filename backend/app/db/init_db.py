@@ -8,18 +8,15 @@ This module handles database table creation and initial data seeding.
 import logging
 from sqlalchemy.ext.asyncio import AsyncEngine
 from sqlalchemy.ext.asyncio import create_async_engine
-from passlib.context import CryptContext
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from backend.app.core.config import settings
+from backend.app.core.security import get_password_hash
 from backend.app.db.base import Base
 from backend.app.models.user import User, Role, Permission
 
 logger = logging.getLogger(__name__)
-
-# Password hashing context
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 async def init_db(engine: AsyncEngine) -> None:
@@ -79,7 +76,7 @@ async def seed_initial_data(engine: AsyncEngine) -> None:
             admin_user = User(
                 email=settings.FIRST_SUPERUSER_EMAIL,
                 username=settings.FIRST_SUPERUSER_EMAIL.split("@")[0],
-                hashed_password=pwd_context.hash(settings.FIRST_SUPERUSER_PASSWORD),
+                hashed_password=get_password_hash(settings.FIRST_SUPERUSER_PASSWORD),
                 full_name="System Administrator",
                 is_active=True,
                 is_superuser=True,
