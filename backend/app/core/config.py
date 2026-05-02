@@ -220,6 +220,49 @@ class Settings(BaseSettings):
                 )
         return v
 
+    @field_validator("AUDIT_HMAC_KEY")
+    @classmethod
+    def validate_audit_hmac_key(cls, v: str, info: ValidationInfo) -> str:
+        """
+        Reject the dev default AUDIT_HMAC_KEY in production.
+
+        This key signs SOC 2 / ISO 27001 compliance audit log integrity proofs
+        (HMAC-SHA256). Shipping the default in prod makes all audit signatures
+        forgeable and breaks compliance attestations.
+        """
+        environment = (info.data or {}).get("ENVIRONMENT", "dev")
+        is_testing = os.getenv("TESTING", "").lower() in ("1", "true", "yes")
+        if not is_testing and environment == "prod":
+            weak_defaults = {"dev-audit-key-change-in-production", "", "changeme"}
+            if v in weak_defaults or len(v) < _MIN_SECRET_KEY_LENGTH:
+                raise ValueError(
+                    f"AUDIT_HMAC_KEY must be at least {_MIN_SECRET_KEY_LENGTH} characters "
+                    "and must not be the dev default in production. "
+                    "Generate one with: python -c \"import secrets; print(secrets.token_hex(32))\""
+                )
+        return v
+
+    @field_validator("SSO_STATE_SECRET")
+    @classmethod
+    def validate_sso_state_secret(cls, v: str, info: ValidationInfo) -> str:
+        """
+        Reject the dev default SSO_STATE_SECRET in production.
+
+        This secret protects the SAML/OIDC state parameter against CSRF.
+        A predictable value lets an attacker forge SSO state tokens.
+        """
+        environment = (info.data or {}).get("ENVIRONMENT", "dev")
+        is_testing = os.getenv("TESTING", "").lower() in ("1", "true", "yes")
+        if not is_testing and environment == "prod":
+            weak_defaults = {"sso-state-secret-change-in-prod", "", "changeme"}
+            if v in weak_defaults or len(v) < _MIN_SECRET_KEY_LENGTH:
+                raise ValueError(
+                    f"SSO_STATE_SECRET must be at least {_MIN_SECRET_KEY_LENGTH} characters "
+                    "and must not be the dev default in production. "
+                    "Generate one with: python -c \"import secrets; print(secrets.token_hex(32))\""
+                )
+        return v
+
     @field_validator("DATABASE_URI", mode="before")
     @classmethod
     def assemble_database_connection(cls, v: Optional[str], info: ValidationInfo) -> Any:
