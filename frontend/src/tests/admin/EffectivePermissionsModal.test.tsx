@@ -19,10 +19,13 @@ describe('EffectivePermissionsModal', () => {
     onClose: jest.fn(),
   };
 
-  it('renders modal when isOpen=true', () => {
+  it('renders modal when isOpen=true', async () => {
     mockGetUserPermissions.mockResolvedValue({ permissions: [] });
     render(<EffectivePermissionsModal {...defaultProps} />);
     expect(screen.getByTestId('effective-permissions-modal')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(mockGetUserPermissions).toHaveBeenCalledWith('user-123');
+    });
   });
 
   it('fetches permissions for userId on open', async () => {
@@ -59,9 +62,12 @@ describe('EffectivePermissionsModal', () => {
     });
   });
 
-  it('renders with data-testid="effective-permissions-modal"', () => {
+  it('renders with data-testid="effective-permissions-modal"', async () => {
     mockGetUserPermissions.mockResolvedValue({ permissions: [] });
     render(<EffectivePermissionsModal {...defaultProps} />);
     expect(screen.getByTestId('effective-permissions-modal')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(mockGetUserPermissions).toHaveBeenCalledWith('user-123');
+    });
   });
 });
