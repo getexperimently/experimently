@@ -25,10 +25,33 @@ jobs:
   pre-deployment-checks:
     name: Pre-deployment Checks
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+      checks: read
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.version }}
+
+      - name: Validate deploy target is an existing git tag
+        run: |
+          git fetch --tags --force
+          git rev-parse "refs/tags/${{ inputs.version }}" >/dev/null
+
+      - name: Verify release gate passed for target commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TARGET_SHA=$(git rev-parse HEAD)
+          RELEASE_GATE_RESULT=$(gh api "repos/${{ github.repository }}/commits/${TARGET_SHA}/check-runs" \
+            --jq '.check_runs[] | select(.name=="Release Gate Summary") | .conclusion' || true)
+
+          if [ "${RELEASE_GATE_RESULT}" != "success" ]; then
+            echo "::error::Release Gate Summary is not successful for ${TARGET_SHA}. Result='${RELEASE_GATE_RESULT}'"
+            exit 1
+          fi
+          echo "Release gate verified for ${TARGET_SHA}"
 
       - name: Notify deployment started
         uses: slackapi/slack-github-action@v1.26.0
@@ -51,8 +74,7 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          role-to-assume: ${{ secrets.PROD_AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Verify backup exists
@@ -129,6 +151,9 @@ jobs:
     name: Build & Push Docker Images
     runs-on: ubuntu-latest
     needs: run-tests
+    permissions:
+      id-token: write
+      contents: read
     outputs:
       backend-image: ${{ steps.build-backend.outputs.image }}
       frontend-image: ${{ steps.build-frontend.outputs.image }}
@@ -140,8 +165,7 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          role-to-assume: ${{ secrets.PROD_AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Login to Amazon ECR
@@ -186,6 +210,9 @@ jobs:
     runs-on: ubuntu-latest
     needs: build-and-push
     environment: production
+    permissions:
+      id-token: write
+      contents: read
     steps:
       - uses: actions/checkout@v4
         with:
@@ -194,8 +221,7 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          role-to-assume: ${{ secrets.PROD_AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Take pre-migration DB snapshot
@@ -243,6 +269,9 @@ jobs:
     runs-on: ubuntu-latest
     needs: [build-and-push, run-migrations]
     environment: production
+    permissions:
+      id-token: write
+      contents: read
     steps:
       - uses: actions/checkout@v4
         with:
@@ -251,8 +280,7 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          role-to-assume: ${{ secrets.PROD_AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Update ECS task definition with new image
@@ -342,12 +370,14 @@ jobs:
     runs-on: ubuntu-latest
     needs: [deploy, smoke-tests]
     if: always()
+    permissions:
+      id-token: write
+      contents: read
     steps:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          role-to-assume: ${{ secrets.PROD_AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Check ECS service health
