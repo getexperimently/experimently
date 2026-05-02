@@ -74,9 +74,9 @@ def decode_token(token: str) -> dict:
     import os
     is_testing = os.getenv("TESTING", "").lower() in ("1", "true", "yes")
     if not is_testing:
-        logger.warning(
-            "decode_token() stub called outside of a test context. "
-            "Production code should use CognitoAuthService for JWT validation."
+        raise RuntimeError(
+            "decode_token() is a test-only stub and must not be called outside "
+            "a test context. Production authentication must use CognitoAuthService."
         )
     return {
         "sub": "user_id",
