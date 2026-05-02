@@ -12,6 +12,9 @@ jobs:
     name: Deploy Frontend (Dev)
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    permissions:
+      id-token: write
+      contents: read
 
     steps:
       - uses: actions/checkout@v4
@@ -34,15 +37,12 @@ jobs:
           npm run build
 
       - name: Configure AWS credentials
-        if: ${{ secrets.AWS_ACCESS_KEY_ID != '' }}
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          role-to-assume: ${{ secrets.DEV_AWS_ROLE_ARN }}
           aws-region: us-west-2
 
       - name: Deploy to S3 (dev)
-        if: ${{ secrets.AWS_ACCESS_KEY_ID != '' }}
         run: |
           aws s3 sync frontend/out/ s3://getexperimently-dev/ \
             --delete \

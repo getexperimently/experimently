@@ -21,9 +21,10 @@ This directory contains all operational documentation for deploying and operatin
 ### Deploy to Production
 
 1. Create and push a git tag: `git tag v1.2.3 && git push origin v1.2.3`
-2. Go to **GitHub Actions** → **"Deploy to Production"** → **Run workflow** → enter the tag
-3. Approve the deployment in the GitHub environment gate
-4. Monitor progress in Slack `#deployments`
+2. Ensure **Release Gate** succeeded for the target commit/tag.
+3. Go to **GitHub Actions** → **"Deploy to Production"** → **Run workflow** → enter the tag
+4. Approve the deployment in the GitHub environment gate
+5. Monitor progress in Slack `#deployments`
 
 Full procedure: [deployment-guide.md](deployment-guide.md)
 
@@ -98,8 +99,9 @@ These secrets must be set in the GitHub repository under **Settings → Secrets 
 
 | Secret | Description |
 |--------|-------------|
-| `AWS_ACCESS_KEY_ID` | AWS deployment role access key ID |
-| `AWS_SECRET_ACCESS_KEY` | AWS deployment role secret access key |
+| `DEV_AWS_ROLE_ARN` | IAM role ARN assumed via GitHub OIDC for dev frontend deploy |
+| `PROD_AWS_ROLE_ARN` | IAM role ARN assumed via GitHub OIDC for production deploy/rollback |
+| `STAGING_AWS_ROLE_ARN` | IAM role ARN assumed via GitHub OIDC for staging DB migrations |
 | `PROD_API_URL` | Production API base URL (e.g., `https://api.experimentation.example.com`) |
 | `PROD_SMOKE_TEST_API_KEY` | API key (`X-API-Key` header) used by automated smoke tests |
 | `PROD_SMOKE_TEST_TOKEN` | JWT Bearer token used by automated smoke tests |
