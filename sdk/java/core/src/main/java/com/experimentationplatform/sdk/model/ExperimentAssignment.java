@@ -3,19 +3,19 @@ package com.experimentationplatform.sdk.model;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
+import java.util.Map;
 import java.util.Objects;
 
 /**
- * Represents an experiment assignment response from the platform.
- *
- * <p>Returned by {@code POST /api/v1/assignments} and by
+ * The variant the server assigned a user to, as returned by
+ * {@code POST /api/v1/tracking/assign} and by
  * {@link com.experimentationplatform.sdk.ExperimentationClient#getExperimentAssignment}.
+ *
+ * <p>Assignments are sticky server-side: the same user always receives the same
+ * variant for a given experiment.
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class ExperimentAssignment {
-
-    @JsonProperty("experiment_id")
-    private String experimentId;
 
     @JsonProperty("experiment_key")
     private String experimentKey;
@@ -23,14 +23,17 @@ public class ExperimentAssignment {
     @JsonProperty("user_id")
     private String userId;
 
-    @JsonProperty("variant_key")
-    private String variantKey;
+    @JsonProperty("variant_id")
+    private String variantId;
 
-    @JsonProperty("in_experiment")
-    private boolean inExperiment;
+    @JsonProperty("variant_name")
+    private String variantName;
 
-    @JsonProperty("assignment_reason")
-    private String assignmentReason;
+    @JsonProperty("is_control")
+    private boolean control;
+
+    @JsonProperty("configuration")
+    private Map<String, Object> configuration;
 
     /** No-arg constructor required for Jackson deserialization. */
     public ExperimentAssignment() {}
@@ -38,25 +41,22 @@ public class ExperimentAssignment {
     /**
      * Full constructor for tests and manual construction.
      *
-     * @param experimentId     unique identifier of the experiment
-     * @param experimentKey    key of the experiment (human-readable)
-     * @param userId           identifier of the user who was assigned
-     * @param variantKey       the variant key assigned (e.g., "control", "treatment")
-     * @param inExperiment     true if the user is included in this experiment
-     * @param assignmentReason explanation of why the user was assigned this variant
+     * @param experimentKey key of the experiment
+     * @param userId        identifier of the user who was assigned
+     * @param variantId     UUID of the assigned variant
+     * @param variantName   name of the assigned variant (e.g. "control", "treatment")
+     * @param control       true for the control variant
+     * @param configuration the variant's configuration JSON, or {@code null}
      */
-    public ExperimentAssignment(String experimentId, String experimentKey, String userId,
-                                 String variantKey, boolean inExperiment, String assignmentReason) {
-        this.experimentId = experimentId;
+    public ExperimentAssignment(String experimentKey, String userId, String variantId,
+                                String variantName, boolean control, Map<String, Object> configuration) {
         this.experimentKey = experimentKey;
         this.userId = userId;
-        this.variantKey = variantKey;
-        this.inExperiment = inExperiment;
-        this.assignmentReason = assignmentReason;
+        this.variantId = variantId;
+        this.variantName = variantName;
+        this.control = control;
+        this.configuration = configuration;
     }
-
-    public String getExperimentId() { return experimentId; }
-    public void setExperimentId(String experimentId) { this.experimentId = experimentId; }
 
     public String getExperimentKey() { return experimentKey; }
     public void setExperimentKey(String experimentKey) { this.experimentKey = experimentKey; }
@@ -64,42 +64,57 @@ public class ExperimentAssignment {
     public String getUserId() { return userId; }
     public void setUserId(String userId) { this.userId = userId; }
 
-    public String getVariantKey() { return variantKey; }
-    public void setVariantKey(String variantKey) { this.variantKey = variantKey; }
+    /** Returns the assigned variant's UUID. */
+    public String getVariantId() { return variantId; }
+    public void setVariantId(String variantId) { this.variantId = variantId; }
 
-    public boolean isInExperiment() { return inExperiment; }
-    public void setInExperiment(boolean inExperiment) { this.inExperiment = inExperiment; }
+    /** Returns the assigned variant's name, e.g. {@code "control"} or {@code "treatment"}. */
+    public String getVariantName() { return variantName; }
+    public void setVariantName(String variantName) { this.variantName = variantName; }
 
-    public String getAssignmentReason() { return assignmentReason; }
-    public void setAssignmentReason(String assignmentReason) { this.assignmentReason = assignmentReason; }
+    /**
+     * Alias for {@link #getVariantName()}.
+     *
+     * @deprecated the server identifies variants by name; use {@link #getVariantName()}.
+     */
+    @Deprecated
+    public String getVariantKey() { return variantName; }
+
+    /** Returns true when the user is in the control variant. */
+    public boolean isControl() { return control; }
+    public void setControl(boolean control) { this.control = control; }
+
+    /** Returns the variant's configuration JSON from the experiment definition, or {@code null}. */
+    public Map<String, Object> getConfiguration() { return configuration; }
+    public void setConfiguration(Map<String, Object> configuration) { this.configuration = configuration; }
 
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
         ExperimentAssignment that = (ExperimentAssignment) o;
-        return inExperiment == that.inExperiment &&
-               Objects.equals(experimentId, that.experimentId) &&
+        return control == that.control &&
                Objects.equals(experimentKey, that.experimentKey) &&
                Objects.equals(userId, that.userId) &&
-               Objects.equals(variantKey, that.variantKey) &&
-               Objects.equals(assignmentReason, that.assignmentReason);
+               Objects.equals(variantId, that.variantId) &&
+               Objects.equals(variantName, that.variantName) &&
+               Objects.equals(configuration, that.configuration);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(experimentId, experimentKey, userId, variantKey, inExperiment, assignmentReason);
+        return Objects.hash(experimentKey, userId, variantId, variantName, control, configuration);
     }
 
     @Override
     public String toString() {
         return "ExperimentAssignment{" +
-               "experimentId='" + experimentId + '\'' +
-               ", experimentKey='" + experimentKey + '\'' +
+               "experimentKey='" + experimentKey + '\'' +
                ", userId='" + userId + '\'' +
-               ", variantKey='" + variantKey + '\'' +
-               ", inExperiment=" + inExperiment +
-               ", assignmentReason='" + assignmentReason + '\'' +
+               ", variantId='" + variantId + '\'' +
+               ", variantName='" + variantName + '\'' +
+               ", control=" + control +
+               ", configuration=" + configuration +
                '}';
     }
 }

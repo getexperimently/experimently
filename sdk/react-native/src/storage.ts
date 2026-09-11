@@ -1,59 +1,49 @@
 /**
- * AsyncStorage wrapper for offline persistence of flag evaluations.
+ * AsyncStorage wrapper for persisting server results per user + key.
+ *
+ * Each entry is stored as `{ value, expiresAt }` so it can act both as a
+ * TTL-bounded cache that survives app restarts and — past its TTL — as the
+ * last-known value served when the API is unreachable (offline fallback).
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import type { Assignment, CacheEntry, FlagEvaluation } from './types';
 
 const FLAG_PREFIX = 'ep_sdk_flag:';
 const ASSIGNMENT_PREFIX = 'ep_sdk_asgn:';
 
+function storageKey(prefix: string, userId: string, key: string): string {
+  return `${prefix}${encodeURIComponent(userId)}:${encodeURIComponent(key)}`;
+}
+
 /**
- * Persists and retrieves flag/assignment values using AsyncStorage.
+ * Persists and retrieves flag evaluations / assignments using AsyncStorage.
  *
- * Keys are namespaced with `ep_sdk_flag:` or `ep_sdk_asgn:` to avoid
- * collisions with other AsyncStorage users in the host app.
+ * Keys are namespaced with `ep_sdk_flag:` or `ep_sdk_asgn:` (followed by the
+ * URL-encoded user id and key) to avoid collisions with other AsyncStorage
+ * users in the host app. Every method is best-effort and never throws.
  */
 export class OfflineStorage {
-  /** Persists a flag enabled/disabled state. */
-  async setFlag(cacheKey: string, value: boolean): Promise<void> {
-    try {
-      await AsyncStorage.setItem(FLAG_PREFIX + cacheKey, JSON.stringify(value));
-    } catch {
-      // Best-effort — never throw
-    }
+  /** Persists a flag evaluation with its expiry. */
+  async setFlag(userId: string, flagKey: string, value: FlagEvaluation, ttlMs: number): Promise<void> {
+    await this.write(storageKey(FLAG_PREFIX, userId, flagKey), value, ttlMs);
   }
 
-  /** Retrieves a persisted flag state, or `null` if not stored. */
-  async getFlag(cacheKey: string): Promise<boolean | null> {
-    try {
-      const raw = await AsyncStorage.getItem(FLAG_PREFIX + cacheKey);
-      if (raw === null) return null;
-      return JSON.parse(raw) as boolean;
-    } catch {
-      return null;
-    }
+  /** Retrieves a persisted flag evaluation (expired or not), or `null` if not stored. */
+  async getFlag(userId: string, flagKey: string): Promise<CacheEntry<FlagEvaluation> | null> {
+    const entry = await this.read<FlagEvaluation>(storageKey(FLAG_PREFIX, userId, flagKey));
+    return entry && typeof entry.value?.enabled === 'boolean' ? entry : null;
   }
 
-  /** Persists an experiment variant key (or `null` for "not assigned"). */
-  async setAssignment(cacheKey: string, variantKey: string | null): Promise<void> {
-    try {
-      const value = variantKey === null ? 'null' : variantKey;
-      await AsyncStorage.setItem(ASSIGNMENT_PREFIX + cacheKey, value);
-    } catch {
-      // Best-effort — never throw
-    }
+  /** Persists an experiment assignment with its expiry. */
+  async setAssignment(userId: string, experimentKey: string, value: Assignment, ttlMs: number): Promise<void> {
+    await this.write(storageKey(ASSIGNMENT_PREFIX, userId, experimentKey), value, ttlMs);
   }
 
-  /** Retrieves a persisted assignment variant key, or `null` if not stored. */
-  async getAssignment(cacheKey: string): Promise<string | null | undefined> {
-    try {
-      const raw = await AsyncStorage.getItem(ASSIGNMENT_PREFIX + cacheKey);
-      if (raw === null) return undefined; // undefined = "never stored"
-      if (raw === 'null') return null;    // null = "stored as not-assigned"
-      return raw;
-    } catch {
-      return undefined;
-    }
+  /** Retrieves a persisted assignment (expired or not), or `null` if not stored. */
+  async getAssignment(userId: string, experimentKey: string): Promise<CacheEntry<Assignment> | null> {
+    const entry = await this.read<Assignment>(storageKey(ASSIGNMENT_PREFIX, userId, experimentKey));
+    return entry && typeof entry.value?.variantName === 'string' ? entry : null;
   }
 
   /** Removes all SDK-namespaced entries from AsyncStorage. */
@@ -68,6 +58,29 @@ export class OfflineStorage {
       }
     } catch {
       // Best-effort
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+
+  private async write(key: string, value: unknown, ttlMs: number): Promise<void> {
+    try {
+      const entry: CacheEntry<unknown> = { value, expiresAt: Date.now() + ttlMs };
+      await AsyncStorage.setItem(key, JSON.stringify(entry));
+    } catch {
+      // Best-effort — never throw
+    }
+  }
+
+  private async read<T>(key: string): Promise<CacheEntry<T> | null> {
+    try {
+      const raw = await AsyncStorage.getItem(key);
+      if (raw === null) return null;
+      const parsed = JSON.parse(raw) as Partial<CacheEntry<T>> | null;
+      if (!parsed || typeof parsed !== 'object' || typeof parsed.expiresAt !== 'number') return null;
+      return { value: parsed.value as T, expiresAt: parsed.expiresAt };
+    } catch {
+      return null;
     }
   }
 }

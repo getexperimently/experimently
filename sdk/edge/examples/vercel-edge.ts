@@ -2,8 +2,8 @@
  * Vercel Edge Functions / Edge Middleware example.
  *
  * This file shows two patterns:
- *  1. Middleware pattern: evaluate flags and inject as request headers
- *     (use this in middleware.ts at the root of your Next.js project)
+ *  1. Middleware pattern: evaluate flags on the server and inject them as
+ *     request headers (use this in middleware.ts at the root of your Next.js project)
  *  2. Edge Function pattern: direct client usage in an API route
  *
  * Vercel Edge Middleware (middleware.ts):
@@ -21,7 +21,8 @@ import { EdgeExperimentationClient } from '../src/client';
 // ---------------------------------------------------------------------------
 
 /**
- * Vercel Edge Middleware that evaluates feature flags and injects the results
+ * Vercel Edge Middleware that evaluates feature flags for the request's user
+ * (from the `X-User-Id` header or `user_id` cookie) and injects the results
  * as request headers for downstream pages and API routes.
  *
  * Each flag becomes a header: X-EP-Flag-{flagKey}: "true" | "false"
@@ -37,7 +38,7 @@ import { EdgeExperimentationClient } from '../src/client';
 export const middleware = createEdgeMiddleware({
   apiKey: process.env.EP_API_KEY ?? '',
   baseUrl: process.env.EP_BASE_URL ?? 'https://api.your-platform.com',
-  flagKeys: ['new-checkout', 'dark-mode', 'beta-search'],
+  flagKeys: ['new-checkout', 'dark-mode', 'beta-search'], // omit to inject every flag the server reports
   userIdCookieName: 'user_id',
   userIdHeaderName: 'X-User-Id',
   cacheTtlMs: 30_000, // 30 seconds — Vercel Edge has short-lived instances
@@ -72,14 +73,17 @@ export async function featureCheckHandler(request: Request): Promise<Response> {
     timeout: 500,
   });
 
-  // Async evaluation with API fallback
-  const enabled = await client.evaluateFlag(flagKey, userId, {
+  // Server-decided evaluation; `config` carries the flag's payload (if any).
+  const { enabled, config } = await client.evaluateFlag(flagKey, userId);
+
+  // Sticky experiment assignment with targeting attributes as `context`.
+  const assignment = await client.getAssignment('checkout_flow', userId, {
     country: request.headers.get('x-vercel-ip-country') ?? 'unknown',
     city: request.headers.get('x-vercel-ip-city') ?? 'unknown',
   });
 
   return new Response(
-    JSON.stringify({ flagKey, userId, enabled }),
+    JSON.stringify({ flagKey, userId, enabled, config, variant: assignment?.variantName ?? null }),
     {
       status: 200,
       headers: {

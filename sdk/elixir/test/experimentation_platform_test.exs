@@ -1,71 +1,85 @@
 defmodule ExperimentationPlatformTest do
   @moduledoc """
-  Integration-style tests for the top-level ExperimentationPlatform facade module.
+  Tests for the top-level ExperimentationPlatform facade module.
 
-  These tests verify the public API surface delegates correctly to the Client.
+  These tests verify the public API surface delegates correctly to the
+  Client and returns the documented shapes.
   """
 
   use ExUnit.Case, async: true
 
-  alias ExperimentationPlatform.{Config, HttpBehaviour}
+  alias ExperimentationPlatform.{Assignment, BatchResult, FlagEvaluation, HttpBehaviour}
+
+  @spy :experimentation_platform_facade_test_spy
 
   defmodule MockHttp do
+    @moduledoc false
     @behaviour HttpBehaviour
 
+    @spy :experimentation_platform_facade_test_spy
+
     @impl true
-    def get(_config, path) do
-      cond do
-        String.contains?(path, "feature-flags/my-flag") ->
-          {:ok, %{
-            "key" => "my-flag",
-            "enabled" => true,
-            "rollout_percentage" => 100,
-            "variants" => [%{"name" => "treatment", "value" => "new"}]
-          }}
-
-        String.contains?(path, "experiments/my-exp") ->
-          {:ok, %{
-            "key" => "my-exp",
-            "status" => "running",
-            "traffic_allocation" => 1.0,
-            "variants" => [%{"name" => "control"}, %{"name" => "treatment"}]
-          }}
-
-        true ->
-          {:error, {:api_error, 404, "Not found"}}
-      end
+    def get(_config, "/api/v1/feature-flags/evaluate/my-flag?user_id=" <> _user_id) do
+      {:ok, %{"key" => "my-flag", "enabled" => true, "config" => %{"variant" => "new"}}}
     end
 
+    def get(_config, _path), do: {:error, {:api_error, 404, "Not found"}}
+
     @impl true
-    def post(_config, _path, _body), do: {:ok, %{"status" => "accepted"}}
+    def post(_config, "/api/v1/tracking/assign", %{experiment_key: "my-exp", user_id: user_id}) do
+      {:ok,
+       %{
+         "experiment_key" => "my-exp",
+         "user_id" => user_id,
+         "variant_id" => "v-1",
+         "variant_name" => "treatment",
+         "is_control" => false,
+         "configuration" => nil
+       }}
+    end
+
+    def post(_config, "/api/v1/tracking/assign", _body) do
+      {:error, {:api_error, 404, "Not found"}}
+    end
+
+    def post(_config, path, body) do
+      if pid = Process.whereis(@spy), do: send(pid, {:post, path, body})
+      {:ok, %{"success_count" => 1, "failure_count" => 0, "errors" => nil}}
+    end
+  end
+
+  setup do
+    Process.register(self(), @spy)
+    :ok
   end
 
   defp start_ep do
-    {:ok, client} = ExperimentationPlatform.start(
-      base_url: "http://localhost:8000",
-      api_key: "test-key",
-      http_client: MockHttp
-    )
+    {:ok, client} =
+      ExperimentationPlatform.start(
+        base_url: "http://localhost:8000",
+        api_key: "test-key",
+        http_client: MockHttp
+      )
+
     on_exit(fn -> if Process.alive?(client), do: ExperimentationPlatform.stop(client) end)
     client
   end
 
   describe "start/1" do
     test "returns {:ok, pid} on success" do
-      result = ExperimentationPlatform.start(
-        base_url: "http://localhost",
-        api_key: "key",
-        http_client: MockHttp
-      )
-      assert {:ok, pid} = result
+      assert {:ok, pid} =
+               ExperimentationPlatform.start(
+                 base_url: "http://localhost",
+                 api_key: "key",
+                 http_client: MockHttp
+               )
+
       assert is_pid(pid)
       ExperimentationPlatform.stop(pid)
     end
 
     test "raises ArgumentError when base_url is missing" do
-      assert_raise ArgumentError, fn ->
-        ExperimentationPlatform.start(api_key: "key")
-      end
+      assert_raise ArgumentError, fn -> ExperimentationPlatform.start(api_key: "key") end
     end
 
     test "raises ArgumentError when api_key is missing" do
@@ -76,65 +90,127 @@ defmodule ExperimentationPlatformTest do
   end
 
   describe "evaluate_flag/4" do
-    test "delegates to Client and returns variant" do
+    test "returns {:ok, %FlagEvaluation{}}" do
       client = start_ep()
-      {:ok, variant} = ExperimentationPlatform.evaluate_flag(client, "my-flag", "user-1")
-      assert variant != nil
-      assert variant["name"] == "treatment"
+
+      assert {:ok, %FlagEvaluation{key: "my-flag", enabled: true, config: %{"variant" => "new"}}} =
+               ExperimentationPlatform.evaluate_flag(client, "my-flag", "user-1")
     end
 
-    test "returns {:ok, nil} for unknown flag" do
+    test "returns {:error, reason} for an unknown flag" do
       client = start_ep()
-      {:ok, result} = ExperimentationPlatform.evaluate_flag(client, "unknown-flag", "user-1")
-      assert result == nil
+
+      assert {:error, {:api_error, 404, _}} =
+               ExperimentationPlatform.evaluate_flag(client, "unknown-flag", "user-1")
     end
 
     test "accepts optional opts" do
       client = start_ep()
-      {:ok, result} = ExperimentationPlatform.evaluate_flag(client, "my-flag", "user-1", attributes: %{country: "US"})
-      assert result != nil
+
+      assert {:ok, %FlagEvaluation{enabled: true}} =
+               ExperimentationPlatform.evaluate_flag(client, "my-flag", "user-1",
+                 attributes: %{country: "US"},
+                 skip_cache: true
+               )
+    end
+  end
+
+  describe "feature_enabled?/3" do
+    test "is a boolean view of evaluate_flag" do
+      client = start_ep()
+      assert ExperimentationPlatform.feature_enabled?(client, "my-flag", "user-1")
+      refute ExperimentationPlatform.feature_enabled?(client, "unknown-flag", "user-1")
     end
   end
 
   describe "get_assignment/4" do
-    test "delegates to Client and returns assignment" do
+    test "returns {:ok, %Assignment{}}" do
       client = start_ep()
-      {:ok, assignment} = ExperimentationPlatform.get_assignment(client, "my-exp", "user-1")
-      assert assignment != nil
-      assert assignment["name"] in ["control", "treatment"]
+
+      assert {:ok,
+              %Assignment{
+                experiment_key: "my-exp",
+                variant_id: "v-1",
+                variant_name: "treatment",
+                is_control: false,
+                configuration: nil
+              }} = ExperimentationPlatform.get_assignment(client, "my-exp", "user-1")
     end
 
-    test "returns {:ok, nil} for unknown experiment" do
+    test "accepts attributes as the fourth argument" do
       client = start_ep()
-      {:ok, result} = ExperimentationPlatform.get_assignment(client, "unknown-exp", "user-1")
-      assert result == nil
+
+      assert {:ok, %Assignment{variant_name: "treatment"}} =
+               ExperimentationPlatform.get_assignment(client, "my-exp", "user-1", %{plan: "pro"})
+    end
+
+    test "returns {:error, reason} for an unknown experiment" do
+      client = start_ep()
+
+      assert {:error, {:api_error, 404, _}} =
+               ExperimentationPlatform.get_assignment(client, "unknown-exp", "user-1")
     end
   end
 
-  describe "track/4" do
+  describe "track/5" do
     test "returns :ok immediately" do
       client = start_ep()
-      result = ExperimentationPlatform.track(client, "page_view", "user-1")
-      assert result == :ok
+      assert :ok = ExperimentationPlatform.track(client, "page_view", "user-1")
     end
 
-    test "accepts optional properties" do
+    test "accepts properties and options" do
       client = start_ep()
-      result = ExperimentationPlatform.track(client, "click", "user-1", %{button: "cta", page: "home"})
-      assert result == :ok
+
+      assert :ok =
+               ExperimentationPlatform.track(client, "click", "user-1", %{button: "cta"},
+                 experiment_key: "my-exp",
+                 value: 1
+               )
+
+      assert_receive {:post, "/api/v1/tracking/track", %{experiment_key: "my-exp", value: 1}}, 500
+    end
+  end
+
+  describe "track_batch/2" do
+    test "returns {:ok, %BatchResult{}}" do
+      client = start_ep()
+
+      assert {:ok, %BatchResult{success_count: 1, failure_count: 0}} =
+               ExperimentationPlatform.track_batch(client, [
+                 %{event_name: "purchase", user_id: "user-1", experiment_key: "my-exp"}
+               ])
+
+      assert_receive {:post, "/api/v1/tracking/batch", %{events: [_]}}
+    end
+  end
+
+  describe "cache helpers" do
+    test "assignments/2, evaluated_flags/2 and clear_cache/1" do
+      client = start_ep()
+
+      {:ok, assignment} = ExperimentationPlatform.get_assignment(client, "my-exp", "user-1")
+      {:ok, _} = ExperimentationPlatform.evaluate_flag(client, "my-flag", "user-1")
+
+      assert ExperimentationPlatform.assignments(client, "user-1") == [assignment]
+      assert ExperimentationPlatform.evaluated_flags(client, "user-1") == ["my-flag"]
+
+      assert :ok = ExperimentationPlatform.clear_cache(client)
+      assert ExperimentationPlatform.assignments(client, "user-1") == []
+      assert ExperimentationPlatform.evaluated_flags(client, "user-1") == []
     end
   end
 
   describe "stop/1" do
     test "terminates the client process" do
-      {:ok, client} = ExperimentationPlatform.start(
-        base_url: "http://localhost",
-        api_key: "key",
-        http_client: MockHttp
-      )
+      {:ok, client} =
+        ExperimentationPlatform.start(
+          base_url: "http://localhost",
+          api_key: "key",
+          http_client: MockHttp
+        )
+
       assert Process.alive?(client)
-      ExperimentationPlatform.stop(client)
-      :timer.sleep(10)
+      assert :ok = ExperimentationPlatform.stop(client)
       refute Process.alive?(client)
     end
   end

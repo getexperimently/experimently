@@ -2,9 +2,10 @@
  * Deno Deploy example using the Edge SDK.
  *
  * Deno Deploy runs V8 isolates globally. This example shows:
- *  1. Loading flags from Deno KV at isolate startup
- *  2. Background KV refresh for subsequent requests
- *  3. Zero-latency flag evaluation in request handlers
+ *  1. One client per isolate (createDenoHandler) so the in-memory cache is reused
+ *  2. Sharing cached server results across isolates via Deno KV
+ *  3. Server-decided flag evaluation and experiment assignment
+ *  4. Fire-and-forget tracking
  *
  * Deploy with: deployctl deploy --project=my-project deno-edge.ts
  */
@@ -16,8 +17,7 @@ import { createDenoHandler, DenoExperimentationClient } from '../src/adapters/de
 // ---------------------------------------------------------------------------
 
 /**
- * The inner handler receives a pre-warmed client and the original request.
- * Flags are loaded from Deno KV (or API on cold start).
+ * The inner handler receives the isolate's shared client and the original request.
  */
 export default {
   fetch: createDenoHandler(
@@ -25,37 +25,28 @@ export default {
       const url = new URL(request.url);
       const userId = request.headers.get('X-User-Id') ?? url.searchParams.get('userId') ?? 'anon';
 
-      // Zero-latency sync evaluation using pre-loaded flags
-      const newSearchEnabled = client.evaluateFlagSync('new-search', userId, {
-        region: request.headers.get('CF-IPCountry') ?? 'unknown',
-      });
-
-      const betaFeaturesEnabled = client.evaluateFlagSync('beta-features', userId);
-
       if (url.pathname === '/health') {
         return new Response(
-          JSON.stringify({
-            status: 'ok',
-            flagCount: client.flagCount,
-            bootstrapped: client.isBootstrapped,
-          }),
+          JSON.stringify({ status: 'ok', cachedFlags: client.flagCount, cachedAssignments: client.experimentCount }),
           { headers: { 'Content-Type': 'application/json' } },
         );
       }
 
-      // Track exposure asynchronously
-      client.track('page_view', userId, {
-        path: url.pathname,
-        newSearch: newSearchEnabled,
-        betaFeatures: betaFeaturesEnabled,
-      }).catch(() => {}); // fire-and-forget
+      // Server-decided; cached per user + key in memory and in Deno KV.
+      const [newSearch, betaFeatures] = await Promise.all([
+        client.evaluateFlag('new-search', userId),
+        client.evaluateFlag('beta-features', userId),
+      ]);
+
+      // Keyless events fan out to every cached assignment + flag for this user.
+      client.track('page_view', userId, { path: url.pathname }).catch(() => {}); // fire-and-forget
 
       return new Response(
         JSON.stringify({
           userId,
           flags: {
-            'new-search': newSearchEnabled,
-            'beta-features': betaFeaturesEnabled,
+            'new-search': newSearch.enabled,
+            'beta-features': betaFeatures.enabled,
           },
         }),
         {
@@ -67,6 +58,7 @@ export default {
     {
       apiKey: Deno.env.get('EP_API_KEY') ?? '',
       baseUrl: Deno.env.get('EP_BASE_URL') ?? 'https://api.your-platform.com',
+      // kv: await Deno.openKv(), // Uncomment to share cached results across isolates
       cacheTtlMs: 60_000,
       timeout: 500,
     },
@@ -92,15 +84,15 @@ export async function manualHandler(request: Request): Promise<Response> {
     kvTtlMs: 300_000, // 5 minutes
   });
 
-  await client.loadFromKvOrApi();
-
   const userId = request.headers.get('X-User-Id') ?? 'anonymous';
-  const enabled = client.evaluateFlagSync('my-feature', userId);
+  const assignment = await client.getAssignment('checkout_flow', userId);
+  const { enabled } = await client.evaluateFlag('my-feature', userId);
 
-  // Background refresh in Deno (no waitUntil — use Promise without await)
-  Promise.resolve().then(() => client.refreshAndStore()).catch(() => {});
+  // Sync reads are free once the server has answered in this isolate
+  const stillEnabled = client.evaluateFlagSync('my-feature', userId);
 
-  return new Response(JSON.stringify({ enabled }), {
-    headers: { 'Content-Type': 'application/json' },
-  });
+  return new Response(
+    JSON.stringify({ enabled, stillEnabled, variant: assignment?.variantName ?? 'control' }),
+    { headers: { 'Content-Type': 'application/json' } },
+  );
 }

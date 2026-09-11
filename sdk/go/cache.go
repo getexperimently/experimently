@@ -126,6 +126,36 @@ func (c *Cache) Len() int {
 	return len(c.items)
 }
 
+// Range calls fn for every live (non-expired) entry, most recently used first.
+// Expired entries encountered during the scan are removed. The snapshot is
+// taken under the lock and fn is invoked after it is released, so fn may call
+// back into the cache. Range does not update recency.
+func (c *Cache) Range(fn func(key string, value interface{})) {
+	type kv struct {
+		key   string
+		value interface{}
+	}
+
+	c.mu.Lock()
+	now := time.Now()
+	live := make([]kv, 0, len(c.items))
+	for el := c.lruList.Front(); el != nil; {
+		next := el.Next()
+		entry := el.Value.(*cacheEntry)
+		if c.ttl > 0 && now.After(entry.expiresAt) {
+			c.removeEntry(entry)
+		} else {
+			live = append(live, kv{entry.key, entry.value})
+		}
+		el = next
+	}
+	c.mu.Unlock()
+
+	for _, item := range live {
+		fn(item.key, item.value)
+	}
+}
+
 // evict removes the least recently used item from the cache.
 // Must be called with c.mu held.
 func (c *Cache) evict() {

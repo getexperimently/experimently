@@ -1,22 +1,33 @@
 # PHP SDK
 
-The PHP SDK provides feature flag evaluation, experiment variant assignment, and event tracking for PHP applications. It requires only the `ext-json` and `ext-curl` PHP extensions (both enabled by default in standard PHP installations) and is compatible with any PSR-compliant application stack.
+`experimently/experimentation-platform-sdk` (v0.1) provides feature flag evaluation, experiment
+assignment and event tracking for PHP 8.1+ applications. It depends only on `ext-curl` and
+`ext-json`.
+
+Flag evaluation and experiment assignment are decided **by the server**: every call goes to the
+public API with your `X-API-Key`, the server buckets the user (sticky per user + experiment), and
+the SDK caches the answer per user + key. Nothing is bucketed locally.
+
+Source: `sdk/php`.
 
 ---
 
 ## Requirements
 
-- PHP 7.4 or later
-- `ext-json` (standard)
-- `ext-curl` (standard)
+- PHP >= 8.1
+- `ext-json`, `ext-curl`
+- Composer for installation and PHPUnit only — the SDK has no runtime dependencies
 
 ---
 
 ## Installation
 
 ```bash
-composer require experimently/sdk
+composer require experimently/experimentation-platform-sdk
 ```
+
+Without composer, `require` the files under `sdk/php/src/` directly (`examples/contract_smoke.php`
+shows the order).
 
 ---
 
@@ -25,18 +36,22 @@ composer require experimently/sdk
 ```php
 <?php
 
-use Experimently\Client;
+use ExperimentationPlatform\ExperimentationClient;
+use ExperimentationPlatform\SdkConfig;
 
-$client = new Client([
-    'base_url' => 'https://api.example.com',
-    'api_key'  => getenv('EXPERIMENTLY_API_KEY'),
-]);
+$client = new ExperimentationClient(new SdkConfig(
+    baseUrl: getenv('EXPERIMENTLY_API_URL') ?: 'http://localhost:8000',
+    apiKey:  getenv('EXPERIMENTLY_API_KEY'),
+));
 
-$enabled = $client->evaluateFlag('new-checkout', 'user-123', false);
-
-if ($enabled) {
-    // show new checkout experience
+if ($client->isFeatureEnabled('new-checkout', 'user-123')) {
+    showNewCheckout();
 }
+
+$assignment = $client->getAssignment('checkout-cta-copy', 'user-123', ['plan' => 'pro']);
+$headline   = $assignment?->configuration['headline'] ?? 'Buy now';
+
+$client->track('purchase', 'user-123', ['sku' => 'pro-plan'], 'checkout-cta-copy', null, 99.99);
 ```
 
 ---
@@ -44,251 +59,273 @@ if ($enabled) {
 ## Configuration
 
 ```php
-$client = new Client([
-    'base_url'   => 'https://api.example.com',  // Required
-    'api_key'    => 'your-api-key',              // Required
-    'cache_ttl'  => 60,                          // Seconds before a cached result expires (default: 60)
-    'timeout'    => 5,                           // cURL timeout in seconds (default: 5)
-    'cache_size' => 1000,                        // Maximum number of entries in the cache (default: 1000)
-]);
+$config = new SdkConfig(
+    baseUrl: 'http://localhost:8000',  // Required — origin only; the SDK appends /api/v1/...
+    apiKey: 'your-api-key',            // Required — sent as X-API-Key
+    cacheTtl: 300,                     // Seconds a successful result is reused (default 300)
+    timeout: 10,                       // HTTP connect/request timeout in seconds (default 10)
+    maxCacheSize: 1000,                // Maximum cached entries, oldest evicted (default 1000)
+);
 ```
 
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `base_url` | `string` | *(required)* | Base URL of the platform API |
-| `api_key` | `string` | *(required)* | API key for SDK authentication |
-| `cache_ttl` | `int` | `60` | Seconds before a cached evaluation expires |
-| `timeout` | `int` | `5` | cURL HTTP timeout in seconds |
-| `cache_size` | `int` | `1000` | Maximum LRU cache entries |
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `baseUrl` | `string` | *(required)* | Backend origin, e.g. `https://api.example.com` |
+| `apiKey` | `string` | *(required)* | API key sent as `X-API-Key` |
+| `cacheTtl` | `int` | `300` | How long a successful evaluation/assignment is reused (seconds) |
+| `timeout` | `int` | `10` | cURL connect and total timeout (seconds) |
+| `maxCacheSize` | `int` | `1000` | Maximum cache entries |
+
+`SdkConfig` validates its arguments and throws `InvalidArgumentException` for an empty
+`baseUrl`/`apiKey` or a non-positive timeout/size.
 
 ---
 
 ## Feature Flag Evaluation
 
-### `evaluateFlag($flagKey, $userId, $default, $attributes = [])`
+### `evaluateFlag(string $flagKey, string $userId): FlagEvaluation`
 
-Returns the flag value for the given user. Returns `$default` on any error so your application always gets a usable answer.
+Calls `GET /api/v1/feature-flags/evaluate/{flagKey}?user_id=…` and returns a `FlagEvaluation`:
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `key` | `string` | The flag key you asked for |
+| `enabled` | `bool` | Server decision for this user (`false` on any failure) |
+| `config` | `mixed`, `null` | The flag's `config` payload as returned by the server |
 
 ```php
-$enabled = $client->evaluateFlag('dark-mode', 'user-456', false);
-
-if ($enabled) {
-    $this->renderDarkMode();
+$flag = $client->evaluateFlag('dark-mode', 'user-456');
+if ($flag->enabled) {
+    $theme = $flag->config['theme'] ?? 'dark';
 }
 ```
 
-Pass user attributes for server-side targeting rules:
+On a network/HTTP failure (including 404 when the flag is not ACTIVE) a cached evaluation is
+returned when one exists; otherwise the flag is reported as disabled. Failures are never cached,
+so the next call retries. `FlagEvaluation::toArray()` gives `['key', 'enabled', 'config']`.
 
-```php
-$enabled = $client->evaluateFlag(
-    'enterprise-dashboard',
-    'user-789',
-    false,
-    [
-        'plan'    => 'enterprise',
-        'country' => 'US',
-        'beta'    => true,
-    ]
-);
-```
+### `isFeatureEnabled(string $flagKey, string $userId): bool`
+
+Shorthand for `evaluateFlag(...)->enabled`.
 
 ---
 
 ## Experiment Assignment
 
-### `getAssignment($experimentKey, $userId, $attributes = [])`
+### `getAssignment(string $experimentKey, string $userId, array $attributes = []): ?Assignment`
 
-Returns an associative array describing the variant assigned to the user.
+Calls `POST /api/v1/tracking/assign` with `{experiment_key, user_id, context: $attributes}`. The
+server buckets the user, keeps the assignment sticky and records the exposure.
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `experimentKey` | `string` | The experiment key |
+| `variantId` | `?string` | UUID of the assigned variant |
+| `variantName` | `string` | Assigned variant name (e.g. `"control"`, `"treatment"`) |
+| `isControl` | `bool` | `true` for the control variant |
+| `configuration` | `?array` | The variant's `configuration` JSON from the experiment definition |
 
 ```php
-$assignment = $client->getAssignment('checkout-cta-copy', 'user-123');
+$assignment = $client->getAssignment('checkout-cta-copy', 'user-123', ['plan' => 'pro', 'country' => 'US']);
 
-switch ($assignment['variant_key']) {
-    case 'control':
-        $this->renderOriginalCta();
-        break;
-    case 'treatment-a':
-        $this->renderShortCta();
-        break;
-    case 'treatment-b':
-        $this->renderUrgencyCta();
-        break;
-    default:
-        $this->renderOriginalCta();
-}
+match ($assignment?->variantName) {
+    'treatment-a' => renderShortCta(),
+    'treatment-b' => renderUrgencyCta(),
+    default       => renderOriginalCta(),   // control, or null on failure
+};
 ```
 
-The returned array includes:
-
-| Key | Type | Description |
-|-----|------|-------------|
-| `variant_key` | `string` | Assigned variant (e.g., `"control"`, `"treatment"`) |
-| `experiment_key` | `string` | The experiment key |
-| `experiment_id` | `string` | UUID of the experiment |
-| `is_control` | `bool` | `true` if this is the control variant |
+Returns `null` on any failure (network error, 401, 404 when the experiment is not ACTIVE); a
+cached assignment is returned when one exists. Failures are never cached. `Assignment::toArray()`
+uses the API field names (`experiment_key`, `variant_id`, ...).
 
 ---
 
 ## Event Tracking
 
-### `track($eventName, $userId, $properties = [])`
+### `track(string $eventName, string $userId, array $properties = [], ?string $experimentKey = null, ?string $featureFlagKey = null, ?float $value = null, ?string $eventType = null): bool`
 
-Records a conversion or behavioural event. Call this after meaningful user actions such as purchases, sign-ups, or form submissions.
+Never throws. Returns `true` when every request succeeded, `false` otherwise.
 
 ```php
-$client->track('purchase', 'user-123', [
-    'amount'   => 99.99,
-    'currency' => 'USD',
-    'sku'      => 'pro-plan',
-]);
+$client->track('purchase', 'user-123', ['sku' => 'pro-plan'], 'checkout-cta-copy', null, 99.99);
+$client->track('search', 'user-123', ['q' => 'shoes'], null, 'new-search');
+$client->track('page_view', 'user-123', ['page' => '/products']);   // no key: fanned out
 ```
 
-Properties are arbitrary key-value pairs. Numeric values are used as the metric measurement for statistical analysis.
+**Fan-out rule.** With `$experimentKey` and/or `$featureFlagKey` the SDK sends one
+`POST /api/v1/tracking/track`. Without a key it sends one `POST /api/v1/tracking/batch`
+containing one entry per experiment the user has been assigned to through this client plus one
+per flag evaluated for the user (from the cache). If nothing is cached, nothing is sent. This is
+what makes a single `track('purchase', …)` count as a conversion for every experiment the user is
+in.
+
+Conversions are matched to metrics by **event name**: an experiment metric whose `event_name` is
+`purchase` counts every `purchase` event, whatever `event_type` was sent. `$properties` is sent as
+`metadata`; `$eventType` defaults to `$eventName`; the timestamp is now (UTC, ISO-8601).
+
+Because PHP's cache lives for one request/process, the key-less fan-out only sees assignments and
+flags evaluated earlier in the **same** request. Pass the key explicitly when tracking from a
+different request (for example a webhook or a queue worker).
+
+### `trackBatch(array $events): BatchResult`
+
+Sends up to 100 events per `POST /api/v1/tracking/batch` (longer lists are chunked). Each event
+is an array with `event_name`, `user_id` and at least one of `experiment_key` /
+`feature_flag_key`; optional `properties`, `value`, `event_type`, `timestamp` (ISO-8601 string or
+`DateTimeInterface`).
+
+```php
+$result = $client->trackBatch([
+    ['event_name' => 'purchase', 'user_id' => 'user-123', 'experiment_key' => 'checkout-cta-copy', 'value' => 99.99],
+    ['event_name' => 'search',   'user_id' => 'user-123', 'feature_flag_key' => 'new-search'],
+]);
+$result->isOk();          // true when failureCount === 0
+$result->successCount;    // 2
+$result->errors;          // null, or a list of error arrays
+```
+
+Malformed events are counted as failures without being sent. Never throws.
 
 ---
 
-## Consistent Hash Algorithm
+## Cache helpers
 
-Variant assignment uses MD5-based consistent hashing. The hash input is the string `"{userId}:{flagKey}"`. The first 4 bytes of the raw MD5 digest are unpacked as a little-endian unsigned 32-bit integer, then divided by `4294967296.0` to produce a value in `[0, 1)`.
+| Method | Description |
+|--------|-------------|
+| `getAssignments(string $userId): Assignment[]` | Cached (successful, unexpired) assignments for the user |
+| `getEvaluatedFlags(string $userId): string[]` | Keys of flags successfully evaluated (and still cached) for the user |
+| `clearCache(): void` | Drop every cached evaluation and assignment |
+
+The cache is an in-memory array scoped to the `ExperimentationClient` instance. PHP is
+single-threaded per request, so no locking is needed; under a long-running runtime (Swoole,
+RoadRunner, FrankenPHP workers) one client per worker gives you cross-request reuse for `cacheTtl`.
+
+---
+
+## Backend endpoints used
+
+Every request carries `X-API-Key`, `Content-Type: application/json` and `Accept: application/json`.
+
+| SDK call | Method and path | Body / query | Response used |
+|---|---|---|---|
+| `evaluateFlag`, `isFeatureEnabled` | `GET /api/v1/feature-flags/evaluate/{flag_key}?user_id=…` | — | `{key, enabled, config}`; 404 when the flag is not ACTIVE |
+| `getAssignment` | `POST /api/v1/tracking/assign` | `{experiment_key, user_id, context?}` | `{experiment_key, user_id, variant_id, variant_name, is_control, configuration}`; 404 when the experiment is not ACTIVE |
+| `track` with a key | `POST /api/v1/tracking/track` | `{event_type, event_name, user_id, experiment_key?, feature_flag_key?, value?, metadata?, timestamp?}` | ignored |
+| `track` without keys, `trackBatch` | `POST /api/v1/tracking/batch` | `{events: [<track body>, …]}` (max 100 per request) | `{success_count, failure_count, errors}` |
+
+These SDK paths share a per-IP rate-limit ceiling of `SDK_RATE_LIMIT_PER_MINUTE` requests
+(default 6000) on the backend; a `429` is surfaced as a failure (disabled flag / `null` / `false`).
+
+---
+
+## Error Handling
+
+The public methods never throw on network or HTTP errors. Only `HttpClient` throws:
+
+| Exception | Extends | When |
+|-----------|---------|------|
+| `ExperimentationPlatform\Errors\ExperimentationException` | `\RuntimeException` | Base class |
+| `ExperimentationPlatform\Errors\NetworkException` | `ExperimentationException` | cURL transport errors, timeouts |
+| `ExperimentationPlatform\Errors\ApiException` (`getStatusCode()`) | `ExperimentationException` | Other 4xx/5xx (404 not ACTIVE, 422 validation, 429 rate limited) |
+| `ExperimentationPlatform\Errors\AuthException` | `ApiException` | HTTP 401 — invalid API key |
+
+---
+
+## Consistent Hash Utility
+
+`FeatureFlagEvaluator::hashUser(string $userId, string $key): float` implements the cross-SDK
+formula — `MD5("{userId}:{key}")`, first 4 bytes as little-endian uint32, divided by 2^32 — and is
+pinned by the golden-vector tests in `tests/sdk-contract/`:
 
 ```php
-function bucket(string $userId, string $key): float
+FeatureFlagEvaluator::hashUser('user-123', 'my-flag');   // 0.6927449859213084
+```
+
+It is exported as a utility only. Since assignment moved to the server, nothing in the SDK uses it
+to decide a variant.
+
+---
+
+## Laravel Integration
+
+```php
+// app/Providers/ExperimentlyServiceProvider.php
+use ExperimentationPlatform\ExperimentationClient;
+use ExperimentationPlatform\SdkConfig;
+
+public function register(): void
 {
-    $raw = md5("{$userId}:{$key}", true); // raw binary output
-    $int = unpack('V', substr($raw, 0, 4))[1];
-    return $int / 4294967296.0;
+    $this->app->singleton(ExperimentationClient::class, fn () => new ExperimentationClient(new SdkConfig(
+        baseUrl: config('services.experimently.url'),
+        apiKey: config('services.experimently.key'),
+        cacheTtl: 60,
+    )));
 }
 ```
 
-This algorithm is identical across all platform SDKs. A user bucketed in PHP will always fall in the same bucket as one evaluated in Go, Java, Ruby, or any other SDK.
+```php
+// In a controller
+public function show(ExperimentationClient $experiments, Request $request)
+{
+    $userId  = (string) ($request->user()?->id ?? $request->cookie('visitor_id'));
+    $variant = $experiments->getAssignment('checkout-cta-copy', $userId, ['plan' => $request->user()?->plan])
+        ?->variantName ?? 'control';
+
+    return view('checkout', ['variant' => $variant]);
+}
+```
 
 ---
 
-## Laravel Service Provider
+## Testing your own code
 
-### Register the Provider
+Inject a fake `HttpClient` (the SDK's own tests use `sdk/php/tests/FakeHttpClient.php`, which
+records requests and serves canned responses), or a PHPUnit mock of `ExperimentationClient`:
 
 ```php
-// config/app.php
-'providers' => [
-    // ...
-    Experimently\Laravel\ExperimentlyServiceProvider::class,
-],
+$http = new FakeHttpClient();
+$http->on('GET', '/api/v1/feature-flags/evaluate/new-checkout?user_id=user-1',
+          ['key' => 'new-checkout', 'enabled' => true, 'config' => null]);
+
+$client = new ExperimentationClient($config, $http);
+self::assertTrue($client->isFeatureEnabled('new-checkout', 'user-1'));
+self::assertSame('GET', $http->requests[0]['method']);
 ```
 
-### Publish Configuration
+---
+
+## Contract smoke
+
+Runs the four contract steps (sticky assignment, flag evaluation, keyed track, key-less fan-out
+plus a 2-event batch) against a live backend and prints one JSON line:
 
 ```bash
-php artisan vendor:publish --provider="Experimently\Laravel\ExperimentlyServiceProvider"
+EXPERIMENTLY_API_KEY=<key> php sdk/php/examples/contract_smoke.php
+# {"sdk":"php","assign":{"variant_name":"control","is_control":true,"sticky":true},"flag":{"enabled":true},"track":{"ok":true},"fanout":{"ok":true}}
 ```
 
-This creates `config/experimently.php`:
+Env: `EXPERIMENTLY_API_URL` (default `http://localhost:8000`), `EXPERIMENTLY_API_KEY` (required),
+`CONTRACT_EXPERIMENT_KEY` (default `sdk_contract_ab`), `CONTRACT_FLAG_KEY` (default
+`sdk_contract_flag`), `CONTRACT_USER_ID` (default random `smoke-<uuid>`). No `composer install`
+is needed — the script `require`s `src/` directly when `vendor/` is absent.
 
-```php
-<?php
-
-return [
-    'base_url' => env('EXPERIMENTLY_BASE_URL', 'https://api.example.com'),
-    'api_key'  => env('EXPERIMENTLY_API_KEY'),
-    'cache_ttl' => env('EXPERIMENTLY_CACHE_TTL', 60),
-    'timeout'   => env('EXPERIMENTLY_TIMEOUT', 5),
-];
-```
-
-### Inject the Client
-
-```php
-<?php
-
-namespace App\Http\Controllers;
-
-use Experimently\Client as ExperimentlyClient;
-use Illuminate\Http\Request;
-
-class CheckoutController extends Controller
-{
-    public function __construct(private readonly ExperimentlyClient $exp) {}
-
-    public function show(Request $request)
-    {
-        $userId = (string) auth()->id() ?? 'anonymous';
-
-        $enabled = $this->exp->evaluateFlag('new-checkout', $userId, false, [
-            'plan'    => auth()->user()?->plan,
-            'country' => $request->header('CF-IPCountry', 'XX'),
-        ]);
-
-        return view($enabled ? 'checkout.new' : 'checkout.legacy');
-    }
-}
-```
-
-### Blade Directive
-
-The service provider registers a `@feature` Blade directive:
-
-```blade
-@feature('new-nav')
-    @include('partials.new-nav')
-@else
-    @include('partials.nav')
-@endfeature
-```
+Verified against a live backend: **not yet (toolchain unavailable — no `php` on the development
+machine)**. Run `python tests/sdk-contract/live/run_live_contract.py --sdk php --strict` on a
+machine with PHP 8.1+.
 
 ---
 
-## Testing
+## Development
 
-### Using the Stub Client
-
-```php
-use Experimently\Testing\StubClient;
-
-$stub = new StubClient();
-$stub->setFlag('new-checkout', true);
-$stub->setVariant('cta-copy-test', 'treatment-b');
-
-// Inject stub into your code under test
-$controller = new CheckoutController($stub);
+```bash
+cd sdk/php
+composer install
+./vendor/bin/phpunit          # PHPUnit 10, HTTP faked — client, cache, HTTP client, hash tests
+php test_standalone.php       # no composer: hash vector, types, cache, client request shapes
 ```
 
-### PHPUnit Example
-
-```php
-<?php
-
-use PHPUnit\Framework\TestCase;
-use Experimently\Testing\StubClient;
-use App\Http\Controllers\CheckoutController;
-
-class CheckoutControllerTest extends TestCase
-{
-    public function test_shows_new_checkout_when_flag_enabled(): void
-    {
-        $stub = new StubClient();
-        $stub->setFlag('new-checkout', true);
-
-        $controller = new CheckoutController($stub);
-        $response   = $controller->show($this->createMockRequest());
-
-        $this->assertStringContainsString('checkout.new', $response->getOriginalContent()->getName());
-    }
-}
-```
-
----
-
-## SDK Compatibility
-
-All platform SDKs produce identical variant assignments for the same `(userId, flagKey)` pair.
-
-| SDK | Hash Algorithm | Assignment Parity |
-|-----|---------------|-------------------|
-| PHP | MD5 | Yes |
-| Ruby | MD5 | Yes |
-| Go | MD5 | Yes |
-| Java | MD5 | Yes |
-| Python | MD5 | Yes |
-| JavaScript | MD5 | Yes |
-| .NET | MD5 | Yes |
-| Elixir | MD5 | Yes |
+Unit tests: **not executed here** (no `php`/`composer` on the development machine). The suite
+(`ExperimentationClientTest` 43, `HttpClientTest` 17, `CacheTest` 18, `HashCompatibilityTest` 10 —
+88 tests) and `test_standalone.php` (36 checks) were reviewed by inspection for the rewire; run them on a machine
+with PHP 8.1+ before relying on the counts.

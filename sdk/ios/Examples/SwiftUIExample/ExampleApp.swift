@@ -20,7 +20,7 @@ struct ContentView: View {
     @State private var statusMessage = "Tap 'Evaluate Flag' to begin."
     @State private var isLoading = false
 
-    // Initialize the SDK client with your base URL and API key.
+    // Initialize the SDK client with your API origin and API key.
     // In production, load these from a configuration file or environment.
     private let client = ExperimentationClient(
         baseURL: "http://localhost:8000",
@@ -92,8 +92,8 @@ struct ContentView: View {
                     }
                     .disabled(isLoading)
 
-                    Button(action: refreshAllFlags) {
-                        Text("Refresh All Flags")
+                    Button(action: assignExperiment) {
+                        Text("Assign 'checkout-flow' Experiment")
                             .frame(maxWidth: .infinity)
                             .padding()
                             .background(Color(.systemGray5))
@@ -137,8 +137,7 @@ struct ContentView: View {
                 let result = try await client.evaluateFlag("new-feature", user: user)
                 await MainActor.run {
                     flagEnabled = result.enabled
-                    variant = result.variantKey ?? ""
-                    statusMessage = "Evaluated successfully. Reason: \(result.reason)"
+                    statusMessage = "Evaluated by the server. Config: \(result.config ?? [:])"
                 }
             } catch {
                 await MainActor.run {
@@ -148,20 +147,23 @@ struct ContentView: View {
         }
     }
 
-    private func refreshAllFlags() {
+    private func assignExperiment() {
         isLoading = true
-        statusMessage = "Refreshing flags..."
+        statusMessage = "Assigning..."
 
         Task {
             defer { isLoading = false }
             do {
-                try await client.refreshFlags()
+                let assignment = try await client.getAssignment("checkout-flow", user: user)
                 await MainActor.run {
-                    statusMessage = "All flags refreshed and cached locally."
+                    variant = assignment.variantName
+                    statusMessage = assignment.isControl
+                        ? "Assigned to control."
+                        : "Assigned to \(assignment.variantName). Configuration: \(assignment.configuration ?? [:])"
                 }
             } catch {
                 await MainActor.run {
-                    statusMessage = "Refresh error: \(error.localizedDescription)"
+                    statusMessage = "Assignment error: \(error.localizedDescription)"
                 }
             }
         }
@@ -169,20 +171,17 @@ struct ContentView: View {
 
     private func trackEvent() {
         Task {
-            do {
-                let event = TrackEvent(
-                    userId: user.id,
-                    eventName: "button_tapped",
-                    properties: ["screen": "demo", "timestamp": Int(Date().timeIntervalSince1970)]
-                )
-                try await client.track(event)
-                await MainActor.run {
-                    statusMessage = "Event 'button_tapped' tracked successfully."
-                }
-            } catch {
-                await MainActor.run {
-                    statusMessage = "Track error: \(error.localizedDescription)"
-                }
+            // No experiment/flag key: the event is fanned out to every experiment the user has
+            // been assigned to and every flag evaluated for them in this client.
+            let delivered = await client.trackWithStatus(TrackEvent(
+                userId: user.id,
+                eventName: "button_tapped",
+                properties: ["screen": "demo"]
+            ))
+            await MainActor.run {
+                statusMessage = delivered
+                    ? "Event 'button_tapped' tracked."
+                    : "Event 'button_tapped' could not be delivered (tracking never throws)."
             }
         }
     }

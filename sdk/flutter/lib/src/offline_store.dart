@@ -1,58 +1,84 @@
-/// SharedPreferences-backed offline fallback store.
+/// Offline fallback stores.
 ///
 /// When [SdkConfig.offlineFallback] is true, [ExperimentationClient] writes
-/// evaluated flag results here so they can be served when the API is
-/// unreachable (e.g. airplane mode, connectivity loss).
+/// every successful server result here so it can be served when the API is
+/// unreachable (airplane mode, connectivity loss, server errors).
+///
+/// This file is pure Dart. The SharedPreferences-backed implementation lives
+/// in `shared_preferences_offline_store.dart` (Flutter only).
 library experimentation_sdk_offline_store;
 
-import 'package:shared_preferences/shared_preferences.dart';
+import 'models.dart';
 
-/// Persistent key-value store backed by [SharedPreferences].
-///
-/// All keys are namespaced under the `ep_sdk_` prefix to avoid collisions
-/// with other SharedPreferences users.
-class OfflineStore {
-  static const String _prefix = 'ep_sdk_flag_';
-  static const String _assignmentPrefix = 'ep_sdk_asgn_';
+/// Persistent (or session) store of the last known server results, keyed by
+/// user + key. Entries have no TTL of their own: they stay until overwritten,
+/// removed or cleared.
+abstract class OfflineStore {
+  /// Initialises the store. Must complete before any read/write.
+  Future<void> init();
 
-  SharedPreferences? _prefs;
+  /// Persists a flag evaluation for [userId] (keyed by `result.key`).
+  Future<void> setFlag(String userId, EvalResult result);
 
-  /// Initialises the store. Must be called before any read/write operations.
-  Future<void> init() async {
-    _prefs = await SharedPreferences.getInstance();
+  /// Retrieves the last persisted evaluation of [flagKey] for [userId], or `null`.
+  EvalResult? getFlag(String userId, String flagKey);
+
+  /// Removes the persisted evaluation of [flagKey] for [userId].
+  Future<void> removeFlag(String userId, String flagKey);
+
+  /// Persists an assignment for [userId] (keyed by `assignment.experimentKey`).
+  Future<void> setAssignment(String userId, Assignment assignment);
+
+  /// Retrieves the last persisted assignment of [experimentKey] for [userId], or `null`.
+  Assignment? getAssignment(String userId, String experimentKey);
+
+  /// Removes the persisted assignment of [experimentKey] for [userId].
+  Future<void> removeAssignment(String userId, String experimentKey);
+
+  /// Clears every entry written by this store.
+  Future<void> clear();
+}
+
+/// Session-scoped [OfflineStore]: survives network loss within one process but
+/// not an app restart. Default when no store is injected; also usable from
+/// plain Dart (server-side, tests, the contract smoke).
+class InMemoryOfflineStore implements OfflineStore {
+  final Map<String, Map<String, EvalResult>> _flags = {};
+  final Map<String, Map<String, Assignment>> _assignments = {};
+
+  @override
+  Future<void> init() async {}
+
+  @override
+  Future<void> setFlag(String userId, EvalResult result) async {
+    _flags.putIfAbsent(userId, () => {})[result.key] = result;
   }
 
-  /// Persists a flag-enabled [value] for the given [cacheKey].
-  Future<void> setFlag(String cacheKey, bool value) async {
-    await _prefs?.setBool('$_prefix$cacheKey', value);
+  @override
+  EvalResult? getFlag(String userId, String flagKey) => _flags[userId]?[flagKey];
+
+  @override
+  Future<void> removeFlag(String userId, String flagKey) async {
+    _flags[userId]?.remove(flagKey);
   }
 
-  /// Retrieves a persisted flag value, or `null` if never stored.
-  bool? getFlag(String cacheKey) {
-    return _prefs?.getBool('$_prefix$cacheKey');
+  @override
+  Future<void> setAssignment(String userId, Assignment assignment) async {
+    _assignments.putIfAbsent(userId, () => {})[assignment.experimentKey] = assignment;
   }
 
-  /// Persists an experiment [variantKey] for [cacheKey].
-  Future<void> setAssignment(String cacheKey, String? variantKey) async {
-    if (variantKey == null) {
-      await _prefs?.remove('$_assignmentPrefix$cacheKey');
-    } else {
-      await _prefs?.setString('$_assignmentPrefix$cacheKey', variantKey);
-    }
+  @override
+  Assignment? getAssignment(String userId, String experimentKey) =>
+      _assignments[userId]?[experimentKey];
+
+  @override
+  Future<void> removeAssignment(String userId, String experimentKey) async {
+    _assignments[userId]?.remove(experimentKey);
   }
 
-  /// Retrieves a persisted assignment, or `null` if none stored.
-  String? getAssignment(String cacheKey) {
-    return _prefs?.getString('$_assignmentPrefix$cacheKey');
-  }
-
-  /// Clears all SDK entries from SharedPreferences.
+  @override
   Future<void> clear() async {
-    final keys = _prefs?.getKeys() ?? {};
-    for (final key in keys) {
-      if (key.startsWith(_prefix) || key.startsWith(_assignmentPrefix)) {
-        await _prefs?.remove(key);
-      }
-    }
+    _flags.clear();
+    _assignments.clear();
   }
 }

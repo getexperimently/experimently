@@ -17,12 +17,22 @@ This means you can:
 
 ## TypeScript / Node.js Provider
 
+`@experimentation-platform/openfeature-provider` (v0.2, source `sdk/openfeature`) implements the
+`@openfeature/server-sdk` `Provider` interface by delegating every evaluation to the
+[JavaScript SDK](javascript.md) (`@experimentation-platform/js-sdk`), which calls
+`GET /api/v1/feature-flags/evaluate/{flag_key}?user_id=<targetingKey>` and caches the answer per
+user + flag. Flags are decided **by the server**; nothing is bucketed locally and no flag
+definitions are downloaded. Requires Node >= 18 and `@openfeature/server-sdk >= 1.7`.
+
+Verified against a live backend: **yes (2026-09-11)** — via
+`python tests/sdk-contract/live/run_live_contract.py --sdk openfeature --strict`.
+
 ### Installation
 
 ```bash
-# The provider package (local path for now; publish to npm for production)
-npm install @openfeature/server-sdk
-# Copy sdk/openfeature/ into your project or add as a local package.
+npm install @openfeature/server-sdk @experimentation-platform/js-sdk @experimentation-platform/openfeature-provider
+# from this repository:
+npm install ./sdk/js ./sdk/openfeature
 ```
 
 ### Quick start
@@ -31,219 +41,307 @@ npm install @openfeature/server-sdk
 import { OpenFeature } from '@openfeature/server-sdk';
 import { ExperimentationProvider } from '@experimentation-platform/openfeature-provider';
 
-// 1. Register the provider (called once at app startup).
-await OpenFeature.setProviderAndWait(
-  new ExperimentationProvider({
-    apiKey: process.env.EP_API_KEY!,
-    baseUrl: 'https://api.yourplatform.com',
-    cacheTtlMs: 5 * 60_000,  // cache for 5 minutes
-  })
-);
+// 1. Register the provider (once, at app start-up).
+const provider = new ExperimentationProvider({
+  apiKey: process.env.EXPERIMENTLY_API_KEY!,
+  baseUrl: process.env.EXPERIMENTLY_API_URL ?? 'http://localhost:8000', // origin only
+  cacheTtlMs: 5 * 60_000, // reuse a successful evaluation per user + flag for 5 minutes
+});
+await OpenFeature.setProviderAndWait(provider);
 
 // 2. Get a client (reuse it throughout your application).
 const client = OpenFeature.getClient('my-service');
 
-// 3. Evaluate flags using the standard OpenFeature API.
-const enabled = await client.getBooleanValue('dark-mode', false, {
-  targetingKey: userId,
-});
+// 3. Evaluate flags. targetingKey is the platform user_id and is required.
+const ctx = { targetingKey: 'user-12345' };
+const enabled = await client.getBooleanValue('dark-mode', false, ctx);              // → enabled
+const variant = await client.getStringValue('checkout-experiment', 'control', ctx); // → config.variant
+const maxItems = await client.getNumberValue('cart-max-items', 10, ctx);            // → config.value
+const config = await client.getObjectValue('feature-config', {}, ctx);              // → config
+
+// 4. Experiments and event tracking are outside OpenFeature: use the JS SDK client underneath.
+const assignment = await provider.client.getAssignment('checkout_flow', { userId: 'user-12345', attributes: { plan: 'pro' } });
+await provider.client.track('user-12345', 'purchase', { value: 49.99, experimentKey: 'checkout_flow' });
+await provider.client.track('user-12345', 'page_view'); // no key → fans out to the cached assignment + flags evaluated via OpenFeature
 ```
 
 ### EvaluationContext mapping
 
-The OpenFeature `EvaluationContext` maps to the Experimentation Platform user model as follows:
+| OpenFeature field | Platform concept | Notes |
+|---|---|---|
+| `targetingKey` | `user_id` | Required. Sent as `?user_id=` on the evaluate call; the server buckets on it. Missing or empty → default value with `errorCode: TARGETING_KEY_MISSING`. |
+| `attributes.*` | — | **Not sent.** The evaluate endpoint takes no context; attributes stay available to your own hooks. Pass them as `attributes` on `provider.client.getAssignment(...)` if an experiment needs them. |
 
-| OpenFeature field       | Platform concept  | Notes                                     |
-|-------------------------|-------------------|-------------------------------------------|
-| `targetingKey`          | `userId`          | Used for consistent hash bucketing.       |
-| `attributes.*`          | User attributes   | Available for future targeting rule eval. |
+### Resolution rules
 
-```typescript
-const ctx = {
-  targetingKey: 'user-12345',      // → userId for MD5 hash
-  attributes: {
-    country: 'US',                 // optional — for targeting rules
-    plan: 'pro',
-    accountAge: 365,
-  },
-};
+| OpenFeature call | Value | When the config lacks it |
+|---|---|---|
+| `getBooleanValue` / `getBooleanDetails` | `enabled` | — |
+| `getStringValue` / `getStringDetails` | `config.variant` when it is a string (or `config` itself when it is a string) | default, reason `DEFAULT` |
+| `getNumberValue` / `getNumberDetails` | `config.value` when it is a number (or `config` itself when it is a number) | default, reason `DEFAULT` |
+| `getObjectValue` / `getObjectDetails` | `config` when it is a non-null object | default, reason `DEFAULT` |
 
-const variant = await client.getStringValue('hero-experiment', 'control', ctx);
-```
-
-### Supported flag types
-
-| OpenFeature method      | Returns     | Use case                              |
-|-------------------------|-------------|---------------------------------------|
-| `getBooleanValue`       | `boolean`   | Simple on/off flags                   |
-| `getStringValue`        | `string`    | A/B test variants, string configs     |
-| `getNumberValue`        | `number`    | Numeric configs, price experiments    |
-| `getObjectValue`        | `JsonValue` | Complex config objects                |
+- A disabled flag resolves boolean calls to `false` with reason `DISABLED`, and non-boolean calls
+  to the caller's default with reason `DISABLED`.
+- `variant` on the resolution details is `config.variant` when it is a string; `flagMetadata` is
+  `{ flagKey, enabled }` on every successful resolution.
+- Errors never throw and are never cached: 404 (flag unknown or not ACTIVE) → `FLAG_NOT_FOUND`;
+  a 2xx with an unexpected body → `PARSE_ERROR`; anything else (401, 5xx, timeout, network) →
+  `GENERAL`. All return the default with reason `ERROR` and an `errorMessage`.
 
 ### Resolution reasons
 
-| Reason     | Meaning                                                           |
-|------------|-------------------------------------------------------------------|
-| `CACHED`   | Evaluated from a warm in-memory flag cache.                       |
-| `STATIC`   | Evaluated from a stale (expired) cache during refresh.            |
-| `DEFAULT`  | Flag not found; the caller's default value was returned.          |
-| `ERROR`    | An error occurred (see `errorCode` for details).                  |
+| Reason | Meaning |
+|---|---|
+| `TARGETING_MATCH` | Fresh answer from the server; the flag is on for this user. |
+| `CACHED` | Served from the JS SDK's per-user cache (within `cacheTtlMs`). |
+| `DISABLED` | The server reports the flag off for this user. |
+| `DEFAULT` | Flag is on but `config` has no value of the requested type; the caller's default was returned. |
+| `ERROR` | Evaluation failed (see `errorCode`); the caller's default was returned. |
 
 ### Constructor options
 
 ```typescript
 new ExperimentationProvider({
-  apiKey: string,       // Required. X-API-Key header value.
-  baseUrl?: string,     // Default: 'http://localhost:8000'
-  cacheTtlMs?: number,  // Default: 300_000 (5 minutes)
-  timeout?: number,     // Default: 5_000 (5 seconds)
-  fetch?: typeof fetch, // Custom fetch impl (useful for testing)
+  apiKey: string,               // Required unless `client` is given. X-API-Key header value.
+  baseUrl?: string,             // Backend origin; the SDK appends /api/v1/... Default: 'http://localhost:8000'
+  cacheTtlMs?: number,          // Default: 300_000 (5 minutes)
+  timeout?: number,             // Per-request timeout in ms. Default: 5_000
+  fetch?: typeof fetch,         // Custom fetch implementation (tests, polyfills)
+  client?: ExperimentationClient, // Reuse your app's JS SDK client (and its cache); other options are then ignored
 })
+```
+
+### Provider API
+
+| Member | Signature | Description |
+|---|---|---|
+| `metadata` | `{ name: 'experimentation-platform-provider' }` | OpenFeature provider metadata |
+| `client` | `ExperimentationClient` | The underlying JS SDK client (`getAssignment`, `getVariant`, `track`, `trackBatch`, `getAssignments`, …) |
+| `initialize` | `(context?) => Promise<void>` | No-op: nothing is pre-fetched, flags are evaluated per user on demand |
+| `onClose` | `() => Promise<void>` | Clears the evaluation cache |
+| `resolveBooleanEvaluation` / `resolveStringEvaluation` / `resolveNumberEvaluation` / `resolveObjectEvaluation` | `(flagKey, defaultValue, context) => Promise<ResolutionDetails<T>>` | The rules above |
+| `refreshFlags` | `() => Promise<void>` | **Deprecated**: there is no list endpoint to refresh from; clears the cache so the next resolution hits the server |
+| `hashUser` | `(userId, flagKey) => number` | Cross-SDK consistent hash, compatibility utility only (see below) |
+
+The package also re-exports `ExperimentationClient`, `ExperimentationError` and the
+`FlagEvaluation`, `Assignment`, `UserContext`, `TrackOptions` types from the JS SDK.
+
+### Backend endpoints used (TypeScript)
+
+Every request carries `X-API-Key: <key>`, `Content-Type: application/json`, `Accept: application/json`.
+
+| Call | Method and path | Response used |
+|---|---|---|
+| every `resolve*Evaluation` | `GET /api/v1/feature-flags/evaluate/{flag_key}?user_id=…` | `{key, enabled, config}`; 404 when not ACTIVE |
+| `provider.client.getAssignment` / `getVariant` | `POST /api/v1/tracking/assign` `{experiment_key, user_id, context?}` | `{experiment_key, user_id, variant_id, variant_name, is_control, configuration}`; 404 when not ACTIVE |
+| `provider.client.track` with a key | `POST /api/v1/tracking/track` | ignored |
+| `provider.client.track` without a key, `trackBatch` | `POST /api/v1/tracking/batch` `{events: [...]}` (max 100 per request) | `{success_count, failure_count, errors}` |
+
+### Contract smoke (TypeScript)
+
+```bash
+cd sdk/openfeature && npm run build --silent && node examples/contract_smoke.mjs
+# {"sdk":"openfeature","assign":{"variant_name":"control","is_control":true,"sticky":true},"flag":{"enabled":true},"track":{"ok":true},"fanout":{"ok":true}}
+```
+
+Env: `EXPERIMENTLY_API_URL` (default `http://localhost:8000`), `EXPERIMENTLY_API_KEY` (required),
+`CONTRACT_EXPERIMENT_KEY` (default `sdk_contract_ab`), `CONTRACT_FLAG_KEY` (default
+`sdk_contract_flag`), `CONTRACT_USER_ID` (default random `smoke-<uuid>`). The flag is resolved
+through `OpenFeature.getClient().getBooleanDetails`; assignment and tracking go through
+`provider.client`. `npm run smoke` is a shortcut.
+
+### Tests (TypeScript)
+
+```bash
+cd sdk/openfeature && npm install
+npx jest          # 51 tests, fetch is mocked (builds ../js first)
+npm run build     # tsc → dist/
 ```
 
 ---
 
 ## Python Provider
 
+`experimentation-openfeature` (v1.0.0, source `sdk/openfeature-python`) delegates every
+evaluation to the [`experimentation` Python SDK](python.md), which calls
+`GET /api/v1/feature-flags/evaluate/{flag_key}?user_id=<targeting_key>` and caches the answer per
+user + flag. Flags are decided **by the server**; nothing is bucketed locally and no flag
+definitions are downloaded. Requires Python 3.9+ and `openfeature-sdk >= 0.9.0`.
+
 ### Installation
 
 ```bash
-pip install openfeature-sdk requests
-# Install the provider (local path; publish to PyPI for production):
-pip install -e sdk/openfeature-python/
+pip install openfeature-sdk experimentation-sdk experimentation-openfeature   # once published
+pip install -e sdk/python -e sdk/openfeature-python                          # from this repository
 ```
 
 ### Quick start
 
 ```python
+import os
 from openfeature import api
 from openfeature.evaluation_context import EvaluationContext
 from experimentation_openfeature import ExperimentationProvider
 
-# 1. Register the provider.
-api.set_provider(ExperimentationProvider(
-    api_key=os.environ["EP_API_KEY"],
-    base_url="https://api.yourplatform.com",
-    cache_ttl=300,   # seconds
-    timeout=10,
-))
+# 1. Register the provider (once, at startup).
+provider = ExperimentationProvider(
+    api_key=os.environ["EXPERIMENTLY_API_KEY"],
+    base_url=os.environ.get("EXPERIMENTLY_API_URL", "http://localhost:8000"),  # origin only
+    cache_ttl=300,   # seconds a successful evaluation is reused per user + flag
+    timeout=10,      # seconds
+)
+api.set_provider(provider)
 
 # 2. Get a client.
 client = api.get_client()
 
-# 3. Evaluate flags.
+# 3. Evaluate flags. targeting_key is the platform user_id and is required.
 ctx = EvaluationContext(targeting_key="user-12345")
-enabled = client.get_boolean_value("dark-mode", False, ctx)
-variant = client.get_string_value("checkout-experiment", "control", ctx)
-max_items = client.get_integer_value("cart-max-items", 10, ctx)
-price = client.get_float_value("price-multiplier", 1.0, ctx)
-config = client.get_object_value("feature-config", {}, ctx)
+enabled = client.get_boolean_value("dark-mode", False, ctx)                 # -> enabled
+variant = client.get_string_value("checkout-experiment", "control", ctx)   # -> config["variant"]
+max_items = client.get_integer_value("cart-max-items", 10, ctx)             # -> config["value"]
+price = client.get_float_value("price-multiplier", 1.0, ctx)                # -> config["value"]
+config = client.get_object_value("feature-config", {}, ctx)                 # -> config
+
+# 4. Experiments and event tracking are outside OpenFeature: use the SDK client underneath.
+assignment = provider.client.get_assignment("checkout_flow", "user-12345", {"plan": "pro"})
+provider.client.track("user-12345", "purchase", event_value=49.99, experiment_key="checkout_flow")
 ```
 
 ### EvaluationContext mapping
 
-Same as the TypeScript provider: `targeting_key` is the `userId` passed to the MD5 hash.
+| OpenFeature field | Platform concept | Notes |
+|---|---|---|
+| `targeting_key` | `user_id` | Required. Sent as `?user_id=` on the evaluate call; the server buckets on it. Missing or empty → default value with `TARGETING_KEY_MISSING`. |
+| `attributes.*` | — | **Not sent.** The evaluate endpoint takes no context; attributes stay available to your own hooks. |
+
+### Resolution rules
+
+| OpenFeature call | Value | When the config lacks it |
+|---|---|---|
+| `get_boolean_*` | `enabled` | — |
+| `get_string_*` | `config["variant"]` (or `config` itself when it is a string) | default, reason `DEFAULT` |
+| `get_integer_*` / `get_float_*` | `config["value"]` (or `config` itself when numeric; `bool` never counts) | default, reason `DEFAULT` |
+| `get_object_*` | `config` when it is a dict or list | default, reason `DEFAULT` |
+
+- A disabled flag resolves non-boolean calls to the default with reason `DISABLED`.
+- `variant` on the resolution details is `config["variant"]` when it is a string.
+- Errors never raise and are never cached: 404 (flag unknown or not ACTIVE) → `FLAG_NOT_FOUND`,
+  anything else (401, 5xx, timeout, network) → `GENERAL`; both return the default with reason
+  `ERROR`.
+- `client.track(event_name, ctx, TrackingEventDetails(value=…, attributes=…))` forwards to
+  `ExperimentationClient.track`, which fans out to the user's cached assignments and flags.
+
+### Resolution reasons
+
+| Reason | Meaning |
+|---|---|
+| `TARGETING_MATCH` | Fresh answer from the server; the flag is on for this user. |
+| `DISABLED` | The server reports the flag off for this user. |
+| `CACHED` | Served from the SDK's per-user cache (within `cache_ttl`). |
+| `DEFAULT` | Flag is on but `config` has no value of the requested type; the caller's default was returned. |
+| `ERROR` | Evaluation failed (see `error_code`); the caller's default was returned. |
 
 ### Constructor options
 
 ```python
 ExperimentationProvider(
-    api_key: str,       # Required. X-API-Key header value.
-    base_url: str = "http://localhost:8000",
-    cache_ttl: int = 300,   # seconds
-    timeout: int = 10,
+    api_key: str = "",                        # Required unless client= is given. X-API-Key header value.
+    base_url: str = "http://localhost:8000",  # Backend origin; the SDK appends /api/v1/...
+    cache_ttl: float = 300,                   # seconds
+    timeout: float = 10,                      # seconds
+    *,
+    client: ExperimentationClient | None = None,  # share one SDK client (and its cache) with your app
+    transport: Transport | None = None,           # custom HTTP layer (tests use experimentation.testing.FakeTransport)
 )
+```
+
+`provider.client` exposes the underlying `experimentation.ExperimentationClient`; `shutdown()`
+clears its cache.
+
+### Backend endpoints used (Python)
+
+Every request carries `X-API-Key: <key>`, `Content-Type: application/json`, `Accept: application/json`.
+
+| Call | Method and path | Response used |
+|---|---|---|
+| every `resolve_*_details` | `GET /api/v1/feature-flags/evaluate/{flag_key}?user_id=…` | `{key, enabled, config}`; 404 when not ACTIVE |
+| `provider.track` / `provider.client.track` | `POST /api/v1/tracking/track` (with a key) or `POST /api/v1/tracking/batch` (fan-out, max 100 per request) | ignored / `{success_count, failure_count, errors}` |
+| `provider.client.get_assignment` | `POST /api/v1/tracking/assign` | `{experiment_key, user_id, variant_id, variant_name, is_control, configuration}`; 404 when not ACTIVE |
+
+### Contract smoke (Python)
+
+```bash
+EXPERIMENTLY_API_KEY=<key> python sdk/openfeature-python/examples/contract_smoke.py
+# {"sdk":"openfeature-python","assign":{"variant_name":"control","is_control":true,"sticky":true},"flag":{"enabled":true},"track":{"ok":true},"fanout":{"ok":true}}
+```
+
+Env: `EXPERIMENTLY_API_URL` (default `http://localhost:8000`), `EXPERIMENTLY_API_KEY` (required),
+`CONTRACT_EXPERIMENT_KEY` (default `sdk_contract_ab`), `CONTRACT_FLAG_KEY` (default
+`sdk_contract_flag`), `CONTRACT_USER_ID` (default random `smoke-<uuid>`). The flag is resolved
+through the OpenFeature API; assignment and tracking go through `provider.client`.
+
+Verified against a live backend: **yes (2026-09-11)** — via
+`python tests/sdk-contract/live/run_live_contract.py --sdk openfeature-python --strict`.
+
+### Tests (Python)
+
+```bash
+source venv/bin/activate
+python -m pytest sdk/openfeature-python/tests -q -o addopts="" -p no:cacheprovider   # 79 tests, HTTP is faked
 ```
 
 ---
 
 ## Backend API endpoints
 
-The providers use two platform API endpoints:
+Both providers are thin adapters over the platform SDKs and use the same public endpoints as every
+other SDK. There are **no OpenFeature-specific endpoints in the SDK contract**: the former
+`/api/v1/openfeature/flags`, `/api/v1/openfeature/evaluate` and `/api/v1/openfeature/bulk-evaluate`
+routes are no longer used by either provider, no flag definitions are downloaded, and no evaluation
+happens locally.
 
-### `GET /api/v1/openfeature/flags`
+Base URL = origin only (e.g. `http://localhost:8000`); the SDK appends `/api/v1/...`. Every request
+carries `X-API-Key: <key>`, `Content-Type: application/json`, `Accept: application/json`.
 
-Returns all feature flag definitions accessible to the API key. Providers call this
-on initialization to warm their local cache. Subsequent evaluations are performed
-locally without a network round-trip.
+| Purpose | Method and path | Body / query | 200 response |
+|---|---|---|---|
+| Evaluate one flag (every OpenFeature resolution) | `GET /api/v1/feature-flags/evaluate/{flag_key}?user_id=<targetingKey>` | — | `{"key","enabled": bool,"config": any\|null}` |
+| Assign user to experiment (`provider.client`) | `POST /api/v1/tracking/assign` | `{"experiment_key","user_id","context"?: object}` | `{"experiment_key","user_id","variant_id","variant_name","is_control": bool,"configuration": object\|null}` |
+| Track one event (`provider.client.track` with a key) | `POST /api/v1/tracking/track` | `{"event_type","event_name"?,"user_id","experiment_key"?,"feature_flag_key"?,"value"?: number,"metadata"?: object,"timestamp"?: ISO-8601}` — at least one key | stored event (ignored) |
+| Track up to 100 events (`track` without a key, `trackBatch`) | `POST /api/v1/tracking/batch` | `{"events":[<track body>...]}` | `{"success_count","failure_count","errors": list\|null}` |
 
-**Request:**
-```http
-GET /api/v1/openfeature/flags
-X-API-Key: your-api-key
-```
+Errors: 401 bad key; 404 flag/experiment not ACTIVE or unknown (→ `FLAG_NOT_FOUND`, never
+cached); 422 track without any key; 429 rate limited (`Retry-After` header).
 
-**Response:**
-```json
-{
-  "flags": [
-    {
-      "key": "dark-mode",
-      "enabled": true,
-      "rollout_percentage": 75.0,
-      "variants": [],
-      "rules": []
-    },
-    {
-      "key": "checkout-experiment",
-      "enabled": true,
-      "rollout_percentage": 100.0,
-      "variants": [
-        {"key": "control",   "weight": 0.5, "value": "original"},
-        {"key": "treatment", "weight": 0.5, "value": "new-checkout"}
-      ],
-      "rules": []
-    }
-  ]
-}
-```
-
-### `POST /api/v1/openfeature/evaluate`
-
-Evaluates a single flag server-side. Use when local evaluation is not possible.
-
-**Request:**
-```json
-{"flagKey": "dark-mode", "userId": "user-12345", "attributes": {}}
-```
-
-**Response:**
-```json
-{"value": true, "variant": null, "reason": "in_rollout", "flagKey": "dark-mode"}
-```
-
-### `POST /api/v1/openfeature/bulk-evaluate`
-
-Evaluates multiple flags in one request.
-
-**Request:**
-```json
-[
-  {"flagKey": "dark-mode",            "userId": "u1"},
-  {"flagKey": "checkout-experiment",  "userId": "u1"}
-]
-```
+Successful evaluations are cached per user + flag for the configured TTL (`cacheTtlMs` /
+`cache_ttl`, default 5 minutes) and reported with reason `CACHED`; failures are never cached.
 
 ---
 
-## Hash algorithm (cross-SDK consistency)
+## Hash algorithm (compatibility utility only)
 
-All providers use the same consistent hash for deterministic user bucketing:
+The platform's cross-SDK consistent hash is still shipped by every SDK so that the golden-vector
+contract tests (`tests/sdk-contract/golden-vectors.json`) and custom integrations can verify
+byte-for-byte parity, but **neither provider uses it to decide a flag or a variant** — the server
+does. It is exposed as `provider.hashUser(userId, flagKey)` (TypeScript, delegating to the JS
+SDK's `consistentHash`) and by the Python SDK's hashing helper.
 
 ```
 input  = "{userId}:{flagKey}"  (UTF-8)
 digest = MD5(input)
 uint32 = first 4 bytes of digest, little-endian unsigned 32-bit int
-hash   = uint32 / 2^32         ∈ [0.0, 1.0)
+hash   = uint32 / 2^32         ∈ [0.0, 1.0)      (divisor 4294967296, not 4294967295)
 ```
 
-**Test vector** (all SDKs must produce this value):
+**Test vector** (all SDKs produce this value):
 
 ```
-hash_user("user-123", "my-flag") ≈ 0.69274
+hash_user("user-123", "my-flag") ≈ 0.6927449859
   MD5("user-123:my-flag") = 43bc57b1e81dec71c5242122ac05170f
   First 4 bytes LE → uint32 = 2975317059
-  2975317059 / 4294967296 ≈ 0.69274...
+  2975317059 / 4294967296 = 0.692744985921308
 ```
 
 ---
@@ -285,6 +383,7 @@ treatment = client.get_treatment('user-123', 'my_feature')
 **After:**
 ```python
 from openfeature import api
+from openfeature.evaluation_context import EvaluationContext
 from experimentation_openfeature import ExperimentationProvider
 api.set_provider(ExperimentationProvider(api_key='api-key'))
 client = api.get_client()

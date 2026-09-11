@@ -1,388 +1,251 @@
 # Java SDK
 
-The Java SDK provides experiment variant assignment, feature flag evaluation, and event tracking for JVM applications. It includes an LRU cache with TTL support, consistent MD5-based hash bucketing, and a Spring Boot auto-configuration starter.
+`com.experimentationplatform:experimentation-java-sdk` (v1.0.0) is a Java 11+ client for feature
+flags, experiment assignment and event tracking, built on OkHttp 4 and Jackson.
+`experimentation-spring-boot-starter` adds Spring Boot auto-configuration (Spring Boot 3.1,
+which needs Java 17+ at runtime).
+
+Flag evaluation and experiment assignment are decided **by the server**: every call goes to the
+public API with your `X-API-Key`, the server buckets the user (sticky per user + experiment), and
+the SDK caches the answer per user + key for a TTL. Nothing is bucketed locally.
+
+Source: `sdk/java` (`core/`, `spring-boot-starter/`).
 
 ---
 
 ## Installation
 
-### Maven (`pom.xml`)
-
 ```xml
+<!-- core client -->
 <dependency>
-    <groupId>com.experimently</groupId>
-    <artifactId>experimently-sdk</artifactId>
+    <groupId>com.experimentationplatform</groupId>
+    <artifactId>experimentation-java-sdk</artifactId>
+    <version>1.0.0</version>
+</dependency>
+
+<!-- Spring Boot: the starter depends on the core, so add only this -->
+<dependency>
+    <groupId>com.experimentationplatform</groupId>
+    <artifactId>experimentation-spring-boot-starter</artifactId>
     <version>1.0.0</version>
 </dependency>
 ```
 
-### Gradle (`build.gradle`)
-
-```groovy
-implementation 'com.experimently:experimently-sdk:1.0.0'
-```
+Gradle: `implementation 'com.experimentationplatform:experimentation-java-sdk:1.0.0'` (or the
+starter). From this monorepo, `cd sdk/java && mvn install` publishes both to `~/.m2`.
 
 ---
 
-## Building the Client
+## Quick Start
 
 ```java
-import com.experimently.sdk.ExperimentationClient;
-import com.experimently.sdk.ExperimentationConfig;
+import com.experimentationplatform.sdk.ExperimentationClient;
+import com.experimentationplatform.sdk.config.SdkConfig;
+import com.experimentationplatform.sdk.exception.ExperimentationException;
+import com.experimentationplatform.sdk.model.ExperimentAssignment;
+import com.experimentationplatform.sdk.model.FlagEvaluation;
+import com.experimentationplatform.sdk.model.TrackEvent;
+import com.experimentationplatform.sdk.model.User;
 
-ExperimentationClient client = ExperimentationClient.builder()
-    .apiUrl("https://your-platform.example.com")
-    .apiKey("your-api-key")
-    .build();
-```
-
-### Configuration Options
-
-```java
-ExperimentationClient client = ExperimentationClient.builder()
-    .apiUrl("https://your-platform.example.com")   // Required
-    .apiKey("your-api-key")                         // Required
-    .timeoutSeconds(2)                              // HTTP timeout (default: 5)
-    .cacheTtlSeconds(60)                            // Cache TTL (default: 60)
-    .cacheMaxSize(1000)                             // Max cache entries (default: 1000)
-    .defaultVariant("control")                      // Fallback on error (default: "control")
-    .build();
-```
-
-Close the client when your application shuts down to release the connection pool:
-
-```java
-client.close();
-```
-
----
-
-## Experiment Variant Assignment
-
-### `getVariant(experimentKey, userId, attributes)`
-
-Returns the variant key assigned to the user. Returns `defaultVariant` on error.
-
-```java
-import java.util.Map;
-
-String variant = client.getVariant(
-    "checkout-button-color",        // experimentKey
-    "user-123",                     // userId
-    Map.of("country", "US", "plan", "pro")  // targeting attributes
-);
-
-System.out.println(variant); // "control" or "treatment"
-
-if ("treatment".equals(variant)) {
-    showGreenButton();
-} else {
-    showBlueButton();
-}
-```
-
-### Getting Full Assignment Metadata
-
-```java
-import com.experimently.sdk.Assignment;
-
-Assignment assignment = client.getAssignment(
-    "checkout-button-color",
-    "user-123",
-    Map.of("plan", "enterprise")
-);
-
-System.out.println(assignment.getVariantKey());    // "treatment"
-System.out.println(assignment.getExperimentId());  // UUID string
-System.out.println(assignment.isControl());        // false
-System.out.println(assignment.getAssignedAt());    // ISO 8601 timestamp
-```
-
----
-
-## Feature Flag Evaluation
-
-### `isFeatureEnabled(flagKey, userId, attributes)`
-
-Returns `true` if the feature flag is enabled for the user, `false` otherwise (including on error).
-
-```java
-boolean enabled = client.isFeatureEnabled(
-    "new-checkout-flow",    // flagKey
-    "user-123",             // userId
-    Map.of(
-        "country", "US",
-        "plan", "enterprise"
-    )
-);
-
-if (enabled) {
-    return handleNewCheckoutFlow(request);
-} else {
-    return handleCurrentCheckoutFlow(request);
-}
-```
-
----
-
-## Event Tracking
-
-### `trackEvent(userId, eventKey, value)`
-
-Records a conversion or behavioral event. Pass `null` for `value` if no numeric value applies.
-
-```java
-// Simple event (no numeric value)
-client.trackEvent("user-123", "page_view", null);
-
-// Event with a numeric value
-client.trackEvent("user-123", "purchase_completed", 149.00);
-
-// Revenue tracking
-client.trackEvent("user-123", "subscription_started", 29.99);
-```
-
-Tracking failures are logged internally but do not throw exceptions.
-
----
-
-## LRU Cache with TTL
-
-The SDK maintains an in-memory LRU cache for assignments and flag evaluations. The cache reduces network calls for high-traffic applications.
-
-```java
-ExperimentationClient client = ExperimentationClient.builder()
-    .apiUrl("https://your-platform.example.com")
-    .apiKey("your-api-key")
-    .cacheTtlSeconds(60)    // Cache entries expire after 60 seconds
-    .cacheMaxSize(1000)     // Maximum 1000 cached entries (LRU eviction when full)
-    .build();
-```
-
-Default values:
-- `cacheTtlSeconds`: 60 (1 minute)
-- `cacheMaxSize`: 1000 entries
-
-For applications with many unique users, increase `cacheMaxSize`. For faster propagation of flag changes, reduce `cacheTtlSeconds`.
-
----
-
-## Consistent Hash Bucketing
-
-The SDK uses **MD5-based consistent hashing** for deterministic variant assignment. The hash input is `"{experimentKey}:{userId}"`.
-
-This guarantees:
-- The same user always sees the same variant for a given experiment
-- Assignment is stable across application restarts (within cache TTL)
-- No sticky-session infrastructure is required
-- Multiple SDK instances serving the same user return the same variant
-
----
-
-## Thread Safety
-
-The `ExperimentationClient` is thread-safe. A single client instance can be shared across all threads in a multi-threaded application without external synchronization.
-
-```java
-// Correct: share a single instance
-@Bean
-public ExperimentationClient experimentationClient() {
-    return ExperimentationClient.builder()
-        .apiUrl(apiUrl)
-        .apiKey(apiKey)
+SdkConfig config = SdkConfig.builder(System.getenv("EXPERIMENTLY_API_KEY"), "http://localhost:8000")
+        .timeoutMs(3000)
         .build();
-}
 
-// Incorrect: do not create a new client per request
-public String getVariantForRequest(HttpRequest request) {
-    ExperimentationClient client = new ExperimentationClient(...); // wrong
-    return client.getVariant(...);
+try (ExperimentationClient client = new ExperimentationClient(config)) {   // AutoCloseable
+    User user = User.builder("user-123").attribute("plan", "pro").build(); // attributes = context
+
+    // 1. Assignment — POST /api/v1/tracking/assign (sticky, records the exposure)
+    String headline = "Buy now";
+    try {
+        ExperimentAssignment a = client.getExperimentAssignment(user, "checkout_flow");
+        if (a.getConfiguration() != null) {
+            headline = (String) a.getConfiguration().getOrDefault("headline", headline);
+        }
+    } catch (ExperimentationException e) {
+        // 404 (not ACTIVE / unknown), 401, network: keep the control experience
+    }
+
+    // 2. Feature flag — GET /api/v1/feature-flags/evaluate/new_search?user_id=user-123
+    if (client.isFeatureEnabled(user, "new_search")) { /* false on any failure */ }
+    FlagEvaluation flag = client.evaluateFeatureFlag(user, "new_search"); // throws on failure
+
+    // 3. Track with a key → one POST /api/v1/tracking/track (async, never throws)
+    client.trackEvent(TrackEvent.builder("user-123", "purchase")
+            .experimentKey("checkout_flow").value(49.99).property("sku", "pro-plan").build());
+
+    // 4. Track without a key → fanned out to every cached assignment + flag of this user
+    client.trackEvent("user-123", "page_view", Map.of("page", "/products"));
 }
 ```
 
 ---
 
-## Spring Boot Auto-Configuration
+## Configuration
 
-Add the Spring Boot starter for zero-configuration integration:
+`SdkConfig.builder(apiKey, baseUrl)`; both are required and non-empty, every setter rejects
+non-positive values with `IllegalArgumentException`.
 
-### Maven
+| Builder | Default | Description |
+|---|---|---|
+| `apiKey` (ctor) | — | Sent as `X-API-Key` |
+| `baseUrl` (ctor) | — | Backend origin, e.g. `https://api.example.com`; trailing `/` stripped; the SDK appends `/api/v1/...` |
+| `timeoutMs(int)` | `5000` | OkHttp connect / read / write timeout |
+| `cacheTtlMs(long)` | `300000` (5 min) | Lifetime of a cached evaluation or assignment |
+| `cacheSize(int)` | `1000` | Max entries in **each** of the two caches (flags, assignments), LRU eviction |
 
-```xml
-<dependency>
-    <groupId>com.experimently</groupId>
-    <artifactId>experimently-spring-boot-starter</artifactId>
-    <version>1.0.0</version>
-</dependency>
-```
-
-### Gradle
-
-```groovy
-implementation 'com.experimently:experimently-spring-boot-starter:1.0.0'
-```
-
-### Enable the Integration
-
-Add `@EnableExperimentation` to your main application class:
-
-```java
-import com.experimently.spring.EnableExperimentation;
-import org.springframework.boot.SpringApplication;
-import org.springframework.boot.autoconfigure.SpringBootApplication;
-
-@SpringBootApplication
-@EnableExperimentation
-public class MyApplication {
-    public static void main(String[] args) {
-        SpringApplication.run(MyApplication.class, args);
-    }
-}
-```
-
-### Inject the Client
-
-The `ExperimentationClient` bean is automatically configured and available for injection:
-
-```java
-import com.experimently.sdk.ExperimentationClient;
-import org.springframework.stereotype.Service;
-
-@Service
-public class CheckoutService {
-
-    private final ExperimentationClient experimentationClient;
-
-    public CheckoutService(ExperimentationClient experimentationClient) {
-        this.experimentationClient = experimentationClient;
-    }
-
-    public String resolveCheckoutVariant(String userId, String plan) {
-        return experimentationClient.getVariant(
-            "checkout-flow",
-            userId,
-            Map.of("plan", plan)
-        );
-    }
-}
-```
+For tests, the package-private constructor `ExperimentationClient(SdkConfig, OkHttpClient)`
+accepts a custom `OkHttpClient` (used with `MockWebServer`).
 
 ---
 
-## Spring Boot Properties
+## API Reference
 
-Configure the SDK in `application.properties` or `application.yml`:
+| Method | Endpoint | Returns | On failure |
+|---|---|---|---|
+| `evaluateFeatureFlag(User, String flagKey)` | `GET /feature-flags/evaluate/{key}?user_id=` | `FlagEvaluation` | throws `ExperimentationException` |
+| `isFeatureEnabled(User, String flagKey)` | same (via cache) | `boolean` | `false` |
+| `getExperimentAssignment(User, String experimentKey)` | `POST /tracking/assign` | `ExperimentAssignment` (never null) | throws `ExperimentationException` |
+| `trackEvent(TrackEvent)` | `/tracking/track` or `/tracking/batch` | `void` (async) | swallowed |
+| `trackEvent(String userId, String eventName, Map props)` | `/tracking/batch` (fan-out) | `void` (async) | swallowed; invalid args ignored |
+| `trackEvent(userId, eventName, props, experimentKey, featureFlagKey, Double value)` | `/tracking/track` | `void` (async) | swallowed |
+| `trackBatch(List<TrackEvent>)` | `/tracking/batch`, 100 per request | `void` (async) | swallowed |
+| `trackEventSync(TrackEvent)` / `trackBatchSync(List<TrackEvent>)` | as above, blocking | `void` | throws `ExperimentationException` |
+| `getCachedAssignments(String userId)` | — | `List<ExperimentAssignment>` | — |
+| `getCachedFlagKeys(String userId)` | — | `List<String>` | — |
+| `invalidateCache(userId, key)`, `clearCache()`, `getCacheSize()` | — | `void` / `int` | — |
+| `close()` | — | shuts down the OkHttp dispatcher and pool, clears caches | — |
+| `ConsistentHash.compute(String userId, String key)` | — | `double` in `[0, 1)` | — |
 
-### `application.properties`
+### Models
 
-```properties
-experimentation.api-url=https://your-platform.example.com
-experimentation.api-key=${EXPERIMENTATION_API_KEY}
-experimentation.cache-ttl-seconds=60
-experimentation.cache-max-size=1000
-experimentation.timeout-seconds=5
-experimentation.default-variant=control
-```
+| Class | Accessors |
+|---|---|
+| `User.builder(userId).attribute(k, v).attributes(map).build()` | `getUserId()`, `getAttributes()` (unmodifiable), `getAttribute(k)` |
+| `FlagEvaluation` | `getKey()`, `isEnabled()`, `getConfig()` (`Object`: `Map`, `List`, scalar or `null`), `getConfigMap()` (`Map` or `null`) |
+| `ExperimentAssignment` | `getExperimentKey()`, `getUserId()`, `getVariantId()` (UUID), `getVariantName()`, `isControl()`, `getConfiguration()` (`Map<String,Object>` or `null`); `getVariantKey()` is a deprecated alias |
+| `TrackEvent.builder(userId, eventName)` | `.eventType(s)` (defaults to `eventName`), `.experimentKey(s)`, `.featureFlagKey(s)`, `.value(Double)`, `.property(k, v)` / `.properties(map)` (sent as `metadata`), `.timestamp(Instant)` (ISO-8601); `hasKey()`, `toBody()` |
+| `ExperimentationException` (`RuntimeException`) | `getStatusCode()` (HTTP status, `0` for network/serialization), `isApiError()` |
 
-### `application.yml`
+---
+
+## Caching and failure behaviour
+
+- Successful evaluations and assignments are cached per **user + key** in two LRU caches
+  (`AssignmentCache<FlagEvaluation>`, `AssignmentCache<ExperimentAssignment>`) for `cacheTtlMs`.
+  A hit makes no request. **Failures are never cached** — the next call retries.
+- Non-2xx responses (401 bad key, 404 flag/experiment unknown or not ACTIVE, 422, 429 rate
+  limited, 5xx) and `IOException`s become `ExperimentationException`; `evaluateFeatureFlag` and
+  `getExperimentAssignment` **throw**, `isFeatureEnabled` returns `false`. There is no stale
+  fallback beyond the TTL — a request that fails after the entry expired surfaces the error.
+- Async tracking (`trackEvent`, `trackBatch`) is fire-and-forget on OkHttp's dispatcher and
+  swallows every error; the `*Sync` variants block and throw.
+- The client is thread-safe (synchronized caches, OkHttp connection pool). Create one per
+  application and `close()` it on shutdown.
+
+---
+
+## Tracking fan-out
+
+With `experimentKey` and/or `featureFlagKey` set, `trackEvent` sends one
+`POST /api/v1/tracking/track`. Without a key it sends one `POST /api/v1/tracking/batch` with one
+entry per experiment the user was assigned to through this client (`experiment_key`) plus one per
+flag evaluated for the user (`feature_flag_key`), taken from the caches. Nothing cached → nothing
+is sent. `trackBatch` puts keyed events in the batch as-is and fans out the unkeyed ones; requests
+are chunked at 100 events.
+
+Conversions are matched to metrics by **event name**: a metric on `purchase` counts every
+`purchase` event regardless of `event_type`.
+
+---
+
+## Spring Boot starter
+
+`ExperimentationAutoConfiguration` is registered via
+`META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports` and activates
+when `ExperimentationClient` is on the classpath **and** `experimentation.api-key` is set. It
+registers one `ExperimentationClient` bean (`@ConditionalOnMissingBean`, so your own bean wins).
+`@EnableExperimentation` is an optional `@Import` for plain-Spring or self-documenting setups.
 
 ```yaml
 experimentation:
-  api-url: https://your-platform.example.com
-  api-key: ${EXPERIMENTATION_API_KEY}
-  cache-ttl-seconds: 60
-  cache-max-size: 1000
-  timeout-seconds: 5
-  default-variant: control
+  api-key: ${EXPERIMENTLY_API_KEY}      # required; relaxed binding (EXPERIMENTATION_API_KEY works)
+  base-url: http://localhost:8000
+  timeout-ms: 5000
+  cache-ttl-seconds: 300
+  cache-size: 1000
 ```
 
-### Properties Reference
-
-| Property | Type | Default | Description |
-|----------|------|---------|-------------|
-| `experimentation.api-url` | `String` | *(required)* | Base URL of the platform API |
-| `experimentation.api-key` | `String` | *(required)* | API key for SDK authentication |
-| `experimentation.cache-ttl-seconds` | `int` | `60` | Seconds before a cached assignment expires |
-| `experimentation.cache-max-size` | `int` | `1000` | Maximum cache entries (LRU eviction when full) |
-| `experimentation.timeout-seconds` | `int` | `5` | HTTP request timeout in seconds |
-| `experimentation.default-variant` | `String` | `"control"` | Variant returned when the API is unreachable |
-
----
-
-## Error Handling and Fallback
-
-The SDK handles errors gracefully without throwing exceptions from assignment and flag evaluation calls:
+| Property | Type | Default | Maps to |
+|---|---|---|---|
+| `experimentation.api-key` | `String` | — (required) | `SdkConfig.apiKey` |
+| `experimentation.base-url` | `String` | `https://api.experimentation-platform.example.com` | `SdkConfig.baseUrl` — set it to your backend origin |
+| `experimentation.timeout-ms` | `int` | `5000` | `timeoutMs` |
+| `experimentation.cache-ttl-seconds` | `int` | `300` | `cacheTtlMs` (× 1000) |
+| `experimentation.cache-size` | `int` | `1000` | `cacheSize` |
 
 ```java
-// getVariant never throws — returns defaultVariant on any failure
-String variant = client.getVariant("experiment-key", userId, Map.of());
-// Returns "control" (defaultVariant) if API is unreachable or times out
+@Service
+public class SearchService {
+    private final ExperimentationClient client;          // constructor-injected bean
+    public SearchService(ExperimentationClient client) { this.client = client; }
 
-// isFeatureEnabled never throws — returns false on any failure
-boolean enabled = client.isFeatureEnabled("flag-key", userId, Map.of());
-// Returns false if API is unreachable
-
-// trackEvent logs failures but does not throw
-client.trackEvent(userId, "purchase", 49.99);
-```
-
-To enable strict mode for tracking (throws on failure):
-
-```java
-client.trackEventStrict(userId, "purchase_completed", 49.99);
-// Throws ExperimentationException if the event cannot be delivered
-```
-
----
-
-## Complete Usage Example
-
-```java
-import com.experimently.sdk.ExperimentationClient;
-import org.springframework.stereotype.Controller;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.ResponseBody;
-import java.util.Map;
-
-@Controller
-public class CheckoutController {
-
-    private final ExperimentationClient experimentationClient;
-
-    public CheckoutController(ExperimentationClient experimentationClient) {
-        this.experimentationClient = experimentationClient;
-    }
-
-    @PostMapping("/checkout")
-    @ResponseBody
-    public CheckoutResponse handleCheckout(@RequestBody CheckoutRequest request) {
-        String userId = request.getUserId();
-        String userPlan = request.getPlan();
-
-        // Check feature flag
-        boolean useNewCheckout = experimentationClient.isFeatureEnabled(
-            "new-checkout-flow",
-            userId,
-            Map.of("plan", userPlan, "country", request.getCountry())
-        );
-
-        // Get experiment variant
-        String ctaVariant = experimentationClient.getVariant(
-            "checkout-cta-copy",
-            userId,
-            Map.of("plan", userPlan)
-        );
-
-        // Process checkout
-        CheckoutResponse response = useNewCheckout
-            ? processNewCheckout(request)
-            : processLegacyCheckout(request);
-
-        // Track the conversion
-        experimentationClient.trackEvent(userId, "checkout_completed", request.getOrderValue());
-
-        return response;
-    }
+    public boolean useNewSearch(String userId) { return client.isFeatureEnabled(User.builder(userId).build(), "new_search"); }
 }
+```
+
+---
+
+## Consistent hash (compatibility utility)
+
+`ConsistentHash.compute(userId, key)` = `MD5("{userId}:{key}")`, first 4 bytes as little-endian
+uint32, divided by 2^32 (`0.6927449859213084` for `"user-123"`, `"my-flag"`). It is kept only so
+the golden vectors in `tests/sdk-contract/golden-vectors.json` stay identical across SDKs.
+**Nothing in the SDK calls it to pick a variant** — the server decides.
+`FeatureFlagEvaluator.computeHash` is a deprecated alias.
+
+---
+
+## Backend endpoints used
+
+Every request carries `X-API-Key`, `Content-Type: application/json` and `Accept: application/json`.
+
+| SDK call | Method and path | Body / query | Response used |
+|---|---|---|---|
+| `evaluateFeatureFlag`, `isFeatureEnabled` | `GET /api/v1/feature-flags/evaluate/{flag_key}?user_id=…` | — | `{key, enabled, config}`; 404 when the flag is not ACTIVE |
+| `getExperimentAssignment` | `POST /api/v1/tracking/assign` | `{experiment_key, user_id, context?}` | `{experiment_key, user_id, variant_id, variant_name, is_control, configuration}`; 404 when the experiment is not ACTIVE |
+| `trackEvent` with a key | `POST /api/v1/tracking/track` | `{event_type, event_name, user_id, experiment_key?, feature_flag_key?, value?, metadata?, timestamp?}` | ignored |
+| `trackEvent` without keys, `trackBatch` | `POST /api/v1/tracking/batch` | `{events: [<track body>, …]}` (max 100 per request) | ignored |
+
+Errors: 401 bad key, 404 experiment/flag unknown or not ACTIVE, 422 event without any key, 429
+rate limited (`Retry-After`). These paths share the backend's per-IP `SDK_RATE_LIMIT_PER_MINUTE`
+ceiling (default 6000).
+
+---
+
+## Contract smoke
+
+```bash
+bash sdk/java/examples/contract_smoke.sh
+# {"sdk":"java","assign":{"variant_name":"control","is_control":true,"sticky":true},"flag":{"enabled":true},"track":{"ok":true},"fanout":{"ok":true}}
+```
+
+The script builds when needed (`mvn -q -pl core -am package -DskipTests`, Maven output on stderr;
+`FORCE_BUILD=1` forces it) and runs
+`java -cp "core/target/classes:core/target/lib/*" com.experimentationplatform.sdk.examples.ContractSmoke`.
+Env: `EXPERIMENTLY_API_URL` (default `http://localhost:8000`), `EXPERIMENTLY_API_KEY` (required),
+`CONTRACT_EXPERIMENT_KEY` (default `sdk_contract_ab`), `CONTRACT_FLAG_KEY` (default
+`sdk_contract_flag`), `CONTRACT_USER_ID` (default random `smoke-<uuid>`). The smoke assigns on one
+client twice and on a fresh client once (server stickiness), evaluates the flag, tracks `purchase`
+with the experiment key via `trackEventSync`, tracks `page_view` without a key and sends a 2-event
+`trackBatchSync`. Fixtures: `backend/scripts/seed_sdk_contract.py`; repo-wide runner:
+`python tests/sdk-contract/live/run_live_contract.py --sdk java --strict`.
+
+Verified against a live backend: yes (2026-09-11)
+
+---
+
+## Development
+
+```bash
+cd sdk/java && mvn test   # core: 77 tests (JUnit 5, MockWebServer); spring-boot-starter: 30 tests
 ```
