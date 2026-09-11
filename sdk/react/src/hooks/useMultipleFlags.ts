@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { useExperimentationContext } from '../context/ExperimentationProvider';
+import { useExperimentation } from '../context/ExperimentationProvider';
+import { disabledEvaluation } from '../client/ExperimentationClient';
 import { FeatureFlagEvaluation } from '../client/types';
 
 /**
@@ -12,7 +13,7 @@ import { FeatureFlagEvaluation } from '../client/types';
 export function useMultipleFlags(
   flagKeys: string[]
 ): Record<string, FeatureFlagEvaluation | null> {
-  const { client, user } = useExperimentationContext();
+  const { client, user } = useExperimentation();
 
   const [state, setState] = useState<Record<string, FeatureFlagEvaluation | null>>(
     () => Object.fromEntries(flagKeys.map(k => [k, null]))
@@ -22,7 +23,6 @@ export function useMultipleFlags(
   const keysJson = JSON.stringify(flagKeys);
 
   useEffect(() => {
-    // Parse back from JSON so we have the current keys inside the effect
     const keys: string[] = JSON.parse(keysJson);
 
     if (keys.length === 0) {
@@ -38,27 +38,10 @@ export function useMultipleFlags(
     Promise.all(
       keys.map(async (flagKey): Promise<[string, FeatureFlagEvaluation]> => {
         try {
-          const variant = await client.evaluateFeatureFlag(user, flagKey);
-          const evaluation: FeatureFlagEvaluation = {
-            flagKey,
-            variant,
-            isEnabled: variant !== null,
-            loading: false,
-            error: null,
-          };
-          return [flagKey, evaluation];
+          return [flagKey, await client.evaluateFeatureFlagDetailed(user, flagKey)];
         } catch (err) {
           const error = err instanceof Error ? err : new Error(String(err));
-          return [
-            flagKey,
-            {
-              flagKey,
-              variant: null,
-              isEnabled: false,
-              loading: false,
-              error,
-            },
-          ];
+          return [flagKey, disabledEvaluation(flagKey, { error })];
         }
       })
     ).then(entries => {
@@ -70,8 +53,7 @@ export function useMultipleFlags(
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [client, user.userId, keysJson]);
+  }, [client, user, keysJson]);
 
   return state;
 }
