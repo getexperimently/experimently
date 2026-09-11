@@ -1,44 +1,89 @@
 """
 Safety monitoring service for feature flags.
 
-This service handles safety monitoring, configuration, and rollback functionality
-for feature flags.
+Responsibilities:
+
+* global safety settings (``safety_settings`` table, a single row),
+* per-flag safety configuration (``feature_flag_safety_configs``),
+* evaluating the configured metric thresholds against the metrics the
+  platform actually records (``raw_metrics`` / ``error_logs``),
+* rolling a flag back to a safe rollout percentage and recording it in
+  ``safety_rollback_records``.
+
+The async methods are the API used by the endpoints and the
+``SafetyScheduler``; the static ``*_record`` helpers are the thin CRUD layer
+underneath them and are also handy in tests.
 """
 
 import logging
 from datetime import datetime, timedelta
-from typing import Dict, Any, List, Optional, Tuple, Union
-from uuid import UUID, uuid4
+from typing import Any, Dict, List, Optional, Tuple
+from uuid import UUID
 
-from sqlalchemy import and_, func, desc
-from sqlalchemy.orm import Session
 from fastapi import HTTPException, status
+from sqlalchemy import func
+from sqlalchemy.orm import Session
 
-from backend.app.models.safety import (
-    SafetySettings,
-    FeatureFlagSafetyConfig,
-    SafetyRollbackRecord,
-    RollbackTriggerType
-)
 from backend.app.models.feature_flag import FeatureFlag, FeatureFlagStatus
-from backend.app.models.metrics import RawMetric, ErrorLog
+from backend.app.models.metrics.metric import ErrorLog, MetricType, RawMetric
+from backend.app.models.safety import (
+    FeatureFlagSafetyConfig,
+    RollbackTriggerType,
+    SafetyRollbackRecord,
+    SafetySettings,
+)
 from backend.app.schemas.safety import (
-    SafetySettingsCreate,
-    SafetySettingsUpdate,
     FeatureFlagSafetyConfigCreate,
-    FeatureFlagSafetyConfigUpdate,
-    SafetyRollbackRecordCreate,
-    SafetyCheckResponse,
-    RollbackResponse,
-    SafetySettingsResponse,
     FeatureFlagSafetyConfigResponse,
-    MetricStatus
+    FeatureFlagSafetyConfigUpdate,
+    MetricStatus,
+    MetricThreshold,
+    RollbackResponse,
+    SafetyCheckResponse,
+    SafetyRollbackRecordCreate,
+    SafetySettingsCreate,
+    SafetySettingsResponse,
+    SafetySettingsUpdate,
 )
 from backend.app.core.logging import get_logger
-from backend.app.services.feature_flag_service import FeatureFlagService
-from backend.app.services.metrics_service import MetricsService
 
 logger = get_logger(__name__)
+
+# Placeholder id returned when a flag has no stored safety configuration and
+# the defaults from the global settings are used instead.
+DEFAULT_CONFIG_ID = UUID("00000000-0000-0000-0000-000000000000")
+
+# Metric names understood by check_feature_flag_safety(). Anything else is
+# reported as "no data source" and treated as healthy.
+_ERROR_METRICS = {"error_rate", "error_count", "total_evaluations"}
+_LATENCY_METRICS = {"latency", "avg_latency", "p95_latency", "max_latency", "min_latency"}
+
+
+def _metric_to_trigger(metric_name: str) -> RollbackTriggerType:
+    if metric_name in _ERROR_METRICS:
+        return RollbackTriggerType.ERROR_RATE
+    if metric_name in _LATENCY_METRICS:
+        return RollbackTriggerType.LATENCY
+    return RollbackTriggerType.CUSTOM_METRIC
+
+
+def _as_threshold(value: Any) -> MetricThreshold:
+    """Config metrics are stored as JSON; accept dicts or MetricThreshold objects."""
+    if isinstance(value, MetricThreshold):
+        return value
+    if isinstance(value, dict):
+        return MetricThreshold(**value)
+    return MetricThreshold()
+
+
+def _breaches(value: float, limit: Optional[float], comparison: str) -> bool:
+    if limit is None:
+        return False
+    if comparison == "less_than":
+        return value < limit
+    if comparison == "equal_to":
+        return value == limit
+    return value > limit  # "greater_than" (default)
 
 
 class SafetyService:
@@ -47,44 +92,23 @@ class SafetyService:
     def __init__(self, db: Session):
         """Initialize the safety service with a database session."""
         self.db = db
-        self.feature_flag_service = FeatureFlagService(db)
-        # MetricsService is designed to be used with static methods only
-        # self.metrics_service = MetricsService(db)
+
+    # ------------------------------------------------------------------
+    # Record-level helpers (sync)
+    # ------------------------------------------------------------------
 
     @staticmethod
-    def get_safety_settings(db: Session) -> Optional[SafetySettings]:
-        """
-        Get global safety settings.
-
-        Args:
-            db: Database session
-
-        Returns:
-            SafetySettings object if found, None otherwise
-        """
+    def get_safety_settings_record(db: Session) -> Optional[SafetySettings]:
+        """Return the global settings row, or None if it has not been created."""
         return db.query(SafetySettings).first()
 
     @staticmethod
-    def create_safety_settings(
-        db: Session, data: SafetySettingsCreate
-    ) -> SafetySettings:
-        """
-        Create global safety settings.
-
-        Args:
-            db: Database session
-            data: Safety settings data
-
-        Returns:
-            Created SafetySettings object
-        """
-        # Check if settings already exist
-        existing = db.query(SafetySettings).first()
-        if existing:
+    def create_safety_settings(db: Session, data: SafetySettingsCreate) -> SafetySettings:
+        """Create the global settings row; raises ValueError if one exists."""
+        if db.query(SafetySettings).first():
             raise ValueError("Safety settings already exist, use update instead")
 
-        # Create new settings
-        db_obj = SafetySettings(**data.model_dump())
+        db_obj = SafetySettings(**_settings_columns(data.model_dump()))
         db.add(db_obj)
         db.commit()
         db.refresh(db_obj)
@@ -94,24 +118,12 @@ class SafetyService:
     def update_safety_settings(
         db: Session, data: SafetySettingsUpdate
     ) -> Optional[SafetySettings]:
-        """
-        Update global safety settings.
-
-        Args:
-            db: Database session
-            data: Safety settings update data
-
-        Returns:
-            Updated SafetySettings object if found, None otherwise
-        """
-        # Get existing settings
+        """Update the global settings row; returns None if it does not exist."""
         db_obj = db.query(SafetySettings).first()
         if not db_obj:
             return None
 
-        # Update fields
-        update_data = data.model_dump(exclude_unset=True)
-        for field, value in update_data.items():
+        for field, value in _settings_columns(data.model_dump(exclude_unset=True)).items():
             setattr(db_obj, field, value)
 
         db.add(db_obj)
@@ -120,55 +132,43 @@ class SafetyService:
         return db_obj
 
     @staticmethod
-    def get_feature_flag_safety_config(
+    def get_feature_flag_safety_config_record(
         db: Session, feature_flag_id: UUID
     ) -> Optional[FeatureFlagSafetyConfig]:
-        """
-        Get safety configuration for a feature flag.
-
-        Args:
-            db: Database session
-            feature_flag_id: ID of the feature flag
-
-        Returns:
-            FeatureFlagSafetyConfig object if found, None otherwise
-        """
-        return db.query(FeatureFlagSafetyConfig).filter(
-            FeatureFlagSafetyConfig.feature_flag_id == feature_flag_id
-        ).first()
+        """Return the stored config for a flag, or None."""
+        return (
+            db.query(FeatureFlagSafetyConfig)
+            .filter(FeatureFlagSafetyConfig.feature_flag_id == feature_flag_id)
+            .first()
+        )
 
     @staticmethod
     def create_feature_flag_safety_config(
-        db: Session, data: FeatureFlagSafetyConfigCreate
+        db: Session,
+        data: FeatureFlagSafetyConfigCreate,
+        feature_flag_id: Optional[UUID] = None,
     ) -> FeatureFlagSafetyConfig:
         """
-        Create safety configuration for a feature flag.
+        Create the safety config for a flag.
 
-        Args:
-            db: Database session
-            data: Safety configuration data
-
-        Returns:
-            Created FeatureFlagSafetyConfig object
+        ``feature_flag_id`` may be passed explicitly or carried by ``data``
+        (``FeatureFlagSafetyConfigBase`` has the field, the create schema does
+        not). Raises ValueError when the flag does not exist or already has a
+        config.
         """
-        # Check if config already exists
-        existing = db.query(FeatureFlagSafetyConfig).filter(
-            FeatureFlagSafetyConfig.feature_flag_id == data.feature_flag_id
-        ).first()
-        if existing:
-            raise ValueError(
-                f"Safety config already exists for feature flag {data.feature_flag_id}"
-            )
+        flag_id = feature_flag_id or getattr(data, "feature_flag_id", None)
+        if flag_id is None:
+            raise ValueError("feature_flag_id is required to create a safety config")
 
-        # Check if feature flag exists
-        feature_flag = db.query(FeatureFlag).filter(
-            FeatureFlag.id == data.feature_flag_id
-        ).first()
-        if not feature_flag:
-            raise ValueError(f"Feature flag {data.feature_flag_id} does not exist")
+        if SafetyService.get_feature_flag_safety_config_record(db, flag_id):
+            raise ValueError(f"Safety config already exists for feature flag {flag_id}")
 
-        # Create new config
-        db_obj = FeatureFlagSafetyConfig(**data.model_dump())
+        if not db.query(FeatureFlag).filter(FeatureFlag.id == flag_id).first():
+            raise ValueError(f"Feature flag {flag_id} does not exist")
+
+        payload = _config_columns(data.model_dump())
+        payload.pop("feature_flag_id", None)
+        db_obj = FeatureFlagSafetyConfig(feature_flag_id=flag_id, **payload)
         db.add(db_obj)
         db.commit()
         db.refresh(db_obj)
@@ -178,27 +178,12 @@ class SafetyService:
     def update_feature_flag_safety_config(
         db: Session, feature_flag_id: UUID, data: FeatureFlagSafetyConfigUpdate
     ) -> Optional[FeatureFlagSafetyConfig]:
-        """
-        Update safety configuration for a feature flag.
-
-        Args:
-            db: Database session
-            feature_flag_id: ID of the feature flag
-            data: Safety configuration update data
-
-        Returns:
-            Updated FeatureFlagSafetyConfig object if found, None otherwise
-        """
-        # Get existing config
-        db_obj = db.query(FeatureFlagSafetyConfig).filter(
-            FeatureFlagSafetyConfig.feature_flag_id == feature_flag_id
-        ).first()
+        """Update a flag's safety config; returns None if there is none."""
+        db_obj = SafetyService.get_feature_flag_safety_config_record(db, feature_flag_id)
         if not db_obj:
             return None
 
-        # Update fields
-        update_data = data.model_dump(exclude_unset=True)
-        for field, value in update_data.items():
+        for field, value in _config_columns(data.model_dump(exclude_unset=True)).items():
             setattr(db_obj, field, value)
 
         db.add(db_obj)
@@ -207,37 +192,16 @@ class SafetyService:
         return db_obj
 
     @staticmethod
-    def get_or_create_safety_config(
-        db: Session, feature_flag_id: UUID
-    ) -> FeatureFlagSafetyConfig:
-        """
-        Get or create safety configuration for a feature flag.
-
-        Args:
-            db: Database session
-            feature_flag_id: ID of the feature flag
-
-        Returns:
-            FeatureFlagSafetyConfig object
-        """
-        # Try to get existing config
-        config = db.query(FeatureFlagSafetyConfig).filter(
-            FeatureFlagSafetyConfig.feature_flag_id == feature_flag_id
-        ).first()
-
-        # If config exists, return it
+    def get_or_create_safety_config(db: Session, feature_flag_id: UUID) -> FeatureFlagSafetyConfig:
+        """Return the flag's config, creating a default one if missing."""
+        config = SafetyService.get_feature_flag_safety_config_record(db, feature_flag_id)
         if config:
             return config
 
-        # Check if feature flag exists
-        feature_flag = db.query(FeatureFlag).filter(
-            FeatureFlag.id == feature_flag_id
-        ).first()
-        if not feature_flag:
+        if not db.query(FeatureFlag).filter(FeatureFlag.id == feature_flag_id).first():
             raise ValueError(f"Feature flag {feature_flag_id} does not exist")
 
-        # Create new config with default values
-        config = FeatureFlagSafetyConfig(feature_flag_id=feature_flag_id)
+        config = FeatureFlagSafetyConfig(feature_flag_id=feature_flag_id, metrics={})
         db.add(config)
         db.commit()
         db.refresh(config)
@@ -245,612 +209,482 @@ class SafetyService:
 
     @staticmethod
     def create_rollback_record(
-        db: Session, data: SafetyRollbackRecordCreate
+        db: Session,
+        data: SafetyRollbackRecordCreate,
+        success: bool = True,
+        executed_by_user_id: Optional[UUID] = None,
     ) -> SafetyRollbackRecord:
-        """
-        Create a rollback record.
-
-        Args:
-            db: Database session
-            data: Rollback record data
-
-        Returns:
-            Created SafetyRollbackRecord object
-        """
-        # Create new record
-        db_obj = SafetyRollbackRecord(**data.model_dump())
+        """Persist a rollback record (the flag's config is created if needed)."""
+        safety_config = SafetyService.get_or_create_safety_config(db, data.feature_flag_id)
+        db_obj = SafetyRollbackRecord(
+            feature_flag_id=data.feature_flag_id,
+            safety_config_id=safety_config.id,
+            trigger_type=str(getattr(data.trigger_type, "value", data.trigger_type)),
+            trigger_reason=data.trigger_reason,
+            previous_percentage=data.previous_percentage,
+            target_percentage=data.target_percentage,
+            success=success,
+            executed_by_user_id=executed_by_user_id,
+        )
         db.add(db_obj)
         db.commit()
         db.refresh(db_obj)
         return db_obj
 
+    # ------------------------------------------------------------------
+    # Metrics
+    # ------------------------------------------------------------------
+
     def get_error_metrics(
         self, db: Session, feature_flag_id: UUID, timeframe_minutes: int = 15
     ) -> Dict[str, Any]:
-        """
-        Get error metrics for a feature flag.
-
-        Args:
-            db: Database session
-            feature_flag_id: ID of the feature flag
-            timeframe_minutes: Timeframe for metrics collection in minutes
-
-        Returns:
-            Dictionary with error metrics
-        """
-        # Calculate time window
+        """Error counts and error rate for a flag over the last ``timeframe_minutes``."""
         end_time = datetime.utcnow()
         start_time = end_time - timedelta(minutes=timeframe_minutes)
 
-        # Get feature flag
-        feature_flag = db.query(FeatureFlag).filter(FeatureFlag.id == feature_flag_id).first()
-        if not feature_flag:
+        if not db.query(FeatureFlag).filter(FeatureFlag.id == feature_flag_id).first():
             raise ValueError(f"Feature flag {feature_flag_id} does not exist")
 
-        # Get error logs for the feature flag within the time window
-        error_logs = db.query(ErrorLog).filter(
-            ErrorLog.feature_flag_id == feature_flag_id,
-            ErrorLog.created_at.between(start_time, end_time)
-        ).all()
+        error_logs = (
+            db.query(ErrorLog)
+            .filter(
+                ErrorLog.feature_flag_id == feature_flag_id,
+                ErrorLog.timestamp.between(start_time, end_time),
+            )
+            .all()
+        )
 
-        # Get total evaluations for the feature flag within the time window
-        total_evaluations = db.query(func.count(RawMetric.id)).filter(
-            RawMetric.feature_flag_id == feature_flag_id,
-            RawMetric.created_at.between(start_time, end_time)
-        ).scalar() or 0
+        total_evaluations = (
+            db.query(func.coalesce(func.sum(RawMetric.count), 0))
+            .filter(
+                RawMetric.feature_flag_id == feature_flag_id,
+                RawMetric.metric_type == MetricType.FLAG_EVALUATION.value,
+                RawMetric.timestamp.between(start_time, end_time),
+            )
+            .scalar()
+            or 0
+        )
 
-        # Count errors by type
-        error_count = len(error_logs)
-        error_types = {}
+        error_types: Dict[str, int] = {}
         for log in error_logs:
-            error_type = log.error_type
-            if error_type in error_types:
-                error_types[error_type] += 1
-            else:
-                error_types[error_type] = 1
+            error_types[log.error_type] = error_types.get(log.error_type, 0) + 1
 
-        # Calculate error rate
-        error_rate = 0 if total_evaluations == 0 else error_count / total_evaluations
+        error_count = len(error_logs)
+        error_rate = 0.0 if total_evaluations == 0 else error_count / total_evaluations
 
-        # Return metrics
         return {
             "error_count": error_count,
-            "total_evaluations": total_evaluations,
+            "total_evaluations": int(total_evaluations),
             "error_rate": error_rate,
             "error_types": error_types,
             "timeframe_minutes": timeframe_minutes,
             "start_time": start_time.isoformat(),
-            "end_time": end_time.isoformat()
+            "end_time": end_time.isoformat(),
         }
 
     def get_latency_metrics(
         self, db: Session, feature_flag_id: UUID, timeframe_minutes: int = 15
     ) -> Dict[str, Any]:
-        """
-        Get latency metrics for a feature flag.
-
-        Args:
-            db: Database session
-            feature_flag_id: ID of the feature flag
-            timeframe_minutes: Timeframe for metrics collection in minutes
-
-        Returns:
-            Dictionary with latency metrics
-        """
-        # Calculate time window
+        """Latency statistics (ms) for a flag over the last ``timeframe_minutes``."""
         end_time = datetime.utcnow()
         start_time = end_time - timedelta(minutes=timeframe_minutes)
 
-        # Get feature flag
-        feature_flag = db.query(FeatureFlag).filter(FeatureFlag.id == feature_flag_id).first()
-        if not feature_flag:
+        if not db.query(FeatureFlag).filter(FeatureFlag.id == feature_flag_id).first():
             raise ValueError(f"Feature flag {feature_flag_id} does not exist")
 
-        # Get latency metrics for the feature flag within the time window
-        # This implementation assumes RawMetric has a 'latency' field
-        # You may need to adapt this based on your actual data model
-        metrics = db.query(RawMetric).filter(
-            RawMetric.feature_flag_id == feature_flag_id,
-            RawMetric.created_at.between(start_time, end_time)
-        ).all()
+        rows = (
+            db.query(RawMetric.value)
+            .filter(
+                RawMetric.feature_flag_id == feature_flag_id,
+                RawMetric.metric_type == MetricType.LATENCY.value,
+                RawMetric.value.isnot(None),
+                RawMetric.timestamp.between(start_time, end_time),
+            )
+            .all()
+        )
+        latencies = sorted(float(v) for (v,) in rows)
 
-        # Calculate latency statistics
-        total_metrics = len(metrics)
-        if total_metrics == 0:
-            return {
-                "avg_latency": 0,
-                "max_latency": 0,
-                "min_latency": 0,
-                "p95_latency": 0,
-                "total_requests": 0,
-                "timeframe_minutes": timeframe_minutes,
-                "start_time": start_time.isoformat(),
-                "end_time": end_time.isoformat()
-            }
-
-        # Extract latency values
-        latencies = [getattr(metric, 'latency', 0) for metric in metrics]
-        latencies = [l for l in latencies if l is not None]
-
-        if not latencies:
-            return {
-                "avg_latency": 0,
-                "max_latency": 0,
-                "min_latency": 0,
-                "p95_latency": 0,
-                "total_requests": total_metrics,
-                "timeframe_minutes": timeframe_minutes,
-                "start_time": start_time.isoformat(),
-                "end_time": end_time.isoformat()
-            }
-
-        # Calculate statistics
-        avg_latency = sum(latencies) / len(latencies)
-        max_latency = max(latencies)
-        min_latency = min(latencies)
-
-        # Calculate p95 latency
-        sorted_latencies = sorted(latencies)
-        p95_index = int(len(sorted_latencies) * 0.95)
-        p95_latency = sorted_latencies[p95_index] if p95_index < len(sorted_latencies) else max_latency
-
-        # Return metrics
-        return {
-            "avg_latency": avg_latency,
-            "max_latency": max_latency,
-            "min_latency": min_latency,
-            "p95_latency": p95_latency,
-            "total_requests": total_metrics,
+        stats: Dict[str, Any] = {
+            "avg_latency": 0,
+            "max_latency": 0,
+            "min_latency": 0,
+            "p95_latency": 0,
+            "total_requests": len(latencies),
             "timeframe_minutes": timeframe_minutes,
             "start_time": start_time.isoformat(),
-            "end_time": end_time.isoformat()
+            "end_time": end_time.isoformat(),
         }
+        if latencies:
+            p95_index = min(int(len(latencies) * 0.95), len(latencies) - 1)
+            stats.update(
+                avg_latency=sum(latencies) / len(latencies),
+                max_latency=latencies[-1],
+                min_latency=latencies[0],
+                p95_latency=latencies[p95_index],
+            )
+        return stats
+
+    def _get_metric_value(self, feature_flag_id: UUID, metric_name: str) -> Optional[float]:
+        """Current value of a named metric, or None when the platform has no source for it."""
+        if metric_name in _ERROR_METRICS:
+            return float(self.get_error_metrics(self.db, feature_flag_id)[metric_name])
+        if metric_name in _LATENCY_METRICS:
+            latency = self.get_latency_metrics(self.db, feature_flag_id)
+            key = "avg_latency" if metric_name == "latency" else metric_name
+            return float(latency[key])
+        return None
+
+    # ------------------------------------------------------------------
+    # Global settings (async API)
+    # ------------------------------------------------------------------
 
     async def get_safety_settings(self) -> SafetySettingsResponse:
-        """Get the global safety settings."""
+        """Return the global settings, creating the default row on first use."""
         settings = self.db.query(SafetySettings).first()
-
         if not settings:
-            # Create default settings if none exist
-            settings = SafetySettings(
-                enabled=True,
-                auto_rollback_enabled=False,
-                default_metrics=[]
-            )
+            settings = SafetySettings(enable_automatic_rollbacks=False, default_metrics=None)
             self.db.add(settings)
             self.db.commit()
             self.db.refresh(settings)
+        return SafetySettingsResponse.model_validate(settings)
 
-        return SafetySettingsResponse.from_orm(settings)
+    async_get_safety_settings = get_safety_settings
 
     async def create_or_update_safety_settings(
         self, settings: SafetySettingsCreate
     ) -> SafetySettingsResponse:
-        """Create or update the global safety settings."""
-        existing_settings = self.db.query(SafetySettings).first()
+        """Create or update the global settings."""
+        existing = self.db.query(SafetySettings).first()
+        payload = _settings_columns(settings.model_dump(exclude_unset=True))
 
-        if existing_settings:
-            # Update existing settings
-            for key, value in settings.model_dump(exclude_unset=True).items():
-                setattr(existing_settings, key, value)
+        if existing:
+            for key, value in payload.items():
+                setattr(existing, key, value)
         else:
-            # Create new settings
-            existing_settings = SafetySettings(**settings.model_dump())
-            self.db.add(existing_settings)
+            existing = SafetySettings(**_settings_columns(settings.model_dump()))
+            self.db.add(existing)
 
         self.db.commit()
-        self.db.refresh(existing_settings)
-        return SafetySettingsResponse.from_orm(existing_settings)
+        self.db.refresh(existing)
+        return SafetySettingsResponse.model_validate(existing)
+
+    # ------------------------------------------------------------------
+    # Per-flag configuration (async API)
+    # ------------------------------------------------------------------
+
+    def _require_flag(self, feature_flag_id: UUID) -> FeatureFlag:
+        feature_flag = self.db.query(FeatureFlag).filter(FeatureFlag.id == feature_flag_id).first()
+        if not feature_flag:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Feature flag with ID {feature_flag_id} not found",
+            )
+        return feature_flag
 
     async def get_feature_flag_safety_config(
         self, feature_flag_id: UUID
     ) -> FeatureFlagSafetyConfigResponse:
-        """Get safety configuration for a feature flag."""
-        # First check if the feature flag exists
-        feature_flag = self.db.query(FeatureFlag).filter(FeatureFlag.id == feature_flag_id).first()
-        if not feature_flag:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Feature flag with ID {feature_flag_id} not found"
-            )
+        """
+        Return the flag's safety config.
 
-        config = self.db.query(FeatureFlagSafetyConfig).filter(
-            FeatureFlagSafetyConfig.feature_flag_id == feature_flag_id
-        ).first()
+        When no config has been stored, a default built from the global
+        settings is returned with ``DEFAULT_CONFIG_ID`` as its id (nothing is
+        written).
+        """
+        self._require_flag(feature_flag_id)
 
-        if not config:
-            # Return default configuration based on global settings
-            settings = await self.async_get_safety_settings()
-            return FeatureFlagSafetyConfigResponse(
-                id=UUID('00000000-0000-0000-0000-000000000000'),  # Placeholder ID
-                feature_flag_id=feature_flag_id,
-                enabled=settings.enabled,
-                auto_rollback_enabled=settings.auto_rollback_enabled,
-                metrics=settings.default_metrics,
-                created_at=datetime.utcnow(),
-                updated_at=datetime.utcnow()
-            )
+        config = self.get_feature_flag_safety_config_record(self.db, feature_flag_id)
+        if config:
+            return FeatureFlagSafetyConfigResponse.model_validate(config)
 
-        return FeatureFlagSafetyConfigResponse.from_orm(config)
+        settings = await self.get_safety_settings()
+        now = datetime.utcnow()
+        return FeatureFlagSafetyConfigResponse(
+            id=DEFAULT_CONFIG_ID,
+            feature_flag_id=feature_flag_id,
+            enabled=True,
+            metrics=settings.default_metrics or {},
+            rollback_percentage=0,
+            created_at=now,
+            updated_at=now,
+        )
+
+    async_get_feature_flag_safety_config = get_feature_flag_safety_config
 
     async def create_or_update_feature_flag_safety_config(
         self, feature_flag_id: UUID, config: FeatureFlagSafetyConfigCreate
     ) -> FeatureFlagSafetyConfigResponse:
-        """Create or update safety configuration for a feature flag."""
-        # First check if the feature flag exists
-        feature_flag = self.db.query(FeatureFlag).filter(FeatureFlag.id == feature_flag_id).first()
-        if not feature_flag:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Feature flag with ID {feature_flag_id} not found"
-            )
+        """Create or update the flag's safety config."""
+        self._require_flag(feature_flag_id)
 
-        existing_config = self.db.query(FeatureFlagSafetyConfig).filter(
-            FeatureFlagSafetyConfig.feature_flag_id == feature_flag_id
-        ).first()
-
-        if existing_config:
-            # Update existing configuration
-            for key, value in config.model_dump(exclude_unset=True).items():
-                setattr(existing_config, key, value)
+        existing = self.get_feature_flag_safety_config_record(self.db, feature_flag_id)
+        if existing:
+            for key, value in _config_columns(config.model_dump(exclude_unset=True)).items():
+                setattr(existing, key, value)
         else:
-            # Create new configuration
-            config_data = config.model_dump()
-            existing_config = FeatureFlagSafetyConfig(
-                feature_flag_id=feature_flag_id,
-                **config_data
-            )
-            self.db.add(existing_config)
+            payload = _config_columns(config.model_dump())
+            payload.pop("feature_flag_id", None)
+            existing = FeatureFlagSafetyConfig(feature_flag_id=feature_flag_id, **payload)
+            self.db.add(existing)
 
         self.db.commit()
-        self.db.refresh(existing_config)
-        return FeatureFlagSafetyConfigResponse.from_orm(existing_config)
+        self.db.refresh(existing)
+        return FeatureFlagSafetyConfigResponse.model_validate(existing)
 
-    async def check_feature_flag_safety(
-        self, feature_flag_id: UUID
-    ) -> SafetyCheckResponse:
-        """Check safety status of a feature flag."""
-        # First check if the feature flag exists
-        feature_flag = self.db.query(FeatureFlag).filter(FeatureFlag.id == feature_flag_id).first()
-        if not feature_flag:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Feature flag with ID {feature_flag_id} not found"
-            )
+    # ------------------------------------------------------------------
+    # Safety checks
+    # ------------------------------------------------------------------
 
-        # Get safety configuration for the feature flag
-        config = await self.async_get_feature_flag_safety_config(feature_flag_id)
+    async def check_feature_flag_safety(self, feature_flag_id: UUID) -> SafetyCheckResponse:
+        """
+        Evaluate every configured metric threshold for the flag.
+
+        A metric is unhealthy when its current value breaches the critical
+        threshold (per ``comparison_type``). Metrics the platform cannot
+        measure are reported with ``current_value`` 0 and noted in details.
+        """
+        feature_flag = self._require_flag(feature_flag_id)
+        config = await self.get_feature_flag_safety_config(feature_flag_id)
 
         if not config.enabled:
-            # Safety monitoring is not enabled for this feature flag
             return SafetyCheckResponse(
                 feature_flag_id=feature_flag_id,
-                is_healthy=True,  # Assume healthy if monitoring is disabled
+                is_healthy=True,
                 metrics=[],
                 last_checked=datetime.utcnow(),
-                details={"message": "Safety monitoring is disabled for this feature flag"}
+                details={"message": "Safety monitoring is disabled for this feature flag"},
             )
 
-        # Retrieve current metric values for the feature flag
-        # In a real implementation, this would query a metrics database or service
-        metric_statuses = []
+        statuses: List[MetricStatus] = []
+        unavailable: List[str] = []
         is_healthy = True
 
-        for metric in config.metrics:
-            # In a real implementation, we would fetch the actual metric value
-            # Here we're just simulating with a placeholder
-            current_value = self._get_metric_value(feature_flag_id, metric.name)
+        for name, raw_threshold in (config.metrics or {}).items():
+            threshold = _as_threshold(raw_threshold)
+            value = self._get_metric_value(feature_flag_id, name)
 
-            # Determine if the metric is healthy based on its threshold
-            metric_is_healthy = current_value <= metric.threshold
-            if not metric_is_healthy:
+            if value is None:
+                unavailable.append(name)
+                value = 0.0
+                critical = warning = False
+            else:
+                critical = _breaches(value, threshold.critical_threshold, threshold.comparison_type)
+                warning = _breaches(value, threshold.warning_threshold, threshold.comparison_type)
+
+            if critical:
                 is_healthy = False
 
-            metric_statuses.append(
+            limit = (
+                threshold.critical_threshold
+                if threshold.critical_threshold is not None
+                else (threshold.warning_threshold or 0.0)
+            )
+            statuses.append(
                 MetricStatus(
-                    name=metric.name,
-                    description=metric.description,
-                    current_value=current_value,
-                    threshold=metric.threshold,
-                    unit=metric.unit,
-                    is_healthy=metric_is_healthy,
-                    details={"feature_flag_id": str(feature_flag_id)}
+                    name=name,
+                    current_value=value,
+                    threshold=limit,
+                    is_healthy=not critical,
+                    details={
+                        "comparison_type": threshold.comparison_type,
+                        "warning_threshold": threshold.warning_threshold,
+                        "critical_threshold": threshold.critical_threshold,
+                        "warning": warning,
+                        "measured": name not in unavailable,
+                    },
                 )
             )
+
+        details: Dict[str, Any] = {"feature_flag_key": feature_flag.key}
+        if unavailable:
+            details["unmeasured_metrics"] = unavailable
 
         return SafetyCheckResponse(
             feature_flag_id=feature_flag_id,
             is_healthy=is_healthy,
-            metrics=metric_statuses,
+            metrics=statuses,
             last_checked=datetime.utcnow(),
-            details={"feature_flag_key": feature_flag.key}
+            details=details,
         )
 
-    def _get_metric_value(self, feature_flag_id: UUID, metric_name: str) -> float:
-        """Get the current value of a metric for a feature flag.
-
-        This is a placeholder implementation. In a real system, this would query
-        a metrics database or service to get the actual metric value.
+    async def should_rollback(
+        self, db: Session, feature_flag_id: UUID
+    ) -> Tuple[bool, Optional[str], Optional[Dict[str, Any]]]:
         """
-        # For demonstration purposes, return a simulated value
-        # In a real implementation, this would use the metrics_service to get actual metrics
-        import random
-        return random.uniform(0.1, 5.0)  # Return a random value between 0.1 and 5.0
+        Decide whether an automatic rollback is warranted.
+
+        Requires: an ACTIVE flag with rollout > 0, monitoring enabled for the
+        flag, automatic rollbacks enabled globally, and a failing safety check.
+        """
+        feature_flag = (
+            db.query(FeatureFlag)
+            .filter(FeatureFlag.id == feature_flag_id, FeatureFlag.status == FeatureFlagStatus.ACTIVE)
+            .first()
+        )
+        if not feature_flag or feature_flag.rollout_percentage == 0:
+            return False, None, None
+
+        config = await self.get_feature_flag_safety_config(feature_flag_id)
+        if not config.enabled:
+            return False, None, None
+
+        settings = await self.get_safety_settings()
+        if not settings.enable_automatic_rollbacks:
+            return False, None, None
+
+        try:
+            safety_check = await self.check_feature_flag_safety(feature_flag_id)
+        except Exception as exc:  # metric sources failing must not roll flags back
+            logger.error(f"Error checking safety for feature flag {feature_flag_id}: {exc}")
+            return False, None, None
+
+        if safety_check.is_healthy:
+            return False, None, None
+
+        failing = next((m for m in safety_check.metrics if not m.is_healthy), None)
+        if failing:
+            reason = f"Metric '{failing.name}' exceeded threshold ({failing.current_value} vs {failing.threshold})"
+            trigger_type = _metric_to_trigger(failing.name)
+            trigger_value, threshold_value = failing.current_value, failing.threshold
+        else:
+            reason, trigger_type = "Multiple issues detected", RollbackTriggerType.AUTOMATIC
+            trigger_value = threshold_value = None
+
+        return True, reason, {
+            "trigger_type": trigger_type,
+            "trigger_value": trigger_value,
+            "threshold_value": threshold_value,
+            "safety_check": safety_check.model_dump(),
+        }
+
+    # ------------------------------------------------------------------
+    # Rollbacks
+    # ------------------------------------------------------------------
+
+    def execute_rollback(
+        self,
+        db: Session,
+        feature_flag_id: UUID,
+        reason: str = "Manual rollback",
+        trigger_type: RollbackTriggerType = RollbackTriggerType.MANUAL,
+        metrics_data: Optional[Dict[str, Any]] = None,
+        trigger_value: Optional[float] = None,
+        threshold_value: Optional[float] = None,
+        target_percentage: int = 0,
+        executed_by_user_id: Optional[UUID] = None,
+    ) -> RollbackResponse:
+        """
+        Set the flag's rollout to ``target_percentage`` (default 0, flag stays
+        ACTIVE) and record the rollback. Never raises: failures are reported
+        with ``success=False`` and the transaction is rolled back.
+        """
+        trigger_name = str(getattr(trigger_type, "value", trigger_type))
+        try:
+            feature_flag = (
+                db.query(FeatureFlag).filter(FeatureFlag.id == feature_flag_id).with_for_update().first()
+            )
+            if not feature_flag:
+                raise ValueError(f"Feature flag {feature_flag_id} does not exist")
+
+            previous_percentage = feature_flag.rollout_percentage
+            safety_config = self.get_or_create_safety_config(db, feature_flag_id)
+
+            feature_flag.rollout_percentage = target_percentage
+            feature_flag.updated_at = datetime.utcnow()
+            db.add(feature_flag)
+
+            record = SafetyRollbackRecord(
+                feature_flag_id=feature_flag_id,
+                safety_config_id=safety_config.id,
+                trigger_type=trigger_name,
+                trigger_reason=reason,
+                previous_percentage=previous_percentage,
+                target_percentage=target_percentage,
+                success=True,
+                executed_by_user_id=executed_by_user_id,
+            )
+            db.add(record)
+            db.commit()
+            db.refresh(record)
+
+            logger.info(
+                f"Rolled back feature flag {feature_flag_id} from {previous_percentage}% "
+                f"to {target_percentage}% due to {reason} (trigger: {trigger_name})"
+            )
+            return RollbackResponse(
+                success=True,
+                feature_flag_id=feature_flag_id,
+                message=(
+                    f"Feature flag '{feature_flag.key}' rolled back from "
+                    f"{previous_percentage}% to {target_percentage}%"
+                ),
+                trigger_type=trigger_name,
+                previous_percentage=previous_percentage,
+                new_percentage=target_percentage,
+                rollback_record_id=record.id,
+                timestamp=datetime.utcnow(),
+                details={
+                    "reason": reason,
+                    "trigger_value": trigger_value,
+                    "threshold_value": threshold_value,
+                    "metrics_data": metrics_data,
+                },
+            )
+
+        except Exception as exc:
+            db.rollback()
+            logger.error(f"Error rolling back feature flag {feature_flag_id}: {exc}")
+            return RollbackResponse(
+                success=False,
+                feature_flag_id=feature_flag_id,
+                message=f"Rollback failed: {exc}",
+                trigger_type=trigger_name,
+                timestamp=datetime.utcnow(),
+                details={"reason": reason},
+            )
 
     async def rollback_feature_flag(
         self,
         feature_flag_id: UUID,
         percentage: Optional[int] = 0,
-        reason: Optional[str] = "Manual rollback"
-    ) -> RollbackResponse:
-        """Roll back a feature flag to a safe state."""
-        # First check if the feature flag exists
-        feature_flag = self.db.query(FeatureFlag).filter(FeatureFlag.id == feature_flag_id).first()
-        if not feature_flag:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Feature flag with ID {feature_flag_id} not found"
-            )
-
-        # Get the current rollout percentage
-        previous_percentage = feature_flag.rollout_percentage
-
-        # Update the feature flag rollout percentage
-        feature_flag.rollout_percentage = percentage
-        self.db.commit()
-
-        # In a real implementation, we would record the rollback in a safety_rollbacks table
-
-        return RollbackResponse(
-            feature_flag_id=feature_flag_id,
-            success=True,
-            message=f"Feature flag '{feature_flag.key}' rolled back from {previous_percentage}% to {percentage}%",
-            trigger_type="manual",
-            previous_percentage=previous_percentage,
-            new_percentage=percentage,
-            details={"reason": reason}
-        )
-
-    def should_rollback(
-        self, db: Session, feature_flag_id: UUID
-    ) -> Tuple[bool, Optional[str], Optional[Dict[str, Any]]]:
-        """
-        Determine if a feature flag should be rolled back based on metrics.
-
-        Args:
-            db: Database session
-            feature_flag_id: ID of the feature flag
-
-        Returns:
-            Tuple with (should_rollback, reason, metrics)
-        """
-        # Skip if feature flag does not exist or is not active
-        feature_flag = db.query(FeatureFlag).filter(
-            FeatureFlag.id == feature_flag_id,
-            FeatureFlag.status == FeatureFlagStatus.ACTIVE
-        ).first()
-        if not feature_flag:
-            return False, None, None
-
-        # Skip if rollout percentage is 0
-        if feature_flag.rollout_percentage == 0:
-            return False, None, None
-
-        # Get safety config
-        safety_config = self.get_or_create_safety_config(db, feature_flag_id)
-
-        # Skip if monitoring or auto-rollback is disabled
-        if not safety_config.monitoring_enabled:
-            return False, None, None
-
-        if not safety_config.auto_rollback_enabled:
-            return False, None, None
-
-        # Check safety
-        try:
-            safety_check = self.check_feature_flag_safety(feature_flag_id)
-
-            # If status is critical, recommend rollback
-            if safety_check.is_healthy == False:
-                # Determine the most severe issue
-                reason = "Multiple issues detected"
-                trigger_type = RollbackTriggerType.CUSTOM_METRIC
-                trigger_value = None
-                threshold_value = None
-
-                for metric in safety_check.metrics:
-                    if metric.is_healthy == False:
-                        reason = f"Metric '{metric.name}' exceeded threshold"
-                        trigger_type = RollbackTriggerType.METRIC
-                        trigger_value = metric.current_value
-                        threshold_value = metric.threshold
-                        break
-
-                # Return rollback recommendation
-                return True, reason, {
-                    "trigger_type": trigger_type,
-                    "trigger_value": trigger_value,
-                    "threshold_value": threshold_value,
-                    "safety_check": safety_check.model_dump()
-                }
-
-            # Otherwise, don't rollback
-            return False, None, None
-
-        except Exception as e:
-            logger.error(f"Error checking safety for feature flag {feature_flag_id}: {str(e)}")
-            return False, None, None
-
-    def execute_rollback(
-        self, db: Session, feature_flag_id: UUID, reason: str = "Manual rollback",
+        reason: Optional[str] = "Manual rollback",
         trigger_type: RollbackTriggerType = RollbackTriggerType.MANUAL,
-        metrics_data: Optional[Dict[str, Any]] = None,
-        trigger_value: Optional[float] = None,
-        threshold_value: Optional[float] = None
+        executed_by_user_id: Optional[UUID] = None,
     ) -> RollbackResponse:
-        """
-        Roll back a feature flag to safe state.
-
-        Args:
-            db: Database session
-            feature_flag_id: ID of the feature flag
-            reason: Reason for rollback
-            trigger_type: Type of trigger that caused the rollback
-            metrics_data: Metrics data at the time of rollback
-            trigger_value: Value that triggered the rollback
-            threshold_value: Threshold that was exceeded
-
-        Returns:
-            RollbackResponse with details of the rollback operation
-        """
-        # Start transaction
-        try:
-            # Get feature flag
-            feature_flag = db.query(FeatureFlag).filter(
-                FeatureFlag.id == feature_flag_id
-            ).with_for_update().first()
-
-            if not feature_flag:
-                raise ValueError(f"Feature flag {feature_flag_id} does not exist")
-
-            # Store previous percentage
-            previous_percentage = feature_flag.rollout_percentage
-
-            # Update feature flag to 0% rollout but keep it ACTIVE
-            feature_flag.rollout_percentage = 0
-            feature_flag.updated_at = datetime.utcnow()
-            db.add(feature_flag)
-
-            # Get safety config
-            safety_config = self.get_or_create_safety_config(db, feature_flag_id)
-
-            # Create rollback record
-            rollback_record = SafetyRollbackRecord(
-                safety_config_id=safety_config.id,
-                trigger_type=trigger_type,
-                trigger_value=trigger_value,
-                threshold_value=threshold_value,
-                rollout_percentage_before=previous_percentage,
-                description=reason,
-                metrics_data=metrics_data
-            )
-            db.add(rollback_record)
-
-            # Commit transaction
-            db.commit()
-            db.refresh(rollback_record)
-
-            # Log rollback
-            logger.info(
-                f"Rolled back feature flag {feature_flag_id} from {previous_percentage}% to 0%"
-                f" due to {reason} (trigger: {trigger_type.value})"
-            )
-
-            # Return response
-            return RollbackResponse(
-                success=True,
-                feature_flag_id=feature_flag_id,
-                rollback_record_id=rollback_record.id,
-                previous_percentage=previous_percentage,
-                current_percentage=0,
-                message=reason,
-                timestamp=datetime.utcnow()
-            )
-
-        except Exception as e:
-            # Rollback transaction on error
-            db.rollback()
-            logger.error(f"Error rolling back feature flag {feature_flag_id}: {str(e)}")
-
-            # Return failure response
-            return RollbackResponse(
-                success=False,
-                feature_flag_id=feature_flag_id,
-                rollback_record_id=None,
-                previous_percentage=-1,  # Use -1 to indicate unknown
-                current_percentage=-1,   # Use -1 to indicate unknown
-                message=f"Rollback failed: {str(e)}",
-                timestamp=datetime.utcnow()
-            )
-
-    async def async_get_safety_settings(self) -> SafetySettingsResponse:
-        """Get the global safety settings."""
-        settings = self.db.query(SafetySettings).first()
-
-        if not settings:
-            # Create default settings if none exist
-            settings = SafetySettings(
-                enabled=True,
-                auto_rollback_enabled=False,
-                default_metrics=[]
-            )
-            self.db.add(settings)
-            self.db.commit()
-            self.db.refresh(settings)
-
-        return SafetySettingsResponse.from_orm(settings)
-
-    async def async_get_feature_flag_safety_config(
-        self, feature_flag_id: UUID
-    ) -> FeatureFlagSafetyConfigResponse:
-        """Get safety configuration for a feature flag."""
-        # First check if the feature flag exists
-        feature_flag = self.db.query(FeatureFlag).filter(FeatureFlag.id == feature_flag_id).first()
-        if not feature_flag:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Feature flag with ID {feature_flag_id} not found"
-            )
-
-        config = self.db.query(FeatureFlagSafetyConfig).filter(
-            FeatureFlagSafetyConfig.feature_flag_id == feature_flag_id
-        ).first()
-
-        if not config:
-            # Return default configuration based on global settings
-            settings = await self.async_get_safety_settings()
-            return FeatureFlagSafetyConfigResponse(
-                id=UUID('00000000-0000-0000-0000-000000000000'),  # Placeholder ID
-                feature_flag_id=feature_flag_id,
-                enabled=settings.enabled,
-                auto_rollback_enabled=settings.auto_rollback_enabled,
-                metrics=settings.default_metrics,
-                created_at=datetime.utcnow(),
-                updated_at=datetime.utcnow()
-            )
-
-        return FeatureFlagSafetyConfigResponse.from_orm(config)
-
-    async def async_rollback_feature_flag(
-        self,
-        feature_flag_id: UUID,
-        percentage: Optional[int] = 0,
-        reason: Optional[str] = "Manual rollback"
-    ) -> RollbackResponse:
-        """Roll back a feature flag to a safe state."""
-        # First check if the feature flag exists
-        feature_flag = self.db.query(FeatureFlag).filter(FeatureFlag.id == feature_flag_id).first()
-        if not feature_flag:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Feature flag with ID {feature_flag_id} not found"
-            )
-
-        # Get the current rollout percentage
-        previous_percentage = feature_flag.rollout_percentage
-
-        # Update the feature flag rollout percentage
-        feature_flag.rollout_percentage = percentage
-        self.db.commit()
-
-        # In a real implementation, we would record the rollback in a safety_rollbacks table
-
-        return RollbackResponse(
-            feature_flag_id=feature_flag_id,
-            success=True,
-            message=f"Feature flag '{feature_flag.key}' rolled back from {previous_percentage}% to {percentage}%",
-            trigger_type="manual",
-            previous_percentage=previous_percentage,
-            new_percentage=percentage,
-            details={"reason": reason}
+        """Roll the flag back to ``percentage`` and record it. 404 if the flag is unknown."""
+        self._require_flag(feature_flag_id)
+        return self.execute_rollback(
+            self.db,
+            feature_flag_id,
+            reason=reason or "Manual rollback",
+            trigger_type=trigger_type,
+            target_percentage=percentage or 0,
+            executed_by_user_id=executed_by_user_id,
         )
+
+    async_rollback_feature_flag = rollback_feature_flag
+
+
+# ----------------------------------------------------------------------
+# Schema -> column mapping helpers
+# ----------------------------------------------------------------------
+
+def _settings_columns(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Serialise nested MetricThreshold models so they can be stored as JSONB."""
+    out = dict(data)
+    if out.get("default_metrics") is not None:
+        out["default_metrics"] = {
+            name: (t.model_dump() if hasattr(t, "model_dump") else t)
+            for name, t in out["default_metrics"].items()
+        }
+    return out
+
+
+def _config_columns(data: Dict[str, Any]) -> Dict[str, Any]:
+    out = dict(data)
+    if out.get("metrics") is not None:
+        out["metrics"] = {
+            name: (t.model_dump() if hasattr(t, "model_dump") else t)
+            for name, t in out["metrics"].items()
+        }
+    return out
