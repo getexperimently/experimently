@@ -2,7 +2,7 @@ import React from 'react';
 import { renderHook, waitFor } from '@testing-library/react';
 import { ExperimentationProvider } from '../context/ExperimentationProvider';
 import { useMultipleFlags } from '../hooks/useMultipleFlags';
-import { SdkConfig, UserContext, FeatureFlag } from '../client/types';
+import { SdkConfig, UserContext, FeatureFlagEvaluateResponse } from '../client/types';
 
 const config: SdkConfig = {
   apiKey: 'test-key',
@@ -11,32 +11,27 @@ const config: SdkConfig = {
 
 const defaultUser: UserContext = { userId: 'user-1' };
 
-const enabledFlag: FeatureFlag = {
-  id: 'f1',
-  key: 'flag-a',
-  name: 'Flag A',
-  enabled: true,
-  rolloutPercentage: 100,
-};
-
-const disabledFlag: FeatureFlag = {
-  id: 'f2',
-  key: 'flag-b',
-  name: 'Flag B',
-  enabled: false,
-  rolloutPercentage: 0,
-};
-
-const flagWithVariant: FeatureFlag = {
-  id: 'f3',
+const enabledFlag: FeatureFlagEvaluateResponse = { key: 'flag-a', enabled: true, config: null };
+const disabledFlag: FeatureFlagEvaluateResponse = { key: 'flag-b', enabled: false, config: null };
+const variantFlag: FeatureFlagEvaluateResponse = {
   key: 'flag-c',
-  name: 'Flag C',
   enabled: true,
-  rolloutPercentage: 100,
-  variants: [
-    { name: 'treatment', weight: 1.0 },
-  ],
+  config: { variant: 'treatment' },
 };
+
+function jsonResponse(body: unknown, status = 200) {
+  return { ok: status >= 200 && status < 300, status, json: () => Promise.resolve(body) };
+}
+
+function mockFetchSequence(...steps: Array<{ body: unknown; status?: number } | Error>): jest.Mock {
+  const mock = jest.fn();
+  for (const step of steps) {
+    if (step instanceof Error) mock.mockRejectedValueOnce(step);
+    else mock.mockResolvedValueOnce(jsonResponse(step.body, step.status ?? 200));
+  }
+  global.fetch = mock;
+  return mock;
+}
 
 function makeWrapper(user: UserContext = defaultUser) {
   return ({ children }: { children: React.ReactNode }) => (
@@ -52,10 +47,11 @@ afterEach(() => {
 
 describe('useMultipleFlags', () => {
   it('returns empty object for empty keys array', () => {
-    const { result } = renderHook(() => useMultipleFlags([]), {
-      wrapper: makeWrapper(),
-    });
+    const fetchMock = jest.fn();
+    global.fetch = fetchMock;
+    const { result } = renderHook(() => useMultipleFlags([]), { wrapper: makeWrapper() });
     expect(result.current).toEqual({});
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('returns null for all flags during initial loading', () => {
@@ -67,156 +63,109 @@ describe('useMultipleFlags', () => {
     expect(result.current['flag-b']).toBeNull();
   });
 
-  it('evaluates all flags and returns populated map when keys are provided', async () => {
-    const fetchMock = jest.fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: () => Promise.resolve(enabledFlag),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: () => Promise.resolve(disabledFlag),
-      });
-    global.fetch = fetchMock;
+  it('requests each flag from the evaluate endpoint with the user id', async () => {
+    const fetchMock = mockFetchSequence({ body: enabledFlag }, { body: disabledFlag });
+    const { result } = renderHook(() => useMultipleFlags(['flag-a', 'flag-b']), {
+      wrapper: makeWrapper(),
+    });
+    await waitFor(() => expect(result.current['flag-b']).not.toBeNull());
 
+    expect(fetchMock.mock.calls.map(c => c[0])).toEqual([
+      'https://api.example.com/api/v1/feature-flags/evaluate/flag-a?user_id=user-1',
+      'https://api.example.com/api/v1/feature-flags/evaluate/flag-b?user_id=user-1',
+    ]);
+  });
+
+  it('evaluates all flags and returns populated map when keys are provided', async () => {
+    mockFetchSequence({ body: enabledFlag }, { body: disabledFlag });
     const { result } = renderHook(() => useMultipleFlags(['flag-a', 'flag-b']), {
       wrapper: makeWrapper(),
     });
 
-    await waitFor(() => {
-      expect(result.current['flag-a']).not.toBeNull();
-    });
-
+    await waitFor(() => expect(result.current['flag-a']).not.toBeNull());
     expect(result.current['flag-a']).not.toBeNull();
     expect(result.current['flag-b']).not.toBeNull();
   });
 
-  it('returns correct variant per flag', async () => {
-    const fetchMock = jest.fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: () => Promise.resolve(enabledFlag),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: () => Promise.resolve(flagWithVariant),
-      });
-    global.fetch = fetchMock;
-
+  it('returns correct variant and config per flag', async () => {
+    mockFetchSequence({ body: enabledFlag }, { body: variantFlag });
     const { result } = renderHook(() => useMultipleFlags(['flag-a', 'flag-c']), {
       wrapper: makeWrapper(),
     });
 
-    await waitFor(() => {
-      expect(result.current['flag-a']).not.toBeNull();
-    });
-
+    await waitFor(() => expect(result.current['flag-a']).not.toBeNull());
     expect(result.current['flag-a']?.variant).toBe('on');
+    expect(result.current['flag-a']?.config).toBeNull();
     expect(result.current['flag-c']?.variant).toBe('treatment');
+    expect(result.current['flag-c']?.config).toEqual({ variant: 'treatment' });
   });
 
   it('handles mixed enabled and disabled flags correctly', async () => {
-    const fetchMock = jest.fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: () => Promise.resolve(enabledFlag),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: () => Promise.resolve(disabledFlag),
-      });
-    global.fetch = fetchMock;
-
+    mockFetchSequence({ body: enabledFlag }, { body: disabledFlag });
     const { result } = renderHook(() => useMultipleFlags(['flag-a', 'flag-b']), {
       wrapper: makeWrapper(),
     });
 
-    await waitFor(() => {
-      expect(result.current['flag-a']).not.toBeNull();
-    });
-
+    await waitFor(() => expect(result.current['flag-a']).not.toBeNull());
     expect(result.current['flag-a']?.isEnabled).toBe(true);
     expect(result.current['flag-b']?.isEnabled).toBe(false);
     expect(result.current['flag-b']?.variant).toBeNull();
   });
 
-  it('re-evaluates flags when keys change — picks up new flag', async () => {
-    const fetchMock = jest.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: () => Promise.resolve(enabledFlag),
-    });
-    global.fetch = fetchMock;
-
-    let keys = ['flag-a'];
-    const { result, rerender } = renderHook(() => useMultipleFlags(keys), {
+  it('returns an error evaluation for flags that fail without affecting the others', async () => {
+    mockFetchSequence({ body: enabledFlag }, new Error('Network down'));
+    const { result } = renderHook(() => useMultipleFlags(['flag-a', 'flag-b']), {
       wrapper: makeWrapper(),
     });
 
-    await waitFor(() => {
-      expect(result.current['flag-a']).not.toBeNull();
+    await waitFor(() => expect(result.current['flag-b']).not.toBeNull());
+    expect(result.current['flag-a']?.isEnabled).toBe(true);
+    expect(result.current['flag-b']).toMatchObject({
+      flagKey: 'flag-b',
+      variant: null,
+      isEnabled: false,
+      config: null,
+      loading: false,
     });
+    expect(result.current['flag-b']?.error?.message).toBe('Network down');
+  });
+
+  it('re-evaluates flags when keys change — picks up new flag', async () => {
+    const fetchMock = jest.fn().mockResolvedValue(jsonResponse(enabledFlag));
+    global.fetch = fetchMock;
+
+    let keys = ['flag-a'];
+    const { result, rerender } = renderHook(() => useMultipleFlags(keys), { wrapper: makeWrapper() });
+
+    await waitFor(() => expect(result.current['flag-a']).not.toBeNull());
     expect(fetchMock).toHaveBeenCalledTimes(1);
 
     keys = ['flag-a', 'flag-b'];
     rerender();
 
-    // flag-a is cached, flag-b needs a fresh fetch — minimum 2 total calls
-    await waitFor(() => {
-      expect(result.current['flag-b']).not.toBeNull();
-    });
+    await waitFor(() => expect(result.current['flag-b']).not.toBeNull());
     expect(result.current['flag-a']).not.toBeNull();
-    expect(result.current['flag-b']).not.toBeNull();
+    // flag-a was served from cache; only flag-b needed a new request
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[1][0]).toContain('/evaluate/flag-b?');
   });
 
   it('sets loading: false and no error on successful evaluation', async () => {
-    const fetchMock = jest.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: () => Promise.resolve(enabledFlag),
-    });
-    global.fetch = fetchMock;
+    global.fetch = jest.fn().mockResolvedValue(jsonResponse(enabledFlag));
+    const { result } = renderHook(() => useMultipleFlags(['flag-a']), { wrapper: makeWrapper() });
 
-    const { result } = renderHook(() => useMultipleFlags(['flag-a']), {
-      wrapper: makeWrapper(),
-    });
-
-    await waitFor(() => {
-      expect(result.current['flag-a']).not.toBeNull();
-    });
-
+    await waitFor(() => expect(result.current['flag-a']).not.toBeNull());
     expect(result.current['flag-a']?.loading).toBe(false);
     expect(result.current['flag-a']?.error).toBeNull();
   });
 
   it('preserves flagKey in each evaluation result', async () => {
-    const fetchMock = jest.fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: () => Promise.resolve(enabledFlag),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: () => Promise.resolve(disabledFlag),
-      });
-    global.fetch = fetchMock;
-
+    mockFetchSequence({ body: enabledFlag }, { body: disabledFlag });
     const { result } = renderHook(() => useMultipleFlags(['flag-a', 'flag-b']), {
       wrapper: makeWrapper(),
     });
 
-    await waitFor(() => {
-      expect(result.current['flag-a']).not.toBeNull();
-    });
-
+    await waitFor(() => expect(result.current['flag-a']).not.toBeNull());
     expect(result.current['flag-a']?.flagKey).toBe('flag-a');
     expect(result.current['flag-b']?.flagKey).toBe('flag-b');
   });

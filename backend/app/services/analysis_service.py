@@ -13,7 +13,12 @@ from sqlalchemy import func, and_, or_, desc, text
 from sqlalchemy.orm import Session, joinedload
 
 from backend.app.models.experiment import Experiment, Variant, Metric, ExperimentStatus
-from backend.app.models.event import Event, EventType
+from backend.app.models.event import Event
+from backend.app.services.event_matching import (
+    CONVERSION_SQL_PREDICATE,
+    any_conversion_event_filter,
+    conversion_event_filter,
+)
 from backend.app.models.assignment import Assignment
 from backend.app.core.config import settings
 from backend.app.core.database_config import get_schema_name
@@ -79,9 +84,10 @@ class AnalysisService:
         if not experiment:
             raise ValueError(f"Experiment {experiment_id} not found")
 
-        # Calculate results for each metric
+        # Calculate results for each metric (primary metric first)
+        metric_definitions = self._ordered_metrics(experiment)
         metrics_results = []
-        for metric in experiment.metric_definitions:
+        for metric in metric_definitions:
             metric_result = self.calculate_metric_results(experiment, metric)
             metrics_results.append(metric_result)
 
@@ -116,8 +122,7 @@ class AnalysisService:
                             .filter(
                                 Event.experiment_id == experiment.id,
                                 Event.variant_id == variant.id,
-                                Event.event_type == EventType.CONVERSION.value,
-                                Event.event_name == primary_metric.event_name,
+                                conversion_event_filter(primary_metric.event_name),
                             )
                             .scalar()
                             or 0
@@ -143,10 +148,10 @@ class AnalysisService:
         alpha = 1.0 - confidence_level
         metrics = [
             self._to_metric_result(metric, raw, alpha, correction_method)
-            for metric, raw in zip(experiment.metric_definitions, metrics_results)
+            for metric, raw in zip(metric_definitions, metrics_results)
         ]
-        summary.update(self._summarise_decision(experiment, metrics))
         sample_size_adequate = self._sample_size_adequate(experiment, metrics_results)
+        summary.update(self._summarise_decision(experiment, metrics, sample_size_adequate))
 
         return {
             "experiment_id": str(experiment_id),
@@ -299,8 +304,19 @@ class AnalysisService:
         return all(v["sample_size"] >= minimum for v in raw["variant_results"])
 
     @staticmethod
-    def _summarise_decision(experiment: Experiment, metrics: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """has_winner / winning_variant_id / recommendation for the summary."""
+    def _summarise_decision(
+        experiment: Experiment,
+        metrics: List[Dict[str, Any]],
+        sample_size_adequate: bool = True,
+    ) -> Dict[str, Any]:
+        """
+        has_winner / winning_variant_id / recommendation for the summary.
+
+        A significant winner is only recommended for shipping once every
+        variant has reached the primary metric's minimum sample size; before
+        that the result is reported but the recommendation stays
+        CONTINUE_TESTING (early peeks inflate false positives).
+        """
         if not metrics:
             return {
                 "has_winner": False,
@@ -320,6 +336,16 @@ class AnalysisService:
                 if pct is not None and p is not None
                 else f"{winner['variant_name']} is significantly better on {primary['metric_name']}."
             )
+            if not sample_size_adequate:
+                return {
+                    "has_winner": True,
+                    "winning_variant_id": winner_id,
+                    "recommendation": "CONTINUE_TESTING",
+                    "recommendation_reason": (
+                        f"{reason} Not every variant has reached the minimum sample size yet, "
+                        "so keep the experiment running before shipping."
+                    ),
+                }
             return {
                 "has_winner": True,
                 "winning_variant_id": winner_id,
@@ -355,6 +381,15 @@ class AnalysisService:
                 f"({total} users assigned)."
             ),
         }
+
+    @staticmethod
+    def _ordered_metrics(experiment: Experiment) -> List[Metric]:
+        """Metric definitions with the primary metric first, then by name."""
+        metrics = list(experiment.metric_definitions or [])
+        return sorted(
+            metrics,
+            key=lambda m: (not bool(getattr(m, "is_primary", False)), m.name or ""),
+        )
 
     def calculate_metric_results(
         self, experiment: Experiment, metric: Metric
@@ -399,8 +434,7 @@ class AnalysisService:
                 .filter(
                     Event.experiment_id == experiment.id,
                     Event.variant_id == variant_id,
-                    Event.event_type == EventType.CONVERSION.value,
-                    Event.event_name == metric.event_name,
+                    conversion_event_filter(metric.event_name),
                 )
                 .scalar()
                 or 0
@@ -553,7 +587,9 @@ class AnalysisService:
             self.db.query(func.count(Event.id))
             .filter(
                 Event.experiment_id == experiment.id,
-                Event.event_type == EventType.CONVERSION.value,
+                any_conversion_event_filter(
+                    m.event_name for m in (experiment.metric_definitions or [])
+                ),
             )
             .scalar()
             or 0
@@ -674,8 +710,7 @@ class AnalysisService:
                         .filter(
                             Event.experiment_id == experiment.id,
                             Event.variant_id == variant.id,
-                            Event.event_type == EventType.CONVERSION.value,
-                            Event.event_name == metric.event_name,
+                            conversion_event_filter(metric.event_name),
                             Event.created_at >= date_start.isoformat(),
                             Event.created_at <= date_end.isoformat(),
                         )
@@ -1160,8 +1195,7 @@ class AnalysisService:
                         FROM {schema}.events
                         WHERE experiment_id = :experiment_id
                         AND variant_id = :variant_id
-                        AND event_type = :event_type
-                        AND event_name = :event_name
+                        AND {CONVERSION_SQL_PREDICATE}
                         AND event_metadata ? :segment_key
                         AND jsonb_extract_path_text(event_metadata, :segment_key) = :segment_value
                     """  # nosec B608 - schema is a fixed config identifier, not user input
@@ -1173,7 +1207,6 @@ class AnalysisService:
                             {
                                 "experiment_id": str(experiment_id),
                                 "variant_id": str(variant.id),
-                                "event_type": EventType.CONVERSION.value,
                                 "event_name": metric.event_name,
                                 "segment_key": segment_by,
                                 "segment_value": segment_value,

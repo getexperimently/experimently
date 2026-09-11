@@ -27,6 +27,20 @@ from backend.app.core.logging import get_logger
 logger = get_logger(__name__)
 
 
+def _as_utc(value: datetime) -> datetime:
+    """
+    Return ``value`` as a timezone-aware UTC datetime.
+
+    ``rollout_stages`` timestamps are stored in ``timestamp without time zone``
+    columns, so SQLAlchemy hands back naive datetimes while the scheduler
+    works with ``datetime.now(timezone.utc)``; comparing the two raises
+    ``TypeError``. Naive values are UTC by convention throughout the app.
+    """
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
 class RolloutScheduler:
     """Handles scheduled tasks for feature flag rollouts."""
 
@@ -171,17 +185,26 @@ class RolloutScheduler:
                                 min_duration_hours = schedule.min_stage_duration or 0
                                 if min_duration_hours > 0:
                                     min_duration = timedelta(hours=min_duration_hours)
-                                    if current_time - current_active_stage.updated_at < min_duration:
+                                    stage_updated_at = _as_utc(current_active_stage.updated_at)
+                                    if current_time - stage_updated_at < min_duration:
                                         logger.info(
                                             f"Minimum duration not met for next stage in schedule {schedule.id}. "
-                                            f"Will wait until {current_active_stage.updated_at + min_duration}"
+                                            f"Will wait until {stage_updated_at + min_duration}"
                                         )
                                         continue
 
-                                # Activate the next stage
-                                was_updated = await self._activate_stage(db, schedule, next_stage, current_time)
-                                if was_updated:
-                                    stages_processed += 1
+                                # Activate the next stage — but only once its own trigger
+                                # allows it (a TIME_BASED stage with a future start_date
+                                # stays PENDING and is picked up by a later run).
+                                if self._is_stage_eligible_for_activation(next_stage, current_time):
+                                    was_updated = await self._activate_stage(db, schedule, next_stage, current_time)
+                                    if was_updated:
+                                        stages_processed += 1
+                                else:
+                                    logger.info(
+                                        f"Stage {next_stage.id} ({next_stage.name}) in schedule {schedule.id} "
+                                        "is not yet eligible for activation; leaving it pending"
+                                    )
                             else:
                                 # This was the last stage, mark the schedule as completed
                                 schedule.status = RolloutScheduleStatus.COMPLETED
@@ -226,7 +249,7 @@ class RolloutScheduler:
                 # If no specific start date, stage can be activated immediately
                 return True
 
-            return stage.start_date <= current_time
+            return _as_utc(stage.start_date) <= current_time
 
         elif stage.trigger_type == TriggerType.METRIC_BASED:
             # For metric-based triggers, this would check if metrics meet criteria
@@ -263,7 +286,7 @@ class RolloutScheduler:
 
             # If the stage has been active for at least the specified duration, it's complete
             if stage.updated_at:
-                min_time = stage.updated_at + timedelta(hours=duration_hours)
+                min_time = _as_utc(stage.updated_at) + timedelta(hours=duration_hours)
                 return current_time >= min_time
 
             return False

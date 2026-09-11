@@ -139,6 +139,17 @@ log "Seeding demo data (100K+ events — this takes ~60s)..."
 python backend/scripts/seed_demo_data.py
 ok "Demo data seeded."
 
+# ShopLab storefront catalogue (experiments, flags, API key, 14-day history).
+# Set SHOPLAB=0 to skip everything ShopLab-related.
+SHOPLAB="${SHOPLAB:-1}"
+if [[ "$SHOPLAB" != "0" ]]; then
+    log "Seeding ShopLab demo catalogue..."
+    python backend/scripts/seed_shoplab.py
+    ok "ShopLab data seeded."
+else
+    warn "SHOPLAB=0 — skipping ShopLab seed."
+fi
+
 # ---------------------------------------------------------------------------
 # 10. Start backend API
 # ---------------------------------------------------------------------------
@@ -214,6 +225,40 @@ echo $! > "$REPO_ROOT/demo/.pids/frontend.pid"
 log "Frontend PID: $(cat "$REPO_ROOT/demo/.pids/frontend.pid")"
 
 # ---------------------------------------------------------------------------
+# 13b. ShopLab storefront (port 3200) + its traffic simulator
+# ---------------------------------------------------------------------------
+SHOPLAB_STARTED=0
+SHOPLAB_DIR="$REPO_ROOT/demo/shoplab"
+if [[ "$SHOPLAB" == "0" ]]; then
+    warn "SHOPLAB=0 — skipping ShopLab storefront."
+elif [[ ! -f "$SHOPLAB_DIR/package.json" ]]; then
+    warn "demo/shoplab/package.json not found — skipping ShopLab storefront."
+else
+    log "Installing ShopLab dependencies..."
+    cd "$SHOPLAB_DIR"
+    npm install --silent
+
+    log "Starting ShopLab storefront on port 3200..."
+    nohup npm run dev \
+        > "$DEMO_DIR/.logs/shoplab.log" 2>&1 &
+    echo $! > "$DEMO_DIR/.pids/shoplab.pid"
+    log "ShopLab PID: $(cat "$DEMO_DIR/.pids/shoplab.pid")"
+    SHOPLAB_STARTED=1
+
+    if [[ -f "$SHOPLAB_DIR/simulator/traffic.py" ]]; then
+        log "Starting ShopLab traffic simulator (3 visitors/s)..."
+        source "$REPO_ROOT/venv/bin/activate"
+        cd "$REPO_ROOT"
+        nohup python demo/shoplab/simulator/traffic.py --rate 3 \
+            > "$DEMO_DIR/.logs/shoplab-simulator.log" 2>&1 &
+        echo $! > "$DEMO_DIR/.pids/shoplab-simulator.pid"
+        ok "ShopLab simulator PID: $(cat "$DEMO_DIR/.pids/shoplab-simulator.pid")"
+    else
+        warn "demo/shoplab/simulator/traffic.py not found — ShopLab simulator not started."
+    fi
+fi
+
+# ---------------------------------------------------------------------------
 # 14. Start live event simulator
 # ---------------------------------------------------------------------------
 log "Starting live event simulator..."
@@ -235,6 +280,9 @@ echo -e "${GREEN}${BOLD}╔═════════════════�
 echo -e "${GREEN}${BOLD}║  Experimently Demo — Ready!            ║${NC}"
 echo -e "${GREEN}${BOLD}║                                        ║${NC}"
 echo -e "${GREEN}${BOLD}║  Frontend:   http://localhost:3000     ║${NC}"
+if [[ "$SHOPLAB_STARTED" == "1" ]]; then
+echo -e "${GREEN}${BOLD}║  ShopLab:    http://localhost:3200     ║${NC}"
+fi
 echo -e "${GREEN}${BOLD}║  API Docs:   http://localhost:8000/docs║${NC}"
 echo -e "${GREEN}${BOLD}║  Admin:      admin@demo.com            ║${NC}"
 echo -e "${GREEN}${BOLD}║  Password:   Demo1234!                 ║${NC}"

@@ -7,9 +7,9 @@ and sensible defaults.
 
 import os
 import secrets
-from typing import Any, Dict, List, Optional, Union
+from typing import Annotated, Any, Dict, List, Optional, Union
 from pydantic import field_validator, model_validator, AnyHttpUrl, EmailStr, PostgresDsn, RedisDsn, ValidationInfo
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 # Minimum acceptable length for SECRET_KEY in non-test environments
 _MIN_SECRET_KEY_LENGTH = 32
@@ -27,8 +27,10 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60  # 1 hour
     BACKEND_CORS_ORIGINS: List[AnyHttpUrl] = []
     # CORS_ORIGINS is a plain-string list version of BACKEND_CORS_ORIGINS that
-    # can also be set via env var as a comma-separated string.
-    CORS_ORIGINS: List[str] = []
+    # can also be set via env var as a comma-separated string. NoDecode stops
+    # pydantic-settings from JSON-decoding the raw value so the "before"
+    # validator below receives it as-is.
+    CORS_ORIGINS: Annotated[List[str], NoDecode] = []
 
     # Database settings
     POSTGRES_SERVER: str = "localhost"
@@ -64,6 +66,15 @@ class Settings(BaseSettings):
 
     # DynamoDB settings
     DYNAMODB_COUNTERS_TABLE: str = "experiment-counters"
+
+    # Multi-armed bandit weight refresh cadence (Issue #22). The in-app
+    # BanditSchedulerRunner recomputes BanditState weights this often.
+    BANDIT_UPDATE_INTERVAL_MINUTES: int = 5
+
+    # Per-IP ceiling for SDK-facing endpoints (/tracking/*, flag evaluation).
+    # Far above the 300/min default because one server-side SDK or NAT egress
+    # can legitimately fan out thousands of assignments a minute.
+    SDK_RATE_LIMIT_PER_MINUTE: int = 6000
 
     # AWS region
     AWS_REGION: str = "us-east-1"
@@ -172,6 +183,10 @@ class Settings(BaseSettings):
     @classmethod
     def assemble_cors_origins_plain(cls, v: Union[str, List[str]]) -> List[str]:
         """Parse plain CORS origins list from comma-separated string or list."""
+        if isinstance(v, str) and v.strip().startswith("["):
+            import json
+
+            v = json.loads(v)
         if isinstance(v, str) and v:
             return [i.strip() for i in v.split(",") if i.strip()]
         if isinstance(v, list):
@@ -321,7 +336,13 @@ class DevSettings(Settings):
 
     ENVIRONMENT: str = "dev"
     LOG_LEVEL: str = "DEBUG"
-    CORS_ORIGINS: List[str] = ["http://localhost:3100", "http://localhost:3000", "http://localhost:3001", "http://localhost:8000"]
+    CORS_ORIGINS: Annotated[List[str], NoDecode] = [
+        "http://localhost:3100",
+        "http://localhost:3000",
+        "http://localhost:3001",
+        "http://localhost:3200",  # ShopLab demo storefront
+        "http://localhost:8000",
+    ]
     CACHE_ENABLED: bool = False
     CACHE_CONTROL: Dict[str, Any] = {"enabled": False, "redis": None, "ttl": 3600}
     PROJECT_NAME: str = "Experimentation Platform (Development)"
