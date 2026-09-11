@@ -75,8 +75,9 @@ def e2e_engine(test_db):
     from backend.app.db.session import engine as app_engine
     app_engine.dispose()
 
-    db_url = os.environ.get("TEST_DATABASE_URL", DEFAULT_TEST_DB_URL)
-    engine = create_engine(db_url, poolclass=NullPool)
+    # Always the per-process database that `test_db` just created; an
+    # environment override could only point at a database without tables.
+    engine = create_engine(DEFAULT_TEST_DB_URL, poolclass=NullPool)
     yield engine
     engine.dispose()
 
