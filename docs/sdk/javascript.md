@@ -48,8 +48,8 @@ assignment.configuration;   // the variant's configuration object, or null
 // Or just the name — 'control' (defaultVariant) when assignment fails
 const variant = await client.getVariant('checkout_button_color', user);
 
-// Feature flag (GET /api/v1/feature-flags/evaluate/{key}?user_id=...)
-const { key, enabled, config } = await client.evaluateFlag('dark_mode', user);
+// Feature flag (GET /api/v1/feature-flags/evaluate/{key}?user_id=...&context=<url-encoded attributes>)
+const { key, enabled, config, reason } = await client.evaluateFlag('dark_mode', user);
 const isEnabled = await client.isFeatureEnabled('dark_mode', user);   // false on failure
 
 // Track a conversion for one experiment (POST /api/v1/tracking/track)
@@ -93,9 +93,23 @@ required field is missing.
 ```typescript
 interface UserContext {
   userId: string;                       // stable id; the server buckets on it
-  attributes?: Record<string, unknown>; // sent as `context` on assignment (targeting rules); not sent on flag evaluation
+  attributes?: Record<string, unknown>; // sent as `context` on assignment and on flag evaluation (targeting rules)
 }
 ```
+
+### Targeting context
+
+`attributes` is what the platform's targeting rules evaluate against. It is sent as `context` in
+the `POST /api/v1/tracking/assign` body and, when it is a non-empty object, as
+`context=<url-encoded JSON>` on `GET /api/v1/feature-flags/evaluate/{flagKey}` (and on
+`getAllFlags(userId, attributes)`), so a flag whose dashboard rule says
+`os_version semver_gte 17.0.0 AND tier equals premium` turns on only for matching users. Top-level
+keys are also reachable under `user.` / `device.` / `app.` aliases in rules (`country` matches
+`user.country`), and nested objects flatten to dotted keys (`{ app: { version: '3.2.1' } }`
+answers `app.version`).
+
+Attributes are assumed **stable per user**: evaluations and assignments are cached by user + key
+only, so call `clearCache()` after changing a user's attributes.
 
 `getAssignment` and `evaluateFlag` reject with `ExperimentationError` (`code: 'INVALID_RESPONSE'`,
 `user.userId is required`) when `userId` is missing or empty; `getVariant` / `isFeatureEnabled`
@@ -109,9 +123,9 @@ turn that into their safe default.
 |--------|-----------|---------|------------|
 | `getAssignment` | `(experimentKey, user: UserContext) => Promise<Assignment>` | `{ experimentKey, userId, variantId, variantName, isControl, configuration }` | Rejects with `ExperimentationError` (404 when the experiment is not ACTIVE) |
 | `getVariant` | `(experimentKey, user) => Promise<string>` | `assignment.variantName` | `defaultVariant` (`'control'`); never rejects |
-| `evaluateFlag` | `(flagKey, user) => Promise<FlagEvaluation>` | `{ key, enabled, config }` | Rejects with `ExperimentationError` (404 when the flag is not ACTIVE) |
+| `evaluateFlag` | `(flagKey, user) => Promise<FlagEvaluation>` | `{ key, enabled, config, reason? }` (`user.attributes` sent as `context`) | Rejects with `ExperimentationError` (off with `reason: "inactive"` when the flag exists but is not ACTIVE; 404 only for an unknown key) |
 | `isFeatureEnabled` | `(flagKey, user) => Promise<boolean>` | `evaluation.enabled` | `false`; never rejects |
-| `getAllFlags` | `(userId) => Promise<Record<string, boolean>>` | `{ flagKey: enabled }`; not cached, not part of the fan-out | Rejects |
+| `getAllFlags` | `(userId, attributes?) => Promise<Record<string, boolean>>` | `{ flagKey: enabled }`; `attributes` sent as `context`; not cached, not part of the fan-out | Rejects |
 | `track` | `(userId, eventName, options?: TrackOptions) => Promise<void>` | — | Never rejects; `onError(err, 'track')` |
 | `trackBatch` | `(events: TrackEvent[]) => Promise<BatchResult>` | `{ successCount, failureCount, errors }` | Never rejects; a failed chunk counts all its events as failures and calls `onError(err, 'trackBatch')` |
 | `fetchAssignments` | `(userId, { activeOnly?: boolean } = { activeOnly: true }) => Promise<AssignmentRecord[]>` | Server-side assignment rows (raw objects); not cached | Rejects |
@@ -179,8 +193,8 @@ Every request carries `X-API-Key`, `Content-Type: application/json` and `Accept:
 | SDK call | Method and path | Body / query | 200 response |
 |---|---|---|---|
 | `getAssignment`, `getVariant` | `POST /api/v1/tracking/assign` | `{"experiment_key","user_id","context"?: object}` | `{"experiment_key","user_id","variant_id","variant_name","is_control","configuration"}` |
-| `evaluateFlag`, `isFeatureEnabled` | `GET /api/v1/feature-flags/evaluate/{flag_key}?user_id=<id>` | — | `{"key","enabled","config"}` |
-| `getAllFlags` | `GET /api/v1/feature-flags/user/{user_id}` | — | `{"<flag_key>": bool, ...}` |
+| `evaluateFlag`, `isFeatureEnabled` | `GET /api/v1/feature-flags/evaluate/{flag_key}?user_id=<id>&context=<url-encoded JSON>` | `context` = `user.attributes` (omitted when empty) | `{"key","enabled","config","reason"}` |
+| `getAllFlags` | `GET /api/v1/feature-flags/user/{user_id}?context=<url-encoded JSON>` | `context` = `attributes` (omitted when empty) | `{"<flag_key>": bool, ...}` |
 | `track` with a key | `POST /api/v1/tracking/track` | `{"event_type","event_name","user_id","experiment_key"?,"feature_flag_key"?,"value"?,"metadata"?,"timestamp"?}` | stored event (ignored) |
 | `track` without a key, `trackBatch` | `POST /api/v1/tracking/batch` | `{"events":[<track body>...]}` (max 100) | `{"success_count","failure_count","errors"}` |
 | `fetchAssignments` | `GET /api/v1/tracking/assignments/{user_id}?active_only=true` | — | list of assignment rows |
@@ -211,6 +225,7 @@ interface FlagEvaluation {
   key: string;
   enabled: boolean;
   config: unknown | null;
+  reason?: string;     // 'targeting_rule' | 'rollout' | 'inactive' | 'error'; undefined when the server does not send it
 }
 
 interface BatchResult {
@@ -276,6 +291,6 @@ With a seeded backend (`python backend/scripts/seed_sdk_contract.py`):
 
 ```bash
 cd sdk/js && npm install
-npx jest          # 95 unit tests, fetch is mocked
+npx jest          # 105 unit tests, fetch is mocked
 npm run build     # tsc → dist/ (CommonJS + .d.ts)
 ```

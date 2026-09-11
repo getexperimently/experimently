@@ -44,6 +44,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class RuleEvaluationMetrics:
     """Metrics for rule evaluation performance."""
+
     rule_id: str
     evaluation_time_ms: float
     matched: bool
@@ -55,6 +56,7 @@ class RuleEvaluationMetrics:
 @dataclass
 class AttributeValidationResult:
     """Result of attribute validation."""
+
     is_valid: bool
     error_message: Optional[str] = None
     normalized_value: Optional[Any] = None
@@ -63,6 +65,7 @@ class AttributeValidationResult:
 @dataclass
 class EvaluationResult:
     """Result of a rule evaluation."""
+
     matched: bool
     matched_rule_id: Optional[str] = None
     variant: Optional[str] = None
@@ -75,6 +78,7 @@ class EvaluationResult:
 @dataclass
 class EvaluationMetrics:
     """Metrics collected during rule evaluation."""
+
     total_evaluations: int = 0
     cache_hits: int = 0
     cache_misses: int = 0
@@ -114,7 +118,7 @@ class RulesEvaluationService:
         cache_max_size: int = 10000,
         cache_ttl: float = 300.0,
         compiler_cache_size: int = 1000,
-        enable_metrics: bool = True
+        enable_metrics: bool = True,
     ):
         """
         Initialize the service.
@@ -133,8 +137,7 @@ class RulesEvaluationService:
 
         # New caching and compilation components
         self.evaluation_cache = EvaluationCache(
-            max_size=cache_max_size,
-            default_ttl=cache_ttl
+            max_size=cache_max_size, default_ttl=cache_ttl
         )
         self.rule_compiler = RuleCompiler(cache_max_size=compiler_cache_size)
         self.enable_metrics = enable_metrics
@@ -171,9 +174,13 @@ class RulesEvaluationService:
         try:
             # Validate user context if requested
             if validate_attributes:
-                validation_result = self.validate_user_context(user_context, targeting_rules)
+                validation_result = self.validate_user_context(
+                    user_context, targeting_rules
+                )
                 if not validation_result.is_valid:
-                    logger.warning(f"User context validation failed: {validation_result.error_message}")
+                    logger.warning(
+                        f"User context validation failed: {validation_result.error_message}"
+                    )
                     if track_metrics:
                         metrics = RuleEvaluationMetrics(
                             rule_id="validation_failed",
@@ -184,7 +191,9 @@ class RulesEvaluationService:
                     return None, metrics
 
             # Evaluate rules with enhanced operators
-            matched_rule = self._evaluate_targeting_rules_enhanced(targeting_rules, user_context)
+            matched_rule = self._evaluate_targeting_rules_enhanced(
+                targeting_rules, user_context
+            )
 
             # Track metrics if requested
             if track_metrics:
@@ -200,11 +209,11 @@ class RulesEvaluationService:
                 )
 
                 self.evaluation_metrics.append(metrics)
-                self.performance_stats['evaluation_time'].append(evaluation_time)
+                self.performance_stats["evaluation_time"].append(evaluation_time)
 
         except Exception as e:
             logger.error(f"Error evaluating rules: {str(e)}")
-            self.error_counts['evaluation_error'] += 1
+            self.error_counts["evaluation_error"] += 1
 
             if track_metrics:
                 metrics = RuleEvaluationMetrics(
@@ -237,7 +246,7 @@ class RulesEvaluationService:
             for attr_name, attr_info in required_attributes.items():
                 if attr_name not in user_context:
                     # Check if attribute is required
-                    if attr_info.get('required', False):
+                    if attr_info.get("required", False):
                         return AttributeValidationResult(
                             is_valid=False,
                             error_message=f"Required attribute '{attr_name}' not found in user context",
@@ -246,10 +255,12 @@ class RulesEvaluationService:
 
                 # Validate attribute type and value
                 attr_value = user_context[attr_name]
-                attr_type = attr_info.get('type')
+                attr_type = attr_info.get("type")
 
                 if attr_type:
-                    validation_result = self._validate_attribute_value(attr_name, attr_value, attr_type)
+                    validation_result = self._validate_attribute_value(
+                        attr_name, attr_value, attr_type
+                    )
                     if not validation_result.is_valid:
                         return validation_result
 
@@ -300,7 +311,7 @@ class RulesEvaluationService:
             elif attr_type == AttributeType.DATE:
                 if isinstance(attr_value, str):
                     try:
-                        datetime.fromisoformat(attr_value.replace('Z', '+00:00'))
+                        datetime.fromisoformat(attr_value.replace("Z", "+00:00"))
                     except ValueError:
                         return AttributeValidationResult(
                             is_valid=False,
@@ -337,7 +348,7 @@ class RulesEvaluationService:
                         is_valid=False,
                         error_message=f"Attribute '{attr_name}' must be a semantic version string",
                     )
-                semver_pattern = r'^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$'
+                semver_pattern = r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$"
                 if not re.match(semver_pattern, attr_value):
                     return AttributeValidationResult(
                         is_valid=False,
@@ -367,16 +378,21 @@ class RulesEvaluationService:
             if self._evaluate_rule_enhanced(rule, user_context):
                 # Check rollout percentage (use base implementation)
                 from backend.app.core.rules_engine import should_include_in_rollout
+
                 if should_include_in_rollout(rule, user_context):
                     return rule
 
         return targeting_rules.default_rule
 
-    def _evaluate_rule_enhanced(self, rule: TargetingRule, user_context: UserContext) -> bool:
+    def _evaluate_rule_enhanced(
+        self, rule: TargetingRule, user_context: UserContext
+    ) -> bool:
         """Evaluate a rule with enhanced operators."""
         return self._evaluate_rule_group_enhanced(rule.rule, user_context)
 
-    def _evaluate_rule_group_enhanced(self, rule_group: RuleGroup, user_context: UserContext) -> bool:
+    def _evaluate_rule_group_enhanced(
+        self, rule_group: RuleGroup, user_context: UserContext
+    ) -> bool:
         """Evaluate a rule group with enhanced operators."""
         operator = rule_group.operator
 
@@ -417,22 +433,32 @@ class RulesEvaluationService:
         logger.warning(f"Unknown logical operator: {operator}")
         return False
 
-    def _evaluate_condition_enhanced(self, condition: Condition, user_context: UserContext) -> bool:
+    def _evaluate_condition_enhanced(
+        self, condition: Condition, user_context: UserContext
+    ) -> bool:
         """Evaluate a condition with enhanced operators."""
         attribute = condition.attribute
         operator = condition.operator
         expected_value = condition.value
         additional_value = condition.additional_value
 
-        # Get actual value from user context
+        # Get actual value from user context. A missing attribute counts as
+        # null so the is_null / is_not_null operators behave like the core
+        # engine (see rules_engine.evaluate_condition).
         if attribute not in user_context:
+            if operator == OperatorType.IS_NULL:
+                return True
+            if operator == OperatorType.IS_NOT_NULL:
+                return False
             logger.debug(f"Attribute {attribute} not found in user context")
             return False
 
         actual_value = user_context[attribute]
 
         # Use enhanced operator application
-        return self._apply_operator_enhanced(operator, actual_value, expected_value, additional_value)
+        return self._apply_operator_enhanced(
+            operator, actual_value, expected_value, additional_value
+        )
 
     def _apply_operator_enhanced(
         self,
@@ -447,25 +473,34 @@ class RulesEvaluationService:
         if operator == OperatorType.SEMANTIC_VERSION:
             return self._compare_semantic_versions(actual_value, expected_value)
         elif operator == OperatorType.GEO_DISTANCE:
-            return self._evaluate_geo_distance(actual_value, expected_value, additional_value)
+            return self._evaluate_geo_distance(
+                actual_value, expected_value, additional_value
+            )
         elif operator == OperatorType.TIME_WINDOW:
             return self._evaluate_time_window(actual_value, expected_value)
         elif operator == OperatorType.PERCENTAGE_BUCKET:
             return self._evaluate_percentage_bucket(actual_value, expected_value)
         elif operator == OperatorType.JSON_PATH:
-            return self._evaluate_json_path(actual_value, expected_value, additional_value)
+            return self._evaluate_json_path(
+                actual_value, expected_value, additional_value
+            )
         elif operator == OperatorType.ARRAY_LENGTH:
             return self._evaluate_array_length(actual_value, expected_value)
 
         # Fall back to base implementation for standard operators
-        return base_apply_operator(operator, actual_value, expected_value, additional_value)
+        return base_apply_operator(
+            operator, actual_value, expected_value, additional_value
+        )
 
-    def _compare_semantic_versions(self, actual_version: str, expected_version: str) -> bool:
+    def _compare_semantic_versions(
+        self, actual_version: str, expected_version: str
+    ) -> bool:
         """Compare semantic versions."""
         try:
+
             def parse_version(version: str) -> Tuple[int, int, int]:
                 # Simple semantic version parsing
-                parts = version.split('-')[0].split('+')[0].split('.')
+                parts = version.split("-")[0].split("+")[0].split(".")
                 return tuple(int(x) for x in parts[:3])
 
             actual_parts = parse_version(str(actual_version))
@@ -473,10 +508,14 @@ class RulesEvaluationService:
 
             return actual_parts >= expected_parts
         except (ValueError, TypeError):
-            logger.warning(f"Failed to compare semantic versions: {actual_version} and {expected_version}")
+            logger.warning(
+                f"Failed to compare semantic versions: {actual_version} and {expected_version}"
+            )
             return False
 
-    def _evaluate_geo_distance(self, actual_coords: Any, target_coords: Any, max_distance_km: Any) -> bool:
+    def _evaluate_geo_distance(
+        self, actual_coords: Any, target_coords: Any, max_distance_km: Any
+    ) -> bool:
         """Evaluate if coordinates are within distance."""
         try:
             if not isinstance(actual_coords, (list, tuple)) or len(actual_coords) != 2:
@@ -494,9 +533,12 @@ class RulesEvaluationService:
             dlat = math.radians(lat2 - lat1)
             dlon = math.radians(lon2 - lon1)
 
-            a = (math.sin(dlat / 2) ** 2 +
-                 math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) *
-                 math.sin(dlon / 2) ** 2)
+            a = (
+                math.sin(dlat / 2) ** 2
+                + math.cos(math.radians(lat1))
+                * math.cos(math.radians(lat2))
+                * math.sin(dlon / 2) ** 2
+            )
             c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
             distance = R * c
 
@@ -512,11 +554,11 @@ class RulesEvaluationService:
             if not isinstance(time_window, dict):
                 return False
 
-            start_time = time_window.get('start')
-            end_time = time_window.get('end')
+            start_time = time_window.get("start")
+            end_time = time_window.get("end")
 
             if isinstance(actual_time, str):
-                actual_dt = datetime.fromisoformat(actual_time.replace('Z', '+00:00'))
+                actual_dt = datetime.fromisoformat(actual_time.replace("Z", "+00:00"))
             elif isinstance(actual_time, (int, float)):
                 actual_dt = datetime.fromtimestamp(actual_time)
             elif isinstance(actual_time, datetime):
@@ -526,12 +568,12 @@ class RulesEvaluationService:
 
             # Parse time window bounds
             if isinstance(start_time, str):
-                start_dt = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
+                start_dt = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
             else:
                 start_dt = datetime.fromtimestamp(start_time)
 
             if isinstance(end_time, str):
-                end_dt = datetime.fromisoformat(end_time.replace('Z', '+00:00'))
+                end_dt = datetime.fromisoformat(end_time.replace("Z", "+00:00"))
             else:
                 end_dt = datetime.fromtimestamp(end_time)
 
@@ -546,7 +588,9 @@ class RulesEvaluationService:
         try:
             # Create deterministic hash
             hash_input = str(user_id)
-            hash_value = int(hashlib.md5(hash_input.encode(), usedforsecurity=False).hexdigest(), 16)
+            hash_value = int(
+                hashlib.md5(hash_input.encode(), usedforsecurity=False).hexdigest(), 16
+            )
             bucket = hash_value % 100
 
             return bucket < float(percentage)
@@ -555,7 +599,9 @@ class RulesEvaluationService:
             logger.warning(f"Failed to evaluate percentage bucket")
             return False
 
-    def _evaluate_json_path(self, json_data: Any, json_path: str, expected_value: Any) -> bool:
+    def _evaluate_json_path(
+        self, json_data: Any, json_path: str, expected_value: Any
+    ) -> bool:
         """Evaluate JSONPath expression."""
         try:
             # Parse JSON string if needed
@@ -570,7 +616,7 @@ class RulesEvaluationService:
                 return False
 
             # Handle simple paths like $.field or $.field.subfield
-            path_parts = json_path[2:].split('.')  # Remove '$.'
+            path_parts = json_path[2:].split(".")  # Remove '$.'
 
             current = json_data
             for part in path_parts:
@@ -599,15 +645,17 @@ class RulesEvaluationService:
             logger.warning(f"Failed to evaluate array length")
             return False
 
-    def _extract_required_attributes(self, targeting_rules: TargetingRules) -> Dict[str, Dict[str, Any]]:
+    def _extract_required_attributes(
+        self, targeting_rules: TargetingRules
+    ) -> Dict[str, Dict[str, Any]]:
         """Extract all attributes used in targeting rules."""
         attributes = {}
 
         def extract_from_group(group: RuleGroup):
             for condition in group.conditions:
                 attributes[condition.attribute] = {
-                    'type': condition.attribute_type,
-                    'required': True,  # All attributes in conditions are considered required
+                    "type": condition.attribute_type,
+                    "required": True,  # All attributes in conditions are considered required
                 }
 
             if group.groups:
@@ -649,14 +697,18 @@ class RulesEvaluationService:
         evaluation_times = [m.evaluation_time_ms for m in self.evaluation_metrics]
 
         return {
-            'total_evaluations': len(self.evaluation_metrics),
-            'avg_evaluation_time_ms': sum(evaluation_times) / len(evaluation_times),
-            'min_evaluation_time_ms': min(evaluation_times),
-            'max_evaluation_time_ms': max(evaluation_times),
-            'error_count': sum(1 for m in self.evaluation_metrics if m.error),
-            'match_rate': sum(1 for m in self.evaluation_metrics if m.matched) / len(self.evaluation_metrics),
-            'avg_complexity_score': sum(m.complexity_score for m in self.evaluation_metrics) / len(self.evaluation_metrics),
-            'error_breakdown': dict(self.error_counts),
+            "total_evaluations": len(self.evaluation_metrics),
+            "avg_evaluation_time_ms": sum(evaluation_times) / len(evaluation_times),
+            "min_evaluation_time_ms": min(evaluation_times),
+            "max_evaluation_time_ms": max(evaluation_times),
+            "error_count": sum(1 for m in self.evaluation_metrics if m.error),
+            "match_rate": sum(1 for m in self.evaluation_metrics if m.matched)
+            / len(self.evaluation_metrics),
+            "avg_complexity_score": sum(
+                m.complexity_score for m in self.evaluation_metrics
+            )
+            / len(self.evaluation_metrics),
+            "error_breakdown": dict(self.error_counts),
         }
 
     def clear_metrics(self):
@@ -670,7 +722,7 @@ class RulesEvaluationService:
         self,
         rules: TargetingRules,
         user_context: Dict[str, Any],
-        skip_cache: bool = False
+        skip_cache: bool = False,
     ) -> EvaluationResult:
         """
         Evaluate targeting rules for a user with caching.
@@ -714,7 +766,7 @@ class RulesEvaluationService:
                 matched=matched_rule is not None,
                 matched_rule_id=matched_rule.id if matched_rule else None,
                 cached=False,
-                evaluation_time_ms=(time.time() - start_time) * 1000
+                evaluation_time_ms=(time.time() - start_time) * 1000,
             )
 
             # Cache result
@@ -738,13 +790,11 @@ class RulesEvaluationService:
             return EvaluationResult(
                 matched=False,
                 error=str(e),
-                evaluation_time_ms=(time.time() - start_time) * 1000
+                evaluation_time_ms=(time.time() - start_time) * 1000,
             )
 
     def batch_evaluate(
-        self,
-        rules: TargetingRules,
-        user_contexts: List[Dict[str, Any]]
+        self, rules: TargetingRules, user_contexts: List[Dict[str, Any]]
     ) -> List[EvaluationResult]:
         """
         Evaluate rules for multiple users in batch.
@@ -806,9 +856,7 @@ class RulesEvaluationService:
         logger.info("Metrics reset")
 
     def _check_cache(
-        self,
-        rules: TargetingRules,
-        user_context: Dict[str, Any]
+        self, rules: TargetingRules, user_context: Dict[str, Any]
     ) -> Optional[EvaluationResult]:
         """
         Check cache for existing evaluation result.
@@ -829,9 +877,7 @@ class RulesEvaluationService:
 
         if cached is not None:
             return EvaluationResult(
-                matched=cached,
-                matched_rule_id=rule_id if cached else None,
-                cached=True
+                matched=cached, matched_rule_id=rule_id if cached else None, cached=True
             )
 
         return None
@@ -840,7 +886,7 @@ class RulesEvaluationService:
         self,
         rules: TargetingRules,
         user_context: Dict[str, Any],
-        result: EvaluationResult
+        result: EvaluationResult,
     ):
         """
         Cache evaluation result.

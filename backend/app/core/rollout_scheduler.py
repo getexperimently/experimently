@@ -12,6 +12,7 @@ from typing import Any, Optional, Dict, List, Tuple
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_, desc
 
+from backend.app.core.config import settings as app_settings
 from backend.app.db.session import SessionLocal
 from backend.app.models.feature_flag import FeatureFlag
 from backend.app.models.rollout_schedule import (
@@ -44,13 +45,17 @@ def _as_utc(value: datetime) -> datetime:
 class RolloutScheduler:
     """Handles scheduled tasks for feature flag rollouts."""
 
-    def __init__(self, interval_minutes: int = 15):
+    def __init__(self, interval_minutes: Optional[int] = None):
         """
         Initialize the rollout scheduler.
 
         Args:
-            interval_minutes: How often to check for schedules that need to be updated (in minutes)
+            interval_minutes: How often to check for schedules that need to be
+                updated (in minutes). Defaults to
+                ``settings.ROLLOUT_CHECK_INTERVAL_MINUTES``.
         """
+        if interval_minutes is None:
+            interval_minutes = app_settings.ROLLOUT_CHECK_INTERVAL_MINUTES
         self.interval_minutes = interval_minutes
         self.is_running = False
         self.task: Optional[asyncio.Task] = None

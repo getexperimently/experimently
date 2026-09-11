@@ -26,7 +26,12 @@ export interface ClientConfig {
 export interface UserContext {
   /** Stable identifier used by the server for sticky bucketing. */
   userId: string;
-  /** Sent as `context` on experiment assignment (targeting rules). Not sent for flag evaluation. */
+  /**
+   * Sent as `context` on experiment assignment (POST body) and, when non-empty, as the
+   * `context=<url-encoded JSON>` query parameter on flag evaluation (targeting rules).
+   * Assumed stable per user: caches are keyed by user + key, so call `clearCache()`
+   * after changing attributes.
+   */
   attributes?: Record<string, unknown>;
 }
 
@@ -40,11 +45,16 @@ export interface Assignment {
   configuration: Record<string, unknown> | null;
 }
 
-/** Result of `GET /api/v1/feature-flags/evaluate/{flag_key}?user_id=…`. */
+/** Result of `GET /api/v1/feature-flags/evaluate/{flag_key}?user_id=…[&context=…]`. */
 export interface FlagEvaluation {
   key: string;
   enabled: boolean;
   config: unknown | null;
+  /**
+   * Why the server decided as it did — `'targeting_rule'`, `'rollout'`, `'inactive'` or
+   * `'error'`. `undefined` when the server did not send one.
+   */
+  reason?: string;
 }
 
 export interface TrackOptions {
@@ -91,11 +101,13 @@ export interface AssignResponse {
   configuration?: Record<string, unknown> | null;
 }
 
-/** `GET /api/v1/feature-flags/evaluate/{flag_key}?user_id=…` */
+/** `GET /api/v1/feature-flags/evaluate/{flag_key}?user_id=…[&context=<url-encoded JSON>]` */
 export interface FlagEvaluateResponse {
   key: string;
   enabled: boolean;
   config?: unknown | null;
+  /** `targeting_rule` | `rollout` | `inactive` | `error`; absent on older servers. */
+  reason?: string;
 }
 
 /** `POST /api/v1/tracking/batch` */
