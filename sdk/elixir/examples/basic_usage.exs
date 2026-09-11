@@ -1,45 +1,54 @@
 # Basic Usage Example — ExperimentationPlatform Elixir SDK
 #
-# This example demonstrates the core functionality of the SDK.
-# In a real application, replace the base_url and api_key with your actual values.
+# Flag evaluation and experiment assignment are decided by the server through
+# the public API; this script shows every public call. Point it at a running
+# backend with EXPERIMENTLY_API_URL / EXPERIMENTLY_API_KEY.
 #
 # Run with:
 #   cd sdk/elixir
 #   mix deps.get
-#   mix run examples/basic_usage.exs
+#   EXPERIMENTLY_API_KEY=<key> mix run examples/basic_usage.exs
+
+alias ExperimentationPlatform.{Assignment, BatchResult, FlagEvaluation}
 
 # -------------------------------------------------------------------
 # 1. Start the client
 # -------------------------------------------------------------------
 IO.puts("Starting ExperimentationPlatform client...")
 
-{:ok, client} = ExperimentationPlatform.start(
-  base_url: "https://api.example.com",
-  api_key: "your-api-key-here",
-  cache_ttl: 300,          # Cache flags for 5 minutes
-  timeout: 10_000,         # 10 second HTTP timeout
-  max_cache_size: 1_000    # Keep up to 1000 entries in cache
-)
+{:ok, client} =
+  ExperimentationPlatform.start(
+    base_url: System.get_env("EXPERIMENTLY_API_URL", "http://localhost:8000"),
+    api_key: System.get_env("EXPERIMENTLY_API_KEY", "your-api-key-here"),
+    # Seconds a successful evaluation/assignment is reused
+    cache_ttl: 300,
+    # HTTP timeout in milliseconds
+    timeout: 10_000,
+    # Keep up to 1000 entries in the cache
+    max_cache_size: 1_000
+  )
 
 IO.puts("Client started: #{inspect(client)}\n")
 
 # -------------------------------------------------------------------
-# 2. Evaluate a feature flag
+# 2. Evaluate a feature flag (GET /api/v1/feature-flags/evaluate/{key}?user_id=...)
 # -------------------------------------------------------------------
 user_id = "user-#{System.unique_integer([:positive])}"
 
 IO.puts("Evaluating feature flag 'dark-mode' for user #{user_id}...")
 
 case ExperimentationPlatform.evaluate_flag(client, "dark-mode", user_id) do
-  {:ok, nil} ->
-    IO.puts("  => User not in rollout — showing default light mode")
+  {:ok, %FlagEvaluation{enabled: true, config: config}} ->
+    IO.puts("  => Enabled for this user. Config: #{inspect(config)}")
 
-  {:ok, %{"name" => variant_name} = variant} ->
-    IO.puts("  => User in rollout! Variant: #{variant_name}")
-    IO.puts("     Full variant: #{inspect(variant)}")
+  {:ok, %FlagEvaluation{enabled: false}} ->
+    IO.puts("  => Disabled for this user — showing default light mode")
 
   {:error, {:auth_error, 401}} ->
     IO.puts("  => Authentication failed — check your API key")
+
+  {:error, {:api_error, 404, _body}} ->
+    IO.puts("  => Flag not found or not ACTIVE — using default")
 
   {:error, {:network_error, reason}} ->
     IO.puts("  => Network error: #{inspect(reason)} — using default")
@@ -48,89 +57,86 @@ case ExperimentationPlatform.evaluate_flag(client, "dark-mode", user_id) do
     IO.puts("  => Error: #{inspect(reason)} — using default")
 end
 
-IO.puts("")
+# Boolean shorthand: false on any failure.
+IO.puts("  feature_enabled?: #{ExperimentationPlatform.feature_enabled?(client, "dark-mode", user_id)}\n")
 
 # -------------------------------------------------------------------
-# 3. Evaluate with user attributes (for targeting rules)
-# -------------------------------------------------------------------
-IO.puts("Evaluating 'premium-features' flag with attributes...")
-
-case ExperimentationPlatform.evaluate_flag(
-  client,
-  "premium-features",
-  user_id,
-  attributes: %{
-    plan: "pro",
-    country: "US",
-    account_age_days: 180
-  }
-) do
-  {:ok, nil} ->
-    IO.puts("  => Not eligible for premium features")
-
-  {:ok, variant} ->
-    IO.puts("  => Premium features enabled! Variant: #{inspect(variant)}")
-
-  {:error, reason} ->
-    IO.puts("  => Could not evaluate: #{inspect(reason)}")
-end
-
-IO.puts("")
-
-# -------------------------------------------------------------------
-# 4. Get experiment assignment
+# 3. Get an experiment assignment (POST /api/v1/tracking/assign — sticky on the server)
+#    User attributes are sent as `context` for targeting rules.
 # -------------------------------------------------------------------
 IO.puts("Getting experiment assignment for 'checkout-flow-experiment'...")
 
-case ExperimentationPlatform.get_assignment(client, "checkout-flow-experiment", user_id) do
-  {:ok, nil} ->
-    IO.puts("  => User not in experiment — showing default checkout")
-
-  {:ok, %{"name" => "control"}} ->
+case ExperimentationPlatform.get_assignment(client, "checkout-flow-experiment", user_id, %{
+       plan: "pro",
+       country: "US"
+     }) do
+  {:ok, %Assignment{is_control: true}} ->
     IO.puts("  => User in CONTROL group — showing existing checkout")
 
-  {:ok, %{"name" => "treatment_v1"}} ->
-    IO.puts("  => User in TREATMENT V1 — showing new streamlined checkout")
+  {:ok, %Assignment{variant_name: variant, configuration: configuration}} ->
+    IO.puts("  => User in variant #{variant} — configuration: #{inspect(configuration)}")
 
-  {:ok, variant} ->
-    IO.puts("  => User assigned to: #{inspect(variant)}")
+  {:error, {:api_error, 404, _body}} ->
+    IO.puts("  => Experiment not found or not ACTIVE — showing default checkout")
 
   {:error, reason} ->
-    IO.puts("  => Assignment error: #{inspect(reason)}")
+    IO.puts("  => Assignment error: #{inspect(reason)} — showing default checkout")
 end
 
 IO.puts("")
 
 # -------------------------------------------------------------------
-# 5. Track events (fire-and-forget)
+# 4. Track events (fire-and-forget, always :ok)
 # -------------------------------------------------------------------
 IO.puts("Tracking events...")
 
-# Basic event
-:ok = ExperimentationPlatform.track(client, "page_viewed", user_id)
-IO.puts("  => Tracked: page_viewed")
+# With a key: one POST /api/v1/tracking/track attributed to the experiment.
+:ok =
+  ExperimentationPlatform.track(client, "purchase_completed", user_id, %{order_id: "ord-12345"},
+    experiment_key: "checkout-flow-experiment",
+    value: 99.99
+  )
 
-# Event with properties
-:ok = ExperimentationPlatform.track(client, "button_clicked", user_id, %{
-  button_id: "cta-primary",
-  page: "checkout",
-  position: "above_fold"
-})
-IO.puts("  => Tracked: button_clicked (with properties)")
+IO.puts("  => Tracked: purchase_completed (experiment_key + value)")
 
-# Conversion event
-:ok = ExperimentationPlatform.track(client, "purchase_completed", user_id, %{
-  order_id: "ord-12345",
-  amount: 99.99,
-  currency: "USD",
-  items_count: 3
-})
-IO.puts("  => Tracked: purchase_completed")
+# With a flag key.
+:ok =
+  ExperimentationPlatform.track(client, "theme_toggled", user_id, %{to: "dark"},
+    feature_flag_key: "dark-mode"
+  )
+
+IO.puts("  => Tracked: theme_toggled (feature_flag_key)")
+
+# Without a key: fanned out through POST /api/v1/tracking/batch to every
+# experiment the user was assigned to and every flag evaluated for the user
+# through this client. Nothing cached -> nothing sent.
+:ok = ExperimentationPlatform.track(client, "page_viewed", user_id, %{page: "checkout"})
+IO.puts("  => Tracked: page_viewed (fanned out to cached assignments + flags)")
+
+# Several events at once (synchronous, max 100 per request).
+case ExperimentationPlatform.track_batch(client, [
+       %{event_name: "click", user_id: user_id, experiment_key: "checkout-flow-experiment"},
+       %{event_name: "click", user_id: user_id, feature_flag_key: "dark-mode"}
+     ]) do
+  {:ok, %BatchResult{success_count: ok, failure_count: failed}} ->
+    IO.puts("  => Batch: #{ok} accepted, #{failed} failed")
+
+  {:error, reason} ->
+    IO.puts("  => Batch error: #{inspect(reason)}")
+end
 
 IO.puts("")
 
 # -------------------------------------------------------------------
-# 6. Direct hash inspection (cross-SDK compatibility check)
+# 5. Cache helpers
+# -------------------------------------------------------------------
+IO.puts("Cached for #{user_id}:")
+IO.puts("  assignments:     #{inspect(ExperimentationPlatform.assignments(client, user_id))}")
+IO.puts("  evaluated flags: #{inspect(ExperimentationPlatform.evaluated_flags(client, user_id))}")
+IO.puts("")
+
+# -------------------------------------------------------------------
+# 6. Direct hash inspection (cross-SDK compatibility check; utility only)
 # -------------------------------------------------------------------
 IO.puts("Cross-SDK hash check:")
 h = ExperimentationPlatform.Evaluator.hash_user("user-123", "my-flag")
@@ -138,13 +144,12 @@ expected = 0.6927449859213084
 diff = abs(h - expected)
 IO.puts("  hash_user(\"user-123\", \"my-flag\") = #{h}")
 IO.puts("  expected:                           #{expected}")
-IO.puts("  diff:                               #{diff}")
 IO.puts("  parity: #{if diff < 1.0e-10, do: "OK (matches all SDKs)", else: "MISMATCH!"}")
 
 IO.puts("")
 
 # -------------------------------------------------------------------
-# 7. Stop the client
+# 7. Stop the client (waits for in-flight track requests)
 # -------------------------------------------------------------------
 IO.puts("Stopping client...")
 ExperimentationPlatform.stop(client)

@@ -1,24 +1,30 @@
-// Package main demonstrates the Experimentation Platform Go SDK.
+// Package main demonstrates the Experimentation Platform Go SDK against a
+// running backend (defaults: http://localhost:8000, key from EXPERIMENTLY_API_KEY).
 package main
 
 import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 	"time"
 
 	exp "github.com/amarkanday/experimentation-platform/sdk/go"
 )
 
 func main() {
+	baseURL := os.Getenv("EXPERIMENTLY_API_URL")
+	if baseURL == "" {
+		baseURL = "http://localhost:8000"
+	}
+
 	// Create a client with functional options.
 	client, err := exp.New(
-		exp.WithBaseURL("http://localhost:8000"),
-		exp.WithAPIKey("your-api-key"),
+		exp.WithBaseURL(baseURL),
+		exp.WithAPIKey(os.Getenv("EXPERIMENTLY_API_KEY")),
 		exp.WithCacheSize(500),
 		exp.WithCacheTTL(5*time.Minute),
 		exp.WithTimeout(10*time.Second),
-		exp.WithLocalEval(true),
 	)
 	if err != nil {
 		log.Fatalf("failed to create client: %v", err)
@@ -27,96 +33,55 @@ func main() {
 
 	ctx := context.Background()
 
-	// Define a user with attributes for targeting rules.
+	// Attributes are sent as the assignment "context" for targeting rules.
 	user := &exp.User{
 		ID: "user-123",
 		Attributes: map[string]interface{}{
 			"plan":    "pro",
 			"country": "US",
-			"age":     30,
 		},
 	}
 
 	// -----------------------------------------------------------------------
-	// Evaluate a feature flag
+	// Evaluate a feature flag (server decides; result cached per user + key)
 	// -----------------------------------------------------------------------
-	result, err := client.EvaluateFlag(ctx, "new-dashboard", user)
+	flag, err := client.EvaluateFlag(ctx, "new-dashboard", user)
 	if err != nil {
-		log.Printf("EvaluateFlag error (degraded gracefully): %v", err)
-	} else {
-		fmt.Printf("Flag 'new-dashboard': enabled=%v, variant=%q, reason=%s\n",
-			result.Enabled, result.VariantKey, result.Reason)
+		log.Printf("EvaluateFlag error (flag reported off): %v", err)
 	}
+	fmt.Printf("Flag %q: enabled=%v config=%v\n", flag.Key, flag.Enabled, flag.Config)
 
 	// -----------------------------------------------------------------------
-	// Get an experiment assignment
+	// Assign the user to an experiment (sticky server-side)
 	// -----------------------------------------------------------------------
 	assignment, err := client.GetAssignment(ctx, "checkout-flow-experiment", user)
 	if err != nil {
 		log.Printf("GetAssignment error: %v", err)
 	} else {
-		fmt.Printf("Experiment 'checkout-flow-experiment': variant=%q for user=%s\n",
-			assignment.VariantKey, assignment.UserID)
+		fmt.Printf("Experiment %q: variant=%q control=%v configuration=%v\n",
+			assignment.ExperimentKey, assignment.VariantName, assignment.IsControl, assignment.Configuration)
 	}
 
 	// -----------------------------------------------------------------------
-	// Track a user event
+	// Track a conversion for one experiment
 	// -----------------------------------------------------------------------
-	err = client.Track(ctx, &exp.TrackEvent{
-		UserID:    "user-123",
-		EventName: "purchase",
-		Properties: map[string]interface{}{
-			"amount":   99.99,
-			"currency": "USD",
-			"item_id":  "sku-42",
-		},
-	})
-	if err != nil {
+	if err := client.Track(ctx, &exp.TrackEvent{
+		UserID:        user.ID,
+		EventName:     "purchase",
+		ExperimentKey: "checkout-flow-experiment",
+		Value:         exp.Float64(99.99),
+		Properties:    map[string]interface{}{"currency": "USD", "item_id": "sku-42"},
+	}); err != nil {
 		log.Printf("Track error: %v", err)
-	} else {
-		fmt.Println("Event 'purchase' tracked successfully.")
 	}
 
 	// -----------------------------------------------------------------------
-	// Local evaluation example (no network call after first fetch)
+	// Track without a key: fanned out to every cached experiment + flag
 	// -----------------------------------------------------------------------
-	fmt.Println("\n--- Local evaluation demo ---")
-	evaluator := &exp.Evaluator{}
-	flag := &exp.FeatureFlag{
-		Key:               "local-feature",
-		Enabled:           true,
-		RolloutPercentage: 75.0,
-		Variants: []exp.Variant{
-			{Key: "control", Weight: 0.5},
-			{Key: "treatment", Weight: 0.5},
-		},
+	if err := client.Track(ctx, &exp.TrackEvent{UserID: user.ID, EventName: "page_view"}); err != nil {
+		log.Printf("Track error: %v", err)
 	}
 
-	for _, uid := range []string{"alice", "bob", "charlie", "dave", "eve"} {
-		u := &exp.User{ID: uid}
-		res := evaluator.EvaluateFlag(flag, u)
-		fmt.Printf("  user=%q → enabled=%v variant=%q reason=%s\n",
-			uid, res.Enabled, res.VariantKey, res.Reason)
-	}
-
-	// -----------------------------------------------------------------------
-	// Targeting rules example
-	// -----------------------------------------------------------------------
-	fmt.Println("\n--- Targeting rules demo ---")
-	rules := []exp.Rule{
-		{Attribute: "plan", Operator: "eq", Value: "pro"},
-		{Attribute: "country", Operator: "in", Value: []interface{}{"US", "CA", "UK"}},
-	}
-
-	testUsers := []*exp.User{
-		{ID: "pro-us", Attributes: map[string]interface{}{"plan": "pro", "country": "US"}},
-		{ID: "free-us", Attributes: map[string]interface{}{"plan": "free", "country": "US"}},
-		{ID: "pro-de", Attributes: map[string]interface{}{"plan": "pro", "country": "DE"}},
-	}
-
-	for _, u := range testUsers {
-		matches := evaluator.MatchesRules(rules, u)
-		fmt.Printf("  user=%q plan=%v country=%v → matches rules: %v\n",
-			u.ID, u.Attributes["plan"], u.Attributes["country"], matches)
-	}
+	// The MD5 consistent hash is still exported for parity checks.
+	fmt.Printf("ConsistentHash(user-123, my-flag) = %.16f\n", exp.ConsistentHash("user-123", "my-flag"))
 }

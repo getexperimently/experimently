@@ -1,4 +1,4 @@
-/// In-memory LRU-style cache with TTL support.
+/// In-memory cache of server results keyed by user + key, with TTL.
 library experimentation_sdk_cache;
 
 /// A single entry in the cache.
@@ -11,52 +11,63 @@ class _CacheEntry<T> {
   bool get isExpired => DateTime.now().isAfter(expiresAt);
 }
 
-/// Thread-safe (single-isolate) in-memory cache with per-entry TTL.
+/// Single-isolate in-memory cache with per-entry TTL, keyed by **user + key**.
 ///
-/// Keys are strings; values are generic. Expired entries are evicted lazily
-/// on the next access.
+/// Only successful server results are stored by the client. Expired entries
+/// are evicted lazily on the next access. Entries of one user can be listed in
+/// insertion order (used for the track fan-out).
 class EvaluationCache<T> {
   final Duration ttl;
-  final Map<String, _CacheEntry<T>> _store = {};
+  final Map<String, Map<String, _CacheEntry<T>>> _users = {};
 
   EvaluationCache({required this.ttl});
 
-  /// Returns the cached value for [key], or `null` if absent or expired.
-  T? get(String key) {
-    final entry = _store[key];
+  /// Returns the cached value for [userId] + [key], or `null` if absent or expired.
+  T? get(String userId, String key) {
+    final byKey = _users[userId];
+    final entry = byKey?[key];
     if (entry == null) return null;
     if (entry.isExpired) {
-      _store.remove(key);
+      byKey!.remove(key);
       return null;
     }
     return entry.value;
   }
 
-  /// Stores [value] under [key] with the configured [ttl].
-  void set(String key, T value) {
-    _store[key] = _CacheEntry(value, DateTime.now().add(ttl));
+  /// Stores [value] for [userId] + [key] with the configured [ttl].
+  void set(String userId, String key, T value) {
+    final byKey = _users.putIfAbsent(userId, () => {});
+    byKey[key] = _CacheEntry(value, DateTime.now().add(ttl));
   }
 
-  /// Removes the entry for [key] if present.
-  void invalidate(String key) {
-    _store.remove(key);
+  /// All live (non-expired) entries for [userId], in insertion order.
+  List<MapEntry<String, T>> entries(String userId) {
+    final byKey = _users[userId];
+    if (byKey == null) return <MapEntry<String, T>>[];
+    byKey.removeWhere((_, entry) => entry.isExpired);
+    return byKey.entries.map((e) => MapEntry(e.key, e.value.value)).toList();
   }
 
-  /// Removes all entries from the cache.
+  /// Removes the entry for [userId] + [key] if present.
+  void invalidate(String userId, String key) {
+    _users[userId]?.remove(key);
+  }
+
+  /// Removes all entries.
   void clear() {
-    _store.clear();
+    _users.clear();
   }
 
-  /// Number of non-expired entries currently in the cache.
+  /// Number of non-expired entries across all users.
   int get size {
-    _evictExpired();
-    return _store.length;
+    var total = 0;
+    for (final byKey in _users.values) {
+      byKey.removeWhere((_, entry) => entry.isExpired);
+      total += byKey.length;
+    }
+    return total;
   }
 
-  /// Whether the cache contains a non-expired entry for [key].
-  bool containsKey(String key) => get(key) != null;
-
-  void _evictExpired() {
-    _store.removeWhere((_, entry) => entry.isExpired);
-  }
+  /// Whether a non-expired entry exists for [userId] + [key].
+  bool containsKey(String userId, String key) => get(userId, key) != null;
 }

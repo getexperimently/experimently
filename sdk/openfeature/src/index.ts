@@ -1,31 +1,27 @@
 /**
  * @experimentation-platform/openfeature-provider
  *
- * OpenFeature provider for the Experimentation Platform.
+ * OpenFeature provider for the Experimentation Platform. Flag evaluation is
+ * delegated to `@experimentation-platform/js-sdk` and decided by the server.
  *
  * @example
  * ```typescript
- * import OpenFeature from '@openfeature/server-sdk';
+ * import { OpenFeature } from '@openfeature/server-sdk';
  * import { ExperimentationProvider } from '@experimentation-platform/openfeature-provider';
  *
- * await OpenFeature.setProviderAndWait(
- *   new ExperimentationProvider({ apiKey: 'my-api-key' })
- * );
+ * const provider = new ExperimentationProvider({ apiKey: 'my-api-key', baseUrl: 'http://localhost:8000' });
+ * await OpenFeature.setProviderAndWait(provider);
  *
  * const client = OpenFeature.getClient();
- * const enabled = await client.getBooleanValue('my-feature', false, {
- *   targetingKey: 'user-123',
- * });
+ * const enabled = await client.getBooleanValue('my-feature', false, { targetingKey: 'user-123' });
+ *
+ * // Experiments and tracking go through the underlying JS SDK client:
+ * const variant = await provider.client.getVariant('checkout_flow', { userId: 'user-123' });
+ * await provider.client.track('user-123', 'purchase', { value: 49.99, experimentKey: 'checkout_flow' });
  * ```
  */
 
 export { ExperimentationProvider } from './ExperimentationProvider';
-export type { ExperimentationProviderOptions } from './ExperimentationProvider';
-export type {
-  FeatureFlagDefinition,
-  FlagVariant,
-  TargetingRule,
-  FlagsResponse,
-  EvaluateResponse,
-  EvalReason,
-} from './types';
+export type { ExperimentationProviderOptions, ExperimentationFlagMetadata, EvalReason } from './types';
+export { ExperimentationClient, ExperimentationError } from '@experimentation-platform/js-sdk';
+export type { FlagEvaluation, Assignment, UserContext, TrackOptions } from '@experimentation-platform/js-sdk';

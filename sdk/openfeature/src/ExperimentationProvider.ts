@@ -1,65 +1,63 @@
 /**
  * OpenFeature Provider for the Experimentation Platform.
  *
- * Implements the @openfeature/server-sdk `Provider` interface, enabling any
- * application using the OpenFeature standard to evaluate feature flags and
- * A/B experiment variants from the Experimentation Platform without changing
- * application code.
+ * Implements the @openfeature/server-sdk `Provider` interface on top of
+ * `@experimentation-platform/js-sdk`. Every evaluation is decided by the
+ * server (`GET /api/v1/feature-flags/evaluate/{flag_key}?user_id=…`); the
+ * JS SDK caches successful answers per user + flag for `cacheTtlMs` and never
+ * caches failures.
  *
- * How it works:
- *   1. On initialize()  → fetches all flags from the platform API, builds
- *      an in-memory cache keyed by flag.key.
- *   2. On resolve*()   → evaluates the flag locally using the same MD5-based
- *      consistent hash algorithm used by the Go / Java / Python SDKs so that
- *      user assignments are identical across all clients.
- *   3. Cache TTL       → after `cacheTtlMs` milliseconds the next evaluation
- *      triggers a background refresh from the API.
- *   4. API errors      → the provider degrades gracefully: returns the
- *      caller-supplied defaultValue with reason=DEFAULT and an ErrorCode.
+ * Resolution rules:
+ *   boolean → `enabled`
+ *   string  → `config.variant` when it is a string (or `config` itself when it is a string)
+ *   number  → `config.value` when it is a number (or `config` itself when it is a number)
+ *   object  → `config` when it is a non-null object
+ *   anything else → the caller's default with reason DEFAULT; a disabled flag
+ *   yields the default with reason DISABLED for non-boolean types.
+ *
+ * Context mapping: `targetingKey` → `user_id`. Other context attributes are
+ * NOT sent — the evaluate endpoint takes only the user id.
+ *
+ * Experiments and event tracking are not OpenFeature concepts; use
+ * `provider.client` (the underlying JS SDK client) for `getAssignment`,
+ * `getVariant`, `track` and `trackBatch`.
  */
 
-import { createHash } from 'crypto';
 import {
-  Provider,
-  ResolutionDetails,
-  EvaluationContext,
-  ProviderMetadata,
-  Hook,
-  JsonValue,
+  ExperimentationClient,
+  consistentHash,
+  type FlagEvaluation,
+} from '@experimentation-platform/js-sdk';
+import {
   ErrorCode,
   StandardResolutionReasons,
-  Logger,
+  type EvaluationContext,
+  type Hook,
+  type JsonValue,
+  type Logger,
+  type Provider,
+  type ProviderMetadata,
+  type ResolutionDetails,
 } from '@openfeature/server-sdk';
-import {
-  FeatureFlagDefinition,
-  FlagVariant,
-  FlagsResponse,
-  CacheEntry,
-  EvalReason,
-} from './types';
+import type { ExperimentationFlagMetadata, ExperimentationProviderOptions } from './types';
 
-export interface ExperimentationProviderOptions {
-  /** API key used in the X-API-Key header. */
-  apiKey: string;
-  /** Base URL of the Experimentation Platform API. Defaults to http://localhost:8000. */
-  baseUrl?: string;
-  /** How long the flag cache is valid in milliseconds. Defaults to 300 000 (5 min). */
-  cacheTtlMs?: number;
-  /** HTTP request timeout in milliseconds. Defaults to 5 000 (5 s). */
-  timeout?: number;
-  /**
-   * Optional fetch implementation. Allows injection of a mock fetch in tests.
-   * Defaults to the global `fetch` available in Node 18+ / browsers.
-   */
-  fetch?: typeof fetch;
+export type { ExperimentationProviderOptions } from './types';
+
+const DEFAULT_BASE_URL = 'http://localhost:8000';
+const DEFAULT_CACHE_TTL_MS = 300_000;
+const DEFAULT_TIMEOUT_MS = 5_000;
+
+type Lookup =
+  | { ok: true; evaluation: FlagEvaluation; reason: string }
+  | { ok: false; errorCode: ErrorCode; errorMessage: string };
+
+function configField(config: unknown, field: string): unknown {
+  if (config && typeof config === 'object' && !Array.isArray(config)) {
+    return (config as Record<string, unknown>)[field];
+  }
+  return undefined;
 }
 
-/**
- * ExperimentationProvider implements the OpenFeature Provider interface for
- * the Experimentation Platform. It performs local (client-side) flag evaluation
- * using a consistent MD5-based hash that is byte-for-byte compatible with the
- * Go, Java, and Python SDKs.
- */
 export class ExperimentationProvider implements Provider {
   readonly metadata: ProviderMetadata = {
     name: 'experimentation-platform-provider',
@@ -67,49 +65,63 @@ export class ExperimentationProvider implements Provider {
 
   hooks?: Hook[];
 
-  private readonly apiKey: string;
-  private readonly baseUrl: string;
-  private readonly cacheTtlMs: number;
-  private readonly timeout: number;
-  private readonly fetchImpl: typeof fetch;
-
-  /** In-memory flag cache. */
-  private cache: CacheEntry | null = null;
-  /** Pending refresh promise to avoid thundering-herd on simultaneous misses. */
-  private refreshPromise: Promise<void> | null = null;
+  /**
+   * The underlying JS SDK client. Use it for experiment assignment
+   * (`getAssignment` / `getVariant`) and event tracking (`track` / `trackBatch`),
+   * which have no OpenFeature equivalent. Flags evaluated through OpenFeature
+   * are cached here too, so a keyless `client.track(...)` fans out to them.
+   */
+  readonly client: ExperimentationClient;
 
   constructor(options: ExperimentationProviderOptions) {
+    if (options.client) {
+      this.client = options.client;
+      return;
+    }
     if (!options.apiKey) {
       throw new Error('ExperimentationProvider: apiKey is required');
     }
-    this.apiKey = options.apiKey;
-    this.baseUrl = (options.baseUrl ?? 'http://localhost:8000').replace(/\/$/, '');
-    this.cacheTtlMs = options.cacheTtlMs ?? 300_000;
-    this.timeout = options.timeout ?? 5_000;
-    // Prefer injected fetch, fall back to global (Node 18+ / browser).
-    this.fetchImpl = options.fetch ?? globalThis.fetch;
+    this.client = new ExperimentationClient({
+      apiUrl: options.baseUrl ?? DEFAULT_BASE_URL,
+      apiKey: options.apiKey,
+      cacheTtlMs: options.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS,
+      timeoutMs: options.timeout ?? DEFAULT_TIMEOUT_MS,
+      fetch: options.fetch,
+    });
   }
 
   /**
    * Called by the OpenFeature SDK after the provider is registered.
-   * Pre-warms the flag cache so the first evaluation is synchronous.
+   * There is nothing to pre-fetch: flags are evaluated per user on demand.
    */
   async initialize(_context?: EvaluationContext): Promise<void> {
-    await this.refreshFlags();
+    // no-op
+  }
+
+  /** Called when the provider is replaced or the SDK shuts down. Drops cached evaluations. */
+  async onClose(): Promise<void> {
+    this.client.clearCache();
   }
 
   /**
-   * Called when the provider is replaced or the SDK shuts down.
-   * Clears the in-memory cache to release references.
+   * @deprecated There is no SDK-facing "list all flags" endpoint any more, so
+   * nothing can be refreshed eagerly. Kept for API compatibility: it clears the
+   * evaluation cache so the next resolution of every flag hits the server.
    */
-  async onClose(): Promise<void> {
-    this.cache = null;
-    this.refreshPromise = null;
+  async refreshFlags(): Promise<void> {
+    this.client.clearCache();
+  }
+
+  /**
+   * Cross-SDK consistent hash (`MD5("{userId}:{flagKey}")` → first 4 bytes LE ÷ 2^32).
+   * Exposed as a utility only; the server decides every evaluation.
+   */
+  hashUser(userId: string, flagKey: string): number {
+    return consistentHash(userId, flagKey);
   }
 
   // ---------------------------------------------------------------------------
   // OpenFeature Provider interface methods
-  // The @openfeature/server-sdk v1 interface uses *Evaluation (not *Value).
   // ---------------------------------------------------------------------------
 
   async resolveBooleanEvaluation(
@@ -119,16 +131,13 @@ export class ExperimentationProvider implements Provider {
     _logger?: Logger,
   ): Promise<ResolutionDetails<boolean>> {
     const result = await this.evaluate(flagKey, context);
-    if (result.reason === StandardResolutionReasons.DEFAULT || result.reason === StandardResolutionReasons.ERROR) {
-      return this.defaultDetails(defaultValue, result.reason, result.errorCode, result.errorMessage);
-    }
-    // For boolean flags (no variants), the value is `enabled` (true/false).
-    const value = typeof result.value === 'boolean' ? result.value : Boolean(result.value);
+    if (!result.ok) return this.errorDetails(defaultValue, result);
+    const { evaluation } = result;
     return {
-      value,
-      reason: result.reason,
-      variant: result.variant ?? undefined,
-      flagMetadata: result.flagMetadata,
+      value: evaluation.enabled,
+      reason: evaluation.enabled ? result.reason : StandardResolutionReasons.DISABLED,
+      variant: this.variantOf(evaluation),
+      flagMetadata: this.metadataFor(evaluation),
     };
   }
 
@@ -139,23 +148,23 @@ export class ExperimentationProvider implements Provider {
     _logger?: Logger,
   ): Promise<ResolutionDetails<string>> {
     const result = await this.evaluate(flagKey, context);
-    if (result.reason === StandardResolutionReasons.DEFAULT || result.reason === StandardResolutionReasons.ERROR) {
-      return this.defaultDetails(defaultValue, result.reason, result.errorCode, result.errorMessage);
-    }
-    if (typeof result.value !== 'string') {
-      return {
-        value: defaultValue,
-        reason: StandardResolutionReasons.ERROR,
-        errorCode: ErrorCode.TYPE_MISMATCH,
-        errorMessage: `Flag "${flagKey}" value is not a string`,
-        flagMetadata: result.flagMetadata,
-      };
-    }
+    if (!result.ok) return this.errorDetails(defaultValue, result);
+    const { evaluation } = result;
+    if (!evaluation.enabled) return this.disabledDetails(defaultValue, evaluation);
+
+    const variant = configField(evaluation.config, 'variant');
+    const value =
+      typeof variant === 'string'
+        ? variant
+        : typeof evaluation.config === 'string'
+          ? evaluation.config
+          : undefined;
+    if (value === undefined) return this.defaultDetails(defaultValue, evaluation);
     return {
-      value: result.value,
+      value,
       reason: result.reason,
-      variant: result.variant ?? undefined,
-      flagMetadata: result.flagMetadata,
+      variant: this.variantOf(evaluation),
+      flagMetadata: this.metadataFor(evaluation),
     };
   }
 
@@ -166,23 +175,23 @@ export class ExperimentationProvider implements Provider {
     _logger?: Logger,
   ): Promise<ResolutionDetails<number>> {
     const result = await this.evaluate(flagKey, context);
-    if (result.reason === StandardResolutionReasons.DEFAULT || result.reason === StandardResolutionReasons.ERROR) {
-      return this.defaultDetails(defaultValue, result.reason, result.errorCode, result.errorMessage);
-    }
-    if (typeof result.value !== 'number') {
-      return {
-        value: defaultValue,
-        reason: StandardResolutionReasons.ERROR,
-        errorCode: ErrorCode.TYPE_MISMATCH,
-        errorMessage: `Flag "${flagKey}" value is not a number`,
-        flagMetadata: result.flagMetadata,
-      };
-    }
+    if (!result.ok) return this.errorDetails(defaultValue, result);
+    const { evaluation } = result;
+    if (!evaluation.enabled) return this.disabledDetails(defaultValue, evaluation);
+
+    const field = configField(evaluation.config, 'value');
+    const value =
+      typeof field === 'number'
+        ? field
+        : typeof evaluation.config === 'number'
+          ? evaluation.config
+          : undefined;
+    if (value === undefined) return this.defaultDetails(defaultValue, evaluation);
     return {
-      value: result.value,
+      value,
       reason: result.reason,
-      variant: result.variant ?? undefined,
-      flagMetadata: result.flagMetadata,
+      variant: this.variantOf(evaluation),
+      flagMetadata: this.metadataFor(evaluation),
     };
   }
 
@@ -193,219 +202,93 @@ export class ExperimentationProvider implements Provider {
     _logger?: Logger,
   ): Promise<ResolutionDetails<T>> {
     const result = await this.evaluate(flagKey, context);
-    if (result.reason === StandardResolutionReasons.DEFAULT || result.reason === StandardResolutionReasons.ERROR) {
-      return this.defaultDetails(defaultValue, result.reason, result.errorCode, result.errorMessage);
-    }
-    if (result.value === null || typeof result.value !== 'object') {
-      return {
-        value: defaultValue,
-        reason: StandardResolutionReasons.ERROR,
-        errorCode: ErrorCode.TYPE_MISMATCH,
-        errorMessage: `Flag "${flagKey}" value is not an object`,
-        flagMetadata: result.flagMetadata,
-      };
+    if (!result.ok) return this.errorDetails(defaultValue, result);
+    const { evaluation } = result;
+    if (!evaluation.enabled) return this.disabledDetails(defaultValue, evaluation);
+
+    if (evaluation.config === null || typeof evaluation.config !== 'object') {
+      return this.defaultDetails(defaultValue, evaluation);
     }
     return {
-      value: result.value as T,
+      value: evaluation.config as T,
       reason: result.reason,
-      variant: result.variant ?? undefined,
-      flagMetadata: result.flagMetadata,
+      variant: this.variantOf(evaluation),
+      flagMetadata: this.metadataFor(evaluation),
     };
   }
 
   // ---------------------------------------------------------------------------
-  // Internal evaluation
+  // Internals
   // ---------------------------------------------------------------------------
 
-  /** Internal evaluation result (richer than ResolutionDetails). */
-  private async evaluate(
-    flagKey: string,
-    context?: EvaluationContext,
-  ): Promise<{
-    value: unknown;
-    variant: string | null;
-    reason: string;
-    errorCode?: ErrorCode;
-    errorMessage?: string;
-    flagMetadata?: Record<string, string | number | boolean>;
-  }> {
-    // Ensure we have a warm cache; refresh if TTL expired.
-    await this.ensureFreshCache();
-
-    const flag = this.cache?.flags.get(flagKey);
-    if (!flag) {
+  /** Resolve `targetingKey` → `user_id` and evaluate through the JS SDK (cached per user + flag). */
+  private async evaluate(flagKey: string, context: EvaluationContext | undefined): Promise<Lookup> {
+    const userId = context?.targetingKey;
+    if (typeof userId !== 'string' || userId.length === 0) {
       return {
-        value: undefined,
-        variant: null,
-        reason: StandardResolutionReasons.DEFAULT,
-        errorCode: ErrorCode.FLAG_NOT_FOUND,
-        errorMessage: `Flag "${flagKey}" not found`,
+        ok: false,
+        errorCode: ErrorCode.TARGETING_KEY_MISSING,
+        errorMessage: 'targetingKey is required: it is sent to the server as user_id',
       };
     }
 
-    const userId = context?.targetingKey ?? '';
-    const cacheWarm = this.isCacheWarm();
-    const evalResult = this.evaluateLocally(flag, userId);
-
-    return {
-      value: evalResult.value,
-      variant: evalResult.variant,
-      reason: cacheWarm ? StandardResolutionReasons.CACHED : StandardResolutionReasons.STATIC,
-      flagMetadata: {
-        flagKey: flag.key,
-        enabled: flag.enabled,
-        rolloutPercentage: flag.rollout_percentage,
-      },
-    };
-  }
-
-  /**
-   * Evaluates a flag locally using the consistent MD5 hash algorithm.
-   *
-   * Algorithm (matches Go / Java / Python SDKs byte-for-byte):
-   *   1. Concatenate userId + ":" + flagKey as UTF-8.
-   *   2. Compute MD5 digest.
-   *   3. Read first 4 bytes as a little-endian uint32.
-   *   4. Divide by 2^32 (4294967296) → float in [0.0, 1.0).
-   */
-  private evaluateLocally(
-    flag: FeatureFlagDefinition,
-    userId: string,
-  ): { value: unknown; variant: string | null } {
-    if (!flag.enabled) {
-      return { value: false, variant: null };
-    }
-
-    const hash = this.hashUser(userId, flag.key);
-    const rolloutFraction = flag.rollout_percentage / 100.0;
-
-    if (hash >= rolloutFraction) {
-      return { value: false, variant: null };
-    }
-
-    if (flag.variants && flag.variants.length > 0) {
-      const variantResult = this.assignVariant(flag.variants, hash, rolloutFraction);
-      return variantResult;
-    }
-
-    return { value: true, variant: null };
-  }
-
-  /**
-   * Assigns a variant proportionally within the rollout band.
-   * Re-scales hash from [0, rolloutFraction) → [0.0, 1.0) before selecting.
-   */
-  private assignVariant(
-    variants: FlagVariant[],
-    hash: number,
-    rolloutFraction: number,
-  ): { value: unknown; variant: string } {
-    const variantHash = rolloutFraction > 0 ? hash / rolloutFraction : 0;
-    let cumulative = 0;
-    for (const v of variants) {
-      cumulative += v.weight;
-      if (variantHash < cumulative) {
-        return { value: v.value ?? v.key, variant: v.key };
-      }
-    }
-    // Fallback to last variant (floating-point edge case).
-    const last = variants[variants.length - 1];
-    return { value: last.value ?? last.key, variant: last.key };
-  }
-
-  /**
-   * Computes a float in [0.0, 1.0) for the (userId, flagKey) pair using MD5.
-   * This is byte-for-byte compatible with the Go, Java, and Python SDKs.
-   *
-   * Hash test vectors (for cross-SDK verification):
-   *   hashUser("user-123", "my-flag")  → ~0.2358 (first 4 LE bytes of MD5)
-   *   hashUser("",         "my-flag")  → hash of ":my-flag"
-   */
-  hashUser(userId: string, flagKey: string): number {
-    const input = `${userId}:${flagKey}`;
-    const digest = createHash('md5').update(input, 'utf8').digest();
-    // Read first 4 bytes as little-endian unsigned 32-bit integer.
-    const uint32 = digest.readUInt32LE(0);
-    // Divide by 2^32 = 4294967296 to normalize to [0.0, 1.0).
-    return uint32 / 4294967296;
-  }
-
-  // ---------------------------------------------------------------------------
-  // Cache management
-  // ---------------------------------------------------------------------------
-
-  private isCacheWarm(): boolean {
-    if (!this.cache) return false;
-    return Date.now() - this.cache.fetchedAt < this.cacheTtlMs;
-  }
-
-  private async ensureFreshCache(): Promise<void> {
-    if (this.isCacheWarm()) return;
-
-    // Coalesce concurrent misses into a single refresh.
-    if (!this.refreshPromise) {
-      this.refreshPromise = this.refreshFlags()
-        .catch((_err) => {
-          // Refresh failed — continue with stale/empty cache and return DEFAULT
-          // for any flag lookup. This allows graceful degradation.
-        })
-        .finally(() => {
-          this.refreshPromise = null;
-        });
-    }
-    await this.refreshPromise;
-  }
-
-  /** Fetches all flags from the platform API and populates the local cache. */
-  async refreshFlags(): Promise<void> {
-    const url = `${this.baseUrl}/api/v1/openfeature/flags`;
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), this.timeout);
-
+    const cached = this.client.getEvaluatedFlags(userId).includes(flagKey);
     try {
-      const response = await this.fetchImpl(url, {
-        method: 'GET',
-        headers: {
-          'X-API-Key': this.apiKey,
-          'Content-Type': 'application/json',
-        },
-        signal: controller.signal,
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-
-      const data = (await response.json()) as FlagsResponse;
-      const flagMap = new Map<string, FeatureFlagDefinition>();
-      for (const flag of data.flags) {
-        flagMap.set(flag.key, flag);
-      }
-
-      this.cache = {
-        flags: flagMap,
-        fetchedAt: Date.now(),
+      const evaluation = await this.client.evaluateFlag(flagKey, { userId });
+      return {
+        ok: true,
+        evaluation,
+        reason: cached ? StandardResolutionReasons.CACHED : StandardResolutionReasons.TARGETING_MATCH,
       };
-    } finally {
-      clearTimeout(timer);
+    } catch (err) {
+      const status = (err as { status?: number })?.status;
+      const code = (err as { code?: string })?.code;
+      const message = err instanceof Error ? err.message : String(err);
+      if (status === 404) {
+        return {
+          ok: false,
+          errorCode: ErrorCode.FLAG_NOT_FOUND,
+          errorMessage: `Flag "${flagKey}" not found or not active`,
+        };
+      }
+      if (code === 'INVALID_RESPONSE') {
+        return { ok: false, errorCode: ErrorCode.PARSE_ERROR, errorMessage: message };
+      }
+      return { ok: false, errorCode: ErrorCode.GENERAL, errorMessage: message };
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // Helpers
-  // ---------------------------------------------------------------------------
+  private variantOf(evaluation: FlagEvaluation): string | undefined {
+    const variant = configField(evaluation.config, 'variant');
+    return typeof variant === 'string' ? variant : undefined;
+  }
 
-  private defaultDetails<T>(
-    value: T,
-    reason: string,
-    errorCode?: ErrorCode,
-    errorMessage?: string,
-  ): ResolutionDetails<T> {
+  private metadataFor(evaluation: FlagEvaluation): ExperimentationFlagMetadata {
+    return { flagKey: evaluation.key, enabled: evaluation.enabled };
+  }
+
+  private errorDetails<T>(value: T, result: Extract<Lookup, { ok: false }>): ResolutionDetails<T> {
     return {
       value,
-      reason,
-      errorCode,
-      errorMessage,
+      reason: StandardResolutionReasons.ERROR,
+      errorCode: result.errorCode,
+      errorMessage: result.errorMessage,
+    };
+  }
+
+  private disabledDetails<T>(value: T, evaluation: FlagEvaluation): ResolutionDetails<T> {
+    return {
+      value,
+      reason: StandardResolutionReasons.DISABLED,
+      flagMetadata: this.metadataFor(evaluation),
+    };
+  }
+
+  private defaultDetails<T>(value: T, evaluation: FlagEvaluation): ResolutionDetails<T> {
+    return {
+      value,
+      reason: StandardResolutionReasons.DEFAULT,
+      flagMetadata: this.metadataFor(evaluation),
     };
   }
 }

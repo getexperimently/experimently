@@ -6,6 +6,8 @@
 defmodule HashTest do
   @moduledoc "Standalone cross-SDK hash parity verification."
 
+  import Bitwise
+
   def hash_user(user_id, flag_key) do
     input = "#{user_id}:#{flag_key}"
     <<b0, b1, b2, b3, _rest::binary>> = :crypto.hash(:md5, input)

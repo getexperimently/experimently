@@ -1,41 +1,52 @@
 # Ruby SDK
 
-The Ruby SDK provides feature flag evaluation, experiment variant assignment, and event tracking for Ruby applications. It has zero runtime gem dependencies, uses `Net::HTTP` from the standard library, and maintains a thread-safe Mutex-backed TTL cache for low-latency repeated evaluations.
+`experimentation_platform` (v0.1.0) provides feature flag evaluation, experiment assignment and
+event tracking for Ruby applications. It has zero runtime gem dependencies (`Net::HTTP`, `JSON`,
+`Digest`, `Mutex` from the standard library) and is safe to share between threads.
+
+Flag evaluation and experiment assignment are decided **by the server**: every call goes to the
+public API with your `X-API-Key`, the server buckets the user (sticky per user + experiment), and
+the SDK caches the answer per user + key for a TTL. Nothing is bucketed locally.
+
+Source: `sdk/ruby`.
 
 ---
 
 ## Installation
 
-Add to your `Gemfile`:
-
 ```ruby
-gem 'experimently-sdk'
+# Gemfile
+gem 'experimentation_platform', '~> 0.1'
 ```
 
-Then run:
-
-```bash
-bundle install
-```
-
-Requires Ruby 2.7 or later.
+The gemspec declares `required_ruby_version = ">= 2.6.0"`; the spec suite in this repository was
+run on Ruby 2.6.10. Inside the monorepo, run scripts with `ruby -Isdk/ruby/lib ...` (no install).
 
 ---
 
 ## Quick Start
 
 ```ruby
-require 'experimently'
+require 'experimentation_platform'
 
-client = Experimently::Client.new(
-  base_url: 'https://api.example.com',
-  api_key:  ENV['EXPERIMENTLY_API_KEY']
+client = ExperimentationPlatform::Client.new(
+  base_url: ENV.fetch('EXPERIMENTLY_API_URL', 'http://localhost:8000'),  # origin only
+  api_key:  ENV.fetch('EXPERIMENTLY_API_KEY')                             # sent as X-API-Key
 )
 
-enabled = client.evaluate_flag(flag_key: 'new-checkout', user_id: 'user-123', default: false)
-puts enabled ? 'Show new checkout' : 'Show old checkout'
+# 1. Assignment — POST /api/v1/tracking/assign (sticky, records the exposure)
+assignment = client.get_assignment('checkout_flow', 'user-123', { plan: 'pro' })   # nil on failure
+headline   = assignment&.configuration&.dig('headline') || 'Buy now'
 
-client.close
+# 2. Feature flag — GET /api/v1/feature-flags/evaluate/new_search?user_id=user-123
+show_new_search = client.feature_enabled?('new_search', 'user-123')                # false on failure
+
+# 3. Track with a key → one POST /api/v1/tracking/track (never raises)
+client.track('purchase', 'user-123', value: 99.99, experiment_key: 'checkout_flow',
+             properties: { sku: 'pro-plan' })
+
+# 4. Track without a key → fanned out to every cached assignment + flag of this user
+client.track('page_view', 'user-123', properties: { page: '/products' })
 ```
 
 ---
@@ -43,278 +54,188 @@ client.close
 ## Configuration
 
 ```ruby
-client = Experimently::Client.new(
-  base_url:  'https://api.example.com',  # Required
-  api_key:   'your-api-key',             # Required
-  cache_ttl: 60,                         # Seconds before a cached result expires (default: 60)
-  timeout:   5,                          # HTTP read/open timeout in seconds (default: 5)
-  cache_size: 1000                       # Maximum number of entries in the LRU cache (default: 1000)
+client = ExperimentationPlatform::Client.new(
+  base_url:       'http://localhost:8000',
+  api_key:        'your-api-key',
+  cache_ttl:      300,
+  timeout:        10,
+  max_cache_size: 1000
 )
+# or: Client.new(ExperimentationPlatform::SdkConfig.new(base_url: ..., api_key: ...))
 ```
 
 | Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `base_url` | `String` | *(required)* | Base URL of the platform API |
-| `api_key` | `String` | *(required)* | API key for SDK authentication |
-| `cache_ttl` | `Integer` | `60` | Seconds before a cached evaluation expires |
-| `timeout` | `Integer` | `5` | HTTP timeout in seconds |
-| `cache_size` | `Integer` | `1000` | Maximum LRU cache entries |
+|---|---|---|---|
+| `base_url` | `String` | — (required) | Backend origin, e.g. `https://api.example.com`; the SDK appends `/api/v1/...`; trailing `/` stripped |
+| `api_key` | `String` | — (required) | API key sent as `X-API-Key` |
+| `cache_ttl` | `Integer` | `300` | Seconds a successful evaluation/assignment is reused |
+| `timeout` | `Integer` | `10` | `Net::HTTP` open and read timeout (seconds) |
+| `max_cache_size` | `Integer` | `1000` | Maximum cache entries, least recently used evicted |
+
+`Client.new` raises `ArgumentError` when `base_url` or `api_key` is missing.
 
 ---
 
-## Feature Flag Evaluation
+## API Reference
 
-### `evaluate_flag`
+| Method | Endpoint | Returns | On failure |
+|---|---|---|---|
+| `evaluate_flag(flag_key, user_id, attributes = {})` | `GET /feature-flags/evaluate/{key}?user_id=` | `FlagEvaluation` | `FlagEvaluation(enabled: false, config: nil)`; never raises |
+| `feature_enabled?(flag_key, user_id, attributes = {})` | same (via cache) | `Boolean` | `false` |
+| `get_assignment(experiment_key, user_id, attributes = {})` | `POST /tracking/assign` | `Assignment` | `nil`; never raises |
+| `track(event_name, user_id, properties: {}, experiment_key: nil, feature_flag_key: nil, value: nil, event_type: nil, timestamp: nil)` | `/tracking/track` or `/tracking/batch` | `true` | `false`; never raises |
+| `track_batch(events)` | `/tracking/batch` (chunks of 100) | `BatchResult` | failures counted; never raises |
+| `assignments(user_id)` | — | `Array<Assignment>` | cached, unexpired only |
+| `evaluated_flags(user_id)` | — | `Array<String>` | cached flag keys |
+| `clear_cache`, `close` | — | `nil` | drop the cache (`at_exit { client.close }`) |
+| `FeatureFlagEvaluator.hash_user(user_id, key)` | — | `Float` in `[0, 1)` | pure |
 
-Returns the flag's value for a given user, falling back to `default` on any error.
+### Structs
 
-```ruby
-enabled = client.evaluate_flag(
-  flag_key: 'dark-mode',
-  user_id:  'user-456',
-  default:  false
-)
+| Struct | Members |
+|---|---|
+| `FlagEvaluation` | `key: String` (the key you asked for), `enabled: Boolean` + `enabled?`, `config: Object, nil` (the server's `config` payload as-is) |
+| `Assignment` | `experiment_key: String`, `variant_id: String, nil` (UUID), `variant_name: String` (`"control"`, `"treatment"`, …), `is_control: Boolean` + `control?`, `configuration: Hash, nil` |
+| `BatchResult` | `success_count: Integer`, `failure_count: Integer`, `errors: Array, nil`, `ok?` |
 
-if enabled
-  render_dark_mode
-end
-```
-
-Pass user attributes for server-side targeting rules:
-
-```ruby
-enabled = client.evaluate_flag(
-  flag_key:   'enterprise-dashboard',
-  user_id:    'user-789',
-  default:    false,
-  attributes: {
-    plan:    'enterprise',
-    country: 'US',
-    beta:    true
-  }
-)
-```
-
----
-
-## Experiment Assignment
-
-### `get_assignment`
-
-Returns the variant assigned to the user for a given experiment.
+`attributes` on `get_assignment` become the assignment `context` (targeting rules); on
+`evaluate_flag` they are accepted for API symmetry only. For `track`: `properties` → `metadata`,
+`event_type` defaults to `event_name`, `timestamp` (`Time` or ISO-8601 string) defaults to now
+(UTC). `track_batch` takes Hashes (symbol or string keys) with `event_name`, `user_id` and at least
+one of `experiment_key`/`feature_flag_key` plus optional `properties`, `value`, `event_type`,
+`timestamp`; malformed entries are reported in `errors` without being sent.
 
 ```ruby
-assignment = client.get_assignment(
-  experiment_key: 'checkout-cta-copy',
-  user_id:        'user-123'
-)
-
-case assignment[:variant_key]
-when 'control'
-  render_original_cta
-when 'treatment-a'
-  render_short_cta
-when 'treatment-b'
-  render_urgency_cta
-else
-  render_original_cta
-end
-```
-
-The returned hash includes:
-
-| Key | Type | Description |
-|-----|------|-------------|
-| `:variant_key` | `String` | Assigned variant (e.g., `"control"`, `"treatment"`) |
-| `:experiment_key` | `String` | The experiment key |
-| `:experiment_id` | `String` | UUID of the experiment |
-| `:is_control` | `Boolean` | `true` if this is the control variant |
-
----
-
-## Event Tracking
-
-### `track`
-
-Records a conversion or behavioural event. Call this after meaningful user actions.
-
-```ruby
-client.track(
-  event_name: 'purchase',
-  user_id:    'user-123',
-  properties: {
-    amount:   99.99,
-    currency: 'USD',
-    sku:      'pro-plan'
-  }
-)
-```
-
-Properties are arbitrary key-value pairs. Numeric values are used as the metric measurement for statistical analysis.
-
----
-
-## Thread Safety
-
-The SDK is safe for use from multiple threads. The internal cache is protected by a `Mutex`, which is acquired only for the duration of a cache read or write — not during the HTTP request itself. This means long-running network calls never block other threads from reading cached results.
-
-```ruby
-# Safe to share a single client instance across threads
-$exp_client = Experimently::Client.new(
-  base_url: ENV['EXPERIMENTLY_BASE_URL'],
-  api_key:  ENV['EXPERIMENTLY_API_KEY']
-)
-
-threads = 10.times.map do |i|
-  Thread.new do
-    $exp_client.evaluate_flag(flag_key: 'my-flag', user_id: "user-#{i}", default: false)
-  end
-end
-threads.each(&:join)
+result = client.track_batch([
+  { event_name: 'purchase', user_id: 'user-123', experiment_key: 'checkout_flow', value: 99.99 },
+  { event_name: 'search',   user_id: 'user-123', feature_flag_key: 'new_search' }
+])
+result.ok?   # => true when failure_count == 0
 ```
 
 ---
 
-## Consistent Hash Algorithm
+## Caching and failure behaviour
 
-Variant assignment uses MD5-based consistent hashing. The hash input is the string `"{user_id}:{flag_key}"`. The first 4 bytes of the MD5 digest are interpreted as a little-endian unsigned 32-bit integer, then divided by `4294967296.0` to produce a value in `[0, 1)`.
+- Successful evaluations and assignments are cached per **user + key** for `cache_ttl` (default
+  300 s), LRU-bounded by `max_cache_size`; a hit makes no request. **Failures are never cached**,
+  so the next call retries. There is no stale fallback beyond the TTL.
+- Network error / timeout, `401` (bad key), `404` (flag/experiment unknown or not ACTIVE), `422`,
+  `429` (rate limited), `5xx`: `evaluate_flag` returns a disabled evaluation, `get_assignment`
+  returns `nil`, `track` returns `false`, `track_batch` counts the chunk as failed. Each failure
+  is logged once with `Kernel#warn` (`[ExperimentationPlatform] ... error: ...`).
+- Only `ExperimentationPlatform::HttpClient` raises:
 
-```ruby
-require 'digest'
+| Error | Extends | When |
+|---|---|---|
+| `ExperimentationPlatform::AuthenticationError` | `APIError` | HTTP 401 — invalid API key |
+| `ExperimentationPlatform::APIError` (`#status_code`) | `Error` | Other 4xx/5xx (404 not ACTIVE, 422 validation, 429 rate limited) |
+| `ExperimentationPlatform::NetworkError` | `Error` | Timeout, DNS failure, connection refused |
 
-def bucket(user_id, key)
-  digest = Digest::MD5.digest("#{user_id}:#{key}")
-  digest[0, 4].unpack1('V') / 4_294_967_296.0
-end
-```
-
-This algorithm is identical across all platform SDKs. A user bucketed server-side (Ruby) will always fall in the same bucket as one evaluated client-side (JavaScript) or in any other SDK.
-
----
-
-## Cleanup
-
-Call `close` before process exit to flush any pending background work:
-
-```ruby
-client.close
-```
-
-In Ruby on Rails, register a shutdown hook:
-
-```ruby
-at_exit { $exp_client.close }
-```
+- Thread safety: a single client can be shared across threads. The cache `Mutex` is held only for
+  a cache read/write — never during the HTTP request — and every request opens its own
+  `Net::HTTP` connection.
 
 ---
 
-## Rails Integration
+## Tracking fan-out
 
-### Initializer
+With `experiment_key` and/or `feature_flag_key`, `track` sends one `POST /api/v1/tracking/track`.
+Without a key it sends one `POST /api/v1/tracking/batch` containing one entry per experiment the
+user was assigned to through this client (`experiment_key`) plus one per flag evaluated for the
+user (`feature_flag_key`), taken from the cache. Nothing cached → nothing is sent and `true` is
+returned. Batches are chunked at 100 events. This is what makes a single `track('purchase', …)`
+count as a conversion for every experiment the user is in.
+
+Conversions are matched to metrics by **event name**: a metric on `purchase` counts every
+`purchase` event regardless of `event_type`.
+
+---
+
+## Rails integration
 
 ```ruby
 # config/initializers/experimently.rb
-
-require 'experimently'
-
-EXPERIMENTLY = Experimently::Client.new(
-  base_url:  ENV.fetch('EXPERIMENTLY_BASE_URL'),
-  api_key:   ENV.fetch('EXPERIMENTLY_API_KEY'),
-  cache_ttl: 30
+EXPERIMENTLY = ExperimentationPlatform::Client.new(
+  base_url: ENV.fetch('EXPERIMENTLY_API_URL'), api_key: ENV.fetch('EXPERIMENTLY_API_KEY'), cache_ttl: 60
 )
-
 at_exit { EXPERIMENTLY.close }
-```
 
-### Controller Helper
-
-```ruby
 # app/controllers/application_controller.rb
-
 class ApplicationController < ActionController::Base
-  helper_method :feature_enabled?
+  helper_method :feature_enabled?, :experiment_variant
 
   private
 
+  def experimently_user_id
+    current_user&.id&.to_s || cookies[:visitor_id]
+  end
+
   def feature_enabled?(flag_key)
-    EXPERIMENTLY.evaluate_flag(
-      flag_key:   flag_key,
-      user_id:    current_user&.id.to_s || 'anonymous',
-      default:    false,
-      attributes: current_user_attributes
-    )
+    EXPERIMENTLY.feature_enabled?(flag_key, experimently_user_id)
   end
 
-  def current_user_attributes
-    return {} unless current_user
-    { plan: current_user.plan, country: current_user.country }
+  def experiment_variant(experiment_key)
+    EXPERIMENTLY.get_assignment(experiment_key, experimently_user_id, { plan: current_user&.plan })
+                &.variant_name || 'control'
   end
 end
 ```
 
-### View Usage
-
-```erb
-<% if feature_enabled?('new-nav') %>
-  <%= render 'layouts/new_nav' %>
-<% else %>
-  <%= render 'layouts/nav' %>
-<% end %>
-```
+In your own specs stub HTTP with WebMock (as `sdk/ruby/spec` does) or double the client
+(`allow(EXPERIMENTLY).to receive(:feature_enabled?).and_return(true)`).
 
 ---
 
-## Testing
+## Consistent hash (compatibility utility)
 
-### Using `stub_client`
-
-The SDK provides a test stub that avoids real HTTP calls:
-
-```ruby
-# spec/support/experimently.rb
-require 'experimently/testing'
-
-RSpec.configure do |config|
-  config.before(:each) do
-    stub_client = Experimently::StubClient.new
-    stub_client.set_flag('new-checkout', true)
-    stub_client.set_variant('cta-copy-test', 'treatment-b')
-    allow(Experimently::Client).to receive(:new).and_return(stub_client)
-  end
-end
-```
-
-### Manual Stub
-
-```ruby
-RSpec.describe CheckoutsController, type: :controller do
-  let(:stub_client) { Experimently::StubClient.new }
-
-  before do
-    stub_client.set_flag('one-click-buy', true)
-    stub_const('EXPERIMENTLY', stub_client)
-  end
-
-  it 'shows the one-click checkout when flag is enabled' do
-    get :show, params: { id: 1 }
-    expect(response.body).to include('Buy now')
-  end
-end
-```
+`ExperimentationPlatform::FeatureFlagEvaluator.hash_user(user_id, key)` = `MD5("{user_id}:{key}")`,
+first 4 bytes as little-endian uint32, divided by 2^32 (`0.6927449859213084` for `'user-123'`,
+`'my-flag'`). It is kept only so the golden vectors in `tests/sdk-contract/` stay identical across
+SDKs. **Nothing in the SDK calls it to pick a variant** — the server decides.
 
 ---
 
-## SDK Compatibility
+## Backend endpoints used
 
-All platform SDKs produce identical variant assignments for the same `(user_id, flag_key)` pair.
+Every request carries `X-API-Key`, `Content-Type: application/json` and `Accept: application/json`.
 
-| SDK | Hash Algorithm | Assignment Parity |
-|-----|---------------|-------------------|
-| Ruby | MD5 | Yes |
-| Go | MD5 | Yes |
-| Java | MD5 | Yes |
-| Python | MD5 | Yes |
-| JavaScript | MD5 | Yes |
-| PHP | MD5 | Yes |
-| .NET | MD5 | Yes |
-| Elixir | MD5 | Yes |
+| SDK call | Method and path | Body / query | Response used |
+|---|---|---|---|
+| `evaluate_flag`, `feature_enabled?` | `GET /api/v1/feature-flags/evaluate/{flag_key}?user_id=…` | — | `{key, enabled, config}`; 404 when the flag is not ACTIVE |
+| `get_assignment` | `POST /api/v1/tracking/assign` | `{experiment_key, user_id, context?}` | `{experiment_key, user_id, variant_id, variant_name, is_control, configuration}`; 404 when the experiment is not ACTIVE |
+| `track` with a key | `POST /api/v1/tracking/track` | `{event_type, event_name, user_id, experiment_key?, feature_flag_key?, value?, metadata?, timestamp}` | ignored |
+| `track` without keys, `track_batch` | `POST /api/v1/tracking/batch` | `{events: [<track body>, …]}` (max 100 per request) | `{success_count, failure_count, errors}` (`track_batch` only) |
+
+Errors: 401 bad key, 404 experiment/flag unknown or not ACTIVE, 422 event without any key, 429
+rate limited (`Retry-After`). These paths share the backend's per-IP `SDK_RATE_LIMIT_PER_MINUTE`
+ceiling (default 6000).
+
+---
+
+## Contract smoke
+
+```bash
+ruby -Isdk/ruby/lib sdk/ruby/examples/contract_smoke.rb
+# {"sdk":"ruby","assign":{"variant_name":"control","is_control":true,"sticky":true},"flag":{"enabled":true},"track":{"ok":true},"fanout":{"ok":true}}
+```
+
+Env: `EXPERIMENTLY_API_URL` (default `http://localhost:8000`), `EXPERIMENTLY_API_KEY` (required),
+`CONTRACT_EXPERIMENT_KEY` (default `sdk_contract_ab`), `CONTRACT_FLAG_KEY` (default
+`sdk_contract_flag`), `CONTRACT_USER_ID` (default random `smoke-<uuid>`). The smoke assigns,
+clears the cache and assigns again (server stickiness), evaluates the flag, tracks `purchase` with
+the experiment key, tracks `page_view` without a key and sends a 2-event `track_batch`. Fixtures:
+`backend/scripts/seed_sdk_contract.py`; repo-wide runner:
+`python tests/sdk-contract/live/run_live_contract.py --sdk ruby --strict`.
+
+Verified against a live backend: yes (2026-09-11)
+
+---
+
+## Development
+
+```bash
+cd sdk/ruby
+bundle install && bundle exec rspec   # 109 examples (run here on Ruby 2.6.10); HTTP stubbed with WebMock
+ruby test_standalone.rb               # stdlib only: hash vector, types, cache, config, track safety
+```
