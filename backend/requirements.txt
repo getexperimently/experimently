@@ -27,10 +27,10 @@ pytz==2023.3
 
 # AWS
 aws-cdk-lib==2.268.0
-aws-cdk.asset-awscli-v1==2.2.294
+aws-cdk.asset-awscli-v1==2.2.292   # pinned by aws-cdk-lib 2.268.0
 aws-cdk.asset-kubectl-v20==2.1.4
 aws-cdk.asset-node-proxy-agent-v6==2.1.2
-aws-cdk.cloud-assembly-schema==40.7.0
+aws-cdk.cloud-assembly-schema==54.23.0   # aws-cdk-lib 2.268.0 needs >=54.11,<55
 aws-lambda-powertools==2.24.0
 aws-xray-sdk==2.15.0
 watchtower==3.4.0  # CloudWatch logging
@@ -50,12 +50,12 @@ moto==4.2.2
 pyparsing==3.3.2       # required by moto's glue backend (mock_glue), not declared by moto 4.2
 python-jose[cryptography]==3.5.0  # required by moto's cognitoidp backend (mock_cognitoidp); app auth uses PyJWT
 jsonschema==4.26.0
-locust==2.46.5
+locust==2.39.1   # 2.40+ requires pytest>=8.3; we pin pytest 7.4
 
 # Statistical Analysis
-numpy==1.25.2
+numpy==1.26.4   # scipy 1.17 needs numpy>=1.26; 2.x is a separate major bump
 scipy==1.17.1
-pandas==2.1.0
+pandas==2.2.3   # statsmodels 0.15 needs pandas>=2.2
 statsmodels==0.15.0
 
 # Utilities
@@ -104,7 +104,7 @@ python3-saml==1.16.0
 authlib==1.8.0
 
 # EP-041: Databricks Warehouse Connector
-databricks-sql-connector==3.3.0
+databricks-sql-connector==3.7.5   # 3.3 pinned pandas<2.2
 
 # EP-048: ClickHouse and MySQL Warehouse Connectors
 clickhouse-connect==0.7.0
