@@ -343,7 +343,15 @@ Three AWS Lambda functions handle real-time operations:
 
 ## Background Schedulers
 
-Three background jobs run automatically:
+Five background jobs start with the API process (`lifespan` in `backend/app/main.py`):
+
+| Scheduler | Default cycle | Responsibility |
+|-----------|---------------|----------------|
+| Experiment scheduler | 15 min | Starts/stops experiments at `start_date` / `end_date` |
+| Rollout scheduler | 15 min | Advances feature-flag rollout stages |
+| Metrics scheduler | 15 min | Aggregates raw metrics |
+| Safety monitor | 5 min | Checks per-flag safety thresholds, triggers rollbacks |
+| Bandit scheduler | `BANDIT_UPDATE_INTERVAL_MINUTES` (5) | Recomputes multi-armed bandit weights (DynamoDB counters → PostgreSQL fallback) |
 
 ### Experiment Scheduler (every 15 min)
 
@@ -360,30 +368,41 @@ PUT /api/v1/experiments/{id}/schedule
 }
 ```
 
-### Rollout Scheduler (every 5 min)
+### Rollout Scheduler (every 15 min)
 
 Advances feature flag rollout stages:
-- Checks `trigger_type == "TIME_BASED"` stages past their `start_date`
+- Activates `TIME_BASED` stages once their `start_date` has passed (a stage never starts early, even
+  when the previous stage has completed)
+- Completes an `IN_PROGRESS` stage after its `trigger_configuration.duration` hours (default 24)
 - Updates `rollout_percentage` on FeatureFlag
 - Transitions stage status: `PENDING → IN_PROGRESS → COMPLETED`
 
-### Safety Monitor (every 1 min)
+### Safety Monitor (every 5 min)
 
-Monitors active feature flags:
-- Tracks error rates and latency
-- Auto-rollback if thresholds exceeded
-- Configurable per-flag via `SafetyConfig`
+Monitors active feature flags that have an enabled safety configuration:
+- Reads error metrics from `error_logs` and latency metrics from `raw_metrics`
+- Compares each configured metric against its thresholds
+- Rolls the flag back to its `rollback_percentage` when a critical threshold is breached
+- Records a `SafetyRollbackRecord`
 
 ```python
 # Configure safety for a feature flag
-POST /api/v1/safety/configs
+POST /api/v1/safety/feature-flags/{feature_flag_id}/config
 {
-  "feature_flag_id": "...",
-  "max_error_rate": 0.05,    # 5% error rate threshold
-  "max_latency_p99": 500,    # 500ms p99 threshold
-  "auto_rollback": true
+  "enabled": true,
+  "metrics": {
+    "error_rate": {"warning_threshold": 0.02, "critical_threshold": 0.05, "comparison_type": "greater_than"},
+    "p95_latency": {"warning_threshold": 300, "critical_threshold": 500, "comparison_type": "greater_than"}
+  },
+  "rollback_percentage": 0
 }
 ```
+
+### Bandit Scheduler (every `BANDIT_UPDATE_INTERVAL_MINUTES`)
+
+Recomputes variant weights for multi-armed bandit experiments and persists them in `bandit_state`;
+`POST /api/v1/tracking/assign` routes new users by those weights. See
+[Multi-Armed Bandit](../api/multi-armed-bandit.md).
 
 ---
 
