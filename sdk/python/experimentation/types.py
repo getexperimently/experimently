@@ -47,11 +47,17 @@ class Assignment:
 
 @dataclass(frozen=True)
 class FlagEvaluation:
-    """A server-side flag decision, from ``GET /api/v1/feature-flags/evaluate/{key}``."""
+    """A server-side flag decision, from ``GET /api/v1/feature-flags/evaluate/{key}``.
+
+    ``reason`` says why the server decided as it did (``"targeting_rule"``,
+    ``"rollout"``, ``"inactive"`` or ``"error"``); ``None`` when the server did
+    not send one.
+    """
 
     key: str
     enabled: bool
     config: Any = None
+    reason: Optional[str] = None
 
 
 @dataclass

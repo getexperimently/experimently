@@ -21,6 +21,7 @@ from fastapi import (
     status,
     Response,
 )
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
 from backend.app.api import deps
@@ -743,6 +744,88 @@ async def deactivate_feature_flag(
     return deactivated_flag
 
 
+CONTEXT_QUERY_DESCRIPTION = (
+    "Optional targeting context as a URL-encoded JSON object, e.g. "
+    '`{"country":"US","os_version":"17.4.0","employee":true}`. Nested objects are '
+    "flattened to dotted keys (`app.version`) and top-level keys also answer "
+    "`user.<key>`, `device.<key>` and `app.<key>` rule attributes."
+)
+
+
+def _parse_context_param(context: Optional[str]) -> Optional[Dict[str, Any]]:
+    """Decode the ``context`` query parameter; 422 when it is not a JSON object."""
+    if context is None or context == "":
+        return None
+    try:
+        parsed = json.loads(context)
+    except (TypeError, ValueError):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Query parameter 'context' must be a URL-encoded JSON object",
+        )
+    if not isinstance(parsed, dict):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Query parameter 'context' must be a JSON object",
+        )
+    return parsed
+
+
+class FlagEvaluationRequest(BaseModel):
+    """Body for ``POST /feature-flags/evaluate/{flag_key}``."""
+
+    user_id: str = Field(
+        ..., min_length=1, description="ID of the user to evaluate the flag for"
+    )
+    context: Optional[Dict[str, Any]] = Field(
+        None, description="Targeting context (user/device/app attributes)"
+    )
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "user_id": "device-42",
+                "context": {
+                    "os": "iOS",
+                    "os_version": "17.4.0",
+                    "region": "US",
+                    "tier": "premium",
+                },
+            }
+        }
+    )
+
+
+def _evaluate_flag_by_key(
+    db: Session, flag_key: str, user_id: str, context: Optional[Dict[str, Any]]
+) -> Dict[str, Any]:
+    """Shared body of the GET and POST evaluate endpoints.
+
+    A flag that exists but is not ACTIVE (disabled with the kill switch,
+    archived, ...) evaluates to ``enabled: false`` with ``reason: "inactive"``
+    rather than 404: the client should treat it as "off", not as an error.
+    Only an unknown key is a 404.
+    """
+    db_flag = db.query(FeatureFlag).filter(FeatureFlag.key == flag_key).first()
+    if not db_flag:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Feature flag with key '{flag_key}' not found",
+        )
+
+    feature_flag_service = FeatureFlagService(db)
+    evaluation = feature_flag_service.evaluate_flag_detailed(db_flag, user_id, context)
+
+    # ``config`` has always been ``None`` here (the flag dict has no ``value``);
+    # kept for backwards compatibility with existing SDKs.
+    return {
+        "key": flag_key,
+        "enabled": evaluation["enabled"],
+        "config": None,
+        "reason": evaluation["reason"],
+    }
+
+
 @router.get(
     "/evaluate/{flag_key}",
     response_model=Dict[str, Any],
@@ -752,15 +835,17 @@ async def deactivate_feature_flag(
 async def evaluate_feature_flag(
     flag_key: str = Path(..., description="The key of the feature flag to evaluate"),
     user_id: str = Query(..., description="ID of the user to evaluate the flag for"),
+    context: Optional[str] = Query(None, description=CONTEXT_QUERY_DESCRIPTION),
     db: Session = Depends(deps.get_db),
     api_key_info: Dict[str, Any] = Depends(deps.get_api_key),
-    context: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Evaluate a feature flag for a specific user.
 
     This endpoint evaluates whether a feature flag is enabled for a specific user
-    based on the flag's status, targeting rules, and rollout percentage.
+    based on the flag's status, targeting rules, and rollout percentage. Pass the
+    user's attributes as ``context=<url-encoded JSON object>`` so targeting rules
+    (dashboard or native shape) can be matched.
 
     This endpoint is intended to be called by client applications to determine
     if a feature should be enabled for a specific user.
@@ -768,39 +853,46 @@ async def evaluate_feature_flag(
     **Authentication**: Requires a valid API key in the X-API-Key header.
 
     Returns:
-        Dict[str, Any]: The feature flag evaluation result
+        ``{"key", "enabled", "config", "reason"}`` where ``reason`` is one of
+        ``targeting_rule`` (a rule matched and its rollout % decided),
+        ``rollout`` (the global rollout % decided), ``inactive`` or ``error``.
 
     Raises:
         HTTPException 401: If the API key is invalid
-        HTTPException 404: If the feature flag doesn't exist
+        HTTPException 404: If the feature flag doesn't exist or is not active
+        HTTPException 422: If ``context`` is not valid JSON object
     """
-    # Create feature flag service
-    feature_flag_service = FeatureFlagService(db)
+    parsed_context = _parse_context_param(context)
+    return _evaluate_flag_by_key(db, flag_key, user_id, parsed_context)
 
-    # Get feature flag by key
-    flags = feature_flag_service.get_feature_flags(
-        status=FeatureFlagStatus.ACTIVE.value
-    )
-    flag = next((f for f in flags if f["key"] == flag_key), None)
 
-    if not flag:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Feature flag with key '{flag_key}' not found or not active",
-        )
+@router.post(
+    "/evaluate/{flag_key}",
+    response_model=Dict[str, Any],
+    summary="Evaluate feature flag for a user (with context body)",
+    response_description="Returns the feature flag evaluation result",
+)
+async def evaluate_feature_flag_post(
+    flag_key: str = Path(..., description="The key of the feature flag to evaluate"),
+    request: FlagEvaluationRequest = Body(..., description="User id and targeting context"),
+    db: Session = Depends(deps.get_db),
+    api_key_info: Dict[str, Any] = Depends(deps.get_api_key),
+) -> Dict[str, Any]:
+    """
+    Evaluate a feature flag for a specific user, sending the targeting context
+    in the request body instead of the query string.
 
-    # Get flag from database to use evaluate_flag method
-    db_flag = db.query(FeatureFlag).filter(FeatureFlag.key == flag_key).first()
+    Body: ``{"user_id": "...", "context": {...}}``. Returns the same
+    ``{"key", "enabled", "config", "reason"}`` payload as the GET variant.
 
-    # Evaluate flag for user
-    is_enabled = feature_flag_service.evaluate_flag(db_flag, user_id, context)
+    **Authentication**: Requires a valid API key in the X-API-Key header.
 
-    # Return evaluation result
-    return {
-        "key": flag_key,
-        "enabled": is_enabled,
-        "config": flag.get("value"),
-    }
+    Raises:
+        HTTPException 401: If the API key is invalid
+        HTTPException 404: If the feature flag doesn't exist or is not active
+        HTTPException 422: If the body is invalid
+    """
+    return _evaluate_flag_by_key(db, flag_key, request.user_id, request.context)
 
 
 @router.get(
@@ -811,16 +903,17 @@ async def evaluate_feature_flag(
 )
 async def get_user_flags(
     user_id: str = Path(..., description="ID of the user to get flags for"),
+    context: Optional[str] = Query(None, description=CONTEXT_QUERY_DESCRIPTION),
     db: Session = Depends(deps.get_db),
     api_key_info: Dict[str, Any] = Depends(deps.get_api_key),
-    context: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, bool]:
     """
     Get all active feature flags for a specific user.
 
     This endpoint evaluates all active feature flags for a specific user
     and returns a dictionary mapping flag keys to boolean values indicating
-    whether each flag is enabled for the user.
+    whether each flag is enabled for the user. Pass the user's attributes as
+    ``context=<url-encoded JSON object>`` so targeting rules can be matched.
 
     This endpoint is intended to be called by client applications to initialize
     feature flags for a user session.
@@ -832,12 +925,15 @@ async def get_user_flags(
 
     Raises:
         HTTPException 401: If the API key is invalid
+        HTTPException 422: If ``context`` is not a valid JSON object
     """
+    parsed_context = _parse_context_param(context)
+
     # Create feature flag service
     feature_flag_service = FeatureFlagService(db)
 
     # Get all flags for user
-    flags = feature_flag_service.get_user_flags(user_id, context)
+    flags = feature_flag_service.get_user_flags(user_id, parsed_context)
 
     return flags
 

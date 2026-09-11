@@ -125,6 +125,7 @@ describe('useExperiment', () => {
       configuration: { steps: 1 },
       loading: false,
       error: null,
+      assigned: true,
     });
   });
 
