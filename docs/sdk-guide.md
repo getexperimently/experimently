@@ -1,6 +1,35 @@
 # SDK Integration Guide
 
-The platform provides official SDKs for Python and JavaScript to integrate experiment assignment and feature flag evaluation directly into your application.
+SDKs integrate experiment assignment, feature-flag evaluation and event tracking into your application.
+Every SDK talks to the same small public API surface, authenticated with an API key.
+
+## Endpoint contract
+
+All SDK traffic uses the `X-API-Key` header and addresses experiments and flags by their public **keys**.
+The server decides bucketing; SDKs must not bucket locally.
+
+| Purpose | Method and path | Body / query | Response |
+|---|---|---|---|
+| Assign a user to an experiment (sticky) | `POST /api/v1/tracking/assign` | `{experiment_key, user_id, context?}` | `{experiment_key, user_id, variant_id, variant_name, is_control, configuration}` |
+| Evaluate a flag | `GET /api/v1/feature-flags/evaluate/{flag_key}?user_id=…` | — | `{key, enabled, config}` |
+| All flags for a user | `GET /api/v1/feature-flags/user/{user_id}` | — | `{flag_key: boolean, …}` |
+| Track one event | `POST /api/v1/tracking/track` | `{event_type, event_name?, user_id, experiment_key? \| feature_flag_key?, value?, metadata?, timestamp?}` | stored event |
+| Track up to 100 events | `POST /api/v1/tracking/batch` | `{events: [...]}` | `{success_count, failure_count, errors}` |
+| A user's assignments | `GET /api/v1/tracking/assignments/{user_id}` | — | list |
+
+Conversions are matched to experiment metrics by `event_name` (exposures excluded), whatever `event_type`
+an SDK sends. Full request/response examples: [API Specs](api/specs.md#tracking-api-sdk). Per-IP rate
+limit for these paths: `SDK_RATE_LIMIT_PER_MINUTE` (default 6000/min).
+
+## SDK status (2026-09-11)
+
+| SDK | Location | Status against the contract above |
+|---|---|---|
+| React | `sdk/react` | **Verified end to end** (v1.1; the ShopLab demo runs on it). See [React SDK](sdk/react.md). |
+| Python, JavaScript | `sdk/python`, `sdk/js` | Placeholders only (no client code); the examples below describe the intended API, not shipped code. |
+| Go, Java, iOS, Android, Flutter, React Native, Edge, .NET, Elixir, Ruby, PHP | `sdk/*` | Ship consistent-hash bucketing and pass the cross-SDK hash contract tests, but still call `/api/v1/events`, `/api/v1/assignments` or `/api/v1/experiments/{key}/assign`, which the backend does not serve. They need the same endpoint rewiring the React SDK received before they work against this API. |
+
+Until an SDK is marked verified, integrate with the raw HTTP contract above (any HTTP client works).
 
 ---
 
@@ -154,24 +183,41 @@ await client.track('user-123', 'checkout_completed', { value: 49.99 });
 
 ### React Integration
 
+Use the dedicated React SDK (`sdk/react`, verified end to end). Full reference: [React SDK](sdk/react.md).
+
 ```tsx
-import { useExperiment, useFeatureFlag } from '@experimentation/sdk/react';
+import {
+  ExperimentationProvider,
+  useExperiment,
+  useFeatureFlag,
+  useTrackEvent,
+} from '@experimentation-platform/react-sdk';
 
-function CheckoutButton() {
-  const { variant, loading } = useExperiment('checkout-cta', {
-    userId: currentUser.id,
-    attributes: { plan: currentUser.plan },
-  });
-
-  if (loading) return <DefaultButton />;
-
-  return variant === 'treatment' ? <GreenButton /> : <DefaultButton />;
+function App() {
+  return (
+    <ExperimentationProvider
+      config={{ apiKey: process.env.NEXT_PUBLIC_EXPERIMENTLY_API_KEY!, baseUrl: 'http://localhost:8000' }}
+      user={{ userId: currentUser.id, attributes: { plan: currentUser.plan } }}
+    >
+      <CheckoutButton />
+    </ExperimentationProvider>
+  );
 }
 
-function SettingsPanel() {
-  const darkMode = useFeatureFlag('dark-mode', { userId: currentUser.id });
+function CheckoutButton() {
+  const { variantKey, configuration, loading } = useExperiment('checkout-cta');   // POST /tracking/assign
+  const darkMode = useFeatureFlag('dark-mode');                                    // GET /feature-flags/evaluate/dark-mode
+  const track = useTrackEvent();
 
-  return <Panel theme={darkMode ? 'dark' : 'light'} />;
+  if (loading) return <DefaultButton />;
+  return (
+    <button
+      style={{ background: (configuration?.color as string) ?? '#0f172a' }}
+      onClick={() => track('purchase', { plan: currentUser.plan }, { value: 49 })}  // fans out to every assigned experiment
+    >
+      {variantKey === 'treatment' ? 'Buy now' : 'Add to cart'}
+    </button>
+  );
 }
 ```
 
@@ -409,268 +455,20 @@ experimentation:
 
 ## React SDK
 
-### Installation
+The React SDK is the one SDK verified end to end against this backend (the ShopLab demo in `demo/shoplab`
+runs on it). Its full reference — provider, hooks, HOC, SSR client, types and the exact backend calls — lives
+in [docs/sdk/react.md](sdk/react.md); `sdk/react/README.md` is the package README.
 
-```bash
-npm install @experimentation/react-sdk
-# or
-yarn add @experimentation/react-sdk
-```
+Highlights:
 
-### Quick Start — Provider Setup
-
-Wrap your application (or the subtree that needs experimentation) with `ExperimentationProvider`:
-
-```tsx
-import React from 'react';
-import { ExperimentationProvider } from '@experimentation/react-sdk';
-
-function App() {
-  return (
-    <ExperimentationProvider
-      apiUrl="https://your-platform.example.com"
-      apiKey="your-api-key"
-      userId="user-123"
-      userAttributes={{ country: 'US', plan: 'pro' }}
-    >
-      <YourApplication />
-    </ExperimentationProvider>
-  );
-}
-
-export default App;
-```
-
-### Hooks Reference
-
-#### `useFeatureFlag(flagKey, defaultValue?)`
-
-Evaluates a single feature flag for the current user. Returns the flag's boolean state. Falls back to `defaultValue` (default: `false`) while loading or on error.
-
-```tsx
-import { useFeatureFlag } from '@experimentation/react-sdk';
-
-function SettingsPanel() {
-  const darkMode = useFeatureFlag('dark-mode', false);
-
-  return <Panel theme={darkMode ? 'dark' : 'light'} />;
-}
-```
-
-#### `useExperiment(experimentKey)`
-
-Returns the variant assignment and loading state for an experiment.
-
-```tsx
-import { useExperiment } from '@experimentation/react-sdk';
-
-function CheckoutButton() {
-  const { variant, loading, error } = useExperiment('checkout-button-color');
-
-  if (loading) return <DefaultButton />;
-  if (error) return <DefaultButton />;
-
-  return variant === 'green' ? <GreenButton /> : <DefaultButton />;
-}
-```
-
-#### `useTrackEvent()`
-
-Returns a `trackEvent` function for recording conversion events. The function is stable across renders.
-
-```tsx
-import { useTrackEvent } from '@experimentation/react-sdk';
-
-function PurchaseButton({ amount }: { amount: number }) {
-  const trackEvent = useTrackEvent();
-
-  const handleClick = async () => {
-    await trackEvent('purchase_completed', amount);
-  };
-
-  return <button onClick={handleClick}>Buy Now</button>;
-}
-```
-
-Signature:
-
-```ts
-trackEvent(eventKey: string, value?: number, properties?: Record<string, unknown>): Promise<void>
-```
-
-#### `useVariant(experimentKey, variantKey)`
-
-Returns `true` if the current user is assigned to the specified variant of an experiment. Useful for conditional rendering without an explicit switch statement.
-
-```tsx
-import { useVariant } from '@experimentation/react-sdk';
-
-function HeroBanner() {
-  const isNewHero = useVariant('hero-image-test', 'new-hero');
-
-  return isNewHero ? <NewHeroBanner /> : <ClassicHeroBanner />;
-}
-```
-
-#### `useMultipleFlags(flagKeys)`
-
-Evaluates multiple feature flags in a single call. Returns a map of `flagKey → boolean` and a shared `loading` state, avoiding multiple round-trips.
-
-```tsx
-import { useMultipleFlags } from '@experimentation/react-sdk';
-
-function FeatureSuite() {
-  const { flags, loading } = useMultipleFlags([
-    'dark-mode',
-    'new-checkout',
-    'beta-dashboard',
-  ]);
-
-  if (loading) return <Spinner />;
-
-  return (
-    <div>
-      {flags['dark-mode'] && <DarkModeToggle />}
-      {flags['new-checkout'] && <NewCheckoutFlow />}
-      {flags['beta-dashboard'] && <BetaDashboard />}
-    </div>
-  );
-}
-```
-
-### `withExperimentation` Higher-Order Component
-
-Use the HOC to inject experimentation props into class components or when you prefer a HOC pattern over hooks:
-
-```tsx
-import { withExperimentation } from '@experimentation/react-sdk';
-
-interface OwnProps {
-  productId: string;
-}
-
-interface InjectedProps {
-  variant: string;
-  isFeatureEnabled: (flagKey: string) => boolean;
-  trackEvent: (eventKey: string, value?: number) => void;
-}
-
-type Props = OwnProps & InjectedProps;
-
-class ProductCard extends React.Component<Props> {
-  handleAddToCart = () => {
-    this.props.trackEvent('add_to_cart', 1);
-  };
-
-  render() {
-    const { variant, isFeatureEnabled } = this.props;
-    const showNewLayout = isFeatureEnabled('new-product-layout');
-
-    return (
-      <div className={showNewLayout ? 'card-v2' : 'card-v1'}>
-        {variant === 'treatment' && <PriceHighlight />}
-        <button onClick={this.handleAddToCart}>Add to Cart</button>
-      </div>
-    );
-  }
-}
-
-export default withExperimentation(ProductCard, {
-  experimentKey: 'product-card-layout',
-});
-```
-
-### SSR / Next.js Support
-
-For server-side rendering, use the `ServerClient` to evaluate flags and experiments on the server before hydration. This prevents layout shift and ensures consistent rendering.
-
-```ts
-// app/layout.tsx (Next.js App Router)
-import { ServerClient } from '@experimentation/react-sdk/server';
-
-export default async function RootLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
-  const serverClient = new ServerClient({
-    apiUrl: process.env.EXPERIMENTATION_API_URL!,
-    apiKey: process.env.EXPERIMENTATION_API_KEY!,
-  });
-
-  // Pre-fetch flags for the request's user (from session/cookie)
-  const userId = await getUserIdFromSession();
-  const flags = await serverClient.getAllFlags(userId, {
-    country: 'US',
-    plan: 'pro',
-  });
-
-  return (
-    <html>
-      <body>
-        <ExperimentationProvider
-          apiUrl={process.env.NEXT_PUBLIC_EXPERIMENTATION_API_URL!}
-          apiKey={process.env.NEXT_PUBLIC_EXPERIMENTATION_API_KEY!}
-          userId={userId}
-          initialFlags={flags}  // Hydrate client with server-fetched values
-        >
-          {children}
-        </ExperimentationProvider>
-      </body>
-    </html>
-  );
-}
-```
-
-**Pages Router** (`getServerSideProps`):
-
-```ts
-// pages/checkout.tsx
-import { ServerClient } from '@experimentation/react-sdk/server';
-import type { GetServerSideProps } from 'next';
-
-export const getServerSideProps: GetServerSideProps = async (context) => {
-  const serverClient = new ServerClient({
-    apiUrl: process.env.EXPERIMENTATION_API_URL!,
-    apiKey: process.env.EXPERIMENTATION_API_KEY!,
-  });
-
-  const userId = context.req.cookies['user_id'] ?? 'anonymous';
-  const variant = await serverClient.getVariant('checkout-flow', userId, {});
-  const flags = await serverClient.getAllFlags(userId, {});
-
-  return {
-    props: {
-      variant,
-      initialFlags: flags,
-    },
-  };
-};
-
-export default function CheckoutPage({
-  variant,
-  initialFlags,
-}: {
-  variant: string;
-  initialFlags: Record<string, boolean>;
-}) {
-  return (
-    <ExperimentationProvider initialFlags={initialFlags} userId="...">
-      {variant === 'express' ? <ExpressCheckout /> : <StandardCheckout />}
-    </ExperimentationProvider>
-  );
-}
-```
-
-**`ServerClient` API**:
-
-| Method | Signature | Description |
-|---|---|---|
-| `getVariant` | `(experimentKey, userId, attributes) => Promise<string>` | Returns the assigned variant key |
-| `isFeatureEnabled` | `(flagKey, userId, attributes) => Promise<boolean>` | Returns the flag's boolean state |
-| `getAllFlags` | `(userId, attributes) => Promise<Record<string, boolean>>` | Returns all flags for pre-hydration |
-
----
+- `ExperimentationProvider` takes `config={{ apiKey, baseUrl }}` and `user={{ userId, attributes }}`.
+- `useExperiment(key)` → `{ variantKey, variantName, variantId, isControl, configuration, loading, error }`
+  via `POST /api/v1/tracking/assign` (sticky on the server).
+- `useFeatureFlag(key)` → `{ isEnabled, variant, config, loading, error }` via
+  `GET /api/v1/feature-flags/evaluate/{key}?user_id=`; `useVariant` and `useMultipleFlags` build on it.
+- `useTrackEvent()` → `track(eventName, properties?, { experimentKey?, featureFlagKey?, value? })`; without a
+  key the event fans out to every experiment the user is assigned to.
+- `ServerClient` (from `@experimentation-platform/react-sdk/ssr`) offers the same calls for Node/SSR and never throws.
 
 ## API Key Authentication
 

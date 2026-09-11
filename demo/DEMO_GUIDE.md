@@ -209,13 +209,13 @@ Run pieces by hand: `python backend/scripts/seed_shoplab.py` (seeds experiments,
 | Page | URL |
 |------|-----|
 | ShopLab storefront | http://localhost:3200 |
-| Home | http://localhost:3000 |
-| Feature Flags | http://localhost:3000/feature-flags |
-| Experiments | http://localhost:3000/experiments |
-| Results (Hero) | http://localhost:3000/results/homepage_hero_copy |
-| MAB | http://localhost:3000/experiments/recommendation_algorithm |
-| Audit | http://localhost:3000/admin/audit |
-| Users/RBAC | http://localhost:3000/admin/users |
+| Home | http://localhost:3100 |
+| Feature Flags | http://localhost:3100/feature-flags |
+| Experiments | http://localhost:3100/experiments |
+| Results (Hero) | http://localhost:3100/results/homepage_hero_copy |
+| MAB | http://localhost:3100/experiments/recommendation_algorithm |
+| Audit | http://localhost:3100/admin/audit |
+| Users/RBAC | http://localhost:3100/admin/users |
 | API Docs | http://localhost:8000/docs |
 | Health | http://localhost:8000/health |
 

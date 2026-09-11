@@ -98,8 +98,12 @@ Built using modern, scalable architecture leveraging AWS services:
 Interested in using this platform for your organization?
 
 1. **Explore the Public Preview**: See [sample audit logs, metrics, and examples](public-preview/)
-2. **Review the Documentation**: Check the [docs](docs/) directory for comprehensive guides
-3. **Run Locally**: Follow the setup instructions in CLAUDE.md for local development
+2. **Run the demo**: `./demo/setup-local.sh` starts Postgres and Redis, seeds demo data, and launches the
+   dashboard (http://localhost:3100), the API (http://localhost:8000) and the **ShopLab** storefront
+   (http://localhost:3200) — a small e-commerce site running five live experiments through the React SDK,
+   with a traffic simulator keeping the dashboards moving. Walkthrough: [demo/DEMO_GUIDE.md](demo/DEMO_GUIDE.md)
+3. **Review the Documentation**: Check the [docs](docs/) directory for comprehensive guides
+4. **Run Locally**: Follow the setup instructions in CLAUDE.md for local development
 
 ### For Deployment
 
