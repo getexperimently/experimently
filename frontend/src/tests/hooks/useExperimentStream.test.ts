@@ -151,6 +151,14 @@ describe('useExperimentStream', () => {
   it('sets error status on WebSocket error', async () => {
     const { result } = renderHook(() => useExperimentStream('exp-1'));
 
+    // The mock schedules its simulated `onopen` with setTimeout(0). Let that
+    // fire first, otherwise it can land after the error below and flip the
+    // status back to "connected" (this made the test flaky in CI).
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(result.current.status).toBe('connected');
+
     await act(async () => {
       wsInstances[0].onerror?.();
     });
