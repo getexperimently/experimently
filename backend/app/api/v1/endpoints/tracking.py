@@ -8,6 +8,7 @@ in experiments and record user interactions.
 
 from typing import Dict, Any, Optional, List
 from datetime import datetime, timezone
+import hashlib
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Path, Body, status
@@ -16,6 +17,7 @@ from sqlalchemy.orm import Session
 from backend.app.api import deps
 from backend.app.models.experiment import Experiment, ExperimentStatus
 from backend.app.models.assignment import Assignment
+from backend.app.models.bandit_state import BanditState
 from backend.app.models.event import Event, EventType
 from backend.app.models.feature_flag import FeatureFlag, FeatureFlagStatus
 from backend.app.schemas.tracking import (
@@ -51,6 +53,74 @@ def _event_response(event: Event) -> EventResponse:
         created_at=event.created_at,
         updated_at=event.updated_at or datetime.now(timezone.utc),
     )
+
+
+def _bandit_weight(raw: Any) -> float:
+    """Extract a non-negative weight from a BanditState.variant_weights entry.
+
+    The scheduler stores ``{"weight": float, "successes": ..., "pulls": ...}``
+    per variant; plain numeric values are accepted as well.
+    """
+    if isinstance(raw, dict):
+        raw = raw.get("weight", 0.0)
+    try:
+        weight = float(raw or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+    return weight if weight > 0.0 else 0.0
+
+
+def _select_bandit_variant(
+    experiment: Experiment,
+    bandit_state: Optional[BanditState],
+    user_id: str,
+) -> Optional[uuid.UUID]:
+    """Pick a variant for a *new* user according to the bandit weights.
+
+    Deterministic per ``(user_id, experiment.id)``: the user is hashed into a
+    bucket in ``[0, 1)`` and the bucket is looked up in the cumulative
+    distribution of the normalised weights, so repeated calls for the same
+    user return the same variant before the sticky assignment row exists.
+
+    Variants whose weight is missing or ``0`` receive no traffic.  Returns
+    ``None`` (meaning: use the default traffic-allocation hashing) when the
+    experiment is fixed-allocation, when there is no bandit state, or when
+    every weight is zero.
+    """
+    if experiment is None:
+        return None
+    if (getattr(experiment, "optimization_type", "fixed") or "fixed") == "fixed":
+        return None
+    if bandit_state is None or not bandit_state.variant_weights:
+        return None
+
+    raw_weights = bandit_state.variant_weights
+    if not isinstance(raw_weights, dict):
+        return None
+
+    # Stable ordering so the cumulative walk is reproducible across sessions.
+    variants = sorted(experiment.variants or [], key=lambda v: str(v.id))
+    weighted = [
+        (variant.id, _bandit_weight(raw_weights.get(str(variant.id))))
+        for variant in variants
+    ]
+    weighted = [(vid, w) for vid, w in weighted if w > 0.0]
+    total = sum(w for _, w in weighted)
+    if not weighted or total <= 0.0:
+        return None
+
+    digest = hashlib.md5(
+        f"{user_id}:{experiment.id}:bandit".encode(), usedforsecurity=False
+    ).hexdigest()
+    bucket = int(digest, 16) % 10_000 / 10_000
+
+    cumulative = 0.0
+    for variant_id, weight in weighted:
+        cumulative += weight / total
+        if bucket < cumulative:
+            return variant_id
+    # Floating-point tail: bucket landed at/after the last threshold.
+    return weighted[-1][0]
 
 
 @router.get("/")
@@ -118,12 +188,27 @@ async def assign_user_to_experiment(
     # Create assignment service
     assignment_service = AssignmentService(db)
 
+    # Multi-armed bandit experiments: route *new* users according to the
+    # latest BanditState weights.  Existing (sticky) assignments always win
+    # because assign_user returns the stored row before using the override.
+    override_variant_id: Optional[uuid.UUID] = None
+    if (experiment.optimization_type or "fixed") != "fixed":
+        bandit_state = (
+            db.query(BanditState)
+            .filter(BanditState.experiment_id == experiment.id)
+            .first()
+        )
+        override_variant_id = _select_bandit_variant(
+            experiment, bandit_state, request.user_id
+        )
+
     try:
         # Attempt to assign the user
         assignment_data = assignment_service.assign_user(
             user_id=request.user_id,
             experiment_id=str(experiment.id),
             context=request.context,
+            override_variant_id=override_variant_id,
         )
 
         # Get the variant

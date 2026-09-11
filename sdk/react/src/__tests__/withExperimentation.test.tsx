@@ -3,7 +3,7 @@ import React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import { ExperimentationProvider } from '../context/ExperimentationProvider';
 import { withExperimentation } from '../hoc/withExperimentation';
-import { FeatureFlagEvaluation, SdkConfig, UserContext, FeatureFlag } from '../client/types';
+import { FeatureFlagEvaluation, SdkConfig, UserContext, FeatureFlagEvaluateResponse } from '../client/types';
 
 const config: SdkConfig = {
   apiKey: 'test-key',
@@ -12,27 +12,19 @@ const config: SdkConfig = {
 
 const defaultUser: UserContext = { userId: 'user-1' };
 
-const enabledFlag: FeatureFlag = {
-  id: 'f1',
+const enabledFlag: FeatureFlagEvaluateResponse = { key: 'my-flag', enabled: true, config: null };
+const disabledFlag: FeatureFlagEvaluateResponse = { key: 'my-flag', enabled: false, config: null };
+const variantFlag: FeatureFlagEvaluateResponse = {
   key: 'my-flag',
-  name: 'My Flag',
   enabled: true,
-  rolloutPercentage: 100,
+  config: { variant: 'treatment', headline: 'Hello' },
 };
 
-const disabledFlag: FeatureFlag = {
-  id: 'f2',
-  key: 'my-flag',
-  name: 'My Flag',
-  enabled: false,
-  rolloutPercentage: 0,
-};
-
-function makeFetchMock(flag: FeatureFlag, status = 200): jest.Mock {
+function makeFetchMock(body: unknown, status = 200): jest.Mock {
   const mock = jest.fn().mockResolvedValue({
     ok: status >= 200 && status < 300,
     status,
-    json: () => Promise.resolve(flag),
+    json: () => Promise.resolve(body),
   });
   global.fetch = mock;
   return mock;
@@ -52,28 +44,27 @@ afterEach(() => {
 
 // ─── Test component ───────────────────────────────────────────────────────────
 
-// OwnProps are the props the consumer passes (excluding the injected flagEvaluation)
 interface OwnProps {
   label: string;
 }
 
-// Full props including the injected prop from the HOC
 interface TestComponentProps extends OwnProps {
   flagEvaluation: FeatureFlagEvaluation | null;
 }
 
 function TestComponent({ flagEvaluation, label }: TestComponentProps) {
+  const headline = (flagEvaluation?.config as { headline?: string } | null)?.headline;
   return (
     <div>
       <span data-testid="label">{label}</span>
       <span data-testid="loading">{flagEvaluation?.loading ? 'loading' : 'done'}</span>
       <span data-testid="enabled">{flagEvaluation?.isEnabled ? 'enabled' : 'disabled'}</span>
       <span data-testid="variant">{flagEvaluation?.variant ?? 'null'}</span>
+      <span data-testid="headline">{headline ?? 'none'}</span>
     </div>
   );
 }
 
-// The HOC strips flagEvaluation from the outward-facing props
 const WrappedTestComponent = withExperimentation(TestComponent, 'my-flag');
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
@@ -85,45 +76,63 @@ describe('withExperimentation HOC', () => {
     expect(screen.getByTestId('label')).toHaveTextContent('test');
   });
 
-  it('flagEvaluation is null during initial loading phase', () => {
+  it('flagEvaluation reports loading during the initial evaluation', () => {
     global.fetch = jest.fn().mockReturnValue(new Promise(() => {})); // never resolves
     renderWithProvider(<WrappedTestComponent label="loading-test" />);
-    // During loading, flagEvaluation.loading should be true
     expect(screen.getByTestId('loading')).toHaveTextContent('loading');
+    expect(screen.getByTestId('enabled')).toHaveTextContent('disabled');
   });
 
-  it('passes through all original props to the wrapped component', () => {
+  it('passes through all original props to the wrapped component', async () => {
     makeFetchMock(enabledFlag);
     renderWithProvider(<WrappedTestComponent label="my-custom-label" />);
     expect(screen.getByTestId('label')).toHaveTextContent('my-custom-label');
+    await waitFor(() => expect(screen.getByTestId('loading')).toHaveTextContent('done'));
+    expect(screen.getByTestId('label')).toHaveTextContent('my-custom-label');
   });
 
-  it('flagEvaluation has variant when flag is loaded and enabled', async () => {
+  it('evaluates the configured flag key for the provider user', async () => {
+    const fetchMock = makeFetchMock(enabledFlag);
+    renderWithProvider(<WrappedTestComponent label="url" />);
+    await waitFor(() => expect(screen.getByTestId('loading')).toHaveTextContent('done'));
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      'https://api.example.com/api/v1/feature-flags/evaluate/my-flag?user_id=user-1'
+    );
+  });
+
+  it('flagEvaluation has variant "on" when the flag is loaded and enabled', async () => {
     makeFetchMock(enabledFlag);
     renderWithProvider(<WrappedTestComponent label="enabled-test" />);
-    await waitFor(() => {
-      expect(screen.getByTestId('loading')).toHaveTextContent('done');
-    });
+    await waitFor(() => expect(screen.getByTestId('loading')).toHaveTextContent('done'));
     expect(screen.getByTestId('enabled')).toHaveTextContent('enabled');
     expect(screen.getByTestId('variant')).toHaveTextContent('on');
   });
 
-  it('works correctly with an enabled flag', async () => {
-    makeFetchMock(enabledFlag);
-    renderWithProvider(<WrappedTestComponent label="enabled" />);
-    await waitFor(() => {
-      expect(screen.getByTestId('loading')).toHaveTextContent('done');
-    });
-    expect(screen.getByTestId('enabled')).toHaveTextContent('enabled');
+  it('injects the server config and config.variant', async () => {
+    makeFetchMock(variantFlag);
+    renderWithProvider(<WrappedTestComponent label="config" />);
+    await waitFor(() => expect(screen.getByTestId('loading')).toHaveTextContent('done'));
+    expect(screen.getByTestId('variant')).toHaveTextContent('treatment');
+    expect(screen.getByTestId('headline')).toHaveTextContent('Hello');
   });
 
   it('works correctly with a disabled flag', async () => {
     makeFetchMock(disabledFlag);
     renderWithProvider(<WrappedTestComponent label="disabled" />);
-    await waitFor(() => {
-      expect(screen.getByTestId('loading')).toHaveTextContent('done');
-    });
+    await waitFor(() => expect(screen.getByTestId('loading')).toHaveTextContent('done'));
     expect(screen.getByTestId('enabled')).toHaveTextContent('disabled');
     expect(screen.getByTestId('variant')).toHaveTextContent('null');
+  });
+
+  it('reports the flag as disabled when evaluation fails', async () => {
+    makeFetchMock({}, 500);
+    renderWithProvider(<WrappedTestComponent label="error" />);
+    await waitFor(() => expect(screen.getByTestId('loading')).toHaveTextContent('done'));
+    expect(screen.getByTestId('enabled')).toHaveTextContent('disabled');
+    expect(screen.getByTestId('variant')).toHaveTextContent('null');
+  });
+
+  it('sets a descriptive displayName', () => {
+    expect(WrappedTestComponent.displayName).toBe('withExperimentation(TestComponent)');
   });
 });

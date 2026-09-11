@@ -22,6 +22,7 @@ from backend.app.middleware.rate_limiter import (
     RateLimitMiddleware,
     RATE_LIMIT_CONFIG,
     DEFAULT_RATE_LIMIT,
+    resolve_rate_limit,
     _get_client_ip,
 )
 
@@ -282,10 +283,27 @@ class TestRateLimitConfig:
             assert limit < default_limit, f"{path} should have stricter limit than default"
 
     def test_tracking_endpoints_have_higher_limits(self):
-        for path in ["/api/v1/tracking/assign", "/api/v1/tracking/track"]:
-            limit, _ = RATE_LIMIT_CONFIG[path]
-            default_limit, _ = DEFAULT_RATE_LIMIT
+        default_limit, _ = DEFAULT_RATE_LIMIT
+        for path in [
+            "/api/v1/tracking/assign",
+            "/api/v1/tracking/track",
+            "/api/v1/tracking/batch",
+            "/api/v1/tracking/assignments/user-1",
+            "/api/v1/feature-flags/evaluate/my-flag",
+            "/api/v1/feature-flags/user/user-1",
+        ]:
+            limit, window = resolve_rate_limit(path)
             assert limit >= default_limit, f"{path} should have higher limit for SDK traffic"
+            assert window == 60
+
+    def test_sdk_limit_is_configurable(self):
+        assert resolve_rate_limit("/api/v1/tracking/batch", 42) == (42, 60)
+
+    def test_exact_config_wins_over_prefix_and_default(self):
+        assert resolve_rate_limit("/api/v1/auth/token") == RATE_LIMIT_CONFIG["/api/v1/auth/token"]
+        assert resolve_rate_limit("/api/v1/experiments/") == DEFAULT_RATE_LIMIT
+        # The dashboard's feature-flag CRUD routes are not SDK traffic
+        assert resolve_rate_limit("/api/v1/feature-flags/") == DEFAULT_RATE_LIMIT
 
     def test_default_rate_limit(self):
         limit, window = DEFAULT_RATE_LIMIT

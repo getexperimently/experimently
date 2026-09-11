@@ -236,8 +236,10 @@ class TestRolloutScheduler:
         mock_pending_stage_query.all.return_value = [mock_pending_stage]
 
         # Mock the completion check to return True (stage eligible for completion)
+        # and the next stage's own trigger as satisfied.
         scheduler = RolloutScheduler(interval_minutes=1)
         scheduler._is_stage_eligible_for_completion = MagicMock(return_value=True)
+        scheduler._is_stage_eligible_for_activation = MagicMock(return_value=True)
         scheduler._activate_stage = AsyncMock(return_value=True)
 
         # Process schedules

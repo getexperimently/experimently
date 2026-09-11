@@ -143,7 +143,7 @@ class ResultsStreamingService:
         # Try to pull per-variant counts from DB
         try:
             from backend.app.models.assignment import Assignment
-            from backend.app.models.event import Event, EventType
+            from backend.app.models.event import Event
 
             # Assignment counts per variant
             assignment_rows = (
@@ -164,12 +164,14 @@ class ResultsStreamingService:
                     experiment.metric_definitions[0] if experiment.metric_definitions else None,
                 )
 
+            from backend.app.services.event_matching import conversion_event_filter
+
             conv_filter = [
                 Event.experiment_id == experiment_id,
-                Event.event_type == EventType.CONVERSION.value,
+                conversion_event_filter(
+                    primary_metric.event_name if primary_metric else None
+                ),
             ]
-            if primary_metric:
-                conv_filter.append(Event.event_name == primary_metric.event_name)
 
             conversion_rows = (
                 db.query(Event.variant_id, func.count(Event.id).label("cnt"))
