@@ -74,7 +74,7 @@ REDIS_PORT=6379
 SECRET_KEY=demo_secret_key_change_in_production_32chars
 ENVIRONMENT=development
 LOG_LEVEL=INFO
-CORS_ORIGINS=http://localhost:3000,http://localhost:8000
+CORS_ORIGINS=http://localhost:3100,http://localhost:3200,http://localhost:8000
 FIRST_SUPERUSER=admin@demo.com
 FIRST_SUPERUSER_PASSWORD=Demo1234!
 AUDIT_HMAC_KEY=demo_hmac_key_change_in_production
@@ -218,7 +218,7 @@ log "Installing frontend dependencies..."
 cd "$REPO_ROOT/frontend"
 npm install --silent
 
-log "Starting frontend on port 3000..."
+log "Starting frontend on port 3100..."
 nohup npm run dev \
     > "$REPO_ROOT/demo/.logs/frontend.log" 2>&1 &
 echo $! > "$REPO_ROOT/demo/.pids/frontend.pid"
@@ -279,7 +279,7 @@ echo ""
 echo -e "${GREEN}${BOLD}╔════════════════════════════════════════╗${NC}"
 echo -e "${GREEN}${BOLD}║  Experimently Demo — Ready!            ║${NC}"
 echo -e "${GREEN}${BOLD}║                                        ║${NC}"
-echo -e "${GREEN}${BOLD}║  Frontend:   http://localhost:3000     ║${NC}"
+echo -e "${GREEN}${BOLD}║  Frontend:   http://localhost:3100     ║${NC}"
 if [[ "$SHOPLAB_STARTED" == "1" ]]; then
 echo -e "${GREEN}${BOLD}║  ShopLab:    http://localhost:3200     ║${NC}"
 fi
