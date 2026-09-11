@@ -13,6 +13,9 @@ jobs:
   deploy-dev:
     name: Deploy to Development
     runs-on: ubuntu-latest
+    # Deploys need the AWS OIDC role, which pull requests cannot assume.
+    # Only run on pushes to main; PRs are validated by the test/gate workflows.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
       id-token: write
       contents: read

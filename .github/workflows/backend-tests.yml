@@ -17,6 +17,7 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     strategy:
       matrix:
         python-version: ["3.11"]
@@ -68,15 +69,34 @@ jobs:
 
     - name: Run tests
       env:
-        TEST_DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/experimentation_test"
+        # Models resolve their schema from APP_ENV/TESTING at import time, so
+        # these must be set before pytest starts (the conftest sets them too
+        # late for that). The test conftest builds its own per-process
+        # database from POSTGRES_*; it must not be pointed elsewhere.
+        APP_ENV: test
+        TESTING: "true"
+        POSTGRES_SERVER: localhost
+        POSTGRES_PORT: 5432
+        POSTGRES_USER: postgres
+        POSTGRES_PASSWORD: postgres
+      # Runs sequentially (no xdist): every other workflow runs the suites in
+      # a single process, and the parallel run never completed on CI.
+      # backend/tests/realistic and backend/tests/performance need a running
+      # platform (they are driven by nightly-qa / performance-tests), so only
+      # the self-contained suites run here.
       run: |
-        python -m pytest backend/tests/ \
-          --cov=backend \
+        python -m pytest \
+          backend/tests/unit \
+          backend/tests/integration \
+          backend/tests/smoke \
+          backend/tests/contract \
+          backend/tests/e2e \
+          --cov=backend.app \
           --cov-report=xml \
           --cov-report=term \
-          -v \
-          --junitxml=pytest.xml \
-          -n auto
+          -q --tb=short \
+          -o log_cli=false \
+          --junitxml=pytest.xml
 
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v4

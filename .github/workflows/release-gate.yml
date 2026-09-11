@@ -64,6 +64,11 @@ jobs:
   security-gate:
     name: Security Gate (Bandit + Gitleaks)
     runs-on: ubuntu-latest
+    # gitleaks-action lists the PR's commits via the API on pull_request
+    # events; the default token has no pull-requests scope, so grant it.
+    permissions:
+      contents: read
+      pull-requests: read
     steps:
       - uses: actions/checkout@v4
         with:

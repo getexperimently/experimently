@@ -236,7 +236,7 @@ class MutualExclusionService:
     def _normalized_hash(self, user_id: str, salt: str) -> float:
         """Hash user_id with salt and normalize to [0, 1)."""
         combined = f"{user_id}:{salt}".encode("utf-8")
-        hash_bytes = hashlib.md5(combined).digest()[:4]
+        hash_bytes = hashlib.md5(combined, usedforsecurity=False).digest()[:4]
         hash_int = struct.unpack("<I", hash_bytes)[0]
         return hash_int / (self.MAX_HASH_VALUE + 1)
 

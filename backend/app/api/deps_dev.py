@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from backend.app.models.user import User, UserRole
 from backend.app.api.deps import get_db
+from backend.app.core.security import get_password_hash
 
 oauth2_scheme_dev = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
@@ -52,7 +53,8 @@ def get_current_user_dev(
             role=UserRole.ADMIN,
             is_superuser=True,
             is_active=True,
-            hashed_password="$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW"  # "admin123"
+            # Hash computed at runtime so no credential hash lives in source.
+            hashed_password=get_password_hash("admin123"),
         )
         db.add(dev_user)
         db.commit()

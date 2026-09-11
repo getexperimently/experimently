@@ -64,6 +64,29 @@ def clear_schema_cache_fixture():
     yield
 
 
+@pytest.fixture(autouse=True)
+def _remove_flags_created_by_test(db_session: Session):
+    """Delete feature flags a test committed so they do not leak.
+
+    The shared per-process test database is not truncated between tests.
+    Flags created here use dict-shaped ``variants`` (the model column is free
+    JSONB) while the public list response expects a list, so a leaked row made
+    the integration "list feature flags" tests fail with a 500 when the whole
+    suite ran in one session.
+    """
+    existing_ids = {row[0] for row in db_session.query(FeatureFlag.id).all()}
+    yield
+    try:
+        db_session.rollback()
+        query = db_session.query(FeatureFlag)
+        if existing_ids:
+            query = query.filter(~FeatureFlag.id.in_(existing_ids))
+        query.delete(synchronize_session=False)
+        db_session.commit()
+    except Exception:
+        db_session.rollback()
+
+
 @pytest.fixture
 def test_user(db_session: Session) -> User:
     """Create a test user."""
@@ -670,7 +693,9 @@ class TestFeatureFlagEndpoints:
             assert "items" in data
             assert data["total"] > 0
             assert len(data["items"]) > 0
-            assert data["items"][0]["key"] == test_feature_flag.key
+            # Other test modules leave flags in the shared database, so look the
+            # fixture's flag up by key instead of assuming it is listed first.
+            assert test_feature_flag.key in {item["key"] for item in data["items"]}
         finally:
             # Restore the original functions
             crud_feature_flag.get_multi = original_get_multi
@@ -750,7 +775,9 @@ class TestFeatureFlagEndpoints:
             assert "items" in data
             assert data["total"] > 0
             assert len(data["items"]) > 0
-            assert data["items"][0]["key"] == test_feature_flag.key
+            # Other test modules leave flags in the shared database, so look the
+            # fixture's flag up by key instead of assuming it is listed first.
+            assert test_feature_flag.key in {item["key"] for item in data["items"]}
         finally:
             # Restore the original functions
             crud_feature_flag.get_multi = original_get_multi

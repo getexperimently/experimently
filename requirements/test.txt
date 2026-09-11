@@ -1,11 +1,4 @@
 -r base.txt
 
-# Testing
-pytest==7.4.2
-pytest-asyncio==0.21.1
-pytest-cov==4.1.0
-pytest-mock==3.11.1
-httpx==0.24.1
-faker==19.6.2
-factory-boy==3.3.0
-freezegun==1.2.2
+# All test dependencies (pytest, pytest-cov, moto, faker, ...) are pinned in
+# backend/requirements.txt so that CI and local runs use identical versions.

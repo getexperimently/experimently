@@ -97,8 +97,10 @@ def _compute_dimensional_breakdown(
     try:
         schema = get_schema_name()
 
-        # Pull distinct segment values for this dimension from event metadata
-        seg_val_q = text(
+        # Pull distinct segment values for this dimension from event metadata.
+        # `schema` comes from get_schema_name(), which only ever returns one of
+        # two literal identifiers; all request-derived values are bound params.
+        seg_val_q = text(  # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text
             f"""
             SELECT DISTINCT
                 COALESCE(
@@ -108,7 +110,7 @@ def _compute_dimensional_breakdown(
             FROM {schema}.events
             WHERE experiment_id = :exp_id
               AND event_metadata IS NOT NULL
-            """
+            """  # nosec B608 - schema is a fixed config identifier, not user input
         )
         seg_val_rows = db.execute(
             seg_val_q, {"dim_key": dimension, "exp_id": str(experiment_id)}
@@ -117,7 +119,7 @@ def _compute_dimensional_breakdown(
 
         for seg_val in segment_values:
             # Count assignments per variant for this segment
-            asgn_q = text(
+            asgn_q = text(  # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text
                 f"""
                 SELECT a.variant_id::text, COUNT(DISTINCT a.user_id) AS total
                 FROM {schema}.assignments a
@@ -131,7 +133,7 @@ def _compute_dimensional_breakdown(
                       'unknown'
                   ) = :seg_val
                 GROUP BY a.variant_id
-                """
+                """  # nosec B608 - schema is a fixed config identifier, not user input
             )
             asgn_rows = db.execute(
                 asgn_q,
@@ -139,7 +141,7 @@ def _compute_dimensional_breakdown(
             ).fetchall()
 
             # Count conversions per variant for this segment
-            conv_q = text(
+            conv_q = text(  # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text
                 f"""
                 SELECT variant_id::text, COUNT(*) AS conversions
                 FROM {schema}.events
@@ -151,7 +153,7 @@ def _compute_dimensional_breakdown(
                       'unknown'
                   ) = :seg_val
                 GROUP BY variant_id
-                """
+                """  # nosec B608 - schema is a fixed config identifier, not user input
             )
             conv_rows = db.execute(
                 conv_q,
