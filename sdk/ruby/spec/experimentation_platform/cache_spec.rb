@@ -50,6 +50,35 @@ RSpec.describe ExperimentationPlatform::Cache do
   end
 
   # -------------------------------------------------------------------------
+  # live_values (per-user listing used by the track fan-out)
+  # -------------------------------------------------------------------------
+  describe '#live_values' do
+    it 'returns the values of live entries whose key satisfies the block, in insertion order' do
+      cache.set([:flag, 'u1', 'a'], 'A')
+      cache.set([:flag, 'u2', 'x'], 'X')
+      cache.set([:flag, 'u1', 'b'], 'B')
+
+      result = cache.live_values { |key| key[0] == :flag && key[1] == 'u1' }
+      expect(result).to eq(%w[A B])
+    end
+
+    it 'returns an empty Array when nothing matches' do
+      cache.set('plain', 1)
+      expect(cache.live_values { |key| key.is_a?(Array) }).to eq([])
+    end
+
+    it 'skips and prunes expired entries' do
+      cache.set([:flag, 'u1', 'old'], 'OLD', ttl: 1)
+      cache.set([:flag, 'u1', 'new'], 'NEW', ttl: 60)
+
+      allow(Time).to receive(:now).and_return(Time.now + 2)
+
+      expect(cache.live_values { |key| key[1] == 'u1' }).to eq(['NEW'])
+      expect(cache.size).to eq(1)
+    end
+  end
+
+  # -------------------------------------------------------------------------
   # delete
   # -------------------------------------------------------------------------
   describe '#delete' do

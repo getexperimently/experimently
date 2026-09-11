@@ -1,15 +1,17 @@
 /**
  * Adapter-specific tests for Cloudflare Workers, Vercel Edge, and Deno Deploy.
  *
- * Tests are structured to run in Node.js (Jest) by mocking the platform-specific
- * APIs (KVNamespace, ExecutionContext, Deno.openKv, etc.).
+ * Tests run in Node.js (Jest) by mocking the platform-specific APIs
+ * (KVNamespace, ExecutionContext, Deno KV). `fetch` is mocked — no network.
  */
 
-import { CloudflareExperimentationClient, withExperimentation } from '../src/adapters/cloudflare';
+import { CloudflareExperimentationClient, CloudflareKvStore, withExperimentation } from '../src/adapters/cloudflare';
 import type { KVNamespace, ExecutionContext } from '../src/adapters/cloudflare';
-import { createEdgeMiddleware } from '../src/adapters/vercel';
-import { DenoExperimentationClient, createDenoHandler } from '../src/adapters/deno';
-import type { FeatureFlag, BootstrapResponse } from '../src/types';
+import { createEdgeMiddleware, extractUserId, evaluateFlagsForRequest } from '../src/adapters/vercel';
+import { DenoExperimentationClient, DenoKvStore, createDenoHandler } from '../src/adapters/deno';
+import type { DenoKv } from '../src/adapters/deno';
+import { EdgeExperimentationClient } from '../src/client';
+import type { Assignment, FlagEvaluation } from '../src/types';
 
 // ---------------------------------------------------------------------------
 // Global fetch mock
@@ -18,36 +20,64 @@ import type { FeatureFlag, BootstrapResponse } from '../src/types';
 const mockFetch = jest.fn();
 global.fetch = mockFetch;
 
-function makeFlag(key: string, enabled = true, rollout = 100): FeatureFlag {
-  return { key, enabled, rolloutPercentage: rollout };
+function jsonResponse(body: unknown, status = 200): Response {
+  return { ok: status >= 200 && status < 300, status, json: async () => body } as unknown as Response;
 }
 
-function mockBootstrap(flags: FeatureFlag[] = []): void {
-  const body: BootstrapResponse = {
-    flags,
-    experiments: [],
-    ttl_seconds: 60,
-    version: 'v1',
-  };
-  mockFetch.mockResolvedValueOnce({
-    ok: true,
-    status: 200,
-    json: async () => body,
-  });
+function flagBody(key: string, enabled = true): Record<string, unknown> {
+  return { key, enabled, config: null };
+}
+
+function assignBody(experimentKey: string, variant = 'treatment'): Record<string, unknown> {
+  return { experiment_key: experimentKey, user_id: 'u', variant_id: 'v', variant_name: variant, is_control: variant === 'control', configuration: null };
 }
 
 beforeEach(() => {
-  mockFetch.mockClear();
+  mockFetch.mockReset();
 });
 
 // ---------------------------------------------------------------------------
-// Cloudflare adapter tests
+// Cloudflare adapter
 // ---------------------------------------------------------------------------
 
-describe('CloudflareExperimentationClient', () => {
-  function makeKv(stored: Record<string, string> = {}): KVNamespace {
+describe('CloudflareKvStore', () => {
+  function makeKv(stored: Record<string, string> = {}) {
     const store = { ...stored };
-    return {
+    const puts: Array<{ key: string; value: string; options?: { expirationTtl?: number } }> = [];
+    const kv: KVNamespace = {
+      async get(key: string) {
+        return store[key] ?? null;
+      },
+      async put(key: string, value: string, options?: { expirationTtl?: number }) {
+        store[key] = value;
+        puts.push({ key, value, options });
+      },
+    };
+    return { kv, store, puts };
+  }
+
+  test('namespaces keys with "ep:" and rounds the TTL up to the 60 s minimum', async () => {
+    const { kv, puts } = makeKv({ 'ep:a': 'x' });
+    const store = new CloudflareKvStore(kv);
+    expect(await store.get('a')).toBe('x');
+    expect(await store.get('missing')).toBeNull();
+    await store.put('b', 'y', 15_000);
+    await store.put('c', 'z', 120_000);
+    expect(puts[0]).toEqual({ key: 'ep:b', value: 'y', options: { expirationTtl: 60 } });
+    expect(puts[1].options).toEqual({ expirationTtl: 120 });
+  });
+
+  test('an explicit kvTtlSeconds wins over the cache TTL', async () => {
+    const { kv, puts } = makeKv();
+    await new CloudflareKvStore(kv, 300).put('k', 'v', 1_000);
+    expect(puts[0].options).toEqual({ expirationTtl: 300 });
+  });
+});
+
+describe('CloudflareExperimentationClient', () => {
+  function makeKv(stored: Record<string, string> = {}) {
+    const store = { ...stored };
+    const kv: KVNamespace = {
       async get(key: string) {
         return store[key] ?? null;
       },
@@ -55,409 +85,306 @@ describe('CloudflareExperimentationClient', () => {
         store[key] = value;
       },
     };
+    return { kv, store };
   }
 
-  test('loads flags from KV when available', async () => {
-    const flags = [makeFlag('kv-flag')];
-    const bootstrapData: BootstrapResponse = {
-      flags,
-      experiments: [],
-      ttl_seconds: 300,
-      version: 'v1',
-    };
-    const kv = makeKv({ 'ep:bootstrap': JSON.stringify(bootstrapData) });
+  test('serves a flag cached in KV per user + key without calling the API', async () => {
+    const cached: FlagEvaluation = { key: 'kv-flag', enabled: true, config: { variant: 'b' } };
+    const { kv } = makeKv({ 'ep:flag:user-1:kv-flag': JSON.stringify(cached) });
+    const client = new CloudflareExperimentationClient({ apiKey: 'k', kvNamespace: kv });
 
-    const client = new CloudflareExperimentationClient({
-      apiKey: 'k',
-      kvNamespace: kv,
-    });
-
-    await client.loadFromKvOrApi();
-
-    // Should not have called fetch (KV hit)
+    expect(await client.evaluateFlag('kv-flag', 'user-1')).toEqual(cached);
     expect(mockFetch).not.toHaveBeenCalled();
-    expect(client.flagCount).toBe(1);
     expect(client.evaluateFlagSync('kv-flag', 'user-1')).toBe(true);
   });
 
-  test('falls back to API when KV is empty', async () => {
-    const kv = makeKv({}); // empty KV
-    mockBootstrap([makeFlag('api-flag')]);
-
-    const client = new CloudflareExperimentationClient({
-      apiKey: 'k',
-      baseUrl: 'http://api.test',
-      kvNamespace: kv,
-    });
-
-    await client.loadFromKvOrApi();
-
+  test('another user is not served from a different user\'s KV entry', async () => {
+    const { kv } = makeKv({ 'ep:flag:user-1:f': JSON.stringify({ key: 'f', enabled: true, config: null }) });
+    mockFetch.mockResolvedValueOnce(jsonResponse(flagBody('f', false)));
+    const client = new CloudflareExperimentationClient({ apiKey: 'k', baseUrl: 'http://api.test', kvNamespace: kv });
+    expect((await client.evaluateFlag('f', 'user-2')).enabled).toBe(false);
     expect(mockFetch).toHaveBeenCalledTimes(1);
-    expect(client.flagCount).toBe(1);
   });
 
-  test('falls back to API when KV has corrupt data', async () => {
-    const kv = makeKv({ 'ep:bootstrap': 'not-valid-json' });
-    mockBootstrap([makeFlag('fallback-flag')]);
+  test('falls back to the API on a KV miss and writes the result to KV', async () => {
+    const { kv, store } = makeKv();
+    mockFetch.mockResolvedValueOnce(jsonResponse(flagBody('api-flag')));
+    mockFetch.mockResolvedValueOnce(jsonResponse(assignBody('exp')));
+    const client = new CloudflareExperimentationClient({ apiKey: 'k', baseUrl: 'http://api.test', kvNamespace: kv });
 
-    const client = new CloudflareExperimentationClient({
-      apiKey: 'k',
-      baseUrl: 'http://api.test',
-      kvNamespace: kv,
-    });
+    await client.evaluateFlag('api-flag', 'user-1');
+    await client.getAssignment('exp', 'user-1');
 
-    await client.loadFromKvOrApi();
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    expect(mockFetch.mock.calls[0][0]).toBe('http://api.test/api/v1/feature-flags/evaluate/api-flag?user_id=user-1');
+    expect(mockFetch.mock.calls[1][0]).toBe('http://api.test/api/v1/tracking/assign');
+    expect(JSON.parse(store['ep:flag:user-1:api-flag'])).toEqual({ key: 'api-flag', enabled: true, config: null });
+    expect((JSON.parse(store['ep:assign:user-1:exp']) as Assignment).variantName).toBe('treatment');
+  });
 
+  test('falls back to the API when KV has corrupt data', async () => {
+    const { kv } = makeKv({ 'ep:flag:user-1:f': 'not-valid-json' });
+    mockFetch.mockResolvedValueOnce(jsonResponse(flagBody('f')));
+    const client = new CloudflareExperimentationClient({ apiKey: 'k', baseUrl: 'http://api.test', kvNamespace: kv });
+    expect((await client.evaluateFlag('f', 'user-1')).enabled).toBe(true);
     expect(mockFetch).toHaveBeenCalledTimes(1);
-    expect(client.flagCount).toBe(1);
   });
 
-  test('works without KV namespace (API only)', async () => {
-    mockBootstrap([makeFlag('no-kv-flag')]);
-
-    const client = new CloudflareExperimentationClient({
-      apiKey: 'k',
-      baseUrl: 'http://api.test',
-    });
-
-    await client.loadFromKvOrApi();
-    expect(client.flagCount).toBe(1);
+  test('works without a KV namespace (API only)', async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse(flagBody('no-kv-flag')));
+    const client = new CloudflareExperimentationClient({ apiKey: 'k', baseUrl: 'http://api.test' });
+    expect((await client.evaluateFlag('no-kv-flag', 'user-1')).enabled).toBe(true);
   });
 
-  test('refreshAndStore fetches from API and writes to KV', async () => {
-    const stored: Record<string, string> = {};
-    const kv: KVNamespace = {
-      async get(key: string) { return stored[key] ?? null; },
-      async put(key: string, value: string) { stored[key] = value; },
-    };
-
-    mockBootstrap([makeFlag('refresh-flag')]);
-
-    const client = new CloudflareExperimentationClient({
-      apiKey: 'k',
-      baseUrl: 'http://api.test',
-      kvNamespace: kv,
-    });
-
-    await client.refreshAndStore();
-
-    // KV should now have the bootstrap data
-    expect(stored['ep:bootstrap']).toBeDefined();
-    const parsed = JSON.parse(stored['ep:bootstrap']) as BootstrapResponse;
-    expect(parsed.flags).toHaveLength(1);
-    expect(parsed.flags[0].key).toBe('refresh-flag');
-  });
-
-  test('evaluateFlagSync works after KV load', async () => {
-    const flags = [makeFlag('kv-sync-flag', true, 100)];
-    const kv = makeKv({
-      'ep:bootstrap': JSON.stringify({ flags, experiments: [], ttl_seconds: 60, version: 'v' }),
-    });
-
-    const client = new CloudflareExperimentationClient({
-      apiKey: 'k',
-      kvNamespace: kv,
-    });
-    await client.loadFromKvOrApi();
-
-    expect(client.evaluateFlagSync('kv-sync-flag', 'user-123')).toBe(true);
-  });
-
-  test('refreshAndStore does not write to KV when no namespace configured', async () => {
-    mockBootstrap([]);
-    const client = new CloudflareExperimentationClient({
-      apiKey: 'k',
-      baseUrl: 'http://api.test',
-    });
-    // Should not throw
+  test('loadFromKvOrApi / refreshAndStore are deprecated no-ops', async () => {
+    const client = new CloudflareExperimentationClient({ apiKey: 'k', baseUrl: 'http://api.test' });
+    await expect(client.loadFromKvOrApi()).resolves.toBeUndefined();
     await expect(client.refreshAndStore()).resolves.toBeUndefined();
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 });
 
-// ---------------------------------------------------------------------------
-// withExperimentation HOF
-// ---------------------------------------------------------------------------
-
 describe('withExperimentation', () => {
   function makeCtx(): ExecutionContext {
-    return {
-      waitUntil: jest.fn(),
-      passThroughOnException: jest.fn(),
-    };
+    return { waitUntil: jest.fn(), passThroughOnException: jest.fn() };
   }
 
-  test('injects EP_CLIENT into env', async () => {
-    mockBootstrap([makeFlag('injected-flag')]);
-    // Second call for background refresh
-    mockBootstrap([makeFlag('injected-flag')]);
-
+  test('injects EP_CLIENT into env without any startup request', async () => {
     let capturedClient: unknown;
     const handler = jest.fn(async (_req: Request, env: Record<string, unknown>) => {
       capturedClient = env['EP_CLIENT'];
       return new Response('ok');
     });
 
-    const wrapped = withExperimentation(handler, {
-      apiKey: 'k',
-      baseUrl: 'http://api.test',
-    });
-
-    const request = new Request('http://localhost/');
-    const env: Record<string, unknown> = {};
-    const ctx = makeCtx();
-
-    await wrapped(request, env, ctx);
+    const wrapped = withExperimentation(handler, { apiKey: 'k', baseUrl: 'http://api.test' });
+    await wrapped(new Request('http://localhost/'), {}, makeCtx());
 
     expect(capturedClient).toBeInstanceOf(CloudflareExperimentationClient);
     expect(handler).toHaveBeenCalledTimes(1);
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 
-  test('calls ctx.waitUntil for background refresh', async () => {
-    mockBootstrap([]);
-    mockBootstrap([]); // background refresh
-
-    const handler = jest.fn(async () => new Response('ok'));
-    const wrapped = withExperimentation(handler, {
-      apiKey: 'k',
-      baseUrl: 'http://api.test',
-    });
-
-    const ctx = makeCtx();
-    await wrapped(new Request('http://localhost/'), {}, ctx);
-
-    expect((ctx.waitUntil as jest.Mock)).toHaveBeenCalledTimes(1);
+  test('the injected client talks to the contract endpoints', async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse(flagBody('f')));
+    const wrapped = withExperimentation(
+      async (_req, env) => {
+        const client = env['EP_CLIENT'] as CloudflareExperimentationClient;
+        const { enabled } = await client.evaluateFlag('f', 'user-1');
+        return new Response(String(enabled));
+      },
+      { apiKey: 'k', baseUrl: 'http://api.test' },
+    );
+    const response = await wrapped(new Request('http://localhost/'), {}, makeCtx());
+    expect(await response.text()).toBe('true');
+    expect(mockFetch.mock.calls[0][0]).toBe('http://api.test/api/v1/feature-flags/evaluate/f?user_id=user-1');
   });
 
-  test('custom clientEnvKey is used', async () => {
-    mockBootstrap([]);
-    mockBootstrap([]);
+  test('uses env.KV as the store when no kvNamespace is configured', async () => {
+    const stored: Record<string, string> = {
+      'ep:flag:user-1:f': JSON.stringify({ key: 'f', enabled: true, config: null }),
+    };
+    const kv: KVNamespace = {
+      async get(key: string) {
+        return stored[key] ?? null;
+      },
+      async put() {},
+    };
+    const wrapped = withExperimentation(
+      async (_req, env) => {
+        const client = env['EP_CLIENT'] as CloudflareExperimentationClient;
+        return new Response(String((await client.evaluateFlag('f', 'user-1')).enabled));
+      },
+      { apiKey: 'k', baseUrl: 'http://api.test' },
+    );
+    const response = await wrapped(new Request('http://localhost/'), { KV: kv }, makeCtx());
+    expect(await response.text()).toBe('true');
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
 
+  test('custom clientEnvKey is used and original env properties pass through', async () => {
     let capturedEnv: Record<string, unknown> = {};
     const handler = jest.fn(async (_req: Request, env: Record<string, unknown>) => {
       capturedEnv = env;
       return new Response('ok');
     });
+    const wrapped = withExperimentation(handler, { apiKey: 'k', baseUrl: 'http://api.test' }, 'MY_CLIENT');
+    await wrapped(new Request('http://localhost/'), { DB: 'my-db-binding', SECRET: 'shhh' }, makeCtx());
 
-    const wrapped = withExperimentation(handler, {
-      apiKey: 'k',
-      baseUrl: 'http://api.test',
-    }, 'MY_CLIENT');
-
-    await wrapped(new Request('http://localhost/'), {}, makeCtx());
-
-    expect(capturedEnv['MY_CLIENT']).toBeDefined();
-  });
-
-  test('passes original env properties through', async () => {
-    mockBootstrap([]);
-    mockBootstrap([]);
-
-    let capturedEnv: Record<string, unknown> = {};
-    const handler = jest.fn(async (_req: Request, env: Record<string, unknown>) => {
-      capturedEnv = env;
-      return new Response('ok');
-    });
-
-    const wrapped = withExperimentation(handler, { apiKey: 'k', baseUrl: 'http://api.test' });
-    const env = { DB: 'my-db-binding', SECRET: 'shhh' };
-
-    await wrapped(new Request('http://localhost/'), env, makeCtx());
-
+    expect(capturedEnv['MY_CLIENT']).toBeInstanceOf(CloudflareExperimentationClient);
     expect(capturedEnv['DB']).toBe('my-db-binding');
     expect(capturedEnv['SECRET']).toBe('shhh');
   });
 });
 
 // ---------------------------------------------------------------------------
-// Vercel Edge adapter tests
+// Vercel Edge adapter
 // ---------------------------------------------------------------------------
 
 describe('createEdgeMiddleware', () => {
-  test('adds flag headers for flagKeys list', async () => {
-    mockBootstrap([makeFlag('dark-mode', true, 100), makeFlag('checkout-v2', false, 100)]);
-    // The middleware then calls fetch to pass through
-    mockFetch.mockResolvedValueOnce(new Response('upstream ok'));
+  test('evaluates each flagKeys entry on the server and injects X-EP-Flag-* headers', async () => {
+    mockFetch.mockImplementation(async (url: unknown) => {
+      if (typeof url !== 'string') return new Response('upstream ok'); // pass-through
+      if (url.includes('/evaluate/dark-mode')) return jsonResponse(flagBody('dark-mode', true));
+      if (url.includes('/evaluate/checkout-v2')) return jsonResponse(flagBody('checkout-v2', false));
+      return jsonResponse({}, 404);
+    });
 
     const middleware = createEdgeMiddleware({
       apiKey: 'k',
       baseUrl: 'http://api.test',
       flagKeys: ['dark-mode', 'checkout-v2'],
     });
-
-    const request = new Request('http://localhost/page');
-    const response = await middleware(request);
-
+    const response = await middleware(new Request('http://localhost/page', { headers: { 'X-User-Id': 'user-9' } }));
     expect(response).toBeDefined();
-    // Verify fetch was called with modified headers
-    // The second fetch call is the pass-through with injected headers
-    const passThrough = mockFetch.mock.calls[1];
-    const passedReq = passThrough[0] as Request;
+
+    const evaluateUrls = mockFetch.mock.calls.map((c) => c[0]).filter((u) => typeof u === 'string');
+    expect(evaluateUrls).toEqual(
+      expect.arrayContaining([
+        'http://api.test/api/v1/feature-flags/evaluate/dark-mode?user_id=user-9',
+        'http://api.test/api/v1/feature-flags/evaluate/checkout-v2?user_id=user-9',
+      ]),
+    );
+    const passedReq = mockFetch.mock.calls[mockFetch.mock.calls.length - 1][0] as Request;
     expect(passedReq.headers.get('X-EP-Flag-dark-mode')).toBe('true');
     expect(passedReq.headers.get('X-EP-Flag-checkout-v2')).toBe('false');
+    expect(passedReq.headers.get('X-EP-User-Id')).toBe('user-9');
   });
 
-  test('extracts userId from X-User-Id header', async () => {
-    mockBootstrap([makeFlag('user-flag', true, 100)]);
-    mockFetch.mockResolvedValueOnce(new Response('ok'));
-
-    const middleware = createEdgeMiddleware({
-      apiKey: 'k',
-      baseUrl: 'http://api.test',
-      flagKeys: ['user-flag'],
+  test('without flagKeys injects every flag from GET /api/v1/feature-flags/user/{user_id}', async () => {
+    mockFetch.mockImplementation(async (url: unknown) => {
+      if (typeof url === 'string' && url.endsWith('/api/v1/feature-flags/user/user-9')) return jsonResponse({ a: true, b: false });
+      return new Response('ok');
     });
-
-    const request = new Request('http://localhost/', {
-      headers: { 'X-User-Id': 'user-from-header' },
-    });
-    await middleware(request);
-
-    const passedReq = mockFetch.mock.calls[1][0] as Request;
-    expect(passedReq.headers.get('X-EP-User-Id')).toBe('user-from-header');
+    const middleware = createEdgeMiddleware({ apiKey: 'k', baseUrl: 'http://api.test' });
+    await middleware(new Request('http://localhost/', { headers: { 'X-User-Id': 'user-9' } }));
+    const passedReq = mockFetch.mock.calls[mockFetch.mock.calls.length - 1][0] as Request;
+    expect(passedReq.headers.get('X-EP-Flag-a')).toBe('true');
+    expect(passedReq.headers.get('X-EP-Flag-b')).toBe('false');
   });
 
-  test('extracts userId from cookie when header absent', async () => {
-    mockBootstrap([makeFlag('cookie-flag', true, 100)]);
-    mockFetch.mockResolvedValueOnce(new Response('ok'));
-
-    const middleware = createEdgeMiddleware({
-      apiKey: 'k',
-      baseUrl: 'http://api.test',
-      flagKeys: ['cookie-flag'],
-    });
-
-    const request = new Request('http://localhost/', {
-      headers: { Cookie: 'ep_user_id=user-from-cookie; other=val' },
-    });
-    await middleware(request);
-
-    const passedReq = mockFetch.mock.calls[1][0] as Request;
+  test('extracts userId from the cookie when the header is absent', async () => {
+    mockFetch.mockImplementation(async (url: unknown) =>
+      typeof url === 'string' ? jsonResponse(flagBody('cookie-flag')) : new Response('ok'),
+    );
+    const middleware = createEdgeMiddleware({ apiKey: 'k', baseUrl: 'http://api.test', flagKeys: ['cookie-flag'] });
+    await middleware(new Request('http://localhost/', { headers: { Cookie: 'ep_user_id=user-from-cookie; other=val' } }));
+    const passedReq = mockFetch.mock.calls[mockFetch.mock.calls.length - 1][0] as Request;
     expect(passedReq.headers.get('X-EP-User-Id')).toBe('user-from-cookie');
+    expect(mockFetch.mock.calls[0][0]).toContain('user_id=user-from-cookie');
   });
 
-  test('continues without throwing when bootstrap fails', async () => {
-    mockFetch.mockRejectedValueOnce(new Error('bootstrap failed'));
+  test('anonymous requests (no user id) evaluate nothing and report flags as false', async () => {
     mockFetch.mockResolvedValueOnce(new Response('ok'));
+    const middleware = createEdgeMiddleware({ apiKey: 'k', baseUrl: 'http://api.test', flagKeys: ['some-flag'] });
+    await middleware(new Request('http://localhost/'));
+    expect(mockFetch).toHaveBeenCalledTimes(1); // only the pass-through
+    const passedReq = mockFetch.mock.calls[0][0] as Request;
+    expect(passedReq.headers.get('X-EP-Flag-some-flag')).toBe('false');
+    expect(passedReq.headers.get('X-EP-User-Id')).toBeNull();
+  });
 
-    const middleware = createEdgeMiddleware({
-      apiKey: 'k',
-      baseUrl: 'http://api.test',
-      flagKeys: ['some-flag'],
-    });
-
-    const request = new Request('http://localhost/');
+  test('continues without throwing when evaluation fails', async () => {
+    mockFetch.mockRejectedValueOnce(new Error('api down'));
+    mockFetch.mockResolvedValueOnce(new Response('ok'));
+    const middleware = createEdgeMiddleware({ apiKey: 'k', baseUrl: 'http://api.test', flagKeys: ['some-flag'] });
+    const request = new Request('http://localhost/', { headers: { 'X-User-Id': 'u' } });
     await expect(middleware(request)).resolves.toBeDefined();
+    const passedReq = mockFetch.mock.calls[1][0] as Request;
+    expect(passedReq.headers.get('X-EP-Flag-some-flag')).toBe('false');
   });
 
-  test('uses custom userIdHeaderName', async () => {
-    mockBootstrap([]);
-    mockFetch.mockResolvedValueOnce(new Response('ok'));
+  test('uses custom userIdHeaderName', () => {
+    const request = new Request('http://localhost/', { headers: { 'X-Custom-User': 'custom-user-id' } });
+    expect(extractUserId(request, { apiKey: 'k', userIdHeaderName: 'X-Custom-User' })).toBe('custom-user-id');
+  });
 
-    const middleware = createEdgeMiddleware({
-      apiKey: 'k',
-      baseUrl: 'http://api.test',
-      userIdHeaderName: 'X-Custom-User',
-      flagKeys: [],
-    });
-
-    const request = new Request('http://localhost/', {
-      headers: { 'X-Custom-User': 'custom-user-id' },
-    });
-    await middleware(request);
-
-    const passedReq = mockFetch.mock.calls[1][0] as Request;
-    expect(passedReq.headers.get('X-EP-User-Id')).toBe('custom-user-id');
+  test('evaluateFlagsForRequest with an explicitly empty list evaluates nothing', async () => {
+    const client = new EdgeExperimentationClient({ apiKey: 'k', baseUrl: 'http://api.test' });
+    expect(await evaluateFlagsForRequest(client, 'u', [])).toEqual({});
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 });
 
 // ---------------------------------------------------------------------------
-// Deno Deploy adapter tests
+// Deno Deploy adapter
 // ---------------------------------------------------------------------------
 
-describe('DenoExperimentationClient', () => {
-  function makeDenoKv(stored: Record<string, unknown> = {}): import('../src/adapters/deno').DenoKv {
-    const store = { ...stored };
-    return {
+describe('DenoKvStore', () => {
+  function makeDenoKv() {
+    const store: Record<string, unknown> = {};
+    const sets: Array<{ key: string[]; options?: { expireIn?: number } }> = [];
+    const kv: DenoKv = {
       async get<T>(key: string[]) {
-        const k = JSON.stringify(key);
-        return { value: (store[k] ?? null) as T | null };
+        return { value: (store[JSON.stringify(key)] ?? null) as T | null };
+      },
+      async set(key: string[], value: unknown, options?: { expireIn?: number }) {
+        store[JSON.stringify(key)] = value;
+        sets.push({ key, options });
+      },
+    };
+    return { kv, store, sets };
+  }
+
+  test('namespaces keys under ["ep", key] and passes expireIn in ms', async () => {
+    const { kv, sets } = makeDenoKv();
+    const store = new DenoKvStore(kv);
+    await store.put('flag:u:f', '{"x":1}', 30_000);
+    expect(sets[0]).toEqual({ key: ['ep', 'flag:u:f'], options: { expireIn: 30_000 } });
+    expect(await store.get('flag:u:f')).toBe('{"x":1}');
+    expect(await store.get('missing')).toBeNull();
+  });
+
+  test('an explicit kvTtlMs wins over the cache TTL', async () => {
+    const { kv, sets } = makeDenoKv();
+    await new DenoKvStore(kv, 300_000).put('k', 'v', 1_000);
+    expect(sets[0].options).toEqual({ expireIn: 300_000 });
+  });
+});
+
+describe('DenoExperimentationClient', () => {
+  function makeDenoKv(stored: Record<string, unknown> = {}) {
+    const store = { ...stored };
+    const kv: DenoKv = {
+      async get<T>(key: string[]) {
+        return { value: (store[JSON.stringify(key)] ?? null) as T | null };
       },
       async set(key: string[], value: unknown) {
         store[JSON.stringify(key)] = value;
       },
     };
+    return { kv, store };
   }
 
-  test('loads from Deno KV when available', async () => {
-    const flags = [makeFlag('deno-kv-flag')];
-    const stored = {
-      '["ep","bootstrap"]': { flags, experiments: [], ttl_seconds: 300, version: 'v' },
-    };
-    const kv = makeDenoKv(stored);
-
+  test('serves an assignment cached in Deno KV per user + key without calling the API', async () => {
+    const cached: Assignment = { experimentKey: 'exp', userId: 'user-1', variantId: 'v', variantName: 'control', isControl: true, configuration: null };
+    const { kv } = makeDenoKv({ '["ep","assign:user-1:exp"]': JSON.stringify(cached) });
     const client = new DenoExperimentationClient({ apiKey: 'k', kv });
-    await client.loadFromKvOrApi();
-
+    expect(await client.getAssignment('exp', 'user-1')).toEqual(cached);
     expect(mockFetch).not.toHaveBeenCalled();
-    expect(client.flagCount).toBe(1);
+    expect(client.getAssignmentSync('exp', 'user-1')).toBe('control');
   });
 
-  test('falls back to API when Deno KV is empty', async () => {
-    mockBootstrap([makeFlag('deno-api-flag')]);
-    const kv = makeDenoKv({});
-
-    const client = new DenoExperimentationClient({
-      apiKey: 'k',
-      baseUrl: 'http://api.test',
-      kv,
-    });
-    await client.loadFromKvOrApi();
-
+  test('falls back to the API on a KV miss and writes the result to Deno KV', async () => {
+    const { kv, store } = makeDenoKv();
+    mockFetch.mockResolvedValueOnce(jsonResponse(flagBody('deno-api-flag')));
+    const client = new DenoExperimentationClient({ apiKey: 'k', baseUrl: 'http://api.test', kv });
+    expect((await client.evaluateFlag('deno-api-flag', 'user-1')).enabled).toBe(true);
     expect(mockFetch).toHaveBeenCalledTimes(1);
-    expect(client.flagCount).toBe(1);
+    expect(JSON.parse(store['["ep","flag:user-1:deno-api-flag"]'] as string)).toEqual({ key: 'deno-api-flag', enabled: true, config: null });
   });
 
-  test('refreshAndStore writes to Deno KV', async () => {
-    mockBootstrap([makeFlag('deno-refresh-flag')]);
-    // Use a shared store object so that writes from the KV mock are visible here
-    const sharedStore: Record<string, unknown> = {};
-    const kv: import('../src/adapters/deno').DenoKv = {
-      async get<T>(key: string[]) {
-        const k = JSON.stringify(key);
-        return { value: (sharedStore[k] ?? null) as T | null };
-      },
-      async set(key: string[], value: unknown) {
-        sharedStore[JSON.stringify(key)] = value;
-      },
-    };
-
-    const client = new DenoExperimentationClient({
-      apiKey: 'k',
-      baseUrl: 'http://api.test',
-      kv,
-    });
-    await client.refreshAndStore();
-
-    const key = JSON.stringify(['ep', 'bootstrap']);
-    expect(sharedStore[key]).toBeDefined();
-    const data = sharedStore[key] as BootstrapResponse;
-    expect(data.flags[0].key).toBe('deno-refresh-flag');
-  });
-
-  test('works without KV (API only)', async () => {
-    mockBootstrap([makeFlag('deno-no-kv')]);
-    const client = new DenoExperimentationClient({
-      apiKey: 'k',
-      baseUrl: 'http://api.test',
-    });
-    await client.loadFromKvOrApi();
-    expect(client.flagCount).toBe(1);
+  test('works without KV (API only) and the deprecated methods are no-ops', async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse(flagBody('deno-no-kv')));
+    const client = new DenoExperimentationClient({ apiKey: 'k', baseUrl: 'http://api.test' });
+    await expect(client.loadFromKvOrApi()).resolves.toBeUndefined();
+    await expect(client.refreshAndStore()).resolves.toBeUndefined();
+    expect((await client.evaluateFlag('deno-no-kv', 'user-1')).enabled).toBe(true);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 });
 
 describe('createDenoHandler', () => {
-  test('creates a handler that passes client to inner function', async () => {
-    mockBootstrap([makeFlag('deno-handler-flag', true, 100)]);
-
+  test('creates a handler that passes the client to the inner function', async () => {
     let receivedClient: unknown;
     const handler = createDenoHandler(
       async (_req, client) => {
@@ -466,25 +393,20 @@ describe('createDenoHandler', () => {
       },
       { apiKey: 'k', baseUrl: 'http://api.test' },
     );
-
     const response = await handler(new Request('http://localhost/'));
     expect(response.status).toBe(200);
     expect(receivedClient).toBeInstanceOf(DenoExperimentationClient);
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 
-  test('initialises client only once across calls (isolate singleton)', async () => {
-    mockBootstrap([makeFlag('singleton-flag')]);
-
+  test('reuses one client (and its cache) across calls in the same isolate', async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse(flagBody('singleton-flag')));
     const handler = createDenoHandler(
-      async () => new Response('ok'),
+      async (_req, client) => new Response(String((await client.evaluateFlag('singleton-flag', 'user-1')).enabled)),
       { apiKey: 'k', baseUrl: 'http://api.test' },
     );
-
-    // Call handler twice
-    await handler(new Request('http://localhost/'));
-    await handler(new Request('http://localhost/'));
-
-    // Bootstrap should only have been called once
+    expect(await (await handler(new Request('http://localhost/'))).text()).toBe('true');
+    expect(await (await handler(new Request('http://localhost/'))).text()).toBe('true');
     expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 });

@@ -1,42 +1,32 @@
 # iOS Swift SDK
 
-The iOS SDK provides feature flag evaluation, experiment variant assignment, and event tracking for Swift applications. It uses `async/await` for all network operations, requires zero external dependencies, and supports offline fallback via `UserDefaults`.
+`ExperimentationSDK` is a Swift Package (iOS 14+, macOS 11+, Swift 5.5+) providing feature flag
+evaluation, experiment assignment and event tracking with `async`/`await`. It depends only on
+Foundation (URLSession, NSCache, UserDefaults) and CommonCrypto.
 
----
+Flag evaluation and experiment assignment are decided **by the server**: every call goes to the
+public API with your `X-API-Key`, the server buckets the user (sticky per user + experiment), and
+the SDK caches the answer per user + key for a TTL. Nothing is bucketed on device.
 
-## Requirements
-
-- iOS 14.0+ / macOS 11.0+
-- Swift 5.5+
-- Xcode 13+
+Source: `sdk/ios`. A SwiftUI demo lives in `sdk/ios/Examples/SwiftUIExample/ExampleApp.swift`.
 
 ---
 
 ## Installation
 
-### Swift Package Manager
-
-Add the package dependency in `Package.swift`:
+The manifest lives in `sdk/ios`, so add the SDK as a local package:
 
 ```swift
 // Package.swift
 dependencies: [
-    .package(
-        url: "https://github.com/amarkanday/experimentation-platform",
-        from: "1.0.0"
-    )
+    .package(name: "ExperimentationSDK", path: "../experimentation-platform/sdk/ios")
 ],
 targets: [
-    .target(
-        name: "MyApp",
-        dependencies: [
-            .product(name: "ExperimentationSDK", package: "experimentation-platform")
-        ]
-    )
+    .target(name: "MyApp", dependencies: [.product(name: "ExperimentationSDK", package: "ExperimentationSDK")])
 ]
 ```
 
-Or from Xcode: **File → Add Package Dependencies** → enter the repository URL → select **Up to Next Major Version: 1.0.0**.
+Xcode: File → Add Package Dependencies… → Add Local… → `sdk/ios` → product `ExperimentationSDK`.
 
 ---
 
@@ -45,435 +35,205 @@ Or from Xcode: **File → Add Package Dependencies** → enter the repository UR
 ```swift
 import ExperimentationSDK
 
-let client = ExperimentationClient(
-    baseURL: "https://api.example.com",
-    apiKey: "your-api-key"
-)
+let client = ExperimentationClient(config: SdkConfig(
+    baseURL: "http://localhost:8000",             // origin only; the SDK appends /api/v1/...
+    apiKey: Secrets.experimentlyApiKey            // sent as X-API-Key
+))
+let user = User(id: "user-123", attributes: ["plan": "pro"])   // attributes = assignment context
 
-let user = User(id: "user-123")
-let result = try await client.evaluateFlag("new-dashboard", user: user)
-if result.enabled {
-    showNewDashboard()
+// 1. Assignment — POST /api/v1/tracking/assign (sticky, records the exposure)
+var headline = "Buy now"
+do {
+    let a = try await client.getAssignment("checkout_flow", user: user)
+    headline = a.configuration?["headline"] as? String ?? headline
+} catch ExperimentationError.experimentNotFound {
+    // unknown or not ACTIVE (404): keep control
+} catch {
+    // network / server error and nothing cached: keep control
 }
+
+// 2. Feature flag — GET /api/v1/feature-flags/evaluate/new_search?user_id=user-123
+let flag = try? await client.evaluateFlag("new_search", user: user)
+if flag?.enabled == true { /* ... */ }
+
+// 3. Track with a key → one POST /api/v1/tracking/track (never throws)
+try? await client.track(TrackEvent(userId: user.id, eventName: "purchase",
+                                   properties: ["sku": "pro-plan"],
+                                   experimentKey: "checkout_flow", value: 49.99))
+
+// 4. Track without a key → fanned out to every cached assignment + flag of this user
+await client.trackWithStatus(TrackEvent(userId: user.id, eventName: "page_view"))
 ```
 
 ---
 
 ## Configuration
 
-Pass a `SdkConfig` instance to customise the client's behaviour.
-
 ```swift
-import ExperimentationSDK
-
 let config = SdkConfig(
-    baseURL: "https://api.example.com",
+    baseURL: "http://localhost:8000",
     apiKey: "your-api-key",
-    timeoutInterval: 2.0,        // Seconds (default: 5.0)
-    cacheSize: 500,               // Maximum LRU entries (default: 1000)
-    cacheTTL: 30.0,               // Seconds before a cache entry expires (default: 60.0)
-    enableLocalEval: true,        // Evaluate flags locally (default: false)
-    enableOfflineFallback: true,  // Cache to UserDefaults for offline use (default: true)
-    defaultVariant: "control"     // Fallback variant on error (default: "control")
+    timeout: 10,                  // seconds
+    cacheSize: 1000,
+    cacheTTL: 300,                // seconds
+    enableOfflineFallback: true
 )
-
-let client = ExperimentationClient(config: config)
+let client = ExperimentationClient(config: config, session: .shared, offlineStore: nil)
 ```
 
-### `SdkConfig` Reference
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `baseURL` | `String` | `"http://localhost:8000"` | Backend origin; trailing `/` tolerated |
+| `apiKey` | `String` | — (required) | Sent as `X-API-Key` on every request |
+| `timeout` | `TimeInterval` | `10` | `URLRequest` timeout per call |
+| `cacheSize` | `Int` | `1000` | Advisory NSCache `countLimit` for each in-memory cache (flags, assignments) |
+| `cacheTTL` | `TimeInterval` | `300` | Lifetime of a cached evaluation/assignment |
+| `enableOfflineFallback` | `Bool` | `true` | Persist successful results in `UserDefaults` (prefix `ep_sdk_`) and serve them when a request fails |
+| `session` (client init) | `URLSession` | `.shared` | Inject a mock session in tests |
+| `offlineStore` (client init) | `OfflineStore?` | `OfflineStore()` | `OfflineStore(suiteName:keyPrefix:)` for App Groups / custom prefix |
 
-| Property | Type | Default | Description |
-|----------|------|---------|-------------|
-| `baseURL` | `String` | *(required)* | Base URL of the platform API |
-| `apiKey` | `String` | *(required)* | API key for SDK authentication |
-| `timeoutInterval` | `TimeInterval` | `5.0` | URLSession request timeout in seconds |
-| `cacheSize` | `Int` | `1000` | Maximum number of cached evaluation results |
-| `cacheTTL` | `TimeInterval` | `60.0` | Seconds before a cached entry is invalidated |
-| `enableLocalEval` | `Bool` | `false` | Download rules and evaluate locally |
-| `enableOfflineFallback` | `Bool` | `true` | Persist last-known values to `UserDefaults` |
-| `defaultVariant` | `String` | `"control"` | Variant returned when assignment fails |
+`ExperimentationClient(baseURL:apiKey:)` is a convenience initializer with the defaults above. The
+`SdkConfig(... enableLocalEval:)` initializer is deprecated and ignores the flag.
 
 ---
 
-## User Model
+## API Reference
 
-```swift
-import ExperimentationSDK
+`ExperimentationClient` conforms to `ExperimentationClientProtocol` (use it for injection/mocking).
 
-// Minimal user
-let user = User(id: "user-123")
+| Method | Endpoint | Returns | On failure |
+|---|---|---|---|
+| `evaluateFlag(_ flagKey: String, user: User) async throws` | `GET /feature-flags/evaluate/{key}?user_id=` | `EvalResult` | throws `ExperimentationError` (see below) |
+| `getAssignment(_ experimentKey: String, user: User) async throws` | `POST /tracking/assign` | `Assignment` | throws `ExperimentationError` |
+| `track(_ event: TrackEvent) async throws` | `/tracking/track` or `/tracking/batch` | `Void` | **never throws**; `throws` kept for source compatibility |
+| `trackWithStatus(_ event: TrackEvent) async` | same | `Bool` | `false` on any failed request |
+| `trackBatch(_ events: [TrackEvent]) async` | `/tracking/batch` (chunks of 100) | `Bool` | `false` when any chunk failed |
+| `getAssignments(for userId: String)` | — | `[Assignment]` | cached, unexpired, insertion order |
+| `getEvaluatedFlags(for userId: String)` | — | `[String]` | cached flag keys |
+| `clearCache()` | — | `Void` | drops the in-memory caches (offline store kept) |
+| `clearOfflineCache()` | — | `Void` | wipes everything the SDK wrote to `UserDefaults` |
+| `close()` | — | `Void` | clears memory caches and cancels in-flight requests |
+| `refreshFlags() async throws` | — | `Void` | **deprecated** no-op (no flag list to download) |
+| `FeatureFlagEvaluator.hashUser(_ userId: String, flagKey: String)` | — | `Double` in `[0, 1)` | pure |
 
-// User with targeting attributes
-let user = User(
-    id: "user-123",
-    attributes: [
-        "plan":    AnyCodable("pro"),
-        "country": AnyCodable("US"),
-        "age":     AnyCodable(28),
-        "beta":    AnyCodable(true)
-    ]
-)
-```
+### Types
 
-`AnyCodable` is a type-erased `Codable` wrapper included in the SDK. It accepts `String`, `Int`, `Double`, and `Bool` values.
-
----
-
-## Feature Flag Evaluation
-
-### `evaluateFlag(_:user:)`
-
-```swift
-do {
-    let result = try await client.evaluateFlag("new-dashboard", user: user)
-    if result.enabled {
-        showNewDashboard()
-    } else {
-        showLegacyDashboard()
-    }
-} catch {
-    // On error, result.enabled is false; the catch block is for strict error handling
-    showLegacyDashboard()
-}
-```
-
-### `FlagResult` Properties
-
-| Property | Type | Description |
-|----------|------|-------------|
-| `enabled` | `Bool` | Whether the flag is on for this user |
-| `flagKey` | `String` | The evaluated flag key |
-| `userID` | `String` | The user ID used for evaluation |
-| `evaluatedAt` | `Date` | Timestamp of the evaluation |
+| Type | Members |
+|---|---|
+| `User(id:attributes:)` | `id: String`, `attributes: [String: AnyCodable]?` — sent as `context` on assignment |
+| `EvalResult` | `key: String`, `enabled: Bool`, `config: [String: Any]?` (`nil` when the server returned `null` or a non-object) |
+| `Assignment` | `experimentKey: String`, `userId: String`, `variantId: String?` (UUID), `variantName: String` (`"control"`, `"treatment"`, …), `isControl: Bool`, `configuration: [String: Any]?`; `variantKey` is a deprecated alias of `variantName` |
+| `TrackEvent(userId:eventName:properties:experimentKey:featureFlagKey:value:eventType:timestamp:)` | `properties` → `metadata`; `eventType` defaults to `eventName`; `value: Double?`; `timestamp: Date?` → ISO-8601 (server-stamped when nil); `hasKey`, `attributed(experimentKey:featureFlagKey:)` |
+| `ExperimentationError` | `.invalidConfig(String)`, `.networkError(Error)`, `.decodingError(Error)`, `.flagNotFound(String)`, `.experimentNotFound(String)`, `.serverError(Int, String)`, `.cancelled` — all `LocalizedError` |
 
 ---
 
-## Experiment Assignment
+## Caching and failure behaviour
 
-### `getAssignment(_:user:)`
-
-```swift
-do {
-    let assignment = try await client.getAssignment("checkout-experiment", user: user)
-    print(assignment.variantKey) // "control" or "treatment"
-
-    switch assignment.variantKey {
-    case "express-checkout":
-        showExpressCheckout()
-    case "standard-checkout":
-        showStandardCheckout()
-    default:
-        showStandardCheckout()
-    }
-} catch {
-    showStandardCheckout()
-}
-```
-
-### `Assignment` Properties
-
-| Property | Type | Description |
-|----------|------|-------------|
-| `variantKey` | `String` | Assigned variant key |
-| `experimentKey` | `String` | The experiment key |
-| `experimentID` | `String` | UUID of the experiment |
-| `isControl` | `Bool` | `true` if this is the control variant |
-| `assignedAt` | `Date` | Assignment timestamp |
-
----
-
-## Event Tracking
-
-### `track(_:)`
+- Successful results are cached in memory per **user + key** (`UserKeyCache`, NSCache-backed,
+  TTL `cacheTTL`); a hit makes no request. Concurrent calls for the same user + key share one
+  in-flight request, so mounting several views on the same experiment yields one assignment
+  (and one exposure). **Failures are never cached** — the next call retries.
+- With `enableOfflineFallback` (default) every successful result is also written to
+  `UserDefaults`; those entries have no TTL and survive relaunches.
+- **HTTP 404** (flag/experiment unknown or not ACTIVE): throws `.flagNotFound(key)` /
+  `.experimentNotFound(key)`, removes the persisted entry and never serves a stale value.
+- **Network error, timeout, 401, 422, 429, 5xx, undecodable body**: returns the persisted value
+  for that user + key when offline fallback is on and one exists; otherwise throws
+  `.networkError`, `.serverError(status, body)`, `.decodingError` or `.cancelled`.
+- `track`, `trackWithStatus`, `trackBatch` never throw.
+- The client is safe to use from any thread or task: caches and the in-flight table are
+  `NSLock`-protected and the lock is never held across a suspension point.
 
 ```swift
-// Async (awaitable)
-try await client.track(TrackEvent(
-    userID: "user-123",
-    eventName: "purchase",
-    value: 49.99,
-    properties: [
-        "currency": AnyCodable("USD"),
-        "sku":      AnyCodable("pro-annual")
-    ]
-))
-```
-
-### Fire-and-Forget
-
-For UI events where you do not want to block the call site:
-
-```swift
-Task {
-    try? await client.track(TrackEvent(
-        userID: currentUser.id,
-        eventName: "button_tapped",
-        properties: ["button_id": AnyCodable("upgrade-cta")]
-    ))
-}
-```
-
-### `TrackEvent` Properties
-
-| Property | Type | Required | Description |
-|----------|------|----------|-------------|
-| `userID` | `String` | Yes | The user who performed the action |
-| `eventName` | `String` | Yes | Event identifier |
-| `value` | `Double?` | No | Numeric value (revenue, duration) |
-| `properties` | `[String: AnyCodable]?` | No | Arbitrary metadata |
-| `timestamp` | `Date` | No | Defaults to `Date()` |
-
----
-
-## Offline Mode
-
-When `enableOfflineFallback: true`, every successful evaluation result is persisted to `UserDefaults`. If a subsequent call fails due to no network connectivity, the SDK returns the last known value instead of an error.
-
-```swift
-// First call (online) — fetched from API and cached in UserDefaults
-let result = try await client.evaluateFlag("new-feature", user: user)
-
-// Later, device goes offline — returns cached value transparently
-let result = try await client.evaluateFlag("new-feature", user: user)
-// result.enabled == last known value
-```
-
-To clear the offline cache:
-
-```swift
-client.clearOfflineCache()
+let enabled = (try? await client.evaluateFlag("new_search", user: user))?.enabled ?? false
 ```
 
 ---
 
-## SwiftUI Integration
+## Tracking fan-out
 
-### Feature Flag in a View
+With `experimentKey` and/or `featureFlagKey` set, `track` sends one `POST /api/v1/tracking/track`.
+Without a key it sends one `POST /api/v1/tracking/batch` with one entry per experiment the user
+was assigned to through this client (`experiment_key`) plus one per flag evaluated for the user
+(`feature_flag_key`), taken from the in-memory cache. Nothing cached → nothing is sent and `true`
+is reported. `trackBatch` keeps keyed events as-is and fans out the unkeyed ones; requests are
+chunked at `ExperimentationClient.batchLimit` (100).
+
+Conversions are matched to metrics by **event name**: a metric on `purchase` counts every
+`purchase` event regardless of `event_type`.
+
+---
+
+## SwiftUI
 
 ```swift
-import SwiftUI
-import ExperimentationSDK
-
-struct DashboardView: View {
-    @State private var showNewDashboard = false
+struct SearchView: View {
     let client: ExperimentationClient
     let user: User
+    @State private var newSearch = false
 
     var body: some View {
-        Group {
-            if showNewDashboard {
-                NewDashboardView()
-            } else {
-                LegacyDashboardView()
+        Group { newSearch ? AnyView(NewSearch()) : AnyView(LegacySearch()) }
+            .onAppear {   // `.task {}` on iOS 15+
+                Task { newSearch = (try? await client.evaluateFlag("new_search", user: user))?.enabled ?? false }
             }
-        }
-        .task {
-            let result = try? await client.evaluateFlag("new-dashboard", user: user)
-            showNewDashboard = result?.enabled ?? false
-        }
-    }
-}
-```
-
-### Observable Wrapper (iOS 17+)
-
-```swift
-import Observation
-import ExperimentationSDK
-
-@Observable
-class ExperimentationState {
-    var isDarkMode = false
-    var checkoutVariant = "control"
-
-    private let client: ExperimentationClient
-    private let user: User
-
-    init(client: ExperimentationClient, user: User) {
-        self.client = client
-        self.user = user
-    }
-
-    func load() async {
-        async let flagResult = client.evaluateFlag("dark-mode", user: user)
-        async let assignment = client.getAssignment("checkout-flow", user: user)
-
-        isDarkMode = (try? await flagResult)?.enabled ?? false
-        checkoutVariant = (try? await assignment)?.variantKey ?? "control"
     }
 }
 ```
 
 ---
 
-## Error Handling
+## Consistent hash (compatibility utility)
 
-All SDK methods throw `ExperimentationError` on failure.
-
-```swift
-do {
-    let result = try await client.evaluateFlag("my-flag", user: user)
-} catch ExperimentationError.networkFailure(let underlying) {
-    // URLSession error; offline fallback was returned if enabled
-    print("Network error: \(underlying.localizedDescription)")
-} catch ExperimentationError.apiError(let statusCode, let message) {
-    // Non-2xx HTTP response
-    print("API \(statusCode): \(message)")
-} catch ExperimentationError.invalidConfiguration(let reason) {
-    // Misconfigured client (empty API key, invalid URL)
-    print("Config error: \(reason)")
-} catch {
-    // Unexpected error
-    print("Unknown error: \(error)")
-}
-```
-
-### `ExperimentationError` Cases
-
-| Case | Description |
-|------|-------------|
-| `.networkFailure(Error)` | Network connectivity issue or timeout |
-| `.apiError(Int, String)` | Non-2xx HTTP response with status code and message |
-| `.decodingError(Error)` | Response body could not be decoded |
-| `.invalidConfiguration(String)` | Client was configured incorrectly |
-| `.offlineFallbackUnavailable` | Offline and no cached value exists |
+`FeatureFlagEvaluator.hashUser(userId, flagKey:)` = `MD5("{userId}:{flagKey}")`, first 4 bytes
+as little-endian UInt32, divided by 2^32 (`0.6927449859213084` for `"user-123"`, `"my-flag"`).
+It is kept only so the golden vectors in `tests/sdk-contract/golden-vectors.json` stay identical
+across SDKs. **Nothing in the SDK calls it to pick a variant** — the server decides.
 
 ---
 
-## Testing
+## Backend endpoints used
 
-### MockURLProtocol Pattern
+Every request carries `X-API-Key`, `Content-Type: application/json` and `Accept: application/json`.
 
-Inject a mock `URLProtocol` to test code that calls the SDK without network access.
+| SDK call | Method and path | Body / query | Response used |
+|---|---|---|---|
+| `evaluateFlag` | `GET /api/v1/feature-flags/evaluate/{flag_key}?user_id=…` | — | `{key, enabled, config}`; 404 when the flag is not ACTIVE |
+| `getAssignment` | `POST /api/v1/tracking/assign` | `{experiment_key, user_id, context?}` | `{experiment_key, user_id, variant_id, variant_name, is_control, configuration}`; 404 when the experiment is not ACTIVE |
+| `track` with a key | `POST /api/v1/tracking/track` | `{event_type, event_name, user_id, experiment_key?, feature_flag_key?, value?, metadata?, timestamp?}` | ignored |
+| `track` without keys, `trackBatch` | `POST /api/v1/tracking/batch` | `{events: [<track body>, …]}` (max 100 per request) | ignored |
 
-```swift
-import XCTest
-@testable import ExperimentationSDK
-
-class MockURLProtocol: URLProtocol {
-    static var requestHandler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
-
-    override class func canInit(with request: URLRequest) -> Bool { true }
-    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-
-    override func startLoading() {
-        guard let handler = MockURLProtocol.requestHandler else {
-            fatalError("No handler set")
-        }
-        do {
-            let (response, data) = try handler(request)
-            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-            client?.urlProtocol(self, didLoad: data)
-            client?.urlProtocolDidFinishLoading(self)
-        } catch {
-            client?.urlProtocol(self, didFailWithError: error)
-        }
-    }
-
-    override func stopLoading() {}
-}
-
-final class FeatureFlagTests: XCTestCase {
-    func testFlagEnabled() async throws {
-        MockURLProtocol.requestHandler = { _ in
-            let response = HTTPURLResponse(
-                url: URL(string: "https://api.example.com")!,
-                statusCode: 200,
-                httpVersion: nil,
-                headerFields: nil
-            )!
-            let data = """
-            {"enabled": true, "flag_key": "new-checkout", "user_id": "user-123"}
-            """.data(using: .utf8)!
-            return (response, data)
-        }
-
-        let sessionConfig = URLSessionConfiguration.ephemeral
-        sessionConfig.protocolClasses = [MockURLProtocol.self]
-        let session = URLSession(configuration: sessionConfig)
-
-        let client = ExperimentationClient(
-            baseURL: "https://api.example.com",
-            apiKey: "test-key",
-            urlSession: session
-        )
-
-        let user = User(id: "user-123")
-        let result = try await client.evaluateFlag("new-checkout", user: user)
-        XCTAssertTrue(result.enabled)
-    }
-}
-```
+Errors: 401 bad key, 404 experiment/flag unknown or not ACTIVE, 422 event without any key, 429
+rate limited (`Retry-After`). These paths share the backend's per-IP `SDK_RATE_LIMIT_PER_MINUTE`
+ceiling (default 6000).
 
 ---
 
-## Thread Safety
+## Contract smoke
 
-`ExperimentationClient` is safe to use from multiple threads and Swift concurrency tasks. Internal state is protected by a serial actor; no external synchronization is required.
-
-```swift
-// All of these can run concurrently with no data races:
-async let r1 = client.evaluateFlag("flag-a", user: user)
-async let r2 = client.evaluateFlag("flag-b", user: user)
-async let r3 = client.getAssignment("experiment-x", user: user)
-let (flag1, flag2, assignment) = try await (r1, r2, r3)
+```bash
+cd sdk/ios && swift run contract-smoke
+# {"sdk":"ios","assign":{"variant_name":"control","is_control":true,"sticky":true},"flag":{"enabled":true},"track":{"ok":true},"fanout":{"ok":true}}
 ```
+
+SwiftPM build output goes to stderr (the repo runner uses `swift run -q contract-smoke`). Env:
+`EXPERIMENTLY_API_URL` (default `http://localhost:8000`), `EXPERIMENTLY_API_KEY` (required),
+`CONTRACT_EXPERIMENT_KEY` (default `sdk_contract_ab`), `CONTRACT_FLAG_KEY` (default
+`sdk_contract_flag`), `CONTRACT_USER_ID` (default random `smoke-<uuid>`). The smoke uses
+`enableOfflineFallback: false`, assigns on two clients (server stickiness), evaluates the flag,
+tracks `purchase` with the experiment key, tracks `page_view` without a key and sends a 2-event
+`trackBatch`. Fixtures: `backend/scripts/seed_sdk_contract.py`; repo-wide runner:
+`python tests/sdk-contract/live/run_live_contract.py --sdk ios --strict`.
+
+Verified against a live backend: yes (2026-09-11)
 
 ---
 
-## Full Working Example
+## Development
 
-```swift
-import SwiftUI
-import ExperimentationSDK
-
-@main
-struct ExampleApp: App {
-    var body: some Scene {
-        WindowGroup {
-            ContentView()
-        }
-    }
-}
-
-struct ContentView: View {
-    private let client = ExperimentationClient(config: SdkConfig(
-        baseURL: ProcessInfo.processInfo.environment["EXP_BASE_URL"] ?? "",
-        apiKey:  ProcessInfo.processInfo.environment["EXP_API_KEY"] ?? "",
-        enableOfflineFallback: true
-    ))
-
-    @State private var checkoutVariant = "control"
-    @State private var showNewUI = false
-    private let user = User(
-        id: "user-456",
-        attributes: ["plan": AnyCodable("pro"), "country": AnyCodable("US")]
-    )
-
-    var body: some View {
-        VStack(spacing: 20) {
-            Text("Checkout variant: \(checkoutVariant)")
-            if showNewUI {
-                Text("New UI is active")
-                    .foregroundColor(.green)
-            }
-            Button("Complete Purchase") {
-                Task {
-                    try? await client.track(TrackEvent(
-                        userID: user.id,
-                        eventName: "purchase_completed",
-                        value: 49.99
-                    ))
-                }
-            }
-        }
-        .task {
-            async let assignment = client.getAssignment("checkout-flow", user: user)
-            async let flag = client.evaluateFlag("new-ui", user: user)
-
-            checkoutVariant = (try? await assignment)?.variantKey ?? "control"
-            showNewUI = (try? await flag)?.enabled ?? false
-        }
-    }
-}
+```bash
+cd sdk/ios
+swift build
+swift test          # 71 XCTests; URLSession is intercepted with a URLProtocol mock
 ```

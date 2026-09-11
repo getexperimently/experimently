@@ -1,12 +1,12 @@
 /**
- * useFlag — evaluates a feature flag for the current user.
+ * useFlag — evaluates a feature flag for the current user (decided by the server).
  *
  * @example
  * ```tsx
  * function DarkModeButton() {
- *   const { value, loading, error } = useFlag('dark-mode');
+ *   const { enabled, config, loading } = useFlag('dark-mode');
  *   if (loading) return <ActivityIndicator />;
- *   return <Text>{value ? 'Dark mode ON' : 'Dark mode OFF'}</Text>;
+ *   return <Text>{enabled ? 'Dark mode ON' : 'Dark mode OFF'}</Text>;
  * }
  * ```
  */
@@ -15,43 +15,42 @@ import { useState, useEffect } from 'react';
 import { useExperimentationContext } from '../context/ExperimentationContext';
 import type { FlagState } from '../types';
 
+function initialState(flagKey: string, loading: boolean): FlagState {
+  return { key: flagKey, enabled: false, value: false, config: null, loading, error: null };
+}
+
 /**
  * Evaluates feature flag `flagKey` for the `userId` supplied to the enclosing
- * {@link ExperimentationProvider}.
+ * {@link ExperimentationProvider} via
+ * `GET /api/v1/feature-flags/evaluate/{flagKey}?user_id=…`.
  *
  * @param flagKey  The feature flag key to evaluate.
- * @param attributes  Optional additional attributes for targeting.
- * @returns `{ value, loading, error }` — `value` is `true` when the flag is
- *   enabled for this user, `false` otherwise.
+ * @param _attributes  Accepted for signature compatibility; the evaluate
+ *   endpoint takes only the user id, so attributes are not sent.
+ * @returns `{ key, enabled, config, value, loading, error }` — `enabled` (and
+ *   its alias `value`) is `true` when the server enabled the flag for this
+ *   user, `false` while loading or on failure.
  */
-export function useFlag(
-  flagKey: string,
-  attributes?: Record<string, unknown>
-): FlagState {
-  const { client, userId, attributes: ctxAttrs } = useExperimentationContext();
-  const mergedAttrs = attributes ?? ctxAttrs;
+export function useFlag(flagKey: string, _attributes?: Record<string, unknown>): FlagState {
+  const { client, userId } = useExperimentationContext();
 
-  const [state, setState] = useState<FlagState>({
-    value: false,
-    loading: true,
-    error: null,
-  });
+  const [state, setState] = useState<FlagState>(() => initialState(flagKey, true));
 
   useEffect(() => {
     let cancelled = false;
 
-    setState({ value: false, loading: true, error: null });
+    setState(initialState(flagKey, true));
 
     client
-      .evaluateFlag(flagKey, userId, mergedAttrs)
-      .then((value) => {
+      .evaluateFlag(flagKey, userId)
+      .then((evaluation) => {
         if (!cancelled) {
-          setState({ value, loading: false, error: null });
+          setState({ ...evaluation, value: evaluation.enabled, loading: false, error: null });
         }
       })
       .catch((error: Error) => {
         if (!cancelled) {
-          setState({ value: false, loading: false, error });
+          setState({ ...initialState(flagKey, false), error });
         }
       });
 
@@ -59,7 +58,6 @@ export function useFlag(
       cancelled = true;
     };
     // Re-evaluate when client, userId, or flagKey changes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client, userId, flagKey]);
 
   return state;

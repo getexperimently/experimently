@@ -1,19 +1,34 @@
+require 'json'
+require 'time'
+require 'uri'
+
 module ExperimentationPlatform
   # Main SDK client for the Experimently experimentation platform.
   #
-  # Provides:
-  #   - evaluate_flag  : local evaluation of feature flags (with remote fetch + caching)
-  #   - get_assignment : experiment variant assignment
-  #   - track          : event tracking (fire-and-forget)
+  # Flag evaluation and experiment assignment are decided by the server; the
+  # SDK never buckets users locally. Successful results are cached per
+  # user + key for +cache_ttl+ seconds; failures are never cached.
+  #
+  #   - evaluate_flag    : GET  /api/v1/feature-flags/evaluate/{key}?user_id=...
+  #   - get_assignment   : POST /api/v1/tracking/assign   (sticky on the server)
+  #   - track            : POST /api/v1/tracking/track    (with a key)
+  #                        POST /api/v1/tracking/batch    (fan-out without a key)
+  #   - track_batch      : POST /api/v1/tracking/batch
   #
   # Example:
   #   client = ExperimentationPlatform::Client.new(
-  #     base_url: "https://api.example.com",
+  #     base_url: "http://localhost:8000",
   #     api_key:  "sk_live_xxx"
   #   )
-  #   result = client.evaluate_flag("dark-mode", "user-123")
-  #   # => { enabled: true, variant: "treatment", value: nil }
+  #   flag = client.evaluate_flag("dark-mode", "user-123")
+  #   flag.enabled?   # => true / false
+  #
+  # All public methods are safe to call from multiple threads: the cache is
+  # mutex-protected and every request opens its own connection.
   class Client
+    # Maximum events per POST /api/v1/tracking/batch request.
+    BATCH_LIMIT = 100
+
     # @param config [SdkConfig, Hash] configuration object or keyword args
     def initialize(config = nil, **kwargs)
       if config.is_a?(SdkConfig)
@@ -37,82 +52,182 @@ module ExperimentationPlatform
       )
     end
 
-    # Evaluate a feature flag for a user.
+    # Evaluate a feature flag for a user. The server decides.
     #
-    # Fetches the flag definition from the remote API (with caching), then
-    # performs local bucket-based evaluation using the consistent MD5 hash.
-    #
-    # @param flag_key   [String]  feature flag key
-    # @param user_id    [String]  user identifier
-    # @param attributes [Hash]    additional user attributes (reserved for rule evaluation)
-    # @param default    [Boolean] value returned when evaluation cannot be performed
-    # @return [Hash] result hash:
-    #   { enabled: Boolean, variant: String|nil, value: Object|nil }
-    def evaluate_flag(flag_key, user_id, attributes: {}, default: false)
-      flag = fetch_flag(flag_key)
-      return { enabled: default, variant: nil, value: nil } if flag.nil?
+    # @param flag_key    [String] feature flag key
+    # @param user_id     [String] user identifier
+    # @param _attributes [Hash]   accepted for API symmetry with get_assignment;
+    #                             the evaluate endpoint only takes the user id
+    # @return [FlagEvaluation] never nil. On a network/HTTP failure (including
+    #   404 when the flag is not ACTIVE) the flag is reported as disabled;
+    #   a cached evaluation, when present, is returned instead.
+    def evaluate_flag(flag_key, user_id, _attributes = {})
+      cache_key = flag_cache_key(user_id, flag_key)
+      cached = @cache.get(cache_key)
+      return cached unless cached.nil?
 
-      variant = FeatureFlagEvaluator.evaluate(flag, user_id, attributes)
+      path = "/api/v1/feature-flags/evaluate/#{encode(flag_key)}?user_id=#{encode(user_id)}"
+      data = @http.get(path)
+      data = {} unless data.is_a?(Hash)
 
-      {
-        enabled: !variant.nil?,
-        variant: variant.is_a?(Hash) ? (variant['key'] || variant[:key]) : variant,
-        value:   variant.is_a?(Hash) ? (variant['value'] || variant[:value]) : nil
-      }
+      evaluation = FlagEvaluation.new(
+        key:     flag_key,
+        enabled: data['enabled'] == true,
+        config:  data['config']
+      )
+      @cache.set(cache_key, evaluation)
+      evaluation
     rescue NetworkError, APIError => e
       warn "[ExperimentationPlatform] evaluate_flag error: #{e.message}"
-      { enabled: default, variant: nil, value: nil }
+      FlagEvaluation.new(key: flag_key, enabled: false, config: nil)
     end
 
-    # Get experiment assignment for a user.
+    # Boolean convenience around evaluate_flag.
+    #
+    # @return [Boolean] false on any failure
+    def feature_enabled?(flag_key, user_id, attributes = {})
+      evaluate_flag(flag_key, user_id, attributes).enabled?
+    end
+
+    # Assign a user to an experiment (sticky on the server, records the exposure).
     #
     # @param experiment_key [String] experiment key
     # @param user_id        [String] user identifier
-    # @param attributes     [Hash]   additional user attributes
-    # @return [Hash, nil] assignment hash or nil on error:
-    #   { experiment_key: String, variant: String|nil, in_experiment: Boolean }
-    def get_assignment(experiment_key, user_id, attributes: {})
-      cache_key = "experiment:#{experiment_key}"
-      experiment = @cache.get(cache_key)
+    # @param attributes     [Hash]   user attributes, sent as +context+ for targeting rules
+    # @return [Assignment, nil] nil on a network/HTTP failure (including 404 when
+    #   the experiment is not ACTIVE); a cached assignment is returned when present
+    def get_assignment(experiment_key, user_id, attributes = {})
+      cache_key = assignment_cache_key(user_id, experiment_key)
+      cached = @cache.get(cache_key)
+      return cached unless cached.nil?
 
-      if experiment.nil?
-        data = @http.get("/api/v1/sdk/experiments/#{experiment_key}")
-        experiment = symbolize_keys(data)
-        @cache.set(cache_key, experiment)
+      body = { experiment_key: experiment_key, user_id: user_id }
+      body[:context] = attributes if attributes.is_a?(Hash) && !attributes.empty?
+
+      data = @http.post('/api/v1/tracking/assign', body)
+      unless data.is_a?(Hash) && data['variant_name']
+        warn "[ExperimentationPlatform] get_assignment: malformed response for #{experiment_key}"
+        return nil
       end
 
-      variant = FeatureFlagEvaluator.evaluate(experiment, user_id, attributes)
-
-      {
-        experiment_key: experiment_key,
-        variant:        variant.is_a?(Hash) ? (variant[:key] || variant['key']) : variant,
-        in_experiment:  !variant.nil?
-      }
+      assignment = Assignment.new(
+        experiment_key: (data['experiment_key'] || experiment_key).to_s,
+        variant_id:     data['variant_id'],
+        variant_name:   data['variant_name'].to_s,
+        is_control:     data['is_control'] == true,
+        configuration:  data['configuration']
+      )
+      @cache.set(cache_key, assignment)
+      assignment
     rescue NetworkError, APIError => e
       warn "[ExperimentationPlatform] get_assignment error: #{e.message}"
       nil
     end
 
-    # Track a custom event (fire-and-forget).
+    # Track an event. Never raises.
     #
-    # Network or API errors are rescued and logged — this method never raises.
+    # With +experiment_key+ and/or +feature_flag_key+ one
+    # POST /api/v1/tracking/track is sent. Without a key the event is fanned
+    # out through POST /api/v1/tracking/batch: one entry per cached assignment
+    # plus one per cached evaluated flag for this user. If nothing is cached
+    # for the user, nothing is sent (and +true+ is returned).
     #
-    # @param event_name  [String] event name
-    # @param user_id     [String] user identifier
-    # @param properties  [Hash]   event properties
-    # @return [Boolean] true if the event was sent, false on error
-    def track(event_name, user_id, properties: {})
-      payload = {
-        event:      event_name,
-        user_id:    user_id,
-        properties: properties,
-        timestamp:  Time.now.utc.iso8601
-      }
-      @http.post('/api/v1/sdk/events', payload)
+    # @param event_name       [String]  event name (also the default +event_type+)
+    # @param user_id          [String]  user identifier
+    # @param properties       [Hash]    sent as +metadata+
+    # @param experiment_key   [String, nil]
+    # @param feature_flag_key [String, nil]
+    # @param value            [Numeric, nil] numeric value (e.g. revenue)
+    # @param event_type       [String, nil]  defaults to +event_name+
+    # @param timestamp        [Time, String, nil] defaults to now (UTC, ISO-8601)
+    # @return [Boolean] true if every request succeeded, false on any error
+    def track(event_name, user_id, properties: {}, experiment_key: nil, feature_flag_key: nil,
+              value: nil, event_type: nil, timestamp: nil)
+      base = build_event_body(event_name, user_id, properties, value, event_type, timestamp)
+
+      if experiment_key || feature_flag_key
+        body = base.dup
+        body[:experiment_key]   = experiment_key   if experiment_key
+        body[:feature_flag_key] = feature_flag_key if feature_flag_key
+        @http.post('/api/v1/tracking/track', body)
+        return true
+      end
+
+      events = assignments(user_id).map { |a| base.merge(experiment_key: a.experiment_key) } +
+               evaluated_flags(user_id).map { |k| base.merge(feature_flag_key: k) }
+      return true if events.empty?
+
+      events.each_slice(BATCH_LIMIT) do |slice|
+        @http.post('/api/v1/tracking/batch', { events: slice })
+      end
       true
     rescue StandardError => e
       warn "[ExperimentationPlatform] track error: #{e.message}"
       false
+    end
+
+    # Track several events in one go via POST /api/v1/tracking/batch
+    # (chunked into requests of at most BATCH_LIMIT events). Never raises.
+    #
+    # Each event is a Hash (symbol or string keys) with +event_name+ and
+    # +user_id+ (required), and at least one of +experiment_key+ /
+    # +feature_flag_key+ (the server rejects key-less events). Optional:
+    # +properties+ (sent as +metadata+), +value+, +event_type+, +timestamp+.
+    #
+    # @param events [Array<Hash>]
+    # @return [BatchResult]
+    def track_batch(events)
+      bodies = []
+      errors = []
+      Array(events).each_with_index do |event, index|
+        begin
+          bodies << normalize_event(event)
+        rescue ArgumentError => e
+          errors << { 'index' => index, 'error' => e.message }
+        end
+      end
+
+      success = 0
+      failure = errors.size
+      bodies.each_slice(BATCH_LIMIT) do |slice|
+        begin
+          resp = @http.post('/api/v1/tracking/batch', { events: slice })
+          resp = {} unless resp.is_a?(Hash)
+          success += resp.fetch('success_count', slice.size).to_i
+          failure += resp.fetch('failure_count', 0).to_i
+          errors.concat(Array(resp['errors']))
+        rescue StandardError => e
+          warn "[ExperimentationPlatform] track_batch error: #{e.message}"
+          failure += slice.size
+          errors << { 'error' => e.message }
+        end
+      end
+
+      BatchResult.new(
+        success_count: success,
+        failure_count: failure,
+        errors:        errors.empty? ? nil : errors
+      )
+    end
+
+    # Cached (successful, unexpired) assignments for the user.
+    #
+    # @return [Array<Assignment>]
+    def assignments(user_id)
+      @cache.live_values { |key| key.is_a?(Array) && key[0] == :assignment && key[1] == user_id }
+    end
+
+    # Keys of flags successfully evaluated (and still cached) for the user.
+    #
+    # @return [Array<String>]
+    def evaluated_flags(user_id)
+      @cache.live_values { |key| key.is_a?(Array) && key[0] == :flag && key[1] == user_id }
+            .map(&:key)
+    end
+
+    # Drop every cached evaluation and assignment.
+    def clear_cache
+      @cache.clear
     end
 
     # Close the client and release resources.
@@ -123,29 +238,55 @@ module ExperimentationPlatform
 
     private
 
-    def fetch_flag(flag_key)
-      cache_key = "flag:#{flag_key}"
-      cached = @cache.get(cache_key)
-      return cached unless cached.nil?
-
-      data = @http.get("/api/v1/sdk/flags/#{flag_key}")
-      flag = symbolize_keys(data)
-      @cache.set(cache_key, flag)
-      flag
-    rescue NetworkError, APIError
-      raise
+    def flag_cache_key(user_id, flag_key)
+      [:flag, user_id, flag_key]
     end
 
-    def symbolize_keys(hash)
-      return hash unless hash.is_a?(Hash)
+    def assignment_cache_key(user_id, experiment_key)
+      [:assignment, user_id, experiment_key]
+    end
 
-      hash.transform_keys(&:to_sym).transform_values do |v|
-        case v
-        when Hash  then symbolize_keys(v)
-        when Array then v.map { |e| e.is_a?(Hash) ? symbolize_keys(e) : e }
-        else v
-        end
+    # Percent-encode a path segment / query value (spaces as %20, not +).
+    def encode(value)
+      URI.encode_www_form_component(value.to_s).gsub('+', '%20')
+    end
+
+    def build_event_body(event_name, user_id, properties, value, event_type, timestamp)
+      body = {
+        event_type: (event_type || event_name).to_s,
+        event_name: event_name.to_s,
+        user_id:    user_id.to_s,
+        timestamp:  format_timestamp(timestamp)
+      }
+      body[:value]    = value.to_f unless value.nil?
+      body[:metadata] = properties if properties.is_a?(Hash) && !properties.empty?
+      body
+    end
+
+    def format_timestamp(timestamp)
+      case timestamp
+      when nil  then Time.now.utc.iso8601
+      when Time then timestamp.utc.iso8601
+      else timestamp.to_s
       end
+    end
+
+    # Turn a user-supplied event Hash into a /tracking/batch entry.
+    def normalize_event(event)
+      raise ArgumentError, 'event must be a Hash' unless event.is_a?(Hash)
+
+      e = {}
+      event.each { |k, v| e[k.to_sym] = v }
+
+      event_name = e[:event_name] || e[:event]
+      raise ArgumentError, 'event_name is required' if event_name.nil? || event_name.to_s.empty?
+      raise ArgumentError, 'user_id is required'    if e[:user_id].nil? || e[:user_id].to_s.empty?
+
+      body = build_event_body(event_name, e[:user_id], e[:properties] || e[:metadata],
+                              e[:value], e[:event_type], e[:timestamp])
+      body[:experiment_key]   = e[:experiment_key]   if e[:experiment_key]
+      body[:feature_flag_key] = e[:feature_flag_key] if e[:feature_flag_key]
+      body
     end
   end
 end
