@@ -24,11 +24,15 @@ def test_application_setup():
     # Print registered routes
     print("\nRegistered routes:")
     for route in app.routes:
+        # Newer FastAPI lists included routers as entries without a path.
+        path = getattr(route, "path", None)
+        if path is None:
+            continue
         methods = getattr(route, "methods", None)
         if methods:
-            print(f"  {route.path} [{', '.join(methods)}]")
+            print(f"  {path} [{', '.join(methods)}]")
         else:
-            print(f"  {route.path} [WebSocket]")
+            print(f"  {path} [WebSocket]")
 
     # Check if the router is properly mounted
     from backend.app.api.api import api_router
@@ -39,11 +43,15 @@ def test_application_setup():
     # Print API router routes
     print("\nAPI Router routes:")
     for route in api_router.routes:
+        # Newer FastAPI lists included routers as entries without a path.
+        path = getattr(route, "path", None)
+        if path is None:
+            continue
         methods = getattr(route, "methods", None)
         if methods:
-            print(f"  {route.path} [{', '.join(methods)}]")
+            print(f"  {path} [{', '.join(methods)}]")
         else:
-            print(f"  {route.path} [WebSocket]")
+            print(f"  {path} [WebSocket]")
 
     # Verify that the application has more than just the default routes
     assert len(app.routes) > 3, "Application should have more than default routes"
