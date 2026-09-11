@@ -41,7 +41,8 @@ func (h *HTTPClient) Get(ctx context.Context, path string, result interface{}) e
 }
 
 // Post performs a POST request to path, encoding body as JSON, and decodes the
-// JSON response into result. The request is cancelled if ctx is cancelled.
+// JSON response into result (skipped when result is nil). The request is
+// cancelled if ctx is cancelled.
 func (h *HTTPClient) Post(ctx context.Context, path string, body interface{}, result interface{}) error {
 	var encoded []byte
 	if body != nil {
@@ -56,12 +57,16 @@ func (h *HTTPClient) Post(ctx context.Context, path string, body interface{}, re
 	if err != nil {
 		return fmt.Errorf("build POST request: %w", err)
 	}
-	req.Header.Set("Content-Type", "application/json")
 	return h.do(req, result)
 }
 
+// CloseIdleConnections closes any idle connections in the underlying pool.
+func (h *HTTPClient) CloseIdleConnections() {
+	h.client.CloseIdleConnections()
+}
+
 // buildRequest creates an *http.Request for the given method and path, attaching
-// the API key header and (optionally) the JSON request body.
+// the API key and JSON headers and (optionally) the JSON request body.
 func (h *HTTPClient) buildRequest(ctx context.Context, method, path string, body []byte) (*http.Request, error) {
 	url := h.baseURL + path
 
@@ -79,6 +84,7 @@ func (h *HTTPClient) buildRequest(ctx context.Context, method, path string, body
 		req.Header.Set("X-API-Key", h.apiKey)
 	}
 	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", "application/json")
 	return req, nil
 }
 
@@ -96,6 +102,7 @@ func (h *HTTPClient) do(req *http.Request, result interface{}) error {
 		return &APIError{
 			StatusCode: resp.StatusCode,
 			Message:    string(body),
+			RetryAfter: resp.Header.Get("Retry-After"),
 		}
 	}
 
@@ -107,10 +114,14 @@ func (h *HTTPClient) do(req *http.Request, result interface{}) error {
 	return nil
 }
 
-// APIError is returned when the server responds with a non-2xx HTTP status code.
+// APIError is returned when the server responds with a non-2xx HTTP status code:
+// 401 bad API key, 404 experiment/flag unknown or not ACTIVE, 422 invalid event,
+// 429 rate limited (see RetryAfter).
 type APIError struct {
 	StatusCode int
 	Message    string
+	// RetryAfter is the raw Retry-After header, set on 429 responses.
+	RetryAfter string
 }
 
 func (e *APIError) Error() string {

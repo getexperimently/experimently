@@ -3,8 +3,13 @@ package experimentation_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"math"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -24,138 +29,149 @@ func newTestUserWithAttrs(id string, attrs map[string]interface{}) *exp.User {
 	return &exp.User{ID: id, Attributes: attrs}
 }
 
-// mustNewClient creates a client pointed at a test server; fails the test on error.
-func mustNewClient(t *testing.T, serverURL string) exp.Client {
+// recordedRequest is one request captured by the fake backend.
+type recordedRequest struct {
+	Method      string
+	Path        string // decoded path
+	EscapedPath string // as sent on the wire
+	Query       map[string]string
+	Header      http.Header
+	Body        map[string]interface{}
+	RawBody     []byte
+}
+
+// fakeBackend is an httptest.Server that records every request and answers
+// from a route table keyed by "METHOD /path".
+type fakeBackend struct {
+	*httptest.Server
+	mu       sync.Mutex
+	requests []recordedRequest
+	routes   map[string]http.HandlerFunc
+}
+
+func newFakeBackend(t *testing.T) *fakeBackend {
 	t.Helper()
-	c, err := exp.New(
+	fb := &fakeBackend{routes: map[string]http.HandlerFunc{}}
+	fb.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := readAll(r)
+		rec := recordedRequest{
+			Method:      r.Method,
+			Path:        r.URL.Path,
+			EscapedPath: r.URL.EscapedPath(),
+			Query:       map[string]string{},
+			Header:      r.Header.Clone(),
+			RawBody:     raw,
+		}
+		for k, v := range r.URL.Query() {
+			rec.Query[k] = v[0]
+		}
+		if len(raw) > 0 {
+			_ = json.Unmarshal(raw, &rec.Body)
+		}
+		fb.mu.Lock()
+		fb.requests = append(fb.requests, rec)
+		handler := fb.routes[r.Method+" "+r.URL.Path]
+		if handler == nil {
+			handler = fb.routes[r.Method+" *"]
+		}
+		fb.mu.Unlock()
+
+		if handler == nil {
+			http.Error(w, `{"detail":"no route"}`, http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		handler(w, r)
+	}))
+	t.Cleanup(fb.Close)
+	return fb
+}
+
+func readAll(r *http.Request) ([]byte, error) {
+	if r.Body == nil {
+		return nil, nil
+	}
+	defer r.Body.Close()
+	buf := make([]byte, 0, 512)
+	tmp := make([]byte, 512)
+	for {
+		n, err := r.Body.Read(tmp)
+		buf = append(buf, tmp[:n]...)
+		if err != nil {
+			break
+		}
+	}
+	return buf, nil
+}
+
+func (fb *fakeBackend) handle(method, path string, h http.HandlerFunc) {
+	fb.mu.Lock()
+	defer fb.mu.Unlock()
+	fb.routes[method+" "+path] = h
+}
+
+func (fb *fakeBackend) respondJSON(method, path string, status int, body interface{}) {
+	fb.handle(method, path, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(status)
+		_ = json.NewEncoder(w).Encode(body)
+	})
+}
+
+func (fb *fakeBackend) Requests() []recordedRequest {
+	fb.mu.Lock()
+	defer fb.mu.Unlock()
+	out := make([]recordedRequest, len(fb.requests))
+	copy(out, fb.requests)
+	return out
+}
+
+func (fb *fakeBackend) Count() int {
+	fb.mu.Lock()
+	defer fb.mu.Unlock()
+	return len(fb.requests)
+}
+
+// Standard fixtures ---------------------------------------------------------
+
+var assignResponse = map[string]interface{}{
+	"experiment_key": "checkout_flow",
+	"user_id":        "user-1",
+	"variant_id":     "8b6f1c2e-0000-4000-8000-000000000001",
+	"variant_name":   "treatment",
+	"is_control":     false,
+	"configuration":  map[string]interface{}{"headline": "Buy now", "discount": 10},
+}
+
+func (fb *fakeBackend) serveAssign() {
+	fb.respondJSON(http.MethodPost, "/api/v1/tracking/assign", http.StatusOK, assignResponse)
+}
+
+func (fb *fakeBackend) serveFlag(key string, enabled bool, config interface{}) {
+	fb.respondJSON(http.MethodGet, "/api/v1/feature-flags/evaluate/"+key, http.StatusOK,
+		map[string]interface{}{"key": key, "enabled": enabled, "config": config})
+}
+
+func (fb *fakeBackend) serveTrack() {
+	fb.respondJSON(http.MethodPost, "/api/v1/tracking/track", http.StatusOK, map[string]interface{}{"id": "evt-1"})
+	fb.respondJSON(http.MethodPost, "/api/v1/tracking/batch", http.StatusOK,
+		map[string]interface{}{"success_count": 1, "failure_count": 0, "errors": nil})
+}
+
+// mustNewClient creates a client pointed at a test server; fails the test on error.
+func mustNewClient(t *testing.T, serverURL string, opts ...exp.Option) exp.Client {
+	t.Helper()
+	base := []exp.Option{
 		exp.WithBaseURL(serverURL),
 		exp.WithAPIKey("test-key"),
 		exp.WithCacheSize(100),
-		exp.WithCacheTTL(5*time.Minute),
-	)
+		exp.WithCacheTTL(5 * time.Minute),
+	}
+	c, err := exp.New(append(base, opts...)...)
 	if err != nil {
 		t.Fatalf("New() error: %v", err)
 	}
 	t.Cleanup(func() { _ = c.Close() })
 	return c
-}
-
-// setupFlagServer creates an httptest.Server that serves a single FeatureFlag as JSON.
-func setupFlagServer(t *testing.T, flag exp.FeatureFlag) *httptest.Server {
-	t.Helper()
-	mux := http.NewServeMux()
-	mux.HandleFunc("/api/v1/feature-flags/"+flag.Key+"/evaluate", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(flag)
-	})
-	return httptest.NewServer(mux)
-}
-
-// setupAssignmentServer creates an httptest.Server that serves experiment assignments.
-func setupAssignmentServer(t *testing.T, assignment exp.Assignment) *httptest.Server {
-	t.Helper()
-	mux := http.NewServeMux()
-	mux.HandleFunc("/api/v1/assignments", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(assignment)
-	})
-	return httptest.NewServer(mux)
-}
-
-// ---------------------------------------------------------------------------
-// hashUser cross-SDK parity tests
-//
-// Vectors computed with Python:
-//   import hashlib, struct
-//   def h(uid, fk):
-//       b = hashlib.md5(f"{uid}:{fk}".encode()).digest()[:4]
-//       v = struct.unpack('<I', b)[0]
-//       return v / 0x100000000  # matches Java SDK HASH_DIVISOR
-// ---------------------------------------------------------------------------
-
-func TestHashUser_CrossSDKParity(t *testing.T) {
-	// These values are computed with the canonical Python implementation which
-	// matches the Java SDK. The Go SDK MUST produce identical results.
-	tests := []struct {
-		userID   string
-		flagKey  string
-		expected float64
-	}{
-		{"user-123", "my-flag", 0.6927449859213084},
-		{"alice", "feature-x", 0.6025943041313440},
-		{"", "empty-user", 0.3582690393086523},
-		{"bob", "new-dashboard", 0.5812188293784857},
-		{"user-456", "checkout-flow", 0.1158445079345256},
-		{"user-789", "dark-mode", 0.9154308021534234},
-		{"charlie", "feature-x", 0.8711284515447915},
-	}
-
-	evaluator := &exp.Evaluator{}
-	for _, tt := range tests {
-		t.Run(tt.userID+":"+tt.flagKey, func(t *testing.T) {
-			// We indirectly test hashUser by evaluating a 100% rollout flag;
-			// the hash is used internally and the result (in_rollout vs out_of_rollout)
-			// must be consistent with the expected hash value.
-			flag := &exp.FeatureFlag{
-				Key:               tt.flagKey,
-				Enabled:           true,
-				RolloutPercentage: 100.0,
-			}
-			user := newTestUser(tt.userID)
-			result := evaluator.EvaluateFlag(flag, user)
-			// 100% rollout: everyone should be in_rollout since hash < 1.0 always.
-			if !result.Enabled {
-				t.Errorf("expected flag enabled for 100%% rollout; user=%q flag=%q hash≈%.6f",
-					tt.userID, tt.flagKey, tt.expected)
-			}
-		})
-	}
-}
-
-// TestHashUser_Consistency verifies the same input always produces the same output.
-func TestHashUser_Consistency(t *testing.T) {
-	flag := &exp.FeatureFlag{Key: "consistency-test", Enabled: true, RolloutPercentage: 50.0}
-	evaluator := &exp.Evaluator{}
-
-	user := newTestUser("user-repeat")
-	var results []*exp.EvalResult
-	for i := 0; i < 100; i++ {
-		results = append(results, evaluator.EvaluateFlag(flag, user))
-	}
-
-	first := results[0].Enabled
-	for i, r := range results[1:] {
-		if r.Enabled != first {
-			t.Errorf("result[%d].Enabled = %v; want %v (hash should be deterministic)", i+1, r.Enabled, first)
-		}
-	}
-}
-
-// TestHashUser_Distribution verifies hash values are roughly uniformly distributed.
-func TestHashUser_Distribution(t *testing.T) {
-	evaluator := &exp.Evaluator{}
-	flag := &exp.FeatureFlag{Key: "dist-flag", Enabled: true, RolloutPercentage: 50.0}
-
-	inRollout := 0
-	const total = 10000
-	for i := 0; i < total; i++ {
-		user := &exp.User{ID: generateUserID(i)}
-		result := evaluator.EvaluateFlag(flag, user)
-		if result.Enabled {
-			inRollout++
-		}
-	}
-
-	fraction := float64(inRollout) / float64(total)
-	// Expect ~50% ± 5% for 10000 samples.
-	if fraction < 0.45 || fraction > 0.55 {
-		t.Errorf("distribution out of range: got %.2f%%, want 45%%–55%% for 50%% rollout", fraction*100)
-	}
-}
-
-// generateUserID creates a deterministic user ID string for distribution tests.
-func generateUserID(i int) string {
-	return "dist-user-" + intToStr(i)
 }
 
 func intToStr(n int) string {
@@ -168,6 +184,92 @@ func intToStr(n int) string {
 		n /= 10
 	}
 	return string(digits)
+}
+
+// ---------------------------------------------------------------------------
+// ConsistentHash: golden vectors shared by every SDK
+// (tests/sdk-contract/golden-vectors.json)
+// ---------------------------------------------------------------------------
+
+var goldenVectors = []struct {
+	userID   string
+	flagKey  string
+	expected float64
+}{
+	{"user-123", "my-flag", 0.6927449859213084},
+	{"alice", "dark-mode", 0.0353864398784935},
+	{"bob", "new-checkout", 0.1463384565431625},
+	{"user-789", "beta-feature", 0.3134219283238053},
+	{"test-user", "flag-key", 0.9923393740318716},
+	{"", "empty-user", 0.3582690393086523},
+	{"a", "b", 0.6056532170623541},
+	{"user-001", "exp-abc", 0.7764157797209918},
+	{"user-002", "exp-abc", 0.1422550100833178},
+}
+
+func TestConsistentHash_GoldenVectors(t *testing.T) {
+	for _, v := range goldenVectors {
+		got := exp.ConsistentHash(v.userID, v.flagKey)
+		if math.Abs(got-v.expected) > 1e-12 {
+			t.Errorf("ConsistentHash(%q, %q) = %.16f; want %.16f", v.userID, v.flagKey, got, v.expected)
+		}
+	}
+}
+
+// TestConsistentHash_GoldenVectorFile replays tests/sdk-contract/golden-vectors.json
+// when the checkout contains it (skipped when the SDK is vendored elsewhere).
+func TestConsistentHash_GoldenVectorFile(t *testing.T) {
+	path := filepath.Join("..", "..", "tests", "sdk-contract", "golden-vectors.json")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Skipf("golden vector file not available: %v", err)
+	}
+	var doc struct {
+		HashVectors []struct {
+			UserID       string  `json:"user_id"`
+			FlagKey      string  `json:"flag_key"`
+			ExpectedHash float64 `json:"expected_hash"`
+		} `json:"hash_vectors"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("decode golden vectors: %v", err)
+	}
+	if len(doc.HashVectors) == 0 {
+		t.Fatal("golden vector file has no hash_vectors")
+	}
+	for _, v := range doc.HashVectors {
+		got := exp.ConsistentHash(v.UserID, v.FlagKey)
+		if math.Abs(got-v.ExpectedHash) > 1e-12 {
+			t.Errorf("ConsistentHash(%q, %q) = %.16f; want %.16f", v.UserID, v.FlagKey, got, v.ExpectedHash)
+		}
+	}
+}
+
+func TestConsistentHash_Deterministic(t *testing.T) {
+	first := exp.ConsistentHash("user-repeat", "consistency-test")
+	for i := 0; i < 100; i++ {
+		if got := exp.ConsistentHash("user-repeat", "consistency-test"); got != first {
+			t.Fatalf("call %d: got %v; want %v", i, got, first)
+		}
+	}
+}
+
+func TestConsistentHash_RangeAndDistribution(t *testing.T) {
+	below := 0
+	const total = 10000
+	for i := 0; i < total; i++ {
+		h := exp.ConsistentHash("dist-user-"+intToStr(i), "dist-flag")
+		if h < 0 || h >= 1 {
+			t.Fatalf("hash out of range: %v", h)
+		}
+		if h < 0.5 {
+			below++
+		}
+	}
+	fraction := float64(below) / float64(total)
+	if fraction < 0.45 || fraction > 0.55 {
+		t.Errorf("distribution out of range: %.2f%% below 0.5, want 45%%–55%%", fraction*100)
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -189,8 +291,7 @@ func TestCache_GetSet(t *testing.T) {
 
 func TestCache_MissReturnsNotFound(t *testing.T) {
 	c := exp.NewCache(10, time.Minute)
-	_, ok := c.Get("nonexistent")
-	if ok {
+	if _, ok := c.Get("nonexistent"); ok {
 		t.Error("Get: expected ok=false for missing key")
 	}
 }
@@ -199,14 +300,12 @@ func TestCache_TTLExpiry(t *testing.T) {
 	c := exp.NewCache(10, 50*time.Millisecond)
 	c.Set("expiring", "soon")
 
-	// Should be present immediately.
 	if _, ok := c.Get("expiring"); !ok {
 		t.Fatal("expected key to exist before TTL")
 	}
 
 	time.Sleep(100 * time.Millisecond)
 
-	// Should be expired now.
 	if _, ok := c.Get("expiring"); ok {
 		t.Error("expected key to be expired after TTL")
 	}
@@ -218,23 +317,17 @@ func TestCache_LRUEviction(t *testing.T) {
 	c.Set("b", 2)
 	c.Set("c", 3)
 
-	// Access "a" to make it recently used.
-	c.Get("a")
+	c.Get("a") // make "a" recently used
 
-	// Adding "d" should evict "b" (LRU).
-	c.Set("d", 4)
+	c.Set("d", 4) // evicts "b"
 
 	if _, ok := c.Get("b"); ok {
 		t.Error("expected 'b' to be evicted (LRU)")
 	}
-	if _, ok := c.Get("a"); !ok {
-		t.Error("expected 'a' to still exist (was accessed recently)")
-	}
-	if _, ok := c.Get("c"); !ok {
-		t.Error("expected 'c' to still exist")
-	}
-	if _, ok := c.Get("d"); !ok {
-		t.Error("expected 'd' to exist (just added)")
+	for _, k := range []string{"a", "c", "d"} {
+		if _, ok := c.Get(k); !ok {
+			t.Errorf("expected %q to still exist", k)
+		}
 	}
 }
 
@@ -244,14 +337,11 @@ func TestCache_UpdateExistingKey(t *testing.T) {
 	c.Set("key", "new")
 
 	val, ok := c.Get("key")
-	if !ok {
-		t.Fatal("expected key to exist")
-	}
-	if val != "new" {
-		t.Errorf("got %v; want 'new'", val)
+	if !ok || val != "new" {
+		t.Errorf("got %v, %v; want 'new', true", val, ok)
 	}
 	if c.Len() != 1 {
-		t.Errorf("Len = %d; want 1 (update should not add duplicates)", c.Len())
+		t.Errorf("Len = %d; want 1", c.Len())
 	}
 }
 
@@ -259,16 +349,11 @@ func TestCache_Delete(t *testing.T) {
 	c := exp.NewCache(10, time.Minute)
 	c.Set("key", "value")
 	c.Delete("key")
+	c.Delete("nonexistent") // must not panic
 
 	if _, ok := c.Get("key"); ok {
 		t.Error("expected key to be deleted")
 	}
-}
-
-func TestCache_DeleteNonExistent(t *testing.T) {
-	c := exp.NewCache(10, time.Minute)
-	// Should not panic.
-	c.Delete("nonexistent")
 }
 
 func TestCache_Clear(t *testing.T) {
@@ -282,15 +367,24 @@ func TestCache_Clear(t *testing.T) {
 	}
 }
 
-func TestCache_Len(t *testing.T) {
-	c := exp.NewCache(10, time.Minute)
-	if c.Len() != 0 {
-		t.Errorf("initial Len = %d; want 0", c.Len())
-	}
+func TestCache_Range(t *testing.T) {
+	c := exp.NewCache(10, 50*time.Millisecond)
 	c.Set("a", 1)
 	c.Set("b", 2)
-	if c.Len() != 2 {
-		t.Errorf("Len = %d; want 2", c.Len())
+	time.Sleep(100 * time.Millisecond)
+	c.Set("c", 3)
+
+	seen := map[string]interface{}{}
+	c.Range(func(key string, value interface{}) {
+		seen[key] = value
+		c.Get(key) // re-entrancy must not deadlock
+	})
+
+	if len(seen) != 1 || seen["c"] != 3 {
+		t.Errorf("Range saw %v; want only c=3 (expired entries dropped)", seen)
+	}
+	if c.Len() != 1 {
+		t.Errorf("Len = %d after Range; want 1 (expired entries removed)", c.Len())
 	}
 }
 
@@ -311,6 +405,9 @@ func TestCache_Concurrent(t *testing.T) {
 				if j%10 == 0 {
 					c.Delete(key)
 				}
+				if j%25 == 0 {
+					c.Range(func(string, interface{}) {})
+				}
 			}
 		}(i)
 	}
@@ -322,306 +419,8 @@ func TestCache_NoTTL(t *testing.T) {
 	c.Set("key", "value")
 	time.Sleep(10 * time.Millisecond)
 
-	val, ok := c.Get("key")
-	if !ok {
-		t.Fatal("expected key to exist with no TTL")
-	}
-	if val != "value" {
-		t.Errorf("got %v; want 'value'", val)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Evaluator tests
-// ---------------------------------------------------------------------------
-
-func TestEvaluator_FlagDisabled(t *testing.T) {
-	e := &exp.Evaluator{}
-	flag := &exp.FeatureFlag{Key: "disabled-flag", Enabled: false, RolloutPercentage: 100.0}
-	result := e.EvaluateFlag(flag, newTestUser("user-1"))
-
-	if result.Enabled {
-		t.Error("expected Enabled=false for disabled flag")
-	}
-	if result.Reason != "flag_disabled" {
-		t.Errorf("Reason = %q; want 'flag_disabled'", result.Reason)
-	}
-}
-
-func TestEvaluator_NilFlag(t *testing.T) {
-	e := &exp.Evaluator{}
-	result := e.EvaluateFlag(nil, newTestUser("user-1"))
-
-	if result.Enabled {
-		t.Error("expected Enabled=false for nil flag")
-	}
-	if result.Reason != "flag_disabled" {
-		t.Errorf("Reason = %q; want 'flag_disabled'", result.Reason)
-	}
-}
-
-func TestEvaluator_FlagEnabled100Percent(t *testing.T) {
-	e := &exp.Evaluator{}
-	flag := &exp.FeatureFlag{Key: "full-rollout", Enabled: true, RolloutPercentage: 100.0}
-
-	// All users should be in rollout.
-	for i := 0; i < 50; i++ {
-		user := newTestUser("user-" + intToStr(i))
-		result := e.EvaluateFlag(flag, user)
-		if !result.Enabled {
-			t.Errorf("user-%d should be in 100%% rollout", i)
-		}
-	}
-}
-
-func TestEvaluator_FlagEnabled0Percent(t *testing.T) {
-	e := &exp.Evaluator{}
-	flag := &exp.FeatureFlag{Key: "zero-rollout", Enabled: true, RolloutPercentage: 0.0}
-
-	// No users should be in rollout.
-	for i := 0; i < 50; i++ {
-		user := newTestUser("user-" + intToStr(i))
-		result := e.EvaluateFlag(flag, user)
-		if result.Enabled {
-			t.Errorf("user-%d should NOT be in 0%% rollout", i)
-		}
-		if result.Reason != "out_of_rollout" {
-			t.Errorf("Reason = %q; want 'out_of_rollout'", result.Reason)
-		}
-	}
-}
-
-// TestEvaluator_FlagEnabled50Percent uses known hash vectors to verify exact rollout boundary.
-// Vectors: user-0 hash=0.3500 (in), user-2 hash=0.5844 (out) for flag "test-flag".
-func TestEvaluator_FlagEnabled50Percent(t *testing.T) {
-	e := &exp.Evaluator{}
-	flag := &exp.FeatureFlag{Key: "test-flag", Enabled: true, RolloutPercentage: 50.0}
-
-	// user-0: hash≈0.3500, should be IN rollout.
-	resultIn := e.EvaluateFlag(flag, newTestUser("user-0"))
-	if !resultIn.Enabled {
-		t.Error("user-0 should be in 50% rollout (hash≈0.35)")
-	}
-
-	// user-2: hash≈0.5844, should be OUT of rollout.
-	resultOut := e.EvaluateFlag(flag, newTestUser("user-2"))
-	if resultOut.Enabled {
-		t.Error("user-2 should NOT be in 50% rollout (hash≈0.58)")
-	}
-}
-
-func TestEvaluator_InRollout_Reason(t *testing.T) {
-	e := &exp.Evaluator{}
-	flag := &exp.FeatureFlag{Key: "full-rollout", Enabled: true, RolloutPercentage: 100.0}
-	result := e.EvaluateFlag(flag, newTestUser("any-user"))
-
-	if result.Reason != "in_rollout" {
-		t.Errorf("Reason = %q; want 'in_rollout'", result.Reason)
-	}
-}
-
-func TestEvaluator_EmptyVariants(t *testing.T) {
-	e := &exp.Evaluator{}
-	flag := &exp.FeatureFlag{
-		Key:               "boolean-flag",
-		Enabled:           true,
-		RolloutPercentage: 100.0,
-		Variants:          []exp.Variant{},
-	}
-	result := e.EvaluateFlag(flag, newTestUser("user-1"))
-
-	if !result.Enabled {
-		t.Error("expected Enabled=true")
-	}
-	if result.VariantKey != "" {
-		t.Errorf("VariantKey = %q; want empty for boolean flag", result.VariantKey)
-	}
-}
-
-func TestEvaluator_VariantAssignment(t *testing.T) {
-	e := &exp.Evaluator{}
-	flag := &exp.FeatureFlag{
-		Key:               "variant-flag",
-		Enabled:           true,
-		RolloutPercentage: 100.0,
-		Variants: []exp.Variant{
-			{Key: "control", Weight: 0.5},
-			{Key: "treatment", Weight: 0.5},
-		},
-	}
-
-	controlCount, treatmentCount := 0, 0
-	for i := 0; i < 1000; i++ {
-		user := newTestUser("vuser-" + intToStr(i))
-		result := e.EvaluateFlag(flag, user)
-		if !result.Enabled {
-			t.Errorf("user %d: expected Enabled=true for 100%% rollout", i)
-		}
-		switch result.VariantKey {
-		case "control":
-			controlCount++
-		case "treatment":
-			treatmentCount++
-		default:
-			t.Errorf("unexpected variant %q", result.VariantKey)
-		}
-	}
-
-	// With 1000 users and 50/50 split, expect roughly 500 each ± 10%.
-	total := controlCount + treatmentCount
-	if total != 1000 {
-		t.Errorf("total assigned = %d; want 1000", total)
-	}
-	ratio := float64(controlCount) / 1000.0
-	if ratio < 0.40 || ratio > 0.60 {
-		t.Errorf("control ratio = %.2f; want 0.40–0.60", ratio)
-	}
-}
-
-func TestEvaluator_VariantAssignment_ThreeVariants(t *testing.T) {
-	e := &exp.Evaluator{}
-	flag := &exp.FeatureFlag{
-		Key:               "three-variant-flag",
-		Enabled:           true,
-		RolloutPercentage: 100.0,
-		Variants: []exp.Variant{
-			{Key: "a", Weight: 0.33},
-			{Key: "b", Weight: 0.33},
-			{Key: "c", Weight: 0.34},
-		},
-	}
-
-	counts := map[string]int{}
-	for i := 0; i < 3000; i++ {
-		user := newTestUser("3vuser-" + intToStr(i))
-		result := e.EvaluateFlag(flag, user)
-		if !result.Enabled {
-			continue
-		}
-		counts[result.VariantKey]++
-	}
-
-	// Each variant should get ~33% ± 10%.
-	for _, key := range []string{"a", "b", "c"} {
-		ratio := float64(counts[key]) / 3000.0
-		if ratio < 0.23 || ratio > 0.43 {
-			t.Errorf("variant %q ratio = %.2f; want 0.23–0.43", key, ratio)
-		}
-	}
-}
-
-func TestEvaluator_VariantAssignment_Reason(t *testing.T) {
-	e := &exp.Evaluator{}
-	flag := &exp.FeatureFlag{
-		Key:               "rv-flag",
-		Enabled:           true,
-		RolloutPercentage: 100.0,
-		Variants: []exp.Variant{
-			{Key: "v1", Weight: 1.0},
-		},
-	}
-	result := e.EvaluateFlag(flag, newTestUser("user-x"))
-	if result.Reason != "variant_assigned" {
-		t.Errorf("Reason = %q; want 'variant_assigned'", result.Reason)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// MatchesRules tests
-// ---------------------------------------------------------------------------
-
-func TestMatchesRules_Empty(t *testing.T) {
-	e := &exp.Evaluator{}
-	user := newTestUserWithAttrs("u1", map[string]interface{}{"plan": "pro"})
-	if !e.MatchesRules([]exp.Rule{}, user) {
-		t.Error("empty rules should match all users")
-	}
-}
-
-func TestMatchesRules_Equals(t *testing.T) {
-	e := &exp.Evaluator{}
-	user := newTestUserWithAttrs("u1", map[string]interface{}{"plan": "pro"})
-	rules := []exp.Rule{{Attribute: "plan", Operator: "eq", Value: "pro"}}
-	if !e.MatchesRules(rules, user) {
-		t.Error("expected rules to match")
-	}
-}
-
-func TestMatchesRules_NotEquals(t *testing.T) {
-	e := &exp.Evaluator{}
-	user := newTestUserWithAttrs("u1", map[string]interface{}{"plan": "free"})
-	rules := []exp.Rule{{Attribute: "plan", Operator: "neq", Value: "pro"}}
-	if !e.MatchesRules(rules, user) {
-		t.Error("expected rules to match")
-	}
-}
-
-func TestMatchesRules_In(t *testing.T) {
-	e := &exp.Evaluator{}
-	user := newTestUserWithAttrs("u1", map[string]interface{}{"country": "US"})
-	rules := []exp.Rule{{Attribute: "country", Operator: "in", Value: []interface{}{"US", "CA", "UK"}}}
-	if !e.MatchesRules(rules, user) {
-		t.Error("expected rules to match")
-	}
-}
-
-func TestMatchesRules_NotIn(t *testing.T) {
-	e := &exp.Evaluator{}
-	user := newTestUserWithAttrs("u1", map[string]interface{}{"country": "DE"})
-	rules := []exp.Rule{{Attribute: "country", Operator: "not_in", Value: []interface{}{"US", "CA"}}}
-	if !e.MatchesRules(rules, user) {
-		t.Error("expected rules to match")
-	}
-}
-
-func TestMatchesRules_Contains(t *testing.T) {
-	e := &exp.Evaluator{}
-	user := newTestUserWithAttrs("u1", map[string]interface{}{"email": "alice@example.com"})
-	rules := []exp.Rule{{Attribute: "email", Operator: "contains", Value: "@example.com"}}
-	if !e.MatchesRules(rules, user) {
-		t.Error("expected rules to match")
-	}
-}
-
-func TestMatchesRules_NumericGt(t *testing.T) {
-	e := &exp.Evaluator{}
-	user := newTestUserWithAttrs("u1", map[string]interface{}{"age": float64(25)})
-	rules := []exp.Rule{{Attribute: "age", Operator: "gt", Value: float64(18)}}
-	if !e.MatchesRules(rules, user) {
-		t.Error("expected gt rule to match age=25 > 18")
-	}
-}
-
-func TestMatchesRules_MissingAttribute(t *testing.T) {
-	e := &exp.Evaluator{}
-	user := newTestUserWithAttrs("u1", map[string]interface{}{"plan": "pro"})
-	rules := []exp.Rule{{Attribute: "country", Operator: "eq", Value: "US"}}
-	if e.MatchesRules(rules, user) {
-		t.Error("expected rules NOT to match when attribute is missing")
-	}
-}
-
-func TestMatchesRules_MultipleRules_AllMustMatch(t *testing.T) {
-	e := &exp.Evaluator{}
-	user := newTestUserWithAttrs("u1", map[string]interface{}{"plan": "pro", "country": "US"})
-	rules := []exp.Rule{
-		{Attribute: "plan", Operator: "eq", Value: "pro"},
-		{Attribute: "country", Operator: "eq", Value: "US"},
-	}
-	if !e.MatchesRules(rules, user) {
-		t.Error("expected all rules to match")
-	}
-}
-
-func TestMatchesRules_MultipleRules_OneFails(t *testing.T) {
-	e := &exp.Evaluator{}
-	user := newTestUserWithAttrs("u1", map[string]interface{}{"plan": "free", "country": "US"})
-	rules := []exp.Rule{
-		{Attribute: "plan", Operator: "eq", Value: "pro"},
-		{Attribute: "country", Operator: "eq", Value: "US"},
-	}
-	if e.MatchesRules(rules, user) {
-		t.Error("expected rules NOT to match when one rule fails")
+	if val, ok := c.Get("key"); !ok || val != "value" {
+		t.Errorf("got %v, %v; want 'value', true", val, ok)
 	}
 }
 
@@ -629,8 +428,7 @@ func TestMatchesRules_MultipleRules_OneFails(t *testing.T) {
 // Config / functional options tests
 // ---------------------------------------------------------------------------
 
-func TestDefaultConfig(t *testing.T) {
-	// Use a non-empty base URL to avoid a validation error.
+func TestNew_Defaults(t *testing.T) {
 	c, err := exp.New()
 	if err != nil {
 		t.Fatalf("New() with default config should not error; got: %v", err)
@@ -638,111 +436,88 @@ func TestDefaultConfig(t *testing.T) {
 	_ = c.Close()
 }
 
-func TestWithBaseURL(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
-	defer srv.Close()
-
-	c, err := exp.New(exp.WithBaseURL(srv.URL))
-	if err != nil {
-		t.Fatalf("New() error: %v", err)
-	}
-	defer c.Close()
-}
-
-func TestWithAPIKey(t *testing.T) {
-	var gotKey string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotKey = r.Header.Get("X-API-Key")
-		flag := exp.FeatureFlag{Key: "f", Enabled: true, RolloutPercentage: 100}
-		_ = json.NewEncoder(w).Encode(flag)
-	}))
-	defer srv.Close()
-
-	c, err := exp.New(exp.WithBaseURL(srv.URL), exp.WithAPIKey("secret-key"))
-	if err != nil {
-		t.Fatalf("New() error: %v", err)
-	}
-	defer c.Close()
-
-	_, _ = c.EvaluateFlag(context.Background(), "f", newTestUser("u1"))
-	if gotKey != "secret-key" {
-		t.Errorf("X-API-Key header = %q; want 'secret-key'", gotKey)
+func TestNew_EmptyBaseURL(t *testing.T) {
+	if _, err := exp.New(exp.WithBaseURL("")); err == nil {
+		t.Error("expected error for empty BaseURL")
 	}
 }
 
-func TestWithTimeout(t *testing.T) {
-	// Server that delays response.
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		time.Sleep(200 * time.Millisecond)
-		_ = json.NewEncoder(w).Encode(exp.FeatureFlag{Key: "f", Enabled: true, RolloutPercentage: 100})
-	}))
-	defer srv.Close()
+func TestNew_TrimsTrailingSlash(t *testing.T) {
+	fb := newFakeBackend(t)
+	fb.serveFlag("f", true, nil)
 
-	c, err := exp.New(exp.WithBaseURL(srv.URL), exp.WithTimeout(50*time.Millisecond))
-	if err != nil {
-		t.Fatalf("New() error: %v", err)
+	c := mustNewClient(t, fb.URL+"/")
+	if _, err := c.EvaluateFlag(context.Background(), "f", newTestUser("u1")); err != nil {
+		t.Fatalf("EvaluateFlag error: %v", err)
 	}
-	defer c.Close()
-
-	_, err = c.EvaluateFlag(context.Background(), "f", newTestUser("u1"))
-	if err == nil {
-		t.Error("expected timeout error but got nil")
+	if got := fb.Requests()[0].Path; got != "/api/v1/feature-flags/evaluate/f" {
+		t.Errorf("path = %q; want no double slash", got)
 	}
 }
 
-func TestWithCacheSize(t *testing.T) {
-	c, err := exp.New(exp.WithBaseURL("http://localhost:9999"), exp.WithCacheSize(500))
-	if err != nil {
-		t.Fatalf("New() error: %v", err)
-	}
-	defer c.Close()
-}
-
-func TestWithCacheTTL(t *testing.T) {
-	c, err := exp.New(exp.WithBaseURL("http://localhost:9999"), exp.WithCacheTTL(30*time.Second))
-	if err != nil {
-		t.Fatalf("New() error: %v", err)
-	}
-	defer c.Close()
-}
-
-func TestWithLocalEval_Disabled(t *testing.T) {
-	callCount := 0
-	flag := exp.FeatureFlag{Key: "localeval-flag", Enabled: true, RolloutPercentage: 100}
-	srv := setupFlagServer(t, flag)
-	defer srv.Close()
-
+func TestNew_AllOptions(t *testing.T) {
 	c, err := exp.New(
-		exp.WithBaseURL(srv.URL),
-		exp.WithLocalEval(false),
-		exp.WithCacheTTL(0), // disable eval cache so each call hits the server
+		exp.WithBaseURL("http://localhost:8000"),
+		exp.WithAPIKey("key-123"),
+		exp.WithTimeout(5*time.Second),
+		exp.WithCacheSize(200),
+		exp.WithCacheTTL(2*time.Minute),
+		exp.WithLocalEval(true), // deprecated no-op, must still compile and be accepted
 	)
 	if err != nil {
 		t.Fatalf("New() error: %v", err)
 	}
 	defer c.Close()
+}
 
-	// Patch server to count calls.
-	mux := http.NewServeMux()
-	mux.HandleFunc("/api/v1/feature-flags/"+flag.Key+"/evaluate", func(w http.ResponseWriter, r *http.Request) {
-		callCount++
-		_ = json.NewEncoder(w).Encode(flag)
-	})
-	srv2 := httptest.NewServer(mux)
-	defer srv2.Close()
+func TestWithTimeout(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(200 * time.Millisecond)
+		_, _ = w.Write([]byte(`{"key":"f","enabled":true}`))
+	}))
+	defer srv.Close()
 
-	c2, _ := exp.New(exp.WithBaseURL(srv2.URL), exp.WithLocalEval(false), exp.WithCacheTTL(0))
-	defer c2.Close()
-
-	for i := 0; i < 3; i++ {
-		_, _ = c2.EvaluateFlag(context.Background(), "localeval-flag", newTestUser("u1"))
+	c := mustNewClient(t, srv.URL, exp.WithTimeout(50*time.Millisecond))
+	result, err := c.EvaluateFlag(context.Background(), "f", newTestUser("u1"))
+	if err == nil {
+		t.Error("expected timeout error but got nil")
 	}
+	if result == nil || result.Enabled {
+		t.Error("expected disabled result on timeout")
+	}
+}
 
-	// With local eval disabled, we expect API calls (at least 1). With eval cache TTL=0 (no TTL), the
-	// Go Cache with 0 TTL actually means no expiry — so the first call populates cache and subsequent
-	// calls use cache. That is expected and correct behavior.
-	if callCount < 1 {
-		t.Errorf("expected at least 1 API call; got %d", callCount)
+// ---------------------------------------------------------------------------
+// Headers common to every request
+// ---------------------------------------------------------------------------
+
+func TestClient_RequestHeaders(t *testing.T) {
+	fb := newFakeBackend(t)
+	fb.serveFlag("f", true, nil)
+	fb.serveAssign()
+	fb.serveTrack()
+
+	c := mustNewClient(t, fb.URL, exp.WithAPIKey("secret-key"))
+	ctx := context.Background()
+	user := newTestUser("user-1")
+	_, _ = c.EvaluateFlag(ctx, "f", user)
+	_, _ = c.GetAssignment(ctx, "checkout_flow", user)
+	_ = c.Track(ctx, &exp.TrackEvent{UserID: "user-1", EventName: "click", ExperimentKey: "checkout_flow"})
+
+	reqs := fb.Requests()
+	if len(reqs) != 3 {
+		t.Fatalf("expected 3 requests; got %d", len(reqs))
+	}
+	for _, r := range reqs {
+		if got := r.Header.Get("X-API-Key"); got != "secret-key" {
+			t.Errorf("%s %s: X-API-Key = %q; want 'secret-key'", r.Method, r.Path, got)
+		}
+		if got := r.Header.Get("Accept"); got != "application/json" {
+			t.Errorf("%s %s: Accept = %q", r.Method, r.Path, got)
+		}
+		if got := r.Header.Get("Content-Type"); got != "application/json" {
+			t.Errorf("%s %s: Content-Type = %q", r.Method, r.Path, got)
+		}
 	}
 }
 
@@ -750,146 +525,195 @@ func TestWithLocalEval_Disabled(t *testing.T) {
 // Client.EvaluateFlag tests
 // ---------------------------------------------------------------------------
 
-func TestClient_New(t *testing.T) {
-	c, err := exp.New(exp.WithBaseURL("http://localhost:8000"))
-	if err != nil {
-		t.Fatalf("New() error: %v", err)
-	}
-	if c == nil {
-		t.Error("New() returned nil client")
-	}
-	_ = c.Close()
-}
+func TestClient_EvaluateFlag_RequestAndMapping(t *testing.T) {
+	fb := newFakeBackend(t)
+	fb.respondJSON(http.MethodGet, "/api/v1/feature-flags/evaluate/new search/v2", http.StatusOK,
+		map[string]interface{}{
+			"key":     "new search/v2",
+			"enabled": true,
+			"config":  map[string]interface{}{"variant": "blue", "limit": 3},
+		})
 
-func TestClient_NewWithOptions(t *testing.T) {
-	c, err := exp.New(
-		exp.WithBaseURL("http://localhost:8000"),
-		exp.WithAPIKey("key-123"),
-		exp.WithTimeout(5*time.Second),
-		exp.WithCacheSize(200),
-		exp.WithCacheTTL(2*time.Minute),
-		exp.WithLocalEval(true),
-	)
-	if err != nil {
-		t.Fatalf("New() error: %v", err)
-	}
-	defer c.Close()
-}
-
-func TestClient_EvaluateFlag_Enabled(t *testing.T) {
-	flag := exp.FeatureFlag{Key: "my-flag", Enabled: true, RolloutPercentage: 100}
-	srv := setupFlagServer(t, flag)
-	defer srv.Close()
-
-	c := mustNewClient(t, srv.URL)
-	result, err := c.EvaluateFlag(context.Background(), "my-flag", newTestUser("user-1"))
+	c := mustNewClient(t, fb.URL)
+	result, err := c.EvaluateFlag(context.Background(), "new search/v2", newTestUser("user 1&2"))
 	if err != nil {
 		t.Fatalf("EvaluateFlag error: %v", err)
 	}
+
+	req := fb.Requests()[0]
+	if req.Method != http.MethodGet {
+		t.Errorf("method = %s; want GET", req.Method)
+	}
+	if req.EscapedPath != "/api/v1/feature-flags/evaluate/new%20search%2Fv2" {
+		t.Errorf("escaped path = %q; want key path-escaped", req.EscapedPath)
+	}
+	if req.Query["user_id"] != "user 1&2" {
+		t.Errorf("user_id query = %q; want 'user 1&2'", req.Query["user_id"])
+	}
+	if len(req.RawBody) != 0 {
+		t.Errorf("GET should have no body; got %s", req.RawBody)
+	}
+
+	if result.Key != "new search/v2" {
+		t.Errorf("Key = %q", result.Key)
+	}
 	if !result.Enabled {
-		t.Errorf("expected Enabled=true for 100%% rollout flag")
+		t.Error("Enabled = false; want true")
+	}
+	if result.Config["variant"] != "blue" || result.Config["limit"] != float64(3) {
+		t.Errorf("Config = %v; want variant=blue limit=3", result.Config)
 	}
 }
 
 func TestClient_EvaluateFlag_Disabled(t *testing.T) {
-	flag := exp.FeatureFlag{Key: "disabled-flag", Enabled: false, RolloutPercentage: 100}
-	srv := setupFlagServer(t, flag)
-	defer srv.Close()
+	fb := newFakeBackend(t)
+	fb.serveFlag("off-flag", false, nil)
 
-	c := mustNewClient(t, srv.URL)
-	result, err := c.EvaluateFlag(context.Background(), "disabled-flag", newTestUser("user-1"))
+	c := mustNewClient(t, fb.URL)
+	result, err := c.EvaluateFlag(context.Background(), "off-flag", newTestUser("user-1"))
 	if err != nil {
 		t.Fatalf("EvaluateFlag error: %v", err)
 	}
 	if result.Enabled {
-		t.Error("expected Enabled=false for disabled flag")
+		t.Error("expected Enabled=false")
+	}
+	if result.Config != nil {
+		t.Errorf("Config = %v; want nil for null config", result.Config)
 	}
 }
 
-func TestClient_EvaluateFlag_NotFound(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, "not found", http.StatusNotFound)
-	}))
-	defer srv.Close()
+func TestClient_EvaluateFlag_NonObjectConfig(t *testing.T) {
+	fb := newFakeBackend(t)
+	fb.serveFlag("string-config", true, "just-a-string")
 
-	c := mustNewClient(t, srv.URL)
-	result, err := c.EvaluateFlag(context.Background(), "missing-flag", newTestUser("user-1"))
-	if err == nil {
-		t.Error("expected error for 404 response")
+	c := mustNewClient(t, fb.URL)
+	result, err := c.EvaluateFlag(context.Background(), "string-config", newTestUser("user-1"))
+	if err != nil {
+		t.Fatalf("EvaluateFlag must not fail on a non-object config: %v", err)
 	}
-	// Should return a graceful disabled result even on error.
-	if result == nil {
-		t.Error("expected non-nil result even on error")
-	} else if result.Enabled {
-		t.Error("expected Enabled=false on API error")
+	if !result.Enabled || result.Config != nil {
+		t.Errorf("got enabled=%v config=%v; want enabled=true config=nil", result.Enabled, result.Config)
 	}
 }
 
 func TestClient_EvaluateFlag_CacheHit(t *testing.T) {
-	callCount := 0
-	flag := exp.FeatureFlag{Key: "cached-flag", Enabled: true, RolloutPercentage: 100}
+	fb := newFakeBackend(t)
+	fb.serveFlag("cached-flag", true, nil)
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("/api/v1/feature-flags/cached-flag/evaluate", func(w http.ResponseWriter, r *http.Request) {
-		callCount++
-		_ = json.NewEncoder(w).Encode(flag)
-	})
-	srv := httptest.NewServer(mux)
-	defer srv.Close()
-
-	c := mustNewClient(t, srv.URL)
+	c := mustNewClient(t, fb.URL)
 	user := newTestUser("user-cache")
-
-	// Make three calls with the same user+flag combination.
 	for i := 0; i < 3; i++ {
-		_, err := c.EvaluateFlag(context.Background(), "cached-flag", user)
-		if err != nil {
+		if _, err := c.EvaluateFlag(context.Background(), "cached-flag", user); err != nil {
 			t.Fatalf("call %d EvaluateFlag error: %v", i, err)
 		}
 	}
+	if fb.Count() != 1 {
+		t.Errorf("expected 1 request (cache hits); got %d", fb.Count())
+	}
+}
 
-	// With local eval enabled, first call fetches from API, subsequent calls use
-	// the local flags map (no additional API calls).
-	if callCount > 1 {
-		t.Errorf("expected cache to prevent repeated API calls; got %d calls", callCount)
+func TestClient_EvaluateFlag_CacheIsPerUserAndKey(t *testing.T) {
+	fb := newFakeBackend(t)
+	fb.serveFlag("f", true, nil)
+	fb.serveFlag("g", true, nil)
+
+	c := mustNewClient(t, fb.URL)
+	ctx := context.Background()
+	_, _ = c.EvaluateFlag(ctx, "f", newTestUser("u1"))
+	_, _ = c.EvaluateFlag(ctx, "f", newTestUser("u2"))
+	_, _ = c.EvaluateFlag(ctx, "g", newTestUser("u1"))
+	_, _ = c.EvaluateFlag(ctx, "f", newTestUser("u1"))
+
+	if fb.Count() != 3 {
+		t.Errorf("expected 3 requests (u1/f, u2/f, u1/g); got %d", fb.Count())
+	}
+}
+
+func TestClient_EvaluateFlag_CacheTTLExpiry(t *testing.T) {
+	fb := newFakeBackend(t)
+	fb.serveFlag("ttl-flag", true, nil)
+
+	c := mustNewClient(t, fb.URL, exp.WithCacheTTL(50*time.Millisecond))
+	user := newTestUser("user-ttl")
+	_, _ = c.EvaluateFlag(context.Background(), "ttl-flag", user)
+	_, _ = c.EvaluateFlag(context.Background(), "ttl-flag", user)
+	time.Sleep(100 * time.Millisecond)
+	_, _ = c.EvaluateFlag(context.Background(), "ttl-flag", user)
+
+	if fb.Count() != 2 {
+		t.Errorf("expected 2 requests (second after TTL expiry); got %d", fb.Count())
+	}
+}
+
+func TestClient_EvaluateFlag_NotFound(t *testing.T) {
+	fb := newFakeBackend(t) // no route → 404
+
+	c := mustNewClient(t, fb.URL)
+	result, err := c.EvaluateFlag(context.Background(), "missing-flag", newTestUser("user-1"))
+	if err == nil {
+		t.Fatal("expected error for 404 response")
+	}
+	var apiErr *exp.APIError
+	if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusNotFound {
+		t.Errorf("expected *APIError 404; got %v", err)
+	}
+	if result == nil || result.Enabled || result.Key != "missing-flag" {
+		t.Errorf("expected disabled result for the requested key; got %+v", result)
+	}
+}
+
+func TestClient_EvaluateFlag_FailureNotCached(t *testing.T) {
+	fb := newFakeBackend(t)
+	calls := 0
+	fb.handle(http.MethodGet, "/api/v1/feature-flags/evaluate/flaky", func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if calls == 1 {
+			http.Error(w, `{"detail":"boom"}`, http.StatusInternalServerError)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"key": "flaky", "enabled": true})
+	})
+
+	c := mustNewClient(t, fb.URL)
+	user := newTestUser("user-1")
+	if _, err := c.EvaluateFlag(context.Background(), "flaky", user); err == nil {
+		t.Fatal("expected first call to fail")
+	}
+	result, err := c.EvaluateFlag(context.Background(), "flaky", user)
+	if err != nil || !result.Enabled {
+		t.Errorf("second call should retry and succeed; got %+v, %v", result, err)
+	}
+	if fb.Count() != 2 {
+		t.Errorf("expected 2 requests; got %d", fb.Count())
 	}
 }
 
 func TestClient_EvaluateFlag_ContextCancelled(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(500 * time.Millisecond)
-		_ = json.NewEncoder(w).Encode(exp.FeatureFlag{Key: "f", Enabled: true, RolloutPercentage: 100})
+		_, _ = w.Write([]byte(`{"key":"f","enabled":true}`))
 	}))
 	defer srv.Close()
 
 	c := mustNewClient(t, srv.URL)
-
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
-	_, err := c.EvaluateFlag(ctx, "slow-flag", newTestUser("u1"))
-	if err == nil {
+	if _, err := c.EvaluateFlag(ctx, "slow-flag", newTestUser("u1")); err == nil {
 		t.Error("expected context cancellation error")
 	}
 }
 
-func TestClient_EvaluateFlag_EmptyFlagKey(t *testing.T) {
-	c, _ := exp.New(exp.WithBaseURL("http://localhost:9999"))
-	defer c.Close()
-
-	_, err := c.EvaluateFlag(context.Background(), "", newTestUser("u1"))
-	if err == nil {
+func TestClient_EvaluateFlag_Validation(t *testing.T) {
+	c := mustNewClient(t, "http://localhost:9")
+	if _, err := c.EvaluateFlag(context.Background(), "", newTestUser("u1")); err == nil {
 		t.Error("expected error for empty flagKey")
 	}
-}
-
-func TestClient_EvaluateFlag_NilUser(t *testing.T) {
-	c, _ := exp.New(exp.WithBaseURL("http://localhost:9999"))
-	defer c.Close()
-
-	_, err := c.EvaluateFlag(context.Background(), "flag", nil)
-	if err == nil {
+	if _, err := c.EvaluateFlag(context.Background(), "flag", nil); err == nil {
 		t.Error("expected error for nil user")
+	}
+	if _, err := c.EvaluateFlag(context.Background(), "flag", &exp.User{}); err == nil {
+		t.Error("expected error for empty user ID")
 	}
 }
 
@@ -897,82 +721,114 @@ func TestClient_EvaluateFlag_NilUser(t *testing.T) {
 // Client.GetAssignment tests
 // ---------------------------------------------------------------------------
 
-func TestClient_GetAssignment_Success(t *testing.T) {
-	expected := exp.Assignment{
-		ExperimentKey: "checkout-exp",
-		VariantKey:    "treatment",
-		UserID:        "user-assign",
-	}
-	srv := setupAssignmentServer(t, expected)
-	defer srv.Close()
+func TestClient_GetAssignment_RequestAndMapping(t *testing.T) {
+	fb := newFakeBackend(t)
+	fb.serveAssign()
 
-	c := mustNewClient(t, srv.URL)
-	got, err := c.GetAssignment(context.Background(), "checkout-exp", newTestUser("user-assign"))
+	c := mustNewClient(t, fb.URL)
+	user := newTestUserWithAttrs("user-1", map[string]interface{}{"plan": "pro", "country": "US"})
+	got, err := c.GetAssignment(context.Background(), "checkout_flow", user)
 	if err != nil {
 		t.Fatalf("GetAssignment error: %v", err)
 	}
-	if got.ExperimentKey != expected.ExperimentKey {
-		t.Errorf("ExperimentKey = %q; want %q", got.ExperimentKey, expected.ExperimentKey)
+
+	req := fb.Requests()[0]
+	if req.Method != http.MethodPost || req.Path != "/api/v1/tracking/assign" {
+		t.Errorf("request = %s %s; want POST /api/v1/tracking/assign", req.Method, req.Path)
 	}
-	if got.VariantKey != expected.VariantKey {
-		t.Errorf("VariantKey = %q; want %q", got.VariantKey, expected.VariantKey)
+	if req.Body["experiment_key"] != "checkout_flow" || req.Body["user_id"] != "user-1" {
+		t.Errorf("body = %v", req.Body)
+	}
+	ctxAttrs, _ := req.Body["context"].(map[string]interface{})
+	if ctxAttrs["plan"] != "pro" || ctxAttrs["country"] != "US" {
+		t.Errorf("context = %v; want user attributes", req.Body["context"])
+	}
+	if _, has := req.Body["attributes"]; has {
+		t.Error("body must not use the legacy 'attributes' field")
+	}
+
+	if got.ExperimentKey != "checkout_flow" || got.UserID != "user-1" {
+		t.Errorf("ExperimentKey/UserID = %q/%q", got.ExperimentKey, got.UserID)
+	}
+	if got.VariantID != "8b6f1c2e-0000-4000-8000-000000000001" || got.VariantName != "treatment" {
+		t.Errorf("VariantID/VariantName = %q/%q", got.VariantID, got.VariantName)
+	}
+	if got.IsControl {
+		t.Error("IsControl = true; want false")
+	}
+	if got.Configuration["headline"] != "Buy now" || got.Configuration["discount"] != float64(10) {
+		t.Errorf("Configuration = %v", got.Configuration)
+	}
+}
+
+func TestClient_GetAssignment_OmitsContextWithoutAttributes(t *testing.T) {
+	fb := newFakeBackend(t)
+	fb.serveAssign()
+
+	c := mustNewClient(t, fb.URL)
+	if _, err := c.GetAssignment(context.Background(), "checkout_flow", newTestUser("user-1")); err != nil {
+		t.Fatalf("GetAssignment error: %v", err)
+	}
+	if _, has := fb.Requests()[0].Body["context"]; has {
+		t.Errorf("context should be omitted when the user has no attributes; body = %s", fb.Requests()[0].RawBody)
+	}
+}
+
+func TestClient_GetAssignment_Sticky_CacheHit(t *testing.T) {
+	fb := newFakeBackend(t)
+	fb.serveAssign()
+
+	c := mustNewClient(t, fb.URL)
+	user := newTestUser("user-1")
+	first, err := c.GetAssignment(context.Background(), "checkout_flow", user)
+	if err != nil {
+		t.Fatalf("GetAssignment error: %v", err)
+	}
+	second, err := c.GetAssignment(context.Background(), "checkout_flow", user)
+	if err != nil {
+		t.Fatalf("GetAssignment error: %v", err)
+	}
+	if first.VariantName != second.VariantName || first.VariantID != second.VariantID {
+		t.Errorf("assignment changed between calls: %+v vs %+v", first, second)
+	}
+	if fb.Count() != 1 {
+		t.Errorf("expected 1 request (sticky cache hit); got %d", fb.Count())
 	}
 }
 
 func TestClient_GetAssignment_NotFound(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, "experiment not found", http.StatusNotFound)
-	}))
-	defer srv.Close()
+	fb := newFakeBackend(t)
+	fb.handle(http.MethodPost, "/api/v1/tracking/assign", func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"detail":"Active experiment with key 'nope' not found"}`, http.StatusNotFound)
+	})
 
-	c := mustNewClient(t, srv.URL)
-	_, err := c.GetAssignment(context.Background(), "nonexistent-exp", newTestUser("u1"))
+	c := mustNewClient(t, fb.URL)
+	got, err := c.GetAssignment(context.Background(), "nope", newTestUser("u1"))
 	if err == nil {
-		t.Error("expected error for 404 response")
+		t.Fatal("expected error for 404 response")
+	}
+	if got != nil {
+		t.Errorf("expected nil assignment on failure; got %+v", got)
+	}
+	var apiErr *exp.APIError
+	if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusNotFound {
+		t.Errorf("expected *APIError 404; got %v", err)
+	}
+
+	// Failures are never cached: the next call hits the server again.
+	_, _ = c.GetAssignment(context.Background(), "nope", newTestUser("u1"))
+	if fb.Count() != 2 {
+		t.Errorf("expected 2 requests; got %d", fb.Count())
 	}
 }
 
-func TestClient_GetAssignment_EmptyExperimentKey(t *testing.T) {
-	c, _ := exp.New(exp.WithBaseURL("http://localhost:9999"))
-	defer c.Close()
-
-	_, err := c.GetAssignment(context.Background(), "", newTestUser("u1"))
-	if err == nil {
+func TestClient_GetAssignment_Validation(t *testing.T) {
+	c := mustNewClient(t, "http://localhost:9")
+	if _, err := c.GetAssignment(context.Background(), "", newTestUser("u1")); err == nil {
 		t.Error("expected error for empty experimentKey")
 	}
-}
-
-func TestClient_GetAssignment_NilUser(t *testing.T) {
-	c, _ := exp.New(exp.WithBaseURL("http://localhost:9999"))
-	defer c.Close()
-
-	_, err := c.GetAssignment(context.Background(), "exp", nil)
-	if err == nil {
+	if _, err := c.GetAssignment(context.Background(), "exp", nil); err == nil {
 		t.Error("expected error for nil user")
-	}
-}
-
-func TestClient_GetAssignment_SendsPayload(t *testing.T) {
-	var gotPayload map[string]interface{}
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewDecoder(r.Body).Decode(&gotPayload)
-		_ = json.NewEncoder(w).Encode(exp.Assignment{
-			ExperimentKey: "exp-1",
-			VariantKey:    "control",
-			UserID:        "u-payload",
-		})
-	}))
-	defer srv.Close()
-
-	c := mustNewClient(t, srv.URL)
-	user := newTestUserWithAttrs("u-payload", map[string]interface{}{"plan": "pro"})
-	_, _ = c.GetAssignment(context.Background(), "exp-1", user)
-
-	if gotPayload["user_id"] != "u-payload" {
-		t.Errorf("payload user_id = %v; want 'u-payload'", gotPayload["user_id"])
-	}
-	if gotPayload["experiment_key"] != "exp-1" {
-		t.Errorf("payload experiment_key = %v; want 'exp-1'", gotPayload["experiment_key"])
 	}
 }
 
@@ -980,74 +836,273 @@ func TestClient_GetAssignment_SendsPayload(t *testing.T) {
 // Client.Track tests
 // ---------------------------------------------------------------------------
 
-func TestClient_Track_Success(t *testing.T) {
-	var gotEvent exp.TrackEvent
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewDecoder(r.Body).Decode(&gotEvent)
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer srv.Close()
+func TestClient_Track_WithExperimentKey(t *testing.T) {
+	fb := newFakeBackend(t)
+	fb.serveTrack()
 
-	c := mustNewClient(t, srv.URL)
+	c := mustNewClient(t, fb.URL)
+	ts := time.Date(2026, 9, 11, 10, 30, 0, 0, time.UTC)
 	err := c.Track(context.Background(), &exp.TrackEvent{
-		UserID:     "user-track",
-		EventName:  "purchase",
-		Properties: map[string]interface{}{"amount": 99.99},
+		UserID:        "user-track",
+		EventName:     "purchase",
+		ExperimentKey: "checkout_flow",
+		Value:         exp.Float64(12.5),
+		Properties:    map[string]interface{}{"sku": "pro"},
+		Timestamp:     ts,
 	})
 	if err != nil {
 		t.Fatalf("Track error: %v", err)
 	}
-	if gotEvent.UserID != "user-track" {
-		t.Errorf("event.UserID = %q; want 'user-track'", gotEvent.UserID)
+
+	reqs := fb.Requests()
+	if len(reqs) != 1 {
+		t.Fatalf("expected 1 request; got %d", len(reqs))
 	}
-	if gotEvent.EventName != "purchase" {
-		t.Errorf("event.EventName = %q; want 'purchase'", gotEvent.EventName)
+	req := reqs[0]
+	if req.Method != http.MethodPost || req.Path != "/api/v1/tracking/track" {
+		t.Errorf("request = %s %s; want POST /api/v1/tracking/track", req.Method, req.Path)
+	}
+	want := map[string]interface{}{
+		"event_type":     "purchase",
+		"event_name":     "purchase",
+		"user_id":        "user-track",
+		"experiment_key": "checkout_flow",
+		"value":          12.5,
+		"timestamp":      "2026-09-11T10:30:00Z",
+	}
+	for k, v := range want {
+		if req.Body[k] != v {
+			t.Errorf("body[%q] = %v; want %v", k, req.Body[k], v)
+		}
+	}
+	meta, _ := req.Body["metadata"].(map[string]interface{})
+	if meta["sku"] != "pro" {
+		t.Errorf("metadata = %v; want sku=pro", req.Body["metadata"])
+	}
+	if _, has := req.Body["feature_flag_key"]; has {
+		t.Error("feature_flag_key must be omitted when empty")
+	}
+	if _, has := req.Body["properties"]; has {
+		t.Error("legacy 'properties' field must not be sent")
 	}
 }
 
-func TestClient_Track_Error(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, "server error", http.StatusInternalServerError)
-	}))
-	defer srv.Close()
+func TestClient_Track_WithFeatureFlagKeyAndEventType(t *testing.T) {
+	fb := newFakeBackend(t)
+	fb.serveTrack()
 
-	c := mustNewClient(t, srv.URL)
+	c := mustNewClient(t, fb.URL)
 	err := c.Track(context.Background(), &exp.TrackEvent{
-		UserID:    "u1",
-		EventName: "click",
+		UserID:         "u1",
+		EventName:      "search",
+		EventType:      "interaction",
+		FeatureFlagKey: "new_search",
 	})
+	if err != nil {
+		t.Fatalf("Track error: %v", err)
+	}
+	body := fb.Requests()[0].Body
+	if body["event_type"] != "interaction" || body["event_name"] != "search" {
+		t.Errorf("event_type/event_name = %v/%v", body["event_type"], body["event_name"])
+	}
+	if body["feature_flag_key"] != "new_search" {
+		t.Errorf("feature_flag_key = %v", body["feature_flag_key"])
+	}
+	for _, absent := range []string{"experiment_key", "value", "metadata", "timestamp"} {
+		if _, has := body[absent]; has {
+			t.Errorf("%s must be omitted when unset", absent)
+		}
+	}
+}
+
+func TestClient_Track_WithoutKey_FansOutToCachedEntries(t *testing.T) {
+	fb := newFakeBackend(t)
+	fb.serveAssign()
+	fb.serveFlag("new_search", true, nil)
+	fb.serveTrack()
+
+	c := mustNewClient(t, fb.URL)
+	ctx := context.Background()
+	user := newTestUser("user-1")
+	if _, err := c.GetAssignment(ctx, "checkout_flow", user); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.EvaluateFlag(ctx, "new_search", user); err != nil {
+		t.Fatal(err)
+	}
+	// Another user's cache entries must not leak into this user's fan-out.
+	if _, err := c.EvaluateFlag(ctx, "new_search", newTestUser("user-2")); err != nil {
+		t.Fatal(err)
+	}
+
+	err := c.Track(ctx, &exp.TrackEvent{
+		UserID:     "user-1",
+		EventName:  "page_view",
+		Value:      exp.Float64(1),
+		Properties: map[string]interface{}{"page": "/home"},
+	})
+	if err != nil {
+		t.Fatalf("Track error: %v", err)
+	}
+
+	reqs := fb.Requests()
+	last := reqs[len(reqs)-1]
+	if last.Method != http.MethodPost || last.Path != "/api/v1/tracking/batch" {
+		t.Fatalf("last request = %s %s; want POST /api/v1/tracking/batch", last.Method, last.Path)
+	}
+	events, _ := last.Body["events"].([]interface{})
+	if len(events) != 2 {
+		t.Fatalf("expected 2 fan-out entries; got %d: %s", len(events), last.RawBody)
+	}
+	first, _ := events[0].(map[string]interface{})
+	second, _ := events[1].(map[string]interface{})
+	if first["experiment_key"] != "checkout_flow" {
+		t.Errorf("entry 0 = %v; want experiment_key=checkout_flow", first)
+	}
+	if second["feature_flag_key"] != "new_search" {
+		t.Errorf("entry 1 = %v; want feature_flag_key=new_search", second)
+	}
+	for i, e := range []map[string]interface{}{first, second} {
+		if e["event_type"] != "page_view" || e["event_name"] != "page_view" || e["user_id"] != "user-1" || e["value"] != float64(1) {
+			t.Errorf("entry %d missing base fields: %v", i, e)
+		}
+		meta, _ := e["metadata"].(map[string]interface{})
+		if meta["page"] != "/home" {
+			t.Errorf("entry %d metadata = %v", i, e["metadata"])
+		}
+	}
+}
+
+func TestClient_Track_WithoutKey_NothingCached_SendsNothing(t *testing.T) {
+	fb := newFakeBackend(t)
+	fb.serveTrack()
+
+	c := mustNewClient(t, fb.URL)
+	if err := c.Track(context.Background(), &exp.TrackEvent{UserID: "nobody", EventName: "page_view"}); err != nil {
+		t.Fatalf("Track error: %v", err)
+	}
+	if fb.Count() != 0 {
+		t.Errorf("expected no request when nothing is cached; got %d", fb.Count())
+	}
+}
+
+func TestClient_Track_ServerError_ReturnsErrorNoPanic(t *testing.T) {
+	fb := newFakeBackend(t)
+	fb.handle(http.MethodPost, "/api/v1/tracking/track", func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"detail":"server error"}`, http.StatusInternalServerError)
+	})
+
+	c := mustNewClient(t, fb.URL)
+	err := c.Track(context.Background(), &exp.TrackEvent{UserID: "u1", EventName: "click", ExperimentKey: "e"})
 	if err == nil {
 		t.Error("expected error for 500 response")
 	}
 }
 
-func TestClient_Track_NilEvent(t *testing.T) {
-	c, _ := exp.New(exp.WithBaseURL("http://localhost:9999"))
-	defer c.Close()
+func TestClient_Track_NeverPanics(t *testing.T) {
+	c := mustNewClient(t, "http://127.0.0.1:1", exp.WithTimeout(200*time.Millisecond))
+	ctx := context.Background()
 
-	err := c.Track(context.Background(), nil)
-	if err == nil {
-		t.Error("expected error for nil event")
+	cases := []*exp.TrackEvent{
+		nil,
+		{},
+		{UserID: "u1"},
+		{EventName: "click"},
+		{UserID: "u1", EventName: "click", ExperimentKey: "e"}, // unreachable server
+		{UserID: "u1", EventName: "click"},                     // nothing cached
+	}
+	for i, ev := range cases {
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					t.Errorf("case %d panicked: %v", i, r)
+				}
+			}()
+			_ = c.Track(ctx, ev)
+		}()
+	}
+	if err := c.TrackBatch(ctx, []*exp.TrackEvent{{UserID: "u1", EventName: "x"}, nil}); err == nil {
+		t.Error("expected validation error for nil event in batch")
 	}
 }
 
-func TestClient_Track_EmptyUserID(t *testing.T) {
-	c, _ := exp.New(exp.WithBaseURL("http://localhost:9999"))
-	defer c.Close()
+// ---------------------------------------------------------------------------
+// Client.TrackBatch tests
+// ---------------------------------------------------------------------------
 
-	err := c.Track(context.Background(), &exp.TrackEvent{EventName: "click"})
-	if err == nil {
-		t.Error("expected error for empty UserID")
+func TestClient_TrackBatch_ChunksAt100(t *testing.T) {
+	fb := newFakeBackend(t)
+	fb.serveTrack()
+
+	c := mustNewClient(t, fb.URL)
+	events := make([]*exp.TrackEvent, 0, 150)
+	for i := 0; i < 150; i++ {
+		events = append(events, &exp.TrackEvent{UserID: "u" + intToStr(i), EventName: "click", ExperimentKey: "e"})
+	}
+	if err := c.TrackBatch(context.Background(), events); err != nil {
+		t.Fatalf("TrackBatch error: %v", err)
+	}
+
+	reqs := fb.Requests()
+	if len(reqs) != 2 {
+		t.Fatalf("expected 2 batch requests; got %d", len(reqs))
+	}
+	sizes := []int{}
+	for _, r := range reqs {
+		if r.Path != "/api/v1/tracking/batch" {
+			t.Errorf("path = %q", r.Path)
+		}
+		evs, _ := r.Body["events"].([]interface{})
+		sizes = append(sizes, len(evs))
+	}
+	if sizes[0] != 100 || sizes[1] != 50 {
+		t.Errorf("chunk sizes = %v; want [100 50]", sizes)
 	}
 }
 
-func TestClient_Track_EmptyEventName(t *testing.T) {
-	c, _ := exp.New(exp.WithBaseURL("http://localhost:9999"))
-	defer c.Close()
+func TestClient_TrackBatch_ExpandsUnkeyedEvents(t *testing.T) {
+	fb := newFakeBackend(t)
+	fb.serveAssign()
+	fb.serveTrack()
 
-	err := c.Track(context.Background(), &exp.TrackEvent{UserID: "u1"})
-	if err == nil {
-		t.Error("expected error for empty EventName")
+	c := mustNewClient(t, fb.URL)
+	ctx := context.Background()
+	if _, err := c.GetAssignment(ctx, "checkout_flow", newTestUser("user-1")); err != nil {
+		t.Fatal(err)
+	}
+
+	err := c.TrackBatch(ctx, []*exp.TrackEvent{
+		{UserID: "user-1", EventName: "purchase", FeatureFlagKey: "f"},
+		{UserID: "user-1", EventName: "page_view"}, // fans out to checkout_flow
+		{UserID: "user-9", EventName: "page_view"}, // nothing cached → dropped
+	})
+	if err != nil {
+		t.Fatalf("TrackBatch error: %v", err)
+	}
+	reqs := fb.Requests()
+	last := reqs[len(reqs)-1]
+	evs, _ := last.Body["events"].([]interface{})
+	if len(evs) != 2 {
+		t.Fatalf("expected 2 entries; got %s", last.RawBody)
+	}
+	e0, _ := evs[0].(map[string]interface{})
+	e1, _ := evs[1].(map[string]interface{})
+	if e0["feature_flag_key"] != "f" || e1["experiment_key"] != "checkout_flow" || e1["event_name"] != "page_view" {
+		t.Errorf("entries = %v, %v", e0, e1)
+	}
+}
+
+func TestClient_TrackBatch_Empty_SendsNothing(t *testing.T) {
+	fb := newFakeBackend(t)
+	c := mustNewClient(t, fb.URL)
+	if err := c.TrackBatch(context.Background(), nil); err != nil {
+		t.Fatalf("TrackBatch(nil) error: %v", err)
+	}
+	if err := c.TrackBatch(context.Background(), []*exp.TrackEvent{}); err != nil {
+		t.Fatalf("TrackBatch(empty) error: %v", err)
+	}
+	if fb.Count() != 0 {
+		t.Errorf("expected no request; got %d", fb.Count())
 	}
 }
 
@@ -1056,16 +1111,26 @@ func TestClient_Track_EmptyEventName(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestClient_Close(t *testing.T) {
-	c, err := exp.New(exp.WithBaseURL("http://localhost:9999"))
+	fb := newFakeBackend(t)
+	fb.serveFlag("f", true, nil)
+
+	c, err := exp.New(exp.WithBaseURL(fb.URL))
 	if err != nil {
 		t.Fatalf("New() error: %v", err)
 	}
+	_, _ = c.EvaluateFlag(context.Background(), "f", newTestUser("u1"))
+
 	if err := c.Close(); err != nil {
 		t.Errorf("Close() error: %v", err)
 	}
-	// Second close should not panic.
 	if err := c.Close(); err != nil {
 		t.Errorf("second Close() error: %v", err)
+	}
+
+	// The cache is cleared on Close, so a further call goes to the server.
+	_, _ = c.EvaluateFlag(context.Background(), "f", newTestUser("u1"))
+	if fb.Count() != 2 {
+		t.Errorf("expected cache cleared on Close; requests = %d", fb.Count())
 	}
 }
 
@@ -1074,23 +1139,28 @@ func TestClient_Close(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestClient_Concurrent(t *testing.T) {
-	flag := exp.FeatureFlag{Key: "race-flag", Enabled: true, RolloutPercentage: 50}
-	srv := setupFlagServer(t, flag)
-	defer srv.Close()
+	fb := newFakeBackend(t)
+	fb.serveFlag("race-flag", true, nil)
+	fb.serveAssign()
+	fb.serveTrack()
 
-	c := mustNewClient(t, srv.URL)
+	c := mustNewClient(t, fb.URL)
 
 	var wg sync.WaitGroup
 	const goroutines = 20
-	const opsPerG = 50
+	const opsPerG = 25
 
 	for i := 0; i < goroutines; i++ {
 		wg.Add(1)
 		go func(gid int) {
 			defer wg.Done()
+			ctx := context.Background()
 			for j := 0; j < opsPerG; j++ {
-				user := newTestUser("cuser-" + intToStr(gid*opsPerG+j))
-				_, _ = c.EvaluateFlag(context.Background(), "race-flag", user)
+				user := newTestUser("cuser-" + intToStr((gid*opsPerG+j)%7))
+				_, _ = c.EvaluateFlag(ctx, "race-flag", user)
+				_, _ = c.GetAssignment(ctx, "checkout_flow", user)
+				_ = c.Track(ctx, &exp.TrackEvent{UserID: user.ID, EventName: "page_view"})
+				_ = c.Track(ctx, &exp.TrackEvent{UserID: user.ID, EventName: "purchase", ExperimentKey: "checkout_flow"})
 			}
 		}(i)
 	}
@@ -1113,8 +1183,7 @@ func TestHTTPClient_Get_Success(t *testing.T) {
 
 	h := exp.NewHTTPClient(srv.URL, "key", 5*time.Second)
 	var result response
-	err := h.Get(context.Background(), "/test", &result)
-	if err != nil {
+	if err := h.Get(context.Background(), "/test", &result); err != nil {
 		t.Fatalf("Get error: %v", err)
 	}
 	if result.Value != "hello" {
@@ -1124,14 +1193,22 @@ func TestHTTPClient_Get_Success(t *testing.T) {
 
 func TestHTTPClient_Get_ServerError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		w.Header().Set("Retry-After", "7")
+		http.Error(w, "rate limited", http.StatusTooManyRequests)
 	}))
 	defer srv.Close()
 
 	h := exp.NewHTTPClient(srv.URL, "key", 5*time.Second)
 	err := h.Get(context.Background(), "/fail", nil)
-	if err == nil {
-		t.Error("expected error for 500 response")
+	var apiErr *exp.APIError
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("expected *APIError; got %v", err)
+	}
+	if apiErr.StatusCode != http.StatusTooManyRequests || apiErr.RetryAfter != "7" {
+		t.Errorf("APIError = %+v", apiErr)
+	}
+	if !strings.Contains(apiErr.Error(), "429") {
+		t.Errorf("Error() = %q; want status in message", apiErr.Error())
 	}
 }
 
@@ -1152,8 +1229,7 @@ func TestHTTPClient_Post_Success(t *testing.T) {
 
 	h := exp.NewHTTPClient(srv.URL, "", 5*time.Second)
 	var result response
-	err := h.Post(context.Background(), "/echo", payload{Name: "world"}, &result)
-	if err != nil {
+	if err := h.Post(context.Background(), "/echo", payload{Name: "world"}, &result); err != nil {
 		t.Fatalf("Post error: %v", err)
 	}
 	if result.Echo != "got:world" {
@@ -1172,105 +1248,32 @@ func TestHTTPClient_ContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
-	err := h.Get(ctx, "/slow", nil)
-	if err == nil {
+	if err := h.Get(ctx, "/slow", nil); err == nil {
 		t.Error("expected context deadline error")
 	}
 }
 
-func TestHTTPClient_AuthHeader(t *testing.T) {
-	var gotKey string
+func TestHTTPClient_Headers(t *testing.T) {
+	var got http.Header
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotKey = r.Header.Get("X-API-Key")
-		w.WriteHeader(http.StatusOK)
+		got = r.Header.Clone()
 		_, _ = w.Write([]byte("{}"))
 	}))
 	defer srv.Close()
 
 	h := exp.NewHTTPClient(srv.URL, "my-secret", 5*time.Second)
-	var result map[string]interface{}
-	_ = h.Get(context.Background(), "/auth-test", &result)
+	_ = h.Get(context.Background(), "/auth-test", nil)
 
-	if gotKey != "my-secret" {
-		t.Errorf("X-API-Key = %q; want 'my-secret'", gotKey)
+	if got.Get("X-API-Key") != "my-secret" {
+		t.Errorf("X-API-Key = %q; want 'my-secret'", got.Get("X-API-Key"))
 	}
-}
-
-func TestHTTPClient_NoAPIKey(t *testing.T) {
-	var gotKey string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotKey = r.Header.Get("X-API-Key")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("{}"))
-	}))
-	defer srv.Close()
-
-	h := exp.NewHTTPClient(srv.URL, "", 5*time.Second)
-	var result map[string]interface{}
-	_ = h.Get(context.Background(), "/no-key", &result)
-
-	if gotKey != "" {
-		t.Errorf("expected no X-API-Key header; got %q", gotKey)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Distribution integration test
-// ---------------------------------------------------------------------------
-
-func TestEvaluation_Distribution_1000Users(t *testing.T) {
-	e := &exp.Evaluator{}
-	flag := &exp.FeatureFlag{
-		Key:               "dist-integration-flag",
-		Enabled:           true,
-		RolloutPercentage: 30.0,
+	if got.Get("Accept") != "application/json" || got.Get("Content-Type") != "application/json" {
+		t.Errorf("Accept/Content-Type = %q/%q", got.Get("Accept"), got.Get("Content-Type"))
 	}
 
-	inRollout := 0
-	for i := 0; i < 1000; i++ {
-		user := newTestUser("dist-int-" + intToStr(i))
-		result := e.EvaluateFlag(flag, user)
-		if result.Enabled {
-			inRollout++
-		}
-	}
-
-	// Expect ~30% ± 5% for 1000 samples.
-	fraction := float64(inRollout) / 1000.0
-	if fraction < 0.25 || fraction > 0.35 {
-		t.Errorf("30%% rollout: got %.1f%%; want 25%%–35%%", fraction*100)
-	}
-}
-
-// TestVariantDistribution_1000Users tests variant assignment distribution.
-func TestVariantDistribution_1000Users(t *testing.T) {
-	e := &exp.Evaluator{}
-	flag := &exp.FeatureFlag{
-		Key:               "variant-dist-flag",
-		Enabled:           true,
-		RolloutPercentage: 100.0,
-		Variants: []exp.Variant{
-			{Key: "control", Weight: 0.5},
-			{Key: "treatment", Weight: 0.5},
-		},
-	}
-
-	counts := map[string]int{}
-	for i := 0; i < 1000; i++ {
-		user := newTestUser("vdist-" + intToStr(i))
-		result := e.EvaluateFlag(flag, user)
-		if result.Enabled {
-			counts[result.VariantKey]++
-		}
-	}
-
-	total := counts["control"] + counts["treatment"]
-	if total != 1000 {
-		t.Errorf("total = %d; want 1000", total)
-	}
-
-	ratio := float64(counts["control"]) / float64(total)
-	if ratio < 0.40 || ratio > 0.60 {
-		t.Errorf("control ratio = %.2f; want 0.40–0.60", ratio)
+	h = exp.NewHTTPClient(srv.URL, "", 5*time.Second)
+	_ = h.Get(context.Background(), "/no-key", nil)
+	if got.Get("X-API-Key") != "" {
+		t.Errorf("expected no X-API-Key header; got %q", got.Get("X-API-Key"))
 	}
 }

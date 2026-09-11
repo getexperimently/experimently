@@ -5,8 +5,10 @@ namespace ExperimentationPlatform.Exceptions;
 /// </summary>
 public class AuthException : ExperimentationException
 {
+    /// <summary>Creates the exception with a message.</summary>
     public AuthException(string message) : base(message) { }
 
+    /// <summary>Creates the exception with a message and an underlying cause.</summary>
     public AuthException(string message, Exception innerException)
         : base(message, innerException) { }
 }

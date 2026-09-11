@@ -1,44 +1,39 @@
 # Android Kotlin SDK
 
-The Android SDK provides feature flag evaluation, experiment variant assignment, and event tracking for Android applications. It is built on Kotlin Coroutines and OkHttp, supports offline fallback via `SharedPreferences`, and requires no Android runtime for unit testing.
+The Android SDK (`com.experimentationplatform.android`) provides feature flag evaluation,
+experiment assignment and event tracking for Android applications. It is built on Kotlin
+Coroutines and OkHttp, persists the last successful results to `SharedPreferences` for offline
+fallback, and its unit tests run on the plain JVM with OkHttp's `MockWebServer`.
+
+Flag evaluation and experiment assignment are decided **by the server**: every call goes to the
+public API with your `X-API-Key`, the server buckets the user (sticky per user + experiment), and
+the SDK caches the answer per user + key. Nothing is bucketed locally.
+
+Source: `sdk/android` (module `sdk/android/sdk`, Compose example in `sdk/android/examples`).
+
+> **Not executed here.** No gradle / Android SDK is installed on the development machine, so the
+> rewire onto the public API was reviewed line by line but the module has not been compiled and
+> its unit tests have not been run. Android has no contract smoke (it needs a device runtime) and
+> no entry in the live runner manifest `tests/sdk-contract/live/run_live_contract.py`.
 
 ---
 
 ## Requirements
 
-- Android minSdk 21 (Android 5.0 Lollipop)
-- Kotlin 1.7+
-- Coroutines 1.6+
-- Gradle 7.0+
+- Android `minSdk 21`, `compileSdk 34`
+- Kotlin 1.9, `kotlinx-coroutines-android` 1.7, OkHttp 4.12 (declared by the module)
+- JDK 17 for the build
 
 ---
 
 ## Installation
 
-### Gradle (Kotlin DSL)
-
-```kotlin
-// build.gradle.kts (app module)
-dependencies {
-    implementation("com.experimentationplatform:android-sdk:1.0.0")
-}
-```
-
-### Gradle (Groovy DSL)
-
-```groovy
-// build.gradle (app module)
-dependencies {
-    implementation 'com.experimentationplatform:android-sdk:1.0.0'
-}
-```
-
-### Local Module (from source)
+The module is not published to Maven yet; consume it from source.
 
 ```kotlin
 // settings.gradle.kts
 include(":sdk")
-project(":sdk").projectDir = file("../sdk/android")
+project(":sdk").projectDir = file("../experimentation-platform/sdk/android/sdk")
 
 // build.gradle.kts (app module)
 dependencies {
@@ -51,530 +46,346 @@ dependencies {
 ## Quick Start
 
 ```kotlin
-import com.experimentationplatform.sdk.ExperimentationClient
-import com.experimentationplatform.sdk.SdkConfig
-import com.experimentationplatform.sdk.User
+import com.experimentationplatform.android.ExperimentationClient
+import com.experimentationplatform.android.SdkConfig
+import com.experimentationplatform.android.TrackEvent
+import com.experimentationplatform.android.User
 
-val client = ExperimentationClient(SdkConfig(
-    baseUrl = "https://api.example.com",
-    apiKey = "your-api-key"
-))
+val client = ExperimentationClient(
+    SdkConfig(
+        baseUrl = "http://10.0.2.2:8000",           // origin only; the SDK appends /api/v1/...
+        apiKey = BuildConfig.EXPERIMENTLY_API_KEY   // sent as X-API-Key
+    )
+)
 
 lifecycleScope.launch {
-    val result = client.evaluateFlag("new-feature", User(id = "user-123"))
-    if (result.enabled) {
-        showNewFeature()
-    }
+    val user = User(id = "user-123", attributes = mapOf("plan" to "pro", "country" to "US"))
+
+    val flag = client.evaluateFlag("new-checkout", user)          // server decides
+    if (flag.enabled) showNewCheckout()
+
+    val assignment = client.getAssignment("checkout-cta-copy", user)   // sticky on the server
+    updateCtaCopy(assignment.variantName, assignment.configuration)
+
+    client.track(TrackEvent(user.id, "purchase", mapOf("sku" to "pro-plan"),
+        experimentKey = "checkout-cta-copy", value = 99.99))
 }
 ```
+
+`http://10.0.2.2:8000` reaches a backend on the host machine from the emulator. Seed a working
+experiment, flag and API key with `python backend/scripts/seed_sdk_contract.py` (the key is
+written to `tests/sdk-contract/live/.api_key`).
 
 ---
 
 ## Configuration
 
-Construct `SdkConfig` with all desired settings and pass it to `ExperimentationClient`.
-
 ```kotlin
-import com.experimentationplatform.sdk.SdkConfig
-
 val config = SdkConfig(
-    baseUrl = "https://api.example.com",     // Required
-    apiKey = "your-api-key",                  // Required
-    timeoutMs = 2_000L,                       // HTTP timeout in ms (default: 5000)
-    cacheSize = 500,                          // LRU cache capacity (default: 1000)
-    cacheTtlMs = 30_000L,                     // Cache TTL in ms (default: 60000)
-    enableLocalEval = true,                   // Evaluate locally (default: false)
-    enableOfflineFallback = true,             // SharedPreferences fallback (default: true)
-    defaultVariant = "control"                // Fallback variant on error (default: "control")
+    baseUrl = "https://api.example.com",   // Required — origin only
+    apiKey = "your-api-key",               // Required — sent as X-API-Key
+    timeoutMs = 10_000L,                   // OkHttp connect/read/write timeout (default 10 s)
+    cacheSize = 1000,                      // Max cached evaluations and, separately, assignments (default 1000)
+    cacheTtlMs = 300_000L                  // How long a successful result is reused (default 5 min)
 )
-
 val client = ExperimentationClient(config)
 ```
 
-### `SdkConfig` Reference
-
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
-| `baseUrl` | `String` | *(required)* | Base URL of the platform API |
-| `apiKey` | `String` | *(required)* | API key for SDK authentication |
-| `timeoutMs` | `Long` | `5000` | OkHttp call timeout in milliseconds |
-| `cacheSize` | `Int` | `1000` | Maximum LRU cache entries |
-| `cacheTtlMs` | `Long` | `60000` | Milliseconds before a cached entry expires |
-| `enableLocalEval` | `Boolean` | `false` | Download rules and evaluate locally |
-| `enableOfflineFallback` | `Boolean` | `true` | Persist last-known values to `SharedPreferences` |
-| `defaultVariant` | `String` | `"control"` | Variant returned when assignment fails |
+| `baseUrl` | `String` | `http://localhost:8000` | Backend origin, e.g. `https://api.example.com`; the SDK appends `/api/v1/...` |
+| `apiKey` | `String` | *(required)* | API key sent as `X-API-Key` |
+| `timeoutMs` | `Long` | `10000` | OkHttp connect, read and write timeout in milliseconds |
+| `cacheSize` | `Int` | `1000` | Maximum LRU entries per cache (evaluations, assignments) |
+| `cacheTtlMs` | `Long` | `300000` | Milliseconds a successful evaluation/assignment is reused |
+| `enableLocalEval` | `Boolean` | — | Deprecated; has no effect (flags are evaluated by the server) |
 
----
-
-## Lifecycle Management
-
-The client manages an internal OkHttp connection pool and an event-flush coroutine. Call `close()` when the client is no longer needed — typically in `onDestroy` or in a `ViewModel.onCleared`.
+`ExperimentationClient(config, httpClient, flagCache, assignmentCache, offlineStore)` accepts
+every collaborator for injection. `OfflineStore()` without arguments is in-memory (tests); in an
+app pass an `OfflineStore.PrefsAdapter` wrapping `SharedPreferences`:
 
 ```kotlin
-// In a ViewModel (recommended)
-class CheckoutViewModel : ViewModel() {
-    val expClient = ExperimentationClient(SdkConfig(
-        baseUrl = BuildConfig.EXP_BASE_URL,
-        apiKey = BuildConfig.EXP_API_KEY
-    ))
-
-    override fun onCleared() {
-        expClient.close()
-        super.onCleared()
-    }
+class PrefsAdapter(private val prefs: SharedPreferences) : OfflineStore.PrefsAdapter {
+    override fun getString(key: String) = prefs.getString(key, null)
+    override fun putString(key: String, value: String) { prefs.edit().putString(key, value).apply() }
+    override fun remove(key: String) { prefs.edit().remove(key).apply() }
+    override fun allKeys() = prefs.all.keys
+    override fun clear() { prefs.edit().clear().apply() }
 }
-```
 
-For application-scoped clients (singleton), close is optional since the process will terminate, but calling it ensures the event buffer is flushed.
-
----
-
-## User Model
-
-```kotlin
-import com.experimentationplatform.sdk.User
-
-// Minimal user
-val user = User(id = "user-123")
-
-// User with targeting attributes
-val user = User(
-    id = "user-123",
-    attributes = mapOf(
-        "plan"    to "pro",
-        "country" to "US",
-        "age"     to 28,
-        "beta"    to true
-    )
+val client = ExperimentationClient(
+    config,
+    offlineStore = OfflineStore(PrefsAdapter(context.getSharedPreferences("experimently", Context.MODE_PRIVATE)))
 )
 ```
 
-Attribute values may be `String`, `Int`, `Long`, `Double`, or `Boolean`.
+---
+
+## Lifecycle
+
+Share one `ExperimentationClient` per process (an `Application` field or a DI singleton). Call
+`close()` when it is no longer needed (`ViewModel.onCleared`, `Activity.onDestroy`); it drops the
+in-memory caches. Events already handed to `track` keep flushing in the background.
+
+---
+
+## User model
+
+```kotlin
+val user = User(
+    id = "user-123",                                      // stable identifier, required
+    attributes = mapOf("plan" to "pro", "country" to "US", "beta" to true)
+)
+```
+
+`attributes` are sent as the assignment `context` (targeting rules). Values may be `String`,
+`Int`, `Long`, `Double`, `Boolean`, nested `Map`/`List` or `null`. The flag evaluation endpoint
+only takes the user id.
 
 ---
 
 ## Feature Flag Evaluation
 
-### `evaluateFlag`
+### `suspend fun evaluateFlag(flagKey: String, user: User): EvalResult`
 
-This is a `suspend` function; call it from a coroutine scope.
-
-```kotlin
-lifecycleScope.launch {
-    val result = client.evaluateFlag(
-        flagKey = "new-feature",
-        user = User(id = "user-123")
-    )
-    if (result.enabled) {
-        showNewFeature()
-    }
-}
-```
-
-With user attributes for targeting:
-
-```kotlin
-lifecycleScope.launch {
-    val user = User(
-        id = currentUser.id,
-        attributes = mapOf(
-            "plan"    to currentUser.plan,
-            "country" to currentUser.country
-        )
-    )
-    val result = client.evaluateFlag("premium-dashboard", user)
-    binding.dashboardContainer.isVisible = result.enabled
-}
-```
-
-### `FlagResult` Properties
+Calls `GET /api/v1/feature-flags/evaluate/{flagKey}?user_id=…` (both values percent-encoded).
 
 | Property | Type | Description |
 |----------|------|-------------|
-| `enabled` | `Boolean` | Whether the flag is on for this user |
-| `flagKey` | `String` | The evaluated flag key |
-| `userId` | `String` | The user ID used for evaluation |
-| `evaluatedAt` | `Instant` | Timestamp of the evaluation |
+| `key` | `String` | The flag key you asked for |
+| `enabled` | `Boolean` | Server decision for this user |
+| `config` | `Any?` | The flag's `config` payload: `Map<String, Any?>` for a JSON object, `List<Any?>` for an array, a scalar, or `null` |
+| `configMap` | `Map<String, Any?>?` | `config` when it is a JSON object, else `null` |
+| `variant` | `String?` | `null` when off; `config["variant"]` when it is a string; otherwise `"on"` |
+
+```kotlin
+val result = client.evaluateFlag("dark-mode", user)
+if (result.enabled) {
+    val theme = result.configMap?.get("theme") as? String ?: "dark"
+}
+```
+
+Resolution order: the in-memory cache for this user + flag, then the API, then (on failure) the
+offline store's last successful evaluation for this user + flag. Failures are never cached; an
+offline fallback is returned without being re-cached, so the next call retries the server. With
+no offline value the call **throws** — `FlagNotFoundException` on 404 (flag unknown or not
+ACTIVE), `ServerException` on another non-2xx status, `NetworkException` on IO errors — which is
+what the SDK did before the rewire.
 
 ---
 
 ## Experiment Assignment
 
-### `getAssignment`
+### `suspend fun getAssignment(experimentKey: String, user: User): Assignment`
 
-```kotlin
-lifecycleScope.launch {
-    val assignment = client.getAssignment(
-        experimentKey = "checkout-experiment",
-        user = User(id = "user-123")
-    )
-
-    when (assignment.variantKey) {
-        "express-checkout" -> showExpressCheckout()
-        "standard-checkout" -> showStandardCheckout()
-        else -> showStandardCheckout()
-    }
-}
-```
-
-### `Assignment` Properties
+Calls `POST /api/v1/tracking/assign` with `{experiment_key, user_id, context}` (`context` is
+omitted when the user has no attributes). The server buckets the user, keeps the assignment
+sticky and records the exposure.
 
 | Property | Type | Description |
 |----------|------|-------------|
-| `variantKey` | `String` | Assigned variant key |
 | `experimentKey` | `String` | The experiment key |
-| `experimentId` | `String` | UUID of the experiment |
-| `isControl` | `Boolean` | `true` if this is the control variant |
-| `assignedAt` | `Instant` | Assignment timestamp |
+| `userId` | `String` | The assigned user |
+| `variantId` | `String?` | UUID of the assigned variant |
+| `variantName` | `String` | Assigned variant name (e.g. `"control"`, `"treatment"`) |
+| `isControl` | `Boolean` | `true` for the control variant |
+| `configuration` | `Map<String, Any?>?` | The variant's `configuration` JSON from the experiment definition |
+| `variantKey` | `String` | Deprecated alias for `variantName` |
+
+```kotlin
+val assignment = client.getAssignment("checkout-cta-copy", user)
+when (assignment.variantName) {
+    "treatment-a" -> renderShortCta()
+    "treatment-b" -> renderUrgencyCta()
+    else          -> renderOriginalCta()
+}
+```
+
+Successful assignments are cached per user + experiment for `cacheTtlMs` (the second call makes
+no request) and persisted to the offline store. On failure the offline value is returned if one
+exists; otherwise `ServerException` (404 when the experiment is not ACTIVE, 401 bad key, 429
+rate limited) or `NetworkException` is thrown. Failures are never cached.
 
 ---
 
 ## Event Tracking
 
-### `track` (suspend)
+### `suspend fun track(event: TrackEvent)`
+
+Fire-and-forget: the request runs on a background `Dispatchers.IO` scope and **never throws**.
+Events with an empty `userId` or `eventName` are ignored.
 
 ```kotlin
-lifecycleScope.launch {
-    client.track(
-        userID = "user-123",
-        eventName = "purchase_completed",
-        value = 49.99,
-        properties = mapOf("currency" to "USD", "sku" to "pro-annual")
-    )
-}
-```
-
-### Fire-and-Forget with `trackAsync`
-
-Use `trackAsync` in UI event handlers where you do not want to block or propagate errors to the caller.
-
-```kotlin
-binding.buyButton.setOnClickListener {
-    // Does not suspend; enqueues the event internally
-    client.trackAsync(
-        userID = currentUser.id,
-        eventName = "buy_button_tapped"
-    )
-}
-```
-
-`trackAsync` enqueues events in an internal `Channel` and flushes them to the platform in batches. Calling `client.close()` drains the buffer before shutdown.
-
----
-
-## Offline Fallback
-
-When `enableOfflineFallback = true`, every successful evaluation result is written to `SharedPreferences`. If a subsequent call fails due to no connectivity, the SDK returns the last-known value.
-
-```kotlin
-// Requires the application Context to access SharedPreferences
-val client = ExperimentationClient(
-    config = SdkConfig(
-        baseUrl = "https://api.example.com",
-        apiKey = "your-api-key",
-        enableOfflineFallback = true
-    ),
-    context = applicationContext // Pass Context for SharedPreferences access
+data class TrackEvent(
+    val userId: String,
+    val eventName: String,
+    val properties: Map<String, Any?> = emptyMap(),   // sent as metadata
+    val experimentKey: String? = null,
+    val featureFlagKey: String? = null,
+    val value: Double? = null,
+    val eventType: String? = null,                    // defaults to eventName
+    val timestampMs: Long? = null                     // sent as ISO-8601 UTC when set
 )
 ```
 
-To clear the offline cache:
-
 ```kotlin
-client.clearOfflineCache()
+client.track(TrackEvent(user.id, "purchase", mapOf("sku" to "pro-plan"), experimentKey = "checkout-cta-copy", value = 99.99))
+client.track(TrackEvent(user.id, "search", featureFlagKey = "new-search"))
+client.track(TrackEvent(user.id, "page_view", mapOf("page" to "/products")))   // no key: fanned out
 ```
+
+**Fan-out rule.** With `experimentKey` and/or `featureFlagKey` the SDK sends one
+`POST /api/v1/tracking/track`. Without a key it sends one `POST /api/v1/tracking/batch`
+containing one entry per experiment the user has been assigned to through this client plus one
+per flag evaluated for the user (from the in-memory cache). If nothing is cached, nothing is
+sent. This is what makes a single `track("purchase")` count as a conversion for every experiment
+the user is in. Conversions are matched to metrics by **event name**.
+
+### `suspend fun trackBatch(events: List<TrackEvent>)`
+
+Sends `POST /api/v1/tracking/batch` with at most 100 events per request (longer lists are
+chunked). Keyed events are sent as-is; unkeyed events are fanned out like `track`, and unkeyed
+events whose user has nothing cached are dropped. Never throws.
 
 ---
 
-## Jetpack Compose Integration
+## Cache helpers
 
-### Feature Flag in a Composable
+| Method | Description |
+|--------|-------------|
+| `getCachedAssignments(userId): List<Assignment>` | Cached (successful, unexpired) assignments for the user |
+| `getCachedFlagKeys(userId): List<String>` | Keys of flags successfully evaluated (and still cached) for the user |
+| `invalidateCache(userId, key)` | Drop the evaluation and assignment for one user + key from memory and the offline store |
+| `clearCache()` | Drop every in-memory evaluation and assignment (the offline store is kept) |
+| `getCacheSize(): Int` | Cached evaluations plus assignments |
 
-```kotlin
-import androidx.compose.runtime.*
-import com.experimentationplatform.sdk.ExperimentationClient
-import com.experimentationplatform.sdk.User
+The in-memory caches are thread-safe LRU maps (`ResultCache`) keyed by `userId`, a NUL
+separator and the flag/experiment `key`.
+The offline store keys are `ep_flag_<len>_<userId>_<key>` / `ep_assign_<len>_<userId>_<key>`.
 
-@Composable
-fun DashboardScreen(client: ExperimentationClient, user: User) {
-    var showNewDashboard by remember { mutableStateOf(false) }
+---
 
-    LaunchedEffect(user.id) {
-        val result = client.evaluateFlag("new-dashboard", user)
-        showNewDashboard = result.enabled
-    }
+## Backend endpoints used
 
-    if (showNewDashboard) {
-        NewDashboard()
-    } else {
-        LegacyDashboard()
-    }
-}
-```
+Every request carries `X-API-Key`, `Content-Type: application/json` and `Accept: application/json`.
 
-### ViewModel Integration (recommended for production)
+| SDK call | Method and path | Body / query | Response used |
+|---|---|---|---|
+| `evaluateFlag` | `GET /api/v1/feature-flags/evaluate/{flag_key}?user_id=…` | — | `{key, enabled, config}`; 404 when the flag is not ACTIVE |
+| `getAssignment` | `POST /api/v1/tracking/assign` | `{experiment_key, user_id, context?}` | `{experiment_key, user_id, variant_id, variant_name, is_control, configuration}`; 404 when the experiment is not ACTIVE |
+| `track` with a key | `POST /api/v1/tracking/track` | `{event_type, event_name, user_id, experiment_key?, feature_flag_key?, value?, metadata?, timestamp?}` | ignored |
+| `track` without keys, `trackBatch` | `POST /api/v1/tracking/batch` | `{events: [<track body>, …]}` (max 100 per request) | ignored |
 
-```kotlin
-import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.launch
-
-data class CheckoutUiState(
-    val checkoutVariant: String = "control",
-    val showNewUI: Boolean = false,
-    val isLoading: Boolean = true
-)
-
-class CheckoutViewModel(
-    private val client: ExperimentationClient
-) : ViewModel() {
-
-    private val _uiState = MutableStateFlow(CheckoutUiState())
-    val uiState: StateFlow<CheckoutUiState> = _uiState
-
-    fun loadForUser(user: User) {
-        viewModelScope.launch {
-            val assignment = client.getAssignment("checkout-flow", user)
-            val flag = client.evaluateFlag("new-ui", user)
-
-            _uiState.value = CheckoutUiState(
-                checkoutVariant = assignment.variantKey,
-                showNewUI = flag.enabled,
-                isLoading = false
-            )
-        }
-    }
-}
-
-@Composable
-fun CheckoutScreen(viewModel: CheckoutViewModel = viewModel()) {
-    val uiState by viewModel.uiState.collectAsState()
-
-    if (uiState.isLoading) {
-        CircularProgressIndicator()
-    } else {
-        Column {
-            Text("Variant: ${uiState.checkoutVariant}")
-            if (uiState.showNewUI) NewCheckoutUI() else LegacyCheckoutUI()
-        }
-    }
-}
-```
+These SDK paths share a per-IP rate-limit ceiling of `SDK_RATE_LIMIT_PER_MINUTE` requests
+(default 6000) on the backend; a `429` surfaces as `ServerException(429, …)`. The former
+`/api/v1/feature-flags/{key}`, `/api/v1/feature-flags` (list), `/api/v1/experiments/{key}/assign`
+and `/api/v1/events` calls, the `Authorization: ApiKey` header and `refreshFlags()` are gone.
 
 ---
 
 ## Error Handling
 
-SDK methods throw `ExperimentationException` subclasses on unrecoverable failures.
+`evaluateFlag` and `getAssignment` throw `ExperimentationException` subclasses when the API
+fails and no offline value exists; `track`/`trackBatch` never throw.
+
+| Class | When |
+|-------|------|
+| `ExperimentationException.NetworkException(message, cause)` | OkHttp IO failure or timeout |
+| `ExperimentationException.ServerException(statusCode, message)` | Non-2xx response: 401 bad key, 404 unknown/not ACTIVE (assignment), 422 invalid event, 429 rate limited; `message` carries the API's `detail` |
+| `ExperimentationException.FlagNotFoundException(flagKey)` | `evaluateFlag` got a 404 and nothing is stored offline |
+| `ExperimentationException.InvalidConfigException(message)` | Reserved for configuration errors |
 
 ```kotlin
 try {
     val result = client.evaluateFlag("my-flag", user)
+} catch (e: ExperimentationException.FlagNotFoundException) {
+    // flag unknown or not ACTIVE → treat as off
 } catch (e: ExperimentationException.NetworkException) {
-    // OkHttp IO or timeout error
-    Timber.e(e, "Network error evaluating flag")
-    // Offline fallback was already attempted; serve the default
-} catch (e: ExperimentationException.ApiException) {
-    // Non-2xx HTTP response
-    Timber.e("API error ${e.statusCode}: ${e.message}")
-} catch (e: ExperimentationException.ConfigurationException) {
-    // Invalid SdkConfig (empty apiKey, malformed URL)
-    Timber.e("SDK misconfigured: ${e.message}")
+    // offline and nothing stored → treat as off
+} catch (e: ExperimentationException.ServerException) {
+    Log.w("exp", "API error ${e.statusCode}: ${e.message}")
 }
 ```
 
-### `ExperimentationException` Hierarchy
-
-| Class | Description |
-|-------|-------------|
-| `NetworkException(cause: Throwable)` | IO failure or timeout from OkHttp |
-| `ApiException(statusCode: Int, message: String)` | Non-2xx HTTP response |
-| `DecodingException(cause: Throwable)` | Response body could not be parsed |
-| `ConfigurationException(message: String)` | Invalid SDK configuration |
-| `OfflineFallbackUnavailableException` | Offline and no cached value exists |
+`evaluateFlag`/`getAssignment` also throw `IllegalArgumentException` for an empty key or user id.
 
 ---
 
-## ProGuard / R8 Rules
+## Consistent Hash Utility
 
-If you have minification enabled, add the following to your `proguard-rules.pro`:
+`ConsistentHash.compute(userId: String, key: String): Double` implements the cross-SDK formula —
+`MD5("{userId}:{key}")`, first 4 bytes as little-endian uint32, divided by 2^32 — and is pinned by
+the golden vectors in `tests/sdk-contract/golden-vectors.json` (`HashCompatibilityTest`):
 
-```proguard
-# Experimentation Platform Android SDK
--keep class com.experimentationplatform.sdk.** { *; }
--keepnames class com.experimentationplatform.sdk.** { *; }
-
-# OkHttp (included transitively)
--dontwarn okhttp3.**
--dontwarn okio.**
--keep class okhttp3.** { *; }
+```kotlin
+ConsistentHash.compute("user-123", "my-flag")   // 0.6927449859213084
 ```
 
-If you use R8 full mode (`android.enableR8.fullMode=true`), also add:
-
-```proguard
--if class com.experimentationplatform.sdk.**
--keep class com.experimentationplatform.sdk.**$** { *; }
-```
+It is exported as a utility only. Since assignment moved to the server, nothing in the SDK uses
+it to decide a variant. `FeatureFlagEvaluator.hashUser` remains as a deprecated alias.
 
 ---
 
-## Testing
-
-### MockWebServer (unit + integration)
-
-The SDK is designed to work with `MockWebServer` from OkHttp for hermetic tests. No Android instrumentation is required for unit tests.
+## Jetpack Compose
 
 ```kotlin
-import com.squareup.okhttp3.mockwebserver.MockResponse
-import com.squareup.okhttp3.mockwebserver.MockWebServer
-import kotlinx.coroutines.test.runTest
-import org.junit.After
-import org.junit.Assert.assertTrue
-import org.junit.Before
-import org.junit.Test
+@Composable
+fun DashboardScreen(client: ExperimentationClient, user: User) {
+    var showNewDashboard by remember { mutableStateOf(false) }
 
-class FeatureFlagTest {
-    private lateinit var server: MockWebServer
-    private lateinit var client: ExperimentationClient
-
-    @Before
-    fun setUp() {
-        server = MockWebServer()
-        server.start()
-
-        client = ExperimentationClient(SdkConfig(
-            baseUrl = server.url("/").toString(),
-            apiKey = "test-key",
-            enableOfflineFallback = false
-        ))
-    }
-
-    @After
-    fun tearDown() {
-        server.shutdown()
-        client.close()
-    }
-
-    @Test
-    fun `evaluateFlag returns enabled when API responds with enabled true`() = runTest {
-        server.enqueue(MockResponse()
-            .setResponseCode(200)
-            .setBody("""{"enabled": true, "flag_key": "new-feature", "user_id": "u1"}""")
-            .addHeader("Content-Type", "application/json")
-        )
-
-        val result = client.evaluateFlag("new-feature", User(id = "u1"))
-
-        assertTrue(result.enabled)
-    }
-
-    @Test
-    fun `evaluateFlag returns disabled on 500 error`() = runTest {
-        server.enqueue(MockResponse().setResponseCode(500))
-
-        val result = client.evaluateFlag("new-feature", User(id = "u1"))
-
-        assertTrue(!result.enabled)
-    }
-}
-```
-
-### Testing with Fakes
-
-For unit tests of ViewModels or business logic, use the `FakeExperimentationClient` included in the SDK test artifact:
-
-```kotlin
-// build.gradle.kts (test dependencies)
-testImplementation("com.experimentationplatform:android-sdk-testing:1.0.0")
-```
-
-```kotlin
-import com.experimentationplatform.sdk.testing.FakeExperimentationClient
-
-class CheckoutViewModelTest {
-    @Test
-    fun `loads treatment variant for experiment`() = runTest {
-        val fakeClient = FakeExperimentationClient()
-        fakeClient.setVariant("checkout-flow", "express-checkout")
-
-        val viewModel = CheckoutViewModel(fakeClient)
-        viewModel.loadForUser(User(id = "u1"))
-
-        assertEquals("express-checkout", viewModel.uiState.value.checkoutVariant)
-    }
-}
-```
-
----
-
-## Thread Safety
-
-`ExperimentationClient` is safe for concurrent access from multiple coroutines. All internal state is protected by coroutine Mutex guards. You can share a single client instance across your entire application.
-
----
-
-## Full Working Example
-
-```kotlin
-// Application.kt
-class MyApplication : Application() {
-    lateinit var expClient: ExperimentationClient
-
-    override fun onCreate() {
-        super.onCreate()
-        expClient = ExperimentationClient(
-            config = SdkConfig(
-                baseUrl = BuildConfig.EXP_BASE_URL,
-                apiKey = BuildConfig.EXP_API_KEY,
-                timeoutMs = 2_000L,
-                cacheSize = 2000,
-                cacheTtlMs = 30_000L,
-                enableOfflineFallback = true
-            ),
-            context = applicationContext
-        )
-    }
-
-    override fun onTerminate() {
-        expClient.close()
-        super.onTerminate()
-    }
-}
-
-// CheckoutActivity.kt
-class CheckoutActivity : AppCompatActivity() {
-    private val expClient get() = (application as MyApplication).expClient
-
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_checkout)
-
-        val user = User(
-            id = getCurrentUserId(),
-            attributes = mapOf(
-                "plan"    to getCurrentUserPlan(),
-                "country" to Locale.getDefault().country
-            )
-        )
-
-        lifecycleScope.launch {
-            val flagResult = expClient.evaluateFlag("new-checkout-flow", user)
-            val assignment = expClient.getAssignment("checkout-cta-copy", user)
-
-            if (flagResult.enabled) showNewCheckoutFlow() else showLegacyCheckoutFlow()
-            updateCtaCopy(assignment.variantKey)
-        }
-
-        binding.checkoutButton.setOnClickListener {
-            expClient.trackAsync(
-                userID = getCurrentUserId(),
-                eventName = "checkout_button_tapped"
-            )
-            proceedToCheckout()
+    LaunchedEffect(user.id) {
+        showNewDashboard = try {
+            client.evaluateFlag("new-dashboard", user).enabled
+        } catch (e: ExperimentationException) {
+            false
         }
     }
+
+    if (showNewDashboard) NewDashboard() else LegacyDashboard()
 }
 ```
+
+A complete Activity is in `sdk/android/examples/ComposeExample/ExampleActivity.kt`.
+
+---
+
+## Testing your own code
+
+Point the client at OkHttp's `MockWebServer` (the SDK's own tests do this) or inject fakes
+through the constructor:
+
+```kotlin
+val server = MockWebServer().apply { start() }
+server.enqueue(MockResponse().setResponseCode(200)
+    .setBody("""{"key":"new-checkout","enabled":true,"config":null}"""))
+
+val client = ExperimentationClient(SdkConfig(baseUrl = server.url("/").toString().trimEnd('/'), apiKey = "test"))
+
+runTest {
+    assertTrue(client.evaluateFlag("new-checkout", User("u1")).enabled)
+    val request = server.takeRequest()
+    assertEquals("/api/v1/feature-flags/evaluate/new-checkout?user_id=u1", request.path)
+    assertEquals("test", request.getHeader("X-API-Key"))
+}
+```
+
+---
+
+## Development and verification
+
+```bash
+cd sdk/android && gradle :sdk:test   # JUnit 5 + MockWebServer, 78 tests (no wrapper checked in)
+```
+
+`ExperimentationClientTest` (56 tests) covers the exact request for each endpoint (method, path
+encoding, `user_id` query, headers, JSON body), response mapping, sticky cache hits, TTL expiry,
+404/401/network failures, offline fallback, that failures are never cached, keyed `track`
+bodies, key-less fan-out, "nothing cached → no request", batch chunking at 100 and that `track`
+never throws. `HashCompatibilityTest` (22 tests) pins the golden vectors.
+
+Unit tests only (JUnit 5 + MockWebServer); no contract smoke (needs a device runtime). The live
+runner manifest in `tests/sdk-contract/live/run_live_contract.py` has no `android` entry.
+
+Verified against a live backend: **not yet (toolchain unavailable — no gradle/Android SDK on the
+development machine)**. The unit tests have not been executed on this machine either; the code
+was reviewed by inspection only.

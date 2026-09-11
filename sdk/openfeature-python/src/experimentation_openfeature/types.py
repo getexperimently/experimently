@@ -1,94 +1,30 @@
 """
-Internal types for the Experimentation Platform OpenFeature Provider.
+Public types for the Experimentation Platform OpenFeature Provider.
 """
+
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from dataclasses import dataclass
 
 
 @dataclass
 class ProviderConfig:
-    """Configuration for ExperimentationProvider."""
+    """Configuration for :class:`~experimentation_openfeature.ExperimentationProvider`.
+
+    Convenience holder for applications that build the provider from settings::
+
+        cfg = ProviderConfig(api_key=..., base_url=...)
+        provider = ExperimentationProvider(**vars(cfg))
+    """
 
     api_key: str
-    """API key used in X-API-Key header."""
+    """API key used in the X-API-Key header."""
 
     base_url: str = "http://localhost:8000"
-    """Base URL of the Experimentation Platform API."""
+    """Backend origin; the SDK appends ``/api/v1/...``."""
 
-    cache_ttl: int = 300
-    """Cache TTL in seconds. Defaults to 5 minutes."""
+    cache_ttl: float = 300
+    """Seconds a successful evaluation is reused per user + flag. Defaults to 5 minutes."""
 
-    timeout: int = 10
+    timeout: float = 10
     """HTTP request timeout in seconds."""
-
-
-@dataclass
-class FlagVariant:
-    """A single variant within a feature flag."""
-
-    key: str
-    weight: float
-    value: Any = None
-
-
-@dataclass
-class TargetingRule:
-    """A targeting rule applied to decide flag audience."""
-
-    attribute: str
-    operator: str
-    value: Any
-
-
-@dataclass
-class FeatureFlagDefinition:
-    """Feature flag definition as returned by the platform API."""
-
-    key: str
-    enabled: bool
-    rollout_percentage: float
-    variants: List[FlagVariant] = field(default_factory=list)
-    rules: List[TargetingRule] = field(default_factory=list)
-
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "FeatureFlagDefinition":
-        """Deserialize from API response dict."""
-        variants = [
-            FlagVariant(
-                key=v["key"],
-                weight=v.get("weight", 0.0),
-                value=v.get("value"),
-            )
-            for v in data.get("variants") or []
-        ]
-        rules = [
-            TargetingRule(
-                attribute=r["attribute"],
-                operator=r["operator"],
-                value=r["value"],
-            )
-            for r in data.get("rules") or []
-        ]
-        return cls(
-            key=data["key"],
-            enabled=data.get("enabled", False),
-            rollout_percentage=float(data.get("rollout_percentage", 0.0)),
-            variants=variants,
-            rules=rules,
-        )
-
-
-@dataclass
-class LocalEvalResult:
-    """Result of a local flag evaluation."""
-
-    value: Any
-    """Resolved value."""
-
-    variant: Optional[str]
-    """Variant key if assigned, else None."""
-
-    enabled: bool
-    """Whether the flag is on for this user."""

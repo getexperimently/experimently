@@ -1,67 +1,40 @@
 /**
- * Internal types for the Experimentation Platform OpenFeature Provider.
+ * Types for the Experimentation Platform OpenFeature Provider.
+ *
+ * The provider delegates every network call to `@experimentation-platform/js-sdk`;
+ * the flag shape it works with is that SDK's `FlagEvaluation`
+ * (`{key, enabled, config}` from `GET /api/v1/feature-flags/evaluate/{key}?user_id=…`).
  */
 
-/** A single variant within a feature flag. */
-export interface FlagVariant {
-  /** Variant identifier (e.g., "control", "treatment"). */
-  key: string;
-  /** Fractional weight in [0.0, 1.0]; all variants within a flag sum to 1.0. */
-  weight: number;
-  /** Arbitrary value associated with this variant. */
-  value?: unknown;
+import type { ExperimentationClient } from '@experimentation-platform/js-sdk';
+
+export interface ExperimentationProviderOptions {
+  /** API key used in the X-API-Key header. */
+  apiKey: string;
+  /** Backend origin (the SDK appends `/api/v1/...`). Defaults to http://localhost:8000. */
+  baseUrl?: string;
+  /** How long a successful evaluation is reused per user + flag, in ms. Defaults to 300 000 (5 min). */
+  cacheTtlMs?: number;
+  /** HTTP request timeout in milliseconds. Defaults to 5 000 (5 s). */
+  timeout?: number;
+  /**
+   * Optional fetch implementation. Allows injection of a mock fetch in tests.
+   * Defaults to the global `fetch` available in Node 18+ / browsers.
+   */
+  fetch?: typeof fetch;
+  /**
+   * Reuse an existing JS SDK client (for example the one your app already uses for
+   * experiment assignment and tracking). When given, the other options are ignored.
+   */
+  client?: ExperimentationClient;
 }
 
-/** A targeting rule that must be satisfied for a user to receive the flag. */
-export interface TargetingRule {
-  attribute: string;
-  operator: string;
-  value: unknown;
-}
-
-/** Feature flag definition as returned by the platform API. */
-export interface FeatureFlagDefinition {
-  /** Unique flag key. */
-  key: string;
-  /** Whether the flag is enabled at all. */
+/** `flagMetadata` attached to every successful resolution. */
+export interface ExperimentationFlagMetadata {
+  flagKey: string;
   enabled: boolean;
-  /** Percentage of traffic exposed to this flag (0–100). */
-  rollout_percentage: number;
-  /** Variants; empty list means the flag is a simple boolean on/off. */
-  variants?: FlagVariant[];
-  /** Targeting rules (AND-combined). */
-  rules?: TargetingRule[];
+  [key: string]: string | number | boolean;
 }
 
-/** Response envelope from GET /api/v1/openfeature/flags */
-export interface FlagsResponse {
-  flags: FeatureFlagDefinition[];
-}
-
-/** Response envelope from POST /api/v1/openfeature/evaluate */
-export interface EvaluateResponse {
-  value: unknown;
-  variant: string | null;
-  reason: string;
-}
-
-/** Internal result of local flag evaluation. */
-export interface LocalEvalResult {
-  /** Resolved value (boolean, string, number, or object). */
-  value: unknown;
-  /** Variant key (null for boolean on/off flags). */
-  variant: string | null;
-  /** Evaluation reason code. */
-  reason: EvalReason;
-  /** Whether the flag was found in the local cache. */
-  fromCache: boolean;
-}
-
-/** Supported evaluation reason codes. */
-export type EvalReason = 'CACHED' | 'STATIC' | 'DEFAULT' | 'ERROR' | 'TARGETING_MATCH';
-
-/** Cache entry for resolved flags. */
-export interface CacheEntry {
-  flags: Map<string, FeatureFlagDefinition>;
-  fetchedAt: number;
-}
+/** Resolution reasons this provider emits (a subset of OpenFeature's `StandardResolutionReasons`). */
+export type EvalReason = 'TARGETING_MATCH' | 'CACHED' | 'DISABLED' | 'DEFAULT' | 'ERROR';

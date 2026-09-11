@@ -4,12 +4,15 @@
     <Nullable>enable</Nullable>
     <LangVersion>10.0</LangVersion>
     <PackageId>ExperimentationPlatform.SDK</PackageId>
-    <Version>0.1.0</Version>
+    <Version>0.2.0</Version>
     <Authors>Experimentation Platform Team</Authors>
-    <Description>Official .NET/C# SDK for the Experimentation Platform — A/B testing and feature flag evaluation.</Description>
+    <Description>Official .NET/C# SDK for the Experimentation Platform — server-decided feature flags, A/B experiment assignment and event tracking.</Description>
     <PackageTags>experimentation;feature-flags;ab-testing;sdk</PackageTags>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
-    <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
+  <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.1'">
+    <!-- System.Text.Json is part of the shared framework on net6.0 but not on netstandard2.1. -->
+    <PackageReference Include="System.Text.Json" Version="8.0.5" />
+  </ItemGroup>
 </Project>

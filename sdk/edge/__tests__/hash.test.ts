@@ -12,7 +12,7 @@
  * 2974425155 / 4294967296 ≈ 0.6927449859213084
  */
 
-import { hashUser } from '../src/evaluator';
+import { hashUser } from '../src/hash';
 import { md5, md5Hex } from '../src/md5';
 
 // ---------------------------------------------------------------------------
