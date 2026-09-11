@@ -59,10 +59,13 @@ export function EvidenceRatioChart({
             tick={{ fontSize: 12 }}
           />
           <Tooltip
-            formatter={(value: number | undefined, name: string | undefined) => {
-              if (value === undefined) return ['', name ?? ''];
-              if (name === 'Lambda Ratio') return [(value as number).toFixed(3), name];
-              return [value, name ?? ''];
+            // Recharts' Formatter receives ValueType/NameType (string | number
+            // | array), so narrow explicitly instead of annotating the params.
+            formatter={(value, name) => {
+              const label = name == null ? '' : String(name);
+              if (value == null || value === '') return ['', label];
+              if (label === 'Lambda Ratio') return [Number(value).toFixed(3), label];
+              return [String(value), label];
             }}
             labelFormatter={(label: React.ReactNode) => `Sample size: ${label}`}
           />
