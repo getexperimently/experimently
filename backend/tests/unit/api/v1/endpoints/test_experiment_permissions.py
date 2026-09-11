@@ -223,7 +223,9 @@ def test_experiment_endpoint_permissions(
     print(f"  Status: {test_experiment_for_permissions.status}")
     print(f"  Status type: {type(test_experiment_for_permissions.status)}")
 
-    # Replace {id} in endpoint with actual experiment ID
+    # Replace {id} in endpoint with actual experiment ID (keep the template so
+    # the per-object viewer checks below can still recognise these endpoints).
+    endpoint_template = endpoint
     if "{id}" in endpoint:
         endpoint = endpoint.replace("{id}", str(test_experiment_for_permissions.id))
 
@@ -265,7 +267,7 @@ def test_experiment_endpoint_permissions(
     # Make request based on method
     try:
         # Special direct checks for viewer_user tests (no HTTP requests)
-        if user_type == "viewer_user" and "{id}" in endpoint:
+        if user_type == "viewer_user" and "{id}" in endpoint_template:
             from backend.app.core.permissions import Action, ResourceType, check_permission, check_ownership
 
             if method == "GET":

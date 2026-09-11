@@ -228,9 +228,11 @@ class TestTrackingValidation:
         """Test that valid event request data passes validation."""
         valid_data = {
             "event_type": "purchase",
-            "experiment_id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",  # Valid UUID v4 string
-            "event_data": {"user_id": "user-123", "product_id": "prod-456", "category": "electronics"},
-            "timestamp": None
+            "user_id": "user-123",
+            "experiment_key": "button-color-test",
+            "value": 49.99,
+            "metadata": {"product_id": "prod-456", "category": "electronics"},
+            "timestamp": None,
         }
 
         # This should not raise an exception
@@ -238,9 +240,11 @@ class TestTrackingValidation:
 
         # Assert that the data was correctly parsed
         assert event.event_type == "purchase"
-        assert str(event.experiment_id) == "f47ac10b-58cc-4372-a567-0e02b2c3d479"
-        assert event.event_data["user_id"] == "user-123"
-        assert event.event_data["product_id"] == "prod-456"
+        assert event.user_id == "user-123"
+        assert event.experiment_key == "button-color-test"
+        assert event.event_name is None  # endpoint defaults it to event_type
+        assert event.value == 49.99
+        assert event.metadata["product_id"] == "prod-456"
 
     def test_event_experiment_or_feature_flag_required(self):
         """Test that either experiment_key or feature_flag_key is required."""
@@ -252,7 +256,7 @@ class TestTrackingValidation:
             EventRequest(**invalid_data)
 
         # Check that the error message mentions the requirement
-        assert "Either experiment_id or feature_flag_id must be provided" in str(
+        assert "Either experiment_key or feature_flag_key must be provided" in str(
             excinfo.value
         )
 
@@ -366,10 +370,11 @@ class TestIntegrationRequestValidation:
         with pytest.raises(ValidationError) as excinfo:
             EventRequest(**invalid_data)
 
-        # Check that validation errors are present for missing fields
+        # user_id is a required field, so Pydantic reports it as missing
+        # before the experiment/flag-key model validator runs.
         errors = excinfo.value.errors()
-        error_types = [error["type"] for error in errors]
-        assert "value_error" in error_types
+        assert [tuple(e["loc"]) for e in errors] == [("user_id",)]
+        assert errors[0]["type"] == "missing"
 
     def test_api_validation_type_conversions(self):
         """Test that API properly converts types in requests."""

@@ -13,15 +13,34 @@ from pydantic import BaseModel, Field, field_validator, model_validator, ConfigD
 class EventBase(BaseModel):
     """Base model for event data."""
     event_name: str = Field(..., min_length=1, max_length=100)
+    event_type: str = Field("custom", min_length=1, max_length=100)
     user_id: Optional[str] = Field(None, max_length=255)
     session_id: Optional[str] = Field(None, max_length=255)
     experiment_id: Optional[str] = Field(None, max_length=255)
     feature_flag_id: Optional[str] = Field(None, max_length=255)
     variant_id: Optional[str] = Field(None, max_length=255)
+    value: Optional[float] = None
+    # Free-form event attributes; ``properties`` is the name used by the
+    # tracking endpoints and services, ``metadata`` is kept for callers
+    # that already send it.  EventService.build_event accepts either.
+    properties: Optional[Dict[str, Any]] = None
     metadata: Optional[Dict[str, Any]] = None
     timestamp: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
+
+    @field_validator("properties", "metadata", mode="before")
+    @classmethod
+    def parse_json_string(cls, v: Any) -> Any:
+        """Accept a JSON-encoded string for the free-form attribute fields."""
+        if isinstance(v, str):
+            import json
+
+            try:
+                return json.loads(v) if v.strip() else None
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"must be a JSON object: {exc}") from exc
+        return v
 
     @model_validator(mode="after")
     def validate_experiment_or_feature_flag(self) -> "EventBase":
@@ -141,24 +160,40 @@ class AssignmentRequest(BaseModel):
     )
 
 
+class VariantAssignmentResponse(BaseModel):
+    """Response for POST /tracking/assign: the variant a user was assigned to."""
+    experiment_key: str
+    user_id: str
+    variant_id: str
+    variant_name: str
+    is_control: bool = False
+    configuration: Optional[Dict[str, Any]] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class EventRequest(BaseModel):
-    """Model for tracking an event."""
-    experiment_id: Optional[UUID4] = None
-    feature_flag_id: Optional[UUID4] = None
+    """
+    Model for tracking an event through the public tracking API.
+
+    Experiments and feature flags are referenced by their human-readable keys
+    (the SDKs do not know internal ids); the endpoint resolves them and picks
+    up the user's variant assignment automatically.
+    """
     event_type: str = Field(..., min_length=1, max_length=100)
-    event_data: Optional[Dict] = None
+    event_name: Optional[str] = Field(None, max_length=255)
+    user_id: str = Field(..., min_length=1, max_length=255)
+    experiment_key: Optional[str] = Field(None, max_length=100)
+    feature_flag_key: Optional[str] = Field(None, max_length=100)
+    value: Optional[float] = None
+    metadata: Optional[Dict[str, Any]] = None
     timestamp: Optional[datetime] = None
 
     @model_validator(mode="after")
-    def validate_experiment_or_feature_flag(cls, values):
-        experiment_id = values.experiment_id
-        feature_flag_id = values.feature_flag_id
-
-        if experiment_id is None and feature_flag_id is None:
-            raise ValueError("Either experiment_id or feature_flag_id must be provided")
-        if experiment_id is not None and feature_flag_id is not None:
-            raise ValueError("Only one of experiment_id or feature_flag_id should be provided")
-        return values
+    def validate_experiment_or_feature_flag(self) -> "EventRequest":
+        if not self.experiment_key and not self.feature_flag_key:
+            raise ValueError("Either experiment_key or feature_flag_key must be provided")
+        return self
 
     model_config = ConfigDict(
         json_schema_extra={

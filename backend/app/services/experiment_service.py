@@ -195,6 +195,20 @@ class ExperimentService:
 
         return query.scalar()
 
+    @staticmethod
+    def generate_key(name: str) -> str:
+        """Derive a unique, URL/SDK-safe experiment key from a name.
+
+        Lower-cases the name, replaces runs of non-alphanumerics with "-", and
+        appends a short random suffix so two experiments with the same name
+        never collide.  Example: "Button Color Test" -> "button-color-test-3f9a2c".
+        """
+        import re as _re
+        import uuid as _uuid
+
+        slug = _re.sub(r"[^a-z0-9]+", "-", (name or "experiment").lower()).strip("-")[:80]
+        return f"{slug or 'experiment'}-{_uuid.uuid4().hex[:6]}"
+
     def create_experiment(
         self,
         obj_in: Union[ExperimentCreate, Dict[str, Any]],
@@ -244,6 +258,8 @@ class ExperimentService:
 
         # Create experiment
         experiment = Experiment(**obj_data)
+        if not experiment.key:
+            experiment.key = self.generate_key(experiment.name)
         self.db.add(experiment)
         self.db.flush()  # Flush to get the experiment ID
 
@@ -337,7 +353,7 @@ class ExperimentService:
         # Handle metrics update if provided
         if metrics_data is not None:
             # Remove existing metrics
-            for metric in experiment.metrics:
+            for metric in experiment.metric_definitions:
                 self.db.delete(metric)
 
             # Create new metrics
@@ -594,13 +610,19 @@ class ExperimentService:
             )
             self.db.add(new_variant)
 
-        # Clone metrics
-        for metric in experiment.metrics:
+        # Clone metrics (copy every definition column; Metric has no event_type)
+        for metric in experiment.metric_definitions:
             new_metric = Metric(
                 name=metric.name,
                 description=metric.description,
                 event_name=metric.event_name,
-                event_type=metric.event_type,
+                metric_type=metric.metric_type,
+                is_primary=metric.is_primary,
+                aggregation_method=metric.aggregation_method,
+                minimum_sample_size=metric.minimum_sample_size,
+                expected_effect=metric.expected_effect,
+                event_value_path=metric.event_value_path,
+                lower_is_better=metric.lower_is_better,
                 experiment_id=new_experiment.id,
             )
             self.db.add(new_metric)
@@ -794,6 +816,11 @@ class ExperimentService:
             logger.error(f"Error parsing date: {date_str}, {str(e)}")
             raise ValueError(f"Invalid date format: {date_str}")
 
+    def to_response_dict(self, experiment: Experiment) -> Dict[str, Any]:
+        """Serialise an Experiment for ExperimentResponse (metrics come from
+        the metric_definitions relationship, not the JSONB `metrics` column)."""
+        return self._experiment_to_dict(experiment)
+
     def _experiment_to_dict(self, experiment: Experiment) -> Dict[str, Any]:
         """
         Convert an experiment model to a dictionary for API responses.
@@ -831,6 +858,9 @@ class ExperimentService:
             "start_date": experiment.start_date,
             "end_date": experiment.end_date,
             "tags": experiment.tags or [],
+            "key": experiment.key,
+            "experiment_metadata": experiment.experiment_metadata or {},
+            "split_url_config": experiment.split_url_config,
         }
 
         # Add variants if loaded
