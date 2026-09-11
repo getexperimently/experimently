@@ -19,7 +19,10 @@ export class ServerClient {
     this.inner = new ExperimentationClient(config);
   }
 
-  /** `GET /api/v1/feature-flags/evaluate/{key}?user_id=…` — never throws. */
+  /**
+   * `GET /api/v1/feature-flags/evaluate/{key}?user_id=…[&context=<url-encoded JSON>]`
+   * — never throws. `user.attributes` (when non-empty) is sent as `context`.
+   */
   async evaluateFeatureFlag(flagKey: string, user: UserContext): Promise<FeatureFlagEvaluation> {
     try {
       return await this.inner.evaluateFeatureFlagDetailed(user, flagKey);

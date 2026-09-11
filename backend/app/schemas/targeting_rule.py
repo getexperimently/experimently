@@ -36,6 +36,11 @@ class OperatorType(str, Enum):
     CONTAINS_ALL = "contains_all"  # Array contains all elements
     CONTAINS_ANY = "contains_any"  # Array contains any element
     MATCH_REGEX = "match_regex"  # String matches regex pattern
+    # Presence operators (dashboard "is empty" / "is not empty"). Unlike
+    # ``eq None`` these also match when the attribute is absent from the
+    # context entirely.
+    IS_NULL = "is_null"
+    IS_NOT_NULL = "is_not_null"
     # Advanced operators for custom attributes
     SEMANTIC_VERSION = "semantic_version"  # Compare semantic versions (e.g., 1.2.3)
     GEO_DISTANCE = "geo_distance"  # Distance from a geographic point

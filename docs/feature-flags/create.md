@@ -124,25 +124,67 @@ curl -X POST http://localhost:8000/api/v1/feature-flags \
 
 ### Add Targeting Rules
 
+`targeting_rules` uses the same shape the dashboard rule builder writes: a top-level
+`logical_operator` combining one or more groups, each group combining its conditions.
+This example targets enterprise-plan users in the US, CA or GB **or** any employee:
+
 ```bash
 curl -X PUT http://localhost:8000/api/v1/feature-flags/flag-uuid-here \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
-    "targeting_rules": [
-      {
-        "attribute": "plan",
-        "operator": "equals",
-        "value": "enterprise"
-      },
-      {
-        "attribute": "country",
-        "operator": "in",
-        "value": ["US", "CA", "GB"]
-      }
-    ]
+    "targeting_rules": {
+      "logical_operator": "OR",
+      "groups": [
+        {
+          "logical_operator": "AND",
+          "conditions": [
+            {"attribute": "user.plan", "operator": "equals", "value": "enterprise"},
+            {"attribute": "user.country", "operator": "in", "value": ["US", "CA", "GB"]}
+          ]
+        },
+        {
+          "logical_operator": "AND",
+          "conditions": [
+            {"attribute": "employee", "operator": "equals", "value": "true"}
+          ]
+        }
+      ]
+    }
   }'
 ```
+
+Operators: `equals`, `not_equals`, `contains`, `not_contains`, `starts_with`, `ends_with`,
+`greater_than`, `less_than`, `greater_than_or_equal`, `less_than_or_equal`, `in`, `not_in`,
+`regex`, `is_null`, `is_not_null`, `semver_eq`, `semver_gt`, `semver_lt`, `semver_gte`,
+`semver_lte`, `geo_within_radius`, `time_window`, `array_contains`, `array_intersects`.
+Values typed in the dashboard are strings; they are compared leniently against typed
+context values (`"true"` matches `true`, `"17"` matches `17`, `"beta, internal"` is a list
+for `in`/`not_in`, `"17.4"` is padded to `17.4.0` for `semver_*`).
+
+Users who match a rule are bucketed with the rule's `rollout_percentage` (100 unless set on
+the rules object); users who match no rule fall through to the flag's global
+`rollout_percentage`. The native Enhanced Rules Engine shape (`{"rules": [...]}`) is accepted
+as well.
+
+#### Targeting context and attribute aliases
+
+Rules are matched against the **context** the SDK sends with each evaluation (the user's
+attributes: `context=<url-encoded JSON>` on `GET /feature-flags/evaluate/{key}`, or the
+`context` object on the `POST` variant). Before matching, the context is expanded so that:
+
+- every key is available as given (`{"country": "US"}` answers `country`);
+- nested objects are flattened to dotted keys (`{"app": {"version": "3.2.1"}}` answers
+  `app.version`);
+- every top-level key also answers `user.<key>`, `device.<key>` and `app.<key>`
+  (`{"country": "US"}` answers `user.country`; `{"os_version": "17.4.0"}` answers
+  `device.os_version`), and `user.<key>` / `device.<key>` / `app.<key>` keys in the context
+  answer the bare `<key>` too;
+- explicit keys always win over aliases.
+
+So a dashboard rule on `user.country` matches an SDK that sends `{"country": "US"}` without
+any renaming on either side. A condition whose attribute is absent from the context does not
+match (except `is_null`, which does).
 
 ### Activate the Flag at 10%
 
@@ -227,23 +269,61 @@ is_enabled = client.is_feature_enabled(
 
 ### REST API (Direct)
 
+Send the targeting context as a URL-encoded JSON object on the GET endpoint (this is what
+the SDKs do), or as the `context` object on the POST variant:
+
 ```bash
-curl -X POST http://localhost:8000/api/v1/feature-flags/new-checkout-flow/evaluate \
+# GET with url-encoded context
+curl -G http://localhost:8000/api/v1/feature-flags/evaluate/new-checkout-flow \
+  -H "X-API-Key: your-api-key" \
+  --data-urlencode "user_id=user-123" \
+  --data-urlencode 'context={"plan":"enterprise","country":"US"}'
+
+# POST with a JSON body
+curl -X POST http://localhost:8000/api/v1/feature-flags/evaluate/new-checkout-flow \
   -H "X-API-Key: your-api-key" \
   -H "Content-Type: application/json" \
-  -d '{
-    "user_id": "user-123",
-    "attributes": {"plan": "enterprise", "country": "US"}
-  }'
+  -d '{"user_id": "user-123", "context": {"plan": "enterprise", "country": "US"}}'
 ```
 
 ```json
 {
-  "flag_key": "new-checkout-flow",
+  "key": "new-checkout-flow",
   "enabled": true,
-  "rollout_percentage": 10
+  "config": null,
+  "reason": "targeting_rule"
 }
 ```
+
+`reason` explains the outcome: `targeting_rule` (a rule matched and its rollout percentage
+decided), `rollout` (no rule matched; the global rollout percentage decided), `inactive` or
+`error`. A `context` that is not a JSON object returns `422`.
+`GET /api/v1/feature-flags/user/{user_id}?context=...` evaluates every active flag the same way
+and returns `{"flag-key": true|false, ...}`.
+
+### Reporting client-side errors
+
+Safety monitoring computes a flag's error rate from `error_logs` rows divided by its
+evaluations. Clients can contribute the errors they see behind a flag (crashes, failed
+requests) with the API key:
+
+```bash
+curl -X POST http://localhost:8000/api/v1/tracking/errors \
+  -H "X-API-Key: your-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "feature_flag_key": "new-checkout-flow",
+    "user_id": "user-123",
+    "error_type": "crash",
+    "message": "NullPointerException in CheckoutV2",
+    "metadata": {"os": "Android", "os_version": "12.0.0"}
+  }'
+```
+
+`POST /api/v1/tracking/errors/batch` accepts `{"errors": [...]}` (up to 100) and returns
+`{"success_count", "failure_count", "errors"}`. At least one of `feature_flag_key` /
+`experiment_key` is required; unknown keys return `404` (single) or are listed per item
+(batch).
 
 ---
 

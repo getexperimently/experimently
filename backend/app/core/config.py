@@ -71,6 +71,12 @@ class Settings(BaseSettings):
     # BanditSchedulerRunner recomputes BanditState weights this often.
     BANDIT_UPDATE_INTERVAL_MINUTES: int = 5
 
+    # Background scheduler cadences (minutes). SafetyScheduler checks flag
+    # error-rate/latency thresholds and auto-rolls back; RolloutScheduler
+    # advances time-based rollout stages. Demos set both to 1.
+    SAFETY_CHECK_INTERVAL_MINUTES: int = 5
+    ROLLOUT_CHECK_INTERVAL_MINUTES: int = 15
+
     # Per-IP ceiling for SDK-facing endpoints (/tracking/*, flag evaluation).
     # Far above the 300/min default because one server-side SDK or NAT egress
     # can legitimately fan out thousands of assignments a minute.
@@ -341,6 +347,7 @@ class DevSettings(Settings):
         "http://localhost:3000",
         "http://localhost:3001",
         "http://localhost:3200",  # ShopLab demo storefront
+        "http://localhost:3300",  # StreamPulse demo app
         "http://localhost:8000",
     ]
     CACHE_ENABLED: bool = False

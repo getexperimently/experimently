@@ -95,15 +95,34 @@ describe('ServerClient constructor', () => {
 // ─── evaluateFeatureFlag ──────────────────────────────────────────────────────
 
 describe('ServerClient.evaluateFeatureFlag', () => {
-  it('GETs /api/v1/feature-flags/evaluate/{key}?user_id=… with the API headers', async () => {
+  it('GETs /api/v1/feature-flags/evaluate/{key}?user_id=…&context=… with the API headers', async () => {
     const fetchMock = mockFetch(flagOn);
     const client = new ServerClient(baseConfig);
     await client.evaluateFeatureFlag('my-flag', user);
 
     const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe('https://api.example.com/api/v1/feature-flags/evaluate/my-flag?user_id=user-123');
+    expect(url).toBe(
+      'https://api.example.com/api/v1/feature-flags/evaluate/my-flag?user_id=user-123&context=%7B%22country%22%3A%22DE%22%7D'
+    );
     expect(init.method).toBe('GET');
     expect(init.headers).toEqual({ 'X-API-Key': 'test-api-key', 'Content-Type': 'application/json' });
+  });
+
+  it('sends no context when the user has no attributes', async () => {
+    const fetchMock = mockFetch(flagOn);
+    const client = new ServerClient(baseConfig);
+    await client.evaluateFeatureFlag('my-flag', { userId: 'user-123' });
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      'https://api.example.com/api/v1/feature-flags/evaluate/my-flag?user_id=user-123'
+    );
+  });
+
+  it('exposes the server reason on the evaluation', async () => {
+    mockFetch({ key: 'my-flag', enabled: true, config: null, reason: 'targeting_rule' });
+    const client = new ServerClient(baseConfig);
+    const result = await client.evaluateFeatureFlag('my-flag', user);
+    expect(result.reason).toBe('targeting_rule');
+    expect(result.isEnabled).toBe(true);
   });
 
   it('returns an enabled evaluation with the full structure', async () => {
@@ -234,6 +253,7 @@ describe('ServerClient.assignExperiment', () => {
       configuration: { media: 'video' },
       loading: false,
       error: null,
+      assigned: true,
     });
   });
 
@@ -296,10 +316,11 @@ describe('ServerClient.getAll', () => {
     const client = new ServerClient(baseConfig);
     await client.getAll(['flag-a', 'flag-b', 'flag-c'], user);
     expect(fetchMock).toHaveBeenCalledTimes(3);
+    const context = '&context=%7B%22country%22%3A%22DE%22%7D';
     expect(fetchMock.mock.calls.map(c => c[0])).toEqual([
-      'https://api.example.com/api/v1/feature-flags/evaluate/flag-a?user_id=user-123',
-      'https://api.example.com/api/v1/feature-flags/evaluate/flag-b?user_id=user-123',
-      'https://api.example.com/api/v1/feature-flags/evaluate/flag-c?user_id=user-123',
+      `https://api.example.com/api/v1/feature-flags/evaluate/flag-a?user_id=user-123${context}`,
+      `https://api.example.com/api/v1/feature-flags/evaluate/flag-b?user_id=user-123${context}`,
+      `https://api.example.com/api/v1/feature-flags/evaluate/flag-c?user_id=user-123${context}`,
     ]);
   });
 

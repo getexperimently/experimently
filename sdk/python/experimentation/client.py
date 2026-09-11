@@ -58,6 +58,17 @@ def _json_default(obj: Any) -> Any:
     raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
 
 
+def _context_param(attributes: Optional[Mapping[str, Any]]) -> Optional[str]:
+    """Compact JSON for the ``context`` query parameter, or ``None`` when there is nothing to send.
+
+    ``_request`` URL-encodes it with :func:`urllib.parse.quote` (percent-encoding, no
+    ``+``), so ``{"country": "US"}`` travels as ``context=%7B%22country%22%3A%22US%22%7D``.
+    """
+    if not attributes:
+        return None
+    return json.dumps(dict(attributes), separators=(",", ":"), default=_json_default)
+
+
 def _retry_after_seconds(response: Response) -> float:
     header = response.header("Retry-After")
     seconds = DEFAULT_RETRY_AFTER_SECONDS
@@ -232,20 +243,33 @@ class ExperimentationClient:
 
     # ---------------------------------------------------------- feature flags
 
-    def get_feature_flag(self, flag_key: str, user_id: str) -> FlagEvaluation:
-        """Evaluate one flag via ``GET /api/v1/feature-flags/evaluate/{flag_key}?user_id=…``.
+    def get_feature_flag(
+        self,
+        flag_key: str,
+        user_id: str,
+        user_attributes: Optional[Mapping[str, Any]] = None,
+    ) -> FlagEvaluation:
+        """Evaluate one flag via
+        ``GET /api/v1/feature-flags/evaluate/{flag_key}?user_id=…[&context=<url-encoded JSON>]``.
 
-        Cached per user + key. Raises :class:`ExperimentationError`
-        (``status == 404`` when the flag is not ACTIVE or unknown).
+        ``user_attributes`` (when non-empty) is sent as ``context`` so the flag's
+        targeting rules can evaluate against it. Cached per user + key only —
+        attributes are assumed stable per user; call :meth:`clear_cache` after
+        changing them. Raises :class:`ExperimentationError` (``status == 404``
+        when the flag is not ACTIVE or unknown).
         """
         cached = self._flags.get(user_id, flag_key)
         if cached is not None:
             return cached
 
+        query: Dict[str, str] = {"user_id": user_id}
+        context = _context_param(user_attributes)
+        if context is not None:
+            query["context"] = context
         data = self._request(
             "GET",
             f"/api/v1/feature-flags/evaluate/{quote(flag_key, safe='')}",
-            query={"user_id": user_id},
+            query=query,
         )
         if not isinstance(data, dict):
             raise ExperimentationError(
@@ -253,25 +277,45 @@ class ExperimentationClient:
                 status=200,
                 body=json.dumps(data),
             )
+        reason = data.get("reason")
         evaluation = FlagEvaluation(
             key=str(data.get("key") or flag_key),
             enabled=bool(data.get("enabled", False)),
             config=data.get("config"),
+            reason=reason if isinstance(reason, str) else None,
         )
         self._flags.set(user_id, flag_key, evaluation)
         return evaluation
 
-    def is_feature_enabled(self, flag_key: str, user_id: str) -> bool:
+    def is_feature_enabled(
+        self,
+        flag_key: str,
+        user_id: str,
+        user_attributes: Optional[Mapping[str, Any]] = None,
+    ) -> bool:
         """``get_feature_flag(...).enabled``, or ``False`` on any failure."""
         try:
-            return self.get_feature_flag(flag_key, user_id).enabled
+            return self.get_feature_flag(flag_key, user_id, user_attributes).enabled
         except ExperimentationError as exc:
             logger.warning("is_feature_enabled(%s, %s) failed: %s", flag_key, user_id, exc)
             return False
 
-    def get_all_flags(self, user_id: str) -> Dict[str, bool]:
-        """All active flags for the user from ``GET /api/v1/feature-flags/user/{user_id}`` (not cached)."""
-        data = self._request("GET", f"/api/v1/feature-flags/user/{quote(user_id, safe='')}")
+    def get_all_flags(
+        self,
+        user_id: str,
+        user_attributes: Optional[Mapping[str, Any]] = None,
+    ) -> Dict[str, bool]:
+        """All active flags for the user from
+        ``GET /api/v1/feature-flags/user/{user_id}[?context=<url-encoded JSON>]`` (not cached).
+
+        ``user_attributes`` (when non-empty) is sent as ``context`` for targeting rules.
+        """
+        context = _context_param(user_attributes)
+        data = self._request(
+            "GET",
+            f"/api/v1/feature-flags/user/{quote(user_id, safe='')}",
+            query=None if context is None else {"context": context},
+        )
         if not isinstance(data, dict):
             return {}
         return {str(key): bool(value) for key, value in data.items()}

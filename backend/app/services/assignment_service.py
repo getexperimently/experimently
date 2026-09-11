@@ -11,13 +11,30 @@ from uuid import UUID
 from sqlalchemy import func, and_, or_, desc
 from sqlalchemy.orm import Session, joinedload
 
+from backend.app.core.targeting_adapter import (
+    expand_context,
+    normalise_targeting_rules,
+)
 from backend.app.models.experiment import Experiment, Variant, ExperimentStatus
 from backend.app.models.assignment import Assignment
 from backend.app.services.event_service import EventService
+from backend.app.services.global_holdout_service import GlobalHoldoutService
+from backend.app.services.mutual_exclusion_service import MutualExclusionService
 from backend.app.services.rules_evaluation_service import RulesEvaluationService
 from backend.app.schemas.targeting_rule import TargetingRules
 
 logger = logging.getLogger(__name__)
+
+# Eligibility reasons returned by ``assign_user`` / ``check_eligibility``.
+REASON_ASSIGNED = "assigned"
+REASON_HOLDOUT = "holdout"
+REASON_MUTUAL_EXCLUSION = "mutual_exclusion"
+REASON_TARGETING = "targeting"
+
+
+def _is_dashboard_rules_shape(raw: Dict[str, Any]) -> bool:
+    """True for the dashboard editor shape ``{"logical_operator", "groups": [...]}``."""
+    return "rules" not in raw and ("groups" in raw or "logical_operator" in raw)
 
 
 class AssignmentService:
@@ -26,6 +43,8 @@ class AssignmentService:
 
     This service handles:
     - Assigning users to experiment variants using deterministic hashing
+    - Eligibility checks for new users (global holdout, mutual exclusion
+      groups, targeting rules)
     - Tracking user assignments
     - Retrieving user assignments for experiments
     - Managing sticky assignments
@@ -36,6 +55,8 @@ class AssignmentService:
         self.db = db
         self.event_service = EventService(db)
         self.rules_evaluation_service = RulesEvaluationService()
+        self.global_holdout_service = GlobalHoldoutService(db)
+        self.mutual_exclusion_service = MutualExclusionService(db)
 
     def get_assignment(
         self, user_id: str, experiment_id: Union[str, UUID]
@@ -97,6 +118,15 @@ class AssignmentService:
         """
         Assign a user to an experiment variant.
 
+        New users go through the eligibility checks (global holdout, mutual
+        exclusion group, targeting rules — in that order) before a variant is
+        chosen.  Ineligible users get no ``Assignment`` row and no exposure
+        event; the returned dict carries ``assigned=False``, the ``reason``
+        (``holdout`` | ``mutual_exclusion`` | ``targeting``) and the control
+        variant so callers can fall back to the default experience.  Existing
+        (sticky) assignments always win and are returned unchanged even if the
+        user would no longer be eligible.
+
         Args:
             user_id: ID of the user to assign
             experiment_id: ID of the experiment
@@ -105,7 +135,8 @@ class AssignmentService:
             context: Optional context data for targeting
 
         Returns:
-            Dictionary containing the assignment data
+            Dictionary containing the assignment data plus ``assigned`` and
+            ``reason``
 
         Raises:
             ValueError: If the experiment is not active or has issues
@@ -142,7 +173,7 @@ class AssignmentService:
             logger.debug(
                 f"Using existing assignment for user {user_id} in experiment {experiment_id}"
             )
-            assignment_dict = self.get_assignment(user_id, experiment_id)
+            assignment_dict = self._assigned_result(user_id, experiment_id)
 
             # Optionally track exposure event
             if track_exposure:
@@ -154,6 +185,15 @@ class AssignmentService:
                 )
 
             return assignment_dict
+
+        # Eligibility gate for new users: holdout -> mutual exclusion -> targeting
+        eligibility = self.check_eligibility(user_id, experiment, context)
+        if not eligibility["eligible"]:
+            logger.info(
+                f"User {user_id} not eligible for experiment {experiment_id}: "
+                f"{eligibility['reason']} ({eligibility.get('detail')})"
+            )
+            return self._ineligible_result(user_id, experiment, eligibility)
 
         # Determine variant assignment
         if override_variant_id:
@@ -197,7 +237,133 @@ class AssignmentService:
             )
 
         # Get full assignment details
-        return self.get_assignment(user_id, experiment_id)
+        return self._assigned_result(user_id, experiment_id)
+
+    # ------------------------------------------------------------------
+    # Eligibility (global holdout, mutual exclusion, targeting)
+    # ------------------------------------------------------------------
+
+    def check_eligibility(
+        self,
+        user_id: str,
+        experiment: Experiment,
+        context: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Decide whether a *new* user may be assigned to ``experiment``.
+
+        Checks run in order and the first failure wins:
+
+        1. global holdout — an active ``GlobalHoldout`` that buckets the user
+           (reason ``holdout``);
+        2. mutual exclusion — the experiment belongs to a group and the group's
+           consistent hashing selects a different experiment for the user
+           (reason ``mutual_exclusion``);
+        3. targeting — the experiment has targeting rules and the user context
+           does not match them (reason ``targeting``).
+
+        Sticky assignments are handled by ``assign_user`` before this runs.
+
+        Returns:
+            ``{"eligible": bool, "reason": str, "detail": Optional[str]}``
+            (``reason`` is ``assigned`` when eligible).
+        """
+        # 1. Global holdout
+        (
+            in_holdout,
+            holdout_percentage,
+            bucket,
+        ) = self.global_holdout_service.is_user_in_holdout(user_id)
+        if in_holdout:
+            return {
+                "eligible": False,
+                "reason": REASON_HOLDOUT,
+                "detail": (
+                    f"User is in the global holdout "
+                    f"({holdout_percentage}%, bucket {bucket})"
+                ),
+            }
+
+        # 2. Mutual exclusion group
+        group_id = getattr(experiment, "mutual_exclusion_group_id", None)
+        if group_id:
+            if not self.mutual_exclusion_service.is_user_eligible_for_experiment(
+                user_id, experiment.id
+            ):
+                return {
+                    "eligible": False,
+                    "reason": REASON_MUTUAL_EXCLUSION,
+                    "detail": (
+                        f"Mutual exclusion group {group_id} selected another "
+                        f"experiment (or none) for this user"
+                    ),
+                }
+
+        # 3. Targeting rules
+        if getattr(experiment, "targeting_rules", None):
+            targeting_context = self._build_targeting_context(user_id, context)
+            targeting = self._evaluate_experiment_targeting(
+                experiment, targeting_context
+            )
+            if not targeting["eligible"]:
+                return {
+                    "eligible": False,
+                    "reason": REASON_TARGETING,
+                    "detail": targeting.get("reason"),
+                }
+
+        return {"eligible": True, "reason": REASON_ASSIGNED, "detail": None}
+
+    @staticmethod
+    def _build_targeting_context(
+        user_id: str, context: Optional[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """Request context + ``user_id`` (for rollout bucketing), expanded with the
+        shared alias rule (``country`` also answers ``user.country`` etc.)."""
+        raw = dict(context or {})
+        raw.setdefault("user_id", user_id)
+        return expand_context(raw)
+
+    def _assigned_result(
+        self, user_id: str, experiment_id: Union[str, UUID]
+    ) -> Dict[str, Any]:
+        """``get_assignment`` result tagged as an actual assignment."""
+        result = self.get_assignment(user_id, experiment_id) or {}
+        result["assigned"] = True
+        result["reason"] = REASON_ASSIGNED
+        return result
+
+    @staticmethod
+    def _control_variant(experiment: Experiment) -> Variant:
+        """The experiment's control variant (first variant when none is flagged)."""
+        variants = list(experiment.variants or [])
+        if not variants:
+            raise ValueError(f"Experiment {experiment.id} has no variants")
+        return next((v for v in variants if v.is_control), variants[0])
+
+    def _ineligible_result(
+        self, user_id: str, experiment: Experiment, eligibility: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Assignment-shaped dict for a user that was not assigned.
+
+        Carries the control variant so SDKs (which treat the response as the
+        variant) render the default experience; ``id``/timestamps are ``None``
+        because no ``Assignment`` row exists.
+        """
+        control = self._control_variant(experiment)
+        return {
+            "id": None,
+            "user_id": user_id,
+            "experiment_id": str(experiment.id),
+            "variant_id": str(control.id),
+            "variant_name": control.name,
+            "is_control": bool(control.is_control),
+            "created_at": None,
+            "updated_at": None,
+            "assigned": False,
+            "reason": eligibility["reason"],
+            "detail": eligibility.get("detail"),
+        }
 
     def get_user_assignments(
         self, user_id: str, active_only: bool = True
@@ -426,8 +592,8 @@ class AssignmentService:
             )
 
         # Ensure user_id is in context
-        if 'user_id' not in user_context:
-            user_context['user_id'] = user_id
+        if "user_id" not in user_context:
+            user_context["user_id"] = user_id
 
         # Check for existing assignment (sticky assignment)
         existing_assignment = (
@@ -446,11 +612,13 @@ class AssignmentService:
             assignment_dict = self.get_assignment(user_id, experiment_id)
 
             # Add targeting info
-            assignment_dict.update({
-                'targeting_matched': True,
-                'targeting_rule_id': 'existing_assignment',
-                'user_context_validated': True,
-            })
+            assignment_dict.update(
+                {
+                    "targeting_matched": True,
+                    "targeting_rule_id": "existing_assignment",
+                    "user_context_validated": True,
+                }
+            )
 
             # Optionally track exposure event
             if track_exposure:
@@ -468,18 +636,20 @@ class AssignmentService:
             experiment, user_context, validate_attributes
         )
 
-        if not targeting_result['eligible']:
+        if not targeting_result["eligible"]:
             # User doesn't match targeting criteria
             logger.info(
                 f"User {user_id} not eligible for experiment {experiment_id}: {targeting_result['reason']}"
             )
             return {
-                'assignment': None,
-                'targeting_matched': False,
-                'targeting_rule_id': None,
-                'reason': targeting_result['reason'],
-                'user_context_validated': targeting_result.get('validation_passed', True),
-                'evaluation_metrics': targeting_result.get('metrics'),
+                "assignment": None,
+                "targeting_matched": False,
+                "targeting_rule_id": None,
+                "reason": targeting_result["reason"],
+                "user_context_validated": targeting_result.get(
+                    "validation_passed", True
+                ),
+                "evaluation_metrics": targeting_result.get("metrics"),
             }
 
         # Determine variant assignment
@@ -504,10 +674,12 @@ class AssignmentService:
         if track_exposure:
             # Include targeting information in exposure event
             exposure_properties = user_context.copy()
-            exposure_properties.update({
-                'targeting_rule_id': targeting_result.get('rule_id'),
-                'targeting_matched': True,
-            })
+            exposure_properties.update(
+                {
+                    "targeting_rule_id": targeting_result.get("rule_id"),
+                    "targeting_matched": True,
+                }
+            )
 
             self.event_service.track_exposure(
                 user_id=user_id,
@@ -518,17 +690,24 @@ class AssignmentService:
 
         # Get full assignment details and add targeting info
         assignment_dict = self.get_assignment(user_id, experiment_id)
-        assignment_dict.update({
-            'targeting_matched': True,
-            'targeting_rule_id': targeting_result.get('rule_id'),
-            'user_context_validated': targeting_result.get('validation_passed', True),
-            'evaluation_metrics': targeting_result.get('metrics'),
-        })
+        assignment_dict.update(
+            {
+                "targeting_matched": True,
+                "targeting_rule_id": targeting_result.get("rule_id"),
+                "user_context_validated": targeting_result.get(
+                    "validation_passed", True
+                ),
+                "evaluation_metrics": targeting_result.get("metrics"),
+            }
+        )
 
         return assignment_dict
 
     def _evaluate_experiment_targeting(
-        self, experiment: Experiment, user_context: Dict[str, Any], validate_attributes: bool = True
+        self,
+        experiment: Experiment,
+        user_context: Dict[str, Any],
+        validate_attributes: bool = True,
     ) -> Dict[str, Any]:
         """
         Evaluate if a user meets experiment targeting criteria.
@@ -543,27 +722,35 @@ class AssignmentService:
         """
         try:
             # Check if experiment has targeting rules
-            if not hasattr(experiment, 'targeting_rules') or not experiment.targeting_rules:
+            if (
+                not hasattr(experiment, "targeting_rules")
+                or not experiment.targeting_rules
+            ):
                 # No targeting rules - allow all users
                 return {
-                    'eligible': True,
-                    'rule_id': None,
-                    'reason': 'No targeting rules defined',
-                    'validation_passed': True,
+                    "eligible": True,
+                    "rule_id": None,
+                    "reason": "No targeting rules defined",
+                    "validation_passed": True,
                 }
 
-            # Parse targeting rules (assuming JSON stored in database)
-            if isinstance(experiment.targeting_rules, str):
-                targeting_rules_data = json.loads(experiment.targeting_rules)
-                targeting_rules = TargetingRules(**targeting_rules_data)
-            elif isinstance(experiment.targeting_rules, dict):
-                targeting_rules = TargetingRules(**experiment.targeting_rules)
-            else:
-                # Assume it's already a TargetingRules object
-                targeting_rules = experiment.targeting_rules
+            # Parse targeting rules (native TargetingRules or dashboard shape)
+            targeting_rules, skip_reason = self._coerce_targeting_rules(
+                experiment.targeting_rules
+            )
+            if targeting_rules is None:
+                return {
+                    "eligible": True,
+                    "rule_id": None,
+                    "reason": skip_reason or "No targeting rules defined",
+                    "validation_passed": True,
+                }
 
             # Evaluate rules with validation
-            matched_rule, metrics = self.rules_evaluation_service.evaluate_rules_with_validation(
+            (
+                matched_rule,
+                metrics,
+            ) = self.rules_evaluation_service.evaluate_rules_with_validation(
                 targeting_rules=targeting_rules,
                 user_context=user_context,
                 validate_attributes=validate_attributes,
@@ -572,29 +759,78 @@ class AssignmentService:
 
             if matched_rule:
                 return {
-                    'eligible': True,
-                    'rule_id': matched_rule.id,
-                    'reason': f"Matched targeting rule: {matched_rule.name or matched_rule.id}",
-                    'validation_passed': metrics.error is None if metrics else True,
-                    'metrics': metrics,
+                    "eligible": True,
+                    "rule_id": matched_rule.id,
+                    "reason": f"Matched targeting rule: {matched_rule.name or matched_rule.id}",
+                    "validation_passed": metrics.error is None if metrics else True,
+                    "metrics": metrics,
                 }
             else:
                 return {
-                    'eligible': False,
-                    'rule_id': None,
-                    'reason': 'No targeting rules matched',
-                    'validation_passed': metrics.error is None if metrics else True,
-                    'metrics': metrics,
+                    "eligible": False,
+                    "rule_id": None,
+                    "reason": "No targeting rules matched",
+                    "validation_passed": metrics.error is None if metrics else True,
+                    "metrics": metrics,
                 }
 
         except Exception as e:
             logger.error(f"Error evaluating experiment targeting: {str(e)}")
             return {
-                'eligible': False,
-                'rule_id': None,
-                'reason': f'Targeting evaluation error: {str(e)}',
-                'validation_passed': False,
+                "eligible": False,
+                "rule_id": None,
+                "reason": f"Targeting evaluation error: {str(e)}",
+                "validation_passed": False,
             }
+
+    @staticmethod
+    def _coerce_targeting_rules(
+        raw: Any,
+    ) -> Tuple[Optional[TargetingRules], Optional[str]]:
+        """
+        Turn the stored ``targeting_rules`` value into a ``TargetingRules``.
+
+        Accepts a JSON string, the native ``TargetingRules`` dict (has ``rules``),
+        the dashboard editor shape (``{"logical_operator", "groups": [...]}``,
+        converted by ``targeting_adapter.normalise_targeting_rules``) or an
+        existing ``TargetingRules`` instance.
+
+        Returns:
+            ``(rules, None)`` when there is something to evaluate, or
+            ``(None, why)`` when the value carries no evaluable rules — callers
+            treat that as "no targeting rules" (everyone eligible).
+        """
+        no_rules = "Targeting rules contain no evaluable rules"
+        rules: Any
+        if isinstance(raw, TargetingRules):
+            rules = raw
+        else:
+            if isinstance(raw, str):
+                raw = json.loads(raw)
+
+            if isinstance(raw, dict):
+                if _is_dashboard_rules_shape(raw):
+                    # The adapter returns None for dashboard rules it cannot
+                    # convert (and logs why); that means "no rules", not "nobody".
+                    rules = normalise_targeting_rules(raw)
+                    if rules is None:
+                        return None, no_rules
+                else:
+                    rules = TargetingRules(**raw)
+            elif isinstance(raw, list):
+                # Legacy feature-flag list shape; never valid for experiments.
+                logger.warning(
+                    "List-shaped experiment targeting rules are not supported; "
+                    "treating as no targeting rules"
+                )
+                return None, "List-shaped targeting rules ignored"
+            else:
+                # Assume it's already a TargetingRules-like object
+                rules = raw
+
+        if not rules.rules and rules.default_rule is None:
+            return None, no_rules
+        return rules, None
 
     def get_targeting_performance_stats(self) -> Dict[str, Any]:
         """
@@ -717,7 +953,9 @@ class AssignmentService:
 
         # Create a hash using user ID and experiment ID
         hash_input = f"{user_id}:{experiment.id}"
-        hash_value = int(hashlib.md5(hash_input.encode(), usedforsecurity=False).hexdigest(), 16)
+        hash_value = int(
+            hashlib.md5(hash_input.encode(), usedforsecurity=False).hexdigest(), 16
+        )
 
         # Get variants with their traffic allocations
         variants = experiment.variants
