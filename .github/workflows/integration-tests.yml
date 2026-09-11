@@ -52,7 +52,10 @@ jobs:
           pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run database migrations
+      # Creates the schema from the models on a fresh database and stamps the
+      # alembic head (see backend/app/db/bootstrap.py); on an existing
+      # database it runs `alembic upgrade head`.
+      - name: Bootstrap database schema
         env:
           APP_ENV: test
           TESTING: "true"
@@ -63,9 +66,7 @@ jobs:
           POSTGRES_PORT: 5432
           POSTGRES_SCHEMA: test_experimentation
           DATABASE_URI: "postgresql://postgres:postgres@localhost:5432/experimentation_test"
-        run: |
-          cd backend
-          python -m alembic -c app/db/alembic.ini upgrade head
+        run: python -m backend.app.db.bootstrap
 
       - name: Run integration tests
         env:

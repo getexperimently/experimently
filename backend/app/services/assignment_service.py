@@ -351,16 +351,23 @@ class AssignmentService:
                 )
 
                 self.db.add(assignment)
-                assigned += 1
 
-                # Track exposure if requested (needs to happen after commit)
+                # Track exposure if requested.  If this fails the user is
+                # reported as an error and the pending assignment is dropped
+                # so the counts add up and no half-tracked row is committed.
                 if track_exposure:
-                    self.event_service.track_exposure(
-                        user_id=user_id,
-                        experiment_id=str(experiment_id),
-                        variant_id=str(variant_id),
-                        properties=context,
-                    )
+                    try:
+                        self.event_service.track_exposure(
+                            user_id=user_id,
+                            experiment_id=str(experiment_id),
+                            variant_id=str(variant_id),
+                            properties=context,
+                        )
+                    except Exception:
+                        self.db.expunge(assignment)
+                        raise
+
+                assigned += 1
 
             except Exception as e:
                 logger.error(
@@ -646,14 +653,30 @@ class AssignmentService:
             # Use deterministic hashing to reassign variant
             variant_id = self._hash_user_to_variant(user_id, experiment)
 
-        # Create new assignment
-        assignment = Assignment(
-            user_id=user_id,
-            experiment_id=experiment_id,
-            variant_id=variant_id,
+        # Update the existing assignment in place when there is one: the
+        # (experiment_id, user_id) pair is unique, so inserting a second row
+        # would violate the index instead of reassigning the user.
+        assignment = (
+            self.db.query(Assignment)
+            .filter(
+                Assignment.user_id == user_id,
+                Assignment.experiment_id == experiment_id,
+            )
+            .first()
         )
+        if assignment:
+            assignment.variant_id = variant_id
+            if context is not None:
+                assignment.context = context
+        else:
+            assignment = Assignment(
+                user_id=user_id,
+                experiment_id=experiment_id,
+                variant_id=variant_id,
+                context=context,
+            )
+            self.db.add(assignment)
 
-        self.db.add(assignment)
         self.db.commit()
         self.db.refresh(assignment)
 
@@ -694,7 +717,7 @@ class AssignmentService:
 
         # Create a hash using user ID and experiment ID
         hash_input = f"{user_id}:{experiment.id}"
-        hash_value = int(hashlib.md5(hash_input.encode()).hexdigest(), 16)
+        hash_value = int(hashlib.md5(hash_input.encode(), usedforsecurity=False).hexdigest(), 16)
 
         # Get variants with their traffic allocations
         variants = experiment.variants

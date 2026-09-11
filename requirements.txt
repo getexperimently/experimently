@@ -1,18 +1,11 @@
 # Experimentation Platform Requirements
-# This project uses a split requirements structure for better dependency management
 #
-# Install requirements based on your environment:
+# backend/requirements.txt is the single source of truth for Python
+# dependencies (it is what the Dockerfile, the CI workflows and Dependabot
+# use).  This file exists so that `pip install -r requirements.txt` from the
+# repository root keeps working.
 #
-# Development:
-#   pip install -r requirements/dev.txt
-#
-# Production:
-#   pip install -r requirements/prod.txt
-#
-# Testing:
-#   pip install -r requirements/test.txt
-#
-# Base only:
-#   pip install -r requirements/base.txt
+# The requirements/ directory holds thin profile files (dev/test/prod) that
+# layer a few extras on top of backend/requirements.txt.
 
--r requirements/base.txt
+-r backend/requirements.txt

@@ -100,7 +100,7 @@ def _hash_user(user_id: str, flag_key: str) -> float:
     hash_user("user-123", "my-flag") ≈ 0.69274
     """
     input_str = f"{user_id}:{flag_key}"
-    digest = hashlib.md5(input_str.encode("utf-8")).digest()  # noqa: S324
+    digest = hashlib.md5(input_str.encode("utf-8"), usedforsecurity=False).digest()  # noqa: S324
     (uint32,) = struct.unpack_from("<I", digest[:4])
     return uint32 / _HASH_DIVISOR
 

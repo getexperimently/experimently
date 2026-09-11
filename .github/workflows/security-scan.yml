@@ -22,7 +22,7 @@ jobs:
 
       - name: Install security tools
         run: |
-          pip install bandit safety
+          pip install bandit pip-audit
 
       - name: Run Bandit
         run: |
@@ -30,10 +30,14 @@ jobs:
           bandit -r backend/app -ll  # Only show medium+ severity, fail on high
         continue-on-error: false
 
-      - name: Run Safety (dependency CVE check)
+      # Informational: lists every advisory for the pinned versions regardless
+      # of severity. The blocking dependency gate is the Trivy HIGH/CRITICAL
+      # scan in container-security; lower-severity items are picked up by the
+      # weekly Dependabot pip group.
+      - name: Run pip-audit (dependency advisories, informational)
         run: |
-          safety check -r backend/requirements.txt --output text
-        continue-on-error: false
+          pip-audit -r backend/requirements.txt --no-deps --desc=off
+        continue-on-error: true
 
       - name: Upload Bandit report
         uses: actions/upload-artifact@v4
@@ -94,6 +98,11 @@ jobs:
   secret-detection:
     name: Secret Detection
     runs-on: ubuntu-latest
+    # gitleaks-action lists the PR's commits via the API on pull_request
+    # events; the default token has no pull-requests scope, so grant it.
+    permissions:
+      contents: read
+      pull-requests: read
     steps:
       - uses: actions/checkout@v4
         with:

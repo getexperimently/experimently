@@ -58,7 +58,11 @@ class SalesforceService:
             self._access_token = response.json().get("access_token")
             return self._access_token
         except Exception as exc:
-            logger.warning("SalesforceService get_access_token failed: %s", exc)
+            # Log the failure class only: the exception text can echo the
+            # OAuth request/response, which may contain credentials.
+            logger.warning(
+                "SalesforceService OAuth login failed: %s", type(exc).__name__
+            )
             return None
 
     def _auth_headers(self) -> Dict[str, str]:
