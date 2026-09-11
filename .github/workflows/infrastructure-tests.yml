@@ -1,1 +1,43 @@
-# GitHub Actions workflow for infrastructure tests
+name: Infrastructure Tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'infrastructure/**'
+      - '.github/workflows/infrastructure-tests.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'infrastructure/**'
+      - '.github/workflows/infrastructure-tests.yml'
+  workflow_dispatch:
+
+jobs:
+  cdk-python-tests:
+    name: CDK Stack Tests (Python)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Set up Node.js (required by the CDK jsii runtime)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: pip install -r backend/requirements.txt
+
+      # --import-mode=importlib keeps the local `infrastructure/constructs`
+      # directory from shadowing the `constructs` package that aws-cdk-lib needs.
+      - name: Run CDK stack tests
+        run: |
+          python -m pytest infrastructure/tests -v --tb=short \
+            -o addopts="" --import-mode=importlib

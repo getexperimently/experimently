@@ -2,6 +2,7 @@ from logging.config import fileConfig
 
 from sqlalchemy import engine_from_config
 from sqlalchemy import pool
+from sqlalchemy.schema import CreateSchema
 
 from alembic import context
 
@@ -9,11 +10,13 @@ from alembic import context
 import os
 import sys
 
-# Add project root to path for imports (backend/migrations -> backend -> project root)
-migrations_dir = os.path.dirname(os.path.abspath(__file__))  # backend/migrations
-backend_dir = os.path.dirname(migrations_dir)  # backend
-project_root = os.path.dirname(backend_dir)  # project root
-sys.path.insert(0, project_root)
+# Add the repository root to sys.path so `import backend...` works no matter
+# which directory alembic is invoked from.  This file lives at
+# <root>/backend/app/db/migrations/env.py, i.e. four levels below the root.
+migrations_dir = os.path.dirname(os.path.abspath(__file__))  # backend/app/db/migrations
+project_root = os.path.abspath(os.path.join(migrations_dir, "..", "..", "..", ".."))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
 
 # Import your models
 from backend.app.models import Base
@@ -29,8 +32,13 @@ config = context.config
 schema = os.environ.get("POSTGRES_SCHEMA", "experimentation")
 db_name = os.environ.get("POSTGRES_DB", "experimentation")
 
-# Override sqlalchemy.url with environment variables
-postgres_url = f"postgresql://postgres:postgres@localhost:5432/{db_name}"
+# Build sqlalchemy.url from the same POSTGRES_* variables the application,
+# the test suite and the CI workflows use.
+_db_user = os.environ.get("POSTGRES_USER", "postgres")
+_db_password = os.environ.get("POSTGRES_PASSWORD", "postgres")
+_db_host = os.environ.get("POSTGRES_SERVER") or os.environ.get("POSTGRES_HOST") or "localhost"
+_db_port = os.environ.get("POSTGRES_PORT", "5432")
+postgres_url = f"postgresql://{_db_user}:{_db_password}@{_db_host}:{_db_port}/{db_name}"
 config.set_main_option("sqlalchemy.url", postgres_url)
 
 # Interpret the config file for Python logging.
@@ -89,6 +97,11 @@ def run_migrations_online() -> None:
     )
 
     with connectable.connect() as connection:
+        # Migrations (and the alembic_version table) live inside `schema`;
+        # create it on a fresh database so `upgrade head` works from zero.
+        connection.execute(CreateSchema(schema, if_not_exists=True))
+        connection.commit()
+
         context.configure(
             connection=connection,
             target_metadata=target_metadata,

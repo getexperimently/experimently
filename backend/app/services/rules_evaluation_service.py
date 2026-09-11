@@ -546,7 +546,7 @@ class RulesEvaluationService:
         try:
             # Create deterministic hash
             hash_input = str(user_id)
-            hash_value = int(hashlib.md5(hash_input.encode()).hexdigest(), 16)
+            hash_value = int(hashlib.md5(hash_input.encode(), usedforsecurity=False).hexdigest(), 16)
             bucket = hash_value % 100
 
             return bucket < float(percentage)

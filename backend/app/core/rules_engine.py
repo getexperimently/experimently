@@ -994,7 +994,7 @@ def should_include_in_rollout(rule: TargetingRule, user_context: UserContext) ->
 
     # Create a hash of the user ID and rule ID for deterministic bucketing
     hash_input = f"{user_id}:{rule.id}"
-    hash_value = int(hashlib.md5(hash_input.encode()).hexdigest(), 16)
+    hash_value = int(hashlib.md5(hash_input.encode(), usedforsecurity=False).hexdigest(), 16)
 
     # Calculate the bucket (0-99)
     bucket = hash_value % 100
@@ -1021,4 +1021,4 @@ def get_stable_user_id(user_context: UserContext) -> str:
     # If no suitable ID is found, use a hash of all available data
     # This isn't ideal for stable bucketing but better than nothing
     context_str = str(sorted(user_context.items()))
-    return hashlib.md5(context_str.encode()).hexdigest()
+    return hashlib.md5(context_str.encode(), usedforsecurity=False).hexdigest()

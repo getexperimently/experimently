@@ -29,8 +29,10 @@ jobs:
       - name: Install dependencies
         run: pip install pytest
 
+      # The repo-level pytest.ini adds --cov flags to every run; this job only
+      # installs pytest, so clear addopts instead of pulling in pytest-cov.
       - name: Run contract tests
-        run: python -m pytest tests/sdk-contract/test_python_sdk.py -v
+        run: python -m pytest tests/sdk-contract/test_python_sdk.py -v -o addopts=""
 
   javascript-contract:
     name: JavaScript SDK Contract Tests

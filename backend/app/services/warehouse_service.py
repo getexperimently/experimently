@@ -106,6 +106,19 @@ class WarehouseQueryGenerator:
         safe = cls.sanitize_identifier(name)
         return f"{q}{safe}{q}"
 
+    @staticmethod
+    def quote_literal(value: str) -> str:
+        """
+        Render *value* as a single-quoted SQL string literal.
+
+        Generated warehouse SQL is shipped as text (no parameter binding is
+        available across Snowflake/BigQuery/Redshift), so every value that
+        lands inside quotes is escaped here: single quotes are doubled and
+        backslashes / control characters are stripped.
+        """
+        cleaned = re.sub(r"[\\\x00-\x1f\x7f]", "", str(value))
+        return "'" + cleaned.replace("'", "''") + "'"
+
     @classmethod
     def generate_assignment_query(
         cls,
@@ -127,10 +140,11 @@ class WarehouseQueryGenerator:
             SQL string ready to execute against the target warehouse.
         """
         table = cls.quote_identifier(assignments_table, dialect)
+        exp_lit = cls.quote_literal(experiment_id)
         return (
-            f"SELECT user_id, variant_id\n"
+            f"SELECT user_id, variant_id\n"  # nosec B608 - identifiers sanitized, literals escaped above
             f"FROM {table}\n"
-            f"WHERE experiment_id = '{experiment_id}'"
+            f"WHERE experiment_id = {exp_lit}"
         )
 
     @classmethod
@@ -171,21 +185,25 @@ class WarehouseQueryGenerator:
         """
         a_table = cls.quote_identifier(assignments_table, dialect)
         e_table = cls.quote_identifier(events_table, dialect)
+        exp_lit = cls.quote_literal(experiment_id)
+        event_lit = cls.quote_literal(metric_event)
 
         date_filter = ""
         if start_date and end_date:
-            date_filter = f"\n  AND e.occurred_at BETWEEN '{start_date}' AND '{end_date}'"
+            start_lit = cls.quote_literal(start_date)
+            end_lit = cls.quote_literal(end_date)
+            date_filter = f"\n  AND e.occurred_at BETWEEN {start_lit} AND {end_lit}"
 
         return (
-            f"WITH assignments AS (\n"
+            f"WITH assignments AS (\n"  # nosec B608 - identifiers sanitized, literals escaped above
             f"  SELECT user_id, variant_id\n"
             f"  FROM {a_table}\n"
-            f"  WHERE experiment_id = '{experiment_id}'\n"
+            f"  WHERE experiment_id = {exp_lit}\n"
             f"),\n"
             f"events AS (\n"
             f"  SELECT user_id, event_type, value\n"
             f"  FROM {e_table}\n"
-            f"  WHERE event_type = '{metric_event}'{date_filter}\n"
+            f"  WHERE event_type = {event_lit}{date_filter}\n"
             f")\n"
             f"SELECT\n"
             f"  a.variant_id,\n"
