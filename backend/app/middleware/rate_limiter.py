@@ -166,13 +166,39 @@ RATE_LIMIT_CONFIG: Dict[str, Tuple[int, int]] = {
     "/api/v1/auth/signup": (5, 60),
     "/api/v1/auth/forgot-password": (5, 60),
     "/api/v1/auth/reset-password": (5, 60),
-    # Tracking endpoints — higher limits for legitimate SDK traffic
-    "/api/v1/tracking/assign": (1000, 60),
-    "/api/v1/tracking/track": (5000, 60),
 }
 
 # Default rate limit for all other endpoints
 DEFAULT_RATE_LIMIT: Tuple[int, int] = (300, 60)  # 300 req/min
+
+# SDK-facing endpoints: assignment, event tracking and flag evaluation.  One
+# server-side SDK or one office NAT can legitimately send thousands of requests
+# a minute from a single IP, so these get a much higher per-IP ceiling
+# (``settings.SDK_RATE_LIMIT_PER_MINUTE``, default 6000).  Prefix matching is
+# needed because flag evaluation carries the flag key in the path.
+SDK_PATH_PREFIXES: Tuple[str, ...] = (
+    "/api/v1/tracking/",
+    "/api/v1/feature-flags/evaluate/",
+    "/api/v1/feature-flags/user/",
+)
+DEFAULT_SDK_RATE_LIMIT_PER_MINUTE = 6000
+
+
+def resolve_rate_limit(
+    path: str, sdk_limit_per_minute: int = DEFAULT_SDK_RATE_LIMIT_PER_MINUTE
+) -> Tuple[int, int]:
+    """
+    Return ``(max_requests, window_seconds)`` for a request path.
+
+    Exact entries in ``RATE_LIMIT_CONFIG`` win, then SDK path prefixes, then
+    ``DEFAULT_RATE_LIMIT``.
+    """
+    exact = RATE_LIMIT_CONFIG.get(path)
+    if exact is not None:
+        return exact
+    if any(path.startswith(prefix) for prefix in SDK_PATH_PREFIXES):
+        return (int(sdk_limit_per_minute), 60)
+    return DEFAULT_RATE_LIMIT
 
 
 # ---------------------------------------------------------------------------
@@ -204,10 +230,14 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     def __init__(self, app: ASGIApp, enabled: bool = True) -> None:
         super().__init__(app)
         self._enabled = enabled
+        self._sdk_limit = DEFAULT_SDK_RATE_LIMIT_PER_MINUTE
 
         if enabled:
             from backend.app.core.config import settings
 
+            self._sdk_limit = int(
+                getattr(settings, "SDK_RATE_LIMIT_PER_MINUTE", DEFAULT_SDK_RATE_LIMIT_PER_MINUTE)
+            )
             self._limiter: object = RedisRateLimiter(
                 redis_host=settings.REDIS_HOST,
                 redis_port=int(settings.REDIS_PORT),
@@ -225,7 +255,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         client_ip = _get_client_ip(request)
 
         # Determine the applicable limit for this path
-        limit, window = RATE_LIMIT_CONFIG.get(path, DEFAULT_RATE_LIMIT)
+        limit, window = resolve_rate_limit(path, self._sdk_limit)
 
         rate_key = f"{client_ip}:{path}"
         allowed, remaining = self._limiter.is_allowed(rate_key, limit, window)
