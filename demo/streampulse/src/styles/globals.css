@@ -1,0 +1,189 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-neutral-100 text-neutral-900 antialiased;
+  }
+  /* Visible focus rings everywhere, for keyboard users. */
+  :focus-visible {
+    @apply outline-none ring-2 ring-pulse-500 ring-offset-2 ring-offset-white;
+  }
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex items-center justify-center rounded-md px-3 py-1.5 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-primary {
+    @apply btn bg-pulse-600 text-white hover:bg-pulse-700;
+  }
+  .btn-secondary {
+    @apply btn border border-neutral-300 bg-white text-neutral-800 hover:bg-neutral-100;
+  }
+  .btn-ghost {
+    @apply btn text-neutral-700 hover:bg-neutral-100;
+  }
+  /* Buttons rendered inside the dark phone screen. */
+  .btn-phone {
+    @apply btn bg-white/10 text-white hover:bg-white/20;
+  }
+  .btn-phone-primary {
+    @apply btn bg-pulse-500 text-white hover:bg-pulse-400;
+  }
+  .input {
+    @apply block w-full rounded-md border border-neutral-300 bg-white px-2.5 py-1.5 text-sm shadow-sm placeholder:text-neutral-400;
+  }
+  .label {
+    @apply mb-1 block text-xs font-medium text-neutral-600;
+  }
+  .card {
+    @apply rounded-lg border border-neutral-200 bg-white shadow-sm;
+  }
+  .pill {
+    @apply inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold;
+  }
+  .pill-on {
+    @apply pill bg-emerald-100 text-emerald-800;
+  }
+  .pill-off {
+    @apply pill bg-neutral-200 text-neutral-700;
+  }
+  .pill-variant {
+    @apply pill bg-pulse-100 text-pulse-700;
+  }
+  .pill-control {
+    @apply pill bg-neutral-200 text-neutral-700;
+  }
+  .pill-warn {
+    @apply pill bg-amber-100 text-amber-800;
+  }
+  .pill-error {
+    @apply pill bg-red-100 text-red-800;
+  }
+}
+
+/* ─── Phone frame ─────────────────────────────────────────────────────────── */
+
+.phone {
+  width: 390px;
+  height: 780px;
+  border-radius: 48px;
+  background: #0b0f19;
+  box-shadow:
+    0 0 0 10px #1f2937,
+    0 0 0 12px #0b0f19,
+    0 30px 60px rgba(15, 23, 42, 0.45);
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  color: #f9fafb;
+}
+
+.phone-notch {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 120px;
+  height: 30px;
+  border-radius: 999px;
+  background: #000;
+  z-index: 10;
+}
+
+.phone-status {
+  /* Tall enough that the text sits below the notch (which ends at 40px). */
+  height: 64px;
+  flex: none;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  padding: 0 24px 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #e5e7eb;
+}
+
+.phone-screen {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px 18px 20px;
+  scrollbar-width: thin;
+}
+
+.phone-tabbar {
+  flex: none;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(17, 24, 39, 0.96);
+  padding: 8px 6px 18px;
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
+.phone-tab {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 0;
+  border-radius: 10px;
+  font-size: 10px;
+  color: #9ca3af;
+  line-height: 1.1;
+}
+.phone-tab[aria-selected='true'] {
+  color: #fb7185;
+}
+.phone-tab-icon {
+  font-size: 18px;
+  line-height: 1;
+}
+
+.art {
+  border-radius: 12px;
+  background: linear-gradient(135deg, var(--art-a), var(--art-b));
+}
+
+/* Player v2 "waveform" progress bar: CSS only. */
+.wave {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 36px;
+}
+.wave span {
+  flex: 1 1 0;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.28);
+}
+.wave span.played {
+  background: #fb7185;
+}
+
+@keyframes pulse-ring {
+  0% {
+    transform: scale(1);
+    opacity: 0.6;
+  }
+  100% {
+    transform: scale(1.6);
+    opacity: 0;
+  }
+}
+.playing-ring::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  border: 2px solid #fb7185;
+  animation: pulse-ring 1.4s ease-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .playing-ring::after {
+    animation: none;
+  }
+}

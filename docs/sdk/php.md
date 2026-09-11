@@ -100,7 +100,7 @@ if ($flag->enabled) {
 }
 ```
 
-On a network/HTTP failure (including 404 when the flag is not ACTIVE) a cached evaluation is
+On a network/HTTP failure (including `enabled: false`, `reason: "inactive"` when the flag is not ACTIVE; 404 only for an unknown key) a cached evaluation is
 returned when one exists; otherwise the flag is reported as disabled. Failures are never cached,
 so the next call retries. `FlagEvaluation::toArray()` gives `['key', 'enabled', 'config']`.
 
@@ -209,7 +209,7 @@ Every request carries `X-API-Key`, `Content-Type: application/json` and `Accept:
 
 | SDK call | Method and path | Body / query | Response used |
 |---|---|---|---|
-| `evaluateFlag`, `isFeatureEnabled` | `GET /api/v1/feature-flags/evaluate/{flag_key}?user_id=…` | — | `{key, enabled, config}`; 404 when the flag is not ACTIVE |
+| `evaluateFlag`, `isFeatureEnabled` | `GET /api/v1/feature-flags/evaluate/{flag_key}?user_id=…` | — | `{key, enabled, config}`; `enabled: false`, `reason: "inactive"` when the flag is not ACTIVE; 404 only for an unknown key |
 | `getAssignment` | `POST /api/v1/tracking/assign` | `{experiment_key, user_id, context?}` | `{experiment_key, user_id, variant_id, variant_name, is_control, configuration}`; 404 when the experiment is not ACTIVE |
 | `track` with a key | `POST /api/v1/tracking/track` | `{event_type, event_name, user_id, experiment_key?, feature_flag_key?, value?, metadata?, timestamp?}` | ignored |
 | `track` without keys, `trackBatch` | `POST /api/v1/tracking/batch` | `{events: [<track body>, …]}` (max 100 per request) | `{success_count, failure_count, errors}` |

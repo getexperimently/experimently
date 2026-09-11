@@ -159,10 +159,19 @@ async def assign_user_to_experiment(
     This means that the same user will always get the same variant assignment
     for a specific experiment, ensuring a consistent user experience.
 
+    New users are first checked for eligibility: the global holdout, the
+    experiment's mutual exclusion group and its targeting rules (evaluated
+    against ``context``; top-level keys also answer ``user.<key>`` /
+    ``device.<key>`` / ``app.<key>``).  Ineligible users receive HTTP 200 with
+    the control variant, ``assigned: false`` and ``reason`` set to
+    ``holdout`` | ``mutual_exclusion`` | ``targeting``; nothing is recorded
+    for them.  Existing assignments are always returned as-is.
+
     **Authentication**: Requires a valid API key in the X-API-Key header.
 
     Returns:
-        AssignmentResponse: The variant assignment with configuration details
+        VariantAssignmentResponse: The variant assignment with configuration
+        details plus ``assigned`` / ``reason``
 
     Raises:
         HTTPException 401: If the API key is invalid
@@ -224,7 +233,8 @@ async def assign_user_to_experiment(
                 detail="Assigned variant not found in experiment",
             )
 
-        # Create response
+        # Create response.  Ineligible users (holdout / mutual exclusion /
+        # targeting) get the control variant with assigned=False.
         return VariantAssignmentResponse(
             experiment_key=request.experiment_key,
             user_id=request.user_id,
@@ -232,6 +242,8 @@ async def assign_user_to_experiment(
             variant_name=variant.name,
             is_control=bool(variant.is_control),
             configuration=variant.configuration,
+            assigned=bool(assignment_data.get("assigned", True)),
+            reason=str(assignment_data.get("reason") or "assigned"),
         )
     except ValueError as e:
         raise HTTPException(

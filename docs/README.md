@@ -96,6 +96,7 @@
 
 - [Guidelines](development/guidelines.md) — coding standards, git workflow, TDD
 - [Testing Guide](development/testing-guide.md) — unit, integration, E2E, contract tests
+- [Testing Audit (Sep 2026)](testing/testing-audit-2026-09.md) — inventory of every test layer, CI gate map, gaps by category, prioritised recommendations
 - [Dependency Injection](development/dependency-injection.md) — FastAPI deps.py patterns
 - [Workflow Explanation](development/workflow-explanation.md) — GitHub Actions CI
 - [Database Migrations](development/database/migrations.md) — Alembic workflow

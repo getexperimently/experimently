@@ -1,0 +1,456 @@
+"""Offline tests for the rollout story (no network: StoryClient is replaced by an in-memory fake)."""
+from __future__ import annotations
+
+import copy
+import io
+import sys
+from pathlib import Path
+
+import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import rollout_story as story  # noqa: E402
+from traffic import PLAYER_FLAG  # noqa: E402
+
+FLAG_ID = "11111111-1111-1111-1111-111111111111"
+EMPLOYEE_GROUP = {
+    "id": "grp-employees",
+    "logical_operator": "AND",
+    "conditions": [{"id": "cond-employee", "attribute": "employee", "operator": "equals", "value": True}],
+}
+
+
+class FakeStoryClient:
+    """In-memory platform: flag, 4-stage schedule (rollout-service semantics), safety config/settings."""
+
+    def __init__(self, api_url: str = "", token: str = "dev", timeout: float = 15.0):
+        self.api_url = api_url
+        self.token = token
+        self.flag = {
+            "id": FLAG_ID,
+            "key": PLAYER_FLAG,
+            "status": "active",
+            "rollout_percentage": 5,
+            "rules": {"logical_operator": "OR", "groups": [copy.deepcopy(EMPLOYEE_GROUP)]},
+        }
+        self.schedule = {
+            "id": "sched-1",
+            "name": "Player v2 rollout",
+            "status": "active",
+            "feature_flag_id": FLAG_ID,
+            "stages": [
+                {"id": "st-1", "stage_order": 1, "name": "Internal + 5%", "target_percentage": 5, "status": "in_progress", "trigger_type": "time_based"},
+                {"id": "st-2", "stage_order": 2, "name": "25%", "target_percentage": 25, "status": "pending", "trigger_type": "time_based"},
+                {"id": "st-3", "stage_order": 3, "name": "50%", "target_percentage": 50, "status": "pending", "trigger_type": "time_based"},
+                {"id": "st-4", "stage_order": 4, "name": "100%", "target_percentage": 100, "status": "pending", "trigger_type": "time_based"},
+            ],
+        }
+        self.settings = {"enable_automatic_rollbacks": True}
+        self.config = {
+            "feature_flag_id": FLAG_ID,
+            "enabled": True,
+            "rollback_percentage": 5,
+            "metrics": {"error_rate": {"warning_threshold": 0.02, "critical_threshold": 0.05, "comparison_type": "greater_than"}},
+        }
+        self.error_rate = 0.0
+        self.healthy_after_checks: int | None = None  # becomes healthy after N safety checks
+        self.scheduler_after_polls: int | None = None  # the "safety scheduler" rolls back after N get_flag calls
+        self.calls: list[tuple[str, ...]] = []
+        self.rollbacks: list[tuple[int, str]] = []
+        self.flag_updates: list[dict] = []
+        self.stage_updates: list[tuple[str, dict]] = []
+        self.checks = 0
+        self.polls = 0
+
+    # --- flags ---
+    def flag_by_key(self, key):
+        self.calls.append(("flag_by_key", key))
+        assert key == PLAYER_FLAG
+        return {"id": FLAG_ID, "key": key, "rollout_percentage": self.flag["rollout_percentage"], "targeting_rules": self.flag["rules"]}
+
+    def get_flag(self, flag_id):
+        self.calls.append(("get_flag", flag_id))
+        self.polls += 1
+        if self.scheduler_after_polls is not None and self.polls > self.scheduler_after_polls:
+            self.flag["rollout_percentage"] = self.config["rollback_percentage"]
+        return copy.deepcopy(self.flag)
+
+    def update_flag(self, flag_id, body):
+        self.calls.append(("update_flag", flag_id))
+        self.flag_updates.append(copy.deepcopy(body))
+        if "targeting_rules" in body:
+            self.flag["rules"] = copy.deepcopy(body["targeting_rules"])
+        if "rollout_percentage" in body:
+            self.flag["rollout_percentage"] = body["rollout_percentage"]
+        return copy.deepcopy(self.flag)
+
+    # --- schedule (mirrors RolloutService.manually_advance_stage) ---
+    def schedule_for_flag(self, flag_id):
+        self.calls.append(("schedule_for_flag", flag_id))
+        return copy.deepcopy(self.schedule)
+
+    def _stage(self, stage_id):
+        return next(s for s in self.schedule["stages"] if s["id"] == stage_id)
+
+    def update_stage(self, stage_id, body):
+        self.calls.append(("update_stage", stage_id))
+        self.stage_updates.append((stage_id, dict(body)))
+        self._stage(stage_id).update(body)
+        return copy.deepcopy(self._stage(stage_id))
+
+    def advance_stage(self, stage_id):
+        self.calls.append(("advance_stage", stage_id))
+        stage = self._stage(stage_id)
+        if stage["trigger_type"] != "manual":
+            raise story.ApiError(400, "Can only manually advance stages with manual trigger type")
+        if self.schedule["status"] != "active":
+            raise story.ApiError(400, f"Cannot advance stage for schedule in {self.schedule['status']} status")
+        if stage["status"] == "pending":
+            stage["status"] = "in_progress"
+            self.flag["rollout_percentage"] = stage["target_percentage"]
+        elif stage["status"] == "in_progress":
+            stage["status"] = "completed"
+            nxt = next((s for s in self.schedule["stages"] if s["stage_order"] > stage["stage_order"] and s["status"] == "pending"), None)
+            if nxt:
+                nxt["status"] = "in_progress"
+                self.flag["rollout_percentage"] = nxt["target_percentage"]
+            else:
+                self.schedule["status"] = "completed"
+        else:
+            raise story.ApiError(400, f"Cannot advance stage in {stage['status']} status")
+        return copy.deepcopy(stage)
+
+    # --- safety ---
+    def safety_settings(self):
+        self.calls.append(("safety_settings",))
+        return dict(self.settings)
+
+    def enable_automatic_rollbacks(self):
+        self.settings["enable_automatic_rollbacks"] = True
+        return dict(self.settings)
+
+    def safety_config(self, flag_id):
+        self.calls.append(("safety_config", flag_id))
+        return copy.deepcopy(self.config)
+
+    def safety_check(self, flag_id):
+        self.calls.append(("safety_check", flag_id))
+        self.checks += 1
+        if self.healthy_after_checks is not None and self.checks > self.healthy_after_checks:
+            self.error_rate = 0.0
+        critical = self.error_rate > 0.05
+        return {
+            "feature_flag_id": flag_id,
+            "is_healthy": not critical,
+            "metrics": [{"name": "error_rate", "current_value": self.error_rate, "threshold": 0.05, "is_healthy": not critical,
+                         "details": {"warning_threshold": 0.02, "critical_threshold": 0.05, "warning": self.error_rate > 0.02}}],
+        }
+
+    def rollback(self, flag_id, percentage, reason):
+        self.calls.append(("rollback", flag_id, str(percentage)))
+        self.rollbacks.append((percentage, reason))
+        previous = self.flag["rollout_percentage"]
+        self.flag["rollout_percentage"] = percentage
+        return {"success": True, "feature_flag_id": flag_id, "message": f"rolled back from {previous}% to {percentage}%"}
+
+    # --- helpers for assertions ---
+    def stage_status(self, order):
+        return next(s["status"] for s in self.schedule["stages"] if s["stage_order"] == order)
+
+    def writes(self):
+        return [c for c in self.calls if c[0] in ("update_flag", "update_stage", "advance_stage", "rollback")]
+
+
+def make_story(client: FakeStoryClient, **kw) -> tuple[story.Story, io.StringIO]:
+    """Story with a fake clock: sleeping advances time instantly."""
+    out = io.StringIO()
+    sleeps: list[float] = []
+    kw.setdefault("sleep", sleeps.append)
+    kw.setdefault("clock", lambda: sum(sleeps))
+    kw.setdefault("run_traffic", lambda args: 0)
+    kw.setdefault("api_key", "eptk_test")
+    kw.setdefault("poll_interval", 1)
+    kw.setdefault("rollback_wait", 5)
+    kw.setdefault("healthy_wait", 5)
+    s = story.Story(client=client, out=out, **kw)
+    s.sleeps = sleeps  # type: ignore[attr-defined]
+    return s, out
+
+
+# --------------------------------------------------------------------------------------
+
+
+def test_step_1_is_read_only_and_describes_the_starting_state():
+    client = FakeStoryClient()
+    s, out = make_story(client)
+    assert s.step_1() is True
+    text = out.getvalue()
+    assert "Step 1/7" in text
+    assert "rollout 5%" in text
+    assert 'employee equals true' in text
+    assert "▶ stage 1" in text and "· stage 2" in text
+    assert "rollback to 5%" in text and "automatic rollbacks globally ON" in text
+    assert "HEALTHY" in text
+    assert "Internal tester" in text and "targeting_rule" in text
+    assert client.writes() == []
+
+
+def test_step_2_advances_the_schedule_to_25_and_is_idempotent():
+    client = FakeStoryClient()
+    s, out = make_story(client)
+    assert s.step_2() is True
+    assert client.flag["rollout_percentage"] == 25
+    assert client.stage_status(1) == "completed" and client.stage_status(2) == "in_progress" and client.stage_status(3) == "pending"
+    # the time-based stage 1 was switched to a manual trigger before the advance call
+    assert client.stage_updates == [("st-1", {"trigger_type": "manual"})]
+    assert ("advance_stage", "st-1") in client.calls
+    text = out.getvalue()
+    assert "Rollout 5% → 25%" in text and "switched from a time-based to a manual trigger" in text
+
+    writes_before = len(client.writes())
+    assert s.step_2() is True
+    assert len(client.writes()) == writes_before, "re-running step 2 must not write"
+    assert "Already at stage 2" in out.getvalue()
+    assert client.flag["rollout_percentage"] == 25
+
+
+def test_step_3_runs_the_incident_traffic_subprocess_and_checks_safety():
+    client = FakeStoryClient()
+    client.flag["rollout_percentage"] = 25
+    runs: list[list[str]] = []
+
+    def run_traffic(args):
+        runs.append(args)
+        client.error_rate = 0.12  # the incident traffic pushed the error rate past 5%
+        return 0
+
+    s, out = make_story(client, run_traffic=run_traffic, api_key="eptk_secret", api_url="http://api:8000")
+    assert s.step_3() is True
+    assert len(runs) == 1
+    args = runs[0]
+    assert args[: 2] == ["--incident", "android12"]
+    assert args[args.index("--rate") + 1] == "6"
+    assert args[args.index("--duration") + 1] == "90"
+    assert args[args.index("--api-key") + 1] == "eptk_secret"
+    assert args[args.index("--api-url") + 1] == "http://api:8000"
+    assert ("safety_check", FLAG_ID) in client.calls
+    text = out.getvalue()
+    assert "CRITICAL" in text and "12.0%" in text and "/admin/safety" in text
+    assert client.writes() == []
+
+
+def test_step_3_fails_loudly_when_traffic_exits_non_zero():
+    client = FakeStoryClient()
+    client.flag["rollout_percentage"] = 25
+    s, _ = make_story(client, run_traffic=lambda args: 3)
+    with pytest.raises(story.StoryError, match="code 3"):
+        s.step_3()
+
+
+def test_step_4_waits_for_the_safety_scheduler_when_automatic_rollbacks_are_on():
+    client = FakeStoryClient()
+    client.flag["rollout_percentage"] = 25
+    client.error_rate = 0.12
+    client.scheduler_after_polls = 3
+    s, out = make_story(client)
+    assert s.step_4() is True
+    assert client.flag["rollout_percentage"] == 5
+    assert client.rollbacks == [], "the scheduler did it; no manual rollback"
+    assert s.sleeps, "polled with sleeps in between"
+    text = out.getvalue()
+    assert "Automatic rollbacks are ON" in text and "Rollout 25% → 5%" in text and "rollback record" in text
+
+
+def test_step_4_rolls_back_by_hand_when_automatic_rollbacks_are_off():
+    client = FakeStoryClient()
+    client.flag["rollout_percentage"] = 25
+    client.error_rate = 0.12
+    client.settings["enable_automatic_rollbacks"] = False
+    s, out = make_story(client)
+    assert s.step_4() is True
+    assert client.rollbacks and client.rollbacks[0][0] == 5
+    assert "Android 12" in client.rollbacks[0][1]
+    assert client.flag["rollout_percentage"] == 5
+    assert "Automatic rollbacks are OFF" in out.getvalue()
+    assert s.sleeps == []
+
+
+def test_step_4_falls_back_to_a_manual_rollback_when_the_scheduler_never_acts():
+    client = FakeStoryClient()
+    client.flag["rollout_percentage"] = 25
+    client.error_rate = 0.12
+    s, out = make_story(client)  # scheduler_after_polls stays None: the flag never moves on its own
+    assert s.step_4() is True
+    assert client.rollbacks == [(5, client.rollbacks[0][1])]
+    assert client.flag["rollout_percentage"] == 5
+    assert "did not act in time" in out.getvalue()
+
+
+def test_step_4_is_idempotent_and_refuses_when_there_is_nothing_to_roll_back():
+    client = FakeStoryClient()  # already at 5%
+    s, out = make_story(client)
+    assert s.step_4() is True
+    assert "already rolled back" in out.getvalue() and client.writes() == []
+
+    client = FakeStoryClient()
+    client.flag["rollout_percentage"] = 25  # healthy at 25%: nothing to roll back
+    s, _ = make_story(client)
+    with pytest.raises(story.StoryError, match="healthy"):
+        s.step_4()
+    assert client.writes() == []
+
+
+def test_step_5_adds_the_fixed_build_rule_next_to_the_employee_group():
+    client = FakeStoryClient()
+    s, out = make_story(client)
+    assert s.step_5() is True
+    assert len(client.flag_updates) == 1
+    rules = client.flag_updates[0]["targeting_rules"]
+    assert rules["logical_operator"] == "OR"
+    assert rules["groups"][0] == EMPLOYEE_GROUP
+    fix = rules["groups"][1]["conditions"]
+    assert fix == [{"id": "cond-app-version", "attribute": "app_version", "operator": "semver_gte", "value": "3.2.1"}]
+    assert set(client.flag_updates[0]) == {"targeting_rules"}, "PUT touches nothing else"
+    assert "semver_gte" in out.getvalue()
+
+    assert s.step_5() is True
+    assert len(client.flag_updates) == 1, "second run is a no-op"
+    assert "already there" in out.getvalue()
+
+
+def test_step_6_waits_until_healthy_then_advances_to_50():
+    client = FakeStoryClient()
+    # state after steps 2-5: stage 2 in progress, flag rolled back to 5%, still critical for a while
+    client.schedule["stages"][0].update({"status": "completed", "trigger_type": "manual"})
+    client.schedule["stages"][1]["status"] = "in_progress"
+    client.flag["rollout_percentage"] = 5
+    client.error_rate = 0.12
+    client.healthy_after_checks = 2
+    s, out = make_story(client, healthy_wait=120)
+    assert s.step_6() is True
+    assert client.flag["rollout_percentage"] == 50
+    assert client.stage_status(2) == "completed" and client.stage_status(3) == "in_progress"
+    text = out.getvalue()
+    assert "error rate still 12.0%" in text and "HEALTHY" in text and "Rollout 5% → 50%" in text
+    assert len(s.sleeps) >= 1
+
+    assert s.step_6() is True
+    assert "Already at stage 3" in out.getvalue()
+
+
+def test_step_7_reaches_100_completes_the_schedule_and_removes_the_rules():
+    client = FakeStoryClient()
+    for stage in client.schedule["stages"][:2]:
+        stage.update({"status": "completed", "trigger_type": "manual"})
+    client.schedule["stages"][2].update({"status": "in_progress", "trigger_type": "manual"})
+    client.flag["rollout_percentage"] = 50
+    s, out = make_story(client)
+    assert s.step_7() is True
+    assert client.flag["rollout_percentage"] == 100
+    assert client.stage_status(4) == "completed" and client.schedule["status"] == "completed"
+    assert client.flag["rules"] == {}
+    assert client.flag_updates[-1] == {"targeting_rules": {}}
+    text = out.getvalue()
+    assert "Rollout is now 100%" in text and "Removed the targeting rules" in text and "Targeting: none" in text
+
+    writes_before = len(client.writes())
+    assert s.step_7() is True
+    assert len(client.writes()) == writes_before
+
+
+def test_auto_runs_all_seven_steps_in_order_through_main():
+    client = FakeStoryClient()
+    made = []
+
+    def factory(url, token):
+        made.append((url, token))
+        client.scheduler_after_polls = 10 ** 6  # never; step 4 falls back to the manual rollback
+        return client
+
+    def run_traffic(args):
+        client.error_rate = 0.12
+        return 0
+
+    sleeps: list[float] = []
+    out = io.StringIO()
+    rc = story.main(
+        ["--auto", "--pace", "0", "--token", "t0k", "--api-url", "http://api:8000", "--no-wait", "--rollback-wait", "0"],
+        client_factory=factory,
+        sleep=sleeps.append,
+        run_traffic=run_traffic,
+        out=out,
+    )
+    assert rc == 0
+    assert made == [("http://api:8000", "t0k")]
+    text = out.getvalue()
+    assert [f"Step {i}/7" in text for i in range(1, 8)] == [True] * 7
+    assert text.index("Step 1/7") < text.index("Step 4/7") < text.index("Step 7/7")
+    assert client.flag["rollout_percentage"] == 100 and client.schedule["status"] == "completed"
+    assert client.rollbacks and client.rollbacks[0][0] == 5
+    assert client.flag["rules"] == {}
+
+
+def test_main_reports_precondition_and_auth_failures():
+    client = FakeStoryClient()
+    client.flag["rollout_percentage"] = 25  # healthy: step 4 has nothing to do
+    rc = story.main(["--step", "4"], client_factory=lambda u, t: client, out=io.StringIO())
+    assert rc == 1
+
+    class Unauthorized(FakeStoryClient):
+        def flag_by_key(self, key):
+            raise story.ApiError(401, "no", "http://x")
+
+    assert story.main(["--step", "1"], client_factory=lambda u, t: Unauthorized(), out=io.StringIO()) == 2
+
+    class Down(FakeStoryClient):
+        def flag_by_key(self, key):
+            raise story.ApiError(0, "connection refused", "http://x")
+
+    assert story.main(["--step", "1"], client_factory=lambda u, t: Down(), out=io.StringIO()) == 4
+
+    with pytest.raises(SystemExit):
+        story.main([])  # --step or --auto is required
+
+
+def test_story_client_uses_bearer_auth_and_the_documented_endpoints(monkeypatch):
+    captured: list[dict] = []
+
+    class Resp:
+        def __init__(self, body: bytes):
+            self.body = body
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read(self):
+            return self.body
+
+    def fake_urlopen(req, timeout):
+        captured.append({"url": req.full_url, "method": req.get_method(), "headers": {k.lower(): v for k, v in req.header_items()}, "body": req.data})
+        if "/feature-flags/?" in req.full_url:
+            return Resp(b'{"items": [{"id": "f-1", "key": "streampulse_player_v2"}], "total": 1}')
+        if "/rollout-schedules/?" in req.full_url:
+            return Resp(b'{"items": [{"id": "s-1", "status": "active", "stages": []}], "total": 1}')
+        return Resp(b'{"ok": true}')
+
+    monkeypatch.setattr(story.urllib.request, "urlopen", fake_urlopen)
+    client = story.StoryClient("http://localhost:8000/", "dev")
+    assert client.flag_by_key(PLAYER_FLAG)["id"] == "f-1"
+    assert captured[0]["headers"]["authorization"] == "Bearer dev"
+    assert captured[0]["url"].startswith("http://localhost:8000/api/v1/feature-flags/?")
+    client.advance_stage("st-2")
+    assert captured[-1] == {**captured[-1], "url": "http://localhost:8000/api/v1/rollout-schedules/stages/st-2/advance", "method": "POST"}
+    client.update_stage("st-2", {"trigger_type": "manual"})
+    assert captured[-1]["url"].endswith("/rollout-schedules/stages/st-2") and captured[-1]["method"] == "PUT"
+    client.rollback("f-1", 5, "crash spike")
+    assert captured[-1]["url"] == "http://localhost:8000/api/v1/safety/feature-flags/f-1/rollback?percentage=5&reason=crash+spike"
+    client.safety_check("f-1")
+    assert captured[-1]["url"].endswith("/safety/feature-flags/f-1/check")
+    client.update_flag("f-1", {"targeting_rules": {}})
+    assert captured[-1]["method"] == "PUT" and captured[-1]["body"] == b'{"targeting_rules": {}}'
+    client.schedule_for_flag("f-1")
+    assert "feature_flag_id=f-1" in captured[-1]["url"]

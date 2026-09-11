@@ -133,7 +133,7 @@ Every request carries `X-API-Key: <key>`, `Content-Type: application/json`, `Acc
 
 | Call | Method and path | Response used |
 |---|---|---|
-| every `resolve*Evaluation` | `GET /api/v1/feature-flags/evaluate/{flag_key}?user_id=…` | `{key, enabled, config}`; 404 when not ACTIVE |
+| every `resolve*Evaluation` | `GET /api/v1/feature-flags/evaluate/{flag_key}?user_id=…` | `{key, enabled, config}`; off with `reason: "inactive"` when the flag exists but is not ACTIVE; 404 only for an unknown key |
 | `provider.client.getAssignment` / `getVariant` | `POST /api/v1/tracking/assign` `{experiment_key, user_id, context?}` | `{experiment_key, user_id, variant_id, variant_name, is_control, configuration}`; 404 when not ACTIVE |
 | `provider.client.track` with a key | `POST /api/v1/tracking/track` | ignored |
 | `provider.client.track` without a key, `trackBatch` | `POST /api/v1/tracking/batch` `{events: [...]}` (max 100 per request) | `{success_count, failure_count, errors}` |
@@ -266,7 +266,7 @@ Every request carries `X-API-Key: <key>`, `Content-Type: application/json`, `Acc
 
 | Call | Method and path | Response used |
 |---|---|---|
-| every `resolve_*_details` | `GET /api/v1/feature-flags/evaluate/{flag_key}?user_id=…` | `{key, enabled, config}`; 404 when not ACTIVE |
+| every `resolve_*_details` | `GET /api/v1/feature-flags/evaluate/{flag_key}?user_id=…` | `{key, enabled, config}`; off with `reason: "inactive"` when the flag exists but is not ACTIVE; 404 only for an unknown key |
 | `provider.track` / `provider.client.track` | `POST /api/v1/tracking/track` (with a key) or `POST /api/v1/tracking/batch` (fan-out, max 100 per request) | ignored / `{success_count, failure_count, errors}` |
 | `provider.client.get_assignment` | `POST /api/v1/tracking/assign` | `{experiment_key, user_id, variant_id, variant_name, is_control, configuration}`; 404 when not ACTIVE |
 

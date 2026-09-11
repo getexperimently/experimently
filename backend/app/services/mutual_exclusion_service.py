@@ -260,10 +260,17 @@ class MutualExclusionService:
     def is_user_eligible_for_experiment(
         self, user_id: str, experiment_id: UUID
     ) -> bool:
-        """Check if a user is eligible for an experiment given mutual exclusion rules."""
+        """Check if a user is eligible for an experiment given mutual exclusion rules.
+
+        Experiments without a group, or whose group has been archived, carry no
+        constraint.  Otherwise the user is eligible only when the group's
+        consistent hashing selects this experiment for them.
+        """
         group = self.get_user_experiment_group(experiment_id)
         if not group:
             return True  # No group constraint
+        if group.status == MutualExclusionGroupStatus.ARCHIVED:
+            return True  # Archived groups no longer constrain their experiments
 
         selected = self.select_experiment_for_user(user_id, group.id)
         return selected == experiment_id
