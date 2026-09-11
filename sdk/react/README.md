@@ -27,7 +27,11 @@ import { ExperimentationProvider } from '@experimentation-platform/react-sdk';
 ```
 
 `SdkConfig`: `apiKey`, `baseUrl`, optional `timeoutMs` (default 5000) and `cacheTtlMs` (default 300 000).
-`user.attributes` is sent as `context` on experiment assignment.
+`user.attributes` is sent as `context` on experiment assignment **and** on flag evaluation
+(`&context=<url-encoded JSON>`, omitted when empty), so flag targeting rules evaluate against it
+(`country` also matches `user.country`; nested objects flatten to dotted keys such as `app.version`).
+Attributes are assumed stable per user — caches are keyed by user + key, so call
+`client.clearCache()` (from `useExperimentation()`) or re-mount the provider after changing them.
 
 ## Hooks
 
@@ -40,7 +44,9 @@ return isEnabled ? <NewSearch engine={(config as any)?.engine} /> : <LegacySearc
 ```
 
 `variant` is `null` when off, `config.variant` when the server config contains a string
-`variant`, otherwise `'on'`. On error the flag is reported off with `error` set.
+`variant`, otherwise `'on'`. On error the flag is reported off with `error` set. `reason`
+(`'targeting_rule' | 'rollout' | 'inactive' | 'error'`) says why the server decided; it is
+`undefined` while loading, on error, or when the server does not send one.
 
 ### `useVariant(flagKey): string | null` — just the variant string (or `null` while loading / off / error).
 
@@ -60,6 +66,11 @@ const headline = (configuration?.headline as string) ?? 'Gear up for the season'
 
 While loading or on error you get the control defaults:
 `variantKey: 'control', variantName: 'Control', variantId: null, isControl: true, configuration: null`.
+
+A resolved assignment also carries `assigned` and `reason`. `assigned: false` means the server
+did not enrol the user — `reason` is `'holdout'`, `'mutual_exclusion'` or `'targeting'` — and
+returned the experiment's control variant so you render the default experience (no exposure is
+recorded). Servers that predate the field are reported as `assigned: true` with no `reason`.
 
 ### `useTrackEvent(): (eventName, properties?, options?) => void`
 
@@ -120,7 +131,7 @@ Every request carries `X-API-Key: <key>` and `Content-Type: application/json`.
 
 | SDK call | Method & path | Body / query | Response used |
 |---|---|---|---|
-| `evaluateFeatureFlag*`, `useFeatureFlag`, `useVariant`, `useMultipleFlags`, `ServerClient.getAll` | `GET /api/v1/feature-flags/evaluate/{flag_key}?user_id=…` | — | `{key, enabled, config}` (404 when not ACTIVE) |
+| `evaluateFeatureFlag*`, `useFeatureFlag`, `useVariant`, `useMultipleFlags`, `ServerClient.getAll` | `GET /api/v1/feature-flags/evaluate/{flag_key}?user_id=…&context=<url-encoded JSON>` | `context` = `user.attributes` (omitted when empty) | `{key, enabled, config, reason}` (off with `reason: "inactive"` when the flag exists but is not ACTIVE; 404 only for an unknown key) |
 | `assignExperiment`, `useExperiment` | `POST /api/v1/tracking/assign` | `{experiment_key, user_id, context?}` | `{experiment_key, variant_id, variant_name, is_control, configuration}` (404 when not ACTIVE) |
 | `trackEvent` with a key | `POST /api/v1/tracking/track` | `{event_type, event_name, user_id, experiment_key?, feature_flag_key?, value?, metadata?, timestamp?}` | ignored |
 | `trackEvent` without keys | `POST /api/v1/tracking/batch` | `{events: [<track body>, …]}` (≤ 100 per request) | ignored |
@@ -129,6 +140,6 @@ Every request carries `X-API-Key: <key>` and `Content-Type: application/json`.
 
 ```bash
 cd sdk/react && npm install
-npx jest            # unit tests (fetch is mocked)
+npx jest            # 215 unit tests (fetch is mocked)
 npm run build       # tsc, strict
 ```

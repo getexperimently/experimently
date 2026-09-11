@@ -53,10 +53,26 @@ function App() {
 | `config.timeoutMs` | `number` | No | Per-request timeout, default `5000` |
 | `config.cacheTtlMs` | `number` | No | How long a successful evaluation/assignment is reused, default `300000` (5 min) |
 | `user.userId` | `string` | Yes | Stable identifier used for bucketing |
-| `user.attributes` | `Record<string, unknown>` | No | Sent as `context` on experiment assignment (targeting rules) |
+| `user.attributes` | `Record<string, unknown>` | No | Sent as `context` on experiment assignment and on flag evaluation (targeting rules); see [Targeting context](#targeting-context) |
 
-The client is recreated only when `apiKey`/`baseUrl` change; hooks re-run when `userId` changes.
-All hooks return safe defaults while loading and on error, and never throw.
+The client is recreated only when `apiKey`/`baseUrl` change; hooks re-run when `userId` or the
+attributes change. All hooks return safe defaults while loading and on error, and never throw.
+
+### Targeting context
+
+`user.attributes` is what the platform's targeting rules evaluate against. The SDK sends it as
+`context` in the `POST /api/v1/tracking/assign` body and, when it is a non-empty object, as
+`context=<url-encoded JSON>` on `GET /api/v1/feature-flags/evaluate/{flagKey}` — so a flag whose
+dashboard rule says `os_version semver_gte 17.0.0 AND tier equals premium` turns on only for users
+whose attributes match. Top-level keys are also reachable under `user.` / `device.` / `app.`
+aliases in rules (`country` matches `user.country`), and nested objects flatten to dotted keys
+(`{ app: { version: '3.2.1' } }` answers `app.version`).
+
+Attributes are assumed to be **stable per user**: evaluations and assignments are cached by
+user + key only, so after changing a user's attributes call `client.clearCache()` (via
+`useExperimentation()`), or re-mount the provider with a `key` tied to the user. The provider does
+re-run hooks when the attributes change, but they will be served from the cache until it is
+cleared or the TTL elapses.
 
 ---
 
@@ -64,7 +80,9 @@ All hooks return safe defaults while loading and on error, and never throw.
 
 ### `useFeatureFlag(flagKey): FeatureFlagEvaluation`
 
-Evaluates one flag for the current user via `GET /api/v1/feature-flags/evaluate/{flagKey}?user_id=…`.
+Evaluates one flag for the current user via
+`GET /api/v1/feature-flags/evaluate/{flagKey}?user_id=…[&context=<url-encoded JSON>]`
+(`context` is `user.attributes`, omitted when empty).
 
 ```tsx
 import { useFeatureFlag } from '@experimentation-platform/react-sdk';
@@ -84,6 +102,7 @@ function SearchPage() {
 | `config` | `unknown \| null` | The flag's `config` payload as returned by the server |
 | `loading` | `boolean` | `true` until the first response |
 | `error` | `Error \| null` | Set when the request failed (flag is reported off) |
+| `reason` | `string \| undefined` | Why the server decided: `targeting_rule`, `rollout`, `inactive` or `error`; `undefined` while loading, on error, or from servers that do not send it |
 
 ### `useVariant(flagKey): string | null`
 
@@ -206,7 +225,7 @@ In the App Router call the same methods from an async server component.
 
 | Method | Signature | Description |
 |--------|-----------|-------------|
-| `evaluateFeatureFlag` | `(flagKey, user) => Promise<FeatureFlagEvaluation>` | One flag; disabled evaluation on failure |
+| `evaluateFeatureFlag` | `(flagKey, user) => Promise<FeatureFlagEvaluation>` | One flag (`user.attributes` sent as `context`); disabled evaluation on failure |
 | `getAll` | `(flagKeys, user) => Promise<Record<string, FeatureFlagEvaluation>>` | Several flags in parallel |
 | `assignExperiment` | `(experimentKey, user) => Promise<ExperimentAssignment>` | Sticky assignment; control defaults on failure |
 | `clearCache` | `() => void` | Drop cached results (per instance) |
@@ -219,7 +238,7 @@ Every request carries `X-API-Key` and `Content-Type: application/json`.
 
 | SDK call | Method and path | Body / query | Response used |
 |---|---|---|---|
-| `useFeatureFlag`, `useVariant`, `useMultipleFlags`, `ServerClient.evaluateFeatureFlag`/`getAll` | `GET /api/v1/feature-flags/evaluate/{flag_key}?user_id=…` | — | `{key, enabled, config}`; 404 when the flag is not ACTIVE |
+| `useFeatureFlag`, `useVariant`, `useMultipleFlags`, `ServerClient.evaluateFeatureFlag`/`getAll` | `GET /api/v1/feature-flags/evaluate/{flag_key}?user_id=…&context=<url-encoded JSON>` | `context` = `user.attributes` (omitted when empty) | `{key, enabled, config, reason}`; off with `reason: "inactive"` when the flag exists but is not ACTIVE; 404 only for an unknown key |
 | `useExperiment`, `ServerClient.assignExperiment` | `POST /api/v1/tracking/assign` | `{experiment_key, user_id, context?}` | `{experiment_key, user_id, variant_id, variant_name, is_control, configuration}`; 404 when the experiment is not ACTIVE |
 | `useTrackEvent` with a key | `POST /api/v1/tracking/track` | `{event_type, event_name, user_id, experiment_key?, feature_flag_key?, value?, metadata?, timestamp?}` | ignored |
 | `useTrackEvent` without keys | `POST /api/v1/tracking/batch` | `{events: [ ...track bodies ]}` (max 100 per request) | ignored |
@@ -247,6 +266,7 @@ interface FeatureFlagEvaluation {
   config: unknown | null;
   loading: boolean;
   error: Error | null;
+  reason?: string; // 'targeting_rule' | 'rollout' | 'inactive' | 'error'; undefined when not sent
 }
 
 interface ExperimentAssignment {
@@ -287,6 +307,6 @@ interface TrackEventOptions {
 
 ```bash
 cd sdk/react && npm install
-npx jest          # 202 unit tests, fetch is mocked
+npx jest          # 215 unit tests, fetch is mocked
 npm run build     # tsc --strict
 ```

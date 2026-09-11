@@ -736,18 +736,32 @@ def seed_feature_flags(db, admin_user) -> dict:
             status=FeatureFlagStatus.ACTIVE,
             owner_id=admin_user.id,
             rollout_percentage=100,
+            # Dashboard-editor shape (what the platform UI reads and writes):
+            # user.role in [beta, internal]  OR  user.email ends with @acme.com.
+            # SDK contexts {"role": "beta"} / {"email": "x@acme.com"} match via
+            # the user.<key> alias (see backend/app/core/targeting_adapter.py).
             targeting_rules={
-                "operator": "or",
-                "rules": [
+                "logical_operator": "OR",
+                "groups": [
                     {
-                        "attribute": "user_role",
-                        "operator": "in",
-                        "value": ["beta", "internal"],
+                        "logical_operator": "AND",
+                        "conditions": [
+                            {
+                                "attribute": "user.role",
+                                "operator": "in",
+                                "value": ["beta", "internal"],
+                            }
+                        ],
                     },
                     {
-                        "attribute": "email_domain",
-                        "operator": "equals",
-                        "value": "@acme.com",
+                        "logical_operator": "AND",
+                        "conditions": [
+                            {
+                                "attribute": "user.email",
+                                "operator": "ends_with",
+                                "value": "@acme.com",
+                            }
+                        ],
                     },
                 ],
             },

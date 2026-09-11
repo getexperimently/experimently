@@ -161,15 +161,43 @@ class AssignmentRequest(BaseModel):
 
 
 class VariantAssignmentResponse(BaseModel):
-    """Response for POST /tracking/assign: the variant a user was assigned to."""
+    """Response for POST /tracking/assign: the variant a user was assigned to.
+
+    Users that are not eligible (global holdout, mutual exclusion group or
+    targeting rules) still get HTTP 200 with the experiment's control variant
+    so SDKs render the default experience; ``assigned`` is ``False`` and
+    ``reason`` says why.  No assignment or exposure is recorded for them.
+    """
     experiment_key: str
     user_id: str
     variant_id: str
     variant_name: str
     is_control: bool = False
     configuration: Optional[Dict[str, Any]] = None
+    assigned: bool = Field(
+        True,
+        description="False when the user was not enrolled; the control variant is returned",
+    )
+    reason: str = Field(
+        "assigned",
+        description="assigned | holdout | mutual_exclusion | targeting",
+    )
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(
+        from_attributes=True,
+        json_schema_extra={
+            "example": {
+                "experiment_key": "button-color-test",
+                "user_id": "user-123",
+                "variant_id": "7b0a1a2e-4c3d-4f5e-8a9b-0c1d2e3f4a5b",
+                "variant_name": "control",
+                "is_control": True,
+                "configuration": {"color": "blue"},
+                "assigned": False,
+                "reason": "holdout",
+            }
+        },
+    )
 
 
 class EventRequest(BaseModel):

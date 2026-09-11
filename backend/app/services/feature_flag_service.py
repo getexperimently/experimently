@@ -11,6 +11,11 @@ from uuid import UUID
 from sqlalchemy import func, and_, or_, desc
 from sqlalchemy.orm import Session, joinedload
 
+from backend.app.core.targeting_adapter import (
+    expand_context,
+    match_targeting_rule,
+    normalise_targeting_rules,
+)
 from backend.app.models.feature_flag import FeatureFlag, FeatureFlagStatus
 from backend.app.schemas.feature_flag import FeatureFlagCreate, FeatureFlagUpdate
 from backend.app.services.metrics_service import MetricsService
@@ -18,6 +23,16 @@ from backend.app.schemas.metrics import ErrorLogCreate
 
 
 logger = logging.getLogger(__name__)
+
+# Reasons reported by ``evaluate_flag_detailed``:
+#   targeting_rule - a targeting rule matched; its rollout % decided
+#   rollout        - no rule matched (or none defined); the global rollout % decided
+#   inactive       - the flag is not ACTIVE
+#   error          - evaluation raised; the flag defaulted to off
+REASON_TARGETING_RULE = "targeting_rule"
+REASON_ROLLOUT = "rollout"
+REASON_INACTIVE = "inactive"
+REASON_ERROR = "error"
 
 
 class FeatureFlagService:
@@ -254,12 +269,45 @@ class FeatureFlagService:
         Returns:
             Boolean indicating if the flag is enabled for this user
         """
+        return self.evaluate_flag_detailed(flag, user_id, context)["enabled"]
+
+    def evaluate_flag_detailed(
+        self, flag: FeatureFlag, user_id: str, context: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        Evaluate a feature flag for a user and explain the outcome.
+
+        Targeting rules are honoured in every stored shape:
+
+        * dashboard editor shape (``{"logical_operator", "groups": [...]}``)
+          and native ``TargetingRules`` — converted by
+          :mod:`backend.app.core.targeting_adapter` and matched by the Enhanced
+          Rules Engine against ``expand_context(context)`` (dotted keys plus
+          ``user.``/``device.``/``app.`` aliases); the first matching rule's
+          ``rollout_percentage`` decides, using the same ``user_id:flag.key``
+          hash as the global rollout;
+        * legacy list shape (``[{"type": "user_id"|"context", ...}]``) —
+          evaluated by :meth:`_evaluate_rule` exactly as before.
+
+        When no rule matches (or the rules cannot be interpreted) the flag's
+        global ``rollout_percentage`` decides.
+
+        Args:
+            flag: Feature flag model object
+            user_id: ID of the user
+            context: Optional context data for rule evaluation
+
+        Returns:
+            ``{"enabled": bool, "reason": "targeting_rule" | "rollout" |
+            "inactive" | "error", "rule_id": Optional[str]}``
+        """
         # Track evaluation time for latency metrics
         start_time = time.time()
 
         # Initialize tracking variables
-        targeting_rule_id = None
+        targeting_rule_id: Optional[str] = None
         result = False
+        reason = REASON_ROLLOUT
         error = None
 
         try:
@@ -269,33 +317,19 @@ class FeatureFlagService:
             # but some code paths store the raw string value.
             if flag.status not in (FeatureFlagStatus.ACTIVE, FeatureFlagStatus.ACTIVE.value):
                 result = False
-                return result
-
-            # If flag has no rules, use the default value
-            if not flag.targeting_rules or len(flag.targeting_rules) == 0:
-                result = self._evaluate_percentage_rollout(flag, user_id)
-                return result
-
-            # Evaluate each rule
-            context = context or {}
-
-            # Extract rules from targeting_rules field (which is a JSONB field)
-            rules = flag.targeting_rules
-
-            if isinstance(rules, list):
-                for i, rule in enumerate(rules):
-                    rule_id = rule.get("id", f"rule_{i}")
-                    if self._evaluate_rule(rule, user_id, context):
-                        # If rule matches, use its rollout percentage
-                        targeting_rule_id = rule_id
-                        result = self._evaluate_percentage_rollout(
-                            flag, user_id, rule.get("percentage", 100)
-                        )
-                        return result
-
-            # If no rules match, use the default value
-            result = self._evaluate_percentage_rollout(flag, user_id)
-            return result
+                reason = REASON_INACTIVE
+            else:
+                matched = self._match_targeting_rule(flag, user_id, context or {})
+                if matched is not None:
+                    targeting_rule_id, rule_percentage = matched
+                    reason = REASON_TARGETING_RULE
+                    result = self._evaluate_percentage_rollout(
+                        flag, user_id, rule_percentage
+                    )
+                else:
+                    # No rules, no match, or an uninterpretable shape: global rollout
+                    reason = REASON_ROLLOUT
+                    result = self._evaluate_percentage_rollout(flag, user_id)
 
         except Exception as e:
             # Log and record the error
@@ -304,7 +338,7 @@ class FeatureFlagService:
 
             # Default behavior on error is to return False
             result = False
-            return result
+            reason = REASON_ERROR
 
         finally:
             # Calculate latency
@@ -337,6 +371,43 @@ class FeatureFlagService:
             except Exception as metrics_error:
                 # Don't let metrics collection errors affect flag evaluation
                 logger.error(f"Failed to record metrics: {str(metrics_error)}")
+
+        return {"enabled": result, "reason": reason, "rule_id": targeting_rule_id}
+
+    def _match_targeting_rule(
+        self, flag: FeatureFlag, user_id: str, context: Dict[str, Any]
+    ) -> Optional[Tuple[str, int]]:
+        """
+        Find the first targeting rule of ``flag`` that matches ``user_id``/``context``.
+
+        Returns:
+            ``(rule_id, rollout_percentage)`` for the matching rule, or ``None``
+            when the flag has no rules, none match, or the stored shape cannot
+            be interpreted (the caller then applies the global rollout).
+        """
+        rules = flag.targeting_rules
+        if not rules:
+            return None
+
+        # Legacy list shape — evaluated in-service, unchanged.
+        if isinstance(rules, list):
+            for i, rule in enumerate(rules):
+                if not isinstance(rule, dict):
+                    continue
+                rule_id = str(rule.get("id", f"rule_{i}"))
+                if self._evaluate_rule(rule, user_id, context):
+                    percentage = rule.get("percentage", 100)
+                    return rule_id, 100 if percentage is None else int(percentage)
+            return None
+
+        # Dashboard / native shapes — Enhanced Rules Engine.
+        native_rules = normalise_targeting_rules(rules)
+        if native_rules is None:
+            return None
+        matched = match_targeting_rule(native_rules, expand_context(context))
+        if matched is None:
+            return None
+        return matched.id, int(matched.rollout_percentage)
 
     def _evaluate_rule(
         self, rule: Dict[str, Any], user_id: str, context: Dict[str, Any]

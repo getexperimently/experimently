@@ -36,6 +36,11 @@ class TestCorsOriginsSettings:
 
         assert "http://localhost:3200" in DevSettings(_env_file=None).CORS_ORIGINS
 
+    def test_dev_settings_default_allows_streampulse_port(self):
+        from backend.app.core.config import DevSettings
+
+        assert "http://localhost:3300" in DevSettings(_env_file=None).CORS_ORIGINS
+
     def test_json_list_is_still_accepted(self, monkeypatch):
         monkeypatch.setenv("CORS_ORIGINS", '["http://a.example", "http://b.example"]')
         settings = Settings(_env_file=None)

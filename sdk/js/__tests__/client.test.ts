@@ -5,6 +5,9 @@ import type { AssignResponse, ClientConfig, FlagEvaluateResponse, UserContext } 
 const baseConfig: ClientConfig = { apiUrl: 'https://api.example.com', apiKey: 'test-api-key' };
 
 const user: UserContext = { userId: 'user-123', attributes: { device: 'mobile', country: 'US' } };
+const plainUser: UserContext = { userId: 'user-123' };
+/** `encodeURIComponent(JSON.stringify(user.attributes))` */
+const userContext = '%7B%22device%22%3A%22mobile%22%2C%22country%22%3A%22US%22%7D';
 
 const expectedHeaders = {
   'X-API-Key': 'test-api-key',
@@ -105,7 +108,7 @@ describe('constructor', () => {
   it('strips trailing slashes from apiUrl', async () => {
     const fetchMock = mockFetch(flagOn);
     const client = new ExperimentationClient({ ...baseConfig, apiUrl: 'https://api.example.com//' });
-    await client.evaluateFlag('my-flag', user);
+    await client.evaluateFlag('my-flag', plainUser);
     expect(call(fetchMock).url).toBe('https://api.example.com/api/v1/feature-flags/evaluate/my-flag?user_id=user-123');
   });
 
@@ -267,13 +270,90 @@ describe('evaluateFlag', () => {
   it('GETs /api/v1/feature-flags/evaluate/{key}?user_id=… with the contract headers and no body', async () => {
     const fetchMock = mockFetch(flagOn);
     const client = new ExperimentationClient(baseConfig);
-    await client.evaluateFlag('my-flag', user);
+    await client.evaluateFlag('my-flag', plainUser);
 
     const { url, init } = call(fetchMock);
     expect(url).toBe('https://api.example.com/api/v1/feature-flags/evaluate/my-flag?user_id=user-123');
     expect(init.method).toBe('GET');
     expect(init.headers).toEqual(expectedHeaders);
     expect(init.body).toBeUndefined();
+  });
+
+  it('appends context=<url-encoded JSON of user.attributes> when the user has attributes', async () => {
+    const fetchMock = mockFetch(flagOn);
+    const client = new ExperimentationClient(baseConfig);
+    await client.evaluateFlag('my-flag', user);
+
+    const { url, init } = call(fetchMock);
+    expect(url).toBe(`https://api.example.com/api/v1/feature-flags/evaluate/my-flag?user_id=user-123&context=${userContext}`);
+    expect(userContext).toBe('%7B%22device%22%3A%22mobile%22%2C%22country%22%3A%22US%22%7D');
+    expect(init.method).toBe('GET');
+    expect(init.body).toBeUndefined();
+  });
+
+  it('the context parameter round-trips to the original attributes', async () => {
+    const fetchMock = mockFetch(flagOn);
+    const client = new ExperimentationClient(baseConfig);
+    const attributes = { os: 'iOS', os_version: '17.4.0', tier: 'premium', employee: false, app: { version: '3.2.1' } };
+    await client.evaluateFlag('my-flag', { userId: 'user-123', attributes });
+
+    const query = new URL(call(fetchMock).url).searchParams;
+    expect(query.get('user_id')).toBe('user-123');
+    expect(JSON.parse(query.get('context')!)).toEqual(attributes);
+  });
+
+  it('omits context when attributes is an empty object', async () => {
+    const fetchMock = mockFetch(flagOn);
+    const client = new ExperimentationClient(baseConfig);
+    await client.evaluateFlag('my-flag', { userId: 'user-123', attributes: {} });
+    expect(call(fetchMock).url).toBe('https://api.example.com/api/v1/feature-flags/evaluate/my-flag?user_id=user-123');
+  });
+
+  it('URL-encodes flag key, user id and context together', async () => {
+    const fetchMock = mockFetch(flagOn);
+    const client = new ExperimentationClient(baseConfig);
+    await client.evaluateFlag('my flag/key', { userId: 'user a/b@c', attributes: { q: 'a&b=c' } });
+    expect(call(fetchMock).url).toBe(
+      'https://api.example.com/api/v1/feature-flags/evaluate/my%20flag%2Fkey?user_id=user%20a%2Fb%40c&context=%7B%22q%22%3A%22a%26b%3Dc%22%7D'
+    );
+  });
+
+  it('exposes the server reason when the response carries one', async () => {
+    mockFetch({ ...flagOn, reason: 'targeting_rule' });
+    const client = new ExperimentationClient(baseConfig);
+    await expect(client.evaluateFlag('my-flag', user)).resolves.toEqual({
+      key: 'my-flag',
+      enabled: true,
+      config: null,
+      reason: 'targeting_rule',
+    });
+  });
+
+  it('leaves reason undefined when the server omits it (older servers)', async () => {
+    mockFetch(flagOn);
+    const client = new ExperimentationClient(baseConfig);
+    const evaluation = await client.evaluateFlag('my-flag', user);
+    expect(evaluation.reason).toBeUndefined();
+    expect(evaluation).not.toHaveProperty('reason');
+  });
+
+  it('ignores a non-string reason', async () => {
+    mockFetch({ ...flagOff, reason: 7 });
+    const client = new ExperimentationClient(baseConfig);
+    await expect(client.evaluateFlag('my-flag', user)).resolves.toEqual({ key: 'my-flag', enabled: false, config: null });
+  });
+
+  it('is cached by user + flag only: changed attributes hit the cache until clearCache', async () => {
+    const fetchMock = mockFetch(flagOn);
+    const client = new ExperimentationClient(baseConfig);
+    await client.evaluateFlag('my-flag', { userId: 'user-123', attributes: { country: 'US' } });
+    await client.evaluateFlag('my-flag', { userId: 'user-123', attributes: { country: 'DE' } });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    client.clearCache();
+    await client.evaluateFlag('my-flag', { userId: 'user-123', attributes: { country: 'DE' } });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(call(fetchMock, 1).url).toContain('&context=%7B%22country%22%3A%22DE%22%7D');
   });
 
   it('URL-encodes the flag key and the user id', async () => {
@@ -401,6 +481,20 @@ describe('getAllFlags', () => {
     const { url, init } = call(fetchMock);
     expect(url).toBe('https://api.example.com/api/v1/feature-flags/user/user%20a');
     expect(init.method).toBe('GET');
+  });
+
+  it('sends attributes as ?context=<url-encoded JSON> when given', async () => {
+    const fetchMock = mockFetch({ new_search: true });
+    const client = new ExperimentationClient(baseConfig);
+    await client.getAllFlags('user a', { device: 'mobile', country: 'US' });
+    expect(call(fetchMock).url).toBe(`https://api.example.com/api/v1/feature-flags/user/user%20a?context=${userContext}`);
+  });
+
+  it('omits context for an empty attributes object', async () => {
+    const fetchMock = mockFetch({ new_search: true });
+    const client = new ExperimentationClient(baseConfig);
+    await client.getAllFlags('user-123', {});
+    expect(call(fetchMock).url).toBe('https://api.example.com/api/v1/feature-flags/user/user-123');
   });
 
   it('throws on a non-2xx response and does not populate the evaluation cache', async () => {
