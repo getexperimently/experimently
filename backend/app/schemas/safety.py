@@ -3,7 +3,9 @@ Schemas for safety monitoring and rollback functionality.
 """
 
 from typing import Dict, List, Optional, Any
-from pydantic import BaseModel, Field, UUID4
+from uuid import UUID
+
+from pydantic import BaseModel, ConfigDict, Field
 from datetime import datetime
 from enum import Enum
 
@@ -54,17 +56,16 @@ class SafetySettingsUpdate(SafetySettingsBase):
 
 class SafetySettingsResponse(SafetySettingsBase):
     """Response schema for safety settings."""
-    id: UUID4
+    id: UUID
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class FeatureFlagSafetyConfigBase(BaseModel):
     """Base schema for feature flag safety configuration."""
-    feature_flag_id: UUID4
+    feature_flag_id: UUID
     enabled: bool = Field(True, description="Whether safety monitoring is enabled for this feature flag")
     metrics: Dict[str, MetricThreshold] = Field(
         {}, description="Metrics to monitor with thresholds for this feature flag"
@@ -94,12 +95,11 @@ class FeatureFlagSafetyConfigUpdate(BaseModel):
 
 class FeatureFlagSafetyConfigResponse(FeatureFlagSafetyConfigBase):
     """Response schema for feature flag safety configuration."""
-    id: UUID4
+    id: UUID
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class MetricValue(BaseModel):
@@ -111,7 +111,7 @@ class MetricValue(BaseModel):
 
 class SafetyCheckResponse(BaseModel):
     """Response schema for safety check."""
-    feature_flag_id: UUID4
+    feature_flag_id: UUID
     is_healthy: bool
     metrics: List[MetricStatus]
     last_checked: datetime = Field(default_factory=datetime.utcnow)
@@ -120,7 +120,7 @@ class SafetyCheckResponse(BaseModel):
 
 class SafetyRollbackRecordBase(BaseModel):
     """Base schema for safety rollback record."""
-    feature_flag_id: UUID4
+    feature_flag_id: UUID
     trigger_type: str = Field(..., description="Type of trigger: 'automatic', 'manual', 'scheduled'")
     trigger_reason: str = Field(..., description="Reason for the rollback")
     previous_percentage: int
@@ -134,23 +134,23 @@ class SafetyRollbackRecordCreate(SafetyRollbackRecordBase):
 
 class SafetyRollbackRecordResponse(SafetyRollbackRecordBase):
     """Response schema for safety rollback record."""
-    id: UUID4
+    id: UUID
+    safety_config_id: UUID
     created_at: datetime
     success: bool
-    executed_by_user_id: UUID4
+    executed_by_user_id: Optional[UUID] = None  # NULL for automatic rollbacks
 
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class RollbackResponse(BaseModel):
     """Response schema for rollback operation."""
     success: bool
-    feature_flag_id: UUID4
+    feature_flag_id: UUID
     message: str
     trigger_type: Optional[str] = None
     previous_percentage: Optional[int] = None
     new_percentage: Optional[int] = None
-    rollback_record_id: Optional[UUID4] = None
+    rollback_record_id: Optional[UUID] = None
     timestamp: datetime = Field(default_factory=datetime.utcnow)
     details: Optional[Dict[str, Any]] = None

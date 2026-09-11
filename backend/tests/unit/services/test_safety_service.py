@@ -56,7 +56,7 @@ class TestSafetyService:
         mock_response = MagicMock(spec=SafetySettingsResponse)
 
         # Mock the from_orm method
-        with patch.object(SafetySettingsResponse, 'from_orm', return_value=mock_response):
+        with patch.object(SafetySettingsResponse, 'model_validate', return_value=mock_response):
             # Call the async method
             result = await self.safety_service.async_get_safety_settings()
 
@@ -106,7 +106,7 @@ class TestSafetyService:
         with patch("backend.app.models.safety.SafetySettings", return_value=mock_settings):
             # Mock the from_orm method
             mock_response = MagicMock(spec=SafetySettingsResponse)
-            with patch.object(SafetySettingsResponse, 'from_orm', return_value=mock_response):
+            with patch.object(SafetySettingsResponse, 'model_validate', return_value=mock_response):
                 # Call the method
                 result = await self.safety_service.create_or_update_safety_settings(data)
 
@@ -166,7 +166,7 @@ class TestSafetyService:
 
         # Mock the from_orm method
         mock_response = MagicMock(spec=FeatureFlagSafetyConfigResponse)
-        with patch.object(FeatureFlagSafetyConfigResponse, 'from_orm', return_value=mock_response):
+        with patch.object(FeatureFlagSafetyConfigResponse, 'model_validate', return_value=mock_response):
             # Call the method
             result = await self.safety_service.async_get_feature_flag_safety_config(self.feature_flag_id)
 
@@ -208,7 +208,7 @@ class TestSafetyService:
         # Mock the constructor and from_orm
         with patch("backend.app.models.safety.FeatureFlagSafetyConfig", return_value=mock_config):
             mock_response = MagicMock(spec=FeatureFlagSafetyConfigResponse)
-            with patch.object(FeatureFlagSafetyConfigResponse, 'from_orm', return_value=mock_response):
+            with patch.object(FeatureFlagSafetyConfigResponse, 'model_validate', return_value=mock_response):
                 # Call the method
                 result = await self.safety_service.create_or_update_feature_flag_safety_config(
                     self.feature_flag_id, config_data
@@ -226,6 +226,8 @@ class TestSafetyService:
         mock_feature_flag.rollout_percentage = 50
         mock_feature_flag.key = "test-flag"
         self.db.query.return_value.filter.return_value.first.return_value = mock_feature_flag
+        # execute_rollback locks the row (`with_for_update`) before updating it
+        self.db.query.return_value.filter.return_value.with_for_update.return_value.first.return_value = mock_feature_flag
 
         # Patch the RollbackResponse creation - we'll use the actual class but control the validation
         with patch.object(RollbackResponse, 'model_validate',

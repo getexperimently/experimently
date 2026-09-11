@@ -53,7 +53,12 @@ class AnalysisService:
             return datetime.fromisoformat(value.replace("Z", "+00:00"))
         raise ValueError(f"Cannot parse datetime from {type(value)}: {value!r}")
 
-    def get_experiment_results(self, experiment_id: Union[str, UUID]) -> Dict[str, Any]:
+    def get_experiment_results(
+        self,
+        experiment_id: Union[str, UUID],
+        confidence_level: float = 0.95,
+        correction_method: str = "none",
+    ) -> Dict[str, Any]:
         """
         Get comprehensive results for an experiment.
 
@@ -134,19 +139,221 @@ class AnalysisService:
                 logger.warning("Bayesian analysis failed (non-critical): %s", exc)
 
         # Return formatted results
+        # Schema-shaped results for the analytics API (schemas/results.py).
+        alpha = 1.0 - confidence_level
+        metrics = [
+            self._to_metric_result(metric, raw, alpha, correction_method)
+            for metric, raw in zip(experiment.metric_definitions, metrics_results)
+        ]
+        summary.update(self._summarise_decision(experiment, metrics))
+        sample_size_adequate = self._sample_size_adequate(experiment, metrics_results)
+
         return {
             "experiment_id": str(experiment_id),
             "experiment_name": experiment.name,
             "status": (
                 experiment.status.value
                 if hasattr(experiment.status, "value")
-                else experiment.status
+                else str(experiment.status)
             ),
             "start_date": experiment.start_date,
             "end_date": experiment.end_date,
+            "confidence_level": confidence_level,
+            "correction_method": correction_method,
+            "sample_size_adequate": sample_size_adequate,
+            "computed_at": datetime.now(timezone.utc),
+            # Legacy per-metric dicts (variant_results / conversion_rate ...)
             "metrics_results": metrics_results,
+            # Schema-shaped per-metric results
+            "metrics": metrics,
             "summary": summary,
             "bayesian_results": bayesian_results,
+        }
+
+    # ------------------------------------------------------------------
+    # Mapping to the analytics results schema (schemas/results.py)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _adjusted_p_values(p_values: List[Optional[float]], method: str) -> List[Optional[float]]:
+        """Multiple-comparison correction across the treatment variants of one metric."""
+        valid = [(i, p) for i, p in enumerate(p_values) if p is not None]
+        adjusted: List[Optional[float]] = [None] * len(p_values)
+        if not valid or method == "none":
+            return adjusted
+        k = len(valid)
+        if method == "bonferroni":
+            for i, p in valid:
+                adjusted[i] = min(1.0, p * k)
+            return adjusted
+        if method == "benjamini_hochberg":
+            ordered = sorted(valid, key=lambda ip: ip[1])
+            running = 1.0
+            for rank in range(k, 0, -1):
+                i, p = ordered[rank - 1]
+                running = min(running, p * k / rank)
+                adjusted[i] = min(1.0, running)
+            return adjusted
+        return adjusted
+
+    def _to_metric_result(
+        self, metric: Metric, raw: Dict[str, Any], alpha: float, correction_method: str
+    ) -> Dict[str, Any]:
+        """Convert a legacy calculate_metric_results() dict into MetricResult shape."""
+        control = next((v for v in raw["variant_results"] if v["is_control"]), None)
+        control_rate = (control["conversion_rate"] / 100.0) if control else 0.0
+        treatments = [v for v in raw["variant_results"] if not v["is_control"]]
+        adjusted = self._adjusted_p_values([v.get("p_value") for v in treatments], correction_method)
+        adjusted_by_id = {v["variant_id"]: a for v, a in zip(treatments, adjusted)}
+
+        variants: List[Dict[str, Any]] = []
+        for v in raw["variant_results"]:
+            rate = v["conversion_rate"] / 100.0
+            n = v["sample_size"]
+            std_dev = math.sqrt(rate * (1 - rate)) if n > 0 else None
+            ci_low, ci_high = v["confidence_interval"]
+            entry: Dict[str, Any] = {
+                "variant_id": v["variant_id"],
+                "variant_name": v["variant_name"],
+                "is_control": v["is_control"],
+                "sample_size": n,
+                "conversions": v["conversions"],
+                "mean": rate,
+                "std_dev": std_dev,
+                "confidence_interval": (ci_low / 100.0, ci_high / 100.0),
+                "p_value": None,
+                "adjusted_p_value": None,
+                "is_significant": False,
+                "effect_size": None,
+                "effect_size_label": None,
+                "relative_improvement_pct": None,
+                "power": None,
+                "statistical_test_used": None,
+            }
+            if not v["is_control"]:
+                p_value = v.get("p_value")
+                adj = adjusted_by_id.get(v["variant_id"])
+                decisive = adj if adj is not None else p_value
+                improvement = v.get("relative_improvement")
+                if improvement is not None and not math.isfinite(improvement):
+                    improvement = None
+                effect = None
+                if n > 0 and control and control["sample_size"] > 0:
+                    # Cohen's h for two proportions
+                    effect = 2 * math.asin(math.sqrt(rate)) - 2 * math.asin(math.sqrt(control_rate))
+                power = None
+                if effect is not None and control and control["sample_size"] > 0 and n > 0:
+                    try:
+                        from statsmodels.stats.power import NormalIndPower
+
+                        power = float(
+                            NormalIndPower().power(
+                                effect_size=abs(effect),
+                                nobs1=n,
+                                alpha=alpha,
+                                ratio=control["sample_size"] / n,
+                            )
+                        )
+                    except Exception:
+                        power = None
+                entry.update(
+                    p_value=p_value,
+                    adjusted_p_value=adj,
+                    is_significant=bool(decisive is not None and decisive < alpha),
+                    effect_size=effect,
+                    effect_size_label=self._effect_size_label(abs(effect)) if effect is not None else None,
+                    relative_improvement_pct=improvement,
+                    power=power,
+                    statistical_test_used="fisher_exact" if p_value is not None else None,
+                )
+            variants.append(entry)
+
+        winners = [
+            v for v in variants
+            if not v["is_control"] and v["is_significant"]
+            and (v["relative_improvement_pct"] or 0) > 0
+        ]
+        winner = max(winners, key=lambda v: v["mean"]) if winners else None
+        metric_type = metric.metric_type.value if hasattr(metric.metric_type, "value") else str(metric.metric_type)
+        return {
+            "metric_id": str(metric.id),
+            "metric_name": metric.name,
+            "metric_type": metric_type,
+            "is_primary": bool(metric.is_primary),
+            "variants": variants,
+            "has_significant_result": any(v["is_significant"] for v in variants),
+            "winning_variant_id": winner["variant_id"] if winner else None,
+        }
+
+    @staticmethod
+    def _sample_size_adequate(experiment: Experiment, metrics_results: List[Dict[str, Any]]) -> bool:
+        """True when every variant meets the primary metric's minimum sample size."""
+        if not metrics_results:
+            return False
+        primary = next((m for m in experiment.metric_definitions if m.is_primary), None)
+        minimum = int(getattr(primary, "minimum_sample_size", None) or 100)
+        raw = next(
+            (r for r in metrics_results if primary and r["metric_id"] == str(primary.id)),
+            metrics_results[0],
+        )
+        return all(v["sample_size"] >= minimum for v in raw["variant_results"])
+
+    @staticmethod
+    def _summarise_decision(experiment: Experiment, metrics: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """has_winner / winning_variant_id / recommendation for the summary."""
+        if not metrics:
+            return {
+                "has_winner": False,
+                "winning_variant_id": None,
+                "recommendation": "CONTINUE_TESTING",
+                "recommendation_reason": "No metrics are defined for this experiment yet.",
+            }
+        primary = next((m for m in metrics if m["is_primary"]), metrics[0])
+        winner_id = primary["winning_variant_id"]
+        if winner_id:
+            winner = next(v for v in primary["variants"] if v["variant_id"] == winner_id)
+            pct = winner["relative_improvement_pct"]
+            p = winner["adjusted_p_value"] if winner["adjusted_p_value"] is not None else winner["p_value"]
+            reason = (
+                f"{winner['variant_name']} shows "
+                f"{pct:.1f}% improvement on {primary['metric_name']} (p={p:.4f})."
+                if pct is not None and p is not None
+                else f"{winner['variant_name']} is significantly better on {primary['metric_name']}."
+            )
+            return {
+                "has_winner": True,
+                "winning_variant_id": winner_id,
+                "recommendation": "SHIP_VARIANT",
+                "recommendation_reason": reason,
+            }
+        treatments = [v for v in primary["variants"] if not v["is_control"]]
+        if treatments and all(
+            v["is_significant"] and (v["relative_improvement_pct"] or 0) < 0 for v in treatments
+        ):
+            return {
+                "has_winner": False,
+                "winning_variant_id": None,
+                "recommendation": "KEEP_CONTROL",
+                "recommendation_reason": (
+                    f"Every treatment is significantly worse than control on {primary['metric_name']}."
+                ),
+            }
+        total = sum(v["sample_size"] for v in primary["variants"])
+        if total == 0:
+            return {
+                "has_winner": False,
+                "winning_variant_id": None,
+                "recommendation": "CONTINUE_TESTING",
+                "recommendation_reason": "No users have been assigned yet.",
+            }
+        return {
+            "has_winner": False,
+            "winning_variant_id": None,
+            "recommendation": "CONTINUE_TESTING",
+            "recommendation_reason": (
+                f"No statistically significant difference on {primary['metric_name']} yet "
+                f"({total} users assigned)."
+            ),
         }
 
     def calculate_metric_results(
