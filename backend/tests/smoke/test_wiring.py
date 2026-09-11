@@ -405,6 +405,29 @@ class TestSecurityHeaders:
 # 5. App startup — all routers register without import errors
 # ===========================================================================
 
+def _iter_http_routes(app):
+    """Yield ``(path, methods)`` for every HTTP route the app serves.
+
+    FastAPI >= 0.141 no longer flattens ``include_router`` calls into
+    ``app.routes``; it keeps a lazy ``_IncludedRouter`` entry whose
+    ``effective_route_contexts`` carry the fully prefixed paths. Older
+    versions expose plain ``APIRoute`` objects, so both shapes are handled.
+    """
+    from fastapi.routing import APIRoute
+
+    for route in app.routes:
+        if isinstance(route, APIRoute):
+            yield route.path, route.methods
+            continue
+        contexts = getattr(route, "effective_route_contexts", None)
+        if contexts is not None:
+            contexts = contexts() if callable(contexts) else contexts
+            for ctx in contexts:
+                yield ctx.path, getattr(ctx, "methods", None)
+        elif hasattr(route, "path"):
+            yield route.path, getattr(route, "methods", None)
+
+
 class TestAppStartup:
     """
     Verify the app imports cleanly and all routers are mounted.
@@ -416,7 +439,7 @@ class TestAppStartup:
         assert app is not None
 
     def test_all_expected_route_prefixes_exist(self, app):
-        routes = {route.path for route in app.routes}
+        routes = {path for path, _ in _iter_http_routes(app)}
         expected_prefixes = [
             "/api/v1/experiments",
             "/api/v1/feature-flags",
@@ -488,14 +511,12 @@ class TestAppStartup:
         flagging FastAPI's own redirect mechanism as duplicates.
         """
         from collections import Counter
-        from fastapi.routing import APIRoute
 
         # Key on (path, frozenset(methods)) — same path with different HTTP verbs is normal
         route_keys = [
-            (route.path, frozenset(route.methods or []))
-            for route in app.routes
-            if isinstance(route, APIRoute)
-            and not any(c in route.path for c in ["{", "}"])
+            (path, frozenset(methods or []))
+            for path, methods in _iter_http_routes(app)
+            if not any(c in path for c in ["{", "}"])
         ]
         counts = Counter(route_keys)
         duplicates = {f"{p} [{' '.join(sorted(m))}]": n for (p, m), n in counts.items() if n > 1}
