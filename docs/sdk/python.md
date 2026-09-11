@@ -41,11 +41,11 @@ if variant == "treatment":
 assignment = client.get_assignment("checkout_flow", "user-123")   # raises on failure
 assignment.variant_name, assignment.is_control, assignment.configuration
 
-# Feature flags (GET /api/v1/feature-flags/evaluate/{key}?user_id=…)
-if client.is_feature_enabled("new_search", "user-123"):
+# Feature flags (GET /api/v1/feature-flags/evaluate/{key}?user_id=…&context=<url-encoded attributes>)
+if client.is_feature_enabled("new_search", "user-123", user_attributes={"plan": "pro"}):
     use_new_search()
-flag = client.get_feature_flag("new_search", "user-123")          # FlagEvaluation(key, enabled, config)
-flags = client.get_all_flags("user-123")                           # {"new_search": True, ...}
+flag = client.get_feature_flag("new_search", "user-123")          # FlagEvaluation(key, enabled, config, reason)
+flags = client.get_all_flags("user-123", {"plan": "pro"})          # {"new_search": True, ...}
 
 # Tracking (never raises)
 client.track("user-123", "purchase", event_value=49.99, experiment_key="checkout_flow")
@@ -77,9 +77,9 @@ is in.
 |---|---|---|
 | `get_assignment(experiment_key, user_id, user_attributes=None)` | `Assignment(experiment_key, user_id, variant_id, variant_name, is_control, configuration)` | raises `ExperimentationError` (`status == 404` when the experiment is not ACTIVE or unknown) |
 | `get_variant(experiment_key, user_id, user_attributes=None)` | `str` — the variant name | returns `default_variant` (`"control"`) |
-| `get_feature_flag(flag_key, user_id)` | `FlagEvaluation(key, enabled, config)` | raises `ExperimentationError` (`status == 404` when the flag is not ACTIVE or unknown) |
-| `is_feature_enabled(flag_key, user_id)` | `bool` | returns `False` |
-| `get_all_flags(user_id)` | `dict[str, bool]` (not cached) | raises `ExperimentationError` |
+| `get_feature_flag(flag_key, user_id, user_attributes=None)` | `FlagEvaluation(key, enabled, config, reason)` | raises `ExperimentationError` (`status == 404` when the flag is not ACTIVE or unknown) |
+| `is_feature_enabled(flag_key, user_id, user_attributes=None)` | `bool` | returns `False` |
+| `get_all_flags(user_id, user_attributes=None)` | `dict[str, bool]` (not cached) | raises `ExperimentationError` |
 | `track(user_id, event_name, event_value=None, properties=None, experiment_key=None, feature_flag_key=None, event_type=None, timestamp=None)` | `bool` — `True` when the server accepted it | never raises; `False` on failure or when nothing was sent |
 | `track_batch(events)` | `BatchResult(success_count, failure_count, errors)`, `.ok` | never raises; sends chunks of 100, a failed chunk counts all its events as failures |
 | `get_assignments(user_id, active_only=True)` | `list[dict]` — the user's assignments from the server (not cached) | raises `ExperimentationError` |
@@ -89,7 +89,22 @@ is in.
 
 `Assignment` and `FlagEvaluation` are frozen dataclasses. `ExperimentationError` carries
 `.status` (HTTP status, `None` for network errors and timeouts) and `.body` (raw response text).
-`user_attributes` is sent as `context` on assignment and is what targeting rules evaluate.
+`FlagEvaluation.reason` (`"targeting_rule"`, `"rollout"`, `"inactive"` or `"error"`) says why the
+server decided; it is `None` when the server does not send one.
+
+### Targeting context
+
+`user_attributes` is what the platform's targeting rules evaluate against. It is sent as `context`
+in the `POST /api/v1/tracking/assign` body and, when non-empty, as `context=<url-encoded JSON>`
+(compact `json.dumps(..., separators=(",", ":"))`, percent-encoded) on
+`GET /api/v1/feature-flags/evaluate/{flag_key}` and `GET /api/v1/feature-flags/user/{user_id}` —
+so a flag whose dashboard rule says `os_version semver_gte 17.0.0 AND tier equals premium` turns
+on only for matching users. Top-level keys are also reachable under `user.` / `device.` / `app.`
+aliases in rules (`country` matches `user.country`), and nested dicts flatten to dotted keys
+(`{"app": {"version": "3.2.1"}}` answers `app.version`).
+
+Attributes are assumed **stable per user**: evaluations and assignments are cached by user + key
+only, so call `clear_cache()` after changing a user's attributes.
 
 ### Caching and retries
 
@@ -122,8 +137,8 @@ Every request carries `X-API-Key: <key>`, `Content-Type: application/json` and
 | SDK call | Method and path | Body / query | Response used |
 |---|---|---|---|
 | `get_assignment`, `get_variant` | `POST /api/v1/tracking/assign` | `{experiment_key, user_id, context?}` | `{experiment_key, user_id, variant_id, variant_name, is_control, configuration}`; 404 when the experiment is not ACTIVE |
-| `get_feature_flag`, `is_feature_enabled` | `GET /api/v1/feature-flags/evaluate/{flag_key}?user_id=…` | — | `{key, enabled, config}`; 404 when the flag is not ACTIVE |
-| `get_all_flags` | `GET /api/v1/feature-flags/user/{user_id}` | — | `{"<flag_key>": bool, …}` |
+| `get_feature_flag`, `is_feature_enabled` | `GET /api/v1/feature-flags/evaluate/{flag_key}?user_id=…&context=<url-encoded JSON>` | `context` = `user_attributes` (omitted when empty) | `{key, enabled, config, reason}`; `enabled: false`, `reason: "inactive"` when the flag is not ACTIVE; 404 only for an unknown key |
+| `get_all_flags` | `GET /api/v1/feature-flags/user/{user_id}?context=<url-encoded JSON>` | `context` = `user_attributes` (omitted when empty) | `{"<flag_key>": bool, …}` |
 | `track` with a key | `POST /api/v1/tracking/track` | `{event_type, event_name, user_id, experiment_key?, feature_flag_key?, value?, metadata?, timestamp?}` | ignored |
 | `track` without keys, `track_batch` | `POST /api/v1/tracking/batch` | `{events: [<track body>, …]}` (max 100 per request) | `{success_count, failure_count, errors}` |
 | `get_assignments` | `GET /api/v1/tracking/assignments/{user_id}?active_only=true` | — | list of dicts |
@@ -179,6 +194,6 @@ Verified against a live backend: **yes (2026-09-11)** — fixtures seeded with
 
 ```bash
 source venv/bin/activate
-python -m pytest sdk/python/tests -q -o addopts="" -p no:cacheprovider   # 87 tests, HTTP is faked
+python -m pytest sdk/python/tests -q -o addopts="" -p no:cacheprovider   # 97 tests, HTTP is faked
 python -m pytest tests/sdk-contract/test_python_sdk.py -q               # cross-SDK hash golden vectors
 ```

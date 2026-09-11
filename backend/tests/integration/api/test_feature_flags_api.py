@@ -219,8 +219,9 @@ class TestFeatureFlagsGet:
 class TestFeatureFlagsEvaluateRead:
     """Evaluate endpoint read tests — read-only, no DB commits triggered."""
 
-    def test_evaluate_inactive_flag_returns_404(self, admin_client, make_feature_flag):
-        """The evaluate endpoint only finds ACTIVE flags; INACTIVE ones return 404."""
+    def test_evaluate_inactive_flag_is_off_not_404(self, admin_client, make_feature_flag):
+        """A flag that exists but is INACTIVE (kill switch) evaluates to off with
+        reason "inactive"; only an unknown key is a 404."""
         flag = make_feature_flag(
             key=unique_flag_key("eval-inactive"),
             name="Inactive Eval",
@@ -230,7 +231,9 @@ class TestFeatureFlagsEvaluateRead:
         response = admin_client.get(
             f"/api/v1/feature-flags/evaluate/{flag.key}?user_id=user-123"
         )
-        assert response.status_code == 404, response.text
+        assert response.status_code == 200, response.text
+        assert response.json()["enabled"] is False
+        assert response.json()["reason"] == "inactive"
 
     def test_evaluate_active_0pct_flag_returns_false(
         self, admin_client, make_feature_flag

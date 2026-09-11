@@ -125,6 +125,7 @@ if not cors_origins:
         "http://localhost:3000",
         "http://localhost:3001",
         "http://localhost:3200",  # ShopLab demo storefront
+        "http://localhost:3300",  # StreamPulse demo app
     ]
 
 app.add_middleware(

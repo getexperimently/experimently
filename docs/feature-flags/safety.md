@@ -11,7 +11,9 @@ Implementation: `backend/app/services/safety_service.py` (checks and rollbacks),
 
 ## What Safety Monitoring Does
 
-The safety monitor runs every 5 minutes. For every `ACTIVE` flag whose `rollout_percentage` is above 0 it:
+The safety monitor runs every 5 minutes (`SAFETY_CHECK_INTERVAL_MINUTES`; the rollout scheduler's cadence is
+`ROLLOUT_CHECK_INTERVAL_MINUTES`, default 15 — demos set both to 1). For every `ACTIVE` flag whose
+`rollout_percentage` is above 0 it:
 
 1. Loads the flag's safety configuration (or the platform default when the flag has none) and skips the flag
    if monitoring is not `enabled`.
@@ -76,7 +78,7 @@ curl -X POST http://localhost:8000/api/v1/safety/feature-flags/flag-uuid-here/co
 |-------|------|----------|-------------|
 | `enabled` | boolean | No | Whether the monitor checks this flag (default `true`) |
 | `metrics` | object | No | Map of metric name → threshold (see above). An empty map means nothing is checked |
-| `rollback_percentage` | int | No | Percentage recorded as the rollback target for this flag (default `0`). The automatic rollback currently sets the flag to `0%`; manual rollbacks take the percentage as a query parameter |
+| `rollback_percentage` | int | No | Percentage the automatic rollback sets the flag to (default `0`, i.e. fully off). Set it to e.g. `5` to fall back to an internal/canary slice instead of turning the flag off; manual rollbacks take the percentage as a query parameter |
 
 **Response** (same shape for `GET .../config`):
 
@@ -207,12 +209,17 @@ curl -X GET http://localhost:8000/api/v1/safety/feature-flags/flag-uuid-here/che
 
 When the monitor finds a flag unhealthy and `enable_automatic_rollbacks` is on, it:
 
-1. Locks the flag row and sets `rollout_percentage` to `0` (status stays `ACTIVE`)
-2. Records a `SafetyRollbackRecord` with the trigger type (`error_rate`, `latency` or `custom_metric`), the
+1. Locks the flag row and sets `rollout_percentage` to the flag's configured `rollback_percentage` (default `0`; status stays `ACTIVE`)
+2. Records a `SafetyRollbackRecord` with trigger type `automatic`, the
    metric value and threshold, the previous and target percentages, and the reason
 3. Dispatches a notification to the configured Slack channels and email addresses
 
-Users no longer receive the flag after the rollback. Investigate the root cause before re-enabling.
+Users outside the rollback percentage no longer receive the flag after the rollback. Investigate the root cause
+before re-enabling.
+
+Error metrics count both server-side evaluation failures and errors reported by clients through
+`POST /api/v1/tracking/errors` (see [Creating Feature Flags](create.md#reporting-client-side-errors)), so a crash
+behind a flag in a mobile app can trigger the same rollback.
 
 ### What Triggers a Rollback
 

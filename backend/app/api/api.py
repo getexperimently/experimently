@@ -12,6 +12,7 @@ from backend.app.api.v1.endpoints import (
     users,
     experiments,
     tracking,
+    client_errors,
     feature_flags,
     admin,
     assignments,
@@ -68,6 +69,11 @@ api_router_v1.include_router(
     experiments.router, prefix="/experiments", tags=["Experiments"]
 )
 api_router_v1.include_router(tracking.router, prefix="/tracking", tags=["Tracking"])
+# Client-side error reports (POST /tracking/errors, /tracking/errors/batch) feed
+# feature flag safety monitoring; same prefix and API-key auth as event tracking.
+api_router_v1.include_router(
+    client_errors.router, prefix="/tracking", tags=["Tracking"]
+)
 api_router_v1.include_router(
     feature_flags.router, prefix="/feature-flags", tags=["Feature Flags"]
 )
