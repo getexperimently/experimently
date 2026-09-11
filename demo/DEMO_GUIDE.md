@@ -39,6 +39,37 @@ Teardown: `./demo/setup-aws.sh --destroy`
 
 ## 20-Minute Demo Walkthrough
 
+### Scene 0 — ShopLab storefront: experiments in a real app (4 min)
+
+ShopLab is a small e-commerce site (`demo/shoplab`, http://localhost:3200) that runs five live experiments through the
+React SDK and the public tracking API — the same path a customer's app would use. `setup-local.sh` seeds it, starts it,
+and runs a traffic simulator against it so the dashboards fill up while you talk.
+
+**What to show:**
+- Open http://localhost:3200 — point at the **Experimently panel** (bottom-right): the visitor id, the variant this visitor
+  got for each experiment, and the two feature flags.
+  - "This is a real storefront calling our API with an API key. Every visitor is bucketed server-side, sticky, in one call."
+- Click **Shop the collection** (or **Watch & shop** if you got the video hero) → the panel logs `hero_cta_click`
+  - "That click just became a conversion for the hero experiment. Nothing else to wire up."
+- On **/products** change nothing — explain the sort order is a **multi-armed bandit** (`shoplab_plp_sort`): Thompson Sampling
+  moves traffic toward the algorithm with the best click rate. Click a product.
+- On the product page the **buy button** is one of four multivariate treatments (`shoplab_pdp_buy_button`). Add to cart.
+- **/checkout** is a 3-step vs one-page A/B test with CUPED enabled. Place the order → `purchase` with the order value.
+- **/search** shows a gradual-rollout flag (`shoplab_new_search`, 10% → 50% → 100%) — press **New visitor** in the panel a
+  few times to land in the 10% and see the "New search ✨" engine.
+- Switch to the dashboard (http://localhost:3100/experiments): open **shoplab_hero_banner** — results are moving because
+  the simulator is streaming visitors through the same API.
+
+**Key talking points:**
+- One SDK call per experiment, one call per event; no client-side bucketing to keep consistent
+- Bandit, multivariate, sequential, CUPED and Bayesian all running on the same storefront at once
+- Gradual rollout + kill switch (`shoplab_free_shipping_banner`) without a deploy
+
+Run pieces by hand: `python backend/scripts/seed_shoplab.py` (seeds experiments, flags, API key, 14 days of history),
+`cd demo/shoplab && npm run dev`, `python demo/shoplab/simulator/traffic.py --rate 3`. See `demo/shoplab/README.md`.
+
+---
+
 ### Scene 1 — Feature Flags (3 min)
 
 **What to show:**
@@ -177,6 +208,7 @@ Teardown: `./demo/setup-aws.sh --destroy`
 
 | Page | URL |
 |------|-----|
+| ShopLab storefront | http://localhost:3200 |
 | Home | http://localhost:3000 |
 | Feature Flags | http://localhost:3000/feature-flags |
 | Experiments | http://localhost:3000/experiments |
@@ -210,4 +242,8 @@ tail -f demo/.logs/simulator.log
 
 # Frontend
 tail -f demo/.logs/frontend.log
+
+# ShopLab storefront and its traffic simulator
+tail -f demo/.logs/shoplab.log
+tail -f demo/.logs/shoplab-simulator.log
 ```

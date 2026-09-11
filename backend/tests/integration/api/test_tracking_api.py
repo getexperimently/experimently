@@ -13,8 +13,22 @@ import uuid
 import pytest
 
 from backend.app.models.assignment import Assignment
+from backend.app.models.bandit_state import BanditState
 from backend.app.models.event import Event
-from backend.app.models.experiment import ExperimentStatus, Variant
+from backend.app.models.experiment import ExperimentStatus, ExperimentType, Variant
+
+
+def _cleanup_experiment_rows(db_session, experiment) -> None:
+    """Remove rows an experiment produced so later tests see a clean slate."""
+    db_session.rollback()
+    db_session.query(BanditState).filter(
+        BanditState.experiment_id == experiment.id
+    ).delete()
+    db_session.query(Event).filter(Event.experiment_id == experiment.id).delete()
+    db_session.query(Assignment).filter(
+        Assignment.experiment_id == experiment.id
+    ).delete()
+    db_session.commit()
 
 
 @pytest.fixture
@@ -40,11 +54,59 @@ def active_experiment(db_session, make_experiment):
     db_session.commit()
     db_session.refresh(experiment)
     yield experiment
-    # Remove rows this experiment produced so later tests see a clean slate.
-    db_session.rollback()
-    db_session.query(Event).filter(Event.experiment_id == experiment.id).delete()
-    db_session.query(Assignment).filter(Assignment.experiment_id == experiment.id).delete()
+    _cleanup_experiment_rows(db_session, experiment)
+
+
+@pytest.fixture
+def bandit_experiment(db_session, make_experiment):
+    """An ACTIVE thompson_sampling experiment with variants ``arm_a``/``arm_b``."""
+    suffix = uuid.uuid4().hex[:8]
+    experiment = make_experiment(
+        name=f"Tracking bandit {suffix}",
+        key=f"tracking-bandit-{suffix}",
+        status=ExperimentStatus.ACTIVE,
+        experiment_type=ExperimentType.BANDIT,
+        optimization_type="thompson_sampling",
+    )
+    for name, is_control in (("arm_a", True), ("arm_b", False)):
+        db_session.add(
+            Variant(
+                experiment_id=experiment.id,
+                name=name,
+                description=f"{name} arm",
+                is_control=is_control,
+                traffic_allocation=50,
+                configuration={"arm": name},
+            )
+        )
     db_session.commit()
+    db_session.refresh(experiment)
+    yield experiment
+    _cleanup_experiment_rows(db_session, experiment)
+
+
+def _set_bandit_weights(db_session, experiment, weights: dict) -> None:
+    """Upsert the BanditState row for ``experiment`` with ``weights``."""
+    state = (
+        db_session.query(BanditState)
+        .filter(BanditState.experiment_id == experiment.id)
+        .first()
+    )
+    if state is None:
+        state = BanditState(
+            experiment_id=experiment.id,
+            algorithm=experiment.optimization_type or "thompson_sampling",
+            variant_weights=weights,
+            total_pulls=0,
+        )
+        db_session.add(state)
+    else:
+        state.variant_weights = weights
+    db_session.commit()
+
+
+def _variant_by_name(experiment, name):
+    return next(v for v in experiment.variants if v.name == name)
 
 
 def _user() -> str:
@@ -52,7 +114,9 @@ def _user() -> str:
 
 
 class TestAssign:
-    def test_assigns_user_to_a_variant_and_is_sticky(self, admin_client, active_experiment):
+    def test_assigns_user_to_a_variant_and_is_sticky(
+        self, admin_client, active_experiment
+    ):
         user_id = _user()
         body = {"experiment_key": active_experiment.key, "user_id": user_id}
 
@@ -80,13 +144,159 @@ class TestAssign:
         suffix = uuid.uuid4().hex[:8]
         draft = make_experiment(name=f"Draft {suffix}", key=f"draft-{suffix}")
         resp = admin_client.post(
-            "/api/v1/tracking/assign", json={"experiment_key": draft.key, "user_id": _user()}
+            "/api/v1/tracking/assign",
+            json={"experiment_key": draft.key, "user_id": _user()},
         )
         assert resp.status_code == 404
 
 
+class TestBanditAssignment:
+    """``/tracking/assign`` honours BanditState weights for MAB experiments."""
+
+    def test_new_users_follow_bandit_weights(
+        self, admin_client, bandit_experiment, db_session
+    ):
+        arm_a = _variant_by_name(bandit_experiment, "arm_a")
+        arm_b = _variant_by_name(bandit_experiment, "arm_b")
+        _set_bandit_weights(
+            db_session, bandit_experiment, {str(arm_a.id): 1.0, str(arm_b.id): 0.0}
+        )
+
+        for _ in range(20):
+            resp = admin_client.post(
+                "/api/v1/tracking/assign",
+                json={"experiment_key": bandit_experiment.key, "user_id": _user()},
+            )
+            assert resp.status_code == 200, resp.text
+            data = resp.json()
+            assert data["variant_id"] == str(arm_a.id)
+            assert data["variant_name"] == "arm_a"
+            assert data["is_control"] is True
+
+    def test_scheduler_payload_shape_is_honoured(
+        self, admin_client, bandit_experiment, db_session
+    ):
+        """The scheduler stores ``{"weight": ..., "pulls": ...}`` per variant."""
+        arm_a = _variant_by_name(bandit_experiment, "arm_a")
+        arm_b = _variant_by_name(bandit_experiment, "arm_b")
+        _set_bandit_weights(
+            db_session,
+            bandit_experiment,
+            {
+                str(arm_a.id): {
+                    "weight": 0.0,
+                    "successes": 1,
+                    "failures": 9,
+                    "pulls": 10,
+                },
+                str(arm_b.id): {
+                    "weight": 1.0,
+                    "successes": 8,
+                    "failures": 2,
+                    "pulls": 10,
+                },
+            },
+        )
+
+        for _ in range(10):
+            resp = admin_client.post(
+                "/api/v1/tracking/assign",
+                json={"experiment_key": bandit_experiment.key, "user_id": _user()},
+            )
+            assert resp.status_code == 200, resp.text
+            assert resp.json()["variant_id"] == str(arm_b.id)
+
+    def test_existing_assignment_is_sticky_when_weights_change(
+        self, admin_client, bandit_experiment, db_session
+    ):
+        arm_a = _variant_by_name(bandit_experiment, "arm_a")
+        arm_b = _variant_by_name(bandit_experiment, "arm_b")
+        _set_bandit_weights(
+            db_session, bandit_experiment, {str(arm_a.id): 1.0, str(arm_b.id): 0.0}
+        )
+
+        user_id = _user()
+        body = {"experiment_key": bandit_experiment.key, "user_id": user_id}
+        first = admin_client.post("/api/v1/tracking/assign", json=body)
+        assert first.status_code == 200, first.text
+        assert first.json()["variant_id"] == str(arm_a.id)
+
+        # The bandit now routes all new traffic to arm_b ...
+        _set_bandit_weights(
+            db_session, bandit_experiment, {str(arm_a.id): 0.0, str(arm_b.id): 1.0}
+        )
+
+        # ... but the already-assigned user keeps arm_a
+        again = admin_client.post("/api/v1/tracking/assign", json=body)
+        assert again.status_code == 200, again.text
+        assert again.json()["variant_id"] == str(arm_a.id)
+
+        stored = (
+            db_session.query(Assignment)
+            .filter(
+                Assignment.experiment_id == bandit_experiment.id,
+                Assignment.user_id == user_id,
+            )
+            .all()
+        )
+        assert len(stored) == 1 and str(stored[0].variant_id) == str(arm_a.id)
+
+        # while a fresh user follows the new weights
+        fresh = admin_client.post(
+            "/api/v1/tracking/assign",
+            json={"experiment_key": bandit_experiment.key, "user_id": _user()},
+        )
+        assert fresh.json()["variant_id"] == str(arm_b.id)
+
+    def test_all_zero_weights_fall_back_to_default_hashing(
+        self, admin_client, bandit_experiment, db_session
+    ):
+        arm_a = _variant_by_name(bandit_experiment, "arm_a")
+        arm_b = _variant_by_name(bandit_experiment, "arm_b")
+        _set_bandit_weights(
+            db_session, bandit_experiment, {str(arm_a.id): 0.0, str(arm_b.id): 0.0}
+        )
+
+        seen = set()
+        for _ in range(40):
+            resp = admin_client.post(
+                "/api/v1/tracking/assign",
+                json={"experiment_key": bandit_experiment.key, "user_id": _user()},
+            )
+            assert resp.status_code == 200, resp.text
+            seen.add(resp.json()["variant_name"])
+        # 50/50 traffic allocation: 40 users landing on one arm is ~2^-39 likely
+        assert seen == {"arm_a", "arm_b"}
+
+    def test_fixed_allocation_ignores_bandit_state(
+        self, admin_client, active_experiment, db_session
+    ):
+        """A BanditState row on a fixed-allocation experiment changes nothing."""
+        control = _variant_by_name(active_experiment, "control")
+        treatment = _variant_by_name(active_experiment, "treatment")
+        assert (active_experiment.optimization_type or "fixed") == "fixed"
+        _set_bandit_weights(
+            db_session,
+            active_experiment,
+            {str(control.id): 0.0, str(treatment.id): 1.0},
+        )
+
+        seen = set()
+        for _ in range(40):
+            resp = admin_client.post(
+                "/api/v1/tracking/assign",
+                json={"experiment_key": active_experiment.key, "user_id": _user()},
+            )
+            assert resp.status_code == 200, resp.text
+            seen.add(resp.json()["variant_name"])
+        # Weights would have sent everyone to treatment; default hashing splits 50/50.
+        assert seen == {"control", "treatment"}
+
+
 class TestTrack:
-    def test_tracks_event_with_assigned_variant(self, admin_client, active_experiment, db_session):
+    def test_tracks_event_with_assigned_variant(
+        self, admin_client, active_experiment, db_session
+    ):
         user_id = _user()
         assigned = admin_client.post(
             "/api/v1/tracking/assign",
@@ -121,7 +331,11 @@ class TestTrack:
     def test_event_name_defaults_to_event_type(self, admin_client, active_experiment):
         resp = admin_client.post(
             "/api/v1/tracking/track",
-            json={"event_type": "page_view", "user_id": _user(), "experiment_key": active_experiment.key},
+            json={
+                "event_type": "page_view",
+                "user_id": _user(),
+                "experiment_key": active_experiment.key,
+            },
         )
         assert resp.status_code == 200, resp.text
         assert resp.json()["event_name"] == "page_view"
@@ -130,7 +344,11 @@ class TestTrack:
     def test_unknown_keys_return_404(self, admin_client):
         resp = admin_client.post(
             "/api/v1/tracking/track",
-            json={"event_type": "click", "user_id": _user(), "experiment_key": "nope-" + uuid.uuid4().hex},
+            json={
+                "event_type": "click",
+                "user_id": _user(),
+                "experiment_key": "nope-" + uuid.uuid4().hex,
+            },
         )
         assert resp.status_code == 404
 
@@ -142,15 +360,30 @@ class TestTrack:
 
 
 class TestBatch:
-    def test_reports_success_and_failure_per_event(self, admin_client, active_experiment, db_session):
+    def test_reports_success_and_failure_per_event(
+        self, admin_client, active_experiment, db_session
+    ):
         user_id = _user()
         resp = admin_client.post(
             "/api/v1/tracking/batch",
             json={
                 "events": [
-                    {"event_type": "page_view", "user_id": user_id, "experiment_key": active_experiment.key},
-                    {"event_type": "click", "user_id": user_id, "experiment_key": "missing-" + uuid.uuid4().hex},
-                    {"event_type": "add_to_cart", "user_id": user_id, "experiment_key": active_experiment.key, "value": 2},
+                    {
+                        "event_type": "page_view",
+                        "user_id": user_id,
+                        "experiment_key": active_experiment.key,
+                    },
+                    {
+                        "event_type": "click",
+                        "user_id": user_id,
+                        "experiment_key": "missing-" + uuid.uuid4().hex,
+                    },
+                    {
+                        "event_type": "add_to_cart",
+                        "user_id": user_id,
+                        "experiment_key": active_experiment.key,
+                        "value": 2,
+                    },
                 ]
             },
         )
@@ -163,15 +396,23 @@ class TestBatch:
 
         stored = (
             db_session.query(Event)
-            .filter(Event.experiment_id == active_experiment.id, Event.user_id == user_id)
+            .filter(
+                Event.experiment_id == active_experiment.id, Event.user_id == user_id
+            )
             .all()
         )
         assert sorted(e.event_type for e in stored) == ["add_to_cart", "page_view"]
 
 
 class TestEventsByIds:
-    def test_tracks_event_by_ids_and_parses_json_properties(self, admin_client, active_experiment, db_session):
-        variant = db_session.query(Variant).filter(Variant.experiment_id == active_experiment.id).first()
+    def test_tracks_event_by_ids_and_parses_json_properties(
+        self, admin_client, active_experiment, db_session
+    ):
+        variant = (
+            db_session.query(Variant)
+            .filter(Variant.experiment_id == active_experiment.id)
+            .first()
+        )
         user_id = _user()
         resp = admin_client.post(
             "/api/v1/tracking/events",
@@ -205,7 +446,12 @@ class TestEventsByIds:
     def test_rejects_invalid_experiment_id(self, admin_client):
         resp = admin_client.post(
             "/api/v1/tracking/events",
-            json={"event_type": "track", "event_name": "x", "user_id": _user(), "experiment_id": "not-a-uuid"},
+            json={
+                "event_type": "track",
+                "event_name": "x",
+                "user_id": _user(),
+                "experiment_id": "not-a-uuid",
+            },
         )
         assert resp.status_code == 422
 
@@ -219,4 +465,6 @@ class TestUserAssignments:
         )
         resp = admin_client.get(f"/api/v1/tracking/assignments/{user_id}")
         assert resp.status_code == 200, resp.text
-        assert any(a.get("experiment_id") == str(active_experiment.id) for a in resp.json())
+        assert any(
+            a.get("experiment_id") == str(active_experiment.id) for a in resp.json()
+        )
