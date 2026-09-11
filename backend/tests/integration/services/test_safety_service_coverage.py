@@ -5,141 +5,56 @@ These tests exercise SafetyService against a real Postgres database (via the
 `db_session` / `make_feature_flag` fixtures defined in
 backend/tests/integration/conftest.py). See also
 backend/tests/unit/services/test_safety_service.py (mock-based unit tests)
-and backend/tests/integration/api/test_safety_api.py (HTTP-layer tests,
-which already document two of the bugs below and work around them).
+and backend/tests/integration/api/test_safety_api.py (HTTP-layer tests).
 
-IMPORTANT - product bugs documented (not fixed) by these tests
-----------------------------------------------------------------
-While writing these tests we discovered that most of SafetyService's async
-"public" surface, and several of its sync helpers, are currently broken:
+This file previously documented a large number of product bugs in
+SafetyService (method-name shadowing, Pydantic v1 `orm_mode` vs. Pydantic
+v2 `.from_orm()`, model/schema column mismatches, an async method called
+without `await`, etc). SafetyService has since been rewritten
+(backend/app/services/safety_service.py) and the response schemas now use
+`ConfigDict(from_attributes=True)` (backend/app/schemas/safety.py), which
+fixes all of those issues. The tests below exercise the *current*,
+corrected behaviour:
 
-1. Method-name shadowing. `get_safety_settings` and
-   `get_feature_flag_safety_config` are each defined *twice* on
-   `SafetyService`: once as `@staticmethod` (taking `db` as the first
-   positional arg) near the top of the class, and again later in the class
-   body as an `async def` *instance* method (taking only `self`/
-   `self, feature_flag_id`). Because Python class bodies execute top to
-   bottom and each `def` rebinds the same name in the class namespace, the
-   later async definition completely replaces the earlier static one.
-   `SafetyService.get_safety_settings` and
-   `SafetyService.get_feature_flag_safety_config` are therefore ALWAYS the
-   async instance versions - the static implementations are unreachable
-   dead code (there is no way to invoke them through the class or an
-   instance). See `TestMethodNameShadowing`.
-
-2. `get_safety_settings` (the async instance version that wins per bug #1)
-   and `async_get_safety_settings` both build a default row via
-   `SafetySettings(enabled=True, auto_rollback_enabled=False,
-   default_metrics=[])` when none exists yet. Neither `enabled` nor
-   `auto_rollback_enabled` are real columns on the `SafetySettings` model
-   (the actual column is `enable_automatic_rollbacks`), so this always
-   raises `TypeError` whenever no settings row exists.
-
-3. `SafetySettingsResponse`/`FeatureFlagSafetyConfigResponse` use the
-   Pydantic v1 `class Config: orm_mode = True` idiom. Under the installed
-   Pydantic v2 (2.10.x), `.from_orm()` unconditionally raises
-   `PydanticUserError` ("You must set the config attribute
-   `from_attributes=True`") no matter what is passed in. Every code path
-   that reaches `.from_orm()` -
-   `get_safety_settings`/`async_get_safety_settings` (existing-row
-   branch), `create_or_update_safety_settings`,
-   `get_feature_flag_safety_config`/`async_get_feature_flag_safety_config`
-   (existing-config branch), and
-   `create_or_update_feature_flag_safety_config` - is completely
-   non-functional. Combined with bug #2, every read/write of safety
-   settings or per-flag safety config through the async API always raises,
-   and so does `check_feature_flag_safety` (which delegates to
-   `async_get_feature_flag_safety_config` internally) for any existing
-   flag.
-
-4. Side effect on failure: `create_or_update_safety_settings` and
-   `create_or_update_feature_flag_safety_config` both call
-   `self.db.commit()` *before* the doomed `.from_orm()` call. The
-   underlying DB write (create or update) actually succeeds and is
-   persisted even though the method always raises `PydanticUserError` to
-   the caller - callers have no way to know their write actually went
-   through.
-
-5. `create_feature_flag_safety_config` (static) reads `data.feature_flag_id`,
-   but the `FeatureFlagSafetyConfigCreate` schema it is typed to accept has
-   no `feature_flag_id` field at all (it does not inherit from
-   `FeatureFlagSafetyConfigBase`, which is the schema class that does have
-   it). Calling it with a genuine `FeatureFlagSafetyConfigCreate` instance
-   always raises `AttributeError` immediately.
-
-6. `create_rollback_record` (static) does
-   `SafetyRollbackRecord(**data.model_dump())` where `data` is a
-   `SafetyRollbackRecordCreate`. That schema has no `safety_config_id`
-   field, but the model column is a non-nullable FK with no default, so
-   this always raises `sqlalchemy.exc.IntegrityError` on commit.
-
-7. `should_rollback` reads `safety_config.monitoring_enabled` /
-   `safety_config.auto_rollback_enabled`, but `FeatureFlagSafetyConfig` has
-   neither column (only `enabled`). As soon as a feature flag is ACTIVE
-   with `rollout_percentage > 0`, this raises `AttributeError` - and unlike
-   the later `check_feature_flag_safety` call (which *is* wrapped in
-   try/except), this line sits outside that try block, so the exception
-   propagates straight out of `should_rollback` to its caller.
-
-8. `execute_rollback` constructs `SafetyRollbackRecord(trigger_value=...,
-   threshold_value=..., rollout_percentage_before=..., description=...,
-   metrics_data=...)`, none of which are real columns on the model (the
-   real columns are `trigger_reason`, `previous_percentage`,
-   `target_percentage`, `success`). This always raises `TypeError`, caught
-   by the method's own try/except, which returns a "failure"
-   `RollbackResponse`. Two further issues compound this:
-     8a. The `RollbackResponse(...)` construction (both in the failure
-         branch and in the otherwise-unreachable success branch) passes
-         `current_percentage=...`, but the schema's field is actually named
-         `new_percentage`. Pydantic v2 silently drops unknown kwargs, so
-         `new_percentage` is always `None` in the returned response instead
-         of the intended `-1` (failure) or `0`/target (success).
-     8b. Whether the feature flag's `rollout_percentage` is left unchanged
-         in the DB after a failed rollback depends on an unrelated
-         implementation detail: `execute_rollback` calls
-         `self.get_or_create_safety_config(db, feature_flag_id)` *between*
-         setting `feature_flag.rollout_percentage = 0` and the (failing)
-         `SafetyRollbackRecord` construction. If no safety config exists
-         yet for the flag, `get_or_create_safety_config` performs its own
-         internal `db.commit()`, which prematurely and silently commits the
-         `rollout_percentage = 0` change - so the flag's traffic really is
-         cut to 0% even though the method reports `success=False`. If a
-         safety config already existed for the flag, no such interim commit
-         happens, and the later `db.rollback()` correctly reverts the
-         change. `execute_rollback`'s failure mode is therefore
-         inconsistent: sometimes a true no-op, sometimes a silent data
-         mutation while reporting failure. See
-         `TestExecuteRollback.test_*_without_existing_config` vs.
-         `test_*_with_existing_config`.
-
-9. `get_latency_metrics` computes `latencies` via
-   `getattr(metric, 'latency', 0)`, but `RawMetric` has no `latency`
-   attribute at all (only `value`), so every metric always contributes `0`.
-   `avg_latency`/`max_latency`/`min_latency`/`p95_latency` are therefore
-   always `0` whenever there is any data, and the `if not latencies:`
-   branch (distinct from the earlier `total_metrics == 0` branch) is
-   unreachable dead code, since the list is never actually empty once any
-   `RawMetric` rows match the query.
-
-Given the above, tests below assert on the *actual* current (broken)
-behaviour using `pytest.raises`/explicit assertions, so that a future fix
-to the model/schema mismatch is caught by a red test here rather than
-silently regressing elsewhere. Methods that are NOT affected by any of the
-bugs above (most of the plain static CRUD helpers, `get_error_metrics`,
-`rollback_feature_flag`/`async_rollback_feature_flag`,
-`get_or_create_safety_config`, `update_feature_flag_safety_config`) are
-tested with genuine happy-path/edge-case assertions.
+* No more name shadowing: the plain CRUD helpers are `get_safety_settings_
+  record(db)` / `get_feature_flag_safety_config_record(db, feature_flag_id)`
+  (static), distinct from the async instance methods `get_safety_settings()`
+  / `get_feature_flag_safety_config(id)`.
+* `create_feature_flag_safety_config(db, data, feature_flag_id=None)` takes
+  the flag id explicitly (or reads `data.feature_flag_id` when present) and
+  raises `ValueError` (not `AttributeError`) if neither is supplied.
+* `create_rollback_record(db, data, success=True, executed_by_user_id=None)`
+  resolves `safety_config_id` itself via `get_or_create_safety_config` and
+  maps the schema fields onto the real model columns.
+* `check_feature_flag_safety` sources metric values from `get_error_metrics`/
+  `get_latency_metrics` for recognised names and marks anything else as
+  "unmeasured" (healthy, current_value 0, listed in
+  `details["unmeasured_metrics"]`). A metric is unhealthy only when it
+  breaches `critical_threshold` (per `comparison_type`); warning-only
+  breaches are reported in `MetricStatus.details["warning"]` without
+  affecting `is_healthy`.
+* `get_latency_metrics` reads real `RawMetric.value` rows (`metric_type ==
+  "latency"`), so latency stats are no longer always zero.
+* `should_rollback` is now `async` and correctly awaits
+  `check_feature_flag_safety`; it requires an ACTIVE flag with
+  `rollout_percentage > 0`, a flag-level config with `enabled=True`, and
+  global `enable_automatic_rollbacks=True` before it will even evaluate the
+  safety check.
+* `execute_rollback` uses the real `SafetyRollbackRecord` columns, so a
+  successful call persists a record and updates the flag's
+  `rollout_percentage` to `target_percentage`; failures (e.g. an unknown
+  flag) report `success=False` with no partial writes.
 """
 import uuid
 from datetime import datetime, timedelta
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi import HTTPException
-from pydantic import PydanticUserError
-from sqlalchemy.exc import IntegrityError
+from pydantic import ValidationError
 
 from backend.app.models.feature_flag import FeatureFlag, FeatureFlagStatus
-from backend.app.models.metrics.metric import RawMetric, ErrorLog
+from backend.app.models.metrics.metric import MetricType, RawMetric, ErrorLog
 from backend.app.models.safety import (
     SafetySettings,
     FeatureFlagSafetyConfig,
@@ -154,7 +69,13 @@ from backend.app.schemas.safety import (
     SafetyRollbackRecordCreate,
     MetricThreshold,
 )
-from backend.app.services.safety_service import SafetyService
+from backend.app.services.safety_service import (
+    SafetyService,
+    DEFAULT_CONFIG_ID,
+    _metric_to_trigger,
+    _breaches,
+    _as_threshold,
+)
 
 pytestmark = [pytest.mark.integration, pytest.mark.requires_db]
 
@@ -207,20 +128,56 @@ def safety_settings_guard(db_session):
         db_session.commit()
 
 
+def _add_error_log(db_session, flag, error_type="boom", timestamp=None):
+    db_session.add(
+        ErrorLog(
+            feature_flag_id=flag.id,
+            error_type=error_type,
+            message="synthetic test error",
+            **({"timestamp": timestamp} if timestamp is not None else {}),
+        )
+    )
+
+
+def _add_evaluations(db_session, flag, n=1, timestamp=None):
+    for _ in range(n):
+        db_session.add(
+            RawMetric(
+                feature_flag_id=flag.id,
+                metric_type=MetricType.FLAG_EVALUATION.value,
+                **({"timestamp": timestamp} if timestamp is not None else {}),
+            )
+        )
+
+
+def _add_latency_sample(db_session, flag, value, timestamp=None):
+    db_session.add(
+        RawMetric(
+            feature_flag_id=flag.id,
+            metric_type=MetricType.LATENCY.value,
+            value=value,
+            **({"timestamp": timestamp} if timestamp is not None else {}),
+        )
+    )
+
+
 # ---------------------------------------------------------------------------
-# Static: SafetySettings CRUD (unaffected by the bugs above)
+# Static: SafetySettings CRUD (get_safety_settings_record / create / update)
 # ---------------------------------------------------------------------------
 
 
 class TestSafetySettingsStatic:
-    def test_get_returns_none_when_table_empty(self, db_session, safety_settings_guard):
-        """NOTE: SafetyService.get_safety_settings(db) cannot be exercised as
-        a static method here - see TestMethodNameShadowing / bug #1. The
-        static implementation is unreachable dead code, so this test simply
-        confirms the table-empty precondition via a direct query and covers
-        the equivalent behaviour through create_safety_settings below."""
+    def test_get_record_returns_none_when_table_empty(self, db_session, safety_settings_guard):
         _wipe_safety_settings(db_session)
-        assert db_session.query(SafetySettings).first() is None
+        assert SafetyService.get_safety_settings_record(db_session) is None
+
+    def test_get_record_returns_none_is_not_a_coroutine(self):
+        """Sanity check that the shadowing bug is gone: this is a plain
+        staticmethod, distinct from the async instance get_safety_settings."""
+        import inspect
+
+        assert not inspect.iscoroutinefunction(SafetyService.get_safety_settings_record)
+        assert inspect.iscoroutinefunction(SafetyService.get_safety_settings)
 
     def test_create_succeeds_when_none_exists(self, db_session, safety_settings_guard):
         _wipe_safety_settings(db_session)
@@ -234,11 +191,10 @@ class TestSafetySettingsStatic:
 
         assert created.id is not None
         assert created.enable_automatic_rollbacks is True
+        # Nested MetricThreshold objects are serialised to plain dicts for JSONB.
         assert created.default_metrics["error_rate"]["critical_threshold"] == 0.1
 
-        # Confirm the new row is really in the DB (see note above re: why we
-        # cannot use the shadowed static get_safety_settings here).
-        fetched = db_session.query(SafetySettings).first()
+        fetched = SafetyService.get_safety_settings_record(db_session)
         assert fetched.id == created.id
 
     def test_create_raises_value_error_when_already_exists(
@@ -286,13 +242,49 @@ class TestSafetySettingsStatic:
 
 
 class TestFeatureFlagSafetyConfigStatic:
-    def test_create_raises_attribute_error_bug(self, db_session, make_feature_flag):
-        """Documents bug #5: FeatureFlagSafetyConfigCreate has no
-        feature_flag_id field, but create_feature_flag_safety_config reads
-        data.feature_flag_id unconditionally."""
+    def test_get_record_none_when_missing(self, db_session, make_feature_flag):
+        flag = make_feature_flag()
+        assert SafetyService.get_feature_flag_safety_config_record(db_session, flag.id) is None
+
+    def test_create_with_explicit_feature_flag_id(self, db_session, make_feature_flag):
+        flag = make_feature_flag()
+        data = FeatureFlagSafetyConfigCreate(
+            enabled=True,
+            metrics={"error_rate": MetricThreshold(critical_threshold=0.2)},
+            rollback_percentage=15,
+        )
+
+        created = SafetyService.create_feature_flag_safety_config(
+            db_session, data, feature_flag_id=flag.id
+        )
+
+        assert created.feature_flag_id == flag.id
+        assert created.rollback_percentage == 15
+        assert created.metrics["error_rate"]["critical_threshold"] == 0.2
+
+    def test_create_raises_value_error_when_no_flag_id_available(self, db_session):
+        """Neither the explicit feature_flag_id kwarg nor data.feature_flag_id
+        is supplied (FeatureFlagSafetyConfigCreate has no such field)."""
         data = FeatureFlagSafetyConfigCreate(enabled=True, metrics={}, rollback_percentage=0)
-        with pytest.raises(AttributeError, match="feature_flag_id"):
+        with pytest.raises(ValueError, match="feature_flag_id is required"):
             SafetyService.create_feature_flag_safety_config(db_session, data)
+
+    def test_create_raises_value_error_when_flag_missing(self, db_session):
+        data = FeatureFlagSafetyConfigCreate(enabled=True, metrics={}, rollback_percentage=0)
+        with pytest.raises(ValueError, match="does not exist"):
+            SafetyService.create_feature_flag_safety_config(
+                db_session, data, feature_flag_id=uuid.uuid4()
+            )
+
+    def test_create_raises_value_error_when_already_exists(self, db_session, make_feature_flag):
+        flag = make_feature_flag()
+        data = FeatureFlagSafetyConfigCreate(enabled=True, metrics={}, rollback_percentage=0)
+        SafetyService.create_feature_flag_safety_config(db_session, data, feature_flag_id=flag.id)
+
+        with pytest.raises(ValueError, match="already exists"):
+            SafetyService.create_feature_flag_safety_config(
+                db_session, data, feature_flag_id=flag.id
+            )
 
     def test_update_modifies_existing_config(self, db_session, make_feature_flag):
         flag = make_feature_flag()
@@ -320,12 +312,7 @@ class TestFeatureFlagSafetyConfigStatic:
 
     def test_get_or_create_creates_new_config_with_defaults(self, db_session, make_feature_flag):
         flag = make_feature_flag()
-        assert (
-            db_session.query(FeatureFlagSafetyConfig)
-            .filter(FeatureFlagSafetyConfig.feature_flag_id == flag.id)
-            .first()
-            is None
-        )
+        assert SafetyService.get_feature_flag_safety_config_record(db_session, flag.id) is None
 
         config = SafetyService.get_or_create_safety_config(db_session, flag.id)
 
@@ -356,13 +343,12 @@ class TestFeatureFlagSafetyConfigStatic:
 
 
 class TestCreateRollbackRecordStatic:
-    def test_raises_integrity_error_due_to_missing_safety_config_id(
-        self, db_session, make_feature_flag
+    def test_creates_record_and_resolves_safety_config_id(
+        self, db_session, make_feature_flag, admin_user
     ):
-        """Documents bug #6: SafetyRollbackRecordCreate has no
-        safety_config_id field, but the model column is non-nullable with
-        no default."""
         flag = make_feature_flag()
+        assert SafetyService.get_feature_flag_safety_config_record(db_session, flag.id) is None
+
         data = SafetyRollbackRecordCreate(
             feature_flag_id=flag.id,
             trigger_type="manual",
@@ -370,24 +356,59 @@ class TestCreateRollbackRecordStatic:
             previous_percentage=50,
             target_percentage=0,
         )
+        # executed_by_user_id is a real FK to users.id, so it must reference
+        # an actual persisted User row (see module docstring "STILL
+        # SUSPICIOUS" note about the opaque failure mode otherwise).
+        user_id = admin_user.id
 
-        with pytest.raises(IntegrityError):
-            SafetyService.create_rollback_record(db_session, data)
-
-        # The session is left in an aborted transaction state after an
-        # IntegrityError; roll back so it stays usable for later
-        # assertions/fixture teardown.
-        db_session.rollback()
-        assert (
-            db_session.query(SafetyRollbackRecord)
-            .filter(SafetyRollbackRecord.feature_flag_id == flag.id)
-            .count()
-            == 0
+        record = SafetyService.create_rollback_record(
+            db_session, data, success=True, executed_by_user_id=user_id
         )
+
+        assert record.id is not None
+        assert record.feature_flag_id == flag.id
+        assert record.trigger_type == "manual"
+        assert record.trigger_reason == "test rollback"
+        assert record.previous_percentage == 50
+        assert record.target_percentage == 0
+        assert record.success is True
+        assert record.executed_by_user_id == user_id
+
+        # get_or_create_safety_config was used to resolve safety_config_id -
+        # a config row now exists for the flag.
+        config = SafetyService.get_feature_flag_safety_config_record(db_session, flag.id)
+        assert config is not None
+        assert record.safety_config_id == config.id
+
+    def test_defaults_success_true_and_no_executor(self, db_session, make_feature_flag):
+        flag = make_feature_flag()
+        data = SafetyRollbackRecordCreate(
+            feature_flag_id=flag.id,
+            trigger_type="automatic",
+            trigger_reason="metric breach",
+            previous_percentage=100,
+            target_percentage=10,
+        )
+
+        record = SafetyService.create_rollback_record(db_session, data)
+
+        assert record.success is True
+        assert record.executed_by_user_id is None
+
+    def test_raises_value_error_for_missing_flag(self, db_session):
+        data = SafetyRollbackRecordCreate(
+            feature_flag_id=uuid.uuid4(),
+            trigger_type="manual",
+            trigger_reason="n/a",
+            previous_percentage=50,
+            target_percentage=0,
+        )
+        with pytest.raises(ValueError, match="does not exist"):
+            SafetyService.create_rollback_record(db_session, data)
 
 
 # ---------------------------------------------------------------------------
-# Instance (sync): get_error_metrics / get_latency_metrics
+# Instance (sync): get_error_metrics / get_latency_metrics / _get_metric_value
 # ---------------------------------------------------------------------------
 
 
@@ -412,14 +433,11 @@ class TestGetErrorMetrics:
     def test_computes_rate_and_error_type_breakdown(self, db_session, make_feature_flag):
         flag = make_feature_flag()
         # 3 errors: 2 "rate_limit", 1 "timeout".
-        for _ in range(2):
-            db_session.add(
-                ErrorLog(feature_flag_id=flag.id, error_type="rate_limit", message="boom")
-            )
-        db_session.add(ErrorLog(feature_flag_id=flag.id, error_type="timeout", message="slow"))
-        # 10 total evaluations.
-        for _ in range(10):
-            db_session.add(RawMetric(feature_flag_id=flag.id, metric_type="evaluation"))
+        _add_error_log(db_session, flag, error_type="rate_limit")
+        _add_error_log(db_session, flag, error_type="rate_limit")
+        _add_error_log(db_session, flag, error_type="timeout")
+        # 10 total evaluations (must be metric_type == "flag_evaluation").
+        _add_evaluations(db_session, flag, n=10)
         db_session.commit()
 
         service = SafetyService(db_session)
@@ -430,20 +448,24 @@ class TestGetErrorMetrics:
         assert result["error_rate"] == pytest.approx(0.3)
         assert result["error_types"] == {"rate_limit": 2, "timeout": 1}
 
+    def test_non_evaluation_raw_metrics_are_not_counted(self, db_session, make_feature_flag):
+        """total_evaluations only sums RawMetric rows with metric_type ==
+        'flag_evaluation'; other metric types (e.g. latency samples) must
+        not inflate the denominator."""
+        flag = make_feature_flag()
+        _add_latency_sample(db_session, flag, 42.0)
+        db_session.commit()
+
+        service = SafetyService(db_session)
+        result = service.get_error_metrics(db_session, flag.id)
+
+        assert result["total_evaluations"] == 0
+
     def test_excludes_data_outside_timeframe_window(self, db_session, make_feature_flag):
         flag = make_feature_flag()
         old_time = datetime.utcnow() - timedelta(hours=2)
-        db_session.add(
-            ErrorLog(
-                feature_flag_id=flag.id,
-                error_type="old_error",
-                message="stale",
-                created_at=old_time,
-            )
-        )
-        db_session.add(
-            RawMetric(feature_flag_id=flag.id, metric_type="evaluation", created_at=old_time)
-        )
+        _add_error_log(db_session, flag, error_type="old_error", timestamp=old_time)
+        _add_evaluations(db_session, flag, n=1, timestamp=old_time)
         db_session.commit()
 
         service = SafetyService(db_session)
@@ -472,109 +494,135 @@ class TestGetLatencyMetrics:
         assert result["p95_latency"] == 0
         assert result["total_requests"] == 0
 
-    def test_with_data_latency_is_always_zero_bug(self, db_session, make_feature_flag):
-        """Documents bug #9: RawMetric has no `latency` attribute, so
-        get_latency_metrics always reports 0 even though total_requests
-        correctly reflects the number of matching rows."""
+    def test_computes_real_latency_statistics(self, db_session, make_feature_flag):
         flag = make_feature_flag()
-        for _ in range(5):
-            db_session.add(
-                RawMetric(feature_flag_id=flag.id, metric_type="evaluation", value=123.4)
-            )
+        for value in (10.0, 20.0, 30.0, 40.0, 50.0):
+            _add_latency_sample(db_session, flag, value)
         db_session.commit()
 
         service = SafetyService(db_session)
         result = service.get_latency_metrics(db_session, flag.id)
 
         assert result["total_requests"] == 5
-        assert result["avg_latency"] == 0
-        assert result["max_latency"] == 0
-        assert result["min_latency"] == 0
-        assert result["p95_latency"] == 0
+        assert result["avg_latency"] == pytest.approx(30.0)
+        assert result["max_latency"] == pytest.approx(50.0)
+        assert result["min_latency"] == pytest.approx(10.0)
+        assert result["p95_latency"] == pytest.approx(50.0)
 
-
-class TestGetMetricValue:
-    def test_returns_value_within_documented_simulated_range(self, db_session, make_feature_flag):
+    def test_value_type_filter_excludes_non_latency_metrics(self, db_session, make_feature_flag):
+        """Only RawMetric rows with metric_type == 'latency' are counted."""
         flag = make_feature_flag()
-        service = SafetyService(db_session)
-        value = service._get_metric_value(flag.id, "error_rate")
-        assert 0.1 <= value <= 5.0
-
-
-# ---------------------------------------------------------------------------
-# Bug #1: method-name shadowing
-# ---------------------------------------------------------------------------
-
-
-class TestMethodNameShadowing:
-    def test_get_safety_settings_class_attribute_is_the_async_version(self):
-        import inspect
-
-        assert inspect.iscoroutinefunction(SafetyService.get_safety_settings)
-
-    def test_get_feature_flag_safety_config_class_attribute_is_the_async_version(self):
-        import inspect
-
-        assert inspect.iscoroutinefunction(SafetyService.get_feature_flag_safety_config)
-
-    def test_unshadowed_static_methods_remain_plain_functions(self):
-        """Sanity check / contrast: static methods with unique names are NOT
-        affected by the shadowing bug."""
-        import inspect
-
-        assert not inspect.iscoroutinefunction(SafetyService.create_safety_settings)
-        assert not inspect.iscoroutinefunction(SafetyService.update_safety_settings)
-        assert not inspect.iscoroutinefunction(SafetyService.get_or_create_safety_config)
-
-
-# ---------------------------------------------------------------------------
-# Bugs #2, #3, #4: async safety settings methods
-# ---------------------------------------------------------------------------
-
-
-class TestAsyncSafetySettingsBugs:
-    @pytest.mark.asyncio
-    async def test_async_get_safety_settings_no_row_raises_type_error(
-        self, db_session, safety_settings_guard
-    ):
-        _wipe_safety_settings(db_session)
-        service = SafetyService(db_session)
-        with pytest.raises(TypeError, match="enabled"):
-            await service.async_get_safety_settings()
-
-    @pytest.mark.asyncio
-    async def test_get_safety_settings_instance_call_shares_the_same_bug(
-        self, db_session, safety_settings_guard
-    ):
-        """service.get_safety_settings() resolves to the async instance
-        method per TestMethodNameShadowing, and shares async_get_safety_
-        settings' identical broken default-creation logic."""
-        _wipe_safety_settings(db_session)
-        service = SafetyService(db_session)
-        with pytest.raises(TypeError, match="enabled"):
-            await service.get_safety_settings()
-
-    @pytest.mark.asyncio
-    async def test_get_safety_settings_instance_call_existing_row_raises_pydantic_user_error(
-        self, db_session, safety_settings_guard
-    ):
-        """Existing-row branch of the shadowed instance get_safety_settings
-        (distinct source lines from async_get_safety_settings, despite the
-        identical body) - covered separately for its own coverage credit."""
-        _wipe_safety_settings(db_session)
-        db_session.add(
-            SafetySettings(enable_automatic_rollbacks=False, default_metrics=None)
-        )
+        _add_evaluations(db_session, flag, n=3)
         db_session.commit()
 
         service = SafetyService(db_session)
-        with pytest.raises(PydanticUserError, match="from_attributes"):
-            await service.get_safety_settings()
+        result = service.get_latency_metrics(db_session, flag.id)
+
+        assert result["total_requests"] == 0
+
+    def test_excludes_data_outside_timeframe_window(self, db_session, make_feature_flag):
+        flag = make_feature_flag()
+        old_time = datetime.utcnow() - timedelta(hours=2)
+        _add_latency_sample(db_session, flag, 999.0, timestamp=old_time)
+        db_session.commit()
+
+        service = SafetyService(db_session)
+        result = service.get_latency_metrics(db_session, flag.id, timeframe_minutes=15)
+
+        assert result["total_requests"] == 0
+        assert result["avg_latency"] == 0
+
+
+class TestGetMetricValue:
+    def test_error_metric_name_uses_error_metrics(self, db_session, make_feature_flag):
+        flag = make_feature_flag()
+        _add_error_log(db_session, flag)
+        _add_evaluations(db_session, flag, n=4)
+        db_session.commit()
+
+        service = SafetyService(db_session)
+        value = service._get_metric_value(flag.id, "error_rate")
+
+        assert value == pytest.approx(0.25)
+
+    def test_latency_metric_name_maps_to_avg_latency(self, db_session, make_feature_flag):
+        flag = make_feature_flag()
+        _add_latency_sample(db_session, flag, 100.0)
+        _add_latency_sample(db_session, flag, 200.0)
+        db_session.commit()
+
+        service = SafetyService(db_session)
+        value = service._get_metric_value(flag.id, "latency")
+
+        assert value == pytest.approx(150.0)
+
+    def test_unrecognized_metric_name_returns_none(self, db_session, make_feature_flag):
+        flag = make_feature_flag()
+        service = SafetyService(db_session)
+        assert service._get_metric_value(flag.id, "custom_business_metric") is None
+
+
+class TestPureHelperFunctions:
+    """Direct coverage of the small module-level helper functions."""
+
+    def test_metric_to_trigger_error_metrics(self):
+        assert _metric_to_trigger("error_rate") == RollbackTriggerType.ERROR_RATE
+        assert _metric_to_trigger("error_count") == RollbackTriggerType.ERROR_RATE
+
+    def test_metric_to_trigger_latency_metrics(self):
+        assert _metric_to_trigger("latency") == RollbackTriggerType.LATENCY
+        assert _metric_to_trigger("p95_latency") == RollbackTriggerType.LATENCY
+
+    def test_metric_to_trigger_custom_metric(self):
+        assert _metric_to_trigger("queue_depth") == RollbackTriggerType.CUSTOM_METRIC
+
+    def test_breaches_greater_than_default(self):
+        assert _breaches(10, 5, "greater_than") is True
+        assert _breaches(5, 10, "greater_than") is False
+        assert _breaches(10, None, "greater_than") is False
+
+    def test_breaches_less_than(self):
+        assert _breaches(1, 5, "less_than") is True
+        assert _breaches(10, 5, "less_than") is False
+
+    def test_breaches_equal_to(self):
+        assert _breaches(5, 5, "equal_to") is True
+        assert _breaches(4, 5, "equal_to") is False
+
+    def test_as_threshold_accepts_dict_and_model_and_default(self):
+        from_dict = _as_threshold({"critical_threshold": 1.0})
+        assert isinstance(from_dict, MetricThreshold)
+        assert from_dict.critical_threshold == 1.0
+
+        model = MetricThreshold(critical_threshold=2.0)
+        assert _as_threshold(model) is model
+
+        default = _as_threshold("not-a-dict-or-model")
+        assert isinstance(default, MetricThreshold)
+        assert default.critical_threshold is None
+
+
+# ---------------------------------------------------------------------------
+# Async global settings
+# ---------------------------------------------------------------------------
+
+
+class TestAsyncSafetySettings:
+    @pytest.mark.asyncio
+    async def test_get_creates_default_row_when_missing(self, db_session, safety_settings_guard):
+        _wipe_safety_settings(db_session)
+        service = SafetyService(db_session)
+
+        result = await service.get_safety_settings()
+
+        assert result.enable_automatic_rollbacks is False
+        assert result.default_metrics is None
+        persisted = db_session.query(SafetySettings).first()
+        assert persisted is not None
+        assert persisted.id == result.id
 
     @pytest.mark.asyncio
-    async def test_async_get_safety_settings_existing_row_raises_pydantic_user_error(
-        self, db_session, safety_settings_guard
-    ):
+    async def test_get_returns_existing_row(self, db_session, safety_settings_guard):
         _wipe_safety_settings(db_session)
         db_session.add(
             SafetySettings(enable_automatic_rollbacks=True, default_metrics=None)
@@ -582,11 +630,16 @@ class TestAsyncSafetySettingsBugs:
         db_session.commit()
 
         service = SafetyService(db_session)
-        with pytest.raises(PydanticUserError, match="from_attributes"):
-            await service.async_get_safety_settings()
+        result = await service.get_safety_settings()
+
+        assert result.enable_automatic_rollbacks is True
 
     @pytest.mark.asyncio
-    async def test_create_or_update_safety_settings_creates_row_but_still_raises(
+    async def test_async_get_safety_settings_is_the_same_function(self):
+        assert SafetyService.async_get_safety_settings is SafetyService.get_safety_settings
+
+    @pytest.mark.asyncio
+    async def test_create_or_update_creates_row_when_missing(
         self, db_session, safety_settings_guard
     ):
         _wipe_safety_settings(db_session)
@@ -598,16 +651,16 @@ class TestAsyncSafetySettingsBugs:
             },
         )
 
-        with pytest.raises(PydanticUserError):
-            await service.create_or_update_safety_settings(data)
+        result = await service.create_or_update_safety_settings(data)
 
-        # Bug #4: the write is persisted despite the exception.
+        assert result.enable_automatic_rollbacks is True
+        assert result.default_metrics["error_rate"].critical_threshold == 0.2
         persisted = db_session.query(SafetySettings).first()
         assert persisted is not None
         assert persisted.enable_automatic_rollbacks is True
 
     @pytest.mark.asyncio
-    async def test_create_or_update_safety_settings_updates_existing_row_but_still_raises(
+    async def test_create_or_update_updates_existing_row(
         self, db_session, safety_settings_guard
     ):
         _wipe_safety_settings(db_session)
@@ -619,91 +672,99 @@ class TestAsyncSafetySettingsBugs:
         service = SafetyService(db_session)
         data = SafetySettingsCreate(enable_automatic_rollbacks=True, default_metrics=None)
 
-        with pytest.raises(PydanticUserError):
-            await service.create_or_update_safety_settings(data)
+        result = await service.create_or_update_safety_settings(data)
 
-        persisted = db_session.query(SafetySettings).first()
-        assert persisted.enable_automatic_rollbacks is True
+        assert result.enable_automatic_rollbacks is True
+        assert (
+            db_session.query(SafetySettings).count() == 1
+        ), "update must not create a second row"
 
 
 # ---------------------------------------------------------------------------
-# Bugs #2, #3, #4: async feature flag safety config methods
+# Async feature flag safety config
 # ---------------------------------------------------------------------------
 
 
-class TestAsyncFeatureFlagSafetyConfigBugs:
+class TestAsyncFeatureFlagSafetyConfig:
     @pytest.mark.asyncio
-    async def test_get_config_missing_flag_raises_404(self, db_session):
+    async def test_get_missing_flag_raises_404(self, db_session):
         service = SafetyService(db_session)
         with pytest.raises(HTTPException) as exc_info:
-            await service.async_get_feature_flag_safety_config(uuid.uuid4())
+            await service.get_feature_flag_safety_config(uuid.uuid4())
         assert exc_info.value.status_code == 404
 
     @pytest.mark.asyncio
-    async def test_get_config_existing_config_raises_pydantic_user_error(
-        self, db_session, make_feature_flag
-    ):
+    async def test_get_returns_existing_config(self, db_session, make_feature_flag):
         flag = make_feature_flag()
         db_session.add(
             FeatureFlagSafetyConfig(
-                feature_flag_id=flag.id, enabled=True, metrics={}, rollback_percentage=0
+                feature_flag_id=flag.id,
+                enabled=False,
+                metrics={"error_rate": {"critical_threshold": 0.5}},
+                rollback_percentage=33,
             )
         )
         db_session.commit()
 
         service = SafetyService(db_session)
-        with pytest.raises(PydanticUserError, match="from_attributes"):
-            await service.async_get_feature_flag_safety_config(flag.id)
+        result = await service.get_feature_flag_safety_config(flag.id)
+
+        assert result.id != DEFAULT_CONFIG_ID
+        assert result.enabled is False
+        assert result.rollback_percentage == 33
+        assert result.metrics["error_rate"].critical_threshold == 0.5
 
     @pytest.mark.asyncio
-    async def test_get_config_missing_config_falls_through_to_settings_bug(
+    async def test_get_missing_config_returns_defaults_from_settings(
         self, db_session, make_feature_flag, safety_settings_guard
     ):
-        """When no config row exists, the method tries to build a default
-        response from global settings via async_get_safety_settings(),
-        inheriting bug #2 when no settings row exists either."""
+        """With no stored config the service returns a default built from the
+        global settings, marked with DEFAULT_CONFIG_ID, and writes nothing."""
         flag = make_feature_flag()
         _wipe_safety_settings(db_session)
-
-        service = SafetyService(db_session)
-        with pytest.raises(TypeError, match="enabled"):
-            await service.async_get_feature_flag_safety_config(flag.id)
-
-    @pytest.mark.asyncio
-    async def test_get_feature_flag_safety_config_instance_alias_same_bug(
-        self, db_session, make_feature_flag
-    ):
-        """service.get_feature_flag_safety_config(...) resolves to the async
-        instance method per TestMethodNameShadowing."""
-        flag = make_feature_flag()
         db_session.add(
-            FeatureFlagSafetyConfig(
-                feature_flag_id=flag.id, enabled=True, metrics={}, rollback_percentage=0
+            SafetySettings(
+                enable_automatic_rollbacks=False,
+                default_metrics={"error_rate": {"critical_threshold": 0.9}},
             )
         )
         db_session.commit()
 
         service = SafetyService(db_session)
-        with pytest.raises(PydanticUserError):
-            await service.get_feature_flag_safety_config(flag.id)
+        response = await service.get_feature_flag_safety_config(flag.id)
+
+        assert response.id == DEFAULT_CONFIG_ID
+        assert response.feature_flag_id == flag.id
+        assert response.enabled is True
+        assert response.rollback_percentage == 0
+        assert response.metrics["error_rate"].critical_threshold == 0.9
+        # Nothing was persisted for this flag.
+        assert SafetyService.get_feature_flag_safety_config_record(db_session, flag.id) is None
 
     @pytest.mark.asyncio
-    async def test_get_feature_flag_safety_config_instance_missing_config_falls_through(
+    async def test_get_missing_config_creates_default_settings_row(
         self, db_session, make_feature_flag, safety_settings_guard
     ):
-        """Missing-config branch of the shadowed instance
-        get_feature_flag_safety_config (distinct source lines from
-        async_get_feature_flag_safety_config, despite the identical body) -
-        covered separately for its own coverage credit."""
         flag = make_feature_flag()
         _wipe_safety_settings(db_session)
 
         service = SafetyService(db_session)
-        with pytest.raises(TypeError, match="enabled"):
-            await service.get_feature_flag_safety_config(flag.id)
+        response = await service.get_feature_flag_safety_config(flag.id)
+
+        # get_safety_settings() created the default settings row on first use,
+        # and with no default_metrics the default config has no metrics.
+        assert db_session.query(SafetySettings).first() is not None
+        assert response.metrics == {}
 
     @pytest.mark.asyncio
-    async def test_create_or_update_config_missing_flag_raises_404(self, db_session):
+    async def test_async_alias_is_the_same_function(self):
+        assert (
+            SafetyService.async_get_feature_flag_safety_config
+            is SafetyService.get_feature_flag_safety_config
+        )
+
+    @pytest.mark.asyncio
+    async def test_create_or_update_missing_flag_raises_404(self, db_session):
         service = SafetyService(db_session)
         data = FeatureFlagSafetyConfigCreate(enabled=True, metrics={}, rollback_percentage=10)
         with pytest.raises(HTTPException) as exc_info:
@@ -711,9 +772,7 @@ class TestAsyncFeatureFlagSafetyConfigBugs:
         assert exc_info.value.status_code == 404
 
     @pytest.mark.asyncio
-    async def test_create_or_update_config_creates_row_but_still_raises(
-        self, db_session, make_feature_flag
-    ):
+    async def test_create_or_update_creates_new_row(self, db_session, make_feature_flag):
         flag = make_feature_flag()
         service = SafetyService(db_session)
         data = FeatureFlagSafetyConfigCreate(
@@ -722,22 +781,16 @@ class TestAsyncFeatureFlagSafetyConfigBugs:
             rollback_percentage=5,
         )
 
-        with pytest.raises(PydanticUserError):
-            await service.create_or_update_feature_flag_safety_config(flag.id, data)
+        result = await service.create_or_update_feature_flag_safety_config(flag.id, data)
 
-        # Bug #4: the write is persisted despite the exception.
-        persisted = (
-            db_session.query(FeatureFlagSafetyConfig)
-            .filter(FeatureFlagSafetyConfig.feature_flag_id == flag.id)
-            .first()
-        )
+        assert result.rollback_percentage == 5
+        assert result.metrics["latency"].warning_threshold == 100
+        persisted = SafetyService.get_feature_flag_safety_config_record(db_session, flag.id)
         assert persisted is not None
         assert persisted.rollback_percentage == 5
 
     @pytest.mark.asyncio
-    async def test_create_or_update_config_updates_existing_row_but_still_raises(
-        self, db_session, make_feature_flag
-    ):
+    async def test_create_or_update_updates_existing_row(self, db_session, make_feature_flag):
         flag = make_feature_flag()
         config = FeatureFlagSafetyConfig(
             feature_flag_id=flag.id, enabled=True, metrics={}, rollback_percentage=0
@@ -748,12 +801,19 @@ class TestAsyncFeatureFlagSafetyConfigBugs:
         service = SafetyService(db_session)
         data = FeatureFlagSafetyConfigCreate(enabled=False, metrics={}, rollback_percentage=99)
 
-        with pytest.raises(PydanticUserError):
-            await service.create_or_update_feature_flag_safety_config(flag.id, data)
+        result = await service.create_or_update_feature_flag_safety_config(flag.id, data)
 
+        assert result.enabled is False
+        assert result.rollback_percentage == 99
         db_session.refresh(config)
         assert config.rollback_percentage == 99
         assert config.enabled is False
+        assert (
+            db_session.query(FeatureFlagSafetyConfig)
+            .filter(FeatureFlagSafetyConfig.feature_flag_id == flag.id)
+            .count()
+            == 1
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -770,10 +830,24 @@ class TestCheckFeatureFlagSafety:
         assert exc_info.value.status_code == 404
 
     @pytest.mark.asyncio
-    async def test_existing_flag_inherits_config_bug(self, db_session, make_feature_flag):
-        """check_feature_flag_safety always delegates to
-        async_get_feature_flag_safety_config internally, so it inherits
-        bug #3 as soon as a config row exists for the flag."""
+    async def test_disabled_config_is_healthy_with_no_metrics(self, db_session, make_feature_flag):
+        flag = make_feature_flag()
+        db_session.add(
+            FeatureFlagSafetyConfig(
+                feature_flag_id=flag.id, enabled=False, metrics={}, rollback_percentage=0
+            )
+        )
+        db_session.commit()
+
+        service = SafetyService(db_session)
+        result = await service.check_feature_flag_safety(flag.id)
+
+        assert result.is_healthy is True
+        assert result.metrics == []
+        assert "disabled" in result.details["message"]
+
+    @pytest.mark.asyncio
+    async def test_enabled_config_with_no_metrics_is_healthy(self, db_session, make_feature_flag):
         flag = make_feature_flag()
         db_session.add(
             FeatureFlagSafetyConfig(
@@ -783,112 +857,379 @@ class TestCheckFeatureFlagSafety:
         db_session.commit()
 
         service = SafetyService(db_session)
-        with pytest.raises(PydanticUserError):
-            await service.check_feature_flag_safety(flag.id)
+        result = await service.check_feature_flag_safety(flag.id)
 
-
-# ---------------------------------------------------------------------------
-# rollback_feature_flag / async_rollback_feature_flag (NOT affected by the
-# from_orm bug - these construct RollbackResponse directly).
-# ---------------------------------------------------------------------------
-
-
-class TestRollbackFeatureFlagAsync:
-    @pytest.mark.asyncio
-    async def test_rollback_feature_flag_happy_path(self, db_session, make_feature_flag):
-        flag = make_feature_flag(rollout_percentage=80, status=FeatureFlagStatus.ACTIVE)
-        service = SafetyService(db_session)
-
-        result = await service.rollback_feature_flag(flag.id, percentage=10, reason="load test")
-
-        assert result.success is True
-        assert result.previous_percentage == 80
-        assert result.new_percentage == 10
-        assert "rolled back from 80% to 10%" in result.message
-        assert result.details == {"reason": "load test"}
-
-        db_session.refresh(flag)
-        assert flag.rollout_percentage == 10
+        assert result.is_healthy is True
+        assert result.metrics == []
+        assert result.details["feature_flag_key"] == flag.key
 
     @pytest.mark.asyncio
-    async def test_rollback_feature_flag_missing_flag_raises_404(self, db_session):
-        service = SafetyService(db_session)
-        with pytest.raises(HTTPException) as exc_info:
-            await service.rollback_feature_flag(uuid.uuid4())
-        assert exc_info.value.status_code == 404
-
-    @pytest.mark.asyncio
-    async def test_rollback_feature_flag_uses_default_args(self, db_session, make_feature_flag):
-        flag = make_feature_flag(rollout_percentage=50)
-        service = SafetyService(db_session)
-
-        result = await service.rollback_feature_flag(flag.id)
-
-        assert result.new_percentage == 0
-        assert result.details == {"reason": "Manual rollback"}
-
-    @pytest.mark.asyncio
-    async def test_async_rollback_feature_flag_happy_path(self, db_session, make_feature_flag):
-        """async_rollback_feature_flag duplicates rollback_feature_flag's
-        body under a different name; exercised directly for its own
-        coverage credit."""
-        flag = make_feature_flag(rollout_percentage=60)
-        service = SafetyService(db_session)
-
-        result = await service.async_rollback_feature_flag(
-            flag.id, percentage=5, reason="dup coverage"
+    async def test_error_rate_metric_breaches_critical_threshold(
+        self, db_session, make_feature_flag
+    ):
+        flag = make_feature_flag()
+        _add_error_log(db_session, flag)
+        _add_error_log(db_session, flag)
+        _add_evaluations(db_session, flag, n=4)  # error_rate == 0.5
+        db_session.add(
+            FeatureFlagSafetyConfig(
+                feature_flag_id=flag.id,
+                enabled=True,
+                metrics={"error_rate": {"critical_threshold": 0.1}},
+                rollback_percentage=0,
+            )
         )
+        db_session.commit()
 
-        assert result.success is True
-        assert result.previous_percentage == 60
-        assert result.new_percentage == 5
-        db_session.refresh(flag)
-        assert flag.rollout_percentage == 5
+        service = SafetyService(db_session)
+        result = await service.check_feature_flag_safety(flag.id)
+
+        assert result.is_healthy is False
+        assert len(result.metrics) == 1
+        metric = result.metrics[0]
+        assert metric.name == "error_rate"
+        assert metric.current_value == pytest.approx(0.5)
+        assert metric.threshold == pytest.approx(0.1)
+        assert metric.is_healthy is False
 
     @pytest.mark.asyncio
-    async def test_async_rollback_feature_flag_missing_flag_raises_404(self, db_session):
+    async def test_metric_within_threshold_is_healthy(self, db_session, make_feature_flag):
+        flag = make_feature_flag()
+        _add_evaluations(db_session, flag, n=10)  # no errors -> error_rate == 0
+        db_session.add(
+            FeatureFlagSafetyConfig(
+                feature_flag_id=flag.id,
+                enabled=True,
+                metrics={"error_rate": {"critical_threshold": 0.1}},
+                rollback_percentage=0,
+            )
+        )
+        db_session.commit()
+
         service = SafetyService(db_session)
-        with pytest.raises(HTTPException) as exc_info:
-            await service.async_rollback_feature_flag(uuid.uuid4())
-        assert exc_info.value.status_code == 404
+        result = await service.check_feature_flag_safety(flag.id)
+
+        assert result.is_healthy is True
+        assert result.metrics[0].is_healthy is True
+
+    @pytest.mark.asyncio
+    async def test_warning_only_breach_is_reported_but_still_healthy(
+        self, db_session, make_feature_flag
+    ):
+        flag = make_feature_flag()
+        _add_latency_sample(db_session, flag, 150.0)
+        db_session.add(
+            FeatureFlagSafetyConfig(
+                feature_flag_id=flag.id,
+                enabled=True,
+                metrics={
+                    "avg_latency": {"warning_threshold": 100.0, "critical_threshold": 500.0}
+                },
+                rollback_percentage=0,
+            )
+        )
+        db_session.commit()
+
+        service = SafetyService(db_session)
+        result = await service.check_feature_flag_safety(flag.id)
+
+        assert result.is_healthy is True
+        metric = result.metrics[0]
+        assert metric.is_healthy is True
+        assert metric.details["warning"] is True
+
+    @pytest.mark.asyncio
+    async def test_less_than_comparison_type(self, db_session, make_feature_flag):
+        flag = make_feature_flag()
+        _add_latency_sample(db_session, flag, 5.0)
+        db_session.add(
+            FeatureFlagSafetyConfig(
+                feature_flag_id=flag.id,
+                enabled=True,
+                metrics={
+                    "avg_latency": {"critical_threshold": 10.0, "comparison_type": "less_than"}
+                },
+                rollback_percentage=0,
+            )
+        )
+        db_session.commit()
+
+        service = SafetyService(db_session)
+        result = await service.check_feature_flag_safety(flag.id)
+
+        # 5.0 < 10.0 -> breaches "less_than" -> unhealthy.
+        assert result.is_healthy is False
+
+    @pytest.mark.asyncio
+    async def test_equal_to_comparison_type(self, db_session, make_feature_flag):
+        flag = make_feature_flag()
+        _add_latency_sample(db_session, flag, 10.0)
+        db_session.add(
+            FeatureFlagSafetyConfig(
+                feature_flag_id=flag.id,
+                enabled=True,
+                metrics={
+                    "avg_latency": {"critical_threshold": 10.0, "comparison_type": "equal_to"}
+                },
+                rollback_percentage=0,
+            )
+        )
+        db_session.commit()
+
+        service = SafetyService(db_session)
+        result = await service.check_feature_flag_safety(flag.id)
+
+        assert result.is_healthy is False
+
+    @pytest.mark.asyncio
+    async def test_unrecognized_metric_name_is_reported_unmeasured(
+        self, db_session, make_feature_flag
+    ):
+        flag = make_feature_flag()
+        db_session.add(
+            FeatureFlagSafetyConfig(
+                feature_flag_id=flag.id,
+                enabled=True,
+                metrics={"queue_depth": {"critical_threshold": 5}},
+                rollback_percentage=0,
+            )
+        )
+        db_session.commit()
+
+        service = SafetyService(db_session)
+        result = await service.check_feature_flag_safety(flag.id)
+
+        assert result.is_healthy is True
+        metric = result.metrics[0]
+        assert metric.current_value == 0.0
+        assert metric.is_healthy is True
+        assert result.details["unmeasured_metrics"] == ["queue_depth"]
+
+    @pytest.mark.asyncio
+    async def test_threshold_falls_back_to_warning_then_zero(self, db_session, make_feature_flag):
+        flag = make_feature_flag()
+        db_session.add(
+            FeatureFlagSafetyConfig(
+                feature_flag_id=flag.id,
+                enabled=True,
+                metrics={
+                    "avg_latency": {"warning_threshold": 42.0},
+                    "error_rate": {},
+                },
+                rollback_percentage=0,
+            )
+        )
+        db_session.commit()
+
+        service = SafetyService(db_session)
+        result = await service.check_feature_flag_safety(flag.id)
+
+        by_name = {m.name: m for m in result.metrics}
+        assert by_name["avg_latency"].threshold == pytest.approx(42.0)
+        assert by_name["error_rate"].threshold == pytest.approx(0.0)
 
 
 # ---------------------------------------------------------------------------
-# Bug #7: should_rollback
+# should_rollback (now async)
 # ---------------------------------------------------------------------------
 
 
 class TestShouldRollback:
-    def test_missing_flag_returns_false_none_none(self, db_session):
+    @pytest.mark.asyncio
+    async def test_missing_flag_returns_false(self, db_session):
         service = SafetyService(db_session)
-        assert service.should_rollback(db_session, uuid.uuid4()) == (False, None, None)
+        assert await service.should_rollback(db_session, uuid.uuid4()) == (False, None, None)
 
-    def test_inactive_flag_returns_false_none_none(self, db_session, make_feature_flag):
+    @pytest.mark.asyncio
+    async def test_inactive_flag_returns_false(self, db_session, make_feature_flag):
         flag = make_feature_flag(status=FeatureFlagStatus.INACTIVE, rollout_percentage=50)
         service = SafetyService(db_session)
-        assert service.should_rollback(db_session, flag.id) == (False, None, None)
+        assert await service.should_rollback(db_session, flag.id) == (False, None, None)
 
-    def test_zero_rollout_returns_false_none_none(self, db_session, make_feature_flag):
+    @pytest.mark.asyncio
+    async def test_zero_rollout_returns_false(self, db_session, make_feature_flag):
         flag = make_feature_flag(status=FeatureFlagStatus.ACTIVE, rollout_percentage=0)
         service = SafetyService(db_session)
-        assert service.should_rollback(db_session, flag.id) == (False, None, None)
+        assert await service.should_rollback(db_session, flag.id) == (False, None, None)
 
-    def test_active_nonzero_rollout_raises_attribute_error_bug(
-        self, db_session, make_feature_flag
-    ):
-        """Documents bug #7: FeatureFlagSafetyConfig has no
-        `monitoring_enabled` column. This line is outside the method's
-        try/except, so the AttributeError propagates to the caller instead
-        of being swallowed."""
+    @pytest.mark.asyncio
+    async def test_config_disabled_returns_false(self, db_session, make_feature_flag):
         flag = make_feature_flag(status=FeatureFlagStatus.ACTIVE, rollout_percentage=50)
-        service = SafetyService(db_session)
+        db_session.add(
+            FeatureFlagSafetyConfig(
+                feature_flag_id=flag.id, enabled=False, metrics={}, rollback_percentage=0
+            )
+        )
+        db_session.commit()
 
-        with pytest.raises(AttributeError, match="monitoring_enabled"):
-            service.should_rollback(db_session, flag.id)
+        service = SafetyService(db_session)
+        assert await service.should_rollback(db_session, flag.id) == (False, None, None)
+
+    @pytest.mark.asyncio
+    async def test_global_auto_rollback_disabled_returns_false(
+        self, db_session, make_feature_flag, safety_settings_guard
+    ):
+        flag = make_feature_flag(status=FeatureFlagStatus.ACTIVE, rollout_percentage=50)
+        db_session.add(
+            FeatureFlagSafetyConfig(
+                feature_flag_id=flag.id,
+                enabled=True,
+                metrics={"error_rate": {"critical_threshold": 0.01}},
+                rollback_percentage=0,
+            )
+        )
+        _wipe_safety_settings(db_session)
+        db_session.add(SafetySettings(enable_automatic_rollbacks=False, default_metrics=None))
+        db_session.commit()
+
+        service = SafetyService(db_session)
+        assert await service.should_rollback(db_session, flag.id) == (False, None, None)
+
+    @pytest.mark.asyncio
+    async def test_healthy_check_returns_false(
+        self, db_session, make_feature_flag, safety_settings_guard
+    ):
+        flag = make_feature_flag(status=FeatureFlagStatus.ACTIVE, rollout_percentage=50)
+        _add_evaluations(db_session, flag, n=10)  # no errors -> healthy
+        db_session.add(
+            FeatureFlagSafetyConfig(
+                feature_flag_id=flag.id,
+                enabled=True,
+                metrics={"error_rate": {"critical_threshold": 0.5}},
+                rollback_percentage=0,
+            )
+        )
+        _wipe_safety_settings(db_session)
+        db_session.add(SafetySettings(enable_automatic_rollbacks=True, default_metrics=None))
+        db_session.commit()
+
+        service = SafetyService(db_session)
+        assert await service.should_rollback(db_session, flag.id) == (False, None, None)
+
+    @pytest.mark.asyncio
+    async def test_unhealthy_error_rate_recommends_rollback(
+        self, db_session, make_feature_flag, safety_settings_guard
+    ):
+        flag = make_feature_flag(status=FeatureFlagStatus.ACTIVE, rollout_percentage=50)
+        _add_error_log(db_session, flag)
+        _add_evaluations(db_session, flag, n=2)  # error_rate == 0.5
+        db_session.add(
+            FeatureFlagSafetyConfig(
+                feature_flag_id=flag.id,
+                enabled=True,
+                metrics={"error_rate": {"critical_threshold": 0.1}},
+                rollback_percentage=0,
+            )
+        )
+        _wipe_safety_settings(db_session)
+        db_session.add(SafetySettings(enable_automatic_rollbacks=True, default_metrics=None))
+        db_session.commit()
+
+        service = SafetyService(db_session)
+        should, reason, details = await service.should_rollback(db_session, flag.id)
+
+        assert should is True
+        assert "error_rate" in reason
+        assert details["trigger_type"] == RollbackTriggerType.ERROR_RATE
+        assert details["trigger_value"] == pytest.approx(0.5)
+        assert details["threshold_value"] == pytest.approx(0.1)
+        assert "safety_check" in details
+
+    @pytest.mark.asyncio
+    async def test_unhealthy_latency_maps_to_latency_trigger(
+        self, db_session, make_feature_flag, safety_settings_guard
+    ):
+        flag = make_feature_flag(status=FeatureFlagStatus.ACTIVE, rollout_percentage=50)
+        _add_latency_sample(db_session, flag, 900.0)
+        db_session.add(
+            FeatureFlagSafetyConfig(
+                feature_flag_id=flag.id,
+                enabled=True,
+                metrics={"avg_latency": {"critical_threshold": 500.0}},
+                rollback_percentage=0,
+            )
+        )
+        _wipe_safety_settings(db_session)
+        db_session.add(SafetySettings(enable_automatic_rollbacks=True, default_metrics=None))
+        db_session.commit()
+
+        service = SafetyService(db_session)
+        should, reason, details = await service.should_rollback(db_session, flag.id)
+
+        assert should is True
+        assert details["trigger_type"] == RollbackTriggerType.LATENCY
+
+    @pytest.mark.asyncio
+    async def test_unhealthy_with_no_failing_metric_falls_back_to_generic_reason(
+        self, db_session, make_feature_flag, safety_settings_guard
+    ):
+        """`check_feature_flag_safety` never actually returns is_healthy=False
+        with an empty/all-healthy metrics list in practice (is_healthy is
+        only False when at least one metric is unhealthy), so this fallback
+        branch is unreachable through normal use. Exercise it directly via
+        the explicitly-sanctioned mocking of the metric-source call."""
+        from backend.app.schemas.safety import SafetyCheckResponse
+
+        flag = make_feature_flag(status=FeatureFlagStatus.ACTIVE, rollout_percentage=50)
+        db_session.add(
+            FeatureFlagSafetyConfig(
+                feature_flag_id=flag.id,
+                enabled=True,
+                metrics={"error_rate": {"critical_threshold": 0.1}},
+                rollback_percentage=0,
+            )
+        )
+        _wipe_safety_settings(db_session)
+        db_session.add(SafetySettings(enable_automatic_rollbacks=True, default_metrics=None))
+        db_session.commit()
+
+        service = SafetyService(db_session)
+        unhealthy_no_metrics = SafetyCheckResponse(
+            feature_flag_id=flag.id, is_healthy=False, metrics=[], last_checked=datetime.utcnow()
+        )
+        with patch.object(
+            SafetyService,
+            "check_feature_flag_safety",
+            new=AsyncMock(return_value=unhealthy_no_metrics),
+        ):
+            should, reason, details = await service.should_rollback(db_session, flag.id)
+
+        assert should is True
+        assert reason == "Multiple issues detected"
+        assert details["trigger_type"] == RollbackTriggerType.AUTOMATIC
+        assert details["trigger_value"] is None
+        assert details["threshold_value"] is None
+
+    @pytest.mark.asyncio
+    async def test_metric_source_exception_is_swallowed(
+        self, db_session, make_feature_flag, safety_settings_guard
+    ):
+        flag = make_feature_flag(status=FeatureFlagStatus.ACTIVE, rollout_percentage=50)
+        db_session.add(
+            FeatureFlagSafetyConfig(
+                feature_flag_id=flag.id,
+                enabled=True,
+                metrics={"error_rate": {"critical_threshold": 0.1}},
+                rollback_percentage=0,
+            )
+        )
+        _wipe_safety_settings(db_session)
+        db_session.add(SafetySettings(enable_automatic_rollbacks=True, default_metrics=None))
+        db_session.commit()
+
+        service = SafetyService(db_session)
+        with patch.object(
+            SafetyService,
+            "check_feature_flag_safety",
+            new=AsyncMock(side_effect=RuntimeError("metrics backend unavailable")),
+        ):
+            result = await service.should_rollback(db_session, flag.id)
+
+        assert result == (False, None, None)
 
 
 # ---------------------------------------------------------------------------
-# Bug #8: execute_rollback
+# execute_rollback / rollback_feature_flag
 # ---------------------------------------------------------------------------
 
 
@@ -899,30 +1240,21 @@ class TestExecuteRollback:
         result = service.execute_rollback(db_session, uuid.uuid4(), reason="probe")
 
         assert result.success is False
-        assert result.previous_percentage == -1
-        # Bug #8a: schema field is `new_percentage`, code sets
-        # `current_percentage` (silently dropped), so it stays None.
+        assert result.previous_percentage is None
         assert result.new_percentage is None
         assert "does not exist" in result.message
+        assert result.details == {"reason": "probe"}
 
-    def test_existing_flag_without_prior_config_silently_zeroes_rollout(
-        self, db_session, make_feature_flag
+    def test_happy_path_creates_record_and_updates_flag_without_prior_config(
+        self, db_session, make_feature_flag, admin_user
     ):
-        """Documents bug #8 + 8b: the SafetyRollbackRecord construction
-        always raises TypeError (real columns don't match the kwargs used),
-        which is swallowed and reported as success=False - but because no
-        safety config exists yet for this flag, get_or_create_safety_config's
-        internal commit() prematurely persists rollout_percentage=0 before
-        the failure even happens."""
         flag = make_feature_flag(status=FeatureFlagStatus.ACTIVE, rollout_percentage=75)
-        assert (
-            db_session.query(FeatureFlagSafetyConfig)
-            .filter(FeatureFlagSafetyConfig.feature_flag_id == flag.id)
-            .first()
-            is None
-        )
-        service = SafetyService(db_session)
+        assert SafetyService.get_feature_flag_safety_config_record(db_session, flag.id) is None
 
+        service = SafetyService(db_session)
+        # executed_by_user_id is a real FK to users.id; must reference an
+        # actual persisted User row.
+        executor_id = admin_user.id
         result = service.execute_rollback(
             db_session,
             flag.id,
@@ -930,49 +1262,137 @@ class TestExecuteRollback:
             trigger_type=RollbackTriggerType.CUSTOM_METRIC,
             trigger_value=9.9,
             threshold_value=5.0,
+            executed_by_user_id=executor_id,
         )
 
-        assert result.success is False
-        assert result.previous_percentage == -1
-        assert result.new_percentage is None
-        assert "invalid keyword argument" in result.message
+        assert result.success is True
+        assert result.previous_percentage == 75
+        assert result.new_percentage == 0
+        assert result.trigger_type == "custom_metric"
+        assert result.details == {
+            "reason": "metric threshold breached",
+            "trigger_value": 9.9,
+            "threshold_value": 5.0,
+            "metrics_data": None,
+        }
+        assert result.rollback_record_id is not None
 
-        # The flag's rollout percentage was silently committed to 0 despite
-        # the reported failure.
         db_session.refresh(flag)
         assert flag.rollout_percentage == 0
 
-        # No rollback record was ever persisted.
-        assert (
-            db_session.query(SafetyRollbackRecord)
-            .filter(SafetyRollbackRecord.feature_flag_id == flag.id)
-            .count()
-            == 0
-        )
+        record = db_session.query(SafetyRollbackRecord).filter(
+            SafetyRollbackRecord.id == result.rollback_record_id
+        ).one()
+        assert record.feature_flag_id == flag.id
+        assert record.previous_percentage == 75
+        assert record.target_percentage == 0
+        assert record.success is True
+        assert record.executed_by_user_id == executor_id
+        # A safety config was auto-created (get_or_create_safety_config).
+        config = SafetyService.get_feature_flag_safety_config_record(db_session, flag.id)
+        assert config is not None
+        assert record.safety_config_id == config.id
 
-        # The session must still be usable after the internal rollback().
-        assert (
-            db_session.query(FeatureFlag).filter(FeatureFlag.id == flag.id).first() is not None
-        )
-
-    def test_existing_flag_with_prior_config_leaves_rollout_unchanged(
+    def test_happy_path_with_existing_config_and_custom_target_percentage(
         self, db_session, make_feature_flag
     ):
-        """Contrast case for bug #8b: when a safety config already exists,
-        get_or_create_safety_config does NOT commit internally, so the
-        eventual db.rollback() correctly reverts the pending
-        rollout_percentage=0 change and the flag is left untouched."""
-        flag = make_feature_flag(status=FeatureFlagStatus.ACTIVE, rollout_percentage=75)
+        flag = make_feature_flag(status=FeatureFlagStatus.ACTIVE, rollout_percentage=100)
         db_session.add(
             FeatureFlagSafetyConfig(
-                feature_flag_id=flag.id, enabled=True, metrics={}, rollback_percentage=0
+                feature_flag_id=flag.id, enabled=True, metrics={}, rollback_percentage=25
             )
         )
         db_session.commit()
 
         service = SafetyService(db_session)
-        result = service.execute_rollback(db_session, flag.id, reason="probe with config")
+        result = service.execute_rollback(
+            db_session, flag.id, reason="partial rollback", target_percentage=25
+        )
 
-        assert result.success is False
+        assert result.success is True
+        assert result.previous_percentage == 100
+        assert result.new_percentage == 25
         db_session.refresh(flag)
-        assert flag.rollout_percentage == 75
+        assert flag.rollout_percentage == 25
+
+    def test_default_trigger_type_is_manual(self, db_session, make_feature_flag):
+        flag = make_feature_flag(status=FeatureFlagStatus.ACTIVE, rollout_percentage=10)
+        service = SafetyService(db_session)
+
+        result = service.execute_rollback(db_session, flag.id)
+
+        assert result.trigger_type == "manual"
+        assert result.message == f"Feature flag '{flag.key}' rolled back from 10% to 0%"
+
+
+class TestRollbackFeatureFlagAsync:
+    @pytest.mark.asyncio
+    async def test_rollback_feature_flag_missing_flag_raises_404(self, db_session):
+        service = SafetyService(db_session)
+        with pytest.raises(HTTPException) as exc_info:
+            await service.rollback_feature_flag(uuid.uuid4())
+        assert exc_info.value.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_rollback_feature_flag_happy_path_persists_record(
+        self, db_session, make_feature_flag
+    ):
+        flag = make_feature_flag(status=FeatureFlagStatus.ACTIVE, rollout_percentage=80)
+        service = SafetyService(db_session)
+
+        result = await service.rollback_feature_flag(flag.id, percentage=10, reason="load test")
+
+        assert result.success is True
+        assert result.previous_percentage == 80
+        assert result.new_percentage == 10
+        assert result.rollback_record_id is not None
+
+        db_session.refresh(flag)
+        assert flag.rollout_percentage == 10
+        assert (
+            db_session.query(SafetyRollbackRecord)
+            .filter(SafetyRollbackRecord.id == result.rollback_record_id)
+            .count()
+            == 1
+        )
+
+    @pytest.mark.asyncio
+    async def test_rollback_feature_flag_default_percentage_is_zero(
+        self, db_session, make_feature_flag
+    ):
+        flag = make_feature_flag(rollout_percentage=50)
+        service = SafetyService(db_session)
+
+        result = await service.rollback_feature_flag(flag.id)
+
+        assert result.new_percentage == 0
+        assert result.trigger_type == "manual"
+
+    @pytest.mark.asyncio
+    async def test_async_rollback_feature_flag_is_the_same_function(self):
+        assert (
+            SafetyService.async_rollback_feature_flag is SafetyService.rollback_feature_flag
+        )
+
+    @pytest.mark.asyncio
+    async def test_rollback_feature_flag_passes_through_trigger_type_and_executor(
+        self, db_session, make_feature_flag, admin_user
+    ):
+        flag = make_feature_flag(rollout_percentage=40)
+        service = SafetyService(db_session)
+        executor_id = admin_user.id
+
+        result = await service.rollback_feature_flag(
+            flag.id,
+            percentage=0,
+            reason="automated safety rollback",
+            trigger_type=RollbackTriggerType.AUTOMATIC,
+            executed_by_user_id=executor_id,
+        )
+
+        assert result.trigger_type == "automatic"
+        record = db_session.query(SafetyRollbackRecord).filter(
+            SafetyRollbackRecord.id == result.rollback_record_id
+        ).one()
+        assert record.executed_by_user_id == executor_id
+        assert record.trigger_type == "automatic"

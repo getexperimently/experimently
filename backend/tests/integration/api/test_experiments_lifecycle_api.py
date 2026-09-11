@@ -434,23 +434,24 @@ class TestCompleteExperiment:
 class TestGetExperimentResults:
     """GET /api/v1/experiments/{id}/results
 
-    NOTE (still broken -- not part of the recent fix batch):
-    AnalysisService.get_experiment_results() returns a dict shaped like
-    {metrics_results, summary, bayesian_results, ...} which does not match
-    the ExperimentResults response_model (which requires `metrics` and
-    `sample_sizes`). FastAPI's response-model validation fails *after* the
-    endpoint's own try/except has already returned successfully, so this is
-    an unhandled ResponseValidationError rather than a clean 500 from the
-    endpoint's error handling. We use a client with
-    raise_server_exceptions=False to observe the resulting 500 response
-    instead of pytest re-raising the exception.
+    Delegates to the analytics results engine (same payload as
+    GET /api/v1/results/{id} with default options) after applying the
+    experiment access rules.
     """
 
     def test_get_results_for_active_experiment(self, admin_client):
         exp = _create_and_start(admin_client, "Results Active Exp")
-        safe_client = TestClient(fastapi_app, raise_server_exceptions=False)
-        response = safe_client.get(f"/api/v1/experiments/{exp['id']}/results")
-        assert response.status_code == 500, response.text
+        response = admin_client.get(f"/api/v1/experiments/{exp['id']}/results")
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert data["experiment_id"] == exp["id"]
+        assert data["experiment_name"] == exp["name"]
+        assert data["status"].lower() == "active"
+        assert data["confidence_level"] == 0.95
+        # Same shape as the analytics results endpoint
+        mirror = admin_client.get(f"/api/v1/results/{exp['id']}")
+        assert mirror.status_code == 200, mirror.text
+        assert set(data.keys()) == set(mirror.json().keys())
 
     def test_get_results_for_draft_experiment_returns_400(self, admin_client):
         exp = _create_experiment(admin_client, "Results Draft Exp")
