@@ -10,6 +10,7 @@ from typing import Generator
 from urllib.parse import urlparse
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.schema import CreateSchema
 
 from backend.app.core.config import settings
 from backend.app.models.base import Base
@@ -71,20 +72,28 @@ def init_db() -> None:
     # Get schema name
     schema_name = get_schema_name()
 
-    # Create schema if it doesn't exist
-    with engine.connect() as conn:
-        conn.execute(text(f"CREATE SCHEMA IF NOT EXISTS {schema_name}"))
-        conn.execute(text("COMMIT"))
-
-        # Set search path
-        conn.execute(text(f"SET search_path TO {schema_name}"))
-        conn.execute(text("COMMIT"))
+    # Create schema if it doesn't exist and point search_path at it
+    _ensure_schema(schema_name)
 
     # Set schema for all tables
     Base.metadata.schema = schema_name
 
     # Create tables
     Base.metadata.create_all(bind=engine)
+
+
+def _ensure_schema(schema_name: str) -> None:
+    """Create *schema_name* if missing and set it as the search_path.
+
+    Uses the SQLAlchemy DDL construct and a bound parameter instead of
+    string-formatted SQL so the identifier is quoted by the dialect.
+    """
+    with engine.connect() as conn:
+        conn.execute(CreateSchema(schema_name, if_not_exists=True))
+        conn.execute(text("COMMIT"))
+
+        conn.execute(text("SET search_path TO :schema").bindparams(schema=schema_name))
+        conn.execute(text("COMMIT"))
 
 
 def reset_db() -> None:
@@ -101,14 +110,8 @@ def reset_db() -> None:
     # Drop and recreate tables
     Base.metadata.drop_all(bind=engine)
 
-    # Create schema if it doesn't exist
-    with engine.connect() as conn:
-        conn.execute(text(f"CREATE SCHEMA IF NOT EXISTS {schema_name}"))
-        conn.execute(text("COMMIT"))
-
-        # Set search path
-        conn.execute(text(f"SET search_path TO {schema_name}"))
-        conn.execute(text("COMMIT"))
+    # Create schema if it doesn't exist and point search_path at it
+    _ensure_schema(schema_name)
 
     # Create tables
     Base.metadata.create_all(bind=engine)

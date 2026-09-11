@@ -278,7 +278,7 @@ class LLMExperimentService:
         divides by 10000 to get a float in [0, 1).
         """
         key = f"{experiment_id}:{user_id}"
-        digest = hashlib.md5(key.encode()).hexdigest()
+        digest = hashlib.md5(key.encode(), usedforsecurity=False).hexdigest()
         bucket = int(digest[:4], 16) % 10000
         return bucket / 10000.0
 

@@ -435,7 +435,7 @@ class FeatureFlagService:
 
         # Create a hash using user ID and flag key for deterministic assignment
         hash_input = f"{user_id}:{flag.key}"
-        hash_value = int(hashlib.md5(hash_input.encode()).hexdigest(), 16)
+        hash_value = int(hashlib.md5(hash_input.encode(), usedforsecurity=False).hexdigest(), 16)
 
         # Get bucket (0-99)
         bucket = hash_value % 100
