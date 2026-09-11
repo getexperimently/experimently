@@ -17,6 +17,7 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     strategy:
       matrix:
         python-version: ["3.11"]
@@ -69,14 +70,15 @@ jobs:
     - name: Run tests
       env:
         TEST_DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/experimentation_test"
+      # Runs sequentially (no xdist): every other workflow runs the suites in
+      # a single process, and the parallel run never completed on CI.
       run: |
         python -m pytest backend/tests/ \
           --cov=backend \
           --cov-report=xml \
           --cov-report=term \
-          -v \
-          --junitxml=pytest.xml \
-          -n auto
+          -q --tb=short \
+          --junitxml=pytest.xml
 
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v4
