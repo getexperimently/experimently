@@ -727,104 +727,57 @@ Enables or disables a feature flag.
 }
 ```
 
-#### Evaluate Feature Flag
+#### Evaluate Feature Flag (SDK)
 
 ```
-GET /api/v1/feature-flags/evaluate
+GET /api/v1/feature-flags/evaluate/{flag_key}?user_id={user_id}
 ```
 
-Evaluates a feature flag for a specific user.
-
-**Query Parameters**
-
-| Parameter | Type   | Required | Description                                  |
-| --------- | ------ | -------- | -------------------------------------------- |
-| key       | string | Yes      | Key of the feature flag to evaluate          |
-| user_id   | string | Yes      | ID of the user                               |
-| context   | string | No       | JSON string of user attributes for targeting |
+Evaluates one flag for a user. Authenticated with an API key (`X-API-Key` header). The server
+applies the flag's status, targeting rules and rollout percentage; SDKs never bucket locally.
 
 **Example Request**
 
 ```
-GET /api/v1/feature-flags/evaluate?key=new_checkout_flow&user_id=user_123&context={"country":"US","user_type":"premium"}
+GET /api/v1/feature-flags/evaluate/new_checkout_flow?user_id=user_123
+X-API-Key: eptk_...
 ```
 
 **Example Response**
 
 ```json
 {
-    "data": {
-        "key": "new_checkout_flow",
-        "enabled": true,
-        "variation": "on",
-        "value": true,
-        "rule_id": "rule_789"
-    }
+    "key": "new_checkout_flow",
+    "enabled": true,
+    "config": null
 }
 ```
 
-### Assignment API
+Returns `404` when no ACTIVE flag has that key. `GET /api/v1/feature-flags/user/{user_id}` returns
+`{flag_key: boolean}` for every active flag.
 
-#### Get Assignment
+### Tracking API (SDK)
 
-```
-GET /api/v1/assignments
-```
+All tracking endpoints authenticate with an API key (`X-API-Key`) and address experiments and flags by
+their public **keys**. Per-IP rate limit: `SDK_RATE_LIMIT_PER_MINUTE` (default 6000/min).
 
-Retrieves the variant assignment for a user in an experiment.
-
-**Query Parameters**
-
-| Parameter     | Type   | Required | Description                                  |
-| ------------- | ------ | -------- | -------------------------------------------- |
-| experiment_id | string | Yes      | ID of the experiment                         |
-| user_id       | string | Yes      | ID of the user                               |
-| context       | string | No       | JSON string of user attributes for targeting |
-
-**Example Request**
+#### Assign User to Experiment
 
 ```
-GET /api/v1/assignments?experiment_id=exp_12345&user_id=user_789&context={"country":"US","device":"mobile"}
+POST /api/v1/tracking/assign
 ```
 
-**Example Response**
-
-```json
-{
-    "data": {
-        "experiment_id": "exp_12345",
-        "user_id": "user_789",
-        "variant": "treatment",
-        "variant_id": "var_b456",
-        "timestamp": "2023-10-15T15:30:22Z"
-    }
-}
-```
-
-### Events API
-
-#### Track Event
-
-```
-POST /api/v1/events
-```
-
-Tracks an event for a user.
+Returns the user's variant for an ACTIVE experiment. Assignment is sticky: the first call buckets the
+user (deterministic hash over traffic allocation, or the current bandit weights for multi-armed bandit
+experiments) and every later call returns the same variant. Each call records an exposure event.
 
 **Request Body**
 
 ```json
 {
+    "experiment_key": "hero_banner",
     "user_id": "user_789",
-    "event_type": "purchase_completed",
-    "experiment_id": "exp_12345",
-    "variant": "treatment",
-    "timestamp": "2023-10-15T16:45:33Z",
-    "metadata": {
-        "value": 99.99,
-        "currency": "USD",
-        "product_id": "prod_456"
-    }
+    "context": {"country": "US", "device": "mobile"}
 }
 ```
 
@@ -832,52 +785,80 @@ Tracks an event for a user.
 
 ```json
 {
-    "data": {
-        "id": "evt_987",
-        "user_id": "user_789",
-        "event_type": "purchase_completed",
-        "experiment_id": "exp_12345",
-        "variant": "treatment",
-        "timestamp": "2023-10-15T16:45:33Z",
-        "received_at": "2023-10-15T16:45:34Z"
-    }
+    "experiment_key": "hero_banner",
+    "user_id": "user_789",
+    "variant_id": "0d3e7f6a-4b0e-4a1a-9b6f-8b1c2d3e4f50",
+    "variant_name": "video_hero",
+    "is_control": false,
+    "configuration": {"media": "video", "headline": "See it in motion"}
 }
 ```
+
+Returns `404` when no ACTIVE experiment has that key.
+
+#### Track Event
+
+```
+POST /api/v1/tracking/track
+```
+
+Records one event. At least one of `experiment_key` / `feature_flag_key` is required; the user's variant
+is looked up from their assignment. `event_type` is free text (SDKs send the event name);
+`event_name` defaults to `event_type`.
+
+**Request Body**
+
+```json
+{
+    "event_type": "purchase",
+    "event_name": "purchase",
+    "user_id": "user_789",
+    "experiment_key": "hero_banner",
+    "value": 99.99,
+    "metadata": {"currency": "USD", "product_id": "prod_456"},
+    "timestamp": "2026-09-11T16:45:33Z"
+}
+```
+
+**Example Response**
+
+```json
+{
+    "id": "c1f0b2a4-...",
+    "event_type": "purchase",
+    "event_name": "purchase",
+    "user_id": "user_789",
+    "experiment_id": "e494aad0-...",
+    "variant_id": "0d3e7f6a-...",
+    "value": 99.99,
+    "created_at": "2026-09-11T16:45:33Z"
+}
+```
+
+**How events become metrics.** An experiment metric counts every event whose `event_name` equals the
+metric's `event_name` (exposure events are excluded), regardless of `event_type`. A metric with
+`event_name: "purchase"` therefore counts the event above.
+
+Returns `404` when neither key exists and `422` when both are missing.
 
 #### Batch Track Events
 
 ```
-POST /api/v1/events/batch
+POST /api/v1/tracking/batch
 ```
 
-Tracks multiple events in a single request.
+Records up to 100 events in one request; each entry has the same shape as `/tracking/track`.
+Failures are reported per event.
 
 **Request Body**
 
 ```json
 {
     "events": [
-        {
-            "user_id": "user_789",
-            "event_type": "page_view",
-            "experiment_id": "exp_12345",
-            "variant": "treatment",
-            "timestamp": "2023-10-15T16:40:22Z",
-            "metadata": {
-                "page": "/products"
-            }
-        },
-        {
-            "user_id": "user_789",
-            "event_type": "add_to_cart",
-            "experiment_id": "exp_12345",
-            "variant": "treatment",
-            "timestamp": "2023-10-15T16:42:15Z",
-            "metadata": {
-                "product_id": "prod_456",
-                "quantity": 1
-            }
-        }
+        {"event_type": "page_view", "user_id": "user_789", "experiment_key": "hero_banner",
+         "metadata": {"page": "/products"}},
+        {"event_type": "add_to_cart", "user_id": "user_789", "experiment_key": "pdp_buy_button",
+         "value": 49.99, "metadata": {"product_id": "prod_456", "quantity": 1}}
     ]
 }
 ```
@@ -886,13 +867,31 @@ Tracks multiple events in a single request.
 
 ```json
 {
-    "data": {
-        "processed": 2,
-        "failed": 0,
-        "event_ids": ["evt_123", "evt_124"]
-    }
+    "success_count": 2,
+    "failure_count": 0,
+    "errors": null
 }
 ```
+
+#### Track Event by Ids
+
+```
+POST /api/v1/tracking/events
+```
+
+Same as `/tracking/track` but addressed by internal ids (`experiment_id`, `variant_id`,
+`feature_flag_id`) instead of keys; used by server-side integrations and seeding tools.
+
+#### Get User Assignments
+
+```
+GET /api/v1/tracking/assignments/{user_id}?active_only=true
+```
+
+Lists the user's experiment assignments.
+
+> The `/api/v1/events` and `/api/v1/assignments` routers only expose an informational `GET /`;
+> use the `/api/v1/tracking/*` endpoints above.
 
 ### Users API
 

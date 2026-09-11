@@ -136,26 +136,27 @@ curl -X GET "http://localhost:8000/api/v1/feature-flags/user/123" \
 
 ### 4. Tracking Events
 ```bash
-# 1. Get user assignments
-curl -X GET "http://localhost:8000/api/v1/tracking/assignments/123" \
+# 1. Assign a user to an experiment (sticky; records an exposure event)
+curl -X POST "http://localhost:8000/api/v1/tracking/assign" \
   -H "X-API-Key: your_api_key" \
-  -H "Content-Type: application/json"
+  -H "Content-Type: application/json" \
+  -d '{"experiment_key": "hero_banner", "user_id": "123", "context": {"device": "mobile"}}'
 
-# 2. Track an event
-curl -X POST "http://localhost:8000/api/v1/tracking/events" \
+# 2. Track a conversion for that experiment (variant is resolved from the assignment)
+curl -X POST "http://localhost:8000/api/v1/tracking/track" \
   -H "X-API-Key: your_api_key" \
   -H "Content-Type: application/json" \
   -d '{
-    "event_type": "PURCHASE",
+    "event_type": "purchase",
     "user_id": "123",
-    "experiment_id": "456",
-    "variant_id": "789",
+    "experiment_key": "hero_banner",
     "value": 99.99,
-    "event_metadata": {
-      "product_id": "ABC123",
-      "payment_method": "credit_card"
-    }
+    "metadata": {"product_id": "ABC123", "payment_method": "credit_card"}
   }'
+
+# 3. Get user assignments
+curl -X GET "http://localhost:8000/api/v1/tracking/assignments/123" \
+  -H "X-API-Key: your_api_key"
 ```
 
 ### 5. Admin Operations
@@ -458,6 +459,47 @@ curl -X POST "http://localhost:8000/api/v1/users/" \
   ```
 
 ## Tracking Endpoints
+
+All tracking endpoints use API-key authentication (`X-API-Key`) and address experiments and flags by their
+public `key`. They share the per-IP `SDK_RATE_LIMIT_PER_MINUTE` ceiling (default 6000/min).
+
+### Assign User to Experiment
+- **Endpoint**: `POST /api/v1/tracking/assign`
+- **Description**: Return the user's variant for an ACTIVE experiment. Sticky per user; bandit experiments
+  route new users by the current `BanditState` weights. Records an exposure event.
+- **Headers**: X-API-Key: {api_key}
+- **Body**: `{"experiment_key": string, "user_id": string, "context": object?}`
+- **Response**: 200 OK
+  ```json
+  {
+    "experiment_key": "string",
+    "user_id": "string",
+    "variant_id": "uuid",
+    "variant_name": "string",
+    "is_control": false,
+    "configuration": {}
+  }
+  ```
+- **Errors**: 404 when no ACTIVE experiment has that key
+
+### Track Event
+- **Endpoint**: `POST /api/v1/tracking/track`
+- **Description**: Record one event. At least one of `experiment_key` / `feature_flag_key` is required.
+  `event_type` is free text (SDKs send the event name); `event_name` defaults to `event_type`. Metrics count
+  events by `event_name`: a metric with `event_name: "purchase"` counts every `purchase` event.
+- **Headers**: X-API-Key: {api_key}
+- **Body**: `{"event_type": string, "event_name": string?, "user_id": string, "experiment_key": string?, "feature_flag_key": string?, "value": number?, "metadata": object?, "timestamp": datetime?}`
+- **Response**: 200 OK (the stored event); 404 unknown keys; 422 no key
+
+### Batch Track Events
+- **Endpoint**: `POST /api/v1/tracking/batch`
+- **Description**: Record up to 100 events (same shape as `/track`) in one request
+- **Response**: 200 OK `{"success_count": int, "failure_count": int, "errors": [...]|null}`; 413 above 100 events
+
+### Track Event by Ids
+- **Endpoint**: `POST /api/v1/tracking/events`
+- **Description**: Same as `/track` but keyed by internal ids (`experiment_id`, `variant_id`, `feature_flag_id`);
+  `event_name` is required. Used by server-side integrations and seeding tools.
 
 ### Get User Assignments
 - **Endpoint**: `GET /api/v1/tracking/assignments/{user_id}`
@@ -1437,13 +1479,15 @@ GET  /api/v1/feature-flags/{id}/history   — Flag change history (ANALYST+)
 
 ### Safety Monitoring
 
+See [Safety Monitoring](../feature-flags/safety.md).
+
 ```
-GET  /api/v1/safety/settings              — Get safety config (ADMIN)
-PUT  /api/v1/safety/settings              — Update safety config (ADMIN)
-GET  /api/v1/safety/feature-flags/{id}    — Get flag safety config
-PUT  /api/v1/safety/feature-flags/{id}    — Update flag safety config (DEVELOPER+)
-POST /api/v1/safety/rollback/{flag_id}    — Trigger manual rollback (DEVELOPER+)
-GET  /api/v1/safety/rollback-history      — Rollback history (ANALYST+)
+GET  /api/v1/safety/settings                              — Global settings (superuser)
+POST /api/v1/safety/settings                              — Create/update global settings (superuser)
+GET  /api/v1/safety/feature-flags/{flag_id}/config        — Per-flag safety config (defaults when none)
+POST /api/v1/safety/feature-flags/{flag_id}/config        — Create/update per-flag config
+GET  /api/v1/safety/feature-flags/{flag_id}/check         — Run the safety check now
+POST /api/v1/safety/feature-flags/{flag_id}/rollback      — Manual rollback (?percentage=0&reason=...) (superuser)
 ```
 
 ---
