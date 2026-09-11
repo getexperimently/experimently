@@ -274,12 +274,18 @@ class LLMExperimentService:
         """
         Map ``experiment_id:user_id`` to a float in [0, 1).
 
-        Uses MD5 truncated to 4 bytes to produce a value in 0–9999, then
-        divides by 10000 to get a float in [0, 1).
+        Reduces the full 128-bit MD5 digest modulo 10000 and divides by
+        10000, matching the other assignment hashers in the platform.
+
+        Note: an earlier version reduced only the first 16 bits of the digest
+        modulo 10000.  Because 65536 is not a multiple of 10000, buckets
+        0-5535 were 7/6 as likely as buckets 5536-9999, which skewed a
+        nominal 33/33/34 split to roughly 36/34/30.  Using the whole digest
+        makes the bias negligible (2**128 mod 10000 is a rounding error).
         """
         key = f"{experiment_id}:{user_id}"
         digest = hashlib.md5(key.encode(), usedforsecurity=False).hexdigest()
-        bucket = int(digest[:4], 16) % 10000
+        bucket = int(digest, 16) % 10000
         return bucket / 10000.0
 
     @staticmethod
