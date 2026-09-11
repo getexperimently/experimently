@@ -32,9 +32,10 @@ from backend.app.schemas.experiment import (
     ExperimentUpdate,
     ExperimentResponse,
     ExperimentListResponse,
-    ExperimentResults,
     ScheduleConfig,
 )
+from backend.app.schemas.results import ExperimentResultsResponse
+from backend.app.api.v1.endpoints import results as results_endpoints
 from backend.app.services.experiment_service import ExperimentService
 from backend.app.services.analysis_service import AnalysisService
 from backend.app.core.logging import logger
@@ -1061,7 +1062,7 @@ async def complete_experiment(
 
 @router.get(
     "/{experiment_id}/results",
-    response_model=ExperimentResults,
+    response_model=ExperimentResultsResponse,
     summary="Get experiment results",
     response_description="Returns the experiment results and analysis",
 )
@@ -1071,72 +1072,43 @@ async def get_experiment_results(
     ),
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_active_user),
-    cache_control: Dict[str, Any] = Depends(deps.get_cache_control),
-) -> ExperimentResults:
+) -> ExperimentResultsResponse:
     """
     Get experiment results and statistical analysis.
 
-    This endpoint retrieves the analytical results of an experiment, including:
-    - Metric values for control and treatment variants
-    - Statistical significance calculations
-    - Sample sizes
-    - Recommendations based on the data
-
-    The results are calculated in real-time based on the latest data.
-    For experiments with insufficient data, the statistical significance
-    may be inconclusive.
-
-    Returns:
-        ExperimentResults: Complete analysis of the experiment results
+    Applies the experiment-level access rules (permission/ownership check and
+    no results for DRAFT experiments) and then delegates to the analytics
+    results engine, so this endpoint returns exactly the same payload as
+    ``GET /api/v1/results/{experiment_id}`` with default options.
 
     Raises:
-        HTTPException 400: If the experiment has no data or is in DRAFT status
+        HTTPException 400: If the experiment is in DRAFT status
         HTTPException 403: If the user doesn't have permission to view this experiment
+        HTTPException 404: If the experiment does not exist
     """
-    try:
-        # Get experiment
-        experiment = db.query(Experiment).filter(Experiment.id == experiment_id).first()
-        if not experiment:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="Experiment not found"
-            )
+    experiment = db.query(Experiment).filter(Experiment.id == experiment_id).first()
+    if not experiment:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Experiment not found"
+        )
 
-        # Check access permission
-        experiment = deps.get_experiment_access(experiment, current_user)
+    deps.get_experiment_access(experiment, current_user)
 
-        # Check if experiment has results
-        if experiment.status == ExperimentStatus.DRAFT:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Cannot get results for experiments in DRAFT status",
-            )
+    if experiment.status == ExperimentStatus.DRAFT:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot get results for experiments in DRAFT status",
+        )
 
-        # Try to get from cache if enabled
-        if cache_control.enabled and cache_control.redis:
-            cache_key = f"experiment_results:{experiment_id}"
-            cached_data = await cache_control.redis.get(cache_key)
-            if cached_data:
-                return ExperimentResults.model_validate_json(cached_data)
-
-        # Calculate results using the analysis service
-        analysis_service = AnalysisService(db)
-        results = analysis_service.get_experiment_results(experiment_id)
-
-        # Cache results if enabled
-        if cache_control.enabled and cache_control.redis:
-            await cache_control.redis.setex(
-                f"experiment_results:{experiment_id}",
-                3600,  # Cache for 1 hour
-                results.model_dump_json() if hasattr(results, "model_dump_json") else str(results),
-            )
-
-        return results
-    except HTTPException:
-        # Let deliberate 4xx responses through instead of wrapping them in a 500.
-        raise
-    except Exception as e:
-        logger.error(f"Error getting experiment results: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+    return results_endpoints.get_experiment_results(
+        experiment_id=experiment_id,
+        confidence_level=0.95,
+        correction_method="none",
+        use_cache=True,
+        breakdown=None,
+        db=db,
+        current_user=current_user,
+    )
 
 
 # New endpoints
