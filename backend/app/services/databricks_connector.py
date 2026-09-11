@@ -119,12 +119,24 @@ class DatabricksConnector:
         self.host = host
         self.http_path = http_path
         self.access_token = access_token
-        self.catalog = catalog
-        self.schema = schema
+        # catalog/schema are interpolated into SQL as identifiers (Databricks
+        # SQL cannot bind identifiers), so restrict them to safe identifier
+        # characters up front.
+        self.catalog = self._validate_identifier(catalog, "catalog")
+        self.schema = self._validate_identifier(schema, "schema")
         self.timeout_seconds = timeout_seconds
 
         # Live connection — None until connect() is called.
         self._connection: Optional[Any] = None
+
+    _IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+    @classmethod
+    def _validate_identifier(cls, value: str, what: str) -> str:
+        """Return *value* if it is a plain SQL identifier, else raise ValueError."""
+        if not isinstance(value, str) or not cls._IDENTIFIER_RE.match(value):
+            raise ValueError(f"Invalid Databricks {what} identifier: {value!r}")
+        return value
 
     # ------------------------------------------------------------------
     # Context manager
@@ -314,7 +326,7 @@ class DatabricksConnector:
             DatabricksQueryError:      On query execution failure.
         """
         sql = (
-            "SELECT variant_id, "
+            "SELECT variant_id, "  # nosec B608 - catalog/schema validated in __init__, values bound via ?
             "COUNT(DISTINCT user_id) AS sample_size, "
             "SUM(CASE WHEN converted THEN 1 ELSE 0 END) AS conversions "
             f"FROM {self.catalog}.{self.schema}.experiment_assignments "
@@ -354,7 +366,7 @@ class DatabricksConnector:
             DatabricksQueryError:      On query execution failure.
         """
         sql = (
-            "SELECT group_key, "
+            "SELECT group_key, "  # nosec B608 - catalog/schema validated in __init__, values bound via ?
             "SUM(request_count) AS requests, "
             "SUM(error_count) AS errors "
             f"FROM {self.catalog}.{self.schema}.feature_flag_events "

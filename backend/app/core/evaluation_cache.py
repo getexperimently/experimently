@@ -40,7 +40,7 @@ class CacheKey:
         # Sort context keys for deterministic hashing
         context_str = json.dumps(self.user_context, sort_keys=True)
         key_str = f"{self.rule_id}:{context_str}"
-        return hashlib.md5(key_str.encode()).hexdigest()
+        return hashlib.md5(key_str.encode(), usedforsecurity=False).hexdigest()
 
     def __str__(self) -> str:
         return self._hash

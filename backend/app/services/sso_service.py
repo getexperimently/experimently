@@ -21,8 +21,11 @@ import logging
 import secrets
 import time
 import uuid
-import xml.etree.ElementTree as ET
 from typing import Any, Dict, List, Optional
+
+# defusedxml guards against entity-expansion / external-entity attacks when
+# parsing IdP-supplied SAML responses (Bandit B314, Semgrep use-defused-xml).
+from defusedxml import ElementTree as ET
 from urllib.parse import urlencode, urlparse
 
 from fastapi import HTTPException, status
@@ -524,7 +527,9 @@ async def exchange_oidc_code(
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error("OIDC token exchange failed: %s", exc)
+        # Log the failure class only: the exception text can echo the token
+        # request/response, which carries the client secret and tokens.
+        logger.error("OIDC code exchange failed: %s", type(exc).__name__)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"OIDC token exchange failed: {exc}",

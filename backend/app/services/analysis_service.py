@@ -881,9 +881,11 @@ class AnalysisService:
         if not metrics:
             return {"segments": []}
 
-        # Get segment values from event metadata
+        # Get segment values from event metadata.
+        # `schema` comes from get_schema_name(), which only ever returns one of
+        # two literal identifiers; all request-derived values are bound params.
         schema = get_schema_name()
-        segment_values_query = text(
+        segment_values_query = text(  # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text
             f"""
             SELECT DISTINCT jsonb_extract_path_text(event_metadata, :segment_key) as segment_value
             FROM {schema}.events
@@ -891,7 +893,7 @@ class AnalysisService:
             AND event_metadata ? :segment_key
             AND jsonb_extract_path_text(event_metadata, :segment_key) IS NOT NULL
             AND jsonb_extract_path_text(event_metadata, :segment_key) != ''
-        """
+        """  # nosec B608 - schema is a fixed config identifier, not user input
         )
 
         segment_values_result = self.db.execute(
@@ -919,7 +921,7 @@ class AnalysisService:
                 for variant in experiment.variants:
                     # Get assignments count for this variant in this segment
                     # This is an approximation - ideally would track segment with the assignment
-                    segment_assignments_query = text(
+                    segment_assignments_query = text(  # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text
                         f"""
                         SELECT COUNT(DISTINCT a.user_id)
                         FROM {schema}.assignments a
@@ -928,7 +930,7 @@ class AnalysisService:
                         AND a.variant_id = :variant_id
                         AND e.event_metadata ? :segment_key
                         AND jsonb_extract_path_text(e.event_metadata, :segment_key) = :segment_value
-                    """
+                    """  # nosec B608 - schema is a fixed config identifier, not user input
                     )
 
                     assignments = (
@@ -945,7 +947,7 @@ class AnalysisService:
                     )
 
                     # Get conversions for this variant and segment
-                    segment_conversions_query = text(
+                    segment_conversions_query = text(  # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text
                         f"""
                         SELECT COUNT(*)
                         FROM {schema}.events
@@ -955,7 +957,7 @@ class AnalysisService:
                         AND event_name = :event_name
                         AND event_metadata ? :segment_key
                         AND jsonb_extract_path_text(event_metadata, :segment_key) = :segment_value
-                    """
+                    """  # nosec B608 - schema is a fixed config identifier, not user input
                     )
 
                     conversions = (

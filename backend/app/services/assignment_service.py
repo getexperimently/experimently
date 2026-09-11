@@ -694,7 +694,7 @@ class AssignmentService:
 
         # Create a hash using user ID and experiment ID
         hash_input = f"{user_id}:{experiment.id}"
-        hash_value = int(hashlib.md5(hash_input.encode()).hexdigest(), 16)
+        hash_value = int(hashlib.md5(hash_input.encode(), usedforsecurity=False).hexdigest(), 16)
 
         # Get variants with their traffic allocations
         variants = experiment.variants
