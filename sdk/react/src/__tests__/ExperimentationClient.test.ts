@@ -15,6 +15,9 @@ const user: UserContext = {
   userId: 'user-123',
   attributes: { device: 'mobile', country: 'US' },
 };
+const plainUser: UserContext = { userId: 'user-123' };
+/** `encodeURIComponent(JSON.stringify(user.attributes))` */
+const userContext = '%7B%22device%22%3A%22mobile%22%2C%22country%22%3A%22US%22%7D';
 
 const flagOn: FeatureFlagEvaluateResponse = { key: 'my-flag', enabled: true, config: null };
 const flagOff: FeatureFlagEvaluateResponse = { key: 'my-flag', enabled: false, config: null };
@@ -110,10 +113,10 @@ describe('ExperimentationClient constructor', () => {
 // ─── evaluateFeatureFlag — request ────────────────────────────────────────────
 
 describe('evaluateFeatureFlag request', () => {
-  it('GETs /api/v1/feature-flags/evaluate/{key}?user_id=…', async () => {
+  it('GETs /api/v1/feature-flags/evaluate/{key}?user_id=… when the user has no attributes', async () => {
     const fetchMock = mockFetch(flagOn);
     const client = new ExperimentationClient(baseConfig);
-    await client.evaluateFeatureFlag(user, 'my-flag');
+    await client.evaluateFeatureFlag(plainUser, 'my-flag');
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const { url, init } = call(fetchMock);
@@ -121,12 +124,56 @@ describe('evaluateFeatureFlag request', () => {
     expect(init.method).toBe('GET');
   });
 
+  it('appends context=<url-encoded JSON of user.attributes> when the user has attributes', async () => {
+    const fetchMock = mockFetch(flagOn);
+    const client = new ExperimentationClient(baseConfig);
+    await client.evaluateFeatureFlag(user, 'my-flag');
+
+    const { url, init } = call(fetchMock);
+    expect(url).toBe(
+      `https://api.example.com/api/v1/feature-flags/evaluate/my-flag?user_id=user-123&context=${userContext}`
+    );
+    expect(userContext).toBe('%7B%22device%22%3A%22mobile%22%2C%22country%22%3A%22US%22%7D');
+    expect(init.method).toBe('GET');
+    expect(init.body).toBeUndefined();
+  });
+
+  it('the context parameter round-trips to the original attributes', async () => {
+    const fetchMock = mockFetch(flagOn);
+    const client = new ExperimentationClient(baseConfig);
+    const attributes = { os: 'iOS', os_version: '17.4.0', tier: 'premium', employee: false, app: { version: '3.2.1' } };
+    await client.evaluateFeatureFlag({ userId: 'user-123', attributes }, 'my-flag');
+
+    const query = new URL(call(fetchMock).url).searchParams;
+    expect(query.get('user_id')).toBe('user-123');
+    expect(JSON.parse(query.get('context')!)).toEqual(attributes);
+  });
+
+  it('omits context when attributes is an empty object', async () => {
+    const fetchMock = mockFetch(flagOn);
+    const client = new ExperimentationClient(baseConfig);
+    await client.evaluateFeatureFlag({ userId: 'user-123', attributes: {} }, 'my-flag');
+    expect(call(fetchMock).url).toBe(
+      'https://api.example.com/api/v1/feature-flags/evaluate/my-flag?user_id=user-123'
+    );
+  });
+
   it('URL-encodes flag keys that contain special characters', async () => {
     const fetchMock = mockFetch(flagOn);
     const client = new ExperimentationClient(baseConfig);
-    await client.evaluateFeatureFlag(user, 'my flag/key');
+    await client.evaluateFeatureFlag(plainUser, 'my flag/key');
     expect(call(fetchMock).url).toBe(
       'https://api.example.com/api/v1/feature-flags/evaluate/my%20flag%2Fkey?user_id=user-123'
+    );
+  });
+
+  it('URL-encodes flag key, user id and context together', async () => {
+    const fetchMock = mockFetch(flagOn);
+    const client = new ExperimentationClient(baseConfig);
+    await client.evaluateFeatureFlag({ userId: 'user a/b@c', attributes: { q: 'a&b=c' } }, 'my flag/key');
+    expect(call(fetchMock).url).toBe(
+      'https://api.example.com/api/v1/feature-flags/evaluate/my%20flag%2Fkey' +
+        '?user_id=user%20a%2Fb%40c&context=%7B%22q%22%3A%22a%26b%3Dc%22%7D'
     );
   });
 
@@ -294,6 +341,43 @@ describe('evaluateFeatureFlagDetailed', () => {
     const client = new ExperimentationClient(baseConfig);
     await expect(client.evaluateFeatureFlagDetailed(user, 'my-flag')).rejects.toThrow('API error: 503');
   });
+
+  it('exposes the server reason when the response carries one', async () => {
+    mockFetch({ key: 'my-flag', enabled: true, config: null, reason: 'targeting_rule' });
+    const client = new ExperimentationClient(baseConfig);
+    await expect(client.evaluateFeatureFlagDetailed(user, 'my-flag')).resolves.toEqual({
+      flagKey: 'my-flag',
+      variant: 'on',
+      isEnabled: true,
+      config: null,
+      loading: false,
+      error: null,
+      reason: 'targeting_rule',
+    });
+  });
+
+  it('exposes reason for a disabled flag too', async () => {
+    mockFetch({ key: 'my-flag', enabled: false, config: null, reason: 'rollout' });
+    const client = new ExperimentationClient(baseConfig);
+    const result = await client.evaluateFeatureFlagDetailed(user, 'my-flag');
+    expect(result.isEnabled).toBe(false);
+    expect(result.reason).toBe('rollout');
+  });
+
+  it('leaves reason undefined when the server omits it (older servers)', async () => {
+    mockFetch(flagOn);
+    const client = new ExperimentationClient(baseConfig);
+    const result = await client.evaluateFeatureFlagDetailed(user, 'my-flag');
+    expect(result.reason).toBeUndefined();
+    expect(result).not.toHaveProperty('reason');
+  });
+
+  it('ignores a non-string reason', async () => {
+    mockFetch({ key: 'my-flag', enabled: true, config: null, reason: 42 });
+    const client = new ExperimentationClient(baseConfig);
+    const result = await client.evaluateFeatureFlagDetailed(user, 'my-flag');
+    expect(result.reason).toBeUndefined();
+  });
 });
 
 // ─── Flag cache ───────────────────────────────────────────────────────────────
@@ -364,6 +448,20 @@ describe('flag cache', () => {
     await client.evaluateFeatureFlag(user, 'my-flag');
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('is keyed by user + flag only: changed attributes hit the cache until clearCache', async () => {
+    const fetchMock = mockFetch(flagOn);
+    const client = new ExperimentationClient(baseConfig);
+
+    await client.evaluateFeatureFlag({ userId: 'user-123', attributes: { country: 'US' } }, 'my-flag');
+    await client.evaluateFeatureFlag({ userId: 'user-123', attributes: { country: 'DE' } }, 'my-flag');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    client.clearCache();
+    await client.evaluateFeatureFlag({ userId: 'user-123', attributes: { country: 'DE' } }, 'my-flag');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(call(fetchMock, 1).url).toContain('&context=%7B%22country%22%3A%22DE%22%7D');
   });
 
   it('does not cache a non-2xx response — the next call re-fetches', async () => {
@@ -466,7 +564,47 @@ describe('assignExperiment result', () => {
       configuration: { steps: 1 },
       loading: false,
       error: null,
+      assigned: true,
     });
+  });
+
+  it('defaults assigned to true and leaves reason undefined when the server omits both (older servers)', async () => {
+    mockFetch(assignment);
+    const client = new ExperimentationClient(baseConfig);
+    const result = await client.assignExperiment(user, 'checkout');
+    expect(result.assigned).toBe(true);
+    expect(result.reason).toBeUndefined();
+    expect(result).not.toHaveProperty('reason');
+  });
+
+  it('maps assigned: true + reason: "assigned" from the server', async () => {
+    mockFetch({ ...assignment, assigned: true, reason: 'assigned' });
+    const client = new ExperimentationClient(baseConfig);
+    const result = await client.assignExperiment(user, 'checkout');
+    expect(result.assigned).toBe(true);
+    expect(result.reason).toBe('assigned');
+    expect(result.isControl).toBe(false);
+  });
+
+  it('maps an ineligible user (assigned: false + reason) onto the control variant the server returned', async () => {
+    mockFetch({ ...controlAssignment, assigned: false, reason: 'mutual_exclusion' });
+    const client = new ExperimentationClient(baseConfig);
+    const result = await client.assignExperiment(user, 'checkout');
+    expect(result).toEqual({
+      experimentKey: 'checkout',
+      variantKey: 'standard',
+      variantName: 'standard',
+      variantId: 'var-1',
+      isControl: true,
+      configuration: { steps: 3 },
+      loading: false,
+      error: null,
+      assigned: false,
+      reason: 'mutual_exclusion',
+    });
+    // An ineligible result is still cached: the server would answer the same way again.
+    expect((await client.assignExperiment(user, 'checkout')).reason).toBe('mutual_exclusion');
+    expect(global.fetch).toHaveBeenCalledTimes(1);
   });
 
   it('marks control assignments with isControl: true', async () => {

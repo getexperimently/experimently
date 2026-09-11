@@ -74,7 +74,7 @@ REDIS_PORT=6379
 SECRET_KEY=demo_secret_key_change_in_production_32chars
 ENVIRONMENT=development
 LOG_LEVEL=INFO
-CORS_ORIGINS=http://localhost:3100,http://localhost:3200,http://localhost:8000
+CORS_ORIGINS=http://localhost:3100,http://localhost:3200,http://localhost:3300,http://localhost:8000
 FIRST_SUPERUSER=admin@demo.com
 FIRST_SUPERUSER_PASSWORD=Demo1234!
 AUDIT_HMAC_KEY=demo_hmac_key_change_in_production
@@ -123,6 +123,11 @@ pip install -r "$REPO_ROOT/backend/requirements.txt" -q
 log "Running database migrations..."
 cd "$REPO_ROOT"
 export APP_ENV=development
+# Background jobs run every minute in the demo so rollouts, safety checks and
+# bandit refreshes are visible during a walkthrough (production defaults: 15/5/5).
+export ROLLOUT_CHECK_INTERVAL_MINUTES="${ROLLOUT_CHECK_INTERVAL_MINUTES:-1}"
+export SAFETY_CHECK_INTERVAL_MINUTES="${SAFETY_CHECK_INTERVAL_MINUTES:-1}"
+export BANDIT_UPDATE_INTERVAL_MINUTES="${BANDIT_UPDATE_INTERVAL_MINUTES:-1}"
 export POSTGRES_DB=experimentation
 export POSTGRES_SCHEMA=experimentation
 export POSTGRES_SERVER=localhost
@@ -148,6 +153,17 @@ if [[ "$SHOPLAB" != "0" ]]; then
     ok "ShopLab data seeded."
 else
     warn "SHOPLAB=0 — skipping ShopLab seed."
+fi
+
+# StreamPulse mobile demo (flags, rollout schedule, safety config, MEG, holdout, API key).
+# Set STREAMPULSE=0 to skip everything StreamPulse-related.
+STREAMPULSE="${STREAMPULSE:-1}"
+if [[ "$STREAMPULSE" != "0" ]]; then
+    log "Seeding StreamPulse demo catalogue..."
+    python backend/scripts/seed_streampulse.py
+    ok "StreamPulse data seeded."
+else
+    warn "STREAMPULSE=0 — skipping StreamPulse seed."
 fi
 
 # ---------------------------------------------------------------------------
@@ -259,6 +275,40 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# 13c. StreamPulse mobile demo (port 3300) + its device simulator
+# ---------------------------------------------------------------------------
+STREAMPULSE_STARTED=0
+STREAMPULSE_DIR="$REPO_ROOT/demo/streampulse"
+if [[ "$STREAMPULSE" == "0" ]]; then
+    warn "STREAMPULSE=0 — skipping StreamPulse."
+elif [[ ! -f "$STREAMPULSE_DIR/package.json" ]]; then
+    warn "demo/streampulse/package.json not found — skipping StreamPulse."
+else
+    log "Installing StreamPulse dependencies..."
+    cd "$STREAMPULSE_DIR"
+    npm install --silent
+
+    log "Starting StreamPulse on port 3300..."
+    nohup npm run dev \
+        > "$DEMO_DIR/.logs/streampulse.log" 2>&1 &
+    echo $! > "$DEMO_DIR/.pids/streampulse.pid"
+    log "StreamPulse PID: $(cat "$DEMO_DIR/.pids/streampulse.pid")"
+    STREAMPULSE_STARTED=1
+
+    if [[ -f "$STREAMPULSE_DIR/simulator/traffic.py" ]]; then
+        log "Starting StreamPulse device simulator (3 devices/s)..."
+        source "$REPO_ROOT/venv/bin/activate"
+        cd "$REPO_ROOT"
+        nohup python demo/streampulse/simulator/traffic.py --rate 3 \
+            > "$DEMO_DIR/.logs/streampulse-simulator.log" 2>&1 &
+        echo $! > "$DEMO_DIR/.pids/streampulse-simulator.pid"
+        ok "StreamPulse simulator PID: $(cat "$DEMO_DIR/.pids/streampulse-simulator.pid")"
+    else
+        warn "demo/streampulse/simulator/traffic.py not found — StreamPulse simulator not started."
+    fi
+fi
+
+# ---------------------------------------------------------------------------
 # 14. Start live event simulator
 # ---------------------------------------------------------------------------
 log "Starting live event simulator..."
@@ -282,6 +332,9 @@ echo -e "${GREEN}${BOLD}║                                        ║${NC}"
 echo -e "${GREEN}${BOLD}║  Frontend:   http://localhost:3100     ║${NC}"
 if [[ "$SHOPLAB_STARTED" == "1" ]]; then
 echo -e "${GREEN}${BOLD}║  ShopLab:    http://localhost:3200     ║${NC}"
+fi
+if [[ "$STREAMPULSE_STARTED" == "1" ]]; then
+echo -e "${GREEN}${BOLD}║  StreamPulse: http://localhost:3300    ║${NC}"
 fi
 echo -e "${GREEN}${BOLD}║  API Docs:   http://localhost:8000/docs║${NC}"
 echo -e "${GREEN}${BOLD}║  Admin:      admin@demo.com            ║${NC}"

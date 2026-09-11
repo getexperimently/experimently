@@ -70,6 +70,42 @@ Run pieces by hand: `python backend/scripts/seed_shoplab.py` (seeds experiments,
 
 ---
 
+### Scene 0b — StreamPulse: feature flags on mobile (5 min)
+
+StreamPulse (`demo/streampulse`, http://localhost:3300) is a simulated music app: a phone frame with seven screens and a
+device picker. Every flag and experiment is evaluated for the chosen device through the React SDK, with the device's
+attributes (OS, OS version, app version, region, tier, employee) sent as targeting context. A simulator streams thousands
+of devices through the same API, and a scripted "rollout story" walks the platform through a real launch.
+
+**What to show:**
+- Pick **iPhone 15 · iOS 17.4 · US · premium** → the Search tab shows **AI search ✨**. Pick **Pixel 7 · Android 14 · DE**
+  → keyword search. The Experimently panel shows `streampulse_ai_search: on (targeting_rule)` vs `off (rollout)`.
+  - "That rule is `os = iOS AND os_version ≥ 17.0.0 AND region = US AND tier = premium`, built in the dashboard's targeting
+    editor. Nothing is hard-coded in the app."
+- Pick **Internal tester** → the Player tab shows the redesigned player (`streampulse_player_v2: on (targeting_rule)`,
+  employee rule) while normal devices are in the 5% canary.
+- Profile tab: `streampulse_wrapped` and `streampulse_profile_badges` are in a **mutual exclusion group** — the panel shows
+  one assigned and the other "excluded: mutual exclusion". A few devices show "in global holdout" for every experiment.
+- Kill switch: in the dashboard (http://localhost:3100/feature-flags) disable **streampulse_recs_v2** → within five seconds
+  the Home tab falls back to the classic feed.
+- The rollout story (drawer in the app, driven by `python demo/streampulse/simulator/rollout_story.py --auto`):
+  1. player v2 at 5% + internal rule → 2. advance the schedule to 25% → 3. Android 12 devices start crashing (the simulator
+  reports errors through the API) → 4. the safety monitor sees the error rate cross 5% and rolls the flag back to 5%
+  automatically → 5. a fix ships: rule `app_version ≥ 3.2.1` → 6. 50% → 7. 100%.
+  - "Targeting, gradual rollout, safety monitoring, auto-rollback and lifecycle management, in one walkthrough."
+
+**Key talking points:**
+- Server-side targeting with 20+ operators, including semantic versions
+- Rollout schedules and safety monitoring work together: expand automatically, retreat automatically
+- Kill switches take effect without a release, which is the whole point on mobile
+
+Run pieces by hand: `python backend/scripts/seed_streampulse.py`, `cd demo/streampulse && npm run dev`,
+`python demo/streampulse/simulator/traffic.py --rate 3`, `python demo/streampulse/simulator/rollout_story.py --auto`.
+For the story to complete on its own, run the backend with `SAFETY_CHECK_INTERVAL_MINUTES=1 ROLLOUT_CHECK_INTERVAL_MINUTES=1`.
+See `demo/streampulse/README.md`.
+
+---
+
 ### Scene 1 — Feature Flags (3 min)
 
 **What to show:**
@@ -209,6 +245,7 @@ Run pieces by hand: `python backend/scripts/seed_shoplab.py` (seeds experiments,
 | Page | URL |
 |------|-----|
 | ShopLab storefront | http://localhost:3200 |
+| StreamPulse mobile demo | http://localhost:3300 |
 | Home | http://localhost:3100 |
 | Feature Flags | http://localhost:3100/feature-flags |
 | Experiments | http://localhost:3100/experiments |
@@ -246,4 +283,8 @@ tail -f demo/.logs/frontend.log
 # ShopLab storefront and its traffic simulator
 tail -f demo/.logs/shoplab.log
 tail -f demo/.logs/shoplab-simulator.log
+
+# StreamPulse and its device simulator
+tail -f demo/.logs/streampulse.log
+tail -f demo/.logs/streampulse-simulator.log
 ```

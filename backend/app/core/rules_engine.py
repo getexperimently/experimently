@@ -141,12 +141,62 @@ def evaluate_condition(condition: Condition, user_context: UserContext) -> bool:
     # Get actual value from user context
     if attribute not in user_context:
         logger.debug(f"Attribute {attribute} not found in user context")
+        # Presence operators are the one case where a missing attribute is
+        # meaningful: "is empty" holds, "is not empty" does not.
+        if operator == OperatorType.IS_NULL:
+            return True
         return False
 
     actual_value = user_context[attribute]
 
     # Apply operator
     return apply_operator(operator, actual_value, expected_value, condition.additional_value)
+
+
+def _is_empty_value(value: Any) -> bool:
+    """True for ``None``, blank strings and empty collections (dashboard "is empty")."""
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return value.strip() == ""
+    if isinstance(value, (list, tuple, set, dict)):
+        return len(value) == 0
+    return False
+
+
+def _values_equal(actual_value: Any, expected_value: Any) -> bool:
+    """
+    Equality with a small amount of type leniency.
+
+    The dashboard rule editor stores every value as a string ("true", "17")
+    while SDK contexts carry typed values (``True``, ``17``). Exact equality is
+    tried first; when exactly one side is a string and the other a bool or
+    number, the string is interpreted as that type before comparing. Two
+    strings, or two typed values, are never coerced.
+    """
+    if actual_value == expected_value:
+        return True
+
+    scalar = (bool, int, float)
+    if isinstance(expected_value, str) and isinstance(actual_value, scalar):
+        typed, text = actual_value, expected_value
+    elif isinstance(actual_value, str) and isinstance(expected_value, scalar):
+        typed, text = expected_value, actual_value
+    else:
+        return False
+
+    if isinstance(typed, bool):
+        lowered = text.strip().lower()
+        if lowered in ("true", "1", "yes"):
+            return typed is True
+        if lowered in ("false", "0", "no"):
+            return typed is False
+        return False
+
+    try:
+        return float(text) == float(typed)
+    except (TypeError, ValueError):
+        return False
 
 
 def apply_operator(
@@ -167,6 +217,12 @@ def apply_operator(
     Returns:
         True if the operator evaluates to true, False otherwise
     """
+    # Presence operators ignore expected_value entirely
+    if operator == OperatorType.IS_NULL:
+        return _is_empty_value(actual_value)
+    elif operator == OperatorType.IS_NOT_NULL:
+        return not _is_empty_value(actual_value)
+
     # Handle None values
     if actual_value is None:
         # Only certain operators make sense with None
@@ -182,9 +238,9 @@ def apply_operator(
 
     # Simple equality operators
     if operator == OperatorType.EQUALS:
-        return actual_value == expected_value
+        return _values_equal(actual_value, expected_value)
     elif operator == OperatorType.NOT_EQUALS:
-        return actual_value != expected_value
+        return not _values_equal(actual_value, expected_value)
 
     # Collection operators
     elif operator == OperatorType.IN:
@@ -192,12 +248,12 @@ def apply_operator(
         if not isinstance(expected_value, (list, tuple, set)):
             logger.warning(f"Expected value for IN operator should be a collection, got {type(expected_value)}")
             return False
-        return actual_value in expected_value
+        return any(_values_equal(actual_value, item) for item in expected_value)
     elif operator == OperatorType.NOT_IN:
         if not isinstance(expected_value, (list, tuple, set)):
             logger.warning(f"Expected value for NOT_IN operator should be a collection, got {type(expected_value)}")
             return False
-        return actual_value not in expected_value
+        return not any(_values_equal(actual_value, item) for item in expected_value)
 
     # String operators
     elif operator == OperatorType.CONTAINS:
@@ -505,6 +561,19 @@ def apply_operator(
     # Geographic distance operator
     elif operator == OperatorType.GEO_DISTANCE:
         try:
+            # The Condition schema validates GEO_DISTANCE as value=[lat, lon] plus
+            # additional_value (a radius, or {"radius", "unit", "comparison"}).
+            # Fold that form into the {"lat", "lon", "radius", ...} dict this
+            # handler works with so both spellings evaluate identically.
+            schema_form = isinstance(expected_value, (list, tuple))
+            if schema_form and additional_value is not None:
+                point = _extract_coordinates(expected_value)
+                if point:
+                    if isinstance(additional_value, dict):
+                        expected_value = {**additional_value, **point}
+                    else:
+                        expected_value = {**point, "radius": additional_value}
+
             # Extract coordinates from actual_value
             actual_coords = _extract_coordinates(actual_value)
             if not actual_coords:

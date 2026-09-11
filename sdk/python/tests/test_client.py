@@ -3,6 +3,7 @@ test can assert the exact method, URL, headers and JSON body that would hit the 
 
 from __future__ import annotations
 
+import json
 import threading
 from datetime import datetime, timezone
 from unittest import mock
@@ -198,11 +199,72 @@ class TestGetFeatureFlag:
         assert request.url == f"{API_URL}/api/v1/feature-flags/evaluate/my%20flag%2F%CE%B2?user_id=u%201"
         assert request.query == {"user_id": "u 1"}
 
+    def test_no_context_without_attributes(self, client, transport):
+        flag_route(transport)
+        client.get_feature_flag("new_search", "user-1")
+        assert transport.last.url == f"{API_URL}/api/v1/feature-flags/evaluate/new_search?user_id=user-1"
+        assert transport.last.query == {"user_id": "user-1"}
+
+    def test_sends_attributes_as_url_encoded_json_context(self, client, transport):
+        flag_route(transport)
+        client.get_feature_flag("new_search", "user-1", {"device": "mobile", "country": "US"})
+        assert transport.last.method == "GET"
+        assert transport.last.body is None
+        assert transport.last.url == (
+            f"{API_URL}/api/v1/feature-flags/evaluate/new_search"
+            "?user_id=user-1&context=%7B%22device%22%3A%22mobile%22%2C%22country%22%3A%22US%22%7D"
+        )
+
+    def test_context_round_trips_nested_attributes(self, client, transport):
+        flag_route(transport)
+        attributes = {"os": "iOS", "os_version": "17.4.0", "employee": False, "app": {"version": "3.2.1"}, "n": 3}
+        client.get_feature_flag("new_search", "user-1", attributes)
+        assert json.loads(transport.last.query["context"]) == attributes
+        # compact separators: no spaces in the wire form
+        assert " " not in transport.last.query["context"]
+
+    def test_empty_attributes_send_no_context(self, client, transport):
+        flag_route(transport)
+        client.get_feature_flag("new_search", "user-1", {})
+        assert transport.last.query == {"user_id": "user-1"}
+
+    def test_context_is_encoded_alongside_key_and_user_id(self, client, transport):
+        transport.respond(200, json={"key": "my flag", "enabled": False, "config": None})
+        client.get_feature_flag("my flag", "u 1", {"q": "a&b=c"})
+        assert transport.last.url == (
+            f"{API_URL}/api/v1/feature-flags/evaluate/my%20flag?user_id=u%201&context=%7B%22q%22%3A%22a%26b%3Dc%22%7D"
+        )
+        assert transport.last.query == {"user_id": "u 1", "context": '{"q":"a&b=c"}'}
+
     def test_maps_response(self, client, transport):
         flag_route(transport)
         assert client.get_feature_flag("new_search", "user-1") == FlagEvaluation(
             key="new_search", enabled=True, config={"variant": "beta", "engine": "v2"}
         )
+
+    def test_maps_reason_when_present(self, client, transport):
+        flag_route(transport, reason="targeting_rule")
+        evaluation = client.get_feature_flag("new_search", "user-1", {"country": "US"})
+        assert evaluation.reason == "targeting_rule"
+        assert evaluation == FlagEvaluation(
+            key="new_search", enabled=True, config={"variant": "beta", "engine": "v2"}, reason="targeting_rule"
+        )
+
+    def test_reason_is_none_when_absent_or_not_a_string(self, client, transport):
+        flag_route(transport)
+        assert client.get_feature_flag("new_search", "user-1").reason is None
+        flag_route(transport, key="other", reason=7)
+        assert client.get_feature_flag("other", "user-1").reason is None
+
+    def test_cache_key_ignores_attributes_until_clear_cache(self, client, transport):
+        flag_route(transport)
+        client.get_feature_flag("new_search", "user-1", {"country": "US"})
+        client.get_feature_flag("new_search", "user-1", {"country": "DE"})
+        assert len(transport.requests) == 1
+        client.clear_cache()
+        client.get_feature_flag("new_search", "user-1", {"country": "DE"})
+        assert len(transport.requests) == 2
+        assert transport.last.query["context"] == '{"country":"DE"}'
 
     def test_disabled_flag_with_null_config(self, client, transport):
         flag_route(transport, enabled=False, config=None)
@@ -250,6 +312,11 @@ class TestIsFeatureEnabled:
         assert client.is_feature_enabled("on", "user-1") is True
         assert client.is_feature_enabled("off", "user-1") is False
 
+    def test_forwards_attributes_as_context(self, client, transport):
+        flag_route(transport, key="on", enabled=True)
+        assert client.is_feature_enabled("on", "user-1", {"tier": "premium"}) is True
+        assert transport.last.query == {"user_id": "user-1", "context": '{"tier":"premium"}'}
+
     def test_false_on_404(self, client, transport):
         transport.respond(404, json={"detail": "not found"})
         assert client.is_feature_enabled("missing", "user-1") is False
@@ -265,6 +332,16 @@ class TestGetAllFlags:
         assert client.get_all_flags("user 1") == {"a": True, "b": False, "c": True}
         assert transport.last.url == f"{API_URL}/api/v1/feature-flags/user/user%201"
         assert transport.last.method == "GET"
+
+    def test_sends_attributes_as_context(self, client, transport):
+        transport.route("GET", "/api/v1/feature-flags/user/user%201", json={"a": True})
+        assert client.get_all_flags("user 1", {"device": "mobile", "country": "US"}) == {"a": True}
+        assert transport.last.url == (
+            f"{API_URL}/api/v1/feature-flags/user/user%201"
+            "?context=%7B%22device%22%3A%22mobile%22%2C%22country%22%3A%22US%22%7D"
+        )
+        client.get_all_flags("user 1", {})
+        assert transport.last.url == f"{API_URL}/api/v1/feature-flags/user/user%201"
 
     def test_not_cached_and_raises_on_error(self, client, transport):
         transport.route("GET", "/api/v1/feature-flags/user/u", json={"a": True})

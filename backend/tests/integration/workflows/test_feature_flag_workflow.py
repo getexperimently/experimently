@@ -294,10 +294,12 @@ class TestFeatureFlagTargetingWorkflow:
             data = eval_resp.json()
             assert "is_enabled" in data or "enabled" in data or "variation" in data
 
-    def test_inactive_flag_evaluate_returns_not_found(
+    def test_inactive_flag_evaluates_off(
         self, admin_user, db_session, admin_client
     ):
-        """Evaluating an INACTIVE flag returns 404 (evaluate only serves active flags)."""
+        """Evaluating an INACTIVE flag (kill switch pulled) is "off", not an
+        error: 200 with enabled=false and reason="inactive". Only an unknown
+        key is a 404."""
         flag = _make_flag_in_db(
             db_session,
             admin_user,
@@ -309,5 +311,6 @@ class TestFeatureFlagTargetingWorkflow:
             f"/api/v1/feature-flags/evaluate/{flag.key}",
             params={"user_id": "test-user-002"},
         )
-        # The evaluate endpoint only serves active flags; inactive flags return 404
-        assert eval_resp.status_code in (404, 500), eval_resp.text
+        assert eval_resp.status_code == 200, eval_resp.text
+        assert eval_resp.json()["enabled"] is False
+        assert eval_resp.json()["reason"] == "inactive"

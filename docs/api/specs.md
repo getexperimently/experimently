@@ -753,7 +753,7 @@ X-API-Key: eptk_...
 }
 ```
 
-Returns `404` when no ACTIVE flag has that key. `GET /api/v1/feature-flags/user/{user_id}` returns
+A flag that exists but is not ACTIVE returns `enabled: false` with `reason: "inactive"`; `404` only when no flag has that key. `GET /api/v1/feature-flags/user/{user_id}` returns
 `{flag_key: boolean}` for every active flag.
 
 ### Tracking API (SDK)

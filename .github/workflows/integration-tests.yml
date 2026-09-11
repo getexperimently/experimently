@@ -80,9 +80,11 @@ jobs:
           POSTGRES_SCHEMA: test_experimentation
           DATABASE_URI: "postgresql://postgres:postgres@localhost:5432/experimentation_test"
         run: |
+          # No marker filter: 30 of the integration files carry no marker and were
+          # silently deselected (570 of 1462 tests, including every regression test
+          # for the tracking API, results engine, bandits and assignment eligibility).
           python -m pytest backend/tests/integration/ -v \
             --tb=short \
-            -m "integration and requires_db" \
             --junit-xml=test-results/integration.xml
 
       - name: Run E2E workflow tests
