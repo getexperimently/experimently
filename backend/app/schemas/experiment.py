@@ -184,6 +184,13 @@ class ExperimentBase(BaseModel):
     """Base model for experiment data."""
 
     name: str = Field(..., min_length=1, max_length=100, description="Experiment name")
+    key: Optional[str] = Field(
+        None,
+        min_length=1,
+        max_length=100,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]*$",
+        description="Stable identifier used by SDKs (generated from the name when omitted)",
+    )
     description: Optional[str] = Field(None, max_length=2000, description="Experiment description")
     hypothesis: Optional[str] = Field(None, max_length=2000, description="Experiment hypothesis")
     experiment_type: ExperimentType = Field(
@@ -446,6 +453,7 @@ class ExperimentResponse(BaseModel):
 
     id: UUID4
     name: str
+    key: Optional[str] = None
     description: Optional[str] = None
     hypothesis: Optional[str] = None
     experiment_type: str
@@ -473,6 +481,9 @@ class ExperimentResponse(BaseModel):
 
     # Issue #22: MAB optimization type
     optimization_type: OptimizationType = OptimizationType.FIXED
+
+    # Free-form notes/insights (POST /experiments/{id}/metadata)
+    experiment_metadata: Optional[Dict[str, Any]] = None
 
     # EP-036: Split URL testing configuration
     split_url_config: Optional[Dict[str, Any]] = None
