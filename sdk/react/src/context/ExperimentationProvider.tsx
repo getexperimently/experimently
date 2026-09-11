@@ -2,7 +2,7 @@ import React, { createContext, useContext, useMemo, ReactNode } from 'react';
 import { ExperimentationClient } from '../client/ExperimentationClient';
 import { SdkConfig, UserContext } from '../client/types';
 
-interface ExperimentationContextValue {
+export interface ExperimentationContextValue {
   client: ExperimentationClient;
   user: UserContext;
 }
@@ -16,16 +16,22 @@ interface ProviderProps {
 }
 
 export function ExperimentationProvider({ config, user, children }: ProviderProps) {
-  // Stabilise the client — only recreate when apiKey or baseUrl changes
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  // Stabilise the client — only recreate when a config primitive changes, so
+  // callers may pass an inline config object without losing the cache.
   const client = useMemo(
     () => new ExperimentationClient(config),
-    // Intentionally omit full config object to avoid recreating on every render;
-    // callers should memoize config or pass stable primitives.
-    [config.apiKey, config.baseUrl]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [config.apiKey, config.baseUrl, config.timeoutMs, config.cacheTtlMs]
   );
 
-  const value = useMemo(() => ({ client, user }), [client, user.userId]);
+  // Stabilise the user reference by content so hooks only re-run when the
+  // identity or attributes actually change.
+  const attributesKey = JSON.stringify(user.attributes ?? null);
+  const value = useMemo(
+    () => ({ client, user }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [client, user.userId, attributesKey]
+  );
 
   return (
     <ExperimentationContext.Provider value={value}>
@@ -34,10 +40,14 @@ export function ExperimentationProvider({ config, user, children }: ProviderProp
   );
 }
 
-export function useExperimentationContext(): ExperimentationContextValue {
+/** Access the SDK client and current user. Must be used inside ExperimentationProvider. */
+export function useExperimentation(): ExperimentationContextValue {
   const ctx = useContext(ExperimentationContext);
   if (!ctx) {
-    throw new Error('useExperimentationContext must be used within ExperimentationProvider');
+    throw new Error('useExperimentation must be used within ExperimentationProvider');
   }
   return ctx;
 }
+
+/** Alias of {@link useExperimentation}, kept for backwards compatibility. */
+export const useExperimentationContext = useExperimentation;

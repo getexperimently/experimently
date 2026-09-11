@@ -41,6 +41,16 @@ from .compliance_audit_event import ComplianceAuditEvent, AuditAction, AuditOutc
 from .mutual_exclusion_group import MutualExclusionGroup, MutualExclusionGroupStatus
 from .global_holdout import GlobalHoldout
 from .bandit_state import BanditState
+# Several models reference these classes by name in relationship() strings
+# (Report, FeatureFlagSafetyConfig, CustomRole, ...). Importing every module
+# here lets scripts that only import backend.app.models configure the mappers.
+from .report import Report
+from .safety import SafetySettings, FeatureFlagSafetyConfig, SafetyRollbackRecord
+from .custom_role import CustomRole
+from .scheduler_run import SchedulerRun
+from .sso_config import SSOConfig
+from .baa_config import BAAConfig
+from .phi_audit_log import PHIAuditLog
 from .warehouse_connection import WarehouseConnection
 from .notification import NotificationPreference, NotificationDeliveryLog, NotificationChannel, NotificationStatus
 from .integration_config import IntegrationConfig, IntegrationType as IntegrationTypeEnum
