@@ -56,7 +56,20 @@ LOG_LEVEL=DEBUG         # INFO, WARNING, ERROR in production
 #### Security Settings
 ```
 SECRET_KEY=your_secret_key  # Use a strong random string in production
-BACKEND_CORS_ORIGINS=http://localhost:3000,http://localhost:8000
+
+# CORS: either form works. CORS_ORIGINS is a plain comma-separated list;
+# BACKEND_CORS_ORIGINS must be a JSON array of URLs. When both are empty the
+# dev defaults (localhost:3000/3001/3100/3200/8000) are used.
+CORS_ORIGINS=http://localhost:3100,http://localhost:3200,http://localhost:8000
+# BACKEND_CORS_ORIGINS=["https://app.example.com"]
+
+# Per-IP ceiling for SDK traffic (/api/v1/tracking/*, flag evaluation). Default 6000/min.
+SDK_RATE_LIMIT_PER_MINUTE=6000
+```
+
+#### Background Jobs
+```
+BANDIT_UPDATE_INTERVAL_MINUTES=5   # multi-armed bandit weight refresh cadence
 ```
 
 ### 3. Environment Selection
