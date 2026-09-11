@@ -147,7 +147,30 @@ curl -X PUT "http://localhost:8000/api/v1/bandit/exp-uuid/weights" \
 
 ## Scheduler
 
-The bandit scheduler runs on a background cycle and recalculates weights for all active MAB experiments. The frequency is configurable via `BANDIT_SCHEDULER_INTERVAL_SECONDS` in settings. Default: every 5 minutes.
+The bandit scheduler (`BanditSchedulerRunner` in `backend/app/core/bandit_scheduler.py`) starts with the API
+process and recalculates weights for every ACTIVE experiment whose `optimization_type` is not `fixed`.
+The cadence is `BANDIT_UPDATE_INTERVAL_MINUTES` (default 5). It does not run under `APP_ENV=test`.
+
+### Where the counts come from
+
+For each variant the scheduler needs pulls (assignments) and successes (conversions). Sources are tried in order:
+
+1. **DynamoDB real-time counters** (`get_experiment_counters`), when the counters stack is deployed.
+2. **PostgreSQL**: pulls = `assignments` rows per variant; successes = distinct users with an event whose
+   `event_name` matches the experiment's primary metric (see the event-matching rule in the tracking API docs).
+   This is the path used in local and single-region deployments.
+3. The previously persisted `BanditState`.
+4. Zero-count priors (equal weights).
+
+### How the weights affect traffic
+
+`POST /api/v1/tracking/assign` reads the latest `BanditState` for bandit experiments and routes **new** users
+according to the current weights (a deterministic hash of the user id is looked up in the cumulative weight
+distribution, so repeated calls agree before the assignment row exists). Users who already have an assignment
+keep it. Variants whose weight is `0` receive no new traffic. Until the first refresh has run, new users are
+split by the variants' `traffic_allocation`.
+
+`POST /api/v1/bandit/{experiment_id}/update` forces an immediate refresh from the dashboard.
 
 ---
 

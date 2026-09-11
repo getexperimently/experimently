@@ -278,7 +278,7 @@ if (enabled) {
 - [User Guide](../guides/user-guide.md) — Guide for experiment designers and analysts
 - [Testing Guide](../development/testing-guide.md) — Write and run tests
 - [API Reference](http://localhost:8000/docs) — Interactive API documentation
-- [SDK Documentation](../sdk/) — JavaScript and Python SDK guides
+- [SDK Guide](../sdk-guide.md) — endpoint contract and per-SDK status; [React SDK](../sdk/react.md) is verified end to end
 
 ---
 
