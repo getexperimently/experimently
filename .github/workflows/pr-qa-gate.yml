@@ -217,6 +217,9 @@ jobs:
       - name: Install backend dependencies
         run: pip install -r backend/requirements.txt
 
+      - name: Install OpenFeature Python SDK dependency
+        run: pip install "openfeature-sdk>=0.9.0"
+
       - name: Install JS SDK dependencies
         run: |
           for d in sdk/js sdk/openfeature sdk/edge; do
