@@ -87,9 +87,11 @@ def auth_client(cognito_resources):
     request, and CognitoAuthService reads env vars in __init__, we patch the
     environment so every new instance picks up the moto pool details.
 
-    The rate limiter is bypassed for tests by patching the singleton limiter's
-    is_allowed method to always return (True, 999), preventing 429 responses
-    that would otherwise corrupt test assertions about status codes.
+    The rate limiter is bypassed for tests by patching ``is_allowed`` on both
+    limiter classes (Redis-backed and the in-memory fallback) to always return
+    (True, 999), preventing 429 responses that would otherwise corrupt test
+    assertions about status codes.  The middleware owns its limiter instance
+    (there is no module-level singleton), so the classes are patched instead.
     """
     from backend.app.main import app
     import backend.app.middleware.rate_limiter as rate_limiter_module
@@ -104,10 +106,14 @@ def auth_client(cognito_resources):
         "AWS_REGION": "us-east-1",
     }
 
-    with patch.dict(os.environ, env_patch):
-        with patch.object(rate_limiter_module._limiter, "is_allowed", return_value=(True, 999)):
-            with TestClient(app, raise_server_exceptions=False) as client:
-                yield client
+    allow_all = {"return_value": (True, 999)}
+    with patch.dict(os.environ, env_patch), patch.object(
+        rate_limiter_module.RedisRateLimiter, "is_allowed", **allow_all
+    ), patch.object(
+        rate_limiter_module.SlidingWindowRateLimiter, "is_allowed", **allow_all
+    ):
+        with TestClient(app, raise_server_exceptions=False) as client:
+            yield client
 
 
 @pytest.fixture

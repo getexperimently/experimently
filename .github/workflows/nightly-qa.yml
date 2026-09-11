@@ -150,8 +150,9 @@ jobs:
       - name: Install pytest
         run: pip install pytest
 
+      # pytest.ini adds --cov flags; only pytest is installed here, so clear addopts.
       - name: Run Python SDK contract tests
-        run: python -m pytest tests/sdk-contract/test_python_sdk.py -v
+        run: python -m pytest tests/sdk-contract/test_python_sdk.py -v -o addopts=""
 
       - name: Run JavaScript SDK contract tests
         run: node tests/sdk-contract/test_js_sdk.js
@@ -216,7 +217,9 @@ jobs:
       - name: Start backend
         env:
           APP_ENV: test
-          POSTGRES_HOST: localhost
+          TESTING: 'true'
+          # The app reads POSTGRES_SERVER (not POSTGRES_HOST) for the DB host.
+          POSTGRES_SERVER: localhost
           POSTGRES_PORT: 5432
           POSTGRES_DB: experimentation
           POSTGRES_USER: postgres
@@ -224,7 +227,11 @@ jobs:
         run: |
           cd backend
           uvicorn app.main:app --host 0.0.0.0 --port 8000 &
-          sleep 5
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:8000/health >/dev/null && break
+            sleep 1
+          done
+          curl -s http://localhost:8000/health || true
 
       - name: Install frontend dependencies
         run: cd frontend && npm ci
@@ -235,12 +242,16 @@ jobs:
       - name: Run E2E tests
         env:
           PLAYWRIGHT_SKIP_SERVER: 'true'
-          PLAYWRIGHT_BASE_URL: http://localhost:3000
+          # `npm run dev` serves on 3100 (see frontend/package.json)
+          PLAYWRIGHT_BASE_URL: http://localhost:3100
           PLAYWRIGHT_API_URL: http://localhost:8000
         run: |
           cd frontend
           npm run dev &
-          sleep 10
+          for i in $(seq 1 60); do
+            curl -sf http://localhost:3100 >/dev/null && break
+            sleep 1
+          done
           npx playwright test --reporter=html
 
       - name: Upload E2E report
@@ -285,11 +296,14 @@ jobs:
       - name: Run accessibility tests
         env:
           PLAYWRIGHT_SKIP_SERVER: 'true'
-          PLAYWRIGHT_BASE_URL: http://localhost:3000
+          PLAYWRIGHT_BASE_URL: http://localhost:3100
         run: |
           cd frontend
           npm run dev &
-          sleep 10
+          for i in $(seq 1 60); do
+            curl -sf http://localhost:3100 >/dev/null && break
+            sleep 1
+          done
           npx playwright test accessibility --reporter=html || true
 
       - name: Upload a11y report

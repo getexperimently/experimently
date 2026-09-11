@@ -35,7 +35,7 @@ def hash_user(user_id: str, experiment_key: str) -> float:
         A float in [0, 1) used for deterministic variant assignment.
     """
     raw = f"{user_id}:{experiment_key}".encode()
-    digest = hashlib.md5(raw).hexdigest()
+    digest = hashlib.md5(raw, usedforsecurity=False).hexdigest()
     return int(digest[:8], 16) / 0xFFFFFFFF
 
 
