@@ -7,7 +7,8 @@
 | [Quick Start](getting-started/quick-start.md) | Everyone | Zero to first experiment in 30 minutes |
 | [User Guide](guides/user-guide.md) | Product / Analysts | Designing, running, and interpreting experiments |
 | [Technical Guide](architecture/technical-guide.md) | Engineers | Architecture, data models, implementation details |
-| [SDK Guide](sdk-guide.md) | Engineers | Integrating the Python and JavaScript SDKs |
+| [SDK Guide](sdk-guide.md) | Engineers | Endpoint contract for SDKs and per-SDK status |
+| [ShopLab Demo](../demo/shoplab/README.md) | Everyone | A storefront running five live experiments through the React SDK (`./demo/setup-local.sh`) |
 | [Testing Guide](development/testing-guide.md) | Engineers | Writing and running tests |
 
 ---
@@ -151,6 +152,8 @@
 ## Go-to-Market
 
 - [GTM Strategy](go-to-market/GTM_STRATEGY.md)
+- [Demo Application Strategy](go-to-market/demo-application-strategy.md) — ShopLab (built), StreamPulse and LaunchPad (planned); see the [Demo Guide](../demo/DEMO_GUIDE.md)
+- [Open-Source Strategy](go-to-market/open-source-strategy.md)
 - [Design Partner Playbook](go-to-market/design-partner-playbook.md)
 - [Messaging Framework](go-to-market/messaging-framework.md)
 - [GTM Metrics Dashboard](go-to-market/metrics-dashboard.md)

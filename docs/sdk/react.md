@@ -1,362 +1,231 @@
 # React SDK
 
-The React SDK provides hooks, a context provider, a higher-order component, and SSR support for integrating experiments and feature flags into React and Next.js applications.
+`@experimentation-platform/react-sdk` (v1.1) provides a context provider, hooks, a higher-order
+component and an SSR client for using experiments and feature flags from React and Next.js.
+
+Flag evaluation and experiment assignment are decided **by the server**: every call goes to the
+public API with your `X-API-Key`, the server buckets the user (sticky per user + experiment), and
+the SDK caches the answer per user + key. Nothing is bucketed locally.
+
+Source: `sdk/react`. A complete working integration is the ShopLab demo storefront in
+`demo/shoplab`.
 
 ---
 
 ## Installation
 
 ```bash
-npm install @experimently/react-sdk
-# or
-yarn add @experimently/react-sdk
+npm install @experimentation-platform/react-sdk   # peer deps: react >= 17, react-dom >= 17
 ```
+
+To consume the SDK from source inside this monorepo (what `demo/shoplab` does), alias
+`@experimentation-platform/react-sdk` to `sdk/react/src` in `tsconfig.json` `paths` and in
+your bundler, and alias `react`/`react-dom` to your app's copies to avoid a duplicate React.
 
 ---
 
 ## Provider Setup
 
-Wrap your application (or the subtree that needs experimentation) with `ExperimentationProvider`. The provider fetches flag and experiment data for the current user and makes it available to all child components via React context.
-
 ```tsx
-import React from 'react';
-import { ExperimentationProvider } from '@experimently/react-sdk';
+import { ExperimentationProvider } from '@experimentation-platform/react-sdk';
 
 function App() {
   return (
     <ExperimentationProvider
-      apiUrl="https://your-platform.example.com"
-      apiKey={process.env.NEXT_PUBLIC_EXPERIMENTATION_API_KEY}
-      userId={currentUser.id}
-      userAttributes={{
-        country: currentUser.country,
-        plan: currentUser.plan,
+      config={{
+        apiKey: process.env.NEXT_PUBLIC_EXPERIMENTLY_API_KEY!,
+        baseUrl: process.env.NEXT_PUBLIC_EXPERIMENTLY_API_URL ?? 'http://localhost:8000',
       }}
+      user={{ userId: currentUser.id, attributes: { country: currentUser.country, plan: currentUser.plan } }}
     >
       <YourApplication />
     </ExperimentationProvider>
   );
 }
-
-export default App;
 ```
 
 ### Provider Props
 
 | Prop | Type | Required | Description |
 |------|------|----------|-------------|
-| `apiUrl` | `string` | Yes | Base URL of the experimentation platform |
-| `apiKey` | `string` | Yes | API key for authentication |
-| `userId` | `string` | Yes | Current user's unique identifier |
-| `userAttributes` | `Record<string, string \| number \| boolean>` | No | Targeting attributes passed to all evaluations |
-| `initialFlags` | `Record<string, boolean>` | No | Pre-fetched flag values for SSR hydration |
-| `defaultVariant` | `string` | No | Fallback variant on error (default: `"control"`) |
+| `config.apiKey` | `string` | Yes | API key (sent as `X-API-Key`) |
+| `config.baseUrl` | `string` | Yes | Backend origin, e.g. `https://api.example.com`; the SDK appends `/api/v1/...` |
+| `config.timeoutMs` | `number` | No | Per-request timeout, default `5000` |
+| `config.cacheTtlMs` | `number` | No | How long a successful evaluation/assignment is reused, default `300000` (5 min) |
+| `user.userId` | `string` | Yes | Stable identifier used for bucketing |
+| `user.attributes` | `Record<string, unknown>` | No | Sent as `context` on experiment assignment (targeting rules) |
 
-The provider catches all errors internally. If the API is unavailable, hooks return safe defaults without throwing.
+The client is recreated only when `apiKey`/`baseUrl` change; hooks re-run when `userId` changes.
+All hooks return safe defaults while loading and on error, and never throw.
 
 ---
 
 ## Hooks Reference
 
-### `useFeatureFlag(flagKey, defaultValue?)`
+### `useFeatureFlag(flagKey): FeatureFlagEvaluation`
 
-Evaluates a single feature flag for the current user. Returns the flag's boolean state (`true` = enabled). Falls back to `defaultValue` (default: `false`) while loading or on error.
-
-```tsx
-import { useFeatureFlag } from '@experimently/react-sdk';
-
-function SettingsPanel() {
-  const isDarkMode = useFeatureFlag('dark-mode', false);
-
-  return <Panel theme={isDarkMode ? 'dark' : 'light'} />;
-}
-```
-
-The hook is synchronous after the initial load. On the first render (while flags are being fetched), it returns `defaultValue`.
-
----
-
-### `useExperiment(experimentKey)`
-
-Returns the variant assignment and loading state for an experiment.
+Evaluates one flag for the current user via `GET /api/v1/feature-flags/evaluate/{flagKey}?user_id=…`.
 
 ```tsx
-import { useExperiment } from '@experimently/react-sdk';
+import { useFeatureFlag } from '@experimentation-platform/react-sdk';
 
-function CheckoutButton() {
-  const { variant, isLoading, error } = useExperiment('checkout-button-color');
-
-  if (isLoading) return <DefaultButton />;
-  if (error) return <DefaultButton />;
-
-  return variant === 'green' ? <GreenButton /> : <DefaultButton />;
+function SearchPage() {
+  const { isEnabled, variant, config, loading, error } = useFeatureFlag('new_search');
+  if (loading) return <Spinner />;
+  return isEnabled ? <NewSearch /> : <LegacySearch />;
 }
 ```
-
-**Return Value**
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `variant` | `string` | The assigned variant key (e.g., `'control'`, `'treatment'`) |
-| `isLoading` | `boolean` | `true` while the assignment is being fetched |
-| `error` | `Error \| null` | Error object if the assignment failed; `null` otherwise |
+| `flagKey` | `string` | The key you asked for |
+| `isEnabled` | `boolean` | Server decision for this user (`false` while loading or on error) |
+| `variant` | `string \| null` | `null` when off; `config.variant` when the flag config carries a string `variant`; otherwise `'on'` |
+| `config` | `unknown \| null` | The flag's `config` payload as returned by the server |
+| `loading` | `boolean` | `true` until the first response |
+| `error` | `Error \| null` | Set when the request failed (flag is reported off) |
 
----
+### `useVariant(flagKey): string | null`
 
-### `useVariant(experimentKey, variantKey)`
+Shorthand for `useFeatureFlag(flagKey).variant`.
 
-Returns `true` if the current user is assigned to the specified variant. Useful for conditional rendering without an explicit switch statement.
+### `useMultipleFlags(flagKeys): Record<string, FeatureFlagEvaluation | null>`
+
+Evaluates several flags in parallel. Each entry is `null` until its evaluation completes.
 
 ```tsx
-import { useVariant } from '@experimently/react-sdk';
+const flags = useMultipleFlags(['new_search', 'free_shipping_banner']);
+const showBanner = flags['free_shipping_banner']?.isEnabled ?? false;
+```
+
+### `useExperiment(experimentKey): ExperimentAssignment`
+
+Assigns the current user via `POST /api/v1/tracking/assign` (sticky on the server) and returns the
+variant plus its configuration.
+
+```tsx
+import { useExperiment } from '@experimentation-platform/react-sdk';
 
 function HeroBanner() {
-  const isNewHero = useVariant('hero-image-test', 'new-hero');
-
-  return isNewHero ? <NewHeroBanner /> : <ClassicHeroBanner />;
+  const { variantKey, configuration, isControl, loading } = useExperiment('hero_banner');
+  const headline = (configuration?.headline as string) ?? 'Gear up for the season';
+  return <Hero headline={headline} video={variantKey === 'video_hero'} />;
 }
 ```
-
----
-
-### `useMultipleFlags(flagKeys)`
-
-Evaluates multiple feature flags in a single call. Returns a map of `flagKey → boolean` and a shared `isLoading` state.
-
-```tsx
-import { useMultipleFlags } from '@experimently/react-sdk';
-
-function FeatureSuite() {
-  const { flags, isLoading } = useMultipleFlags([
-    'dark-mode',
-    'new-checkout',
-    'beta-dashboard',
-  ]);
-
-  if (isLoading) return <Spinner />;
-
-  return (
-    <div>
-      {flags['dark-mode'] && <DarkModeToggle />}
-      {flags['new-checkout'] && <NewCheckoutFlow />}
-      {flags['beta-dashboard'] && <BetaDashboard />}
-    </div>
-  );
-}
-```
-
-**Return Value**
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `flags` | `Record<string, boolean>` | Map of flag key to enabled state |
-| `isLoading` | `boolean` | `true` while flags are being fetched |
+| `experimentKey` | `string` | The key you asked for |
+| `variantKey` | `string` | Assigned variant name (`'control'` while loading or on error) |
+| `variantName` | `string` | Same value as `variantKey` (`'Control'` as the default) |
+| `variantId` | `string \| null` | Variant UUID, `null` until assigned |
+| `isControl` | `boolean` | `true` for the control variant (and for the default) |
+| `configuration` | `Record<string, unknown> \| null` | The variant's `configuration` JSON from the experiment definition |
+| `loading` | `boolean` | `true` until the first response |
+| `error` | `Error \| null` | Set when assignment failed (404 when the experiment is not ACTIVE) |
 
----
+### `useTrackEvent(): (eventName, properties?, options?) => void`
 
-### `useTrackEvent()`
-
-Returns a stable `trackEvent` function for recording conversion events. The function reference is stable across renders — safe to pass as a prop or use in event handlers without causing unnecessary re-renders.
+Returns a stable function that records events. Tracking is fire-and-forget and never throws.
 
 ```tsx
-import { useTrackEvent } from '@experimently/react-sdk';
+const track = useTrackEvent();
 
-function PurchaseButton({ amount }: { amount: number }) {
-  const trackEvent = useTrackEvent();
-
-  const handleClick = async () => {
-    // Process the purchase...
-    await trackEvent('purchase_completed', amount);
-  };
-
-  return <button onClick={handleClick}>Buy Now</button>;
-}
+track('add_to_cart', { product_id, quantity: 1 }, { experimentKey: 'pdp_buy_button', value: 49 });
+track('search', { query, results: 12 }, { featureFlagKey: 'new_search' });
+track('page_view', { page: '/products' });   // no key: fanned out, see below
 ```
 
-**Function Signature**
+`TrackEventOptions`: `experimentKey?`, `featureFlagKey?`, `value?` (numeric value, e.g. revenue),
+`eventType?` (defaults to `eventName`), `timestamp?` (`Date`, sent as ISO-8601).
 
-```typescript
-trackEvent(
-  eventKey: string,
-  value?: number,
-  properties?: Record<string, unknown>
-): Promise<void>
-```
+**Fan-out rule.** With `experimentKey` and/or `featureFlagKey` the SDK sends one
+`POST /api/v1/tracking/track`. Without a key it sends one `POST /api/v1/tracking/batch` containing
+one entry per experiment the user has been assigned to in this client plus one per flag evaluated
+for the user (from the cache). If nothing is cached, nothing is sent. This is what makes a single
+`track('purchase', …)` count as a conversion for every experiment the user is in.
 
-Tracking failures are swallowed internally and logged. The returned Promise always resolves.
+Conversions are matched to metrics by **event name**: an experiment metric whose `event_name` is
+`purchase` counts every `purchase` event, whatever `event_type` was sent.
+
+### `useExperimentation(): { client, user }`
+
+Escape hatch to the underlying `ExperimentationClient` (for example `client.getAssignments(user.userId)`
+to build a debug overlay). `useExperimentationContext` is an alias.
 
 ---
 
 ## `withExperimentation` Higher-Order Component
 
-The `withExperimentation` HOC injects experimentation props into class components or when you prefer a HOC pattern over hooks.
+Injects `flagEvaluation: FeatureFlagEvaluation` for one flag into a component.
 
 ```tsx
-import { withExperimentation } from '@experimently/react-sdk';
+import { withExperimentation, type FeatureFlagEvaluation } from '@experimentation-platform/react-sdk';
 
-interface OwnProps {
-  productId: string;
+interface Props { flagEvaluation: FeatureFlagEvaluation | null; title: string }
+
+function Layout({ flagEvaluation, title }: Props) {
+  return <div className={flagEvaluation?.isEnabled ? 'layout-v2' : 'layout-v1'}>{title}</div>;
 }
 
-interface InjectedProps {
-  variant: string;
-  isFeatureEnabled: (flagKey: string) => boolean;
-  trackEvent: (eventKey: string, value?: number) => Promise<void>;
-}
-
-type Props = OwnProps & InjectedProps;
-
-class ProductCard extends React.Component<Props> {
-  handleAddToCart = async () => {
-    await this.props.trackEvent('add_to_cart', 1);
-  };
-
-  render() {
-    const { variant, isFeatureEnabled } = this.props;
-    const showNewLayout = isFeatureEnabled('new-product-layout');
-
-    return (
-      <div className={showNewLayout ? 'card-v2' : 'card-v1'}>
-        {variant === 'treatment' && <PriceHighlight />}
-        <button onClick={this.handleAddToCart}>Add to Cart</button>
-      </div>
-    );
-  }
-}
-
-export default withExperimentation(ProductCard, {
-  experimentKey: 'product-card-layout',
-});
+export default withExperimentation(Layout, 'new_product_layout');
+// <LayoutWithFlag title="..." />  — no flagEvaluation prop needed
 ```
 
 ---
 
 ## SSR / Next.js Support
 
-For server-side rendering, use `ServerClient` to evaluate flags and experiments on the server before sending the response. This prevents layout shift and ensures the correct variant is rendered on first paint.
-
-### Pages Router (`getServerSideProps`)
+`ServerClient` makes the same requests from Node and **never throws**: failures come back as a
+disabled evaluation or the control defaults with `error` set.
 
 ```tsx
 // pages/checkout.tsx
-import { ServerClient } from '@experimently/react-sdk/server';
-import { ExperimentationProvider } from '@experimently/react-sdk';
+import { ServerClient } from '@experimentation-platform/react-sdk/ssr';
 import type { GetServerSideProps } from 'next';
 
-export const getServerSideProps: GetServerSideProps = async (context) => {
-  const serverClient = new ServerClient({
-    apiUrl: process.env.EXPERIMENTATION_API_URL!,
-    apiKey: process.env.EXPERIMENTATION_API_KEY!,
+export const getServerSideProps: GetServerSideProps = async ({ req }) => {
+  const client = new ServerClient({
+    apiKey: process.env.EXPERIMENTLY_API_KEY!,
+    baseUrl: process.env.EXPERIMENTLY_API_URL!,
   });
+  const user = { userId: req.cookies['visitor_id'] ?? 'anonymous' };
 
-  const userId = context.req.cookies['user_id'] ?? 'anonymous';
-
-  const [variant, initialFlags] = await Promise.all([
-    serverClient.getVariant('checkout-flow', userId, {}),
-    serverClient.getAllFlags(userId, {}),
+  const [checkout, flags] = await Promise.all([
+    client.assignExperiment('checkout_flow', user),
+    client.getAll(['new_search', 'free_shipping_banner'], user),
   ]);
 
-  return {
-    props: { variant, initialFlags, userId },
-  };
+  return { props: { variantKey: checkout.variantKey, flags } };
 };
-
-export default function CheckoutPage({
-  variant,
-  initialFlags,
-  userId,
-}: {
-  variant: string;
-  initialFlags: Record<string, boolean>;
-  userId: string;
-}) {
-  return (
-    <ExperimentationProvider
-      apiUrl={process.env.NEXT_PUBLIC_EXPERIMENTATION_API_URL!}
-      apiKey={process.env.NEXT_PUBLIC_EXPERIMENTATION_API_KEY!}
-      userId={userId}
-      initialFlags={initialFlags}
-    >
-      {variant === 'express' ? <ExpressCheckout /> : <StandardCheckout />}
-    </ExperimentationProvider>
-  );
-}
 ```
 
-### App Router (Next.js 13+)
-
-In the App Router, use `ServerClient` directly in async server components:
-
-```tsx
-// app/checkout/page.tsx
-import { ServerClient } from '@experimently/react-sdk/server';
-import { cookies } from 'next/headers';
-
-export default async function CheckoutPage() {
-  const serverClient = new ServerClient({
-    apiUrl: process.env.EXPERIMENTATION_API_URL!,
-    apiKey: process.env.EXPERIMENTATION_API_KEY!,
-  });
-
-  const userId = cookies().get('user_id')?.value ?? 'anonymous';
-  const variant = await serverClient.getVariant('checkout-flow', userId, {});
-  const isDarkMode = await serverClient.isFeatureEnabled('dark-mode', userId, {});
-
-  return (
-    <div className={isDarkMode ? 'dark' : 'light'}>
-      {variant === 'express' ? <ExpressCheckout /> : <StandardCheckout />}
-    </div>
-  );
-}
-```
-
-### Root Layout with Pre-Hydration
-
-Pre-fetch all flags in the root layout to avoid loading states in child components:
-
-```tsx
-// app/layout.tsx
-import { ServerClient } from '@experimently/react-sdk/server';
-import { ExperimentationProvider } from '@experimently/react-sdk';
-import { cookies } from 'next/headers';
-
-export default async function RootLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
-  const serverClient = new ServerClient({
-    apiUrl: process.env.EXPERIMENTATION_API_URL!,
-    apiKey: process.env.EXPERIMENTATION_API_KEY!,
-  });
-
-  const userId = cookies().get('user_id')?.value ?? 'anonymous';
-  const initialFlags = await serverClient.getAllFlags(userId, {});
-
-  return (
-    <html>
-      <body>
-        <ExperimentationProvider
-          apiUrl={process.env.NEXT_PUBLIC_EXPERIMENTATION_API_URL!}
-          apiKey={process.env.NEXT_PUBLIC_EXPERIMENTATION_API_KEY!}
-          userId={userId}
-          initialFlags={initialFlags}
-        >
-          {children}
-        </ExperimentationProvider>
-      </body>
-    </html>
-  );
-}
-```
+In the App Router call the same methods from an async server component.
 
 ### `ServerClient` API
 
 | Method | Signature | Description |
 |--------|-----------|-------------|
-| `getVariant` | `(experimentKey: string, userId: string, attributes: object) => Promise<string>` | Returns the assigned variant key |
-| `isFeatureEnabled` | `(flagKey: string, userId: string, attributes: object) => Promise<boolean>` | Returns the flag's boolean state |
-| `getAllFlags` | `(userId: string, attributes: object) => Promise<Record<string, boolean>>` | Returns all flags for the user; used for `initialFlags` hydration |
+| `evaluateFeatureFlag` | `(flagKey, user) => Promise<FeatureFlagEvaluation>` | One flag; disabled evaluation on failure |
+| `getAll` | `(flagKeys, user) => Promise<Record<string, FeatureFlagEvaluation>>` | Several flags in parallel |
+| `assignExperiment` | `(experimentKey, user) => Promise<ExperimentAssignment>` | Sticky assignment; control defaults on failure |
+| `clearCache` | `() => void` | Drop cached results (per instance) |
+
+---
+
+## Backend endpoints used
+
+Every request carries `X-API-Key` and `Content-Type: application/json`.
+
+| SDK call | Method and path | Body / query | Response used |
+|---|---|---|---|
+| `useFeatureFlag`, `useVariant`, `useMultipleFlags`, `ServerClient.evaluateFeatureFlag`/`getAll` | `GET /api/v1/feature-flags/evaluate/{flag_key}?user_id=…` | — | `{key, enabled, config}`; 404 when the flag is not ACTIVE |
+| `useExperiment`, `ServerClient.assignExperiment` | `POST /api/v1/tracking/assign` | `{experiment_key, user_id, context?}` | `{experiment_key, user_id, variant_id, variant_name, is_control, configuration}`; 404 when the experiment is not ACTIVE |
+| `useTrackEvent` with a key | `POST /api/v1/tracking/track` | `{event_type, event_name, user_id, experiment_key?, feature_flag_key?, value?, metadata?, timestamp?}` | ignored |
+| `useTrackEvent` without keys | `POST /api/v1/tracking/batch` | `{events: [ ...track bodies ]}` (max 100 per request) | ignored |
+
+These SDK paths share a per-IP rate-limit ceiling of `SDK_RATE_LIMIT_PER_MINUTE` requests
+(default 6000) on the backend.
 
 ---
 
@@ -364,21 +233,39 @@ export default async function RootLayout({
 
 ```typescript
 import type {
-  ExperimentResult,
-  FlagMap,
-} from '@experimently/react-sdk';
+  SdkConfig,
+  UserContext,
+  FeatureFlagEvaluation,
+  ExperimentAssignment,
+  TrackEventOptions,
+} from '@experimentation-platform/react-sdk';
 
-// useExperiment return type
-interface ExperimentResult {
-  variant: string;
-  isLoading: boolean;
+interface FeatureFlagEvaluation {
+  flagKey: string;
+  variant: string | null;
+  isEnabled: boolean;
+  config: unknown | null;
+  loading: boolean;
   error: Error | null;
 }
 
-// useMultipleFlags return type
-interface FlagMap {
-  flags: Record<string, boolean>;
-  isLoading: boolean;
+interface ExperimentAssignment {
+  experimentKey: string;
+  variantKey: string;
+  variantName: string;
+  variantId: string | null;
+  isControl: boolean;
+  configuration: Record<string, unknown> | null;
+  loading: boolean;
+  error: Error | null;
+}
+
+interface TrackEventOptions {
+  experimentKey?: string;
+  featureFlagKey?: string;
+  value?: number;
+  eventType?: string;
+  timestamp?: Date;
 }
 ```
 
@@ -386,11 +273,20 @@ interface FlagMap {
 
 ## Error Handling
 
-The provider catches all errors from the platform API. If the API is unavailable:
+- `useFeatureFlag` / `useMultipleFlags` report the flag as off with `error` set.
+- `useExperiment` returns the control defaults (`variantKey: 'control'`, `isControl: true`,
+  `configuration: null`) with `error` set.
+- `useTrackEvent` swallows network failures.
+- Failed evaluations and assignments are never cached, so the next render retries.
+- Concurrent calls for the same user + key share one in-flight request, so mounting several
+  components that use the same experiment produces one assignment (and one exposure event).
 
-- `useFeatureFlag` returns `defaultValue` (default: `false`)
-- `useExperiment` returns `{ variant: defaultVariant, isLoading: false, error: <Error> }`
-- `useVariant` returns `false`
-- `useMultipleFlags` returns `{ flags: {}, isLoading: false }`
+---
 
-No unhandled promise rejections or React error boundaries are triggered by SDK failures. Your application continues to render normally with safe fallback values.
+## Development
+
+```bash
+cd sdk/react && npm install
+npx jest          # 202 unit tests, fetch is mocked
+npm run build     # tsc --strict
+```

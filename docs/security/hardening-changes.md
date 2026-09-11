@@ -41,13 +41,16 @@ Security headers are the last line of defence against a range of client-side att
 
 ---
 
-## 2. In-Memory Rate Limiting (`backend/app/middleware/rate_limiter.py`)
+## 2. Rate Limiting (`backend/app/middleware/rate_limiter.py`)
 
 ### What changed
 
-A new `RateLimitMiddleware` class was created implementing a sliding-window rate limiter backed by in-memory Python `deque` structures.  It is registered in `main.py` and is enabled by default.
+`RateLimitMiddleware` enforces per-IP, per-path sliding-window limits. Counters live in Redis
+(`RedisRateLimiter`, shared across API instances); when Redis is unreachable the middleware falls back to
+an in-process sliding window so requests are never rejected because the limiter is down.
 
-Route-specific limits:
+Limits are resolved by `resolve_rate_limit(path)`: exact entries first, then SDK path prefixes, then the
+default.
 
 | Route | Limit | Window |
 |---|---|---|
@@ -55,19 +58,18 @@ Route-specific limits:
 | `POST /api/v1/auth/signup` | 5 req | 60 s |
 | `POST /api/v1/auth/forgot-password` | 5 req | 60 s |
 | `POST /api/v1/auth/reset-password` | 5 req | 60 s |
-| `POST /api/v1/tracking/assign` | 1 000 req | 60 s |
-| `POST /api/v1/tracking/track` | 5 000 req | 60 s |
+| SDK traffic: `/api/v1/tracking/*`, `/api/v1/feature-flags/evaluate/*`, `/api/v1/feature-flags/user/*` | `SDK_RATE_LIMIT_PER_MINUTE` (default 6 000 req) | 60 s |
 | All other routes | 300 req | 60 s |
+
+The SDK ceiling is per IP and deliberately high: one server-side SDK or one office NAT egress legitimately
+fans out thousands of assignments and events a minute. Tune it with the `SDK_RATE_LIMIT_PER_MINUTE`
+setting.
 
 Rate-limited responses return HTTP 429 with `Retry-After`, `X-RateLimit-Limit`, `X-RateLimit-Remaining`, and `X-RateLimit-Window` headers.  Successful responses also carry the `X-RateLimit-*` informational headers.
 
 ### Why it matters
 
 Without rate limiting, authentication endpoints are vulnerable to credential-stuffing and brute-force attacks.  Tracking endpoints without limits could be used to generate arbitrary event noise or exhaust server resources.
-
-### Follow-up
-
-The current implementation is in-process only.  In a multi-instance (horizontally scaled) deployment, limits are not shared across instances.  **For production**, replace with a Redis-backed solution (e.g. `slowapi` with a Redis storage backend, or a custom implementation using the existing Redis infrastructure).
 
 ---
 
