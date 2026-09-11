@@ -31,6 +31,7 @@ from backend.app.core.scheduler import experiment_scheduler
 from backend.app.core.rollout_scheduler import rollout_scheduler
 from backend.app.core.metrics_scheduler import metrics_scheduler
 from backend.app.core.safety_scheduler import safety_scheduler
+from backend.app.core.bandit_scheduler import bandit_scheduler_runner
 
 # --- EP-013 additions ---
 try:
@@ -74,6 +75,9 @@ async def lifespan(app: FastAPI):
     logger.info("Starting safety monitoring scheduler")
     await safety_scheduler.start()
 
+    logger.info("Starting bandit scheduler")
+    await bandit_scheduler_runner.start()
+
     yield
 
     logger.info("Stopping experiment scheduler")
@@ -87,6 +91,9 @@ async def lifespan(app: FastAPI):
 
     logger.info("Stopping safety monitoring scheduler")
     await safety_scheduler.stop()
+
+    logger.info("Stopping bandit scheduler")
+    await bandit_scheduler_runner.stop()
 
 
 # Create FastAPI application
@@ -109,11 +116,15 @@ app = FastAPI(
 # Add CORS middleware — restrict methods and headers to what the API actually needs
 cors_origins = [str(origin) for origin in settings.BACKEND_CORS_ORIGINS]
 if not cors_origins:
+    # Plain comma-separated form (CORS_ORIGINS=http://a,http://b), see .env.example
+    cors_origins = [origin for origin in settings.CORS_ORIGINS if origin]
+if not cors_origins:
     # Fall back to dev defaults
     cors_origins = [
         "http://localhost:3100",
         "http://localhost:3000",
         "http://localhost:3001",
+        "http://localhost:3200",  # ShopLab demo storefront
     ]
 
 app.add_middleware(

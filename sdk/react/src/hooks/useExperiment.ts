@@ -1,46 +1,42 @@
 import { useState, useEffect } from 'react';
-import { useExperimentationContext } from '../context/ExperimentationProvider';
+import { useExperimentation } from '../context/ExperimentationProvider';
+import { defaultAssignment } from '../client/ExperimentationClient';
 import { ExperimentAssignment } from '../client/types';
 
+/**
+ * Assigns the current user to an experiment via `POST /api/v1/tracking/assign`.
+ *
+ * While loading or on error the control defaults are returned
+ * (`variantKey: 'control'`, `variantName: 'Control'`, `variantId: null`,
+ * `isControl: true`, `configuration: null`). Re-assigns when the experiment
+ * key or user changes (the server keeps assignments sticky).
+ */
 export function useExperiment(experimentKey: string): ExperimentAssignment {
-  const { client, user } = useExperimentationContext();
-  const [state, setState] = useState<ExperimentAssignment>({
-    experimentKey,
-    variantKey: 'control',
-    variantName: 'Control',
-    loading: true,
-    error: null,
-  });
+  const { client, user } = useExperimentation();
+  const [state, setState] = useState<ExperimentAssignment>(() =>
+    defaultAssignment(experimentKey, { loading: true })
+  );
 
   useEffect(() => {
     let cancelled = false;
+    setState(defaultAssignment(experimentKey, { loading: true }));
 
-    // Use feature flag evaluation as a proxy for experiment assignment.
-    // Full experiment assignment API will be added in Batch 2.
     client
-      .evaluateFeatureFlag(user, experimentKey)
-      .then(variant => {
-        if (!cancelled) {
-          const variantKey = variant ?? 'control';
-          setState({
-            experimentKey,
-            variantKey,
-            variantName: variantKey.charAt(0).toUpperCase() + variantKey.slice(1),
-            loading: false,
-            error: null,
-          });
-        }
+      .assignExperiment(user, experimentKey)
+      .then(assignment => {
+        if (!cancelled) setState(assignment);
       })
-      .catch((error: Error) => {
+      .catch((err: unknown) => {
         if (!cancelled) {
-          setState(prev => ({ ...prev, variantKey: 'control', loading: false, error }));
+          const error = err instanceof Error ? err : new Error(String(err));
+          setState(defaultAssignment(experimentKey, { error }));
         }
       });
 
     return () => {
       cancelled = true;
     };
-  }, [client, user.userId, experimentKey]);
+  }, [client, user, experimentKey]);
 
   return state;
 }
