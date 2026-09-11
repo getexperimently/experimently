@@ -38,7 +38,10 @@ from backend.tests.integration.conftest import (  # noqa: F401
     analyst_client,
 )
 
-DEFAULT_TEST_DB_URL = "postgresql://postgres:postgres@localhost:5432/experimentation_test"
+# Use the per-process database that the root conftest's `test_db` fixture
+# creates (experimentation_test_<pid>) rather than a fixed name, so the
+# contract engine points at a database that actually has the schema.
+from backend.tests.conftest import DEFAULT_TEST_DB_URL  # noqa: E402
 
 HASHED_PASSWORD = "$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW"
 
@@ -75,9 +78,10 @@ def contract_engine(test_db):
     from backend.app.db.session import engine as app_engine
     app_engine.dispose()
 
-    db_url = os.environ.get("TEST_DATABASE_URL", DEFAULT_TEST_DB_URL)
+    # Always the per-process database that `test_db` just created; an
+    # environment override could only point at a database without tables.
     engine = create_engine(
-        db_url,
+        DEFAULT_TEST_DB_URL,
         pool_pre_ping=True,
         pool_size=5,
         max_overflow=10,

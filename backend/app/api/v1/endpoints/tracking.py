@@ -21,6 +21,7 @@ from backend.app.models.feature_flag import FeatureFlag, FeatureFlagStatus
 from backend.app.schemas.tracking import (
     AssignmentRequest,
     AssignmentResponse,
+    VariantAssignmentResponse,
     EventCreate,
     EventRequest,
     EventResponse,
@@ -32,6 +33,24 @@ from backend.app.services.event_service import EventService
 
 # Create router
 router = APIRouter()
+
+
+def _event_response(event: Event) -> EventResponse:
+    """Build the public response model from a stored Event row."""
+    return EventResponse(
+        id=str(event.id),
+        event_type=event.event_type,
+        event_name=event.event_name or event.event_type,
+        user_id=event.user_id,
+        experiment_id=str(event.experiment_id) if event.experiment_id else None,
+        feature_flag_id=str(event.feature_flag_id) if event.feature_flag_id else None,
+        variant_id=str(event.variant_id) if event.variant_id else None,
+        value=event.value,
+        properties=event.event_metadata,
+        timestamp=event.created_at,
+        created_at=event.created_at,
+        updated_at=event.updated_at or datetime.now(timezone.utc),
+    )
 
 
 @router.get("/")
@@ -46,7 +65,7 @@ def get_tracking():
 
 @router.post(
     "/assign",
-    response_model=AssignmentResponse,
+    response_model=VariantAssignmentResponse,
     summary="Assign user to experiment variant",
     response_description="Returns the variant assignment for the user",
 )
@@ -54,7 +73,7 @@ async def assign_user_to_experiment(
     request: AssignmentRequest = Body(..., description="Assignment request data"),
     db: Session = Depends(deps.get_db),
     api_key_info: Dict[str, Any] = Depends(deps.get_api_key),
-) -> AssignmentResponse:
+) -> VariantAssignmentResponse:
     """
     Assign a user to an experiment variant.
 
@@ -121,10 +140,12 @@ async def assign_user_to_experiment(
             )
 
         # Create response
-        return AssignmentResponse(
+        return VariantAssignmentResponse(
             experiment_key=request.experiment_key,
+            user_id=request.user_id,
+            variant_id=str(variant.id),
             variant_name=variant.name,
-            is_control=variant.is_control,
+            is_control=bool(variant.is_control),
             configuration=variant.configuration,
         )
     except ValueError as e:
@@ -226,26 +247,58 @@ async def track_event(
         event_data = EventCreate(
             user_id=request.user_id,
             event_type=request.event_type,
-            event_name=request.event_type,  # Default to type if no name provided
+            event_name=request.event_name or request.event_type,
             experiment_id=str(experiment_id) if experiment_id else None,
             feature_flag_id=str(feature_flag_id) if feature_flag_id else None,
             variant_id=str(variant_id) if variant_id else None,
             value=request.value,
             properties=request.metadata,
-            timestamp=request.timestamp or datetime.now(timezone.utc).isoformat(),
+            timestamp=request.timestamp or datetime.now(timezone.utc),
         )
 
-        # Create event service
-        event_service = EventService(db)
-
         # Track the event
-        event = event_service.track_event(event_data.dict())
+        event = EventService(db).track_event(event_data)
+        return _event_response(event)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Invalid event: {str(e)}",
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error tracking event: {str(e)}",
+        )
 
-        # Return success response
-        return EventResponse(
-            success=True,
-            event_id=event.get("id"),
-            message="Event successfully tracked",
+
+@router.post(
+    "/events",
+    response_model=EventResponse,
+    summary="Track event by ids",
+    response_description="Returns the stored event",
+)
+async def track_event_by_ids(
+    event_data: EventCreate = Body(..., description="Event data keyed by experiment/flag ids"),
+    db: Session = Depends(deps.get_db),
+    api_key_info: Dict[str, Any] = Depends(deps.get_api_key),
+) -> EventResponse:
+    """
+    Track an event that already carries internal identifiers.
+
+    Unlike ``/track`` (which resolves ``experiment_key``/``feature_flag_key``),
+    this endpoint accepts ``experiment_id``/``feature_flag_id``/``variant_id``
+    directly.  It is used by server-side integrations and the data seeding
+    tooling that already hold the ids.
+
+    **Authentication**: Requires a valid API key in the X-API-Key header.
+    """
+    try:
+        event = EventService(db).track_event(event_data)
+        return _event_response(event)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Invalid event: {str(e)}",
         )
     except Exception as e:
         raise HTTPException(
@@ -383,18 +436,17 @@ async def track_events_batch(
             event_data = EventCreate(
                 user_id=event_request.user_id,
                 event_type=event_request.event_type,
-                event_name=event_request.event_type,  # Default to type if no name provided
+                event_name=event_request.event_name or event_request.event_type,
                 experiment_id=str(experiment_id) if experiment_id else None,
                 feature_flag_id=str(feature_flag_id) if feature_flag_id else None,
                 variant_id=str(variant_id) if variant_id else None,
                 value=event_request.value,
                 properties=event_request.metadata,
-                timestamp=event_request.timestamp
-                or datetime.now(timezone.utc).isoformat(),
+                timestamp=event_request.timestamp or datetime.now(timezone.utc),
             )
 
             # Track the event
-            event_service.track_event(event_data.dict())
+            event_service.track_event(event_data)
             success_count += 1
 
         except Exception as e:

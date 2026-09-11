@@ -63,6 +63,9 @@ class Experiment(Base, BaseModel):
     __tablename__ = "experiments"
 
     name = Column(String(100), nullable=False)
+    # Stable, human-readable identifier used by the SDK-facing tracking API
+    # (`experiment_key`).  Generated from the name on create when not given.
+    key = Column(String(100), unique=True, nullable=True, index=True)
     description = Column(Text)
     hypothesis = Column(Text)
     status = Column(
@@ -85,6 +88,9 @@ class Experiment(Base, BaseModel):
     targeting_rules = Column(JSONB)  # For user segmentation
     metrics = Column(JSONB)  # Metrics to track
     tags = Column(JSONB)  # For categorization
+    # Free-form notes/insights managed via POST /experiments/{id}/metadata.
+    # (Named experiment_metadata because `metadata` is reserved by SQLAlchemy.)
+    experiment_metadata = Column(JSONB, nullable=True)
 
     # Issue #22: MAB optimization type
     optimization_type = Column(

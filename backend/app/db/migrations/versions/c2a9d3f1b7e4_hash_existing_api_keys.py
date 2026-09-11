@@ -25,13 +25,15 @@ def upgrade() -> None:
     op.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto")
 
     # One-way transform legacy plaintext API keys to SHA-256 hex digests.
+    # _SCHEMA is a module-level constant, so the only interpolated value is a
+    # fixed identifier; there is no external input in this statement.
     op.execute(
         f"""
         UPDATE {_SCHEMA}.api_keys
         SET key = encode(digest(key, 'sha256'), 'hex')
         WHERE key IS NOT NULL
           AND key !~ '^[0-9a-f]{{64}}$'
-        """
+        """  # nosec B608 - schema is a module constant, not user input
     )
 
     # Narrow type to reflect hashed storage contract.

@@ -23,6 +23,16 @@ from backend.app.schemas.targeting_rule import (
     OperatorType
 )
 
+import os
+
+# Throughput assertions below assume a quiet local machine; shared CI
+# runners are several times slower and make them flaky, so they only run
+# outside CI (GitHub Actions sets CI=true).
+pytestmark = pytest.mark.skipif(
+    os.environ.get("CI", "").lower() == "true",
+    reason="timing-sensitive benchmark; run locally",
+)
+
 
 class TestOperatorPerformance:
     """Benchmark individual operator performance."""

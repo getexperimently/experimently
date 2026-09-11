@@ -43,7 +43,14 @@ logger = logging.getLogger(__name__)
 # DROP DATABASE + CREATE DATABASE in its test_db fixture setup/teardown).
 _PID = os.getpid()
 _TEST_DB_NAME = f"experimentation_test_{_PID}"
-_BASE_DB_URL = "postgresql://postgres:postgres@localhost:5432"
+# Honour the same POSTGRES_* variables that the app, CI workflows and
+# scripts/run-backend-tests.sh use, so the compose test profile (port 5433)
+# and GitHub Actions service containers both work without editing this file.
+_DB_USER = os.environ.get("POSTGRES_USER", "postgres")
+_DB_PASSWORD = os.environ.get("POSTGRES_PASSWORD", "postgres")
+_DB_HOST = os.environ.get("POSTGRES_SERVER") or os.environ.get("POSTGRES_HOST") or "localhost"
+_DB_PORT = os.environ.get("POSTGRES_PORT", "5432")
+_BASE_DB_URL = f"postgresql://{_DB_USER}:{_DB_PASSWORD}@{_DB_HOST}:{_DB_PORT}"
 DEFAULT_TEST_DB_URL = f"{_BASE_DB_URL}/{_TEST_DB_NAME}"
 
 
@@ -61,7 +68,8 @@ def setup_test_environment():
     os.environ["TESTING"] = "true"
     os.environ["POSTGRES_DB"] = _TEST_DB_NAME
     os.environ["POSTGRES_SCHEMA"] = "test_experimentation"
-    os.environ["POSTGRES_SERVER"] = "localhost"
+    os.environ["POSTGRES_SERVER"] = _DB_HOST
+    os.environ["POSTGRES_PORT"] = _DB_PORT
     os.environ["DATABASE_URI"] = DEFAULT_TEST_DB_URL
 
     # Initialize test settings

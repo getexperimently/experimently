@@ -157,7 +157,7 @@ class RuleCompiler:
         }
 
         rule_json = json.dumps(rule_dict, sort_keys=True)
-        return hashlib.md5(rule_json.encode()).hexdigest()
+        return hashlib.md5(rule_json.encode(), usedforsecurity=False).hexdigest()
 
     def _serialize_rule_group(self, group: RuleGroup) -> Dict[str, Any]:
         """Serialize rule group for hashing."""

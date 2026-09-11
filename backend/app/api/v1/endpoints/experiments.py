@@ -174,6 +174,9 @@ async def list_experiments(
             skip=skip,
             limit=limit,
         )
+    except HTTPException:
+        # Let deliberate 4xx responses through instead of wrapping them in a 500.
+        raise
     except Exception as e:
         logger.error(f"Error listing experiments: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -278,6 +281,9 @@ async def create_experiment(
                     logger.warning(f"Cache invalidation failed: {str(e)}")
 
         return ExperimentResponse.model_validate(experiment)
+    except HTTPException:
+        # Let deliberate 4xx responses through instead of wrapping them in a 500.
+        raise
     except Exception as e:
         logger.error(f"Error creating experiment: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))
@@ -384,6 +390,9 @@ async def get_experiment(
             )
 
         return response
+    except HTTPException:
+        # Let deliberate 4xx responses through instead of wrapping them in a 500.
+        raise
     except Exception as e:
         logger.error(f"Error getting experiment: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -527,6 +536,9 @@ async def update_experiment(
                     )
             else:
                 raise
+    except HTTPException:
+        # Let deliberate 4xx responses through instead of wrapping them in a 500.
+        raise
     except Exception as e:
         logger.error(f"Error updating experiment: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -777,6 +789,9 @@ async def start_experiment(
                 cache_control.redis.delete(key)
 
         return ExperimentResponse.model_validate(started_experiment)
+    except HTTPException:
+        # Let deliberate 4xx responses through instead of wrapping them in a 500.
+        raise
     except Exception as e:
         logger.error(f"Error starting experiment: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -846,7 +861,14 @@ async def pause_experiment(
             for key in cache_control.redis.scan_iter(match=pattern):
                 cache_control.redis.delete(key)
 
-        return ExperimentResponse.model_validate(experiment)
+        # Serialise through the service so `metrics` comes from the
+        # metric_definitions relationship (the ORM `metrics` column is JSONB).
+        return ExperimentResponse.model_validate(
+            ExperimentService(db).to_response_dict(experiment)
+        )
+    except HTTPException:
+        # Let deliberate 4xx responses through instead of wrapping them in a 500.
+        raise
     except Exception as e:
         logger.error(f"Error pausing experiment: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -1024,7 +1046,14 @@ async def complete_experiment(
             for key in cache_control.redis.scan_iter(match=pattern):
                 cache_control.redis.delete(key)
 
-        return ExperimentResponse.model_validate(experiment)
+        # Serialise through the service so `metrics` comes from the
+        # metric_definitions relationship (the ORM `metrics` column is JSONB).
+        return ExperimentResponse.model_validate(
+            ExperimentService(db).to_response_dict(experiment)
+        )
+    except HTTPException:
+        # Let deliberate 4xx responses through instead of wrapping them in a 500.
+        raise
     except Exception as e:
         logger.error(f"Error completing experiment: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -1102,6 +1131,9 @@ async def get_experiment_results(
             )
 
         return results
+    except HTTPException:
+        # Let deliberate 4xx responses through instead of wrapping them in a 500.
+        raise
     except Exception as e:
         logger.error(f"Error getting experiment results: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -1177,7 +1209,14 @@ async def archive_experiment(
             for key in cache_control.redis.scan_iter(match=pattern):
                 cache_control.redis.delete(key)
 
-        return ExperimentResponse.model_validate(experiment)
+        # Serialise through the service so `metrics` comes from the
+        # metric_definitions relationship (the ORM `metrics` column is JSONB).
+        return ExperimentResponse.model_validate(
+            ExperimentService(db).to_response_dict(experiment)
+        )
+    except HTTPException:
+        # Let deliberate 4xx responses through instead of wrapping them in a 500.
+        raise
     except Exception as e:
         logger.error(f"Error archiving experiment: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -1243,6 +1282,9 @@ async def clone_experiment(
                 cache_control.redis.delete(key)
 
         return ExperimentResponse.model_validate(cloned_experiment)
+    except HTTPException:
+        # Let deliberate 4xx responses through instead of wrapping them in a 500.
+        raise
     except Exception as e:
         logger.error(f"Error cloning experiment: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -1338,6 +1380,9 @@ async def get_daily_experiment_results(
             )
 
         return results
+    except HTTPException:
+        # Let deliberate 4xx responses through instead of wrapping them in a 500.
+        raise
     except Exception as e:
         logger.error(f"Error getting daily experiment results: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -1441,6 +1486,9 @@ async def get_segmented_experiment_results(
             )
 
         return results
+    except HTTPException:
+        # Let deliberate 4xx responses through instead of wrapping them in a 500.
+        raise
     except Exception as e:
         logger.error(f"Error getting segmented experiment results: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -1489,23 +1537,15 @@ async def update_experiment_metadata(
         # Create experiment service
         experiment_service = ExperimentService(db)
 
-        # Update experiment metadata
-        try:
-            # Check if experiment already has metadata
-            current_metadata = getattr(experiment, "metadata", {}) or {}
-
-            # Merge new metadata with existing metadata
-            updated_metadata = {**current_metadata, **metadata}
-
-            # Create update data with only metadata field
-            update_data = {"metadata": updated_metadata}
-
-            # Update experiment
-            updated_experiment = experiment_service.update_experiment(
-                experiment, update_data
-            )
-        except ValueError as e:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        # Merge the new keys into the stored experiment_metadata JSONB column.
+        # (`experiment.metadata` would be SQLAlchemy's table MetaData, which is
+        # why this endpoint used to fail with a TypeError.)
+        current_metadata = dict(experiment.experiment_metadata or {})
+        current_metadata.update(metadata)
+        experiment.experiment_metadata = current_metadata
+        db.commit()
+        db.refresh(experiment)
+        updated_experiment = experiment_service.to_response_dict(experiment)
 
         # Invalidate cache if enabled
         if cache_control.enabled and cache_control.redis:
@@ -1514,6 +1554,9 @@ async def update_experiment_metadata(
             cache_control.redis.delete(experiment_cache_key)
 
         return updated_experiment
+    except HTTPException:
+        # Let deliberate 4xx responses through instead of wrapping them in a 500.
+        raise
     except Exception as e:
         logger.error(f"Error updating experiment metadata: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))

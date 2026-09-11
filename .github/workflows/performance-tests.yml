@@ -64,13 +64,16 @@ jobs:
           --health-retries 5
 
     env:
-      # Database connection
+      # Database connection (the app reads POSTGRES_SERVER for the host)
+      POSTGRES_SERVER: localhost
       POSTGRES_HOST: localhost
       POSTGRES_PORT: 5432
       POSTGRES_DB: experimentation
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-      POSTGRES_SCHEMA: experimentation
+      # With APP_ENV=test the application derives its schema as
+      # test_experimentation, so the bootstrap must create the same one.
+      POSTGRES_SCHEMA: test_experimentation
       # Redis connection
       REDIS_HOST: localhost
       REDIS_PORT: 6379
@@ -98,12 +101,10 @@ jobs:
         working-directory: backend
         run: pip install -r requirements.txt
 
-      - name: Run database migrations
-        working-directory: backend
-        run: |
-          python -m alembic -c app/db/alembic.ini upgrade head
-        env:
-          POSTGRES_HOST: localhost
+      # Fresh database: create the schema from the models and stamp the
+      # alembic head (see backend/app/db/bootstrap.py).
+      - name: Bootstrap database schema
+        run: python -m backend.app.db.bootstrap
 
       - name: Start API server
         working-directory: backend
