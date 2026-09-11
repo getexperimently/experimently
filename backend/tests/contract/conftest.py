@@ -78,9 +78,10 @@ def contract_engine(test_db):
     from backend.app.db.session import engine as app_engine
     app_engine.dispose()
 
-    db_url = os.environ.get("TEST_DATABASE_URL", DEFAULT_TEST_DB_URL)
+    # Always the per-process database that `test_db` just created; an
+    # environment override could only point at a database without tables.
     engine = create_engine(
-        db_url,
+        DEFAULT_TEST_DB_URL,
         pool_pre_ping=True,
         pool_size=5,
         max_overflow=10,
