@@ -5,12 +5,15 @@ require 'json'
 module ExperimentationPlatform
   # Lightweight HTTP client wrapping Net::HTTP.
   #
-  # All requests include an Authorization header derived from the configured API key.
-  # Responses are parsed as JSON. Non-2xx responses raise APIError subclasses.
-  # Network failures raise NetworkError.
+  # Every request carries the configured API key in the +X-API-Key+ header plus
+  # +Accept+/+Content-Type: application/json+. Responses are parsed as JSON.
+  # Non-2xx responses raise APIError subclasses; network failures raise NetworkError.
+  #
+  # A new Net::HTTP connection is opened per request, so a single instance can
+  # be shared between threads.
   class HttpClient
-    # @param base_url [String] API base URL (e.g. "https://api.example.com")
-    # @param api_key  [String] API key sent as "Bearer <api_key>"
+    # @param base_url [String] API origin (e.g. "http://localhost:8000"); paths are appended
+    # @param api_key  [String] API key sent as the "X-API-Key" header
     # @param timeout  [Integer] open/read timeout in seconds (default: 10)
     def initialize(base_url:, api_key:, timeout: 10)
       @base_url = base_url.chomp('/')
@@ -20,7 +23,8 @@ module ExperimentationPlatform
 
     # Perform a GET request.
     #
-    # @param path    [String] URL path (e.g. "/api/v1/sdk/flags/my-flag")
+    # @param path    [String] URL path including any query string
+    #                         (e.g. "/api/v1/feature-flags/evaluate/my-flag?user_id=u1")
     # @param headers [Hash]   additional HTTP headers
     # @return [Hash, Array] parsed JSON response body
     # @raise [AuthenticationError] on 401
@@ -57,10 +61,10 @@ module ExperimentationPlatform
       req = req_class.new(uri.request_uri)
 
       # Default headers
-      req['Authorization'] = "Bearer #{@api_key}"
-      req['Accept']        = 'application/json'
-      req['Content-Type']  = 'application/json'
-      req['User-Agent']    = "ExperimentationPlatform-Ruby/#{ExperimentationPlatform::VERSION}"
+      req['X-API-Key']    = @api_key
+      req['Accept']       = 'application/json'
+      req['Content-Type'] = 'application/json'
+      req['User-Agent']   = "ExperimentationPlatform-Ruby/#{ExperimentationPlatform::VERSION}"
 
       extra_headers.each { |k, v| req[k] = v }
 

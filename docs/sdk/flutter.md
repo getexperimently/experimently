@@ -1,18 +1,26 @@
 # Flutter SDK
 
-The Experimentation Platform Flutter SDK provides feature flag evaluation, A/B experiment assignment, and event tracking for Flutter applications. It works on iOS, Android, Web, macOS, Windows, and Linux.
+`experimentation_sdk` (v0.2) provides feature flag evaluation, A/B experiment assignment and
+event tracking for Flutter applications on iOS, Android, Web, macOS, Windows and Linux. A
+Flutter-free entry point (`experimentation_sdk_core.dart`) exposes the same client to plain Dart
+programs.
 
-## Features
+Flag evaluation and experiment assignment are decided **by the server**: every call goes to the
+public API with your `X-API-Key`, the server buckets the user (sticky per user + experiment), and
+the SDK caches the answer per user + key. Nothing is bucketed on the device.
 
-- Local feature flag evaluation using consistent MD5 hashing (cross-SDK compatible)
-- In-memory caching with configurable TTL
-- SharedPreferences-backed offline fallback
-- Fire-and-forget event tracking
-- Null-safe Dart 2.17+ API
+Source: `sdk/flutter`.
+
+---
+
+## Requirements
+
+- Dart 2.17+ (null safety), Flutter 3.0+
+- Dependencies: `http`, `crypto`, `shared_preferences`
+
+---
 
 ## Installation
-
-Add the SDK to your `pubspec.yaml`:
 
 ```yaml
 dependencies:
@@ -24,143 +32,274 @@ dependencies:
       path: flutter
 ```
 
-Or from pub.dev (once published):
-
-```yaml
-dependencies:
-  experimentation_sdk: ^0.1.0
-```
-
-Then run:
-
 ```bash
 flutter pub get
 ```
 
-## Configuration
+Two library entry points are available:
+
+| Import | Use from | Adds |
+|--------|----------|------|
+| `package:experimentation_sdk/experimentation_sdk.dart` | Flutter apps | everything below plus `SharedPreferencesOfflineStore` |
+| `package:experimentation_sdk/experimentation_sdk_core.dart` | plain Dart (servers, CLIs, the contract smoke) | the client, models, cache, HTTP client, `InMemoryOfflineStore`, `hashUser` — no `package:flutter` code |
+
+---
+
+## Quick Start
 
 ```dart
 import 'package:experimentation_sdk/experimentation_sdk.dart';
 
 final client = ExperimentationClient(
-  config: SdkConfig(
-    apiKey: 'your-api-key',
-    baseUrl: 'https://api.getexperimently.com',
-    cacheTtl: Duration(minutes: 5),      // default: 5 minutes
-    timeout: Duration(seconds: 5),        // default: 5 seconds
-    offlineFallback: true,                // default: true
+  config: const SdkConfig(
+    apiKey: 'your-api-key',            // sent as X-API-Key
+    baseUrl: 'http://localhost:8000',  // origin only; the SDK appends /api/v1/...
   ),
+  offlineStore: SharedPreferencesOfflineStore(),
 );
 
-// Always call init() before using the client.
+// Once, before any other call. Opens the offline store; makes no network request.
 await client.init();
+
+final flag = await client.evaluateFlag('new-checkout', 'user-123');
+if (flag.enabled) {
+  showNewCheckout(flag.config);
+}
+
+final assignment = await client.getAssignment('checkout-cta-copy', 'user-123',
+    attributes: {'plan': 'pro'});
+final headline = (assignment?.configuration?['headline'] as String?) ?? 'Buy now';
+
+await client.track('purchase', 'user-123',
+    experimentKey: 'checkout-cta-copy', value: 99.99, properties: {'sku': 'pro-plan'});
 ```
 
-## Basic Usage
+---
 
-### Feature Flag Evaluation
+## Configuration
 
 ```dart
-final enabled = await client.evaluateFlag(
-  'dark-mode',
-  'user-123',
-  attributes: {'plan': 'pro', 'country': 'US'},
+const config = SdkConfig(
+  apiKey: 'your-api-key',                // Required — sent as X-API-Key
+  baseUrl: 'https://api.example.com',    // Required — origin only
+  timeout: Duration(seconds: 5),         // Per-request HTTP timeout (default 5 s)
+  cacheTtl: Duration(minutes: 5),        // How long a successful result is reused (default 5 min)
+  offlineFallback: true,                 // Persist results to the OfflineStore (default true)
 );
+```
 
-if (enabled) {
-  // Show dark mode UI
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `apiKey` | `String` | *(required)* | API key sent as `X-API-Key` |
+| `baseUrl` | `String` | *(required)* | Backend origin, e.g. `https://api.example.com`; a trailing `/` is stripped |
+| `timeout` | `Duration` | `5s` | HTTP request timeout |
+| `cacheTtl` | `Duration` | `5 min` | How long a successful evaluation/assignment is reused |
+| `offlineFallback` | `bool` | `true` | Write successful results to the `OfflineStore` and serve them when the API is unreachable |
+
+`ExperimentationClient` constructor parameters:
+
+| Parameter | Description |
+|-----------|-------------|
+| `config` | `SdkConfig` (required) |
+| `httpClient` | `ApiHttpClient`; build one with a `package:http` `Client` to inject `MockClient` in tests |
+| `offlineStore` | `SharedPreferencesOfflineStore()` for Flutter apps; defaults to `InMemoryOfflineStore()` (session-scoped) |
+
+---
+
+## Feature Flag Evaluation
+
+### `evaluateFlag(String flagKey, String userId): Future<EvalResult>`
+
+Calls `GET /api/v1/feature-flags/evaluate/{flagKey}?user_id=…` and returns an `EvalResult`:
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `key` | `String` | The flag key you asked for |
+| `enabled` | `bool` | Server decision for this user (`false` on any failure) |
+| `config` | `dynamic` | The flag's `config` payload as returned by the server, or `null` |
+| `configMap` | `Map<String, dynamic>?` | `config` when it is a JSON object, else `null` |
+
+```dart
+final flag = await client.evaluateFlag('dark-mode', 'user-456');
+if (flag.enabled) {
+  final theme = flag.configMap?['theme'] ?? 'dark';
 }
 ```
 
-### Experiment Assignment
+Never throws. On a network/HTTP failure the cached evaluation is returned when one exists,
+otherwise the persisted offline value (if `offlineFallback`), otherwise `EvalResult.disabled(key)`.
+Failures are never cached, so the next call retries. A 404 (flag not ACTIVE or unknown) is a
+definitive answer: the flag is reported disabled and any persisted offline value is removed.
+Concurrent calls for the same user + key share a single request.
+
+### `isEnabled(String flagKey, String userId): Future<bool>`
+
+Shorthand for `(await evaluateFlag(...)).enabled`.
+
+---
+
+## Experiment Assignment
+
+### `getAssignment(String experimentKey, String userId, {Map<String, dynamic>? attributes}): Future<Assignment?>`
+
+Calls `POST /api/v1/tracking/assign` with `{experiment_key, user_id, context: attributes}`. The
+server buckets the user, keeps the assignment sticky and records the exposure.
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `experimentKey` | `String` | The experiment key |
+| `userId` | `String` | The user the assignment belongs to |
+| `variantId` | `String?` | UUID of the assigned variant |
+| `variantName` | `String` | Assigned variant name (e.g. `"control"`, `"treatment"`) |
+| `isControl` | `bool` | `true` for the control variant |
+| `configuration` | `Map<String, dynamic>?` | The variant's `configuration` JSON from the experiment definition |
 
 ```dart
-final variant = await client.getAssignment(
-  'checkout-experiment',
-  'user-123',
-);
+final assignment = await client.getAssignment('checkout-cta-copy', 'user-123',
+    attributes: {'plan': 'pro', 'country': 'US'});
 
-switch (variant) {
-  case 'treatment':
-    // Show new checkout flow
-    break;
-  case 'control':
-  default:
-    // Show original checkout flow
-    break;
+switch (assignment?.variantName) {
+  case 'treatment-a': renderShortCta(); break;
+  case 'treatment-b': renderUrgencyCta(); break;
+  default:            renderOriginalCta();   // control, or null on failure
 }
 ```
 
-### Event Tracking
+Never throws. Returns `null` on a 404 (experiment not ACTIVE / unknown) or when the request failed
+and neither the cache nor the offline store has a value. Failures are never cached.
+`variantKey` remains as a deprecated alias of `variantName`.
+
+### `getVariant(String experimentKey, String userId, {attributes}): Future<String?>`
+
+Shorthand for `(await getAssignment(...))?.variantName`.
+
+---
+
+## Event Tracking
+
+### `track(String eventName, String userId, {properties, experimentKey, featureFlagKey, value, eventType, timestamp}): Future<bool>`
+
+Never throws. Returns `true` when every request succeeded (or nothing had to be sent), `false`
+otherwise.
 
 ```dart
-// Fire-and-forget — never throws, safe to call without await.
-await client.track(
-  'button_clicked',
-  'user-123',
-  properties: {
-    'button_id': 'checkout_cta',
-    'screen': 'cart',
-  },
-);
+await client.track('purchase', 'user-123', experimentKey: 'checkout-cta-copy', value: 99.99);
+await client.track('search', 'user-123', featureFlagKey: 'new-search', properties: {'q': 'shoes'});
+await client.track('page_view', 'user-123', properties: {'page': '/products'});   // no key: fanned out
 ```
 
-## Evaluation Order
+**Fan-out rule.** With `experimentKey` and/or `featureFlagKey` the SDK sends one
+`POST /api/v1/tracking/track`. Without a key it sends one `POST /api/v1/tracking/batch`
+containing one entry per experiment the user has been assigned to through this client plus one
+per flag evaluated for the user (from the in-memory cache). If nothing is cached, nothing is sent.
+This is what makes a single `track('purchase', …)` count as a conversion for every experiment the
+user is in.
 
-When `evaluateFlag` or `getAssignment` is called, the client follows this
-priority order:
+Conversions are matched to metrics by **event name**: an experiment metric whose `event_name` is
+`purchase` counts every `purchase` event, whatever `event_type` was sent. `properties` is sent as
+`metadata`; `eventType` defaults to `eventName`; `timestamp` is sent as ISO-8601 UTC when given.
 
-1. **In-memory cache** — returns the cached result if not expired.
-2. **API call** — fetches the flag from the platform, evaluates locally using
-   the consistent hash, writes the result to the in-memory cache and (if
-   `offlineFallback: true`) to SharedPreferences.
-3. **SharedPreferences fallback** — when `offlineFallback: true` and the API
-   is unreachable, returns the last-known persisted value.
-4. **Safe default** — returns `false` / `null` if no value is available.
+Because the fan-out reads the in-memory cache, it only sees assignments and flags evaluated
+through the **same** client instance within `cacheTtl`. Pass the key explicitly otherwise.
 
-## Offline Support
+### `trackEvent(TrackEvent event): Future<bool>`
 
-The SDK automatically writes evaluated results to SharedPreferences when
-`offlineFallback: true` (the default). On subsequent app launches or when the
-network is unavailable, the last-known values are served from disk.
+Same as `track` with a prebuilt `TrackEvent(userId, eventName, {eventType, experimentKey,
+featureFlagKey, value, properties, timestamp})`.
+
+### `trackBatch(List<TrackEvent> events): Future<bool>`
+
+Sends events with `POST /api/v1/tracking/batch`, at most 100 per request (longer lists are
+chunked). Keyed events are sent as-is; events without a key are fanned out like `track`. Never
+throws; returns `false` if any batch request failed.
 
 ```dart
-// Offline fallback is enabled by default.
-// The first successful API evaluation is persisted automatically.
-final config = SdkConfig(
-  apiKey: 'your-api-key',
-  baseUrl: 'https://api.getexperimently.com',
-  offlineFallback: true, // default
-);
+final ok = await client.trackBatch([
+  TrackEvent(userId: 'user-123', eventName: 'purchase', experimentKey: 'checkout-cta-copy', value: 99.99),
+  TrackEvent(userId: 'user-123', eventName: 'search', featureFlagKey: 'new-search'),
+]);
 ```
 
-To disable offline fallback:
+---
+
+## Cache and offline store
+
+| Method | Description |
+|--------|-------------|
+| `getAssignments(String userId): List<Assignment>` | Cached (successful, unexpired) assignments for the user |
+| `getEvaluatedFlags(String userId): List<String>` | Keys of flags successfully evaluated (and still cached) for the user |
+| `clearCache(): void` | Drop every cached evaluation and assignment (the offline store is kept) |
+| `clearOfflineCache(): Future<void>` | Remove everything the SDK persisted to the offline store |
+| `close(): Future<void>` | Clear the cache and close the HTTP connection pool |
+
+Lookup order for `evaluateFlag` / `getAssignment`:
+
+1. **In-memory cache** — per user + key, expires after `cacheTtl`.
+2. **API call** — the server decides; the result is cached and, with `offlineFallback: true`,
+   written to the `OfflineStore`.
+3. **Offline store** — on a network error or non-404 HTTP error, the last persisted result.
+4. **Safe default** — `EvalResult.disabled(key)` / `null`.
+
+`OfflineStore` is an interface (`init`, `setFlag`/`getFlag`/`removeFlag`,
+`setAssignment`/`getAssignment`/`removeAssignment`, `clear`). `SharedPreferencesOfflineStore`
+persists JSON under `ep_sdk_flag_`/`ep_sdk_asgn_` keys across app launches;
+`InMemoryOfflineStore` (the default) lasts for the process. The Dart VM is single-isolate, so the
+client needs no locking; use one client per isolate.
+
+---
+
+## Backend endpoints used
+
+Every request carries `X-API-Key`, `Content-Type: application/json` and `Accept: application/json`.
+
+| SDK call | Method and path | Body / query | Response used |
+|---|---|---|---|
+| `evaluateFlag`, `isEnabled` | `GET /api/v1/feature-flags/evaluate/{flag_key}?user_id=…` | — | `{key, enabled, config}`; 404 when the flag is not ACTIVE |
+| `getAssignment`, `getVariant` | `POST /api/v1/tracking/assign` | `{experiment_key, user_id, context?}` | `{experiment_key, user_id, variant_id, variant_name, is_control, configuration}`; 404 when the experiment is not ACTIVE |
+| `track` with a key, `trackEvent` | `POST /api/v1/tracking/track` | `{event_type, event_name, user_id, experiment_key?, feature_flag_key?, value?, metadata?, timestamp?}` | ignored |
+| `track` without keys, `trackBatch` | `POST /api/v1/tracking/batch` | `{events: [<track body>, …]}` (max 100 per request) | ignored |
+
+These SDK paths share a per-IP rate-limit ceiling of `SDK_RATE_LIMIT_PER_MINUTE` requests
+(default 6000) on the backend; a `429` is surfaced as a failure (disabled flag / `null` / `false`).
+
+---
+
+## Error Handling
+
+The public methods never throw on network or HTTP errors. The single exception is calling any
+method before `init()`, which throws `StateError` (a programming error). Only `ApiHttpClient`
+throws:
+
+| Exception | When |
+|-----------|------|
+| `ApiException` (`statusCode`, `message`, `body`, `isNotFound`) | Non-2xx responses (`statusCode` 401/404/422/429/5xx) and network errors or timeouts (`statusCode == 0`) |
+
+---
+
+## Consistent Hash Utility
+
+`hashUser(String userId, String key): double` implements the cross-SDK formula —
+`MD5("{userId}:{key}")`, first 4 bytes as little-endian uint32, divided by 2^32 — and is pinned by
+the golden-vector tests in `tests/sdk-contract/`:
 
 ```dart
-final config = SdkConfig(
-  apiKey: 'your-api-key',
-  baseUrl: 'https://api.getexperimently.com',
-  offlineFallback: false,
-);
+import 'package:experimentation_sdk/experimentation_sdk.dart';
+
+hashUser('user-123', 'my-flag');   // 0.6927449859213084
 ```
 
-## Resource Management
+It is exported as a utility only. Since assignment moved to the server, nothing in the SDK uses it
+to decide a variant.
 
-Close the client when it is no longer needed (e.g. when the app is disposed):
-
-```dart
-@override
-void dispose() {
-  client.close();
-  super.dispose();
-}
-```
+---
 
 ## Flutter Widget Integration
 
 ```dart
 class FeatureFlagWidget extends StatefulWidget {
-  const FeatureFlagWidget({super.key});
+  const FeatureFlagWidget({super.key, required this.client});
+  final ExperimentationClient client;
+
   @override
   State<FeatureFlagWidget> createState() => _FeatureFlagWidgetState();
 }
@@ -176,8 +315,8 @@ class _FeatureFlagWidgetState extends State<FeatureFlagWidget> {
   }
 
   Future<void> _evaluate() async {
-    final enabled = await client.evaluateFlag('new-ui', 'user-123');
-    if (mounted) setState(() { _enabled = enabled; _loading = false; });
+    final flag = await widget.client.evaluateFlag('new-ui', 'user-123');   // never throws
+    if (mounted) setState(() { _enabled = flag.enabled; _loading = false; });
   }
 
   @override
@@ -188,84 +327,71 @@ class _FeatureFlagWidgetState extends State<FeatureFlagWidget> {
 }
 ```
 
-## Hash Algorithm
+A complete example app is in `sdk/flutter/example/lib/main.dart`.
 
-All SDKs use an identical consistent hash to ensure the same user always gets
-the same assignment, regardless of which SDK they use:
+---
 
-```
-MD5("{userId}:{flagKey}") → first 4 bytes as little-endian uint32 → ÷ 2^32
-```
+## Testing your own code
 
-The divisor is **2^32 = 4294967296**, not `MaxUInt32` (4294967295). This
-matches the Java, Python, Go, iOS, Android, and React Native SDKs exactly.
+Inject a `package:http` `MockClient` (no code generation needed); the SDK's own tests in
+`sdk/flutter/test/client_test.dart` use this pattern to record requests and serve canned responses:
 
 ```dart
-import 'package:experimentation_sdk/experimentation_sdk.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
+import 'package:experimentation_sdk/experimentation_sdk_core.dart';
 
-// Direct hash access (for testing/debugging):
-final h = hashUser('user-123', 'my-flag');
-// h ≈ 0.6927449859  (verified against all SDK implementations)
+final apiHttp = ApiHttpClient(
+  apiKey: 'test',
+  baseUrl: 'https://example.com',
+  timeout: const Duration(seconds: 2),
+  httpClient: MockClient((request) async =>
+      http.Response('{"key":"new-ui","enabled":true,"config":null}', 200)),
+);
+final client = ExperimentationClient(
+  config: const SdkConfig(apiKey: 'test', baseUrl: 'https://example.com', offlineFallback: false),
+  httpClient: apiHttp,
+);
+await client.init();
+expect(await client.isEnabled('new-ui', 'user-1'), isTrue);
 ```
 
-## Testing Guide
+---
 
-### Mocking the Client
+## Contract smoke
 
-Inject a mock `ApiHttpClient` in tests instead of making real network calls:
-
-```dart
-import 'package:mockito/annotations.dart';
-import 'package:mockito/mockito.dart';
-import 'package:experimentation_sdk/experimentation_sdk.dart';
-
-@GenerateMocks([ApiHttpClient])
-import 'my_test.mocks.dart';
-
-void main() {
-  test('evaluateFlag returns true when API returns enabled flag', () async {
-    final mockHttp = MockApiHttpClient();
-    when(mockHttp.get(any)).thenAnswer((_) async => {
-      'id': 'f1', 'key': 'my-flag', 'name': 'My Flag',
-      'enabled': true, 'rollout_percentage': 100.0, 'variants': [],
-    });
-
-    final client = ExperimentationClient(
-      config: SdkConfig(apiKey: 'test', baseUrl: 'https://example.com', offlineFallback: false),
-      httpClient: mockHttp,
-    );
-    await client.init();
-
-    expect(await client.evaluateFlag('my-flag', 'user-1'), isTrue);
-  });
-}
-```
-
-Generate mocks:
+Runs the four contract steps (sticky assignment, flag evaluation, keyed track, key-less fan-out
+plus a 2-event batch) against a live backend and prints one JSON line:
 
 ```bash
-dart run build_runner build
+cd sdk/flutter && flutter pub get
+EXPERIMENTLY_API_KEY=<key> dart run example/contract_smoke.dart
+# {"sdk":"flutter","assign":{"variant_name":"control","is_control":true,"sticky":true},"flag":{"enabled":true},"track":{"ok":true},"fanout":{"ok":true}}
 ```
 
-Run tests:
+The live runner (`tests/sdk-contract/live/run_live_contract.py`) invokes exactly
+`cd sdk/flutter && dart run example/contract_smoke.dart`. Env: `EXPERIMENTLY_API_URL` (default
+`http://localhost:8000`), `EXPERIMENTLY_API_KEY` (required), `CONTRACT_EXPERIMENT_KEY` (default
+`sdk_contract_ab`), `CONTRACT_FLAG_KEY` (default `sdk_contract_flag`), `CONTRACT_USER_ID` (default
+random `smoke-<uuid>`). The smoke imports only `experimentation_sdk_core.dart`, so no
+`package:flutter` code is loaded — but the package depends on the `flutter` SDK, so dependency
+resolution needs Flutter's bundled `dart` (run `flutter pub get` first so `dart run` prints
+nothing but the JSON line).
+
+Verified against a live backend: **not yet (toolchain unavailable — no dart/flutter on the
+development machine)**. Run `python tests/sdk-contract/live/run_live_contract.py --sdk flutter --strict`
+on a machine with the Flutter SDK.
+
+---
+
+## Development
 
 ```bash
-flutter test
+cd sdk/flutter
+flutter pub get
+flutter test                 # 70 tests: client (MockClient), hash golden vectors, SharedPreferences store
+flutter analyze
 ```
 
-## Troubleshooting
-
-### `StateError: init() must be called before using the client`
-
-You must call `await client.init()` before any other method. Do this in your
-app's startup sequence, e.g. in `main()` before `runApp()`.
-
-### SharedPreferences not persisting on Web
-
-SharedPreferences uses `window.localStorage` on Flutter Web. Ensure the user
-has not disabled local storage in their browser.
-
-### Hash values don't match other SDKs
-
-Verify you are using the `hashUser()` function from this SDK, not a custom
-implementation. The divisor must be `4294967296.0` (2^32), not `4294967295`.
+The test suite and the contract smoke were reviewed line by line for the server-side rewire but
+**not executed** on the development machine (no `dart`/`flutter` installed).

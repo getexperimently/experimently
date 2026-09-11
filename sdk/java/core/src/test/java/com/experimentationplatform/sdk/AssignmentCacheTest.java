@@ -4,6 +4,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.util.Arrays;
+import java.util.Collections;
+
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
@@ -21,12 +24,12 @@ import static org.junit.jupiter.api.Assertions.*;
 @DisplayName("AssignmentCache")
 class AssignmentCacheTest {
 
-    private AssignmentCache cache;
+    private AssignmentCache<String> cache;
 
     @BeforeEach
     void setUp() {
         // 10 entries max, 1 second TTL
-        cache = new AssignmentCache(10, 1000L);
+        cache = new AssignmentCache<>(10, 1000L);
     }
 
     // -------------------------------------------------------------------------
@@ -77,7 +80,7 @@ class AssignmentCacheTest {
     @DisplayName("get returns null after TTL expires")
     void testCacheEntryExpiresAfterTtl() throws InterruptedException {
         // Create a cache with a very short TTL (50ms)
-        AssignmentCache shortTtlCache = new AssignmentCache(100, 50L);
+        AssignmentCache<String> shortTtlCache = new AssignmentCache<>(100, 50L);
         shortTtlCache.put("user-1:flag-a", "on");
 
         // Before expiry: value should be present
@@ -95,7 +98,7 @@ class AssignmentCacheTest {
     @Test
     @DisplayName("expired entry is removed on access (lazy eviction)")
     void testExpiredEntryIsRemovedOnAccess() throws InterruptedException {
-        AssignmentCache shortTtlCache = new AssignmentCache(100, 50L);
+        AssignmentCache<String> shortTtlCache = new AssignmentCache<>(100, 50L);
         shortTtlCache.put("user-1:flag-a", "on");
 
         assertEquals(1, shortTtlCache.size(), "Cache should have 1 entry before expiry");
@@ -111,7 +114,7 @@ class AssignmentCacheTest {
     @Test
     @DisplayName("non-expired entries remain accessible while others expire")
     void testNonExpiredEntriesRemain() throws InterruptedException {
-        AssignmentCache shortTtlCache = new AssignmentCache(100, 50L);
+        AssignmentCache<String> shortTtlCache = new AssignmentCache<>(100, 50L);
         shortTtlCache.put("user-1:flag-a", "on");
 
         Thread.sleep(100L);
@@ -132,7 +135,7 @@ class AssignmentCacheTest {
     @DisplayName("cache respects maxSize and evicts LRU entry when full")
     void testCacheRespectsMaxSize() {
         // Create cache with maxSize=3
-        AssignmentCache smallCache = new AssignmentCache(3, 60_000L);
+        AssignmentCache<String> smallCache = new AssignmentCache<>(3, 60_000L);
         smallCache.put("key-1", "v1");
         smallCache.put("key-2", "v2");
         smallCache.put("key-3", "v3");
@@ -154,7 +157,7 @@ class AssignmentCacheTest {
     @Test
     @DisplayName("accessing a key prevents it from being LRU-evicted")
     void testAccessedKeyNotEvicted() {
-        AssignmentCache smallCache = new AssignmentCache(3, 60_000L);
+        AssignmentCache<String> smallCache = new AssignmentCache<>(3, 60_000L);
         smallCache.put("key-1", "v1");
         smallCache.put("key-2", "v2");
         smallCache.put("key-3", "v3");
@@ -239,7 +242,7 @@ class AssignmentCacheTest {
     @DisplayName("constructor throws when maxSize is 0")
     void testConstructorThrowsWhenMaxSizeIsZero() {
         assertThrows(IllegalArgumentException.class,
-                () -> new AssignmentCache(0, 1000L),
+                () -> new AssignmentCache<String>(0, 1000L),
                 "maxSize=0 should throw IllegalArgumentException");
     }
 
@@ -247,7 +250,7 @@ class AssignmentCacheTest {
     @DisplayName("constructor throws when maxSize is negative")
     void testConstructorThrowsWhenMaxSizeIsNegative() {
         assertThrows(IllegalArgumentException.class,
-                () -> new AssignmentCache(-1, 1000L),
+                () -> new AssignmentCache<String>(-1, 1000L),
                 "Negative maxSize should throw IllegalArgumentException");
     }
 
@@ -255,7 +258,7 @@ class AssignmentCacheTest {
     @DisplayName("constructor throws when ttlMs is 0")
     void testConstructorThrowsWhenTtlIsZero() {
         assertThrows(IllegalArgumentException.class,
-                () -> new AssignmentCache(100, 0L),
+                () -> new AssignmentCache<String>(100, 0L),
                 "ttlMs=0 should throw IllegalArgumentException");
     }
 
@@ -263,8 +266,29 @@ class AssignmentCacheTest {
     @DisplayName("constructor throws when ttlMs is negative")
     void testConstructorThrowsWhenTtlIsNegative() {
         assertThrows(IllegalArgumentException.class,
-                () -> new AssignmentCache(100, -500L),
+                () -> new AssignmentCache<String>(100, -500L),
                 "Negative ttlMs should throw IllegalArgumentException");
+    }
+
+    // -------------------------------------------------------------------------
+    // valuesWithPrefix
+    // -------------------------------------------------------------------------
+
+    @Test
+    @DisplayName("valuesWithPrefix returns only live values whose key starts with the prefix")
+    void testValuesWithPrefix() throws InterruptedException {
+        AssignmentCache<String> shortTtlCache = new AssignmentCache<>(100, 50L);
+        shortTtlCache.put("user-1\0flag-a", "expired");
+        Thread.sleep(100L);
+        shortTtlCache.put("user-1\0flag-b", "b");
+        shortTtlCache.put("user-1\0flag-c", "c");
+        shortTtlCache.put("user-10\0flag-a", "other-user");
+
+        assertEquals(Arrays.asList("b", "c"), shortTtlCache.valuesWithPrefix("user-1\0"),
+                "expired entries are dropped and other users' keys are not matched");
+        assertEquals(Collections.singletonList("other-user"), shortTtlCache.valuesWithPrefix("user-10\0"));
+        assertTrue(shortTtlCache.valuesWithPrefix("user-2\0").isEmpty());
+        assertEquals(3, shortTtlCache.size(), "expired entry removed during the scan");
     }
 
     // -------------------------------------------------------------------------
@@ -274,7 +298,7 @@ class AssignmentCacheTest {
     @Test
     @DisplayName("getMaxSize and getTtlMs return configured values")
     void testGetMaxSizeAndGetTtlMs() {
-        AssignmentCache c = new AssignmentCache(42, 12345L);
+        AssignmentCache<String> c = new AssignmentCache<>(42, 12345L);
         assertEquals(42, c.getMaxSize());
         assertEquals(12345L, c.getTtlMs());
     }

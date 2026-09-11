@@ -34,7 +34,8 @@ class Cache
     public function __construct(
         private readonly int $defaultTtl = 300,
         private readonly int $maxCacheSize = 1000,
-    ) {}
+    ) {
+    }
 
     /**
      * Retrieve a cached value.
@@ -86,6 +87,28 @@ class Cache
             'expires_at' => $expiresAt,
         ];
         $this->insertionOrder[] = $key;
+    }
+
+    /**
+     * Values of all non-expired entries whose key starts with $prefix, in insertion order.
+     * Expired entries are pruned on the way.
+     *
+     * Used by the client to list everything cached for one user (the track fan-out).
+     *
+     * @return list<mixed>
+     */
+    public function valuesWithPrefix(string $prefix): array
+    {
+        $this->pruneExpired();
+
+        $values = [];
+        foreach ($this->insertionOrder as $key) {
+            if (str_starts_with($key, $prefix) && isset($this->store[$key])) {
+                $values[] = $this->store[$key]['value'];
+            }
+        }
+
+        return $values;
     }
 
     /**

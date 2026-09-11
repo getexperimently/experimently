@@ -28,6 +28,9 @@ dependencies {
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.1")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.7.3")
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
+    // The SDK uses the platform's org.json; android.jar only ships stubs for local
+    // unit tests, so the real implementation is needed on the test classpath.
+    testImplementation("org.json:json:20240303")
     testImplementation("io.mockk:mockk:1.13.9")
     testImplementation("org.assertj:assertj-core:3.24.2")
 }

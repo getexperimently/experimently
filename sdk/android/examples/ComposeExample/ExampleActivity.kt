@@ -19,6 +19,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -27,12 +28,15 @@ import com.experimentationplatform.android.ExperimentationClient
 import com.experimentationplatform.android.SdkConfig
 import com.experimentationplatform.android.TrackEvent
 import com.experimentationplatform.android.User
+import kotlinx.coroutines.launch
 
 /**
  * Example Activity demonstrating the Experimentation Platform Android SDK
  * with Jetpack Compose.
  *
- * Uses http://10.0.2.2:8000 which maps to localhost from the Android emulator.
+ * Flags and experiments are evaluated by the server (the SDK sends the API key as
+ * `X-API-Key` and caches the answers per user + key). Uses http://10.0.2.2:8000 which
+ * maps to localhost from the Android emulator.
  */
 class ExampleActivity : ComponentActivity() {
 
@@ -63,17 +67,22 @@ fun ExperimentationDemoScreen(client: ExperimentationClient) {
     var variant by remember { mutableStateOf("") }
     var loading by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf("") }
+    val scope = rememberCoroutineScope()
 
+    // Attributes are sent as the assignment "context" for targeting rules.
     val user = User(id = "user-123", attributes = mapOf("plan" to "pro", "country" to "US"))
 
     LaunchedEffect(Unit) {
         loading = true
         errorMessage = ""
         try {
-            // Evaluate the feature flag
+            // Evaluate the feature flag (GET /api/v1/feature-flags/evaluate/new-dashboard?user_id=user-123)
             val result = client.evaluateFlag("new-dashboard", user)
             flagEnabled = result.enabled
-            variant = result.variantKey ?: ""
+
+            // Assign the user to an experiment (POST /api/v1/tracking/assign, sticky server-side)
+            val assignment = client.getAssignment("checkout-flow", user)
+            variant = assignment.variantName
         } catch (e: Exception) {
             errorMessage = "Error: ${e.message}"
         } finally {
@@ -116,13 +125,20 @@ fun ExperimentationDemoScreen(client: ExperimentationClient) {
 
                 Button(
                     onClick = {
-                        // Track a purchase event (fire-and-forget)
-                        val event = TrackEvent(
-                            userId = user.id,
-                            eventName = "purchase_clicked",
-                            properties = mapOf("source" to "demo_screen")
-                        )
-                        client.close() // Not the right place, just for demo
+                        // Track a purchase attributed to the experiment (fire-and-forget,
+                        // POST /api/v1/tracking/track). Without experimentKey/featureFlagKey the
+                        // event is fanned out to every cached assignment and flag for the user.
+                        scope.launch {
+                            client.track(
+                                TrackEvent(
+                                    userId = user.id,
+                                    eventName = "purchase_clicked",
+                                    properties = mapOf("source" to "demo_screen"),
+                                    experimentKey = "checkout-flow",
+                                    value = 49.99
+                                )
+                            )
+                        }
                     }
                 ) {
                     Text("Track Purchase")

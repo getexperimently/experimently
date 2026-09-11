@@ -5,123 +5,112 @@ declare(strict_types=1);
 /**
  * Basic usage example for the Experimently PHP SDK.
  *
- * This file demonstrates how to:
- *  1. Create a client with a valid configuration
- *  2. Evaluate a feature flag for a user
- *  3. Get an experiment assignment
- *  4. Track a user event
+ * Demonstrates:
+ *  1. Creating a client
+ *  2. Evaluating a feature flag (decided by the server)
+ *  3. Getting a sticky experiment assignment
+ *  4. Tracking events (with a key, and key-less fan-out)
+ *  5. The cross-SDK hash utility
  *
- * Run from the sdk/php directory after installing dependencies:
+ * Run from the sdk/php directory:
  *   composer install
- *   php examples/basic_usage.php
+ *   EXPERIMENTLY_API_URL=http://localhost:8000 EXPERIMENTLY_API_KEY=... php examples/basic_usage.php
+ *
+ * For a runnable end-to-end check against a live backend see contract_smoke.php.
  */
 
 require_once __DIR__ . '/../vendor/autoload.php';
 
 use ExperimentationPlatform\ExperimentationClient;
+use ExperimentationPlatform\FeatureFlagEvaluator;
 use ExperimentationPlatform\SdkConfig;
-use ExperimentationPlatform\Errors\ExperimentationException;
 
 // ---------------------------------------------------------------------------
-// 1. Configure the SDK
+// 1. Configure and create the client
 // ---------------------------------------------------------------------------
 
 $config = new SdkConfig(
-    baseUrl: getenv('EXPERIMENT_API_URL') ?: 'https://api.example.com',
-    apiKey:  getenv('EXPERIMENT_API_KEY') ?: 'your-api-key-here',
-    cacheTtl:     300,   // Cache flag definitions for 5 minutes
-    timeout:       10,   // 10-second HTTP timeout
-    maxCacheSize: 1000,  // Keep up to 1,000 flags in memory
+    baseUrl: getenv('EXPERIMENTLY_API_URL') ?: 'http://localhost:8000', // origin only; the SDK appends /api/v1/...
+    apiKey: getenv('EXPERIMENTLY_API_KEY') ?: 'your-api-key-here',       // sent as X-API-Key
+    cacheTtl: 300,      // reuse a successful evaluation/assignment for 5 minutes
+    timeout: 10,        // HTTP timeout in seconds
+    maxCacheSize: 1000, // max cached entries
 );
-
-// ---------------------------------------------------------------------------
-// 2. Create the client
-// ---------------------------------------------------------------------------
 
 $client = new ExperimentationClient($config);
 
-// ---------------------------------------------------------------------------
-// 3. Evaluate a feature flag
-// ---------------------------------------------------------------------------
+$userId = 'user-' . random_int(1000, 9999);
 
-$userId = 'user-' . rand(1000, 9999);
-
-$result = $client->evaluateFlag(
-    flagKey:    'dark-mode',
-    userId:     $userId,
-    attributes: ['country' => 'US', 'plan' => 'premium'],
-    default:    false
-);
+// ---------------------------------------------------------------------------
+// 2. Evaluate a feature flag — GET /api/v1/feature-flags/evaluate/{key}?user_id=...
+// ---------------------------------------------------------------------------
 
 echo "=== Feature Flag Evaluation ===\n";
-echo "Flag:    dark-mode\n";
-echo "User:    $userId\n";
-echo "Enabled: " . ($result['enabled'] ? 'true' : 'false') . "\n";
-echo "Variant: " . ($result['variant'] ?? 'none') . "\n";
-echo "Value:   " . json_encode($result['value']) . "\n\n";
 
-if ($result['enabled']) {
-    // Use the variant value to drive the application experience
-    echo "Dark mode is ENABLED for this user (variant: {$result['variant']})\n";
+$flag = $client->evaluateFlag('dark-mode', $userId);
+
+echo "Flag:    {$flag->key}\n";
+echo "User:    {$userId}\n";
+echo 'Enabled: ' . ($flag->enabled ? 'true' : 'false') . "\n";
+echo 'Config:  ' . json_encode($flag->config) . "\n";
+
+if ($client->isFeatureEnabled('dark-mode', $userId)) {   // served from the cache
+    echo "Dark mode is ENABLED for this user\n";
 } else {
-    echo "Dark mode is DISABLED for this user — showing default experience\n";
+    echo "Dark mode is DISABLED (or the flag is not ACTIVE / the API is unreachable)\n";
 }
 
 // ---------------------------------------------------------------------------
-// 4. Get an experiment assignment
+// 3. Get an experiment assignment — POST /api/v1/tracking/assign (sticky)
 // ---------------------------------------------------------------------------
 
 echo "\n=== Experiment Assignment ===\n";
 
-$assignment = $client->getAssignment(
-    experimentKey: 'checkout-flow-v2',
-    userId:        $userId,
-    attributes:    ['plan' => 'premium'],
-);
+$assignment = $client->getAssignment('checkout-flow-v2', $userId, ['plan' => 'premium', 'country' => 'US']);
 
 if ($assignment !== null) {
-    echo "Experiment: checkout-flow-v2\n";
-    echo "Variant:    " . ($assignment['variant'] ?? 'unknown') . "\n";
-    echo "Is control: " . (($assignment['is_control'] ?? false) ? 'yes' : 'no') . "\n";
+    echo "Experiment: {$assignment->experimentKey}\n";
+    echo "Variant:    {$assignment->variantName} (id {$assignment->variantId})\n";
+    echo 'Is control: ' . ($assignment->isControl ? 'yes' : 'no') . "\n";
+    echo 'Config:     ' . json_encode($assignment->configuration) . "\n";
 } else {
-    echo "User is not assigned to experiment checkout-flow-v2\n";
+    echo "No assignment (experiment not ACTIVE, unknown key, or the API is unreachable)\n";
 }
 
 // ---------------------------------------------------------------------------
-// 5. Track an event
+// 4. Track events — never throws
 // ---------------------------------------------------------------------------
 
 echo "\n=== Event Tracking ===\n";
 
-$success = $client->track(
-    eventName:  'page_view',
-    userId:     $userId,
-    properties: [
-        'page'     => 'checkout',
-        'referrer' => 'homepage',
-    ]
-);
+// With a key -> one POST /api/v1/tracking/track
+$ok = $client->track('purchase', $userId, ['sku' => 'pro-plan'], 'checkout-flow-v2', null, 99.99);
+echo 'Tracked purchase (experiment_key): ' . ($ok ? 'success' : 'failed (non-fatal)') . "\n";
 
-echo "Tracked page_view: " . ($success ? "success" : "failed (non-fatal)") . "\n";
+$ok = $client->track('search', $userId, ['q' => 'shoes'], null, 'dark-mode');
+echo 'Tracked search (feature_flag_key): ' . ($ok ? 'success' : 'failed (non-fatal)') . "\n";
 
-// track() never throws — safe to call unconditionally
-$client->track('button_click', $userId, ['button' => 'buy-now']);
+// Without a key -> one POST /api/v1/tracking/batch with one entry per cached
+// assignment and evaluated flag for this user (nothing cached -> nothing sent)
+$ok = $client->track('page_view', $userId, ['page' => 'checkout']);
+echo 'Tracked page_view (fan-out):       ' . ($ok ? 'success' : 'failed (non-fatal)') . "\n";
+
+// Explicit batch -> BatchResult
+$result = $client->trackBatch([
+    ['event_name' => 'add_to_cart', 'user_id' => $userId, 'experiment_key' => 'checkout-flow-v2', 'value' => 1.0],
+    ['event_name' => 'add_to_cart', 'user_id' => $userId, 'feature_flag_key' => 'dark-mode'],
+]);
+echo "trackBatch: {$result->successCount} ok, {$result->failureCount} failed\n";
 
 // ---------------------------------------------------------------------------
-// 6. Local hash evaluation (no network call)
+// 5. Cross-SDK hash utility (no network; not used for bucketing)
 // ---------------------------------------------------------------------------
 
-echo "\n=== Local Hash Evaluation ===\n";
+echo "\n=== Hash Utility ===\n";
 
-use ExperimentationPlatform\FeatureFlagEvaluator;
-
-$bucket = FeatureFlagEvaluator::hashUser($userId, 'some-flag');
-printf("Local bucket for %s / some-flag: %.6f\n", $userId, $bucket);
-
-// Known cross-SDK vector
 $known = FeatureFlagEvaluator::hashUser('user-123', 'my-flag');
-printf("Known cross-SDK vector (user-123, my-flag): %.16f\n", $known);
-echo "Expected:                                    0.6927449859213084\n";
-echo "Match: " . (abs($known - 0.6927449859213084) < 1e-10 ? "YES" : "NO") . "\n";
+printf("hashUser('user-123', 'my-flag') = %.16f\n", $known);
+echo "Expected (all SDKs):              0.6927449859213084\n";
+echo 'Match: ' . (abs($known - 0.6927449859213084) < 1e-10 ? 'YES' : 'NO') . "\n";
 
 echo "\nDone.\n";

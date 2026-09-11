@@ -1,7 +1,7 @@
 {
   "name": "@experimentation-platform/react-native-sdk",
   "version": "0.1.0",
-  "description": "React Native SDK for the Experimentation Platform — feature flags, A/B tests, and event tracking with consistent hashing and AsyncStorage offline fallback.",
+  "description": "React Native SDK for the Experimentation Platform — server-decided feature flags and A/B assignments, event tracking, in-memory cache and AsyncStorage offline fallback.",
   "main": "src/index.ts",
   "types": "src/index.ts",
   "repository": {
@@ -19,14 +19,16 @@
     "test": "jest",
     "test:coverage": "jest --coverage",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint src --ext .ts,.tsx"
+    "lint": "eslint src --ext .ts,.tsx",
+    "typecheck:tests": "tsc --noEmit -p tsconfig.jest.json"
   },
   "dependencies": {
-    "md5": "^2.3.0",
-    "@react-native-async-storage/async-storage": "^1.21.0"
+    "@react-native-async-storage/async-storage": "^1.21.0",
+    "md5": "^2.3.0"
   },
   "devDependencies": {
     "@testing-library/react-native": "^12.0.0",
+    "@types/jest": "^29.5.14",
     "@types/md5": "^2.3.5",
     "@types/react": "^18.0.0",
     "@types/react-native": "^0.73.0",
@@ -34,6 +36,7 @@
     "jest-environment-jsdom": "^29.0.0",
     "react": "^18.0.0",
     "react-native": "^0.73.0",
+    "react-test-renderer": "18.2.0",
     "ts-jest": "^29.0.0",
     "typescript": "^5.0.0"
   },
@@ -43,19 +46,26 @@
   },
   "jest": {
     "preset": "react-native",
-    "moduleFileExtensions": ["ts", "tsx", "js", "jsx", "json"],
+    "moduleFileExtensions": [
+      "ts",
+      "tsx",
+      "js",
+      "jsx",
+      "json"
+    ],
     "transform": {
-      "^.+\\.(ts|tsx)$": "ts-jest"
+      "^.+\\.(ts|tsx)$": [
+        "ts-jest",
+        {
+          "tsconfig": "tsconfig.jest.json"
+        }
+      ]
     },
-    "testMatch": ["**/__tests__/**/*.test.(ts|tsx)"],
-    "setupFilesAfterFramework": [],
+    "testMatch": [
+      "**/__tests__/**/*.test.(ts|tsx)"
+    ],
     "moduleNameMapper": {
       "@react-native-async-storage/async-storage": "<rootDir>/__mocks__/@react-native-async-storage/async-storage.ts"
-    },
-    "globals": {
-      "ts-jest": {
-        "tsconfig": "tsconfig.json"
-      }
     }
   }
 }

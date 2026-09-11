@@ -6,12 +6,15 @@ namespace ExperimentationPlatform;
 
 use ExperimentationPlatform\Errors\ApiException;
 use ExperimentationPlatform\Errors\AuthException;
+use ExperimentationPlatform\Errors\ExperimentationException;
 use ExperimentationPlatform\Errors\NetworkException;
 
 /**
  * Thin cURL wrapper for communicating with the Experimentation Platform API.
  *
- * No external dependencies — uses only PHP's built-in ext-curl and ext-json.
+ * Every request carries the configured API key in the X-API-Key header plus
+ * Content-Type/Accept: application/json. No external dependencies — uses only
+ * PHP's built-in ext-curl and ext-json.
  */
 class HttpClient
 {
@@ -30,9 +33,10 @@ class HttpClient
     /**
      * Perform an HTTP GET request and return the decoded JSON body.
      *
-     * @param string              $path    API path (e.g. '/api/v1/sdk/flags/my-flag')
+     * @param string              $path    API path including any query string
+     *                                     (e.g. '/api/v1/feature-flags/evaluate/my-flag?user_id=u1')
      * @param array<string,string> $headers Additional HTTP headers
-     * @return array<mixed> Decoded JSON response body
+     * @return array<mixed> Decoded JSON response body ([] when the body is empty or not an object)
      *
      * @throws NetworkException if cURL encounters a transport-level error
      * @throws AuthException    if the server returns HTTP 401
@@ -49,7 +53,7 @@ class HttpClient
      * @param string              $path    API path
      * @param array<mixed>        $body    Request body (will be JSON-encoded)
      * @param array<string,string> $headers Additional HTTP headers
-     * @return array<mixed> Decoded JSON response body
+     * @return array<mixed> Decoded JSON response body ([] when the body is empty or not an object)
      *
      * @throws NetworkException if cURL encounters a transport-level error
      * @throws AuthException    if the server returns HTTP 401
@@ -97,14 +101,20 @@ class HttpClient
             CURLOPT_URL            => $url,
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_TIMEOUT        => $this->timeout,
+            CURLOPT_CONNECTTIMEOUT => $this->timeout,
             CURLOPT_HTTPHEADER     => $curlHeaders,
             CURLOPT_FOLLOWLOCATION => true,
             CURLOPT_MAXREDIRS      => 5,
         ];
 
         if ($method === 'POST') {
+            try {
+                $encoded = json_encode($body, JSON_THROW_ON_ERROR);
+            } catch (\JsonException $e) {
+                throw new ExperimentationException('Failed to encode request body: ' . $e->getMessage(), 0, $e);
+            }
             $options[CURLOPT_POST]       = true;
-            $options[CURLOPT_POSTFIELDS] = json_encode($body, JSON_THROW_ON_ERROR);
+            $options[CURLOPT_POSTFIELDS] = $encoded;
         }
 
         [$responseBody, $httpCode, $curlError] = $this->executeCurl($options);
@@ -113,15 +123,27 @@ class HttpClient
             throw new NetworkException('cURL error: ' . $curlError);
         }
 
-        $decoded = json_decode($responseBody, true, 512, JSON_THROW_ON_ERROR);
+        $decoded = null;
+        if ($responseBody !== '') {
+            try {
+                $decoded = json_decode($responseBody, true, 512, JSON_THROW_ON_ERROR);
+            } catch (\JsonException) {
+                $decoded = null;
+            }
+        }
 
         if ($httpCode === 401) {
             throw new AuthException('Unauthorized: invalid or missing API key');
         }
 
         if ($httpCode >= 400) {
-            $message = $decoded['detail'] ?? $decoded['message'] ?? "HTTP {$httpCode}";
-            throw new ApiException((string)$message, $httpCode);
+            $message = is_array($decoded) ? ($decoded['detail'] ?? $decoded['message'] ?? null) : null;
+            if ($message === null) {
+                $message = "HTTP {$httpCode}";
+            } elseif (!is_string($message)) {
+                $message = (string) json_encode($message);
+            }
+            throw new ApiException($message, $httpCode);
         }
 
         return is_array($decoded) ? $decoded : [];

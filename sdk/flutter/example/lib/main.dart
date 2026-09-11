@@ -1,10 +1,10 @@
 /// Example Flutter application demonstrating the Experimentation Platform SDK.
 ///
 /// This app shows:
-///  - SDK initialisation
-///  - Feature flag evaluation (with live boolean display)
-///  - Experiment assignment retrieval
-///  - Event tracking (fire-and-forget)
+///  - SDK initialisation (no network call; flags are decided per user by the server)
+///  - Feature flag evaluation (`GET /api/v1/feature-flags/evaluate/{key}`)
+///  - Experiment assignment (`POST /api/v1/tracking/assign`, sticky)
+///  - Event tracking (never throws; fans out to cached assignments and flags)
 ///  - Offline fallback (SharedPreferences)
 import 'package:flutter/material.dart';
 import 'package:experimentation_sdk/experimentation_sdk.dart';
@@ -15,10 +15,11 @@ Future<void> main() async {
   final client = ExperimentationClient(
     config: const SdkConfig(
       apiKey: 'YOUR_API_KEY_HERE',
-      baseUrl: 'https://api.getexperimently.com',
+      baseUrl: 'http://localhost:8000',
       cacheTtl: Duration(minutes: 5),
       offlineFallback: true,
     ),
+    offlineStore: SharedPreferencesOfflineStore(),
   );
 
   await client.init();
@@ -67,21 +68,15 @@ class _HomePageState extends State<HomePage> {
       _status = 'Evaluating flag…';
     });
 
-    try {
-      final enabled = await widget.client.evaluateFlag(
-        'dark-mode',
-        _userId,
-        attributes: {'platform': 'flutter'},
-      );
-      setState(() {
-        _darkModeEnabled = enabled;
-        _status = 'dark-mode flag: ${enabled ? "ENABLED" : "DISABLED"}';
-      });
-    } catch (e) {
-      setState(() => _status = 'Error: $e');
-    } finally {
-      setState(() => _loading = false);
-    }
+    // evaluateFlag never throws: on failure it returns the cached/offline
+    // value or a disabled result.
+    final result = await widget.client.evaluateFlag('dark-mode', _userId);
+    setState(() {
+      _darkModeEnabled = result.enabled;
+      _status = 'dark-mode flag: ${result.enabled ? "ENABLED" : "DISABLED"}'
+          ' (config: ${result.config})';
+      _loading = false;
+    });
   }
 
   Future<void> _getAssignment() async {
@@ -90,29 +85,34 @@ class _HomePageState extends State<HomePage> {
       _status = 'Fetching experiment assignment…';
     });
 
-    try {
-      final variant = await widget.client.getAssignment(
-        'checkout-experiment',
-        _userId,
-      );
-      setState(() {
-        _checkoutVariant = variant;
-        _status = 'checkout-experiment variant: ${variant ?? "not assigned"}';
-      });
-    } catch (e) {
-      setState(() => _status = 'Error: $e');
-    } finally {
-      setState(() => _loading = false);
-    }
+    // getAssignment never throws: `null` means the experiment is not ACTIVE
+    // or the API was unreachable with nothing cached.
+    final assignment = await widget.client.getAssignment(
+      'checkout-experiment',
+      _userId,
+      attributes: {'platform': 'flutter', 'plan': 'pro'},
+    );
+    setState(() {
+      _checkoutVariant = assignment?.variantName;
+      _status = assignment == null
+          ? 'checkout-experiment: not assigned'
+          : 'checkout-experiment variant: ${assignment.variantName}'
+              ' (control: ${assignment.isControl}, configuration: ${assignment.configuration})';
+      _loading = false;
+    });
   }
 
   Future<void> _trackEvent() async {
-    await widget.client.track(
+    // No experiment/flag key: the event is fanned out to every experiment the
+    // user has been assigned to and every flag evaluated for them in this client.
+    final delivered = await widget.client.track(
       'demo_button_clicked',
       _userId,
       properties: {'source': 'flutter-example', 'screen': 'home'},
     );
-    setState(() => _status = 'Event "demo_button_clicked" tracked (fire-and-forget).');
+    setState(() => _status = delivered
+        ? 'Event "demo_button_clicked" tracked.'
+        : 'Event "demo_button_clicked" could not be delivered (tracking never throws).');
   }
 
   @override

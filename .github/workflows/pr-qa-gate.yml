@@ -139,6 +139,113 @@ jobs:
       - name: Run JS contracts
         run: node tests/sdk-contract/test_js_sdk.js
 
+  # Live SDK contract: every SDK's contract_smoke against a real backend.
+  # Proves the SDKs call endpoints the backend actually serves (the golden-vector
+  # job above only covers hashing). Toolchains not available on ubuntu-latest
+  # (Android, Flutter, Elixir, iOS) are exercised by their unit tests only.
+  sdk-live-contract:
+    name: SDK Live Contract
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_DB: experimentation
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      APP_ENV: development
+      ENVIRONMENT: development
+      POSTGRES_SERVER: localhost
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: experimentation
+      POSTGRES_SCHEMA: experimentation
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      REDIS_HOST: localhost
+      REDIS_PORT: 6379
+      SECRET_KEY: ci-only-sdk-live-contract-secret-key-0123456789abcdef
+      EXPERIMENTLY_API_URL: http://127.0.0.1:8000
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '20'
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22.x'
+          cache-dependency-path: sdk/go/go.sum
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '6.0.x'
+
+      - name: Install backend dependencies
+        run: pip install -r backend/requirements.txt
+
+      - name: Install JS SDK dependencies
+        run: |
+          for d in sdk/js sdk/openfeature sdk/edge; do
+            (cd "$d" && (npm ci --no-audit --no-fund 2>/dev/null || npm install --no-audit --no-fund))
+          done
+
+      - name: Seed contract fixtures
+        run: python backend/scripts/seed_sdk_contract.py
+
+      - name: Start backend
+        run: |
+          nohup python -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000 > backend.log 2>&1 &
+          for i in $(seq 1 60); do
+            curl -sf http://127.0.0.1:8000/health > /dev/null && exit 0
+            sleep 1
+          done
+          echo "backend did not become healthy"; tail -n 100 backend.log; exit 1
+
+      - name: Run live SDK contract
+        run: >
+          python tests/sdk-contract/live/run_live_contract.py --strict
+          --sdk python --sdk openfeature-python
+          --sdk js --sdk openfeature --sdk edge
+          --sdk go --sdk java --sdk ruby --sdk php --sdk dotnet
+
+      - name: Backend log (on failure)
+        if: failure()
+        run: tail -n 200 backend.log
+
   # Browser E2E tests need a seeded backend (the Playwright fixtures create
   # experiments through the real API), so they run in nightly-qa.yml where the
   # full stack is started, not in the PR gate.

@@ -6,44 +6,49 @@
  *
  * Key design constraints:
  *  - Zero Node.js built-ins (no `fs`, `crypto`, `Buffer`, `process`)
- *  - Uses Web Crypto API where needed (or pure-JS implementations)
- *  - Works in Cloudflare Workers, Vercel Edge, Deno Deploy, and browsers
- *  - Sub-millisecond evaluation via bootstrap flags
+ *  - Pure-JS MD5 for the cross-SDK hash utility
+ *  - Works in Cloudflare Workers, Vercel Edge, Deno Deploy, Node >= 18 and browsers
+ *
+ * Flag evaluation and experiment assignment are decided by the server
+ * (`GET /api/v1/feature-flags/evaluate/{key}?user_id=…`,
+ * `POST /api/v1/tracking/assign`); results are cached per user + key in
+ * memory and optionally in a shared KV store.
  *
  * Quick start:
  * ```ts
  * import { EdgeExperimentationClient } from '@experimentation-platform/edge-sdk';
  *
- * const client = new EdgeExperimentationClient({
- *   apiKey: 'your-api-key',
- *   bootstrapFlags: flagsFromKv,
- * });
+ * const client = new EdgeExperimentationClient({ apiKey: 'your-api-key', baseUrl: 'https://api.example.com' });
  *
- * // Sync — zero latency
- * const enabled = client.evaluateFlagSync('new-checkout', userId);
+ * const { enabled, config } = await client.evaluateFlag('new-checkout', userId);
+ * const assignment = await client.getAssignment('checkout_flow', userId); // null on failure
+ * await client.track('purchase', userId, { total: 49.99 }, { value: 49.99, experimentKey: 'checkout_flow' });
  *
- * // Async — fetches on cache miss
- * const enabled2 = await client.evaluateFlag('new-checkout', userId);
+ * // Sync — zero latency, serves the in-memory cache populated above
+ * const enabledAgain = client.evaluateFlagSync('new-checkout', userId);
  * ```
  */
 
 // Main client
-export { EdgeExperimentationClient } from './client';
+export { EdgeExperimentationClient, EdgeApiError } from './client.js';
 
-// Core utilities
-export { hashUser, evaluateFlag, assignVariant, matchesRule } from './evaluator';
-export { md5, md5Hex } from './md5';
-export { EdgeCache } from './cache';
+// Utilities
+export { hashUser } from './hash.js';
+export { md5, md5Hex } from './md5.js';
+export { EdgeCache } from './cache.js';
 
 // Types
 export type {
   EdgeSdkConfig,
-  FeatureFlag,
-  FlagVariant,
-  TargetingRule,
-  Experiment,
-  ExperimentVariant,
-  BootstrapResponse,
-  EvalResult,
+  EdgeStore,
+  FlagEvaluation,
+  Assignment,
+  TrackOptions,
+  TrackEvent,
+  BatchResult,
+  AssignResponse,
+  FlagEvaluateResponse,
+  BatchResponse,
+  TrackBody,
   CacheEntry,
-} from './types';
+} from './types.js';
