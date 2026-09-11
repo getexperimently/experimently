@@ -2,37 +2,62 @@
  * @jest-environment node
  */
 import { ServerClient } from '../client/ServerClient';
-import { SdkConfig, UserContext, FeatureFlag } from '../client/types';
+import {
+  SdkConfig,
+  UserContext,
+  FeatureFlagEvaluateResponse,
+  ExperimentAssignResponse,
+} from '../client/types';
 
 const baseConfig: SdkConfig = {
   apiKey: 'test-api-key',
   baseUrl: 'https://api.example.com',
 };
 
-const user: UserContext = { userId: 'user-123' };
+const user: UserContext = { userId: 'user-123', attributes: { country: 'DE' } };
 
-const enabledFlag: FeatureFlag = {
-  id: 'flag-1',
+const flagOn: FeatureFlagEvaluateResponse = { key: 'my-flag', enabled: true, config: null };
+const flagOff: FeatureFlagEvaluateResponse = { key: 'disabled-flag', enabled: false, config: null };
+const flagWithVariant: FeatureFlagEvaluateResponse = {
   key: 'my-flag',
-  name: 'My Flag',
   enabled: true,
-  rolloutPercentage: 100,
+  config: { variant: 'treatment' },
 };
 
-const disabledFlag: FeatureFlag = {
-  id: 'flag-2',
-  key: 'disabled-flag',
-  name: 'Disabled Flag',
-  enabled: false,
-  rolloutPercentage: 0,
+const assignment: ExperimentAssignResponse = {
+  experiment_key: 'hero',
+  user_id: 'user-123',
+  variant_id: 'var-9',
+  variant_name: 'video_hero',
+  is_control: false,
+  configuration: { media: 'video' },
 };
 
-function mockFetch(response: object, status = 200): jest.Mock {
-  const mock = jest.fn().mockResolvedValue({
-    ok: status >= 200 && status < 300,
-    status,
-    json: () => Promise.resolve(response),
-  });
+const controlDefaults = {
+  variantKey: 'control',
+  variantName: 'Control',
+  variantId: null,
+  isControl: true,
+  configuration: null,
+  loading: false,
+};
+
+function jsonResponse(body: unknown, status = 200) {
+  return { ok: status >= 200 && status < 300, status, json: () => Promise.resolve(body) };
+}
+
+function mockFetch(body: unknown, status = 200): jest.Mock {
+  const mock = jest.fn().mockResolvedValue(jsonResponse(body, status));
+  global.fetch = mock;
+  return mock;
+}
+
+function mockFetchSequence(...steps: Array<{ body: unknown; status?: number } | Error>): jest.Mock {
+  const mock = jest.fn();
+  for (const step of steps) {
+    if (step instanceof Error) mock.mockRejectedValueOnce(step);
+    else mock.mockResolvedValueOnce(jsonResponse(step.body, step.status ?? 200));
+  }
   global.fetch = mock;
   return mock;
 }
@@ -45,15 +70,13 @@ afterEach(() => {
 
 describe('ServerClient constructor', () => {
   it('throws when apiKey is missing', () => {
-    expect(
-      () => new ServerClient({ apiKey: '', baseUrl: 'https://api.example.com' })
-    ).toThrow('apiKey is required');
+    expect(() => new ServerClient({ apiKey: '', baseUrl: 'https://api.example.com' })).toThrow(
+      'apiKey is required'
+    );
   });
 
   it('throws when baseUrl is missing', () => {
-    expect(
-      () => new ServerClient({ apiKey: 'key', baseUrl: '' })
-    ).toThrow('baseUrl is required');
+    expect(() => new ServerClient({ apiKey: 'key', baseUrl: '' })).toThrow('baseUrl is required');
   });
 
   it('creates client with valid config', () => {
@@ -61,7 +84,7 @@ describe('ServerClient constructor', () => {
   });
 
   it('strips trailing slash from baseUrl', async () => {
-    const fetchMock = mockFetch(enabledFlag);
+    const fetchMock = mockFetch(flagOn);
     const client = new ServerClient({ ...baseConfig, baseUrl: 'https://api.example.com/' });
     await client.evaluateFeatureFlag('my-flag', user);
     expect(fetchMock.mock.calls[0][0]).toMatch(/^https:\/\/api\.example\.com\/api/);
@@ -72,56 +95,179 @@ describe('ServerClient constructor', () => {
 // ─── evaluateFeatureFlag ──────────────────────────────────────────────────────
 
 describe('ServerClient.evaluateFeatureFlag', () => {
-  it('returns enabled flag evaluation with correct structure', async () => {
-    mockFetch(enabledFlag);
+  it('GETs /api/v1/feature-flags/evaluate/{key}?user_id=… with the API headers', async () => {
+    const fetchMock = mockFetch(flagOn);
     const client = new ServerClient(baseConfig);
-    const result = await client.evaluateFeatureFlag('my-flag', user);
-    expect(result.flagKey).toBe('my-flag');
-    expect(result.isEnabled).toBe(true);
-    expect(result.variant).not.toBeNull();
+    await client.evaluateFeatureFlag('my-flag', user);
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('https://api.example.com/api/v1/feature-flags/evaluate/my-flag?user_id=user-123');
+    expect(init.method).toBe('GET');
+    expect(init.headers).toEqual({ 'X-API-Key': 'test-api-key', 'Content-Type': 'application/json' });
   });
 
-  it('returns disabled flag evaluation when flag is disabled', async () => {
-    mockFetch(disabledFlag);
+  it('returns an enabled evaluation with the full structure', async () => {
+    mockFetch(flagOn);
+    const client = new ServerClient(baseConfig);
+    await expect(client.evaluateFeatureFlag('my-flag', user)).resolves.toEqual({
+      flagKey: 'my-flag',
+      variant: 'on',
+      isEnabled: true,
+      config: null,
+      loading: false,
+      error: null,
+    });
+  });
+
+  it('uses config.variant as the variant when present', async () => {
+    mockFetch(flagWithVariant);
+    const client = new ServerClient(baseConfig);
+    const result = await client.evaluateFeatureFlag('my-flag', user);
+    expect(result.variant).toBe('treatment');
+    expect(result.config).toEqual({ variant: 'treatment' });
+  });
+
+  it('returns a disabled evaluation when the flag is disabled', async () => {
+    mockFetch(flagOff);
     const client = new ServerClient(baseConfig);
     const result = await client.evaluateFeatureFlag('disabled-flag', user);
     expect(result.flagKey).toBe('disabled-flag');
     expect(result.isEnabled).toBe(false);
     expect(result.variant).toBeNull();
+    expect(result.error).toBeNull();
   });
 
-  it('sends X-API-Key header in request', async () => {
-    const fetchMock = mockFetch(enabledFlag);
-    const client = new ServerClient(baseConfig);
-    await client.evaluateFeatureFlag('my-flag', user);
-    const headers = fetchMock.mock.calls[0][1].headers;
-    expect(headers['X-API-Key']).toBe('test-api-key');
-  });
-
-  it('sends X-User-ID header in request', async () => {
-    const fetchMock = mockFetch(enabledFlag);
-    const client = new ServerClient(baseConfig);
-    await client.evaluateFeatureFlag('my-flag', user);
-    const headers = fetchMock.mock.calls[0][1].headers;
-    expect(headers['X-User-ID']).toBe('user-123');
-  });
-
-  it('returns error evaluation on non-2xx response', async () => {
+  it('returns an error evaluation (does not throw) on a non-2xx response', async () => {
     mockFetch({}, 500);
     const client = new ServerClient(baseConfig);
     const result = await client.evaluateFeatureFlag('my-flag', user);
-    expect(result.isEnabled).toBe(false);
-    expect(result.variant).toBeNull();
+    expect(result).toMatchObject({
+      flagKey: 'my-flag',
+      variant: null,
+      isEnabled: false,
+      config: null,
+      loading: false,
+    });
     expect(result.error).toBeInstanceOf(Error);
+    expect(result.error?.message).toBe('API error: 500');
   });
 
-  it('returns error evaluation on network failure', async () => {
+  it('returns an error evaluation (does not throw) on network failure', async () => {
     global.fetch = jest.fn().mockRejectedValue(new Error('Network error'));
     const client = new ServerClient(baseConfig);
     const result = await client.evaluateFeatureFlag('my-flag', user);
     expect(result.isEnabled).toBe(false);
     expect(result.variant).toBeNull();
+    expect(result.error?.message).toBe('Network error');
+  });
+
+  it('wraps non-Error rejections in an Error', async () => {
+    global.fetch = jest.fn().mockRejectedValue('boom');
+    const client = new ServerClient(baseConfig);
+    const result = await client.evaluateFeatureFlag('my-flag', user);
     expect(result.error).toBeInstanceOf(Error);
+    expect(result.error?.message).toBe('boom');
+  });
+
+  it('caches successful evaluations (fetch once for repeated calls)', async () => {
+    const fetchMock = mockFetch(flagOn);
+    const client = new ServerClient(baseConfig);
+    await client.evaluateFeatureFlag('my-flag', user);
+    await client.evaluateFeatureFlag('my-flag', user);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not cache failures — a later call re-fetches and succeeds', async () => {
+    const fetchMock = mockFetchSequence({ body: {}, status: 500 }, { body: flagOn });
+    const client = new ServerClient(baseConfig);
+
+    const first = await client.evaluateFeatureFlag('my-flag', user);
+    const second = await client.evaluateFeatureFlag('my-flag', user);
+
+    expect(first.error).toBeInstanceOf(Error);
+    expect(second.error).toBeNull();
+    expect(second.isEnabled).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('re-fetches after the cache TTL has expired', async () => {
+    const now = jest.spyOn(Date, 'now').mockReturnValue(1_000_000);
+    const fetchMock = mockFetch(flagOn);
+    const client = new ServerClient({ ...baseConfig, cacheTtlMs: 1_000 });
+
+    await client.evaluateFeatureFlag('my-flag', user);
+    now.mockReturnValue(1_001_001);
+    await client.evaluateFeatureFlag('my-flag', user);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});
+
+// ─── assignExperiment ─────────────────────────────────────────────────────────
+
+describe('ServerClient.assignExperiment', () => {
+  it('POSTs {experiment_key, user_id, context} to /api/v1/tracking/assign', async () => {
+    const fetchMock = mockFetch(assignment);
+    const client = new ServerClient(baseConfig);
+    await client.assignExperiment('hero', user);
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('https://api.example.com/api/v1/tracking/assign');
+    expect(init.method).toBe('POST');
+    expect(init.headers).toEqual({ 'X-API-Key': 'test-api-key', 'Content-Type': 'application/json' });
+    expect(JSON.parse(init.body)).toEqual({
+      experiment_key: 'hero',
+      user_id: 'user-123',
+      context: { country: 'DE' },
+    });
+  });
+
+  it('returns the mapped assignment on success', async () => {
+    mockFetch(assignment);
+    const client = new ServerClient(baseConfig);
+    await expect(client.assignExperiment('hero', user)).resolves.toEqual({
+      experimentKey: 'hero',
+      variantKey: 'video_hero',
+      variantName: 'video_hero',
+      variantId: 'var-9',
+      isControl: false,
+      configuration: { media: 'video' },
+      loading: false,
+      error: null,
+    });
+  });
+
+  it('returns the control defaults with an error (does not throw) on 404', async () => {
+    mockFetch({ detail: 'not found' }, 404);
+    const client = new ServerClient(baseConfig);
+    const result = await client.assignExperiment('missing', user);
+    expect(result).toMatchObject({ experimentKey: 'missing', ...controlDefaults });
+    expect(result.error?.message).toBe('API error: 404');
+  });
+
+  it('returns the control defaults with an error (does not throw) on network failure', async () => {
+    global.fetch = jest.fn().mockRejectedValue(new Error('Network error'));
+    const client = new ServerClient(baseConfig);
+    const result = await client.assignExperiment('hero', user);
+    expect(result).toMatchObject({ experimentKey: 'hero', ...controlDefaults });
+    expect(result.error?.message).toBe('Network error');
+  });
+
+  it('caches successful assignments', async () => {
+    const fetchMock = mockFetch(assignment);
+    const client = new ServerClient(baseConfig);
+    await client.assignExperiment('hero', user);
+    await client.assignExperiment('hero', user);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not cache failed assignments', async () => {
+    const fetchMock = mockFetchSequence({ body: {}, status: 404 }, { body: assignment });
+    const client = new ServerClient(baseConfig);
+    await client.assignExperiment('hero', user);
+    const second = await client.assignExperiment('hero', user);
+    expect(second.variantKey).toBe('video_hero');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -129,81 +275,55 @@ describe('ServerClient.evaluateFeatureFlag', () => {
 
 describe('ServerClient.getAll', () => {
   it('returns empty object for empty flagKeys array', async () => {
+    const fetchMock = mockFetch(flagOn);
     const client = new ServerClient(baseConfig);
-    const result = await client.getAll([], user);
-    expect(result).toEqual({});
+    await expect(client.getAll([], user)).resolves.toEqual({});
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('evaluates multiple flags and returns map keyed by flagKey', async () => {
-    const fetchMock = jest.fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: () => Promise.resolve(enabledFlag),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: () => Promise.resolve(disabledFlag),
-      });
-    global.fetch = fetchMock;
-
+    mockFetchSequence({ body: flagOn }, { body: flagOff });
     const client = new ServerClient(baseConfig);
     const result = await client.getAll(['my-flag', 'disabled-flag'], user);
 
-    expect(result).toHaveProperty('my-flag');
-    expect(result).toHaveProperty('disabled-flag');
+    expect(Object.keys(result)).toEqual(['my-flag', 'disabled-flag']);
     expect(result['my-flag'].isEnabled).toBe(true);
     expect(result['disabled-flag'].isEnabled).toBe(false);
   });
 
   it('evaluates flags in parallel (calls fetch for each key)', async () => {
-    const fetchMock = jest.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: () => Promise.resolve(enabledFlag),
-    });
-    global.fetch = fetchMock;
-
+    const fetchMock = mockFetch(flagOn);
     const client = new ServerClient(baseConfig);
     await client.getAll(['flag-a', 'flag-b', 'flag-c'], user);
-
     expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock.mock.calls.map(c => c[0])).toEqual([
+      'https://api.example.com/api/v1/feature-flags/evaluate/flag-a?user_id=user-123',
+      'https://api.example.com/api/v1/feature-flags/evaluate/flag-b?user_id=user-123',
+      'https://api.example.com/api/v1/feature-flags/evaluate/flag-c?user_id=user-123',
+    ]);
   });
 
   it('returns all keys even when some fail', async () => {
-    const fetchMock = jest.fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: () => Promise.resolve(enabledFlag),
-      })
-      .mockRejectedValueOnce(new Error('Network error'));
-    global.fetch = fetchMock;
-
+    mockFetchSequence({ body: flagOn }, new Error('Network error'));
     const client = new ServerClient(baseConfig);
     const result = await client.getAll(['my-flag', 'failing-flag'], user);
 
-    expect(result).toHaveProperty('my-flag');
-    expect(result).toHaveProperty('failing-flag');
     expect(result['my-flag'].isEnabled).toBe(true);
     expect(result['failing-flag'].isEnabled).toBe(false);
     expect(result['failing-flag'].error).toBeInstanceOf(Error);
   });
 });
 
-// ─── No browser APIs ─────────────────────────────────────────────────────────
+// ─── No browser APIs / cache isolation ───────────────────────────────────────
 
 describe('ServerClient — no browser-specific API usage', () => {
   it('does not reference document', async () => {
-    // Temporarily make document undefined to simulate Node environment
     const originalDocument = global.document;
     // @ts-expect-error intentionally removing document
     delete global.document;
 
-    mockFetch(enabledFlag);
+    mockFetch(flagOn);
     const client = new ServerClient(baseConfig);
-    // Should not throw even when document is unavailable
     const result = await client.evaluateFeatureFlag('my-flag', user);
     expect(result.flagKey).toBe('my-flag');
 
@@ -211,34 +331,33 @@ describe('ServerClient — no browser-specific API usage', () => {
   });
 
   it('does not reference window.localStorage', async () => {
-    mockFetch(enabledFlag);
+    mockFetch(flagOn);
     const client = new ServerClient(baseConfig);
     const result = await client.evaluateFeatureFlag('my-flag', user);
-    // If ServerClient tried to use localStorage it would have thrown
     expect(result).toBeDefined();
   });
 
   it('has separate per-instance cache (not shared between instances)', async () => {
-    const fetchMock = jest.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: () => Promise.resolve(enabledFlag),
-    });
-    global.fetch = fetchMock;
-
+    const fetchMock = mockFetch(flagOn);
     const client1 = new ServerClient(baseConfig);
     const client2 = new ServerClient(baseConfig);
 
     await client1.evaluateFeatureFlag('my-flag', user);
     await client2.evaluateFeatureFlag('my-flag', user);
 
-    // Each instance has its own cache, so both should have made a fetch call
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it('handles timeout configuration', async () => {
-    expect(
-      () => new ServerClient({ ...baseConfig, timeoutMs: 1000 })
-    ).not.toThrow();
+  it('clearCache forces a fresh fetch', async () => {
+    const fetchMock = mockFetch(flagOn);
+    const client = new ServerClient(baseConfig);
+    await client.evaluateFeatureFlag('my-flag', user);
+    client.clearCache();
+    await client.evaluateFeatureFlag('my-flag', user);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('handles timeout configuration', () => {
+    expect(() => new ServerClient({ ...baseConfig, timeoutMs: 1000 })).not.toThrow();
   });
 });

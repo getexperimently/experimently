@@ -31,6 +31,7 @@ from backend.app.core.bandit_scheduler import BanditScheduler
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_variant(variant_id: str, name: str = None):
     """Create a mock Variant with a UUID id."""
     v = MagicMock()
@@ -70,6 +71,7 @@ def _make_scheduler(db=None):
 # ===========================================================================
 # TestBanditScheduler — scheduler logic with mocked DB
 # ===========================================================================
+
 
 class TestBanditScheduler:
     """Tests for BanditScheduler using mocked DB and service dependencies."""
@@ -134,7 +136,9 @@ class TestBanditScheduler:
             scheduler, "get_variant_stats_from_counters", return_value=mock_stats
         ):
             with patch.object(
-                BanditService, "compute_weights", return_value={str(v.id): 0.5 for v in mock_exp.variants}
+                BanditService,
+                "compute_weights",
+                return_value={str(v.id): 0.5 for v in mock_exp.variants},
             ) as mock_compute:
                 db.query.return_value.filter.return_value.first.return_value = None
                 scheduler.update_experiment(mock_exp)
@@ -165,7 +169,9 @@ class TestBanditScheduler:
         }
         weights = {vid: 0.7, vid2: 0.3}
 
-        with patch.object(scheduler, "get_variant_stats_from_counters", return_value=mock_stats):
+        with patch.object(
+            scheduler, "get_variant_stats_from_counters", return_value=mock_stats
+        ):
             with patch.object(BanditService, "compute_weights", return_value=weights):
                 result = scheduler.update_experiment(mock_exp)
 
@@ -193,8 +199,12 @@ class TestBanditScheduler:
             vid2: VariantStats(variant_id=vid2),
         }
 
-        with patch.object(scheduler, "get_variant_stats_from_counters", return_value=mock_stats):
-            with patch.object(BanditService, "compute_weights", return_value={vid: 0.5, vid2: 0.5}):
+        with patch.object(
+            scheduler, "get_variant_stats_from_counters", return_value=mock_stats
+        ):
+            with patch.object(
+                BanditService, "compute_weights", return_value={vid: 0.5, vid2: 0.5}
+            ):
                 scheduler.update_experiment(mock_exp)
 
         # db.add must have been called with a BanditState instance
@@ -224,8 +234,12 @@ class TestBanditScheduler:
             vid2: VariantStats(variant_id=vid2, successes=10, pulls=50),
         }
 
-        with patch.object(scheduler, "get_variant_stats_from_counters", return_value=mock_stats):
-            with patch.object(BanditService, "compute_weights", return_value={vid: 0.65, vid2: 0.35}):
+        with patch.object(
+            scheduler, "get_variant_stats_from_counters", return_value=mock_stats
+        ):
+            with patch.object(
+                BanditService, "compute_weights", return_value={vid: 0.65, vid2: 0.35}
+            ):
                 scheduler.update_experiment(mock_exp)
 
         # db.add should NOT be called (existing record updated in place)
@@ -265,7 +279,9 @@ class TestBanditScheduler:
             vid2: VariantStats(variant_id=vid2),  # 0 pulls
         }
 
-        with patch.object(scheduler, "get_variant_stats_from_counters", return_value=mock_stats):
+        with patch.object(
+            scheduler, "get_variant_stats_from_counters", return_value=mock_stats
+        ):
             result = scheduler.update_experiment(mock_exp)
 
         assert result is True
@@ -275,20 +291,45 @@ class TestBanditScheduler:
     # 9. get_variant_stats_from_counters — mocked DynamoDB fetch
     # -----------------------------------------------------------------------
     def test_get_variant_stats_from_counters_uses_dynamodb(self):
-        """get_variant_stats_from_counters calls DynamoDB counter service."""
+        """get_variant_stats_from_counters reads DynamoDB via get_experiment_counters."""
+        from backend.app.schemas.realtime_counters import (
+            ExperimentCounters,
+            VariantCounters,
+        )
+
         db = MagicMock()
         scheduler = BanditScheduler(db=db)
 
         exp_id = uuid.uuid4()
         vid1, vid2 = str(uuid.uuid4()), str(uuid.uuid4())
 
-        mock_counters = {
-            vid1: {"assignments": 100, "conversions": 40},
-            vid2: {"assignments": 100, "conversions": 20},
-        }
+        counters = ExperimentCounters(
+            experiment_id=str(exp_id),
+            total_assignments=200,
+            total_events=0,
+            total_conversions=60,
+            variants=[
+                VariantCounters(
+                    variant_id=vid1,
+                    variant_name=vid1,
+                    is_control=True,
+                    assignments=100,
+                    conversions=40,
+                    conversion_rate=0.4,
+                ),
+                VariantCounters(
+                    variant_id=vid2,
+                    variant_name=vid2,
+                    is_control=False,
+                    assignments=100,
+                    conversions=20,
+                    conversion_rate=0.2,
+                ),
+            ],
+        )
 
         mock_counter_service = MagicMock()
-        mock_counter_service.get_counters.return_value = mock_counters
+        mock_counter_service.get_experiment_counters.return_value = counters
 
         # DynamoDBCounterService is imported inside the function body, so we
         # patch the class at its definition site (the service module).
@@ -296,20 +337,20 @@ class TestBanditScheduler:
             "backend.app.services.dynamodb_counter_service.DynamoDBCounterService",
             return_value=mock_counter_service,
         ):
-            # Also patch the import reference the scheduler uses at call time
-            import backend.app.services.dynamodb_counter_service as _dcs
-            original_cls = _dcs.DynamoDBCounterService
-            _dcs.DynamoDBCounterService = lambda: mock_counter_service
-            try:
-                stats = scheduler.get_variant_stats_from_counters(exp_id, [vid1, vid2])
-            finally:
-                _dcs.DynamoDBCounterService = original_cls
+            stats = scheduler.get_variant_stats_from_counters(exp_id, [vid1, vid2])
 
-        assert vid1 in stats
-        assert vid2 in stats
-        # conversions → successes
+        mock_counter_service.get_experiment_counters.assert_called_once_with(
+            str(exp_id)
+        )
+        assert set(stats) == {vid1, vid2}
+        # assignments → pulls, conversions → successes, failures = pulls - successes
+        assert stats[vid1].pulls == 100
         assert stats[vid1].successes == 40
+        assert stats[vid1].failures == 60
         assert stats[vid2].successes == 20
+        assert stats[vid2].failures == 80
+        # DynamoDB had data, so PostgreSQL was never consulted
+        db.query.assert_not_called()
 
     # -----------------------------------------------------------------------
     # 10. estimate_regret_reduction > 0 when best variant dominates
@@ -335,6 +376,7 @@ class TestBanditScheduler:
 # TestBanditSchedulerIntegration — pure logic, no DB
 # ===========================================================================
 
+
 class TestBanditSchedulerIntegration:
     """Integration tests that exercise the pure MAB algorithm logic."""
 
@@ -345,7 +387,12 @@ class TestBanditSchedulerIntegration:
         """Thompson Sampling allocates more traffic to the higher-converting variant."""
         variant_data = {
             "ctrl": {"successes": 5, "failures": 95, "pulls": 100, "total_reward": 5.0},
-            "trtm": {"successes": 50, "failures": 50, "pulls": 100, "total_reward": 50.0},
+            "trtm": {
+                "successes": 50,
+                "failures": 50,
+                "pulls": 100,
+                "total_reward": 50.0,
+            },
         }
         weights = BanditService.compute_weights("thompson_sampling", variant_data)
         assert weights["trtm"] > weights["ctrl"]
@@ -356,8 +403,18 @@ class TestBanditSchedulerIntegration:
     def test_ucb1_weights_shift_toward_better_variant(self):
         """UCB1 allocates more weight to the variant with higher observed reward."""
         variant_data = {
-            "ctrl": {"successes": 10, "failures": 90, "pulls": 100, "total_reward": 10.0},
-            "trtm": {"successes": 80, "failures": 20, "pulls": 100, "total_reward": 80.0},
+            "ctrl": {
+                "successes": 10,
+                "failures": 90,
+                "pulls": 100,
+                "total_reward": 10.0,
+            },
+            "trtm": {
+                "successes": 80,
+                "failures": 20,
+                "pulls": 100,
+                "total_reward": 80.0,
+            },
         }
         weights = BanditService.compute_weights("ucb1", variant_data)
         assert weights["trtm"] > weights["ctrl"]
@@ -430,9 +487,9 @@ class TestBanditSchedulerIntegration:
         # Thompson Sampling and UCB1 produce near-equal weights with no data
         for algo in ("thompson_sampling", "ucb1"):
             weights = BanditService.compute_weights(algo, variant_data)
-            assert abs(weights["a"] - weights["b"]) < 0.3, (
-                f"{algo} weights not near equal: {weights}"
-            )
+            assert (
+                abs(weights["a"] - weights["b"]) < 0.3
+            ), f"{algo} weights not near equal: {weights}"
 
         # EpsilonGreedy still sums to 1.0 even if not equal
         eg_weights = BanditService.compute_weights("epsilon_greedy", variant_data)
@@ -443,10 +500,14 @@ class TestBanditSchedulerIntegration:
     # -----------------------------------------------------------------------
     def test_single_variant_gets_full_weight(self):
         """With a single variant every algorithm assigns weight=1.0."""
-        variant_data = {"only": {"successes": 5, "failures": 5, "pulls": 10, "total_reward": 5.0}}
+        variant_data = {
+            "only": {"successes": 5, "failures": 5, "pulls": 10, "total_reward": 5.0}
+        }
         for algo in ("thompson_sampling", "ucb1", "epsilon_greedy"):
             weights = BanditService.compute_weights(algo, variant_data)
-            assert weights["only"] == pytest.approx(1.0), f"{algo}: expected 1.0, got {weights}"
+            assert weights["only"] == pytest.approx(
+                1.0
+            ), f"{algo}: expected 1.0, got {weights}"
 
     # -----------------------------------------------------------------------
     # 18. get_recommendation strings
@@ -477,3 +538,403 @@ class TestBanditSchedulerIntegration:
         names = {"v1": "A", "v2": "B", "v3": "C"}
         rec = scheduler.get_recommendation(weights, names)
         assert rec == "EXPLORING"
+
+
+# ===========================================================================
+# TestBanditSchedulerStatsFallback — DynamoDB → PostgreSQL → BanditState → priors
+# ===========================================================================
+
+
+def _mock_metric(event_name: str, is_primary: bool):
+    metric = MagicMock()
+    metric.event_name = event_name
+    metric.is_primary = is_primary
+    return metric
+
+
+class TestBanditSchedulerStatsFallback:
+    """The stats chain used by get_variant_stats_from_counters."""
+
+    def _scheduler_with_experiment(self, metrics=None, legacy_metrics=None):
+        db = MagicMock()
+        scheduler = BanditScheduler(db=db)
+        exp = _make_experiment(str(uuid.uuid4()))
+        exp.metric_definitions = metrics if metrics is not None else []
+        exp.metrics = legacy_metrics
+        return db, scheduler, exp
+
+    def test_falls_back_to_postgres_when_dynamodb_raises(self):
+        """DynamoDB unavailable → pulls/successes come from PostgreSQL counts."""
+        db, scheduler, exp = self._scheduler_with_experiment(
+            metrics=[_mock_metric("purchase", True)]
+        )
+        vid1, vid2 = (str(v.id) for v in exp.variants)
+
+        with patch.object(
+            scheduler, "_stats_from_dynamodb", return_value=None
+        ), patch.object(
+            scheduler,
+            "_count_assignments_by_variant",
+            return_value={vid1: 100, vid2: 100},
+        ) as count_pulls, patch.object(
+            scheduler,
+            "_count_conversions_by_variant",
+            return_value={vid1: 40, vid2: 5},
+        ) as count_conv:
+            stats = scheduler.get_variant_stats_from_counters(
+                exp.id, [vid1, vid2], experiment=exp
+            )
+
+        count_pulls.assert_called_once_with(exp.id)
+        count_conv.assert_called_once_with(exp.id, "purchase")
+        assert stats[vid1].pulls == 100
+        assert stats[vid1].successes == 40
+        assert stats[vid1].failures == 60
+        assert stats[vid1].total_reward == 40.0
+        assert stats[vid2].successes == 5
+        assert stats[vid2].failures == 95
+
+    def test_falls_back_to_postgres_when_dynamodb_has_no_pulls(self):
+        """DynamoDB reachable but empty for this experiment → PostgreSQL."""
+        from backend.app.schemas.realtime_counters import ExperimentCounters
+
+        db, scheduler, exp = self._scheduler_with_experiment(
+            metrics=[_mock_metric("purchase", True)]
+        )
+        vid1, vid2 = (str(v.id) for v in exp.variants)
+
+        empty = ExperimentCounters(
+            experiment_id=str(exp.id),
+            total_assignments=0,
+            total_events=0,
+            total_conversions=0,
+            variants=[],
+        )
+        mock_counter_service = MagicMock()
+        mock_counter_service.get_experiment_counters.return_value = empty
+
+        with patch(
+            "backend.app.services.dynamodb_counter_service.DynamoDBCounterService",
+            return_value=mock_counter_service,
+        ), patch.object(
+            scheduler,
+            "_count_assignments_by_variant",
+            return_value={vid1: 10, vid2: 10},
+        ), patch.object(
+            scheduler, "_count_conversions_by_variant", return_value={vid1: 3}
+        ):
+            stats = scheduler.get_variant_stats_from_counters(
+                exp.id, [vid1, vid2], experiment=exp
+            )
+
+        assert stats[vid1].pulls == 10
+        assert stats[vid1].successes == 3
+        assert stats[vid2].successes == 0
+
+    def test_successes_are_capped_at_pulls(self):
+        """A variant can never convert more users than it was assigned."""
+        db, scheduler, exp = self._scheduler_with_experiment(
+            metrics=[_mock_metric("purchase", True)]
+        )
+        vid1, vid2 = (str(v.id) for v in exp.variants)
+
+        with patch.object(
+            scheduler, "_stats_from_dynamodb", return_value=None
+        ), patch.object(
+            scheduler, "_count_assignments_by_variant", return_value={vid1: 5, vid2: 5}
+        ), patch.object(
+            scheduler, "_count_conversions_by_variant", return_value={vid1: 9, vid2: 0}
+        ):
+            stats = scheduler.get_variant_stats_from_counters(
+                exp.id, [vid1, vid2], experiment=exp
+            )
+
+        assert stats[vid1].successes == 5
+        assert stats[vid1].failures == 0
+
+    def test_primary_metric_resolution_order(self):
+        """is_primary metric → first metric → legacy JSON → None."""
+        exp = _make_experiment(str(uuid.uuid4()))
+
+        exp.metric_definitions = [
+            _mock_metric("secondary", False),
+            _mock_metric("primary", True),
+        ]
+        exp.metrics = {"primary_metric": "legacy"}
+        assert BanditScheduler._primary_event_name(exp) == "primary"
+
+        exp.metric_definitions = [
+            _mock_metric("first", False),
+            _mock_metric("second", False),
+        ]
+        assert BanditScheduler._primary_event_name(exp) == "first"
+
+        exp.metric_definitions = []
+        assert BanditScheduler._primary_event_name(exp) == "legacy"
+
+        exp.metrics = None
+        assert BanditScheduler._primary_event_name(exp) is None
+        assert BanditScheduler._primary_event_name(None) is None
+
+    def test_no_metric_counts_non_exposure_events(self):
+        """Without a metric the conversion query uses event_name=None (any non-exposure event)."""
+        db, scheduler, exp = self._scheduler_with_experiment(
+            metrics=[], legacy_metrics=None
+        )
+        vid1, vid2 = (str(v.id) for v in exp.variants)
+
+        with patch.object(
+            scheduler, "_stats_from_dynamodb", return_value=None
+        ), patch.object(
+            scheduler, "_count_assignments_by_variant", return_value={vid1: 4, vid2: 4}
+        ), patch.object(
+            scheduler, "_count_conversions_by_variant", return_value={vid2: 2}
+        ) as count_conv:
+            stats = scheduler.get_variant_stats_from_counters(
+                exp.id, [vid1, vid2], experiment=exp
+            )
+
+        count_conv.assert_called_once_with(exp.id, None)
+        assert stats[vid2].successes == 2
+
+    def test_old_signature_loads_experiment_from_db(self):
+        """Calling without the experiment kwarg still works (experiment loaded by id)."""
+        db, scheduler, exp = self._scheduler_with_experiment(
+            metrics=[_mock_metric("signup", True)]
+        )
+        vid1, vid2 = (str(v.id) for v in exp.variants)
+        db.query.return_value.filter.return_value.first.return_value = exp
+
+        with patch.object(
+            scheduler, "_stats_from_dynamodb", return_value=None
+        ), patch.object(
+            scheduler,
+            "_count_assignments_by_variant",
+            return_value={vid1: 20, vid2: 20},
+        ), patch.object(
+            scheduler, "_count_conversions_by_variant", return_value={vid1: 7, vid2: 1}
+        ) as count_conv:
+            stats = scheduler.get_variant_stats_from_counters(exp.id, [vid1, vid2])
+
+        count_conv.assert_called_once_with(exp.id, "signup")
+        assert stats[vid1].successes == 7
+
+    def test_falls_back_to_bandit_state_when_postgres_is_empty(self):
+        """No assignments in PostgreSQL → previously persisted BanditState stats."""
+        from backend.app.models.bandit_state import BanditState
+
+        db, scheduler, exp = self._scheduler_with_experiment(
+            metrics=[_mock_metric("purchase", True)]
+        )
+        vid1, vid2 = (str(v.id) for v in exp.variants)
+
+        state = MagicMock(spec=BanditState)
+        state.variant_weights = {
+            vid1: {"weight": 0.7, "successes": 30, "failures": 20, "pulls": 50},
+            vid2: {"weight": 0.3, "successes": 10, "failures": 40, "pulls": 50},
+        }
+        db.query.return_value.filter.return_value.first.return_value = state
+
+        with patch.object(
+            scheduler, "_stats_from_dynamodb", return_value=None
+        ), patch.object(
+            scheduler, "_count_assignments_by_variant", return_value={}
+        ), patch.object(
+            scheduler, "_count_conversions_by_variant", return_value={}
+        ):
+            stats = scheduler.get_variant_stats_from_counters(
+                exp.id, [vid1, vid2], experiment=exp
+            )
+
+        assert stats[vid1].pulls == 50
+        assert stats[vid1].successes == 30
+        assert stats[vid2].failures == 40
+
+    def test_falls_back_to_bandit_state_when_postgres_raises(self):
+        """A failing PostgreSQL query is logged and the BanditState is used."""
+        from backend.app.models.bandit_state import BanditState
+
+        db, scheduler, exp = self._scheduler_with_experiment(
+            metrics=[_mock_metric("purchase", True)]
+        )
+        vid1, vid2 = (str(v.id) for v in exp.variants)
+
+        state = MagicMock(spec=BanditState)
+        state.variant_weights = {
+            vid1: {"weight": 1.0, "successes": 3, "failures": 1, "pulls": 4}
+        }
+        db.query.return_value.filter.return_value.first.return_value = state
+
+        with patch.object(
+            scheduler, "_stats_from_dynamodb", return_value=None
+        ), patch.object(
+            scheduler,
+            "_count_assignments_by_variant",
+            side_effect=RuntimeError("db down"),
+        ):
+            stats = scheduler.get_variant_stats_from_counters(
+                exp.id, [vid1, vid2], experiment=exp
+            )
+
+        db.rollback.assert_called()
+        assert stats[vid1].pulls == 4
+        assert stats[vid2].pulls == 0
+
+    def test_zero_priors_when_no_source_has_data(self):
+        """Nothing anywhere → zero-count VariantStats for every variant."""
+        db, scheduler, exp = self._scheduler_with_experiment(metrics=[])
+        vid1, vid2 = (str(v.id) for v in exp.variants)
+        db.query.return_value.filter.return_value.first.return_value = None
+
+        with patch.object(
+            scheduler, "_stats_from_dynamodb", return_value=None
+        ), patch.object(
+            scheduler, "_count_assignments_by_variant", return_value={}
+        ), patch.object(
+            scheduler, "_count_conversions_by_variant", return_value={}
+        ):
+            stats = scheduler.get_variant_stats_from_counters(
+                exp.id, [vid1, vid2], experiment=exp
+            )
+
+        assert set(stats) == {vid1, vid2}
+        assert all(vs.pulls == 0 and vs.successes == 0 for vs in stats.values())
+
+    def test_update_experiment_passes_experiment_to_stats(self):
+        """update_experiment hands the experiment over so no extra query is needed."""
+        db = MagicMock()
+        exp = _make_experiment(str(uuid.uuid4()))
+        db.query.return_value.filter.return_value.first.return_value = None
+        scheduler = BanditScheduler(db=db)
+
+        stats = {str(v.id): VariantStats(variant_id=str(v.id)) for v in exp.variants}
+        with patch.object(
+            scheduler, "get_variant_stats_from_counters", return_value=stats
+        ) as get_stats:
+            scheduler.update_experiment(exp)
+
+        get_stats.assert_called_once()
+        assert get_stats.call_args.kwargs["experiment"] is exp
+
+
+# ===========================================================================
+# TestBanditSchedulerRunner — asyncio background loop
+# ===========================================================================
+
+
+class TestBanditSchedulerRunner:
+    """Lifecycle of the in-app BanditSchedulerRunner."""
+
+    RESULT = {"updated": 1, "skipped": 0, "errors": 0}
+
+    def _runner(self):
+        from backend.app.core.bandit_scheduler import BanditSchedulerRunner
+
+        runner = BanditSchedulerRunner(interval_minutes=1, run_in_tests=True)
+        runner.interval_seconds = 0.01
+        return runner
+
+    @pytest.mark.asyncio
+    async def test_start_and_stop(self):
+        import asyncio
+
+        runner = self._runner()
+        runner._run_sync = MagicMock(return_value=self.RESULT)
+
+        await runner.start()
+        assert runner.is_running is True
+        assert runner.task is not None
+
+        await asyncio.sleep(0.1)
+        await runner.stop()
+
+        assert runner.is_running is False
+        assert runner.task is None
+        assert runner.run_count >= 1
+        assert runner.last_result == self.RESULT
+
+    @pytest.mark.asyncio
+    async def test_double_start_creates_single_task(self):
+        runner = self._runner()
+        runner._run_sync = MagicMock(return_value=self.RESULT)
+
+        await runner.start()
+        first_task = runner.task
+        await runner.start()
+        assert runner.task is first_task
+
+        await runner.stop()
+
+    @pytest.mark.asyncio
+    async def test_run_exception_does_not_kill_loop(self):
+        import asyncio
+
+        runner = self._runner()
+        calls = {"n": 0}
+
+        def flaky_run():
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise RuntimeError("boom")
+            return self.RESULT
+
+        runner._run_sync = flaky_run
+
+        await runner.start()
+        await asyncio.sleep(0.15)
+
+        assert runner.is_running is True
+        assert runner.task is not None and not runner.task.done()
+        assert runner.error_count == 1
+        assert runner.last_error == "boom"
+        assert runner.run_count >= 1
+        assert runner.last_result == self.RESULT
+
+        await runner.stop()
+
+    @pytest.mark.asyncio
+    async def test_start_is_skipped_in_test_environment(self, monkeypatch):
+        from backend.app.core.bandit_scheduler import BanditSchedulerRunner
+
+        monkeypatch.setenv("APP_ENV", "test")
+        runner = BanditSchedulerRunner(interval_minutes=1)
+
+        await runner.start()
+
+        assert runner.is_running is False
+        assert runner.task is None
+        # stop() on a never-started runner is a no-op
+        await runner.stop()
+
+    def test_interval_defaults_from_settings(self):
+        from backend.app.core import bandit_scheduler as module
+
+        with patch.object(module.settings, "BANDIT_UPDATE_INTERVAL_MINUTES", 7):
+            runner = module.BanditSchedulerRunner(run_in_tests=True)
+
+        assert runner.interval_minutes == 7
+        assert runner.interval_seconds == 7 * 60
+
+    def test_run_sync_uses_fresh_session_and_closes_it(self):
+        from backend.app.core.bandit_scheduler import BanditSchedulerRunner
+
+        session = MagicMock()
+        with patch(
+            "backend.app.db.session.SessionLocal", return_value=session
+        ), patch.object(
+            BanditScheduler, "run_once", return_value=self.RESULT
+        ) as run_once:
+            result = BanditSchedulerRunner._run_sync()
+
+        assert result == self.RESULT
+        run_once.assert_called_once()
+        session.close.assert_called_once()
+
+    def test_module_level_instance_exists(self):
+        from backend.app.core.bandit_scheduler import (
+            BanditSchedulerRunner,
+            bandit_scheduler_runner,
+        )
+
+        assert isinstance(bandit_scheduler_runner, BanditSchedulerRunner)
+        assert bandit_scheduler_runner.is_running is False

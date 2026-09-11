@@ -85,6 +85,41 @@ def ensure_schema(db):
     db.commit()
 
 
+# Public ``experiment_key`` values used by the SDK-facing tracking API
+# (``POST /api/v1/tracking/assign`` etc.) to find the demo experiments.
+DEMO_EXPERIMENT_KEYS = {
+    "Homepage Hero Copy Test": "homepage_hero_copy",
+    "Checkout Button Color": "checkout_button_color",
+    "Recommendation Algorithm MAB": "recommendation_algorithm_mab",
+}
+
+
+def backfill_experiment_keys(db) -> int:
+    """Give demo experiments seeded before ``key`` existed their public key.
+
+    Returns the number of rows updated.  Idempotent: rows that already have a
+    key are left alone.
+    """
+    updated = 0
+    for name, key in DEMO_EXPERIMENT_KEYS.items():
+        rows = (
+            db.query(Experiment)
+            .filter(Experiment.name == name, Experiment.key.is_(None))
+            .all()
+        )
+        for row in rows:
+            taken = db.query(Experiment).filter(Experiment.key == key).first()
+            if taken is not None and taken.id != row.id:
+                print(f"    Key '{key}' already used by experiment {taken.id}; leaving {row.id} without a key.")
+                continue
+            row.key = key
+            updated += 1
+            print(f"    Backfilled key '{key}' on experiment '{name}' ({row.id}).")
+    if updated:
+        db.commit()
+    return updated
+
+
 def ensure_tables():
     """Create all tables if they don't already exist."""
     # Import all models to register them
@@ -94,6 +129,10 @@ def ensure_tables():
     import backend.app.models.notification  # noqa: F401
     import backend.app.models.audit_log  # noqa: F401
     import backend.app.models.api_key  # noqa: F401
+    # User/Experiment/FeatureFlag declare a "Report" relationship by name; the
+    # mapper cannot be configured until the class is imported.
+    import backend.app.models.report  # noqa: F401
+    import backend.app.models.bandit_state  # noqa: F401
 
     schema = get_schema_name()
     Base.metadata.schema = schema
@@ -187,6 +226,7 @@ def seed_homepage_hero_experiment(db, admin_user) -> Experiment:
 
     exp = Experiment(
         name=exp_name,
+        key=DEMO_EXPERIMENT_KEYS[exp_name],
         description="Testing new hero copy to improve signup conversion.",
         hypothesis="The new, value-focused copy will increase sign-ups by 10%+.",
         status=ExperimentStatus.COMPLETED,
@@ -337,6 +377,7 @@ def seed_checkout_button_experiment(db, admin_user) -> Experiment:
 
     exp = Experiment(
         name=exp_name,
+        key=DEMO_EXPERIMENT_KEYS[exp_name],
         description="Testing blue vs. green checkout button to improve conversions.",
         hypothesis="A green CTA button will increase checkout completions.",
         status=ExperimentStatus.ACTIVE,
@@ -479,6 +520,7 @@ def seed_recommendation_mab_experiment(db, admin_user) -> Experiment:
 
     exp = Experiment(
         name=exp_name,
+        key=DEMO_EXPERIMENT_KEYS[exp_name],
         description="Multi-armed bandit to find best recommendation algorithm.",
         hypothesis="Thompson Sampling will route traffic to best-performing algorithm.",
         status=ExperimentStatus.ACTIVE,
@@ -949,6 +991,7 @@ def main():
         exp1 = seed_homepage_hero_experiment(db, admin_user)
         exp2 = seed_checkout_button_experiment(db, admin_user)
         exp3 = seed_recommendation_mab_experiment(db, admin_user)
+        backfill_experiment_keys(db)
 
         print("\n[3/7] Feature Flags")
         flags = seed_feature_flags(db, admin_user)
