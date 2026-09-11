@@ -693,7 +693,9 @@ class TestFeatureFlagEndpoints:
             assert "items" in data
             assert data["total"] > 0
             assert len(data["items"]) > 0
-            assert data["items"][0]["key"] == test_feature_flag.key
+            # Other test modules leave flags in the shared database, so look the
+            # fixture's flag up by key instead of assuming it is listed first.
+            assert test_feature_flag.key in {item["key"] for item in data["items"]}
         finally:
             # Restore the original functions
             crud_feature_flag.get_multi = original_get_multi
@@ -773,7 +775,9 @@ class TestFeatureFlagEndpoints:
             assert "items" in data
             assert data["total"] > 0
             assert len(data["items"]) > 0
-            assert data["items"][0]["key"] == test_feature_flag.key
+            # Other test modules leave flags in the shared database, so look the
+            # fixture's flag up by key instead of assuming it is listed first.
+            assert test_feature_flag.key in {item["key"] for item in data["items"]}
         finally:
             # Restore the original functions
             crud_feature_flag.get_multi = original_get_multi
