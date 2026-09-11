@@ -5,8 +5,8 @@ Gem::Specification.new do |s|
   s.version     = ExperimentationPlatform::VERSION
   s.summary     = "Ruby SDK for Experimently A/B testing platform"
   s.description = "Native Ruby client for the Experimently experimentation platform. " \
-                  "Provides experiment assignment, feature flag evaluation, and event " \
-                  "tracking with local consistent hashing and transparent HTTP caching."
+                  "Provides server-decided experiment assignment, feature flag evaluation, and " \
+                  "event tracking with a thread-safe per-user TTL cache."
   s.authors     = ["Experimently Platform Team"]
   s.email       = ["sdk@experimently.io"]
   s.homepage    = "https://github.com/experimently/experimentation-platform"
@@ -15,7 +15,7 @@ Gem::Specification.new do |s|
   s.files            = Dir["lib/**/*.rb"] + ["README.md", "experimentation_platform.gemspec"]
   s.require_paths    = ["lib"]
 
-  s.required_ruby_version = ">= 2.7.0"
+  s.required_ruby_version = ">= 2.6.0"
 
   # No runtime dependencies — stdlib only
   # Uses: Digest (MD5), Net::HTTP, JSON, Mutex, Struct, Thread

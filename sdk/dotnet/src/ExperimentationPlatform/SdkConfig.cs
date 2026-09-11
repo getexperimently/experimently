@@ -5,19 +5,19 @@ namespace ExperimentationPlatform;
 /// </summary>
 public class SdkConfig
 {
-    /// <summary>The base URL of the Experimentation Platform API (e.g. "https://api.example.com").</summary>
+    /// <summary>The origin of the Experimentation Platform API (e.g. "https://api.example.com"); the SDK appends "/api/v1/...".</summary>
     public string BaseUrl { get; init; }
 
-    /// <summary>The API key used for authentication.</summary>
+    /// <summary>The API key, sent as the <c>X-API-Key</c> header on every request.</summary>
     public string ApiKey { get; init; }
 
-    /// <summary>How long to cache feature flag responses in seconds. Default: 300 (5 minutes).</summary>
+    /// <summary>How long a successful flag evaluation / experiment assignment is cached per user + key, in seconds. Default: 300 (5 minutes).</summary>
     public int CacheTtlSeconds { get; init; } = 300;
 
     /// <summary>HTTP request timeout in seconds. Default: 10.</summary>
     public int TimeoutSeconds { get; init; } = 10;
 
-    /// <summary>Maximum number of entries to hold in the in-memory cache. Default: 1000.</summary>
+    /// <summary>Maximum number of entries in each in-memory cache (evaluations, assignments). Default: 1000.</summary>
     public int MaxCacheSize { get; init; } = 1000;
 
     /// <summary>

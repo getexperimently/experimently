@@ -1,20 +1,41 @@
 {
   "name": "@experimentation-platform/edge-sdk",
-  "version": "0.1.0",
-  "description": "Edge-compatible SDK for Cloudflare Workers, Vercel Edge Functions, and Deno Deploy",
-  "main": "src/index.ts",
-  "types": "src/index.ts",
+  "version": "0.2.0",
+  "description": "Edge-compatible SDK for Cloudflare Workers, Vercel Edge Functions, and Deno Deploy (server-decided flags and assignments, zero runtime dependencies)",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "exports": {
-    ".": "./src/index.ts",
-    "./cloudflare": "./src/adapters/cloudflare.ts",
-    "./vercel": "./src/adapters/vercel.ts",
-    "./deno": "./src/adapters/deno.ts"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./cloudflare": {
+      "types": "./dist/adapters/cloudflare.d.ts",
+      "default": "./dist/adapters/cloudflare.js"
+    },
+    "./vercel": {
+      "types": "./dist/adapters/vercel.d.ts",
+      "default": "./dist/adapters/vercel.js"
+    },
+    "./deno": {
+      "types": "./dist/adapters/deno.d.ts",
+      "default": "./dist/adapters/deno.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
   },
   "scripts": {
+    "build": "tsc -p tsconfig.json && node -e \"require('fs').writeFileSync('dist/package.json', JSON.stringify({ type: 'module' }) + '\\n')\"",
     "test": "jest --testEnvironment node",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "smoke": "npm run build --silent && node examples/contract_smoke.mjs"
   },
   "dependencies": {},
   "devDependencies": {
@@ -41,18 +62,22 @@
       "**/__tests__/**/*.test.ts"
     ],
     "moduleNameMapper": {
-      "^../src/(.*)$": "<rootDir>/src/$1"
+      "^(\\.{1,2}/.*)\\.js$": "$1"
     },
-    "globals": {
-      "ts-jest": {
-        "tsconfig": {
-          "strict": true,
-          "esModuleInterop": true,
-          "target": "ES2020",
-          "lib": ["ES2020", "DOM"],
-          "moduleResolution": "node"
+    "transform": {
+      "^.+\\.ts$": [
+        "ts-jest",
+        {
+          "tsconfig": {
+            "strict": true,
+            "esModuleInterop": true,
+            "target": "ES2020",
+            "lib": ["ES2020", "DOM"],
+            "module": "commonjs",
+            "moduleResolution": "node"
+          }
         }
-      }
+      ]
     }
   }
 }

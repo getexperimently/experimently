@@ -2,9 +2,9 @@
 //
 // To run:
 //   cd sdk/dotnet/examples/BasicUsage
-//   dotnet run
+//   EXPERIMENTLY_API_URL=http://localhost:8000 EXPERIMENTLY_API_KEY=<key> dotnet run
 //
-// Set your actual API base URL and key via environment variables or replace the constants below.
+// Flags and experiments are decided by the server; the SDK caches the answers per user + key.
 
 using ExperimentationPlatform;
 using ExperimentationPlatform.Models;
@@ -12,82 +12,79 @@ using ExperimentationPlatform.Models;
 // -----------------------------------------------------------------
 // 1. Configure the SDK
 // -----------------------------------------------------------------
-const string BaseUrl = "https://your-api.example.com";  // override with EP_BASE_URL env var
-const string ApiKey  = "your-api-key-here";              // override with EP_API_KEY env var
-
-var baseUrl = Environment.GetEnvironmentVariable("EP_BASE_URL") ?? BaseUrl;
-var apiKey  = Environment.GetEnvironmentVariable("EP_API_KEY")  ?? ApiKey;
+var baseUrl = Environment.GetEnvironmentVariable("EXPERIMENTLY_API_URL") ?? "http://localhost:8000";
+var apiKey  = Environment.GetEnvironmentVariable("EXPERIMENTLY_API_KEY")  ?? "your-api-key-here";
 
 var config = new SdkConfig(baseUrl, apiKey)
 {
-    CacheTtlSeconds = 300,   // cache flags for 5 minutes
+    CacheTtlSeconds = 300,   // reuse a successful evaluation / assignment for 5 minutes
     TimeoutSeconds  = 10,    // HTTP timeout
-    MaxCacheSize    = 1000   // max in-memory cached flags
+    MaxCacheSize    = 1000   // max in-memory cached entries
 };
 
 using var client = new ExperimentationClient(config);
 
 // -----------------------------------------------------------------
-// 2. Evaluate a feature flag
+// 2. Evaluate a feature flag (GET /api/v1/feature-flags/evaluate/{key}?user_id=…)
 // -----------------------------------------------------------------
 Console.WriteLine("=== Feature Flag Evaluation ===");
 
 var userId = "user-42";
-var flagResult = await client.EvaluateFlagAsync(
-    flagKey: "new-checkout-ui",
-    userId: userId,
-    attributes: new Dictionary<string, object> { { "country", "US" }, { "plan", "pro" } },
-    defaultValue: false);
+var flagResult = await client.EvaluateFlagAsync("new-checkout-ui", userId);
 
-Console.WriteLine($"Flag 'new-checkout-ui' for user '{userId}':");
+Console.WriteLine($"Flag '{flagResult.Key}' for user '{userId}':");
 Console.WriteLine($"  Enabled  : {flagResult.Enabled}");
-Console.WriteLine($"  Variant  : {flagResult.Variant ?? "(none)"}");
-Console.WriteLine($"  Value    : {flagResult.Value}");
+Console.WriteLine($"  Config   : {(flagResult.Config.HasValue ? flagResult.Config.Value.ToString() : "(none)")}");
 
 // -----------------------------------------------------------------
-// 3. Get an experiment assignment
+// 3. Get an experiment assignment (POST /api/v1/tracking/assign, sticky)
 // -----------------------------------------------------------------
 Console.WriteLine();
 Console.WriteLine("=== Experiment Assignment ===");
 
 var assignment = await client.GetAssignmentAsync(
     experimentKey: "checkout-cta-test",
-    userId: userId);
+    userId: userId,
+    attributes: new Dictionary<string, object> { { "country", "US" }, { "plan", "pro" } });
 
 if (assignment != null)
 {
-    Console.WriteLine($"Experiment 'checkout-cta-test' for user '{userId}':");
-    Console.WriteLine($"  InExperiment : {assignment.IsInExperiment}");
-    Console.WriteLine($"  Variant      : {assignment.Variant?.Key ?? "(not assigned)"}");
+    Console.WriteLine($"Experiment '{assignment.ExperimentKey}' for user '{userId}':");
+    Console.WriteLine($"  Variant       : {assignment.VariantName} (id {assignment.VariantId})");
+    Console.WriteLine($"  IsControl     : {assignment.IsControl}");
+    Console.WriteLine($"  Configuration : {(assignment.Configuration.HasValue ? assignment.Configuration.Value.ToString() : "(none)")}");
 }
 else
 {
-    Console.WriteLine("Could not retrieve assignment (check that the experiment exists and API is reachable).");
+    Console.WriteLine("Not assigned (experiment not ACTIVE, or API unreachable with nothing cached).");
 }
 
 // -----------------------------------------------------------------
-// 4. Track an event
+// 4. Track events (never throws)
 // -----------------------------------------------------------------
 Console.WriteLine();
 Console.WriteLine("=== Event Tracking ===");
 
+// With an experiment key: one POST /api/v1/tracking/track.
 bool tracked = await client.TrackAsync(
     eventName: "checkout_started",
     userId: userId,
-    properties: new Dictionary<string, object>
-    {
-        { "cart_total", 129.99 },
-        { "item_count", 3 },
-        { "currency", "USD" }
-    });
-
+    properties: new Dictionary<string, object> { { "cart_total", 129.99 }, { "item_count", 3 } },
+    experimentKey: "checkout-cta-test",
+    value: 129.99);
 Console.WriteLine($"Event 'checkout_started' tracked: {tracked}");
 
+// Without a key: fanned out (POST /api/v1/tracking/batch) to every experiment the user was
+// assigned to and every flag evaluated for them through this client.
+bool fannedOut = await client.TrackAsync("page_view", userId,
+    properties: new Dictionary<string, object> { { "page", "/checkout" } });
+Console.WriteLine($"Event 'page_view' fanned out: {fannedOut}");
+
 // -----------------------------------------------------------------
-// 5. Local hash parity demo — no network needed
+// 5. Hash parity demo — no network needed (not used for bucketing any more)
 // -----------------------------------------------------------------
 Console.WriteLine();
-Console.WriteLine("=== Local Hash Parity ===");
+Console.WriteLine("=== Hash Parity ===");
 
 double hashResult = FeatureFlagEvaluator.HashUser("user-123", "my-flag");
 double expected   = 0.6927449859213084;

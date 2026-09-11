@@ -1,8 +1,8 @@
 /**
- * Browser example: using ExperimentationProvider with the OpenFeature Web SDK.
+ * Browser example: using ExperimentationProvider in a browser bundle.
  *
- * In a browser environment the built-in `fetch` is available globally.
- * This example demonstrates usage in a React-like component.
+ * The provider only needs the global `fetch`; the API key is visible to end
+ * users, so use a read-only SDK key. Evaluation is done by the server per user.
  */
 
 import { OpenFeature, EvaluationContext } from '@openfeature/server-sdk';
@@ -13,7 +13,7 @@ export async function initFeatureFlags(userId: string): Promise<void> {
   const provider = new ExperimentationProvider({
     apiKey: 'your-public-client-api-key',
     baseUrl: 'https://api.yourplatform.com',
-    cacheTtlMs: 5 * 60_000, // 5-minute cache
+    cacheTtlMs: 5 * 60_000, // reuse each evaluation for 5 minutes
   });
 
   await OpenFeature.setProviderAndWait(provider);
@@ -31,11 +31,11 @@ async function renderHomePage(userId: string): Promise<void> {
   const ctx: EvaluationContext = { targetingKey: userId };
 
   const showNewHero = await client.getBooleanValue('new-hero-section', false, ctx);
-  const heroVariant = await client.getStringValue('hero-experiment', 'control', ctx);
+  const heroCopy = await client.getStringValue('hero-copy', 'default', ctx); // config.variant
 
   console.log(`User ${userId}:`);
   console.log(`  new-hero-section: ${showNewHero}`);
-  console.log(`  hero-experiment variant: ${heroVariant}`);
+  console.log(`  hero-copy variant: ${heroCopy}`);
 }
 
 // Example usage.

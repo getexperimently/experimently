@@ -71,53 +71,111 @@ public final class Cache<Key: AnyObject, Value: AnyObject> {
     }
 }
 
-// MARK: - FlagCache
+// MARK: - UserKeyCache
 
-/// A thread-safe, string-keyed cache specifically for `FeatureFlag` objects with TTL support.
+/// A thread-safe, TTL-aware cache of server results keyed by **user + key**, backed by NSCache.
 ///
-/// This is a simpler alternative to `Cache<NSString, AnyObject>` for the common case of
-/// caching feature flags by their string keys.
-public final class FlagCache {
-    private var store: [String: (flag: FeatureFlag, expiresAt: Date)] = [:]
+/// Used by ``ExperimentationClient`` for flag evaluations and experiment assignments. Only
+/// successful results are ever stored. Unlike a bare NSCache it can enumerate the live entries
+/// of one user (needed for the track fan-out), via a small per-user key index.
+public final class UserKeyCache<Value> {
+    private let store = NSCache<NSString, CacheBox<Value>>()
+    /// userId → keys in insertion order. Entries evicted by NSCache are dropped lazily.
+    private var index: [String: [String]] = [:]
     private let lock = NSLock()
     private let ttl: TimeInterval
 
-    /// - Parameter ttl: Time-to-live for each cached flag, in seconds. Default is 5 minutes.
-    public init(ttl: TimeInterval = 300) {
+    /// - Parameters:
+    ///   - ttl: Time-to-live for each entry in seconds.
+    ///   - countLimit: Advisory maximum number of entries (NSCache `countLimit`).
+    public init(ttl: TimeInterval, countLimit: Int = 1000) {
         self.ttl = ttl
+        store.countLimit = countLimit
     }
 
-    /// Returns the cached `FeatureFlag` for `key`, or `nil` if absent or expired.
-    public func get(_ key: String) -> FeatureFlag? {
+    /// Returns the cached value for the user + key, or `nil` if absent or expired.
+    public func get(userId: String, key: String) -> Value? {
         lock.lock()
         defer { lock.unlock() }
-        guard let entry = store[key] else { return nil }
-        if Date() > entry.expiresAt {
-            store.removeValue(forKey: key)
+        let storageKey = Self.storageKey(userId, key)
+        guard let box = store.object(forKey: storageKey) else {
+            dropFromIndex(userId, key)
             return nil
         }
-        return entry.flag
+        if box.isExpired {
+            store.removeObject(forKey: storageKey)
+            dropFromIndex(userId, key)
+            return nil
+        }
+        return box.value
     }
 
-    /// Stores a `FeatureFlag` under its `.key`, with a TTL expiry.
-    public func set(_ key: String, flag: FeatureFlag) {
+    /// Stores `value` for the user + key with a TTL expiry.
+    public func set(userId: String, key: String, value: Value) {
         lock.lock()
         defer { lock.unlock() }
-        store[key] = (flag: flag, expiresAt: Date().addingTimeInterval(ttl))
+        let box = CacheBox(value, expiresAt: Date().addingTimeInterval(ttl))
+        store.setObject(box, forKey: Self.storageKey(userId, key))
+        var keys = index[userId] ?? []
+        if !keys.contains(key) {
+            keys.append(key)
+        }
+        index[userId] = keys
     }
 
-    /// Removes all cached flags.
+    /// All live (non-expired) entries for a user, in insertion order.
+    public func entries(userId: String) -> [(key: String, value: Value)] {
+        lock.lock()
+        defer { lock.unlock() }
+        var live: [(key: String, value: Value)] = []
+        var liveKeys: [String] = []
+        for key in index[userId] ?? [] {
+            let storageKey = Self.storageKey(userId, key)
+            if let box = store.object(forKey: storageKey), !box.isExpired {
+                live.append((key: key, value: box.value))
+                liveKeys.append(key)
+            } else {
+                store.removeObject(forKey: storageKey)
+            }
+        }
+        index[userId] = liveKeys.isEmpty ? nil : liveKeys
+        return live
+    }
+
+    /// Removes the entry for the user + key.
+    public func remove(userId: String, key: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        store.removeObject(forKey: Self.storageKey(userId, key))
+        dropFromIndex(userId, key)
+    }
+
+    /// Removes all cached entries.
     public func removeAll() {
         lock.lock()
         defer { lock.unlock() }
-        store.removeAll()
+        store.removeAllObjects()
+        index.removeAll()
     }
 
-    /// The number of flags currently in the cache (including potentially expired ones
-    /// not yet evicted by a get call).
+    /// Number of live entries across all users.
     public var count: Int {
         lock.lock()
-        defer { lock.unlock() }
-        return store.count
+        let users = Array(index.keys)
+        lock.unlock()
+        return users.reduce(0) { $0 + entries(userId: $1).count }
+    }
+
+    // MARK: Private
+
+    /// Length-prefixed so a user ID containing the separator cannot collide with another pair.
+    private static func storageKey(_ userId: String, _ key: String) -> NSString {
+        "\(userId.utf8.count):\(userId):\(key)" as NSString
+    }
+
+    private func dropFromIndex(_ userId: String, _ key: String) {
+        guard var keys = index[userId] else { return }
+        keys.removeAll { $0 == key }
+        index[userId] = keys.isEmpty ? nil : keys
     }
 }

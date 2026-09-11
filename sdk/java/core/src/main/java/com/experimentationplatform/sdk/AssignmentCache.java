@@ -1,10 +1,14 @@
 package com.experimentationplatform.sdk;
 
+import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
- * Thread-safe in-memory LRU cache with TTL (time-to-live) eviction for assignment results.
+ * Thread-safe in-memory LRU cache with TTL (time-to-live) eviction for server
+ * results (flag evaluations and experiment assignments).
  *
  * <p>When the cache reaches {@code maxSize} entries, the least-recently-accessed entry is
  * automatically evicted (LRU eviction via {@link LinkedHashMap} in access-order mode).
@@ -15,16 +19,18 @@ import java.util.Map;
  *
  * <h2>Usage</h2>
  * <pre>
- *     AssignmentCache cache = new AssignmentCache(1000, 300_000L); // 1000 entries, 5 min TTL
+ *     AssignmentCache&lt;String&gt; cache = new AssignmentCache&lt;&gt;(1000, 300_000L); // 1000 entries, 5 min TTL
  *     cache.put("user-123:my-flag", "on");
  *     String result = cache.get("user-123:my-flag"); // "on" (if not expired)
  * </pre>
+ *
+ * @param <V> the cached value type
  */
-public class AssignmentCache {
+public class AssignmentCache<V> {
 
     private final int maxSize;
     private final long ttlMs;
-    private final Map<String, CacheEntry> cache;
+    private final Map<String, CacheEntry<V>> cache;
 
     /**
      * Creates a new AssignmentCache.
@@ -39,9 +45,9 @@ public class AssignmentCache {
         this.maxSize = maxSize;
         this.ttlMs = ttlMs;
         // accessOrder=true enables LRU eviction via removeEldestEntry
-        this.cache = new LinkedHashMap<String, CacheEntry>(maxSize, 0.75f, true) {
+        this.cache = new LinkedHashMap<String, CacheEntry<V>>(maxSize, 0.75f, true) {
             @Override
-            protected boolean removeEldestEntry(Map.Entry<String, CacheEntry> eldest) {
+            protected boolean removeEldestEntry(Map.Entry<String, CacheEntry<V>> eldest) {
                 return size() > maxSize;
             }
         };
@@ -50,28 +56,24 @@ public class AssignmentCache {
     /**
      * Stores a value in the cache with the current timestamp as the base for TTL.
      *
-     * @param key   cache key (typically "{userId}:{flagKey}")
+     * @param key   cache key
      * @param value the value to cache (non-null)
      */
-    public synchronized void put(String key, String value) {
-        cache.put(key, new CacheEntry(value, System.currentTimeMillis() + ttlMs));
+    public synchronized void put(String key, V value) {
+        cache.put(key, new CacheEntry<>(value, System.currentTimeMillis() + ttlMs));
     }
 
     /**
      * Retrieves a cached value for the given key.
      *
-     * <p>Returns {@code null} if:
-     * <ul>
-     *   <li>The key is not present in the cache, or</li>
-     *   <li>The entry has expired (current time > insertion time + TTL).</li>
-     * </ul>
+     * <p>Returns {@code null} if the key is not present or the entry has expired.
      * Expired entries are removed lazily on access.
      *
      * @param key cache key
      * @return the cached value, or {@code null} if absent or expired
      */
-    public synchronized String get(String key) {
-        CacheEntry entry = cache.get(key);
+    public synchronized V get(String key) {
+        CacheEntry<V> entry = cache.get(key);
         if (entry == null) {
             return null;
         }
@@ -80,6 +82,31 @@ public class AssignmentCache {
             return null;
         }
         return entry.value;
+    }
+
+    /**
+     * Returns the live (non-expired) values whose key starts with {@code prefix},
+     * least recently used first. Expired entries encountered are removed; recency
+     * is not updated.
+     *
+     * @param prefix key prefix to match
+     * @return matching values (never null)
+     */
+    public synchronized List<V> valuesWithPrefix(String prefix) {
+        long now = System.currentTimeMillis();
+        List<V> values = new ArrayList<>();
+        Iterator<Map.Entry<String, CacheEntry<V>>> it = cache.entrySet().iterator();
+        while (it.hasNext()) {
+            Map.Entry<String, CacheEntry<V>> e = it.next();
+            if (now > e.getValue().expiresAt) {
+                it.remove();
+                continue;
+            }
+            if (e.getKey().startsWith(prefix)) {
+                values.add(e.getValue().value);
+            }
+        }
+        return values;
     }
 
     /**
@@ -129,11 +156,11 @@ public class AssignmentCache {
     /**
      * Internal cache entry holding a value and its expiration timestamp.
      */
-    private static class CacheEntry {
-        final String value;
+    private static class CacheEntry<V> {
+        final V value;
         final long expiresAt; // absolute epoch millis
 
-        CacheEntry(String value, long expiresAt) {
+        CacheEntry(V value, long expiresAt) {
             this.value = value;
             this.expiresAt = expiresAt;
         }

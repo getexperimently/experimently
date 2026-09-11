@@ -1,13 +1,13 @@
 /**
  * Vercel Edge Functions / Edge Middleware adapter.
  *
- * Pattern: the middleware evaluates feature flags and injects the results as
- * request headers so that origin functions (serverless or edge) can read them
- * without an additional API call.
+ * Pattern: the middleware evaluates feature flags **on the server** and
+ * injects the results as request headers so that origin functions
+ * (serverless or edge) can read them without an additional API call.
  *
  * Header convention:
  *   X-EP-Flag-{flagKey}: "true" | "false"
- *   X-EP-User-Id: the resolved user ID (from cookie or header)
+ *   X-EP-User-Id: the resolved user ID (from header or cookie)
  *
  * Usage (middleware.ts):
  * ```ts
@@ -15,6 +15,7 @@
  *
  * export const middleware = createEdgeMiddleware({
  *   apiKey: process.env.EP_API_KEY!,
+ *   baseUrl: process.env.EP_BASE_URL!,
  *   flagKeys: ['new-checkout', 'dark-mode'],
  * });
  *
@@ -22,8 +23,8 @@
  * ```
  */
 
-import { EdgeExperimentationClient } from '../client';
-import type { EdgeSdkConfig } from '../types';
+import { EdgeExperimentationClient } from '../client.js';
+import type { EdgeSdkConfig } from '../types.js';
 
 // ---------------------------------------------------------------------------
 // Config
@@ -31,8 +32,10 @@ import type { EdgeSdkConfig } from '../types';
 
 export interface VercelEdgeConfig extends EdgeSdkConfig {
   /**
-   * List of flag keys to evaluate and inject as request headers.
-   * If omitted, all bootstrap flags are evaluated.
+   * Flag keys to evaluate (in parallel, via
+   * `GET /api/v1/feature-flags/evaluate/{key}?user_id=…`) and inject as request
+   * headers. If omitted, every flag the server reports for the user
+   * (`GET /api/v1/feature-flags/user/{user_id}`) is injected.
    */
   flagKeys?: string[];
   /**
@@ -54,9 +57,9 @@ export interface VercelEdgeConfig extends EdgeSdkConfig {
  * Extract the user ID from the request:
  *   1. Check the configurable header
  *   2. Fall back to the configurable cookie
- *   3. Fall back to an empty string (anonymous)
+ *   3. Fall back to an empty string (anonymous — no flags are evaluated)
  */
-function extractUserId(request: Request, config: VercelEdgeConfig): string {
+export function extractUserId(request: Request, config: VercelEdgeConfig): string {
   const headerName = config.userIdHeaderName ?? 'X-User-Id';
   const fromHeader = request.headers.get(headerName);
   if (fromHeader) return fromHeader;
@@ -73,6 +76,26 @@ function extractUserId(request: Request, config: VercelEdgeConfig): string {
   return '';
 }
 
+/**
+ * Evaluate the configured flags for `userId` and return `{flagKey: enabled}`.
+ * Failures count as disabled; an empty user id evaluates nothing.
+ */
+export async function evaluateFlagsForRequest(
+  client: EdgeExperimentationClient,
+  userId: string,
+  flagKeys: string[] | undefined,
+): Promise<Record<string, boolean>> {
+  if (!userId) return {};
+  if (flagKeys && flagKeys.length > 0) {
+    const results = await Promise.all(flagKeys.map((key) => client.evaluateFlag(key, userId)));
+    const flags: Record<string, boolean> = {};
+    for (const evaluation of results) flags[evaluation.key] = evaluation.enabled;
+    return flags;
+  }
+  if (flagKeys) return {}; // explicitly empty list
+  return client.getAllFlags(userId);
+}
+
 // ---------------------------------------------------------------------------
 // Factory
 // ---------------------------------------------------------------------------
@@ -84,35 +107,26 @@ function extractUserId(request: Request, config: VercelEdgeConfig): string {
  * The returned function has the same signature as a Vercel Edge middleware:
  *   `(request: Request) => Promise<Response>`
  *
- * When no `Response` constructor is needed the function just modifies headers
- * on a NextResponse.next() — here we pass-through using fetch() or a redirect,
- * but in practice the consumer calls `NextResponse.next({ request: { headers } })`.
+ * The request is passed through with the injected headers; in a Next.js
+ * project use `NextResponse.next({ request: { headers } })` with the same
+ * headers instead of the built-in pass-through.
  */
 export function createEdgeMiddleware(config: VercelEdgeConfig) {
+  const client = new EdgeExperimentationClient(config);
+
   return async function middleware(request: Request): Promise<Response> {
-    const client = new EdgeExperimentationClient(config);
-
-    // Warm the client from the bootstrap endpoint
-    try {
-      await client.refreshFlags();
-    } catch {
-      // If the bootstrap call fails, continue without flag injection
-      // This ensures the middleware never breaks the request pipeline
-    }
-
     const userId = extractUserId(request, config);
     const newHeaders = new Headers(request.headers);
 
-    // Determine which flags to evaluate
-    const keysToEvaluate: string[] = config.flagKeys && config.flagKeys.length > 0
-      ? config.flagKeys
-      : Array.from((client as unknown as { flags: Map<string, unknown> }).flags.keys());
-
-    // Evaluate each flag and inject as a header
-    for (const flagKey of keysToEvaluate) {
-      const enabled = client.evaluateFlagSync(flagKey, userId);
-      const headerKey = `X-EP-Flag-${flagKey}`;
-      newHeaders.set(headerKey, String(enabled));
+    // Never break the request pipeline: evaluation failures mean "disabled".
+    let flags: Record<string, boolean> = {};
+    try {
+      flags = await evaluateFlagsForRequest(client, userId, config.flagKeys);
+    } catch {
+      flags = {};
+    }
+    for (const key of config.flagKeys ?? Object.keys(flags)) {
+      newHeaders.set(`X-EP-Flag-${key}`, String(flags[key] ?? false));
     }
 
     // Inject the resolved user ID for downstream use
@@ -120,9 +134,6 @@ export function createEdgeMiddleware(config: VercelEdgeConfig) {
       newHeaders.set('X-EP-User-Id', userId);
     }
 
-    // Pass through: in real Vercel middleware this would be NextResponse.next()
-    // Here we rewrite the request with injected headers and pass through.
-    // The consumer can use these headers in their pages/api routes.
     return fetch(new Request(request, { headers: newHeaders }));
   };
 }

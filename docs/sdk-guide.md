@@ -23,17 +23,45 @@ limit for these paths: `SDK_RATE_LIMIT_PER_MINUTE` (default 6000/min).
 
 ## SDK status (2026-09-11)
 
-| SDK | Location | Status against the contract above |
-|---|---|---|
-| React | `sdk/react` | **Verified end to end** (v1.1; the ShopLab demo runs on it). See [React SDK](sdk/react.md). |
-| Python, JavaScript | `sdk/python`, `sdk/js` | Placeholders only (no client code); the examples below describe the intended API, not shipped code. |
-| Go, Java, iOS, Android, Flutter, React Native, Edge, .NET, Elixir, Ruby, PHP | `sdk/*` | Ship consistent-hash bucketing and pass the cross-SDK hash contract tests, but still call `/api/v1/events`, `/api/v1/assignments` or `/api/v1/experiments/{key}/assign`, which the backend does not serve. They need the same endpoint rewiring the React SDK received before they work against this API. |
+Every SDK was rewired to the contract above in September 2026: the server decides assignment and flag
+evaluation, results are cached per user + key, and `track` fans out to the user's cached assignments and
+flags when no key is given. The MD5 consistent hash remains exported by each SDK as a compatibility utility
+(the golden-vector tests still cover it) but nothing buckets locally any more.
 
-Until an SDK is marked verified, integrate with the raw HTTP contract above (any HTTP client works).
+"Verified live" means the SDK's `contract_smoke` entry point passed
+`tests/sdk-contract/live/run_live_contract.py` against a running backend (see
+[tests/sdk-contract/README.md](../tests/sdk-contract/README.md)); the `SDK Live Contract` CI job repeats
+this on every pull request for the SDKs whose toolchain is available on Linux.
+
+| SDK | Location | Unit tests | Verified live | Docs |
+|---|---|---|---|---|
+| React | `sdk/react` | 202 (jest) | yes — also runs the ShopLab demo | [react.md](sdk/react.md) |
+| JavaScript / TypeScript | `sdk/js` | 95 (jest) | yes | [javascript.md](sdk/javascript.md) |
+| OpenFeature (JS) | `sdk/openfeature` | 51 (jest) | yes | [openfeature.md](sdk/openfeature.md) |
+| Edge (Cloudflare Workers) | `sdk/edge` | 101 (jest) | yes | [edge.md](sdk/edge.md) |
+| React Native | `sdk/react-native` | jest | unit tests only (no device runtime) | [react-native.md](sdk/react-native.md) |
+| Python | `sdk/python` | 87 (pytest) | yes | [python.md](sdk/python.md) |
+| OpenFeature (Python) | `sdk/openfeature-python` | 79 (pytest) | yes | [openfeature.md](sdk/openfeature.md) |
+| Go | `sdk/go` | 51 (`go test -race`) | yes | [go.md](sdk/go.md) |
+| Java + Spring Boot starter | `sdk/java` | 77 + 30 (JUnit 5) | yes | [java.md](sdk/java.md) |
+| iOS (Swift) | `sdk/ios` | 71 (XCTest) | yes | [ios.md](sdk/ios.md) |
+| Ruby | `sdk/ruby` | 109 (RSpec) | yes | [ruby.md](sdk/ruby.md) |
+| PHP | `sdk/php` | PHPUnit | in CI only (no PHP on the dev machine) | [php.md](sdk/php.md) |
+| .NET | `sdk/dotnet` | xUnit | in CI only (no .NET on the dev machine) | [dotnet.md](sdk/dotnet.md) |
+| Android (Kotlin) | `sdk/android` | JUnit 5 | not yet (needs the Android SDK) | [android.md](sdk/android.md) |
+| Flutter / Dart | `sdk/flutter` | `dart test` | not yet (needs the Dart SDK) | [flutter.md](sdk/flutter.md) |
+| Elixir | `sdk/elixir` | ExUnit | not yet (needs Elixir) | [elixir.md](sdk/elixir.md) |
+
+Rows marked "not yet" were rewired by inspection and reviewed line by line, but their tests and smoke
+have not been executed anywhere; run `run_live_contract.py --sdk <name> --strict` on a machine with the
+toolchain before relying on them.
 
 ---
 
 ## Python SDK
+
+`sdk/python` — package `experimentation-sdk`, stdlib only (no runtime dependencies), Python ≥ 3.9,
+synchronous. Full reference: [Python SDK](sdk/python.md).
 
 ### Installation
 
@@ -49,110 +77,85 @@ pip install -e ./sdk/python
 from experimentation import ExperimentationClient
 
 client = ExperimentationClient(
-    api_url="https://your-platform.example.com",
-    api_key="your-api-key",
+    api_url="http://localhost:8000",   # origin only; the SDK appends /api/v1/...
+    api_key="eptk_...",
 )
 
-# Get experiment variant assignment
-variant = client.get_variant(
-    experiment_key="checkout-button-color",
+# Sticky experiment assignment (POST /api/v1/tracking/assign)
+assignment = client.get_assignment(
+    "checkout_button_color",
     user_id="user-123",
-    user_attributes={"country": "US", "plan": "pro"},
+    user_attributes={"country": "US", "plan": "pro"},   # sent as `context`
 )
-print(variant)  # "control" or "treatment"
+assignment.variant_name     # "control" or "treatment"
+assignment.is_control       # bool
+assignment.configuration    # the variant's configuration dict, or None
 
-# Check feature flag
-is_enabled = client.is_feature_enabled(
-    flag_key="dark-mode",
-    user_id="user-123",
-)
+# Or just the variant name, "control" (default_variant) when the API is unreachable
+variant = client.get_variant("checkout_button_color", user_id="user-123")
 
-# Track a conversion event
-client.track(
-    user_id="user-123",
-    event_type="checkout_completed",
-    event_value=49.99,
-    properties={"payment_method": "card"},
-)
+# Feature flag (GET /api/v1/feature-flags/evaluate/{key}?user_id=...)
+flag = client.get_feature_flag("dark_mode", user_id="user-123")
+flag.enabled, flag.config
+if client.is_feature_enabled("dark_mode", user_id="user-123"):
+    ...
+
+# Track a conversion for a specific experiment (POST /api/v1/tracking/track)
+client.track("user-123", "purchase", event_value=49.99,
+             properties={"payment_method": "card"},
+             experiment_key="checkout_button_color")
+
+# Track without a key: fans out to every cached assignment and flag for the user
+client.track("user-123", "page_view", properties={"page": "/checkout"})
 ```
 
 ### Client Configuration
 
 ```python
 client = ExperimentationClient(
-    api_url="https://your-platform.example.com",
-    api_key="your-api-key",
-    timeout_seconds=2.0,         # Default: 5.0
-    cache_ttl_seconds=60,        # Local assignment cache TTL. Default: 300
-    default_variant="control",   # Fallback when API is unreachable
+    api_url="http://localhost:8000",
+    api_key="eptk_...",
+    timeout_seconds=5.0,        # per request
+    cache_ttl_seconds=300,      # assignments and flag evaluations are cached per user + key
+    default_variant="control",  # returned by get_variant() on failure
 )
 ```
 
-### Experiments
+### API
 
-```python
-# Get variant assignment (returns default_variant on error)
-variant = client.get_variant("experiment-key", user_id="user-123")
+| Method | Returns | On failure |
+|---|---|---|
+| `get_assignment(experiment_key, user_id, user_attributes=None)` | `Assignment(experiment_key, user_id, variant_id, variant_name, is_control, configuration)` | raises `ExperimentationError(status, body)` (404 when the experiment is not ACTIVE) |
+| `get_variant(experiment_key, user_id, user_attributes=None)` | `str` | `default_variant` |
+| `get_feature_flag(flag_key, user_id)` | `FlagEvaluation(key, enabled, config)` | raises `ExperimentationError` |
+| `is_feature_enabled(flag_key, user_id)` | `bool` | `False` |
+| `get_all_flags(user_id)` | `dict[str, bool]` | raises `ExperimentationError` |
+| `track(user_id, event_name, event_value=None, properties=None, experiment_key=None, feature_flag_key=None, event_type=None, timestamp=None)` | `bool` | `False`, never raises |
+| `track_batch(events)` | `BatchResult(success_count, failure_count, errors)` | never raises; chunked at 100 |
+| `get_assignments(user_id)` | `list[dict]` from `/tracking/assignments/{user_id}` | raises `ExperimentationError` |
+| `cached_assignments(user_id)`, `cached_flags(user_id)`, `clear_cache()` | local cache access | — |
+| `consistent_hash(user_id, flag_key)`, `md5_hex(user_id, flag_key)` | compatibility hash utilities | — |
 
-# Get assignment with full metadata
-assignment = client.get_assignment(
-    experiment_key="experiment-key",
-    user_id="user-123",
-    user_attributes={"plan": "enterprise"},
-)
-print(assignment.variant_key)      # "treatment-a"
-print(assignment.experiment_id)    # UUID
-print(assignment.is_control)       # False
-```
+Successful results are cached per user + key for `cache_ttl_seconds`; failures are never cached. A 429
+is retried once after the server's `Retry-After` (capped at 5 s). The client is thread-safe.
 
-### Feature Flags
+Testing: construct the client with `transport=` (see `experimentation.testing.FakeTransport`) to assert
+requests without a network.
 
-```python
-# Boolean flag check
-enabled = client.is_feature_enabled("flag-key", user_id="user-123")
-
-# Get flag with targeting evaluation
-flag = client.get_feature_flag(
-    flag_key="new-checkout",
-    user_id="user-123",
-    user_attributes={"country": "US"},
-)
-print(flag.enabled)         # True / False
-print(flag.rollout_pct)     # 0.5 (50% rollout)
-```
-
-### Event Tracking
-
-```python
-# Simple event
-client.track("user-123", "page_view")
-
-# Event with value and properties
-client.track(
-    user_id="user-123",
-    event_type="purchase_completed",
-    event_value=149.00,
-    properties={
-        "product_id": "prod-456",
-        "currency": "USD",
-    },
-)
-
-# Batch track (more efficient for high-volume scenarios)
-client.track_batch([
-    {"user_id": "user-1", "event_type": "click", "event_value": None},
-    {"user_id": "user-2", "event_type": "click", "event_value": None},
-])
-```
+Smoke against a live backend: `python sdk/python/examples/contract_smoke.py`.
 
 ---
 
 ## JavaScript / TypeScript SDK
 
+`sdk/js` — package `@experimentation-platform/js-sdk`, zero runtime dependencies, uses the global
+`fetch` (Node ≥ 18 and browsers), CommonJS build with type declarations. Full reference:
+[JavaScript SDK](sdk/javascript.md). For React apps use the [React SDK](sdk/react.md) instead.
+
 ### Installation
 
 ```bash
-npm install @experimentation/sdk
+npm install @experimentation-platform/js-sdk
 # or from source:
 npm install ./sdk/js
 ```
@@ -160,26 +163,67 @@ npm install ./sdk/js
 ### Quick Start
 
 ```typescript
-import { ExperimentationClient } from '@experimentation/sdk';
+import { ExperimentationClient } from '@experimentation-platform/js-sdk';
 
 const client = new ExperimentationClient({
-  apiUrl: 'https://your-platform.example.com',
-  apiKey: 'your-api-key',
+  apiUrl: 'http://localhost:8000',   // origin only; the SDK appends /api/v1/...
+  apiKey: 'eptk_...',
 });
 
-// Get variant assignment
-const variant = await client.getVariant('checkout-button-color', {
-  userId: 'user-123',
-  attributes: { country: 'US', plan: 'pro' },
-});
-console.log(variant); // "control" or "treatment"
+const user = { userId: 'user-123', attributes: { country: 'US', plan: 'pro' } };
 
-// Feature flag check
-const isEnabled = await client.isFeatureEnabled('dark-mode', { userId: 'user-123' });
+// Sticky experiment assignment (POST /api/v1/tracking/assign)
+const assignment = await client.getAssignment('checkout_button_color', user);
+assignment.variantName;     // 'control' | 'treatment'
+assignment.configuration;   // the variant's configuration, or null
 
-// Track event
-await client.track('user-123', 'checkout_completed', { value: 49.99 });
+// Or just the name, 'control' (defaultVariant) on failure
+const variant = await client.getVariant('checkout_button_color', user);
+
+// Feature flag (GET /api/v1/feature-flags/evaluate/{key}?user_id=...)
+const flag = await client.evaluateFlag('dark_mode', user);        // { key, enabled, config }
+const isEnabled = await client.isFeatureEnabled('dark_mode', user); // false on failure
+
+// Track for a specific experiment (POST /api/v1/tracking/track)
+await client.track('user-123', 'purchase', { value: 49.99, experimentKey: 'checkout_button_color' });
+
+// Track without a key: fans out to every cached assignment and flag for the user
+await client.track('user-123', 'page_view', { properties: { page: '/checkout' } });
 ```
+
+### Client Configuration
+
+```typescript
+const client = new ExperimentationClient({
+  apiUrl: 'http://localhost:8000',
+  apiKey: 'eptk_...',
+  timeoutMs: 5000,          // per request
+  cacheTtlMs: 300_000,      // assignments and flag evaluations cached per user + key
+  defaultVariant: 'control',
+  fetch: customFetch,       // optional (tests, polyfills)
+  onError: (err) => log(err),  // optional; called for swallowed failures
+});
+```
+
+### API
+
+| Method | Returns | On failure |
+|---|---|---|
+| `getAssignment(experimentKey, user)` | `Promise<Assignment>` (`experimentKey, userId, variantId, variantName, isControl, configuration`) | rejects with `ExperimentationError` (`status`, `code`) |
+| `getVariant(experimentKey, user)` | `Promise<string>` | `defaultVariant` |
+| `evaluateFlag(flagKey, user)` | `Promise<FlagEvaluation>` (`key, enabled, config`) | rejects with `ExperimentationError` |
+| `isFeatureEnabled(flagKey, user)` | `Promise<boolean>` | `false` |
+| `getAllFlags(userId)` | `Promise<Record<string, boolean>>` | rejects |
+| `track(userId, eventName, { value?, properties?, experimentKey?, featureFlagKey?, eventType?, timestamp? })` | `Promise<void>` | never rejects |
+| `trackBatch(events)` | `Promise<BatchResult>` | never rejects; chunked at 100 |
+| `fetchAssignments(userId)` | server-side list from `/tracking/assignments/{userId}` | rejects |
+| `getAssignments(userId)`, `getEvaluatedFlags(userId)`, `clearCache()` | local cache access | — |
+| `consistentHash(userId, flagKey)`, `md5Hex(...)` (module exports) | compatibility hash utilities | — |
+
+Concurrent calls for the same user + key share one request; failures are never cached; a 429 is
+retried once after `Retry-After`.
+
+Smoke against a live backend: `cd sdk/js && npm run build && node examples/contract_smoke.mjs`.
 
 ### React Integration
 
@@ -237,219 +281,89 @@ const client = new ExperimentationClient({
 
 ## Java SDK
 
-### Installation
+`sdk/java` — Maven modules `core` (OkHttp + Jackson client, Java 11+) and `spring-boot-starter`
+(auto-configuration). Full reference: [Java SDK](sdk/java.md).
 
-**Maven** (`pom.xml`):
+### Installation
 
 ```xml
 <dependency>
-    <groupId>com.experimentation</groupId>
-    <artifactId>experimentation-sdk</artifactId>
-    <version>1.0.0</version>
+  <groupId>com.experimentationplatform</groupId>
+  <artifactId>experimentation-java-sdk</artifactId>
+  <version>1.0.0</version>
 </dependency>
-```
-
-**Gradle** (`build.gradle`):
-
-```groovy
-implementation 'com.experimentation:experimentation-sdk:1.0.0'
+<!-- Spring Boot: use experimentation-spring-boot-starter instead -->
 ```
 
 ### Quick Start
 
 ```java
-import com.experimentation.sdk.ExperimentationClient;
-import com.experimentation.sdk.ExperimentationConfig;
+import com.experimentationplatform.sdk.ExperimentationClient;
+import com.experimentationplatform.sdk.config.SdkConfig;
+import com.experimentationplatform.sdk.model.*;
 
-ExperimentationClient client = new ExperimentationClient(
-    ExperimentationConfig.builder()
-        .apiUrl("https://your-platform.example.com")
-        .apiKey("your-api-key")
-        .build()
-);
+SdkConfig config = SdkConfig.builder("eptk_...", "http://localhost:8000")  // apiKey, baseUrl (origin only)
+    .timeoutMs(5000)
+    .cacheTtlMs(300_000)
+    .cacheSize(1000)
+    .build();
+ExperimentationClient client = new ExperimentationClient(config);
 
-// Get experiment variant assignment
-String variant = client.getVariant(
-    "checkout-button-color",   // experimentKey
-    "user-123",                // userId
-    Map.of("country", "US", "plan", "pro")  // attributes
-);
-System.out.println(variant); // "control" or "treatment"
+User user = User.builder("user-123")
+    .attribute("country", "US")
+    .attribute("plan", "pro")          // sent as `context` on assignment
+    .build();
 
-// Check feature flag
-boolean isEnabled = client.isFeatureEnabled(
-    "dark-mode",  // flagKey
-    "user-123",   // userId
-    Map.of()      // attributes
-);
+// Sticky experiment assignment (POST /api/v1/tracking/assign)
+ExperimentAssignment assignment = client.getExperimentAssignment(user, "checkout_button_color");
+assignment.getVariantName();       // "control" | "treatment"
+assignment.isControl();
+assignment.getConfiguration();     // Map<String,Object> or null
 
-// Track a conversion event
-client.trackEvent(
-    "user-123",           // userId
-    "checkout_completed", // eventKey
-    49.99                 // value
-);
+// Feature flag (GET /api/v1/feature-flags/evaluate/{key}?user_id=...)
+FlagEvaluation flag = client.evaluateFeatureFlag(user, "dark_mode");
+flag.isEnabled(); flag.getConfig();
+boolean on = client.isFeatureEnabled(user, "dark_mode");   // false on failure
 
-// Close the client when done (releases connection pool)
-client.close();
+// Track for a specific experiment (POST /api/v1/tracking/track) — asynchronous, never throws
+client.trackEvent("user-123", "purchase", Map.of("payment_method", "card"),
+                  "checkout_button_color", null, 49.99);
+
+// Track without a key: fans out to every cached assignment and flag for the user
+client.trackEvent("user-123", "page_view", Map.of("page", "/checkout"));
+
+// Full control
+client.trackEvent(TrackEvent.builder("user-123", "purchase")
+    .experimentKey("checkout_button_color").value(49.99).property("currency", "USD").build());
+client.trackBatch(List.of(...));     // chunked at 100; trackEventSync / trackBatchSync block
 ```
 
-### Client Configuration
+### API
 
-```java
-ExperimentationClient client = new ExperimentationClient(
-    ExperimentationConfig.builder()
-        .apiUrl("https://your-platform.example.com")
-        .apiKey("your-api-key")
-        .timeoutSeconds(2)         // HTTP call timeout. Default: 5
-        .cacheTtlSeconds(60)       // Local assignment cache TTL. Default: 300
-        .cacheMaxSize(1000)        // Max entries in local cache. Default: 10000
-        .defaultVariant("control") // Fallback when API is unreachable
-        .build()
-);
-```
+| Method | Returns | On failure |
+|---|---|---|
+| `getExperimentAssignment(user, experimentKey)` | `ExperimentAssignment` (`getExperimentKey, getUserId, getVariantId, getVariantName, isControl, getConfiguration`) | throws `ExperimentationException` (unchecked; 404 when not ACTIVE, network errors) |
+| `evaluateFeatureFlag(user, flagKey)` | `FlagEvaluation` (`getKey, isEnabled, getConfig, getConfigMap`) | throws `ExperimentationException` |
+| `isFeatureEnabled(user, flagKey)` | `boolean` | `false` |
+| `trackEvent(userId, eventName, properties[, experimentKey, featureFlagKey, value])`, `trackEvent(TrackEvent)` | `void` (async) | swallowed |
+| `trackBatch(List<TrackEvent>)`, `trackEventSync`, `trackBatchSync` | `void` | swallowed |
+| `getCachedAssignments(userId)`, `getCachedFlagKeys(userId)`, `invalidateCache(userId, key)`, `clearCache()`, `getCacheSize()`, `close()` | cache / lifecycle | — |
+| `ConsistentHash.hash(userId, flagKey)` | compatibility hash utility | — |
 
-### Experiment Variant Assignment
-
-```java
-// Simple variant lookup (returns defaultVariant on error)
-String variant = client.getVariant("experiment-key", "user-123", Map.of());
-
-// With targeting attributes
-String variant = client.getVariant(
-    "premium-checkout",
-    "user-123",
-    Map.of(
-        "country", "US",
-        "plan", "enterprise",
-        "accountAge", "365"
-    )
-);
-
-// Full assignment metadata
-Assignment assignment = client.getAssignment(
-    "experiment-key",
-    "user-123",
-    Map.of("plan", "pro")
-);
-System.out.println(assignment.getVariantKey());    // "treatment-a"
-System.out.println(assignment.getExperimentId());  // UUID string
-System.out.println(assignment.isControl());        // false
-```
-
-### Feature Flag Evaluation
-
-```java
-// Boolean flag
-boolean enabled = client.isFeatureEnabled("flag-key", "user-123", Map.of());
-
-// With targeting attributes
-boolean enabled = client.isFeatureEnabled(
-    "new-checkout",
-    "user-123",
-    Map.of("country", "US", "segment", "beta")
-);
-```
-
-### Event Tracking
-
-```java
-// Simple event (no value)
-client.trackEvent("user-123", "page_view", null);
-
-// Event with a numeric value
-client.trackEvent("user-123", "purchase_completed", 149.00);
-```
-
-### Consistent-Hash Bucketing
-
-The Java SDK uses MD5-based consistent hashing for deterministic variant assignment. Given the same `experimentKey` and `userId`, `getVariant()` always returns the same variant without a network call when the assignment is already cached. The hash input is `"{experimentKey}:{userId}"` and bucket boundaries are derived from the experiment's traffic allocation configuration returned by the API. This guarantees that:
-
-- The same user always sees the same variant for a given experiment.
-- Variant assignment is stable across SDK restarts (within cache TTL).
-- No sticky-session infrastructure is required.
-
-### Spring Boot Auto-Configuration
-
-Add the starter dependency to use Spring Boot auto-configuration:
-
-**Maven**:
-
-```xml
-<dependency>
-    <groupId>com.experimentation</groupId>
-    <artifactId>experimentation-spring-boot-starter</artifactId>
-    <version>1.0.0</version>
-</dependency>
-```
-
-**Gradle**:
-
-```groovy
-implementation 'com.experimentation:experimentation-spring-boot-starter:1.0.0'
-```
-
-Enable the integration in your application class:
-
-```java
-import com.experimentation.spring.EnableExperimentation;
-import org.springframework.boot.SpringApplication;
-import org.springframework.boot.autoconfigure.SpringBootApplication;
-
-@SpringBootApplication
-@EnableExperimentation
-public class MyApplication {
-    public static void main(String[] args) {
-        SpringApplication.run(MyApplication.class, args);
-    }
-}
-```
-
-The `ExperimentationClient` bean is then available for injection:
-
-```java
-import com.experimentation.sdk.ExperimentationClient;
-import org.springframework.stereotype.Service;
-
-@Service
-public class CheckoutService {
-
-    private final ExperimentationClient experimentationClient;
-
-    public CheckoutService(ExperimentationClient experimentationClient) {
-        this.experimentationClient = experimentationClient;
-    }
-
-    public String resolveCheckoutVariant(String userId, Map<String, String> attributes) {
-        return experimentationClient.getVariant("checkout-flow", userId, attributes);
-    }
-}
-```
-
-### Spring Boot Properties
-
-Configure the SDK via `application.properties` or `application.yml`:
-
-| Property | Type | Default | Description |
-|---|---|---|---|
-| `experimentation.api-url` | `String` | _(required)_ | Base URL of the Experimentation Platform API |
-| `experimentation.api-key` | `String` | _(required)_ | API key for SDK authentication (`X-API-Key` header) |
-| `experimentation.cache-ttl-seconds` | `int` | `300` | Seconds before a cached assignment expires |
-| `experimentation.cache-max-size` | `int` | `10000` | Maximum number of entries held in the local LRU cache |
-| `experimentation.timeout-seconds` | `int` | `5` | HTTP request timeout in seconds |
-| `experimentation.default-variant` | `String` | `"control"` | Variant returned when the API is unreachable |
-
-**Example `application.yml`**:
+### Spring Boot starter
 
 ```yaml
 experimentation:
-  api-url: https://your-platform.example.com
-  api-key: ${EXPERIMENTATION_API_KEY}
-  cache-ttl-seconds: 120
-  cache-max-size: 5000
-  timeout-seconds: 2
-  default-variant: control
+  api-key: eptk_...
+  base-url: http://localhost:8000
+  cache-ttl-seconds: 300
+  cache-size: 1000
+  timeout-ms: 5000
 ```
+
+The starter registers an `ExperimentationClient` bean (`@ConditionalOnMissingBean`) that you can inject
+anywhere. Tests: `cd sdk/java && mvn test` (77 core + 30 starter). Smoke against a live backend:
+`bash sdk/java/examples/contract_smoke.sh`.
 
 ---
 

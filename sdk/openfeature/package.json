@@ -1,18 +1,21 @@
 {
   "name": "@experimentation-platform/openfeature-provider",
-  "version": "0.1.0",
-  "description": "OpenFeature provider for Experimentation Platform",
+  "version": "0.2.0",
+  "description": "OpenFeature provider for the Experimentation Platform (delegates to @experimentation-platform/js-sdk)",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "files": [
     "dist"
   ],
   "scripts": {
+    "prebuild": "npm --prefix ../js run build --silent",
     "build": "tsc",
+    "pretest": "npm --prefix ../js run build --silent",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
     "lint": "eslint src --ext .ts",
+    "smoke": "npm run build --silent && node examples/contract_smoke.mjs",
     "prepublishOnly": "npm run build"
   },
   "keywords": [
@@ -24,6 +27,7 @@
   ],
   "license": "MIT",
   "dependencies": {
+    "@experimentation-platform/js-sdk": "file:../js",
     "@openfeature/server-sdk": "^1.7.0"
   },
   "devDependencies": {
