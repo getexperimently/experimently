@@ -6,7 +6,13 @@ from backend.app.utils.aws_client import AWSClient
 
 class TestAWSClient:
     @pytest.fixture
-    def aws_client(self):
+    def aws_client(self, monkeypatch):
+        # These tests assert on AWSClient's built-in default region.  Other
+        # test modules (e.g. the moto-backed auth integration conftest) export
+        # AWS_REGION/AWS_PROFILE at import time, so clear them here to keep
+        # the assertions independent of collection order.
+        monkeypatch.delenv("AWS_REGION", raising=False)
+        monkeypatch.delenv("AWS_PROFILE", raising=False)
         return AWSClient()
 
     @patch('boto3.client')

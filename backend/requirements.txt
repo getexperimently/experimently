@@ -47,6 +47,8 @@ faker==19.6.2
 factory-boy==3.3.0
 freezegun==1.2.2
 moto==4.2.2
+pyparsing==3.3.2       # required by moto's glue backend (mock_glue), not declared by moto 4.2
+python-jose[cryptography]==3.5.0  # required by moto's cognitoidp backend (mock_cognitoidp); app auth uses PyJWT
 jsonschema==4.19.2
 locust==2.17.0
 

@@ -15,7 +15,13 @@ def experiment_service(db_session):
 
 @pytest.fixture
 def draft_experiment(db_session):
-    """Create a draft experiment for testing."""
+    """Create a draft experiment for testing.
+
+    The row is committed (the service under test commits), so it is removed
+    again on teardown: the shared per-process test database is not truncated
+    between tests, and an ownerless experiment left behind here used to make
+    later "list all experiments" integration tests fail.
+    """
     experiment = Experiment(
         id=uuid4(),
         name="Test Experiment",
@@ -25,7 +31,13 @@ def draft_experiment(db_session):
     )
     db_session.add(experiment)
     db_session.commit()
-    return experiment
+    yield experiment
+    try:
+        db_session.rollback()
+        db_session.query(Experiment).filter(Experiment.id == experiment.id).delete()
+        db_session.commit()
+    except Exception:
+        db_session.rollback()
 
 
 class TestExperimentScheduling:

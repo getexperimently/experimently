@@ -266,38 +266,30 @@ async def test_list_experiments(
         mock_experiments
     )
 
-    # Create a mock ExperimentListResponse for patching
-    mock_response = ExperimentListResponse(
-        items=[ExperimentResponse(**exp.model_dump()) for exp in mock_experiments],
-        total=len(mock_experiments),
+    # NOTE: do not patch ExperimentListResponse.__new__/__init__ here.  Once
+    # __new__ has been set and deleted on a class, CPython leaves the class
+    # with a slot that rejects constructor arguments for the rest of the
+    # process, which broke every later test that built a list response.
+    # The endpoint validates the service's dicts into real response models,
+    # so we can assert on the actual result.
+    response = await experiments.list_experiments(
+        db=mock_db,
+        current_user=mock_user,
+        cache_control=mock_cache_control,
         skip=0,
         limit=100,
     )
 
-    # Mock the ExperimentListResponse constructor
-    with patch.object(
-        ExperimentListResponse, "__init__", return_value=None
-    ) as mock_list_response:
-        with patch.object(
-            ExperimentListResponse, "__new__", return_value=mock_response
-        ):
-            # Call the endpoint
-            response = await experiments.list_experiments(
-                db=mock_db,
-                current_user=mock_user,
-                cache_control=mock_cache_control,
-                skip=0,
-                limit=100,
-            )
+    # Verify service was called correctly
+    mock_experiment_service.get_experiments_by_owner.assert_called_once()
 
-            # Verify service was called correctly
-            mock_experiment_service.get_experiments_by_owner.assert_called_once()
-
-            # Verify response
-            assert isinstance(response, ExperimentListResponse)
-            assert response.total == len(mock_experiments)
-            assert response.skip == 0
-            assert response.limit == 100
+    # Verify response
+    assert isinstance(response, ExperimentListResponse)
+    assert response.total == len(mock_experiments)
+    assert response.skip == 0
+    assert response.limit == 100
+    assert [item.id for item in response.items] == [experiment_id1, experiment_id2]
+    assert all(isinstance(item, ExperimentResponse) for item in response.items)
 
 
 @pytest.mark.asyncio
