@@ -72,7 +72,7 @@ jobs:
           echo "No active incidents found - proceeding"
 
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ secrets.PROD_AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
@@ -120,7 +120,7 @@ jobs:
           ref: ${{ inputs.version }}
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.11'
           cache: 'pip'
@@ -163,7 +163,7 @@ jobs:
           ref: ${{ inputs.version }}
 
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ secrets.PROD_AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
@@ -219,7 +219,7 @@ jobs:
           ref: ${{ inputs.version }}
 
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ secrets.PROD_AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
@@ -278,7 +278,7 @@ jobs:
           ref: ${{ inputs.version }}
 
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ secrets.PROD_AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
@@ -350,7 +350,7 @@ jobs:
           ref: ${{ inputs.version }}
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.11'
 
@@ -375,7 +375,7 @@ jobs:
       contents: read
     steps:
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ secrets.PROD_AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
