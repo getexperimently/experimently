@@ -1,26 +1,34 @@
 # .NET SDK
 
-The .NET SDK provides feature flag evaluation, experiment variant assignment, and event tracking for .NET applications. It targets `netstandard2.1` and `net6.0`, uses `System.Text.Json` for zero-dependency serialisation, `HttpClient` for network calls, and maintains an LRU cache with configurable TTL for low-latency repeated evaluations.
+`ExperimentationPlatform.SDK` (v0.2) provides feature flag evaluation, experiment assignment and
+event tracking for .NET applications. It targets `netstandard2.1` and `net6.0`, uses
+`System.Text.Json` and `HttpClient`, and has no other dependencies.
+
+Flag evaluation and experiment assignment are decided **by the server**: every call goes to the
+public API with your `X-API-Key`, the server buckets the user (sticky per user + experiment), and
+the SDK caches the answer per user + key. Nothing is bucketed locally.
+
+Source: `sdk/dotnet`.
 
 ---
 
 ## Requirements
 
-- .NET Standard 2.1 compatible runtime, or .NET 6.0+
-- No additional NuGet dependencies beyond the SDK itself
+- .NET 6.0+ runtime, or any `netstandard2.1`-compatible runtime (.NET Core 3.0+, Mono 6.4+)
+- .NET 6+ SDK to build, test or run the examples
 
 ---
 
 ## Installation
 
 ```bash
-dotnet add package Experimently.SDK
+dotnet add package ExperimentationPlatform.SDK
 ```
 
-Or add to your `.csproj`:
+Or reference the project directly from a checkout:
 
 ```xml
-<PackageReference Include="Experimently.SDK" Version="1.*" />
+<ProjectReference Include="../../sdk/dotnet/src/ExperimentationPlatform/ExperimentationPlatform.csproj" />
 ```
 
 ---
@@ -28,20 +36,27 @@ Or add to your `.csproj`:
 ## Quick Start
 
 ```csharp
-using Experimently;
+using ExperimentationPlatform;
 
-await using var client = new ExperimentlyClient(new SdkConfig
+var config = new SdkConfig(
+    baseUrl: Environment.GetEnvironmentVariable("EXPERIMENTLY_API_URL") ?? "http://localhost:8000",
+    apiKey:  Environment.GetEnvironmentVariable("EXPERIMENTLY_API_KEY")!);
+
+using var client = new ExperimentationClient(config);
+
+var flag = await client.EvaluateFlagAsync("new-checkout", "user-123");
+if (flag.Enabled)
 {
-    BaseUrl = "https://api.example.com",
-    ApiKey  = Environment.GetEnvironmentVariable("EXPERIMENTLY_API_KEY")!,
-});
-
-bool enabled = await client.EvaluateFlagAsync("new-checkout", "user-123", defaultValue: false);
-
-if (enabled)
-{
-    // show new checkout experience
+    ShowNewCheckout();
 }
+
+var assignment = await client.GetAssignmentAsync("checkout-cta-copy", "user-123",
+    new Dictionary<string, object> { ["plan"] = "pro" });
+var headline = assignment?.Configuration?.GetProperty("headline").GetString() ?? "Buy now";
+
+await client.TrackAsync("purchase", "user-123",
+    properties: new Dictionary<string, object> { ["sku"] = "pro-plan" },
+    experimentKey: "checkout-cta-copy", value: 99.99);
 ```
 
 ---
@@ -49,267 +64,295 @@ if (enabled)
 ## Configuration
 
 ```csharp
-var config = new SdkConfig
+var config = new SdkConfig("http://localhost:8000", "your-api-key")   // origin only; the SDK appends /api/v1/...
 {
-    BaseUrl   = "https://api.example.com",  // Required
-    ApiKey    = "your-api-key",             // Required
-    CacheTtl  = TimeSpan.FromSeconds(60),   // Default: 60 s
-    Timeout   = TimeSpan.FromSeconds(5),    // Default: 5 s
-    CacheSize = 1000,                       // Maximum LRU cache entries (default: 1000)
+    CacheTtlSeconds = 300,   // Seconds a successful result is reused (default 300)
+    TimeoutSeconds  = 10,    // Timeout of the SDK-created HttpClient (default 10)
+    MaxCacheSize    = 1000,  // Maximum entries per cache, oldest evicted (default 1000)
 };
 
-await using var client = new ExperimentlyClient(config);
+using var client = new ExperimentationClient(config);
+// or, with your own HttpClient (IHttpClientFactory, tests):
+using var client2 = new ExperimentationClient(config, httpClient);
 ```
 
-| Property | Type | Default | Description |
-|----------|------|---------|-------------|
-| `BaseUrl` | `string` | *(required)* | Base URL of the platform API |
-| `ApiKey` | `string` | *(required)* | API key for SDK authentication |
-| `CacheTtl` | `TimeSpan` | `60s` | Time before a cached evaluation expires |
-| `Timeout` | `TimeSpan` | `5s` | HTTP request timeout |
-| `CacheSize` | `int` | `1000` | Maximum number of entries in the LRU cache |
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `baseUrl` (ctor) | `string` | *(required)* | Backend origin, e.g. `https://api.example.com`; a trailing `/` is trimmed |
+| `apiKey` (ctor) | `string` | *(required)* | API key sent as `X-API-Key` on every request |
+| `CacheTtlSeconds` | `int` | `300` | How long a successful evaluation/assignment is reused per user + key |
+| `TimeoutSeconds` | `int` | `10` | `HttpClient.Timeout` for the client the SDK creates (an injected `HttpClient` keeps its own) |
+| `MaxCacheSize` | `int` | `1000` | Maximum entries in each of the two caches (evaluations, assignments) |
 
-The `ExperimentlyClient` implements both `IDisposable` and `IAsyncDisposable`. Prefer `await using` in async contexts so the client flushes pending events before disposal.
+`SdkConfig` throws `ArgumentException` for an empty `baseUrl`/`apiKey`. `ExperimentationClient`
+is thread-safe and meant to be shared (one instance per process). Dispose it to release the
+`HttpClient` it created; an injected `HttpClient` is never mutated or disposed.
 
 ---
 
 ## Feature Flag Evaluation
 
-### `EvaluateFlagAsync`
+### `Task<FlagEvaluationResult> EvaluateFlagAsync(string flagKey, string userId, Dictionary<string, object>? attributes = null)`
 
-Returns the flag value for the given user. Returns `defaultValue` on any error so your application always has a safe fallback.
+Calls `GET /api/v1/feature-flags/evaluate/{flagKey}?user_id=…` (both values percent-encoded) and
+returns a `FlagEvaluationResult`. `attributes` is accepted for source compatibility but not sent —
+the evaluate endpoint only takes the user id.
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `Key` | `string` | The flag key you asked for |
+| `Enabled` | `bool` | Server decision for this user (`false` on any failure) |
+| `Config` | `JsonElement?` | The flag's `config` payload as returned by the server (any JSON), `null` when absent |
 
 ```csharp
-bool enabled = await client.EvaluateFlagAsync("dark-mode", userId, defaultValue: false);
-
-if (enabled)
+var flag = await client.EvaluateFlagAsync("dark-mode", "user-456");
+if (flag.Enabled)
 {
-    RenderDarkMode();
+    var theme = flag.Config?.GetProperty("theme").GetString() ?? "dark";
 }
 ```
 
-Pass user attributes for server-side targeting rules:
-
-```csharp
-bool enabled = await client.EvaluateFlagAsync(
-    flagKey:      "enterprise-dashboard",
-    userId:       userId,
-    defaultValue: false,
-    attributes: new Dictionary<string, object>
-    {
-        ["plan"]    = "enterprise",
-        ["country"] = "US",
-        ["beta"]    = true,
-    }
-);
-```
+Never throws. On a network/HTTP failure (including 404 when the flag is not ACTIVE) a cached
+evaluation is returned when one exists; otherwise a disabled result
+(`FlagEvaluationResult.Disabled(flagKey)`). Failures are never cached, so the next call retries.
 
 ---
 
 ## Experiment Assignment
 
-### `GetAssignmentAsync`
+### `Task<Assignment?> GetAssignmentAsync(string experimentKey, string userId, Dictionary<string, object>? attributes = null)`
 
-Returns an `Assignment` record describing the variant assigned to the user.
-
-```csharp
-Assignment assignment = await client.GetAssignmentAsync("checkout-cta-copy", userId);
-
-string view = assignment.VariantKey switch
-{
-    "control"     => "Views/Checkout/Original",
-    "treatment-a" => "Views/Checkout/ShortCta",
-    "treatment-b" => "Views/Checkout/UrgencyCta",
-    _             => "Views/Checkout/Original",
-};
-```
-
-The `Assignment` record exposes:
+Calls `POST /api/v1/tracking/assign` with `{experiment_key, user_id, context: attributes}`. The
+server buckets the user, keeps the assignment sticky and records the exposure. `context` is
+omitted when `attributes` is `null`.
 
 | Property | Type | Description |
 |----------|------|-------------|
-| `VariantKey` | `string` | Assigned variant (e.g., `"control"`, `"treatment"`) |
 | `ExperimentKey` | `string` | The experiment key |
-| `ExperimentId` | `Guid` | UUID of the experiment |
-| `IsControl` | `bool` | `true` if this is the control variant |
+| `UserId` | `string` | The user that was assigned |
+| `VariantId` | `string?` | UUID of the assigned variant |
+| `VariantName` | `string` | Assigned variant name (e.g. `"control"`, `"treatment"`) |
+| `IsControl` | `bool` | `true` for the control variant |
+| `Configuration` | `JsonElement?` | The variant's `configuration` JSON from the experiment definition, `null` when absent |
+
+```csharp
+var assignment = await client.GetAssignmentAsync("checkout-cta-copy", "user-123",
+    new Dictionary<string, object> { ["plan"] = "pro", ["country"] = "US" });
+
+var view = assignment?.VariantName switch
+{
+    "treatment-a" => "Views/Checkout/ShortCta",
+    "treatment-b" => "Views/Checkout/UrgencyCta",
+    _             => "Views/Checkout/Original",   // control, or null on failure
+};
+```
+
+Never throws. Returns `null` on any failure (network error, 401, 404 when the experiment is not
+ACTIVE, 429); a cached assignment is returned when one exists. Failures are never cached.
 
 ---
 
 ## Event Tracking
 
-### `TrackAsync`
+### `Task<bool> TrackAsync(string eventName, string userId, Dictionary<string, object>? properties = null, string? experimentKey = null, string? featureFlagKey = null, double? value = null, string? eventType = null, DateTimeOffset? timestamp = null)`
 
-Records a conversion or behavioural event. Call after meaningful user actions such as purchases, sign-ups, or form submissions.
+Never throws. Returns `true` when every request succeeded (or nothing had to be sent), `false`
+otherwise. A `TrackAsync(TrackEvent)` overload takes a prebuilt event with the same fields.
 
 ```csharp
-await client.TrackAsync("purchase", userId, new Dictionary<string, object>
+await client.TrackAsync("purchase", "user-123", new Dictionary<string, object> { ["sku"] = "pro-plan" },
+    experimentKey: "checkout-cta-copy", value: 99.99);
+await client.TrackAsync("search", "user-123", featureFlagKey: "new-search");
+await client.TrackAsync("page_view", "user-123", new Dictionary<string, object> { ["page"] = "/products" });   // no key: fanned out
+```
+
+**Fan-out rule.** With `experimentKey` and/or `featureFlagKey` the SDK sends one
+`POST /api/v1/tracking/track`. Without a key it sends one `POST /api/v1/tracking/batch`
+containing one entry per experiment the user has been assigned to through this client plus one
+per flag evaluated for the user (from the cache). If nothing is cached, nothing is sent and
+`true` is returned. This is what makes a single `TrackAsync("purchase", …)` count as a conversion
+for every experiment the user is in.
+
+Conversions are matched to metrics by **event name**: an experiment metric whose `event_name` is
+`purchase` counts every `purchase` event, whatever `event_type` was sent. `properties` is sent as
+`metadata`; `eventType` defaults to `eventName`; `timestamp` is sent as ISO-8601 UTC when given
+(the server stamps the event otherwise).
+
+Because the cache lives in the `ExperimentationClient` instance, the key-less fan-out only sees
+assignments and flags evaluated through that instance within `CacheTtlSeconds`. Pass the key
+explicitly when tracking from another process (a queue worker, a webhook handler).
+
+### `Task<bool> TrackBatchAsync(IEnumerable<TrackEvent> events)`
+
+Sends up to 100 events per `POST /api/v1/tracking/batch` (longer lists are chunked). Events with
+a key are sent as-is; events without a key are fanned out like `TrackAsync`. Returns `false` if
+any chunk failed. Never throws.
+
+```csharp
+bool ok = await client.TrackBatchAsync(new[]
 {
-    ["amount"]   = 99.99,
-    ["currency"] = "USD",
-    ["sku"]      = "pro-plan",
+    new TrackEvent { UserId = "user-123", EventName = "purchase", ExperimentKey = "checkout-cta-copy", Value = 99.99 },
+    new TrackEvent { UserId = "user-123", EventName = "search",   FeatureFlagKey = "new-search" },
 });
 ```
-
-Fire-and-forget variant (non-blocking):
-
-```csharp
-client.TrackFireAndForget("page_view", userId);
-```
-
-`TrackFireAndForget` enqueues the event internally and returns immediately. Call `DisposeAsync()` (or `await using`) before process exit to ensure the buffer is flushed.
 
 ---
 
-## Dependency Injection (ASP.NET Core)
+## Cache helpers
 
-### Register the Client
+| Method | Description |
+|--------|-------------|
+| `IReadOnlyList<Assignment> GetAssignments(string userId)` | Cached (successful, unexpired) assignments for the user, oldest first |
+| `IReadOnlyList<string> GetEvaluatedFlags(string userId)` | Keys of flags successfully evaluated (and still cached) for the user |
+| `void ClearCache()` | Drop every cached evaluation and assignment |
+
+Both caches are in-memory, keyed by user + key, TTL-expiring, capped at `MaxCacheSize` (oldest
+entry evicted) and guarded by locks.
+
+---
+
+## Backend endpoints used
+
+Every request carries `X-API-Key` and `Accept: application/json`; POSTs carry
+`Content-Type: application/json`.
+
+| SDK call | Method and path | Body / query | Response used |
+|---|---|---|---|
+| `EvaluateFlagAsync` | `GET /api/v1/feature-flags/evaluate/{flag_key}?user_id=…` | — | `{key, enabled, config}`; 404 when the flag is not ACTIVE |
+| `GetAssignmentAsync` | `POST /api/v1/tracking/assign` | `{experiment_key, user_id, context?}` | `{experiment_key, user_id, variant_id, variant_name, is_control, configuration}`; 404 when the experiment is not ACTIVE |
+| `TrackAsync` with a key | `POST /api/v1/tracking/track` | `{event_type, event_name, user_id, experiment_key?, feature_flag_key?, value?, metadata?, timestamp?}` | ignored |
+| `TrackAsync` without keys, `TrackBatchAsync` | `POST /api/v1/tracking/batch` | `{events: [<track body>, …]}` (max 100 per request) | ignored (status only) |
+
+These SDK paths share a per-IP rate-limit ceiling of `SDK_RATE_LIMIT_PER_MINUTE` requests
+(default 6000) on the backend; a `429` is surfaced as a failure (disabled flag / `null` / `false`).
+
+---
+
+## Error Handling
+
+The public `ExperimentationClient` methods never throw on network or HTTP errors. Only the
+low-level `ExperimentationHttpClient` throws:
+
+| Exception | Extends | When |
+|-----------|---------|------|
+| `ExperimentationPlatform.Exceptions.ExperimentationException` | `Exception` | Base class |
+| `ExperimentationPlatform.Exceptions.NetworkException` | `ExperimentationException` | `HttpRequestException`, timeouts (`TaskCanceledException`) |
+| `ExperimentationPlatform.Exceptions.ApiException` (`StatusCode`, `ResponseBody`) | `ExperimentationException` | Other 4xx/5xx (404 not ACTIVE, 422 validation, 429 rate limited) or an undecodable body |
+| `ExperimentationPlatform.Exceptions.AuthException` | `ExperimentationException` | HTTP 401 — invalid API key |
+
+---
+
+## Consistent Hash Utility
+
+`FeatureFlagEvaluator.HashUser(string userId, string flagKey)` implements the cross-SDK formula —
+`MD5("{userId}:{flagKey}")`, first 4 bytes as little-endian uint32, divided by 2^32 — and is
+pinned by the golden-vector tests in `tests/sdk-contract/`:
+
+```csharp
+FeatureFlagEvaluator.HashUser("user-123", "my-flag");   // 0.6927449859213084
+```
+
+It is exported as a utility only. Since assignment moved to the server, nothing in the SDK uses it
+to decide a variant.
+
+---
+
+## ASP.NET Core Integration
+
+Register one client as a singleton; the SDK has no DI extension of its own, so use the standard
+`IServiceCollection` APIs:
 
 ```csharp
 // Program.cs
-builder.Services.AddExperimently(options =>
+builder.Services.AddHttpClient("experimently", http => http.Timeout = TimeSpan.FromSeconds(5));
+builder.Services.AddSingleton(sp =>
 {
-    options.BaseUrl  = builder.Configuration["Experimently:BaseUrl"]!;
-    options.ApiKey   = builder.Configuration["Experimently:ApiKey"]!;
-    options.CacheTtl = TimeSpan.FromSeconds(30);
+    var cfg = builder.Configuration.GetSection("Experimently");
+    var http = sp.GetRequiredService<IHttpClientFactory>().CreateClient("experimently");
+    return new ExperimentationClient(
+        new SdkConfig(cfg["BaseUrl"]!, cfg["ApiKey"]!) { CacheTtlSeconds = cfg.GetValue("CacheTtlSeconds", 300) },
+        http);
 });
 ```
-
-The `AddExperimently` extension registers `IExperimentlyClient` as a singleton and wires up graceful shutdown via `IHostApplicationLifetime`.
-
-### Inject into Controllers
 
 ```csharp
 [ApiController]
 [Route("api/[controller]")]
 public class CheckoutController : ControllerBase
 {
-    private readonly IExperimentlyClient _exp;
-
-    public CheckoutController(IExperimentlyClient exp)
-    {
-        _exp = exp;
-    }
+    private readonly ExperimentationClient _experiments;
+    public CheckoutController(ExperimentationClient experiments) => _experiments = experiments;
 
     [HttpGet]
     public async Task<IActionResult> Get()
     {
-        string userId = User.FindFirst("sub")?.Value ?? "anonymous";
-
-        bool newFlow = await _exp.EvaluateFlagAsync("new-checkout", userId, false);
-        var  assignment = await _exp.GetAssignmentAsync("checkout-cta-test", userId);
-
-        await _exp.TrackAsync("checkout_view", userId);
-
-        return Ok(new { newFlow, cta = assignment.VariantKey });
+        var userId = User.FindFirst("sub")?.Value ?? "anonymous";
+        var newFlow = (await _experiments.EvaluateFlagAsync("new-checkout", userId)).Enabled;
+        var assignment = await _experiments.GetAssignmentAsync("checkout-cta-test", userId);
+        await _experiments.TrackAsync("checkout_view", userId);   // fans out to the assignment + flag above
+        return Ok(new { newFlow, cta = assignment?.VariantName ?? "control" });
     }
 }
 ```
-
-### appsettings.json
 
 ```json
 {
-  "Experimently": {
-    "BaseUrl": "https://api.example.com",
-    "ApiKey":  "your-api-key",
-    "CacheTtlSeconds": 30,
-    "TimeoutSeconds":  5
-  }
+  "Experimently": { "BaseUrl": "https://api.example.com", "ApiKey": "your-api-key", "CacheTtlSeconds": 300 }
 }
 ```
 
 ---
 
-## Consistent Hash Algorithm
+## Testing your own code
 
-Variant assignment uses MD5-based consistent hashing. The hash input is the string `"{userId}:{flagKey}"`. The first 4 bytes of the MD5 digest are converted to a little-endian unsigned 32-bit integer with `BitConverter.ToUInt32`, then divided by `4294967296.0` to produce a value in `[0, 1)`.
+Inject an `HttpClient` built on a fake `HttpMessageHandler` — the SDK's own tests do exactly
+this (`sdk/dotnet/tests/ExperimentationPlatform.Tests/ExperimentationClientTests.cs`):
 
 ```csharp
-using System.Security.Cryptography;
-using System.Text;
-
-static double Bucket(string userId, string flagKey)
+sealed class CannedHandler : HttpMessageHandler
 {
-    byte[] input  = Encoding.UTF8.GetBytes($"{userId}:{flagKey}");
-    byte[] digest = MD5.HashData(input);
-    // BitConverter.ToUInt32 reads little-endian on all .NET platforms
-    uint value = BitConverter.ToUInt32(digest, 0);
-    return value / 4_294_967_296.0;
+    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct) =>
+        Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("{\"key\":\"new-checkout\",\"enabled\":true,\"config\":null}", Encoding.UTF8, "application/json")
+        });
 }
-```
 
-This algorithm is identical across all platform SDKs. A user bucketed server-side (.NET) will always fall in the same bucket as one evaluated in Go, Java, Ruby, PHP, or any other SDK.
-
----
-
-## LRU Cache
-
-The SDK maintains an internal LRU cache keyed by `(flagKey, userId)`. Cache entries expire after `CacheTtl`. The cache is thread-safe; concurrent reads do not block each other.
-
-To bypass the cache for a single call (e.g., in tests):
-
-```csharp
-bool enabled = await client.EvaluateFlagAsync(
-    "my-flag", userId, false, skipCache: true);
+var client = new ExperimentationClient(new SdkConfig("http://test", "k"), new HttpClient(new CannedHandler()));
+Assert.True((await client.EvaluateFlagAsync("new-checkout", "user-1")).Enabled);
 ```
 
 ---
 
-## Testing with xUnit
+## Contract smoke
 
-```csharp
-using Experimently.Testing;
-using Xunit;
+Runs the four contract steps (sticky assignment, flag evaluation, keyed track, key-less fan-out
+plus a 2-event batch) against a live backend and prints one JSON line:
 
-public class CheckoutControllerTests
-{
-    [Fact]
-    public async Task Shows_new_flow_when_flag_is_enabled()
-    {
-        var stub = new StubExperimentlyClient();
-        stub.SetFlag("new-checkout", true);
-        stub.SetVariant("cta-test", "treatment-b");
-
-        var controller = new CheckoutController(stub);
-        var result     = await controller.Get() as OkObjectResult;
-
-        Assert.NotNull(result);
-        dynamic body = result!.Value!;
-        Assert.True((bool)body.newFlow);
-        Assert.Equal("treatment-b", (string)body.cta);
-    }
-}
+```bash
+EXPERIMENTLY_API_KEY=<key> dotnet run --project sdk/dotnet/examples/ContractSmoke
+# {"sdk":"dotnet","assign":{"variant_name":"control","is_control":true,"sticky":true},"flag":{"enabled":true},"track":{"ok":true},"fanout":{"ok":true}}
 ```
 
-`StubExperimentlyClient` implements `IExperimentlyClient` and lets you pre-configure flag values and variant assignments without any HTTP calls.
+Env: `EXPERIMENTLY_API_URL` (default `http://localhost:8000`), `EXPERIMENTLY_API_KEY` (required),
+`CONTRACT_EXPERIMENT_KEY` (default `sdk_contract_ab`), `CONTRACT_FLAG_KEY` (default
+`sdk_contract_flag`), `CONTRACT_USER_ID` (default random `smoke-<guid>`). The program writes only
+that line to stdout (on first run `dotnet run` may print restore/build messages first; the live
+runner reads the last stdout line) and, on failure, one line to stderr with exit code 1. This is
+the command in `tests/sdk-contract/live/run_live_contract.py`.
+
+Verified against a live backend: **not yet (toolchain unavailable — no dotnet SDK on the development
+machine)**. The SDK, its tests and the smoke were reviewed by inspection only and were not compiled
+or executed here. Run `python tests/sdk-contract/live/run_live_contract.py --sdk dotnet --strict`
+on a machine with the .NET 6+ SDK.
 
 ---
 
-## Cleanup
+## Development
 
-`ExperimentlyClient` implements `IAsyncDisposable`:
-
-```csharp
-await using var client = new ExperimentlyClient(config);
-// ... use client ...
-// Disposal flushes pending events automatically
+```bash
+cd sdk/dotnet
+dotnet build                      # netstandard2.1 + net6.0
+dotnet test                       # xUnit, 89 tests by inspection (HTTP faked, no network)
+dotnet run --project examples/BasicUsage
 ```
-
-When using dependency injection, disposal is handled automatically by the ASP.NET Core host on shutdown.
-
----
-
-## SDK Compatibility
-
-All platform SDKs produce identical variant assignments for the same `(userId, flagKey)` pair.
-
-| SDK | Hash Algorithm | Assignment Parity |
-|-----|---------------|-------------------|
-| .NET | MD5 | Yes |
-| Ruby | MD5 | Yes |
-| PHP | MD5 | Yes |
-| Go | MD5 | Yes |
-| Java | MD5 | Yes |
-| Python | MD5 | Yes |
-| JavaScript | MD5 | Yes |
-| Elixir | MD5 | Yes |

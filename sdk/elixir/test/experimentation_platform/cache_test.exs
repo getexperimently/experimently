@@ -176,6 +176,51 @@ defmodule ExperimentationPlatform.CacheTest do
     end
   end
 
+  describe "list/3 (per-user listing used by the track fan-out)" do
+    test "returns live values whose key is {type, user_id, _}, oldest first", %{cache: cache} do
+      Cache.put(cache, {:flag, "user-1", "b-flag"}, :b)
+      Cache.put(cache, {:assignment, "user-1", "exp"}, :exp)
+      Cache.put(cache, {:flag, "user-1", "a-flag"}, :a)
+      Cache.put(cache, {:flag, "user-2", "c-flag"}, :c)
+
+      assert Cache.list(cache, :flag, "user-1") == [:b, :a]
+      assert Cache.list(cache, :assignment, "user-1") == [:exp]
+      assert Cache.list(cache, :flag, "user-2") == [:c]
+      assert Cache.list(cache, :assignment, "user-2") == []
+    end
+
+    test "returns [] for an unknown user or type", %{cache: cache} do
+      assert Cache.list(cache, :flag, "nobody") == []
+      assert Cache.list(cache, :other, "nobody") == []
+    end
+
+    test "ignores plain (non-tuple) keys", %{cache: cache} do
+      Cache.put(cache, "plain", "value")
+      assert Cache.list(cache, :flag, "plain") == []
+    end
+
+    test "skips and prunes expired entries", %{cache: cache} do
+      Cache.put(cache, {:flag, "user-1", "short"}, :short, 1)
+      Cache.put(cache, {:flag, "user-1", "long"}, :long)
+
+      assert Cache.list(cache, :flag, "user-1") == [:short, :long]
+
+      :timer.sleep(1_100)
+
+      assert Cache.list(cache, :flag, "user-1") == [:long]
+      assert Cache.size(cache) == 1
+    end
+
+    test "re-inserting a key moves it to the newest position", %{cache: cache} do
+      Cache.put(cache, {:flag, "user-1", "first"}, 1)
+      Cache.put(cache, {:flag, "user-1", "second"}, 2)
+      Cache.put(cache, {:flag, "user-1", "first"}, 3)
+
+      # seq is bumped on every write, so the refreshed entry moves last
+      assert Cache.list(cache, :flag, "user-1") == [2, 3]
+    end
+  end
+
   describe "max_cache_size eviction" do
     test "does not exceed max_cache_size", %{config: config} do
       small_config = %{config | max_cache_size: 5}

@@ -8,9 +8,10 @@
  *
  * The cache uses a simple Map and relies on wall-clock time for expiry.
  * Entries are lazily evicted on read (no background timers needed).
+ * Only successful server results are ever stored in it.
  */
 
-import type { CacheEntry } from './types';
+import type { CacheEntry } from './types.js';
 
 export class EdgeCache<T> {
   private readonly store = new Map<string, CacheEntry<T>>();
@@ -55,6 +56,23 @@ export class EdgeCache<T> {
    */
   delete(key: string): void {
     this.store.delete(key);
+  }
+
+  /**
+   * All live (non-expired) entries whose key starts with `prefix`, in
+   * insertion order. Expired entries encountered on the way are evicted.
+   */
+  entries(prefix = ''): Array<[string, T]> {
+    const now = Date.now();
+    const live: Array<[string, T]> = [];
+    for (const [key, entry] of this.store.entries()) {
+      if (now > entry.expiresAt) {
+        this.store.delete(key);
+      } else if (key.startsWith(prefix)) {
+        live.push([key, entry.value]);
+      }
+    }
+    return live;
   }
 
   /**

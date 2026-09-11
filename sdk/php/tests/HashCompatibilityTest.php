@@ -111,6 +111,13 @@ class HashCompatibilityTest extends TestCase
         $this->assertLessThan(1.0, $h);
     }
 
+    public function testLocalEvaluationWasRemoved(): void
+    {
+        // The server decides: the hash is exported as a utility only.
+        $this->assertFalse(method_exists(FeatureFlagEvaluator::class, 'evaluate'));
+        $this->assertTrue(method_exists(FeatureFlagEvaluator::class, 'hashUser'));
+    }
+
     public function testHashConsistencyAcrossMultipleCalls(): void
     {
         // Run 200 iterations to confirm no flakiness

@@ -1,51 +1,106 @@
 import com.experimentationplatform.android.*
+import kotlinx.coroutines.async
 import kotlinx.coroutines.test.runTest
+import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
+import okhttp3.mockwebserver.RecordedRequest
+import org.json.JSONObject
 import org.junit.jupiter.api.*
 import org.junit.jupiter.api.Assertions.*
+import java.util.concurrent.TimeUnit
 
 /**
- * Comprehensive test suite for the Experimentation Platform Android SDK.
+ * Test suite for the Experimentation Platform Android SDK against OkHttp's MockWebServer.
  *
  * Tests cover:
  * - SdkConfig defaults and custom values
- * - FlagCache: set/get, TTL expiry, LRU eviction, thread safety, clear
- * - FeatureFlagEvaluator: disabled, enabled, 0%/100%, rollout, variants, reasons
- * - ExperimentationClient: evaluateFlag, getAssignment, track, refreshFlags
- * - OfflineStore: save/load, saveAll/loadAll, clearAll
- * - Model JSON parsing: FeatureFlag, Assignment, TrackEvent
- * - Error scenarios: 404, server error, network error, offline fallback
+ * - ResultCache: set/get, TTL expiry, LRU eviction, prefix enumeration, thread safety
+ * - ExperimentationClient.evaluateFlag: exact request (encoded path + user_id query, headers),
+ *   response mapping, per user+key cache, TTL expiry, 404 / 401 / network failures,
+ *   offline fallback, failures never cached
+ * - ExperimentationClient.getAssignment: POST /api/v1/tracking/assign body, mapping,
+ *   sticky cache hit, 404, offline fallback
+ * - ExperimentationClient.track / trackBatch: /tracking/track body, /tracking/batch fan-out,
+ *   nothing cached -> no request, chunking at 100, never throws
+ * - OfflineStore: per user+key persistence of evaluations and assignments
+ * - Model JSON parsing / serialization
  */
-@TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class ExperimentationClientTest {
 
     private lateinit var server: MockWebServer
     private lateinit var client: ExperimentationClient
-    private lateinit var cache: FlagCache
+    private lateinit var flagCache: ResultCache<EvalResult>
+    private lateinit var assignmentCache: ResultCache<Assignment>
     private lateinit var offlineStore: OfflineStore
+
+    private val assignJson = """{"experiment_key":"checkout_flow","user_id":"user-1",""" +
+        """"variant_id":"8b6f1c2e-0000-4000-8000-000000000001","variant_name":"treatment",""" +
+        """"is_control":false,"configuration":{"headline":"Buy now","discount":10}}"""
 
     // ---- Setup/Teardown ----
 
-    @BeforeAll
-    fun setupServer() {
+    @BeforeEach
+    fun setUp() {
         server = MockWebServer()
         server.start()
-    }
-
-    @BeforeEach
-    fun setupClient() {
-        cache = FlagCache(maxSize = 100, ttlMs = 300_000L)
+        flagCache = ResultCache(maxSize = 100, ttlMs = 300_000L)
+        assignmentCache = ResultCache(maxSize = 100, ttlMs = 300_000L)
         offlineStore = OfflineStore()
-        val baseUrl = server.url("/").toString().trimEnd('/')
-        val config = SdkConfig(baseUrl = baseUrl, apiKey = "test-key")
-        val httpClient = HttpClient(baseUrl, "test-key", 5_000L)
-        client = ExperimentationClient(config, httpClient, cache, offlineStore)
+        client = newClient(cacheTtlMs = 300_000L)
     }
 
-    @AfterAll
+    @AfterEach
     fun tearDown() {
+        client.close()
         server.shutdown()
+    }
+
+    private fun newClient(cacheTtlMs: Long): ExperimentationClient {
+        val baseUrl = server.url("/").toString().trimEnd('/')
+        val config = SdkConfig(baseUrl = baseUrl, apiKey = "test-key", cacheTtlMs = cacheTtlMs)
+        val httpClient = HttpClient(baseUrl, "test-key", 5_000L)
+        if (cacheTtlMs != 300_000L) {
+            flagCache = ResultCache(maxSize = 100, ttlMs = cacheTtlMs)
+            assignmentCache = ResultCache(maxSize = 100, ttlMs = cacheTtlMs)
+        }
+        return ExperimentationClient(config, httpClient, flagCache, assignmentCache, offlineStore)
+    }
+
+    private fun unreachableClient(): ExperimentationClient =
+        ExperimentationClient(SdkConfig(baseUrl = "http://127.0.0.1:1", apiKey = "k", timeoutMs = 500L))
+
+    private fun json(code: Int, body: String): MockResponse =
+        MockResponse().setResponseCode(code).setHeader("Content-Type", "application/json").setBody(body)
+
+    private fun flagJson(key: String, enabled: Boolean, config: String = "null"): String =
+        """{"key":"$key","enabled":$enabled,"config":$config}"""
+
+    private fun takeRequest(): RecordedRequest {
+        val request = server.takeRequest(2, TimeUnit.SECONDS)
+        assertNotNull(request, "expected a request to reach the server")
+        return request!!
+    }
+
+    private fun bodyOf(request: RecordedRequest): JSONObject = JSONObject(request.body.readUtf8())
+
+    /** Routes by path so multi-request scenarios do not depend on enqueue order. */
+    private fun routeByPath() {
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                val path = request.path ?: return MockResponse().setResponseCode(404)
+                return when {
+                    path == "/api/v1/tracking/assign" -> json(200, assignJson)
+                    path.startsWith("/api/v1/feature-flags/evaluate/") -> {
+                        val key = path.removePrefix("/api/v1/feature-flags/evaluate/").substringBefore('?')
+                        json(200, flagJson(key, true))
+                    }
+                    path == "/api/v1/tracking/track" -> json(200, """{"id":"evt-1"}""")
+                    path == "/api/v1/tracking/batch" -> json(200, """{"success_count":1,"failure_count":0,"errors":null}""")
+                    else -> json(404, """{"detail":"no route"}""")
+                }
+            }
+        }
     }
 
     // ============================
@@ -60,7 +115,6 @@ class ExperimentationClientTest {
         assertEquals(10_000L, config.timeoutMs)
         assertEquals(1000, config.cacheSize)
         assertEquals(300_000L, config.cacheTtlMs)
-        assertTrue(config.enableLocalEval)
     }
 
     @Test
@@ -70,33 +124,23 @@ class ExperimentationClientTest {
             apiKey = "custom-key",
             timeoutMs = 5_000L,
             cacheSize = 500,
-            cacheTtlMs = 60_000L,
-            enableLocalEval = false
+            cacheTtlMs = 60_000L
         )
         assertEquals("https://api.example.com", config.baseUrl)
         assertEquals("custom-key", config.apiKey)
         assertEquals(5_000L, config.timeoutMs)
         assertEquals(500, config.cacheSize)
         assertEquals(60_000L, config.cacheTtlMs)
-        assertFalse(config.enableLocalEval)
-    }
-
-    @Test
-    fun `config with empty apiKey is valid`() {
-        val config = SdkConfig(apiKey = "")
-        assertEquals("", config.apiKey)
-        assertNotNull(config)
     }
 
     // ============================
-    // Cache tests
+    // ResultCache tests
     // ============================
 
     @Test
     fun `cache set and get returns correct value`() {
-        val flag = makeFlag("flag-a", true, 100.0)
-        cache.set("flag-a", flag)
-        val result = cache.get("flag-a")
+        flagCache.set("k", EvalResult("flag-a", true))
+        val result = flagCache.get("k")
         assertNotNull(result)
         assertEquals("flag-a", result!!.key)
         assertTrue(result.enabled)
@@ -104,50 +148,69 @@ class ExperimentationClientTest {
 
     @Test
     fun `cache returns null on miss`() {
-        val result = cache.get("nonexistent-flag")
-        assertNull(result)
+        assertNull(flagCache.get("nonexistent"))
     }
 
     @Test
-    fun `cache respects TTL expiry`() {
-        val shortCache = FlagCache(maxSize = 100, ttlMs = 1L) // 1ms TTL
-        val flag = makeFlag("flag-b", true, 50.0)
-        shortCache.set("flag-b", flag)
+    fun `cache respects TTL expiry and removes expired entries`() {
+        val shortCache = ResultCache<EvalResult>(maxSize = 100, ttlMs = 1L)
+        shortCache.set("k", EvalResult("flag-b", true))
         Thread.sleep(10)
-        assertNull(shortCache.get("flag-b"), "Entry should be expired after TTL")
+        assertNull(shortCache.get("k"), "Entry should be expired after TTL")
+        assertEquals(0, shortCache.size(), "Expired entry removed on access")
     }
 
     @Test
     fun `cache LRU eviction removes eldest entry`() {
-        val smallCache = FlagCache(maxSize = 3, ttlMs = 300_000L)
-        smallCache.set("a", makeFlag("a", true, 100.0))
-        smallCache.set("b", makeFlag("b", true, 100.0))
-        smallCache.set("c", makeFlag("c", true, 100.0))
-        // Access "a" to make it recently used
-        smallCache.get("a")
-        // Adding "d" should evict "b" (LRU)
-        smallCache.set("d", makeFlag("d", true, 100.0))
-        // "a", "c", "d" should survive; "b" evicted
-        assertNotNull(smallCache.get("a"), "a was accessed recently, should survive")
+        val smallCache = ResultCache<String>(maxSize = 3, ttlMs = 300_000L)
+        smallCache.set("a", "1")
+        smallCache.set("b", "2")
+        smallCache.set("c", "3")
+        smallCache.get("a") // make "a" recently used
+        smallCache.set("d", "4") // evicts "b"
+        assertNull(smallCache.get("b"), "b was least recently used and should be evicted")
+        assertNotNull(smallCache.get("a"))
         assertNotNull(smallCache.get("c"))
         assertNotNull(smallCache.get("d"))
     }
 
     @Test
-    fun `cache clear removes all entries`() {
-        cache.set("x", makeFlag("x", true, 100.0))
-        cache.set("y", makeFlag("y", true, 100.0))
-        cache.clear()
-        assertNull(cache.get("x"))
-        assertNull(cache.get("y"))
+    fun `cache clear and remove`() {
+        flagCache.set("x", EvalResult("x", true))
+        flagCache.set("y", EvalResult("y", true))
+        assertEquals(2, flagCache.size())
+        flagCache.remove("x")
+        assertNull(flagCache.get("x"))
+        assertEquals(1, flagCache.size())
+        flagCache.clear()
+        assertNull(flagCache.get("y"))
+        assertEquals(0, flagCache.size())
+    }
+
+    @Test
+    fun `cache valuesWithPrefix returns live values for that prefix only`() {
+        val shortCache = ResultCache<String>(maxSize = 100, ttlMs = 50L)
+        shortCache.set(ResultCache.key("user-1", "expired"), "expired")
+        Thread.sleep(100)
+        shortCache.set(ResultCache.key("user-1", "b"), "b")
+        shortCache.set(ResultCache.key("user-1", "c"), "c")
+        shortCache.set(ResultCache.key("user-10", "a"), "other-user")
+
+        assertEquals(listOf("b", "c"), shortCache.valuesWithPrefix(ResultCache.userPrefix("user-1")))
+        assertEquals(listOf("other-user"), shortCache.valuesWithPrefix(ResultCache.userPrefix("user-10")))
+        assertTrue(shortCache.valuesWithPrefix(ResultCache.userPrefix("user-2")).isEmpty())
+        assertEquals(3, shortCache.size(), "expired entry removed during the scan")
     }
 
     @Test
     fun `cache is thread safe under concurrent access`() {
         val threads = (1..20).map { i ->
             Thread {
-                cache.set("flag-$i", makeFlag("flag-$i", true, 50.0))
-                cache.get("flag-$i")
+                repeat(50) {
+                    flagCache.set("flag-$i", EvalResult("flag-$i", true))
+                    flagCache.get("flag-$i")
+                    flagCache.valuesWithPrefix("flag-")
+                }
             }
         }
         threads.forEach { it.start() }
@@ -155,188 +218,158 @@ class ExperimentationClientTest {
         // No exception = thread safe
     }
 
-    @Test
-    fun `cache size reflects stored entries`() {
-        val freshCache = FlagCache()
-        assertEquals(0, freshCache.size())
-        freshCache.set("k1", makeFlag("k1", true, 100.0))
-        freshCache.set("k2", makeFlag("k2", false, 0.0))
-        assertEquals(2, freshCache.size())
-        freshCache.remove("k1")
-        assertEquals(1, freshCache.size())
-    }
-
-    @Test
-    fun `cache remove deletes specific key`() {
-        cache.set("flag-rm", makeFlag("flag-rm", true, 100.0))
-        assertNotNull(cache.get("flag-rm"))
-        cache.remove("flag-rm")
-        assertNull(cache.get("flag-rm"))
-    }
-
-    // ============================
-    // FeatureFlagEvaluator tests
-    // ============================
-
-    @Test
-    fun `evaluate disabled flag returns disabled with reason`() {
-        val flag = makeFlag("f", false, 100.0)
-        val result = FeatureFlagEvaluator.evaluate(flag, User("user-1"))
-        assertFalse(result.enabled)
-        assertEquals("flag_disabled", result.reason)
-    }
-
-    @Test
-    fun `evaluate enabled flag at 100 percent returns enabled`() {
-        val flag = makeFlag("f", true, 100.0)
-        val result = FeatureFlagEvaluator.evaluate(flag, User("user-1"))
-        assertTrue(result.enabled)
-        assertEquals("in_rollout", result.reason)
-    }
-
-    @Test
-    fun `evaluate enabled flag at 0 percent returns disabled`() {
-        val flag = makeFlag("f", true, 0.0)
-        val result = FeatureFlagEvaluator.evaluate(flag, User("user-1"))
-        assertFalse(result.enabled)
-        assertEquals("out_of_rollout", result.reason)
-    }
-
-    @Test
-    fun `evaluate 50 percent rollout distributes roughly half enabled`() {
-        val flag = makeFlag("rollout-test", true, 50.0)
-        var enabled = 0
-        for (i in 0 until 1000) {
-            if (FeatureFlagEvaluator.evaluate(flag, User("u$i")).enabled) enabled++
-        }
-        assertTrue(enabled in 400..600, "Expected ~500 enabled out of 1000, got $enabled")
-    }
-
-    @Test
-    fun `evaluate with variants returns variant_assigned reason`() {
-        val flag = FeatureFlag(
-            key = "varflag",
-            enabled = true,
-            rolloutPercentage = 100.0,
-            variants = listOf(
-                Variant("control", 0.5),
-                Variant("treatment", 0.5)
-            )
-        )
-        val result = FeatureFlagEvaluator.evaluate(flag, User("user-42"))
-        assertTrue(result.enabled)
-        assertEquals("variant_assigned", result.reason)
-        assertNotNull(result.variantKey)
-        assertTrue(result.variantKey in listOf("control", "treatment"))
-    }
-
-    @Test
-    fun `evaluate disabled flag returns null variantKey`() {
-        val flag = makeFlag("f", false, 100.0)
-        val result = FeatureFlagEvaluator.evaluate(flag, User("u"))
-        assertNull(result.variantKey)
-    }
-
-    @Test
-    fun `evaluate variant assignment is deterministic`() {
-        val flag = FeatureFlag(
-            key = "det-flag",
-            enabled = true,
-            rolloutPercentage = 100.0,
-            variants = listOf(Variant("a", 0.5), Variant("b", 0.5))
-        )
-        val r1 = FeatureFlagEvaluator.evaluate(flag, User("user-xyz"))
-        val r2 = FeatureFlagEvaluator.evaluate(flag, User("user-xyz"))
-        assertEquals(r1.variantKey, r2.variantKey)
-    }
-
-    @Test
-    fun `evaluate out of rollout returns disabled even when flag enabled`() {
-        // User "definitely-out" should have hash >= 0.01 (1% rollout)
-        val flag = makeFlag("tiny-rollout", true, 1.0)
-        var disabledCount = 0
-        for (i in 0 until 100) {
-            if (!FeatureFlagEvaluator.evaluate(flag, User("out-user-$i")).enabled) disabledCount++
-        }
-        assertTrue(disabledCount > 80, "Most users should be out of 1% rollout")
-    }
-
     // ============================
     // Client evaluateFlag tests
     // ============================
 
     @Test
-    fun `evaluateFlag returns enabled for in-rollout user`() = runTest {
-        server.enqueue(MockResponse().setBody(flagJson("test-flag", true, 100.0)).setResponseCode(200))
-        val result = client.evaluateFlag("test-flag", User("user-1"))
+    fun `evaluateFlag sends GET with encoded key, user_id query and headers`() = runTest {
+        server.enqueue(json(200, flagJson("new search/v2", true, """{"variant":"blue","limit":3}""")))
+
+        val result = client.evaluateFlag("new search/v2", User("user 1&2"))
+
+        val request = takeRequest()
+        assertEquals("GET", request.method)
+        assertEquals("/api/v1/feature-flags/evaluate/new%20search%2Fv2?user_id=user%201%262", request.path)
+        assertEquals("user 1&2", request.requestUrl!!.queryParameter("user_id"))
+        assertEquals(0L, request.bodySize, "GET must have no body")
+        assertEquals("test-key", request.getHeader("X-API-Key"))
+        assertEquals("application/json", request.getHeader("Accept"))
+        assertEquals("application/json", request.getHeader("Content-Type"))
+        assertNull(request.getHeader("Authorization"), "legacy Authorization header must not be sent")
+
+        assertEquals("new search/v2", result.key)
         assertTrue(result.enabled)
+        assertEquals("blue", result.configMap!!["variant"])
+        assertEquals(3, result.configMap!!["limit"])
+        assertEquals("blue", result.variant)
     }
 
     @Test
-    fun `evaluateFlag returns disabled for disabled flag`() = runTest {
-        server.enqueue(MockResponse().setBody(flagJson("off-flag", false, 100.0)).setResponseCode(200))
+    fun `evaluateFlag maps a disabled flag with null config`() = runTest {
+        server.enqueue(json(200, flagJson("off-flag", false)))
         val result = client.evaluateFlag("off-flag", User("user-1"))
         assertFalse(result.enabled)
-        assertEquals("flag_disabled", result.reason)
+        assertNull(result.config)
+        assertNull(result.configMap)
+        assertNull(result.variant)
+    }
+
+    @Test
+    fun `evaluateFlag keeps a non-object config as the raw value`() = runTest {
+        server.enqueue(json(200, flagJson("string-config", true, "\"just-a-string\"")))
+        val result = client.evaluateFlag("string-config", User("user-1"))
+        assertTrue(result.enabled)
+        assertEquals("just-a-string", result.config)
+        assertNull(result.configMap)
+        assertEquals("on", result.variant)
+    }
+
+    @Test
+    fun `evaluateFlag falls back to the requested key when the response omits it`() = runTest {
+        server.enqueue(json(200, """{"enabled":true}"""))
+        val result = client.evaluateFlag("no-key-in-body", User("user-1"))
+        assertEquals("no-key-in-body", result.key)
     }
 
     @Test
     fun `evaluateFlag uses cache on second call without hitting server`() = runTest {
-        server.enqueue(MockResponse().setBody(flagJson("cached-flag", true, 100.0)).setResponseCode(200))
-        // First call: fetches from server
-        client.evaluateFlag("cached-flag", User("user-1"))
-        // Second call: should use cache (no server request queued)
-        val result = client.evaluateFlag("cached-flag", User("user-1"))
-        assertTrue(result.enabled)
-        // Only 1 request should have been made
+        server.enqueue(json(200, flagJson("cached-flag", true)))
+        repeat(3) { assertTrue(client.evaluateFlag("cached-flag", User("user-1")).enabled) }
         assertEquals(1, server.requestCount)
     }
 
     @Test
-    fun `evaluateFlag falls back to offline store on network error`() = runTest {
-        // Pre-populate offline store
-        val flag = makeFlag("offline-flag", true, 100.0)
-        offlineStore.saveFlag(flag)
-        // Server returns error
-        server.enqueue(MockResponse().setResponseCode(503))
-        val result = client.evaluateFlag("offline-flag", User("user-1"))
-        assertTrue(result.enabled, "Should use offline fallback")
+    fun `evaluateFlag caches per user and key`() = runTest {
+        routeByPath()
+        client.evaluateFlag("f", User("u1"))
+        client.evaluateFlag("f", User("u2"))
+        client.evaluateFlag("g", User("u1"))
+        client.evaluateFlag("f", User("u1"))
+        assertEquals(3, server.requestCount)
     }
 
     @Test
-    fun `evaluateFlag throws FlagNotFoundException when not found and no offline data`() = runTest {
-        server.enqueue(MockResponse().setResponseCode(404).setBody("{\"detail\":\"Not found\"}"))
+    fun `evaluateFlag re-fetches after the cache TTL expires`() = runTest {
+        routeByPath()
+        val shortTtl = newClient(cacheTtlMs = 50L)
+        shortTtl.evaluateFlag("ttl-flag", User("user-ttl"))
+        shortTtl.evaluateFlag("ttl-flag", User("user-ttl"))
+        Thread.sleep(100)
+        shortTtl.evaluateFlag("ttl-flag", User("user-ttl"))
+        assertEquals(2, server.requestCount)
+    }
+
+    @Test
+    fun `evaluateFlag throws FlagNotFoundException on 404 and does not cache the failure`() = runTest {
+        server.enqueue(json(404, """{"detail":"Feature flag not found"}"""))
+        server.enqueue(json(404, """{"detail":"Feature flag not found"}"""))
         assertThrows<ExperimentationException.FlagNotFoundException> {
             client.evaluateFlag("ghost-flag", User("user-1"))
         }
+        assertThrows<ExperimentationException.FlagNotFoundException> {
+            client.evaluateFlag("ghost-flag", User("user-1"))
+        }
+        assertEquals(2, server.requestCount)
+    }
+
+    @Test
+    fun `evaluateFlag throws ServerException with status code on 401`() = runTest {
+        server.enqueue(json(401, """{"detail":"Invalid API key"}"""))
+        val ex = assertThrows<ExperimentationException.ServerException> {
+            client.evaluateFlag("f", User("user-1"))
+        }
+        assertEquals(401, ex.statusCode)
+        assertTrue(ex.message!!.contains("Invalid API key"))
     }
 
     @Test
     fun `evaluateFlag throws NetworkException on connection refused with no offline data`() = runTest {
-        // Use a client pointed at a closed port
-        val badConfig = SdkConfig(baseUrl = "http://127.0.0.1:1", apiKey = "k")
-        val badClient = ExperimentationClient(badConfig)
         assertThrows<ExperimentationException.NetworkException> {
-            badClient.evaluateFlag("any-flag", User("u"))
+            unreachableClient().evaluateFlag("any-flag", User("u"))
         }
     }
 
     @Test
-    fun `evaluateFlag with variant returns variantKey`() = runTest {
-        val body = """{"key":"var-flag","enabled":true,"rollout_percentage":100.0,"variants":[{"key":"control","weight":0.5},{"key":"treatment","weight":0.5}]}"""
-        server.enqueue(MockResponse().setBody(body).setResponseCode(200))
-        val result = client.evaluateFlag("var-flag", User("user-99"))
-        assertTrue(result.enabled)
-        assertNotNull(result.variantKey)
-        assertTrue(result.variantKey in listOf("control", "treatment"))
+    fun `evaluateFlag falls back to offline store on server error`() = runTest {
+        offlineStore.saveFlag("user-1", EvalResult("offline-flag", true))
+        server.enqueue(json(503, """{"detail":"unavailable"}"""))
+        val result = client.evaluateFlag("offline-flag", User("user-1"))
+        assertTrue(result.enabled, "Should use offline fallback")
+        assertEquals("offline-flag", result.key)
     }
 
     @Test
-    fun `evaluateFlag 0 percent rollout returns disabled`() = runTest {
-        server.enqueue(MockResponse().setBody(flagJson("zero-flag", true, 0.0)).setResponseCode(200))
-        val result = client.evaluateFlag("zero-flag", User("user-1"))
-        assertFalse(result.enabled)
-        assertEquals("out_of_rollout", result.reason)
+    fun `evaluateFlag offline fallback is per user and is not re-cached`() = runTest {
+        offlineStore.saveFlag("user-1", EvalResult("offline-flag", true))
+        server.enqueue(json(503, "{}"))
+        server.enqueue(json(503, "{}"))
+        server.enqueue(json(200, flagJson("offline-flag", false)))
+
+        assertTrue(client.evaluateFlag("offline-flag", User("user-1")).enabled)
+        assertThrows<ExperimentationException.ServerException> {
+            client.evaluateFlag("offline-flag", User("user-2")) // nothing stored for user-2
+        }
+        // The fallback was not cached in memory: the next call retries the server.
+        assertFalse(client.evaluateFlag("offline-flag", User("user-1")).enabled)
+        assertEquals(3, server.requestCount)
+    }
+
+    @Test
+    fun `evaluateFlag persists successful results to the offline store`() = runTest {
+        server.enqueue(json(200, flagJson("persist-flag", true, """{"x":1}""")))
+        client.evaluateFlag("persist-flag", User("user-1"))
+        val stored = offlineStore.loadFlag("user-1", "persist-flag")
+        assertNotNull(stored)
+        assertTrue(stored!!.enabled)
+        assertEquals(1, stored.configMap!!["x"])
+        assertNull(offlineStore.loadFlag("user-2", "persist-flag"))
+    }
+
+    @Test
+    fun `evaluateFlag rejects empty key or user id`() = runTest {
+        assertThrows<IllegalArgumentException> { client.evaluateFlag("", User("u")) }
+        assertThrows<IllegalArgumentException> { client.evaluateFlag("f", User("")) }
     }
 
     // ============================
@@ -344,43 +377,94 @@ class ExperimentationClientTest {
     // ============================
 
     @Test
-    fun `getAssignment returns correct assignment`() = runTest {
-        val body = """{"experiment_key":"exp-1","variant_key":"control","user_id":"user-42"}"""
-        server.enqueue(MockResponse().setBody(body).setResponseCode(200))
-        val assignment = client.getAssignment("exp-1", User("user-42"))
-        assertEquals("exp-1", assignment.experimentKey)
-        assertEquals("control", assignment.variantKey)
-        assertEquals("user-42", assignment.userId)
-    }
-
-    @Test
-    fun `getAssignment throws ServerException on server error`() = runTest {
-        server.enqueue(MockResponse().setResponseCode(500).setBody("{\"detail\":\"Internal error\"}"))
-        assertThrows<ExperimentationException.ServerException> {
-            client.getAssignment("exp-1", User("user-1"))
-        }
-    }
-
-    @Test
-    fun `getAssignment sends user attributes in request body`() = runTest {
-        val body = """{"experiment_key":"exp-1","variant_key":"treatment","user_id":"user-1"}"""
-        server.enqueue(MockResponse().setBody(body).setResponseCode(200))
+    fun `getAssignment sends POST tracking assign with experiment_key, user_id and context`() = runTest {
+        server.enqueue(json(200, assignJson))
         val user = User("user-1", mapOf("plan" to "pro", "country" to "US"))
-        client.getAssignment("exp-1", user)
-        val request = server.takeRequest()
-        val reqBody = request.body.readUtf8()
-        assertTrue(reqBody.contains("user_id"))
-        assertTrue(reqBody.contains("user-1"))
-        assertTrue(reqBody.contains("attributes"))
+
+        val assignment = client.getAssignment("checkout_flow", user)
+
+        val request = takeRequest()
+        assertEquals("POST", request.method)
+        assertEquals("/api/v1/tracking/assign", request.path)
+        assertEquals("test-key", request.getHeader("X-API-Key"))
+        assertTrue(request.getHeader("Content-Type")!!.startsWith("application/json"))
+        val body = bodyOf(request)
+        assertEquals("checkout_flow", body.getString("experiment_key"))
+        assertEquals("user-1", body.getString("user_id"))
+        assertEquals("pro", body.getJSONObject("context").getString("plan"))
+        assertEquals("US", body.getJSONObject("context").getString("country"))
+        assertFalse(body.has("attributes"), "legacy 'attributes' field must not be sent")
+
+        assertEquals("checkout_flow", assignment.experimentKey)
+        assertEquals("user-1", assignment.userId)
+        assertEquals("8b6f1c2e-0000-4000-8000-000000000001", assignment.variantId)
+        assertEquals("treatment", assignment.variantName)
+        assertFalse(assignment.isControl)
+        assertEquals("Buy now", assignment.configuration!!["headline"])
+        assertEquals(10, assignment.configuration!!["discount"])
+    }
+
+    @Test
+    fun `getAssignment omits context when the user has no attributes`() = runTest {
+        server.enqueue(json(200, assignJson))
+        client.getAssignment("checkout_flow", User("user-1"))
+        assertFalse(bodyOf(takeRequest()).has("context"))
+    }
+
+    @Test
+    fun `getAssignment maps a control assignment with null configuration`() = runTest {
+        server.enqueue(json(200, """{"experiment_key":"e","user_id":"u","variant_id":null,""" +
+            """"variant_name":"control","is_control":true,"configuration":null}"""))
+        val assignment = client.getAssignment("e", User("u"))
+        assertEquals("control", assignment.variantName)
+        assertTrue(assignment.isControl)
+        assertNull(assignment.variantId)
+        assertNull(assignment.configuration)
+    }
+
+    @Test
+    fun `getAssignment is sticky - second call is served from the cache`() = runTest {
+        server.enqueue(json(200, assignJson))
+        val first = client.getAssignment("checkout_flow", User("user-1"))
+        val second = client.getAssignment("checkout_flow", User("user-1"))
+        assertEquals(first, second)
+        assertEquals(1, server.requestCount)
+    }
+
+    @Test
+    fun `getAssignment throws ServerException on 404 and does not cache the failure`() = runTest {
+        server.enqueue(json(404, """{"detail":"Active experiment with key 'nope' not found"}"""))
+        server.enqueue(json(404, """{"detail":"Active experiment with key 'nope' not found"}"""))
+        val ex = assertThrows<ExperimentationException.ServerException> {
+            client.getAssignment("nope", User("user-1"))
+        }
+        assertEquals(404, ex.statusCode)
+        assertThrows<ExperimentationException.ServerException> {
+            client.getAssignment("nope", User("user-1"))
+        }
+        assertEquals(2, server.requestCount)
     }
 
     @Test
     fun `getAssignment throws NetworkException on IO failure`() = runTest {
-        val badConfig = SdkConfig(baseUrl = "http://127.0.0.1:1", apiKey = "k")
-        val badClient = ExperimentationClient(badConfig)
         assertThrows<ExperimentationException.NetworkException> {
-            badClient.getAssignment("exp-1", User("u"))
+            unreachableClient().getAssignment("exp-1", User("u"))
         }
+    }
+
+    @Test
+    fun `getAssignment falls back to the offline store and persists successes`() = runTest {
+        server.enqueue(json(200, assignJson))
+        client.getAssignment("checkout_flow", User("user-1"))
+        val stored = offlineStore.loadAssignment("user-1", "checkout_flow")
+        assertNotNull(stored)
+        assertEquals("treatment", stored!!.variantName)
+
+        client.clearCache()
+        server.enqueue(json(500, """{"detail":"boom"}"""))
+        val fallback = client.getAssignment("checkout_flow", User("user-1"))
+        assertEquals("treatment", fallback.variantName)
+        assertEquals(2, server.requestCount)
     }
 
     // ============================
@@ -388,81 +472,227 @@ class ExperimentationClientTest {
     // ============================
 
     @Test
-    fun `track sends event to server`() = runTest {
-        server.enqueue(MockResponse().setResponseCode(200).setBody("{}"))
-        val event = TrackEvent("user-1", "purchase", mapOf("amount" to 99.99))
-        client.track(event)
-        // Small delay to allow background coroutine to execute
-        kotlinx.coroutines.delay(100)
-        val request = server.takeRequest(500, java.util.concurrent.TimeUnit.MILLISECONDS)
-        assertNotNull(request, "Expected a request to be sent")
-        assertEquals("/api/v1/events", request!!.path)
+    fun `track with experiment key sends one POST tracking track`() = runTest {
+        server.enqueue(json(200, """{"id":"evt-1"}"""))
+        client.track(TrackEvent("user-track", "purchase", mapOf("sku" to "pro"), experimentKey = "checkout_flow", value = 12.5))
+
+        val request = takeRequest()
+        assertEquals("POST", request.method)
+        assertEquals("/api/v1/tracking/track", request.path)
+        assertEquals("test-key", request.getHeader("X-API-Key"))
+        val body = bodyOf(request)
+        assertEquals("purchase", body.getString("event_type"))
+        assertEquals("purchase", body.getString("event_name"))
+        assertEquals("user-track", body.getString("user_id"))
+        assertEquals("checkout_flow", body.getString("experiment_key"))
+        assertEquals(12.5, body.getDouble("value"), 1e-9)
+        assertEquals("pro", body.getJSONObject("metadata").getString("sku"))
+        assertFalse(body.has("feature_flag_key"))
+        assertFalse(body.has("properties"), "legacy 'properties' field must not be sent")
+        assertFalse(body.has("timestamp"))
     }
 
     @Test
-    fun `track does not throw on server error`() = runTest {
-        server.enqueue(MockResponse().setResponseCode(500))
-        val event = TrackEvent("user-1", "click")
-        // Should not throw
-        assertDoesNotThrow { client.track(event) }
+    fun `track with feature flag key sends event_type override and ISO-8601 timestamp`() = runTest {
+        server.enqueue(json(200, "{}"))
+        client.track(TrackEvent("u1", "search", featureFlagKey = "new_search", eventType = "interaction",
+            timestampMs = 1_789_165_800_000L))
+
+        val body = bodyOf(takeRequest())
+        assertEquals("interaction", body.getString("event_type"))
+        assertEquals("search", body.getString("event_name"))
+        assertEquals("new_search", body.getString("feature_flag_key"))
+        assertEquals("2026-09-11T22:30:00.000Z", body.getString("timestamp"))
+        for (absent in listOf("experiment_key", "value", "metadata")) {
+            assertFalse(body.has(absent), "$absent must be omitted when unset")
+        }
     }
 
     @Test
-    fun `track event json has correct fields`() {
-        val event = TrackEvent("user-123", "button_click", mapOf("page" to "home"))
-        val json = event.toJson()
-        assertEquals("user-123", json.getString("user_id"))
-        assertEquals("button_click", json.getString("event_name"))
-        assertTrue(json.has("properties"))
-        assertEquals("home", json.getJSONObject("properties").getString("page"))
+    fun `track without a key fans out via tracking batch to the cached assignment and flag`() = runTest {
+        routeByPath()
+        client.getAssignment("checkout_flow", User("user-1"))
+        client.evaluateFlag("new_search", User("user-1"))
+        client.evaluateFlag("new_search", User("user-2")) // must not leak into user-1's fan-out
+        repeat(3) { takeRequest() }
+
+        client.track(TrackEvent("user-1", "page_view", mapOf("page" to "/home")))
+
+        val request = takeRequest()
+        assertEquals("/api/v1/tracking/batch", request.path)
+        val events = bodyOf(request).getJSONArray("events")
+        assertEquals(2, events.length(), "one entry per cached assignment + one per cached flag")
+        val first = events.getJSONObject(0)
+        val second = events.getJSONObject(1)
+        assertEquals("checkout_flow", first.getString("experiment_key"))
+        assertFalse(first.has("feature_flag_key"))
+        assertEquals("new_search", second.getString("feature_flag_key"))
+        assertFalse(second.has("experiment_key"))
+        for (i in 0 until events.length()) {
+            val entry = events.getJSONObject(i)
+            assertEquals("page_view", entry.getString("event_type"))
+            assertEquals("page_view", entry.getString("event_name"))
+            assertEquals("user-1", entry.getString("user_id"))
+            assertEquals("/home", entry.getJSONObject("metadata").getString("page"))
+        }
+        assertEquals(4, server.requestCount)
+    }
+
+    @Test
+    fun `track without a key and nothing cached sends nothing`() = runTest {
+        routeByPath()
+        client.track(TrackEvent("nobody", "page_view"))
+        client.trackBatch(listOf(TrackEvent("nobody", "page_view")))
+        assertNull(server.takeRequest(300, TimeUnit.MILLISECONDS))
+        assertEquals(0, server.requestCount)
+    }
+
+    @Test
+    fun `track never throws on server error, unreachable server or invalid input`() = runTest {
+        // Any exception escaping track / trackBatch fails this test.
+        server.enqueue(json(500, """{"detail":"server error"}"""))
+        client.track(TrackEvent("u1", "click", experimentKey = "e"))
+        takeRequest()
+
+        client.track(TrackEvent("", "click", experimentKey = "e"))
+        client.track(TrackEvent("u1", "", experimentKey = "e"))
+        client.trackBatch(emptyList())
+        assertNull(server.takeRequest(300, TimeUnit.MILLISECONDS), "invalid events must not produce requests")
+        assertEquals(1, server.requestCount)
+
+        val unreachable = unreachableClient()
+        unreachable.track(TrackEvent("u1", "click", experimentKey = "e"))
+        unreachable.trackBatch(listOf(TrackEvent("u1", "click", featureFlagKey = "f")))
+    }
+
+    @Test
+    fun `trackBatch sends keyed events in one tracking batch request`() = runTest {
+        server.enqueue(json(200, """{"success_count":2,"failure_count":0,"errors":null}"""))
+        client.trackBatch(listOf(
+            TrackEvent("u1", "page_view", experimentKey = "e"),
+            TrackEvent("u1", "page_view", featureFlagKey = "f")
+        ))
+        val request = takeRequest()
+        assertEquals("/api/v1/tracking/batch", request.path)
+        val events = bodyOf(request).getJSONArray("events")
+        assertEquals(2, events.length())
+        assertEquals("e", events.getJSONObject(0).getString("experiment_key"))
+        assertEquals("f", events.getJSONObject(1).getString("feature_flag_key"))
+    }
+
+    @Test
+    fun `trackBatch with a single keyed event still uses tracking batch`() = runTest {
+        server.enqueue(json(200, """{"success_count":1,"failure_count":0,"errors":null}"""))
+        client.trackBatch(listOf(TrackEvent("u1", "purchase", experimentKey = "e", value = 1.0)))
+        val request = takeRequest()
+        assertEquals("/api/v1/tracking/batch", request.path)
+        val events = bodyOf(request).getJSONArray("events")
+        assertEquals(1, events.length())
+        assertEquals("e", events.getJSONObject(0).getString("experiment_key"))
+        assertEquals(1.0, events.getJSONObject(0).getDouble("value"), 1e-9)
+    }
+
+    @Test
+    fun `track with both keys sends experiment_key and feature_flag_key in one request`() = runTest {
+        server.enqueue(json(200, "{}"))
+        client.track(TrackEvent("u1", "click", experimentKey = "e", featureFlagKey = "f"))
+        val request = takeRequest()
+        assertEquals("/api/v1/tracking/track", request.path)
+        assertEquals("application/json", request.getHeader("Accept"))
+        val body = bodyOf(request)
+        assertEquals("e", body.getString("experiment_key"))
+        assertEquals("f", body.getString("feature_flag_key"))
+        assertNull(server.takeRequest(300, TimeUnit.MILLISECONDS), "exactly one request for a keyed event")
+    }
+
+    @Test
+    fun `trackBatch chunks at 100 events per request`() = runTest {
+        routeByPath()
+        client.trackBatch((0 until 150).map { TrackEvent("u$it", "click", experimentKey = "e") })
+        val sizes = (0 until 2).map {
+            val request = takeRequest()
+            assertEquals("/api/v1/tracking/batch", request.path)
+            bodyOf(request).getJSONArray("events").length()
+        }
+        assertEquals(listOf(100, 50), sizes)
+    }
+
+    @Test
+    fun `trackBatch expands unkeyed events from the cache and drops those with nothing cached`() = runTest {
+        routeByPath()
+        client.getAssignment("checkout_flow", User("user-1"))
+        takeRequest()
+
+        client.trackBatch(listOf(
+            TrackEvent("user-1", "purchase", featureFlagKey = "f"),
+            TrackEvent("user-1", "page_view"),   // fans out to checkout_flow
+            TrackEvent("user-9", "page_view")    // nothing cached -> dropped
+        ))
+
+        val events = bodyOf(takeRequest()).getJSONArray("events")
+        assertEquals(2, events.length())
+        assertEquals("f", events.getJSONObject(0).getString("feature_flag_key"))
+        assertEquals("checkout_flow", events.getJSONObject(1).getString("experiment_key"))
+        assertEquals("page_view", events.getJSONObject(1).getString("event_name"))
     }
 
     // ============================
-    // Client refreshFlags tests
+    // Cache access
     // ============================
 
     @Test
-    fun `refreshFlags updates local flags map`() = runTest {
-        val body = """{"items":[${flagJson("flag-r1", true, 100.0)},${flagJson("flag-r2", false, 0.0)}]}"""
-        server.enqueue(MockResponse().setBody(body).setResponseCode(200))
-        client.refreshFlags()
-        val keys = client.getCachedFlagKeys()
-        assertTrue(keys.contains("flag-r1"))
-        assertTrue(keys.contains("flag-r2"))
+    fun `getCachedAssignments and getCachedFlagKeys list the user's live entries`() = runTest {
+        routeByPath()
+        client.getAssignment("checkout_flow", User("user-1"))
+        client.evaluateFlag("new_search", User("user-1"))
+        client.evaluateFlag("other", User("user-10"))
+
+        assertEquals(listOf("checkout_flow"), client.getCachedAssignments("user-1").map { it.experimentKey })
+        assertEquals(listOf("new_search"), client.getCachedFlagKeys("user-1"))
+        assertTrue(client.getCachedAssignments("user-10").isEmpty())
+        assertEquals(listOf("other"), client.getCachedFlagKeys("user-10"))
+        assertTrue(client.getCachedFlagKeys("user-1x").isEmpty(), "prefix must not match a longer user id")
     }
 
     @Test
-    fun `refreshFlags updates cache so next evaluateFlag uses no server call`() = runTest {
-        val body = """{"items":[${flagJson("pre-cached", true, 100.0)}]}"""
-        server.enqueue(MockResponse().setBody(body).setResponseCode(200))
-        client.refreshFlags()
-        val requestCountAfterRefresh = server.requestCount
-        val result = client.evaluateFlag("pre-cached", User("user-1"))
-        assertTrue(result.enabled)
-        assertEquals(requestCountAfterRefresh, server.requestCount, "No additional requests after refreshFlags")
+    fun `invalidateCache forces a fresh request for that user and key only`() = runTest {
+        routeByPath()
+        client.evaluateFlag("f", User("user-1"))
+        client.getAssignment("checkout_flow", User("user-1"))
+        assertEquals(2, server.requestCount)
+
+        client.invalidateCache("user-1", "f")
+        assertNull(offlineStore.loadFlag("user-1", "f"))
+        client.evaluateFlag("f", User("user-1"))
+        client.getAssignment("checkout_flow", User("user-1"))
+        assertEquals(3, server.requestCount)
     }
 
     @Test
-    fun `refreshFlags saves flags to offline store`() = runTest {
-        val body = """{"items":[${flagJson("off-flag-x", true, 75.0)}]}"""
-        server.enqueue(MockResponse().setBody(body).setResponseCode(200))
-        client.refreshFlags()
-        val stored = offlineStore.loadFlag("off-flag-x")
-        assertNotNull(stored)
-        assertEquals("off-flag-x", stored!!.key)
-        assertEquals(75.0, stored.rolloutPercentage)
+    fun `clearCache and close drop evaluations and assignments`() = runTest {
+        routeByPath()
+        client.evaluateFlag("f", User("user-1"))
+        client.getAssignment("checkout_flow", User("user-1"))
+        assertEquals(2, client.getCacheSize())
+
+        client.clearCache()
+        assertEquals(0, client.getCacheSize())
+        client.evaluateFlag("f", User("user-1"))
+        assertEquals(3, server.requestCount)
+
+        client.close()
+        assertEquals(0, client.getCacheSize())
     }
 
     @Test
-    fun `refreshFlags replaces stale local flags`() = runTest {
-        // First refresh
-        server.enqueue(MockResponse().setBody("""{"items":[${flagJson("stale-flag", true, 100.0)}]}""").setResponseCode(200))
-        client.refreshFlags()
-        // Second refresh with updated flag
-        server.enqueue(MockResponse().setBody("""{"items":[${flagJson("stale-flag", false, 0.0)}]}""").setResponseCode(200))
-        client.refreshFlags()
-        val keys = client.getCachedFlagKeys()
-        assertTrue(keys.contains("stale-flag"))
+    fun `multiple concurrent evaluateFlag calls are thread safe`() = runTest {
+        routeByPath()
+        val jobs = (1..10).map { i ->
+            async { client.evaluateFlag("concurrent-flag", User("user-$i")) }
+        }
+        val results = jobs.map { it.await() }
+        assertTrue(results.all { it.enabled }, "All concurrent evaluations should succeed")
+        assertEquals(10, client.getCacheSize())
     }
 
     // ============================
@@ -470,75 +700,73 @@ class ExperimentationClientTest {
     // ============================
 
     @Test
-    fun `offlineStore save and load roundtrip`() {
+    fun `offlineStore flag save and load roundtrip per user`() {
         val store = OfflineStore()
-        val flag = makeFlag("stored-flag", true, 80.0)
-        store.saveFlag(flag)
-        val loaded = store.loadFlag("stored-flag")
+        store.saveFlag("user-1", EvalResult("stored-flag", true, mapOf("limit" to 3, "variant" to "blue")))
+        val loaded = store.loadFlag("user-1", "stored-flag")
         assertNotNull(loaded)
         assertEquals("stored-flag", loaded!!.key)
         assertTrue(loaded.enabled)
-        assertEquals(80.0, loaded.rolloutPercentage)
+        assertEquals(3, loaded.configMap!!["limit"])
+        assertEquals("blue", loaded.variant)
+        assertNull(store.loadFlag("user-2", "stored-flag"))
+        assertNull(store.loadFlag("user-1", "does-not-exist"))
     }
 
     @Test
-    fun `offlineStore loadMissing returns null`() {
+    fun `offlineStore assignment save and load roundtrip per user`() {
         val store = OfflineStore()
-        assertNull(store.loadFlag("does-not-exist"))
+        val assignment = Assignment("exp", "user-1", "v-1", "treatment", false, mapOf("headline" to "Buy now"))
+        store.saveAssignment("user-1", assignment)
+        assertEquals(assignment, store.loadAssignment("user-1", "exp"))
+        assertNull(store.loadAssignment("user-2", "exp"))
+
+        val control = Assignment("exp", "user-1", null, "control", true, null)
+        store.saveAssignment("user-1", control)
+        assertEquals(control, store.loadAssignment("user-1", "exp"), "overwrite updates the entry")
     }
 
     @Test
-    fun `offlineStore saveAll and loadAll`() {
+    fun `offlineStore remove, size and clearAll`() {
         val store = OfflineStore()
-        val flags = listOf(
-            makeFlag("flag-1", true, 100.0),
-            makeFlag("flag-2", false, 0.0),
-            makeFlag("flag-3", true, 50.0)
-        )
-        store.saveAllFlags(flags)
-        val loaded = store.loadAllFlags()
-        assertEquals(3, loaded.size)
-        val keys = loaded.map { it.key }.toSet()
-        assertTrue(keys.containsAll(listOf("flag-1", "flag-2", "flag-3")))
-    }
-
-    @Test
-    fun `offlineStore clearAll removes all flags`() {
-        val store = OfflineStore()
-        store.saveFlag(makeFlag("clear-me", true, 100.0))
-        store.saveFlag(makeFlag("clear-me-too", true, 100.0))
+        store.saveFlag("u", EvalResult("f1", true))
+        store.saveFlag("u", EvalResult("f2", false))
+        store.saveAssignment("u", Assignment("e", "u", "v", "control", true))
+        assertEquals(3, store.size())
+        store.removeFlag("u", "f1")
+        store.removeAssignment("u", "e")
+        assertNull(store.loadFlag("u", "f1"))
+        assertNull(store.loadAssignment("u", "e"))
+        assertNotNull(store.loadFlag("u", "f2"))
         store.clearAll()
-        assertNull(store.loadFlag("clear-me"))
-        assertNull(store.loadFlag("clear-me-too"))
-        assertTrue(store.loadAllFlags().isEmpty())
+        assertNull(store.loadFlag("u", "f2"))
+        assertEquals(0, store.size())
     }
 
     @Test
-    fun `offlineStore overwrite updates existing flag`() {
+    fun `offlineStore keys with underscores do not collide`() {
         val store = OfflineStore()
-        store.saveFlag(makeFlag("overwrite-flag", true, 100.0))
-        store.saveFlag(makeFlag("overwrite-flag", false, 0.0))
-        val loaded = store.loadFlag("overwrite-flag")
-        assertNotNull(loaded)
-        assertFalse(loaded!!.enabled)
-        assertEquals(0.0, loaded.rolloutPercentage)
+        store.saveFlag("a_b", EvalResult("c", true))
+        store.saveFlag("a", EvalResult("b_c", false))
+        assertTrue(store.loadFlag("a_b", "c")!!.enabled)
+        assertFalse(store.loadFlag("a", "b_c")!!.enabled)
     }
 
     @Test
-    fun `offlineStore saves and loads variants`() {
-        val store = OfflineStore()
-        val flag = FeatureFlag(
-            key = "variant-stored",
-            enabled = true,
-            rolloutPercentage = 100.0,
-            variants = listOf(Variant("control", 0.5), Variant("treatment", 0.5))
-        )
-        store.saveFlag(flag)
-        val loaded = store.loadFlag("variant-stored")
-        assertNotNull(loaded)
-        assertEquals(2, loaded!!.variants.size)
-        assertEquals("control", loaded.variants[0].key)
-        assertEquals(0.5, loaded.variants[0].weight, 0.001)
+    fun `offlineStore returns null for corrupt entries`() {
+        val prefs = object : OfflineStore.PrefsAdapter {
+            val map = mutableMapOf<String, String>()
+            override fun getString(key: String) = map[key]
+            override fun putString(key: String, value: String) { map[key] = value }
+            override fun remove(key: String) { map.remove(key) }
+            override fun allKeys() = map.keys.toSet()
+            override fun clear() = map.clear()
+        }
+        val store = OfflineStore(prefs)
+        store.saveFlag("u", EvalResult("f", true))
+        val key = prefs.map.keys.single()
+        prefs.map[key] = "not json"
+        assertNull(store.loadFlag("u", "f"))
     }
 
     // ============================
@@ -554,66 +782,57 @@ class ExperimentationClientTest {
     }
 
     @Test
-    fun `featureFlag fromJson parses correctly`() {
-        val json = org.json.JSONObject("""{"key":"my-flag","enabled":true,"rollout_percentage":75.5,"variants":[]}""")
-        val flag = FeatureFlag.fromJson(json)
-        assertEquals("my-flag", flag.key)
-        assertTrue(flag.enabled)
-        assertEquals(75.5, flag.rolloutPercentage)
-        assertTrue(flag.variants.isEmpty())
+    fun `evalResult fromJson parses key, enabled and nested config`() {
+        val json = JSONObject("""{"key":"my-flag","enabled":true,"config":{"a":[1,2,{"b":null}],"c":"d"}}""")
+        val result = EvalResult.fromJson(json)
+        assertEquals("my-flag", result.key)
+        assertTrue(result.enabled)
+        val a = result.configMap!!["a"] as List<*>
+        assertEquals(listOf(1, 2, mapOf("b" to null)), a)
+        assertEquals("d", result.configMap!!["c"])
+        assertEquals(result, EvalResult.fromJson(result.toJson()), "toJson/fromJson roundtrip")
     }
 
     @Test
-    fun `featureFlag fromJson parses variants`() {
-        val json = org.json.JSONObject("""{"key":"v-flag","enabled":true,"rollout_percentage":100.0,"variants":[{"key":"a","weight":0.3},{"key":"b","weight":0.7}]}""")
-        val flag = FeatureFlag.fromJson(json)
-        assertEquals(2, flag.variants.size)
-        assertEquals("a", flag.variants[0].key)
-        assertEquals(0.3, flag.variants[0].weight, 0.001)
+    fun `assignment fromJson parses the contract fields`() {
+        val assignment = Assignment.fromJson(JSONObject(assignJson))
+        assertEquals("checkout_flow", assignment.experimentKey)
+        assertEquals("user-1", assignment.userId)
+        assertEquals("8b6f1c2e-0000-4000-8000-000000000001", assignment.variantId)
+        assertEquals("treatment", assignment.variantName)
+        assertFalse(assignment.isControl)
+        assertEquals(10, assignment.configuration!!["discount"])
+        assertEquals(assignment, Assignment.fromJson(assignment.toJson()), "toJson/fromJson roundtrip")
     }
 
     @Test
-    fun `assignment fromJson parses correctly`() {
-        val json = org.json.JSONObject("""{"experiment_key":"exp-abc","variant_key":"treatment","user_id":"user-99"}""")
-        val assignment = Assignment.fromJson(json)
-        assertEquals("exp-abc", assignment.experimentKey)
-        assertEquals("treatment", assignment.variantKey)
-        assertEquals("user-99", assignment.userId)
-    }
-
-    @Test
-    fun `trackEvent toJson serializes correctly`() {
-        val event = TrackEvent("u-1", "page_view", mapOf("url" to "/home", "referrer" to null))
-        val json = event.toJson()
+    fun `trackEvent toJson serializes the contract body`() {
+        val json = TrackEvent("u-1", "page_view", mapOf("url" to "/home", "referrer" to null)).toJson()
         assertEquals("u-1", json.getString("user_id"))
         assertEquals("page_view", json.getString("event_name"))
-        val props = json.getJSONObject("properties")
-        assertEquals("/home", props.getString("url"))
+        assertEquals("page_view", json.getString("event_type"))
+        val metadata = json.getJSONObject("metadata")
+        assertEquals("/home", metadata.getString("url"))
+        assertTrue(metadata.isNull("referrer"))
+        assertFalse(json.has("experiment_key"))
+        assertFalse(json.has("feature_flag_key"))
+        assertFalse(json.has("value"))
+        assertFalse(json.has("timestamp"))
     }
 
     @Test
-    fun `trackEvent with empty properties serializes cleanly`() {
-        val event = TrackEvent("u-2", "app_open")
-        val json = event.toJson()
+    fun `trackEvent with empty properties omits metadata`() {
+        val json = TrackEvent("u-2", "app_open").toJson()
         assertEquals("u-2", json.getString("user_id"))
-        assertEquals("app_open", json.getString("event_name"))
-        assertTrue(json.has("properties"))
+        assertFalse(json.has("metadata"))
+        assertFalse(TrackEvent("u-2", "app_open").hasKey())
+        assertTrue(TrackEvent("u-2", "app_open", experimentKey = "e").hasKey())
     }
 
     @Test
-    fun `variant fromJson supports key field`() {
-        val json = org.json.JSONObject("""{"key":"control","weight":0.5}""")
-        val variant = Variant.fromJson(json)
-        assertEquals("control", variant.key)
-        assertEquals(0.5, variant.weight, 0.001)
-    }
-
-    @Test
-    fun `variant fromJson supports name field fallback`() {
-        // Java SDK uses "name" field, Android should handle both
-        val json = org.json.JSONObject("""{"name":"treatment","weight":0.5}""")
-        val variant = Variant.fromJson(json)
-        assertEquals("treatment", variant.key)
+    fun `trackEvent isoTimestamp formats UTC`() {
+        assertEquals("1970-01-01T00:00:00.000Z", TrackEvent.isoTimestamp(0L))
+        assertEquals("2026-09-11T22:30:00.500Z", TrackEvent.isoTimestamp(1_789_165_800_500L))
     }
 
     @Test
@@ -628,155 +847,4 @@ class ExperimentationClientTest {
         assertTrue(serverEx.message!!.contains("500"))
         assertEquals(500, serverEx.statusCode)
     }
-
-    @Test
-    fun `client close clears cache`() {
-        cache.set("cleanup-flag", makeFlag("cleanup-flag", true, 100.0))
-        assertNotNull(cache.get("cleanup-flag"))
-        client.close()
-        assertNull(cache.get("cleanup-flag"))
-    }
-
-    // ============================
-    // HTTP layer and auth header tests
-    // ============================
-
-    @Test
-    fun `evaluateFlag request includes Authorization header`() = runTest {
-        server.enqueue(MockResponse().setBody(flagJson("auth-flag", true, 100.0)).setResponseCode(200))
-        client.evaluateFlag("auth-flag", User("u"))
-        val request = server.takeRequest()
-        assertEquals("ApiKey test-key", request.getHeader("Authorization"))
-    }
-
-    @Test
-    fun `evaluateFlag request targets correct path`() = runTest {
-        server.enqueue(MockResponse().setBody(flagJson("path-flag", true, 100.0)).setResponseCode(200))
-        client.evaluateFlag("path-flag", User("u"))
-        val request = server.takeRequest()
-        assertTrue(request.path!!.contains("path-flag"))
-    }
-
-    @Test
-    fun `getAssignment request includes Authorization header`() = runTest {
-        val body = """{"experiment_key":"exp-x","variant_key":"control","user_id":"u"}"""
-        server.enqueue(MockResponse().setBody(body).setResponseCode(200))
-        client.getAssignment("exp-x", User("u"))
-        val request = server.takeRequest()
-        assertEquals("ApiKey test-key", request.getHeader("Authorization"))
-    }
-
-    @Test
-    fun `refreshFlags request includes Authorization header`() = runTest {
-        server.enqueue(MockResponse().setBody("""{"items":[]}""").setResponseCode(200))
-        client.refreshFlags()
-        val request = server.takeRequest()
-        assertEquals("ApiKey test-key", request.getHeader("Authorization"))
-    }
-
-    @Test
-    fun `refreshFlags with empty items list clears localFlags`() = runTest {
-        // First populate with a flag
-        server.enqueue(MockResponse().setBody("""{"items":[${flagJson("old-flag", true, 100.0)}]}""").setResponseCode(200))
-        client.refreshFlags()
-        assertTrue(client.getCachedFlagKeys().contains("old-flag"))
-        // Now refresh with empty items
-        server.enqueue(MockResponse().setBody("""{"items":[]}""").setResponseCode(200))
-        client.refreshFlags()
-        assertTrue(client.getCachedFlagKeys().isEmpty(), "LocalFlags should be empty after refresh with no items")
-    }
-
-    @Test
-    fun `serverException carries status code`() = runTest {
-        server.enqueue(MockResponse().setResponseCode(403).setBody("{\"detail\":\"Forbidden\"}"))
-        val ex = assertThrows<ExperimentationException.ServerException> {
-            client.evaluateFlag("forbidden-flag", User("u"))
-        }
-        assertEquals(403, ex.statusCode)
-    }
-
-    @Test
-    fun `multiple concurrent evaluateFlag calls are thread safe`() = runTest {
-        repeat(10) {
-            server.enqueue(MockResponse().setBody(flagJson("concurrent-flag", true, 100.0)).setResponseCode(200))
-        }
-        // Launch 10 concurrent evaluations for different users
-        val jobs = (1..10).map { i ->
-            kotlinx.coroutines.async {
-                client.evaluateFlag("concurrent-flag", User("user-$i"))
-            }
-        }
-        val results = jobs.map { it.await() }
-        assertTrue(results.all { it.enabled }, "All concurrent evaluations should succeed")
-    }
-
-    // ============================
-    // Additional evaluator edge cases
-    // ============================
-
-    @Test
-    fun `evaluate single-variant flag always returns that variant`() {
-        val flag = FeatureFlag(
-            key = "single-v",
-            enabled = true,
-            rolloutPercentage = 100.0,
-            variants = listOf(Variant("only-variant", 1.0))
-        )
-        for (i in 0 until 20) {
-            val result = FeatureFlagEvaluator.evaluate(flag, User("user-$i"))
-            assertEquals("only-variant", result.variantKey)
-        }
-    }
-
-    @Test
-    fun `evaluate flag with 100 percent rollout and no variants returns in_rollout for all users`() {
-        val flag = makeFlag("always-on", true, 100.0)
-        for (i in 0 until 50) {
-            val result = FeatureFlagEvaluator.evaluate(flag, User("u$i"))
-            assertTrue(result.enabled)
-            assertEquals("in_rollout", result.reason)
-        }
-    }
-
-    @Test
-    fun `evaluate flag variant assignment distributes by weight`() {
-        val flag = FeatureFlag(
-            key = "weighted",
-            enabled = true,
-            rolloutPercentage = 100.0,
-            variants = listOf(
-                Variant("heavy", 0.9),
-                Variant("light", 0.1)
-            )
-        )
-        var heavy = 0
-        var light = 0
-        for (i in 0 until 1000) {
-            val result = FeatureFlagEvaluator.evaluate(flag, User("user-$i"))
-            if (result.variantKey == "heavy") heavy++ else light++
-        }
-        // heavy should get ~90%, light ~10%
-        assertTrue(heavy in 800..980, "Expected ~900 heavy assignments, got $heavy")
-        assertTrue(light in 20..200, "Expected ~100 light assignments, got $light")
-    }
-
-    @Test
-    fun `offlineStore removeFlag removes specific key`() {
-        val store = OfflineStore()
-        store.saveFlag(makeFlag("remove-me", true, 100.0))
-        store.saveFlag(makeFlag("keep-me", true, 100.0))
-        store.removeFlag("remove-me")
-        assertNull(store.loadFlag("remove-me"))
-        assertNotNull(store.loadFlag("keep-me"))
-    }
-
-    // ============================
-    // Helpers
-    // ============================
-
-    private fun makeFlag(key: String, enabled: Boolean, rollout: Double): FeatureFlag =
-        FeatureFlag(key = key, enabled = enabled, rolloutPercentage = rollout)
-
-    private fun flagJson(key: String, enabled: Boolean, rollout: Double): String =
-        """{"key":"$key","enabled":$enabled,"rollout_percentage":$rollout,"variants":[]}"""
 }

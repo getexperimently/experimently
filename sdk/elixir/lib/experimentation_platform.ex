@@ -2,159 +2,168 @@ defmodule ExperimentationPlatform do
   @moduledoc """
   Elixir SDK for the Experimentation Platform.
 
-  Provides A/B testing and feature flag evaluation with:
-  - Cross-SDK consistent hashing (MD5-based, compatible with JS/Python/Java/Go SDKs)
-  - ETS-backed in-process caching with configurable TTL
+  Flag evaluation and experiment assignment are decided **by the server**:
+  every call goes to the public API with your `X-API-Key`, the server buckets
+  the user (sticky per user + experiment), and the SDK caches the answer per
+  user + key. Nothing is bucketed locally.
+
+  - GenServer-based client lifecycle with a per-client ETS cache (TTL, max size)
   - OTP `:httpc`-based HTTP (zero external runtime deps beyond Jason)
-  - GenServer-based client lifecycle management
+  - Behaviour-based HTTP client for easy testing with mock modules
+  - Cross-SDK MD5 hash utility (`ExperimentationPlatform.Evaluator.hash_user/2`)
 
   ## Quick Start
 
-      # Start a client
       {:ok, client} = ExperimentationPlatform.start(
-        base_url: "https://api.example.com",
-        api_key: "your-api-key"
+        base_url: "http://localhost:8000",
+        api_key: System.fetch_env!("EXPERIMENTLY_API_KEY")
       )
 
-      # Evaluate a feature flag
+      # Feature flag (GET /api/v1/feature-flags/evaluate/{key}?user_id=...)
       case ExperimentationPlatform.evaluate_flag(client, "dark-mode", "user-123") do
-        {:ok, nil} ->
-          # User not in rollout — show default
-          render_default()
-
-        {:ok, %{"name" => "enabled"}} ->
-          render_dark_mode()
-
-        {:error, reason} ->
-          Logger.warning("Flag evaluation failed: \#{inspect(reason)}")
-          render_default()
+        {:ok, %ExperimentationPlatform.FlagEvaluation{enabled: true, config: config}} -> render_dark_mode(config)
+        {:ok, _disabled} -> render_default()
+        {:error, reason} -> render_default()   # network/HTTP failure, flag not ACTIVE
       end
 
-      # Get experiment assignment
-      {:ok, variant} = ExperimentationPlatform.get_assignment(client, "checkout-experiment", "user-123")
+      ExperimentationPlatform.feature_enabled?(client, "dark-mode", "user-123")   # => true | false
 
-      # Track an event
-      ExperimentationPlatform.track(client, "button_clicked", "user-123", %{page: "checkout"})
+      # Experiment assignment (POST /api/v1/tracking/assign — sticky on the server)
+      {:ok, %ExperimentationPlatform.Assignment{variant_name: variant}} =
+        ExperimentationPlatform.get_assignment(client, "checkout-experiment", "user-123", %{plan: "pro"})
+
+      # Events (fire-and-forget, always :ok)
+      ExperimentationPlatform.track(client, "purchase", "user-123", %{sku: "pro"},
+        experiment_key: "checkout-experiment", value: 49.99)
+      ExperimentationPlatform.track(client, "page_view", "user-123", %{page: "/"})   # no key: fanned out
 
   ## Configuration Options
 
-  | Option           | Type    | Required | Default | Description                              |
-  |------------------|---------|----------|---------|------------------------------------------|
-  | `:base_url`      | string  | yes      | —       | API base URL                             |
-  | `:api_key`       | string  | yes      | —       | API key for authentication               |
-  | `:cache_ttl`     | integer | no       | 300     | Cache TTL in seconds                     |
-  | `:timeout`       | integer | no       | 10_000  | HTTP timeout in milliseconds             |
-  | `:max_cache_size`| integer | no       | 1_000   | Maximum number of cached entries         |
+  | Option            | Type    | Required | Default    | Description                                   |
+  |-------------------|---------|----------|------------|-----------------------------------------------|
+  | `:base_url`       | string  | yes      | —          | Backend origin; the SDK appends `/api/v1/...` |
+  | `:api_key`        | string  | yes      | —          | API key, sent as `X-API-Key`                  |
+  | `:cache_ttl`      | integer | no       | 300        | Seconds a successful result is reused         |
+  | `:timeout`        | integer | no       | 10_000     | HTTP timeout in milliseconds                  |
+  | `:max_cache_size` | integer | no       | 1_000      | Maximum number of cached entries              |
+  | `:http_client`    | module  | no       | HttpClient | `HttpBehaviour` implementation (for testing)  |
+  | `:name`           | atom    | no       | —          | Register the client process under a name      |
 
   ## Architecture
 
-  Each call to `start/1` creates:
-  1. A `Client` GenServer managing config and HTTP
-  2. A `Cache` GenServer (child of Client's init) backed by ETS
-
-  The client PID is passed to all subsequent API calls. Multiple independent
-  clients can be created (e.g., for different environments or configurations).
+  Each call to `start/1` creates a `Client` GenServer (config, in-flight track
+  requests) and a `Cache` GenServer backed by a private ETS table. Evaluations,
+  assignments and batches run in the calling process; `track/5` is a cast.
+  Multiple independent clients can be created.
 
   ## Hash Compatibility
-
-  The SDK uses MD5-based consistent hashing compatible with all platform SDKs:
 
       ExperimentationPlatform.Evaluator.hash_user("user-123", "my-flag")
       # => 0.6927449859213084
 
-  This value is identical across JavaScript, Python, Java, Go, Ruby, and Go SDKs.
+  This value is identical across every platform SDK. It is exported as a
+  utility only — nothing in the SDK uses it to decide a variant.
   """
 
-  alias ExperimentationPlatform.Client
+  alias ExperimentationPlatform.{Assignment, BatchResult, Client, FlagEvaluation}
 
   @doc """
-  Start a new ExperimentationPlatform client.
-
-  ## Parameters
-  - `config_opts` - Keyword list or map of configuration options
-
-  ## Returns
-  - `{:ok, pid}` on success
-  - `{:error, reason}` on failure
+  Start a new client. Returns `{:ok, pid}` or `{:error, reason}`; raises
+  `ArgumentError` when `:base_url` or `:api_key` is missing.
 
   ## Examples
 
-      {:ok, client} = ExperimentationPlatform.start(
-        base_url: "https://api.example.com",
-        api_key: "sk-prod-abc123"
-      )
+      {:ok, client} = ExperimentationPlatform.start(base_url: "http://localhost:8000", api_key: "sk-...")
 
       {:ok, client} = ExperimentationPlatform.start(
-        base_url: "https://api.example.com",
-        api_key: "sk-prod-abc123",
+        base_url: "http://localhost:8000",
+        api_key: "sk-...",
         cache_ttl: 60,
-        timeout: 5_000
+        timeout: 5_000,
+        name: MyApp.Experiments
       )
   """
-  @spec start(keyword() | map() | ExperimentationPlatform.Config.t()) :: {:ok, pid()} | {:error, term()}
+  @spec start(keyword() | map() | ExperimentationPlatform.Config.t()) ::
+          {:ok, pid()} | {:error, term()}
   def start(config_opts) do
     Client.start_link(config_opts)
   end
 
   @doc """
-  Evaluate a feature flag for a user.
+  Evaluate a feature flag for a user (the server decides).
 
-  ## Parameters
-  - `client` - The client PID returned by `start/1`
-  - `flag_key` - The unique key of the feature flag
-  - `user_id` - The user identifier
-  - `opts` - Options (`:attributes`, `:skip_cache`)
-
-  ## Returns
-  - `{:ok, variant_map}` if user is in rollout
-  - `{:ok, nil}` if user is not in rollout or flag not found
-  - `{:error, reason}` on error
+  Returns `{:ok, %FlagEvaluation{key, enabled, config}}` or `{:error, reason}`.
+  See `ExperimentationPlatform.Client.evaluate_flag/4`.
   """
-  @spec evaluate_flag(pid(), String.t(), String.t(), keyword()) ::
-          {:ok, map() | nil} | {:error, term()}
+  @spec evaluate_flag(Client.server(), String.t(), String.t(), keyword()) ::
+          {:ok, FlagEvaluation.t()} | {:error, term()}
   def evaluate_flag(client, flag_key, user_id, opts \\ []) do
     Client.evaluate_flag(client, flag_key, user_id, opts)
   end
 
   @doc """
-  Get experiment assignment for a user.
-
-  ## Parameters
-  - `client` - The client PID returned by `start/1`
-  - `experiment_key` - The unique key of the experiment
-  - `user_id` - The user identifier
-  - `opts` - Options (`:attributes`, `:skip_cache`)
-
-  ## Returns
-  - `{:ok, variant_map}` if user is assigned to a variant
-  - `{:ok, nil}` if user is not assigned
-  - `{:error, reason}` on error
+  `true` when the server enables the flag for the user, `false` otherwise
+  (including on any failure).
   """
-  @spec get_assignment(pid(), String.t(), String.t(), keyword()) ::
-          {:ok, map() | nil} | {:error, term()}
-  def get_assignment(client, experiment_key, user_id, opts \\ []) do
-    Client.get_assignment(client, experiment_key, user_id, opts)
+  @spec feature_enabled?(Client.server(), String.t(), String.t()) :: boolean()
+  def feature_enabled?(client, flag_key, user_id) do
+    Client.feature_enabled?(client, flag_key, user_id)
   end
 
   @doc """
-  Track an event for analytics (fire-and-forget).
+  Assign a user to an experiment (sticky on the server). `attributes` is sent
+  as `context` for targeting rules.
 
-  The event is sent asynchronously. This function always returns `:ok` immediately.
-  Network or API errors are logged as warnings but do not raise.
-
-  ## Parameters
-  - `client` - The client PID returned by `start/1`
-  - `event_name` - Name of the event (e.g., "purchase_completed")
-  - `user_id` - The user identifier
-  - `properties` - Optional map of event properties
+  Returns `{:ok, %Assignment{experiment_key, variant_id, variant_name, is_control, configuration}}`
+  or `{:error, reason}`. See `ExperimentationPlatform.Client.get_assignment/4`.
   """
-  @spec track(pid(), String.t(), String.t(), map()) :: :ok
-  def track(client, event_name, user_id, properties \\ %{}) do
-    Client.track(client, event_name, user_id, properties)
+  @spec get_assignment(Client.server(), String.t(), String.t(), map() | keyword()) ::
+          {:ok, Assignment.t()} | {:error, term()}
+  def get_assignment(client, experiment_key, user_id, attributes \\ %{}) do
+    Client.get_assignment(client, experiment_key, user_id, attributes)
   end
 
-  @doc "Stop the client and free associated resources."
-  @spec stop(pid()) :: :ok
+  @doc """
+  Track an event (fire-and-forget). Always returns `:ok`; never raises.
+
+  `opts`: `:experiment_key`, `:feature_flag_key`, `:value`, `:event_type`,
+  `:timestamp`. Without a key the event is fanned out to every cached
+  assignment and evaluated flag for the user (nothing cached — nothing sent).
+  See `ExperimentationPlatform.Client.track/5`.
+  """
+  @spec track(Client.server(), String.t(), String.t(), map(), keyword()) :: :ok
+  def track(client, event_name, user_id, properties \\ %{}, opts \\ []) do
+    Client.track(client, event_name, user_id, properties, opts)
+  end
+
+  @doc """
+  Track several events via `POST /api/v1/tracking/batch` (max 100 per request).
+
+  Returns `{:ok, %BatchResult{}}` or `{:error, reason}`.
+  See `ExperimentationPlatform.Client.track_batch/2`.
+  """
+  @spec track_batch(Client.server(), [map()]) :: {:ok, BatchResult.t()} | {:error, term()}
+  def track_batch(client, events) do
+    Client.track_batch(client, events)
+  end
+
+  @doc "Cached (successful, unexpired) assignments for the user."
+  @spec assignments(Client.server(), String.t()) :: [Assignment.t()]
+  def assignments(client, user_id), do: Client.assignments(client, user_id)
+
+  @doc "Keys of flags successfully evaluated (and still cached) for the user."
+  @spec evaluated_flags(Client.server(), String.t()) :: [String.t()]
+  def evaluated_flags(client, user_id), do: Client.evaluated_flags(client, user_id)
+
+  @doc "Drop every cached evaluation and assignment."
+  @spec clear_cache(Client.server()) :: :ok
+  def clear_cache(client), do: Client.clear_cache(client)
+
+  @doc """
+  Stop the client and free associated resources. Waits (up to the configured
+  `timeout`) for in-flight fire-and-forget track requests.
+  """
+  @spec stop(Client.server()) :: :ok
   def stop(client) do
     Client.stop(client)
   end
