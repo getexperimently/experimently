@@ -12,8 +12,10 @@ from typing import Any, Optional, Dict, List, Tuple
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
 
+from backend.app.core.config import settings as app_settings
 from backend.app.db.session import SessionLocal
 from backend.app.models.feature_flag import FeatureFlag, FeatureFlagStatus
+from backend.app.models.safety import RollbackTriggerType
 from backend.app.services.safety_service import SafetyService
 from backend.app.services.notification_service import NotificationService
 from backend.app.core.logging import get_logger
@@ -21,16 +23,32 @@ from backend.app.core.logging import get_logger
 logger = get_logger(__name__)
 
 
+def _rollback_target_percentage(config: Any) -> int:
+    """
+    The percentage an automatic rollback should set the flag to.
+
+    Reads ``rollback_percentage`` from the flag's safety config and clamps it to
+    0-100; anything missing or non-numeric rolls back to 0 (fully off).
+    """
+    value = getattr(config, "rollback_percentage", None)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return 0
+    return max(0, min(100, int(value)))
+
+
 class SafetyScheduler:
     """Handles scheduled tasks for feature flag safety monitoring."""
 
-    def __init__(self, interval_minutes: int = 5):
+    def __init__(self, interval_minutes: Optional[int] = None):
         """
         Initialize the safety scheduler.
 
         Args:
-            interval_minutes: How often to check feature flags for safety issues (in minutes)
+            interval_minutes: How often to check feature flags for safety issues
+                (in minutes). Defaults to ``settings.SAFETY_CHECK_INTERVAL_MINUTES``.
         """
+        if interval_minutes is None:
+            interval_minutes = app_settings.SAFETY_CHECK_INTERVAL_MINUTES
         self.interval_minutes = interval_minutes
         self.is_running = False
         self.task: Optional[asyncio.Task] = None
@@ -44,7 +62,9 @@ class SafetyScheduler:
 
         self.is_running = True
         self.task = asyncio.create_task(self._run_scheduler())
-        logger.info(f"Safety scheduler started with {self.interval_minutes} minute interval")
+        logger.info(
+            f"Safety scheduler started with {self.interval_minutes} minute interval"
+        )
 
     async def stop(self):
         """Stop the scheduler."""
@@ -93,12 +113,16 @@ class SafetyScheduler:
         db = SessionLocal()
         try:
             # Get all active feature flags with rollout percentage > 0
-            active_flags = db.query(FeatureFlag).filter(
-                and_(
-                    FeatureFlag.status == FeatureFlagStatus.ACTIVE,
-                    FeatureFlag.rollout_percentage > 0
+            active_flags = (
+                db.query(FeatureFlag)
+                .filter(
+                    and_(
+                        FeatureFlag.status == FeatureFlagStatus.ACTIVE,
+                        FeatureFlag.rollout_percentage > 0,
+                    )
                 )
-            ).all()
+                .all()
+            )
 
             if not active_flags:
                 logger.info("No active feature flags with rollout percentage > 0 found")
@@ -110,26 +134,39 @@ class SafetyScheduler:
             for feature_flag in active_flags:
                 try:
                     # Get safety configuration for the feature flag
-                    config = await safety_service.async_get_feature_flag_safety_config(feature_flag.id)
+                    config = await safety_service.async_get_feature_flag_safety_config(
+                        feature_flag.id
+                    )
 
                     # Skip if safety monitoring is not enabled for this flag
                     if not config.enabled:
                         continue
 
                     # Check safety status
-                    safety_check = await safety_service.check_feature_flag_safety(feature_flag.id)
+                    safety_check = await safety_service.check_feature_flag_safety(
+                        feature_flag.id
+                    )
 
                     # Log the safety check result
                     if safety_check.is_healthy:
-                        logger.info(f"Feature flag {feature_flag.key} ({feature_flag.id}) is healthy")
+                        logger.info(
+                            f"Feature flag {feature_flag.key} ({feature_flag.id}) is healthy"
+                        )
                     else:
-                        logger.warning(f"Feature flag {feature_flag.key} ({feature_flag.id}) has safety issues: {safety_check.details}")
+                        logger.warning(
+                            f"Feature flag {feature_flag.key} ({feature_flag.id}) has safety issues: {safety_check.details}"
+                        )
 
                     # If auto-rollback is enabled and safety check fails, trigger rollback
                     settings = await safety_service.async_get_safety_settings()
 
-                    if settings.enable_automatic_rollbacks and not safety_check.is_healthy:
-                        logger.warning(f"Triggering automatic rollback for feature flag {feature_flag.key} ({feature_flag.id})")
+                    if (
+                        settings.enable_automatic_rollbacks
+                        and not safety_check.is_healthy
+                    ):
+                        logger.warning(
+                            f"Triggering automatic rollback for feature flag {feature_flag.key} ({feature_flag.id})"
+                        )
 
                         # Find what metric triggered the rollback
                         trigger_reason = "Automatic rollback due to safety issues"
@@ -138,15 +175,35 @@ class SafetyScheduler:
                                 trigger_reason = f"Automatic rollback due to {metric.name} exceeding threshold ({metric.current_value} > {metric.threshold})"
                                 break
 
+                        # Roll back to the percentage configured for this flag
+                        # (e.g. back to the internal 5% stage), not always to 0.
+                        target_percentage = _rollback_target_percentage(config)
+
+                        if feature_flag.rollout_percentage <= target_percentage:
+                            # Already rolled back; the error window is still hot
+                            # from before the rollback. Do not write another
+                            # record or send another notification every cycle.
+                            logger.info(
+                                f"Feature flag {feature_flag.key} is unhealthy but already at "
+                                f"{feature_flag.rollout_percentage}% (rollback target {target_percentage}%); "
+                                "waiting for the error window to clear"
+                            )
+                            continue
+
                         # Execute rollback
-                        rollback_result = await safety_service.async_rollback_feature_flag(
-                            feature_flag_id=feature_flag.id,
-                            percentage=0,
-                            reason=trigger_reason
+                        rollback_result = (
+                            await safety_service.async_rollback_feature_flag(
+                                feature_flag_id=feature_flag.id,
+                                percentage=target_percentage,
+                                reason=trigger_reason,
+                                trigger_type=RollbackTriggerType.AUTOMATIC,
+                            )
                         )
 
                         if rollback_result.success:
-                            logger.info(f"Successfully rolled back feature flag {feature_flag.key}: {rollback_result.message}")
+                            logger.info(
+                                f"Successfully rolled back feature flag {feature_flag.key}: {rollback_result.message}"
+                            )
                             try:
                                 self._notification_service.notify_safety_rollback(
                                     feature_flag_id=str(feature_flag.id),
@@ -154,12 +211,18 @@ class SafetyScheduler:
                                     reason=trigger_reason,
                                 )
                             except Exception as exc:
-                                logger.warning("Notification failed (non-critical): %s", exc)
+                                logger.warning(
+                                    "Notification failed (non-critical): %s", exc
+                                )
                         else:
-                            logger.error(f"Failed to roll back feature flag {feature_flag.key}: {rollback_result.message}")
+                            logger.error(
+                                f"Failed to roll back feature flag {feature_flag.key}: {rollback_result.message}"
+                            )
 
                 except Exception as e:
-                    logger.error(f"Error checking safety for feature flag {feature_flag.id}: {str(e)}")
+                    logger.error(
+                        f"Error checking safety for feature flag {feature_flag.id}: {str(e)}"
+                    )
 
         except Exception as e:
             logger.error(f"Error checking feature flags safety: {str(e)}")

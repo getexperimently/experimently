@@ -11,7 +11,7 @@ The server decides bucketing; SDKs must not bucket locally.
 | Purpose | Method and path | Body / query | Response |
 |---|---|---|---|
 | Assign a user to an experiment (sticky) | `POST /api/v1/tracking/assign` | `{experiment_key, user_id, context?}` | `{experiment_key, user_id, variant_id, variant_name, is_control, configuration}` |
-| Evaluate a flag | `GET /api/v1/feature-flags/evaluate/{flag_key}?user_id=…` | — | `{key, enabled, config}` |
+| Evaluate a flag | `GET /api/v1/feature-flags/evaluate/{flag_key}?user_id=…&context=<url-encoded JSON, optional>` | — | `{key, enabled, config, reason}` |
 | All flags for a user | `GET /api/v1/feature-flags/user/{user_id}` | — | `{flag_key: boolean, …}` |
 | Track one event | `POST /api/v1/tracking/track` | `{event_type, event_name?, user_id, experiment_key? \| feature_flag_key?, value?, metadata?, timestamp?}` | stored event |
 | Track up to 100 events | `POST /api/v1/tracking/batch` | `{events: [...]}` | `{success_count, failure_count, errors}` |
@@ -20,6 +20,14 @@ The server decides bucketing; SDKs must not bucket locally.
 Conversions are matched to experiment metrics by `event_name` (exposures excluded), whatever `event_type`
 an SDK sends. Full request/response examples: [API Specs](api/specs.md#tracking-api-sdk). Per-IP rate
 limit for these paths: `SDK_RATE_LIMIT_PER_MINUTE` (default 6000/min).
+
+**Targeting context.** The user's attributes (`user.attributes` / `user_attributes`) are sent as `context`:
+in the `/tracking/assign` body, and on flag evaluation as `context=<url-encoded JSON>` (omitted when empty).
+A flag's targeting rules — as written in the dashboard rule editor — evaluate against them; the response's
+`reason` (`targeting_rule` / `rollout` / `inactive` / `error`) says which path decided. Attribute lookup is
+aliased: a top-level `country` also matches a rule on `user.country` (likewise `device.` / `app.` prefixes),
+and nested objects flatten to dotted keys (`{"app": {"version": "3.2.1"}}` answers `app.version`). The React,
+JavaScript and Python SDKs send the context today; the other SDKs will follow.
 
 ## SDK status (2026-09-11)
 
@@ -35,12 +43,12 @@ this on every pull request for the SDKs whose toolchain is available on Linux.
 
 | SDK | Location | Unit tests | Verified live | Docs |
 |---|---|---|---|---|
-| React | `sdk/react` | 202 (jest) | yes — also runs the ShopLab demo | [react.md](sdk/react.md) |
-| JavaScript / TypeScript | `sdk/js` | 95 (jest) | yes | [javascript.md](sdk/javascript.md) |
+| React | `sdk/react` | 215 (jest) | yes — also runs the ShopLab demo | [react.md](sdk/react.md) |
+| JavaScript / TypeScript | `sdk/js` | 105 (jest) | yes | [javascript.md](sdk/javascript.md) |
 | OpenFeature (JS) | `sdk/openfeature` | 51 (jest) | yes | [openfeature.md](sdk/openfeature.md) |
 | Edge (Cloudflare Workers) | `sdk/edge` | 101 (jest) | yes | [edge.md](sdk/edge.md) |
 | React Native | `sdk/react-native` | jest | unit tests only (no device runtime) | [react-native.md](sdk/react-native.md) |
-| Python | `sdk/python` | 87 (pytest) | yes | [python.md](sdk/python.md) |
+| Python | `sdk/python` | 97 (pytest) | yes | [python.md](sdk/python.md) |
 | OpenFeature (Python) | `sdk/openfeature-python` | 79 (pytest) | yes | [openfeature.md](sdk/openfeature.md) |
 | Go | `sdk/go` | 51 (`go test -race`) | yes | [go.md](sdk/go.md) |
 | Java + Spring Boot starter | `sdk/java` | 77 + 30 (JUnit 5) | yes | [java.md](sdk/java.md) |
@@ -127,9 +135,9 @@ client = ExperimentationClient(
 |---|---|---|
 | `get_assignment(experiment_key, user_id, user_attributes=None)` | `Assignment(experiment_key, user_id, variant_id, variant_name, is_control, configuration)` | raises `ExperimentationError(status, body)` (404 when the experiment is not ACTIVE) |
 | `get_variant(experiment_key, user_id, user_attributes=None)` | `str` | `default_variant` |
-| `get_feature_flag(flag_key, user_id)` | `FlagEvaluation(key, enabled, config)` | raises `ExperimentationError` |
-| `is_feature_enabled(flag_key, user_id)` | `bool` | `False` |
-| `get_all_flags(user_id)` | `dict[str, bool]` | raises `ExperimentationError` |
+| `get_feature_flag(flag_key, user_id, user_attributes=None)` | `FlagEvaluation(key, enabled, config, reason)` | raises `ExperimentationError` |
+| `is_feature_enabled(flag_key, user_id, user_attributes=None)` | `bool` | `False` |
+| `get_all_flags(user_id, user_attributes=None)` | `dict[str, bool]` | raises `ExperimentationError` |
 | `track(user_id, event_name, event_value=None, properties=None, experiment_key=None, feature_flag_key=None, event_type=None, timestamp=None)` | `bool` | `False`, never raises |
 | `track_batch(events)` | `BatchResult(success_count, failure_count, errors)` | never raises; chunked at 100 |
 | `get_assignments(user_id)` | `list[dict]` from `/tracking/assignments/{user_id}` | raises `ExperimentationError` |
@@ -211,9 +219,9 @@ const client = new ExperimentationClient({
 |---|---|---|
 | `getAssignment(experimentKey, user)` | `Promise<Assignment>` (`experimentKey, userId, variantId, variantName, isControl, configuration`) | rejects with `ExperimentationError` (`status`, `code`) |
 | `getVariant(experimentKey, user)` | `Promise<string>` | `defaultVariant` |
-| `evaluateFlag(flagKey, user)` | `Promise<FlagEvaluation>` (`key, enabled, config`) | rejects with `ExperimentationError` |
+| `evaluateFlag(flagKey, user)` | `Promise<FlagEvaluation>` (`key, enabled, config, reason?`) — `user.attributes` sent as `context` | rejects with `ExperimentationError` |
 | `isFeatureEnabled(flagKey, user)` | `Promise<boolean>` | `false` |
-| `getAllFlags(userId)` | `Promise<Record<string, boolean>>` | rejects |
+| `getAllFlags(userId, attributes?)` | `Promise<Record<string, boolean>>` | rejects |
 | `track(userId, eventName, { value?, properties?, experimentKey?, featureFlagKey?, eventType?, timestamp? })` | `Promise<void>` | never rejects |
 | `trackBatch(events)` | `Promise<BatchResult>` | never rejects; chunked at 100 |
 | `fetchAssignments(userId)` | server-side list from `/tracking/assignments/{userId}` | rejects |

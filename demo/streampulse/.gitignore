@@ -1,0 +1,9 @@
+node_modules
+.next
+out
+.env.local
+.api_key
+coverage
+tsconfig.tsbuildinfo
+__pycache__
+.pytest_cache

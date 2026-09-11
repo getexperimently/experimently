@@ -75,6 +75,26 @@ describe('useFeatureFlag', () => {
     expect(init.headers).toEqual({ 'X-API-Key': 'test-key', 'Content-Type': 'application/json' });
   });
 
+  it('sends the provider user attributes as context=<url-encoded JSON>', async () => {
+    const fetchMock = makeFetchMock(enabledFlag);
+    const wrapper = makeWrapper({ userId: 'user-1', attributes: { os: 'iOS', tier: 'premium' } });
+    const { result } = renderHook(() => useFeatureFlag('my-flag'), { wrapper });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      'https://api.example.com/api/v1/feature-flags/evaluate/my-flag' +
+        '?user_id=user-1&context=%7B%22os%22%3A%22iOS%22%2C%22tier%22%3A%22premium%22%7D'
+    );
+  });
+
+  it('exposes the server reason on the evaluation', async () => {
+    makeFetchMock({ ...enabledFlag, reason: 'targeting_rule' });
+    const { result } = renderHook(() => useFeatureFlag('my-flag'), { wrapper: makeWrapper() });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.reason).toBe('targeting_rule');
+    expect(result.current.isEnabled).toBe(true);
+  });
+
   it('sets isEnabled: true and variant "on" when the server enables the flag', async () => {
     makeFetchMock(enabledFlag);
     const { result } = renderHook(() => useFeatureFlag('my-flag'), { wrapper: makeWrapper() });

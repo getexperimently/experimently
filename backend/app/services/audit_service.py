@@ -7,6 +7,8 @@ for compliance, debugging, and analysis purposes.
 """
 
 import asyncio
+import json
+from enum import Enum
 import logging
 from datetime import datetime, timezone
 from typing import List, Optional, Tuple, Dict, Any
@@ -20,6 +22,21 @@ from backend.app.models.user import User
 
 
 logger = logging.getLogger(__name__)
+
+
+def _as_audit_text(value: Any) -> Optional[str]:
+    """Render an audit value for the Text columns.
+
+    Enum members become their ``.value``, dicts/lists are JSON-encoded, ``None``
+    stays ``None`` and everything else goes through ``str()``.
+    """
+    if value is None:
+        return None
+    if isinstance(value, Enum):
+        return str(value.value)
+    if isinstance(value, (dict, list, tuple)):
+        return json.dumps(value, default=str, sort_keys=True)
+    return str(value)
 
 
 class AuditService:
@@ -58,7 +75,9 @@ class AuditService:
             Exception: If logging fails
         """
         try:
-            # Create audit log entry
+            # Create audit log entry. old/new values are Text columns; callers
+            # pass enum members (FeatureFlagStatus), dicts or plain strings, so
+            # normalise here instead of failing the whole toggle at INSERT time.
             audit_log = AuditLog(
                 user_id=user_id,
                 user_email=user_email,
@@ -66,8 +85,8 @@ class AuditService:
                 entity_type=EntityType.FEATURE_FLAG.value,
                 entity_id=entity_id,
                 entity_name=entity_name,
-                old_value=old_value,
-                new_value=new_value,
+                old_value=_as_audit_text(old_value),
+                new_value=_as_audit_text(new_value),
                 reason=reason,
                 timestamp=datetime.now(timezone.utc),
             )
@@ -166,8 +185,11 @@ class AuditService:
             entity_type=entity_type.value,
             entity_id=entity_id,
             entity_name=entity_name,
-            old_value=old_value,
-            new_value=new_value,
+            # Text columns: enum members (FeatureFlagStatus) and dicts must be
+            # rendered here, otherwise psycopg2 cannot adapt them and the
+            # caller's whole transaction (including the flag change) is lost.
+            old_value=_as_audit_text(old_value),
+            new_value=_as_audit_text(new_value),
             reason=reason,
             timestamp=datetime.now(timezone.utc),
         )
@@ -247,10 +269,7 @@ class AuditService:
         # Apply pagination and ordering
         offset = (page - 1) * limit
         audit_logs = (
-            query.order_by(desc(AuditLog.timestamp))
-            .offset(offset)
-            .limit(limit)
-            .all()
+            query.order_by(desc(AuditLog.timestamp)).offset(offset).limit(limit).all()
         )
 
         logger.info(
@@ -327,15 +346,9 @@ class AuditService:
         if to_date:
             query = query.filter(AuditLog.timestamp <= to_date)
 
-        audit_logs = (
-            query.order_by(desc(AuditLog.timestamp))
-            .limit(limit)
-            .all()
-        )
+        audit_logs = query.order_by(desc(AuditLog.timestamp)).limit(limit).all()
 
-        logger.info(
-            f"Retrieved {len(audit_logs)} audit logs for user {user_id}"
-        )
+        logger.info(f"Retrieved {len(audit_logs)} audit logs for user {user_id}")
 
         return audit_logs
 
@@ -394,10 +407,7 @@ class AuditService:
         total_count = query.count()
 
         audit_logs = (
-            query.order_by(desc(AuditLog.timestamp))
-            .offset(offset)
-            .limit(limit)
-            .all()
+            query.order_by(desc(AuditLog.timestamp)).offset(offset).limit(limit).all()
         )
 
         logger.info(
@@ -439,7 +449,9 @@ class AuditService:
                 user_id=user_id,
                 user_email=user_email,
                 action_type=action,
-                entity_id=UUID(result["flag_id"]) if isinstance(result["flag_id"], str) else result["flag_id"],
+                entity_id=UUID(result["flag_id"])
+                if isinstance(result["flag_id"], str)
+                else result["flag_id"],
                 entity_name=result.get("flag_name", ""),
                 old_value=result.get("old_status", ""),
                 new_value=result.get("new_status", ""),

@@ -112,7 +112,7 @@ if (flag.Enabled)
 }
 ```
 
-Never throws. On a network/HTTP failure (including 404 when the flag is not ACTIVE) a cached
+Never throws. On a network/HTTP failure (including `enabled: false`, `reason: "inactive"` when the flag is not ACTIVE; 404 only for an unknown key) a cached
 evaluation is returned when one exists; otherwise a disabled result
 (`FlagEvaluationResult.Disabled(flagKey)`). Failures are never cached, so the next call retries.
 
@@ -218,7 +218,7 @@ Every request carries `X-API-Key` and `Accept: application/json`; POSTs carry
 
 | SDK call | Method and path | Body / query | Response used |
 |---|---|---|---|
-| `EvaluateFlagAsync` | `GET /api/v1/feature-flags/evaluate/{flag_key}?user_id=…` | — | `{key, enabled, config}`; 404 when the flag is not ACTIVE |
+| `EvaluateFlagAsync` | `GET /api/v1/feature-flags/evaluate/{flag_key}?user_id=…` | — | `{key, enabled, config}`; `enabled: false`, `reason: "inactive"` when the flag is not ACTIVE; 404 only for an unknown key |
 | `GetAssignmentAsync` | `POST /api/v1/tracking/assign` | `{experiment_key, user_id, context?}` | `{experiment_key, user_id, variant_id, variant_name, is_control, configuration}`; 404 when the experiment is not ACTIVE |
 | `TrackAsync` with a key | `POST /api/v1/tracking/track` | `{event_type, event_name, user_id, experiment_key?, feature_flag_key?, value?, metadata?, timestamp?}` | ignored |
 | `TrackAsync` without keys, `TrackBatchAsync` | `POST /api/v1/tracking/batch` | `{events: [<track body>, …]}` (max 100 per request) | ignored (status only) |

@@ -50,6 +50,15 @@ jobs:
           POSTGRES_PASSWORD: postgres
         run: python -m pytest backend/tests/unit/ -p no:cov -q --tb=short -x
 
+      # The Lambda functions (assignment, event processor, flag evaluation) carry
+      # 301 tests of their own that ran nowhere in CI. Each function's tests/ dir
+      # must run in its own pytest invocation (they all define `tests.conftest`).
+      - name: Run Lambda tests
+        run: |
+          for d in backend/lambda/assignment backend/lambda/event_processor backend/lambda/feature_flag_evaluation backend/lambda/shared; do
+            python -m pytest "$d" -p no:cov -q --tb=short || exit 1
+          done
+
   smoke-tests:
     name: Smoke Tests
     runs-on: ubuntu-latest

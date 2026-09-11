@@ -587,6 +587,22 @@ class SafetyService:
                 raise ValueError(f"Feature flag {feature_flag_id} does not exist")
 
             previous_percentage = feature_flag.rollout_percentage
+            if previous_percentage <= target_percentage:
+                # Already at (or below) the safe percentage: nothing to roll
+                # back. Without this guard the safety monitor writes a new
+                # rollback record every cycle while the error window is hot.
+                db.rollback()
+                return RollbackResponse(
+                    success=False,
+                    feature_flag_id=feature_flag_id,
+                    message=(
+                        f"Feature flag '{feature_flag.key}' is already at "
+                        f"{previous_percentage}% (target {target_percentage}%); no rollback needed"
+                    ),
+                    trigger_type=trigger_name,
+                    previous_percentage=previous_percentage,
+                    new_percentage=previous_percentage,
+                )
             safety_config = self.get_or_create_safety_config(db, feature_flag_id)
 
             feature_flag.rollout_percentage = target_percentage
