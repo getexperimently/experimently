@@ -158,7 +158,7 @@ class GlobalHoldoutService:
     def _get_holdout_bucket_static(user_id: str) -> int:
         """Get holdout bucket for a user (0-99). Static version."""
         combined = f"{user_id}:{HOLDOUT_SALT}".encode("utf-8")
-        hash_bytes = hashlib.md5(combined).digest()[:4]
+        hash_bytes = hashlib.md5(combined, usedforsecurity=False).digest()[:4]
         hash_int = struct.unpack("<I", hash_bytes)[0]
         return hash_int % 100
 

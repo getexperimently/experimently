@@ -14,9 +14,18 @@ import pytest
 import requests
 from typing import Optional
 
-API_URL = os.environ.get("SMOKE_TEST_API_URL", "http://localhost:8000")
+API_URL = os.environ.get("SMOKE_TEST_API_URL", "")
 API_KEY = os.environ.get("SMOKE_TEST_API_KEY", "")
 TOKEN = os.environ.get("SMOKE_TEST_TOKEN", "")
+
+# These tests need a deployed environment.  Without SMOKE_TEST_API_URL they
+# would try to reach a server that does not exist in unit/CI runs and fail,
+# so the whole module is skipped unless the target URL is provided
+# (deploy-prod.yml sets it after a release).
+pytestmark = pytest.mark.skipif(
+    not API_URL,
+    reason="SMOKE_TEST_API_URL not set — production smoke tests only run against a deployed environment",
+)
 
 REQUIRES_API_KEY = pytest.mark.skipif(not API_KEY, reason="SMOKE_TEST_API_KEY not set")
 REQUIRES_TOKEN = pytest.mark.skipif(not TOKEN, reason="SMOKE_TEST_TOKEN not set")

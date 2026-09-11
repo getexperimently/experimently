@@ -18,7 +18,9 @@ MODE="${1:-release}"
 PROFILE="${EP_TEST_PROFILE:-external}" # external | compose
 
 if [[ "${PROFILE}" == "compose" ]]; then
-  docker compose -f docker-compose.test.yml up -d postgres-test redis-test
+  # --wait blocks until the services' healthchecks pass, so the schema
+  # bootstrap below never races Postgres' first-start initialisation.
+  docker compose -f docker-compose.test.yml up -d --wait postgres-test redis-test
   trap 'docker compose -f docker-compose.test.yml down --remove-orphans >/dev/null 2>&1 || true' EXIT
   export POSTGRES_PORT="${POSTGRES_PORT:-5433}"
   export REDIS_PORT="${REDIS_PORT:-6380}"

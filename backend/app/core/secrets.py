@@ -54,7 +54,8 @@ def get_secret(secret_name: str, region_name: str = "us-west-2") -> str:
             import base64
             secret = base64.b64decode(response["SecretBinary"]).decode("utf-8")
 
-        logger.info("Successfully retrieved secret: %s", secret_name)
+        # Only the secret's identifier is logged, never its value.
+        logger.info("Successfully retrieved secret: %s", secret_name)  # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure
         return secret
 
     except ImportError:
@@ -63,7 +64,8 @@ def get_secret(secret_name: str, region_name: str = "us-west-2") -> str:
             "Install it with: pip install boto3"
         )
     except Exception as exc:
-        logger.error("Failed to retrieve secret %s: %s", secret_name, exc)
+        # Logs the identifier and the boto error, never the secret value.
+        logger.error("Failed to retrieve secret %s: %s", secret_name, exc)  # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure
         raise RuntimeError(f"Could not retrieve secret '{secret_name}': {exc}") from exc
 
 

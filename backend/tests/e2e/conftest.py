@@ -36,7 +36,10 @@ from backend.app.models.experiment import (
 from backend.app.models.feature_flag import FeatureFlag, FeatureFlagStatus
 
 HASHED_PASSWORD = "$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW"
-DEFAULT_TEST_DB_URL = "postgresql://postgres:postgres@localhost:5432/experimentation_test"
+# Use the per-process database that the root conftest's `test_db` fixture
+# creates (experimentation_test_<pid>) rather than a fixed name, so the E2E
+# engine points at a database that actually has the schema.
+from backend.tests.conftest import DEFAULT_TEST_DB_URL  # noqa: E402
 
 
 class DictLikeCacheControl:

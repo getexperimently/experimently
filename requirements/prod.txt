@@ -1,10 +1,4 @@
 -r base.txt
 
-# Monitoring & Tracing
-opentelemetry-api==1.19.0
-opentelemetry-sdk==1.19.0
-opentelemetry-exporter-otlp==1.19.0
-prometheus-client==0.17.1
-
-# Production WSGI server
+# Production WSGI server (monitoring/tracing libs are in backend/requirements.txt)
 gunicorn==21.2.0
