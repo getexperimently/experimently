@@ -1,75 +1,87 @@
 /**
  * Tests for ExperimentationProvider (OpenFeature TypeScript provider).
  *
- * Coverage:
- *   - Provider initialization fetches flags
- *   - resolveBooleanEvaluation: enabled flag, disabled flag, default, type mismatch
- *   - resolveStringEvaluation: variant string, default, type mismatch
- *   - resolveNumberEvaluation: number value, default, type mismatch
- *   - resolveObjectEvaluation: JSON config, default, type mismatch
- *   - EvaluationContext mapping: targetingKey → userId
- *   - Cache behaviour: warm cache returns CACHED reason, cold cache refetches
- *   - API error handling: DEFAULT reason with ErrorCode
- *   - onClose() cleans up resources
- *   - Hash algorithm correctness (cross-SDK test vectors)
- *   - Multiple flags coexist in cache
- *   - Variant assignment proportional to weight
- *   - Flag with no variants → boolean on/off
- *   - Out-of-rollout user → false / defaultValue
- *   - Provider can be registered with OpenFeature.setProvider()
+ * The provider delegates to @experimentation-platform/js-sdk; `fetch` is injected
+ * so no network calls are made. Coverage:
+ *   - construction / metadata / baseUrl handling / reusing a JS SDK client
+ *   - request shape: GET /api/v1/feature-flags/evaluate/{key}?user_id=…, headers, no attributes
+ *   - boolean / string / number / object resolution rules
+ *   - error mapping: 404 → FLAG_NOT_FOUND, network → GENERAL, missing targetingKey
+ *   - per user + flag caching (CACHED reason, TTL expiry, failures not cached)
+ *   - onClose / refreshFlags clear the cache
+ *   - hash utility vectors
+ *   - OpenFeature.setProviderAndWait registration
+ *   - provider.client tracking fan-out includes flags evaluated via OpenFeature
  */
 
-import { ExperimentationProvider, ExperimentationProviderOptions } from '../src/ExperimentationProvider';
-import { EvaluationContext, ErrorCode, StandardResolutionReasons } from '@openfeature/server-sdk';
-import { FeatureFlagDefinition, FlagsResponse } from '../src/types';
+import { ExperimentationProvider } from '../src/ExperimentationProvider';
+import type { ExperimentationProviderOptions } from '../src/types';
+import { ErrorCode, StandardResolutionReasons } from '@openfeature/server-sdk';
+import { ExperimentationClient } from '@experimentation-platform/js-sdk';
+import type { FlagEvaluateResponse } from '@experimentation-platform/js-sdk';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Creates a minimal FeatureFlagDefinition for testing. */
-function makeFlag(overrides: Partial<FeatureFlagDefinition> = {}): FeatureFlagDefinition {
-  return {
-    key: 'test-flag',
-    enabled: true,
-    rollout_percentage: 100,
-    variants: [],
-    rules: [],
-    ...overrides,
-  };
+interface Step {
+  body?: unknown;
+  status?: number;
 }
 
-/** Builds a mock fetch that returns the given flags array as FlagsResponse. */
-function mockFetch(flags: FeatureFlagDefinition[], status = 200): jest.MockedFunction<typeof fetch> {
-  return jest.fn().mockResolvedValue({
+function response(step: Step) {
+  const status = step.status ?? 200;
+  return {
     ok: status >= 200 && status < 300,
     status,
     statusText: status === 200 ? 'OK' : 'Error',
-    json: async () => ({ flags } as FlagsResponse),
-  } as unknown as Response);
+    headers: { get: () => null },
+    json: async () => step.body ?? {},
+  } as unknown as Response;
 }
 
-/** Builds a mock fetch that rejects (network error). */
+/** Mock fetch that answers every call with the same flag evaluation. */
+function flagFetch(body: Partial<FlagEvaluateResponse> & { enabled: boolean }, status = 200): jest.MockedFunction<typeof fetch> {
+  return jest.fn().mockResolvedValue(response({ body: { key: 'flag', config: null, ...body }, status }));
+}
+
+/** Mock fetch that answers calls in order. */
+function sequenceFetch(...steps: Array<Step | Error>): jest.MockedFunction<typeof fetch> {
+  const mock = jest.fn();
+  for (const step of steps) {
+    if (step instanceof Error) mock.mockRejectedValueOnce(step);
+    else mock.mockResolvedValueOnce(response(step));
+  }
+  return mock;
+}
+
 function errorFetch(message = 'Network error'): jest.MockedFunction<typeof fetch> {
   return jest.fn().mockRejectedValue(new Error(message));
 }
 
-/** Builds provider options with an injected mock fetch. */
-function makeOptions(
-  flags: FeatureFlagDefinition[],
-  extra: Partial<ExperimentationProviderOptions> = {},
-): ExperimentationProviderOptions {
-  return {
+function makeProvider(fetchImpl: typeof fetch, extra: Partial<ExperimentationProviderOptions> = {}): ExperimentationProvider {
+  return new ExperimentationProvider({
     apiKey: 'test-api-key',
     baseUrl: 'http://localhost:8000',
     cacheTtlMs: 30_000,
-    fetch: mockFetch(flags),
+    fetch: fetchImpl,
     ...extra,
-  };
+  });
 }
 
+function requestOf(fetchMock: jest.MockedFunction<typeof fetch>, index = 0) {
+  const [url, init] = fetchMock.mock.calls[index] as [string, RequestInit];
+  return { url, init, body: init.body ? JSON.parse(init.body as string) : undefined };
+}
+
+const ctx = { targetingKey: 'user-1' };
+
+afterEach(() => {
+  jest.restoreAllMocks();
+});
+
 // ---------------------------------------------------------------------------
-// Provider construction
+// Construction
 // ---------------------------------------------------------------------------
 
 describe('ExperimentationProvider — construction', () => {
@@ -77,56 +89,105 @@ describe('ExperimentationProvider — construction', () => {
     expect(() => new ExperimentationProvider({ apiKey: '' })).toThrow('apiKey is required');
   });
 
-  test('provider metadata name is correct', () => {
-    const provider = new ExperimentationProvider({ apiKey: 'key', fetch: mockFetch([]) });
+  test('provider metadata name is unchanged', () => {
+    const provider = makeProvider(flagFetch({ enabled: true }));
     expect(provider.metadata.name).toBe('experimentation-platform-provider');
   });
 
+  test('hooks are undefined by default', () => {
+    expect(makeProvider(flagFetch({ enabled: true })).hooks).toBeUndefined();
+  });
+
   test('defaults baseUrl to http://localhost:8000', async () => {
-    const fetchMock = mockFetch([]);
+    const fetchMock = flagFetch({ enabled: true });
     const provider = new ExperimentationProvider({ apiKey: 'key', fetch: fetchMock });
-    await provider.initialize();
-    expect((fetchMock.mock.calls[0][0] as string)).toContain('http://localhost:8000');
+    await provider.resolveBooleanEvaluation('f', false, ctx);
+    expect(requestOf(fetchMock).url).toBe('http://localhost:8000/api/v1/feature-flags/evaluate/f?user_id=user-1');
   });
 
   test('strips trailing slash from baseUrl', async () => {
-    const fetchMock = mockFetch([]);
-    const provider = new ExperimentationProvider({
-      apiKey: 'key',
-      baseUrl: 'https://api.example.com/',
-      fetch: fetchMock,
-    });
+    const fetchMock = flagFetch({ enabled: true });
+    const provider = new ExperimentationProvider({ apiKey: 'key', baseUrl: 'https://api.example.com/', fetch: fetchMock });
+    await provider.resolveBooleanEvaluation('f', false, ctx);
+    expect(requestOf(fetchMock).url).toBe('https://api.example.com/api/v1/feature-flags/evaluate/f?user_id=user-1');
+  });
+
+  test('exposes the underlying JS SDK client', () => {
+    const provider = makeProvider(flagFetch({ enabled: true }));
+    expect(provider.client).toBeInstanceOf(ExperimentationClient);
+  });
+
+  test('reuses an injected JS SDK client (apiKey not required then)', async () => {
+    const fetchMock = flagFetch({ enabled: true });
+    const client = new ExperimentationClient({ apiUrl: 'https://shared.example.com', apiKey: 'shared', fetch: fetchMock });
+    const provider = new ExperimentationProvider({ apiKey: '', client });
+    expect(provider.client).toBe(client);
+    await provider.resolveBooleanEvaluation('f', false, ctx);
+    expect(requestOf(fetchMock).url).toContain('https://shared.example.com/');
+  });
+
+  test('initialize() makes no request (nothing to pre-fetch)', async () => {
+    const fetchMock = flagFetch({ enabled: true });
+    const provider = makeProvider(fetchMock);
     await provider.initialize();
-    expect((fetchMock.mock.calls[0][0] as string)).toContain('api.example.com/api/v1');
-    expect((fetchMock.mock.calls[0][0] as string)).not.toContain('//api/v1');
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 
 // ---------------------------------------------------------------------------
-// Initialization
+// Request shape
 // ---------------------------------------------------------------------------
 
-describe('ExperimentationProvider — initialize()', () => {
-  test('initialize() fetches flags from API', async () => {
-    const fetchMock = mockFetch([makeFlag()]);
-    const provider = new ExperimentationProvider({ apiKey: 'key', fetch: fetchMock });
-    await provider.initialize();
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const url = fetchMock.mock.calls[0][0] as string;
-    expect(url).toContain('/api/v1/openfeature/flags');
+describe('ExperimentationProvider — request', () => {
+  test('GETs /api/v1/feature-flags/evaluate/{key}?user_id=targetingKey with the contract headers', async () => {
+    const fetchMock = flagFetch({ enabled: true });
+    const provider = makeProvider(fetchMock);
+    await provider.resolveBooleanEvaluation('dark-mode', false, { targetingKey: 'user 1/a' });
+
+    const { url, init } = requestOf(fetchMock);
+    expect(url).toBe('http://localhost:8000/api/v1/feature-flags/evaluate/dark-mode?user_id=user%201%2Fa');
+    expect(init.method).toBe('GET');
+    expect(init.headers).toEqual({
+      'X-API-Key': 'test-api-key',
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    });
+    expect(init.body).toBeUndefined();
   });
 
-  test('initialize() sends X-API-Key header', async () => {
-    const fetchMock = mockFetch([]);
-    const provider = new ExperimentationProvider({ apiKey: 'my-secret-key', fetch: fetchMock });
-    await provider.initialize();
-    const opts = fetchMock.mock.calls[0][1] as RequestInit;
-    expect((opts.headers as Record<string, string>)['X-API-Key']).toBe('my-secret-key');
+  test('URL-encodes the flag key', async () => {
+    const fetchMock = flagFetch({ enabled: true });
+    const provider = makeProvider(fetchMock);
+    await provider.resolveBooleanEvaluation('a b/c', false, ctx);
+    expect(requestOf(fetchMock).url).toContain('/evaluate/a%20b%2Fc?user_id=user-1');
   });
 
-  test('get_provider_hooks returns empty array by default', () => {
-    const provider = new ExperimentationProvider({ apiKey: 'key', fetch: mockFetch([]) });
-    expect(provider.hooks).toBeUndefined();
+  test('does not send context attributes (only targetingKey → user_id)', async () => {
+    const fetchMock = flagFetch({ enabled: true });
+    const provider = makeProvider(fetchMock);
+    await provider.resolveBooleanEvaluation('f', false, { targetingKey: 'user-1', country: 'US', plan: 'pro' });
+    const { url, init } = requestOf(fetchMock);
+    expect(url).not.toContain('country');
+    expect(init.body).toBeUndefined();
+  });
+
+  test('missing targetingKey → default with TARGETING_KEY_MISSING and no request', async () => {
+    const fetchMock = flagFetch({ enabled: true });
+    const provider = makeProvider(fetchMock);
+    const result = await provider.resolveBooleanEvaluation('f', true);
+    expect(result).toEqual({
+      value: true,
+      reason: StandardResolutionReasons.ERROR,
+      errorCode: ErrorCode.TARGETING_KEY_MISSING,
+      errorMessage: expect.stringContaining('targetingKey'),
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  test('empty targetingKey is treated as missing', async () => {
+    const provider = makeProvider(flagFetch({ enabled: true }));
+    const result = await provider.resolveStringEvaluation('f', 'd', { targetingKey: '' });
+    expect(result.errorCode).toBe(ErrorCode.TARGETING_KEY_MISSING);
   });
 });
 
@@ -135,57 +196,54 @@ describe('ExperimentationProvider — initialize()', () => {
 // ---------------------------------------------------------------------------
 
 describe('ExperimentationProvider — resolveBooleanEvaluation()', () => {
-  test('returns true for an enabled flag at 100% rollout', async () => {
-    const flag = makeFlag({ key: 'my-feature', enabled: true, rollout_percentage: 100 });
-    const provider = new ExperimentationProvider(makeOptions([flag]));
-    await provider.initialize();
-
-    const result = await provider.resolveBooleanEvaluation('my-feature', false, {
-      targetingKey: 'user-1',
+  test('returns true with TARGETING_MATCH for an enabled flag', async () => {
+    const provider = makeProvider(flagFetch({ key: 'my-feature', enabled: true }));
+    const result = await provider.resolveBooleanEvaluation('my-feature', false, ctx);
+    expect(result).toEqual({
+      value: true,
+      reason: StandardResolutionReasons.TARGETING_MATCH,
+      variant: undefined,
+      flagMetadata: { flagKey: 'my-feature', enabled: true },
     });
-    expect(result.value).toBe(true);
+  });
+
+  test('returns false with DISABLED for a disabled flag (ignores defaultValue)', async () => {
+    const provider = makeProvider(flagFetch({ enabled: false }));
+    const result = await provider.resolveBooleanEvaluation('off', true, ctx);
+    expect(result.value).toBe(false);
+    expect(result.reason).toBe(StandardResolutionReasons.DISABLED);
     expect(result.errorCode).toBeUndefined();
   });
 
-  test('returns false for a disabled flag', async () => {
-    const flag = makeFlag({ key: 'disabled-flag', enabled: false, rollout_percentage: 100 });
-    const provider = new ExperimentationProvider(makeOptions([flag]));
-    await provider.initialize();
-
-    const result = await provider.resolveBooleanEvaluation('disabled-flag', true, {
-      targetingKey: 'user-1',
-    });
-    expect(result.value).toBe(false);
+  test('reports config.variant as the variant when it is a string', async () => {
+    const provider = makeProvider(flagFetch({ enabled: true, config: { variant: 'blue' } }));
+    const result = await provider.resolveBooleanEvaluation('f', false, ctx);
+    expect(result.variant).toBe('blue');
   });
 
-  test('returns defaultValue with FLAG_NOT_FOUND when flag missing', async () => {
-    const provider = new ExperimentationProvider(makeOptions([]));
-    await provider.initialize();
-
-    const result = await provider.resolveBooleanEvaluation('nonexistent', true);
+  test('404 → defaultValue with FLAG_NOT_FOUND and reason ERROR', async () => {
+    const provider = makeProvider(flagFetch({ enabled: true }, 404));
+    const result = await provider.resolveBooleanEvaluation('nonexistent', true, ctx);
     expect(result.value).toBe(true);
+    expect(result.reason).toBe(StandardResolutionReasons.ERROR);
     expect(result.errorCode).toBe(ErrorCode.FLAG_NOT_FOUND);
-    expect(result.reason).toBe(StandardResolutionReasons.DEFAULT);
+    expect(result.errorMessage).toContain('nonexistent');
   });
 
-  test('returns false for user out of rollout (0% rollout)', async () => {
-    const flag = makeFlag({ key: 'zero-pct', enabled: true, rollout_percentage: 0 });
-    const provider = new ExperimentationProvider(makeOptions([flag]));
-    await provider.initialize();
-
-    const result = await provider.resolveBooleanEvaluation('zero-pct', true, {
-      targetingKey: 'any-user',
-    });
-    expect(result.value).toBe(false);
-  });
-
-  test('returns true when evaluation context is undefined (no user)', async () => {
-    const flag = makeFlag({ key: 'open-flag', enabled: true, rollout_percentage: 100 });
-    const provider = new ExperimentationProvider(makeOptions([flag]));
-    await provider.initialize();
-
-    const result = await provider.resolveBooleanEvaluation('open-flag', false);
+  test('network error → defaultValue with GENERAL and reason ERROR', async () => {
+    const provider = makeProvider(errorFetch('ECONNREFUSED'));
+    const result = await provider.resolveBooleanEvaluation('f', true, ctx);
     expect(result.value).toBe(true);
+    expect(result.reason).toBe(StandardResolutionReasons.ERROR);
+    expect(result.errorCode).toBe(ErrorCode.GENERAL);
+    expect(result.errorMessage).toContain('ECONNREFUSED');
+  });
+
+  test('401 → defaultValue with GENERAL', async () => {
+    const provider = makeProvider(flagFetch({ enabled: true }, 401));
+    const result = await provider.resolveBooleanEvaluation('f', false, ctx);
+    expect(result.value).toBe(false);
+    expect(result.errorCode).toBe(ErrorCode.GENERAL);
   });
 });
 
@@ -194,67 +252,51 @@ describe('ExperimentationProvider — resolveBooleanEvaluation()', () => {
 // ---------------------------------------------------------------------------
 
 describe('ExperimentationProvider — resolveStringEvaluation()', () => {
-  test('returns variant string for A/B flag', async () => {
-    const flag = makeFlag({
-      key: 'ab-test',
-      enabled: true,
-      rollout_percentage: 100,
-      variants: [
-        { key: 'control', weight: 0.5, value: 'original' },
-        { key: 'treatment', weight: 0.5, value: 'new-design' },
-      ],
+  test('returns config.variant when it is a string', async () => {
+    const provider = makeProvider(flagFetch({ key: 'ab', enabled: true, config: { variant: 'new-design', color: 'green' } }));
+    const result = await provider.resolveStringEvaluation('ab', 'original', ctx);
+    expect(result).toEqual({
+      value: 'new-design',
+      reason: StandardResolutionReasons.TARGETING_MATCH,
+      variant: 'new-design',
+      flagMetadata: { flagKey: 'ab', enabled: true },
     });
-    const provider = new ExperimentationProvider(makeOptions([flag]));
-    await provider.initialize();
-
-    const result = await provider.resolveStringEvaluation('ab-test', 'original', {
-      targetingKey: 'user-abc',
-    });
-    expect(typeof result.value).toBe('string');
-    expect(['original', 'new-design']).toContain(result.value);
-    expect(result.variant).toMatch(/control|treatment/);
   });
 
-  test('returns defaultValue when flag not found', async () => {
-    const provider = new ExperimentationProvider(makeOptions([]));
-    await provider.initialize();
+  test('returns config itself when config is a string', async () => {
+    const provider = makeProvider(flagFetch({ enabled: true, config: 'plain' }));
+    const result = await provider.resolveStringEvaluation('f', 'd', ctx);
+    expect(result.value).toBe('plain');
+    expect(result.variant).toBeUndefined();
+  });
 
-    const result = await provider.resolveStringEvaluation('missing', 'default-str');
+  test('enabled flag without a string variant → defaultValue with reason DEFAULT', async () => {
+    const provider = makeProvider(flagFetch({ enabled: true, config: { variant: 42 } }));
+    const result = await provider.resolveStringEvaluation('f', 'fallback', ctx);
+    expect(result.value).toBe('fallback');
+    expect(result.reason).toBe(StandardResolutionReasons.DEFAULT);
+    expect(result.errorCode).toBeUndefined();
+  });
+
+  test('enabled flag with null config → defaultValue with reason DEFAULT', async () => {
+    const provider = makeProvider(flagFetch({ enabled: true, config: null }));
+    const result = await provider.resolveStringEvaluation('f', 'fallback', ctx);
+    expect(result.value).toBe('fallback');
+    expect(result.reason).toBe(StandardResolutionReasons.DEFAULT);
+  });
+
+  test('disabled flag → defaultValue with reason DISABLED even when config names a variant', async () => {
+    const provider = makeProvider(flagFetch({ enabled: false, config: { variant: 'treatment' } }));
+    const result = await provider.resolveStringEvaluation('f', 'control', ctx);
+    expect(result.value).toBe('control');
+    expect(result.reason).toBe(StandardResolutionReasons.DISABLED);
+  });
+
+  test('404 → defaultValue with FLAG_NOT_FOUND', async () => {
+    const provider = makeProvider(flagFetch({ enabled: true }, 404));
+    const result = await provider.resolveStringEvaluation('missing', 'default-str', ctx);
     expect(result.value).toBe('default-str');
     expect(result.errorCode).toBe(ErrorCode.FLAG_NOT_FOUND);
-  });
-
-  test('returns TYPE_MISMATCH when value is not a string', async () => {
-    const flag = makeFlag({
-      key: 'num-flag',
-      enabled: true,
-      rollout_percentage: 100,
-      variants: [{ key: 'v1', weight: 1.0, value: 42 }],
-    });
-    const provider = new ExperimentationProvider(makeOptions([flag]));
-    await provider.initialize();
-
-    const result = await provider.resolveStringEvaluation('num-flag', 'fallback', {
-      targetingKey: 'u1',
-    });
-    expect(result.value).toBe('fallback');
-    expect(result.errorCode).toBe(ErrorCode.TYPE_MISMATCH);
-  });
-
-  test('returns variant key as value when variant.value is undefined', async () => {
-    const flag = makeFlag({
-      key: 'key-as-value',
-      enabled: true,
-      rollout_percentage: 100,
-      variants: [{ key: 'control', weight: 1.0 }],
-    });
-    const provider = new ExperimentationProvider(makeOptions([flag]));
-    await provider.initialize();
-
-    const result = await provider.resolveStringEvaluation('key-as-value', 'default', {
-      targetingKey: 'u1',
-    });
-    expect(result.value).toBe('control');
   });
 });
 
@@ -263,57 +305,39 @@ describe('ExperimentationProvider — resolveStringEvaluation()', () => {
 // ---------------------------------------------------------------------------
 
 describe('ExperimentationProvider — resolveNumberEvaluation()', () => {
-  test('returns numeric value for a number variant flag', async () => {
-    const flag = makeFlag({
-      key: 'price-flag',
-      enabled: true,
-      rollout_percentage: 100,
-      variants: [{ key: 'v1', weight: 1.0, value: 9.99 }],
-    });
-    const provider = new ExperimentationProvider(makeOptions([flag]));
-    await provider.initialize();
-
-    const result = await provider.resolveNumberEvaluation('price-flag', 0, { targetingKey: 'u1' });
+  test('returns config.value when it is a number', async () => {
+    const provider = makeProvider(flagFetch({ enabled: true, config: { value: 9.99, variant: 'v1' } }));
+    const result = await provider.resolveNumberEvaluation('price', 0, ctx);
     expect(result.value).toBe(9.99);
     expect(result.variant).toBe('v1');
+    expect(result.reason).toBe(StandardResolutionReasons.TARGETING_MATCH);
   });
 
-  test('returns defaultValue when flag not found', async () => {
-    const provider = new ExperimentationProvider(makeOptions([]));
-    await provider.initialize();
+  test('returns config itself when config is a number', async () => {
+    const provider = makeProvider(flagFetch({ enabled: true, config: 100 }));
+    const result = await provider.resolveNumberEvaluation('count', 0, ctx);
+    expect(result.value).toBe(100);
+  });
 
-    const result = await provider.resolveNumberEvaluation('missing', 42);
+  test('non-numeric config → defaultValue with reason DEFAULT', async () => {
+    const provider = makeProvider(flagFetch({ enabled: true, config: { value: 'not-a-number' } }));
+    const result = await provider.resolveNumberEvaluation('f', 7, ctx);
+    expect(result.value).toBe(7);
+    expect(result.reason).toBe(StandardResolutionReasons.DEFAULT);
+  });
+
+  test('disabled flag → defaultValue with reason DISABLED', async () => {
+    const provider = makeProvider(flagFetch({ enabled: false, config: { value: 3 } }));
+    const result = await provider.resolveNumberEvaluation('f', 42, ctx);
+    expect(result.value).toBe(42);
+    expect(result.reason).toBe(StandardResolutionReasons.DISABLED);
+  });
+
+  test('404 → defaultValue with FLAG_NOT_FOUND', async () => {
+    const provider = makeProvider(flagFetch({ enabled: true }, 404));
+    const result = await provider.resolveNumberEvaluation('missing', 42, ctx);
     expect(result.value).toBe(42);
     expect(result.errorCode).toBe(ErrorCode.FLAG_NOT_FOUND);
-  });
-
-  test('returns TYPE_MISMATCH when value is not a number', async () => {
-    const flag = makeFlag({
-      key: 'str-flag',
-      enabled: true,
-      rollout_percentage: 100,
-      variants: [{ key: 'v1', weight: 1.0, value: 'not-a-number' }],
-    });
-    const provider = new ExperimentationProvider(makeOptions([flag]));
-    await provider.initialize();
-
-    const result = await provider.resolveNumberEvaluation('str-flag', 0, { targetingKey: 'u1' });
-    expect(result.value).toBe(0);
-    expect(result.errorCode).toBe(ErrorCode.TYPE_MISMATCH);
-  });
-
-  test('returns integer value correctly', async () => {
-    const flag = makeFlag({
-      key: 'count-flag',
-      enabled: true,
-      rollout_percentage: 100,
-      variants: [{ key: 'v1', weight: 1.0, value: 100 }],
-    });
-    const provider = new ExperimentationProvider(makeOptions([flag]));
-    await provider.initialize();
-
-    const result = await provider.resolveNumberEvaluation('count-flag', 0, { targetingKey: 'u1' });
-    expect(result.value).toBe(100);
   });
 });
 
@@ -322,106 +346,46 @@ describe('ExperimentationProvider — resolveNumberEvaluation()', () => {
 // ---------------------------------------------------------------------------
 
 describe('ExperimentationProvider — resolveObjectEvaluation()', () => {
-  test('returns JSON config object', async () => {
+  test('returns the config object', async () => {
     const config = { theme: 'dark', maxRetries: 3, enabled: true };
-    const flag = makeFlag({
-      key: 'config-flag',
-      enabled: true,
-      rollout_percentage: 100,
-      variants: [{ key: 'v1', weight: 1.0, value: config }],
-    });
-    const provider = new ExperimentationProvider(makeOptions([flag]));
-    await provider.initialize();
-
-    const result = await provider.resolveObjectEvaluation('config-flag', {}, { targetingKey: 'u1' });
+    const provider = makeProvider(flagFetch({ enabled: true, config }));
+    const result = await provider.resolveObjectEvaluation('config-flag', {}, ctx);
     expect(result.value).toEqual(config);
+    expect(result.reason).toBe(StandardResolutionReasons.TARGETING_MATCH);
   });
 
-  test('returns defaultValue when flag not found', async () => {
-    const provider = new ExperimentationProvider(makeOptions([]));
-    await provider.initialize();
+  test('returns a JSON array config', async () => {
+    const provider = makeProvider(flagFetch({ enabled: true, config: ['a', 'b'] }));
+    const result = await provider.resolveObjectEvaluation('arr', [], ctx);
+    expect(result.value).toEqual(['a', 'b']);
+  });
 
-    const result = await provider.resolveObjectEvaluation('missing', { default: true });
+  test('string config → defaultValue with reason DEFAULT', async () => {
+    const provider = makeProvider(flagFetch({ enabled: true, config: 'not-an-object' }));
+    const result = await provider.resolveObjectEvaluation('f', { d: 1 }, ctx);
+    expect(result.value).toEqual({ d: 1 });
+    expect(result.reason).toBe(StandardResolutionReasons.DEFAULT);
+  });
+
+  test('null config → defaultValue with reason DEFAULT', async () => {
+    const provider = makeProvider(flagFetch({ enabled: true, config: null }));
+    const result = await provider.resolveObjectEvaluation('f', { d: 1 }, ctx);
+    expect(result.value).toEqual({ d: 1 });
+    expect(result.reason).toBe(StandardResolutionReasons.DEFAULT);
+  });
+
+  test('disabled flag → defaultValue with reason DISABLED', async () => {
+    const provider = makeProvider(flagFetch({ enabled: false, config: { x: 1 } }));
+    const result = await provider.resolveObjectEvaluation('f', { default: true }, ctx);
+    expect(result.value).toEqual({ default: true });
+    expect(result.reason).toBe(StandardResolutionReasons.DISABLED);
+  });
+
+  test('404 → defaultValue with FLAG_NOT_FOUND', async () => {
+    const provider = makeProvider(flagFetch({ enabled: true }, 404));
+    const result = await provider.resolveObjectEvaluation('missing', { default: true }, ctx);
     expect(result.value).toEqual({ default: true });
     expect(result.errorCode).toBe(ErrorCode.FLAG_NOT_FOUND);
-  });
-
-  test('returns TYPE_MISMATCH when value is a string', async () => {
-    const flag = makeFlag({
-      key: 'str-obj',
-      enabled: true,
-      rollout_percentage: 100,
-      variants: [{ key: 'v1', weight: 1.0, value: 'not-an-object' }],
-    });
-    const provider = new ExperimentationProvider(makeOptions([flag]));
-    await provider.initialize();
-
-    const result = await provider.resolveObjectEvaluation('str-obj', {}, { targetingKey: 'u1' });
-    expect(result.value).toEqual({});
-    expect(result.errorCode).toBe(ErrorCode.TYPE_MISMATCH);
-  });
-
-  test('returns JSON array as object value', async () => {
-    const arr = ['a', 'b', 'c'];
-    const flag = makeFlag({
-      key: 'arr-flag',
-      enabled: true,
-      rollout_percentage: 100,
-      variants: [{ key: 'v1', weight: 1.0, value: arr }],
-    });
-    const provider = new ExperimentationProvider(makeOptions([flag]));
-    await provider.initialize();
-
-    const result = await provider.resolveObjectEvaluation('arr-flag', [], { targetingKey: 'u1' });
-    expect(result.value).toEqual(arr);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// EvaluationContext mapping
-// ---------------------------------------------------------------------------
-
-describe('ExperimentationProvider — EvaluationContext', () => {
-  test('targetingKey is used as userId for hash computation', async () => {
-    // Two flags at 50% rollout — different users should get different results.
-    const flag = makeFlag({
-      key: 'hash-test',
-      enabled: true,
-      rollout_percentage: 50,
-    });
-    const provider = new ExperimentationProvider(makeOptions([flag]));
-    await provider.initialize();
-
-    const ctx1: EvaluationContext = { targetingKey: 'user-in' };
-    const ctx2: EvaluationContext = { targetingKey: 'user-out' };
-
-    // Just verify that we get boolean results without errors.
-    const r1 = await provider.resolveBooleanEvaluation('hash-test', false, ctx1);
-    const r2 = await provider.resolveBooleanEvaluation('hash-test', false, ctx2);
-    expect(typeof r1.value).toBe('boolean');
-    expect(typeof r2.value).toBe('boolean');
-  });
-
-  test('empty targetingKey is allowed (evaluates as empty-string userId)', async () => {
-    const flag = makeFlag({ key: 'f', enabled: true, rollout_percentage: 100 });
-    const provider = new ExperimentationProvider(makeOptions([flag]));
-    await provider.initialize();
-
-    const result = await provider.resolveBooleanEvaluation('f', false, { targetingKey: '' });
-    expect(result.value).toBe(true);
-  });
-
-  test('context with additional attributes does not error', async () => {
-    const flag = makeFlag({ key: 'ctx-flag', enabled: true, rollout_percentage: 100 });
-    const provider = new ExperimentationProvider(makeOptions([flag]));
-    await provider.initialize();
-
-    const ctx: EvaluationContext = {
-      targetingKey: 'u1',
-      attributes: { country: 'US', plan: 'pro', age: 30 } as Record<string, unknown> as EvaluationContext['attributes'],
-    };
-    const result = await provider.resolveBooleanEvaluation('ctx-flag', false, ctx);
-    expect(typeof result.value).toBe('boolean');
   });
 });
 
@@ -429,255 +393,98 @@ describe('ExperimentationProvider — EvaluationContext', () => {
 // Cache behaviour
 // ---------------------------------------------------------------------------
 
-describe('ExperimentationProvider — Cache', () => {
-  test('warm cache returns CACHED or STATIC reason (no second fetch)', async () => {
-    const fetchMock = mockFetch([makeFlag({ key: 'f1' })]);
-    const provider = new ExperimentationProvider({
-      apiKey: 'key',
-      cacheTtlMs: 60_000,
-      fetch: fetchMock,
-    });
-    await provider.initialize();
+describe('ExperimentationProvider — cache', () => {
+  test('second evaluation for the same user + flag is served from cache with reason CACHED', async () => {
+    const fetchMock = flagFetch({ enabled: true });
+    const provider = makeProvider(fetchMock);
+    const first = await provider.resolveBooleanEvaluation('f1', false, ctx);
+    const second = await provider.resolveBooleanEvaluation('f1', false, ctx);
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(first.reason).toBe(StandardResolutionReasons.TARGETING_MATCH);
+    expect(second.reason).toBe(StandardResolutionReasons.CACHED);
+    expect(second.value).toBe(true);
+  });
 
+  test('cache is per user and per flag', async () => {
+    const fetchMock = flagFetch({ enabled: true });
+    const provider = makeProvider(fetchMock);
     await provider.resolveBooleanEvaluation('f1', false, { targetingKey: 'u1' });
     await provider.resolveBooleanEvaluation('f1', false, { targetingKey: 'u2' });
-    // No additional fetch calls — cache is still warm.
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await provider.resolveBooleanEvaluation('f2', false, { targetingKey: 'u1' });
+    await provider.resolveBooleanEvaluation('f1', false, { targetingKey: 'u1' });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
-  test('cache miss (TTL=0) triggers a new fetch on next evaluation', async () => {
-    const fetchMock = mockFetch([makeFlag({ key: 'f2' })]);
-    const provider = new ExperimentationProvider({
-      apiKey: 'key',
-      cacheTtlMs: 0, // expires immediately
-      fetch: fetchMock,
-    });
-    await provider.initialize(); // 1st fetch
-    // TTL is 0 so cache expires instantly; next call should re-fetch.
-    await provider.resolveBooleanEvaluation('f2', false, { targetingKey: 'u1' }); // 2nd fetch
-    expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(2);
+  test('re-fetches after cacheTtlMs elapses', async () => {
+    const now = jest.spyOn(Date, 'now').mockReturnValue(1_000_000);
+    const fetchMock = sequenceFetch({ body: { key: 'f', enabled: true, config: null } }, { body: { key: 'f', enabled: false, config: null } });
+    const provider = makeProvider(fetchMock, { cacheTtlMs: 1_000 });
+
+    await expect(provider.resolveBooleanEvaluation('f', false, ctx)).resolves.toMatchObject({ value: true });
+    now.mockReturnValue(1_000_999);
+    await expect(provider.resolveBooleanEvaluation('f', false, ctx)).resolves.toMatchObject({ value: true, reason: 'CACHED' });
+    now.mockReturnValue(1_001_001);
+    await expect(provider.resolveBooleanEvaluation('f', false, ctx)).resolves.toMatchObject({ value: false });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  test('multiple flags coexist in cache', async () => {
-    const flags = [
-      makeFlag({ key: 'flag-a', enabled: true, rollout_percentage: 100 }),
-      makeFlag({ key: 'flag-b', enabled: false, rollout_percentage: 100 }),
-    ];
-    const provider = new ExperimentationProvider(makeOptions(flags));
-    await provider.initialize();
-
-    const rA = await provider.resolveBooleanEvaluation('flag-a', false, { targetingKey: 'u1' });
-    const rB = await provider.resolveBooleanEvaluation('flag-b', true, { targetingKey: 'u1' });
-    expect(rA.value).toBe(true);
-    expect(rB.value).toBe(false);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// API error handling
-// ---------------------------------------------------------------------------
-
-describe('ExperimentationProvider — API errors', () => {
-  test('API network error on initialize: cache remains null; evaluation returns DEFAULT', async () => {
-    const provider = new ExperimentationProvider({
-      apiKey: 'key',
-      fetch: errorFetch(),
-    });
-
-    await expect(provider.initialize()).rejects.toThrow();
-
-    // Since initialization failed, cache is null — evaluations return DEFAULT.
-    const result = await provider.resolveBooleanEvaluation('any-flag', true);
-    expect(result.value).toBe(true);
-    expect(result.reason).toBe(StandardResolutionReasons.DEFAULT);
+  test('failures are not cached — the next evaluation retries', async () => {
+    const fetchMock = sequenceFetch(new Error('down'), { body: { key: 'f', enabled: true, config: null } });
+    const provider = makeProvider(fetchMock);
+    const first = await provider.resolveBooleanEvaluation('f', false, ctx);
+    const second = await provider.resolveBooleanEvaluation('f', false, ctx);
+    expect(first.errorCode).toBe(ErrorCode.GENERAL);
+    expect(second.value).toBe(true);
+    expect(second.reason).toBe(StandardResolutionReasons.TARGETING_MATCH);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  test('HTTP 4xx from API on refresh: cache remains stale; returns DEFAULT', async () => {
-    const provider = new ExperimentationProvider({
-      apiKey: 'key',
-      cacheTtlMs: 0,
-      fetch: mockFetch([], 401),
-    });
-
-    await expect(provider.initialize()).rejects.toThrow('HTTP 401');
-  });
-
-  test('missing flag returns FLAG_NOT_FOUND error code', async () => {
-    const provider = new ExperimentationProvider(makeOptions([]));
-    await provider.initialize();
-
-    const r = await provider.resolveStringEvaluation('does-not-exist', 'default');
-    expect(r.errorCode).toBe(ErrorCode.FLAG_NOT_FOUND);
-    expect(r.value).toBe('default');
-  });
-});
-
-// ---------------------------------------------------------------------------
-// onClose / cleanup
-// ---------------------------------------------------------------------------
-
-describe('ExperimentationProvider — onClose()', () => {
   test('onClose() clears the cache', async () => {
-    const flag = makeFlag({ key: 'f', enabled: true, rollout_percentage: 100 });
-    const provider = new ExperimentationProvider(makeOptions([flag]));
-    await provider.initialize();
-
+    const fetchMock = flagFetch({ enabled: true });
+    const provider = makeProvider(fetchMock);
+    await provider.resolveBooleanEvaluation('f', false, ctx);
     await provider.onClose();
-
-    // After close the cache is null; evaluation for a flag returns DEFAULT.
-    const fetchMock = mockFetch([flag]);
-    // Use a fresh provider to confirm behaviour post-close with no re-fetch:
-    const result = await provider.resolveBooleanEvaluation('f', true);
-    // Cache is null but ensureFreshCache will try to re-fetch (and fail because fetchImpl
-    // still points to the original mock that returned the flag).
-    // The primary assertion is that onClose does not throw.
-    expect(result).toBeDefined();
+    await provider.onClose(); // idempotent
+    await provider.resolveBooleanEvaluation('f', false, ctx);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  test('onClose() can be called multiple times without error', async () => {
-    const provider = new ExperimentationProvider(makeOptions([]));
-    await provider.initialize();
-    await provider.onClose();
-    await provider.onClose();
+  test('refreshFlags() (deprecated) clears the cache and resolves', async () => {
+    const fetchMock = flagFetch({ enabled: true });
+    const provider = makeProvider(fetchMock);
+    await provider.resolveBooleanEvaluation('f', false, ctx);
+    await expect(provider.refreshFlags()).resolves.toBeUndefined();
+    await provider.resolveBooleanEvaluation('f', false, ctx);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });
 
 // ---------------------------------------------------------------------------
-// Hash algorithm correctness (cross-SDK test vectors)
+// Hash utility (cross-SDK test vectors)
 // ---------------------------------------------------------------------------
 
-describe('ExperimentationProvider — hash algorithm', () => {
-  let provider: ExperimentationProvider;
+describe('ExperimentationProvider — hashUser utility', () => {
+  const provider = new ExperimentationProvider({ apiKey: 'key', fetch: flagFetch({ enabled: true }) });
 
-  beforeAll(async () => {
-    provider = new ExperimentationProvider(makeOptions([]));
-    await provider.initialize();
+  test('matches the primary cross-SDK vector', () => {
+    expect(provider.hashUser('user-123', 'my-flag')).toBeCloseTo(0.6927449859213084, 10);
   });
 
-  test('hashUser returns value in [0.0, 1.0)', () => {
-    const h = provider.hashUser('user-123', 'my-flag');
-    expect(h).toBeGreaterThanOrEqual(0.0);
-    expect(h).toBeLessThan(1.0);
+  test.each([
+    ['alice', 'dark-mode', 0.0353864398784935],
+    ['bob', 'new-checkout', 0.1463384565431625],
+    ['', 'empty-user', 0.3582690393086523],
+    ['a', 'b', 0.6056532170623541],
+  ])('hashUser(%j, %j)', (userId, flagKey, expected) => {
+    expect(provider.hashUser(userId, flagKey)).toBeCloseTo(expected, 10);
   });
 
-  test('hashUser is deterministic (same inputs → same output)', () => {
-    const h1 = provider.hashUser('alice', 'dark-mode');
-    const h2 = provider.hashUser('alice', 'dark-mode');
-    expect(h1).toBe(h2);
-  });
-
-  test('hashUser differs for different userIds', () => {
-    const h1 = provider.hashUser('alice', 'flag-x');
-    const h2 = provider.hashUser('bob', 'flag-x');
-    expect(h1).not.toBe(h2);
-  });
-
-  test('hashUser differs for different flagKeys', () => {
-    const h1 = provider.hashUser('alice', 'flag-a');
-    const h2 = provider.hashUser('alice', 'flag-b');
-    expect(h1).not.toBe(h2);
-  });
-
-  /**
-   * Cross-SDK test vector:
-   *   MD5("user-123:my-flag") hex = 43bc57b1e81dec71c5242122ac05170f
-   *   First 4 bytes LE: 0x43, 0xbc, 0x57, 0xb1 → uint32 = 2975317059
-   *   2975317059 / 4294967296 ≈ 0.69274...
-   *
-   * This vector must match the Go, Java, and Python SDK tests exactly.
-   */
-  test('hashUser("user-123", "my-flag") matches cross-SDK test vector', () => {
-    const h = provider.hashUser('user-123', 'my-flag');
-    // MD5("user-123:my-flag") first 4 bytes LE → float ≈ 0.69274
-    expect(h).toBeCloseTo(0.69274, 4);
-  });
-
-  /**
-   * Cross-SDK test vector #2:
-   *   MD5(":empty-user-flag") — userId is empty string
-   */
-  test('hashUser handles empty userId', () => {
-    const h = provider.hashUser('', 'empty-user-flag');
-    expect(h).toBeGreaterThanOrEqual(0.0);
-    expect(h).toBeLessThan(1.0);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Variant assignment
-// ---------------------------------------------------------------------------
-
-describe('ExperimentationProvider — variant assignment', () => {
-  test('50/50 split produces both variants across different users', async () => {
-    const flag = makeFlag({
-      key: 'split',
-      enabled: true,
-      rollout_percentage: 100,
-      variants: [
-        { key: 'control', weight: 0.5, value: 'A' },
-        { key: 'treatment', weight: 0.5, value: 'B' },
-      ],
-    });
-    const provider = new ExperimentationProvider(makeOptions([flag]));
-    await provider.initialize();
-
-    const results = new Set<string>();
-    for (let i = 0; i < 200; i++) {
-      const r = await provider.resolveStringEvaluation('split', 'A', { targetingKey: `user-${i}` });
-      if (typeof r.value === 'string') results.add(r.value);
-    }
-    expect(results.has('A')).toBe(true);
-    expect(results.has('B')).toBe(true);
-  });
-
-  test('100% weight to single variant always returns that variant', async () => {
-    const flag = makeFlag({
-      key: 'single',
-      enabled: true,
-      rollout_percentage: 100,
-      variants: [{ key: 'v1', weight: 1.0, value: 'always-this' }],
-    });
-    const provider = new ExperimentationProvider(makeOptions([flag]));
-    await provider.initialize();
-
-    for (let i = 0; i < 10; i++) {
-      const r = await provider.resolveStringEvaluation('single', 'default', {
-        targetingKey: `u${i}`,
-      });
-      expect(r.value).toBe('always-this');
-    }
-  });
-
-  test('variant field in ResolutionDetails contains variant key', async () => {
-    const flag = makeFlag({
-      key: 'vk-test',
-      enabled: true,
-      rollout_percentage: 100,
-      variants: [{ key: 'my-variant', weight: 1.0, value: 'val' }],
-    });
-    const provider = new ExperimentationProvider(makeOptions([flag]));
-    await provider.initialize();
-
-    const r = await provider.resolveStringEvaluation('vk-test', '', { targetingKey: 'u1' });
-    expect(r.variant).toBe('my-variant');
-  });
-});
-
-// ---------------------------------------------------------------------------
-// flagMetadata
-// ---------------------------------------------------------------------------
-
-describe('ExperimentationProvider — flagMetadata', () => {
-  test('flagMetadata includes flagKey, enabled, and rolloutPercentage', async () => {
-    const flag = makeFlag({ key: 'meta-flag', enabled: true, rollout_percentage: 75 });
-    const provider = new ExperimentationProvider(makeOptions([flag]));
-    await provider.initialize();
-
-    const r = await provider.resolveBooleanEvaluation('meta-flag', false, { targetingKey: 'u1' });
-    expect(r.flagMetadata?.['flagKey']).toBe('meta-flag');
-    expect(r.flagMetadata?.['enabled']).toBe(true);
-    expect(r.flagMetadata?.['rolloutPercentage']).toBe(75);
+  test('is deterministic and in [0, 1)', () => {
+    const h = provider.hashUser('alice', 'flag-x');
+    expect(h).toBe(provider.hashUser('alice', 'flag-x'));
+    expect(h).toBeGreaterThanOrEqual(0);
+    expect(h).toBeLessThan(1);
+    expect(provider.hashUser('bob', 'flag-x')).not.toBe(h);
   });
 });
 
@@ -686,83 +493,54 @@ describe('ExperimentationProvider — flagMetadata', () => {
 // ---------------------------------------------------------------------------
 
 describe('ExperimentationProvider — OpenFeature registration', () => {
-  test('provider can be registered with OpenFeature.setProvider()', async () => {
-    // Dynamic import to avoid polluting global state in other tests.
+  test('provider can be registered with OpenFeature.setProviderAndWait()', async () => {
     const { OpenFeature } = await import('@openfeature/server-sdk');
-    const fetchMock = mockFetch([makeFlag({ key: 'registered-flag' })]);
-    const provider = new ExperimentationProvider({
-      apiKey: 'reg-key',
-      fetch: fetchMock,
-    });
+    const fetchMock = flagFetch({ key: 'registered-flag', enabled: true });
+    const provider = new ExperimentationProvider({ apiKey: 'reg-key', fetch: fetchMock });
 
-    // setProvider is synchronous but schedules async init; we use setProviderAndWait.
     await OpenFeature.setProviderAndWait(provider);
-
     const client = OpenFeature.getClient('test-registration');
-    const value = await client.getBooleanValue('registered-flag', false, {
-      targetingKey: 'test-user',
-    });
-    expect(typeof value).toBe('boolean');
+    const details = await client.getBooleanDetails('registered-flag', false, { targetingKey: 'test-user' });
+    expect(details.value).toBe(true);
+    expect(details.reason).toBe(StandardResolutionReasons.TARGETING_MATCH);
+    expect(requestOf(fetchMock).url).toContain('/api/v1/feature-flags/evaluate/registered-flag?user_id=test-user');
 
-    // Clean up.
     await OpenFeature.clearProviders();
   });
 });
 
 // ---------------------------------------------------------------------------
-// refreshFlags (public for testing)
+// provider.client — experiments and tracking share the cache
 // ---------------------------------------------------------------------------
 
-describe('ExperimentationProvider — refreshFlags()', () => {
-  test('refreshFlags() populates the cache from the first API response', async () => {
-    const fetchMock = jest
-      .fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: async () => ({ flags: [makeFlag({ key: 'f-v1', enabled: true, rollout_percentage: 100 })] }),
-      }) as jest.MockedFunction<typeof fetch>;
+describe('ExperimentationProvider — provider.client', () => {
+  test('a keyless track() fans out to flags evaluated through OpenFeature', async () => {
+    const fetchMock = sequenceFetch(
+      { body: { key: 'new-search', enabled: true, config: null } },
+      { body: { success_count: 1, failure_count: 0 } },
+    );
+    const provider = makeProvider(fetchMock);
+    await provider.resolveBooleanEvaluation('new-search', false, ctx);
+    await provider.client.track('user-1', 'search', { properties: { q: 'boots' } });
 
-    // Use a long TTL so the cache stays warm after initialize().
-    const provider = new ExperimentationProvider({
-      apiKey: 'key',
-      cacheTtlMs: 60_000,
-      fetch: fetchMock as typeof fetch,
+    const { url, body } = requestOf(fetchMock, 1);
+    expect(url).toBe('http://localhost:8000/api/v1/tracking/batch');
+    expect(body).toEqual({
+      events: [
+        { event_type: 'search', event_name: 'search', user_id: 'user-1', feature_flag_key: 'new-search', metadata: { q: 'boots' } },
+      ],
     });
-    await provider.initialize(); // fetch #1 → enabled=true, cached for 60 s
-
-    // Cache is warm — no extra fetch; value comes from first API response.
-    const r1 = await provider.resolveBooleanEvaluation('f-v1', false, { targetingKey: 'u1' });
-    expect(r1.value).toBe(true);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  test('refreshFlags() can be called manually to update the cache', async () => {
-    const fetchMock = jest
-      .fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: async () => ({ flags: [makeFlag({ key: 'f-v2', enabled: true })] }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: async () => ({ flags: [makeFlag({ key: 'f-v2', enabled: false })] }),
-      }) as jest.MockedFunction<typeof fetch>;
-
-    const provider = new ExperimentationProvider({
-      apiKey: 'key',
-      cacheTtlMs: 60_000,
-      fetch: fetchMock as typeof fetch,
+  test('getAssignment goes through POST /api/v1/tracking/assign', async () => {
+    const fetchMock = sequenceFetch({
+      body: { experiment_key: 'checkout', user_id: 'user-1', variant_id: 'v2', variant_name: 'treatment', is_control: false, configuration: { steps: 1 } },
     });
-    await provider.initialize(); // fetch #1 → enabled=true
-
-    // Manually refresh — fetch #2 → enabled=false
-    await provider.refreshFlags();
-
-    const r2 = await provider.resolveBooleanEvaluation('f-v2', true, { targetingKey: 'u1' });
-    expect(r2.value).toBe(false);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const provider = makeProvider(fetchMock);
+    const assignment = await provider.client.getAssignment('checkout', { userId: 'user-1', attributes: { plan: 'pro' } });
+    expect(assignment).toMatchObject({ variantName: 'treatment', isControl: false, configuration: { steps: 1 } });
+    const { url, body } = requestOf(fetchMock);
+    expect(url).toBe('http://localhost:8000/api/v1/tracking/assign');
+    expect(body).toEqual({ experiment_key: 'checkout', user_id: 'user-1', context: { plan: 'pro' } });
   });
 });

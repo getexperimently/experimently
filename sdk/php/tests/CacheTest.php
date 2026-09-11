@@ -209,6 +209,32 @@ class CacheTest extends TestCase
     }
 
     // -------------------------------------------------------------------------
+    // valuesWithPrefix — per-user listing used by the track fan-out
+    // -------------------------------------------------------------------------
+
+    public function testValuesWithPrefixReturnsMatchingValuesInInsertionOrder(): void
+    {
+        $this->cache->set('flag:2:u1:a', 'A');
+        $this->cache->set('flag:2:u2:b', 'B');
+        $this->cache->set('flag:2:u1:c', 'C');
+        $this->cache->set('assignment:2:u1:x', 'X');
+
+        $this->assertSame(['A', 'C'], $this->cache->valuesWithPrefix('flag:2:u1:'));
+        $this->assertSame(['X'], $this->cache->valuesWithPrefix('assignment:2:u1:'));
+        $this->assertSame([], $this->cache->valuesWithPrefix('flag:2:u3:'));
+    }
+
+    public function testValuesWithPrefixSkipsExpiredEntries(): void
+    {
+        $this->cache->set('flag:2:u1:short', 'gone', 1);
+        $this->cache->set('flag:2:u1:long', 'kept');
+
+        sleep(2);
+
+        $this->assertSame(['kept'], $this->cache->valuesWithPrefix('flag:2:u1:'));
+    }
+
+    // -------------------------------------------------------------------------
     // Per-key TTL override
     // -------------------------------------------------------------------------
 

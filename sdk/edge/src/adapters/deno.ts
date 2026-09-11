@@ -4,13 +4,13 @@
  * Deno Deploy runs Deno-compatible JavaScript/TypeScript at the edge.
  * This adapter provides:
  *  - A `DenoExperimentationClient` that extends the base client
- *  - A `serve` helper that wraps Deno.serve() with automatic flag loading
- *  - KV-backed persistence using Deno KV (available in Deno Deploy)
+ *  - A `createDenoHandler` helper that creates one client per isolate
+ *  - Deno KV-backed sharing of cached server results **per user + key**
  *
  * Deno KV layout:
- *   Key:   ["ep", "bootstrap"]
- *   Value: BootstrapResponse
- *   TTL:   configurable (default 300 seconds)
+ *   Key:   ["ep", "flag:{userId}:{flagKey}"] / ["ep", "assign:{userId}:{experimentKey}"]
+ *   Value: JSON string of the FlagEvaluation / Assignment
+ *   TTL:   kvTtlMs (defaults to cacheTtlMs)
  *
  * Usage:
  * ```ts
@@ -19,16 +19,16 @@
  * export default createDenoHandler(
  *   async (req, client) => {
  *     const userId = req.headers.get('X-User-Id') ?? 'anon';
- *     const enabled = client.evaluateFlagSync('new-feature', userId);
+ *     const { enabled } = await client.evaluateFlag('new-feature', userId);
  *     return new Response(enabled ? 'new' : 'old');
  *   },
- *   { apiKey: Deno.env.get('EP_API_KEY')! }
+ *   { apiKey: Deno.env.get('EP_API_KEY')!, kv: await Deno.openKv() }
  * );
  * ```
  */
 
-import { EdgeExperimentationClient } from '../client';
-import type { EdgeSdkConfig, BootstrapResponse } from '../types';
+import { EdgeExperimentationClient } from '../client.js';
+import type { EdgeSdkConfig, EdgeStore } from '../types.js';
 
 // ---------------------------------------------------------------------------
 // Deno KV interface (minimal, compatible with Deno's built-in Deno.openKv)
@@ -45,76 +45,64 @@ export interface DenoKv {
 
 export interface DenoConfig extends EdgeSdkConfig {
   /**
-   * Deno KV instance for flag persistence.
-   * If provided, flags are cached in KV and shared across isolates.
+   * Deno KV instance. If provided, server results are cached in KV per
+   * user + key and shared across isolates.
    */
   kv?: DenoKv;
   /**
    * TTL for KV entries in milliseconds (Deno KV uses ms).
-   * Defaults to 300_000 (5 minutes).
+   * Defaults to `cacheTtlMs`.
    */
   kvTtlMs?: number;
+}
+
+// ---------------------------------------------------------------------------
+// KV-backed store
+// ---------------------------------------------------------------------------
+
+const KV_NAMESPACE = 'ep';
+
+/** `EdgeStore` over a Deno KV instance. Values are stored as JSON strings. */
+export class DenoKvStore implements EdgeStore {
+  constructor(
+    private readonly kv: DenoKv,
+    private readonly ttlMs?: number,
+  ) {}
+
+  async get(key: string): Promise<string | null> {
+    const entry = await this.kv.get<string>([KV_NAMESPACE, key]);
+    return typeof entry.value === 'string' ? entry.value : null;
+  }
+
+  async put(key: string, value: string, ttlMs: number): Promise<void> {
+    await this.kv.set([KV_NAMESPACE, key], value, { expireIn: this.ttlMs ?? ttlMs });
+  }
 }
 
 // ---------------------------------------------------------------------------
 // Client
 // ---------------------------------------------------------------------------
 
-const KV_KEY = ['ep', 'bootstrap'];
-const DEFAULT_KV_TTL_MS = 300_000; // 5 minutes
-
 export class DenoExperimentationClient extends EdgeExperimentationClient {
-  private readonly kv: DenoKv | undefined;
-  private readonly kvTtlMs: number;
-
   constructor(config: DenoConfig) {
-    super(config);
-    this.kv = config.kv;
-    this.kvTtlMs = config.kvTtlMs ?? DEFAULT_KV_TTL_MS;
+    const store = config.store ?? (config.kv ? new DenoKvStore(config.kv, config.kvTtlMs) : undefined);
+    super({ ...config, store });
   }
 
   /**
-   * Load flags from Deno KV if available, falling back to the API.
+   * @deprecated There is no bootstrap payload any more: results are cached in
+   * KV per user + key as they are fetched. No-op kept for API compatibility.
    */
   async loadFromKvOrApi(): Promise<void> {
-    if (this.kv) {
-      const entry = await this.kv.get<BootstrapResponse>(KV_KEY);
-      if (entry.value) {
-        try {
-          const data = entry.value;
-          this.flags.clear();
-          for (const flag of data.flags) {
-            this.flags.set(flag.key, flag);
-          }
-          this.experiments.clear();
-          for (const exp of data.experiments) {
-            this.experiments.set(exp.key, exp);
-          }
-          return;
-        } catch {
-          // Corrupt KV entry — fall through to API
-        }
-      }
-    }
-
-    await this.refreshFlags();
+    // no-op
   }
 
   /**
-   * Fetch fresh flags from the API and persist to Deno KV.
+   * @deprecated Flag definitions are no longer fetched. No-op kept for API
+   * compatibility; each `evaluateFlag` / `getAssignment` writes its result to KV.
    */
   async refreshAndStore(): Promise<void> {
-    await this.refreshFlags();
-
-    if (this.kv) {
-      const payload: BootstrapResponse = {
-        flags: Array.from(this.flags.values()),
-        experiments: Array.from(this.experiments.values()),
-        ttl_seconds: Math.floor(this.kvTtlMs / 1000),
-        version: '',
-      };
-      await this.kv.set(KV_KEY, payload, { expireIn: this.kvTtlMs });
-    }
+    // no-op
   }
 }
 
@@ -128,10 +116,10 @@ export type DenoHandler = (
 ) => Promise<Response>;
 
 /**
- * Create a Deno.serve-compatible handler with automatic flag loading.
+ * Create a Deno.serve-compatible handler with a shared client.
  *
- * The returned handler loads flags from KV (or API) once per isolate startup,
- * then passes the pre-warmed client to the inner handler.
+ * The client is created once per isolate so its in-memory cache is reused
+ * across requests; the inner handler receives it with the original request.
  */
 export function createDenoHandler(
   handler: DenoHandler,
@@ -140,12 +128,7 @@ export function createDenoHandler(
   let client: DenoExperimentationClient | null = null;
 
   return async function denoHandler(request: Request): Promise<Response> {
-    // Initialise the client once per isolate
-    if (!client) {
-      client = new DenoExperimentationClient(config);
-      await client.loadFromKvOrApi();
-    }
-
+    if (!client) client = new DenoExperimentationClient(config);
     return handler(request, client);
   };
 }

@@ -2,30 +2,19 @@
 # frozen_string_literal: true
 
 # Standalone test runner — no bundler or rspec required.
-# Exercises core SDK functionality using stdlib only.
+# Exercises core SDK functionality using stdlib only (no HTTP).
 # Run: ruby test_standalone.rb
 
 $LOAD_PATH.unshift File.join(__dir__, 'lib')
 require 'experimentation_platform'
 
 failures = []
-passed   = 0
 
 def assert_equal(description, expected, actual, failures)
   if (actual - expected).abs < 1e-10
     puts "  PASS: #{description}"
   else
     msg = "FAIL: #{description}\n       expected=#{expected}, got=#{actual}, delta=#{(actual - expected).abs}"
-    puts "  #{msg}"
-    failures << msg
-  end
-end
-
-def assert_not_nil(description, actual, failures)
-  if !actual.nil?
-    puts "  PASS: #{description}"
-  else
-    msg = "FAIL: #{description} — got nil"
     puts "  #{msg}"
     failures << msg
   end
@@ -87,39 +76,29 @@ assert_in_range('hash_user("user-456", "my-flag") is in [0.0, 1.0)', v1, 0.0, 1.
 v_empty = ExperimentationPlatform::FeatureFlagEvaluator.hash_user("", "")
 assert_in_range('hash_user("", "") is in [0.0, 1.0)', v_empty, 0.0, 1.0, failures)
 
+assert_true('Local evaluation was removed (server decides)',
+  !ExperimentationPlatform::FeatureFlagEvaluator.respond_to?(:evaluate), failures)
+
 puts
 
 # ---------------------------------------------------------------------------
-# Test group 2: Flag evaluation
+# Test group 2: Result types
 # ---------------------------------------------------------------------------
-puts ">>> Flag Evaluation Tests"
+puts ">>> Result Type Tests"
 
-enabled_flag = {
-  key:                'my-flag',
-  enabled:            true,
-  rollout_percentage: 100.0,
-  variants:           [{ 'key' => 'control' }, { 'key' => 'treatment' }]
-}
+flag = ExperimentationPlatform::FlagEvaluation.new(key: 'dark-mode', enabled: true, config: { 'theme' => 'dark' })
+assert_true('FlagEvaluation#enabled? reflects enabled', flag.enabled? == true, failures)
+assert_true('FlagEvaluation#to_h exposes key/enabled/config',
+  flag.to_h == { key: 'dark-mode', enabled: true, config: { 'theme' => 'dark' } }, failures)
 
-variant = ExperimentationPlatform::FeatureFlagEvaluator.evaluate(enabled_flag, "user-123")
-assert_not_nil('evaluate returns a variant at 100% rollout', variant, failures)
+assignment = ExperimentationPlatform::Assignment.new(
+  experiment_key: 'exp', variant_id: 'v1', variant_name: 'control', is_control: true, configuration: nil
+)
+assert_true('Assignment#control? reflects is_control', assignment.control? == true, failures)
+assert_true('Assignment exposes variant_name', assignment.variant_name == 'control', failures)
 
-disabled_flag = enabled_flag.merge(enabled: false)
-nil_result = ExperimentationPlatform::FeatureFlagEvaluator.evaluate(disabled_flag, "user-123")
-assert_nil('evaluate returns nil when flag is disabled', nil_result, failures)
-
-zero_rollout = enabled_flag.merge(rollout_percentage: 0.0)
-nil_result2 = ExperimentationPlatform::FeatureFlagEvaluator.evaluate(zero_rollout, "user-123")
-assert_nil('evaluate returns nil at 0% rollout', nil_result2, failures)
-
-empty_variants = enabled_flag.merge(variants: [])
-nil_result3 = ExperimentationPlatform::FeatureFlagEvaluator.evaluate(empty_variants, "user-123")
-assert_nil('evaluate returns nil with empty variants', nil_result3, failures)
-
-# hash_user("user-123", "my-flag") ≈ 0.6927 → bucket ≈ 69.27; use 50% to exclude
-low_rollout = enabled_flag.merge(rollout_percentage: 50.0)
-excl = ExperimentationPlatform::FeatureFlagEvaluator.evaluate(low_rollout, "user-123")
-assert_nil('evaluate excludes user-123 at 50% rollout (bucket ≈ 69.27)', excl, failures)
+batch = ExperimentationPlatform::BatchResult.new(success_count: 2, failure_count: 0, errors: nil)
+assert_true('BatchResult#ok? is true without failures', batch.ok?, failures)
 
 puts
 
@@ -143,6 +122,13 @@ evicted = cache.get('k0')
 assert_nil('Cache: evicts oldest when at max_size', evicted, failures)
 kept = cache.get('k3')
 assert_true('Cache: new entry kept after eviction', kept == 99, failures)
+
+# Per-user listing
+cache.clear
+cache.set([:flag, 'u1', 'a'], 'A')
+cache.set([:flag, 'u2', 'b'], 'B')
+listed = cache.live_values { |key| key[1] == 'u1' }
+assert_true('Cache: live_values lists entries for one user', listed == ['A'], failures)
 
 puts
 
@@ -174,22 +160,39 @@ puts ">>> Config Validation Tests"
 begin
   ExperimentationPlatform::SdkConfig.new(api_key: 'key').validate!
   failures << "FAIL: should raise for missing base_url"
-rescue ArgumentError => e
+rescue ArgumentError
   puts "  PASS: Raises ArgumentError for missing base_url"
 end
 
 begin
   ExperimentationPlatform::SdkConfig.new(base_url: 'http://example.com').validate!
   failures << "FAIL: should raise for missing api_key"
-rescue ArgumentError => e
+rescue ArgumentError
   puts "  PASS: Raises ArgumentError for missing api_key"
 end
 
 begin
-  cfg = ExperimentationPlatform::SdkConfig.new(base_url: 'http://example.com', api_key: 'k').validate!
+  ExperimentationPlatform::SdkConfig.new(base_url: 'http://example.com', api_key: 'k').validate!
   puts "  PASS: Valid config does not raise"
 rescue ArgumentError => e
   failures << "FAIL: Valid config raised: #{e.message}"
+end
+
+puts
+
+# ---------------------------------------------------------------------------
+# Test group 6: track never raises (no backend reachable)
+# ---------------------------------------------------------------------------
+puts ">>> Track Safety Tests"
+
+client = ExperimentationPlatform::Client.new(base_url: 'http://127.0.0.1:9', api_key: 'k', timeout: 1)
+begin
+  sent = client.track('page_view', 'user-1')
+  assert_true('track without a key and nothing cached sends nothing and returns true', sent == true, failures)
+  sent = client.track('purchase', 'user-1', experiment_key: 'exp', value: 1.0)
+  assert_true('track with a key against an unreachable host returns false (no raise)', sent == false, failures)
+rescue StandardError => e
+  failures << "FAIL: track raised #{e.class}: #{e.message}"
 end
 
 puts
@@ -199,7 +202,7 @@ puts
 # ---------------------------------------------------------------------------
 puts "=" * 60
 if failures.empty?
-  puts "All standalone tests PASSED (#{passed + (failures.length == 0 ? 1 : 0)} groups)"
+  puts "All standalone tests PASSED"
   puts
   puts "Cross-SDK hash parity CONFIRMED:"
   puts "  hash_user(\"user-123\", \"my-flag\") = #{ExperimentationPlatform::FeatureFlagEvaluator.hash_user('user-123', 'my-flag')}"

@@ -2,16 +2,16 @@
  * Cloudflare Workers adapter for the Edge Experimentation SDK.
  *
  * Features:
- *  - KV namespace integration: flags are persisted in Cloudflare KV for sharing
- *    across worker instances in the same data centre
+ *  - KV namespace integration: server results (flag evaluations and
+ *    experiment assignments) are cached in Cloudflare KV **per user + key**
+ *    so that other worker instances can reuse them without a network call
  *  - `withExperimentation` HOF: wraps a Cloudflare fetch handler and injects
  *    a pre-initialised client into the handler via the `env` object
- *  - `refreshAndStore`: fetches fresh flags from the API and writes them to KV
  *
  * KV layout:
- *   Key:   "ep:bootstrap"
- *   Value: JSON-serialised BootstrapResponse
- *   TTL:   kvTtlSeconds (default 300 s)
+ *   Key:   "ep:flag:{userId}:{flagKey}" / "ep:assign:{userId}:{experimentKey}"
+ *   Value: JSON-serialised FlagEvaluation / Assignment
+ *   TTL:   cacheTtlMs (rounded up to Cloudflare's 60 s minimum)
  *
  * Usage:
  *   export default withExperimentation(handler, {
@@ -20,11 +20,13 @@
  *   });
  */
 
-import { EdgeExperimentationClient } from '../client';
-import type { EdgeSdkConfig, BootstrapResponse, FeatureFlag, Experiment } from '../types';
+import { EdgeExperimentationClient } from '../client.js';
+import type { EdgeSdkConfig, EdgeStore } from '../types.js';
 
-const KV_KEY = 'ep:bootstrap';
-const DEFAULT_KV_TTL_SECONDS = 300; // 5 minutes
+/** Cloudflare KV rejects `expirationTtl` values below 60 seconds. */
+const KV_MIN_TTL_SECONDS = 60;
+/** Namespace prefix for every key this SDK writes to KV. */
+const KV_PREFIX = 'ep:';
 
 // ---------------------------------------------------------------------------
 // KVNamespace interface (matches the Cloudflare Workers type)
@@ -49,10 +51,34 @@ export interface ExecutionContext {
 // ---------------------------------------------------------------------------
 
 export interface CloudflareConfig extends EdgeSdkConfig {
-  /** Cloudflare KV namespace binding for flag persistence across instances. */
+  /** Cloudflare KV namespace binding for sharing cached results across instances. */
   kvNamespace?: KVNamespace;
-  /** TTL in seconds for KV entries. Defaults to 300 (5 minutes). */
+  /**
+   * TTL in seconds for KV entries. Defaults to `cacheTtlMs / 1000`, never below
+   * Cloudflare's 60 s minimum.
+   */
   kvTtlSeconds?: number;
+}
+
+// ---------------------------------------------------------------------------
+// KV-backed store
+// ---------------------------------------------------------------------------
+
+/** `EdgeStore` over a Cloudflare KV namespace. */
+export class CloudflareKvStore implements EdgeStore {
+  constructor(
+    private readonly kv: KVNamespace,
+    private readonly ttlSeconds?: number,
+  ) {}
+
+  get(key: string): Promise<string | null> {
+    return this.kv.get(KV_PREFIX + key);
+  }
+
+  put(key: string, value: string, ttlMs: number): Promise<void> {
+    const seconds = this.ttlSeconds ?? Math.ceil(ttlMs / 1000);
+    return this.kv.put(KV_PREFIX + key, value, { expirationTtl: Math.max(KV_MIN_TTL_SECONDS, seconds) });
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -60,65 +86,27 @@ export interface CloudflareConfig extends EdgeSdkConfig {
 // ---------------------------------------------------------------------------
 
 export class CloudflareExperimentationClient extends EdgeExperimentationClient {
-  private readonly kv: KVNamespace | undefined;
-  private readonly kvTtlSeconds: number;
-  private kvLoaded: boolean = false;
-
   constructor(config: CloudflareConfig) {
-    super(config);
-    this.kv = config.kvNamespace;
-    this.kvTtlSeconds = config.kvTtlSeconds ?? DEFAULT_KV_TTL_SECONDS;
+    const store =
+      config.store ??
+      (config.kvNamespace ? new CloudflareKvStore(config.kvNamespace, config.kvTtlSeconds) : undefined);
+    super({ ...config, store });
   }
 
   /**
-   * Load flags from KV if available, falling back to the API.
-   * Should be called at worker startup inside the fetch handler.
+   * @deprecated There is no bootstrap payload any more: results are cached in
+   * KV per user + key as they are fetched. No-op kept for API compatibility.
    */
   async loadFromKvOrApi(): Promise<void> {
-    if (this.kv && !this.kvLoaded) {
-      const raw = await this.kv.get(KV_KEY);
-      if (raw) {
-        try {
-          const data: BootstrapResponse = JSON.parse(raw);
-          this.flags.clear();
-          for (const flag of data.flags) {
-            this.flags.set(flag.key, flag);
-          }
-          this.experiments.clear();
-          for (const exp of data.experiments) {
-            this.experiments.set(exp.key, exp);
-          }
-          this.kvLoaded = true;
-          return;
-        } catch {
-          // Corrupt KV data — fall through to API
-        }
-      }
-    }
-
-    // KV miss or no KV configured: fetch from API
-    await this.refreshFlags();
-    this.kvLoaded = true;
+    // no-op
   }
 
   /**
-   * Fetch fresh flags from the API and persist to KV.
-   * Safe to call from `ctx.waitUntil()` for background refresh.
+   * @deprecated Flag definitions are no longer fetched. No-op kept for API
+   * compatibility; each `evaluateFlag` / `getAssignment` writes its result to KV.
    */
   async refreshAndStore(): Promise<void> {
-    await this.refreshFlags();
-
-    if (this.kv) {
-      const payload: BootstrapResponse = {
-        flags: Array.from(this.flags.values()),
-        experiments: Array.from(this.experiments.values()),
-        ttl_seconds: this.kvTtlSeconds,
-        version: '',
-      };
-      await this.kv.put(KV_KEY, JSON.stringify(payload), {
-        expirationTtl: this.kvTtlSeconds,
-      });
-    }
+    // no-op
   }
 }
 
@@ -127,17 +115,19 @@ export class CloudflareExperimentationClient extends EdgeExperimentationClient {
 // ---------------------------------------------------------------------------
 
 /**
- * Wrap a Cloudflare fetch handler with automatic flag loading.
+ * Wrap a Cloudflare fetch handler with a ready-to-use client.
  *
  * The wrapped handler receives the client as `env.EP_CLIENT` (or the key
- * specified by `clientEnvKey`).
+ * specified by `clientEnvKey`). When `config.kvNamespace` is not set, the
+ * binding `env.KV` is used if present.
  *
  * @example
  * ```ts
  * export default withExperimentation(
  *   async (request, env, ctx) => {
- *     const client: CloudflareExperimentationClient = env.EP_CLIENT;
- *     const enabled = client.evaluateFlagSync('new-checkout', userId);
+ *     const client = env.EP_CLIENT as CloudflareExperimentationClient;
+ *     const { enabled } = await client.evaluateFlag('new-checkout', userId);
+ *     ctx.waitUntil(client.track('page_view', userId, { path: '/' }));
  *     ...
  *   },
  *   { apiKey: 'key', kvNamespace: env.FLAGS_KV }
@@ -158,12 +148,6 @@ export function withExperimentation(
       ...config,
       kvNamespace: config.kvNamespace ?? (env['KV'] as KVNamespace | undefined),
     });
-
-    // Load flags (KV → API fallback), non-blocking for warm instances
-    await client.loadFromKvOrApi();
-
-    // Background refresh: update KV without blocking the response
-    ctx.waitUntil(client.refreshAndStore());
 
     // Inject client into env for the handler
     const enrichedEnv = { ...env, [clientEnvKey]: client };

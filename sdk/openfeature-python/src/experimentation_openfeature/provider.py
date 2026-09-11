@@ -1,118 +1,211 @@
 """
-ExperimentationProvider — OpenFeature AbstractProvider implementation.
+ExperimentationProvider — OpenFeature provider for the Experimentation Platform.
 
-Performs local, consistent-hash-based flag evaluation using the same MD5
-algorithm as the Go, Java, and TypeScript SDKs.
+Every flag is evaluated **by the server**: the provider delegates to the
+``experimentation`` Python SDK, which calls
+``GET /api/v1/feature-flags/evaluate/{flag_key}?user_id=<targeting_key>`` and
+caches the answer per user + key for ``cache_ttl`` seconds. Nothing is
+bucketed locally and no flag definitions are downloaded.
 
-Lifecycle:
-  1. Construct with API key (and optional base_url / cache_ttl / timeout).
-  2. The OpenFeature SDK calls initialize(evaluation_context) on set_provider().
-  3. resolve_*_details() methods evaluate flags from the in-memory cache.
-  4. The OpenFeature SDK calls shutdown() when the provider is replaced.
+Resolution rules
+----------------
+* ``EvaluationContext.targeting_key`` is the platform ``user_id`` and is
+  required: without it the default value is returned with
+  ``TARGETING_KEY_MISSING``. Context attributes are **not** sent — the
+  evaluate endpoint takes no context.
+* boolean flags   -> ``enabled``.
+* string flags    -> ``config["variant"]`` (or ``config`` itself when it is a
+  string); otherwise the default value with reason ``DEFAULT``.
+* integer/float   -> ``config["value"]`` (or ``config`` itself when numeric;
+  ``bool`` is never accepted as a number).
+* object flags    -> ``config`` when it is a dict or list.
+* A disabled flag resolves non-boolean requests to the default value with
+  reason ``DISABLED``.
+* Failures never raise: 404 -> ``FLAG_NOT_FOUND``, anything else ->
+  ``GENERAL``; both return the default value with reason ``ERROR``.
+
+Reasons: ``TARGETING_MATCH`` (fresh from the server, flag on), ``DISABLED``
+(flag off for this user), ``CACHED`` (served from the SDK cache), ``DEFAULT``
+(``config`` lacks the requested field), ``ERROR``.
 """
+
 from __future__ import annotations
 
 import logging
-import threading
-from typing import Any, List, Optional, Union
-
-import requests
-from requests.exceptions import RequestException, Timeout
+from typing import Any, Callable, List, Optional, Tuple, Union
 
 from openfeature.evaluation_context import EvaluationContext
-from openfeature.exception import (
-    ErrorCode,
-    FlagNotFoundError,
-    GeneralError,
-    TypeMismatchError,
-)
+from openfeature.exception import ErrorCode
 from openfeature.flag_evaluation import FlagResolutionDetails, Reason
 from openfeature.hook import Hook
-from openfeature.provider.metadata import Metadata
-from openfeature.provider.provider import AbstractProvider
+from openfeature.provider import AbstractProvider, Metadata, TrackingEventDetails
 
-from .cache import FlagCache
-from .evaluator import LocalEvaluator
-from .types import FeatureFlagDefinition
+from experimentation import ExperimentationClient, ExperimentationError, FlagEvaluation
+from experimentation.transport import Transport
 
 logger = logging.getLogger(__name__)
+
+PROVIDER_NAME = "experimentation-platform-provider"
+
+# (value, found) — ``found`` is False when the config carries nothing usable.
+_Picker = Callable[[FlagEvaluation], Tuple[Any, bool]]
+
+
+def _is_str(value: Any) -> bool:
+    return isinstance(value, str)
+
+
+def _is_int(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _is_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _is_object(value: Any) -> bool:
+    return isinstance(value, (dict, list))
+
+
+def _from_config(config: Any, field: str, accept: Callable[[Any], bool]) -> Tuple[Any, bool]:
+    """``config[field]`` when it passes ``accept``, else ``config`` itself when it does."""
+    if isinstance(config, dict) and accept(config.get(field)):
+        return config[field], True
+    if accept(config):
+        return config, True
+    return None, False
+
+
+def _pick_bool(evaluation: FlagEvaluation) -> Tuple[Any, bool]:
+    return evaluation.enabled, True
+
+
+def _pick_str(evaluation: FlagEvaluation) -> Tuple[Any, bool]:
+    if not evaluation.enabled:
+        return None, False
+    return _from_config(evaluation.config, "variant", _is_str)
+
+
+def _pick_int(evaluation: FlagEvaluation) -> Tuple[Any, bool]:
+    if not evaluation.enabled:
+        return None, False
+    return _from_config(evaluation.config, "value", _is_int)
+
+
+def _pick_float(evaluation: FlagEvaluation) -> Tuple[Any, bool]:
+    if not evaluation.enabled:
+        return None, False
+    value, found = _from_config(evaluation.config, "value", _is_number)
+    return (float(value), True) if found else (None, False)
+
+
+def _pick_object(evaluation: FlagEvaluation) -> Tuple[Any, bool]:
+    if evaluation.enabled and _is_object(evaluation.config):
+        return evaluation.config, True
+    return None, False
+
+
+def _variant_label(config: Any) -> Optional[str]:
+    if isinstance(config, dict) and isinstance(config.get("variant"), str):
+        return config["variant"]
+    return None
+
+
+def _targeting_key(evaluation_context: Optional[EvaluationContext]) -> Optional[str]:
+    if evaluation_context is None:
+        return None
+    key = evaluation_context.targeting_key
+    return key if isinstance(key, str) and key else None
 
 
 class ExperimentationProvider(AbstractProvider):
     """
-    OpenFeature provider for the Experimentation Platform.
-
-    Evaluates feature flags locally using the same MD5-based consistent hash
-    algorithm as the Go, Java, and TypeScript SDKs, ensuring identical user
-    assignments across all clients.
+    OpenFeature provider backed by the Experimentation Platform public API.
 
     Example::
 
         from openfeature import api
+        from openfeature.evaluation_context import EvaluationContext
         from experimentation_openfeature import ExperimentationProvider
 
         api.set_provider(ExperimentationProvider(api_key="your-api-key"))
         client = api.get_client()
-        enabled = client.get_boolean_value("dark-mode", False)
+        enabled = client.get_boolean_value("dark-mode", False, EvaluationContext("user-123"))
+
+    ``provider.client`` exposes the underlying
+    :class:`experimentation.ExperimentationClient` for experiment assignment
+    and event tracking, which OpenFeature does not model.
     """
 
     def __init__(
         self,
-        api_key: str,
+        api_key: str = "",
         base_url: str = "http://localhost:8000",
-        cache_ttl: int = 300,
-        timeout: int = 10,
+        cache_ttl: float = 300,
+        timeout: float = 10,
         *,
-        _session: Optional[requests.Session] = None,
+        client: Optional[ExperimentationClient] = None,
+        transport: Optional[Transport] = None,
     ) -> None:
         """
-        Create a new ExperimentationProvider.
-
         Args:
-            api_key:    API key sent in the X-API-Key header.
-            base_url:   Base URL of the platform API (no trailing slash).
-            cache_ttl:  Seconds the flag cache is valid. Defaults to 300 (5 min).
-            timeout:    HTTP request timeout in seconds. Defaults to 10.
-            _session:   Optional requests.Session for testing (dependency injection).
+            api_key:   API key sent in the ``X-API-Key`` header (required unless ``client`` is given).
+            base_url:  Backend origin; the SDK appends ``/api/v1/...``.
+            cache_ttl: Seconds a successful evaluation is reused per user + flag. Default 300.
+            timeout:   HTTP request timeout in seconds. Default 10.
+            client:    A pre-configured :class:`experimentation.ExperimentationClient` to share
+                       with the rest of your application (overrides the other arguments).
+            transport: Custom HTTP transport (tests use ``experimentation.testing.FakeTransport``).
         """
-        if not api_key:
-            raise ValueError("ExperimentationProvider: api_key is required")
+        if client is None:
+            if not api_key:
+                raise ValueError("ExperimentationProvider: api_key is required")
+            client = ExperimentationClient(
+                api_url=base_url,
+                api_key=api_key,
+                timeout_seconds=timeout,
+                cache_ttl_seconds=cache_ttl,
+                transport=transport,
+            )
+        self._client = client
 
-        self._api_key = api_key
-        self._base_url = base_url.rstrip("/")
-        self._timeout = timeout
-        self._cache = FlagCache(ttl=cache_ttl)
-        self._evaluator = LocalEvaluator()
-        self._refresh_lock = threading.Lock()
-
-        # Use injected session (tests) or create a new persistent session.
-        if _session is not None:
-            self._session = _session
-        else:
-            self._session = requests.Session()
-            self._session.headers.update({
-                "X-API-Key": api_key,
-                "Content-Type": "application/json",
-            })
+    @property
+    def client(self) -> ExperimentationClient:
+        """The underlying SDK client (use it for ``get_assignment`` / ``track``)."""
+        return self._client
 
     # ------------------------------------------------------------------
     # AbstractProvider interface
     # ------------------------------------------------------------------
 
     def get_metadata(self) -> Metadata:
-        return Metadata("experimentation-platform-provider")
+        return Metadata(PROVIDER_NAME)
 
     def get_provider_hooks(self) -> List[Hook]:
         return []
 
     def initialize(self, evaluation_context: Optional[EvaluationContext] = None) -> None:
-        """Fetch all flags and warm the cache. Called by the OpenFeature SDK."""
-        self._refresh_flags()
+        """Nothing to warm up: flags are evaluated per user, on demand."""
 
     def shutdown(self) -> None:
-        """Release resources. Called by the OpenFeature SDK on provider change."""
-        self._cache.clear()
-        self._session.close()
+        """Drop cached evaluations. Called by the OpenFeature SDK on provider change."""
+        self._client.clear_cache()
+
+    def track(
+        self,
+        tracking_event_name: str,
+        evaluation_context: Optional[EvaluationContext] = None,
+        tracking_event_details: Optional[TrackingEventDetails] = None,
+    ) -> None:
+        """OpenFeature tracking → ``ExperimentationClient.track`` (fans out to the user's
+        cached assignments and evaluated flags; never raises)."""
+        user_id = _targeting_key(evaluation_context)
+        if user_id is None:
+            logger.warning("track(%s) ignored: targeting_key is required", tracking_event_name)
+            return
+        value = tracking_event_details.value if tracking_event_details is not None else None
+        attributes = dict(tracking_event_details.attributes) if tracking_event_details is not None else {}
+        self._client.track(user_id, tracking_event_name, event_value=value, properties=attributes or None)
 
     # ------------------------------------------------------------------
     # Flag resolution
@@ -124,18 +217,7 @@ class ExperimentationProvider(AbstractProvider):
         default_value: bool,
         evaluation_context: Optional[EvaluationContext] = None,
     ) -> FlagResolutionDetails[bool]:
-        result = self._resolve(flag_key, evaluation_context)
-        value = result.value
-        if not isinstance(value, bool):
-            # Treat "enabled" (True/False from a no-variant flag) as bool-compatible.
-            value = bool(value) if value is not None else default_value
-        return FlagResolutionDetails(
-            value=value,
-            reason=result.reason,
-            variant=result.variant,
-            error_code=result.error_code,
-            error_message=result.error_message,
-        )
+        return self._resolve(flag_key, default_value, evaluation_context, _pick_bool)
 
     def resolve_string_details(
         self,
@@ -143,26 +225,7 @@ class ExperimentationProvider(AbstractProvider):
         default_value: str,
         evaluation_context: Optional[EvaluationContext] = None,
     ) -> FlagResolutionDetails[str]:
-        result = self._resolve(flag_key, evaluation_context)
-        if result.error_code is not None:
-            return FlagResolutionDetails(
-                value=default_value,
-                reason=result.reason,
-                error_code=result.error_code,
-                error_message=result.error_message,
-            )
-        if not isinstance(result.value, str):
-            return FlagResolutionDetails(
-                value=default_value,
-                reason=Reason.ERROR,
-                error_code=ErrorCode.TYPE_MISMATCH,
-                error_message=f'Flag "{flag_key}" value is not a string',
-            )
-        return FlagResolutionDetails(
-            value=result.value,
-            reason=result.reason,
-            variant=result.variant,
-        )
+        return self._resolve(flag_key, default_value, evaluation_context, _pick_str)
 
     def resolve_integer_details(
         self,
@@ -170,26 +233,7 @@ class ExperimentationProvider(AbstractProvider):
         default_value: int,
         evaluation_context: Optional[EvaluationContext] = None,
     ) -> FlagResolutionDetails[int]:
-        result = self._resolve(flag_key, evaluation_context)
-        if result.error_code is not None:
-            return FlagResolutionDetails(
-                value=default_value,
-                reason=result.reason,
-                error_code=result.error_code,
-                error_message=result.error_message,
-            )
-        if not isinstance(result.value, int) or isinstance(result.value, bool):
-            return FlagResolutionDetails(
-                value=default_value,
-                reason=Reason.ERROR,
-                error_code=ErrorCode.TYPE_MISMATCH,
-                error_message=f'Flag "{flag_key}" value is not an integer',
-            )
-        return FlagResolutionDetails(
-            value=result.value,
-            reason=result.reason,
-            variant=result.variant,
-        )
+        return self._resolve(flag_key, default_value, evaluation_context, _pick_int)
 
     def resolve_float_details(
         self,
@@ -197,26 +241,7 @@ class ExperimentationProvider(AbstractProvider):
         default_value: float,
         evaluation_context: Optional[EvaluationContext] = None,
     ) -> FlagResolutionDetails[float]:
-        result = self._resolve(flag_key, evaluation_context)
-        if result.error_code is not None:
-            return FlagResolutionDetails(
-                value=default_value,
-                reason=result.reason,
-                error_code=result.error_code,
-                error_message=result.error_message,
-            )
-        if not isinstance(result.value, (int, float)) or isinstance(result.value, bool):
-            return FlagResolutionDetails(
-                value=default_value,
-                reason=Reason.ERROR,
-                error_code=ErrorCode.TYPE_MISMATCH,
-                error_message=f'Flag "{flag_key}" value is not a float',
-            )
-        return FlagResolutionDetails(
-            value=float(result.value),
-            reason=result.reason,
-            variant=result.variant,
-        )
+        return self._resolve(flag_key, default_value, evaluation_context, _pick_float)
 
     def resolve_object_details(
         self,
@@ -224,113 +249,54 @@ class ExperimentationProvider(AbstractProvider):
         default_value: Union[dict, list],
         evaluation_context: Optional[EvaluationContext] = None,
     ) -> FlagResolutionDetails[Union[dict, list]]:
-        result = self._resolve(flag_key, evaluation_context)
-        if result.error_code is not None:
-            return FlagResolutionDetails(
-                value=default_value,
-                reason=result.reason,
-                error_code=result.error_code,
-                error_message=result.error_message,
-            )
-        if not isinstance(result.value, (dict, list)):
-            return FlagResolutionDetails(
-                value=default_value,
-                reason=Reason.ERROR,
-                error_code=ErrorCode.TYPE_MISMATCH,
-                error_message=f'Flag "{flag_key}" value is not a dict or list',
-            )
-        return FlagResolutionDetails(
-            value=result.value,
-            reason=result.reason,
-            variant=result.variant,
-        )
+        return self._resolve(flag_key, default_value, evaluation_context, _pick_object)
 
     # ------------------------------------------------------------------
     # Internal
     # ------------------------------------------------------------------
 
     def _resolve(
-        self, flag_key: str, evaluation_context: Optional[EvaluationContext]
-    ) -> "_InternalResult":
-        """Common resolution logic shared by all resolve_*_details methods."""
-        self._ensure_fresh_cache()
-
-        flag = self._cache.get(flag_key)
-        if flag is None:
-            return _InternalResult(
-                value=None,
-                variant=None,
-                reason=Reason.DEFAULT,
-                error_code=ErrorCode.FLAG_NOT_FOUND,
-                error_message=f'Flag "{flag_key}" not found',
-            )
-
-        user_id = ""
-        if evaluation_context is not None and evaluation_context.targeting_key:
-            user_id = evaluation_context.targeting_key
-
-        cached_warm = self._cache.is_valid()
-        eval_result = self._evaluator.evaluate(flag, user_id)
-
-        return _InternalResult(
-            value=eval_result.value,
-            variant=eval_result.variant,
-            reason=Reason.CACHED if cached_warm else Reason.STATIC,
-        )
-
-    def _ensure_fresh_cache(self) -> None:
-        """Refresh the flag cache if it has expired (with double-checked locking)."""
-        if self._cache.is_valid():
-            return
-        with self._refresh_lock:
-            # Re-check after acquiring the lock (another thread may have refreshed).
-            if not self._cache.is_valid():
-                try:
-                    self._refresh_flags()
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning("Flag cache refresh failed: %s", exc)
-
-    def _refresh_flags(self) -> None:
-        """Fetch all flags from the platform API and update the cache."""
-        url = f"{self._base_url}/api/v1/openfeature/flags"
-        try:
-            response = self._session.get(
-                url,
-                headers={"X-API-Key": self._api_key},
-                timeout=self._timeout,
-            )
-            response.raise_for_status()
-            data = response.json()
-            flags = [
-                FeatureFlagDefinition.from_dict(f) for f in data.get("flags", [])
-            ]
-            self._cache.update(flags)
-            logger.debug("Loaded %d flags from %s", len(flags), url)
-        except Timeout as exc:
-            raise GeneralError(
-                error_message=f"Timeout fetching flags from {url}"
-            ) from exc
-        except RequestException as exc:
-            raise GeneralError(
-                error_message=f"HTTP error fetching flags: {exc}"
-            ) from exc
-
-
-class _InternalResult:
-    """Lightweight internal resolution result (not the public FlagResolutionDetails)."""
-
-    __slots__ = ("value", "variant", "reason", "error_code", "error_message")
-
-    def __init__(
         self,
-        value: Any,
-        variant: Optional[str],
-        reason: Union[str, Reason],
-        error_code: Optional[ErrorCode] = None,
-        error_message: Optional[str] = None,
-    ) -> None:
-        self.value = value
-        self.variant = variant
-        self.reason = reason
-        self.error_code = error_code
-        self.error_message = error_message
+        flag_key: str,
+        default_value: Any,
+        evaluation_context: Optional[EvaluationContext],
+        pick: _Picker,
+    ) -> FlagResolutionDetails[Any]:
+        user_id = _targeting_key(evaluation_context)
+        if user_id is None:
+            return FlagResolutionDetails(
+                value=default_value,
+                reason=Reason.ERROR,
+                error_code=ErrorCode.TARGETING_KEY_MISSING,
+                error_message="EvaluationContext.targeting_key (the platform user_id) is required",
+            )
+
+        served_from_cache = any(cached.key == flag_key for cached in self._client.cached_flags(user_id))
+        try:
+            evaluation = self._client.get_feature_flag(flag_key, user_id)
+        except ExperimentationError as exc:
+            code = ErrorCode.FLAG_NOT_FOUND if exc.status == 404 else ErrorCode.GENERAL
+            logger.warning("Flag %r could not be evaluated for %r: %s", flag_key, user_id, exc)
+            return FlagResolutionDetails(
+                value=default_value,
+                reason=Reason.ERROR,
+                error_code=code,
+                error_message=str(exc),
+            )
+
+        variant = _variant_label(evaluation.config)
+        value, found = pick(evaluation)
+        if not found:
+            return FlagResolutionDetails(
+                value=default_value,
+                reason=Reason.DEFAULT if evaluation.enabled else Reason.DISABLED,
+                variant=variant,
+            )
+
+        if served_from_cache:
+            reason = Reason.CACHED
+        elif evaluation.enabled:
+            reason = Reason.TARGETING_MATCH
+        else:
+            reason = Reason.DISABLED
+        return FlagResolutionDetails(value=value, reason=reason, variant=variant)

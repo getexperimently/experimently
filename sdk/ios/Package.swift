@@ -11,6 +11,11 @@ let package = Package(
         .library(
             name: "ExperimentationSDK",
             targets: ["ExperimentationSDK"]
+        ),
+        // Contract smoke against a live backend: `swift run contract-smoke`.
+        .executable(
+            name: "contract-smoke",
+            targets: ["contract-smoke"]
         )
     ],
     targets: [
@@ -18,6 +23,11 @@ let package = Package(
             name: "ExperimentationSDK",
             dependencies: [],
             path: "Sources/ExperimentationSDK"
+        ),
+        .executableTarget(
+            name: "contract-smoke",
+            dependencies: ["ExperimentationSDK"],
+            path: "Sources/contract-smoke"
         ),
         .testTarget(
             name: "ExperimentationSDKTests",

@@ -1,32 +1,33 @@
-/// Local feature-flag evaluator using MD5-based consistent hashing.
+/// MD5 consistent-hash utility shared by every platform SDK.
+///
+/// Flag evaluation and experiment assignment are decided **by the server**;
+/// nothing in this SDK uses the hash to pick a variant any more. It is kept
+/// as an exported utility so the cross-SDK golden-vector tests keep passing
+/// and applications can reproduce server bucketing for debugging.
 ///
 /// ## Hash Algorithm
-/// Byte-for-byte compatible with the Java, Python, Go, iOS, and Android SDKs:
+/// Byte-for-byte compatible with the Java, Python, Go, iOS, Android and .NET SDKs:
 ///
 /// 1. Compute MD5 of `"{userId}:{flagKey}"` encoded as UTF-8.
 /// 2. Read the first 4 bytes as a **little-endian unsigned 32-bit integer**.
 /// 3. Divide by **4294967296.0** (2^32 = 0x100000000) to normalise to `[0.0, 1.0)`.
 ///
-/// The divisor is 2^32 **not** `MaxUInt32` (4294967295). This matches the
-/// Java SDK `HASH_DIVISOR = 0x100000000L`, the Python lambda
-/// `MAX_HASH_VALUE + 1`, and the Go SDK `float64(0x100000000)`.
+/// The divisor is 2^32 **not** `MaxUInt32` (4294967295).
 library experimentation_sdk_evaluator;
 
 import 'dart:convert';
 import 'dart:typed_data';
 import 'package:crypto/crypto.dart';
-import 'models.dart';
 
 /// Divisor used to normalise the 32-bit hash to [0.0, 1.0).
 /// Equals 2^32 = 4294967296.0.
 /// This MUST NOT be changed to 4294967295 (MaxUInt32); doing so would break
-/// cross-SDK assignment consistency.
+/// cross-SDK hash parity.
 const double _hashDivisor = 4294967296.0;
 
 /// Computes a deterministic, normalised hash value in `[0.0, 1.0)` for the
 /// given [userId] and [flagKey] pair.
 ///
-/// This is the canonical hash function used by all SDK implementations:
 /// ```
 /// MD5("{userId}:{flagKey}") → first 4 bytes as little-endian uint32 → ÷ 2^32
 /// ```
@@ -52,58 +53,4 @@ double hashUser(String userId, String flagKey) {
 
   // Divide by 2^32 (not 2^32-1) to produce a value in [0.0, 1.0).
   return value / _hashDivisor;
-}
-
-/// Evaluates whether a feature flag is enabled for a given user and, if
-/// applicable, which variant they are assigned to.
-class FeatureFlagEvaluator {
-  const FeatureFlagEvaluator();
-
-  /// Evaluates [flag] for a user identified by [userId].
-  EvalResult evaluate(FeatureFlag flag, String userId) {
-    if (!flag.enabled) {
-      return const EvalResult(enabled: false, reason: 'flag_disabled');
-    }
-
-    final hash = hashUser(userId, flag.key);
-    final rolloutFraction = flag.rolloutPercentage / 100.0;
-
-    if (hash >= rolloutFraction) {
-      return const EvalResult(enabled: false, reason: 'out_of_rollout');
-    }
-
-    if (flag.variants.isNotEmpty) {
-      final variantKey = _assignVariant(flag.variants, hash, rolloutFraction);
-      return EvalResult(
-        enabled: true,
-        variantKey: variantKey,
-        reason: 'variant_assigned',
-      );
-    }
-
-    return const EvalResult(enabled: true, reason: 'in_rollout');
-  }
-
-  /// Picks a variant for a user who is within the rollout band.
-  ///
-  /// Re-scales the hash from `[0, rolloutFraction)` → `[0.0, 1.0)` and
-  /// selects a variant proportionally by cumulative weight.
-  String _assignVariant(
-    List<Variant> variants,
-    double hash,
-    double rolloutFraction,
-  ) {
-    final normalised = rolloutFraction > 0.0 ? hash / rolloutFraction : 0.0;
-    final totalWeight = variants.fold<double>(0.0, (sum, v) => sum + v.weight);
-    var cumulative = 0.0;
-
-    for (final variant in variants) {
-      cumulative += variant.weight / totalWeight;
-      if (normalised < cumulative) {
-        return variant.key;
-      }
-    }
-    // Fallback to last variant for floating-point edge cases.
-    return variants.last.key;
-  }
 }

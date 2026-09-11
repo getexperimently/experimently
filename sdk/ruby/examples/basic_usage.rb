@@ -4,7 +4,7 @@
 # basic_usage.rb — ExperimentationPlatform Ruby SDK usage examples
 #
 # This file demonstrates the SDK API without making actual HTTP calls.
-# It uses stub objects to show what real usage looks like.
+# For a runnable end-to-end check against a live backend see contract_smoke.rb.
 
 $LOAD_PATH.unshift File.join(__dir__, '..', 'lib')
 require 'experimentation_platform'
@@ -21,17 +21,17 @@ puts "-" * 30
 
 # Option A: keyword arguments
 client = ExperimentationPlatform::Client.new(
-  base_url:  "https://api.experimently.io",
-  api_key:   ENV.fetch("EP_API_KEY", "sk_live_demo_key"),
-  cache_ttl: 300,   # cache flag definitions for 5 minutes
+  base_url:  ENV.fetch("EXPERIMENTLY_API_URL", "http://localhost:8000"),  # origin only
+  api_key:   ENV.fetch("EXPERIMENTLY_API_KEY", "sk_live_demo_key"),       # sent as X-API-Key
+  cache_ttl: 300,   # cache evaluations/assignments per user + key for 5 minutes
   timeout:   10     # HTTP timeout in seconds
 )
 puts "   Client created with keyword args"
 
 # Option B: SdkConfig struct
 config = ExperimentationPlatform::SdkConfig.new(
-  base_url:  "https://api.experimently.io",
-  api_key:   ENV.fetch("EP_API_KEY", "sk_live_demo_key"),
+  base_url:  "http://localhost:8000",
+  api_key:   ENV.fetch("EXPERIMENTLY_API_KEY", "sk_live_demo_key"),
   cache_ttl: 60,
   timeout:   5
 )
@@ -40,53 +40,58 @@ puts "   SdkConfig created and validated"
 puts
 
 # ---------------------------------------------------------------------------
-# 2. Evaluating a feature flag
+# 2. Evaluating a feature flag (server decides)
 # ---------------------------------------------------------------------------
 puts "2. Evaluating a feature flag"
 puts "-" * 30
-puts "   result = client.evaluate_flag('dark-mode', 'user-123')"
-puts "   # Returns:"
-puts "   # {"
-puts "   #   enabled: true,      # Is the flag on for this user?"
-puts "   #   variant: 'control', # Which variant is assigned?"
-puts "   #   value:   nil        # Optional value attached to variant"
-puts "   # }"
+puts "   flag = client.evaluate_flag('dark-mode', 'user-123')"
+puts "   # GET /api/v1/feature-flags/evaluate/dark-mode?user_id=user-123"
+puts "   flag.key       # => 'dark-mode'"
+puts "   flag.enabled?  # => true / false (false on any failure)"
+puts "   flag.config    # => the flag's config payload, or nil"
 puts
-puts "   # With a default value if the API is unreachable:"
-puts "   result = client.evaluate_flag('dark-mode', 'user-123', default: false)"
+puts "   client.feature_enabled?('dark-mode', 'user-123')  # => true / false"
 puts
 
 # ---------------------------------------------------------------------------
-# 3. Getting experiment assignment
+# 3. Getting an experiment assignment (sticky on the server)
 # ---------------------------------------------------------------------------
 puts "3. Getting experiment assignment"
 puts "-" * 30
-puts "   assignment = client.get_assignment('checkout-flow', 'user-123')"
-puts "   # Returns:"
-puts "   # {"
-puts "   #   experiment_key: 'checkout-flow',"
-puts "   #   variant:        'treatment',"
-puts "   #   in_experiment:  true"
-puts "   # }"
+puts "   assignment = client.get_assignment('checkout-flow', 'user-123', { country: 'US' })"
+puts "   # POST /api/v1/tracking/assign {experiment_key, user_id, context}"
+puts "   # nil when the experiment is not ACTIVE or the request fails, otherwise:"
+puts "   assignment.experiment_key  # => 'checkout-flow'"
+puts "   assignment.variant_name    # => 'control' / 'treatment'"
+puts "   assignment.variant_id      # => variant UUID"
+puts "   assignment.control?        # => true for the control variant"
+puts "   assignment.configuration   # => the variant's configuration Hash, or nil"
 puts
 
 # ---------------------------------------------------------------------------
 # 4. Tracking events
 # ---------------------------------------------------------------------------
-puts "4. Tracking events (fire-and-forget)"
+puts "4. Tracking events (never raises)"
 puts "-" * 30
-puts "   client.track('page_view', 'user-123')"
-puts "   client.track('button_click', 'user-123', properties: {"
-puts "     button:   'signup',"
-puts "     location: 'header'"
-puts "   })"
-puts "   # Returns true on success, false on error (never raises)"
+puts "   # With a key -> one POST /api/v1/tracking/track"
+puts "   client.track('purchase', 'user-123', value: 49.0, experiment_key: 'checkout-flow')"
+puts "   client.track('search', 'user-123', properties: { q: 'shoes' }, feature_flag_key: 'new-search')"
+puts
+puts "   # Without a key -> one POST /api/v1/tracking/batch with one entry per cached"
+puts "   # assignment and evaluated flag for the user (nothing cached -> nothing sent)"
+puts "   client.track('page_view', 'user-123', properties: { page: '/' })"
+puts
+puts "   # Explicit batch -> BatchResult(success_count, failure_count, errors)"
+puts "   client.track_batch(["
+puts "     { event_name: 'purchase', user_id: 'user-123', experiment_key: 'checkout-flow', value: 49.0 },"
+puts "     { event_name: 'search',   user_id: 'user-123', feature_flag_key: 'new-search' }"
+puts "   ])"
 puts
 
 # ---------------------------------------------------------------------------
-# 5. Local hash evaluation (no HTTP)
+# 5. Consistent hash utility (no HTTP)
 # ---------------------------------------------------------------------------
-puts "5. Local consistent hashing (no HTTP required)"
+puts "5. Consistent hash utility (golden vector; not used for bucketing)"
 puts "-" * 30
 
 bucket = ExperimentationPlatform::FeatureFlagEvaluator.hash_user("user-123", "my-flag")
@@ -95,31 +100,17 @@ puts "   # Cross-SDK reference value:      0.6927449859213084"
 puts "   # Match: #{(bucket - 0.6927449859213084).abs < 1e-10}"
 puts
 
-# Demonstrate local evaluation
-demo_flag = {
-  key:                'demo-flag',
-  enabled:            true,
-  rollout_percentage: 100.0,
-  variants:           [{ 'key' => 'control' }, { 'key' => 'treatment' }]
-}
-variant = ExperimentationPlatform::FeatureFlagEvaluator.evaluate(demo_flag, "user-123")
-puts "   Local evaluate for 'user-123': #{variant.inspect}"
-puts
-
 # ---------------------------------------------------------------------------
 # 6. Error handling
 # ---------------------------------------------------------------------------
 puts "6. Error handling"
 puts "-" * 30
-puts "   begin"
-puts "     result = client.evaluate_flag('my-flag', 'user-123')"
-puts "   rescue ExperimentationPlatform::AuthenticationError => e"
-puts "     puts \"Auth failed: \#{e.message} (HTTP \#{e.status_code})\""
-puts "   rescue ExperimentationPlatform::NetworkError => e"
-puts "     puts \"Network error: \#{e.message}\""
-puts "   rescue ExperimentationPlatform::APIError => e"
-puts "     puts \"API error: \#{e.message} (HTTP \#{e.status_code})\""
-puts "   end"
+puts "   # evaluate_flag / get_assignment / track never raise on network or HTTP"
+puts "   # errors: they log a warning and return a disabled flag / nil / false."
+puts "   # Only HttpClient raises:"
+puts "   #   ExperimentationPlatform::AuthenticationError (401)"
+puts "   #   ExperimentationPlatform::APIError            (other 4xx/5xx, #status_code)"
+puts "   #   ExperimentationPlatform::NetworkError        (timeout, DNS, refused)"
 puts
 
 # ---------------------------------------------------------------------------
@@ -127,8 +118,11 @@ puts
 # ---------------------------------------------------------------------------
 puts "7. Cleanup"
 puts "-" * 30
-puts "   client.close  # clears in-memory cache"
+puts "   client.clear_cache  # drop cached results"
+puts "   client.close        # same, for shutdown hooks"
 puts
+
+client.close
 
 puts "=" * 55
 puts "For full API reference see README.md"

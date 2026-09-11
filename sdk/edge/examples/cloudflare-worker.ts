@@ -2,10 +2,10 @@
  * Complete Cloudflare Worker example using the Edge SDK.
  *
  * This example demonstrates:
- *  1. Pre-loading flags from Cloudflare KV at worker startup
- *  2. Zero-latency flag evaluation in the request handler
- *  3. Background KV refresh so the next request gets fresh flags
- *  4. Event tracking for analytics
+ *  1. Server-decided flag evaluation and experiment assignment from a worker
+ *  2. Sharing cached results across worker instances via Cloudflare KV
+ *  3. Zero-latency re-reads within the same request via the sync accessors
+ *  4. Event tracking (fire-and-forget, run in ctx.waitUntil)
  *
  * Deploy with: wrangler deploy
  *
@@ -16,76 +16,86 @@
  * compatibility_date = "2024-01-01"
  *
  * [[kv_namespaces]]
- * binding = "FLAGS_KV"
+ * binding = "KV"
  * id = "your-kv-namespace-id"
  *
  * [vars]
  * EP_API_KEY = "your-api-key"
+ * EP_BASE_URL = "https://api.your-experimentation-platform.com"
  * ```
  */
 
-import { withExperimentation } from '../src/adapters/cloudflare';
-import type { CloudflareExperimentationClient } from '../src/adapters/cloudflare';
+import { CloudflareExperimentationClient } from '../src/adapters/cloudflare';
+import type { KVNamespace, ExecutionContext } from '../src/adapters/cloudflare';
 
 interface Env {
-  FLAGS_KV: import('../src/adapters/cloudflare').KVNamespace;
+  KV?: KVNamespace;
   EP_API_KEY: string;
-  EP_CLIENT?: CloudflareExperimentationClient;
+  EP_BASE_URL: string;
 }
 
-async function handler(
-  request: Request,
-  env: Record<string, unknown>,
-): Promise<Response> {
-  const typedEnv = env as unknown as Env;
-  const client = typedEnv.EP_CLIENT!;
+export default {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    const client = new CloudflareExperimentationClient({
+      apiKey: env.EP_API_KEY,
+      baseUrl: env.EP_BASE_URL,
+      kvNamespace: env.KV,   // optional: share results across instances
+      cacheTtlMs: 60_000,
+      timeout: 500,
+    });
 
-  // Extract user ID from cookie or generate anonymous ID
-  const userId = getUserId(request) ?? 'anonymous';
+    const userId = getUserId(request) ?? 'anonymous';
+    const url = new URL(request.url);
 
-  // Zero-latency evaluation — uses KV-loaded bootstrap flags
-  const newCheckoutEnabled = client.evaluateFlagSync('new-checkout', userId, {
-    country: request.headers.get('CF-IPCountry') ?? 'unknown',
-  });
+    // Ask the server once (parallel) — results are cached per user + key.
+    const [checkout, newCheckout, darkMode] = await Promise.all([
+      client.getAssignment('checkout_flow', userId, {
+        country: request.headers.get('CF-IPCountry') ?? 'unknown',
+      }),
+      client.evaluateFlag('new-checkout', userId),
+      client.evaluateFlag('dark-mode', userId),
+    ]);
 
-  const darkModeEnabled = client.evaluateFlagSync('dark-mode', userId);
+    if (url.pathname === '/checkout' && newCheckout.enabled) {
+      // Track the exposure without blocking the response
+      ctx.waitUntil(
+        client.track('checkout_viewed', userId, { path: url.pathname }, { featureFlagKey: 'new-checkout' }),
+      );
 
-  // Route to appropriate handler
-  const url = new URL(request.url);
+      return new Response(
+        JSON.stringify({
+          checkout: 'new',
+          variant: checkout?.variantName ?? 'control',
+          configuration: checkout?.configuration ?? null,
+          darkMode: darkMode.enabled,
+        }),
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            'X-EP-User-Id': userId,
+            'X-EP-Flag-new-checkout': 'true',
+          },
+        },
+      );
+    }
 
-  if (url.pathname === '/checkout' && newCheckoutEnabled) {
-    // Track the experiment exposure
-    client.track('checkout_viewed', userId, {
-      variant: 'new-checkout',
-      path: url.pathname,
-    }).catch(() => {}); // fire-and-forget
+    // A keyless event fans out to every cached assignment + flag for this user.
+    ctx.waitUntil(client.track('page_view', userId, { path: url.pathname }));
 
     return new Response(
-      JSON.stringify({ checkout: 'new', darkMode: darkModeEnabled }),
-      {
-        headers: {
-          'Content-Type': 'application/json',
-          'X-EP-User-Id': userId,
-          'X-EP-Flag-new-checkout': 'true',
+      JSON.stringify({
+        checkout: 'original',
+        variant: checkout?.variantName ?? 'control',
+        flags: {
+          // Sync reads are free once the flags above have been evaluated
+          'new-checkout': client.evaluateFlagSync('new-checkout', userId),
+          'dark-mode': client.evaluateFlagSync('dark-mode', userId),
         },
-      },
+      }),
+      { headers: { 'Content-Type': 'application/json' } },
     );
-  }
-
-  return new Response(
-    JSON.stringify({
-      checkout: 'original',
-      darkMode: darkModeEnabled,
-      flags: {
-        'new-checkout': newCheckoutEnabled,
-        'dark-mode': darkModeEnabled,
-      },
-    }),
-    {
-      headers: { 'Content-Type': 'application/json' },
-    },
-  );
-}
+  },
+};
 
 function getUserId(request: Request): string | null {
   // Try to get userId from cookie
@@ -99,15 +109,3 @@ function getUserId(request: Request): string | null {
   // Fall back to a header
   return request.headers.get('X-User-Id');
 }
-
-// Export the wrapped handler — flags are loaded from KV automatically
-export default {
-  fetch: withExperimentation(
-    handler,
-    {
-      apiKey: '', // Will be overridden from env.EP_API_KEY at runtime
-      baseUrl: 'https://api.your-experimentation-platform.com',
-      cacheTtlMs: 60_000,
-    },
-  ),
-};

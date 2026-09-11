@@ -1,30 +1,35 @@
 """
 Basic usage example: Experimentation Platform OpenFeature Python Provider.
 
-Run with the virtual environment activated:
+Run from the repository root with the virtual environment activated:
     source venv/bin/activate
-    python examples/basic_usage.py
+    EXPERIMENTLY_API_KEY=<key> python sdk/openfeature-python/examples/basic_usage.py
 """
+
 from __future__ import annotations
 
-import sys
 import os
+import sys
+from pathlib import Path
 
-# Add src to path for running outside of an installed package.
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+# Import from the source tree when the packages are not installed.
+_HERE = Path(__file__).resolve()
+for _path in (_HERE.parents[1] / "src", _HERE.parents[2] / "python"):
+    sys.path.insert(0, str(_path))
 
-from openfeature import api
-from openfeature.evaluation_context import EvaluationContext
+from openfeature import api  # noqa: E402
+from openfeature.evaluation_context import EvaluationContext  # noqa: E402
 
-from experimentation_openfeature import ExperimentationProvider
+from experimentation_openfeature import ExperimentationProvider  # noqa: E402
 
 
 def main() -> None:
-    # 1. Create and register the provider.
+    # 1. Create and register the provider. Flags are evaluated by the server and cached
+    #    per user + flag for cache_ttl seconds.
     provider = ExperimentationProvider(
-        api_key=os.environ.get("EP_API_KEY", "your-api-key"),
-        base_url=os.environ.get("EP_BASE_URL", "http://localhost:8000"),
-        cache_ttl=300,   # Cache flags for 5 minutes.
+        api_key=os.environ.get("EXPERIMENTLY_API_KEY", "your-api-key"),
+        base_url=os.environ.get("EXPERIMENTLY_API_URL", "http://localhost:8000"),
+        cache_ttl=300,
         timeout=10,
     )
     api.set_provider(provider)
@@ -32,31 +37,22 @@ def main() -> None:
     # 2. Get a client.
     client = api.get_client()
 
-    # 3. Build evaluation context for the current user.
-    ctx = EvaluationContext(
-        targeting_key="user-12345",
-        attributes={
-            "country": "US",
-            "plan": "pro",
-            "accountAge": 365,
-        },
-    )
+    # 3. Build the evaluation context. targeting_key is the platform user_id and is
+    #    required; attributes are kept for your own hooks (they are not sent to the
+    #    evaluate endpoint).
+    ctx = EvaluationContext(targeting_key="user-12345", attributes={"country": "US", "plan": "pro"})
 
     # 4. Evaluate flags — same API regardless of provider.
-    dark_mode = client.get_boolean_value("dark-mode", False, ctx)
-    print(f"dark-mode enabled: {dark_mode}")
+    print("dark-mode enabled:", client.get_boolean_value("dark-mode", False, ctx))
+    print("checkout-experiment variant:", client.get_string_value("checkout-experiment", "control", ctx))
+    print("cart-max-items:", client.get_integer_value("cart-max-items", 10, ctx))
+    print("price-multiplier:", client.get_float_value("price-multiplier", 1.0, ctx))
+    print("feature-config:", client.get_object_value("feature-config", {}, ctx))
 
-    checkout_variant = client.get_string_value("checkout-experiment", "control", ctx)
-    print(f"checkout-experiment variant: {checkout_variant}")
-
-    max_items = client.get_integer_value("cart-max-items", 10, ctx)
-    print(f"cart-max-items: {max_items}")
-
-    price = client.get_float_value("feature-price-multiplier", 1.0, ctx)
-    print(f"feature-price-multiplier: {price}")
-
-    config = client.get_object_value("feature-config", {}, ctx)
-    print(f"feature-config: {config}")
+    # 5. Experiments and tracking are outside OpenFeature: use the SDK client underneath.
+    assignment = provider.client.get_variant("checkout_flow", "user-12345", {"plan": "pro"})
+    print("checkout_flow variant:", assignment)
+    provider.client.track("user-12345", "page_view", properties={"page": "/"})
 
 
 if __name__ == "__main__":

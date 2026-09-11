@@ -1,532 +1,729 @@
 /**
  * Tests for EdgeExperimentationClient.
  *
- * Uses Jest with ts-jest. All tests run in a Node.js environment (jest config).
- * fetch is mocked via jest.fn() — no actual network calls are made.
+ * Runs in Node (Jest + ts-jest). `fetch` is mocked via jest.fn() — no network.
+ * Covers the backend contract: URLs, methods, headers, JSON bodies, response
+ * mapping, per user + key caching (TTL, never caching failures), the tracking
+ * fan-out rule and the shared-store read-through.
  */
 
-import { EdgeExperimentationClient } from '../src/client';
-import type { FeatureFlag, Experiment, BootstrapResponse } from '../src/types';
+import { EdgeExperimentationClient, EdgeApiError } from '../src/client';
+import type { EdgeStore, FlagEvaluation, Assignment } from '../src/types';
 
 // ---------------------------------------------------------------------------
-// Global fetch mock setup
+// fetch mock helpers
 // ---------------------------------------------------------------------------
 
 const mockFetch = jest.fn();
 global.fetch = mockFetch;
 
-function mockBootstrapResponse(flags: FeatureFlag[] = [], experiments: Experiment[] = []): void {
-  const body: BootstrapResponse = {
-    flags,
-    experiments,
-    ttl_seconds: 60,
-    version: 'abc123',
-  };
-  mockFetch.mockResolvedValueOnce({
-    ok: true,
-    status: 200,
-    json: async () => body,
-  });
-}
-
-function mockFetchError(status = 500): void {
-  mockFetch.mockResolvedValueOnce({
-    ok: false,
+function jsonResponse(body: unknown, status = 200): Response {
+  return {
+    ok: status >= 200 && status < 300,
     status,
-    statusText: 'Internal Server Error',
-    json: async () => ({ detail: 'error' }),
-  });
+    statusText: status === 200 ? 'OK' : 'Error',
+    headers: new Headers(),
+    json: async () => body,
+  } as unknown as Response;
 }
 
-function makFlag(
-  key: string,
-  enabled = true,
-  rolloutPercentage = 100,
-  rules: FeatureFlag['rules'] = [],
-  variants: FeatureFlag['variants'] = [],
-): FeatureFlag {
-  return { key, enabled, rolloutPercentage, rules, variants };
+function mockJson(body: unknown, status = 200): void {
+  mockFetch.mockResolvedValueOnce(jsonResponse(body, status));
 }
 
-// ---------------------------------------------------------------------------
-// Setup / teardown
-// ---------------------------------------------------------------------------
+function assignBody(overrides: Partial<Record<string, unknown>> = {}): Record<string, unknown> {
+  return {
+    experiment_key: 'checkout_flow',
+    user_id: 'user-1',
+    variant_id: 'var-treatment',
+    variant_name: 'treatment',
+    is_control: false,
+    configuration: { button: 'green' },
+    ...overrides,
+  };
+}
+
+function flagBody(overrides: Partial<Record<string, unknown>> = {}): Record<string, unknown> {
+  return { key: 'new-checkout', enabled: true, config: { variant: 'v2' }, ...overrides };
+}
+
+function lastCall(index = -1): { url: string; init: RequestInit } {
+  const calls = mockFetch.mock.calls;
+  const call = calls[index < 0 ? calls.length + index : index] as [string, RequestInit];
+  return { url: call[0], init: call[1] };
+}
+
+function bodyOf(index = -1): Record<string, unknown> {
+  return JSON.parse(lastCall(index).init.body as string) as Record<string, unknown>;
+}
+
+function makeClient(overrides: Partial<ConstructorParameters<typeof EdgeExperimentationClient>[0]> = {}) {
+  return new EdgeExperimentationClient({ apiKey: 'k', baseUrl: 'http://api.test', ...overrides });
+}
+
+/** In-memory EdgeStore that records calls. */
+function makeStore(initial: Record<string, string> = {}): EdgeStore & { data: Record<string, string>; ttls: number[] } {
+  const data = { ...initial };
+  const ttls: number[] = [];
+  return {
+    data,
+    ttls,
+    async get(key: string) {
+      return data[key] ?? null;
+    },
+    async put(key: string, value: string, ttlMs: number) {
+      data[key] = value;
+      ttls.push(ttlMs);
+    },
+  };
+}
 
 beforeEach(() => {
-  mockFetch.mockClear();
+  mockFetch.mockReset();
 });
 
 // ---------------------------------------------------------------------------
-// Constructor tests
+// Constructor
 // ---------------------------------------------------------------------------
 
-describe('EdgeExperimentationClient constructor', () => {
+describe('constructor', () => {
   test('throws when apiKey is empty', () => {
     expect(() => new EdgeExperimentationClient({ apiKey: '' })).toThrow('apiKey is required');
   });
 
-  test('accepts valid config', () => {
-    const client = new EdgeExperimentationClient({ apiKey: 'test-key' });
-    expect(client).toBeTruthy();
+  test('strips trailing slashes from baseUrl', async () => {
+    mockJson(flagBody());
+    const client = makeClient({ baseUrl: 'http://api.test//' });
+    await client.evaluateFlag('new-checkout', 'user-1');
+    expect(lastCall().url).toBe('http://api.test/api/v1/feature-flags/evaluate/new-checkout?user_id=user-1');
   });
 
-  test('pre-loads bootstrap flags', () => {
-    const flags = [makFlag('dark-mode'), makFlag('checkout-v2', false)];
-    const client = new EdgeExperimentationClient({ apiKey: 'k', bootstrapFlags: flags });
-    expect(client.flagCount).toBe(2);
-    expect(client.isBootstrapped).toBe(true);
-  });
-
-  test('strips trailing slash from baseUrl', () => {
-    const client = new EdgeExperimentationClient({
-      apiKey: 'k',
-      baseUrl: 'https://api.example.com/',
-    });
-    // Indirectly verify by checking refreshFlags URL
-    mockBootstrapResponse([]);
-    return expect(client.refreshFlags()).resolves.toBeUndefined();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// evaluateFlagSync
-// ---------------------------------------------------------------------------
-
-describe('evaluateFlagSync', () => {
-  test('returns false when flag is not in bootstrap set', () => {
-    const client = new EdgeExperimentationClient({ apiKey: 'k' });
-    expect(client.evaluateFlagSync('unknown-flag', 'user-1')).toBe(false);
-  });
-
-  test('returns false for disabled flag', () => {
-    const client = new EdgeExperimentationClient({
-      apiKey: 'k',
-      bootstrapFlags: [makFlag('off-flag', false)],
-    });
-    expect(client.evaluateFlagSync('off-flag', 'user-1')).toBe(false);
-  });
-
-  test('returns true for 100% rollout flag', () => {
-    const client = new EdgeExperimentationClient({
-      apiKey: 'k',
-      bootstrapFlags: [makFlag('full-rollout', true, 100)],
-    });
-    expect(client.evaluateFlagSync('full-rollout', 'user-1')).toBe(true);
-  });
-
-  test('returns false for 0% rollout flag', () => {
-    const client = new EdgeExperimentationClient({
-      apiKey: 'k',
-      bootstrapFlags: [makFlag('zero-rollout', true, 0)],
-    });
-    expect(client.evaluateFlagSync('zero-rollout', 'user-1')).toBe(false);
-  });
-
-  test('consistent result for same user+flag (deterministic)', () => {
-    const client = new EdgeExperimentationClient({
-      apiKey: 'k',
-      bootstrapFlags: [makFlag('half-flag', true, 50)],
-    });
-    const result1 = client.evaluateFlagSync('half-flag', 'user-stable');
-    const result2 = client.evaluateFlagSync('half-flag', 'user-stable');
-    expect(result1).toBe(result2);
-  });
-
-  test('evaluates targeting rules — matching rule returns true', () => {
-    const flag = makFlag('beta-users', true, 100, [
-      { attribute: 'plan', operator: 'eq', value: 'pro', rolloutPercentage: 100 },
-    ]);
-    const client = new EdgeExperimentationClient({ apiKey: 'k', bootstrapFlags: [flag] });
-    expect(client.evaluateFlagSync('beta-users', 'u1', { plan: 'pro' })).toBe(true);
-  });
-
-  test('evaluates targeting rules — non-matching rule returns false', () => {
-    const flag = makFlag('beta-users', true, 100, [
-      { attribute: 'plan', operator: 'eq', value: 'pro', rolloutPercentage: 100 },
-    ]);
-    const client = new EdgeExperimentationClient({ apiKey: 'k', bootstrapFlags: [flag] });
-    expect(client.evaluateFlagSync('beta-users', 'u1', { plan: 'free' })).toBe(false);
-  });
-
-  test('no rules: uses global rollout percentage', () => {
-    // user-123 hashes to ~0.6927 for 'my-flag'
-    // At 69% rollout: 0.6927 >= 0.69 → user is outside rollout → false
-    const flag = makFlag('my-flag', true, 69);
-    const client = new EdgeExperimentationClient({ apiKey: 'k', bootstrapFlags: [flag] });
-    // 0.6927 >= 0.69 → false (user is outside rollout)
-    expect(client.evaluateFlagSync('my-flag', 'user-123')).toBe(false);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// getAssignmentSync
-// ---------------------------------------------------------------------------
-
-describe('getAssignmentSync', () => {
-  function makeExperiment(key: string, enabled = true): Experiment {
-    return {
-      key,
-      enabled,
-      variants: [
-        { key: 'control', name: 'Control', weight: 0.5 },
-        { key: 'treatment', name: 'Treatment', weight: 0.5 },
-      ],
-    };
-  }
-
-  test('returns null when experiment not in bootstrap', () => {
-    const client = new EdgeExperimentationClient({ apiKey: 'k' });
-    expect(client.getAssignmentSync('unknown-exp', 'user-1')).toBeNull();
-  });
-
-  test('returns null for disabled experiment', () => {
-    const client = new EdgeExperimentationClient({ apiKey: 'k' });
-    // Add experiment manually via refreshFlags simulation is complex — use internal approach
-    // We test via a flag with variants instead (same code path)
-    const flag = makFlag('exp-key', false, 100, [], [
-      { key: 'control', weight: 0.5 },
-      { key: 'treatment', weight: 0.5 },
-    ]);
-    const c2 = new EdgeExperimentationClient({ apiKey: 'k', bootstrapFlags: [flag] });
-    // evaluateFlagSync on disabled flag → false
-    expect(c2.evaluateFlagSync('exp-key', 'user-1')).toBe(false);
-    expect(client.getAssignmentSync('exp-key', 'user-1')).toBeNull();
-  });
-
-  test('returns consistent variant for same user', () => {
-    const client = new EdgeExperimentationClient({ apiKey: 'k' });
-    // Inject experiment via internal map (testing via public API via refreshFlags)
-    // We'll test consistency through the evaluator logic
-    const variant1 = client.getAssignmentSync('some-exp', 'user-steady');
-    const variant2 = client.getAssignmentSync('some-exp', 'user-steady');
-    expect(variant1).toBe(variant2);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// evaluateFlag (async)
-// ---------------------------------------------------------------------------
-
-describe('evaluateFlag (async)', () => {
-  test('returns true for 100% rollout from bootstrap', async () => {
-    const client = new EdgeExperimentationClient({
-      apiKey: 'k',
-      bootstrapFlags: [makFlag('full-flag', true, 100)],
-    });
-    expect(await client.evaluateFlag('full-flag', 'user-1')).toBe(true);
-    // No fetch calls — served from bootstrap
+  test('uses config.fetch when provided instead of the global', async () => {
+    const custom = jest.fn().mockResolvedValue(jsonResponse(flagBody()));
+    const client = makeClient({ fetch: custom as unknown as typeof fetch });
+    await client.evaluateFlag('new-checkout', 'user-1');
+    expect(custom).toHaveBeenCalledTimes(1);
     expect(mockFetch).not.toHaveBeenCalled();
   });
+});
 
-  test('fetches flag from API on cache miss', async () => {
-    const client = new EdgeExperimentationClient({ apiKey: 'k', baseUrl: 'http://api.test' });
-    // Single flag fetch (not bootstrap endpoint)
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      json: async () => ({
-        key: 'remote-flag',
-        enabled: true,
-        rollout_percentage: 100,
-        variants: [],
-        targeting_rules: [],
-      }),
+// ---------------------------------------------------------------------------
+// evaluateFlag
+// ---------------------------------------------------------------------------
+
+describe('evaluateFlag', () => {
+  test('GETs /api/v1/feature-flags/evaluate/{key}?user_id=… with the contract headers and no body', async () => {
+    mockJson(flagBody());
+    await makeClient().evaluateFlag('new-checkout', 'user-1');
+
+    const { url, init } = lastCall();
+    expect(url).toBe('http://api.test/api/v1/feature-flags/evaluate/new-checkout?user_id=user-1');
+    expect(init.method).toBe('GET');
+    expect(init.headers).toEqual({
+      'X-API-Key': 'k',
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
     });
-    const result = await client.evaluateFlag('remote-flag', 'user-1');
-    expect(result).toBe(true);
+    expect(init.body).toBeUndefined();
+    expect(init.signal).toBeDefined();
+  });
+
+  test('URL-encodes the flag key and the user id', async () => {
+    mockJson(flagBody({ key: 'a/b c' }));
+    await makeClient().evaluateFlag('a/b c', 'user 1@x');
+    expect(lastCall().url).toBe('http://api.test/api/v1/feature-flags/evaluate/a%2Fb%20c?user_id=user%201%40x');
+  });
+
+  test('maps {key, enabled, config}', async () => {
+    mockJson(flagBody());
+    const evaluation = await makeClient().evaluateFlag('new-checkout', 'user-1');
+    expect(evaluation).toEqual<FlagEvaluation>({ key: 'new-checkout', enabled: true, config: { variant: 'v2' } });
+  });
+
+  test('normalises a missing config to null', async () => {
+    mockJson({ key: 'f', enabled: false });
+    expect(await makeClient().evaluateFlag('f', 'user-1')).toEqual({ key: 'f', enabled: false, config: null });
+  });
+
+  test('caches per user + key: the second call makes no request', async () => {
+    mockJson(flagBody());
+    const client = makeClient();
+    await client.evaluateFlag('new-checkout', 'user-1');
+    await client.evaluateFlag('new-checkout', 'user-1');
     expect(mockFetch).toHaveBeenCalledTimes(1);
-    expect((mockFetch.mock.calls[0][0] as string)).toContain('remote-flag');
   });
 
-  test('caches result after first evaluation', async () => {
-    const client = new EdgeExperimentationClient({ apiKey: 'k', baseUrl: 'http://api.test' });
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      json: async () => ({
-        key: 'cached-flag',
-        enabled: true,
-        rollout_percentage: 100,
-        variants: [],
-        targeting_rules: [],
-      }),
-    });
+  test('keeps separate cache entries per user and per flag', async () => {
+    mockFetch.mockImplementation(async () => jsonResponse(flagBody()));
+    const client = makeClient();
+    await client.evaluateFlag('f1', 'user-A');
+    await client.evaluateFlag('f1', 'user-B');
+    await client.evaluateFlag('f2', 'user-A');
+    await client.evaluateFlag('f1', 'user-A');
+    expect(mockFetch).toHaveBeenCalledTimes(3);
+  });
 
-    await client.evaluateFlag('cached-flag', 'user-1');
-    await client.evaluateFlag('cached-flag', 'user-1'); // second call
-    // fetch should only be called once
+  test('caches disabled results too', async () => {
+    mockJson(flagBody({ enabled: false }));
+    const client = makeClient();
+    expect((await client.evaluateFlag('new-checkout', 'user-1')).enabled).toBe(false);
+    await client.evaluateFlag('new-checkout', 'user-1');
     expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 
-  test('returns false when flag not found (404)', async () => {
-    const client = new EdgeExperimentationClient({ apiKey: 'k', baseUrl: 'http://api.test' });
-    mockFetch.mockResolvedValueOnce({
-      ok: false,
-      status: 404,
-      statusText: 'Not Found',
-    });
-    const result = await client.evaluateFlag('missing-flag', 'user-1');
-    expect(result).toBe(false);
+  test('shares one in-flight request between concurrent callers', async () => {
+    let resolve!: (r: Response) => void;
+    mockFetch.mockReturnValueOnce(new Promise<Response>((r) => (resolve = r)));
+    const client = makeClient();
+    const p1 = client.evaluateFlag('new-checkout', 'user-1');
+    const p2 = client.evaluateFlag('new-checkout', 'user-1');
+    resolve(jsonResponse(flagBody()));
+    const [a, b] = await Promise.all([p1, p2]);
+    expect(a).toBe(b);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 
-  test('returns false on network error (resilience)', async () => {
-    const client = new EdgeExperimentationClient({ apiKey: 'k', baseUrl: 'http://api.test' });
+  test('returns a disabled evaluation on 404 (flag not ACTIVE) and does not cache it', async () => {
+    mockJson({ detail: 'Feature flag not found' }, 404);
+    mockJson(flagBody());
+    const client = makeClient();
+    expect(await client.evaluateFlag('new-checkout', 'user-1')).toEqual({ key: 'new-checkout', enabled: false, config: null });
+    expect((await client.evaluateFlag('new-checkout', 'user-1')).enabled).toBe(true);
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+  });
+
+  test('returns a disabled evaluation on a network error', async () => {
     mockFetch.mockRejectedValueOnce(new Error('network error'));
-    const result = await client.evaluateFlag('network-error-flag', 'user-1');
-    expect(result).toBe(false);
+    expect(await makeClient().evaluateFlag('f', 'user-1')).toEqual({ key: 'f', enabled: false, config: null });
   });
 
-  test('bootstrap flag overrides API (bootstrap takes precedence)', async () => {
-    const client = new EdgeExperimentationClient({
-      apiKey: 'k',
-      bootstrapFlags: [makFlag('overridden-flag', false, 100)], // disabled
-    });
-    // No fetch should happen since bootstrap has the flag
-    const result = await client.evaluateFlag('overridden-flag', 'user-1');
-    expect(result).toBe(false);
-    expect(mockFetch).not.toHaveBeenCalled();
-  });
-
-  test('disabled flag always returns false', async () => {
-    const client = new EdgeExperimentationClient({
-      apiKey: 'k',
-      bootstrapFlags: [makFlag('disabled-flag', false, 100)],
-    });
-    for (let i = 0; i < 5; i++) {
-      expect(await client.evaluateFlag('disabled-flag', `user-${i}`)).toBe(false);
+  test('re-fetches after cacheTtlMs elapses', async () => {
+    jest.useFakeTimers();
+    try {
+      mockJson(flagBody());
+      mockJson(flagBody({ enabled: false }));
+      const client = makeClient({ cacheTtlMs: 1000 });
+      expect((await client.evaluateFlag('new-checkout', 'user-1')).enabled).toBe(true);
+      jest.advanceTimersByTime(999);
+      expect((await client.evaluateFlag('new-checkout', 'user-1')).enabled).toBe(true);
+      jest.advanceTimersByTime(2);
+      expect((await client.evaluateFlag('new-checkout', 'user-1')).enabled).toBe(false);
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+    } finally {
+      jest.useRealTimers();
     }
   });
 
-  test('passes attributes to targeting rule evaluation', async () => {
-    const flag = makFlag('attr-flag', true, 100, [
-      { attribute: 'country', operator: 'eq', value: 'US', rolloutPercentage: 100 },
-    ]);
-    const client = new EdgeExperimentationClient({ apiKey: 'k', bootstrapFlags: [flag] });
-    expect(await client.evaluateFlag('attr-flag', 'u1', { country: 'US' })).toBe(true);
-    expect(await client.evaluateFlag('attr-flag', 'u2', { country: 'UK' })).toBe(false);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// getAssignment (async)
-// ---------------------------------------------------------------------------
-
-describe('getAssignment (async)', () => {
-  test('fetches bootstrap on cache miss when experiment not loaded', async () => {
-    const client = new EdgeExperimentationClient({ apiKey: 'k', baseUrl: 'http://api.test' });
-    mockBootstrapResponse([], [
-      { key: 'exp-1', enabled: true, variants: [{ key: 'c', name: 'Control', weight: 1.0 }] },
-    ]);
-    const result = await client.getAssignment('exp-1', 'user-1');
-    expect(mockFetch).toHaveBeenCalledTimes(1);
-    // With 100% weight on 'c', user should get 'c'
-    expect(result).toBe('c');
-  });
-
-  test('caches assignment result', async () => {
-    const client = new EdgeExperimentationClient({ apiKey: 'k', baseUrl: 'http://api.test' });
-    mockBootstrapResponse([], [
-      { key: 'exp-cache', enabled: true, variants: [{ key: 'v', name: 'V', weight: 1.0 }] },
-    ]);
-    await client.getAssignment('exp-cache', 'user-1');
-    // Second call — no additional fetch
-    await client.getAssignment('exp-cache', 'user-1');
-    expect(mockFetch).toHaveBeenCalledTimes(1);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// track
-// ---------------------------------------------------------------------------
-
-describe('track', () => {
-  test('sends POST to /api/v1/events', async () => {
-    mockFetch.mockResolvedValueOnce({ ok: true, status: 200 });
-    const client = new EdgeExperimentationClient({ apiKey: 'k', baseUrl: 'http://api.test' });
-    await client.track('button_click', 'user-1', { page: 'home' });
-
-    expect(mockFetch).toHaveBeenCalledWith(
-      'http://api.test/api/v1/events',
-      expect.objectContaining({
-        method: 'POST',
-        headers: expect.objectContaining({
-          'X-API-Key': 'k',
-          'Content-Type': 'application/json',
-        }),
-        body: expect.stringContaining('button_click'),
-      }),
-    );
-  });
-
-  test('does not throw on network error (fire-and-forget)', async () => {
-    mockFetch.mockRejectedValueOnce(new Error('network failure'));
-    const client = new EdgeExperimentationClient({ apiKey: 'k', baseUrl: 'http://api.test' });
-    await expect(client.track('event', 'user-1')).resolves.toBeUndefined();
-  });
-
-  test('includes userId and properties in request body', async () => {
-    mockFetch.mockResolvedValueOnce({ ok: true, status: 200 });
-    const client = new EdgeExperimentationClient({ apiKey: 'k', baseUrl: 'http://api.test' });
-    await client.track('purchase', 'user-42', { amount: 99.99, currency: 'USD' });
-
-    const body = JSON.parse((mockFetch.mock.calls[0][1] as RequestInit).body as string);
-    expect(body.event_name).toBe('purchase');
-    expect(body.user_id).toBe('user-42');
-    expect(body.properties).toEqual({ amount: 99.99, currency: 'USD' });
-  });
-
-  test('includes X-API-Key header', async () => {
-    mockFetch.mockResolvedValueOnce({ ok: true, status: 200 });
-    const client = new EdgeExperimentationClient({ apiKey: 'secret-key', baseUrl: 'http://api.test' });
-    await client.track('ev', 'u1');
-
-    const headers = (mockFetch.mock.calls[0][1] as RequestInit).headers as Record<string, string>;
-    expect(headers['X-API-Key']).toBe('secret-key');
-  });
-});
-
-// ---------------------------------------------------------------------------
-// refreshFlags
-// ---------------------------------------------------------------------------
-
-describe('refreshFlags', () => {
-  test('populates flags from API response', async () => {
-    const flags = [makFlag('f1'), makFlag('f2', false)];
-    const client = new EdgeExperimentationClient({ apiKey: 'k', baseUrl: 'http://api.test' });
-    mockBootstrapResponse(flags);
-    await client.refreshFlags();
-    expect(client.flagCount).toBe(2);
-  });
-
-  test('populates experiments from API response', async () => {
-    const client = new EdgeExperimentationClient({ apiKey: 'k', baseUrl: 'http://api.test' });
-    mockBootstrapResponse([], [
-      { key: 'exp-a', enabled: true, variants: [{ key: 'v', name: 'V', weight: 1 }] },
-    ]);
-    await client.refreshFlags();
-    expect(client.experimentCount).toBe(1);
-  });
-
-  test('replaces existing flags on refresh', async () => {
-    const client = new EdgeExperimentationClient({
-      apiKey: 'k',
-      baseUrl: 'http://api.test',
-      bootstrapFlags: [makFlag('old-flag')],
-    });
-    expect(client.flagCount).toBe(1);
-
-    mockBootstrapResponse([makFlag('new-flag-1'), makFlag('new-flag-2')]);
-    await client.refreshFlags();
-    expect(client.flagCount).toBe(2);
-    expect(client.evaluateFlagSync('old-flag', 'user-1')).toBe(false);
-  });
-
-  test('sets bootstrapped state after refresh', async () => {
-    const client = new EdgeExperimentationClient({ apiKey: 'k', baseUrl: 'http://api.test' });
-    expect(client.isBootstrapped).toBe(false);
-    mockBootstrapResponse([]);
-    await client.refreshFlags();
-    expect(client.isBootstrapped).toBe(true);
-  });
-
-  test('throws on API error', async () => {
-    const client = new EdgeExperimentationClient({ apiKey: 'k', baseUrl: 'http://api.test' });
-    mockFetchError(500);
-    await expect(client.refreshFlags()).rejects.toThrow();
-  });
-
-  test('calls bootstrap endpoint with X-API-Key header', async () => {
-    mockBootstrapResponse([]);
-    const client = new EdgeExperimentationClient({ apiKey: 'my-api-key', baseUrl: 'http://api.test' });
-    await client.refreshFlags();
-
-    const [url, init] = mockFetch.mock.calls[0] as [string, RequestInit];
-    expect(url).toContain('/api/v1/edge/bootstrap');
-    expect((init.headers as Record<string, string>)['X-API-Key']).toBe('my-api-key');
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Cache TTL expiration
-// ---------------------------------------------------------------------------
-
-describe('cache TTL expiration', () => {
-  beforeEach(() => {
+  test('aborts after `timeout` ms and returns the disabled evaluation', async () => {
     jest.useFakeTimers();
+    try {
+      mockFetch.mockImplementationOnce(
+        (_url: string, init: RequestInit) =>
+          new Promise((_resolve, reject) => {
+            init.signal?.addEventListener('abort', () => reject(new Error('aborted')));
+          }),
+      );
+      const client = makeClient({ timeout: 50 });
+      const pending = client.evaluateFlag('f', 'user-1');
+      await jest.advanceTimersByTimeAsync(51);
+      expect(await pending).toEqual({ key: 'f', enabled: false, config: null });
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+});
+
+describe('isFeatureEnabled', () => {
+  test('returns the server decision, false on failure', async () => {
+    mockJson(flagBody({ enabled: true }));
+    mockFetch.mockRejectedValueOnce(new Error('down'));
+    const client = makeClient();
+    expect(await client.isFeatureEnabled('new-checkout', 'user-1')).toBe(true);
+    expect(await client.isFeatureEnabled('other', 'user-1')).toBe(false);
+  });
+});
+
+describe('getAllFlags', () => {
+  test('GETs /api/v1/feature-flags/user/{user_id} and returns {key: boolean}', async () => {
+    mockJson({ a: true, b: false, c: 1 });
+    const flags = await makeClient().getAllFlags('user 1');
+    expect(lastCall().url).toBe('http://api.test/api/v1/feature-flags/user/user%201');
+    expect(lastCall().init.method).toBe('GET');
+    expect(flags).toEqual({ a: true, b: false, c: true });
   });
 
-  afterEach(() => {
-    jest.useRealTimers();
+  test('returns {} on failure and does not populate the evaluation cache', async () => {
+    mockJson({ detail: 'nope' }, 401);
+    const client = makeClient();
+    expect(await client.getAllFlags('user-1')).toEqual({});
+    expect(client.getEvaluatedFlags('user-1')).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getAssignment
+// ---------------------------------------------------------------------------
+
+describe('getAssignment', () => {
+  test('POSTs /api/v1/tracking/assign with the contract headers', async () => {
+    mockJson(assignBody());
+    await makeClient().getAssignment('checkout_flow', 'user-1');
+
+    const { url, init } = lastCall();
+    expect(url).toBe('http://api.test/api/v1/tracking/assign');
+    expect(init.method).toBe('POST');
+    expect(init.headers).toEqual({
+      'X-API-Key': 'k',
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    });
   });
 
-  test('cache expires after TTL and re-fetches', async () => {
-    const client = new EdgeExperimentationClient({
-      apiKey: 'k',
-      baseUrl: 'http://api.test',
-      cacheTtlMs: 1000, // 1 second TTL
+  test('sends {experiment_key, user_id, context: attributes} as the JSON body', async () => {
+    mockJson(assignBody());
+    await makeClient().getAssignment('checkout_flow', 'user-1', { country: 'US', plan: 'pro' });
+    expect(bodyOf()).toEqual({
+      experiment_key: 'checkout_flow',
+      user_id: 'user-1',
+      context: { country: 'US', plan: 'pro' },
     });
+  });
 
-    // First fetch
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({
-        key: 'ttl-flag',
-        enabled: true,
-        rollout_percentage: 100,
-        variants: [],
-        targeting_rules: [],
-      }),
+  test('omits context when no attributes are given', async () => {
+    mockJson(assignBody());
+    await makeClient().getAssignment('checkout_flow', 'user-1');
+    expect(bodyOf()).toEqual({ experiment_key: 'checkout_flow', user_id: 'user-1' });
+  });
+
+  test('maps the server response to an Assignment', async () => {
+    mockJson(assignBody());
+    const assignment = await makeClient().getAssignment('checkout_flow', 'user-1');
+    expect(assignment).toEqual<Assignment>({
+      experimentKey: 'checkout_flow',
+      userId: 'user-1',
+      variantId: 'var-treatment',
+      variantName: 'treatment',
+      isControl: false,
+      configuration: { button: 'green' },
     });
-    await client.evaluateFlag('ttl-flag', 'user-1');
+  });
+
+  test('normalises missing variant_id / is_control / configuration', async () => {
+    mockJson({ experiment_key: 'checkout_flow', user_id: 'user-1', variant_name: 'control' });
+    const assignment = await makeClient().getAssignment('checkout_flow', 'user-1');
+    expect(assignment).toMatchObject({ variantId: null, isControl: false, configuration: null });
+  });
+
+  test('is sticky: the second call is served from the cache without a request', async () => {
+    mockJson(assignBody());
+    const client = makeClient();
+    const first = await client.getAssignment('checkout_flow', 'user-1');
+    const second = await client.getAssignment('checkout_flow', 'user-1');
+    expect(second).toBe(first);
     expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
 
-    // Advance time past TTL
-    jest.advanceTimersByTime(2000);
+  test('shares one in-flight request between concurrent callers', async () => {
+    let resolve!: (r: Response) => void;
+    mockFetch.mockReturnValueOnce(new Promise<Response>((r) => (resolve = r)));
+    const client = makeClient();
+    const p1 = client.getAssignment('checkout_flow', 'user-1');
+    const p2 = client.getAssignment('checkout_flow', 'user-1');
+    resolve(jsonResponse(assignBody()));
+    expect(await p1).toBe(await p2);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
 
-    // Second fetch after TTL expiration
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({
-        key: 'ttl-flag',
-        enabled: true,
-        rollout_percentage: 100,
-        variants: [],
-        targeting_rules: [],
-      }),
-    });
-    await client.evaluateFlag('ttl-flag', 'user-1');
-    // fetch should have been called again
+  test('returns null on 404 (experiment not ACTIVE) and never caches the failure', async () => {
+    mockJson({ detail: 'Experiment not found' }, 404);
+    mockJson(assignBody());
+    const client = makeClient();
+    expect(await client.getAssignment('checkout_flow', 'user-1')).toBeNull();
+    expect((await client.getAssignment('checkout_flow', 'user-1'))?.variantName).toBe('treatment');
     expect(mockFetch).toHaveBeenCalledTimes(2);
   });
+
+  test('returns null on a network error and on a malformed body', async () => {
+    mockFetch.mockRejectedValueOnce(new Error('refused'));
+    mockJson({ unexpected: true });
+    const client = makeClient();
+    expect(await client.getAssignment('a', 'user-1')).toBeNull();
+    expect(await client.getAssignment('b', 'user-1')).toBeNull();
+  });
+});
+
+describe('getVariant', () => {
+  test('returns the variant name, null on failure', async () => {
+    mockJson(assignBody());
+    mockJson({}, 404);
+    const client = makeClient();
+    expect(await client.getVariant('checkout_flow', 'user-1')).toBe('treatment');
+    expect(await client.getVariant('other', 'user-1')).toBeNull();
+  });
 });
 
 // ---------------------------------------------------------------------------
-// Timeout handling
+// Sync accessors + cache helpers
 // ---------------------------------------------------------------------------
 
-describe('timeout handling', () => {
-  test('AbortController is used for fetch calls', async () => {
-    // Verify that the fetch call includes a signal (AbortController)
-    const client = new EdgeExperimentationClient({
-      apiKey: 'k',
-      baseUrl: 'http://api.test',
-      timeout: 100,
+describe('sync cache accessors', () => {
+  test('evaluateFlagSync / getAssignmentSync read the in-memory cache only', async () => {
+    const client = makeClient();
+    expect(client.evaluateFlagSync('new-checkout', 'user-1')).toBe(false);
+    expect(client.getAssignmentSync('checkout_flow', 'user-1')).toBeNull();
+    expect(mockFetch).not.toHaveBeenCalled();
+
+    mockJson(flagBody());
+    mockJson(assignBody());
+    await client.evaluateFlag('new-checkout', 'user-1');
+    await client.getAssignment('checkout_flow', 'user-1');
+
+    expect(client.evaluateFlagSync('new-checkout', 'user-1')).toBe(true);
+    expect(client.getAssignmentSync('checkout_flow', 'user-1')).toBe('treatment');
+    expect(client.getCachedFlag('new-checkout', 'user-1')).toEqual({ key: 'new-checkout', enabled: true, config: { variant: 'v2' } });
+    expect(client.getCachedAssignment('checkout_flow', 'user-1')?.variantId).toBe('var-treatment');
+    expect(client.getCachedFlag('new-checkout', 'other')).toBeNull();
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+  });
+
+  test('getAssignments / getEvaluatedFlags are per user, in order; clearCache empties both', async () => {
+    mockJson(assignBody({ experiment_key: 'e1' }));
+    mockJson(assignBody({ experiment_key: 'e2' }));
+    mockJson(assignBody({ experiment_key: 'e3', user_id: 'user-2' }));
+    mockJson(flagBody({ key: 'f1' }));
+    mockJson(flagBody({ key: 'f2' }));
+    const client = makeClient();
+    await client.getAssignment('e1', 'user-1');
+    await client.getAssignment('e2', 'user-1');
+    await client.getAssignment('e3', 'user-2');
+    await client.evaluateFlag('f1', 'user-1');
+    await client.evaluateFlag('f2', 'user-2');
+
+    expect(client.getAssignments('user-1').map((a) => a.experimentKey)).toEqual(['e1', 'e2']);
+    expect(client.getAssignments('user-2').map((a) => a.experimentKey)).toEqual(['e3']);
+    expect(client.getEvaluatedFlags('user-1')).toEqual(['f1']);
+    expect(client.flagCount).toBe(2);
+    expect(client.experimentCount).toBe(3);
+
+    client.clearCache();
+    expect(client.getAssignments('user-1')).toEqual([]);
+    expect(client.getEvaluatedFlags('user-1')).toEqual([]);
+    expect(client.flagCount).toBe(0);
+  });
+
+  test('user ids containing ":" do not collide in the fan-out prefix', async () => {
+    mockJson(assignBody({ experiment_key: 'e1' }));
+    mockJson(assignBody({ experiment_key: 'e2' }));
+    const client = makeClient();
+    await client.getAssignment('e1', 'a');
+    await client.getAssignment('e2', 'a:b');
+    expect(client.getAssignments('a').map((a) => a.experimentKey)).toEqual(['e1']);
+  });
+
+  test('refreshFlags is a deprecated no-op that resolves without a request', async () => {
+    await expect(makeClient().refreshFlags()).resolves.toBeUndefined();
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Shared store read-through
+// ---------------------------------------------------------------------------
+
+describe('shared store', () => {
+  test('serves a flag from the store without a network call and populates memory', async () => {
+    const stored: FlagEvaluation = { key: 'new-checkout', enabled: true, config: null };
+    const store = makeStore({ 'flag:user-1:new-checkout': JSON.stringify(stored) });
+    const client = makeClient({ store });
+    expect(await client.evaluateFlag('new-checkout', 'user-1')).toEqual(stored);
+    expect(mockFetch).not.toHaveBeenCalled();
+    expect(client.evaluateFlagSync('new-checkout', 'user-1')).toBe(true);
+  });
+
+  test('serves an assignment from the store without a network call', async () => {
+    const stored: Assignment = {
+      experimentKey: 'checkout_flow',
+      userId: 'user-1',
+      variantId: 'v',
+      variantName: 'control',
+      isControl: true,
+      configuration: null,
+    };
+    const store = makeStore({ 'assign:user-1:checkout_flow': JSON.stringify(stored) });
+    expect(await makeClient({ store }).getAssignment('checkout_flow', 'user-1')).toEqual(stored);
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  test('writes successful results to the store with the cache TTL, keyed per user + key', async () => {
+    const store = makeStore();
+    const client = makeClient({ store, cacheTtlMs: 45_000 });
+    mockJson(flagBody());
+    mockJson(assignBody());
+    await client.evaluateFlag('new-checkout', 'user-1');
+    await client.getAssignment('checkout_flow', 'user-1');
+    expect(Object.keys(store.data).sort()).toEqual(['assign:user-1:checkout_flow', 'flag:user-1:new-checkout']);
+    expect(JSON.parse(store.data['flag:user-1:new-checkout'])).toEqual({ key: 'new-checkout', enabled: true, config: { variant: 'v2' } });
+    expect(store.ttls).toEqual([45_000, 45_000]);
+  });
+
+  test('ignores corrupt or mismatched store values and falls through to the network', async () => {
+    const store = makeStore({ 'flag:user-1:f': 'not json', 'assign:user-1:e': JSON.stringify({ nope: 1 }) });
+    mockJson(flagBody({ key: 'f' }));
+    mockJson(assignBody({ experiment_key: 'e' }));
+    const client = makeClient({ store });
+    expect((await client.evaluateFlag('f', 'user-1')).enabled).toBe(true);
+    expect((await client.getAssignment('e', 'user-1'))?.variantName).toBe('treatment');
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+  });
+
+  test('a failing store never breaks evaluation', async () => {
+    const store: EdgeStore = {
+      get: async () => {
+        throw new Error('kv down');
+      },
+      put: async () => {
+        throw new Error('kv down');
+      },
+    };
+    mockJson(flagBody());
+    expect((await makeClient({ store }).evaluateFlag('new-checkout', 'user-1')).enabled).toBe(true);
+  });
+
+  test('failures are never written to the store', async () => {
+    const store = makeStore();
+    mockJson({}, 404);
+    await makeClient({ store }).evaluateFlag('f', 'user-1');
+    expect(store.data).toEqual({});
+  });
+});
+
+// ---------------------------------------------------------------------------
+// track with an explicit key
+// ---------------------------------------------------------------------------
+
+describe('track with an explicit key', () => {
+  test('POSTs one event to /api/v1/tracking/track with the exact body', async () => {
+    mockJson({ id: 'evt' });
+    const client = makeClient();
+    await client.track(
+      'purchase',
+      'user-1',
+      { sku: 'A1', qty: 2 },
+      { value: 12.5, experimentKey: 'checkout_flow', timestamp: new Date('2026-01-02T03:04:05.000Z') },
+    );
+
+    const { url, init } = lastCall();
+    expect(url).toBe('http://api.test/api/v1/tracking/track');
+    expect(init.method).toBe('POST');
+    expect(init.headers).toEqual({
+      'X-API-Key': 'k',
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
     });
-
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({
-        key: 'timeout-flag',
-        enabled: true,
-        rollout_percentage: 100,
-        variants: [],
-        targeting_rules: [],
-      }),
+    expect(bodyOf()).toEqual({
+      event_type: 'purchase',
+      event_name: 'purchase',
+      user_id: 'user-1',
+      experiment_key: 'checkout_flow',
+      value: 12.5,
+      metadata: { sku: 'A1', qty: 2 },
+      timestamp: '2026-01-02T03:04:05.000Z',
     });
+  });
 
-    await client.evaluateFlag('timeout-flag', 'user-1');
+  test('sends feature_flag_key (and no experiment_key), uses eventType, accepts a string timestamp', async () => {
+    mockJson({});
+    await makeClient().track('flag_seen', 'user-1', undefined, {
+      featureFlagKey: 'new-checkout',
+      eventType: 'exposure',
+      timestamp: '2026-01-01T00:00:00Z',
+    });
+    expect(bodyOf()).toEqual({
+      event_type: 'exposure',
+      event_name: 'flag_seen',
+      user_id: 'user-1',
+      feature_flag_key: 'new-checkout',
+      metadata: {},
+      timestamp: '2026-01-01T00:00:00Z',
+    });
+  });
 
-    const init = mockFetch.mock.calls[0][1] as RequestInit;
-    expect(init.signal).toBeDefined();
+  test('does not fan out to cached assignments when a key is given', async () => {
+    mockJson(assignBody({ experiment_key: 'other' }));
+    mockJson({});
+    const client = makeClient();
+    await client.getAssignment('other', 'user-1');
+    await client.track('purchase', 'user-1', {}, { experimentKey: 'checkout_flow' });
+    expect(lastCall().url).toBe('http://api.test/api/v1/tracking/track');
+    expect(bodyOf().experiment_key).toBe('checkout_flow');
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+  });
+
+  test('never throws: 500 responses and network errors are swallowed', async () => {
+    mockJson({ detail: 'boom' }, 500);
+    mockFetch.mockRejectedValueOnce(new Error('network'));
+    const client = makeClient();
+    await expect(client.track('e', 'user-1', {}, { experimentKey: 'x' })).resolves.toBeUndefined();
+    await expect(client.track('e', 'user-1', {}, { experimentKey: 'x' })).resolves.toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// track fan-out (no key)
+// ---------------------------------------------------------------------------
+
+describe('track fan-out (no key)', () => {
+  test('sends nothing when nothing is cached for the user', async () => {
+    await makeClient().track('page_view', 'user-1', { page: '/' });
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  test('sends nothing when only another user has cached data', async () => {
+    mockJson(assignBody({ user_id: 'user-2' }));
+    const client = makeClient();
+    await client.getAssignment('checkout_flow', 'user-2');
+    await client.track('page_view', 'user-1');
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  test('POSTs /api/v1/tracking/batch with one entry per assignment plus one per evaluated flag', async () => {
+    mockJson(assignBody({ experiment_key: 'exp_a' }));
+    mockJson(assignBody({ experiment_key: 'exp_b' }));
+    mockJson(flagBody({ key: 'flag_x' }));
+    mockJson({ success_count: 3, failure_count: 0, errors: null });
+    const client = makeClient();
+    await client.getAssignment('exp_a', 'user-1');
+    await client.getAssignment('exp_b', 'user-1');
+    await client.evaluateFlag('flag_x', 'user-1');
+
+    await client.track('page_view', 'user-1', { page: '/home' }, { value: 1 });
+
+    const { url, init } = lastCall();
+    expect(url).toBe('http://api.test/api/v1/tracking/batch');
+    expect(init.method).toBe('POST');
+    const base = { event_type: 'page_view', event_name: 'page_view', user_id: 'user-1', value: 1, metadata: { page: '/home' } };
+    expect(bodyOf()).toEqual({
+      events: [
+        { ...base, experiment_key: 'exp_a' },
+        { ...base, experiment_key: 'exp_b' },
+        { ...base, feature_flag_key: 'flag_x' },
+      ],
+    });
+  });
+
+  test('does not fan out to a failed assignment or an expired one', async () => {
+    jest.useFakeTimers();
+    try {
+      mockJson({}, 404); // exp_fail
+      mockJson(assignBody({ experiment_key: 'exp_ok' }));
+      const client = makeClient({ cacheTtlMs: 1000 });
+      await client.getAssignment('exp_fail', 'user-1');
+      await client.getAssignment('exp_ok', 'user-1');
+
+      mockJson({ success_count: 1, failure_count: 0 });
+      await client.track('page_view', 'user-1');
+      expect((bodyOf() as { events: unknown[] }).events).toHaveLength(1);
+
+      jest.advanceTimersByTime(1001);
+      await client.track('page_view', 'user-1');
+      expect(mockFetch).toHaveBeenCalledTimes(3); // no new batch request
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  test('splits more than 100 entries into multiple batch requests', async () => {
+    mockFetch.mockImplementation(async (url: string) =>
+      url.endsWith('/assign')
+        ? jsonResponse(assignBody({ experiment_key: `exp_${mockFetch.mock.calls.length}` }))
+        : jsonResponse({ success_count: 0, failure_count: 0 }),
+    );
+    const client = makeClient();
+    for (let i = 0; i < 150; i++) await client.getAssignment(`exp_${i}`, 'user-1');
+    mockFetch.mockClear();
+
+    await client.track('page_view', 'user-1');
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    expect((bodyOf(0) as { events: unknown[] }).events).toHaveLength(100);
+    expect((bodyOf(1) as { events: unknown[] }).events).toHaveLength(50);
+  });
+
+  test('never rejects when the batch request fails', async () => {
+    mockJson(assignBody());
+    mockFetch.mockRejectedValueOnce(new Error('network'));
+    const client = makeClient();
+    await client.getAssignment('checkout_flow', 'user-1');
+    await expect(client.track('page_view', 'user-1')).resolves.toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// trackBatch
+// ---------------------------------------------------------------------------
+
+describe('trackBatch', () => {
+  test('POSTs keyed events to /api/v1/tracking/batch and aggregates the server counts', async () => {
+    mockJson({ success_count: 2, failure_count: 0, errors: null });
+    const result = await makeClient().trackBatch([
+      { eventName: 'add_to_cart', userId: 'user-1', experimentKey: 'checkout_flow', value: 1 },
+      { eventName: 'flag_seen', userId: 'user-1', featureFlagKey: 'new-checkout' },
+    ]);
+    expect(lastCall().url).toBe('http://api.test/api/v1/tracking/batch');
+    expect(bodyOf()).toEqual({
+      events: [
+        { event_type: 'add_to_cart', event_name: 'add_to_cart', user_id: 'user-1', experiment_key: 'checkout_flow', value: 1 },
+        { event_type: 'flag_seen', event_name: 'flag_seen', user_id: 'user-1', feature_flag_key: 'new-checkout' },
+      ],
+    });
+    expect(result).toEqual({ successCount: 2, failureCount: 0, errors: [] });
+  });
+
+  test('chunks at 100 events per request', async () => {
+    mockFetch.mockImplementation(async () => jsonResponse({ success_count: 0, failure_count: 0 }));
+    const events = Array.from({ length: 250 }, (_, i) => ({ eventName: 'e', userId: 'u', experimentKey: `x${i}` }));
+    await makeClient().trackBatch(events);
+    expect(mockFetch).toHaveBeenCalledTimes(3);
+    expect((bodyOf(2) as { events: unknown[] }).events).toHaveLength(50);
+  });
+
+  test('expands keyless entries with the fan-out rule and drops those with nothing cached', async () => {
+    mockJson(assignBody({ experiment_key: 'exp_a' }));
+    mockJson({ success_count: 2, failure_count: 0 });
+    const client = makeClient();
+    await client.getAssignment('exp_a', 'user-1');
+    await client.trackBatch([
+      { eventName: 'page_view', userId: 'user-1' },
+      { eventName: 'page_view', userId: 'nobody' },
+      { eventName: 'click', userId: 'user-1', featureFlagKey: 'f' },
+    ]);
+    const events = (bodyOf() as { events: Array<Record<string, unknown>> }).events;
+    expect(events).toHaveLength(2);
+    expect(events[0]).toMatchObject({ event_name: 'page_view', experiment_key: 'exp_a' });
+    expect(events[1]).toMatchObject({ event_name: 'click', feature_flag_key: 'f' });
+  });
+
+  test('sends nothing and returns zeros for an empty list', async () => {
+    expect(await makeClient().trackBatch([])).toEqual({ successCount: 0, failureCount: 0, errors: [] });
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  test('never rejects: a failed chunk counts its events as failures with the status', async () => {
+    mockJson({ detail: 'rate limited' }, 429);
+    const result = await makeClient().trackBatch([
+      { eventName: 'a', userId: 'u', experimentKey: 'x' },
+      { eventName: 'b', userId: 'u', experimentKey: 'x' },
+    ]);
+    expect(result.successCount).toBe(0);
+    expect(result.failureCount).toBe(2);
+    expect(result.errors).toEqual([{ message: expect.stringContaining('429'), status: 429 }]);
+  });
+});
+
+describe('EdgeApiError', () => {
+  test('carries the HTTP status', () => {
+    const err = new EdgeApiError(404, 'nope');
+    expect(err.status).toBe(404);
+    expect(err.name).toBe('EdgeApiError');
+    expect(err).toBeInstanceOf(Error);
   });
 });

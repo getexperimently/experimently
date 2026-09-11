@@ -20,21 +20,25 @@ implementation("com.experimentationplatform:android-sdk:1.0.0")
 
 ```kotlin
 val client = ExperimentationClient(
-    SdkConfig(baseUrl = "http://10.0.2.2:8000", apiKey = "your-api-key")
+    SdkConfig(baseUrl = "http://10.0.2.2:8000", apiKey = "your-api-key")   // sent as X-API-Key
 )
 
 // In a Composable:
 var flagEnabled by remember { mutableStateOf(false) }
+var variant by remember { mutableStateOf("") }
 
 LaunchedEffect(Unit) {
-    val result = client.evaluateFlag("new-feature", User(id = "user-123"))
-    flagEnabled = result.enabled
+    val user = User(id = "user-123")
+    flagEnabled = client.evaluateFlag("new-feature", user).enabled        // server decides
+    variant = client.getAssignment("checkout-flow", user).variantName     // sticky server-side
 }
 ```
 
 ## Running the Example
 
-1. Start the backend server: `uvicorn app.main:app --reload`
-2. Open the project in Android Studio.
+1. Start the backend server from the repo root: `uvicorn backend.app.main:app --port 8000`
+   and create an API key (for example with `python backend/scripts/seed_sdk_contract.py`).
+2. Open the project in Android Studio and paste the key into `ExampleActivity.kt`.
 3. Run on an emulator (use `http://10.0.2.2:8000` to reach localhost).
-4. The app evaluates `new-dashboard` flag for `user-123` on launch.
+4. The app evaluates the `new-dashboard` flag and assigns `user-123` to `checkout-flow` on
+   launch; the button tracks a `purchase_clicked` event attributed to that experiment.
