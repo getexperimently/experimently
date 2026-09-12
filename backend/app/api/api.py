@@ -9,6 +9,7 @@ from fastapi import APIRouter
 
 from backend.app.api.v1.endpoints import (
     auth,
+    api_keys,
     users,
     experiments,
     tracking,
@@ -64,6 +65,8 @@ api_router_v1 = APIRouter()
 
 # Include endpoint routers with appropriate prefixes and tags
 api_router_v1.include_router(auth.router, prefix="/auth", tags=["Authentication"])
+# P0 (open-core): user-owned API keys for SDK authentication
+api_router_v1.include_router(api_keys.router, prefix="/api-keys", tags=["API Keys"])
 api_router_v1.include_router(users.router, prefix="/users", tags=["Users"])
 api_router_v1.include_router(
     experiments.router, prefix="/experiments", tags=["Experiments"]
@@ -259,6 +262,13 @@ tags_metadata = [
             "Pre-experiment statistical power analysis: sample size computation, "
             "MDE estimation, runtime estimation, power curves, and AI-enhanced "
             "planning advice. No authentication required."
+        ),
+    },
+    {
+        "name": "API Keys",
+        "description": (
+            "User-owned API keys for SDK authentication (X-API-Key header). "
+            "The plaintext key is returned once, at creation."
         ),
     },
     {

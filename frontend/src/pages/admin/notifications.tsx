@@ -3,8 +3,10 @@ import { AdminService } from '@/services/admin';
 import { NotificationPrefsForm } from '@/components/admin/notifications/NotificationPrefsForm';
 import { DeliveryLogTable } from '@/components/admin/notifications/DeliveryLogTable';
 import { NotificationPreference, NotificationDeliveryLog } from '@/types/admin';
+import { withAdminGuard } from '@/components/admin/withAdminGuard';
+import { PageTitle } from '@/components/PageTitle';
 
-export default function NotificationsAdminPage() {
+export function NotificationsAdminPage() {
   const [prefs, setPrefs] = useState<NotificationPreference | null>(null);
   const [logs, setLogs] = useState<NotificationDeliveryLog[]>([]);
   const [logsLoading, setLogsLoading] = useState(true);
@@ -37,6 +39,7 @@ export default function NotificationsAdminPage() {
 
   return (
     <div data-testid="notifications-admin-page" className="p-6 space-y-8">
+      <PageTitle title="Notifications · Admin" />
       <h1 className="text-2xl font-bold text-slate-900">Notifications</h1>
 
       <section>
@@ -67,3 +70,5 @@ export default function NotificationsAdminPage() {
     </div>
   );
 }
+
+export default withAdminGuard(NotificationsAdminPage);

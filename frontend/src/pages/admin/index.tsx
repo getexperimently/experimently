@@ -4,6 +4,7 @@ import { AdminLayout } from '@/components/admin/AdminLayout';
 import { StatTile } from '@/components/admin/StatTile';
 import { AdminService } from '@/services/admin';
 import { AdminStats } from '@/types/admin';
+import { withAdminGuard } from '@/components/admin/withAdminGuard';
 
 export function AdminDashboard() {
   const router = useRouter();
@@ -84,4 +85,4 @@ export function AdminDashboard() {
   );
 }
 
-export default AdminDashboard;
+export default withAdminGuard(AdminDashboard);

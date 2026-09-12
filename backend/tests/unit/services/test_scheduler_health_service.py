@@ -291,23 +291,18 @@ class TestGetAllHealth:
         self.db = make_db()
         self.service = SchedulerHealthService()
 
-    def test_returns_list_of_four(self):
+    def test_returns_one_entry_per_scheduler(self):
         # Mock all queries to return empty
         self.db.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = []
         result = self.service.get_all_health(self.db)
         assert isinstance(result, list)
-        assert len(result) == 4
+        assert len(result) == len(SchedulerName)
 
     def test_covers_all_scheduler_names(self):
         self.db.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = []
         result = self.service.get_all_health(self.db)
         names = {r.scheduler_name for r in result}
-        assert names == {
-            SchedulerName.EXPERIMENT,
-            SchedulerName.ROLLOUT,
-            SchedulerName.METRICS,
-            SchedulerName.SAFETY,
-        }
+        assert names == set(SchedulerName)
 
 
 # ---------------------------------------------------------------------------

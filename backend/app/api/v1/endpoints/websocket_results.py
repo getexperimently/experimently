@@ -6,6 +6,18 @@ along with HTTP companion endpoints for subscriber counts and active experiments
 
 WebSocket protocol:
   - Client connects to ws://host/api/v1/ws/experiments/{experiment_id}/results
+    and authenticates with, in order of preference:
+      1. the ``Sec-WebSocket-Protocol`` header ``experimently.bearer, <token>``
+         (what the dashboard sends: ``new WebSocket(url, ["experimently.bearer",
+         token])``; browsers cannot set other headers on a handshake and this
+         keeps the token out of URL/access logs).  The server selects
+         ``experimently.bearer`` as the accepted subprotocol.
+      2. an ``Authorization: Bearer`` header (non-browser clients).
+      3. ``?token=<access token>`` — supported for compatibility only; it is
+         written to every access log on the path, prefer 1 or 2.
+    The token is validated exactly like an HTTP request (local JWT or
+    Cognito); the dev-auth bypass applies too.  An invalid/missing token
+    closes the socket with code 4401 after the handshake.
   - Server sends an initial snapshot on connection
   - Server sends periodic updates every RESULTS_STREAM_INTERVAL_SECONDS seconds
   - Client can send {"action": "ping"} -> server replies {"event": "pong"}
@@ -17,13 +29,21 @@ import asyncio
 import json
 import logging
 import os
+from typing import Optional
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
+from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
+from backend.app.api import deps
 from backend.app.services.websocket_manager import ConnectionManager
 from backend.app.services.results_streaming_service import ResultsStreamingService
 
 logger = logging.getLogger(__name__)
+
+# Application-defined close code for a failed WebSocket authentication
+# (4000-4999 is the private-use range of RFC 6455).
+WS_CLOSE_UNAUTHORIZED = 4401
 
 # How often (in seconds) to push periodic updates to connected clients.
 # Configurable via environment variable for testing / tuning.
@@ -37,22 +57,102 @@ router = APIRouter()
 manager = ConnectionManager()
 
 
+WS_AUTH_SUBPROTOCOL = "experimently.bearer"
+
+
+def _token_from_subprotocol(websocket: WebSocket) -> Optional[str]:
+    """
+    ``Sec-WebSocket-Protocol: experimently.bearer, <token>`` -> ``<token>``.
+
+    The header is a comma-separated list of protocol names; the token follows
+    the marker entry.  JWT characters (``A-Za-z0-9-_.``) are all valid
+    protocol-name characters, so no encoding is needed.
+    """
+    raw = websocket.headers.get("sec-websocket-protocol", "")
+    if not raw:
+        return None
+    entries = [entry.strip() for entry in raw.split(",") if entry.strip()]
+    for index, entry in enumerate(entries):
+        if entry == WS_AUTH_SUBPROTOCOL and index + 1 < len(entries):
+            return entries[index + 1]
+    return None
+
+
+def _extract_ws_token(websocket: WebSocket, token: Optional[str]) -> Optional[str]:
+    """Subprotocol first, then ``Authorization: Bearer``, then ``?token=``."""
+    from_subprotocol = _token_from_subprotocol(websocket)
+    if from_subprotocol:
+        return from_subprotocol
+    authorization = websocket.headers.get("authorization", "")
+    scheme, _, value = authorization.partition(" ")
+    if scheme.lower() == "bearer" and value.strip():
+        return value.strip()
+    if token:
+        return token
+    return None
+
+
+def _accepted_subprotocol(websocket: WebSocket) -> Optional[str]:
+    """Echo ``experimently.bearer`` when the client offered it (RFC 6455 requires a match)."""
+    return WS_AUTH_SUBPROTOCOL if _token_from_subprotocol(websocket) is not None else None
+
+
+def _authenticate_websocket(websocket: WebSocket, token: Optional[str], db: Session) -> bool:
+    """
+    Run the HTTP authentication chain for a WebSocket handshake.
+
+    Returns True when the caller is an active user.  With the dev-auth bypass
+    on, every connection is accepted without touching the database (the
+    bypass user is synthetic, exactly as for HTTP requests).
+    """
+    if deps.dev_auth_bypass_active():
+        return True
+    bearer = _extract_ws_token(websocket, token)
+    if not bearer:
+        return False
+    try:
+        user = deps.get_current_user(token=bearer, db=db)
+        deps.get_current_active_user(user)
+        return True
+    except HTTPException as exc:
+        logger.info("WebSocket auth rejected (%s): %s", exc.status_code, exc.detail)
+        return False
+    except Exception as exc:  # DB down, etc. — fail closed
+        logger.warning("WebSocket auth error: %s", exc)
+        return False
+
+
 @router.websocket("/ws/experiments/{experiment_id}/results")
 async def stream_results(
     websocket: WebSocket,
     experiment_id: str,
+    token: Optional[str] = Query(None, description="Access token (alternative to the bearer header)"),
+    db: Session = Depends(deps.get_db),
 ) -> None:
     """
     Stream live experiment results over WebSocket.
 
-    Sends an initial snapshot on connection, then periodic updates every
+    Authenticates via ``?token=`` or a bearer header (close code 4401 when
+    invalid), then sends an initial snapshot, then periodic updates every
     RESULTS_STREAM_INTERVAL_SECONDS seconds. Also responds to client messages:
       {"action": "ping"} -> {"event": "pong"}
       {"action": "refresh"} -> immediate fresh snapshot
     """
     from backend.app.db.session import SessionLocal
 
-    await manager.connect(websocket, experiment_id)
+    # Sync SQLAlchemy work runs in the threadpool, like a sync HTTP dependency.
+    subprotocol = _accepted_subprotocol(websocket)
+    if not await run_in_threadpool(_authenticate_websocket, websocket, token, db):
+        # Accept first so the client receives the application close code
+        # (closing before accept surfaces as a bare HTTP 403 handshake error).
+        await websocket.accept(subprotocol=subprotocol)
+        await websocket.close(code=WS_CLOSE_UNAUTHORIZED, reason="Unauthorized")
+        return
+    # The session was only needed for authentication; release its connection
+    # now rather than holding it for the lifetime of the socket.
+    db.close()
+
+    await manager.connect(websocket, experiment_id, subprotocol=subprotocol)
     streaming_service = ResultsStreamingService(SessionLocal)
 
     try:

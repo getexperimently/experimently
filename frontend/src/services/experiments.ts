@@ -4,8 +4,7 @@ import {
   CreateExperimentRequest,
   ExperimentStatus,
 } from '@/types/experiments';
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+import { apiFetch } from '@/services/api';
 
 interface ListParams {
   status?: ExperimentStatus;
@@ -15,61 +14,28 @@ interface ListParams {
 
 export const ExperimentsService = {
   async list(params?: ListParams): Promise<ExperimentListResponse> {
-    const url = new URL(`${API_URL}/api/v1/experiments`);
-    if (params?.status) {
-      url.searchParams.set('status', params.status);
-    }
-    if (params?.page !== undefined) {
-      url.searchParams.set('page', String(params.page));
-    }
-    if (params?.limit !== undefined) {
-      url.searchParams.set('limit', String(params.limit));
-    }
-    const response = await fetch(url.toString());
-    if (!response.ok) {
-      throw new Error(`Failed to fetch experiments: ${response.statusText}`);
-    }
-    return response.json();
+    return apiFetch<ExperimentListResponse>('/api/v1/experiments', {
+      query: {
+        status: params?.status,
+        page: params?.page,
+        limit: params?.limit,
+      },
+    });
   },
 
   async get(id: string): Promise<Experiment> {
-    const response = await fetch(`${API_URL}/api/v1/experiments/${id}`);
-    if (!response.ok) {
-      throw new Error(`Failed to fetch experiment: ${response.statusText}`);
-    }
-    return response.json();
+    return apiFetch<Experiment>(`/api/v1/experiments/${id}`);
   },
 
   async create(data: CreateExperimentRequest): Promise<Experiment> {
-    const response = await fetch(`${API_URL}/api/v1/experiments`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
-    });
-    if (!response.ok) {
-      throw new Error(`Failed to create experiment: ${response.statusText}`);
-    }
-    return response.json();
+    return apiFetch<Experiment>('/api/v1/experiments', { method: 'POST', json: data });
   },
 
   async update(id: string, data: Partial<Experiment>): Promise<Experiment> {
-    const response = await fetch(`${API_URL}/api/v1/experiments/${id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
-    });
-    if (!response.ok) {
-      throw new Error(`Failed to update experiment: ${response.statusText}`);
-    }
-    return response.json();
+    return apiFetch<Experiment>(`/api/v1/experiments/${id}`, { method: 'PUT', json: data });
   },
 
   async delete(id: string): Promise<void> {
-    const response = await fetch(`${API_URL}/api/v1/experiments/${id}`, {
-      method: 'DELETE',
-    });
-    if (!response.ok) {
-      throw new Error(`Failed to delete experiment: ${response.statusText}`);
-    }
+    await apiFetch<void>(`/api/v1/experiments/${id}`, { method: 'DELETE' });
   },
 };

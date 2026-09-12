@@ -66,6 +66,26 @@ def test_record_event_tracked(mocker):
     mock_counter.labels.return_value.inc.assert_called_once()
 
 
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("purchase", "custom"),
+        ("purchase_9f3c1b2a-unique", "custom"),
+        ("Conversion", "conversion"),
+        ("exposure", "exposure"),
+        ("", "custom"),
+    ],
+)
+def test_record_event_tracked_bounds_label_cardinality(mocker, raw, expected):
+    """Client-supplied event names must never become new label values."""
+    mock_counter = mocker.patch("backend.app.core.metrics.events_tracked_total")
+    from backend.app.core.metrics import record_event_tracked
+
+    record_event_tracked(raw)
+
+    mock_counter.labels.assert_called_with(event_type=expected)
+
+
 def test_record_flag_evaluation(mocker):
     mock_counter = mocker.patch("backend.app.core.metrics.feature_flag_evaluations_total")
     from backend.app.core.metrics import record_flag_evaluation

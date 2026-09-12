@@ -15,6 +15,7 @@ on:
 
 env:
   AWS_REGION: us-west-2
+  AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
   ECR_BACKEND_REPO: experimentation-platform/backend
   ECR_FRONTEND_REPO: experimentation-platform/frontend
   ECS_CLUSTER: experimentation-prod
@@ -25,6 +26,7 @@ jobs:
   pre-deployment-checks:
     name: Pre-deployment Checks
     runs-on: ubuntu-latest
+    if: github.repository == 'amarkanday/experimentation-platform' && vars.AWS_ACCOUNT_ID != ''
     permissions:
       id-token: write
       contents: read
@@ -97,6 +99,7 @@ jobs:
   run-tests:
     name: Run Test Suite
     runs-on: ubuntu-latest
+    if: github.repository == 'amarkanday/experimentation-platform' && vars.AWS_ACCOUNT_ID != ''
     needs: pre-deployment-checks
     services:
       postgres:
@@ -150,6 +153,7 @@ jobs:
   build-and-push:
     name: Build & Push Docker Images
     runs-on: ubuntu-latest
+    if: github.repository == 'amarkanday/experimentation-platform' && vars.AWS_ACCOUNT_ID != ''
     needs: run-tests
     permissions:
       id-token: write
@@ -178,13 +182,15 @@ jobs:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: ${{ inputs.version }}
         run: |
+          # Build context is the repository root (the code imports backend.app.*).
           docker build \
             --build-arg BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ') \
             --build-arg GIT_COMMIT=${{ github.sha }} \
+            --target ce \
             -t $ECR_REGISTRY/$ECR_BACKEND_REPO:$IMAGE_TAG \
             -t $ECR_REGISTRY/$ECR_BACKEND_REPO:latest \
             -f backend/Dockerfile \
-            backend/
+            .
           docker push $ECR_REGISTRY/$ECR_BACKEND_REPO:$IMAGE_TAG
           docker push $ECR_REGISTRY/$ECR_BACKEND_REPO:latest
           echo "image=$ECR_REGISTRY/$ECR_BACKEND_REPO:$IMAGE_TAG" >> $GITHUB_OUTPUT
@@ -195,8 +201,11 @@ jobs:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: ${{ inputs.version }}
         run: |
+          # NEXT_PUBLIC_API_URL stays empty when the dashboard's nginx proxies
+          # /api to the API (same origin); set PROD_API_URL only for a split origin.
           docker build \
             --build-arg NEXT_PUBLIC_API_URL=${{ secrets.PROD_API_URL }} \
+            --build-arg GIT_COMMIT=${{ github.sha }} \
             -t $ECR_REGISTRY/$ECR_FRONTEND_REPO:$IMAGE_TAG \
             -t $ECR_REGISTRY/$ECR_FRONTEND_REPO:latest \
             -f frontend/Dockerfile \
@@ -208,6 +217,7 @@ jobs:
   run-migrations:
     name: Run Database Migrations
     runs-on: ubuntu-latest
+    if: github.repository == 'amarkanday/experimentation-platform' && vars.AWS_ACCOUNT_ID != ''
     needs: build-and-push
     environment: production
     permissions:
@@ -267,6 +277,7 @@ jobs:
   deploy:
     name: Deploy to Production (Blue/Green)
     runs-on: ubuntu-latest
+    if: github.repository == 'amarkanday/experimentation-platform' && vars.AWS_ACCOUNT_ID != ''
     needs: [build-and-push, run-migrations]
     environment: production
     permissions:
@@ -343,7 +354,7 @@ jobs:
     name: Post-deployment Smoke Tests
     runs-on: ubuntu-latest
     needs: deploy
-    if: ${{ !inputs.skip_smoke_tests }}
+    if: github.repository == 'amarkanday/experimentation-platform' && vars.AWS_ACCOUNT_ID != '' && (!inputs.skip_smoke_tests)
     steps:
       - uses: actions/checkout@v4
         with:
@@ -369,7 +380,7 @@ jobs:
     name: Post-deployment Verification
     runs-on: ubuntu-latest
     needs: [deploy, smoke-tests]
-    if: always()
+    if: github.repository == 'amarkanday/experimentation-platform' && vars.AWS_ACCOUNT_ID != '' && (always())
     permissions:
       id-token: write
       contents: read

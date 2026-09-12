@@ -1,111 +1,299 @@
-version: '3.8'
+# =============================================================================
+# Experimently — local / self-hosted stack.
+#
+#   docker compose up -d --wait            # postgres + redis + api + dashboard
+#   docker compose --profile demo up -d    # + ShopLab (:3200), StreamPulse (:3300)
+#                                          #   and their traffic simulators
+#   docker compose --profile tools up -d   # + pgAdmin (:5050)
+#   docker compose --profile aws up -d     # + LocalStack (:4566)
+#   docker compose down -v                 # stop and drop the volumes
+#
+# Every ${VAR:-default} below can be set in a `.env` file next to this file
+# (compose reads it automatically) or in the shell. Defaults are for a local
+# development stack: change SECRET_KEY, FIRST_SUPERUSER_PASSWORD and
+# POSTGRES_PASSWORD before exposing the stack to anyone.
+#
+# First start: the api container waits for Postgres, creates the schema
+# (RUN_MIGRATIONS=true -> python -m backend.app.db.bootstrap) and applies the
+# seeds in SEED (default `demo`: admin@demo.com / Demo1234!, three experiments,
+# two flags). Seeds run once per database (seed_markers table).
+#
+# Ports on the host (override with *_HOST_PORT):
+#   dashboard http://localhost:3000   api http://localhost:8000
+#   postgres  localhost:5432          redis localhost:6379
+# =============================================================================
+
+x-api-image: &api-image experimently-api:${EXPERIMENTLY_IMAGE_TAG:-ce}
+x-web-image: &web-image experimently-web:${EXPERIMENTLY_IMAGE_TAG:-ce}
 
 services:
-  # PostgreSQL database
+  # ---------------------------------------------------------------------------
   postgres:
-    image: postgres:15-alpine
-    container_name: experimentation-postgres
-    ports:
-      - "5432:5432"
+    image: postgres:16-alpine
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: experimentation
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-experimentation}
+    ports:
+      - "${POSTGRES_HOST_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-experimentation}"]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 12
+    restart: unless-stopped
 
-  # Redis for caching
+  # ---------------------------------------------------------------------------
   redis:
     image: redis:7-alpine
-    container_name: experimentation-redis
+    command: ["redis-server", "--appendonly", "yes"]
     ports:
-      - "6379:6379"
+      - "${REDIS_HOST_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
-    command: redis-server --appendonly yes
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 12
+    restart: unless-stopped
 
-  # LocalStack for AWS services emulation
-  localstack:
-    image: localstack/localstack:latest
-    container_name: experimentation-localstack
-    ports:
-      - "4566:4566"  # LocalStack edge port
+  # ---------------------------------------------------------------------------
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+      target: ${EXPERIMENTLY_EDITION:-ce}
+    image: *api-image
     environment:
-      - SERVICES=dynamodb,s3,kinesis,lambda,cognito-idp,sqs,opensearch
-      - DEBUG=1
-      - DATA_DIR=/var/lib/localstack
-      - PERSISTENCE=1
+      # --- edition / environment ---
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_FORMAT: ${LOG_FORMAT:-console}          # json | console
+      WEB_CONCURRENCY: ${WEB_CONCURRENCY:-1}       # 1 worker per container; scale containers instead
+      # --- auth ---
+      AUTH_PROVIDER: ${AUTH_PROVIDER:-local}       # local | cognito
+      DEV_AUTH_BYPASS: ${DEV_AUTH_BYPASS:-false}   # never true outside development/test
+      # Placeholder for local development only. Generate a real one with
+      #   python -c 'import secrets; print(secrets.token_urlsafe(48))'
+      SECRET_KEY: ${SECRET_KEY:-dev-only-change-me-9f1c7b2e4a6d8e0f1a2b3c4d5e6f7a8b}
+      FIRST_SUPERUSER: ${FIRST_SUPERUSER:-admin@demo.com}
+      FIRST_SUPERUSER_PASSWORD: ${FIRST_SUPERUSER_PASSWORD:-Demo1234!}
+      # --- database ---
+      POSTGRES_SERVER: postgres
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-experimentation}
+      POSTGRES_SCHEMA: ${POSTGRES_SCHEMA:-experimentation}
+      RUN_MIGRATIONS: ${RUN_MIGRATIONS:-true}
+      # --- seeds: comma list of demo, shoplab, streampulse, sdk-contract ---
+      SEED: ${SEED:-demo}
+      SEED_FORCE: ${SEED_FORCE:-false}
+      # --- redis ---
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_REQUIRED: ${REDIS_REQUIRED:-false}
+      # --- http ---
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://localhost:3100,http://localhost:3200,http://localhost:3300}
+      METRICS_TOKEN: ${METRICS_TOKEN:-}
+      # --- demo profile: where the seeds write the demo apps' API keys and the
+      #     fixed keys baked into the demo images (see the shoplab/streampulse
+      #     services below) ---
+      SHOPLAB_DEMO_DIR: /data/demo/shoplab
+      STREAMPULSE_DEMO_DIR: /data/demo/streampulse
+      SDK_CONTRACT_KEY_DIR: /data/demo/sdk-contract
+      SHOPLAB_API_KEY: ${SHOPLAB_API_KEY:-eptk_demo_shoplab_0123456789abcdef0123456789abcdef}
+      STREAMPULSE_API_KEY: ${STREAMPULSE_API_KEY:-eptk_demo_streampulse_0123456789abcdef0123456789ab}
+      # --- optional AWS (aws profile / Cognito) ---
+      AWS_REGION: ${AWS_REGION:-us-west-2}
+      AWS_DEFAULT_REGION: ${AWS_REGION:-us-west-2}
     volumes:
-      - ./localstack:/docker-entrypoint-initaws.d
-      - localstack_data:/var/lib/localstack
-
-  # PGAdmin for database management (optional)
-  pgadmin:
-    image: dpage/pgadmin4:latest
-    container_name: experimentation-pgadmin
-    depends_on:
-      - postgres
+      - demo_keys:/data/demo
     ports:
-      - "5050:80"
+      - "${API_HOST_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # Readiness (DB reachable) rather than the image's liveness check, so
+    # `docker compose up --wait` returns only once bootstrap + seeds are done
+    # and the API answers. start_period covers the first-run seeding.
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 300s
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        # Relative: the dashboard calls /api/... on its own origin and nginx
+        # proxies to the api container.
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-}
+    image: *web-image
     environment:
-      PGADMIN_DEFAULT_EMAIL: admin@example.com
-      PGADMIN_DEFAULT_PASSWORD: admin
+      API_UPSTREAM: http://api:8000
+      # connect-src of the CSP; add the API origin when NEXT_PUBLIC_API_URL is absolute.
+      CSP_CONNECT_SRC: "${CSP_CONNECT_SRC:-'self' ws: wss:}"
+    ports:
+      - "${FRONTEND_HOST_PORT:-3000}:8080"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    restart: unless-stopped
+
+  # ===========================================================================
+  # profile: demo — ShopLab + StreamPulse demo apps and their simulators.
+  # Add `shoplab,streampulse` to SEED so their experiments, flags and API keys
+  # exist:  SEED=demo,shoplab,streampulse docker compose --profile demo up -d
+  # ===========================================================================
+  shoplab:
+    profiles: ["demo"]
+    build:
+      context: .
+      dockerfile: demo/shoplab/Dockerfile
+      args:
+        NEXT_PUBLIC_EXPERIMENTLY_API_URL: ${SHOPLAB_API_URL:-http://localhost:${API_HOST_PORT:-8000}}
+        NEXT_PUBLIC_EXPERIMENTLY_API_KEY: ${SHOPLAB_API_KEY:-eptk_demo_shoplab_0123456789abcdef0123456789abcdef}
+        NEXT_PUBLIC_EXPERIMENTLY_DASHBOARD_URL: ${DASHBOARD_URL:-http://localhost:${FRONTEND_HOST_PORT:-3000}}
+    image: experimently-shoplab:${EXPERIMENTLY_IMAGE_TAG:-ce}
+    ports:
+      - "${SHOPLAB_HOST_PORT:-3200}:3200"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  shoplab-simulator:
+    profiles: ["demo"]
+    image: python:3.11-slim
+    working_dir: /sim
+    volumes:
+      - ./demo/shoplab/simulator:/sim/demo/shoplab/simulator:ro
+      - demo_keys:/data/demo:ro
+    environment:
+      SHOPLAB_SIM_RATE: ${SHOPLAB_SIM_RATE:-1}
+      PYTHONUNBUFFERED: "1"
+    # The seed (SEED includes shoplab) writes /data/demo/shoplab/.api_key on the
+    # shared volume before the api becomes healthy; read it at start.
+    command:
+      - sh
+      - -c
+      - >-
+        test -f /data/demo/shoplab/.api_key
+        || { echo "no /data/demo/shoplab/.api_key — start the api with SEED=demo,shoplab"; exit 1; };
+        exec python demo/shoplab/simulator/traffic.py
+        --api-url http://api:8000
+        --api-key "$$(cat /data/demo/shoplab/.api_key)"
+        --rate "$$SHOPLAB_SIM_RATE"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  streampulse:
+    profiles: ["demo"]
+    build:
+      context: .
+      dockerfile: demo/streampulse/Dockerfile
+      args:
+        NEXT_PUBLIC_EXPERIMENTLY_API_URL: ${STREAMPULSE_API_URL:-http://localhost:${API_HOST_PORT:-8000}}
+        NEXT_PUBLIC_EXPERIMENTLY_API_KEY: ${STREAMPULSE_API_KEY:-eptk_demo_streampulse_0123456789abcdef0123456789ab}
+        NEXT_PUBLIC_EXPERIMENTLY_DASHBOARD_URL: ${DASHBOARD_URL:-http://localhost:${FRONTEND_HOST_PORT:-3000}}
+    image: experimently-streampulse:${EXPERIMENTLY_IMAGE_TAG:-ce}
+    ports:
+      - "${STREAMPULSE_HOST_PORT:-3300}:3300"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  streampulse-simulator:
+    profiles: ["demo"]
+    image: python:3.11-slim
+    working_dir: /sim
+    volumes:
+      - ./demo/streampulse/simulator:/sim/demo/streampulse/simulator:ro
+      - demo_keys:/data/demo:ro
+    environment:
+      STREAMPULSE_SIM_RATE: ${STREAMPULSE_SIM_RATE:-1}
+      PYTHONUNBUFFERED: "1"
+    command:
+      - sh
+      - -c
+      - >-
+        test -f /data/demo/streampulse/.api_key
+        || { echo "no /data/demo/streampulse/.api_key — start the api with SEED=demo,streampulse"; exit 1; };
+        exec python demo/streampulse/simulator/traffic.py
+        --api-url http://api:8000
+        --api-key "$$(cat /data/demo/streampulse/.api_key)"
+        --rate "$$STREAMPULSE_SIM_RATE" --no-probe
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ===========================================================================
+  # profile: tools
+  # ===========================================================================
+  pgadmin:
+    profiles: ["tools"]
+    image: dpage/pgadmin4:latest
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL:-admin@example.com}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD:-admin}
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+    ports:
+      - "${PGADMIN_HOST_PORT:-5050}:80"
     volumes:
       - pgadmin_data:/var/lib/pgadmin
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
 
-  # Backend API service (optional - uncomment to use)
-  # api:
-  #   build:
-  #     context: ./backend
-  #     dockerfile: Dockerfile.dev
-  #   container_name: experimentation-api
-  #   ports:
-  #     - "8000:8000"
-  #   volumes:
-  #     - ./backend:/app
-  #   environment:
-  #     - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/experimentation
-  #     - REDIS_URL=redis://redis:6379/0
-  #     - AWS_ENDPOINT_URL=http://localstack:4566
-  #     - AWS_REGION=us-west-2
-  #     - AWS_ACCESS_KEY_ID=test
-  #     - AWS_SECRET_ACCESS_KEY=test
-  #   depends_on:
-  #     postgres:
-  #       condition: service_healthy
-  #     redis:
-  #       condition: service_healthy
-  #     localstack:
-  #       condition: service_started
-
-  # Frontend service (optional - uncomment to use)
-  # web:
-  #   build:
-  #     context: ./frontend
-  #     dockerfile: Dockerfile.dev
-  #   container_name: experimentation-web
-  #   ports:
-  #     - "3000:3000"
-  #   volumes:
-  #     - ./frontend:/app
-  #     - /app/node_modules
-  #   environment:
-  #     - NEXT_PUBLIC_API_URL=http://localhost:8000
-  #   depends_on:
-  #     - api
+  # ===========================================================================
+  # profile: aws — LocalStack for the DynamoDB counters / Kinesis / S3 paths.
+  # Point the api at it with AWS_ENDPOINT_URL=http://localstack:4566.
+  # ===========================================================================
+  localstack:
+    profiles: ["aws"]
+    image: localstack/localstack:3
+    environment:
+      SERVICES: dynamodb,s3,kinesis,sqs,cognito-idp
+      DEBUG: "0"
+      PERSISTENCE: "1"
+    ports:
+      - "${LOCALSTACK_HOST_PORT:-4566}:4566"
+    volumes:
+      - localstack_data:/var/lib/localstack
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:4566/_localstack/health"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+    restart: unless-stopped
 
 volumes:
   postgres_data:
   redis_data:
   pgadmin_data:
   localstack_data:
+  # Demo API keys written by the seeds, read by the simulators.
+  demo_keys:

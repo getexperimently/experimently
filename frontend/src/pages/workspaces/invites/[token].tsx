@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import Head from 'next/head';
+import { PageTitle } from '@/components/PageTitle';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { WorkspaceInvite, workspaceService } from '@/services/workspaces';
@@ -22,16 +22,8 @@ export default function AcceptInvitePage() {
   useEffect(() => {
     if (!token) return;
 
-    // Check if user is logged in (simple heuristic — look for auth token in localStorage)
-    if (typeof window !== 'undefined') {
-      const authToken = localStorage.getItem('auth_token');
-      if (!authToken) {
-        const returnUrl = encodeURIComponent(`/workspaces/invites/${token}`);
-        router.replace(`/login?returnUrl=${returnUrl}`);
-        return;
-      }
-    }
-
+    // Authentication is enforced by <RequireAuth> in _app.tsx (this route is
+    // protected), which redirects anonymous visitors to /login?next=<this page>.
     workspaceService
       .getInvite(token)
       .then(setInvite)
@@ -61,17 +53,10 @@ export default function AcceptInvitePage() {
 
   return (
     <>
-      <Head>
-        <title>Accept Invitation — Experimently</title>
-      </Head>
+      <PageTitle title="Accept Invitation" />
 
-      <div className="min-h-screen bg-slate-50 flex flex-col">
+      <div className="flex-1 bg-slate-50 flex flex-col">
         {/* Simple header */}
-        <nav className="bg-white border-b border-slate-200 px-6 h-14 flex items-center">
-          <Link href="/" className="text-lg font-semibold text-slate-900">
-            Experimently
-          </Link>
-        </nav>
 
         <div className="flex-1 flex items-center justify-center px-4 py-12">
           <div className="w-full max-w-md">

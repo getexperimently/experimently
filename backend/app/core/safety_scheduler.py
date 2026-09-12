@@ -19,8 +19,11 @@ from backend.app.models.safety import RollbackTriggerType
 from backend.app.services.safety_service import SafetyService
 from backend.app.services.notification_service import NotificationService
 from backend.app.core.logging import get_logger
+from backend.app.core.scheduler_tick import run_locked_tick
 
 logger = get_logger(__name__)
+
+SCHEDULER_NAME = "safety"
 
 
 def _rollback_target_percentage(config: Any) -> int:
@@ -85,8 +88,9 @@ class SafetyScheduler:
         """Run the scheduler loop."""
         while self.is_running:
             try:
-                # Process feature flags that need safety checks
-                await self.check_feature_flags_safety()
+                # One tick under the advisory lock; records the run and
+                # skips when another replica holds the lock.
+                await run_locked_tick(SCHEDULER_NAME, self.check_feature_flags_safety)
 
                 # Wait for the next interval
                 await asyncio.sleep(self.interval_minutes * 60)
@@ -97,7 +101,7 @@ class SafetyScheduler:
                 # Wait a bit before trying again
                 await asyncio.sleep(60)
 
-    async def check_feature_flags_safety(self):
+    async def check_feature_flags_safety(self) -> Dict[str, int]:
         """
         Check all active feature flags for safety issues.
 
@@ -106,8 +110,16 @@ class SafetyScheduler:
         2. For each flag, check if safety monitoring is enabled
         3. If enabled, check safety metrics
         4. If auto-rollback is enabled and safety check fails, trigger rollback
+
+        Returns ``{"items_processed": n, "items_failed": m}`` for the run record
+        (``items_processed`` counts flags checked, ``metadata.rollbacks`` the
+        automatic rollbacks executed).
         """
         logger.info("Checking feature flags safety")
+
+        checked_count = 0
+        failed_count = 0
+        rollback_count = 0
 
         # Use a new database session for this task
         db = SessionLocal()
@@ -126,7 +138,7 @@ class SafetyScheduler:
 
             if not active_flags:
                 logger.info("No active feature flags with rollout percentage > 0 found")
-                return
+                return {"items_processed": 0, "items_failed": 0}
 
             safety_service = SafetyService(db)
 
@@ -146,6 +158,7 @@ class SafetyScheduler:
                     safety_check = await safety_service.check_feature_flag_safety(
                         feature_flag.id
                     )
+                    checked_count += 1
 
                     # Log the safety check result
                     if safety_check.is_healthy:
@@ -201,6 +214,7 @@ class SafetyScheduler:
                         )
 
                         if rollback_result.success:
+                            rollback_count += 1
                             logger.info(
                                 f"Successfully rolled back feature flag {feature_flag.key}: {rollback_result.message}"
                             )
@@ -220,14 +234,22 @@ class SafetyScheduler:
                             )
 
                 except Exception as e:
+                    failed_count += 1
                     logger.error(
                         f"Error checking safety for feature flag {feature_flag.id}: {str(e)}"
                     )
 
         except Exception as e:
+            failed_count += 1
             logger.error(f"Error checking feature flags safety: {str(e)}")
         finally:
             db.close()
+
+        return {
+            "items_processed": checked_count,
+            "items_failed": failed_count,
+            "metadata": {"rollbacks": rollback_count},
+        }
 
 
 # Create a global instance of the safety scheduler

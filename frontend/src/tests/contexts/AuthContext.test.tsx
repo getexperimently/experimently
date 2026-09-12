@@ -1,80 +1,243 @@
 import React from 'react';
-import { render, screen, act } from '@testing-library/react';
-import { AuthProvider, useAuth } from '@/contexts/AuthContext';
-import { AuthUser } from '@/types/common';
+import { render, screen, act, waitFor, fireEvent } from '@testing-library/react';
+import { AuthProvider, useAuth, useOptionalAuth } from '@/contexts/AuthContext';
+import { TOKEN_STORAGE_KEY, UserMe, navigation } from '@/services/api';
 
-const mockUser: AuthUser = {
-  id: '1',
-  username: 'testuser',
-  email: 'test@example.com',
+const mockFetch = jest.fn();
+global.fetch = mockFetch;
+
+const mockUser: UserMe = {
+  id: 'u-1',
+  email: 'admin@demo.com',
+  username: 'admin',
+  full_name: 'Demo Admin',
   role: 'ADMIN',
+  is_superuser: true,
   is_active: true,
-  created_at: '2024-01-01T00:00:00Z',
+  auth_provider: 'local',
 };
 
-function TestConsumer() {
-  const { user, isAuthenticated, login, logout } = useAuth();
+function jsonResponse(status: number, body: unknown): Response {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    statusText: 'STATUS',
+    headers: { get: () => 'application/json' },
+    json: () => Promise.resolve(body),
+    text: () => Promise.resolve(body === undefined ? '' : JSON.stringify(body)),
+  } as unknown as Response;
+}
+
+function Consumer() {
+  const { user, status, isAuthenticated, login, logout, hasRole } = useAuth();
+  const [error, setError] = React.useState<string | null>(null);
   return (
     <div>
+      <span data-testid="status">{status}</span>
       <span data-testid="authed">{String(isAuthenticated)}</span>
-      <span data-testid="username">{user?.username ?? 'none'}</span>
-      <button onClick={() => login(mockUser)}>login</button>
-      <button onClick={() => logout()}>logout</button>
+      <span data-testid="email">{user?.email ?? 'none'}</span>
+      <span data-testid="is-admin">{String(hasRole('ADMIN'))}</span>
+      <span data-testid="error">{error ?? ''}</span>
+      <button
+        onClick={() =>
+          login('admin@demo.com', 'Demo1234!').catch((e: Error) => setError(e.message))
+        }
+      >
+        login
+      </button>
+      <button onClick={() => void logout()}>logout</button>
     </div>
   );
 }
 
+let assignSpy: jest.SpyInstance;
+
 beforeEach(() => {
+  mockFetch.mockReset();
   localStorage.clear();
+  delete process.env.NEXT_PUBLIC_API_URL;
+  assignSpy = jest.spyOn(navigation, 'assign').mockImplementation(() => {});
 });
 
-describe('AuthContext', () => {
-  it('throws when used outside provider', () => {
+afterEach(() => {
+  assignSpy.mockRestore();
+});
+
+describe('AuthProvider', () => {
+  it('throws when useAuth is used outside AuthProvider', () => {
     const spy = jest.spyOn(console, 'error').mockImplementation(() => {});
-    expect(() => render(<TestConsumer />)).toThrow('useAuth must be used within AuthProvider');
+    expect(() => render(<Consumer />)).toThrow('useAuth must be used within AuthProvider');
     spy.mockRestore();
   });
 
-  it('starts unauthenticated when localStorage is empty', () => {
-    render(<AuthProvider><TestConsumer /></AuthProvider>);
-    expect(screen.getByTestId('authed').textContent).toBe('false');
-    expect(screen.getByTestId('username').textContent).toBe('none');
+  it('useOptionalAuth returns null outside a provider', () => {
+    function Probe() {
+      const auth = useOptionalAuth();
+      return <span data-testid="probe">{auth === null ? 'null' : 'ctx'}</span>;
+    }
+    render(<Probe />);
+    expect(screen.getByTestId('probe')).toHaveTextContent('null');
   });
 
-  it('hydrates from localStorage on mount', () => {
-    localStorage.setItem('admin_user', JSON.stringify(mockUser));
-    render(<AuthProvider><TestConsumer /></AuthProvider>);
-    expect(screen.getByTestId('authed').textContent).toBe('true');
-    expect(screen.getByTestId('username').textContent).toBe('testuser');
+  it('is anonymous without a token and never calls /auth/me', async () => {
+    render(
+      <AuthProvider>
+        <Consumer />
+      </AuthProvider>,
+    );
+    await waitFor(() => expect(screen.getByTestId('status')).toHaveTextContent('anonymous'));
+    expect(screen.getByTestId('authed')).toHaveTextContent('false');
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 
-  it('handles corrupted localStorage gracefully', () => {
-    localStorage.setItem('admin_user', 'not-json');
-    render(<AuthProvider><TestConsumer /></AuthProvider>);
-    expect(screen.getByTestId('authed').textContent).toBe('false');
+  it('starts loading, then calls /auth/me with the stored token', async () => {
+    localStorage.setItem(TOKEN_STORAGE_KEY, 'tok-1');
+    mockFetch.mockResolvedValueOnce(jsonResponse(200, mockUser));
+    render(
+      <AuthProvider>
+        <Consumer />
+      </AuthProvider>,
+    );
+    expect(screen.getByTestId('status')).toHaveTextContent('loading');
+    await waitFor(() => expect(screen.getByTestId('status')).toHaveTextContent('authenticated'));
+    expect(screen.getByTestId('email')).toHaveTextContent('admin@demo.com');
+    expect(screen.getByTestId('is-admin')).toHaveTextContent('true');
+    const [url, init] = mockFetch.mock.calls[0];
+    expect(url).toBe('/api/v1/auth/me');
+    expect(init.headers.Authorization).toBe('Bearer tok-1');
   });
 
-  it('login sets user and persists to localStorage', () => {
-    render(<AuthProvider><TestConsumer /></AuthProvider>);
-    act(() => { screen.getByText('login').click(); });
-    expect(screen.getByTestId('authed').textContent).toBe('true');
-    expect(screen.getByTestId('username').textContent).toBe('testuser');
-    expect(localStorage.getItem('admin_user')).toBeTruthy();
+  it('becomes anonymous and drops the token when /auth/me returns 401 (no redirect)', async () => {
+    localStorage.setItem(TOKEN_STORAGE_KEY, 'stale');
+    mockFetch.mockResolvedValueOnce(jsonResponse(401, { detail: 'Could not validate credentials' }));
+    render(
+      <AuthProvider>
+        <Consumer />
+      </AuthProvider>,
+    );
+    await waitFor(() => expect(screen.getByTestId('status')).toHaveTextContent('anonymous'));
+    expect(localStorage.getItem(TOKEN_STORAGE_KEY)).toBeNull();
+    expect(assignSpy).not.toHaveBeenCalled();
   });
 
-  it('logout clears user and localStorage', () => {
-    localStorage.setItem('admin_user', JSON.stringify(mockUser));
-    render(<AuthProvider><TestConsumer /></AuthProvider>);
-    act(() => { screen.getByText('logout').click(); });
-    expect(screen.getByTestId('authed').textContent).toBe('false');
+  it('keeps the token but reports anonymous when the API is unreachable', async () => {
+    localStorage.setItem(TOKEN_STORAGE_KEY, 'tok-keep');
+    mockFetch.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    render(
+      <AuthProvider>
+        <Consumer />
+      </AuthProvider>,
+    );
+    await waitFor(() => expect(screen.getByTestId('status')).toHaveTextContent('anonymous'));
+    expect(localStorage.getItem(TOKEN_STORAGE_KEY)).toBe('tok-keep');
+  });
+
+  it('login posts credentials without a bearer, stores only the token and sets the user', async () => {
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse(200, {
+        access_token: 'jwt-abc',
+        token_type: 'bearer',
+        expires_in: 43200,
+        user: mockUser,
+      }),
+    );
+    render(
+      <AuthProvider>
+        <Consumer />
+      </AuthProvider>,
+    );
+    await waitFor(() => expect(screen.getByTestId('status')).toHaveTextContent('anonymous'));
+
+    await act(async () => {
+      fireEvent.click(screen.getByText('login'));
+    });
+
+    await waitFor(() => expect(screen.getByTestId('status')).toHaveTextContent('authenticated'));
+    const [url, init] = mockFetch.mock.calls[0];
+    expect(url).toBe('/api/v1/auth/login');
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(init.body)).toEqual({ email: 'admin@demo.com', password: 'Demo1234!' });
+    expect(init.headers.Authorization).toBeUndefined();
+    expect(localStorage.getItem(TOKEN_STORAGE_KEY)).toBe('jwt-abc');
     expect(localStorage.getItem('admin_user')).toBeNull();
+    expect(localStorage.length).toBe(1);
+    expect(screen.getByTestId('email')).toHaveTextContent('admin@demo.com');
   });
 
-  it('login then logout round-trips correctly', () => {
-    render(<AuthProvider><TestConsumer /></AuthProvider>);
-    act(() => { screen.getByText('login').click(); });
-    expect(screen.getByTestId('authed').textContent).toBe('true');
-    act(() => { screen.getByText('logout').click(); });
-    expect(screen.getByTestId('authed').textContent).toBe('false');
+  it('login rejects with the API detail on 401 and stays anonymous', async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse(401, { detail: 'Invalid email or password' }));
+    render(
+      <AuthProvider>
+        <Consumer />
+      </AuthProvider>,
+    );
+    await waitFor(() => expect(screen.getByTestId('status')).toHaveTextContent('anonymous'));
+    await act(async () => {
+      fireEvent.click(screen.getByText('login'));
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId('error')).toHaveTextContent('Invalid email or password'),
+    );
+    expect(screen.getByTestId('status')).toHaveTextContent('anonymous');
+    expect(localStorage.getItem(TOKEN_STORAGE_KEY)).toBeNull();
+    expect(assignSpy).not.toHaveBeenCalled();
+  });
+
+  it('logout calls /auth/logout, clears the token and goes anonymous', async () => {
+    localStorage.setItem(TOKEN_STORAGE_KEY, 'tok-1');
+    mockFetch
+      .mockResolvedValueOnce(jsonResponse(200, mockUser))
+      .mockResolvedValueOnce(jsonResponse(204, undefined));
+    render(
+      <AuthProvider>
+        <Consumer />
+      </AuthProvider>,
+    );
+    await waitFor(() => expect(screen.getByTestId('status')).toHaveTextContent('authenticated'));
+
+    await act(async () => {
+      fireEvent.click(screen.getByText('logout'));
+    });
+
+    await waitFor(() => expect(screen.getByTestId('status')).toHaveTextContent('anonymous'));
+    expect(localStorage.getItem(TOKEN_STORAGE_KEY)).toBeNull();
+    const [url, init] = mockFetch.mock.calls[1];
+    expect(url).toBe('/api/v1/auth/logout');
+    expect(init.method).toBe('POST');
+  });
+
+  it('logout still clears the session when /auth/logout fails', async () => {
+    localStorage.setItem(TOKEN_STORAGE_KEY, 'tok-1');
+    mockFetch
+      .mockResolvedValueOnce(jsonResponse(200, mockUser))
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    render(
+      <AuthProvider>
+        <Consumer />
+      </AuthProvider>,
+    );
+    await waitFor(() => expect(screen.getByTestId('status')).toHaveTextContent('authenticated'));
+    await act(async () => {
+      fireEvent.click(screen.getByText('logout'));
+    });
+    await waitFor(() => expect(screen.getByTestId('status')).toHaveTextContent('anonymous'));
+    expect(localStorage.getItem(TOKEN_STORAGE_KEY)).toBeNull();
+  });
+
+  it('reacts to the token being removed in another tab', async () => {
+    localStorage.setItem(TOKEN_STORAGE_KEY, 'tok-1');
+    mockFetch.mockResolvedValueOnce(jsonResponse(200, mockUser));
+    render(
+      <AuthProvider>
+        <Consumer />
+      </AuthProvider>,
+    );
+    await waitFor(() => expect(screen.getByTestId('status')).toHaveTextContent('authenticated'));
+
+    localStorage.removeItem(TOKEN_STORAGE_KEY);
+    await act(async () => {
+      window.dispatchEvent(new StorageEvent('storage', { key: TOKEN_STORAGE_KEY, newValue: null }));
+    });
+    await waitFor(() => expect(screen.getByTestId('status')).toHaveTextContent('anonymous'));
   });
 });

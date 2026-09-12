@@ -10,6 +10,7 @@ import {
 } from '@/types/experiments';
 import { ExperimentsService } from '@/services/experiments';
 import { useApi } from '@/hooks/useApi';
+import { PageTitle } from '@/components/PageTitle';
 
 const STATUS_FILTERS: Array<{ label: string; value: ExperimentStatus | 'all' }> = [
   { label: 'All', value: 'all' },
@@ -30,7 +31,8 @@ export default function ExperimentsPage() {
   const experiments = data?.items ?? [];
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="flex-1 bg-slate-50">
+      <PageTitle title="Experiments" />
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Header */}
         <div className="flex items-center justify-between mb-6">

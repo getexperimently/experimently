@@ -6,6 +6,7 @@ import { SafetyStatusCard } from '@/components/admin/safety/SafetyStatusCard';
 import { RollbackHistoryTable } from '@/components/admin/safety/RollbackHistoryTable';
 import { AdminService } from '@/services/admin';
 import { FlagSafetyStatus, RollbackRecord } from '@/types/admin';
+import { withAdminGuard } from '@/components/admin/withAdminGuard';
 
 const MOCK_FLAGS: FlagSafetyStatus[] = [
   {
@@ -198,4 +199,4 @@ export function SafetyDashboard() {
   );
 }
 
-export default SafetyDashboard;
+export default withAdminGuard(SafetyDashboard);

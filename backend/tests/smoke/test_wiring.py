@@ -17,7 +17,6 @@ Usage:
     export APP_ENV=test TESTING=true
     python -m pytest backend/tests/smoke/test_wiring.py -v
 """
-import importlib
 import inspect
 import pytest
 from fastapi.testclient import TestClient
@@ -230,55 +229,86 @@ class TestCORSWiring:
 
 class TestAuthWiring:
     """
-    Verify auth middleware wiring WITHOUT mocking deps.get_current_user.
+    Verify auth wiring WITHOUT mocking deps.get_current_user.
 
-    These tests send real (unauthenticated) requests and assert the app
-    responds correctly at the HTTP level — catching issues like:
-    - Duplicate oauth2_scheme declarations overriding auto_error=False
-    - Dev-mode bypass returning 500 instead of the dev admin user
-    - Protected endpoints returning 500 instead of 401
+    These tests send real requests through the real dependency chain and
+    assert the HTTP-level outcome:
+
+    - bypass off  -> unauthenticated / bad-token requests are rejected with 401
+                     (never 500, never silently served)
+    - bypass on   -> the request is served as the dev-admin superuser (200)
+    - the bypass is ignored outside development/test even when enabled
     """
 
-    def _db_available(self) -> bool:
-        """Return True if the test Postgres DB is reachable."""
+    @pytest.fixture
+    def settings(self):
+        from backend.app.core.config import settings as _settings
+        return _settings
+
+    @pytest.fixture
+    def db_override(self, app, db_session):
+        """Route deps.get_db at the per-process test database for one test."""
+        from backend.app.api import deps
+
+        def _override():
+            yield db_session
+
+        app.dependency_overrides[deps.get_db] = _override
         try:
-            from backend.app.db.session import SessionLocal
-            db = SessionLocal()
-            db.execute(__import__("sqlalchemy").text("SELECT 1"))
-            db.close()
-            return True
-        except Exception:
-            return False
+            yield db_session
+        finally:
+            app.dependency_overrides.pop(deps.get_db, None)
 
-    def test_protected_endpoint_returns_401_not_500(self, client):
-        """No token → 401/403 (or 500 only due to DB unavailability, not wiring)."""
-        resp = client.get("/api/v1/experiments")
-        if resp.status_code == 500:
-            # Acceptable only when the DB is down (dev bypass tried to create admin user)
-            assert not self._db_available(), (
-                f"Got 500 on protected endpoint but DB is up — wiring error in deps.py. "
-                f"Response: {resp.text[:200]}"
-            )
-        else:
-            assert resp.status_code in (401, 403), (
-                f"Expected 401/403 for unauthenticated request, got {resp.status_code}."
-            )
+    def test_unauthenticated_request_returns_401_when_bypass_off(self, client, settings, monkeypatch):
+        monkeypatch.setattr(settings, "DEV_AUTH_BYPASS", False)
+        resp = client.get("/api/v1/experiments/")
+        assert resp.status_code == 401, resp.text
+        assert resp.json()["detail"]
+        assert resp.headers.get("www-authenticate", "").lower().startswith("bearer")
 
-    def test_invalid_bearer_token_returns_401_not_500(self, client):
-        """Malformed token → 401, not an unhandled exception."""
+    def test_invalid_bearer_token_returns_401_when_bypass_off(self, client, settings, monkeypatch):
+        monkeypatch.setattr(settings, "DEV_AUTH_BYPASS", False)
         resp = client.get(
-            "/api/v1/experiments",
+            "/api/v1/experiments/",
             headers={"Authorization": "Bearer this.is.not.a.valid.jwt"},
         )
-        if resp.status_code == 500:
-            assert not self._db_available(), (
-                f"Got 500 on invalid JWT but DB is up — auth middleware may be broken. "
-                f"Response: {resp.text[:200]}"
-            )
-        else:
-            assert resp.status_code in (401, 403), (
-                f"Invalid JWT returned {resp.status_code} — auth middleware may be broken"
-            )
+        assert resp.status_code == 401, resp.text
+
+    def test_wrong_auth_scheme_returns_401_when_bypass_off(self, client, settings, monkeypatch):
+        monkeypatch.setattr(settings, "DEV_AUTH_BYPASS", False)
+        resp = client.get(
+            "/api/v1/experiments/",
+            headers={"Authorization": "Basic dXNlcjpwYXNz"},
+        )
+        assert resp.status_code == 401, resp.text
+
+    def test_bypass_on_serves_request_as_dev_admin(self, client, settings, monkeypatch, db_override):
+        monkeypatch.setattr(settings, "DEV_AUTH_BYPASS", True)
+        assert settings.ENVIRONMENT == "test"
+        resp = client.get("/api/v1/experiments/")
+        assert resp.status_code == 200, resp.text
+
+        from backend.app.api import deps
+        from backend.app.models.user import User
+        dev_user = db_override.query(User).filter(User.username == deps.DEV_BYPASS_USERNAME).first()
+        assert dev_user is not None and dev_user.is_superuser
+
+    def test_bypass_is_ignored_outside_development_and_test(self, client, settings, monkeypatch):
+        monkeypatch.setattr(settings, "DEV_AUTH_BYPASS", True)
+        monkeypatch.setattr(settings, "ENVIRONMENT", "production")
+        resp = client.get("/api/v1/experiments/")
+        assert resp.status_code == 401, resp.text
+
+    def test_login_endpoint_is_mounted(self, client, settings, monkeypatch):
+        """POST /auth/login exists (422 on an empty body; 404 would mean the router is missing)."""
+        monkeypatch.setattr(settings, "AUTH_PROVIDER", "local")
+        resp = client.post("/api/v1/auth/login", json={})
+        assert resp.status_code == 422, resp.text
+
+    def test_api_keys_router_is_mounted(self, client, settings, monkeypatch):
+        monkeypatch.setattr(settings, "DEV_AUTH_BYPASS", False)
+        resp = client.get("/api/v1/api-keys")
+        assert resp.status_code == 401, resp.text
 
     def test_token_endpoint_returns_validation_error_not_500(self, client):
         """Empty token request → 422 validation, not 500. Auth router must be wired."""
@@ -294,10 +324,7 @@ class TestAuthWiring:
         overrides the auto_error=False setting from core/security.py.
         """
         import backend.app.api.deps as deps_module
-        import backend.app.core.security as security_module
 
-        # Count OAuth2PasswordBearer instances imported or defined in deps
-        from fastapi.security import OAuth2PasswordBearer
         deps_source = inspect.getsource(deps_module)
         # Should NOT define a new OAuth2PasswordBearer — it should only import
         assert deps_source.count("OAuth2PasswordBearer(") == 0, (
@@ -306,24 +333,15 @@ class TestAuthWiring:
             "and use: from backend.app.core.security import oauth2_scheme"
         )
 
-    def test_oauth2_scheme_auto_error_matches_cognito_config(self):
+    def test_oauth2_scheme_never_auto_errors(self):
         """
-        The oauth2_scheme auto_error flag must match whether Cognito is configured.
-        If Cognito is OFF (dev mode), auto_error must be False so unauthenticated
-        requests don't get a hard 401 before the dev bypass can run.
+        auto_error must be False so a missing token reaches get_current_user,
+        which decides between the dev bypass and a 401.
         """
         from backend.app.core.security import oauth2_scheme
-        from backend.app.core.config import settings
 
-        cognito_configured = bool(
-            getattr(settings, "COGNITO_USER_POOL_ID", "") and
-            getattr(settings, "COGNITO_APP_CLIENT_ID", "")
-        )
-        # auto_error should be True only when Cognito is configured
-        # (accessing the internal model — implementation detail, but critical)
-        scheme_auto_error = getattr(oauth2_scheme, "model", None)
-        # At minimum, verify the scheme imports without error and is callable
         assert callable(oauth2_scheme), "oauth2_scheme is not callable — wiring broken"
+        assert oauth2_scheme.auto_error is False
 
     def test_health_endpoint_is_public(self, client):
         """/health must be reachable without auth (200 when DB up, 503 when DB down)."""
@@ -341,28 +359,6 @@ class TestAuthWiring:
         data = resp.json()
         assert "paths" in data, "OpenAPI schema missing 'paths' key"
         assert "info" in data, "OpenAPI schema missing 'info' key"
-
-    def test_dev_mode_admin_bypass_does_not_raise(self, client):
-        """
-        In dev mode (TESTING=true, Cognito not configured), endpoints that use
-        get_current_active_user should not return 500 due to auth wiring errors.
-        A 500 due to DB unavailability is acceptable; a 500 due to bad oauth2_scheme
-        wiring is not.
-        """
-        import os
-        if os.environ.get("TESTING") != "true":
-            pytest.skip("Only meaningful in test/dev mode")
-
-        resp = client.get("/api/v1/experiments")
-        if resp.status_code == 500:
-            # Acceptable only when DB is genuinely unavailable
-            body = resp.text.lower()
-            db_error_indicators = ("does not exist", "connection refused", "psycopg2", "operationalerror")
-            is_db_error = any(ind in body for ind in db_error_indicators)
-            assert is_db_error, (
-                f"Got 500 on authenticated endpoint in dev mode — this is an auth wiring error, "
-                f"not a DB error. Response: {resp.text[:300]}"
-            )
 
 
 # ===========================================================================

@@ -18,7 +18,8 @@ Usage:
     python backend/scripts/seed_sdk_contract.py [--reset]
 
 Environment: the same POSTGRES_* variables as the other seed scripts.
-``SDK_CONTRACT_API_KEY`` fixes the plaintext key (otherwise one is generated).
+``SDK_CONTRACT_API_KEY`` fixes the plaintext key (otherwise one is generated);
+``SDK_CONTRACT_KEY_DIR`` redirects the ``.api_key`` file (containers).
 """
 
 from __future__ import annotations
@@ -65,7 +66,13 @@ from backend.app.models.feature_flag import FeatureFlag, FeatureFlagStatus  # no
 EXPERIMENT_KEY = "sdk_contract_ab"
 FLAG_KEY = "sdk_contract_flag"
 API_KEY_NAME = "sdk-contract-smoke"
-KEY_FILE = PROJECT_ROOT / "tests" / "sdk-contract" / "live" / ".api_key"
+# SDK_CONTRACT_KEY_DIR lets containers (docker-compose SEED=...,sdk-contract)
+# redirect the generated key away from the read-only source tree.
+KEY_FILE = (
+    Path(os.environ["SDK_CONTRACT_KEY_DIR"]) / ".api_key"
+    if os.environ.get("SDK_CONTRACT_KEY_DIR")
+    else PROJECT_ROOT / "tests" / "sdk-contract" / "live" / ".api_key"
+)
 
 
 def seed_experiment(db, admin_user) -> Experiment:
@@ -156,7 +163,7 @@ def seed_api_key(db, admin_user) -> str:
     if existing is not None and KEY_FILE.exists():
         plaintext = KEY_FILE.read_text().strip()
         if plaintext and hash_api_key(plaintext) == existing.key:
-            print(f"  API key kept ({KEY_FILE.relative_to(PROJECT_ROOT)}).")
+            print(f"  API key kept ({_display(KEY_FILE)}).")
             return plaintext
         print("  Key file does not match the stored hash; rotating.")
     if existing is not None:
@@ -178,8 +185,15 @@ def seed_api_key(db, admin_user) -> str:
     KEY_FILE.parent.mkdir(parents=True, exist_ok=True)
     KEY_FILE.write_text(plaintext + "\n")
     os.chmod(KEY_FILE, 0o600)
-    print(f"  Created API key, written to {KEY_FILE.relative_to(PROJECT_ROOT)}.")
+    print(f"  Created API key, written to {_display(KEY_FILE)}.")
     return plaintext
+
+
+def _display(path: Path) -> str:
+    try:
+        return str(path.relative_to(PROJECT_ROOT))
+    except ValueError:
+        return str(path)
 
 
 def reset(db) -> None:

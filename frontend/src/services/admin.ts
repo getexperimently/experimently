@@ -12,8 +12,7 @@ import {
   SchedulerRun,
   UserListResponse,
 } from '@/types/admin';
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+import { apiFetch } from '@/services/api';
 
 export const AdminService = {
   // Users
@@ -22,59 +21,30 @@ export const AdminService = {
     limit?: number;
     search?: string;
   }): Promise<UserListResponse> {
-    const url = new URL(`${API_URL}/api/v1/admin/users`);
-    if (params?.page !== undefined) {
-      url.searchParams.set('page', String(params.page));
-    }
-    if (params?.limit !== undefined) {
-      url.searchParams.set('limit', String(params.limit));
-    }
-    if (params?.search) {
-      url.searchParams.set('search', params.search);
-    }
-    const response = await fetch(url.toString());
-    if (!response.ok) {
-      throw new Error(`Failed to fetch users: ${response.statusText}`);
-    }
-    return response.json();
+    return apiFetch<UserListResponse>('/api/v1/admin/users', {
+      query: {
+        page: params?.page,
+        limit: params?.limit,
+        search: params?.search || undefined,
+      },
+    });
   },
 
   async getUser(id: string): Promise<AdminUser> {
-    const response = await fetch(`${API_URL}/api/v1/admin/users/${id}`);
-    if (!response.ok) {
-      throw new Error(`Failed to fetch user: ${response.statusText}`);
-    }
-    return response.json();
+    return apiFetch<AdminUser>(`/api/v1/admin/users/${id}`);
   },
 
   async updateUser(id: string, data: Partial<AdminUser>): Promise<AdminUser> {
-    const response = await fetch(`${API_URL}/api/v1/admin/users/${id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
-    });
-    if (!response.ok) {
-      throw new Error(`Failed to update user: ${response.statusText}`);
-    }
-    return response.json();
+    return apiFetch<AdminUser>(`/api/v1/admin/users/${id}`, { method: 'PUT', json: data });
   },
 
   async deleteUser(id: string): Promise<void> {
-    const response = await fetch(`${API_URL}/api/v1/admin/users/${id}`, {
-      method: 'DELETE',
-    });
-    if (!response.ok) {
-      throw new Error(`Failed to delete user: ${response.statusText}`);
-    }
+    await apiFetch<void>(`/api/v1/admin/users/${id}`, { method: 'DELETE' });
   },
 
   // Stats
   async getStats(): Promise<AdminStats> {
-    const response = await fetch(`${API_URL}/api/v1/admin/stats`);
-    if (!response.ok) {
-      throw new Error(`Failed to fetch stats: ${response.statusText}`);
-    }
-    return response.json();
+    return apiFetch<AdminStats>('/api/v1/admin/stats');
   },
 
   // Audit logs
@@ -88,45 +58,23 @@ export const AdminService = {
     start_date?: string;
     end_date?: string;
   }): Promise<AuditLogListResponse> {
-    const url = new URL(`${API_URL}/api/v1/audit-logs/`);
-    if (params?.page !== undefined) {
-      url.searchParams.set('page', String(params.page));
-    }
-    if (params?.limit !== undefined) {
-      url.searchParams.set('limit', String(params.limit));
-    }
-    if (params?.user_id) {
-      url.searchParams.set('user_id', params.user_id);
-    }
-    if (params?.action_type) {
-      url.searchParams.set('action_type', params.action_type);
-    }
-    if (params?.entity_type) {
-      url.searchParams.set('entity_type', params.entity_type);
-    }
-    if (params?.entity_name) {
-      url.searchParams.set('entity_name', params.entity_name);
-    }
-    if (params?.start_date) {
-      url.searchParams.set('start_date', params.start_date);
-    }
-    if (params?.end_date) {
-      url.searchParams.set('end_date', params.end_date);
-    }
-    const response = await fetch(url.toString());
-    if (!response.ok) {
-      throw new Error(`Failed to fetch audit logs: ${response.statusText}`);
-    }
-    return response.json();
+    return apiFetch<AuditLogListResponse>('/api/v1/audit-logs/', {
+      query: {
+        page: params?.page,
+        limit: params?.limit,
+        user_id: params?.user_id || undefined,
+        action_type: params?.action_type || undefined,
+        entity_type: params?.entity_type || undefined,
+        entity_name: params?.entity_name || undefined,
+        start_date: params?.start_date || undefined,
+        end_date: params?.end_date || undefined,
+      },
+    });
   },
 
   // Roles
   async listRoles(): Promise<CustomRole[]> {
-    const response = await fetch(`${API_URL}/api/v1/rbac/roles`);
-    if (!response.ok) {
-      throw new Error(`Failed to fetch roles: ${response.statusText}`);
-    }
-    return response.json();
+    return apiFetch<CustomRole[]>('/api/v1/rbac/roles');
   },
 
   async createRole(data: {
@@ -134,119 +82,60 @@ export const AdminService = {
     description: string;
     permissions: string[];
   }): Promise<CustomRole> {
-    const response = await fetch(`${API_URL}/api/v1/rbac/roles`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
-    });
-    if (!response.ok) {
-      throw new Error(`Failed to create role: ${response.statusText}`);
-    }
-    return response.json();
+    return apiFetch<CustomRole>('/api/v1/rbac/roles', { method: 'POST', json: data });
   },
 
   async updateRole(name: string, data: Partial<CustomRole>): Promise<CustomRole> {
-    const response = await fetch(`${API_URL}/api/v1/rbac/roles/${name}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
-    });
-    if (!response.ok) {
-      throw new Error(`Failed to update role: ${response.statusText}`);
-    }
-    return response.json();
+    return apiFetch<CustomRole>(`/api/v1/rbac/roles/${name}`, { method: 'PUT', json: data });
   },
 
   async deleteRole(name: string): Promise<void> {
-    const response = await fetch(`${API_URL}/api/v1/rbac/roles/${name}`, {
-      method: 'DELETE',
-    });
-    if (!response.ok) {
-      throw new Error(`Failed to delete role: ${response.statusText}`);
-    }
+    await apiFetch<void>(`/api/v1/rbac/roles/${name}`, { method: 'DELETE' });
   },
 
   async getUserPermissions(userId: string): Promise<{ permissions: string[] }> {
-    const response = await fetch(`${API_URL}/api/v1/rbac/users/${userId}/permissions`);
-    if (!response.ok) {
-      throw new Error(`Failed to fetch user permissions: ${response.statusText}`);
-    }
-    return response.json();
+    return apiFetch<{ permissions: string[] }>(`/api/v1/rbac/users/${userId}/permissions`);
   },
 
   // Safety
   async getSafetySettings(): Promise<SafetySettings> {
-    const response = await fetch(`${API_URL}/api/v1/safety/settings`);
-    if (!response.ok) {
-      throw new Error(`Failed to fetch safety settings: ${response.statusText}`);
-    }
-    return response.json();
+    return apiFetch<SafetySettings>('/api/v1/safety/settings');
   },
 
   async updateSafetySettings(data: Partial<SafetySettings>): Promise<SafetySettings> {
-    const response = await fetch(`${API_URL}/api/v1/safety/settings`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
-    });
-    if (!response.ok) {
-      throw new Error(`Failed to update safety settings: ${response.statusText}`);
-    }
-    return response.json();
+    return apiFetch<SafetySettings>('/api/v1/safety/settings', { method: 'PUT', json: data });
   },
 
   async getFlagSafetyStatus(flagId: string): Promise<FlagSafetyStatus> {
-    const response = await fetch(`${API_URL}/api/v1/safety/flags/${flagId}`);
-    if (!response.ok) {
-      throw new Error(`Failed to fetch flag safety status: ${response.statusText}`);
-    }
-    return response.json();
+    return apiFetch<FlagSafetyStatus>(`/api/v1/safety/flags/${flagId}`);
   },
 
   async rollbackFlag(flagId: string, reason: string): Promise<{ success: boolean }> {
-    const response = await fetch(`${API_URL}/api/v1/safety/rollback/${flagId}`, {
+    return apiFetch<{ success: boolean }>(`/api/v1/safety/rollback/${flagId}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ reason }),
+      json: { reason },
     });
-    if (!response.ok) {
-      throw new Error(`Failed to rollback flag: ${response.statusText}`);
-    }
-    return response.json();
   },
 
   // Scheduler
   async getSchedulerHealth(): Promise<SchedulerHealth[]> {
-    const response = await fetch(`${API_URL}/api/v1/scheduler/health`);
-    if (!response.ok) {
-      throw new Error(`Failed to fetch scheduler health: ${response.statusText}`);
-    }
-    return response.json();
+    return apiFetch<SchedulerHealth[]>('/api/v1/scheduler/health');
   },
 
   async getSchedulerHistory(name: string): Promise<SchedulerRun[]> {
-    const response = await fetch(`${API_URL}/api/v1/scheduler/${name}/history`);
-    if (!response.ok) {
-      throw new Error(`Failed to fetch scheduler history: ${response.statusText}`);
-    }
-    return response.json();
+    return apiFetch<SchedulerRun[]>(`/api/v1/scheduler/${name}/history`);
   },
 
   // Notification preferences
   async getMyNotificationPrefs(): Promise<NotificationPreference> {
-    const response = await fetch(`${API_URL}/api/v1/notifications/preferences`);
-    if (!response.ok) throw new Error(`Failed to fetch notification preferences: ${response.statusText}`);
-    return response.json();
+    return apiFetch<NotificationPreference>('/api/v1/notifications/preferences');
   },
 
   async updateMyNotificationPrefs(data: Partial<NotificationPreference>): Promise<NotificationPreference> {
-    const response = await fetch(`${API_URL}/api/v1/notifications/preferences`, {
+    return apiFetch<NotificationPreference>('/api/v1/notifications/preferences', {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
+      json: data,
     });
-    if (!response.ok) throw new Error(`Failed to update notification preferences: ${response.statusText}`);
-    return response.json();
   },
 
   async getNotificationDeliveryLog(params?: {
@@ -255,23 +144,20 @@ export const AdminService = {
     event_type?: string;
     status?: string;
   }): Promise<NotificationDeliveryLogListResponse> {
-    const url = new URL(`${API_URL}/api/v1/notifications/delivery-log`);
-    if (params?.page !== undefined) url.searchParams.set('page', String(params.page));
-    if (params?.limit !== undefined) url.searchParams.set('limit', String(params.limit));
-    if (params?.event_type) url.searchParams.set('event_type', params.event_type);
-    if (params?.status) url.searchParams.set('status', params.status);
-    const response = await fetch(url.toString());
-    if (!response.ok) throw new Error(`Failed to fetch delivery log: ${response.statusText}`);
-    return response.json();
+    return apiFetch<NotificationDeliveryLogListResponse>('/api/v1/notifications/delivery-log', {
+      query: {
+        page: params?.page,
+        limit: params?.limit,
+        event_type: params?.event_type || undefined,
+        status: params?.status || undefined,
+      },
+    });
   },
 
   async sendTestNotification(channel: NotificationChannel, message: string, recipient?: string): Promise<{ success: boolean; channel: string; message: string }> {
-    const response = await fetch(`${API_URL}/api/v1/notifications/test`, {
+    return apiFetch<{ success: boolean; channel: string; message: string }>('/api/v1/notifications/test', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ channel, message, recipient }),
+      json: { channel, message, recipient },
     });
-    if (!response.ok) throw new Error(`Failed to send test notification: ${response.statusText}`);
-    return response.json();
   },
 };

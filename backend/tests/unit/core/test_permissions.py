@@ -110,6 +110,13 @@ class TestCheckPermission:
         assert check_permission(admin_user, ResourceType.EXPERIMENT, Action.CREATE)
         assert check_permission(admin_user, ResourceType.USER, Action.CREATE)
 
+    def test_only_admin_may_act_on_other_users_api_keys(self, admin_user, developer_user, analyst_user, viewer_user):
+        """ResourceType.API_KEY governs cross-user key access (``/api/v1/api-keys?all=true``)."""
+        for action in (Action.LIST, Action.DELETE):
+            assert check_permission(admin_user, ResourceType.API_KEY, action)
+            for user in (developer_user, analyst_user, viewer_user):
+                assert not check_permission(user, ResourceType.API_KEY, action)
+
     def test_developer_permission(self, developer_user):
         """Test developer user permissions."""
         assert check_permission(developer_user, ResourceType.EXPERIMENT, Action.CREATE)

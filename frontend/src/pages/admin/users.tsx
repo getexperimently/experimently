@@ -6,6 +6,7 @@ import { EditUserModal } from '@/components/admin/users/EditUserModal';
 import { EffectivePermissionsModal } from '@/components/admin/users/EffectivePermissionsModal';
 import { AdminUser } from '@/types/admin';
 import { AdminService } from '@/services/admin';
+import { withAdminGuard } from '@/components/admin/withAdminGuard';
 
 export function UserManagementPage() {
   const [inviteOpen, setInviteOpen] = useState(false);
@@ -78,4 +79,4 @@ export function UserManagementPage() {
   );
 }
 
-export default UserManagementPage;
+export default withAdminGuard(UserManagementPage, { requiredRole: 'ADMIN' });

@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Path, Body, status
 from sqlalchemy.orm import Session
 
 from backend.app.api import deps
+from backend.app.core.metrics import record_event_tracked, record_experiment_assignment
 from backend.app.models.experiment import Experiment, ExperimentStatus
 from backend.app.models.assignment import Assignment
 from backend.app.models.bandit_state import BanditState
@@ -233,6 +234,15 @@ async def assign_user_to_experiment(
                 detail="Assigned variant not found in experiment",
             )
 
+        # Prometheus: count every assignment decision handed out (label by
+        # experiment/variant id; ineligible users are counted under their
+        # reason so holdout/exclusion volume is visible too).
+        assigned_flag = bool(assignment_data.get("assigned", True))
+        record_experiment_assignment(
+            experiment_id=str(experiment.id),
+            variant_id=str(variant.id) if assigned_flag else str(assignment_data.get("reason") or "ineligible"),
+        )
+
         # Create response.  Ineligible users (holdout / mutual exclusion /
         # targeting) get the control variant with assigned=False.
         return VariantAssignmentResponse(
@@ -355,6 +365,7 @@ async def track_event(
 
         # Track the event
         event = EventService(db).track_event(event_data)
+        record_event_tracked(str(event_data.event_type))
         return _event_response(event)
     except ValueError as e:
         raise HTTPException(
@@ -391,6 +402,7 @@ async def track_event_by_ids(
     """
     try:
         event = EventService(db).track_event(event_data)
+        record_event_tracked(str(event_data.event_type))
         return _event_response(event)
     except ValueError as e:
         raise HTTPException(
@@ -544,6 +556,7 @@ async def track_events_batch(
 
             # Track the event
             event_service.track_event(event_data)
+            record_event_tracked(str(event_data.event_type))
             success_count += 1
 
         except Exception as e:

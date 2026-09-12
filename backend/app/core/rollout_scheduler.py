@@ -24,8 +24,11 @@ from backend.app.models.rollout_schedule import (
 )
 from backend.app.services.notification_service import NotificationService
 from backend.app.core.logging import get_logger
+from backend.app.core.scheduler_tick import run_locked_tick
 
 logger = get_logger(__name__)
+
+SCHEDULER_NAME = "rollout"
 
 
 def _as_utc(value: datetime) -> datetime:
@@ -90,8 +93,9 @@ class RolloutScheduler:
         """Run the scheduler loop."""
         while self.is_running:
             try:
-                # Process rollout schedules that need updates
-                await self.process_rollout_schedules()
+                # One tick under the advisory lock; records the run and
+                # skips when another replica holds the lock.
+                await run_locked_tick(SCHEDULER_NAME, self.process_rollout_schedules)
 
                 # Wait for the next interval
                 await asyncio.sleep(self.interval_minutes * 60)
@@ -102,7 +106,7 @@ class RolloutScheduler:
                 # Wait a bit before trying again
                 await asyncio.sleep(60)
 
-    async def process_rollout_schedules(self):
+    async def process_rollout_schedules(self) -> Dict[str, int]:
         """
         Process rollout schedules that need updates based on their triggers.
 
@@ -110,8 +114,14 @@ class RolloutScheduler:
         1. Schedules in ACTIVE status that have pending stages
         2. For each schedule, finds stages that should be activated
         3. Updates feature flag rollout percentages accordingly
+
+        Returns ``{"items_processed": n, "items_failed": m}`` for the run record.
         """
         logger.info("Processing rollout schedules")
+
+        schedules_updated = 0
+        stages_processed = 0
+        failed_count = 0
 
         # Use a new database session for this task
         db = SessionLocal()
@@ -131,12 +141,9 @@ class RolloutScheduler:
 
             if not active_schedules:
                 logger.info("No active rollout schedules found")
-                return
+                return {"items_processed": 0, "items_failed": 0}
 
             logger.info(f"Found {len(active_schedules)} active rollout schedules")
-
-            schedules_updated = 0
-            stages_processed = 0
 
             # Process each active schedule
             for schedule in active_schedules:
@@ -221,6 +228,7 @@ class RolloutScheduler:
                             schedules_updated += 1
 
                 except Exception as e:
+                    failed_count += 1
                     logger.error(f"Error processing rollout schedule {schedule.id}: {str(e)}")
                     # Continue with next schedule
 
@@ -230,9 +238,16 @@ class RolloutScheduler:
                 logger.info("No rollout schedules required updates")
 
         except Exception as e:
+            failed_count += 1
             logger.error(f"Error processing rollout schedules: {str(e)}")
         finally:
             db.close()
+
+        return {
+            "items_processed": schedules_updated,
+            "items_failed": failed_count,
+            "metadata": {"stage_transitions": stages_processed},
+        }
 
     def _is_stage_eligible_for_activation(self, stage: RolloutStage, current_time: datetime) -> bool:
         """

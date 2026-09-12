@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import Head from 'next/head';
+import { PageTitle } from '@/components/PageTitle';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { workspaceService } from '@/services/workspaces';
@@ -70,22 +70,10 @@ export default function NewWorkspacePage() {
 
   return (
     <>
-      <Head>
-        <title>New Workspace — Experimently</title>
-      </Head>
+      <PageTitle title="New Workspace" />
 
-      <div className="min-h-screen bg-slate-50">
+      <div className="flex-1 bg-slate-50">
         {/* Nav */}
-        <nav className="bg-white border-b border-slate-200 px-6 h-14 flex items-center gap-6">
-          <Link href="/" className="text-lg font-semibold text-slate-900">
-            Experimently
-          </Link>
-          <div className="flex items-center gap-4 text-sm">
-            <Link href="/experiments" className="text-slate-600 hover:text-slate-900">Experiments</Link>
-            <Link href="/feature-flags" className="text-slate-600 hover:text-slate-900">Feature Flags</Link>
-            <Link href="/workspaces" className="text-slate-600 hover:text-slate-900">Workspaces</Link>
-          </div>
-        </nav>
 
         <div className="max-w-xl mx-auto px-4 py-12">
           {/* Breadcrumb */}

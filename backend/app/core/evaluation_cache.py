@@ -16,6 +16,20 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
+# Prometheus cache_hits_total / cache_misses_total label for this cache.
+CACHE_METRIC_TYPE = "rule_evaluation"
+
+try:  # prometheus_client is a runtime dependency; keep the cache usable without it
+    from backend.app.core.metrics import record_cache_hit as _record_cache_hit
+    from backend.app.core.metrics import record_cache_miss as _record_cache_miss
+except Exception:  # pragma: no cover - defensive
+
+    def _record_cache_hit(cache_type: str) -> None:
+        return None
+
+    def _record_cache_miss(cache_type: str) -> None:
+        return None
+
 
 @dataclass
 class CacheEntry:
@@ -132,14 +146,17 @@ class EvaluationCache:
                     # Remove expired entry
                     del self._cache[key]
                     self._misses += 1
+                    _record_cache_miss(CACHE_METRIC_TYPE)
                     return None
 
                 # Mark as recently used
                 self._cache.move_to_end(key)
                 self._hits += 1
+                _record_cache_hit(CACHE_METRIC_TYPE)
                 return entry.result
             else:
                 self._misses += 1
+                _record_cache_miss(CACHE_METRIC_TYPE)
                 return None
 
     def set(

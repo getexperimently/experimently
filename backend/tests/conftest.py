@@ -8,11 +8,28 @@ import pytest
 import os
 import logging
 
-# Set Cognito env vars BEFORE importing the app so that
-# oauth2_scheme.auto_error=True (security.py reads these at import time).
-# Without this, unauthenticated requests return 500 instead of 401.
-os.environ.setdefault("COGNITO_USER_POOL_ID", "test-pool-id")
-os.environ.setdefault("COGNITO_CLIENT_ID", "test-client-id")
+# ---------------------------------------------------------------------------
+# Process environment for the whole test session (set BEFORE the app import)
+# ---------------------------------------------------------------------------
+# * APP_ENV=test / TESTING=true select TestSettings (ENVIRONMENT == "test")
+#   and the test_experimentation schema.  ENVIRONMENT itself is deliberately
+#   NOT exported: tests that construct ProdSettings()/DevSettings() directly
+#   must keep their class default, and the settings singleton already resolves
+#   APP_ENV=test to the canonical "test".
+# * Auth runs exactly as the Community Edition ships: AUTH_PROVIDER=local and
+#   the dev-admin bypass OFF (fail-closed).  That is also what the existing
+#   suite was written against (the old root conftest forced the Cognito env so
+#   unauthenticated requests got 401): tests either override
+#   deps.get_current_user / get_current_active_user or assert a 401.  The two
+#   exceptions opt in with a module-level fixture — the WebSocket protocol
+#   tests enable the bypass, the Cognito dependency-chain tests select
+#   AUTH_PROVIDER=cognito — and backend/tests/integration/auth/conftest.py
+#   runs its package under the Cognito provider.
+os.environ.setdefault("APP_ENV", "test")
+os.environ.setdefault("TESTING", "true")
+# A developer shell may export ENVIRONMENT=development (see .env.example);
+# ENVIRONMENT wins over APP_ENV, so drop it for the test process.
+os.environ.pop("ENVIRONMENT", None)
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
@@ -33,6 +50,14 @@ from backend.app.api.deps import CacheControl
 from unittest.mock import patch, MagicMock, AsyncMock
 
 logger = logging.getLogger(__name__)
+
+# Pin the auth mode on the singleton (see the header comment) regardless of
+# what a developer's shell exports.  Set on the object rather than through
+# DEV_AUTH_BYPASS/AUTH_PROVIDER in os.environ so that Settings objects built
+# inside individual tests (e.g. ProdSettings()) keep their own defaults and do
+# not trip the production bypass guard.
+settings.AUTH_PROVIDER = "local"
+settings.DEV_AUTH_BYPASS = False
 
 # ---------------------------------------------------------------------------
 # Per-process database name

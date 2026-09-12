@@ -1,13 +1,15 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { ApiKey } from '@/types/admin';
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+import { apiFetch } from '@/services/api';
 
 interface ApiKeyTableProps {
   onCreateKey: () => void;
+  /** Bump after creating a key so the list refreshes. */
+  refreshToken?: number;
 }
 
-function formatDate(isoString: string): string {
+function formatDate(isoString?: string | null): string {
+  if (!isoString) return '—';
   try {
     return new Date(isoString).toLocaleString();
   } catch {
@@ -15,48 +17,71 @@ function formatDate(isoString: string): string {
   }
 }
 
-export function ApiKeyTable({ onCreateKey }: ApiKeyTableProps) {
+export type KeyState = 'active' | 'expired' | 'inactive';
+
+/** Derive the display state from the fields the API actually returns. */
+export function keyState(key: ApiKey, now: Date = new Date()): KeyState {
+  if (!key.is_active) return 'inactive';
+  if (key.expires_at && new Date(key.expires_at).getTime() <= now.getTime()) return 'expired';
+  return 'active';
+}
+
+const STATE_CLASSES: Record<KeyState, string> = {
+  active: 'bg-green-100 text-green-800',
+  expired: 'bg-amber-100 text-amber-800',
+  inactive: 'bg-slate-100 text-slate-600',
+};
+
+/**
+ * Lists the caller's API keys (`GET /api/v1/api-keys`). Administrators can
+ * switch to every user's keys (`?all=true`). Keys carry no retrievable
+ * secret and no prefix: the plaintext is shown once at creation, so rows are
+ * identified by name and creation time. Deleting a key is permanent
+ * (`DELETE /api/v1/api-keys/{id}`); there is no soft revoke on this route.
+ */
+export function ApiKeyTable({ onCreateKey, refreshToken = 0 }: ApiKeyTableProps) {
   const [keys, setKeys] = useState<ApiKey[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [showAll, setShowAll] = useState(false);
+  const [includeInactive, setIncludeInactive] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<ApiKey | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const fetchKeys = useCallback(async () => {
     setLoading(true);
     setError(null);
+    const params = new URLSearchParams();
+    if (showAll) params.set('all', 'true');
+    if (includeInactive) params.set('include_inactive', 'true');
+    const query = params.toString();
     try {
-      const response = await fetch(`${API_URL}/api/v1/api-keys`);
-      if (!response.ok) {
-        throw new Error(`Failed to fetch API keys: ${response.statusText}`);
-      }
-      const data: ApiKey[] = await response.json();
-      setKeys(data);
+      const data = await apiFetch<ApiKey[]>(`/api/v1/api-keys${query ? `?${query}` : ''}`);
+      setKeys(Array.isArray(data) ? data : []);
     } catch (err) {
       setError((err as Error).message || 'Failed to load API keys');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [showAll, includeInactive]);
 
   useEffect(() => {
     fetchKeys();
-  }, [fetchKeys]);
+  }, [fetchKeys, refreshToken]);
 
-  const handleRevoke = async (key: ApiKey) => {
-    const confirmed = window.confirm(
-      `Are you sure you want to revoke the API key "${key.name}"? This cannot be undone.`
-    );
-    if (!confirmed) return;
-
+  const confirmDelete = async () => {
+    if (!pendingDelete) return;
+    setDeleting(true);
+    setDeleteError(null);
     try {
-      const response = await fetch(`${API_URL}/api/v1/api-keys/${key.id}`, {
-        method: 'DELETE',
-      });
-      if (!response.ok) {
-        throw new Error(`Failed to revoke API key: ${response.statusText}`);
-      }
+      await apiFetch<void>(`/api/v1/api-keys/${pendingDelete.id}`, { method: 'DELETE' });
+      setPendingDelete(null);
       await fetchKeys();
     } catch (err) {
-      alert(`Failed to revoke API key: ${(err as Error).message}`);
+      setDeleteError((err as Error).message || 'Failed to delete API key');
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -66,16 +91,82 @@ export function ApiKeyTable({ onCreateKey }: ApiKeyTableProps) {
       className="bg-white rounded-lg border border-slate-200 overflow-hidden"
     >
       {/* Toolbar */}
-      <div className="flex items-center justify-between p-4 border-b border-slate-200">
-        <h2 className="text-sm font-semibold text-slate-900">API Keys</h2>
-        <button
-          data-testid="create-api-key-button"
-          onClick={onCreateKey}
-          className="px-3 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 transition-colors"
-        >
-          Create API Key
-        </button>
+      <div className="flex flex-wrap items-center justify-between gap-3 p-4 border-b border-slate-200">
+        <div>
+          <h2 className="text-sm font-semibold text-slate-900">API Keys</h2>
+          <p className="text-xs text-slate-500 mt-0.5">
+            SDKs authenticate with <code className="font-mono">X-API-Key</code>. The key is shown
+            once when created.
+          </p>
+        </div>
+        <div className="flex items-center gap-4 text-sm text-slate-600">
+          <label className="inline-flex items-center gap-1.5">
+            <input
+              type="checkbox"
+              data-testid="show-all-keys"
+              checked={showAll}
+              onChange={(e) => setShowAll(e.target.checked)}
+            />
+            All users (admin)
+          </label>
+          <label className="inline-flex items-center gap-1.5">
+            <input
+              type="checkbox"
+              data-testid="include-inactive-keys"
+              checked={includeInactive}
+              onChange={(e) => setIncludeInactive(e.target.checked)}
+            />
+            Include inactive
+          </label>
+          <button
+            data-testid="create-api-key-button"
+            onClick={onCreateKey}
+            className="px-3 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 transition-colors"
+          >
+            Create API Key
+          </button>
+        </div>
       </div>
+
+      {/* Delete confirmation (inline, no window.confirm) */}
+      {pendingDelete && (
+        <div
+          data-testid="delete-confirm"
+          role="alertdialog"
+          aria-label={`Delete API key ${pendingDelete.name}`}
+          className="flex flex-wrap items-center justify-between gap-3 px-6 py-3 bg-red-50 border-b border-red-200 text-sm text-red-800"
+        >
+          <span>
+            Delete <strong>{pendingDelete.name}</strong>? Applications using it stop working
+            immediately. This cannot be undone.
+          </span>
+          <span className="flex items-center gap-3">
+            {deleteError && (
+              <span data-testid="delete-error" className="text-red-700">
+                {deleteError}
+              </span>
+            )}
+            <button
+              data-testid="cancel-delete"
+              onClick={() => {
+                setPendingDelete(null);
+                setDeleteError(null);
+              }}
+              className="px-3 py-1 rounded-md border border-slate-300 bg-white text-slate-700"
+            >
+              Cancel
+            </button>
+            <button
+              data-testid="confirm-delete"
+              onClick={confirmDelete}
+              disabled={deleting}
+              className="px-3 py-1 rounded-md bg-red-600 text-white font-medium disabled:opacity-60"
+            >
+              {deleting ? 'Deleting…' : 'Delete key'}
+            </button>
+          </span>
+        </div>
+      )}
 
       {/* Loading state */}
       {loading && (
@@ -93,10 +184,7 @@ export function ApiKeyTable({ onCreateKey }: ApiKeyTableProps) {
 
       {/* Error state */}
       {!loading && error && (
-        <div
-          data-testid="api-key-error-state"
-          className="p-8 text-center text-red-600"
-        >
+        <div data-testid="api-key-error-state" className="p-8 text-center text-red-600">
           <p className="font-medium">Failed to load API keys</p>
           <p className="text-sm mt-1 text-red-500">{error}</p>
         </div>
@@ -104,10 +192,7 @@ export function ApiKeyTable({ onCreateKey }: ApiKeyTableProps) {
 
       {/* Empty state */}
       {!loading && !error && keys.length === 0 && (
-        <div
-          data-testid="api-key-empty-state"
-          className="p-8 text-center text-slate-500"
-        >
+        <div data-testid="api-key-empty-state" className="p-8 text-center text-slate-500">
           <p>No API keys found. Create one to get started.</p>
         </div>
       )}
@@ -119,53 +204,59 @@ export function ApiKeyTable({ onCreateKey }: ApiKeyTableProps) {
             <thead className="bg-slate-50 text-slate-600 uppercase text-xs tracking-wide">
               <tr>
                 <th className="px-6 py-3 text-left">Name</th>
-                <th className="px-6 py-3 text-left">Prefix</th>
-                <th className="px-6 py-3 text-left">Created At</th>
+                <th className="px-6 py-3 text-left">Scopes</th>
+                <th className="px-6 py-3 text-left">Created</th>
+                <th className="px-6 py-3 text-left">Last used</th>
+                <th className="px-6 py-3 text-left">Expires</th>
                 <th className="px-6 py-3 text-left">Status</th>
                 <th className="px-6 py-3 text-left">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {keys.map((key) => (
-                <tr
-                  key={key.id}
-                  data-testid={`api-key-row-${key.id}`}
-                  className="hover:bg-slate-50"
-                >
-                  <td className="px-6 py-4 font-medium text-slate-900">{key.name}</td>
-                  <td className="px-6 py-4 text-slate-600 font-mono text-xs">{key.prefix}</td>
-                  <td
-                    data-testid={`created-at-${key.id}`}
-                    className="px-6 py-4 text-slate-600"
-                  >
-                    {formatDate(key.created_at)}
-                  </td>
-                  <td className="px-6 py-4">
-                    <span
-                      data-testid={`status-badge-${key.id}`}
-                      className={[
-                        'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium',
-                        key.is_active
-                          ? 'bg-green-100 text-green-800'
-                          : 'bg-slate-100 text-slate-600',
-                      ].join(' ')}
-                    >
-                      {key.is_active ? 'active' : 'revoked'}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4">
-                    {key.is_active && (
+              {keys.map((key) => {
+                const state = keyState(key);
+                return (
+                  <tr key={key.id} data-testid={`api-key-row-${key.id}`} className="hover:bg-slate-50">
+                    <td className="px-6 py-4">
+                      <div className="font-medium text-slate-900">{key.name}</div>
+                      {key.description && (
+                        <div className="text-xs text-slate-500 mt-0.5">{key.description}</div>
+                      )}
+                    </td>
+                    <td className="px-6 py-4 text-slate-600 font-mono text-xs">
+                      {key.scopes && key.scopes.length > 0 ? key.scopes.join(', ') : '—'}
+                    </td>
+                    <td data-testid={`created-at-${key.id}`} className="px-6 py-4 text-slate-600">
+                      {formatDate(key.created_at)}
+                    </td>
+                    <td className="px-6 py-4 text-slate-600">{formatDate(key.last_used_at)}</td>
+                    <td className="px-6 py-4 text-slate-600">{formatDate(key.expires_at)}</td>
+                    <td className="px-6 py-4">
+                      <span
+                        data-testid={`status-badge-${key.id}`}
+                        className={[
+                          'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium',
+                          STATE_CLASSES[state],
+                        ].join(' ')}
+                      >
+                        {state}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4">
                       <button
-                        data-testid={`revoke-button-${key.id}`}
-                        onClick={() => handleRevoke(key)}
+                        data-testid={`delete-button-${key.id}`}
+                        onClick={() => {
+                          setDeleteError(null);
+                          setPendingDelete(key);
+                        }}
                         className="text-red-600 hover:text-red-800 text-sm font-medium"
                       >
-                        Revoke
+                        Delete
                       </button>
-                    )}
-                  </td>
-                </tr>
-              ))}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

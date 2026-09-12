@@ -16,8 +16,12 @@ from backend.app.db.session import SessionLocal
 from backend.app.models.experiment import Experiment, ExperimentStatus
 from backend.app.services.notification_service import NotificationService
 from backend.app.core.logging import get_logger
+from backend.app.core.metrics import update_active_experiments
+from backend.app.core.scheduler_tick import run_locked_tick
 
 logger = get_logger(__name__)
+
+SCHEDULER_NAME = "experiment"
 
 class ExperimentScheduler:
     """Handles scheduled tasks for experiments."""
@@ -63,8 +67,9 @@ class ExperimentScheduler:
         """Run the scheduler loop."""
         while self.is_running:
             try:
-                # Process experiments that need status updates
-                await self.process_scheduled_experiments()
+                # One tick under the advisory lock; records the run and
+                # skips when another replica holds the lock.
+                await run_locked_tick(SCHEDULER_NAME, self.process_scheduled_experiments)
 
                 # Wait for the next interval
                 await asyncio.sleep(self.interval_minutes * 60)
@@ -75,7 +80,7 @@ class ExperimentScheduler:
                 # Wait a bit before trying again
                 await asyncio.sleep(60)
 
-    async def process_scheduled_experiments(self):
+    async def process_scheduled_experiments(self) -> Dict[str, int]:
         """
         Process experiments that need status updates based on their scheduled dates.
 
@@ -84,8 +89,15 @@ class ExperimentScheduler:
         2. Experiments in ACTIVE status that should be completed (time-based)
         3. Experiments in ACTIVE status that should be stopped due to
            bayesian_decision being STOP_WINNER or STOP_FUTILE (EP-035 Batch 2)
+
+        Returns ``{"items_processed": n, "items_failed": m}`` for the run record.
         """
         logger.info("Processing scheduled experiments")
+
+        activated_count = 0
+        completed_count = 0
+        bayesian_stopped_count = 0
+        failed_count = 0
 
         # Use a new database session for this task
         db = SessionLocal()
@@ -102,7 +114,6 @@ class ExperimentScheduler:
             ).all()
 
             # Activate experiments
-            activated_count = 0
             for experiment in experiments_to_activate:
                 try:
                     experiment.status = ExperimentStatus.ACTIVE
@@ -121,6 +132,7 @@ class ExperimentScheduler:
                     except Exception as exc:
                         logger.warning("Notification failed (non-critical): %s", exc)
                 except Exception as e:
+                    failed_count += 1
                     logger.error(f"Error activating experiment {experiment.id}: {str(e)}")
 
             # Commit all activation changes before checking for experiments to complete
@@ -137,7 +149,6 @@ class ExperimentScheduler:
             ).all()
 
             # Complete experiments
-            completed_count = 0
             for experiment in experiments_to_complete:
                 try:
                     experiment.status = ExperimentStatus.COMPLETED
@@ -156,6 +167,7 @@ class ExperimentScheduler:
                     except Exception as exc:
                         logger.warning("Notification failed (non-critical): %s", exc)
                 except Exception as e:
+                    failed_count += 1
                     logger.error(f"Error completing experiment {experiment.id}: {str(e)}")
 
             # Commit completion changes
@@ -164,7 +176,6 @@ class ExperimentScheduler:
 
             # EP-035 Batch 2: Stop ACTIVE experiments where bayesian_decision
             # is STOP_WINNER or STOP_FUTILE (Bayesian stopping rules triggered).
-            bayesian_stopped_count = 0
             try:
                 _bayesian_stop_decisions = ("STOP_WINNER", "STOP_FUTILE")
                 experiments_to_bayesian_stop = db.query(Experiment).filter(
@@ -195,6 +206,7 @@ class ExperimentScheduler:
                                 "Notification failed (non-critical): %s", exc
                             )
                     except Exception as e:
+                        failed_count += 1
                         logger.error(
                             f"Error bayesian-stopping experiment {experiment.id}: "
                             f"{str(e)}"
@@ -218,10 +230,38 @@ class ExperimentScheduler:
             else:
                 logger.info("No experiments required scheduling updates")
 
+            # Prometheus: active_experiments_gauge reflects the post-tick state.
+            self._update_active_experiments_gauge(db)
+
         except Exception as e:
+            failed_count += 1
             logger.error(f"Error processing scheduled experiments: {str(e)}")
         finally:
             db.close()
+
+        return {
+            "items_processed": activated_count + completed_count + bayesian_stopped_count,
+            "items_failed": failed_count,
+            "metadata": {
+                "activated": activated_count,
+                "completed": completed_count,
+                "bayesian_stopped": bayesian_stopped_count,
+            },
+        }
+
+    @staticmethod
+    def _update_active_experiments_gauge(db: Session) -> None:
+        """Set ``active_experiments_gauge`` from the database (best-effort)."""
+        try:
+            count = (
+                db.query(Experiment)
+                .filter(Experiment.status == ExperimentStatus.ACTIVE)
+                .count()
+            )
+            if isinstance(count, int):
+                update_active_experiments(count)
+        except Exception as exc:  # pragma: no cover - metrics must never break the tick
+            logger.debug(f"Could not update active_experiments_gauge: {exc}")
 
 # Create a singleton instance of the scheduler
 experiment_scheduler = ExperimentScheduler()

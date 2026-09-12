@@ -1,4 +1,4 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+import { apiFetch } from '@/services/api';
 
 export interface Workspace {
   id: string;
@@ -50,73 +50,41 @@ export interface WorkspaceInvite {
   expires_at: string;
 }
 
-async function apiFetch<T>(url: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_URL}${url}`, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(options?.headers ?? {}),
-    },
-  });
-  if (!response.ok) {
-    const text = await response.text().catch(() => response.statusText);
-    throw new Error(text || `Request failed: ${response.status}`);
-  }
-  return response.json() as Promise<T>;
-}
-
-async function apiDelete(url: string): Promise<void> {
-  const response = await fetch(`${API_URL}${url}`, { method: 'DELETE' });
-  if (!response.ok) {
-    const text = await response.text().catch(() => response.statusText);
-    throw new Error(text || `Request failed: ${response.status}`);
-  }
-}
-
 export const workspaceService = {
   list: () =>
     apiFetch<Workspace[]>('/api/v1/workspaces/'),
 
   create: (data: Partial<Workspace>) =>
-    apiFetch<Workspace>('/api/v1/workspaces/', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    }),
+    apiFetch<Workspace>('/api/v1/workspaces/', { method: 'POST', json: data }),
 
   get: (id: string) =>
     apiFetch<Workspace>(`/api/v1/workspaces/${id}`),
 
   update: (id: string, data: Partial<Workspace>) =>
-    apiFetch<Workspace>(`/api/v1/workspaces/${id}`, {
-      method: 'PUT',
-      body: JSON.stringify(data),
-    }),
+    apiFetch<Workspace>(`/api/v1/workspaces/${id}`, { method: 'PUT', json: data }),
 
   delete: (id: string) =>
-    apiDelete(`/api/v1/workspaces/${id}`),
+    apiFetch<void>(`/api/v1/workspaces/${id}`, { method: 'DELETE' }),
 
   listMembers: (id: string) =>
     apiFetch<WorkspaceMember[]>(`/api/v1/workspaces/${id}/members`),
 
   addMember: (id: string, data: { user_id: string; role: string }) =>
-    apiFetch<WorkspaceMember>(`/api/v1/workspaces/${id}/members`, {
-      method: 'POST',
-      body: JSON.stringify(data),
-    }),
+    apiFetch<WorkspaceMember>(`/api/v1/workspaces/${id}/members`, { method: 'POST', json: data }),
 
   updateMember: (id: string, userId: string, role: string) =>
     apiFetch<WorkspaceMember>(`/api/v1/workspaces/${id}/members/${userId}`, {
       method: 'PUT',
-      body: JSON.stringify({ role }),
+      json: { role },
     }),
 
   removeMember: (id: string, userId: string) =>
-    apiDelete(`/api/v1/workspaces/${id}/members/${userId}`),
+    apiFetch<void>(`/api/v1/workspaces/${id}/members/${userId}`, { method: 'DELETE' }),
 
   sendInvite: (id: string, email: string, role: string) =>
     apiFetch<WorkspaceInvite>(`/api/v1/workspaces/${id}/invites`, {
       method: 'POST',
-      body: JSON.stringify({ email, role }),
+      json: { email, role },
     }),
 
   getInvite: (token: string) =>
@@ -133,11 +101,11 @@ export const workspaceService = {
   createAPIKey: (id: string, data: { name: string; scopes: string[] }) =>
     apiFetch<CreateWorkspaceAPIKeyResponse>(`/api/v1/workspaces/${id}/api-keys`, {
       method: 'POST',
-      body: JSON.stringify(data),
+      json: data,
     }),
 
   revokeAPIKey: (id: string, keyId: string) =>
-    apiDelete(`/api/v1/workspaces/${id}/api-keys/${keyId}`),
+    apiFetch<void>(`/api/v1/workspaces/${id}/api-keys/${keyId}`, { method: 'DELETE' }),
 
   rotateAPIKey: (id: string, keyId: string) =>
     apiFetch<CreateWorkspaceAPIKeyResponse>(
