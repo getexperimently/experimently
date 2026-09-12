@@ -1,4 +1,4 @@
-import { FeatureFlagsService } from '@/services/featureFlags';
+import { FeatureFlagsService, isFlagOn, flagRules } from '@/services/featureFlags';
 import { ApiError, TOKEN_STORAGE_KEY } from '@/services/api';
 
 const mockFetch = jest.fn();
@@ -46,18 +46,18 @@ describe('FeatureFlagsService.list', () => {
     expect(url).toBe(`${BASE}/api/v1/feature-flags`);
   });
 
-  it('appends status param', async () => {
+  it('upper-cases the status param to match the DB enum', async () => {
     mockOk({ items: [] });
     await FeatureFlagsService.list({ status: 'active' });
     const url = mockFetch.mock.calls[0][0] as string;
-    expect(url).toContain('status=active');
+    expect(url).toContain('status=ACTIVE');
   });
 
-  it('appends page and limit params', async () => {
+  it('appends skip and limit params', async () => {
     mockOk({ items: [] });
-    await FeatureFlagsService.list({ page: 3, limit: 5 });
+    await FeatureFlagsService.list({ skip: 15, limit: 5 });
     const url = mockFetch.mock.calls[0][0] as string;
-    expect(url).toContain('page=3');
+    expect(url).toContain('skip=15');
     expect(url).toContain('limit=5');
   });
 
@@ -100,7 +100,7 @@ describe('FeatureFlagsService.get', () => {
 
 describe('FeatureFlagsService.create', () => {
   it('sends POST with JSON body', async () => {
-    const data = { name: 'New Flag' };
+    const data = { name: 'New Flag', key: 'new_flag' };
     mockOk({ id: 'f1', ...data });
     await FeatureFlagsService.create(data);
     expect(mockFetch).toHaveBeenCalledWith(`${BASE}/api/v1/feature-flags`, jsonInit('POST', data));
@@ -108,7 +108,7 @@ describe('FeatureFlagsService.create', () => {
 
   it('throws on error', async () => {
     mockError(400, 'Bad Request');
-    await expect(FeatureFlagsService.create({ name: '' })).rejects.toThrow('Bad Request');
+    await expect(FeatureFlagsService.create({ name: '', key: '' })).rejects.toThrow('Bad Request');
   });
 });
 
@@ -139,5 +139,62 @@ describe('FeatureFlagsService.delete', () => {
   it('throws on error', async () => {
     mockError(404, 'Not Found');
     await expect(FeatureFlagsService.delete('f1')).rejects.toThrow('Not Found');
+  });
+});
+
+describe('FeatureFlagsService.setEnabled', () => {
+  it('POSTs to /enable with a ToggleRequest body when turning on', async () => {
+    mockOk({ id: 'f1', status: 'active' });
+    await FeatureFlagsService.setEnabled('f1', true, 'launch');
+    expect(mockFetch).toHaveBeenCalledWith(
+      `${BASE}/api/v1/feature-flags/f1/enable`,
+      jsonInit('POST', { reason: 'launch' }),
+    );
+  });
+
+  it('POSTs to /disable when turning off', async () => {
+    mockOk({ id: 'f1', status: 'inactive' });
+    await FeatureFlagsService.setEnabled('f1', false);
+    expect(mockFetch).toHaveBeenCalledWith(
+      `${BASE}/api/v1/feature-flags/f1/disable`,
+      jsonInit('POST', { reason: null }),
+    );
+  });
+});
+
+describe('FeatureFlagsService.listRolloutSchedules', () => {
+  it('filters /rollout-schedules by feature_flag_id', async () => {
+    mockOk({ items: [], total: 0, skip: 0, limit: 50 });
+    await FeatureFlagsService.listRolloutSchedules('f1');
+    const url = mockFetch.mock.calls[0][0] as string;
+    expect(url.startsWith(`${BASE}/api/v1/rollout-schedules?`)).toBe(true);
+    expect(url).toContain('feature_flag_id=f1');
+  });
+});
+
+describe('FeatureFlagsService.safetyCheck', () => {
+  it('calls the safety check route', async () => {
+    mockOk({ feature_flag_id: 'f1', is_healthy: true, metrics: [] });
+    await FeatureFlagsService.safetyCheck('f1');
+    expect(mockFetch).toHaveBeenCalledWith(
+      `${BASE}/api/v1/safety/feature-flags/f1/check`,
+      expect.any(Object),
+    );
+  });
+});
+
+describe('isFlagOn / flagRules helpers', () => {
+  it('prefers status over is_active', () => {
+    expect(isFlagOn({ status: 'active', is_active: false })).toBe(true);
+    expect(isFlagOn({ status: 'INACTIVE', is_active: true })).toBe(false);
+    expect(isFlagOn({ is_active: true })).toBe(true);
+    expect(isFlagOn({})).toBe(false);
+  });
+
+  it('reads targeting_rules, then the legacy rules key', () => {
+    const rules = { logical_operator: 'AND', groups: [] };
+    expect(flagRules({ targeting_rules: rules })).toBe(rules);
+    expect(flagRules({ rules })).toBe(rules);
+    expect(flagRules({})).toBeNull();
   });
 });

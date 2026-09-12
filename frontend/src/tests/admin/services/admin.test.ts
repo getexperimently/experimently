@@ -1,5 +1,6 @@
 import { AdminService } from '@/services/admin';
 import { ApiError, TOKEN_STORAGE_KEY } from '@/services/api';
+import { SafetySettings } from '@/types/admin';
 
 const mockFetch = jest.fn();
 global.fetch = mockFetch;
@@ -130,16 +131,59 @@ describe('AdminService', () => {
     });
   });
 
-  describe('getSafetySettings', () => {
-    it('calls /safety/settings endpoint', async () => {
-      mockOk({
-        error_rate_threshold: 0.05,
-        latency_threshold_ms: 500,
-        rollback_policy: 'auto',
-        monitoring_window_minutes: 15,
-      });
-      await AdminService.getSafetySettings();
+  describe('safety', () => {
+    const settings: SafetySettings = {
+      id: 'settings-1',
+      enable_automatic_rollbacks: true,
+      default_metrics: {
+        error_rate: { warning_threshold: 0.02, critical_threshold: 0.05, comparison_type: 'greater_than' },
+      },
+      created_at: '2026-01-01T00:00:00Z',
+      updated_at: '2026-01-01T00:00:00Z',
+    };
+
+    it('getSafetySettings calls GET /safety/settings', async () => {
+      mockOk(settings);
+      const result = await AdminService.getSafetySettings();
       expect(mockFetch).toHaveBeenCalledWith(`${BASE}/api/v1/safety/settings`, expect.any(Object));
+      expect(result.enable_automatic_rollbacks).toBe(true);
+    });
+
+    it('updateSafetySettings POSTs SafetySettingsUpdate to /safety/settings', async () => {
+      mockOk(settings);
+      await AdminService.updateSafetySettings({
+        enable_automatic_rollbacks: true,
+        default_metrics: settings.default_metrics,
+      });
+      const [url, init] = mockFetch.mock.calls[0];
+      expect(url).toBe(`${BASE}/api/v1/safety/settings`);
+      expect(init.method).toBe('POST');
+      expect(JSON.parse(init.body)).toEqual({
+        enable_automatic_rollbacks: true,
+        default_metrics: settings.default_metrics,
+      });
+    });
+
+    it('does not duplicate the per-flag safety check (FeatureFlagsService.safetyCheck owns it)', () => {
+      expect(AdminService).not.toHaveProperty('getFlagSafetyStatus');
+    });
+
+    it('rollbackFlag POSTs /safety/feature-flags/{id}/rollback with query params', async () => {
+      mockOk({ success: true, feature_flag_id: 'flag-1', message: 'ok', timestamp: 'now' });
+      await AdminService.rollbackFlag('flag-1', 'error spike');
+      const [url, init] = mockFetch.mock.calls[0];
+      expect(url).toBe(
+        `${BASE}/api/v1/safety/feature-flags/flag-1/rollback?percentage=0&reason=error+spike`,
+      );
+      expect(init.method).toBe('POST');
+      expect(init.body).toBeUndefined();
+    });
+
+    it('rollbackFlag omits an empty reason and honours a custom percentage', async () => {
+      mockOk({ success: true, feature_flag_id: 'flag-1', message: 'ok', timestamp: 'now' });
+      await AdminService.rollbackFlag('flag-1', '   ', 10);
+      const [url] = mockFetch.mock.calls[0];
+      expect(url).toBe(`${BASE}/api/v1/safety/feature-flags/flag-1/rollback?percentage=10`);
     });
   });
 

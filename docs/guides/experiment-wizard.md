@@ -1,6 +1,13 @@
-# No-Code Experiment Wizard
+# Guided experiment builder (API)
 
-The experiment wizard is a 5-step guided interface for designing and launching experiments without writing code or calling the API directly. It is intended for product managers, analysts, and other non-technical users.
+The wizard is a 5-step guided flow for designing an experiment: it keeps a draft
+while you answer one question at a time, validates each step, and creates the
+experiment when you submit. Submitting writes a real experiment in DRAFT status,
+owned by the caller, and discards the draft.
+
+**This release ships the wizard as an API only.** There is no wizard screen in the
+dashboard; `/experiments/new` is a single form. Drafts are held in the API process's
+memory, so they do not survive a restart and are not shared between replicas.
 
 ---
 
@@ -8,7 +15,7 @@ The experiment wizard is a 5-step guided interface for designing and launching e
 
 | Step | Name | What You Configure |
 |------|------|--------------------|
-| 1 | Choose Type | Experiment type (A/B, multivariate, bandit) |
+| 1 | Choose Type | Experiment type (A/B, multivariate, bandit, feature-flag rollout) |
 | 2 | Define Hypothesis | Experiment name, description, and hypothesis statement |
 | 3 | Select Metrics | Primary metric, guardrail metrics |
 | 4 | Configure Targeting | Audience rules, traffic allocation, MDE, baseline rate |

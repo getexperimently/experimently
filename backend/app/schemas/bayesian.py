@@ -3,6 +3,8 @@ from typing import Optional, List
 import enum
 from pydantic import BaseModel, Field, field_validator, ConfigDict
 
+from backend.app.core.stats_engine import ENGINE_VERSION
+
 
 class PriorFamily(str, enum.Enum):
     """Supported conjugate prior families."""
@@ -107,6 +109,12 @@ class BayesianResultsResponse(BaseModel):
         is_enabled: Whether Bayesian analysis is enabled for this experiment.
         decision: Stopping decision based on Bayesian stopping rules.
         variant_results: Per-variant Bayesian results.
+        seed: Deterministic RNG seed used for the Monte Carlo draws
+            (``blake2b(experiment_id | as_of day | n_samples)``); ``None``
+            when no sampling was performed.
+        n_samples: Number of Monte Carlo samples drawn per variant.
+        engine_version: Version of the statistics engine that produced
+            these numbers.
     """
 
     model_config = ConfigDict(from_attributes=True)
@@ -114,3 +122,17 @@ class BayesianResultsResponse(BaseModel):
     is_enabled: bool
     decision: Optional[BayesianDecision] = None
     variant_results: List[BayesianVariantResult] = []
+    seed: Optional[int] = Field(
+        None,
+        ge=0,
+        description="Deterministic RNG seed used for the Monte Carlo draws.",
+    )
+    n_samples: Optional[int] = Field(
+        None,
+        ge=1,
+        description="Monte Carlo samples drawn per variant.",
+    )
+    engine_version: str = Field(
+        ENGINE_VERSION,
+        description="Statistics engine version that produced these results.",
+    )

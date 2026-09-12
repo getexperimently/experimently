@@ -251,6 +251,12 @@ class Settings(BaseSettings):
     # Observability (read by backend/app/core/health.py, logger.py, main.py)
     LOG_LEVEL: str = "INFO"
     LOG_FORMAT: Optional[Literal["json", "console"]] = None  # None -> json in staging/production, console otherwise
+    # Days of `analysis_snapshots` and `bandit_state_history` to keep. The
+    # request path writes at most one snapshot per experiment, kind and day,
+    # but the bandit scheduler records every tick, so the tables still grow
+    # without a purge. 0 disables the purge.
+    ANALYSIS_HISTORY_RETENTION_DAYS: int = 90
+
     METRICS_ENABLED: bool = True
     METRICS_TOKEN: Optional[str] = None  # required to read /metrics outside development/test
     REDIS_REQUIRED: bool = False  # when true, /health/ready fails without Redis

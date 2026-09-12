@@ -10,13 +10,22 @@ Algorithms
 
 All public ``compute_weights`` methods return a ``Dict[str, float]`` that maps
 variant_id → allocation weight, where weights sum to 1.0.
+
+Thompson sampling is the only stochastic algorithm.  Its draws come from
+``numpy.random.default_rng(seed)``; the scheduler passes a seed derived from
+``(experiment_id, tick day, n_samples)`` so a tick can be reproduced exactly.
 """
 
 import math
 from dataclasses import dataclass, field
-from typing import Dict, List
+from typing import Dict, List, Optional, Sequence
 
 import numpy as np
+
+from backend.app.core.stats_engine import derive_seed, make_rng
+
+#: Namespace for the fallback seed used when a caller passes ``seed=None``.
+_FALLBACK_SEED_NAMESPACE = "bandit_service"
 
 
 # ---------------------------------------------------------------------------
@@ -66,10 +75,50 @@ class ThompsonSampling:
     N_SAMPLES: int = 10_000    # samples used to estimate selection probabilities
 
     @staticmethod
+    def arm_fingerprint(
+        alpha: Optional[Sequence[float]],
+        beta: Optional[Sequence[float]],
+    ) -> str:
+        """Return a stable string identifying the arms' posterior parameters.
+
+        ``%.17g`` round-trips a float exactly, so the same arms always give
+        the same fingerprint and different arms (almost surely) do not.
+        """
+        if not alpha and not beta:
+            return ""
+        pairs = zip(alpha or [], beta or [])
+        return ";".join(f"{float(a):.17g}:{float(b):.17g}" for a, b in pairs)
+
+    @staticmethod
+    def resolve_seed(
+        seed: Optional[int],
+        n_samples: int,
+        alpha: Optional[Sequence[float]] = None,
+        beta: Optional[Sequence[float]] = None,
+    ) -> int:
+        """Return ``seed``, or a fallback derived from the arms themselves.
+
+        The scheduler passes a seed derived from ``(experiment_id, tick day,
+        n_samples)``.  Without one the seed comes from ``(namespace, arm
+        fingerprint, n_samples)``, so each set of arm statistics draws its own
+        stream instead of every seedless caller on the platform sharing one
+        fixed sequence (which would turn Monte Carlo error into a fixed bias);
+        repeating a call on the same arms still reproduces it exactly.
+        """
+        if seed is not None:
+            return int(seed)
+        return derive_seed(
+            _FALLBACK_SEED_NAMESPACE,
+            ThompsonSampling.arm_fingerprint(alpha, beta),
+            n_samples,
+        )
+
+    @staticmethod
     def sample(
         alpha: List[float],
         beta: List[float],
         n_samples: int = 10_000,
+        seed: Optional[int] = None,
     ) -> List[float]:
         """
         Draw ``n_samples`` from each Beta posterior and estimate arm-selection
@@ -83,6 +132,10 @@ class ThompsonSampling:
             Posterior beta parameter for each variant (shape: n_variants).
         n_samples:
             Number of Monte Carlo draws used to estimate probabilities.
+        seed:
+            RNG seed (see ``backend.app.core.stats_engine.derive_seed``);
+            ``None`` derives one from ``alpha``/``beta`` (see
+            :meth:`resolve_seed`).
 
         Returns
         -------
@@ -95,7 +148,9 @@ class ThompsonSampling:
             return [1.0]
 
         # Draw n_samples from each Beta posterior: shape (n_samples, n_variants)
-        rng = np.random.default_rng()
+        rng = make_rng(
+            ThompsonSampling.resolve_seed(seed, n_samples, alpha, beta)
+        )
         draws = rng.beta(alpha, beta, size=(n_samples, n_variants))
 
         # For each sample pick the arm with the maximum draw
@@ -107,7 +162,10 @@ class ThompsonSampling:
         return probabilities
 
     @staticmethod
-    def compute_weights(variant_stats: List[VariantStats]) -> Dict[str, float]:
+    def compute_weights(
+        variant_stats: List[VariantStats],
+        seed: Optional[int] = None,
+    ) -> Dict[str, float]:
         """
         Compute allocation weights for all variants via Thompson Sampling.
 
@@ -115,6 +173,9 @@ class ThompsonSampling:
         ----------
         variant_stats:
             Per-variant statistics list.
+        seed:
+            RNG seed for the ``N_SAMPLES`` Monte Carlo draws; ``None`` uses
+            the deterministic module fallback.
 
         Returns
         -------
@@ -132,7 +193,9 @@ class ThompsonSampling:
             alpha.append(ThompsonSampling.PRIOR_ALPHA + vs.successes)
             beta_vals.append(ThompsonSampling.PRIOR_BETA + vs.failures)
 
-        probs = ThompsonSampling.sample(alpha, beta_vals, ThompsonSampling.N_SAMPLES)
+        probs = ThompsonSampling.sample(
+            alpha, beta_vals, ThompsonSampling.N_SAMPLES, seed=seed
+        )
         return {vs.variant_id: p for vs, p in zip(variant_stats, probs)}
 
 
@@ -354,11 +417,17 @@ class BanditService:
         return stats
 
     @classmethod
+    def is_stochastic(cls, algorithm: str) -> bool:
+        """True when ``algorithm`` draws Monte Carlo samples (needs a seed)."""
+        return algorithm == "thompson_sampling"
+
+    @classmethod
     def compute_weights(
         cls,
         algorithm: str,
         variant_data: Dict[str, Dict],
         epsilon: float = 0.1,
+        seed: Optional[int] = None,
     ) -> Dict[str, float]:
         """
         Compute allocation weights for all variants.
@@ -373,6 +442,8 @@ class BanditService:
                              "pulls": int, "total_reward": float}}``
         epsilon:
             Exploration fraction for epsilon-greedy (ignored by other algorithms).
+        seed:
+            RNG seed for Thompson sampling (ignored by deterministic algorithms).
 
         Returns
         -------
@@ -394,5 +465,8 @@ class BanditService:
 
         if algorithm == "epsilon_greedy":
             return algo_cls.compute_weights(variant_stats, epsilon=epsilon)
+
+        if algorithm == "thompson_sampling":
+            return algo_cls.compute_weights(variant_stats, seed=seed)
 
         return algo_cls.compute_weights(variant_stats)

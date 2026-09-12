@@ -1,33 +1,48 @@
 import React from 'react';
-import { FlagSafetyStatus } from '@/types/admin';
+import { FlagHealth, FlagSafetyStatus } from '@/types/admin';
 
 interface SafetyStatusCardProps {
   flag: FlagSafetyStatus;
   onRollback: (flagId: string) => void;
 }
 
-const STATUS_BADGE_CLASSES: Record<FlagSafetyStatus['status'], string> = {
+const STATUS_BADGE_CLASSES: Record<FlagHealth, string> = {
   healthy: 'bg-green-100 text-green-800',
   warning: 'bg-yellow-100 text-yellow-800',
   critical: 'bg-red-100 text-red-800',
 };
 
+/** `error_rate` is a 0–1 fraction on the API; show it as a percentage. */
+export function formatErrorRate(value: number | null): string {
+  return value === null ? 'n/a' : `${(value * 100).toFixed(2)}%`;
+}
+
+export function formatLatency(value: number | null): string {
+  return value === null ? 'n/a' : `${Math.round(value)} ms`;
+}
+
 export function SafetyStatusCard({ flag, onRollback }: SafetyStatusCardProps) {
-  const badgeClass = STATUS_BADGE_CLASSES[flag.status];
-  const showRollback = flag.status === 'warning' || flag.status === 'critical';
+  const badgeClass = STATUS_BADGE_CLASSES[flag.health];
+  const showRollback = flag.health === 'warning' || flag.health === 'critical';
+  const unmeasured = flag.check.details?.unmeasured_metrics;
+  const disabled = flag.check.metrics.length === 0;
 
   return (
     <div
       data-testid="safety-status-card"
+      data-flag-id={flag.flag_id}
       className="bg-white border border-slate-200 rounded-lg p-4 flex flex-col gap-3"
     >
       <div className="flex items-center justify-between gap-2">
-        <span className="font-semibold text-slate-800 text-sm truncate">{flag.flag_name}</span>
+        <div className="min-w-0">
+          <span className="block font-semibold text-slate-800 text-sm truncate">{flag.flag_name}</span>
+          <span className="block font-mono text-xs text-slate-500 truncate">{flag.flag_key}</span>
+        </div>
         <span
           data-testid="status-badge"
           className={`text-xs font-medium px-2 py-0.5 rounded-full whitespace-nowrap ${badgeClass}`}
         >
-          {flag.status}
+          {flag.health}
         </span>
       </div>
 
@@ -35,15 +50,25 @@ export function SafetyStatusCard({ flag, onRollback }: SafetyStatusCardProps) {
         <div className="flex justify-between">
           <span>Error Rate</span>
           <span data-testid="error-rate-value" className="font-medium text-slate-800">
-            {flag.current_error_rate.toFixed(2)}%
+            {formatErrorRate(flag.error_rate)}
           </span>
         </div>
         <div className="flex justify-between">
           <span>Latency</span>
           <span data-testid="latency-value" className="font-medium text-slate-800">
-            {flag.current_latency_ms} ms
+            {formatLatency(flag.latency_ms)}
           </span>
         </div>
+        {disabled && (
+          <p data-testid="safety-disabled-note" className="text-xs text-slate-500">
+            No safety metrics configured for this flag.
+          </p>
+        )}
+        {Array.isArray(unmeasured) && unmeasured.length > 0 && (
+          <p data-testid="safety-unmeasured-note" className="text-xs text-slate-500">
+            Not yet measured: {unmeasured.join(', ')}
+          </p>
+        )}
       </div>
 
       {showRollback && (

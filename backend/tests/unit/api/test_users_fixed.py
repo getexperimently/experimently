@@ -108,9 +108,12 @@ def test_update_user_superuser(
     assert data["full_name"] == update_data["full_name"]
     assert data["is_superuser"] == update_data["is_superuser"]
 
-    # Verify mock calls
+    # Verify mock calls.  ``get_password_hash`` hashes the *plain text*: it
+    # calls ``.encode()``, so handing it the SecretStr wrapper is a 500.
     assert mock_hash.call_count == 1
-    assert isinstance(mock_hash.call_args[0][0], SecretStr)
+    hashed_arg = mock_hash.call_args[0][0]
+    assert not isinstance(hashed_arg, SecretStr)
+    assert hashed_arg == update_data["password"]
     mock_db.commit.assert_called_once()
 
     # Reset overrides

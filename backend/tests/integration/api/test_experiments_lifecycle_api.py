@@ -51,6 +51,7 @@ docstrings on the relevant tests for detail):
     given the stricter Query/Pydantic validation that runs first (bug #7,
     not something to "fix" — just documenting unreachable code).
 """
+import uuid
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -296,19 +297,42 @@ class TestDeleteExperimentOwnership:
         )
         assert response.status_code == 403, response.text
 
+    def test_analyst_cannot_create_an_experiment(self, analyst_client):
+        """ANALYST has READ and LIST on EXPERIMENT, not CREATE.
+
+        Regression: the endpoint used to gate creation on the substring
+        "viewer" appearing in the username, so an analyst (and any VIEWER not
+        named "viewer") could create experiments.
+        """
+        response = analyst_client.post(
+            "/api/v1/experiments/", json=_valid_create_payload("Analyst Create Attempt")
+        )
+        assert response.status_code == 403, response.text
+
     def test_analyst_owner_without_delete_permission_returns_403(
-        self, analyst_client
+        self, analyst_client, analyst_user, db_session
     ):
-        """Analyst *does* own this experiment (analyst can create), but the
-        ANALYST role lacks DELETE permission on EXPERIMENT -- this exercises
-        the `check_permission(..., Action.DELETE)` branch distinct from the
+        """An owner who lacks DELETE still cannot delete.
+
+        The analyst cannot create through the API, so the experiment is
+        seeded directly with the analyst as owner; this exercises the
+        `check_permission(..., Action.DELETE)` branch rather than the
         ownership-mismatch branch above.
         """
-        create_response = analyst_client.post(
-            "/api/v1/experiments/", json=_valid_create_payload("Analyst Owns Draft Exp")
+        from backend.app.models.experiment import Experiment, ExperimentStatus
+
+        experiment = Experiment(
+            name=f"Analyst Owns Draft {uuid.uuid4().hex[:8]}",
+            key=f"analyst_owns_{uuid.uuid4().hex[:8]}",
+            description="Owned by the analyst, seeded directly",
+            hypothesis="Ownership does not grant DELETE",
+            status=ExperimentStatus.DRAFT,
+            owner_id=analyst_user.id,
         )
-        assert create_response.status_code == 201, create_response.text
-        exp_id = create_response.json()["id"]
+        db_session.add(experiment)
+        db_session.commit()
+        db_session.refresh(experiment)
+        exp_id = str(experiment.id)
 
         response = analyst_client.delete(
             f"/api/v1/experiments/{exp_id}", params={"experiment_key": exp_id}

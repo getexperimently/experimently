@@ -26,7 +26,7 @@ export POSTGRES_USER=postgres
 export POSTGRES_PASSWORD=your-password
 
 # Run migrations
-python -m alembic -c app/db/alembic.ini upgrade head
+python -m alembic -c backend/app/db/alembic.ini upgrade head
 ```
 
 `head` refers to the latest migration. This command applies all unapplied migrations in order.
@@ -38,7 +38,7 @@ python -m alembic -c app/db/alembic.ini upgrade head
 Show all migrations and whether they have been applied:
 
 ```bash
-python -m alembic -c app/db/alembic.ini history
+python -m alembic -c backend/app/db/alembic.ini history
 ```
 
 Output:
@@ -59,7 +59,7 @@ Revisions shown with `(head)` are the latest applied migration. Revisions not ye
 Show which migration is currently applied to the database:
 
 ```bash
-python -m alembic -c app/db/alembic.ini current
+python -m alembic -c backend/app/db/alembic.ini current
 ```
 
 Output:
@@ -77,7 +77,7 @@ This is the revision ID of the last migration that was applied to the database.
 When you add or modify SQLAlchemy models, generate a migration script:
 
 ```bash
-python -m alembic -c app/db/alembic.ini revision --autogenerate -m "add email_verified column to users"
+python -m alembic -c backend/app/db/alembic.ini revision --autogenerate -m "add email_verified column to users"
 ```
 
 Alembic inspects the difference between the current models and the database schema, then generates a migration file in `backend/app/db/migrations/versions/`.
@@ -112,17 +112,17 @@ Check for:
 Apply migrations up to a specific revision (not necessarily the latest):
 
 ```bash
-python -m alembic -c app/db/alembic.ini upgrade ab1234567890
+python -m alembic -c backend/app/db/alembic.ini upgrade ab1234567890
 ```
 
 You can also use relative steps:
 
 ```bash
 # Apply the next one migration
-python -m alembic -c app/db/alembic.ini upgrade +1
+python -m alembic -c backend/app/db/alembic.ini upgrade +1
 
 # Apply the next three migrations
-python -m alembic -c app/db/alembic.ini upgrade +3
+python -m alembic -c backend/app/db/alembic.ini upgrade +3
 ```
 
 ---
@@ -132,19 +132,19 @@ python -m alembic -c app/db/alembic.ini upgrade +3
 Roll back the most recent migration:
 
 ```bash
-python -m alembic -c app/db/alembic.ini downgrade -1
+python -m alembic -c backend/app/db/alembic.ini downgrade -1
 ```
 
 Roll back to a specific revision:
 
 ```bash
-python -m alembic -c app/db/alembic.ini downgrade ab1234567890
+python -m alembic -c backend/app/db/alembic.ini downgrade ab1234567890
 ```
 
 Roll back all migrations (to the empty database state):
 
 ```bash
-python -m alembic -c app/db/alembic.ini downgrade base
+python -m alembic -c backend/app/db/alembic.ini downgrade base
 ```
 
 **Note**: Not all migrations are safely reversible. If a migration deletes a column, the downgrade drops data. Review the `downgrade()` function in each migration file before rolling back in production.
@@ -161,10 +161,10 @@ The `stamp` command marks a migration as applied without actually running its SQ
 
 ```bash
 # Mark current database state as "head"
-python -m alembic -c app/db/alembic.ini stamp head
+python -m alembic -c backend/app/db/alembic.ini stamp head
 
 # Mark as a specific revision
-python -m alembic -c app/db/alembic.ini stamp ab1234567890
+python -m alembic -c backend/app/db/alembic.ini stamp ab1234567890
 ```
 
 ---
@@ -180,7 +180,7 @@ FAILED: Multiple head revisions are present for given argument 'head'
 ### Diagnosis
 
 ```bash
-python -m alembic -c app/db/alembic.ini heads
+python -m alembic -c backend/app/db/alembic.ini heads
 ```
 
 Output:
@@ -195,13 +195,13 @@ cd1234567890 (head)
 Create a merge migration that unifies the two heads:
 
 ```bash
-python -m alembic -c app/db/alembic.ini merge -m "merge heads" ab1234567890 cd1234567890
+python -m alembic -c backend/app/db/alembic.ini merge -m "merge heads" ab1234567890 cd1234567890
 ```
 
 This creates a new migration file with both revisions as its `down_revision`. The merge migration itself has no SQL operations — it exists only to reunify the graph. Apply it normally:
 
 ```bash
-python -m alembic -c app/db/alembic.ini upgrade head
+python -m alembic -c backend/app/db/alembic.ini upgrade head
 ```
 
 ---

@@ -11,8 +11,8 @@ from sqlalchemy.orm import Session
 import uuid
 
 from backend.app.api import deps
-from backend.app.models.user import User
-from backend.app.core.security import get_password_hash
+from backend.app.models.user import User, UserRole
+from backend.app.core.security import get_password_hash, unwrap_secret
 from backend.app.schemas.user import (
     UserCreate,
     UserUpdate,
@@ -103,8 +103,9 @@ async def create_user(
             detail="Username already registered",
         )
 
-    # Create new user
-    hashed_password = get_password_hash(user_in.password)
+    # Create new user.  ``UserCreate.password`` is a ``SecretStr``; bcrypt
+    # needs the plain text behind it.
+    hashed_password = get_password_hash(unwrap_secret(user_in.password))
     user_id = uuid.uuid4()
 
     # Create the user with required fields
@@ -117,11 +118,17 @@ async def create_user(
         "is_active": user_in.is_active,
         "is_superuser": user_in.is_superuser,
     }
+    if user_in.role is not None:
+        # ``UserCreate.role`` is the upper-case enum *name* (ADMIN, ...); the
+        # column stores the ``UserRole`` member.
+        user_data["role"] = UserRole[user_in.role]
 
     user = User(**user_data)
     db.add(user)
     db.commit()
     db.refresh(user)
+
+    role = getattr(user, "role", None)
 
     # Return response directly without schema validation
     # This is necessary to work with the testing mock expectations
@@ -132,6 +139,7 @@ async def create_user(
         "full_name": user.full_name,
         "is_active": user.is_active,
         "is_superuser": user.is_superuser,
+        "role": role.name if isinstance(role, UserRole) else "VIEWER",
         "created_at": user.created_at,
         "updated_at": user.updated_at,
     }
@@ -303,7 +311,7 @@ async def update_user(
     if "password" in update_data:
         password = update_data.pop("password")
         if password:
-            update_data["hashed_password"] = get_password_hash(password)
+            update_data["hashed_password"] = get_password_hash(unwrap_secret(password))
 
     # Update user attributes
     for field in update_data:

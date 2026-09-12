@@ -1,3 +1,5 @@
+import type { SafetyCheckResponse } from '@/types/safety';
+
 export type UserRole = 'ADMIN' | 'DEVELOPER' | 'ANALYST' | 'VIEWER';
 
 export interface AdminUser {
@@ -8,6 +10,31 @@ export interface AdminUser {
   is_active: boolean;
   created_at: string;
   last_login?: string;
+}
+
+/** `UserCreate` — body of `POST /api/v1/users/` (superuser only). */
+export interface CreateUserRequest {
+  username: string;
+  email: string;
+  /** Min 8 chars with at least one upper-case letter, one lower-case letter and one digit. */
+  password: string;
+  full_name?: string | null;
+  is_active?: boolean;
+  is_superuser?: boolean;
+  role?: UserRole;
+}
+
+/** Response of `POST /api/v1/users/`. */
+export interface CreatedUser {
+  id: string;
+  username: string;
+  email: string;
+  full_name: string | null;
+  is_active: boolean;
+  is_superuser: boolean;
+  role: UserRole;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface CustomRole {
@@ -33,21 +60,67 @@ export interface AuditLog {
   action_description: string;
 }
 
-export interface SafetySettings {
-  error_rate_threshold: number;
-  latency_threshold_ms: number;
-  rollback_policy: 'auto' | 'manual';
-  monitoring_window_minutes: number;
+// ---------------------------------------------------------------------------
+// Safety monitoring — mirrors `backend/app/schemas/safety.py`.
+// `SafetyCheckResponse` / `SafetyMetricStatus` live in `@/types/safety`.
+// ---------------------------------------------------------------------------
+
+/** `MetricThreshold`. Thresholds are in the metric's own unit
+ *  (`error_rate` is a 0–1 fraction, `latency` is milliseconds). */
+export interface SafetyMetricThreshold {
+  warning_threshold: number | null;
+  critical_threshold: number | null;
+  comparison_type: 'greater_than' | 'less_than' | 'equal_to';
 }
 
+/** `SafetySettingsResponse` — `GET /api/v1/safety/settings`. */
+export interface SafetySettings {
+  id: string;
+  enable_automatic_rollbacks: boolean;
+  default_metrics: Record<string, SafetyMetricThreshold> | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** `SafetySettingsUpdate` — body of `POST /api/v1/safety/settings`. */
+export interface SafetySettingsUpdate {
+  enable_automatic_rollbacks?: boolean;
+  default_metrics?: Record<string, SafetyMetricThreshold> | null;
+}
+
+/** `RollbackResponse` — `POST /api/v1/safety/feature-flags/{id}/rollback`. */
+export interface RollbackResponse {
+  success: boolean;
+  feature_flag_id: string;
+  message: string;
+  trigger_type?: string | null;
+  previous_percentage?: number | null;
+  new_percentage?: number | null;
+  rollback_record_id?: string | null;
+  timestamp: string;
+  details?: Record<string, unknown> | null;
+}
+
+export type FlagHealth = 'healthy' | 'warning' | 'critical';
+
+/**
+ * Admin dashboard view-model: a flag's `SafetyCheckResponse` joined with the
+ * flag it describes. Built by `toFlagSafetyStatus()` in `@/services/admin`.
+ */
 export interface FlagSafetyStatus {
   flag_id: string;
   flag_name: string;
-  current_error_rate: number;
-  current_latency_ms: number;
-  status: 'healthy' | 'warning' | 'critical';
+  flag_key: string;
+  health: FlagHealth;
+  /** `error_rate` metric as a 0–1 fraction; null when not configured/measured. */
+  error_rate: number | null;
+  /** `latency` / `avg_latency` / `p95_latency` metric in ms; null when absent. */
+  latency_ms: number | null;
+  last_checked: string;
+  check: SafetyCheckResponse;
 }
 
+/** A rollback performed in this session (the API has no rollback-history list). */
 export interface RollbackRecord {
   id: string;
   flag_id: string;
@@ -55,6 +128,8 @@ export interface RollbackRecord {
   rolled_back_by: string;
   reason: string;
   timestamp: string;
+  previous_percentage?: number | null;
+  new_percentage?: number | null;
 }
 
 export interface SchedulerHealth {

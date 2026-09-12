@@ -20,6 +20,8 @@ from pydantic import (
     ConfigDict,
 )
 
+from backend.app.schemas.auth import RoleName
+
 
 class UserBase(BaseModel):
     """Base user model."""
@@ -35,6 +37,24 @@ class UserBase(BaseModel):
 class UserCreate(UserBase):
     """User creation model."""
     password: SecretStr = Field(..., min_length=8)
+    role: Optional[RoleName] = Field(
+        None,
+        description=(
+            "RBAC role name (ADMIN, DEVELOPER, ANALYST or VIEWER; case-insensitive). "
+            "Defaults to VIEWER."
+        ),
+    )
+
+    @field_validator("role", mode="before")
+    @classmethod
+    def normalise_role(cls, v: Any) -> Any:
+        """Accept ``UserRole`` members and lower-/upper-case names alike."""
+        if v is None:
+            return None
+        name = getattr(v, "name", None)
+        if isinstance(name, str):
+            return name.upper()
+        return v.upper() if isinstance(v, str) else v
 
     @field_validator("password")
     @classmethod

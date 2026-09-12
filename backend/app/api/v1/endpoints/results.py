@@ -5,6 +5,7 @@ Provides endpoints for retrieving experiment results, daily time-series data,
 sample size / power analysis, cache invalidation, and sequential testing analysis.
 """
 
+import logging
 import math
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
@@ -14,14 +15,17 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, joinedload
 
 from backend.app.api.deps import get_db, get_current_active_user, get_current_superuser
+from backend.app.models.analysis_snapshot import AnalysisKind
 from backend.app.models.experiment import Experiment, ExperimentStatus
 from backend.app.models.user import User
+from backend.app.schemas.bayesian import BayesianResultsResponse
 from backend.app.schemas.dimensional import DimensionalBreakdownResponse, SegmentBreakdown, SegmentVariantResult as SchemaSegmentVariantResult
 from backend.app.schemas.results import (
     DailyDataPoint,
     DailyResultsResponse,
     ExperimentResultsResponse,
     SampleSizeResult,
+    SRMResult,
     VariantTimeSeries,
 )
 from backend.app.schemas.sequential import SequentialTestingResponse
@@ -31,12 +35,48 @@ from backend.app.schemas.variance_reduction import (
     VarianceReductionMethod,
 )
 from backend.app.services.analysis_service import AnalysisService
+from backend.app.services.analysis_snapshot_service import record_snapshot
 from backend.app.services.cache import CacheService
 from backend.app.services.cuped_service import CupedService
 from backend.app.services.dimensional_analysis_service import DimensionalAnalysisService
 from backend.app.services.sequential_testing_service import SequentialTestingService
+from backend.app.services.srm_service import compute_srm_for_experiment
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+# ---------------------------------------------------------------------------
+# Helper: sample-ratio mismatch (best-effort)
+# ---------------------------------------------------------------------------
+
+
+def _compute_srm(experiment_id: UUID, db: Session) -> Optional[SRMResult]:
+    """
+    Run the SRM chi-square test for an experiment.
+
+    Returns ``None`` when the test is undefined (fewer than two allocated
+    variants, no assignments, or an adaptive/bandit allocation) or when the
+    lookup fails — an SRM check must never turn a results request into an
+    error.
+    """
+    try:
+        result = compute_srm_for_experiment(db, experiment_id)
+    except Exception as exc:  # noqa: BLE001 - best-effort by design
+        logger.warning("SRM check failed for experiment %s: %s", experiment_id, exc)
+        try:
+            db.rollback()
+        except Exception:  # pragma: no cover - defensive
+            pass
+        return None
+    if result is None:
+        return None
+    try:
+        return SRMResult(**result.to_dict())
+    except Exception as exc:  # noqa: BLE001 - defensive against odd DB values
+        logger.warning("SRM result for experiment %s not serialisable: %s", experiment_id, exc)
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -358,6 +398,9 @@ def get_experiment_results(
                 base_alpha=1.0 - confidence_level,
             )
 
+        # --- P0 statistical credibility: sample-ratio mismatch ---
+        srm_response = _compute_srm(experiment_id, db)
+
         response = ExperimentResultsResponse(
             experiment_id=result.get("experiment_id", str(experiment_id)),
             experiment_name=result.get("experiment_name", ""),
@@ -373,12 +416,16 @@ def get_experiment_results(
             sequential_testing=result.get("sequential_testing"),
             breakdown=breakdown_response,
             bayesian_results=result.get("bayesian_results"),
+            srm=srm_response,
         )
     except Exception as exc:
         raise HTTPException(
             status_code=500,
             detail=f"Failed to serialise results: {exc}",
         )
+
+    # --- Persist audit snapshots (best-effort; never fails the response) ---
+    _record_results_snapshots(db, response)
 
     # --- Cache write ---
     try:
@@ -390,6 +437,43 @@ def get_experiment_results(
         pass  # Cache write failure is non-fatal
 
     return response
+
+
+def _record_results_snapshots(db: Session, response: ExperimentResultsResponse) -> None:
+    """
+    Write the ``analysis_snapshots`` rows for one fresh results computation.
+
+    One ``frequentist`` row carries the whole response; when the experiment
+    has Bayesian analysis enabled a second ``bayesian`` row records the seed
+    and sample count that produced the posteriors.  Cache hits do not reach
+    this function, so a row means the numbers were actually recomputed.
+    """
+    try:
+        payload = response.model_dump(mode="json")
+    except Exception as exc:  # noqa: BLE001 - never fail the response
+        logger.warning("Could not serialise results for snapshot: %s", exc)
+        return
+
+    record_snapshot(
+        db,
+        response.experiment_id,
+        AnalysisKind.FREQUENTIST,
+        payload,
+        as_of=response.computed_at,
+    )
+
+    bayesian = response.bayesian_results
+    if bayesian is not None and bayesian.is_enabled:
+        record_snapshot(
+            db,
+            response.experiment_id,
+            AnalysisKind.BAYESIAN,
+            payload.get("bayesian_results") or {},
+            engine_version=bayesian.engine_version,
+            seed=bayesian.seed,
+            n_samples=bayesian.n_samples,
+            as_of=response.computed_at,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -891,7 +975,7 @@ def get_sequential_results(
             "recommendation": analysis.long_running_risk.recommendation,
         }
 
-    return SequentialTestingResponse(
+    response = SequentialTestingResponse(
         method=analysis.method.value,
         msprt_result=msprt_data,
         confidence_sequence=cs_data,
@@ -900,6 +984,19 @@ def get_sequential_results(
         long_running_risk=risk_data,
         recommended_action=analysis.recommended_action,
     )
+
+    # Audit snapshot (best-effort; mSPRT is closed-form, so no seed).
+    try:
+        record_snapshot(
+            db,
+            experiment_id,
+            AnalysisKind.SEQUENTIAL,
+            response.model_dump(mode="json"),
+        )
+    except Exception as exc:  # noqa: BLE001 - never fail the response
+        logger.warning("Sequential snapshot failed for %s: %s", experiment_id, exc)
+
+    return response
 
 
 # ---------------------------------------------------------------------------
@@ -1089,8 +1186,80 @@ def get_cuped_results(
     Returns 404 if the experiment does not exist.
     """
     try:
-        return get_cuped_results_data(experiment_id, db)
+        response = get_cuped_results_data(experiment_id, db)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"CUPED computation failed: {exc}")
+
+    # Audit snapshot (best-effort; CUPED is closed-form, so no seed).
+    try:
+        record_snapshot(
+            db,
+            experiment_id,
+            AnalysisKind.CUPED,
+            response.model_dump(mode="json"),
+            engine_version=response.engine_version,
+            as_of=response.computed_at,
+        )
+    except Exception as exc:  # noqa: BLE001 - never fail the response
+        logger.warning("CUPED snapshot failed for %s: %s", experiment_id, exc)
+
+    return response
+
+
+# ---------------------------------------------------------------------------
+# Endpoint 7 — GET /{experiment_id}/bayesian (P0 statistical credibility)
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/{experiment_id}/bayesian",
+    response_model=BayesianResultsResponse,
+)
+def get_bayesian_results(
+    experiment_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> BayesianResultsResponse:
+    """
+    Get the Bayesian analysis block for an experiment on its own.
+
+    Returns the same ``bayesian_results`` payload that ``GET /results/{id}``
+    embeds, always freshly computed (no cache).  The Monte Carlo seed is
+    derived from ``(experiment_id, UTC day, n_samples)`` and echoed in the
+    response, so two calls on the same day return byte-identical posteriors
+    and the same ``seed``.
+
+    Returns ``is_enabled=false`` (HTTP 200) when the experiment has not opted
+    into Bayesian analysis, and 404 when the experiment does not exist.
+    """
+    experiment = _get_experiment_for_sequential(experiment_id, db)
+    if not experiment:
+        raise HTTPException(status_code=404, detail="Experiment not found")
+
+    service = AnalysisService(db)
+    if not service.is_bayesian_enabled(experiment):
+        return BayesianResultsResponse(is_enabled=False)
+
+    try:
+        response = service.compute_bayesian_results(experiment)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500, detail=f"Bayesian computation failed: {exc}"
+        )
+
+    try:
+        record_snapshot(
+            db,
+            experiment_id,
+            AnalysisKind.BAYESIAN,
+            response.model_dump(mode="json"),
+            engine_version=response.engine_version,
+            seed=response.seed,
+            n_samples=response.n_samples,
+        )
+    except Exception as exc:  # noqa: BLE001 - never fail the response
+        logger.warning("Bayesian snapshot failed for %s: %s", experiment_id, exc)
+
+    return response

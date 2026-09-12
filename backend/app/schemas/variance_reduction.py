@@ -10,6 +10,8 @@ from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from backend.app.core.stats_engine import ENGINE_VERSION
+
 
 # ---------------------------------------------------------------------------
 # Enums
@@ -160,4 +162,19 @@ class CupedResultsResponse(BaseModel):
     )
     computed_at: str = Field(
         ..., description="ISO 8601 UTC timestamp of when the results were computed."
+    )
+    # CUPED is closed-form (OLS theta); there is no Monte Carlo draw, so the
+    # seed and sample count are always null.  They are kept on the schema so
+    # every analysis response shares the same provenance block.
+    seed: Optional[int] = Field(
+        None,
+        description="Always null: CUPED is closed-form and draws no random samples.",
+    )
+    n_samples: Optional[int] = Field(
+        None,
+        description="Always null: CUPED is closed-form and draws no random samples.",
+    )
+    engine_version: str = Field(
+        ENGINE_VERSION,
+        description="Statistics engine version that produced these results.",
     )
