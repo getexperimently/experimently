@@ -16,10 +16,10 @@ Usage:
     python backend/scripts/seed_demo_data.py
 """
 
-import os
-import sys
-import random
 import argparse
+import os
+import random
+import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -37,38 +37,38 @@ os.environ.setdefault("POSTGRES_SCHEMA", "experimentation")
 
 from sqlalchemy import text
 
+from backend.app.core.database_config import get_schema_name
+from backend.app.core.security import get_password_hash
 from backend.app.db.session import SessionLocal, engine
+from backend.app.models.assignment import Assignment
+from backend.app.models.audit_log import AuditLog
 from backend.app.models.base import Base
-from backend.app.models.user import User, UserRole
+from backend.app.models.custom_role import CustomRole
+from backend.app.models.event import Event
 from backend.app.models.experiment import (
     Experiment,
     ExperimentStatus,
     ExperimentType,
-    Variant,
     Metric,
     MetricType,
+    Variant,
 )
 from backend.app.models.feature_flag import FeatureFlag, FeatureFlagStatus
-from backend.app.models.event import Event
-from backend.app.models.assignment import Assignment
-from backend.app.models.audit_log import AuditLog
+from backend.app.models.integration_config import IntegrationConfig, IntegrationType
 from backend.app.models.rollout_schedule import (
     RolloutSchedule,
-    RolloutStage,
     RolloutScheduleStatus,
+    RolloutStage,
     RolloutStageStatus,
     TriggerType,
 )
 from backend.app.models.safety import FeatureFlagSafetyConfig, SafetySettings
-from backend.app.models.custom_role import CustomRole
-from backend.app.models.integration_config import IntegrationConfig, IntegrationType
-from backend.app.core.security import get_password_hash
-from backend.app.core.database_config import get_schema_name
-
+from backend.app.models.user import User, UserRole
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def now_utc() -> datetime:
     return datetime.now(timezone.utc)
@@ -110,7 +110,9 @@ def backfill_experiment_keys(db) -> int:
         for row in rows:
             taken = db.query(Experiment).filter(Experiment.key == key).first()
             if taken is not None and taken.id != row.id:
-                print(f"    Key '{key}' already used by experiment {taken.id}; leaving {row.id} without a key.")
+                print(
+                    f"    Key '{key}' already used by experiment {taken.id}; leaving {row.id} without a key."
+                )
                 continue
             row.key = key
             updated += 1
@@ -123,16 +125,17 @@ def backfill_experiment_keys(db) -> int:
 def ensure_tables():
     """Create all tables if they don't already exist."""
     # Import all models to register them
-    import backend.app.models.safety  # noqa: F401
-    import backend.app.models.custom_role  # noqa: F401
-    import backend.app.models.integration_config  # noqa: F401
-    import backend.app.models.notification  # noqa: F401
-    import backend.app.models.audit_log  # noqa: F401
-    import backend.app.models.api_key  # noqa: F401
+    import backend.app.models.api_key
+    import backend.app.models.audit_log
+    import backend.app.models.bandit_state
+    import backend.app.models.custom_role
+    import backend.app.models.integration_config
+    import backend.app.models.notification
+
     # User/Experiment/FeatureFlag declare a "Report" relationship by name; the
     # mapper cannot be configured until the class is imported.
-    import backend.app.models.report  # noqa: F401
-    import backend.app.models.bandit_state  # noqa: F401
+    import backend.app.models.report
+    import backend.app.models.safety  # noqa: F401
 
     schema = get_schema_name()
     Base.metadata.schema = schema
@@ -214,6 +217,7 @@ def seed_users(db) -> dict:
 # Experiment 1: Homepage Hero Copy Test (COMPLETED — clear winner)
 # ---------------------------------------------------------------------------
 
+
 def seed_homepage_hero_experiment(db, admin_user) -> Experiment:
     """50K events, treatment wins at p < 0.001, ~12% lift. Status: COMPLETED."""
     print("  Seeding experiment: Homepage Hero Copy Test...")
@@ -294,76 +298,91 @@ def seed_homepage_hero_experiment(db, admin_user) -> Experiment:
         event_time = days_ago(45) + timedelta(days=days_offset)
 
         # Control assignment + exposure
-        assignments_to_add.append(Assignment(
-            experiment_id=exp.id,
-            variant_id=control.id,
-            user_id=user_id,
-            created_at=event_time,
-        ))
-        events_to_add.append(Event(
-            event_type="experiment_exposure",
-            event_name="experiment_exposure",
-            user_id=user_id,
-            experiment_id=exp.id,
-            variant_id=control.id,
-            value=1.0,
-            created_at=event_time.isoformat(),
-        ))
-        if rng.random() < CONTROL_CVR:
-            conv_time = event_time + timedelta(minutes=rng.randint(1, 60))
-            events_to_add.append(Event(
-                event_type="demo_signup",
-                event_name="demo_signup",
+        assignments_to_add.append(
+            Assignment(
+                experiment_id=exp.id,
+                variant_id=control.id,
+                user_id=user_id,
+                created_at=event_time,
+            )
+        )
+        events_to_add.append(
+            Event(
+                event_type="experiment_exposure",
+                event_name="experiment_exposure",
                 user_id=user_id,
                 experiment_id=exp.id,
                 variant_id=control.id,
                 value=1.0,
-                created_at=conv_time.isoformat(),
-            ))
+                created_at=event_time.isoformat(),
+            )
+        )
+        if rng.random() < CONTROL_CVR:
+            conv_time = event_time + timedelta(minutes=rng.randint(1, 60))
+            events_to_add.append(
+                Event(
+                    event_type="demo_signup",
+                    event_name="demo_signup",
+                    user_id=user_id,
+                    experiment_id=exp.id,
+                    variant_id=control.id,
+                    value=1.0,
+                    created_at=conv_time.isoformat(),
+                )
+            )
 
     for i in range(TOTAL_PER_VARIANT):
         user_id = f"user_hero_t_{i:06d}"
         days_offset = rng.uniform(0, exp_duration_days)
         event_time = days_ago(45) + timedelta(days=days_offset)
 
-        assignments_to_add.append(Assignment(
-            experiment_id=exp.id,
-            variant_id=treatment.id,
-            user_id=user_id,
-            created_at=event_time,
-        ))
-        events_to_add.append(Event(
-            event_type="experiment_exposure",
-            event_name="experiment_exposure",
-            user_id=user_id,
-            experiment_id=exp.id,
-            variant_id=treatment.id,
-            value=1.0,
-            created_at=event_time.isoformat(),
-        ))
-        if rng.random() < TREATMENT_CVR:
-            conv_time = event_time + timedelta(minutes=rng.randint(1, 60))
-            events_to_add.append(Event(
-                event_type="demo_signup",
-                event_name="demo_signup",
+        assignments_to_add.append(
+            Assignment(
+                experiment_id=exp.id,
+                variant_id=treatment.id,
+                user_id=user_id,
+                created_at=event_time,
+            )
+        )
+        events_to_add.append(
+            Event(
+                event_type="experiment_exposure",
+                event_name="experiment_exposure",
                 user_id=user_id,
                 experiment_id=exp.id,
                 variant_id=treatment.id,
                 value=1.0,
-                created_at=conv_time.isoformat(),
-            ))
+                created_at=event_time.isoformat(),
+            )
+        )
+        if rng.random() < TREATMENT_CVR:
+            conv_time = event_time + timedelta(minutes=rng.randint(1, 60))
+            events_to_add.append(
+                Event(
+                    event_type="demo_signup",
+                    event_name="demo_signup",
+                    user_id=user_id,
+                    experiment_id=exp.id,
+                    variant_id=treatment.id,
+                    value=1.0,
+                    created_at=conv_time.isoformat(),
+                )
+            )
 
     # Bulk insert in batches for performance
     _bulk_insert(db, assignments_to_add, batch_size=1000)
     _bulk_insert(db, events_to_add, batch_size=1000)
     db.commit()
-    print(f"    Created {len(assignments_to_add):,} assignments and {len(events_to_add):,} events.")
+    print(
+        f"    Created {len(assignments_to_add):,} assignments and {len(events_to_add):,} events."
+    )
     return exp
 
 
 # ---------------------------------------------------------------------------
 # Experiment 2: Checkout Button Color (ACTIVE — live simulator target)
 # ---------------------------------------------------------------------------
+
 
 def seed_checkout_button_experiment(db, admin_user) -> Experiment:
     """30K pre-seeded events, no clear winner yet. Status: ACTIVE."""
@@ -428,7 +447,9 @@ def seed_checkout_button_experiment(db, admin_user) -> Experiment:
     BLUE_CVR = 0.08
     GREEN_CVR = 0.09
 
-    print(f"    Generating {TOTAL_PER_VARIANT * 2:,} events for checkout_button_color...")
+    print(
+        f"    Generating {TOTAL_PER_VARIANT * 2:,} events for checkout_button_color..."
+    )
     events_to_add = []
     assignments_to_add = []
     rng = random.Random(123)
@@ -438,75 +459,90 @@ def seed_checkout_button_experiment(db, admin_user) -> Experiment:
         days_offset = rng.uniform(0, 14)
         event_time = days_ago(14) + timedelta(days=days_offset)
 
-        assignments_to_add.append(Assignment(
-            experiment_id=exp.id,
-            variant_id=blue_btn.id,
-            user_id=user_id,
-            created_at=event_time,
-        ))
-        events_to_add.append(Event(
-            event_type="experiment_exposure",
-            event_name="experiment_exposure",
-            user_id=user_id,
-            experiment_id=exp.id,
-            variant_id=blue_btn.id,
-            value=1.0,
-            created_at=event_time.isoformat(),
-        ))
-        if rng.random() < BLUE_CVR:
-            conv_time = event_time + timedelta(minutes=rng.randint(1, 30))
-            events_to_add.append(Event(
-                event_type="checkout_completed",
-                event_name="checkout_completed",
+        assignments_to_add.append(
+            Assignment(
+                experiment_id=exp.id,
+                variant_id=blue_btn.id,
+                user_id=user_id,
+                created_at=event_time,
+            )
+        )
+        events_to_add.append(
+            Event(
+                event_type="experiment_exposure",
+                event_name="experiment_exposure",
                 user_id=user_id,
                 experiment_id=exp.id,
                 variant_id=blue_btn.id,
                 value=1.0,
-                created_at=conv_time.isoformat(),
-            ))
+                created_at=event_time.isoformat(),
+            )
+        )
+        if rng.random() < BLUE_CVR:
+            conv_time = event_time + timedelta(minutes=rng.randint(1, 30))
+            events_to_add.append(
+                Event(
+                    event_type="checkout_completed",
+                    event_name="checkout_completed",
+                    user_id=user_id,
+                    experiment_id=exp.id,
+                    variant_id=blue_btn.id,
+                    value=1.0,
+                    created_at=conv_time.isoformat(),
+                )
+            )
 
     for i in range(TOTAL_PER_VARIANT):
         user_id = f"user_checkout_g_{i:06d}"
         days_offset = rng.uniform(0, 14)
         event_time = days_ago(14) + timedelta(days=days_offset)
 
-        assignments_to_add.append(Assignment(
-            experiment_id=exp.id,
-            variant_id=green_btn.id,
-            user_id=user_id,
-            created_at=event_time,
-        ))
-        events_to_add.append(Event(
-            event_type="experiment_exposure",
-            event_name="experiment_exposure",
-            user_id=user_id,
-            experiment_id=exp.id,
-            variant_id=green_btn.id,
-            value=1.0,
-            created_at=event_time.isoformat(),
-        ))
-        if rng.random() < GREEN_CVR:
-            conv_time = event_time + timedelta(minutes=rng.randint(1, 30))
-            events_to_add.append(Event(
-                event_type="checkout_completed",
-                event_name="checkout_completed",
+        assignments_to_add.append(
+            Assignment(
+                experiment_id=exp.id,
+                variant_id=green_btn.id,
+                user_id=user_id,
+                created_at=event_time,
+            )
+        )
+        events_to_add.append(
+            Event(
+                event_type="experiment_exposure",
+                event_name="experiment_exposure",
                 user_id=user_id,
                 experiment_id=exp.id,
                 variant_id=green_btn.id,
                 value=1.0,
-                created_at=conv_time.isoformat(),
-            ))
+                created_at=event_time.isoformat(),
+            )
+        )
+        if rng.random() < GREEN_CVR:
+            conv_time = event_time + timedelta(minutes=rng.randint(1, 30))
+            events_to_add.append(
+                Event(
+                    event_type="checkout_completed",
+                    event_name="checkout_completed",
+                    user_id=user_id,
+                    experiment_id=exp.id,
+                    variant_id=green_btn.id,
+                    value=1.0,
+                    created_at=conv_time.isoformat(),
+                )
+            )
 
     _bulk_insert(db, assignments_to_add, batch_size=1000)
     _bulk_insert(db, events_to_add, batch_size=1000)
     db.commit()
-    print(f"    Created {len(assignments_to_add):,} assignments and {len(events_to_add):,} events.")
+    print(
+        f"    Created {len(assignments_to_add):,} assignments and {len(events_to_add):,} events."
+    )
     return exp
 
 
 # ---------------------------------------------------------------------------
 # Experiment 3: Recommendation Algorithm MAB (ACTIVE — Thompson Sampling)
 # ---------------------------------------------------------------------------
+
 
 def seed_recommendation_mab_experiment(db, admin_user) -> Experiment:
     """20K events, algo_v2 pulling ahead. Status: ACTIVE (Thompson Sampling MAB)."""
@@ -576,9 +612,13 @@ def seed_recommendation_mab_experiment(db, admin_user) -> Experiment:
 
     # Historical events: 20K total, v2 ahead
     # v1: 5%, v2: 9%, v3: 6% conversion
-    PER_VARIANT = {"algo_v1": (v1, 0.05, 6667), "algo_v2": (v2, 0.09, 6667), "algo_v3": (v3, 0.06, 6666)}
+    PER_VARIANT = {
+        "algo_v1": (v1, 0.05, 6667),
+        "algo_v2": (v2, 0.09, 6667),
+        "algo_v3": (v3, 0.06, 6666),
+    }
 
-    print(f"    Generating ~20,000 events for recommendation_algorithm MAB...")
+    print("    Generating ~20,000 events for recommendation_algorithm MAB...")
     events_to_add = []
     assignments_to_add = []
     rng = random.Random(456)
@@ -589,43 +629,52 @@ def seed_recommendation_mab_experiment(db, admin_user) -> Experiment:
             days_offset = rng.uniform(0, 7)
             event_time = days_ago(7) + timedelta(days=days_offset)
 
-            assignments_to_add.append(Assignment(
-                experiment_id=exp.id,
-                variant_id=variant.id,
-                user_id=user_id,
-                created_at=event_time,
-            ))
-            events_to_add.append(Event(
-                event_type="experiment_exposure",
-                event_name="experiment_exposure",
-                user_id=user_id,
-                experiment_id=exp.id,
-                variant_id=variant.id,
-                value=1.0,
-                created_at=event_time.isoformat(),
-            ))
-            if rng.random() < cvr:
-                conv_time = event_time + timedelta(seconds=rng.randint(5, 300))
-                events_to_add.append(Event(
-                    event_type="item_clicked",
-                    event_name="item_clicked",
+            assignments_to_add.append(
+                Assignment(
+                    experiment_id=exp.id,
+                    variant_id=variant.id,
+                    user_id=user_id,
+                    created_at=event_time,
+                )
+            )
+            events_to_add.append(
+                Event(
+                    event_type="experiment_exposure",
+                    event_name="experiment_exposure",
                     user_id=user_id,
                     experiment_id=exp.id,
                     variant_id=variant.id,
                     value=1.0,
-                    created_at=conv_time.isoformat(),
-                ))
+                    created_at=event_time.isoformat(),
+                )
+            )
+            if rng.random() < cvr:
+                conv_time = event_time + timedelta(seconds=rng.randint(5, 300))
+                events_to_add.append(
+                    Event(
+                        event_type="item_clicked",
+                        event_name="item_clicked",
+                        user_id=user_id,
+                        experiment_id=exp.id,
+                        variant_id=variant.id,
+                        value=1.0,
+                        created_at=conv_time.isoformat(),
+                    )
+                )
 
     _bulk_insert(db, assignments_to_add, batch_size=1000)
     _bulk_insert(db, events_to_add, batch_size=1000)
     db.commit()
-    print(f"    Created {len(assignments_to_add):,} assignments and {len(events_to_add):,} events.")
+    print(
+        f"    Created {len(assignments_to_add):,} assignments and {len(events_to_add):,} events."
+    )
     return exp
 
 
 # ---------------------------------------------------------------------------
 # Feature Flags
 # ---------------------------------------------------------------------------
+
 
 def seed_feature_flags(db, admin_user) -> dict:
     """Seed new_dashboard_ui and beta_features feature flags."""
@@ -720,7 +769,9 @@ def seed_feature_flags(db, admin_user) -> dict:
             rollback_percentage=0,
         )
         db.add(safety_cfg)
-        print(f"    Created feature flag '{key1}' with rollout schedule + safety config.")
+        print(
+            f"    Created feature flag '{key1}' with rollout schedule + safety config."
+        )
 
     # --- beta_features ---
     key2 = "beta_features"
@@ -780,6 +831,7 @@ def seed_feature_flags(db, admin_user) -> dict:
 # Audit logs
 # ---------------------------------------------------------------------------
 
+
 def seed_audit_logs(db, users: dict, flags: dict, experiments: list):
     """Seed a realistic audit trail."""
     print("  Seeding audit log entries...")
@@ -790,28 +842,29 @@ def seed_audit_logs(db, users: dict, flags: dict, experiments: list):
         return
 
     # Check if we already have demo audit logs
-    existing_count = db.query(AuditLog).filter(
-        AuditLog.user_email == "admin@demo.com"
-    ).count()
+    existing_count = (
+        db.query(AuditLog).filter(AuditLog.user_email == "admin@demo.com").count()
+    )
     if existing_count > 5:
         print("    Audit logs already exist, skipping.")
         return
 
     log_entries = []
-    base_time = days_ago(45)
 
     # User login events
     for i, (email, user) in enumerate(users.items()):
         for day in [44, 30, 14, 7, 3, 1]:
-            log_entries.append(AuditLog(
-                user_id=user.id,
-                user_email=email,
-                action_type="user_login",
-                entity_type="user",
-                entity_id=user.id,
-                entity_name=email,
-                timestamp=days_ago(day) + timedelta(hours=i),
-            ))
+            log_entries.append(
+                AuditLog(
+                    user_id=user.id,
+                    user_email=email,
+                    action_type="user_login",
+                    entity_type="user",
+                    entity_id=user.id,
+                    entity_name=email,
+                    timestamp=days_ago(day) + timedelta(hours=i),
+                )
+            )
 
     # Experiment lifecycle events
     if experiments:
@@ -823,48 +876,56 @@ def seed_audit_logs(db, users: dict, flags: dict, experiments: list):
             ("experiment_pause", "Homepage Hero Copy Test", 25),
             ("experiment_complete", "Homepage Hero Copy Test", 10),
         ]:
-            log_entries.append(AuditLog(
-                user_id=admin.id,
-                user_email=admin.email,
-                action_type=action,
-                entity_type="experiment",
-                entity_id=exp1.id,
-                entity_name=entity_name,
-                timestamp=days_ago(day_offset),
-            ))
+            log_entries.append(
+                AuditLog(
+                    user_id=admin.id,
+                    user_email=admin.email,
+                    action_type=action,
+                    entity_type="experiment",
+                    entity_id=exp1.id,
+                    entity_name=entity_name,
+                    timestamp=days_ago(day_offset),
+                )
+            )
 
     # Feature flag events
     for flag_key, flag in flags.items():
-        log_entries.append(AuditLog(
-            user_id=dev.id,
-            user_email=dev.email,
-            action_type="feature_flag_create",
-            entity_type="feature_flag",
-            entity_id=flag.id,
-            entity_name=flag_key,
-            timestamp=days_ago(30),
-        ))
-        log_entries.append(AuditLog(
-            user_id=admin.id,
-            user_email=admin.email,
-            action_type="feature_flag_activate",
-            entity_type="feature_flag",
-            entity_id=flag.id,
-            entity_name=flag_key,
-            timestamp=days_ago(29),
-        ))
+        log_entries.append(
+            AuditLog(
+                user_id=dev.id,
+                user_email=dev.email,
+                action_type="feature_flag_create",
+                entity_type="feature_flag",
+                entity_id=flag.id,
+                entity_name=flag_key,
+                timestamp=days_ago(30),
+            )
+        )
+        log_entries.append(
+            AuditLog(
+                user_id=admin.id,
+                user_email=admin.email,
+                action_type="feature_flag_activate",
+                entity_type="feature_flag",
+                entity_id=flag.id,
+                entity_name=flag_key,
+                timestamp=days_ago(29),
+            )
+        )
 
     # RBAC events
-    log_entries.append(AuditLog(
-        user_id=admin.id,
-        user_email=admin.email,
-        action_type="role_assign",
-        entity_type="user",
-        entity_id=dev.id,
-        entity_name="dev@demo.com",
-        reason="Assigned developer role for experimentation platform access",
-        timestamp=days_ago(60),
-    ))
+    log_entries.append(
+        AuditLog(
+            user_id=admin.id,
+            user_email=admin.email,
+            action_type="role_assign",
+            entity_type="user",
+            entity_id=dev.id,
+            entity_name="dev@demo.com",
+            reason="Assigned developer role for experimentation platform access",
+            timestamp=days_ago(60),
+        )
+    )
 
     _bulk_insert(db, log_entries, batch_size=200)
     db.commit()
@@ -874,6 +935,7 @@ def seed_audit_logs(db, users: dict, flags: dict, experiments: list):
 # ---------------------------------------------------------------------------
 # Custom RBAC Role
 # ---------------------------------------------------------------------------
+
 
 def seed_custom_role(db, admin_user):
     """Create a ReadOnlyAnalyst custom role."""
@@ -905,14 +967,17 @@ def seed_custom_role(db, admin_user):
 # Integration configs (Slack, Jira)
 # ---------------------------------------------------------------------------
 
+
 def seed_integrations(db):
     """Seed Jira integration config (demo credentials)."""
     print("  Seeding integration configs...")
 
     # Jira
-    slack_existing = db.query(IntegrationConfig).filter(
-        IntegrationConfig.integration_type == IntegrationType.JIRA
-    ).first()
+    slack_existing = (
+        db.query(IntegrationConfig)
+        .filter(IntegrationConfig.integration_type == IntegrationType.JIRA)
+        .first()
+    )
 
     if not slack_existing:
         try:
@@ -940,6 +1005,7 @@ def seed_integrations(db):
 # ---------------------------------------------------------------------------
 # Safety Settings (global)
 # ---------------------------------------------------------------------------
+
 
 def seed_safety_settings(db):
     """Create global safety settings if not present."""
@@ -969,10 +1035,11 @@ def seed_safety_settings(db):
 # Bulk insert helper
 # ---------------------------------------------------------------------------
 
+
 def _bulk_insert(db, objects, batch_size=500):
     """Insert objects in batches to avoid memory issues."""
     for i in range(0, len(objects), batch_size):
-        batch = objects[i:i + batch_size]
+        batch = objects[i : i + batch_size]
         db.add_all(batch)
         db.flush()
 
@@ -981,10 +1048,15 @@ def _bulk_insert(db, objects, batch_size=500):
 # Main
 # ---------------------------------------------------------------------------
 
+
 def main():
-    parser = argparse.ArgumentParser(description="Seed demo data for Experimently platform")
-    parser.add_argument("--api-url", default=None, help="API URL (unused, kept for AWS script compat)")
-    args = parser.parse_args()
+    parser = argparse.ArgumentParser(
+        description="Seed demo data for Experimently platform"
+    )
+    parser.add_argument(
+        "--api-url", default=None, help="API URL (unused, kept for AWS script compat)"
+    )
+    parser.parse_args()
 
     print("\n" + "=" * 60)
     print("  Experimently Demo Data Seeder")

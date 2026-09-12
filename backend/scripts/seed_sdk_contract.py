@@ -41,19 +41,12 @@ os.environ.setdefault("POSTGRES_PASSWORD", "postgres")
 os.environ.setdefault("POSTGRES_DB", "experimentation")
 os.environ.setdefault("POSTGRES_SCHEMA", "experimentation")
 
-from backend.scripts.seed_demo_data import (  # noqa: E402
-    ensure_schema,
-    ensure_tables,
-    now_utc,
-    seed_users,
-)
-
-from backend.app.core.security import hash_api_key  # noqa: E402
-from backend.app.db.session import SessionLocal  # noqa: E402
-from backend.app.models.api_key import APIKey, generate_api_key  # noqa: E402
-from backend.app.models.assignment import Assignment  # noqa: E402
-from backend.app.models.event import Event  # noqa: E402
-from backend.app.models.experiment import (  # noqa: E402
+from backend.app.core.security import hash_api_key
+from backend.app.db.session import SessionLocal
+from backend.app.models.api_key import APIKey, generate_api_key
+from backend.app.models.assignment import Assignment
+from backend.app.models.event import Event
+from backend.app.models.experiment import (
     Experiment,
     ExperimentStatus,
     ExperimentType,
@@ -61,7 +54,13 @@ from backend.app.models.experiment import (  # noqa: E402
     MetricType,
     Variant,
 )
-from backend.app.models.feature_flag import FeatureFlag, FeatureFlagStatus  # noqa: E402
+from backend.app.models.feature_flag import FeatureFlag, FeatureFlagStatus
+from backend.scripts.seed_demo_data import (
+    ensure_schema,
+    ensure_tables,
+    now_utc,
+    seed_users,
+)
 
 EXPERIMENT_KEY = "sdk_contract_ab"
 FLAG_KEY = "sdk_contract_flag"
@@ -217,7 +216,9 @@ def reset(db) -> None:
 
 def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="Seed the live SDK contract fixtures.")
-    parser.add_argument("--reset", action="store_true", help="remove everything this script created")
+    parser.add_argument(
+        "--reset", action="store_true", help="remove everything this script created"
+    )
     args = parser.parse_args(argv)
 
     print("SDK contract seed")

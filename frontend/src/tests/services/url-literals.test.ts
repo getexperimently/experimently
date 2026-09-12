@@ -17,8 +17,7 @@ import path from 'path';
 const SRC_ROOT = path.resolve(__dirname, '..', '..');
 const FIXTURE = path.join(SRC_ROOT, 'tests', 'fixtures', 'openapi.json');
 const EXCLUDED_DIRS = new Set(['tests', '__mocks__', 'node_modules']);
-const HTTP_METHODS = ['get', 'post', 'put', 'patch', 'delete'] as const;
-type HttpMethod = (typeof HTTP_METHODS)[number];
+type HttpMethod = 'get' | 'post' | 'put' | 'patch' | 'delete';
 
 interface UrlLiteral {
   file: string;

@@ -3,17 +3,17 @@ Pydantic schemas for notification preferences and delivery log.
 """
 
 from datetime import datetime
-from typing import Optional, Any, Dict
+from typing import Any, Dict, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, EmailStr, Field, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from backend.app.models.notification import NotificationChannel, NotificationStatus
-
 
 # ---------------------------------------------------------------------------
 # Notification Preferences
 # ---------------------------------------------------------------------------
+
 
 class NotificationPreferenceBase(BaseModel):
     notify_experiment_started: bool = True
@@ -48,6 +48,7 @@ class NotificationPreferenceResponse(NotificationPreferenceBase):
 # Delivery Log
 # ---------------------------------------------------------------------------
 
+
 class NotificationDeliveryLogResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -73,7 +74,10 @@ class NotificationDeliveryLogListResponse(BaseModel):
 # Test notification request
 # ---------------------------------------------------------------------------
 
+
 class TestNotificationRequest(BaseModel):
     channel: NotificationChannel = NotificationChannel.SLACK
-    message: str = Field("Test notification from Experimentation Platform", max_length=500)
+    message: str = Field(
+        "Test notification from Experimentation Platform", max_length=500
+    )
     recipient: Optional[str] = None

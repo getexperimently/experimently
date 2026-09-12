@@ -33,7 +33,9 @@ from backend.app.core.config import (
 
 pytestmark = pytest.mark.unit
 
-REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
+REPO_ROOT = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "..", "..", "..")
+)
 
 
 def _clean_env(**overrides):
@@ -41,7 +43,8 @@ def _clean_env(**overrides):
     env = {
         k: v
         for k, v in os.environ.items()
-        if k not in ("ENVIRONMENT", "APP_ENV", "DEV_AUTH_BYPASS", "TESTING", "SECRET_KEY")
+        if k
+        not in ("ENVIRONMENT", "APP_ENV", "DEV_AUTH_BYPASS", "TESTING", "SECRET_KEY")
     }
     env["PYTHONPATH"] = REPO_ROOT
     env.update(overrides)
@@ -71,7 +74,9 @@ class TestCanonicalEnvironment:
             warnings.simplefilter("error")
             assert canonical_environment(value) == value
 
-    @pytest.mark.parametrize("legacy,expected", [("dev", "development"), ("prod", "production")])
+    @pytest.mark.parametrize(
+        "legacy,expected", [("dev", "development"), ("prod", "production")]
+    )
     def test_legacy_aliases_map_with_deprecation_warning(self, legacy, expected):
         with pytest.warns(DeprecationWarning, match="deprecated"):
             assert canonical_environment(legacy) == expected
@@ -89,7 +94,12 @@ class TestCanonicalEnvironment:
         assert canonical_environment(3) == 3
 
     def test_canonical_set_matches_contract(self):
-        assert set(CANONICAL_ENVIRONMENTS) == {"development", "test", "staging", "production"}
+        assert set(CANONICAL_ENVIRONMENTS) == {
+            "development",
+            "test",
+            "staging",
+            "production",
+        }
         assert set(BYPASS_ALLOWED_ENVIRONMENTS) == {"development", "test"}
 
 
@@ -137,7 +147,9 @@ class TestSettingsEnvironmentField:
             assert TestSettings(_env_file=None).ENVIRONMENT == "test"
             assert (
                 ProdSettings(
-                    _env_file=None, SECRET_KEY="a" * 64, FIRST_SUPERUSER_PASSWORD="StrongProd1!"
+                    _env_file=None,
+                    SECRET_KEY="a" * 64,
+                    FIRST_SUPERUSER_PASSWORD="StrongProd1!",
                 ).ENVIRONMENT
                 == "production"
             )
@@ -160,7 +172,10 @@ class TestSettingsEnvironmentField:
     def test_demo_alias_maps_to_development(self):
         """demo/setup-aws.sh and the CDK demo stack run with APP_ENV=demo."""
         with pytest.warns(DeprecationWarning):
-            assert Settings(_env_file=None, ENVIRONMENT="demo").ENVIRONMENT == "development"
+            assert (
+                Settings(_env_file=None, ENVIRONMENT="demo").ENVIRONMENT
+                == "development"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -204,7 +219,12 @@ class TestHardenedSecrets:
         with pytest.raises(ValidationError) as excinfo:
             Settings(_env_file=None, ENVIRONMENT=env)
         text = str(excinfo.value)
-        for field in ("SECRET_KEY", "AUDIT_HMAC_KEY", "SSO_STATE_SECRET", "FIRST_SUPERUSER_PASSWORD"):
+        for field in (
+            "SECRET_KEY",
+            "AUDIT_HMAC_KEY",
+            "SSO_STATE_SECRET",
+            "FIRST_SUPERUSER_PASSWORD",
+        ):
             assert field in text
 
     @pytest.mark.parametrize("env", ["staging", "production"])
@@ -213,7 +233,9 @@ class TestHardenedSecrets:
         assert Settings(_env_file=None, ENVIRONMENT=env, **_STRONG).ENVIRONMENT == env
 
     @pytest.mark.parametrize("env", ["development", "test"])
-    def test_placeholders_are_fine_outside_hardened_environments(self, env, monkeypatch):
+    def test_placeholders_are_fine_outside_hardened_environments(
+        self, env, monkeypatch
+    ):
         monkeypatch.delenv("TESTING", raising=False)
         assert Settings(_env_file=None, ENVIRONMENT=env).ENVIRONMENT == env
 
@@ -250,7 +272,9 @@ class TestResolveFromProcessEnv:
                 assert resolve_environment_from_process_env() == "production"
 
     def test_environment_wins_over_app_env(self):
-        with patch.dict(os.environ, {"ENVIRONMENT": "staging", "APP_ENV": "test"}, clear=False):
+        with patch.dict(
+            os.environ, {"ENVIRONMENT": "staging", "APP_ENV": "test"}, clear=False
+        ):
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore", DeprecationWarning)
                 assert resolve_environment_from_process_env() == "staging"
@@ -321,7 +345,9 @@ class TestModuleImportSelection:
 
     def test_bypass_in_production_refuses_without_testing_too(self):
         proc = _run(
-            "import backend.app.core.config", ENVIRONMENT="production", DEV_AUTH_BYPASS="true"
+            "import backend.app.core.config",
+            ENVIRONMENT="production",
+            DEV_AUTH_BYPASS="true",
         )
         assert proc.returncode != 0
 
@@ -387,7 +413,9 @@ class TestAuthSettings:
             Settings(_env_file=None, AUTH_PROVIDER="ldap")
 
     def test_cognito_provider_accepted(self):
-        assert Settings(_env_file=None, AUTH_PROVIDER="cognito").AUTH_PROVIDER == "cognito"
+        assert (
+            Settings(_env_file=None, AUTH_PROVIDER="cognito").AUTH_PROVIDER == "cognito"
+        )
 
     @pytest.mark.parametrize("env", ["development", "test"])
     def test_bypass_allowed_in_dev_and_test(self, env):
@@ -399,7 +427,12 @@ class TestAuthSettings:
         # TESTING=true must NOT relax this guard.
         monkeypatch.setenv("TESTING", "true")
         with pytest.raises(ValidationError, match="DEV_AUTH_BYPASS"):
-            Settings(_env_file=None, ENVIRONMENT=env, DEV_AUTH_BYPASS=True, SECRET_KEY="a" * 64)
+            Settings(
+                _env_file=None,
+                ENVIRONMENT=env,
+                DEV_AUTH_BYPASS=True,
+                SECRET_KEY="a" * 64,
+            )
 
     def test_bypass_false_in_production_is_fine(self):
         s = Settings(

@@ -6,13 +6,16 @@ the JSON schemas defined in backend/tests/contract/schemas/.
 
 Uses jsonschema for validation. Install with: pip install jsonschema
 """
+
 import json
-import pytest
 from pathlib import Path
+
+import pytest
 
 try:
     import jsonschema
-    from jsonschema import validate, ValidationError
+    from jsonschema import ValidationError, validate
+
     JSONSCHEMA_AVAILABLE = True
 except ImportError:
     JSONSCHEMA_AVAILABLE = False
@@ -56,7 +59,9 @@ def _experiment_payload(name: str = "Contract Test Experiment") -> dict:
     }
 
 
-def assert_required_fields_present(data: dict, schema: dict, label: str = "response") -> None:
+def assert_required_fields_present(
+    data: dict, schema: dict, label: str = "response"
+) -> None:
     """Assert that all required fields in the schema are present in the data."""
     required_fields = schema.get("required", [])
     for field in required_fields:
@@ -69,6 +74,7 @@ def assert_required_fields_present(data: dict, schema: dict, label: str = "respo
 # ---------------------------------------------------------------------------
 # Experiment Contract Tests
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.contract
 @pytest.mark.requires_db
@@ -83,7 +89,9 @@ class TestExperimentContractAPI:
         data = response.json()
         assert_required_fields_present(data, schema, label="create experiment response")
 
-    def test_get_experiment_response_has_required_fields(self, admin_client, make_experiment):
+    def test_get_experiment_response_has_required_fields(
+        self, admin_client, make_experiment
+    ):
         """GET /api/v1/experiments/{id} response must contain all required schema fields."""
         schema = load_schema("experiment")
         exp = make_experiment(name="Schema Validation Experiment")
@@ -151,6 +159,7 @@ class TestExperimentContractAPI:
 # Feature Flag Contract Tests
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.contract
 @pytest.mark.requires_db
 class TestFeatureFlagContractAPI:
@@ -159,13 +168,18 @@ class TestFeatureFlagContractAPI:
     def test_create_feature_flag_response_has_required_fields(self, admin_client):
         """POST /api/v1/feature-flags response must contain all required schema fields."""
         schema = load_schema("feature_flag")
-        response = admin_client.post("/api/v1/feature-flags", json={
-            "key": unique_flag_key("contract-create"),
-            "name": "Contract Test Flag",
-        })
+        response = admin_client.post(
+            "/api/v1/feature-flags",
+            json={
+                "key": unique_flag_key("contract-create"),
+                "name": "Contract Test Flag",
+            },
+        )
         assert response.status_code == 201, response.text
         data = response.json()
-        assert_required_fields_present(data, schema, label="create feature flag response")
+        assert_required_fields_present(
+            data, schema, label="create feature flag response"
+        )
 
     def test_get_feature_flag_response_has_required_fields(
         self, admin_client, make_feature_flag
@@ -194,7 +208,9 @@ class TestFeatureFlagContractAPI:
             f"Expected 'id' to be a string, got {type(data['id'])}"
         )
 
-    def test_feature_flag_key_is_non_empty_string(self, admin_client, make_feature_flag):
+    def test_feature_flag_key_is_non_empty_string(
+        self, admin_client, make_feature_flag
+    ):
         """The 'key' field must be a non-empty string."""
         expected_key = unique_flag_key("contract-key")
         flag = make_feature_flag(key=expected_key, name="Key Type Check Flag")

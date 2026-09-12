@@ -12,11 +12,11 @@ Tests cover:
 - Function metadata (name, docstring) preserved by @wraps
 """
 
+from unittest.mock import MagicMock, call, patch
+
 import pytest
-from unittest.mock import MagicMock, patch, call
 
 from backend.app.core.scheduler_retry import with_retry
-
 
 # ---------------------------------------------------------------------------
 # Basic success / failure behaviour
@@ -179,4 +179,6 @@ class TestWithRetryMetadata:
             """Processes all active rollout schedules."""
             return True
 
-        assert "Processes all active rollout schedules" in (process_rollouts.__doc__ or "")
+        assert "Processes all active rollout schedules" in (
+            process_rollouts.__doc__ or ""
+        )

@@ -3,9 +3,10 @@ Pagination utilities for API endpoints.
 
 This module provides a Paginator class to handle pagination in API responses.
 """
-from typing import Dict, Any, List, TypeVar, Generic, Optional
 
-T = TypeVar('T')
+from typing import Any, Dict, Generic, List, Optional, TypeVar
+
+T = TypeVar("T")
 
 
 class Paginator(Generic[T]):
@@ -34,10 +35,7 @@ class Paginator(Generic[T]):
         Returns:
             Dict with skip and limit parameters
         """
-        return {
-            "skip": self.skip,
-            "limit": self.limit
-        }
+        return {"skip": self.skip, "limit": self.limit}
 
     def paginate_query(self, query: Any) -> Any:
         """
@@ -62,15 +60,12 @@ class Paginator(Generic[T]):
         Returns:
             Dict with items, total count, and pagination parameters
         """
-        return {
-            "items": items,
-            "total": total,
-            "skip": self.skip,
-            "limit": self.limit
-        }
+        return {"items": items, "total": total, "skip": self.skip, "limit": self.limit}
 
     @classmethod
-    def from_request(cls, skip: Optional[int] = 0, limit: Optional[int] = 100) -> 'Paginator':
+    def from_request(
+        cls, skip: Optional[int] = 0, limit: Optional[int] = 100
+    ) -> "Paginator":
         """
         Create a Paginator instance from request query parameters.
 

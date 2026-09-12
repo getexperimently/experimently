@@ -15,15 +15,15 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from backend.app.main import app
 from backend.app.api import deps
-from backend.app.models.user import User, UserRole
+from backend.app.main import app
 from backend.app.models.integration_config import IntegrationConfig, IntegrationType
-
+from backend.app.models.user import User, UserRole
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_user(role: UserRole = UserRole.ADMIN, is_superuser: bool = False) -> User:
     """Create an in-memory User mock with the given role."""
@@ -77,6 +77,7 @@ def _clear():
 # ---------------------------------------------------------------------------
 # TestListIntegrations
 # ---------------------------------------------------------------------------
+
 
 class TestListIntegrations:
     """GET /api/v1/integrations"""
@@ -164,6 +165,7 @@ class TestListIntegrations:
 # ---------------------------------------------------------------------------
 # TestGetIntegration
 # ---------------------------------------------------------------------------
+
 
 class TestGetIntegration:
     """GET /api/v1/integrations/{integration_type}"""
@@ -254,6 +256,7 @@ class TestGetIntegration:
 # TestCreateIntegration
 # ---------------------------------------------------------------------------
 
+
 class TestCreateIntegration:
     """POST /api/v1/integrations"""
 
@@ -284,7 +287,10 @@ class TestCreateIntegration:
         payload = {
             "integration_type": "jira",
             "is_active": False,
-            "encrypted_config": {"base_url": "https://jira.example.com", "api_token": "tok"},
+            "encrypted_config": {
+                "base_url": "https://jira.example.com",
+                "api_token": "tok",
+            },
         }
 
         client = TestClient(app)
@@ -352,8 +358,8 @@ class TestCreateIntegration:
         admin = _make_user(UserRole.ADMIN)
         mock_db = _override(admin)
         # Existing config found
-        mock_db.query.return_value.filter.return_value.first.return_value = _make_config(
-            IntegrationType.JIRA
+        mock_db.query.return_value.filter.return_value.first.return_value = (
+            _make_config(IntegrationType.JIRA)
         )
 
         payload = {
@@ -383,10 +389,16 @@ class TestCreateIntegration:
         payload = {
             "integration_type": "github",
             "is_active": False,
-            "encrypted_config": {"token": "ghp_secret", "repo_owner": "acme", "repo_name": "app"},
+            "encrypted_config": {
+                "token": "ghp_secret",
+                "repo_owner": "acme",
+                "repo_name": "app",
+            },
         }
 
-        saved = _make_config(IntegrationType.GITHUB, encrypted_config=payload["encrypted_config"])
+        saved = _make_config(
+            IntegrationType.GITHUB, encrypted_config=payload["encrypted_config"]
+        )
 
         def fake_refresh(obj):
             obj.id = saved.id
@@ -406,6 +418,7 @@ class TestCreateIntegration:
 # ---------------------------------------------------------------------------
 # TestUpdateIntegration
 # ---------------------------------------------------------------------------
+
 
 class TestUpdateIntegration:
     """PUT /api/v1/integrations/{integration_type}"""
@@ -528,6 +541,7 @@ class TestUpdateIntegration:
 # TestDeleteIntegration
 # ---------------------------------------------------------------------------
 
+
 class TestDeleteIntegration:
     """DELETE /api/v1/integrations/{integration_type}"""
 
@@ -587,6 +601,7 @@ class TestDeleteIntegration:
 # TestWebhookEndpoints
 # ---------------------------------------------------------------------------
 
+
 class TestWebhookEndpoints:
     """POST /api/v1/integrations/webhooks/{jira,salesforce,github}"""
 
@@ -607,7 +622,11 @@ class TestWebhookEndpoints:
         client = TestClient(app)
         response = client.post(
             "/api/v1/integrations/webhooks/jira",
-            json={"webhookEvent": "jira:issue_updated", "issue": {"key": "EXP-1"}, "changelog": {"items": []}},
+            json={
+                "webhookEvent": "jira:issue_updated",
+                "issue": {"key": "EXP-1"},
+                "changelog": {"items": []},
+            },
         )
 
         assert response.status_code == 200
@@ -620,9 +639,7 @@ class TestWebhookEndpoints:
         config = _make_config(IntegrationType.JIRA, is_active=True)
         mock_db.query.return_value.filter.return_value.first.return_value = config
 
-        with patch(
-            "backend.app.api.v1.endpoints.integrations.JiraService"
-        ) as MockJira:
+        with patch("backend.app.api.v1.endpoints.integrations.JiraService") as MockJira:
             mock_svc = MagicMock()
             MockJira.from_config.return_value = mock_svc
 
@@ -699,16 +716,22 @@ class TestWebhookEndpoints:
         config = _make_config(
             IntegrationType.GITHUB,
             is_active=True,
-            encrypted_config={"token": "ghp_t", "repo_owner": "acme", "repo_name": "app", "webhook_secret": secret},
+            encrypted_config={
+                "token": "ghp_t",
+                "repo_owner": "acme",
+                "repo_name": "app",
+                "webhook_secret": secret,
+            },
         )
         mock_db.query.return_value.filter.return_value.first.return_value = config
 
         payload = json.dumps({"action": "opened"}).encode()
-        sig = "sha256=" + hmac_lib.new(secret.encode(), payload, hashlib.sha256).hexdigest()
+        sig = (
+            "sha256="
+            + hmac_lib.new(secret.encode(), payload, hashlib.sha256).hexdigest()
+        )
 
-        with patch(
-            "backend.app.api.v1.endpoints.integrations.GitHubService"
-        ) as MockGH:
+        with patch("backend.app.api.v1.endpoints.integrations.GitHubService") as MockGH:
             mock_svc = MagicMock()
             mock_svc.verify_webhook_signature.return_value = True
             MockGH.from_config.return_value = mock_svc
@@ -735,16 +758,19 @@ class TestWebhookEndpoints:
         config = _make_config(
             IntegrationType.GITHUB,
             is_active=True,
-            encrypted_config={"token": "ghp_t", "repo_owner": "acme", "repo_name": "app", "webhook_secret": "real_secret"},
+            encrypted_config={
+                "token": "ghp_t",
+                "repo_owner": "acme",
+                "repo_name": "app",
+                "webhook_secret": "real_secret",
+            },
         )
         mock_db.query.return_value.filter.return_value.first.return_value = config
 
         payload = json.dumps({"action": "opened"}).encode()
         bad_sig = "sha256=badbadbadbad"
 
-        with patch(
-            "backend.app.api.v1.endpoints.integrations.GitHubService"
-        ) as MockGH:
+        with patch("backend.app.api.v1.endpoints.integrations.GitHubService") as MockGH:
             mock_svc = MagicMock()
             mock_svc.verify_webhook_signature.return_value = False
             MockGH.from_config.return_value = mock_svc
@@ -792,7 +818,11 @@ class TestWebhookEndpoints:
         config = _make_config(
             IntegrationType.GITHUB,
             is_active=True,
-            encrypted_config={"token": "ghp_t", "repo_owner": "acme", "repo_name": "app"},
+            encrypted_config={
+                "token": "ghp_t",
+                "repo_owner": "acme",
+                "repo_name": "app",
+            },
         )
         mock_db.query.return_value.filter.return_value.first.return_value = config
 

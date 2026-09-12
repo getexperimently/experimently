@@ -15,9 +15,9 @@ import gzip
 import json
 import logging
 import uuid
-from datetime import datetime
-from typing import List, Dict, Any, Optional
 from collections import defaultdict
+from datetime import datetime
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +38,7 @@ def create_s3_key(timestamp: str, file_id: Optional[str] = None) -> str:
     """
     # Parse timestamp
     if isinstance(timestamp, str):
-        dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+        dt = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
     else:
         dt = timestamp
 
@@ -72,15 +72,13 @@ def compress_events(events: List[Dict[str, Any]]) -> bytes:
     json_str = json.dumps(events, default=str)  # default=str handles datetime objects
 
     # Compress with gzip
-    compressed = gzip.compress(json_str.encode('utf-8'))
+    compressed = gzip.compress(json_str.encode("utf-8"))
 
     return compressed
 
 
 def archive_to_s3(
-    enriched_events: List[Dict[str, Any]],
-    bucket: str,
-    max_retries: int = 3
+    enriched_events: List[Dict[str, Any]], bucket: str, max_retries: int = 3
 ) -> Dict[str, Any]:
     """
     Archive a batch of enriched events to S3.
@@ -112,7 +110,7 @@ def archive_to_s3(
         compressed_data = compress_events(enriched_events)
     except Exception as e:
         logger.error(f"Failed to compress events: {e}")
-        return {"success": False, "error": f"Compression failed: {str(e)}"}
+        return {"success": False, "error": f"Compression failed: {e!s}"}
 
     # Attempt upload with retries
     retries = 0
@@ -130,20 +128,22 @@ def archive_to_s3(
                 Metadata={
                     "event_count": str(len(enriched_events)),
                     "compression": "gzip",
-                    "upload_timestamp": datetime.utcnow().isoformat()
-                }
+                    "upload_timestamp": datetime.utcnow().isoformat(),
+                },
             )
 
             # Check response
             status_code = response.get("ResponseMetadata", {}).get("HTTPStatusCode", 0)
             if status_code == 200:
-                logger.info(f"Archived {len(enriched_events)} events to s3://{bucket}/{s3_key}")
+                logger.info(
+                    f"Archived {len(enriched_events)} events to s3://{bucket}/{s3_key}"
+                )
                 return {
                     "success": True,
                     "s3_uri": f"s3://{bucket}/{s3_key}",
                     "event_count": len(enriched_events),
                     "compressed_size": len(compressed_data),
-                    "retries": retries
+                    "retries": retries,
                 }
             else:
                 last_error = f"Unexpected status code: {status_code}"
@@ -162,18 +162,14 @@ def archive_to_s3(
 
     # All retries failed
     logger.error(f"Failed to archive events after {max_retries} attempts: {last_error}")
-    return {
-        "success": False,
-        "error": last_error,
-        "retries": retries
-    }
+    return {"success": False, "error": last_error, "retries": retries}
 
 
 def archive_to_s3_batched(
     enriched_events: List[Dict[str, Any]],
     bucket: str,
     max_batch_size: int = 1000,
-    max_batch_size_mb: float = 5.0
+    max_batch_size_mb: float = 5.0,
 ) -> Dict[str, Any]:
     """
     Archive events to S3 in multiple batches.
@@ -193,11 +189,13 @@ def archive_to_s3_batched(
     for event in enriched_events:
         timestamp = event.get("timestamp")
         if not timestamp:
-            logger.warning(f"Skipping event {event.get('event_id')} - missing timestamp")
+            logger.warning(
+                f"Skipping event {event.get('event_id')} - missing timestamp"
+            )
             continue
 
         # Parse timestamp and group by hour
-        dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+        dt = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
         hour_key = dt.strftime("%Y-%m-%d-%H")
         events_by_hour[hour_key].append(event)
 
@@ -213,12 +211,13 @@ def archive_to_s3_batched(
         max_bytes = int(max_batch_size_mb * 1024 * 1024)
 
         for event in hour_events:
-            event_size = len(json.dumps(event, default=str).encode('utf-8'))
+            event_size = len(json.dumps(event, default=str).encode("utf-8"))
 
             # Check if adding this event would exceed limits
-            if len(current_batch) >= max_batch_size or \
-               (current_batch_size + event_size) > max_bytes:
-
+            if (
+                len(current_batch) >= max_batch_size
+                or (current_batch_size + event_size) > max_bytes
+            ):
                 # Archive current batch
                 if current_batch:
                     result = archive_to_s3(current_batch, bucket)
@@ -254,5 +253,5 @@ def archive_to_s3_batched(
         "total_events": len(enriched_events),
         "uploaded_events": total_uploaded,
         "failures": failures,
-        "success": failures == 0
+        "success": failures == 0,
     }

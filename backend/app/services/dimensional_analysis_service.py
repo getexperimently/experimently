@@ -8,8 +8,8 @@ detecting heterogeneous treatment effects (HTE).
 
 from __future__ import annotations
 
-import math
 import logging
+import math
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -135,15 +135,9 @@ class DimensionalAnalysisService:
             control_data = variant_map.get(control_id, {})
             control_total = control_data.get("total", 0)
             control_conversions = control_data.get("conversions", 0)
-            control_mean = (
-                control_conversions / control_total if control_total > 0 else 0.0
-            )
-            control_ci = self._wilson_ci(control_conversions, control_total, adjusted_alpha)
 
             # Total sample across all variants in this segment
-            total_sample = sum(
-                v.get("total", 0) for v in variant_map.values()
-            )
+            total_sample = sum(v.get("total", 0) for v in variant_map.values())
 
             variant_results: List[SegmentVariantResult] = []
 
@@ -164,7 +158,9 @@ class DimensionalAnalysisService:
                         v_conversions,
                         v_total,
                     )
-                    is_significant = (p_value is not None) and (p_value < adjusted_alpha)
+                    is_significant = (p_value is not None) and (
+                        p_value < adjusted_alpha
+                    )
 
                 variant_results.append(
                     SegmentVariantResult(
@@ -218,8 +214,12 @@ class DimensionalAnalysisService:
             if ctrl is None or treat is None:
                 continue
             segment_data.append(
-                (ctrl.sample_size, ctrl.conversions or 0,
-                 treat.sample_size, treat.conversions or 0)
+                (
+                    ctrl.sample_size,
+                    ctrl.conversions or 0,
+                    treat.sample_size,
+                    treat.conversions or 0,
+                )
             )
 
         if len(segment_data) < 2:
@@ -238,14 +238,13 @@ class DimensionalAnalysisService:
 
         # Chi-squared test on treatment conversion counts across segments
         # If variances in conversion rates are large relative to their means, HTE detected.
-        observed_treat = treat_conv.tolist()
-        observed_ctrl = ctrl_conv.tolist()
-
         # Create a 2xN contingency table for chi-squared
-        contingency = np.array([
-            [int(c) for c in treat_conv],
-            [int(c) for c in ctrl_conv],
-        ])
+        contingency = np.array(
+            [
+                [int(c) for c in treat_conv],
+                [int(c) for c in ctrl_conv],
+            ]
+        )
 
         # Only test if cells are non-trivially small
         total_treat = treat_total.sum()
@@ -318,7 +317,8 @@ class DimensionalAnalysisService:
 
         center = (p_hat + z2 / (2.0 * n)) / (1.0 + z2 / n)
         margin = (
-            z * math.sqrt(p_hat * (1.0 - p_hat) / n + z2 / (4.0 * n * n))
+            z
+            * math.sqrt(p_hat * (1.0 - p_hat) / n + z2 / (4.0 * n * n))
             / (1.0 + z2 / n)
         )
 

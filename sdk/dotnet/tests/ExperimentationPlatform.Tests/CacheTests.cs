@@ -143,7 +143,9 @@ public class CacheTests
         cache.Set("fourth", 4);
 
         Assert.Equal(3, cache.Count);
-        Assert.Null(cache.Get("first"));   // evicted
+        // TryGet, not Get: for a value type `Get` returns 0 for a missing key
+        // and for a cached 0 alike.
+        Assert.False(cache.TryGet("first", out _));   // evicted
         Assert.Equal(2, cache.Get("second"));
         Assert.Equal(3, cache.Get("third"));
         Assert.Equal(4, cache.Get("fourth"));
@@ -229,5 +231,56 @@ public class CacheTests
 
         var ex = Record.Exception(() => Task.WaitAll(tasks.ToArray()));
         Assert.Null(ex);
+    }
+
+    [Fact]
+    public void Set_AfterDeletes_StillEvictsTheOldest()
+    {
+        // Regression: eviction used to take "the first key Dictionary<K,V>
+        // enumerates", which is not the oldest once a removal has freed a slot
+        // for reuse, so an arbitrary entry was dropped.
+        var cache = new SdkCache<string>(maxSize: 3, defaultTtl: TimeSpan.FromSeconds(60));
+        cache.Set("a", "1");
+        cache.Set("b", "2");
+        cache.Set("c", "3");
+
+        cache.Delete("b");        // frees a slot in the middle
+        cache.Set("d", "4");      // fills it
+        cache.Set("e", "5");      // at capacity: must evict "a", the oldest
+
+        Assert.Equal(3, cache.Count);
+        Assert.False(cache.TryGet("a", out _));
+        Assert.Equal("3", cache.Get("c"));
+        Assert.Equal("4", cache.Get("d"));
+        Assert.Equal("5", cache.Get("e"));
+    }
+
+    [Fact]
+    public void TryGet_DistinguishesMissingFromADefaultValue()
+    {
+        var cache = new SdkCache<int>(maxSize: 4, defaultTtl: TimeSpan.FromSeconds(60));
+        cache.Set("zero", 0);
+
+        Assert.True(cache.TryGet("zero", out var stored));
+        Assert.Equal(0, stored);
+        Assert.False(cache.TryGet("absent", out _));
+        // Get cannot tell them apart, which is why TryGet exists.
+        Assert.Equal(0, cache.Get("zero"));
+        Assert.Equal(0, cache.Get("absent"));
+    }
+
+    [Fact]
+    public void Delete_RemovesTheKeyFromTheEvictionOrderToo()
+    {
+        var cache = new SdkCache<string>(maxSize: 2, defaultTtl: TimeSpan.FromSeconds(60));
+        cache.Set("a", "1");
+        cache.Delete("a");
+        cache.Set("b", "2");
+        cache.Set("c", "3");
+
+        // "a" is gone, so nothing stale should have been evicted in its place.
+        Assert.Equal(2, cache.Count);
+        Assert.Equal("2", cache.Get("b"));
+        Assert.Equal("3", cache.Get("c"));
     }
 }

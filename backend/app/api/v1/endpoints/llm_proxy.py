@@ -5,7 +5,6 @@ Routes completion requests, collects evaluation scores, returns analytics,
 and runs LLM-as-judge scoring.
 """
 
-from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -21,7 +20,6 @@ from backend.app.schemas.llm_experiments import (
     LLMEvaluationResponse,
     LLMExperimentResults,
     LLMJudgeRequest,
-    LLMJudgeResult,
     SubmitEvaluationRequest,
 )
 from backend.app.services.llm_analytics_service import LLMEvaluationAnalyticsService
@@ -78,11 +76,15 @@ async def llm_complete(
     """
     # Any authenticated user can call this endpoint (READ permission)
     if not check_permission(current_user, ResourceType.EXPERIMENT, Action.READ):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions"
+        )
 
     experiment = _experiment_service.get_experiment(db, experiment_id)
     if experiment is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="LLM experiment not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="LLM experiment not found"
+        )
     if experiment.status != LLMExperimentStatus.ACTIVE:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -110,7 +112,9 @@ async def llm_complete(
     return LLMCompleteResponse(
         variant_id=str(evaluation.variant_id),
         variant_name=variant.name if variant else "",
-        provider=variant.provider.value if variant and hasattr(variant.provider, "value") else "",
+        provider=variant.provider.value
+        if variant and hasattr(variant.provider, "value")
+        else "",
         model_name=variant.model_name if variant else "",
         response=evaluation.model_response or "",
         latency_ms=evaluation.latency_ms or 0,
@@ -141,13 +145,19 @@ def submit_evaluation(
     Submit human rating and/or business metric value for a prior completion.
     """
     if not check_permission(current_user, ResourceType.EXPERIMENT, Action.UPDATE):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions"
+        )
 
     evaluation = (
-        db.query(LLMEvaluation).filter(LLMEvaluation.id == UUID(body.evaluation_id)).first()
+        db.query(LLMEvaluation)
+        .filter(LLMEvaluation.id == UUID(body.evaluation_id))
+        .first()
     )
     if evaluation is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Evaluation not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Evaluation not found"
+        )
     if str(evaluation.llm_experiment_id) != str(experiment_id):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -183,7 +193,9 @@ def get_llm_results(
 ):
     """Return per-variant statistics, CIs, p-values, and winner determination."""
     if not check_permission(current_user, ResourceType.EXPERIMENT, Action.READ):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions"
+        )
     try:
         return _analytics_service.get_experiment_results(db, experiment_id)
     except ValueError as exc:
@@ -213,18 +225,25 @@ async def run_judge(
     Returns a list of LLMJudgeResult objects with scores 0–1.
     """
     if not check_permission(current_user, ResourceType.EXPERIMENT, Action.UPDATE):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions"
+        )
 
     experiment = _experiment_service.get_experiment(db, experiment_id)
     if experiment is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="LLM experiment not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="LLM experiment not found"
+        )
 
     eval_uuids = None
     if body.evaluation_ids:
         try:
             eval_uuids = [UUID(eid) for eid in body.evaluation_ids]
         except ValueError:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid evaluation_id format")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid evaluation_id format",
+            )
 
     results = await _analytics_service.run_llm_as_judge(
         db=db,

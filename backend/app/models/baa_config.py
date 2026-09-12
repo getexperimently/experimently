@@ -5,15 +5,14 @@ A BAA is a legally required contract between a HIPAA covered entity and
 a business associate (like this platform) that specifies how PHI may be used.
 """
 
-import uuid
-from datetime import date, datetime
+from datetime import date
 
-from sqlalchemy import Boolean, Column, Date, DateTime, ForeignKey, String
-from sqlalchemy.dialects.postgresql import UUID, JSONB
+from sqlalchemy import Boolean, Column, Date, ForeignKey, String
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.ext.declarative import declared_attr
 
-from backend.app.models.base import Base, BaseModel
 from backend.app.core.database_config import get_schema_name
+from backend.app.models.base import Base, BaseModel
 
 
 class BAAConfig(Base, BaseModel):

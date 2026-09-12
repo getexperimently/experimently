@@ -10,7 +10,6 @@ from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-
 # ---------------------------------------------------------------------------
 # Enumerations
 # ---------------------------------------------------------------------------
@@ -101,9 +100,7 @@ class MSPRTResultResponse(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-    lambda_ratio: float = Field(
-        ..., description="mSPRT likelihood ratio (Lambda_n)."
-    )
+    lambda_ratio: float = Field(..., description="mSPRT likelihood ratio (Lambda_n).")
     always_valid_p_value: float = Field(
         ..., description="Always-valid p-value: min(1, 1/Lambda_n)."
     )
@@ -113,9 +110,7 @@ class MSPRTResultResponse(BaseModel):
     evidence_strength: EvidenceStrength = Field(
         ..., description="Qualitative strength of evidence."
     )
-    boundary: float = Field(
-        ..., description="Stopping boundary (1/alpha)."
-    )
+    boundary: float = Field(..., description="Stopping boundary (1/alpha).")
 
 
 class ConfidenceSequenceResponse(BaseModel):
@@ -125,7 +120,9 @@ class ConfidenceSequenceResponse(BaseModel):
 
     lower: float = Field(..., description="Lower bound of confidence sequence.")
     upper: float = Field(..., description="Upper bound of confidence sequence.")
-    width: float = Field(..., description="Width of confidence sequence (upper - lower).")
+    width: float = Field(
+        ..., description="Width of confidence sequence (upper - lower)."
+    )
     sample_size: int = Field(
         ..., ge=0, description="Sample size at which CI was computed."
     )
@@ -140,12 +137,8 @@ class AlphaSpendingBoundaryResponse(BaseModel):
     cumulative_alpha: float = Field(
         ..., description="Cumulative alpha spent up to this look."
     )
-    boundary_z: float = Field(
-        ..., description="Critical z-value at this look."
-    )
-    boundary_p: float = Field(
-        ..., description="Critical p-value at this look."
-    )
+    boundary_z: float = Field(..., description="Critical z-value at this look.")
+    boundary_p: float = Field(..., description="Critical p-value at this look.")
 
 
 class EvidencePointResponse(BaseModel):
@@ -153,7 +146,9 @@ class EvidencePointResponse(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-    sample_size: int = Field(..., ge=0, description="Cumulative sample size at this look.")
+    sample_size: int = Field(
+        ..., ge=0, description="Cumulative sample size at this look."
+    )
     lambda_ratio: float = Field(..., description="mSPRT Lambda ratio at this look.")
     always_valid_p_value: float = Field(
         ..., description="Always-valid p-value at this look."
@@ -177,12 +172,8 @@ class LongRunningRiskResponse(BaseModel):
     actual_duration_days: int = Field(
         ..., ge=0, description="Actual duration so far in days."
     )
-    risk_ratio: float = Field(
-        ..., description="Ratio of actual to expected duration."
-    )
-    recommendation: str = Field(
-        ..., description="Recommendation for the experiment."
-    )
+    risk_ratio: float = Field(..., description="Ratio of actual to expected duration.")
+    recommendation: str = Field(..., description="Recommendation for the experiment.")
 
 
 # ---------------------------------------------------------------------------
@@ -218,8 +209,7 @@ class SequentialTestingResponse(BaseModel):
     recommended_action: str = Field(
         ...,
         description=(
-            "Recommended action: 'stop_for_effect', 'stop_for_futility', "
-            "or 'continue'."
+            "Recommended action: 'stop_for_effect', 'stop_for_futility', or 'continue'."
         ),
     )
 
@@ -228,7 +218,5 @@ class SequentialTestingResponse(BaseModel):
     def validate_recommended_action(cls, v: str) -> str:
         allowed = {"stop_for_effect", "stop_for_futility", "continue"}
         if v not in allowed:
-            raise ValueError(
-                f"recommended_action must be one of {allowed}, got {v!r}"
-            )
+            raise ValueError(f"recommended_action must be one of {allowed}, got {v!r}")
         return v

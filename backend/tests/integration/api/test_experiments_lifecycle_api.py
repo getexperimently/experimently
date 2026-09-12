@@ -51,6 +51,7 @@ docstrings on the relevant tests for detail):
     given the stricter Query/Pydantic validation that runs first (bug #7,
     not something to "fix" — just documenting unreachable code).
 """
+
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -61,10 +62,10 @@ from backend.app.api.v1.endpoints.experiments import stats_z_score
 from backend.app.main import app as fastapi_app
 from backend.tests.integration.conftest import make_client_for_user
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _valid_create_payload(name: str = "Lifecycle Test Experiment") -> dict:
     """Return a minimal valid ExperimentCreate payload."""
@@ -99,7 +100,9 @@ def _valid_create_payload(name: str = "Lifecycle Test Experiment") -> dict:
     }
 
 
-def _create_experiment(client: TestClient, name: str = "Lifecycle Test Experiment") -> dict:
+def _create_experiment(
+    client: TestClient, name: str = "Lifecycle Test Experiment"
+) -> dict:
     """Create an experiment via the API and return the response JSON."""
     response = client.post("/api/v1/experiments/", json=_valid_create_payload(name))
     assert response.status_code == 201, f"Failed to create experiment: {response.text}"
@@ -120,8 +123,16 @@ def _split_url_payload(name: str, with_config: bool = True) -> dict:
     if with_config:
         payload["split_url_config"] = {
             "variants": [
-                {"name": "Control", "url": "https://example.com/a", "traffic_allocation": 50},
-                {"name": "Treatment", "url": "https://example.com/b", "traffic_allocation": 50},
+                {
+                    "name": "Control",
+                    "url": "https://example.com/a",
+                    "traffic_allocation": 50,
+                },
+                {
+                    "name": "Treatment",
+                    "url": "https://example.com/b",
+                    "traffic_allocation": 50,
+                },
             ],
             "cookie_ttl_days": 30,
         }
@@ -131,6 +142,7 @@ def _split_url_payload(name: str, with_config: bool = True) -> dict:
 # ---------------------------------------------------------------------------
 # Start / pause - additional permission & error branches
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.integration
 class TestStartPausePermissions:
@@ -170,7 +182,9 @@ class TestStartPausePermissions:
         """
         experiment = make_experiment(name="No Metrics Direct Start")
         make_variant(experiment, name="Control", is_control=True, traffic_allocation=50)
-        make_variant(experiment, name="Treatment", is_control=False, traffic_allocation=50)
+        make_variant(
+            experiment, name="Treatment", is_control=False, traffic_allocation=50
+        )
 
         response = admin_client.post(f"/api/v1/experiments/{experiment.id}/start")
         assert response.status_code == 400, response.text
@@ -179,6 +193,7 @@ class TestStartPausePermissions:
 # ---------------------------------------------------------------------------
 # Get experiment - permission branch not covered by test_experiments_api.py
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.integration
 class TestGetExperimentPermissions:
@@ -209,6 +224,7 @@ class TestGetExperimentPermissions:
 # ---------------------------------------------------------------------------
 # Update experiment - additional branches not covered by test_experiments_api.py
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.integration
 class TestUpdateExperimentAdditional:
@@ -282,6 +298,7 @@ class TestUpdateExperimentAdditional:
 # Delete experiment - ownership branch not covered by test_experiments_api.py
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.integration
 class TestDeleteExperimentOwnership:
     """DELETE /api/v1/experiments/{id} — non-owner (not superuser) 403 branch."""
@@ -343,6 +360,7 @@ class TestDeleteExperimentOwnership:
 # ---------------------------------------------------------------------------
 # Update experiment schedule
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.integration
 class TestUpdateExperimentSchedule:
@@ -418,6 +436,7 @@ class TestUpdateExperimentSchedule:
 # Complete experiment
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.integration
 class TestCompleteExperiment:
     """POST /api/v1/experiments/{id}/complete"""
@@ -453,6 +472,7 @@ class TestCompleteExperiment:
 # ---------------------------------------------------------------------------
 # Get experiment results
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.integration
 class TestGetExperimentResults:
@@ -500,6 +520,7 @@ class TestGetExperimentResults:
 # Archive experiment
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.integration
 class TestArchiveExperiment:
     """POST /api/v1/experiments/{id}/archive"""
@@ -538,6 +559,7 @@ class TestArchiveExperiment:
 # Clone experiment
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.integration
 class TestCloneExperiment:
     """POST /api/v1/experiments/{id}/clone"""
@@ -556,7 +578,9 @@ class TestCloneExperiment:
         assert sorted(v["name"] for v in clone["variants"]) == sorted(
             v["name"] for v in exp["variants"]
         )
-        assert [m["name"] for m in clone["metrics"]] == [m["name"] for m in exp["metrics"]]
+        assert [m["name"] for m in clone["metrics"]] == [
+            m["name"] for m in exp["metrics"]
+        ]
         assert [m["event_name"] for m in clone["metrics"]] == [
             m["event_name"] for m in exp["metrics"]
         ]
@@ -578,6 +602,7 @@ class TestCloneExperiment:
 # ---------------------------------------------------------------------------
 # Daily experiment results
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.integration
 class TestDailyExperimentResults:
@@ -621,6 +646,7 @@ class TestDailyExperimentResults:
 # ---------------------------------------------------------------------------
 # Segmented experiment results
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.integration
 class TestSegmentedExperimentResults:
@@ -672,6 +698,7 @@ class TestSegmentedExperimentResults:
 # ---------------------------------------------------------------------------
 # Update experiment metadata
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.integration
 class TestUpdateExperimentMetadata:
@@ -725,6 +752,7 @@ class TestUpdateExperimentMetadata:
 # ---------------------------------------------------------------------------
 # Calculate sample size
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.integration
 class TestCalculateSampleSize:
@@ -821,7 +849,9 @@ class TestCalculateSampleSize:
         )
         assert response.status_code == 200, response.text
 
-    def test_sample_size_traffic_allocation_out_of_range_returns_422(self, admin_client):
+    def test_sample_size_traffic_allocation_out_of_range_returns_422(
+        self, admin_client
+    ):
         """The endpoint has a manual `traffic_allocation <= 0 or > 1` 400
         check, but it is dead code: the Query parameter itself already
         declares gt=0, le=1, so FastAPI rejects out-of-range values with 422
@@ -845,6 +875,7 @@ class TestCalculateSampleSize:
 # 1-statistical_power are bounded well below 0.5), so the upper-region
 # (p >= 0.97575) branch is unreachable via HTTP; we exercise it directly.
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.integration
 class TestStatsZScoreHelper:
@@ -888,6 +919,7 @@ class TestStatsZScoreHelper:
 # Trigger schedule processing (admin-only)
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.integration
 class TestTriggerScheduleProcessing:
     """POST /api/v1/experiments/schedules/process"""
@@ -913,6 +945,7 @@ class TestTriggerScheduleProcessing:
 # ---------------------------------------------------------------------------
 # Preview split URL assignment
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.integration
 class TestPreviewSplitUrlAssignment:

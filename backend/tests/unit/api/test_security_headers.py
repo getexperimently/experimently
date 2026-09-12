@@ -3,9 +3,11 @@ CORS and security headers tests.
 
 This module contains tests for the CORS configuration and security headers.
 """
+
+from unittest.mock import MagicMock, patch
+
 import pytest
 from fastapi.testclient import TestClient
-from unittest.mock import patch, MagicMock
 
 from backend.app.main import app
 from backend.app.middleware.security_middleware import SecurityHeadersMiddleware
@@ -40,6 +42,7 @@ class TestSecurityMiddleware:
 
         # Run the middleware
         import asyncio
+
         response = asyncio.run(middleware.dispatch(request, mock_call_next))
 
         # Check that the headers were added
@@ -68,6 +71,7 @@ class TestSecurityMiddleware:
 
             # Run the middleware
             import asyncio
+
             response = asyncio.run(middleware.dispatch(request, mock_call_next))
 
             # Check for HSTS header (note the case sensitivity)
@@ -92,6 +96,7 @@ class TestSecurityMiddleware:
 
             # Run the middleware
             import asyncio
+
             response = asyncio.run(middleware.dispatch(request, mock_call_next))
 
             # Check that there is no HSTS header
@@ -107,7 +112,9 @@ class TestAPIEndpointHeaders:
         response = client.get("/api/v1/docs")
 
         # Check response code
-        assert response.status_code in [200, 404], "Docs endpoint should return 200 or 404"
+        assert response.status_code in [200, 404], (
+            "Docs endpoint should return 200 or 404"
+        )
 
         if response.status_code == 200:
             # Check if security headers are present
@@ -140,7 +147,9 @@ class TestCORSSimple:
 
         # The test just checks if we get a response, without asserting specific headers
         # since CORS may not be fully configured yet
-        assert response.status_code in [200, 404], "Docs endpoint should return 200 or 404"
+        assert response.status_code in [200, 404], (
+            "Docs endpoint should return 200 or 404"
+        )
 
         # If we got a successful response, we can optionally check for CORS headers
         # but don't fail the test if they're not there

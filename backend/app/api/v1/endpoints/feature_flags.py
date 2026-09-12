@@ -6,46 +6,46 @@ feature flags in the experimentation platform. It implements functionality to to
 manage feature flags for gradual rollouts and A/B testing.
 """
 
-from uuid import UUID
-from typing import List, Dict, Any, Optional
 import json
 import logging
+from typing import Any, Dict, Optional
+from uuid import UUID
 
 from fastapi import (
     APIRouter,
+    Body,
     Depends,
     HTTPException,
-    Query,
     Path,
-    Body,
-    status,
+    Query,
     Response,
+    status,
 )
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
 from backend.app.api import deps
-from backend.app.core.metrics import record_cache_hit, record_cache_miss, record_flag_evaluation
-from backend.app.models.user import User
+from backend.app.core.config import settings
+from backend.app.core.metrics import (
+    record_cache_hit,
+    record_cache_miss,
+    record_flag_evaluation,
+)
+from backend.app.core.permissions import Action, ResourceType, check_permission
+from backend.app.crud import crud_feature_flag
+from backend.app.models.audit_log import ActionType, EntityType
+from backend.app.models.compliance_audit_event import AuditAction, AuditOutcome
 from backend.app.models.feature_flag import FeatureFlag, FeatureFlagStatus
+from backend.app.models.user import User
+from backend.app.schemas.audit_log import ToggleRequest, ToggleResponse
 from backend.app.schemas.feature_flag import (
     FeatureFlagCreate,
-    FeatureFlagUpdate,
-    FeatureFlagInDB,
     FeatureFlagListResponse,
-    FeatureFlagReadExtended,
+    FeatureFlagUpdate,
 )
-from backend.app.schemas.audit_log import ToggleRequest, ToggleResponse
-from backend.app.models.audit_log import ActionType, EntityType
+from backend.app.services.audit_log_service import AuditLogService
 from backend.app.services.audit_service import AuditService
 from backend.app.services.feature_flag_service import FeatureFlagService
-from backend.app.core import security
-from backend.app.core.config import settings
-from backend.app.core.security import get_password_hash
-from backend.app.crud import crud_user, crud_feature_flag
-from backend.app.core.permissions import ResourceType, Action, check_permission
-from backend.app.services.audit_log_service import AuditLogService
-from backend.app.models.compliance_audit_event import AuditAction, AuditOutcome
 
 # Setup logger
 logger = logging.getLogger(__name__)
@@ -110,7 +110,7 @@ async def list_feature_flags(
     limit: int = 100,
     status: Optional[str] = None,
     search: Optional[str] = None,
-    current_user = Depends(deps.get_current_active_user),
+    current_user=Depends(deps.get_current_active_user),
 ) -> FeatureFlagListResponse:
     """
     Retrieve feature flags.
@@ -140,7 +140,7 @@ async def list_feature_flags(
                 items=cached_response["items"],
                 total=cached_response["total"],
                 skip=cached_response["skip"],
-                limit=cached_response["limit"]
+                limit=cached_response["limit"],
             )
         record_cache_miss("feature_flag_list")
 
@@ -162,8 +162,12 @@ async def list_feature_flags(
         else:
             # User can only see their own feature flags (e.g., ANALYST, VIEWER with limited permissions)
             feature_flags_data = crud_feature_flag.get_multi_by_owner(
-                db=db, owner_id=current_user.id, skip=skip, limit=limit,
-                status=status, search=search
+                db=db,
+                owner_id=current_user.id,
+                skip=skip,
+                limit=limit,
+                status=status,
+                search=search,
             )
             total = crud_feature_flag.count_by_owner(
                 db=db, owner_id=current_user.id, status=status, search=search
@@ -171,10 +175,7 @@ async def list_feature_flags(
 
     # Create response with pagination
     response = FeatureFlagListResponse(
-        items=feature_flags_data,
-        total=total,
-        skip=skip,
-        limit=limit
+        items=feature_flags_data, total=total, skip=skip, limit=limit
     )
 
     # Cache the response if caching is enabled
@@ -183,7 +184,7 @@ async def list_feature_flags(
         redis_client.setex(
             cache_key,
             settings.CACHE_CONTROL.get("ttl", 3600),  # Default to 1 hour
-            json.dumps(response.model_dump())
+            json.dumps(response.model_dump()),
         )
 
     return response
@@ -230,7 +231,9 @@ async def create_feature_flag(
     feature_flag_service = FeatureFlagService(db)
 
     # Check if feature flag with the same key already exists
-    existing_flag = db.query(FeatureFlag).filter(FeatureFlag.key == feature_flag_in.key).first()
+    existing_flag = (
+        db.query(FeatureFlag).filter(FeatureFlag.key == feature_flag_in.key).first()
+    )
     if existing_flag:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -258,14 +261,20 @@ async def create_feature_flag(
             "key": feature_flag.key,
             "name": feature_flag.name,
             "description": feature_flag.description,
-            "status": feature_flag.status.value.lower() if hasattr(feature_flag.status, 'value') else str(feature_flag.status).lower(),
+            "status": feature_flag.status.value.lower()
+            if hasattr(feature_flag.status, "value")
+            else str(feature_flag.status).lower(),
             "owner_id": str(feature_flag.owner_id) if feature_flag.owner_id else None,
             "targeting_rules": feature_flag.targeting_rules,
             "rollout_percentage": feature_flag.rollout_percentage,
             "variants": feature_flag.variants,
             "tags": feature_flag.tags,
-            "created_at": feature_flag.created_at.isoformat() if feature_flag.created_at else None,
-            "updated_at": feature_flag.updated_at.isoformat() if feature_flag.updated_at else None
+            "created_at": feature_flag.created_at.isoformat()
+            if feature_flag.created_at
+            else None,
+            "updated_at": feature_flag.updated_at.isoformat()
+            if feature_flag.updated_at
+            else None,
         }
 
     except ValueError as e:
@@ -280,10 +289,15 @@ async def create_feature_flag(
             outcome=AuditOutcome.SUCCESS,
             resource_id=response_dict.get("id"),
             actor_id=str(current_user.id) if current_user else None,
-            new_value={"key": response_dict.get("key"), "name": response_dict.get("name")},
+            new_value={
+                "key": response_dict.get("key"),
+                "name": response_dict.get("name"),
+            },
         )
     except Exception as audit_error:
-        logger.warning(f"Compliance audit logging failed for feature_flag create: {audit_error}")
+        logger.warning(
+            f"Compliance audit logging failed for feature_flag create: {audit_error}"
+        )
 
     # Invalidate cache if enabled
     try:
@@ -292,7 +306,9 @@ async def create_feature_flag(
             for key in cache_control.redis.scan_iter(match=pattern):
                 cache_control.redis.delete(key)
     except Exception as cache_error:
-        logger.warning(f"Cache invalidation failed for create operation: {str(cache_error)}")
+        logger.warning(
+            f"Cache invalidation failed for create operation: {cache_error!s}"
+        )
 
     return response_dict
 
@@ -449,10 +465,20 @@ async def update_feature_flag(
     # Compliance audit logging (non-fatal)
     try:
         new_flag_snapshot = {
-            "key": updated_flag.get("key") if isinstance(updated_flag, dict) else getattr(updated_flag, "key", None),
-            "name": updated_flag.get("name") if isinstance(updated_flag, dict) else getattr(updated_flag, "name", None),
-            "status": str(updated_flag.get("status") if isinstance(updated_flag, dict) else getattr(updated_flag, "status", None)),
-            "rollout_percentage": updated_flag.get("rollout_percentage") if isinstance(updated_flag, dict) else getattr(updated_flag, "rollout_percentage", None),
+            "key": updated_flag.get("key")
+            if isinstance(updated_flag, dict)
+            else getattr(updated_flag, "key", None),
+            "name": updated_flag.get("name")
+            if isinstance(updated_flag, dict)
+            else getattr(updated_flag, "name", None),
+            "status": str(
+                updated_flag.get("status")
+                if isinstance(updated_flag, dict)
+                else getattr(updated_flag, "status", None)
+            ),
+            "rollout_percentage": updated_flag.get("rollout_percentage")
+            if isinstance(updated_flag, dict)
+            else getattr(updated_flag, "rollout_percentage", None),
         }
         audit = AuditLogService(db)
         audit.log(
@@ -465,7 +491,9 @@ async def update_feature_flag(
             new_value=new_flag_snapshot,
         )
     except Exception as audit_error:
-        logger.warning(f"Compliance audit logging failed for feature_flag update: {audit_error}")
+        logger.warning(
+            f"Compliance audit logging failed for feature_flag update: {audit_error}"
+        )
 
     # Invalidate cache if enabled
     if cache_control.enabled and cache_control.redis:
@@ -584,7 +612,9 @@ async def delete_feature_flag(
             old_value=deleted_flag_snapshot,
         )
     except Exception as audit_error:
-        logger.warning(f"Compliance audit logging failed for feature_flag delete: {audit_error}")
+        logger.warning(
+            f"Compliance audit logging failed for feature_flag delete: {audit_error}"
+        )
 
     # Invalidate cache if enabled
     if cache_control.enabled and cache_control.redis:
@@ -593,7 +623,7 @@ async def delete_feature_flag(
         cache_control.redis.delete(flag_cache_key)
 
         # Delete feature flag list caches
-        pattern = f"feature_flags:*"
+        pattern = "feature_flags:*"
         for key in cache_control.redis.scan_iter(match=pattern):
             cache_control.redis.delete(key)
 
@@ -668,7 +698,7 @@ async def activate_feature_flag(
         cache_control.redis.delete(flag_cache_key)
 
         # Delete feature flag list caches
-        pattern = f"feature_flags:*"
+        pattern = "feature_flags:*"
         for key in cache_control.redis.scan_iter(match=pattern):
             cache_control.redis.delete(key)
 
@@ -742,7 +772,7 @@ async def deactivate_feature_flag(
         cache_control.redis.delete(flag_cache_key)
 
         # Delete feature flag list caches
-        pattern = f"feature_flags:*"
+        pattern = "feature_flags:*"
         for key in cache_control.redis.scan_iter(match=pattern):
             cache_control.redis.delete(key)
 
@@ -880,7 +910,9 @@ async def evaluate_feature_flag(
 )
 async def evaluate_feature_flag_post(
     flag_key: str = Path(..., description="The key of the feature flag to evaluate"),
-    request: FlagEvaluationRequest = Body(..., description="User id and targeting context"),
+    request: FlagEvaluationRequest = Body(
+        ..., description="User id and targeting context"
+    ),
     db: Session = Depends(deps.get_db),
     api_key_info: Dict[str, Any] = Depends(deps.get_api_key),
 ) -> Dict[str, Any]:
@@ -952,7 +984,9 @@ async def get_user_flags(
 )
 async def toggle_feature_flag(
     flag_id: UUID = Path(..., description="The ID of the feature flag to toggle"),
-    toggle_request: ToggleRequest = Body(..., description="Toggle request with optional reason"),
+    toggle_request: ToggleRequest = Body(
+        ..., description="Toggle request with optional reason"
+    ),
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_active_user),
     cache_control: Dict[str, Any] = Depends(deps.get_cache_control),
@@ -984,8 +1018,7 @@ async def toggle_feature_flag(
     flag = db.query(FeatureFlag).filter(FeatureFlag.id == flag_id).first()
     if not flag:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Feature flag not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail="Feature flag not found"
         )
 
     # Check access permission
@@ -1027,7 +1060,9 @@ async def toggle_feature_flag(
             )
         except Exception as audit_error:
             # Log audit error but don't fail the toggle operation
-            logger.warning(f"Audit logging failed for toggle operation: {str(audit_error)}")
+            logger.warning(
+                f"Audit logging failed for toggle operation: {audit_error!s}"
+            )
 
         # Invalidate cache if enabled (don't fail if cache invalidation fails)
         try:
@@ -1037,12 +1072,14 @@ async def toggle_feature_flag(
                 cache_control.redis.delete(flag_cache_key)
 
                 # Delete feature flag list caches
-                pattern = f"feature_flags:*"
+                pattern = "feature_flags:*"
                 for key in cache_control.redis.scan_iter(match=pattern):
                     cache_control.redis.delete(key)
         except Exception as cache_error:
             # Log cache error but don't fail the toggle operation
-            logger.warning(f"Cache invalidation failed for toggle operation: {str(cache_error)}")
+            logger.warning(
+                f"Cache invalidation failed for toggle operation: {cache_error!s}"
+            )
 
         return ToggleResponse(
             id=flag.id,
@@ -1057,7 +1094,7 @@ async def toggle_feature_flag(
         db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to toggle feature flag: {str(e)}",
+            detail=f"Failed to toggle feature flag: {e!s}",
         )
 
 
@@ -1069,7 +1106,9 @@ async def toggle_feature_flag(
 )
 async def enable_feature_flag(
     flag_id: UUID = Path(..., description="The ID of the feature flag to enable"),
-    toggle_request: ToggleRequest = Body(..., description="Enable request with optional reason"),
+    toggle_request: ToggleRequest = Body(
+        ..., description="Enable request with optional reason"
+    ),
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_active_user),
     cache_control: Dict[str, Any] = Depends(deps.get_cache_control),
@@ -1095,8 +1134,7 @@ async def enable_feature_flag(
     flag = db.query(FeatureFlag).filter(FeatureFlag.id == flag_id).first()
     if not flag:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Feature flag not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail="Feature flag not found"
         )
 
     # Check access permission
@@ -1134,11 +1172,13 @@ async def enable_feature_flag(
             if cache_control.enabled and cache_control.redis:
                 flag_cache_key = f"feature_flag:{flag_id}"
                 cache_control.redis.delete(flag_cache_key)
-                pattern = f"feature_flags:*"
+                pattern = "feature_flags:*"
                 for key in cache_control.redis.scan_iter(match=pattern):
                     cache_control.redis.delete(key)
         except Exception as cache_error:
-            logger.warning(f"Cache invalidation failed for enable operation: {str(cache_error)}")
+            logger.warning(
+                f"Cache invalidation failed for enable operation: {cache_error!s}"
+            )
 
         return ToggleResponse(
             id=flag.id,
@@ -1153,7 +1193,7 @@ async def enable_feature_flag(
         db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to enable feature flag: {str(e)}",
+            detail=f"Failed to enable feature flag: {e!s}",
         )
 
 
@@ -1165,7 +1205,9 @@ async def enable_feature_flag(
 )
 async def disable_feature_flag(
     flag_id: UUID = Path(..., description="The ID of the feature flag to disable"),
-    toggle_request: ToggleRequest = Body(..., description="Disable request with optional reason"),
+    toggle_request: ToggleRequest = Body(
+        ..., description="Disable request with optional reason"
+    ),
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_active_user),
     cache_control: Dict[str, Any] = Depends(deps.get_cache_control),
@@ -1191,8 +1233,7 @@ async def disable_feature_flag(
     flag = db.query(FeatureFlag).filter(FeatureFlag.id == flag_id).first()
     if not flag:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Feature flag not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail="Feature flag not found"
         )
 
     # Check access permission
@@ -1230,11 +1271,13 @@ async def disable_feature_flag(
             if cache_control.enabled and cache_control.redis:
                 flag_cache_key = f"feature_flag:{flag_id}"
                 cache_control.redis.delete(flag_cache_key)
-                pattern = f"feature_flags:*"
+                pattern = "feature_flags:*"
                 for key in cache_control.redis.scan_iter(match=pattern):
                     cache_control.redis.delete(key)
         except Exception as cache_error:
-            logger.warning(f"Cache invalidation failed for disable operation: {str(cache_error)}")
+            logger.warning(
+                f"Cache invalidation failed for disable operation: {cache_error!s}"
+            )
 
         return ToggleResponse(
             id=flag.id,
@@ -1249,5 +1292,5 @@ async def disable_feature_flag(
         db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to disable feature flag: {str(e)}",
+            detail=f"Failed to disable feature flag: {e!s}",
         )

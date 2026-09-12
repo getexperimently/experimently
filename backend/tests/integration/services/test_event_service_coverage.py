@@ -34,6 +34,7 @@ measure the "old" row count dynamically immediately before purging rather
 than asserting a hardcoded global count, and additionally scope-check their
 own tagged rows.
 """
+
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -179,7 +180,9 @@ class TestBuildEvent:
         )
         assert event.created_at == "2021-06-01T12:00:00+00:00"
 
-    def test_build_event_coerces_string_ids_to_uuid(self, make_experiment, make_variant):
+    def test_build_event_coerces_string_ids_to_uuid(
+        self, make_experiment, make_variant
+    ):
         experiment = make_experiment(name="Build Event UUID Coercion")
         variant = make_variant(experiment=experiment)
 
@@ -214,9 +217,7 @@ class TestBuildEvent:
             EventService.build_event({"experiment_id": str(experiment.id)})
 
     def test_build_event_raises_without_experiment_or_feature_flag_id(self):
-        with pytest.raises(
-            ValueError, match="experiment_id or feature_flag_id"
-        ):
+        with pytest.raises(ValueError, match="experiment_id or feature_flag_id"):
             EventService.build_event({"user_id": "u1"})
 
     def test_build_event_raises_for_invalid_uuid(self):
@@ -278,9 +279,7 @@ class TestTrackEvent:
 
         assert event.id is not None
         assert event.user_id == user_id
-        assert (
-            db_session.query(Event).filter(Event.user_id == user_id).count() == 1
-        )
+        assert db_session.query(Event).filter(Event.user_id == user_id).count() == 1
 
     def test_track_event_rolls_back_and_raises_on_invalid_data(
         self, db_session, make_experiment
@@ -295,9 +294,7 @@ class TestTrackEvent:
 
         # Session must remain usable after the rollback, and nothing from
         # this failed call should have been persisted.
-        assert (
-            db_session.query(Event).filter(Event.user_id == tag_user).count() == 0
-        )
+        assert db_session.query(Event).filter(Event.user_id == tag_user).count() == 0
         # A subsequent, valid call on the same session/service must still work.
         event = service.track_event(
             {
@@ -476,9 +473,7 @@ class TestTrackEventsBatch:
         with pytest.raises(ValueError):
             service.track_events_batch([good_payload, bad_payload])
 
-        assert (
-            db_session.query(Event).filter(Event.user_id == user_id).count() == 0
-        )
+        assert db_session.query(Event).filter(Event.user_id == user_id).count() == 0
 
     def test_track_events_batch_empty_list_returns_empty_list(self, db_session):
         service = EventService(db_session)
@@ -531,20 +526,18 @@ class TestGetEventsByExperiment:
         assert [r["timestamp"] for r in results] == [t3, t2, t1]
 
         first = results[0]
-        assert set(
-            [
-                "id",
-                "user_id",
-                "event_type",
-                "event_name",
-                "experiment_id",
-                "feature_flag_id",
-                "variant_id",
-                "value",
-                "timestamp",
-                "properties",
-            ]
-        ).issubset(first.keys())
+        assert {
+            "id",
+            "user_id",
+            "event_type",
+            "event_name",
+            "experiment_id",
+            "feature_flag_id",
+            "variant_id",
+            "value",
+            "timestamp",
+            "properties",
+        }.issubset(first.keys())
         assert first["experiment_id"] == str(experiment.id)
         assert first["user_id"] == user_id
         assert first["value"] == 6.0
@@ -576,7 +569,9 @@ class TestGetEventsByExperiment:
         assert len(by_name) == 1
         assert by_name[0]["event_name"] == "purchase"
 
-    def test_filters_by_start_and_end_date(self, db_session, make_experiment, make_event):
+    def test_filters_by_start_and_end_date(
+        self, db_session, make_experiment, make_event
+    ):
         experiment = make_experiment(name="Get Events Filter Dates")
         make_event(
             experiment_id=experiment.id,
@@ -629,7 +624,9 @@ class TestGetEventsByExperiment:
         # Newest first: day5, day4, day3, day2, day1 -> skip 2, take 2 -> day3, day2
         assert [r["user_id"] for r in page] == ["page-user-2", "page-user-1"]
 
-    def test_accepts_str_or_uuid_experiment_id(self, db_session, make_experiment, make_event):
+    def test_accepts_str_or_uuid_experiment_id(
+        self, db_session, make_experiment, make_event
+    ):
         experiment = make_experiment(name="Get Events Str Or UUID")
         make_event(experiment_id=experiment.id, user_id="u1")
 
@@ -651,7 +648,9 @@ class TestGetEventsByExperiment:
 
 
 class TestCountEventsByExperiment:
-    def test_counts_with_type_and_name_filters(self, db_session, make_experiment, make_event):
+    def test_counts_with_type_and_name_filters(
+        self, db_session, make_experiment, make_event
+    ):
         experiment = make_experiment(name="Count Events Coverage")
         other_experiment = make_experiment(name="Count Events Other")
 
@@ -793,7 +792,9 @@ class TestGetEventsByUser:
     def test_filters_by_event_type_and_event_name(self, db_session, make_event):
         user_id = _uid("user-type-name-filter")
         make_event(user_id=user_id, event_type="conversion", event_name="purchase")
-        make_event(user_id=user_id, event_type="exposure", event_name="variant_exposure")
+        make_event(
+            user_id=user_id, event_type="exposure", event_name="variant_exposure"
+        )
 
         service = EventService(db_session)
 
@@ -845,9 +846,7 @@ class TestDeleteEventsByExperiment:
 
         assert deleted_count == 3
         assert (
-            db_session.query(Event)
-            .filter(Event.experiment_id == experiment.id)
-            .count()
+            db_session.query(Event).filter(Event.experiment_id == experiment.id).count()
             == 0
         )
         assert (
@@ -929,7 +928,9 @@ class TestPurgeOldEvents:
                 == 1
             )
 
-    def test_purge_old_events_respects_custom_days_to_keep(self, db_session, make_event):
+    def test_purge_old_events_respects_custom_days_to_keep(
+        self, db_session, make_event
+    ):
         fixed_now = datetime(2026, 6, 1, tzinfo=timezone.utc)
         with freeze_time(fixed_now):
             user_id = _uid("purge-custom")
@@ -943,17 +944,13 @@ class TestPurgeOldEvents:
 
             # Still within a 90-day retention window -> survives.
             service.purge_old_events(days_to_keep=90)
-            assert (
-                db_session.query(Event).filter(Event.user_id == user_id).count() == 1
-            )
+            assert db_session.query(Event).filter(Event.user_id == user_id).count() == 1
 
             # A stricter 10-day retention window purges it.
             deleted = service.purge_old_events(days_to_keep=10)
 
             assert deleted >= 1
-            assert (
-                db_session.query(Event).filter(Event.user_id == user_id).count() == 0
-            )
+            assert db_session.query(Event).filter(Event.user_id == user_id).count() == 0
 
     def test_purge_old_events_uses_default_90_days_when_not_specified(
         self, db_session, make_event
@@ -970,6 +967,4 @@ class TestPurgeOldEvents:
             deleted_count = service.purge_old_events()  # default days_to_keep=90
 
             assert deleted_count >= 1
-            assert (
-                db_session.query(Event).filter(Event.user_id == user_id).count() == 0
-            )
+            assert db_session.query(Event).filter(Event.user_id == user_id).count() == 0

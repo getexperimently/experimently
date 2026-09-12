@@ -1,0 +1,407 @@
+name: SDK Unit Tests
+
+# =============================================================================
+# The ~1,500 unit tests under sdk/ ran in no workflow (testing audit §"Layers
+# that exist but run nowhere"). This runs each SDK's own suite in its own
+# toolchain, in two tiers:
+#
+#   Linux tier (required on PRs) — js, react, react-native, edge, openfeature,
+#     python, openfeature-python, go, java, ruby, php, dotnet. All install and
+#     run in well under a minute on ubuntu-latest. A pull request runs the SDKs
+#     it touches plus the always-on core three (js, python, react: the dashboard,
+#     the demos and the backend's own examples depend on them), so an unrelated
+#     backend change does not pay for twelve toolchains.
+#
+#   Heavy tier (nightly + when touched) — elixir, flutter, android, ios. These
+#     provision a BEAM, a Flutter SDK, the Android SDK + Gradle, or a macOS
+#     runner; minutes each, and they are not on the PR critical path.
+#
+# The `sdk-unit-tests` job at the bottom is the single stable name to require in
+# branch protection: matrix job names change with the matrix, this one does not.
+#
+# Not covered here: the live contract (tests/sdk-contract/live) and the golden
+# vectors, which run in pr-qa-gate.yml — those check the SDKs against a real
+# backend, these check each SDK against its own mocks.
+# =============================================================================
+
+on:
+  pull_request:
+    branches: [main]
+  schedule:
+    # 03:00 UTC, an hour after nightly-qa.yml, so the heavy tier runs daily.
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: sdk-unit-${{ github.event_name }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  # dorny/paths-filter asks the API which files a pull request touched
+  # (listFiles); without this it fails with "Resource not accessible by
+  # integration" and no SDK runs at all.
+  pull-requests: read
+
+jobs:
+  # ───────────────────────────────────────────────────────────────────────────
+  # Which SDKs does this run touch?
+  # ───────────────────────────────────────────────────────────────────────────
+  changes:
+    name: Select SDKs
+    runs-on: ubuntu-latest
+    outputs:
+      linux: ${{ steps.select.outputs.linux }}
+      any_linux: ${{ steps.select.outputs.any_linux }}
+      elixir: ${{ steps.select.outputs.elixir }}
+      flutter: ${{ steps.select.outputs.flutter }}
+      android: ${{ steps.select.outputs.android }}
+      ios: ${{ steps.select.outputs.ios }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Filter changed paths
+        id: filter
+        if: github.event_name == 'pull_request'
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        with:
+          filters: |
+            all: &all
+              - '.github/workflows/sdk-unit-tests.yml'
+              - 'tests/sdk-contract/**'
+            js:
+              - *all
+              - 'sdk/js/**'
+            react:
+              - *all
+              - 'sdk/react/**'
+            react-native:
+              - *all
+              - 'sdk/react-native/**'
+            edge:
+              - *all
+              - 'sdk/edge/**'
+            openfeature:
+              - *all
+              - 'sdk/openfeature/**'
+              # its build and tests compile sdk/js first (see its `pretest` script)
+              - 'sdk/js/**'
+            python:
+              - *all
+              - 'sdk/python/**'
+            openfeature-python:
+              - *all
+              - 'sdk/openfeature-python/**'
+              # imports the python SDK straight from the source tree
+              - 'sdk/python/**'
+            go:
+              - *all
+              - 'sdk/go/**'
+            java:
+              - *all
+              - 'sdk/java/**'
+            ruby:
+              - *all
+              - 'sdk/ruby/**'
+            php:
+              - *all
+              - 'sdk/php/**'
+            dotnet:
+              - *all
+              - 'sdk/dotnet/**'
+            elixir:
+              - *all
+              - 'sdk/elixir/**'
+            flutter:
+              - *all
+              - 'sdk/flutter/**'
+            android:
+              - *all
+              - 'sdk/android/**'
+            ios:
+              - *all
+              - 'sdk/ios/**'
+
+      - name: Build the matrix
+        id: select
+        env:
+          IS_PR: ${{ github.event_name == 'pull_request' }}
+          CHANGED: ${{ steps.filter.outputs.changes }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, os
+
+          # name -> language, which decides the setup steps in the linux job.
+          LINUX = {
+              "js": "node",
+              "react": "node",
+              "react-native": "node",
+              "edge": "node",
+              "openfeature": "node",
+              "python": "python",
+              "openfeature-python": "python",
+              "go": "go",
+              "java": "java",
+              "ruby": "ruby",
+              "php": "php",
+              "dotnet": "dotnet",
+          }
+          HEAVY = ["elixir", "flutter", "android", "ios"]
+
+          # The SDKs the rest of the product consumes: the dashboard and both demo
+          # apps use react, the backend's own examples and scripts use python, and
+          # react/openfeature/edge all build on js. Always run these on a PR.
+          ALWAYS = ["js", "python", "react"]
+
+          is_pr = os.environ["IS_PR"] == "true"
+          changed = set(json.loads(os.environ.get("CHANGED") or "[]"))
+
+          if is_pr:
+              linux = [n for n in LINUX if n in changed or n in ALWAYS]
+              heavy = {n: (n in changed) for n in HEAVY}
+          else:
+              # schedule / workflow_dispatch: everything.
+              linux = list(LINUX)
+              heavy = {n: True for n in HEAVY}
+
+          # The canonical dynamic-matrix shape: a whole `matrix` object, so the
+          # job below can feed it straight to `strategy.matrix` via fromJSON.
+          print("linux=" + json.dumps({"include": [{"sdk": n, "lang": LINUX[n]} for n in linux]}))
+          print("any_linux=" + ("true" if linux else "false"))
+          for name, run in heavy.items():
+              print(f"{name}={'true' if run else 'false'}")
+          PY
+
+      - name: Summary
+        run: |
+          echo "Linux tier: ${{ steps.select.outputs.linux }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "elixir=${{ steps.select.outputs.elixir }} flutter=${{ steps.select.outputs.flutter }} android=${{ steps.select.outputs.android }} ios=${{ steps.select.outputs.ios }}" >> "$GITHUB_STEP_SUMMARY"
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Linux tier — required on pull requests.
+  # ───────────────────────────────────────────────────────────────────────────
+  linux:
+    name: ${{ matrix.sdk }}
+    needs: changes
+    if: needs.changes.outputs.any_linux == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.changes.outputs.linux) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        if: matrix.lang == 'node'
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: sdk/${{ matrix.sdk }}/package-lock.json
+
+      - name: Set up Python
+        if: matrix.lang == 'python'
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+
+      - name: Set up Go
+        if: matrix.lang == 'go'
+        uses: actions/setup-go@v5
+        with:
+          # go.mod declares go 1.21; 1.22 is the oldest supported toolchain.
+          go-version: '1.22.x'
+          # The SDK is stdlib-only: there is no go.sum to key a cache on.
+          cache: false
+
+      - name: Set up Java
+        if: matrix.lang == 'java'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          # The Spring Boot 3.1 starter needs 17+; Maven comes from ./mvnw.
+          java-version: '17'
+          cache: maven
+
+      - name: Set up Ruby
+        if: matrix.lang == 'ruby'
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.2'
+
+      - name: Set up PHP
+        if: matrix.lang == 'php'
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: json, curl
+          tools: composer:v2
+
+      - name: Set up .NET
+        if: matrix.lang == 'dotnet'
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '6.0.x'
+
+      - name: Run unit tests
+        env:
+          SDK: ${{ matrix.sdk }}
+        run: |
+          set -euo pipefail
+          case "$SDK" in
+            js|react|react-native|edge|openfeature)
+              cd "sdk/$SDK"
+              npm ci --no-audit --no-fund
+              # `openfeature` builds sdk/js in its pretest hook, so that tree needs
+              # its dev dependencies too.
+              if [ "$SDK" = "openfeature" ]; then
+                (cd ../js && npm ci --no-audit --no-fund)
+              fi
+              npm test -- --ci
+              ;;
+            python)
+              pip install pytest
+              # tests/conftest.py puts the source tree on sys.path; no install needed.
+              # pytest.ini at the repo root adds --cov flags, so clear addopts.
+              python -m pytest sdk/python/tests -q -o addopts=""
+              ;;
+            openfeature-python)
+              pip install pytest "openfeature-sdk>=0.9.0"
+              python -m pytest sdk/openfeature-python/tests -q -o addopts=""
+              ;;
+            go)
+              cd sdk/go && go test ./... -count=1
+              ;;
+            java)
+              # `clean` matters: without it a stale target/classes keeps a deleted
+              # META-INF/spring/...AutoConfiguration.imports on the test classpath and
+              # ExperimentationStarterRegistrationTest passes when it should not.
+              cd sdk/java && ./mvnw -B clean test
+              ;;
+            ruby)
+              cd sdk/ruby && bundle install --jobs 4 && bundle exec rspec
+              ;;
+            php)
+              cd sdk/php && composer install --no-interaction --no-progress && vendor/bin/phpunit
+              ;;
+            dotnet)
+              dotnet test sdk/dotnet/ExperimentationPlatform.sln --nologo --verbosity minimal
+              ;;
+            *)
+              echo "::error::no test command for sdk '$SDK'"; exit 1 ;;
+          esac
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Heavy tier — nightly, or when the SDK's own path is touched.
+  # ───────────────────────────────────────────────────────────────────────────
+  elixir:
+    name: elixir
+    needs: changes
+    if: needs.changes.outputs.elixir == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: erlef/setup-beam@v1
+        with:
+          # mix.exs declares elixir ~> 1.14.
+          elixir-version: '1.16.3'
+          otp-version: '26.2.5'
+      - name: Run ExUnit
+        run: cd sdk/elixir && mix deps.get && mix test
+
+  flutter:
+    name: flutter
+    needs: changes
+    if: needs.changes.outputs.flutter == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          # pubspec.yaml declares flutter >=3.0.0, dart >=2.17 <4.0.
+          flutter-version: '3.19.6'
+          channel: stable
+      - name: Run flutter test
+        run: cd sdk/flutter && flutter pub get && flutter test
+
+  android:
+    name: android
+    needs: changes
+    if: needs.changes.outputs.android == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+
+      # The same Kotlin sources on a plain JVM: no Android SDK, no emulator, and
+      # it fails for the same reasons the Gradle run would. Runs first so a broken
+      # test is reported in seconds rather than after Gradle provisioning.
+      - name: Unit tests (JVM variant)
+        run: cd sdk/android/jvm && ./mvnw -B clean test
+
+      - uses: android-actions/setup-android@v3
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          # AGP 8.2 needs Gradle 8.0+. There is no committed gradlew (a
+          # gradle-wrapper.jar is a binary blob this repo does not carry); pinning
+          # the version here gives the same reproducibility.
+          gradle-version: '8.7'
+
+      - name: Unit tests (Android library)
+        run: cd sdk/android && gradle --no-daemon :sdk:testDebugUnitTest
+
+      - name: Test report (on failure)
+        if: failure()
+        run: |
+          find sdk/android/sdk/build/reports -name '*.html' -print 2>/dev/null || true
+          find sdk/android/sdk/build/test-results -name '*.xml' -exec cat {} + 2>/dev/null | tail -n 200 || true
+
+  ios:
+    name: ios
+    needs: changes
+    if: needs.changes.outputs.ios == 'true'
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run XCTest
+        run: cd sdk/ios && swift test
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # One stable name for branch protection. Green when every job that ran passed
+  # (and when nothing needed to run at all); red as soon as one fails.
+  # ───────────────────────────────────────────────────────────────────────────
+  sdk-unit-tests:
+    name: SDK Unit Tests
+    needs: [changes, linux, elixir, flutter, android, ios]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check results
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, sys
+          needs = json.loads(os.environ["RESULTS"])
+          bad = {job: r["result"] for job, r in needs.items()
+                 if r["result"] not in ("success", "skipped")}
+          for job, result in sorted(needs.items()):
+              print(f"{job:10} {result['result']}")
+          if bad:
+              print("\nFailed: " + ", ".join(f"{j} ({r})" for j, r in sorted(bad.items())))
+              sys.exit(1)
+          print("\nAll SDK suites that ran passed.")
+          PY

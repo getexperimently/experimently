@@ -2,8 +2,9 @@
 Test cases for Experiment CRUD API endpoints - Application setup verification.
 """
 
-import pytest
 import inspect
+
+import pytest
 from fastapi.testclient import TestClient
 
 # Import the main application
@@ -64,7 +65,9 @@ def test_api_endpoints():
     # 503 when DB/Redis are unavailable (common in unit-test environments).
     health_response = client.get("/health")
     print(f"\nHealth endpoint: {health_response.status_code}")
-    assert health_response.status_code in (200, 503), "Health endpoint should be accessible"
+    assert health_response.status_code in (200, 503), (
+        "Health endpoint should be accessible"
+    )
     assert "status" in health_response.json()
 
     # Test API documentation endpoints
@@ -78,9 +81,9 @@ def test_api_endpoints():
     for endpoint in docs_endpoints:
         response = client.get(endpoint)
         print(f"  {endpoint} - Status: {response.status_code}")
-        assert (
-            response.status_code == 200
-        ), f"Documentation endpoint {endpoint} should be accessible"
+        assert response.status_code == 200, (
+            f"Documentation endpoint {endpoint} should be accessible"
+        )
 
     # Test API resource endpoints (should return 401 if auth is required)
     api_resource_endpoints = [

@@ -27,7 +27,6 @@ from backend.app.schemas.variance_reduction import (
     VarianceReductionMethod,
 )
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -150,7 +149,9 @@ class TestCupedApiEndpoint:
 
     def test_cuped_endpoint_cuped_method_returns_adjusted_results(self, client):
         """When method is CUPED, response contains CUPED-adjusted results."""
-        mock_response = _make_cuped_response(method="cuped", variance_reduction_pct=30.0)
+        mock_response = _make_cuped_response(
+            method="cuped", variance_reduction_pct=30.0
+        )
         with patch(
             "backend.app.api.v1.endpoints.results.get_cuped_results_data",
             return_value=mock_response,
@@ -234,9 +235,7 @@ class TestCupedApiEndpoint:
         """GET /results/{id}/cuped requires authentication (no override)."""
         # Use a raw client without auth override
         with TestClient(app) as raw_client:
-            response = raw_client.get(
-                f"/api/v1/results/{TEST_EXPERIMENT_ID}/cuped"
-            )
+            response = raw_client.get(f"/api/v1/results/{TEST_EXPERIMENT_ID}/cuped")
         # Without auth, should get 401 or 403
         assert response.status_code in (401, 403, 422)
 

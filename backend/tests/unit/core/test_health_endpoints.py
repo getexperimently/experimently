@@ -56,25 +56,43 @@ def fake_settings(monkeypatch):
 @pytest.fixture
 def healthy_deps(monkeypatch):
     """Make the dependency checks pass without a database or Redis."""
-    monkeypatch.setattr(health, "check_database", lambda: {"status": "healthy", "latency_ms": 0.1})
-    monkeypatch.setattr(health, "check_redis", lambda: {"status": "healthy", "latency_ms": 0.1})
-    monkeypatch.setattr(health, "check_disk", lambda path="/": {"status": "healthy", "free_gb": 50.0})
+    monkeypatch.setattr(
+        health, "check_database", lambda: {"status": "healthy", "latency_ms": 0.1}
+    )
+    monkeypatch.setattr(
+        health, "check_redis", lambda: {"status": "healthy", "latency_ms": 0.1}
+    )
+    monkeypatch.setattr(
+        health, "check_disk", lambda path="/": {"status": "healthy", "free_gb": 50.0}
+    )
 
 
 @pytest.fixture
 def db_down(monkeypatch):
     monkeypatch.setattr(
-        health, "check_database", lambda: {"status": "unhealthy", "error": "connection refused"}
+        health,
+        "check_database",
+        lambda: {"status": "unhealthy", "error": "connection refused"},
     )
-    monkeypatch.setattr(health, "check_redis", lambda: {"status": "healthy", "latency_ms": 0.1})
-    monkeypatch.setattr(health, "check_disk", lambda path="/": {"status": "healthy", "free_gb": 50.0})
+    monkeypatch.setattr(
+        health, "check_redis", lambda: {"status": "healthy", "latency_ms": 0.1}
+    )
+    monkeypatch.setattr(
+        health, "check_disk", lambda path="/": {"status": "healthy", "free_gb": 50.0}
+    )
 
 
 @pytest.fixture
 def redis_down(monkeypatch):
-    monkeypatch.setattr(health, "check_database", lambda: {"status": "healthy", "latency_ms": 0.1})
-    monkeypatch.setattr(health, "check_redis", lambda: {"status": "unhealthy", "error": "refused"})
-    monkeypatch.setattr(health, "check_disk", lambda path="/": {"status": "healthy", "free_gb": 50.0})
+    monkeypatch.setattr(
+        health, "check_database", lambda: {"status": "healthy", "latency_ms": 0.1}
+    )
+    monkeypatch.setattr(
+        health, "check_redis", lambda: {"status": "unhealthy", "error": "refused"}
+    )
+    monkeypatch.setattr(
+        health, "check_disk", lambda path="/": {"status": "healthy", "free_gb": 50.0}
+    )
 
 
 @pytest.fixture
@@ -131,12 +149,16 @@ class TestReadiness:
         assert body["status"] == "unhealthy"
         assert body["checks"]["database"]["status"] == "unhealthy"
 
-    def test_redis_down_does_not_fail_readiness_by_default(self, client, redis_down, fake_settings):
+    def test_redis_down_does_not_fail_readiness_by_default(
+        self, client, redis_down, fake_settings
+    ):
         resp = client.get("/health/ready")
         assert resp.status_code == 200
         assert resp.json()["checks"]["redis"]["status"] == "unhealthy"
 
-    def test_redis_down_fails_readiness_when_required(self, client, redis_down, fake_settings):
+    def test_redis_down_fails_readiness_when_required(
+        self, client, redis_down, fake_settings
+    ):
         fake_settings.REDIS_REQUIRED = True
         resp = client.get("/health/ready")
         assert resp.status_code == 503
@@ -157,7 +179,9 @@ class TestReadiness:
         assert body["checks"]["database"] == {"status": "unhealthy"}  # no error text
 
     def test_error_text_never_contains_password(self):
-        err = health._safe_error(RuntimeError('FATAL: password authentication failed for user "x"'))
+        err = health._safe_error(
+            RuntimeError('FATAL: password authentication failed for user "x"')
+        )
         assert "password" not in err.lower()
 
 
@@ -175,7 +199,9 @@ class TestMetricsEndpoint:
         assert "scheduler_last_success_timestamp" in resp.text
 
     @pytest.mark.parametrize("env", ["production", "staging"])
-    def test_forbidden_outside_development_without_token(self, client, fake_settings, env):
+    def test_forbidden_outside_development_without_token(
+        self, client, fake_settings, env
+    ):
         fake_settings.ENVIRONMENT = env
         resp = client.get("/metrics")
         assert resp.status_code == 403
@@ -184,14 +210,29 @@ class TestMetricsEndpoint:
         fake_settings.METRICS_TOKEN = "s3cret"
 
         assert client.get("/metrics").status_code == 401
-        assert client.get("/metrics", headers={"Authorization": "Bearer wrong"}).status_code == 401
-        assert client.get("/metrics", headers={"Authorization": "Bearer s3cret"}).status_code == 200
+        assert (
+            client.get(
+                "/metrics", headers={"Authorization": "Bearer wrong"}
+            ).status_code
+            == 401
+        )
+        assert (
+            client.get(
+                "/metrics", headers={"Authorization": "Bearer s3cret"}
+            ).status_code
+            == 200
+        )
         assert client.get("/metrics?token=s3cret").status_code == 200
 
     def test_token_works_in_production(self, client, fake_settings):
         fake_settings.ENVIRONMENT = "production"
         fake_settings.METRICS_TOKEN = "prod-token"
-        assert client.get("/metrics", headers={"Authorization": "Bearer prod-token"}).status_code == 200
+        assert (
+            client.get(
+                "/metrics", headers={"Authorization": "Bearer prod-token"}
+            ).status_code
+            == 200
+        )
 
     def test_disabled_returns_404(self, client, fake_settings):
         fake_settings.METRICS_ENABLED = False

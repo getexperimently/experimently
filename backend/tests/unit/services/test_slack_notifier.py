@@ -13,9 +13,9 @@ Tests cover:
 - All methods return False when Slack is disabled
 """
 
-import pytest
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, call, patch
 
+import pytest
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -32,13 +32,16 @@ def _make_notifier(
     Return a SlackNotifier whose settings and SDK availability can be
     controlled by the caller.
     """
-    with patch("backend.app.services.slack_notifier.settings") as mock_settings, \
-         patch("backend.app.services.slack_notifier.SLACK_SDK_AVAILABLE", sdk_available):
+    with (
+        patch("backend.app.services.slack_notifier.settings") as mock_settings,
+        patch("backend.app.services.slack_notifier.SLACK_SDK_AVAILABLE", sdk_available),
+    ):
         mock_settings.SLACK_ENABLED = slack_enabled
         mock_settings.SLACK_BOT_TOKEN = slack_bot_token
         mock_settings.SLACK_DEFAULT_CHANNEL = slack_default_channel
 
         from backend.app.services.slack_notifier import SlackNotifier
+
         notifier = SlackNotifier()
         # Override instance attributes directly so they don't re-read settings
         notifier._enabled = slack_enabled
@@ -62,6 +65,7 @@ class TestInit:
             mock_settings.SLACK_DEFAULT_CHANNEL = "#eng-alerts"
 
             from backend.app.services.slack_notifier import SlackNotifier
+
             notifier = SlackNotifier()
 
         assert notifier._enabled is True
@@ -78,17 +82,13 @@ class TestDisabledGuards:
     def test_send_when_disabled_returns_false(self):
         """All sends return False immediately when SLACK_ENABLED is False."""
         notifier = _make_notifier(slack_enabled=False)
-        result = notifier._send_message(
-            channel="#test", blocks=[], text="hello"
-        )
+        result = notifier._send_message(channel="#test", blocks=[], text="hello")
         assert result is False
 
     def test_send_when_no_token_returns_false(self):
         """All sends return False when the bot token is empty."""
         notifier = _make_notifier(slack_bot_token="")
-        result = notifier._send_message(
-            channel="#test", blocks=[], text="hello"
-        )
+        result = notifier._send_message(channel="#test", blocks=[], text="hello")
         assert result is False
 
 
@@ -105,10 +105,10 @@ class TestSendMessage:
         mock_client = MagicMock()
         mock_client.chat_postMessage.return_value = {"ok": True}
 
-        with patch("backend.app.services.slack_notifier.WebClient", return_value=mock_client):
-            result = notifier._send_message(
-                channel="#test", blocks=[], text="hello"
-            )
+        with patch(
+            "backend.app.services.slack_notifier.WebClient", return_value=mock_client
+        ):
+            result = notifier._send_message(channel="#test", blocks=[], text="hello")
 
         assert result is True
         mock_client.chat_postMessage.assert_called_once()
@@ -125,10 +125,10 @@ class TestSendMessage:
             response={"ok": False, "error": "channel_not_found"},
         )
 
-        with patch("backend.app.services.slack_notifier.WebClient", return_value=mock_client):
-            result = notifier._send_message(
-                channel="#missing", blocks=[], text="hello"
-            )
+        with patch(
+            "backend.app.services.slack_notifier.WebClient", return_value=mock_client
+        ):
+            result = notifier._send_message(channel="#missing", blocks=[], text="hello")
 
         assert result is False
 
@@ -139,10 +139,10 @@ class TestSendMessage:
         mock_client = MagicMock()
         mock_client.chat_postMessage.side_effect = ConnectionError("network error")
 
-        with patch("backend.app.services.slack_notifier.WebClient", return_value=mock_client):
-            result = notifier._send_message(
-                channel="#test", blocks=[], text="hello"
-            )
+        with patch(
+            "backend.app.services.slack_notifier.WebClient", return_value=mock_client
+        ):
+            result = notifier._send_message(channel="#test", blocks=[], text="hello")
 
         assert result is False
 
@@ -153,10 +153,10 @@ class TestSendMessage:
         mock_client = MagicMock()
         mock_client.chat_postMessage.return_value = {"ok": True}
 
-        with patch("backend.app.services.slack_notifier.WebClient", return_value=mock_client):
-            notifier._send_message(
-                channel="#custom-alerts", blocks=[], text="hello"
-            )
+        with patch(
+            "backend.app.services.slack_notifier.WebClient", return_value=mock_client
+        ):
+            notifier._send_message(channel="#custom-alerts", blocks=[], text="hello")
 
         call_kwargs = mock_client.chat_postMessage.call_args[1]
         assert call_kwargs.get("channel") == "#custom-alerts"
@@ -168,7 +168,9 @@ class TestSendMessage:
         mock_client = MagicMock()
         mock_client.chat_postMessage.return_value = {"ok": True}
 
-        with patch("backend.app.services.slack_notifier.WebClient", return_value=mock_client):
+        with patch(
+            "backend.app.services.slack_notifier.WebClient", return_value=mock_client
+        ):
             notifier._send_message(channel=None, blocks=[], text="hello")
 
         call_kwargs = mock_client.chat_postMessage.call_args[1]
@@ -511,11 +513,17 @@ class TestSlackDisabledAllMethodsReturnFalse:
         """When SLACK_ENABLED=False every public method returns False."""
         notifier = _make_notifier(slack_enabled=False)
 
-        assert notifier.send_safety_rollback_alert(
-            flag_name="f", error_rate=0.1, threshold=0.05, reason="r"
-        ) is False
+        assert (
+            notifier.send_safety_rollback_alert(
+                flag_name="f", error_rate=0.1, threshold=0.05, reason="r"
+            )
+            is False
+        )
         assert notifier.send_experiment_started(experiment_name="E") is False
         assert notifier.send_experiment_completed(experiment_name="E") is False
-        assert notifier.send_rollout_advanced(flag_name="f", from_pct=0, to_pct=10) is False
+        assert (
+            notifier.send_rollout_advanced(flag_name="f", from_pct=0, to_pct=10)
+            is False
+        )
         assert notifier.send_rollout_completed(flag_name="f") is False
         assert notifier.send_generic_alert(title="T", message="M") is False

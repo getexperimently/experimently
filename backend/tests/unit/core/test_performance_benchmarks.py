@@ -7,23 +7,23 @@ Measures the performance impact of:
 - Operator execution
 """
 
-import pytest
+import os
 import time
 from datetime import datetime
 
-from backend.app.core.rules_engine import evaluate_targeting_rules, apply_operator
-from backend.app.core.rule_compiler import RuleCompiler
+import pytest
+
 from backend.app.core.evaluation_cache import EvaluationCache
+from backend.app.core.rule_compiler import RuleCompiler
+from backend.app.core.rules_engine import apply_operator, evaluate_targeting_rules
 from backend.app.schemas.targeting_rule import (
-    TargetingRule,
-    TargetingRules,
-    RuleGroup,
     Condition,
     LogicalOperator,
-    OperatorType
+    OperatorType,
+    RuleGroup,
+    TargetingRule,
+    TargetingRules,
 )
-
-import os
 
 # Throughput assertions below assume a quiet local machine; shared CI
 # runners are several times slower and make them flaky, so they only run
@@ -72,10 +72,7 @@ class TestOperatorPerformance:
         start = time.time()
         for _ in range(iterations):
             apply_operator(
-                OperatorType.SEMANTIC_VERSION,
-                "1.2.3",
-                "1.0.0",
-                additional_value="gt"
+                OperatorType.SEMANTIC_VERSION, "1.2.3", "1.0.0", additional_value="gt"
             )
         duration = time.time() - start
 
@@ -93,7 +90,7 @@ class TestOperatorPerformance:
             apply_operator(
                 OperatorType.GEO_DISTANCE,
                 {"lat": 37.7749, "lon": -122.4194},
-                {"lat": 37.8044, "lon": -122.2712, "radius": 15, "unit": "miles"}
+                {"lat": 37.8044, "lon": -122.2712, "radius": 15, "unit": "miles"},
             )
         duration = time.time() - start
 
@@ -116,8 +113,8 @@ class TestOperatorPerformance:
                 {
                     "days": [0, 1, 2, 3, 4],  # Weekdays
                     "start_time": "09:00",
-                    "end_time": "17:00"
-                }
+                    "end_time": "17:00",
+                },
             )
         duration = time.time() - start
 
@@ -140,12 +137,14 @@ class TestRuleCompilationPerformance:
             rule=RuleGroup(
                 operator=LogicalOperator.AND,
                 conditions=[
-                    Condition(attribute="country", operator=OperatorType.EQUALS, value="US")
+                    Condition(
+                        attribute="country", operator=OperatorType.EQUALS, value="US"
+                    )
                 ],
-                groups=[]
+                groups=[],
             ),
             priority=1,
-            rollout_percentage=100
+            rollout_percentage=100,
         )
 
         start = time.time()
@@ -169,27 +168,34 @@ class TestRuleCompilationPerformance:
         inner_group = RuleGroup(
             operator=LogicalOperator.OR,
             conditions=[
-                Condition(attribute="age", operator=OperatorType.GREATER_THAN, value=18),
-                Condition(attribute="verified", operator=OperatorType.EQUALS, value=True),
-                Condition(attribute="premium", operator=OperatorType.EQUALS, value=True),
+                Condition(
+                    attribute="age", operator=OperatorType.GREATER_THAN, value=18
+                ),
+                Condition(
+                    attribute="verified", operator=OperatorType.EQUALS, value=True
+                ),
+                Condition(
+                    attribute="premium", operator=OperatorType.EQUALS, value=True
+                ),
             ],
-            groups=[]
+            groups=[],
         )
 
         outer_group = RuleGroup(
             operator=LogicalOperator.AND,
             conditions=[
-                Condition(attribute="country", operator=OperatorType.IN, value=["US", "CA", "UK"]),
+                Condition(
+                    attribute="country",
+                    operator=OperatorType.IN,
+                    value=["US", "CA", "UK"],
+                ),
                 Condition(attribute="active", operator=OperatorType.EQUALS, value=True),
             ],
-            groups=[inner_group]
+            groups=[inner_group],
         )
 
         rule = TargetingRule(
-            id="complex_rule",
-            rule=outer_group,
-            priority=1,
-            rollout_percentage=100
+            id="complex_rule", rule=outer_group, priority=1, rollout_percentage=100
         )
 
         start = time.time()
@@ -210,27 +216,34 @@ class TestRuleCompilationPerformance:
         inner_group = RuleGroup(
             operator=LogicalOperator.OR,
             conditions=[
-                Condition(attribute="age", operator=OperatorType.GREATER_THAN, value=18),
-                Condition(attribute="verified", operator=OperatorType.EQUALS, value=True),
-                Condition(attribute="premium", operator=OperatorType.EQUALS, value=True),
+                Condition(
+                    attribute="age", operator=OperatorType.GREATER_THAN, value=18
+                ),
+                Condition(
+                    attribute="verified", operator=OperatorType.EQUALS, value=True
+                ),
+                Condition(
+                    attribute="premium", operator=OperatorType.EQUALS, value=True
+                ),
             ],
-            groups=[]
+            groups=[],
         )
 
         outer_group = RuleGroup(
             operator=LogicalOperator.AND,
             conditions=[
-                Condition(attribute="country", operator=OperatorType.IN, value=["US", "CA", "UK"]),
+                Condition(
+                    attribute="country",
+                    operator=OperatorType.IN,
+                    value=["US", "CA", "UK"],
+                ),
                 Condition(attribute="active", operator=OperatorType.EQUALS, value=True),
             ],
-            groups=[inner_group]
+            groups=[inner_group],
         )
 
         rule = TargetingRule(
-            id="cache_test",
-            rule=outer_group,
-            priority=1,
-            rollout_percentage=100
+            id="cache_test", rule=outer_group, priority=1, rollout_percentage=100
         )
 
         # Time uncached compilation
@@ -311,23 +324,27 @@ class TestEndToEndPerformance:
                     rule=RuleGroup(
                         operator=LogicalOperator.AND,
                         conditions=[
-                            Condition(attribute="country", operator=OperatorType.EQUALS, value="US"),
-                            Condition(attribute="age", operator=OperatorType.GREATER_THAN, value=18),
+                            Condition(
+                                attribute="country",
+                                operator=OperatorType.EQUALS,
+                                value="US",
+                            ),
+                            Condition(
+                                attribute="age",
+                                operator=OperatorType.GREATER_THAN,
+                                value=18,
+                            ),
                         ],
-                        groups=[]
+                        groups=[],
                     ),
                     priority=1,
-                    rollout_percentage=100
+                    rollout_percentage=100,
                 )
             ],
-            default_rule=None
+            default_rule=None,
         )
 
-        user_context = {
-            "user_id": "user_123",
-            "country": "US",
-            "age": 25
-        }
+        user_context = {"user_id": "user_123", "country": "US", "age": 25}
 
         iterations = 1000
 
@@ -352,14 +369,26 @@ class TestEndToEndPerformance:
                     rule=RuleGroup(
                         operator=LogicalOperator.AND,
                         conditions=[
-                            Condition(attribute="country", operator=OperatorType.IN, value=["US", "CA", "UK"]),
-                            Condition(attribute="age", operator=OperatorType.GREATER_THAN, value=18 + i),
-                            Condition(attribute="verified", operator=OperatorType.EQUALS, value=True),
+                            Condition(
+                                attribute="country",
+                                operator=OperatorType.IN,
+                                value=["US", "CA", "UK"],
+                            ),
+                            Condition(
+                                attribute="age",
+                                operator=OperatorType.GREATER_THAN,
+                                value=18 + i,
+                            ),
+                            Condition(
+                                attribute="verified",
+                                operator=OperatorType.EQUALS,
+                                value=True,
+                            ),
                         ],
-                        groups=[]
+                        groups=[],
                     ),
                     priority=i,
-                    rollout_percentage=100
+                    rollout_percentage=100,
                 )
             )
 
@@ -369,7 +398,7 @@ class TestEndToEndPerformance:
             "user_id": "user_123",
             "country": "US",
             "age": 25,
-            "verified": True
+            "verified": True,
         }
 
         iterations = 100
@@ -426,13 +455,22 @@ class TestPerformanceComparison:
             rule=RuleGroup(
                 operator=LogicalOperator.AND,
                 conditions=[
-                    Condition(attribute="country", operator=OperatorType.IN, value=["US", "CA"]),
-                    Condition(attribute="age", operator=OperatorType.BETWEEN, value=18, additional_value=65),
+                    Condition(
+                        attribute="country",
+                        operator=OperatorType.IN,
+                        value=["US", "CA"],
+                    ),
+                    Condition(
+                        attribute="age",
+                        operator=OperatorType.BETWEEN,
+                        value=18,
+                        additional_value=65,
+                    ),
                 ],
-                groups=[]
+                groups=[],
             ),
             priority=1,
-            rollout_percentage=100
+            rollout_percentage=100,
         )
 
         # Compile rule

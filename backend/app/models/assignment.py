@@ -1,11 +1,12 @@
 # models/assignment.py
-from sqlalchemy import Column, String, ForeignKey, Index
-from sqlalchemy.dialects.postgresql import UUID, JSONB
-from sqlalchemy.orm import relationship
+from sqlalchemy import Column, ForeignKey, Index, String
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.ext.declarative import declared_attr
+from sqlalchemy.orm import relationship
+
+from backend.app.core.database_config import get_schema_name
 
 from .base import Base, BaseModel
-from backend.app.core.database_config import get_schema_name
 
 
 class Assignment(Base, BaseModel):

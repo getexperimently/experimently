@@ -1,20 +1,19 @@
-from typing import Generator, Optional, AsyncGenerator, Any, Dict
-
-import jwt
-from fastapi import Depends, HTTPException, status, Request
-from fastapi.security import OAuth2PasswordBearer
-from sqlalchemy.orm import Session
 import os
+from typing import Any, AsyncGenerator, Dict, Generator, Optional
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import jwt
+import pytest
+from fastapi import Depends, HTTPException, Request, status
+from fastapi.security import OAuth2PasswordBearer
+from loguru import logger
+from sqlalchemy.orm import Session
+
+from backend.app.core.cognito import map_cognito_groups_to_role, should_be_superuser
 from backend.app.core.config import settings
 from backend.app.db.session import SessionLocal
-from backend.app.models.user import User
+from backend.app.models.user import User, UserRole
 from backend.app.services.auth_service import auth_service
-from backend.app.core.cognito import map_cognito_groups_to_role, should_be_superuser
-from loguru import logger
-import pytest
-from backend.app.models.user import UserRole
 
 # OAuth2 scheme for token authentication
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.API_V1_STR}/auth/token")
@@ -86,13 +85,15 @@ def get_current_user(
                 full_name=full_name,
                 is_active=True,
                 role=role,
-                is_superuser=is_superuser
+                is_superuser=is_superuser,
             )
             db.add(user)
             db.commit()
             db.refresh(user)
 
-            logger.info(f"Created new user {username} with role {role} and superuser={is_superuser}")
+            logger.info(
+                f"Created new user {username} with role {role} and superuser={is_superuser}"
+            )
         elif settings.SYNC_ROLES_ON_LOGIN:
             # Update user's role and superuser status if changed
             role_changed = user.role != role
@@ -102,11 +103,15 @@ def get_current_user(
                 # Update user properties
                 if role_changed:
                     user.role = role
-                    logger.info(f"User {username} role updated to {role} based on Cognito groups")
+                    logger.info(
+                        f"User {username} role updated to {role} based on Cognito groups"
+                    )
 
                 if superuser_changed:
                     user.is_superuser = is_superuser
-                    logger.info(f"User {username} superuser status updated to {is_superuser}")
+                    logger.info(
+                        f"User {username} superuser status updated to {is_superuser}"
+                    )
 
                 # Commit changes to database
                 db.commit()
@@ -114,7 +119,7 @@ def get_current_user(
 
         return user
     except Exception as e:
-        logger.error(f"Authentication error: {str(e)}")
+        logger.error(f"Authentication error: {e!s}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Could not validate credentials",
@@ -137,7 +142,7 @@ async def test_get_current_user_with_cognito_groups(
             "given_name": "Test",
             "family_name": "User",
         },
-        "groups": ["Developers", "Analysts"]
+        "groups": ["Developers", "Analysts"],
     }
     mock_auth_service.get_user_with_groups.return_value = user_data
 
@@ -177,7 +182,7 @@ async def test_get_current_user_with_admin_group(
             "given_name": "Admin",
             "family_name": "User",
         },
-        "groups": ["Admins"]
+        "groups": ["Admins"],
     }
     mock_auth_service.get_user_with_groups.return_value = user_data
 
@@ -212,7 +217,7 @@ async def test_get_current_user_update_role(
             "given_name": "Existing",
             "family_name": "User",
         },
-        "groups": ["Analysts"]
+        "groups": ["Analysts"],
     }
     mock_auth_service.get_user_with_groups.return_value = user_data
 
@@ -227,7 +232,7 @@ async def test_get_current_user_update_role(
         first_name="Existing",
         last_name="User",
         role=UserRole.VIEWER,
-        is_superuser=False
+        is_superuser=False,
     )
     mock_user_repository.get_user_by_id.return_value = existing_user
 
@@ -255,7 +260,7 @@ async def test_get_current_user_role_sync_disabled(
             "given_name": "Test",
             "family_name": "User",
         },
-        "groups": ["Developers"]
+        "groups": ["Developers"],
     }
     mock_auth_service.get_user_with_groups.return_value = user_data
 
@@ -270,7 +275,7 @@ async def test_get_current_user_role_sync_disabled(
         first_name="Test",
         last_name="User",
         role=UserRole.VIEWER,  # Different from Cognito group
-        is_superuser=False
+        is_superuser=False,
     )
     mock_user_repository.get_user_by_id.return_value = existing_user
 
@@ -288,13 +293,14 @@ def db_session():
     yield mock_session
     # Optional cleanup code would go here
 
+
 @pytest.fixture
 def cognito_token():
     # Mock Cognito token
     token = {
         "sub": "test-user-id",
         "email": "test@example.com",
-        "cognito:groups": ["developer"]
+        "cognito:groups": ["developer"],
     }
     yield token
     # Optional cleanup code would go here
@@ -328,16 +334,16 @@ async def test_get_current_user_valid_token(mock_db_session, mock_auth_service):
     mock_auth_service.get_user_with_groups.return_value = {
         "username": "test_user",
         "attributes": {"email": "test@example.com"},
-        "groups": []
+        "groups": [],
     }
 
     # Setup database to return user
     mock_user = User(
-        username="test_user",
-        email="test@example.com",
-        role=UserRole.DEVELOPER
+        username="test_user", email="test@example.com", role=UserRole.DEVELOPER
     )
-    mock_db_session.query.return_value.filter.return_value.first.return_value = mock_user
+    mock_db_session.query.return_value.filter.return_value.first.return_value = (
+        mock_user
+    )
 
     # Use patch to mock the auth_service module
     with patch("backend.app.api.deps.auth_service", mock_auth_service):
@@ -348,6 +354,7 @@ async def test_get_current_user_valid_token(mock_db_session, mock_auth_service):
         assert user is not None
         assert user.username == "test_user"
         mock_auth_service.get_user_with_groups.assert_called_once_with("test_token")
+
 
 @pytest.mark.skip(reason="Cognito authentication not properly mocked")
 @pytest.mark.asyncio
@@ -367,6 +374,7 @@ async def test_get_current_user_invalid_token(mock_db_session, mock_auth_service
         assert "Could not validate credentials" in exc_info.value.detail
         mock_auth_service.get_user_with_groups.assert_called_once_with("invalid_token")
 
+
 @pytest.mark.skip(reason="Cognito authentication not properly mocked")
 @pytest.mark.asyncio
 async def test_get_current_user_new_user(mock_db_session, mock_auth_service):
@@ -377,9 +385,9 @@ async def test_get_current_user_new_user(mock_db_session, mock_auth_service):
         "attributes": {
             "email": "new@example.com",
             "given_name": "New",
-            "family_name": "User"
+            "family_name": "User",
         },
-        "groups": ["Developers"]
+        "groups": ["Developers"],
     }
 
     # Setup database to return no existing user, then add the new user
@@ -388,7 +396,10 @@ async def test_get_current_user_new_user(mock_db_session, mock_auth_service):
     # Use patch to mock the auth_service module
     with patch("backend.app.api.deps.auth_service", mock_auth_service):
         # Mock the cognito module functions
-        with patch("backend.app.api.deps.map_cognito_groups_to_role", return_value=UserRole.DEVELOPER):
+        with patch(
+            "backend.app.api.deps.map_cognito_groups_to_role",
+            return_value=UserRole.DEVELOPER,
+        ):
             with patch("backend.app.api.deps.should_be_superuser", return_value=False):
                 # Call the function under test
                 user = await get_current_user("test_token", mock_db_session)
@@ -402,7 +413,10 @@ async def test_get_current_user_new_user(mock_db_session, mock_auth_service):
                 mock_db_session.add.assert_called_once()
                 mock_db_session.commit.assert_called_once()
                 mock_db_session.refresh.assert_called_once()
-                mock_auth_service.get_user_with_groups.assert_called_once_with("test_token")
+                mock_auth_service.get_user_with_groups.assert_called_once_with(
+                    "test_token"
+                )
+
 
 @pytest.mark.skip(reason="Cognito authentication not properly mocked")
 @pytest.mark.asyncio
@@ -412,7 +426,7 @@ async def test_get_current_user_existing_user(mock_db_session, mock_auth_service
     mock_auth_service.get_user_with_groups.return_value = {
         "username": "existing_user",
         "attributes": {"email": "existing@example.com"},
-        "groups": ["Developers"]
+        "groups": ["Developers"],
     }
 
     # Setup database to return an existing user
@@ -420,13 +434,18 @@ async def test_get_current_user_existing_user(mock_db_session, mock_auth_service
         username="existing_user",
         email="existing@example.com",
         role=UserRole.DEVELOPER,
-        is_superuser=False
+        is_superuser=False,
     )
-    mock_db_session.query.return_value.filter.return_value.first.return_value = mock_user
+    mock_db_session.query.return_value.filter.return_value.first.return_value = (
+        mock_user
+    )
 
     # Patch needed dependencies
     with patch("backend.app.api.deps.auth_service", mock_auth_service):
-        with patch("backend.app.api.deps.map_cognito_groups_to_role", return_value=UserRole.DEVELOPER):
+        with patch(
+            "backend.app.api.deps.map_cognito_groups_to_role",
+            return_value=UserRole.DEVELOPER,
+        ):
             with patch("backend.app.api.deps.should_be_superuser", return_value=False):
                 with patch("backend.app.api.deps.settings") as mock_settings:
                     # Configure settings
@@ -439,7 +458,10 @@ async def test_get_current_user_existing_user(mock_db_session, mock_auth_service
                     assert user is mock_user
                     assert user.username == "existing_user"
                     assert user.email == "existing@example.com"
-                    mock_auth_service.get_user_with_groups.assert_called_once_with("test_token")
+                    mock_auth_service.get_user_with_groups.assert_called_once_with(
+                        "test_token"
+                    )
+
 
 @pytest.mark.skip(reason="Cognito authentication not properly mocked")
 @pytest.mark.asyncio
@@ -449,7 +471,7 @@ async def test_get_current_user_superuser(mock_db_session, mock_auth_service):
     mock_auth_service.get_user_with_groups.return_value = {
         "username": "admin_user",
         "attributes": {"email": "admin@example.com"},
-        "groups": ["Admins"]
+        "groups": ["Admins"],
     }
 
     # Setup database to return no existing user
@@ -457,7 +479,10 @@ async def test_get_current_user_superuser(mock_db_session, mock_auth_service):
 
     # Patch needed dependencies
     with patch("backend.app.api.deps.auth_service", mock_auth_service):
-        with patch("backend.app.api.deps.map_cognito_groups_to_role", return_value=UserRole.ADMIN):
+        with patch(
+            "backend.app.api.deps.map_cognito_groups_to_role",
+            return_value=UserRole.ADMIN,
+        ):
             with patch("backend.app.api.deps.should_be_superuser", return_value=True):
                 # Call the function under test
                 user = await get_current_user("test_token", mock_db_session)
@@ -467,29 +492,34 @@ async def test_get_current_user_superuser(mock_db_session, mock_auth_service):
                 assert user.username == "admin_user"
                 assert user.role == UserRole.ADMIN
                 assert user.is_superuser is True
-                mock_auth_service.get_user_with_groups.assert_called_once_with("test_token")
+                mock_auth_service.get_user_with_groups.assert_called_once_with(
+                    "test_token"
+                )
+
 
 @pytest.mark.skip(reason="Cognito authentication not properly mocked")
 @pytest.mark.asyncio
-async def test_get_current_user_superuser_role_override(mock_db_session, mock_auth_service):
+async def test_get_current_user_superuser_role_override(
+    mock_db_session, mock_auth_service
+):
     """Test superusers are assigned ADMIN role regardless of their groups."""
     # Setup existing user
     existing_user = User(
         username="test_user",
         email="test@example.com",
         role=UserRole.VIEWER,
-        is_superuser=False
+        is_superuser=False,
     )
-    mock_db_session.query.return_value.filter.return_value.first.return_value = existing_user
+    mock_db_session.query.return_value.filter.return_value.first.return_value = (
+        existing_user
+    )
 
     # Mock Cognito response with SuperUsers group that's defined as admin in COGNITO_ADMIN_GROUPS
     # but mapped to a different role in COGNITO_GROUP_ROLE_MAPPING
     mock_auth_service.get_user_with_groups.return_value = {
         "username": "test_user",
-        "attributes": {
-            "email": "test@example.com"
-        },
-        "groups": ["SuperUsers"]
+        "attributes": {"email": "test@example.com"},
+        "groups": ["SuperUsers"],
     }
 
     # Patch needed dependencies
@@ -511,7 +541,10 @@ async def test_get_current_user_superuser_role_override(mock_db_session, mock_au
                     assert user is existing_user
                     assert user.role == UserRole.ADMIN
                     assert user.is_superuser is True
-                    mock_auth_service.get_user_with_groups.assert_called_once_with("test_token")
+                    mock_auth_service.get_user_with_groups.assert_called_once_with(
+                        "test_token"
+                    )
+
 
 @pytest.mark.skip(reason="Cognito authentication not properly mocked")
 @pytest.mark.asyncio

@@ -7,6 +7,7 @@ import { withAdminGuard } from '@/components/admin/withAdminGuard';
 export function ApiKeysPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [newKeyBanner, setNewKeyBanner] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
   const [tableKey, setTableKey] = useState(0);
 
   const handleKeyCreated = (keyValue: string) => {
@@ -27,21 +28,46 @@ export function ApiKeysPage() {
             data-testid="new-key-banner"
             className="p-4 bg-amber-50 border border-amber-300 rounded-md flex items-center justify-between"
           >
-            <div>
+            <div className="min-w-0">
               <p className="text-sm font-semibold text-amber-800">
                 Copy this key — it won&apos;t be shown again
               </p>
-              <p className="font-mono text-sm text-amber-900 mt-1">
-                {newKeyBanner.slice(0, 8)}...
-              </p>
+              {/* The whole key, not a preview: this is the only time the
+                  plaintext exists anywhere, and a truncated one is useless. */}
+              <code
+                data-testid="new-key-value"
+                className="block font-mono text-sm text-amber-900 mt-1 break-all select-all"
+              >
+                {newKeyBanner}
+              </code>
             </div>
-            <button
-              data-testid="dismiss-key-banner"
-              onClick={() => setNewKeyBanner(null)}
-              className="text-amber-600 hover:text-amber-800 text-sm font-medium ml-4"
-            >
-              Dismiss
-            </button>
+            <div className="flex items-center gap-3 ml-4 shrink-0">
+              <button
+                data-testid="copy-new-key"
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard?.writeText(newKeyBanner);
+                    setCopied(true);
+                    setTimeout(() => setCopied(false), 2000);
+                  } catch {
+                    setCopied(false);
+                  }
+                }}
+                className="px-3 py-1.5 rounded-md bg-amber-600 text-white text-sm font-medium hover:bg-amber-700"
+              >
+                {copied ? 'Copied' : 'Copy'}
+              </button>
+              <button
+                data-testid="dismiss-key-banner"
+                onClick={() => {
+                  setNewKeyBanner(null);
+                  setCopied(false);
+                }}
+                className="text-amber-600 hover:text-amber-800 text-sm font-medium"
+              >
+                Dismiss
+              </button>
+            </div>
           </div>
         )}
 

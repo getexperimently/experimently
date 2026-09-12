@@ -6,16 +6,14 @@ aggregating raw metrics data into summary data for efficient querying.
 """
 
 import asyncio
-import logging
-from datetime import datetime, timezone, timedelta
-from typing import Any, Optional, Dict, List
-from sqlalchemy.orm import Session
+from datetime import datetime, timedelta, timezone
+from typing import Dict, Optional
 
+from backend.app.core.logging import get_logger
+from backend.app.core.scheduler_tick import run_locked_tick
 from backend.app.db.session import SessionLocal
 from backend.app.models.metrics.metric import AggregationPeriod
 from backend.app.services.metrics_service import MetricsService
-from backend.app.core.logging import get_logger
-from backend.app.core.scheduler_tick import run_locked_tick
 
 logger = get_logger(__name__)
 
@@ -44,7 +42,9 @@ class MetricsScheduler:
 
         self.is_running = True
         self.task = asyncio.create_task(self._run_scheduler())
-        logger.info(f"Metrics scheduler started with {self.interval_minutes} minute interval")
+        logger.info(
+            f"Metrics scheduler started with {self.interval_minutes} minute interval"
+        )
 
     async def stop(self):
         """Stop the scheduler."""
@@ -57,6 +57,7 @@ class MetricsScheduler:
             try:
                 # Only await the task if it's a real asyncio Task and not a mock
                 from unittest.mock import Mock
+
                 if not isinstance(self.task, Mock):
                     await self.task
             except asyncio.CancelledError:
@@ -77,7 +78,7 @@ class MetricsScheduler:
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error(f"Error in metrics scheduler: {str(e)}")
+                logger.error(f"Error in metrics scheduler: {e!s}")
                 # Wait a bit before trying again
                 await asyncio.sleep(60)
 
@@ -99,10 +100,12 @@ class MetricsScheduler:
         # lowest-frequency scheduler that already holds an advisory lock, and
         # retention needs to run somewhere.
         try:
-            from backend.app.services.analysis_snapshot_service import purge_expired_history
+            from backend.app.services.analysis_snapshot_service import (
+                purge_expired_history,
+            )
 
             purge_expired_history()
-        except Exception as exc:  # noqa: BLE001 - never fail the tick on retention
+        except Exception as exc:
             logger.warning("analysis history purge skipped: %s", exc)
 
         total_records = 0
@@ -136,27 +139,31 @@ class MetricsScheduler:
                         db=db,
                         period=period,
                         start_time=start_time,
-                        end_time=current_time
+                        end_time=current_time,
                     )
                     total_records += records
                     logger.info(f"Aggregated {records} records for {period} period")
                 except Exception as e:
                     failed_periods += 1
-                    logger.error(f"Error aggregating {period} metrics: {str(e)}")
+                    logger.error(f"Error aggregating {period} metrics: {e!s}")
 
             if total_records > 0:
-                logger.info(f"Total of {total_records} aggregated metric records created/updated")
+                logger.info(
+                    f"Total of {total_records} aggregated metric records created/updated"
+                )
             else:
                 logger.info("No metrics required aggregation")
 
         except Exception as e:
             failed_periods += 1
-            logger.error(f"Error processing metrics aggregation: {str(e)}")
+            logger.error(f"Error processing metrics aggregation: {e!s}")
         finally:
             db.close()
 
         return {
-            "items_processed": int(total_records) if isinstance(total_records, int) else 0,
+            "items_processed": int(total_records)
+            if isinstance(total_records, int)
+            else 0,
             "items_failed": failed_periods,
         }
 

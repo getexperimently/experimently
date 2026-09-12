@@ -49,16 +49,21 @@ defmodule ExperimentationPlatform.Config do
   end
 
   def new(opts) when is_list(opts) do
-    struct = struct!(__MODULE__, opts)
+    # Validate before building: `@enforce_keys` makes `struct!/2` raise first,
+    # with "the following keys must also be given when building struct ...",
+    # so the messages below were unreachable and a caller who forgot an option
+    # got struct internals instead of what to pass.
+    base_url = Keyword.get(opts, :base_url)
+    api_key = Keyword.get(opts, :api_key)
 
-    if is_nil(struct.base_url) or struct.base_url == "" do
+    if is_nil(base_url) or base_url == "" do
       raise ArgumentError, "base_url required"
     end
 
-    if is_nil(struct.api_key) or struct.api_key == "" do
+    if is_nil(api_key) or api_key == "" do
       raise ArgumentError, "api_key required"
     end
 
-    struct
+    struct!(__MODULE__, opts)
   end
 end

@@ -11,9 +11,10 @@ Coverage:
 - reset_counters: sets counter(s) to 0, supports variant_id=None and counter_type=None
 """
 
-import pytest
-import boto3
 from decimal import Decimal
+
+import boto3
+import pytest
 from moto import mock_dynamodb
 
 from backend.app.schemas.realtime_counters import (
@@ -105,9 +106,7 @@ class TestIncrementCounter:
         assert new_val == 3
 
     def test_increment_event_counter(self, counter_service):
-        val = counter_service.increment_counter(
-            "exp-1", "v-control", CounterType.EVENT
-        )
+        val = counter_service.increment_counter("exp-1", "v-control", CounterType.EVENT)
         assert val == 1
 
     def test_increment_conversion_counter(self, counter_service):
@@ -145,13 +144,15 @@ class TestIncrementCounter:
         )
         assert val == 8
 
-    def test_increment_uses_add_expression_atomically(self, counter_service, dynamodb_resource):
+    def test_increment_uses_add_expression_atomically(
+        self, counter_service, dynamodb_resource
+    ):
         """Verify the item is stored with the correct attribute name."""
         counter_service.increment_counter("exp-1", "v1", CounterType.ASSIGNMENT)
         table = dynamodb_resource.Table(TABLE_NAME)
-        item = table.get_item(
-            Key={"pk": "EXPERIMENT#exp-1", "sk": "VARIANT#v1"}
-        ).get("Item", {})
+        item = table.get_item(Key={"pk": "EXPERIMENT#exp-1", "sk": "VARIANT#v1"}).get(
+            "Item", {}
+        )
         assert "assignments" in item
         assert int(item["assignments"]) == 1
 
@@ -323,7 +324,9 @@ class TestBulkIncrement:
 
 
 class TestResetCounters:
-    def test_reset_all_counters_for_experiment(self, counter_service, dynamodb_resource):
+    def test_reset_all_counters_for_experiment(
+        self, counter_service, dynamodb_resource
+    ):
         # Populate some counters
         counter_service.increment_counter("exp-1", "v1", CounterType.ASSIGNMENT, 50)
         counter_service.increment_counter("exp-1", "v1", CounterType.EVENT, 40)
@@ -375,7 +378,7 @@ class TestResetCounters:
 
         result = counter_service.get_experiment_counters("exp-1")
         assert result.total_assignments == 150  # both variants untouched
-        assert result.total_conversions == 10   # only v2 conversion remains
+        assert result.total_conversions == 10  # only v2 conversion remains
 
     def test_reset_nonexistent_experiment_does_not_raise(self, counter_service):
         # Should not raise an exception

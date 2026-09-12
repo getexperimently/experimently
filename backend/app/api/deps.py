@@ -1,29 +1,36 @@
-from typing import Generator, Optional, Union, Any, Dict
+from typing import Any, Dict, Generator, Optional, Union
 from uuid import UUID
-import asyncio
-from fastapi import Depends, HTTPException, status, Header, Request, Query
-from fastapi.security import OAuth2PasswordBearer, APIKeyHeader, HTTPBearer, HTTPAuthorizationCredentials
-from sqlalchemy.orm import Session
-from pydantic import BaseModel, SecretStr
 
-from backend.app.core.config import settings
-from backend.app.core.pagination import Paginator
-from backend.app.core.security import (
-    oauth2_scheme,
-    hash_api_key,
-    decode_local_token,
-    InvalidTokenError,
+from fastapi import Depends, HTTPException, Query, Request, status
+from fastapi.security import (
+    APIKeyHeader,
 )
-from backend.app.core.permissions import ResourceType, Action, check_permission, check_ownership, get_permission_error_message
+from loguru import logger
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
+
 from backend.app.core.cognito import map_cognito_groups_to_role, should_be_superuser
+from backend.app.core.config import settings
+from backend.app.core.permissions import (
+    Action,
+    ResourceType,
+    check_ownership,
+    check_permission,
+    get_permission_error_message,
+)
+from backend.app.core.security import (
+    InvalidTokenError,
+    decode_local_token,
+    hash_api_key,
+    oauth2_scheme,
+)
 from backend.app.db.session import SessionLocal
-from backend.app.models.user import User, UserRole
+from backend.app.models.api_key import APIKey
 from backend.app.models.experiment import Experiment, ExperimentStatus
 from backend.app.models.feature_flag import FeatureFlag
 from backend.app.models.report import Report
+from backend.app.models.user import User, UserRole
 from backend.app.services.auth_service import auth_service
-from loguru import logger
-from backend.app.models.api_key import APIKey
 
 # Try to import Redis, handle gracefully if not installed
 try:
@@ -174,7 +181,9 @@ def _get_or_create_dev_user(db: Session) -> User:
     return user
 
 
-def _credentials_exception(detail: str = "Could not validate credentials") -> HTTPException:
+def _credentials_exception(
+    detail: str = "Could not validate credentials",
+) -> HTTPException:
     return HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail=detail,
@@ -197,7 +206,9 @@ def _authenticate_local_token(token: str, db: Session) -> User:
 
     try:
         user = db.query(User).filter(User.id == user_id).first()
-    except Exception as exc:  # pragma: no cover - defensive; DB errors are not auth errors
+    except (
+        Exception
+    ) as exc:  # pragma: no cover - defensive; DB errors are not auth errors
         logger.error(f"User lookup failed during local token auth: {exc}")
         raise _credentials_exception()
 
@@ -284,13 +295,15 @@ def get_current_user(
                 full_name=full_name,
                 is_active=True,
                 role=role,
-                is_superuser=is_superuser
+                is_superuser=is_superuser,
             )
             db.add(user)
             db.commit()
             db.refresh(user)
 
-            logger.info(f"Created new user {username} with role {role} and superuser={is_superuser}")
+            logger.info(
+                f"Created new user {username} with role {role} and superuser={is_superuser}"
+            )
         elif settings.SYNC_ROLES_ON_LOGIN:
             # Update user's role and superuser status if changed
             role_changed = user.role != role
@@ -300,11 +313,15 @@ def get_current_user(
                 # Update user properties
                 if role_changed:
                     user.role = role
-                    logger.info(f"User {username} role updated to {role} based on Cognito groups")
+                    logger.info(
+                        f"User {username} role updated to {role} based on Cognito groups"
+                    )
 
                 if superuser_changed:
                     user.is_superuser = is_superuser
-                    logger.info(f"User {username} superuser status updated to {is_superuser}")
+                    logger.info(
+                        f"User {username} superuser status updated to {is_superuser}"
+                    )
 
                 # Commit changes to database
                 db.commit()
@@ -312,7 +329,7 @@ def get_current_user(
 
         return user
     except Exception as e:
-        logger.error(f"Authentication error: {str(e)}")
+        logger.error(f"Authentication error: {e!s}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Could not validate credentials",
@@ -377,7 +394,7 @@ def get_current_superuser_or_none(
 
 def get_experiment_access(
     experiment: Union[Experiment, Dict[str, Any]],
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ) -> Union[Experiment, Dict[str, Any]]:
     """
     Check if user has access to the experiment.
@@ -413,7 +430,9 @@ def get_experiment_access(
         )
 
     # Check ownership for non-admin users for modification actions
-    if not check_permission(current_user, ResourceType.EXPERIMENT, Action.UPDATE) and not check_ownership(current_user, experiment):
+    if not check_permission(
+        current_user, ResourceType.EXPERIMENT, Action.UPDATE
+    ) and not check_ownership(current_user, experiment):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You don't have permission to access this experiment",
@@ -470,7 +489,7 @@ def get_api_key(
 def get_experiment_by_key(
     experiment_key: str,
     db: Session = Depends(get_db),
-    required_status: Optional[ExperimentStatus] = None
+    required_status: Optional[ExperimentStatus] = None,
 ) -> Experiment:
     """
     Get experiment by key or ID.
@@ -491,6 +510,7 @@ def get_experiment_by_key(
     # First try to lookup by ID (UUID)
     try:
         from uuid import UUID
+
         experiment_id = UUID(experiment_key)
         experiment = db.query(Experiment).filter(Experiment.id == experiment_id).first()
     except (ValueError, TypeError):
@@ -509,10 +529,20 @@ def get_experiment_by_key(
         raise HTTPException(status_code=404, detail="Experiment not found")
 
     # Check for required status if specified
-    if required_status is not None and hasattr(experiment, 'status') and experiment.status != required_status:
-        raise HTTPException(status_code=400, detail=f"Experiment not in {required_status.value} status")
+    if (
+        required_status is not None
+        and hasattr(experiment, "status")
+        and experiment.status != required_status
+    ):
+        raise HTTPException(
+            status_code=400, detail=f"Experiment not in {required_status.value} status"
+        )
     # Default check for active status (only if required_status is not specified)
-    elif required_status is None and hasattr(experiment, 'status') and experiment.status != ExperimentStatus.ACTIVE:
+    elif (
+        required_status is None
+        and hasattr(experiment, "status")
+        and experiment.status != ExperimentStatus.ACTIVE
+    ):
         raise HTTPException(status_code=400, detail="Inactive experiment")
 
     return experiment
@@ -583,7 +613,9 @@ async def get_feature_flag_access(
         )
 
     # Check ownership for non-admin users for modification actions
-    if not check_permission(current_user, ResourceType.FEATURE_FLAG, Action.UPDATE) and not check_ownership(current_user, feature_flag):
+    if not check_permission(
+        current_user, ResourceType.FEATURE_FLAG, Action.UPDATE
+    ) and not check_ownership(current_user, feature_flag):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You don't have permission to access this feature flag",
@@ -599,7 +631,9 @@ async def can_create_feature_flag(
     if not check_permission(current_user, ResourceType.FEATURE_FLAG, Action.CREATE):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=get_permission_error_message(ResourceType.FEATURE_FLAG, Action.CREATE),
+            detail=get_permission_error_message(
+                ResourceType.FEATURE_FLAG, Action.CREATE
+            ),
         )
     return True
 
@@ -612,7 +646,9 @@ async def can_update_feature_flag(
     if not check_permission(current_user, ResourceType.FEATURE_FLAG, Action.UPDATE):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=get_permission_error_message(ResourceType.FEATURE_FLAG, Action.UPDATE),
+            detail=get_permission_error_message(
+                ResourceType.FEATURE_FLAG, Action.UPDATE
+            ),
         )
     return True
 
@@ -625,7 +661,9 @@ async def can_delete_feature_flag(
     if not check_permission(current_user, ResourceType.FEATURE_FLAG, Action.DELETE):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=get_permission_error_message(ResourceType.FEATURE_FLAG, Action.DELETE),
+            detail=get_permission_error_message(
+                ResourceType.FEATURE_FLAG, Action.DELETE
+            ),
         )
     return True
 
@@ -661,7 +699,9 @@ async def get_report_access(
         )
 
     # Check ownership for non-admin users for modification actions
-    if not check_permission(current_user, ResourceType.REPORT, Action.UPDATE) and not check_ownership(current_user, report):
+    if not check_permission(
+        current_user, ResourceType.REPORT, Action.UPDATE
+    ) and not check_ownership(current_user, report):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You don't have permission to access this report",
@@ -760,13 +800,17 @@ def can_delete_experiment(
     # If not a superuser, check ownership
     if not current_user.is_superuser:
         # For Dict objects, check owner_id field
-        if isinstance(experiment, dict) and str(experiment.get("owner_id")) != str(current_user.id):
+        if isinstance(experiment, dict) and str(experiment.get("owner_id")) != str(
+            current_user.id
+        ):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="You must be the owner to delete this experiment",
             )
         # For Experiment objects, check owner_id attribute
-        elif hasattr(experiment, "owner_id") and str(experiment.owner_id) != str(current_user.id):
+        elif hasattr(experiment, "owner_id") and str(experiment.owner_id) != str(
+            current_user.id
+        ):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="You must be the owner to delete this experiment",
@@ -777,7 +821,9 @@ def can_delete_experiment(
 
 # Create a dedicated function for getting experiments for deletion
 def get_experiment_for_deletion(
-    experiment_key: str = Query(..., description="Key or ID of the experiment to delete"),
+    experiment_key: str = Query(
+        ..., description="Key or ID of the experiment to delete"
+    ),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
     cache_control: Dict[str, Any] = Depends(get_cache_control),
@@ -805,7 +851,9 @@ def get_experiment_for_deletion(
         experiment = db.query(Experiment).filter(Experiment.id == experiment_id).first()
     except (ValueError, TypeError):
         # If not valid UUID, try by key
-        experiment = db.query(Experiment).filter(Experiment.key == experiment_key).first()
+        experiment = (
+            db.query(Experiment).filter(Experiment.key == experiment_key).first()
+        )
 
     if not experiment:
         raise HTTPException(
@@ -816,10 +864,11 @@ def get_experiment_for_deletion(
     if experiment.status != ExperimentStatus.DRAFT:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Experiment not in DRAFT status"
+            detail="Experiment not in DRAFT status",
         )
 
     return experiment
+
 
 async def can_delete_draft_experiment(
     current_user: User = Depends(get_current_active_user),
@@ -847,7 +896,7 @@ async def can_delete_draft_experiment(
     if experiment.owner_id != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not enough permissions to delete this experiment"
+            detail="Not enough permissions to delete this experiment",
         )
 
     return True

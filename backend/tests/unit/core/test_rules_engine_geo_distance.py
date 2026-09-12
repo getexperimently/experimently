@@ -5,6 +5,7 @@ Tests geographic distance calculation functionality for location-based targeting
 """
 
 import pytest
+
 from backend.app.core.rules_engine import apply_operator
 from backend.app.schemas.targeting_rule import OperatorType
 
@@ -18,7 +19,7 @@ class TestGeoDistanceWithinRadius:
         result = apply_operator(
             OperatorType.GEO_DISTANCE,
             {"lat": 37.7749, "lon": -122.4194},  # San Francisco
-            {"lat": 37.8044, "lon": -122.2712, "radius": 15, "unit": "miles"}
+            {"lat": 37.8044, "lon": -122.2712, "radius": 15, "unit": "miles"},
         )
         assert result is True
 
@@ -28,7 +29,7 @@ class TestGeoDistanceWithinRadius:
         result = apply_operator(
             OperatorType.GEO_DISTANCE,
             {"lat": 48.8566, "lon": 2.3522},  # Paris
-            {"lat": 48.8049, "lon": 2.1204, "radius": 25, "unit": "km"}
+            {"lat": 48.8049, "lon": 2.1204, "radius": 25, "unit": "km"},
         )
         assert result is True
 
@@ -38,7 +39,7 @@ class TestGeoDistanceWithinRadius:
         result = apply_operator(
             OperatorType.GEO_DISTANCE,
             {"lat": 37.7749, "lon": -122.4194},  # San Francisco
-            {"lat": 34.0522, "lon": -118.2437, "radius": 100, "unit": "miles"}
+            {"lat": 34.0522, "lon": -118.2437, "radius": 100, "unit": "miles"},
         )
         assert result is False
 
@@ -48,7 +49,7 @@ class TestGeoDistanceWithinRadius:
         result = apply_operator(
             OperatorType.GEO_DISTANCE,
             {"lat": 37.7749, "lon": -122.4194},
-            {"lat": 37.7749, "lon": -122.4194, "radius": 0, "unit": "miles"}
+            {"lat": 37.7749, "lon": -122.4194, "radius": 0, "unit": "miles"},
         )
         assert result is True  # Same location, distance = 0
 
@@ -57,7 +58,7 @@ class TestGeoDistanceWithinRadius:
         result = apply_operator(
             OperatorType.GEO_DISTANCE,
             {"lat": 48.8566, "lon": 2.3522},  # Paris
-            {"lat": 48.8049, "lon": 2.1204, "radius": 25}  # No unit specified
+            {"lat": 48.8049, "lon": 2.1204, "radius": 25},  # No unit specified
         )
         assert result is True  # Default should be km
 
@@ -71,7 +72,13 @@ class TestGeoDistanceComparisons:
         result = apply_operator(
             OperatorType.GEO_DISTANCE,
             {"lat": 37.7749, "lon": -122.4194},
-            {"lat": 34.0522, "lon": -118.2437, "radius": 100, "unit": "miles", "comparison": "gt"}
+            {
+                "lat": 34.0522,
+                "lon": -118.2437,
+                "radius": 100,
+                "unit": "miles",
+                "comparison": "gt",
+            },
         )
         assert result is True
 
@@ -81,7 +88,13 @@ class TestGeoDistanceComparisons:
         result = apply_operator(
             OperatorType.GEO_DISTANCE,
             {"lat": 37.7749, "lon": -122.4194},
-            {"lat": 37.8044, "lon": -122.2712, "radius": 50, "unit": "miles", "comparison": "lt"}
+            {
+                "lat": 37.8044,
+                "lon": -122.2712,
+                "radius": 50,
+                "unit": "miles",
+                "comparison": "lt",
+            },
         )
         assert result is True
 
@@ -91,7 +104,13 @@ class TestGeoDistanceComparisons:
         result = apply_operator(
             OperatorType.GEO_DISTANCE,
             {"lat": 37.7749, "lon": -122.4194},
-            {"lat": 34.0522, "lon": -118.2437, "radius": 100, "unit": "miles", "comparison": "lt"}
+            {
+                "lat": 34.0522,
+                "lon": -118.2437,
+                "radius": 100,
+                "unit": "miles",
+                "comparison": "lt",
+            },
         )
         assert result is False
 
@@ -104,7 +123,12 @@ class TestGeoDistanceFormats:
         result = apply_operator(
             OperatorType.GEO_DISTANCE,
             {"latitude": 37.7749, "longitude": -122.4194},
-            {"latitude": 37.8044, "longitude": -122.2712, "radius": 15, "unit": "miles"}
+            {
+                "latitude": 37.8044,
+                "longitude": -122.2712,
+                "radius": 15,
+                "unit": "miles",
+            },
         )
         assert result is True
 
@@ -113,7 +137,12 @@ class TestGeoDistanceFormats:
         result = apply_operator(
             OperatorType.GEO_DISTANCE,
             {"lat": 37.7749, "lon": -122.4194},
-            {"latitude": 37.8044, "longitude": -122.2712, "radius": 15, "unit": "miles"}
+            {
+                "latitude": 37.8044,
+                "longitude": -122.2712,
+                "radius": 15,
+                "unit": "miles",
+            },
         )
         assert result is True
 
@@ -122,7 +151,7 @@ class TestGeoDistanceFormats:
         result = apply_operator(
             OperatorType.GEO_DISTANCE,
             [37.7749, -122.4194],  # [lat, lon]
-            {"lat": 37.8044, "lon": -122.2712, "radius": 15, "unit": "miles"}
+            {"lat": 37.8044, "lon": -122.2712, "radius": 15, "unit": "miles"},
         )
         assert result is True
 
@@ -131,7 +160,7 @@ class TestGeoDistanceFormats:
         result = apply_operator(
             OperatorType.GEO_DISTANCE,
             {"lat": "37.7749", "lon": "-122.4194"},
-            {"lat": "37.8044", "lon": "-122.2712", "radius": 15, "unit": "miles"}
+            {"lat": "37.8044", "lon": "-122.2712", "radius": 15, "unit": "miles"},
         )
         assert result is True
 
@@ -144,7 +173,7 @@ class TestGeoDistanceUnits:
         result = apply_operator(
             OperatorType.GEO_DISTANCE,
             {"lat": 37.7749, "lon": -122.4194},
-            {"lat": 37.8044, "lon": -122.2712, "radius": 15, "unit": "miles"}
+            {"lat": 37.8044, "lon": -122.2712, "radius": 15, "unit": "miles"},
         )
         assert result is True
 
@@ -153,7 +182,7 @@ class TestGeoDistanceUnits:
         result = apply_operator(
             OperatorType.GEO_DISTANCE,
             {"lat": 37.7749, "lon": -122.4194},
-            {"lat": 37.8044, "lon": -122.2712, "radius": 24, "unit": "km"}
+            {"lat": 37.8044, "lon": -122.2712, "radius": 24, "unit": "km"},
         )
         assert result is True
 
@@ -162,7 +191,7 @@ class TestGeoDistanceUnits:
         result = apply_operator(
             OperatorType.GEO_DISTANCE,
             {"lat": 37.7749, "lon": -122.4194},
-            {"lat": 37.7750, "lon": -122.4195, "radius": 200, "unit": "meters"}
+            {"lat": 37.7750, "lon": -122.4195, "radius": 200, "unit": "meters"},
         )
         assert result is True
 
@@ -171,7 +200,7 @@ class TestGeoDistanceUnits:
         result = apply_operator(
             OperatorType.GEO_DISTANCE,
             {"lat": 37.7749, "lon": -122.4194},
-            {"lat": 37.8044, "lon": -122.2712, "radius": 15, "unit": "MILES"}
+            {"lat": 37.8044, "lon": -122.2712, "radius": 15, "unit": "MILES"},
         )
         assert result is True
 
@@ -184,7 +213,7 @@ class TestGeoDistanceEdgeCases:
         result = apply_operator(
             OperatorType.GEO_DISTANCE,
             {"lat": 37.7749, "lon": -122.4194},
-            {"lat": 37.7749, "lon": -122.4194, "radius": 1, "unit": "miles"}
+            {"lat": 37.7749, "lon": -122.4194, "radius": 1, "unit": "miles"},
         )
         assert result is True
 
@@ -193,7 +222,7 @@ class TestGeoDistanceEdgeCases:
         result = apply_operator(
             OperatorType.GEO_DISTANCE,
             {"lat": 90.0, "lon": 0.0},
-            {"lat": 89.0, "lon": 0.0, "radius": 200, "unit": "km"}
+            {"lat": 89.0, "lon": 0.0, "radius": 200, "unit": "km"},
         )
         assert result is True
 
@@ -202,7 +231,7 @@ class TestGeoDistanceEdgeCases:
         result = apply_operator(
             OperatorType.GEO_DISTANCE,
             {"lat": -90.0, "lon": 0.0},
-            {"lat": -89.0, "lon": 0.0, "radius": 200, "unit": "km"}
+            {"lat": -89.0, "lon": 0.0, "radius": 200, "unit": "km"},
         )
         assert result is True
 
@@ -211,7 +240,7 @@ class TestGeoDistanceEdgeCases:
         result = apply_operator(
             OperatorType.GEO_DISTANCE,
             {"lat": 0.0, "lon": 179.0},
-            {"lat": 0.0, "lon": -179.0, "radius": 500, "unit": "km"}
+            {"lat": 0.0, "lon": -179.0, "radius": 500, "unit": "km"},
         )
         assert result is True
 
@@ -220,7 +249,7 @@ class TestGeoDistanceEdgeCases:
         result = apply_operator(
             OperatorType.GEO_DISTANCE,
             {"lat": 1.0, "lon": 0.0},
-            {"lat": -1.0, "lon": 0.0, "radius": 300, "unit": "km"}
+            {"lat": -1.0, "lon": 0.0, "radius": 300, "unit": "km"},
         )
         assert result is True
 
@@ -230,7 +259,12 @@ class TestGeoDistanceEdgeCases:
         result = apply_operator(
             OperatorType.GEO_DISTANCE,
             {"lat": 37.7749, "lon": -122.4194},
-            {"lat": -33.8688, "lon": 151.2093, "radius": 50000, "unit": "km"}  # SF to Sydney
+            {
+                "lat": -33.8688,
+                "lon": 151.2093,
+                "radius": 50000,
+                "unit": "km",
+            },  # SF to Sydney
         )
         assert result is True
 
@@ -243,7 +277,7 @@ class TestGeoDistanceInvalidInputs:
         result = apply_operator(
             OperatorType.GEO_DISTANCE,
             None,
-            {"lat": 37.7749, "lon": -122.4194, "radius": 10, "unit": "miles"}
+            {"lat": 37.7749, "lon": -122.4194, "radius": 10, "unit": "miles"},
         )
         assert result is False
 
@@ -252,7 +286,7 @@ class TestGeoDistanceInvalidInputs:
         result = apply_operator(
             OperatorType.GEO_DISTANCE,
             "not a location",
-            {"lat": 37.7749, "lon": -122.4194, "radius": 10, "unit": "miles"}
+            {"lat": 37.7749, "lon": -122.4194, "radius": 10, "unit": "miles"},
         )
         assert result is False
 
@@ -261,7 +295,7 @@ class TestGeoDistanceInvalidInputs:
         result = apply_operator(
             OperatorType.GEO_DISTANCE,
             {"lon": -122.4194},
-            {"lat": 37.7749, "lon": -122.4194, "radius": 10, "unit": "miles"}
+            {"lat": 37.7749, "lon": -122.4194, "radius": 10, "unit": "miles"},
         )
         assert result is False
 
@@ -270,7 +304,7 @@ class TestGeoDistanceInvalidInputs:
         result = apply_operator(
             OperatorType.GEO_DISTANCE,
             {"lat": 37.7749},
-            {"lat": 37.7749, "lon": -122.4194, "radius": 10, "unit": "miles"}
+            {"lat": 37.7749, "lon": -122.4194, "radius": 10, "unit": "miles"},
         )
         assert result is False
 
@@ -279,7 +313,7 @@ class TestGeoDistanceInvalidInputs:
         result = apply_operator(
             OperatorType.GEO_DISTANCE,
             {"lat": 37.7749, "lon": -122.4194},
-            {"lon": -122.4194, "radius": 10, "unit": "miles"}
+            {"lon": -122.4194, "radius": 10, "unit": "miles"},
         )
         assert result is False
 
@@ -288,7 +322,7 @@ class TestGeoDistanceInvalidInputs:
         result = apply_operator(
             OperatorType.GEO_DISTANCE,
             {"lat": 37.7749, "lon": -122.4194},
-            {"lat": 37.7749, "radius": 10, "unit": "miles"}
+            {"lat": 37.7749, "radius": 10, "unit": "miles"},
         )
         assert result is False
 
@@ -297,7 +331,7 @@ class TestGeoDistanceInvalidInputs:
         result = apply_operator(
             OperatorType.GEO_DISTANCE,
             {"lat": 37.7749, "lon": -122.4194},
-            {"lat": 37.7749, "lon": -122.4194, "unit": "miles"}
+            {"lat": 37.7749, "lon": -122.4194, "unit": "miles"},
         )
         assert result is False
 
@@ -306,7 +340,7 @@ class TestGeoDistanceInvalidInputs:
         result = apply_operator(
             OperatorType.GEO_DISTANCE,
             {"lat": 100.0, "lon": -122.4194},
-            {"lat": 37.7749, "lon": -122.4194, "radius": 10, "unit": "miles"}
+            {"lat": 37.7749, "lon": -122.4194, "radius": 10, "unit": "miles"},
         )
         assert result is False
 
@@ -315,7 +349,7 @@ class TestGeoDistanceInvalidInputs:
         result = apply_operator(
             OperatorType.GEO_DISTANCE,
             {"lat": 37.7749, "lon": 200.0},
-            {"lat": 37.7749, "lon": -122.4194, "radius": 10, "unit": "miles"}
+            {"lat": 37.7749, "lon": -122.4194, "radius": 10, "unit": "miles"},
         )
         assert result is False
 
@@ -324,7 +358,7 @@ class TestGeoDistanceInvalidInputs:
         result = apply_operator(
             OperatorType.GEO_DISTANCE,
             {"lat": 37.7749, "lon": -122.4194},
-            {"lat": 37.7749, "lon": -122.4194, "radius": -10, "unit": "miles"}
+            {"lat": 37.7749, "lon": -122.4194, "radius": -10, "unit": "miles"},
         )
         assert result is False
 
@@ -333,7 +367,7 @@ class TestGeoDistanceInvalidInputs:
         result = apply_operator(
             OperatorType.GEO_DISTANCE,
             {"lat": 37.7749, "lon": -122.4194},
-            {"lat": 37.7749, "lon": -122.4194, "radius": 10, "unit": "lightyears"}
+            {"lat": 37.7749, "lon": -122.4194, "radius": 10, "unit": "lightyears"},
         )
         assert result is False
 
@@ -342,7 +376,7 @@ class TestGeoDistanceInvalidInputs:
         result = apply_operator(
             OperatorType.GEO_DISTANCE,
             {"lat": "not a number", "lon": -122.4194},
-            {"lat": 37.7749, "lon": -122.4194, "radius": 10, "unit": "miles"}
+            {"lat": 37.7749, "lon": -122.4194, "radius": 10, "unit": "miles"},
         )
         assert result is False
 
@@ -351,7 +385,7 @@ class TestGeoDistanceInvalidInputs:
         result = apply_operator(
             OperatorType.GEO_DISTANCE,
             {"lat": 37.7749, "lon": -122.4194},
-            {"lat": 37.7749, "lon": -122.4194, "radius": "ten", "unit": "miles"}
+            {"lat": 37.7749, "lon": -122.4194, "radius": "ten", "unit": "miles"},
         )
         assert result is False
 
@@ -365,7 +399,7 @@ class TestGeoDistanceHaversineAccuracy:
         result = apply_operator(
             OperatorType.GEO_DISTANCE,
             {"lat": 40.7128, "lon": -74.0060},  # New York
-            {"lat": 40.7200, "lon": -74.0060, "radius": 1.5, "unit": "km"}
+            {"lat": 40.7200, "lon": -74.0060, "radius": 1.5, "unit": "km"},
         )
         assert result is True
 
@@ -375,7 +409,7 @@ class TestGeoDistanceHaversineAccuracy:
         result = apply_operator(
             OperatorType.GEO_DISTANCE,
             {"lat": 40.7128, "lon": -74.0060},  # New York
-            {"lat": 42.3601, "lon": -71.0589, "radius": 350, "unit": "km"}
+            {"lat": 42.3601, "lon": -71.0589, "radius": 350, "unit": "km"},
         )
         assert result is True
 
@@ -385,6 +419,6 @@ class TestGeoDistanceHaversineAccuracy:
         result = apply_operator(
             OperatorType.GEO_DISTANCE,
             {"lat": 40.7128, "lon": -74.0060},  # New York
-            {"lat": 51.5074, "lon": -0.1278, "radius": 6000, "unit": "km"}
+            {"lat": 51.5074, "lon": -0.1278, "radius": 6000, "unit": "km"},
         )
         assert result is True

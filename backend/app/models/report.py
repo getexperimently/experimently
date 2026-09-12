@@ -1,19 +1,22 @@
 """
 Report model for storing analytics reports and visualizations.
 """
-from sqlalchemy import Column, String, Text, ForeignKey, JSON, Enum, Boolean
-from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import relationship
-from sqlalchemy.ext.declarative import declared_attr
+
 import enum
-from uuid import uuid4
+
+from sqlalchemy import JSON, Boolean, Column, Enum, ForeignKey, String, Text
+from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.ext.declarative import declared_attr
+from sqlalchemy.orm import relationship
+
+from backend.app.core.database_config import get_schema_name
 
 from .base import Base, BaseModel
-from backend.app.core.database_config import get_schema_name
 
 
 class ReportType(str, enum.Enum):
     """Types of reports that can be created."""
+
     EXPERIMENT_RESULT = "experiment_result"
     FEATURE_FLAG_USAGE = "feature_flag_usage"
     USER_ACTIVITY = "user_activity"
@@ -31,7 +34,9 @@ class Report(Base, BaseModel):
     data = Column(JSON, nullable=True)  # Stored report data/results
     query_definition = Column(JSON, nullable=True)  # Definition of data query
     visualization_config = Column(JSON, nullable=True)  # Visualization settings
-    is_public = Column(Boolean, default=False)  # Whether report is viewable by all users
+    is_public = Column(
+        Boolean, default=False
+    )  # Whether report is viewable by all users
 
     # Foreign keys
     owner_id = Column(

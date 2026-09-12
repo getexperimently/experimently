@@ -57,7 +57,9 @@ class AccountLockedError(Exception):
 
     def __init__(self, retry_after_seconds: int) -> None:
         self.retry_after_seconds = max(1, int(retry_after_seconds))
-        super().__init__(f"Too many failed login attempts; retry in {self.retry_after_seconds}s")
+        super().__init__(
+            f"Too many failed login attempts; retry in {self.retry_after_seconds}s"
+        )
 
 
 class InvalidCredentialsError(Exception):
@@ -112,7 +114,9 @@ class LoginAttemptTracker:
         self._last_sweep = now
         overflow = len(self._failures) - self.max_tracked
         if overflow > 0:
-            oldest = sorted(self._failures.items(), key=lambda item: item[1][-1])[:overflow]
+            oldest = sorted(self._failures.items(), key=lambda item: item[1][-1])[
+                :overflow
+            ]
             for key, _ in oldest:
                 self._failures.pop(key, None)
 
@@ -181,9 +185,13 @@ class LocalAuthService:
 
     def __init__(self, tracker: Optional[LoginAttemptTracker] = None) -> None:
         # ``is not None``: an empty tracker is falsy (``__len__``).
-        self.tracker = tracker if tracker is not None else LoginAttemptTracker(
-            max_attempts=settings.LOCAL_AUTH_MAX_FAILED_ATTEMPTS,
-            window_seconds=settings.LOCAL_AUTH_LOCKOUT_MINUTES * 60,
+        self.tracker = (
+            tracker
+            if tracker is not None
+            else LoginAttemptTracker(
+                max_attempts=settings.LOCAL_AUTH_MAX_FAILED_ATTEMPTS,
+                window_seconds=settings.LOCAL_AUTH_LOCKOUT_MINUTES * 60,
+            )
         )
 
     def authenticate(self, db: Session, email: str, password: str) -> User:
@@ -200,7 +208,11 @@ class LocalAuthService:
         if status.locked:
             raise AccountLockedError(status.retry_after_seconds)
 
-        user = db.query(User).filter(User.email == email_key).first() if email_key else None
+        user = (
+            db.query(User).filter(User.email == email_key).first()
+            if email_key
+            else None
+        )
         if user is None and email and email != email_key:
             # Legacy rows may have been stored with the original casing.
             user = db.query(User).filter(User.email == email.strip()).first()

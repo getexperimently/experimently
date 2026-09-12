@@ -17,12 +17,14 @@ bypass enabled for the rest of the suite), so everything Cognito-specific is
 scoped here.  ``_cognito_provider`` below flips the settings singleton to the
 Cognito provider with the bypass off for every test in this directory.
 """
+
 import os
-import pytest
-import boto3
-from moto import mock_cognitoidp
 from unittest.mock import patch
+
+import boto3
+import pytest
 from fastapi.testclient import TestClient
+from moto import mock_cognitoidp
 
 # Set env vars BEFORE importing app (moto requires this order).
 # CognitoAuthService reads COGNITO_* from os.environ on every instantiation.
@@ -111,8 +113,8 @@ def auth_client(cognito_resources):
     assertions about status codes.  The middleware owns its limiter instance
     (there is no module-level singleton), so the classes are patched instead.
     """
-    from backend.app.main import app
     import backend.app.middleware.rate_limiter as rate_limiter_module
+    from backend.app.main import app
 
     user_pool_id = cognito_resources["user_pool_id"]
     client_id = cognito_resources["client_id"]
@@ -125,10 +127,12 @@ def auth_client(cognito_resources):
     }
 
     allow_all = {"return_value": (True, 999)}
-    with patch.dict(os.environ, env_patch), patch.object(
-        rate_limiter_module.RedisRateLimiter, "is_allowed", **allow_all
-    ), patch.object(
-        rate_limiter_module.SlidingWindowRateLimiter, "is_allowed", **allow_all
+    with (
+        patch.dict(os.environ, env_patch),
+        patch.object(rate_limiter_module.RedisRateLimiter, "is_allowed", **allow_all),
+        patch.object(
+            rate_limiter_module.SlidingWindowRateLimiter, "is_allowed", **allow_all
+        ),
     ):
         with TestClient(app, raise_server_exceptions=False) as client:
             yield client

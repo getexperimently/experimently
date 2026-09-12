@@ -9,7 +9,7 @@ space of the Prometheus counter and histogram.
 
 import re
 import time
-from typing import Callable, Awaitable
+from typing import Awaitable, Callable
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request

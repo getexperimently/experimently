@@ -131,13 +131,37 @@ Every request carries `X-API-Key`, `Content-Type: application/json` and `Accept:
 
 ## Tests
 
+Nothing in `sdk/src/main/kotlin` touches an `android.*` API — `OfflineStore` talks to a
+`PrefsAdapter` interface, `ResultCache` is hand-rolled rather than `android.util.LruCache`, and JSON
+goes through `org.json` (which `android.jar` only stubs, so the real implementation is a dependency
+for unit tests either way). So the same sources compile and test on a plain JVM:
+
 ```bash
-cd sdk/android && gradle :sdk:test   # JUnit 5 + MockWebServer, 78 tests (no wrapper checked in; needs Gradle 8 + Android SDK)
+cd sdk/android/jvm && ./mvnw clean test   # JUnit 5 + MockWebServer, 78 tests — no Android SDK, no emulator
+cd sdk/android && gradle :sdk:testDebugUnitTest   # the same tests through the AAR build (Gradle 8 + Android SDK)
 ```
 
-Unit tests only (JUnit 5 + MockWebServer); there is no contract smoke for Android because it
-needs a device runtime, and the live runner manifest
-(`tests/sdk-contract/live/run_live_contract.py`) has no `android` entry.
+Both run in `.github/workflows/sdk-unit-tests.yml` (nightly, and on any PR touching `sdk/android/**`).
 
-Verified against a live backend: **not yet (toolchain unavailable — no gradle/Android SDK on the
-development machine)**. The tests above have not been executed here either.
+## Contract smoke
+
+```bash
+bash sdk/android/examples/contract_smoke.sh
+# {"sdk":"android","assign":{"variant_name":"treatment","is_control":false,"sticky":true},"flag":{"enabled":true},"track":{"ok":true},"fanout":{"ok":true}}
+```
+
+Runs `com.experimentationplatform.android.examples.ContractSmoke` from the JVM build above
+(`./mvnw -q package -DskipTests` when `jvm/target` is stale, Maven output to stderr; `FORCE_BUILD=1`
+forces a rebuild). Env: `EXPERIMENTLY_API_URL` (default `http://localhost:8000`),
+`EXPERIMENTLY_API_KEY` (required), `CONTRACT_EXPERIMENT_KEY` (default `sdk_contract_ab`),
+`CONTRACT_FLAG_KEY` (default `sdk_contract_flag`), `CONTRACT_USER_ID` (default random
+`smoke-<uuid>`). Repo-wide runner:
+`python tests/sdk-contract/live/run_live_contract.py --sdk android`.
+
+`ExperimentationClient.track()` is fire-and-forget — it launches on a background scope and swallows
+every error — so the smoke calls it *and* posts the same `TrackEvent.toJson()` bodies through
+`HttpClient`, which throws on a non-2xx response. A renamed field or a path the backend does not
+serve fails the smoke.
+
+Verified against a live backend: **yes** (JVM variant, 2026-09-11). The Gradle/AAR build itself has
+still not been executed here (no Gradle or Android SDK on the development machine).

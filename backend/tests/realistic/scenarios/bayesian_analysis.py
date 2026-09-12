@@ -16,6 +16,7 @@ or analytically known values.
 """
 
 import math
+
 import pytest
 
 
@@ -120,8 +121,8 @@ class TestProbabilityToBeBest:
         from backend.app.services.bayesian_service import compute_probability_to_be_best
 
         posteriors = [
-            {"alpha": 10, "beta": 90},   # mean = 0.1
-            {"alpha": 50, "beta": 50},   # mean = 0.5 — clearly better
+            {"alpha": 10, "beta": 90},  # mean = 0.1
+            {"alpha": 50, "beta": 50},  # mean = 0.5 — clearly better
         ]
         ptbb = compute_probability_to_be_best(posteriors, n_samples=50_000)
         assert ptbb[1] > 0.99, f"Better variant should win >99%, got {ptbb[1]:.3f}"
@@ -153,9 +154,9 @@ class TestProbabilityToBeBest:
         from backend.app.services.bayesian_service import compute_probability_to_be_best
 
         posteriors = [
-            {"alpha": 5, "beta": 95},    # 5% CVR
-            {"alpha": 5, "beta": 95},    # 5% CVR
-            {"alpha": 50, "beta": 50},   # 50% CVR — dominant
+            {"alpha": 5, "beta": 95},  # 5% CVR
+            {"alpha": 5, "beta": 95},  # 5% CVR
+            {"alpha": 50, "beta": 50},  # 50% CVR — dominant
         ]
         ptbb = compute_probability_to_be_best(posteriors, n_samples=50_000)
         assert ptbb[2] > 0.99
@@ -168,11 +169,13 @@ class TestExpectedLoss:
         from backend.app.services.bayesian_service import compute_expected_loss
 
         posteriors = [
-            {"alpha": 10, "beta": 90},   # 10% CVR
-            {"alpha": 90, "beta": 10},   # 90% CVR — much better
+            {"alpha": 10, "beta": 90},  # 10% CVR
+            {"alpha": 90, "beta": 10},  # 90% CVR — much better
         ]
         losses = compute_expected_loss(posteriors, n_samples=50_000)
-        assert losses[1] < 0.01, f"Best variant should have near-zero loss, got {losses[1]}"
+        assert losses[1] < 0.01, (
+            f"Best variant should have near-zero loss, got {losses[1]}"
+        )
         assert losses[0] > 0.5, f"Worst variant should have high loss, got {losses[0]}"
 
     def test_equal_variants_have_similar_loss(self):
@@ -237,11 +240,12 @@ class TestBayesianStoppingRule:
         from backend.app.services.bayesian_service import should_stop
 
         posteriors = [
-            {"alpha": 10, "beta": 990},    # 1% CVR
-            {"alpha": 200, "beta": 800},   # 20% CVR — obvious winner
+            {"alpha": 10, "beta": 990},  # 1% CVR
+            {"alpha": 200, "beta": 800},  # 20% CVR — obvious winner
         ]
         try:
             from backend.app.schemas.bayesian import BayesianConfig
+
             config = BayesianConfig()
         except ImportError:
             pytest.skip("BayesianConfig not available")
@@ -254,11 +258,12 @@ class TestBayesianStoppingRule:
         from backend.app.services.bayesian_service import should_stop
 
         posteriors = [
-            {"alpha": 5, "beta": 5},   # very uncertain (n=10)
-            {"alpha": 6, "beta": 4},   # slightly better but tiny sample
+            {"alpha": 5, "beta": 5},  # very uncertain (n=10)
+            {"alpha": 6, "beta": 4},  # slightly better but tiny sample
         ]
         try:
             from backend.app.schemas.bayesian import BayesianConfig
+
             config = BayesianConfig()
         except ImportError:
             pytest.skip("BayesianConfig not available")
@@ -308,8 +313,8 @@ class TestBayesianServiceIntegration:
         service = BayesianService()
         result = service.analyze(
             variant_observations=[
-                {"conversions": 500, "total": 10000},   # 5%
-                {"conversions": 800, "total": 10000},   # 8%
+                {"conversions": 500, "total": 10000},  # 5%
+                {"conversions": 800, "total": 10000},  # 8%
             ],
         )
         ptbb = result["probability_to_be_best"]

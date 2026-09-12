@@ -6,8 +6,7 @@ import re
 from datetime import datetime
 from typing import List, Optional
 
-from pydantic import BaseModel, ConfigDict, EmailStr, field_validator
-
+from pydantic import BaseModel, ConfigDict, field_validator
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Workspace
@@ -179,7 +178,9 @@ class CreateInviteRequest(BaseModel):
         # OWNER cannot be granted via invite
         allowed = {"ADMIN", "DEVELOPER", "ANALYST", "VIEWER"}
         if v.upper() not in allowed:
-            raise ValueError(f"role must be one of {sorted(allowed)} (OWNER cannot be invited)")
+            raise ValueError(
+                f"role must be one of {sorted(allowed)} (OWNER cannot be invited)"
+            )
         return v.upper()
 
 

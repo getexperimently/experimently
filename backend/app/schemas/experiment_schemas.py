@@ -1,7 +1,8 @@
-from typing import Optional, List, Dict, Any, Union
 from datetime import datetime
+from typing import List, Optional
 from uuid import UUID
-from pydantic import BaseModel, Field, ConfigDict
+
+from pydantic import BaseModel, ConfigDict
 
 
 # Base Experiment model
@@ -17,8 +18,6 @@ class ExperimentBase(BaseModel):
 # Experiment create schema (used for creating new experiments)
 class ExperimentCreate(ExperimentBase):
     """Schema for creating a new experiment."""
-
-    pass
 
 
 # Experiment update schema (all fields optional for partial updates)
@@ -46,8 +45,6 @@ class ExperimentInDB(ExperimentBase):
 # Public experiment schema (for API responses)
 class ExperimentResponse(ExperimentInDB):
     """Schema for experiment API responses."""
-
-    pass
 
 
 # Simple experiment schema (minimal information)

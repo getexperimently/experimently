@@ -12,7 +12,6 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from backend.app.core.stats_engine import ENGINE_VERSION
 
-
 # ---------------------------------------------------------------------------
 # Enums
 # ---------------------------------------------------------------------------
@@ -151,9 +150,7 @@ class CupedResultsResponse(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-    experiment_id: str = Field(
-        ..., description="Unique identifier of the experiment."
-    )
+    experiment_id: str = Field(..., description="Unique identifier of the experiment.")
     method: VarianceReductionMethod = Field(
         ..., description="Variance-reduction method that was applied."
     )

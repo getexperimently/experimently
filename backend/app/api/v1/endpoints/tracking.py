@@ -6,30 +6,29 @@ These endpoints are designed to be called from client applications to participat
 in experiments and record user interactions.
 """
 
-from typing import Dict, Any, Optional, List
-from datetime import datetime, timezone
 import hashlib
 import uuid
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Path, Body, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, status
 from sqlalchemy.orm import Session
 
 from backend.app.api import deps
 from backend.app.core.metrics import record_event_tracked, record_experiment_assignment
-from backend.app.models.experiment import Experiment, ExperimentStatus
 from backend.app.models.assignment import Assignment
 from backend.app.models.bandit_state import BanditState
-from backend.app.models.event import Event, EventType
-from backend.app.models.feature_flag import FeatureFlag, FeatureFlagStatus
+from backend.app.models.event import Event
+from backend.app.models.experiment import Experiment, ExperimentStatus
+from backend.app.models.feature_flag import FeatureFlag
 from backend.app.schemas.tracking import (
     AssignmentRequest,
-    AssignmentResponse,
-    VariantAssignmentResponse,
+    EventBatchRequest,
+    EventBatchResponse,
     EventCreate,
     EventRequest,
     EventResponse,
-    EventBatchRequest,
-    EventBatchResponse,
+    VariantAssignmentResponse,
 )
 from backend.app.services.assignment_service import AssignmentService
 from backend.app.services.event_service import EventService
@@ -240,7 +239,9 @@ async def assign_user_to_experiment(
         assigned_flag = bool(assignment_data.get("assigned", True))
         record_experiment_assignment(
             experiment_id=str(experiment.id),
-            variant_id=str(variant.id) if assigned_flag else str(assignment_data.get("reason") or "ineligible"),
+            variant_id=str(variant.id)
+            if assigned_flag
+            else str(assignment_data.get("reason") or "ineligible"),
         )
 
         # Create response.  Ineligible users (holdout / mutual exclusion /
@@ -263,7 +264,7 @@ async def assign_user_to_experiment(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error assigning user to experiment: {str(e)}",
+            detail=f"Error assigning user to experiment: {e!s}",
         )
 
 
@@ -370,12 +371,12 @@ async def track_event(
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Invalid event: {str(e)}",
+            detail=f"Invalid event: {e!s}",
         )
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error tracking event: {str(e)}",
+            detail=f"Error tracking event: {e!s}",
         )
 
 
@@ -386,7 +387,9 @@ async def track_event(
     response_description="Returns the stored event",
 )
 async def track_event_by_ids(
-    event_data: EventCreate = Body(..., description="Event data keyed by experiment/flag ids"),
+    event_data: EventCreate = Body(
+        ..., description="Event data keyed by experiment/flag ids"
+    ),
     db: Session = Depends(deps.get_db),
     api_key_info: Dict[str, Any] = Depends(deps.get_api_key),
 ) -> EventResponse:
@@ -407,12 +410,12 @@ async def track_event_by_ids(
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Invalid event: {str(e)}",
+            detail=f"Invalid event: {e!s}",
         )
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error tracking event: {str(e)}",
+            detail=f"Error tracking event: {e!s}",
         )
 
 
@@ -445,7 +448,7 @@ async def track_events_batch(
                             "metadata": {"element": "buy-button"},
                         },
                     ]
-                }
+                },
             }
         },
     ),

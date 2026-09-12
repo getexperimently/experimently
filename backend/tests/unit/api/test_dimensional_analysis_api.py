@@ -14,8 +14,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
+from backend.app.api.deps import get_current_user, get_db
 from backend.app.main import app
-from backend.app.api.deps import get_db, get_current_user
 from backend.app.models.user import User
 from backend.app.schemas.dimensional import (
     DimensionalBreakdownResponse,
@@ -223,14 +223,19 @@ class TestBreakdownQueryParam:
     """Tests for ?breakdown=<dimension> extension to GET /results/{id}."""
 
     @pytest.mark.unit
-    def test_breakdown_platform_returns_200(
-        self, client, mock_experiment_results
-    ):
+    def test_breakdown_platform_returns_200(self, client, mock_experiment_results):
         """GET /results/{id}?breakdown=platform returns 200."""
         mock_bd = _make_breakdown_response("platform", ["ios", "android", "web"])
 
-        with patch.object(AnalysisService, "get_experiment_results", return_value=mock_experiment_results):
-            with patch(f"{_ENDPOINT_MODULE}._compute_dimensional_breakdown", return_value=mock_bd):
+        with patch.object(
+            AnalysisService,
+            "get_experiment_results",
+            return_value=mock_experiment_results,
+        ):
+            with patch(
+                f"{_ENDPOINT_MODULE}._compute_dimensional_breakdown",
+                return_value=mock_bd,
+            ):
                 response = client.get(
                     f"/api/v1/results/{EXPERIMENT_UUID}",
                     params={"breakdown": "platform", "use_cache": "false"},
@@ -239,14 +244,19 @@ class TestBreakdownQueryParam:
         assert response.status_code == 200
 
     @pytest.mark.unit
-    def test_breakdown_country_returns_200(
-        self, client, mock_experiment_results
-    ):
+    def test_breakdown_country_returns_200(self, client, mock_experiment_results):
         """GET /results/{id}?breakdown=country returns 200."""
         mock_bd = _make_breakdown_response("country", ["US", "UK", "DE"])
 
-        with patch.object(AnalysisService, "get_experiment_results", return_value=mock_experiment_results):
-            with patch(f"{_ENDPOINT_MODULE}._compute_dimensional_breakdown", return_value=mock_bd):
+        with patch.object(
+            AnalysisService,
+            "get_experiment_results",
+            return_value=mock_experiment_results,
+        ):
+            with patch(
+                f"{_ENDPOINT_MODULE}._compute_dimensional_breakdown",
+                return_value=mock_bd,
+            ):
                 response = client.get(
                     f"/api/v1/results/{EXPERIMENT_UUID}",
                     params={"breakdown": "country", "use_cache": "false"},
@@ -255,11 +265,13 @@ class TestBreakdownQueryParam:
         assert response.status_code == 200
 
     @pytest.mark.unit
-    def test_no_breakdown_still_works(
-        self, client, mock_experiment_results
-    ):
+    def test_no_breakdown_still_works(self, client, mock_experiment_results):
         """GET /results/{id} with no breakdown param is backward compatible."""
-        with patch.object(AnalysisService, "get_experiment_results", return_value=mock_experiment_results):
+        with patch.object(
+            AnalysisService,
+            "get_experiment_results",
+            return_value=mock_experiment_results,
+        ):
             response = client.get(
                 f"/api/v1/results/{EXPERIMENT_UUID}",
                 params={"use_cache": "false"},
@@ -277,8 +289,15 @@ class TestBreakdownQueryParam:
         """Response breakdown.segments lists one entry per distinct segment value."""
         mock_bd = _make_breakdown_response("platform", ["ios", "android", "web"])
 
-        with patch.object(AnalysisService, "get_experiment_results", return_value=mock_experiment_results):
-            with patch(f"{_ENDPOINT_MODULE}._compute_dimensional_breakdown", return_value=mock_bd):
+        with patch.object(
+            AnalysisService,
+            "get_experiment_results",
+            return_value=mock_experiment_results,
+        ):
+            with patch(
+                f"{_ENDPOINT_MODULE}._compute_dimensional_breakdown",
+                return_value=mock_bd,
+            ):
                 response = client.get(
                     f"/api/v1/results/{EXPERIMENT_UUID}",
                     params={"breakdown": "platform", "use_cache": "false"},
@@ -290,14 +309,19 @@ class TestBreakdownQueryParam:
         assert len(data["breakdown"]["segments"]) == 3
 
     @pytest.mark.unit
-    def test_breakdown_is_exploratory_true(
-        self, client, mock_experiment_results
-    ):
+    def test_breakdown_is_exploratory_true(self, client, mock_experiment_results):
         """breakdown.is_exploratory must always be True."""
         mock_bd = _make_breakdown_response("platform", ["ios", "android"])
 
-        with patch.object(AnalysisService, "get_experiment_results", return_value=mock_experiment_results):
-            with patch(f"{_ENDPOINT_MODULE}._compute_dimensional_breakdown", return_value=mock_bd):
+        with patch.object(
+            AnalysisService,
+            "get_experiment_results",
+            return_value=mock_experiment_results,
+        ):
+            with patch(
+                f"{_ENDPOINT_MODULE}._compute_dimensional_breakdown",
+                return_value=mock_bd,
+            ):
                 response = client.get(
                     f"/api/v1/results/{EXPERIMENT_UUID}",
                     params={"breakdown": "platform", "use_cache": "false"},
@@ -316,8 +340,15 @@ class TestBreakdownQueryParam:
             "platform", ["ios", "android", "web"], adjusted_alpha=expected_alpha
         )
 
-        with patch.object(AnalysisService, "get_experiment_results", return_value=mock_experiment_results):
-            with patch(f"{_ENDPOINT_MODULE}._compute_dimensional_breakdown", return_value=mock_bd):
+        with patch.object(
+            AnalysisService,
+            "get_experiment_results",
+            return_value=mock_experiment_results,
+        ):
+            with patch(
+                f"{_ENDPOINT_MODULE}._compute_dimensional_breakdown",
+                return_value=mock_bd,
+            ):
                 response = client.get(
                     f"/api/v1/results/{EXPERIMENT_UUID}",
                     params={"breakdown": "platform", "use_cache": "false"},
@@ -335,8 +366,15 @@ class TestBreakdownQueryParam:
         """GET with ?breakdown=unknown_dim returns 200 with empty segments list."""
         mock_bd = _make_breakdown_response("unknown_dim", [])
 
-        with patch.object(AnalysisService, "get_experiment_results", return_value=mock_experiment_results):
-            with patch(f"{_ENDPOINT_MODULE}._compute_dimensional_breakdown", return_value=mock_bd):
+        with patch.object(
+            AnalysisService,
+            "get_experiment_results",
+            return_value=mock_experiment_results,
+        ):
+            with patch(
+                f"{_ENDPOINT_MODULE}._compute_dimensional_breakdown",
+                return_value=mock_bd,
+            ):
                 response = client.get(
                     f"/api/v1/results/{EXPERIMENT_UUID}",
                     params={"breakdown": "unknown_dim", "use_cache": "false"},
@@ -362,16 +400,19 @@ class TestBreakdownQueryParam:
         assert response.status_code == 404
 
     @pytest.mark.unit
-    def test_hte_detected_sets_flag_and_warning(
-        self, client, mock_experiment_results
-    ):
+    def test_hte_detected_sets_flag_and_warning(self, client, mock_experiment_results):
         """When HTE is detected, has_heterogeneous_effects=True and hte_warning is set."""
-        mock_bd = _make_breakdown_response(
-            "platform", ["ios", "android"], has_hte=True
-        )
+        mock_bd = _make_breakdown_response("platform", ["ios", "android"], has_hte=True)
 
-        with patch.object(AnalysisService, "get_experiment_results", return_value=mock_experiment_results):
-            with patch(f"{_ENDPOINT_MODULE}._compute_dimensional_breakdown", return_value=mock_bd):
+        with patch.object(
+            AnalysisService,
+            "get_experiment_results",
+            return_value=mock_experiment_results,
+        ):
+            with patch(
+                f"{_ENDPOINT_MODULE}._compute_dimensional_breakdown",
+                return_value=mock_bd,
+            ):
                 response = client.get(
                     f"/api/v1/results/{EXPERIMENT_UUID}",
                     params={"breakdown": "platform", "use_cache": "false"},
@@ -391,8 +432,15 @@ class TestBreakdownQueryParam:
             "platform", ["ios", "android"], has_hte=False
         )
 
-        with patch.object(AnalysisService, "get_experiment_results", return_value=mock_experiment_results):
-            with patch(f"{_ENDPOINT_MODULE}._compute_dimensional_breakdown", return_value=mock_bd):
+        with patch.object(
+            AnalysisService,
+            "get_experiment_results",
+            return_value=mock_experiment_results,
+        ):
+            with patch(
+                f"{_ENDPOINT_MODULE}._compute_dimensional_breakdown",
+                return_value=mock_bd,
+            ):
                 response = client.get(
                     f"/api/v1/results/{EXPERIMENT_UUID}",
                     params={"breakdown": "platform", "use_cache": "false"},
@@ -409,8 +457,15 @@ class TestBreakdownQueryParam:
         """breakdown.dimension in response must equal the requested dimension."""
         mock_bd = _make_breakdown_response("country", ["US", "UK"])
 
-        with patch.object(AnalysisService, "get_experiment_results", return_value=mock_experiment_results):
-            with patch(f"{_ENDPOINT_MODULE}._compute_dimensional_breakdown", return_value=mock_bd):
+        with patch.object(
+            AnalysisService,
+            "get_experiment_results",
+            return_value=mock_experiment_results,
+        ):
+            with patch(
+                f"{_ENDPOINT_MODULE}._compute_dimensional_breakdown",
+                return_value=mock_bd,
+            ):
                 response = client.get(
                     f"/api/v1/results/{EXPERIMENT_UUID}",
                     params={"breakdown": "country", "use_cache": "false"},
@@ -420,14 +475,19 @@ class TestBreakdownQueryParam:
         assert data["breakdown"]["dimension"] == "country"
 
     @pytest.mark.unit
-    def test_breakdown_segments_contain_variants(
-        self, client, mock_experiment_results
-    ):
+    def test_breakdown_segments_contain_variants(self, client, mock_experiment_results):
         """Each segment in the response must contain a non-empty variants list."""
         mock_bd = _make_breakdown_response("platform", ["ios"])
 
-        with patch.object(AnalysisService, "get_experiment_results", return_value=mock_experiment_results):
-            with patch(f"{_ENDPOINT_MODULE}._compute_dimensional_breakdown", return_value=mock_bd):
+        with patch.object(
+            AnalysisService,
+            "get_experiment_results",
+            return_value=mock_experiment_results,
+        ):
+            with patch(
+                f"{_ENDPOINT_MODULE}._compute_dimensional_breakdown",
+                return_value=mock_bd,
+            ):
                 response = client.get(
                     f"/api/v1/results/{EXPERIMENT_UUID}",
                     params={"breakdown": "platform", "use_cache": "false"},

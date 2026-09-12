@@ -14,12 +14,18 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, joinedload
 
-from backend.app.api.deps import get_db, get_current_active_user, get_current_superuser
+from backend.app.api.deps import get_current_active_user, get_current_superuser, get_db
 from backend.app.models.analysis_snapshot import AnalysisKind
-from backend.app.models.experiment import Experiment, ExperimentStatus
+from backend.app.models.experiment import Experiment
 from backend.app.models.user import User
 from backend.app.schemas.bayesian import BayesianResultsResponse
-from backend.app.schemas.dimensional import DimensionalBreakdownResponse, SegmentBreakdown, SegmentVariantResult as SchemaSegmentVariantResult
+from backend.app.schemas.dimensional import (
+    DimensionalBreakdownResponse,
+    SegmentBreakdown,
+)
+from backend.app.schemas.dimensional import (
+    SegmentVariantResult as SchemaSegmentVariantResult,
+)
 from backend.app.schemas.results import (
     DailyDataPoint,
     DailyResultsResponse,
@@ -63,7 +69,7 @@ def _compute_srm(experiment_id: UUID, db: Session) -> Optional[SRMResult]:
     """
     try:
         result = compute_srm_for_experiment(db, experiment_id)
-    except Exception as exc:  # noqa: BLE001 - best-effort by design
+    except Exception as exc:
         logger.warning("SRM check failed for experiment %s: %s", experiment_id, exc)
         try:
             db.rollback()
@@ -74,14 +80,17 @@ def _compute_srm(experiment_id: UUID, db: Session) -> Optional[SRMResult]:
         return None
     try:
         return SRMResult(**result.to_dict())
-    except Exception as exc:  # noqa: BLE001 - defensive against odd DB values
-        logger.warning("SRM result for experiment %s not serialisable: %s", experiment_id, exc)
+    except Exception as exc:
+        logger.warning(
+            "SRM result for experiment %s not serialisable: %s", experiment_id, exc
+        )
         return None
 
 
 # ---------------------------------------------------------------------------
 # Helper: build a CacheService backed by Redis (best-effort)
 # ---------------------------------------------------------------------------
+
 
 def _get_cache_service() -> CacheService:
     """
@@ -93,6 +102,7 @@ def _get_cache_service() -> CacheService:
     """
     try:
         import redis as redis_lib
+
         from backend.app.core.config import settings
 
         r = redis_lib.Redis(
@@ -129,6 +139,7 @@ def _compute_dimensional_breakdown(
     an empty-segment breakdown so that the main results response is not affected.
     """
     from sqlalchemy import text
+
     from backend.app.core.database_config import get_schema_name
 
     dim_service = DimensionalAnalysisService()
@@ -196,7 +207,11 @@ def _compute_dimensional_breakdown(
             )
             asgn_rows = db.execute(
                 asgn_q,
-                {"exp_id": str(experiment_id), "dim_key": dimension, "seg_val": seg_val},
+                {
+                    "exp_id": str(experiment_id),
+                    "dim_key": dimension,
+                    "seg_val": seg_val,
+                },
             ).fetchall()
 
             # Count conversions per variant for this segment
@@ -239,6 +254,7 @@ def _compute_dimensional_breakdown(
     except Exception as exc:
         # Non-fatal: log and return empty breakdown
         import logging
+
         logging.getLogger(__name__).warning(
             "Failed to fetch segment data for dimension %r: %s", dimension, exc
         )
@@ -248,7 +264,11 @@ def _compute_dimensional_breakdown(
         segments=segments, base_alpha=base_alpha
     )
     has_hte = dim_service.detect_hte(segment_results)
-    adjusted_alpha = dim_service.get_adjusted_alpha(base_alpha, len(segments)) if segments else base_alpha
+    adjusted_alpha = (
+        dim_service.get_adjusted_alpha(base_alpha, len(segments))
+        if segments
+        else base_alpha
+    )
 
     hte_warning = (
         (
@@ -450,7 +470,7 @@ def _record_results_snapshots(db: Session, response: ExperimentResultsResponse) 
     """
     try:
         payload = response.model_dump(mode="json")
-    except Exception as exc:  # noqa: BLE001 - never fail the response
+    except Exception as exc:
         logger.warning("Could not serialise results for snapshot: %s", exc)
         return
 
@@ -536,7 +556,7 @@ def get_experiment_daily_results(
 
     # Collect per-variant daily points.  Key = variant_id (str).
     variant_daily: Dict[str, List[Dict]] = {}  # variant_id -> list of daily dicts
-    variant_meta: Dict[str, Dict] = {}         # variant_id -> {name, is_control}
+    variant_meta: Dict[str, Dict] = {}  # variant_id -> {name, is_control}
 
     for day_entry in daily_data:
         date_str = day_entry.get("date", "")
@@ -670,6 +690,7 @@ def get_sample_size_status(
     try:
         from scipy.stats import norm
         from sqlalchemy import func as sqla_func
+
         from backend.app.models.assignment import Assignment
 
         # Verify experiment exists
@@ -711,9 +732,9 @@ def get_sample_size_status(
         # Achieved power
         if current_per_variant > 0:
             se = math.sqrt(p_bar * (1.0 - p_bar) * (2.0 / current_per_variant))
-            achieved_power = float(
-                norm.cdf(abs(p2 - p1) / se - z_alpha)
-            ) if se > 0 else 0.0
+            achieved_power = (
+                float(norm.cdf(abs(p2 - p1) / se - z_alpha)) if se > 0 else 0.0
+            )
         else:
             achieved_power = 0.0
 
@@ -756,6 +777,7 @@ def invalidate_results_cache(
     """
     try:
         import redis as redis_lib
+
         from backend.app.core.config import settings
 
         r = redis_lib.Redis(
@@ -800,15 +822,12 @@ def _get_sequential_data(
     Returns (control_successes, control_total, treatment_successes, treatment_total).
     """
     from sqlalchemy import func
+
     from backend.app.models.assignment import Assignment
     from backend.app.models.event import Event
 
-    control_variant = next(
-        (v for v in experiment.variants if v.is_control), None
-    )
-    treatment_variant = next(
-        (v for v in experiment.variants if not v.is_control), None
-    )
+    control_variant = next((v for v in experiment.variants if v.is_control), None)
+    treatment_variant = next((v for v in experiment.variants if not v.is_control), None)
 
     if not control_variant or not treatment_variant:
         return (0, 0, 0, 0)
@@ -902,9 +921,12 @@ def get_sequential_results(
     # Calculate duration
     actual_days = 0
     if experiment.start_date:
-        delta = datetime.now(timezone.utc) - experiment.start_date.replace(
-            tzinfo=timezone.utc
-        ) if experiment.start_date.tzinfo is None else datetime.now(timezone.utc) - experiment.start_date
+        delta = (
+            datetime.now(timezone.utc)
+            - experiment.start_date.replace(tzinfo=timezone.utc)
+            if experiment.start_date.tzinfo is None
+            else datetime.now(timezone.utc) - experiment.start_date
+        )
         actual_days = max(0, delta.days)
 
     # Run sequential analysis
@@ -993,7 +1015,7 @@ def get_sequential_results(
             AnalysisKind.SEQUENTIAL,
             response.model_dump(mode="json"),
         )
-    except Exception as exc:  # noqa: BLE001 - never fail the response
+    except Exception as exc:
         logger.warning("Sequential snapshot failed for %s: %s", experiment_id, exc)
 
     return response
@@ -1049,9 +1071,7 @@ def get_cuped_results_data(
     computed_at = datetime.now(timezone.utc).isoformat()
 
     # Identify control and treatment variants
-    control_variant = next(
-        (v for v in experiment.variants if v.is_control), None
-    )
+    control_variant = next((v for v in experiment.variants if v.is_control), None)
     treatment_variants = [v for v in experiment.variants if not v.is_control]
 
     metric_results: List[CupedMetricResult] = []
@@ -1069,9 +1089,8 @@ def get_cuped_results_data(
         # data, treating assignment order as a proxy covariate.
 
         try:
-            from sqlalchemy import func as sqla_func
             from backend.app.models.assignment import Assignment
-            from backend.app.models.event import Event, EventType
+            from backend.app.models.event import Event
 
             def _get_outcomes(variant_id):
                 """Return (Y, X) arrays for CUPED — Y=converted, X=assignment index."""
@@ -1091,7 +1110,7 @@ def get_cuped_results_data(
                 X = np.arange(n, dtype=float)
 
                 # Y = 1 if user converted, 0 otherwise
-                converted_ids = set(
+                converted_ids = {
                     str(e.user_id)
                     for e in db.query(Event)
                     .filter(
@@ -1100,10 +1119,12 @@ def get_cuped_results_data(
                         Event.event_name == metric_def.event_name,
                     )
                     .all()
-                )
+                }
                 Y = np.array(
-                    [1.0 if str(a.user_id) in converted_ids else 0.0
-                     for a in assignments]
+                    [
+                        1.0 if str(a.user_id) in converted_ids else 0.0
+                        for a in assignments
+                    ]
                 )
                 return Y, X
 
@@ -1116,16 +1137,26 @@ def get_cuped_results_data(
             Y_t, X_t = _get_outcomes(treatment_variant.id)
 
             # Apply Winsorization if requested (before CUPED)
-            if method in (VarianceReductionMethod.WINSORIZATION,
-                          VarianceReductionMethod.CUPED,
-                          VarianceReductionMethod.CUPED_PLUS):
+            if method in (
+                VarianceReductionMethod.WINSORIZATION,
+                VarianceReductionMethod.CUPED,
+                VarianceReductionMethod.CUPED_PLUS,
+            ):
                 if method == VarianceReductionMethod.WINSORIZATION:
-                    Y_c = CupedService.apply_winsorization(Y_c, percentile=winsorization_pct)
-                    Y_t = CupedService.apply_winsorization(Y_t, percentile=winsorization_pct)
+                    Y_c = CupedService.apply_winsorization(
+                        Y_c, percentile=winsorization_pct
+                    )
+                    Y_t = CupedService.apply_winsorization(
+                        Y_t, percentile=winsorization_pct
+                    )
 
             # Compute CUPED effect
             cuped_effect = CupedService.compute_cuped_effect(Y_c, X_c, Y_t, X_t)
-            applied_method = method if method != VarianceReductionMethod.NONE else VarianceReductionMethod.NONE
+            applied_method = (
+                method
+                if method != VarianceReductionMethod.NONE
+                else VarianceReductionMethod.NONE
+            )
 
             metric_results.append(
                 CupedMetricResult(
@@ -1202,7 +1233,7 @@ def get_cuped_results(
             engine_version=response.engine_version,
             as_of=response.computed_at,
         )
-    except Exception as exc:  # noqa: BLE001 - never fail the response
+    except Exception as exc:
         logger.warning("CUPED snapshot failed for %s: %s", experiment_id, exc)
 
     return response
@@ -1259,7 +1290,7 @@ def get_bayesian_results(
             seed=response.seed,
             n_samples=response.n_samples,
         )
-    except Exception as exc:  # noqa: BLE001 - never fail the response
+    except Exception as exc:
         logger.warning("Bayesian snapshot failed for %s: %s", experiment_id, exc)
 
     return response

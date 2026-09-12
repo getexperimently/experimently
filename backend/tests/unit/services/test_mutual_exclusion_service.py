@@ -1,14 +1,16 @@
 """Unit tests for MutualExclusionService (EP-022)."""
-import pytest
-from unittest.mock import MagicMock, patch, PropertyMock, call
-from uuid import uuid4, UUID
 
-from backend.app.services.mutual_exclusion_service import MutualExclusionService
+from unittest.mock import MagicMock, PropertyMock, call, patch
+from uuid import UUID, uuid4
+
+import pytest
+
+from backend.app.models.experiment import Experiment, ExperimentStatus
 from backend.app.models.mutual_exclusion_group import (
     MutualExclusionGroup,
     MutualExclusionGroupStatus,
 )
-from backend.app.models.experiment import Experiment, ExperimentStatus
+from backend.app.services.mutual_exclusion_service import MutualExclusionService
 
 
 @pytest.fixture
@@ -219,8 +221,12 @@ class TestSelectExperimentForUser:
         exp.status = status
         return exp
 
-    def _make_group(self, group_id=None, traffic_allocation=1.0,
-                    status=MutualExclusionGroupStatus.ACTIVE):
+    def _make_group(
+        self,
+        group_id=None,
+        traffic_allocation=1.0,
+        status=MutualExclusionGroupStatus.ACTIVE,
+    ):
         group = MagicMock(spec=MutualExclusionGroup)
         group.id = group_id or uuid4()
         group.traffic_allocation = traffic_allocation
@@ -256,7 +262,7 @@ class TestSelectExperimentForUser:
         result = service.select_experiment_for_user("user1", group.id)
         assert result is None
 
-    @patch.object(MutualExclusionService, '_normalized_hash')
+    @patch.object(MutualExclusionService, "_normalized_hash")
     def test_excluded_by_traffic_allocation(self, mock_hash, service, mock_db):
         """User with hash >= traffic_allocation should be excluded."""
         group = self._make_group(traffic_allocation=0.5)
@@ -279,7 +285,7 @@ class TestSelectExperimentForUser:
         result = service.select_experiment_for_user("user1", group.id)
         assert result is None
 
-    @patch.object(MutualExclusionService, '_normalized_hash')
+    @patch.object(MutualExclusionService, "_normalized_hash")
     def test_selects_single_experiment(self, mock_hash, service, mock_db):
         """With one experiment and hash within traffic, selects that experiment."""
         group = self._make_group(traffic_allocation=1.0)
@@ -301,13 +307,17 @@ class TestSelectExperimentForUser:
         result = service.select_experiment_for_user("user1", group.id)
         assert result == exp.id
 
-    @patch.object(MutualExclusionService, '_normalized_hash')
+    @patch.object(MutualExclusionService, "_normalized_hash")
     def test_even_distribution_among_experiments(self, mock_hash, service, mock_db):
         """With two experiments and traffic=1.0, hash < 0.5 goes to first, >= 0.5 to second."""
         group = self._make_group(traffic_allocation=1.0)
         # Create experiments with deterministic sorted IDs
-        exp_a = self._make_experiment(exp_id=UUID('00000000-0000-0000-0000-000000000001'))
-        exp_b = self._make_experiment(exp_id=UUID('00000000-0000-0000-0000-000000000002'))
+        exp_a = self._make_experiment(
+            exp_id=UUID("00000000-0000-0000-0000-000000000001")
+        )
+        exp_b = self._make_experiment(
+            exp_id=UUID("00000000-0000-0000-0000-000000000002")
+        )
 
         def setup_db(hash_val):
             mock_hash.return_value = hash_val
@@ -369,7 +379,7 @@ class TestIsUserEligibleForExperiment:
         result = service.is_user_eligible_for_experiment("user1", uuid4())
         assert result is True
 
-    @patch.object(MutualExclusionService, 'select_experiment_for_user')
+    @patch.object(MutualExclusionService, "select_experiment_for_user")
     def test_eligible_when_selected(self, mock_select, service, mock_db):
         """User is eligible if select_experiment_for_user returns this experiment."""
         exp_id = uuid4()
@@ -400,8 +410,10 @@ class TestIsUserEligibleForExperiment:
         result = service.is_user_eligible_for_experiment("user1", exp_id)
         assert result is True
 
-    @patch.object(MutualExclusionService, 'select_experiment_for_user')
-    def test_not_eligible_when_different_experiment_selected(self, mock_select, service, mock_db):
+    @patch.object(MutualExclusionService, "select_experiment_for_user")
+    def test_not_eligible_when_different_experiment_selected(
+        self, mock_select, service, mock_db
+    ):
         """User is NOT eligible if select_experiment_for_user returns a different experiment."""
         exp_id = uuid4()
         other_exp_id = uuid4()
@@ -431,7 +443,7 @@ class TestIsUserEligibleForExperiment:
         result = service.is_user_eligible_for_experiment("user1", exp_id)
         assert result is False
 
-    @patch.object(MutualExclusionService, 'select_experiment_for_user')
+    @patch.object(MutualExclusionService, "select_experiment_for_user")
     def test_archived_group_imposes_no_constraint(self, mock_select, service, mock_db):
         """An archived (soft-deleted) group must not lock users out of its experiments."""
         exp_id = uuid4()

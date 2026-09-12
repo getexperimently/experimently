@@ -6,13 +6,12 @@ This module provides LRU caching of rule evaluation results with TTL support.
 
 import hashlib
 import json
-import time
-import threading
 import logging
-from typing import Dict, Any, Optional
+import threading
+import time
 from collections import OrderedDict
 from dataclasses import dataclass
-from datetime import datetime
+from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +33,7 @@ except Exception:  # pragma: no cover - defensive
 @dataclass
 class CacheEntry:
     """Cache entry with TTL and metadata."""
+
     result: bool
     created_at: float
     expires_at: float
@@ -83,7 +83,7 @@ class EvaluationCache:
     def __init__(
         self,
         max_size: int = 10000,
-        default_ttl: float = 300.0  # 5 minutes default
+        default_ttl: float = 300.0,  # 5 minutes default
     ):
         """
         Initialize evaluation cache.
@@ -164,7 +164,7 @@ class EvaluationCache:
         rule_id: str,
         user_context: Dict[str, Any],
         result: bool,
-        ttl: Optional[float] = None
+        ttl: Optional[float] = None,
     ):
         """
         Store evaluation result in cache.
@@ -186,7 +186,7 @@ class EvaluationCache:
             created_at=current_time,
             expires_at=current_time + ttl,
             rule_id=rule_id,
-            user_id=user_id
+            user_id=user_id,
         )
 
         with self._lock:
@@ -212,14 +212,15 @@ class EvaluationCache:
         """
         with self._lock:
             keys_to_remove = [
-                key for key, entry in self._cache.items()
-                if entry.rule_id == rule_id
+                key for key, entry in self._cache.items() if entry.rule_id == rule_id
             ]
 
             for key in keys_to_remove:
                 del self._cache[key]
 
-            logger.info(f"Invalidated {len(keys_to_remove)} cache entries for rule {rule_id}")
+            logger.info(
+                f"Invalidated {len(keys_to_remove)} cache entries for rule {rule_id}"
+            )
 
     def invalidate_user(self, user_id: str):
         """
@@ -230,14 +231,15 @@ class EvaluationCache:
         """
         with self._lock:
             keys_to_remove = [
-                key for key, entry in self._cache.items()
-                if entry.user_id == user_id
+                key for key, entry in self._cache.items() if entry.user_id == user_id
             ]
 
             for key in keys_to_remove:
                 del self._cache[key]
 
-            logger.info(f"Invalidated {len(keys_to_remove)} cache entries for user {user_id}")
+            logger.info(
+                f"Invalidated {len(keys_to_remove)} cache entries for user {user_id}"
+            )
 
     def clear(self):
         """Clear entire cache."""
@@ -266,7 +268,7 @@ class EvaluationCache:
                 "misses": self._misses,
                 "hit_rate": hit_rate,
                 "evictions": self._evictions,
-                "total_requests": total_requests
+                "total_requests": total_requests,
             }
 
     def cleanup_expired(self):
@@ -275,7 +277,8 @@ class EvaluationCache:
 
         with self._lock:
             keys_to_remove = [
-                key for key, entry in self._cache.items()
+                key
+                for key, entry in self._cache.items()
                 if current_time > entry.expires_at
             ]
 

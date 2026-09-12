@@ -358,7 +358,7 @@ class BanditScheduler:
             )
             with self.db.begin_nested():
                 self.db.add_all(rows)
-        except Exception as exc:  # noqa: BLE001 - audit rows are best-effort
+        except Exception as exc:
             logger.warning(
                 "BanditScheduler: could not record tick history for experiment %s: %s",
                 experiment.id,
@@ -801,7 +801,8 @@ class BanditSchedulerRunner:
         """``run_once`` reshaped for ``run_locked_tick`` (items_processed/failed)."""
         result = await self.run_once()
         return {
-            "items_processed": int(result.get("updated", 0)) + int(result.get("skipped", 0)),
+            "items_processed": int(result.get("updated", 0))
+            + int(result.get("skipped", 0)),
             "items_failed": int(result.get("errors", 0)),
             "metadata": dict(result),
         }

@@ -13,7 +13,6 @@ Uses the existing rules engine (evaluate_rule_group) internally.
 
 import logging
 import time
-import uuid
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session
@@ -21,14 +20,14 @@ from sqlalchemy.orm import Session
 from backend.app.core.rules_engine import evaluate_rule_group
 from backend.app.models.experiment import Experiment
 from backend.app.models.feature_flag import FeatureFlag
-from backend.app.models.segment import Segment, SegmentStatus as ModelSegmentStatus
+from backend.app.models.segment import Segment
+from backend.app.models.segment import SegmentStatus as ModelSegmentStatus
 from backend.app.schemas.segment import (
     AudiencePreviewResponse,
     BulkSegmentMembershipRequest,
     BulkSegmentMembershipResponse,
     SegmentCreate,
     SegmentExperimentResponse,
-    SegmentMembershipRequest,
     SegmentMembershipResponse,
     SegmentStatus,
     SegmentUpdate,
@@ -80,7 +79,9 @@ def _build_rule_group(rules: Dict[str, Any]) -> RuleGroup:
     return RuleGroup(operator=operator, conditions=conditions, groups=nested_groups)
 
 
-def _collect_matched_rules(rules: Dict[str, Any], user_context: Dict[str, Any]) -> List[str]:
+def _collect_matched_rules(
+    rules: Dict[str, Any], user_context: Dict[str, Any]
+) -> List[str]:
     """
     Return human-readable descriptions of the conditions that matched.
 
@@ -91,13 +92,13 @@ def _collect_matched_rules(rules: Dict[str, Any], user_context: Dict[str, Any]) 
         attribute = cond.get("attribute", "")
         operator = cond.get("operator", "")
         value = cond.get("value", "")
-        actual = user_context.get(attribute)
 
         # Build label regardless; check match separately via the engine
         label = f"{attribute} {operator} {value}"
         try:
             condition_obj = Condition(**cond)
             from backend.app.core.rules_engine import evaluate_condition
+
             if evaluate_condition(condition_obj, user_context):
                 matched.append(label)
         except Exception:
@@ -305,9 +306,7 @@ class AudienceService:
                 if is_member:
                     matched_rules = _collect_matched_rules(rules, user_context)
             except Exception as exc:
-                logger.error(
-                    "Error evaluating segment %s rules: %s", segment_id, exc
-                )
+                logger.error("Error evaluating segment %s rules: %s", segment_id, exc)
                 is_member = False
 
         return SegmentMembershipResponse(
@@ -345,9 +344,7 @@ class AudienceService:
                 # Segment not found — treat as non-member
                 memberships[segment_id] = False
             except Exception as exc:
-                logger.error(
-                    "Error evaluating segment %s in bulk: %s", segment_id, exc
-                )
+                logger.error("Error evaluating segment %s in bulk: %s", segment_id, exc)
                 memberships[segment_id] = False
 
         elapsed_ms = (time.monotonic() - start_time) * 1000.0
@@ -461,7 +458,6 @@ class AudienceService:
         Returns:
             AudiencePreviewResponse with estimated_percentage, sample_size, and matched.
         """
-        from backend.app.models.experiment import Experiment  # local to avoid circular
 
         matched = 0
         actual_sample = 0
@@ -473,11 +469,7 @@ class AudienceService:
             try:
                 from backend.app.models.assignment import Assignment
 
-                assignments = (
-                    db.query(Assignment)
-                    .limit(sample_size)
-                    .all()
-                )
+                assignments = db.query(Assignment).limit(sample_size).all()
                 actual_sample = len(assignments)
 
                 for assignment in assignments:

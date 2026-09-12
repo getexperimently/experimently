@@ -1,8 +1,10 @@
 import asyncio
 import os
+
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from backend.app.db.init_db import init_db
+
 
 async def main():
     # Set environment variables
@@ -17,6 +19,7 @@ async def main():
 
     # Initialize database
     await init_db(engine)
+
 
 if __name__ == "__main__":
     asyncio.run(main())

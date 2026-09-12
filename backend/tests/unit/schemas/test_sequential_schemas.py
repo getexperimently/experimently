@@ -6,16 +6,16 @@ import pytest
 from pydantic import ValidationError
 
 from backend.app.schemas.sequential import (
-    SequentialTestingConfig,
-    MSPRTResultResponse,
-    ConfidenceSequenceResponse,
     AlphaSpendingBoundaryResponse,
+    ConfidenceSequenceResponse,
     EvidencePointResponse,
-    LongRunningRiskResponse,
-    SequentialTestingResponse,
-    SequentialTestingMethod,
-    SpendingFunction,
     EvidenceStrength,
+    LongRunningRiskResponse,
+    MSPRTResultResponse,
+    SequentialTestingConfig,
+    SequentialTestingMethod,
+    SequentialTestingResponse,
+    SpendingFunction,
 )
 
 

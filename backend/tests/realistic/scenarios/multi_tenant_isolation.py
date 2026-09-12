@@ -11,7 +11,7 @@ These tests do NOT require a running platform or database.
 import os
 import uuid
 from datetime import datetime, timedelta, timezone
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
 
@@ -23,8 +23,16 @@ class TestWorkspaceModelIntegrity:
         from backend.app.models.workspace import Workspace
 
         col_names = {c.key for c in Workspace.__table__.columns}
-        required = {"name", "slug", "plan", "is_active", "max_experiments",
-                     "max_feature_flags", "max_members", "max_api_keys"}
+        required = {
+            "name",
+            "slug",
+            "plan",
+            "is_active",
+            "max_experiments",
+            "max_feature_flags",
+            "max_members",
+            "max_api_keys",
+        }
         missing = required - col_names
         assert not missing, f"Workspace model missing columns: {missing}"
 
@@ -135,16 +143,19 @@ class TestWorkspaceInviteLifecycle:
     def test_invite_token_is_64_hex_chars(self):
         """Invite tokens should be 64 hex characters."""
         import secrets
+
         token = secrets.token_hex(32)
         assert len(token) == 64
         assert all(c in "0123456789abcdef" for c in token)
 
     def test_invite_model_has_is_expired_property(self):
         from backend.app.models.workspace import WorkspaceInvite
+
         assert hasattr(WorkspaceInvite, "is_expired"), "Missing is_expired property"
 
     def test_invite_model_has_is_accepted_property(self):
         from backend.app.models.workspace import WorkspaceInvite
+
         assert hasattr(WorkspaceInvite, "is_accepted"), "Missing is_accepted property"
 
     def test_invite_expiry_logic(self):
@@ -166,20 +177,24 @@ class TestAPIKeyProperties:
         prefix = "ep_live_"
         # UUID hex is 32 chars; the actual key uses secrets.token_hex(24) = 48 hex chars
         import secrets
+
         key = prefix + secrets.token_hex(24)
         assert key.startswith("ep_live_")
         assert len(key) == 8 + 48  # prefix + 48 hex chars
 
     def test_api_key_model_has_is_expired_property(self):
         from backend.app.models.workspace import WorkspaceAPIKey
+
         assert hasattr(WorkspaceAPIKey, "is_expired"), "Missing is_expired property"
 
     def test_api_key_model_has_is_valid_property(self):
         from backend.app.models.workspace import WorkspaceAPIKey
+
         assert hasattr(WorkspaceAPIKey, "is_valid"), "Missing is_valid property"
 
     def test_api_key_model_has_scopes_column(self):
         from backend.app.models.workspace import WorkspaceAPIKey
+
         col_names = {c.key for c in WorkspaceAPIKey.__table__.columns}
         assert "scopes" in col_names
         assert "is_active" in col_names
@@ -213,9 +228,9 @@ class TestWorkspaceServiceExceptions:
 
     def test_workspace_error_is_base_class(self):
         from backend.app.services.workspace_service import (
+            PlanLimitExceeded,
             WorkspaceError,
             WorkspaceNotFound,
-            PlanLimitExceeded,
         )
 
         assert issubclass(WorkspaceNotFound, (WorkspaceError, Exception))
@@ -231,7 +246,8 @@ class TestWorkspaceDataIsolation:
 
         # Check for unique constraint on (workspace_id, user_id)
         unique_constraints = [
-            c for c in WorkspaceMember.__table__.constraints
+            c
+            for c in WorkspaceMember.__table__.constraints
             if hasattr(c, "columns") and len(c.columns) >= 2
         ]
         # There should be a unique constraint covering workspace_id + user_id

@@ -13,27 +13,25 @@ All SAML operations gracefully degrade to stub implementations when the
 ``python3-saml`` (onelogin) package is not installed, so the service remains
 importable in CI/test environments that skip the optional dependency.
 """
+
 from __future__ import annotations
 
-import hashlib
-import hmac
 import logging
 import secrets
 import time
 import uuid
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlencode, urlparse
 
 # defusedxml guards against entity-expansion / external-entity attacks when
 # parsing IdP-supplied SAML responses (Bandit B314, Semgrep use-defused-xml).
 from defusedxml import ElementTree as ET
-from urllib.parse import urlencode, urlparse
-
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
-from backend.app.models.sso_config import SSOConfig, SSOProviderType
-from backend.app.models.user import User, UserRole
 from backend.app.core.config import settings
+from backend.app.models.sso_config import SSOConfig
+from backend.app.models.user import User, UserRole
 
 # Optional: python3-saml
 try:
@@ -126,9 +124,7 @@ def create_sso_config(db: Session, config_data: Dict[str, Any]) -> SSOConfig:
             detail="org_domain is required",
         )
 
-    existing = (
-        db.query(SSOConfig).filter(SSOConfig.org_domain == org_domain).first()
-    )
+    existing = db.query(SSOConfig).filter(SSOConfig.org_domain == org_domain).first()
     if existing:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -144,9 +140,7 @@ def create_sso_config(db: Session, config_data: Dict[str, Any]) -> SSOConfig:
 
 def get_sso_config(db: Session, org_domain: str) -> Optional[SSOConfig]:
     """Return the SSOConfig for the given *org_domain*, or ``None``."""
-    return (
-        db.query(SSOConfig).filter(SSOConfig.org_domain == org_domain).first()
-    )
+    return db.query(SSOConfig).filter(SSOConfig.org_domain == org_domain).first()
 
 
 def get_sso_config_by_id(db: Session, config_id: uuid.UUID) -> Optional[SSOConfig]:
@@ -225,7 +219,9 @@ def generate_saml_metadata(config: SSOConfig) -> str:
     ``OneLogin_Saml2_Settings``; otherwise it generates minimal XML directly
     so the endpoint works in environments without the optional dependency.
     """
-    sp_entity_id = getattr(settings, "SAML_SP_ENTITY_ID", "https://experimentation-platform.example.com")
+    sp_entity_id = getattr(
+        settings, "SAML_SP_ENTITY_ID", "https://experimentation-platform.example.com"
+    )
     sp_acs_url = getattr(
         settings,
         "SAML_SP_ACS_URL",
@@ -267,7 +263,6 @@ def _build_minimal_sp_metadata(
     config: SSOConfig, sp_entity_id: str, sp_acs_url: str
 ) -> str:
     """Build a minimal SAML 2.0 SP metadata XML string without external libraries."""
-    config_id_str = str(config.id)
     return (
         '<?xml version="1.0"?>\n'
         '<md:EntityDescriptor xmlns:md="urn:oasis:names:tc:SAML:2.0:metadata"\n'
@@ -315,7 +310,9 @@ def _parse_saml_response_with_library(
     config: SSOConfig, saml_response_b64: str
 ) -> Dict[str, Any]:
     """Parse SAML response using the python3-saml library."""
-    sp_entity_id = getattr(settings, "SAML_SP_ENTITY_ID", "https://experimentation-platform.example.com")
+    sp_entity_id = getattr(
+        settings, "SAML_SP_ENTITY_ID", "https://experimentation-platform.example.com"
+    )
     sp_acs_url = getattr(
         settings,
         "SAML_SP_ACS_URL",
@@ -373,13 +370,15 @@ def _parse_saml_response_with_library(
             if "@" in (name_id or "")
             else (
                 attributes.get("email", [None])[0]
-                or attributes.get("http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress", [None])[0]
+                or attributes.get(
+                    "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress",
+                    [None],
+                )[0]
                 or name_id
             )
         )
-        groups = (
-            attributes.get("groups", [])
-            or attributes.get("http://schemas.microsoft.com/ws/2008/06/identity/claims/groups", [])
+        groups = attributes.get("groups", []) or attributes.get(
+            "http://schemas.microsoft.com/ws/2008/06/identity/claims/groups", []
         )
         first_name = (attributes.get("firstName", [None]) or [None])[0]
         last_name = (attributes.get("lastName", [None]) or [None])[0]
@@ -574,7 +573,9 @@ async def get_oidc_user_info(
             else:
                 raw = response
         elif _AUTHLIB_AVAILABLE and AsyncOAuth2Client is not None:
-            async with AsyncOAuth2Client(token={"access_token": access_token}) as client:
+            async with AsyncOAuth2Client(
+                token={"access_token": access_token}
+            ) as client:
                 resp = await client.get(userinfo_url)
                 raw = resp.json()
         else:

@@ -48,10 +48,9 @@ os.environ.setdefault("POSTGRES_DB", "experimentation")
 os.environ.setdefault("POSTGRES_SCHEMA", "experimentation")
 
 from backend.app.db.session import SessionLocal
-from backend.app.models.experiment import Experiment, ExperimentStatus, Variant
 from backend.app.models.assignment import Assignment
 from backend.app.models.event import Event
-
+from backend.app.models.experiment import Experiment, ExperimentStatus, Variant
 
 # ---------------------------------------------------------------------------
 # Configuration: per-variant conversion rates
@@ -60,17 +59,17 @@ from backend.app.models.event import Event
 EXPERIMENT_CONFIG = {
     "Checkout Button Color": {
         "variant_rates": {
-            "blue_button": 0.08,    # 8% conversion
-            "green_button": 0.11,   # 11% — green winning slowly
+            "blue_button": 0.08,  # 8% conversion
+            "green_button": 0.11,  # 11% — green winning slowly
         },
         "event_name": "checkout_completed",
         "weight": 0.6,
     },
     "Recommendation Algorithm MAB": {
         "variant_rates": {
-            "algo_v1": 0.05,        # 5%
-            "algo_v2": 0.09,        # 9% — v2 pulling ahead
-            "algo_v3": 0.06,        # 6%
+            "algo_v1": 0.05,  # 5%
+            "algo_v2": 0.09,  # 9% — v2 pulling ahead
+            "algo_v3": 0.06,  # 6%
         },
         "event_name": "item_clicked",
         "weight": 0.4,
@@ -81,6 +80,7 @@ EXPERIMENT_CONFIG = {
 # ---------------------------------------------------------------------------
 # Statistics tracker
 # ---------------------------------------------------------------------------
+
 
 class Stats:
     def __init__(self):
@@ -107,12 +107,16 @@ class Stats:
     def print_summary(self):
         elapsed = time.time() - self.start_time
         ts = datetime.now(timezone.utc).strftime("%H:%M:%S")
-        lines = [f"[{ts}] Live stats (elapsed: {int(elapsed)}s | total events: {self.total_events:,})"]
+        lines = [
+            f"[{ts}] Live stats (elapsed: {int(elapsed)}s | total events: {self.total_events:,})"
+        ]
 
         for exp_name, exp_config in EXPERIMENT_CONFIG.items():
             assigned_total = self.assigned.get(exp_name, 0)
             converted_total = self.converted.get(exp_name, 0)
-            cvr = (converted_total / assigned_total * 100) if assigned_total > 0 else 0.0
+            cvr = (
+                (converted_total / assigned_total * 100) if assigned_total > 0 else 0.0
+            )
 
             variant_parts = []
             for variant_name in exp_config["variant_rates"]:
@@ -123,8 +127,7 @@ class Stats:
 
             lines.append(
                 f"  {exp_name}: {assigned_total} assigned, "
-                f"{converted_total} converted ({cvr:.1f}%) | "
-                + " ".join(variant_parts)
+                f"{converted_total} converted ({cvr:.1f}%) | " + " ".join(variant_parts)
             )
 
         if self.errors > 0:
@@ -137,6 +140,7 @@ class Stats:
 # ---------------------------------------------------------------------------
 # Simulator core
 # ---------------------------------------------------------------------------
+
 
 class Simulator:
     def __init__(self, rate: float, duration: int, rng_seed: Optional[int] = None):
@@ -159,30 +163,40 @@ class Simulator:
         try:
             with SessionLocal() as db:
                 for exp_name in EXPERIMENT_CONFIG:
-                    exp = db.query(Experiment).filter(
-                        Experiment.name == exp_name,
-                        Experiment.status == ExperimentStatus.ACTIVE,
-                    ).first()
+                    exp = (
+                        db.query(Experiment)
+                        .filter(
+                            Experiment.name == exp_name,
+                            Experiment.status == ExperimentStatus.ACTIVE,
+                        )
+                        .first()
+                    )
                     if not exp:
-                        print(f"  [warn] Experiment '{exp_name}' not found or not ACTIVE — will skip.")
+                        print(
+                            f"  [warn] Experiment '{exp_name}' not found or not ACTIVE — will skip."
+                        )
                         continue
 
-                    variants = db.query(Variant).filter(
-                        Variant.experiment_id == exp.id
-                    ).all()
+                    variants = (
+                        db.query(Variant).filter(Variant.experiment_id == exp.id).all()
+                    )
 
                     self._experiment_cache[exp_name] = {
                         "id": exp.id,
                         "variants": {v.name: v.id for v in variants},
                     }
-                    print(f"  Loaded '{exp_name}' (id={exp.id}): "
-                          f"{[v.name for v in variants]}")
+                    print(
+                        f"  Loaded '{exp_name}' (id={exp.id}): "
+                        f"{[v.name for v in variants]}"
+                    )
         except Exception as e:
             print(f"  [error] Could not load experiments from DB: {e}")
 
     def _pick_experiment(self) -> Optional[tuple]:
         """Return (exp_name, exp_config) based on weights. Returns None if no experiments loaded."""
-        available = [name for name in EXPERIMENT_CONFIG if name in self._experiment_cache]
+        available = [
+            name for name in EXPERIMENT_CONFIG if name in self._experiment_cache
+        ]
         if not available:
             return None, None
         weights = [EXPERIMENT_CONFIG[name]["weight"] for name in available]
@@ -215,10 +229,14 @@ class Simulator:
                 now = datetime.now(timezone.utc)
 
                 # Check for existing assignment (idempotency)
-                existing = db.query(Assignment).filter(
-                    Assignment.experiment_id == exp_id,
-                    Assignment.user_id == user_id,
-                ).first()
+                existing = (
+                    db.query(Assignment)
+                    .filter(
+                        Assignment.experiment_id == exp_id,
+                        Assignment.user_id == user_id,
+                    )
+                    .first()
+                )
 
                 if not existing:
                     assignment = Assignment(
@@ -264,7 +282,7 @@ class Simulator:
                 else:
                     db.commit()
 
-        except Exception as e:
+        except Exception:
             self.stats.record_error()
             # Don't print every error — just increment counter
 
@@ -272,10 +290,10 @@ class Simulator:
         signal.signal(signal.SIGINT, self._stop)
         signal.signal(signal.SIGTERM, self._stop)
 
-        print(f"Starting live event simulator")
+        print("Starting live event simulator")
         print(f"  Rate:    {self.rate} events/sec")
         print(f"  Duration:{self.duration}s (0=infinite)")
-        print(f"  Writing directly to database")
+        print("  Writing directly to database")
         print()
 
         # Load experiment data
@@ -320,6 +338,7 @@ class Simulator:
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
+
 
 def main():
     parser = argparse.ArgumentParser(

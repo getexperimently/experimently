@@ -2,10 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { AdminService } from '@/services/admin';
 import { AdminUser, ROLE_COLORS, USER_ROLE_LABELS, UserListResponse } from '@/types/admin';
 
-// eslint-disable-next-line @typescript-eslint/no-empty-interface
-interface UserTableProps {}
-
-export function UserTable(_props: UserTableProps) {
+export function UserTable() {
   const [data, setData] = useState<UserListResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

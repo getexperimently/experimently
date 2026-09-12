@@ -123,11 +123,17 @@ class ClickHouseConnector:
     ) -> None:
         self.host = host if host is not None else settings.CLICKHOUSE_HOST
         self.port = port if port is not None else settings.CLICKHOUSE_PORT
-        self.database = database if database is not None else settings.CLICKHOUSE_DATABASE
+        self.database = (
+            database if database is not None else settings.CLICKHOUSE_DATABASE
+        )
         self.user = user if user is not None else settings.CLICKHOUSE_USER
-        self.password = password if password is not None else settings.CLICKHOUSE_PASSWORD
+        self.password = (
+            password if password is not None else settings.CLICKHOUSE_PASSWORD
+        )
         self.secure = secure if secure is not None else settings.CLICKHOUSE_SECURE
-        self.timeout = timeout if timeout is not None else settings.CLICKHOUSE_TIMEOUT_SECONDS
+        self.timeout = (
+            timeout if timeout is not None else settings.CLICKHOUSE_TIMEOUT_SECONDS
+        )
 
         # Live client — None until connect() is called.
         self._client: Optional[Any] = None
@@ -142,7 +148,7 @@ class ClickHouseConnector:
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         self.close()
-        return None  # Do not suppress exceptions
+        return  # Do not suppress exceptions
 
     # ------------------------------------------------------------------
     # Connection management
@@ -213,7 +219,15 @@ class ClickHouseConnector:
 
         if any(
             kw in err_lower
-            for kw in ("401", "403", "forbidden", "auth", "unauthorized", "wrong password", "password")
+            for kw in (
+                "401",
+                "403",
+                "forbidden",
+                "auth",
+                "unauthorized",
+                "wrong password",
+                "password",
+            )
         ):
             raise ClickHouseAuthError(
                 f"ClickHouse authentication failed after {max_retries} attempts: "

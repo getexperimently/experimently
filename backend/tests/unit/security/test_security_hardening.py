@@ -14,10 +14,11 @@ Covers:
 - Input validation depth limits
 - Password strength validation consistency
 """
-import os
-import pytest
-from unittest.mock import patch, MagicMock, AsyncMock
 
+import os
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 # ---------------------------------------------------------------------------
 # Security Headers
@@ -29,11 +30,14 @@ class TestSecurityHeadersHardening:
 
     def test_hsts_only_in_production(self):
         """HSTS should only be added in production to avoid dev HTTPS issues."""
-        from backend.app.middleware.security_middleware import SecurityHeadersMiddleware
-        from backend.app.main import app
         import asyncio
 
-        with patch("backend.app.middleware.security_middleware.settings") as mock_settings:
+        from backend.app.main import app
+        from backend.app.middleware.security_middleware import SecurityHeadersMiddleware
+
+        with patch(
+            "backend.app.middleware.security_middleware.settings"
+        ) as mock_settings:
             mock_settings.ENVIRONMENT = "dev"
             middleware = SecurityHeadersMiddleware(app)
 
@@ -50,11 +54,14 @@ class TestSecurityHeadersHardening:
 
     def test_hsts_present_in_production(self):
         """HSTS must be present in production with proper max-age."""
-        from backend.app.middleware.security_middleware import SecurityHeadersMiddleware
-        from backend.app.main import app
         import asyncio
 
-        with patch("backend.app.middleware.security_middleware.settings") as mock_settings:
+        from backend.app.main import app
+        from backend.app.middleware.security_middleware import SecurityHeadersMiddleware
+
+        with patch(
+            "backend.app.middleware.security_middleware.settings"
+        ) as mock_settings:
             mock_settings.ENVIRONMENT = "prod"
             middleware = SecurityHeadersMiddleware(app)
 
@@ -70,9 +77,10 @@ class TestSecurityHeadersHardening:
 
     def test_all_owasp_headers_present(self):
         """All OWASP-recommended security headers must be present."""
-        from backend.app.middleware.security_middleware import SecurityHeadersMiddleware
-        from backend.app.main import app
         import asyncio
+
+        from backend.app.main import app
+        from backend.app.middleware.security_middleware import SecurityHeadersMiddleware
 
         middleware = SecurityHeadersMiddleware(app)
 
@@ -97,9 +105,10 @@ class TestSecurityHeadersHardening:
 
     def test_server_header_removed(self):
         """Server identification headers must be removed."""
-        from backend.app.middleware.security_middleware import SecurityHeadersMiddleware
-        from backend.app.main import app
         import asyncio
+
+        from backend.app.main import app
+        from backend.app.middleware.security_middleware import SecurityHeadersMiddleware
 
         middleware = SecurityHeadersMiddleware(app)
 
@@ -222,9 +231,10 @@ class TestConfigSecurity:
         # If extra="forbid", this should raise; if "ignore", it should not
         # store the value. Either is acceptable over "allow".
         s = Settings(COMPLETELY_MADE_UP_FIELD="should_not_work")
-        assert not hasattr(s, "COMPLETELY_MADE_UP_FIELD") or getattr(
-            s, "COMPLETELY_MADE_UP_FIELD", None
-        ) is None, "Settings should not silently accept unknown fields"
+        assert (
+            not hasattr(s, "COMPLETELY_MADE_UP_FIELD")
+            or getattr(s, "COMPLETELY_MADE_UP_FIELD", None) is None
+        ), "Settings should not silently accept unknown fields"
 
 
 # ---------------------------------------------------------------------------
@@ -238,6 +248,7 @@ class TestRequestBodyLimits:
     def test_large_payload_rejected(self):
         """Oversized request bodies should be rejected to prevent DoS."""
         from fastapi.testclient import TestClient
+
         from backend.app.main import app
 
         client = TestClient(app, raise_server_exceptions=False)
@@ -268,6 +279,7 @@ class TestHealthEndpointSecurity:
     def test_health_does_not_expose_environment_in_production(self):
         """Health endpoint should not expose environment name in production."""
         from fastapi.testclient import TestClient
+
         from backend.app.main import app
 
         client = TestClient(app, raise_server_exceptions=False)
@@ -290,6 +302,7 @@ class TestHealthEndpointSecurity:
     def test_health_does_not_expose_error_details_in_production(self):
         """Health endpoint should not expose internal error details."""
         from fastapi.testclient import TestClient
+
         from backend.app.main import app
 
         client = TestClient(app, raise_server_exceptions=False)

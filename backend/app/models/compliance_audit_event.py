@@ -3,18 +3,22 @@ SOC 2 Type 2 / ISO 27001 compliance audit event model.
 Separate from the existing AuditLog — this table is append-only,
 HMAC-signed, and has configurable retention.
 """
-import uuid
+
 import enum
-from datetime import datetime
-from sqlalchemy import Column, String, DateTime, Enum as SQLAEnum, Index
-from sqlalchemy.dialects.postgresql import UUID, JSONB
+import uuid
+
+from sqlalchemy import Column, DateTime, Index, String
+from sqlalchemy import Enum as SQLAEnum
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.sql import func
-from backend.app.models.base import Base
+
 from backend.app.core.database_config import get_schema_name
+from backend.app.models.base import Base
 
 
 class AuditAction(str, enum.Enum):
     """Actions that can be recorded in the compliance audit log."""
+
     CREATE = "CREATE"
     READ = "READ"
     UPDATE = "UPDATE"
@@ -32,6 +36,7 @@ class AuditAction(str, enum.Enum):
 
 class AuditOutcome(str, enum.Enum):
     """Outcome of the audited action."""
+
     SUCCESS = "SUCCESS"
     FAILURE = "FAILURE"
     DENIED = "DENIED"
@@ -44,6 +49,7 @@ class ComplianceAuditEvent(Base):
     This table is append-only, HMAC-signed for tamper-evidence, and supports
     configurable retention schedules for SOC 2 Type 2 and ISO 27001 compliance.
     """
+
     __tablename__ = "audit_events_v2"
     __table_args__ = (
         Index("ix_audit_events_v2_timestamp", "timestamp"),
@@ -52,8 +58,12 @@ class ComplianceAuditEvent(Base):
         {"schema": get_schema_name()},
     )
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, nullable=False)
-    timestamp = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    id = Column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, nullable=False
+    )
+    timestamp = Column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
 
     # Actor (who performed the action)
     actor_id = Column(UUID(as_uuid=True), nullable=True)

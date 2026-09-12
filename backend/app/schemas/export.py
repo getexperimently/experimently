@@ -2,10 +2,12 @@
 Pydantic schemas for data export and report generation endpoints.
 These define the API contract for EP-020.
 """
-from pydantic import BaseModel, Field, ConfigDict
-from typing import Optional, List, Literal
+
 from datetime import datetime
 from enum import Enum
+from typing import List, Optional
+
+from pydantic import BaseModel
 
 
 class ExportFormat(str, Enum):
@@ -14,8 +16,8 @@ class ExportFormat(str, Enum):
 
 
 class ExportScope(str, Enum):
-    SUMMARY = "summary"          # Aggregated results only
-    EVENTS = "events"            # Raw events
+    SUMMARY = "summary"  # Aggregated results only
+    EVENTS = "events"  # Raw events
     ASSIGNMENTS = "assignments"  # Assignment data
 
 
@@ -45,6 +47,7 @@ class ReportRequest(BaseModel):
 
 class ExperimentExportRow(BaseModel):
     """One row in a CSV/JSON export of experiment data."""
+
     experiment_id: str
     experiment_name: str
     status: str

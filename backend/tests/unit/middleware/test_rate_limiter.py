@@ -10,22 +10,21 @@ Covers:
 """
 
 import time
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from backend.app.middleware.rate_limiter import (
-    SlidingWindowRateLimiter,
-    RedisRateLimiter,
-    RateLimitMiddleware,
-    RATE_LIMIT_CONFIG,
     DEFAULT_RATE_LIMIT,
-    resolve_rate_limit,
+    RATE_LIMIT_CONFIG,
+    RateLimitMiddleware,
+    RedisRateLimiter,
+    SlidingWindowRateLimiter,
     _get_client_ip,
+    resolve_rate_limit,
 )
-
 
 # ---------------------------------------------------------------------------
 # SlidingWindowRateLimiter tests
@@ -150,7 +149,10 @@ class TestRedisRateLimiter:
 
     def test_lazy_connect_failure(self):
         """If initial Redis connection fails, falls back gracefully."""
-        with patch("backend.app.middleware.rate_limiter.RedisRateLimiter._get_redis", return_value=None):
+        with patch(
+            "backend.app.middleware.rate_limiter.RedisRateLimiter._get_redis",
+            return_value=None,
+        ):
             limiter = RedisRateLimiter(redis_host="nonexistent")
             limiter._redis_available = False
 
@@ -276,11 +278,17 @@ class TestRateLimitConfig:
     """Verify the rate limit configuration constants."""
 
     def test_auth_endpoints_have_strict_limits(self):
-        for path in ["/api/v1/auth/token", "/api/v1/auth/signup",
-                     "/api/v1/auth/forgot-password", "/api/v1/auth/reset-password"]:
+        for path in [
+            "/api/v1/auth/token",
+            "/api/v1/auth/signup",
+            "/api/v1/auth/forgot-password",
+            "/api/v1/auth/reset-password",
+        ]:
             limit, window = RATE_LIMIT_CONFIG[path]
             default_limit, _ = DEFAULT_RATE_LIMIT
-            assert limit < default_limit, f"{path} should have stricter limit than default"
+            assert limit < default_limit, (
+                f"{path} should have stricter limit than default"
+            )
 
     def test_tracking_endpoints_have_higher_limits(self):
         default_limit, _ = DEFAULT_RATE_LIMIT
@@ -293,14 +301,19 @@ class TestRateLimitConfig:
             "/api/v1/feature-flags/user/user-1",
         ]:
             limit, window = resolve_rate_limit(path)
-            assert limit >= default_limit, f"{path} should have higher limit for SDK traffic"
+            assert limit >= default_limit, (
+                f"{path} should have higher limit for SDK traffic"
+            )
             assert window == 60
 
     def test_sdk_limit_is_configurable(self):
         assert resolve_rate_limit("/api/v1/tracking/batch", 42) == (42, 60)
 
     def test_exact_config_wins_over_prefix_and_default(self):
-        assert resolve_rate_limit("/api/v1/auth/token") == RATE_LIMIT_CONFIG["/api/v1/auth/token"]
+        assert (
+            resolve_rate_limit("/api/v1/auth/token")
+            == RATE_LIMIT_CONFIG["/api/v1/auth/token"]
+        )
         assert resolve_rate_limit("/api/v1/experiments/") == DEFAULT_RATE_LIMIT
         # The dashboard's feature-flag CRUD routes are not SDK traffic
         assert resolve_rate_limit("/api/v1/feature-flags/") == DEFAULT_RATE_LIMIT

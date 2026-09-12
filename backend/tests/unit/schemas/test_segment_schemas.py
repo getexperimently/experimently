@@ -9,19 +9,18 @@ import pytest
 from pydantic import ValidationError
 
 from backend.app.schemas.segment import (
-    SegmentCreate,
-    SegmentUpdate,
-    SegmentResponse,
-    SegmentStatus,
-    SegmentMembershipRequest,
-    SegmentMembershipResponse,
+    AudiencePreviewResponse,
     BulkSegmentMembershipRequest,
     BulkSegmentMembershipResponse,
     ExperimentSegmentLink,
+    SegmentCreate,
     SegmentExperimentResponse,
-    AudiencePreviewResponse,
+    SegmentMembershipRequest,
+    SegmentMembershipResponse,
+    SegmentResponse,
+    SegmentStatus,
+    SegmentUpdate,
 )
-
 
 VALID_RULES = {
     "operator": "and",

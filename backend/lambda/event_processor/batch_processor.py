@@ -15,11 +15,12 @@ Follows TDD (Test-Driven Development) - GREEN phase implementation.
 
 import logging
 import time
-from typing import Dict, Any, List
+from typing import Any, Dict
+
+from event_aggregator import aggregate_events_batch
+from event_enricher import enrich_events_batch
 from event_parser import parse_kinesis_events
 from event_validator import validate_events_batch
-from event_enricher import enrich_events_batch
-from event_aggregator import aggregate_events_batch
 from s3_archiver import archive_to_s3_batched
 
 logger = logging.getLogger(__name__)
@@ -28,7 +29,9 @@ logger = logging.getLogger(__name__)
 sqs_client = None
 
 
-def send_to_dlq(failed_record: Dict[str, Any], dlq_url: str, error_message: str) -> bool:
+def send_to_dlq(
+    failed_record: Dict[str, Any], dlq_url: str, error_message: str
+) -> bool:
     """
     Send a failed record to Dead Letter Queue.
 
@@ -42,15 +45,16 @@ def send_to_dlq(failed_record: Dict[str, Any], dlq_url: str, error_message: str)
     """
     try:
         message_body = {
-            "sequenceNumber": failed_record.get("kinesis", {}).get("sequenceNumber", "unknown"),
+            "sequenceNumber": failed_record.get("kinesis", {}).get(
+                "sequenceNumber", "unknown"
+            ),
             "data": failed_record.get("kinesis", {}).get("data", ""),
             "error": error_message,
-            "timestamp": time.time()
+            "timestamp": time.time(),
         }
 
         response = sqs_client.send_message(
-            QueueUrl=dlq_url,
-            MessageBody=str(message_body)
+            QueueUrl=dlq_url, MessageBody=str(message_body)
         )
 
         logger.info(f"Sent failed record to DLQ: {response.get('MessageId')}")
@@ -65,7 +69,7 @@ def process_batch(
     kinesis_event: Dict[str, Any],
     dlq_enabled: bool = False,
     dlq_url: str = None,
-    s3_bucket: str = "event-archive"
+    s3_bucket: str = "event-archive",
 ) -> Dict[str, Any]:
     """
     Process a batch of Kinesis records through the complete pipeline.
@@ -95,7 +99,7 @@ def process_batch(
         "validation_errors": 0,
         "enrichment_errors": 0,
         "aggregation_errors": 0,
-        "archive_errors": 0
+        "archive_errors": 0,
     }
 
     # Handle empty batch
@@ -105,14 +109,16 @@ def process_batch(
             "failure_count": 0,
             "batchItemFailures": [],
             "metrics": metrics,
-            "processing_time_ms": 0
+            "processing_time_ms": 0,
         }
 
     # STAGE 1: Parse Kinesis events
     logger.info(f"Processing batch of {total_records} records")
 
     try:
-        parsed_events, parse_errors = parse_kinesis_events(kinesis_event, skip_errors=True)
+        parsed_events, parse_errors = parse_kinesis_events(
+            kinesis_event, skip_errors=True
+        )
         metrics["parse_errors"] = len(parse_errors)
 
         # Track parse failures
@@ -125,8 +131,13 @@ def process_batch(
             if dlq_enabled and dlq_url:
                 # Find the original record
                 for record in records:
-                    if record.get("kinesis", {}).get("sequenceNumber") == sequence_number:
-                        send_to_dlq(record, dlq_url, error.get("message", "Parse error"))
+                    if (
+                        record.get("kinesis", {}).get("sequenceNumber")
+                        == sequence_number
+                    ):
+                        send_to_dlq(
+                            record, dlq_url, error.get("message", "Parse error")
+                        )
                         break
 
     except Exception as e:
@@ -142,7 +153,7 @@ def process_batch(
             "batchItemFailures": batch_item_failures,
             "metrics": metrics,
             "processing_time_ms": int((time.time() - start_time) * 1000),
-            "error": "Parsing stage failed"
+            "error": "Parsing stage failed",
         }
 
     # If no events were successfully parsed, return early
@@ -152,14 +163,13 @@ def process_batch(
             "failure_count": total_records,
             "batchItemFailures": batch_item_failures,
             "metrics": metrics,
-            "processing_time_ms": int((time.time() - start_time) * 1000)
+            "processing_time_ms": int((time.time() - start_time) * 1000),
         }
 
     # STAGE 2: Validate events
     try:
         validated_events, validation_errors = validate_events_batch(
-            parsed_events,
-            skip_invalid=True
+            parsed_events, skip_invalid=True
         )
         metrics["validation_errors"] = len(validation_errors)
 
@@ -187,8 +197,7 @@ def process_batch(
     try:
         if enriched_events:
             aggregation_result = aggregate_events_batch(
-                enriched_events,
-                return_summary=True
+                enriched_events, return_summary=True
             )
             metrics["aggregation_errors"] = aggregation_result.get("failure_count", 0)
     except Exception as e:
@@ -198,10 +207,7 @@ def process_batch(
     # STAGE 5: Archive to S3
     try:
         if enriched_events:
-            archive_result = archive_to_s3_batched(
-                enriched_events,
-                bucket=s3_bucket
-            )
+            archive_result = archive_to_s3_batched(enriched_events, bucket=s3_bucket)
             if not archive_result.get("success"):
                 metrics["archive_errors"] = archive_result.get("failures", 0)
     except Exception as e:
@@ -225,5 +231,5 @@ def process_batch(
         "failure_count": failure_count,
         "batchItemFailures": batch_item_failures,
         "metrics": metrics,
-        "processing_time_ms": processing_time_ms
+        "processing_time_ms": processing_time_ms,
     }

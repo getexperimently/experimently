@@ -2,17 +2,20 @@
 Tests for GitHubService.
 All HTTP calls are mocked with unittest.mock — no real GitHub required.
 """
+
 import hashlib
 import hmac as hmac_lib
-import pytest
 from unittest.mock import MagicMock, patch
+
 import httpx
+import pytest
 
 
 class TestGitHubServiceInit:
     def test_init_with_token(self):
         """Service stores token, repo_owner, repo_name."""
         from backend.app.services.integrations.github_service import GitHubService
+
         svc = GitHubService(token="ghp_abc123", repo_owner="myorg", repo_name="myrepo")
         assert svc._token == "ghp_abc123"
         assert svc._owner == "myorg"
@@ -21,6 +24,7 @@ class TestGitHubServiceInit:
     def test_init_stores_webhook_secret(self):
         """Service stores optional webhook_secret."""
         from backend.app.services.integrations.github_service import GitHubService
+
         svc = GitHubService(
             token="tok",
             repo_owner="org",
@@ -32,12 +36,14 @@ class TestGitHubServiceInit:
     def test_init_default_webhook_secret_is_empty(self):
         """webhook_secret defaults to empty string."""
         from backend.app.services.integrations.github_service import GitHubService
+
         svc = GitHubService(token="tok", repo_owner="org", repo_name="repo")
         assert svc._webhook_secret == ""
 
     def test_from_config_extracts_credentials(self):
         """from_config() reads encrypted_config."""
         from backend.app.services.integrations.github_service import GitHubService
+
         mock_config = MagicMock()
         mock_config.encrypted_config = {
             "token": "ghp_test_token",
@@ -55,6 +61,7 @@ class TestGitHubServiceInit:
     def test_from_config_missing_token_returns_none(self):
         """Returns None if token missing."""
         from backend.app.services.integrations.github_service import GitHubService
+
         mock_config = MagicMock()
         mock_config.encrypted_config = {
             "repo_owner": "myorg",
@@ -67,6 +74,7 @@ class TestGitHubServiceInit:
     def test_from_config_missing_repo_owner_returns_none(self):
         """Returns None if repo_owner is missing."""
         from backend.app.services.integrations.github_service import GitHubService
+
         mock_config = MagicMock()
         mock_config.encrypted_config = {
             "token": "ghp_tok",
@@ -78,6 +86,7 @@ class TestGitHubServiceInit:
     def test_from_config_none_config_returns_none(self):
         """Returns None if encrypted_config is None."""
         from backend.app.services.integrations.github_service import GitHubService
+
         mock_config = MagicMock()
         mock_config.encrypted_config = None
         svc = GitHubService.from_config(mock_config)
@@ -87,6 +96,7 @@ class TestGitHubServiceInit:
 class TestGitHubIssueOperations:
     def _make_service(self):
         from backend.app.services.integrations.github_service import GitHubService
+
         return GitHubService(
             token="ghp_test_token",
             repo_owner="myorg",
@@ -143,7 +153,9 @@ class TestGitHubIssueOperations:
             mock_resp.status_code = 201
             mock_resp.json.return_value = {"number": 1}
             mock_post.return_value = mock_resp
-            svc.create_issue(title="Test", body="body", labels=["enhancement", "ab-test"])
+            svc.create_issue(
+                title="Test", body="body", labels=["enhancement", "ab-test"]
+            )
             _, kwargs = mock_post.call_args
             labels = kwargs.get("json", {}).get("labels", [])
             assert "experiment" in labels
@@ -196,7 +208,9 @@ class TestGitHubIssueOperations:
             mock_resp.status_code = 201
             mock_resp.json.return_value = {"id": 77777}
             mock_post.return_value = mock_resp
-            comment_id = svc.add_results_comment(issue_number=1, results_markdown="results")
+            comment_id = svc.add_results_comment(
+                issue_number=1, results_markdown="results"
+            )
             assert comment_id == 77777
 
     def test_add_results_comment_returns_none_on_error(self):
@@ -254,6 +268,7 @@ class TestGitHubIssueOperations:
 class TestGitHubPROperations:
     def _make_service(self):
         from backend.app.services.integrations.github_service import GitHubService
+
         return GitHubService(
             token="ghp_test_token",
             repo_owner="myorg",
@@ -302,6 +317,7 @@ class TestGitHubPROperations:
 class TestGitHubWebhook:
     def _make_service(self, webhook_secret="test_webhook_secret"):
         from backend.app.services.integrations.github_service import GitHubService
+
         return GitHubService(
             token="ghp_test",
             repo_owner="myorg",
@@ -318,7 +334,7 @@ class TestGitHubWebhook:
                 "number": 42,
                 "title": "[Experiment] Checkout Test",
                 "state": "open",
-            }
+            },
         }
         event = svc.parse_webhook_event("issues", payload)
         assert event is not None
@@ -334,7 +350,7 @@ class TestGitHubWebhook:
                 "number": 10,
                 "title": "Some Issue",
                 "state": "closed",
-            }
+            },
         }
         event = svc.parse_webhook_event("issues", payload)
         assert event is not None
@@ -351,7 +367,7 @@ class TestGitHubWebhook:
                 "title": "Merge experiment feature",
                 "merged": True,
                 "merged_at": "2024-01-15T10:00:00Z",
-            }
+            },
         }
         event = svc.parse_webhook_event("pull_request", payload)
         assert event is not None
@@ -369,7 +385,7 @@ class TestGitHubWebhook:
                 "title": "Closed PR",
                 "merged": False,
                 "merged_at": None,
-            }
+            },
         }
         event = svc.parse_webhook_event("pull_request", payload)
         assert event is None
@@ -393,9 +409,10 @@ class TestGitHubWebhook:
         secret = "test_webhook_secret"
         svc = self._make_service(webhook_secret=secret)
         payload_body = b'{"action": "opened"}'
-        expected_sig = "sha256=" + hmac_lib.new(
-            secret.encode(), payload_body, hashlib.sha256
-        ).hexdigest()
+        expected_sig = (
+            "sha256="
+            + hmac_lib.new(secret.encode(), payload_body, hashlib.sha256).hexdigest()
+        )
         result = svc.verify_webhook_signature(payload_body, expected_sig)
         assert result is True
 
@@ -403,13 +420,16 @@ class TestGitHubWebhook:
         """Returns False for tampered payload."""
         svc = self._make_service(webhook_secret="test_webhook_secret")
         payload_body = b'{"action": "opened"}'
-        tampered_sig = "sha256=0000000000000000000000000000000000000000000000000000000000000000"
+        tampered_sig = (
+            "sha256=0000000000000000000000000000000000000000000000000000000000000000"
+        )
         result = svc.verify_webhook_signature(payload_body, tampered_sig)
         assert result is False
 
     def test_verify_webhook_signature_no_secret_returns_false(self):
         """Returns False when no webhook_secret configured."""
         from backend.app.services.integrations.github_service import GitHubService
+
         svc = GitHubService(token="tok", repo_owner="org", repo_name="repo")
         result = svc.verify_webhook_signature(b"payload", "sha256=abc")
         assert result is False

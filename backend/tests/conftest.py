@@ -4,9 +4,11 @@ Test configuration for the experimentation platform.
 
 This module sets up fixtures and configuration for pytest.
 """
-import pytest
-import os
+
 import logging
+import os
+
+import pytest
 
 # ---------------------------------------------------------------------------
 # Process environment for the whole test session (set BEFORE the app import)
@@ -31,23 +33,23 @@ os.environ.setdefault("TESTING", "true")
 # ENVIRONMENT wins over APP_ENV, so drop it for the test process.
 os.environ.pop("ENVIRONMENT", None)
 
+from unittest.mock import AsyncMock, MagicMock, patch
+
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 from sqlalchemy import event as sa_event
-from sqlalchemy.orm import sessionmaker, scoped_session, Session
-from sqlalchemy.orm import configure_mappers
+from sqlalchemy.orm import Session, configure_mappers, scoped_session, sessionmaker
 from sqlalchemy.pool import NullPool
 
-from backend.app.main import app
-from backend.app.db.session import get_db, Base, init_db
 from backend.app.api import deps
-from backend.app.models.user import User, UserRole
-from backend.app.models.experiment import Experiment, ExperimentStatus
-from backend.app.core.database_config import get_schema_name
-from backend.app.core.config import settings, TestSettings
-from backend.app.models.base import set_schema
 from backend.app.api.deps import CacheControl
-from unittest.mock import patch, MagicMock, AsyncMock
+from backend.app.core.config import TestSettings, settings
+from backend.app.core.database_config import get_schema_name
+from backend.app.db.session import Base, get_db, init_db
+from backend.app.main import app
+from backend.app.models.base import set_schema
+from backend.app.models.experiment import Experiment, ExperimentStatus
+from backend.app.models.user import User, UserRole
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +75,9 @@ _TEST_DB_NAME = f"experimentation_test_{_PID}"
 # and GitHub Actions service containers both work without editing this file.
 _DB_USER = os.environ.get("POSTGRES_USER", "postgres")
 _DB_PASSWORD = os.environ.get("POSTGRES_PASSWORD", "postgres")
-_DB_HOST = os.environ.get("POSTGRES_SERVER") or os.environ.get("POSTGRES_HOST") or "localhost"
+_DB_HOST = (
+    os.environ.get("POSTGRES_SERVER") or os.environ.get("POSTGRES_HOST") or "localhost"
+)
 _DB_PORT = os.environ.get("POSTGRES_PORT", "5432")
 _BASE_DB_URL = f"postgresql://{_DB_USER}:{_DB_PASSWORD}@{_DB_HOST}:{_DB_PORT}"
 DEFAULT_TEST_DB_URL = f"{_BASE_DB_URL}/{_TEST_DB_NAME}"
@@ -133,6 +137,7 @@ def test_db():
     # Dispose the production engine pool to prevent interference.
     try:
         from backend.app.db.session import engine as _prod_engine
+
         _prod_engine.dispose()
         logger.info("Disposed production engine pool before test_db setup")
     except Exception as _e:
@@ -148,8 +153,9 @@ def test_db():
             # database-level DDL (DROP DATABASE / CREATE DATABASE).
             # These statements cannot run inside a transaction block in
             # PostgreSQL, so we must use autocommit mode.
-            import psycopg2
             from urllib.parse import urlparse
+
+            import psycopg2
 
             parsed = urlparse(db_url)
             admin_conn = psycopg2.connect(
@@ -219,25 +225,25 @@ def test_db():
                 # Import ALL models to ensure they are registered with the
                 # metadata before create_all runs.  Missing imports cause
                 # create_all to fail, which triggers the retry loop.
-                import backend.app.models.user  # noqa: F401
-                import backend.app.models.experiment  # noqa: F401
-                import backend.app.models.feature_flag  # noqa: F401
-                import backend.app.models.event  # noqa: F401
-                import backend.app.models.assignment  # noqa: F401
-                import backend.app.models.safety  # noqa: F401
-                import backend.app.models.audit_log  # noqa: F401
-                import backend.app.models.segment  # noqa: F401
-                import backend.app.models.rollout_schedule  # noqa: F401
-                import backend.app.models.report  # noqa: F401
-                import backend.app.models.api_key  # noqa: F401
-                import backend.app.models.scheduler_run  # noqa: F401
-                import backend.app.models.custom_role  # noqa: F401
-                import backend.app.models.sso_config  # noqa: F401
-                import backend.app.models.workspace  # noqa: F401  EP-057
-                import backend.app.models.compliance_audit_event  # noqa: F401  EP-033
-                import backend.app.models.llm_experiment  # noqa: F401  EP-046
-                import backend.app.models.phi_audit_log  # noqa: F401  EP-050
-                import backend.app.models.baa_config  # noqa: F401  EP-050
+                import backend.app.models.api_key
+                import backend.app.models.assignment
+                import backend.app.models.audit_log
+                import backend.app.models.baa_config
+                import backend.app.models.compliance_audit_event
+                import backend.app.models.custom_role
+                import backend.app.models.event
+                import backend.app.models.experiment
+                import backend.app.models.feature_flag
+                import backend.app.models.llm_experiment
+                import backend.app.models.phi_audit_log
+                import backend.app.models.report
+                import backend.app.models.rollout_schedule
+                import backend.app.models.safety
+                import backend.app.models.scheduler_run
+                import backend.app.models.segment
+                import backend.app.models.sso_config
+                import backend.app.models.user
+                import backend.app.models.workspace
 
                 # Set schema for all tables
                 Base.metadata.schema = schema_name
@@ -260,14 +266,16 @@ def test_db():
                     f"Failed to set up test database after {max_retries} attempts: {e}"
                 )
             import time
+
             time.sleep(2)  # Wait before retrying
 
     yield engine
 
     # Teardown: drop the per-process test database.
     try:
-        import psycopg2
         from urllib.parse import urlparse
+
+        import psycopg2
 
         parsed = urlparse(db_url)
         cleanup_conn = psycopg2.connect(
@@ -352,6 +360,7 @@ def db_session(test_db):
 @pytest.fixture
 def client(db_session, monkeypatch):
     """Create a test client for the FastAPI application."""
+
     # Override the get_db dependency
     def override_get_db():
         try:
@@ -364,12 +373,12 @@ def client(db_session, monkeypatch):
         return {
             "username": "test_user",
             "attributes": {"email": "test@example.com"},
-            "groups": ["admin-group"]
+            "groups": ["admin-group"],
         }
 
     monkeypatch.setattr(
         "backend.app.services.auth_service.CognitoAuthService.get_user_with_groups",
-        mock_get_user_with_groups
+        mock_get_user_with_groups,
     )
 
     # Mock security token decoder
@@ -377,13 +386,10 @@ def client(db_session, monkeypatch):
         return {
             "sub": "test_user_id",
             "username": "test_user",
-            "email": "test@example.com"
+            "email": "test@example.com",
         }
 
-    monkeypatch.setattr(
-        "backend.app.core.security.decode_token",
-        mock_decode_token
-    )
+    monkeypatch.setattr("backend.app.core.security.decode_token", mock_decode_token)
 
     # Get or create a superuser for authentication
     user = db_session.query(User).filter(User.email == "test@example.com").first()
@@ -395,7 +401,7 @@ def client(db_session, monkeypatch):
             hashed_password="$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW",
             is_active=True,
             is_superuser=True,
-            role=UserRole.ADMIN
+            role=UserRole.ADMIN,
         )
         db_session.add(user)
         db_session.commit()
@@ -425,8 +431,12 @@ def client(db_session, monkeypatch):
     # Set up dependency overrides
     app.dependency_overrides[deps.get_db] = override_get_db
     app.dependency_overrides[deps.get_current_user] = override_get_current_user
-    app.dependency_overrides[deps.get_current_active_user] = override_get_current_active_user
-    app.dependency_overrides[deps.get_current_superuser] = override_get_current_superuser
+    app.dependency_overrides[deps.get_current_active_user] = (
+        override_get_current_active_user
+    )
+    app.dependency_overrides[deps.get_current_superuser] = (
+        override_get_current_superuser
+    )
     app.dependency_overrides[deps.get_cache_control] = override_get_cache_control
     app.dependency_overrides[deps.get_api_key] = override_get_api_key
 
@@ -482,6 +492,7 @@ def superuser(db_session):
 @pytest.fixture
 def mock_auth(normal_user, monkeypatch):
     """Mock the authentication dependencies."""
+
     async def override_get_current_user():
         return normal_user
 
@@ -493,12 +504,12 @@ def mock_auth(normal_user, monkeypatch):
         return {
             "username": normal_user.username,
             "attributes": {"email": normal_user.email},
-            "groups": ["developer-group"]
+            "groups": ["developer-group"],
         }
 
     monkeypatch.setattr(
         "backend.app.services.auth_service.CognitoAuthService.get_user_with_groups",
-        mock_get_user_with_groups
+        mock_get_user_with_groups,
     )
 
     # Mock security token decoder
@@ -506,16 +517,15 @@ def mock_auth(normal_user, monkeypatch):
         return {
             "sub": str(normal_user.id),
             "username": normal_user.username,
-            "email": normal_user.email
+            "email": normal_user.email,
         }
 
-    monkeypatch.setattr(
-        "backend.app.core.security.decode_token",
-        mock_decode_token
-    )
+    monkeypatch.setattr("backend.app.core.security.decode_token", mock_decode_token)
 
     app.dependency_overrides[deps.get_current_user] = override_get_current_user
-    app.dependency_overrides[deps.get_current_active_user] = override_get_current_active_user
+    app.dependency_overrides[deps.get_current_active_user] = (
+        override_get_current_active_user
+    )
 
     yield
 
@@ -526,6 +536,7 @@ def mock_auth(normal_user, monkeypatch):
 @pytest.fixture
 def mock_auth_superuser(superuser, monkeypatch):
     """Mock the authentication dependencies to return a superuser."""
+
     async def override_get_current_user():
         return superuser
 
@@ -540,12 +551,12 @@ def mock_auth_superuser(superuser, monkeypatch):
         return {
             "username": superuser.username,
             "attributes": {"email": superuser.email},
-            "groups": ["admin-group"]
+            "groups": ["admin-group"],
         }
 
     monkeypatch.setattr(
         "backend.app.services.auth_service.CognitoAuthService.get_user_with_groups",
-        mock_get_user_with_groups
+        mock_get_user_with_groups,
     )
 
     # Mock security token decoder
@@ -553,18 +564,19 @@ def mock_auth_superuser(superuser, monkeypatch):
         return {
             "sub": str(superuser.id),
             "username": superuser.username,
-            "email": superuser.email
+            "email": superuser.email,
         }
 
-    monkeypatch.setattr(
-        "backend.app.core.security.decode_token",
-        mock_decode_token
-    )
+    monkeypatch.setattr("backend.app.core.security.decode_token", mock_decode_token)
 
     # Set up dependency overrides
     app.dependency_overrides[deps.get_current_user] = override_get_current_user
-    app.dependency_overrides[deps.get_current_active_user] = override_get_current_active_user
-    app.dependency_overrides[deps.get_current_superuser] = override_get_current_superuser
+    app.dependency_overrides[deps.get_current_active_user] = (
+        override_get_current_active_user
+    )
+    app.dependency_overrides[deps.get_current_superuser] = (
+        override_get_current_superuser
+    )
 
     yield
 

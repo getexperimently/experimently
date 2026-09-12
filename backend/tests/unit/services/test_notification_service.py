@@ -13,13 +13,13 @@ Tests cover:
 - Empty/missing webhook URL skips sending (logs debug, returns None/False)
 """
 
-import pytest
-from unittest.mock import MagicMock, patch, call
 from datetime import datetime, timezone
+from unittest.mock import MagicMock, call, patch
 
-from backend.app.services.notification_service import NotificationService
+import pytest
+
 from backend.app.schemas.scheduler import NotificationEvent
-
+from backend.app.services.notification_service import NotificationService
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -54,7 +54,10 @@ class TestSendWebhook:
         mock_response = MagicMock()
         mock_response.status_code = 200
 
-        with patch("backend.app.services.notification_service.httpx.post", return_value=mock_response):
+        with patch(
+            "backend.app.services.notification_service.httpx.post",
+            return_value=mock_response,
+        ):
             result = self.service.send_webhook(
                 url="https://hooks.example.com/test",
                 event=self.event,
@@ -65,7 +68,10 @@ class TestSendWebhook:
         mock_response = MagicMock()
         mock_response.status_code = 201
 
-        with patch("backend.app.services.notification_service.httpx.post", return_value=mock_response):
+        with patch(
+            "backend.app.services.notification_service.httpx.post",
+            return_value=mock_response,
+        ):
             result = self.service.send_webhook(
                 url="https://hooks.example.com/test",
                 event=self.event,
@@ -76,7 +82,10 @@ class TestSendWebhook:
         mock_response = MagicMock()
         mock_response.status_code = 400
 
-        with patch("backend.app.services.notification_service.httpx.post", return_value=mock_response):
+        with patch(
+            "backend.app.services.notification_service.httpx.post",
+            return_value=mock_response,
+        ):
             result = self.service.send_webhook(
                 url="https://hooks.example.com/test",
                 event=self.event,
@@ -87,7 +96,10 @@ class TestSendWebhook:
         mock_response = MagicMock()
         mock_response.status_code = 500
 
-        with patch("backend.app.services.notification_service.httpx.post", return_value=mock_response):
+        with patch(
+            "backend.app.services.notification_service.httpx.post",
+            return_value=mock_response,
+        ):
             result = self.service.send_webhook(
                 url="https://hooks.example.com/test",
                 event=self.event,
@@ -109,6 +121,7 @@ class TestSendWebhook:
     def test_returns_false_on_timeout(self):
         """Timeout exceptions must be swallowed and return False."""
         import httpx as _httpx
+
         with patch(
             "backend.app.services.notification_service.httpx.post",
             side_effect=_httpx.TimeoutException("Request timed out"),
@@ -123,7 +136,10 @@ class TestSendWebhook:
         mock_response = MagicMock()
         mock_response.status_code = 200
 
-        with patch("backend.app.services.notification_service.httpx.post", return_value=mock_response) as mock_post:
+        with patch(
+            "backend.app.services.notification_service.httpx.post",
+            return_value=mock_response,
+        ) as mock_post:
             self.service.send_webhook(
                 url="https://hooks.example.com/test",
                 event=self.event,
@@ -137,7 +153,10 @@ class TestSendWebhook:
         mock_response = MagicMock()
         mock_response.status_code = 200
 
-        with patch("backend.app.services.notification_service.httpx.post", return_value=mock_response) as mock_post:
+        with patch(
+            "backend.app.services.notification_service.httpx.post",
+            return_value=mock_response,
+        ) as mock_post:
             self.service.send_webhook(
                 url="https://hooks.example.com/test",
                 event=self.event,
@@ -267,7 +286,9 @@ class TestNotifyExperimentEnded:
             experiment_name="My Exp",
             winning_variant="variant_b",
         )
-        assert "variant_b" in captured_events[0].message or "variant_b" in str(captured_events[0].metadata)
+        assert "variant_b" in captured_events[0].message or "variant_b" in str(
+            captured_events[0].metadata
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -349,4 +370,6 @@ class TestNotifyRolloutAdvanced:
             stage_name="Phase 3",
             new_percentage=75,
         )
-        assert "75" in captured_events[0].message or "75" in str(captured_events[0].metadata)
+        assert "75" in captured_events[0].message or "75" in str(
+            captured_events[0].metadata
+        )

@@ -4,13 +4,15 @@ Phase 6: E2E Workflow Tests — A/B Test Scenario.
 Tests the complete A/B test workflow end-to-end using the API layer,
 exercising experiment creation, variant/metric attachment, and retrieval.
 """
-import pytest
-from backend.tests.integration.helpers import unique_flag_key
 
+import pytest
+
+from backend.tests.integration.helpers import unique_flag_key
 
 # ---------------------------------------------------------------------------
 # Valid payloads used across tests
 # ---------------------------------------------------------------------------
+
 
 def _ab_experiment_payload(name: str = "A/B Test E2E") -> dict:
     """Return a minimal but valid ExperimentCreate payload."""
@@ -87,7 +89,14 @@ class TestCompleteABTestWorkflow:
         assert create_resp.status_code == 201, create_resp.text
         data = create_resp.json()
 
-        required_fields = ["id", "name", "status", "owner_id", "created_at", "updated_at"]
+        required_fields = [
+            "id",
+            "name",
+            "status",
+            "owner_id",
+            "created_at",
+            "updated_at",
+        ]
         for field in required_fields:
             assert field in data, f"Required field '{field}' missing from response"
 
@@ -130,7 +139,9 @@ class TestCompleteABTestWorkflow:
         exp_id = create_resp.json()["id"]
 
         update_payload = {"description": "Updated description for E2E test"}
-        put_resp = admin_client.put(f"/api/v1/experiments/{exp_id}", json=update_payload)
+        put_resp = admin_client.put(
+            f"/api/v1/experiments/{exp_id}", json=update_payload
+        )
         assert put_resp.status_code in (200, 201), put_resp.text
 
         get_resp = admin_client.get(f"/api/v1/experiments/{exp_id}")
@@ -142,8 +153,12 @@ class TestCompleteABTestWorkflow:
     ):
         """Create experiment with DB factories (fast path), retrieve via API."""
         exp = make_experiment(name="Full E2E Test via DB")
-        make_variant(experiment=exp, name="Control", is_control=True, traffic_allocation=50)
-        make_variant(experiment=exp, name="Treatment", is_control=False, traffic_allocation=50)
+        make_variant(
+            experiment=exp, name="Control", is_control=True, traffic_allocation=50
+        )
+        make_variant(
+            experiment=exp, name="Treatment", is_control=False, traffic_allocation=50
+        )
 
         response = admin_client.get(f"/api/v1/experiments/{exp.id}")
         assert response.status_code == 200, response.text
@@ -167,7 +182,9 @@ class TestCompleteABTestWorkflow:
             "name": "No Variants Test",
             "description": "Should fail",
             "variants": [],
-            "metrics": [{"name": "Rate", "event_name": "click", "metric_type": "conversion"}],
+            "metrics": [
+                {"name": "Rate", "event_name": "click", "metric_type": "conversion"}
+            ],
         }
         response = admin_client.post("/api/v1/experiments", json=payload)
         assert response.status_code in (400, 422), response.text

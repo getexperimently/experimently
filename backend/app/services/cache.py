@@ -5,7 +5,8 @@ This module provides caching functionality using Redis.
 """
 
 import logging
-from typing import Any, Dict, Optional, Union
+from typing import Any, Optional, Union
+
 from redis import Redis
 
 logger = logging.getLogger(__name__)

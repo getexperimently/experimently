@@ -6,8 +6,10 @@ returns a static message. These tests verify the stub behaviour and test
 the Assignment model persistence via the make_assignment factory fixture,
 ensuring the data layer is wired correctly for future expansion.
 """
-import pytest
+
 import uuid
+
+import pytest
 
 from backend.app.models.assignment import Assignment
 from backend.app.models.experiment import ExperimentStatus
@@ -75,9 +77,7 @@ class TestAssignmentModelPersistence:
 
         # Query back from DB
         fetched = (
-            db_session.query(Assignment)
-            .filter(Assignment.id == assignment.id)
-            .first()
+            db_session.query(Assignment).filter(Assignment.id == assignment.id).first()
         )
         assert fetched is not None
         assert fetched.user_id == user_id
@@ -98,6 +98,7 @@ class TestAssignmentModelPersistence:
 
         # Second assignment for same experiment + user should fail
         import sqlalchemy.exc
+
         with pytest.raises(sqlalchemy.exc.IntegrityError):
             make_assignment(experiment=exp, variant=control, user_id=user_id)
 
@@ -169,6 +170,6 @@ class TestAssignmentModelPersistence:
         variant = make_variant(
             experiment=exp, name="C", is_control=True, traffic_allocation=100
         )
-        user_id = f"user-repr"
+        user_id = "user-repr"
         assignment = make_assignment(experiment=exp, variant=variant, user_id=user_id)
         assert "user-repr" in repr(assignment)

@@ -125,9 +125,7 @@ class MutualExclusionService:
             raise ValueError(f"Group {group_id} not found")
 
         experiment = (
-            self.db.query(Experiment)
-            .filter(Experiment.id == experiment_id)
-            .first()
+            self.db.query(Experiment).filter(Experiment.id == experiment_id).first()
         )
         if not experiment:
             raise ValueError(f"Experiment {experiment_id} not found")
@@ -135,9 +133,7 @@ class MutualExclusionService:
         if experiment.mutual_exclusion_group_id is not None:
             if experiment.mutual_exclusion_group_id == group_id:
                 return experiment  # Already in this group
-            raise ValueError(
-                f"Experiment {experiment_id} is already in another group"
-            )
+            raise ValueError(f"Experiment {experiment_id} is already in another group")
 
         experiment.mutual_exclusion_group_id = group_id
         self.db.commit()
@@ -249,9 +245,7 @@ class MutualExclusionService:
     ) -> Optional[MutualExclusionGroup]:
         """Get the mutual exclusion group for an experiment, if any."""
         experiment = (
-            self.db.query(Experiment)
-            .filter(Experiment.id == experiment_id)
-            .first()
+            self.db.query(Experiment).filter(Experiment.id == experiment_id).first()
         )
         if not experiment or not experiment.mutual_exclusion_group_id:
             return None

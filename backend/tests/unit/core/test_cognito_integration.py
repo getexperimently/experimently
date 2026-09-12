@@ -5,12 +5,13 @@ These tests verify the complete integration flow for Cognito authentication,
 including user creation, role mapping, and superuser status assignment.
 """
 
-import pytest  # noqa: F401
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
+import pytest
+
+from backend.app.api.deps import get_current_user
 from backend.app.core.cognito import map_cognito_groups_to_role, should_be_superuser
 from backend.app.models.user import User, UserRole
-from backend.app.api.deps import get_current_user
 
 
 class TestCognitoIntegration:
@@ -41,7 +42,7 @@ class TestCognitoIntegration:
                 "Admins": "admin",
                 "Developers": "developer",
                 "Analysts": "analyst",
-                "Viewers": "viewer"
+                "Viewers": "viewer",
             }
             mock_settings.COGNITO_ADMIN_GROUPS = ["Admins", "SuperUsers"]
             mock_settings.SYNC_ROLES_ON_LOGIN = True
@@ -122,7 +123,9 @@ class TestCognitoIntegration:
             role = map_cognito_groups_to_role(["SuperUsers"])
             assert role == UserRole.ADMIN
 
-    def test_create_new_user_from_cognito(self, mock_db_session, mock_auth_service, mock_settings):
+    def test_create_new_user_from_cognito(
+        self, mock_db_session, mock_auth_service, mock_settings
+    ):
         """Test creating a new user from Cognito authentication."""
         # Setup user not in database
         mock_db_session.query().filter().first.return_value = None
@@ -133,9 +136,9 @@ class TestCognitoIntegration:
             "attributes": {
                 "email": "newuser@example.com",
                 "given_name": "New",
-                "family_name": "User"
+                "family_name": "User",
             },
-            "groups": ["Developers"]
+            "groups": ["Developers"],
         }
 
         # Setup patching the required components
@@ -157,7 +160,9 @@ class TestCognitoIntegration:
                     assert user.role == UserRole.DEVELOPER
                     assert user.is_superuser is False
 
-    def test_update_existing_user_role(self, mock_db_session, mock_auth_service, mock_settings):
+    def test_update_existing_user_role(
+        self, mock_db_session, mock_auth_service, mock_settings
+    ):
         """Test updating an existing user's role from Cognito groups."""
         # Create existing user with different role
         existing_user = User(
@@ -165,17 +170,15 @@ class TestCognitoIntegration:
             email="existing@example.com",
             full_name="Existing User",
             role=UserRole.VIEWER,
-            is_superuser=False
+            is_superuser=False,
         )
         mock_db_session.query().filter().first.return_value = existing_user
 
         # Mock Cognito response with different role
         mock_auth_service.get_user_with_groups.return_value = {
             "username": "existinguser",
-            "attributes": {
-                "email": "existing@example.com"
-            },
-            "groups": ["Developers"]  # Different role than currently assigned
+            "attributes": {"email": "existing@example.com"},
+            "groups": ["Developers"],  # Different role than currently assigned
         }
 
         # Setup patching
@@ -193,7 +196,9 @@ class TestCognitoIntegration:
                     assert user.is_superuser is False
                     assert mock_db_session.commit.called
 
-    def test_update_user_to_superuser(self, mock_db_session, mock_auth_service, mock_settings):
+    def test_update_user_to_superuser(
+        self, mock_db_session, mock_auth_service, mock_settings
+    ):
         """Test updating an existing user to superuser status."""
         # Create existing regular user
         existing_user = User(
@@ -201,17 +206,15 @@ class TestCognitoIntegration:
             email="regular@example.com",
             full_name="Regular User",
             role=UserRole.DEVELOPER,
-            is_superuser=False
+            is_superuser=False,
         )
         mock_db_session.query().filter().first.return_value = existing_user
 
         # Mock Cognito response with admin group
         mock_auth_service.get_user_with_groups.return_value = {
             "username": "regularuser",
-            "attributes": {
-                "email": "regular@example.com"
-            },
-            "groups": ["Admins"]  # Admin group should make them superuser
+            "attributes": {"email": "regular@example.com"},
+            "groups": ["Admins"],  # Admin group should make them superuser
         }
 
         # Setup patching
@@ -229,7 +232,9 @@ class TestCognitoIntegration:
                     assert user.is_superuser is True
                     assert mock_db_session.commit.called
 
-    def test_no_role_update_when_sync_disabled(self, mock_db_session, mock_auth_service, mock_settings):
+    def test_no_role_update_when_sync_disabled(
+        self, mock_db_session, mock_auth_service, mock_settings
+    ):
         """Test that roles aren't updated when sync is disabled."""
         # Create existing user
         existing_user = User(
@@ -237,17 +242,15 @@ class TestCognitoIntegration:
             email="nochange@example.com",
             full_name="No Change",
             role=UserRole.VIEWER,  # Will remain this even though Cognito has Developer
-            is_superuser=False
+            is_superuser=False,
         )
         mock_db_session.query().filter().first.return_value = existing_user
 
         # Mock Cognito response with different role
         mock_auth_service.get_user_with_groups.return_value = {
             "username": "nochange",
-            "attributes": {
-                "email": "nochange@example.com"
-            },
-            "groups": ["Developers"]  # Different from current VIEWER role
+            "attributes": {"email": "nochange@example.com"},
+            "groups": ["Developers"],  # Different from current VIEWER role
         }
 
         # Disable role sync
@@ -269,7 +272,9 @@ class TestCognitoIntegration:
                     # commit should not be called when no changes
                     assert not mock_db_session.commit.called
 
-    def test_superuser_always_gets_admin_role(self, mock_db_session, mock_auth_service, mock_settings):
+    def test_superuser_always_gets_admin_role(
+        self, mock_db_session, mock_auth_service, mock_settings
+    ):
         """Test that superusers always get ADMIN role regardless of their group mapping."""
         # Create existing user
         existing_user = User(
@@ -277,17 +282,15 @@ class TestCognitoIntegration:
             email="super@example.com",
             full_name="Super User",
             role=UserRole.DEVELOPER,  # Current role
-            is_superuser=False  # Will be changed to True
+            is_superuser=False,  # Will be changed to True
         )
         mock_db_session.query().filter().first.return_value = existing_user
 
         # Mock Cognito response with SuperUsers group (admin group but mapped as developer)
         mock_auth_service.get_user_with_groups.return_value = {
             "username": "superuser",
-            "attributes": {
-                "email": "super@example.com"
-            },
-            "groups": ["SuperUsers"]  # In COGNITO_ADMIN_GROUPS but mapped as developer
+            "attributes": {"email": "super@example.com"},
+            "groups": ["SuperUsers"],  # In COGNITO_ADMIN_GROUPS but mapped as developer
         }
 
         # Make SuperUsers map to developer role, but still in admin groups

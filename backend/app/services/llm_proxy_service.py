@@ -133,7 +133,9 @@ class AnthropicProvider(BaseProvider):
             text = response.content[0].text if response.content else ""
             input_tok = response.usage.input_tokens if response.usage else 0
             output_tok = response.usage.output_tokens if response.usage else 0
-            return ProviderResponse(text=text, input_tokens=input_tok, output_tokens=output_tok)
+            return ProviderResponse(
+                text=text, input_tokens=input_tok, output_tokens=output_tok
+            )
         except Exception as exc:
             logger.error(f"Anthropic completion failed: {exc}")
             raise
@@ -164,7 +166,9 @@ class OpenAIProvider(BaseProvider):
             text = response.choices[0].message.content or ""
             input_tok = response.usage.prompt_tokens if response.usage else 0
             output_tok = response.usage.completion_tokens if response.usage else 0
-            return ProviderResponse(text=text, input_tokens=input_tok, output_tokens=output_tok)
+            return ProviderResponse(
+                text=text, input_tokens=input_tok, output_tokens=output_tok
+            )
         except Exception as exc:
             logger.error(f"OpenAI completion failed: {exc}")
             raise
@@ -191,13 +195,18 @@ class GoogleProvider(BaseProvider):
             model_obj = genai.GenerativeModel(model)
             response = await model_obj.generate_content_async(
                 prompt,
-                generation_config={"temperature": temperature, "max_output_tokens": max_tokens},
+                generation_config={
+                    "temperature": temperature,
+                    "max_output_tokens": max_tokens,
+                },
             )
             text = response.text if response.text else ""
             # Gemini doesn't always expose token counts — approximate
             input_tok = len(prompt.split())
             output_tok = len(text.split())
-            return ProviderResponse(text=text, input_tokens=input_tok, output_tokens=output_tok)
+            return ProviderResponse(
+                text=text, input_tokens=input_tok, output_tokens=output_tok
+            )
         except Exception as exc:
             logger.error(f"Google completion failed: {exc}")
             raise
@@ -228,7 +237,11 @@ class LocalProvider(BaseProvider):
                 r.raise_for_status()
                 data = r.json()
                 text = data.get("response", "")
-                return ProviderResponse(text=text, input_tokens=len(prompt.split()), output_tokens=len(text.split()))
+                return ProviderResponse(
+                    text=text,
+                    input_tokens=len(prompt.split()),
+                    output_tokens=len(text.split()),
+                )
         except Exception as exc:
             logger.error(f"Local provider completion failed: {exc}")
             raise
@@ -308,7 +321,9 @@ class LLMProxyService:
         Returns the saved LLMEvaluation row.
         """
         variant = self._experiment_service.assign_variant(db, experiment_id, user_id)
-        return await self._call_variant(db, variant, input_variables, user_id, experiment_id)
+        return await self._call_variant(
+            db, variant, input_variables, user_id, experiment_id
+        )
 
     async def _call_variant(
         self,
@@ -326,7 +341,11 @@ class LLMProxyService:
             messages.append({"role": "system", "content": variant.system_prompt})
         messages.append({"role": "user", "content": rendered})
 
-        provider_name = variant.provider.value if hasattr(variant.provider, "value") else str(variant.provider)
+        provider_name = (
+            variant.provider.value
+            if hasattr(variant.provider, "value")
+            else str(variant.provider)
+        )
         provider = get_provider(provider_name)
 
         extra_params = variant.additional_params or {}

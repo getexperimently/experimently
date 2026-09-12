@@ -10,11 +10,11 @@ Tests cover:
 """
 
 import math
-import pytest
+
 import numpy as np
+import pytest
 
-from backend.app.services.cuped_service import CupedService, CupedEffect
-
+from backend.app.services.cuped_service import CupedEffect, CupedService
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -204,11 +204,11 @@ class TestComputeCupedEffect:
         """Generate control/treatment data with a correlated covariate."""
         rng = np.random.default_rng(seed)
         X_control = rng.normal(5.0, 1.0, n)
-        noise_c = rng.normal(0, math.sqrt(1 - rho ** 2), n)
+        noise_c = rng.normal(0, math.sqrt(1 - rho**2), n)
         Y_control = rho * (X_control - 5.0) + noise_c + 5.0
 
         X_treatment = rng.normal(5.0, 1.0, n)
-        noise_t = rng.normal(0, math.sqrt(1 - rho ** 2), n)
+        noise_t = rng.normal(0, math.sqrt(1 - rho**2), n)
         Y_treatment = rho * (X_treatment - 5.0) + noise_t + 5.0 + effect
         return X_control, Y_control, X_treatment, Y_treatment
 

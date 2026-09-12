@@ -2,23 +2,24 @@
 Data export service — converts DB data to CSV/JSON for download.
 EP-020: Data Export & Reporting
 """
+
 import csv
-import json
 import io
+import json
 from datetime import datetime, timezone
 from typing import List, Optional, Tuple
+
 from sqlalchemy.orm import Session
 
 from backend.app.models.experiment import Experiment, ExperimentStatus
 from backend.app.models.feature_flag import FeatureFlag, FeatureFlagStatus
 from backend.app.schemas.export import (
-    ExportRequest,
-    ExportFormat,
-    ExportScope,
     ExperimentExportRow,
-    VariantExportRow,
+    ExportFormat,
+    ExportRequest,
     FeatureFlagExportRow,
     PlatformOverviewReport,
+    VariantExportRow,
 )
 
 
@@ -129,12 +130,12 @@ class ExportService:
 
         total_experiments: int = exp_query.count()
 
-        active_experiments: int = (
-            exp_query.filter(Experiment.status == ExperimentStatus.ACTIVE).count()
-        )
-        completed_experiments: int = (
-            exp_query.filter(Experiment.status == ExperimentStatus.COMPLETED).count()
-        )
+        active_experiments: int = exp_query.filter(
+            Experiment.status == ExperimentStatus.ACTIVE
+        ).count()
+        completed_experiments: int = exp_query.filter(
+            Experiment.status == ExperimentStatus.COMPLETED
+        ).count()
 
         # Feature flag counts
         ff_query = self.db.query(FeatureFlag)
@@ -144,9 +145,9 @@ class ExportService:
             ff_query = ff_query.filter(FeatureFlag.created_at <= end_date)
 
         total_feature_flags: int = ff_query.count()
-        active_feature_flags: int = (
-            ff_query.filter(FeatureFlag.status == FeatureFlagStatus.ACTIVE).count()
-        )
+        active_feature_flags: int = ff_query.filter(
+            FeatureFlag.status == FeatureFlagStatus.ACTIVE
+        ).count()
 
         # Assignment and event counts via relationships — use scalar counts where available
         # These are approximated from what the DB can provide without raw-event tables
@@ -273,9 +274,7 @@ class ExportService:
         start_str: Optional[str] = (
             exp.start_date.isoformat() if exp.start_date else None
         )
-        end_str: Optional[str] = (
-            exp.end_date.isoformat() if exp.end_date else None
-        )
+        end_str: Optional[str] = exp.end_date.isoformat() if exp.end_date else None
 
         duration: Optional[float] = None
         if exp.start_date and exp.end_date:
@@ -327,9 +326,7 @@ class ExportService:
             try:
                 total_evals = len(ff.raw_metrics)
                 enabled_evals = sum(
-                    1
-                    for m in ff.raw_metrics
-                    if getattr(m, "flag_enabled", False)
+                    1 for m in ff.raw_metrics if getattr(m, "flag_enabled", False)
                 )
             except TypeError:
                 pass

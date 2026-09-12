@@ -1,66 +1,106 @@
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { defineConfig, devices } from "@playwright/test";
+import { API_URL, BASE_URL, IS_EXTERNAL_BASE_URL, PORT } from "./tests/e2e/env";
 
 /**
- * Playwright configuration for the Experimently platform.
+ * Playwright configuration for the Experimently dashboard.
  *
- * Used by the scenario-runner agent for browser-based UI validation.
- * Can also be run directly for browser automation tests.
+ * Two projects:
+ *   - `journeys` — the five fail-hard PR journeys (`*.journey.spec.ts`), the
+ *     required `browser-e2e` gate. Run them with `--project=journeys`.
+ *   - `extended` — everything else under tests/e2e (accessibility, visual
+ *     regression); nightly territory, not a PR gate.
  *
- * Run:
- *   npx playwright test                    # all tests
- *   npx playwright test --headed           # with visible browser
- *   npx playwright test --ui               # interactive UI mode
- *   npx playwright show-report             # view HTML report
+ * The web server is chosen automatically so nobody has to remember a flag:
+ *   - a dashboard already answering on the base URL is reused (local dev);
+ *   - otherwise, if `frontend/out` holds a static export (CI, after
+ *     `npm run build`), it is served by tests/e2e/static-server.mjs exactly the
+ *     way nginx serves it in the image — including the `/api` proxy, so the
+ *     dashboard and the API share one origin and the browser sends no CORS
+ *     preflight (build that export with NEXT_PUBLIC_API_URL="");
+ *   - otherwise `npm run dev` is started.
  *
  * Environment variables:
- *   PLAYWRIGHT_BASE_URL   — override default frontend URL (default: http://localhost:3100)
- *   PLAYWRIGHT_API_URL    — backend API URL (default: http://localhost:8000)
- *   PLAYWRIGHT_HEADLESS   — "false" to show browser window (default: "true")
+ *   PLAYWRIGHT_BASE_URL    dashboard origin        (default http://localhost:3100)
+ *   PLAYWRIGHT_API_URL     backend origin          (default http://localhost:8000)
+ *   PLAYWRIGHT_PORT        port for the managed server (default 3100)
+ *   PLAYWRIGHT_WEB_SERVER  auto | dev | export | none   (default auto)
+ *   PLAYWRIGHT_HEADLESS    "false" to watch the browser
  */
 
-const BASE_URL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3100";
 const HEADLESS = process.env.PLAYWRIGHT_HEADLESS !== "false";
+const hasExport = existsSync(join(__dirname, "out", "index.html"));
+
+type ServerMode = "auto" | "dev" | "export" | "none";
+const requestedMode = (process.env.PLAYWRIGHT_WEB_SERVER as ServerMode) ?? "auto";
+const mode: ServerMode =
+  requestedMode !== "auto"
+    ? requestedMode
+    : IS_EXTERNAL_BASE_URL
+      ? "none" // someone pointed us at their own stack
+      : hasExport
+        ? "export"
+        : "dev";
+
+const webServer =
+  mode === "none"
+    ? undefined
+    : {
+        command:
+          mode === "export"
+            ? `node tests/e2e/static-server.mjs --port ${PORT} --api ${API_URL}`
+            : `npm run dev -- --port ${PORT}`,
+        url: BASE_URL,
+        // Locally, a dev server already on the port is the stack under test.
+        reuseExistingServer: !process.env.CI,
+        timeout: 120_000,
+        stdout: "pipe" as const,
+        stderr: "pipe" as const,
+      };
+
+const use = {
+  baseURL: BASE_URL,
+  headless: HEADLESS,
+  screenshot: "only-on-failure" as const,
+  video: "retain-on-failure" as const,
+  trace: "retain-on-failure" as const,
+  actionTimeout: 15_000,
+  navigationTimeout: 30_000,
+};
 
 export default defineConfig({
   testDir: "./tests/e2e",
-  fullyParallel: false,       // scenarios share state — run sequentially
-  forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 1 : 0,
+  // Journeys walk one backend through real state transitions; serialise them.
+  fullyParallel: false,
   workers: 1,
-  reporter: [
-    ["html", { outputFolder: "playwright-report", open: "never" }],
-    ["list"],
-  ],
+  forbidOnly: !!process.env.CI,
+  // One retry absorbs network jitter in CI; a journey that fails twice fails the PR.
+  retries: process.env.CI ? 1 : 0,
+  // Generous: a journey that trips the backend's 10/min login limit waits the
+  // window out (see LoginPage.submitResilient) before it can continue.
+  timeout: 120_000,
+  expect: { timeout: 10_000 },
+  reporter: process.env.CI
+    ? [["html", { outputFolder: "playwright-report", open: "never" }], ["github"], ["list"]]
+    : [["html", { outputFolder: "playwright-report", open: "never" }], ["list"]],
 
-  use: {
-    baseURL: BASE_URL,
-    headless: HEADLESS,
-    screenshot: "only-on-failure",
-    video: "retain-on-failure",
-    trace: "on-first-retry",
-
-    // Generous timeouts for a dev environment
-    actionTimeout: 15_000,
-    navigationTimeout: 30_000,
-  },
+  use,
 
   projects: [
     {
-      name: "chromium",
+      name: "journeys",
+      testMatch: /\.journey\.spec\.ts$/,
+      use: { ...devices["Desktop Chrome"] },
+    },
+    {
+      name: "extended",
+      testMatch: /\.spec\.ts$/,
+      testIgnore: /\.journey\.spec\.ts$/,
       use: { ...devices["Desktop Chrome"] },
     },
   ],
 
-  // Start the Next.js dev server automatically if not already running
-  webServer: process.env.PLAYWRIGHT_SKIP_SERVER
-    ? undefined
-    : {
-        command: "npm run dev",
-        url: BASE_URL,
-        reuseExistingServer: true,
-        timeout: 60_000,
-      },
-
-  // Output directories
+  webServer,
   outputDir: "playwright-results",
 });

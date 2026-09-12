@@ -15,7 +15,6 @@ Usage:
     plaintext  = enc.decrypt(ciphertext)
 """
 
-import base64
 from typing import Optional
 
 from cryptography.fernet import Fernet, InvalidToken
@@ -61,7 +60,9 @@ class PHIEncryption:
             )
 
         try:
-            self._fernet = Fernet(resolved_key.encode() if isinstance(resolved_key, str) else resolved_key)
+            self._fernet = Fernet(
+                resolved_key.encode() if isinstance(resolved_key, str) else resolved_key
+            )
         except Exception as exc:
             raise RuntimeError(
                 f"PHI_ENCRYPTION_KEY is not a valid Fernet key: {exc}. "
@@ -103,7 +104,11 @@ class PHIEncryption:
                         with a different key.
         """
         try:
-            token_bytes = ciphertext.encode("utf-8") if isinstance(ciphertext, str) else ciphertext
+            token_bytes = (
+                ciphertext.encode("utf-8")
+                if isinstance(ciphertext, str)
+                else ciphertext
+            )
             plaintext_bytes: bytes = self._fernet.decrypt(token_bytes)
             return plaintext_bytes.decode("utf-8")
         except (InvalidToken, Exception) as exc:

@@ -24,8 +24,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from backend.app.api import deps
 from backend.app.models.user import User, UserRole
 from backend.app.services.mysql_connector import (
-    MySQLConnector,
     MySQLConnectionError,
+    MySQLConnector,
     MySQLQueryError,
 )
 

@@ -10,22 +10,22 @@ This module tests the audit log schemas including:
 - Schema edge cases and error handling
 """
 
-import pytest
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
+import pytest
 from pydantic import ValidationError
 
+from backend.app.models.audit_log import ActionType, EntityType
 from backend.app.schemas.audit_log import (
     AuditLogCreate,
-    AuditLogResponse,
+    AuditLogFilterParams,
     AuditLogListResponse,
+    AuditLogResponse,
+    AuditStatsResponse,
     ToggleRequest,
     ToggleResponse,
-    AuditLogFilterParams,
-    AuditStatsResponse,
 )
-from backend.app.models.audit_log import ActionType, EntityType
 
 
 class TestAuditLogCreateSchema:
@@ -409,8 +409,7 @@ class TestAuditLogFilterParamsSchema:
     def test_filter_params_valid_enum_values(self):
         """Test AuditLogFilterParams with valid enum string values."""
         params = AuditLogFilterParams(
-            entity_type="feature_flag",
-            action_type="toggle_enable"
+            entity_type="feature_flag", action_type="toggle_enable"
         )
 
         assert params.entity_type == "feature_flag"
@@ -503,7 +502,7 @@ class TestSchemaIntegration:
             "action_description": "updated",
             "created_at": datetime.now(timezone.utc),
             "updated_at": datetime.now(timezone.utc),
-            **create_data
+            **create_data,
         }
 
         response_schema = AuditLogResponse(**response_data)

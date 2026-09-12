@@ -6,32 +6,32 @@ Tests logging, validation, AWS helpers, and response formatting.
 
 import json
 import logging
-import os
-import pytest
 import sys
-from pathlib import Path
 from datetime import datetime, timezone
 from decimal import Decimal
-from unittest.mock import Mock, patch, MagicMock
+from pathlib import Path
+from unittest.mock import Mock, patch
+
+import pytest
 
 # Add parent directory to path to import shared modules
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from utils import (
-    JsonFormatter,
-    get_logger,
-    validate_event,
-    format_response,
-    format_error_response,
     DecimalEncoder,
-    get_dynamodb_client,
-    get_dynamodb_resource,
-    get_kinesis_client,
-    put_dynamodb_item,
-    get_dynamodb_item,
-    put_kinesis_record,
+    JsonFormatter,
     batch_put_kinesis_records,
+    format_error_response,
+    format_response,
+    get_dynamodb_client,
+    get_dynamodb_item,
+    get_dynamodb_resource,
     get_env_variable,
+    get_kinesis_client,
+    get_logger,
+    put_dynamodb_item,
+    put_kinesis_record,
+    validate_event,
 )
 
 
@@ -49,7 +49,7 @@ class TestJsonFormatter:
             msg="Test message",
             args=(),
             exc_info=None,
-            func="test_func"
+            func="test_func",
         )
 
         formatted = formatter.format(record)
@@ -70,6 +70,7 @@ class TestJsonFormatter:
             raise ValueError("Test error")
         except ValueError:
             import sys
+
             exc_info = sys.exc_info()
 
         record = logging.LogRecord(
@@ -80,7 +81,7 @@ class TestJsonFormatter:
             msg="Error occurred",
             args=(),
             exc_info=exc_info,
-            func="test_func"
+            func="test_func",
         )
 
         formatted = formatter.format(record)
@@ -101,7 +102,7 @@ class TestJsonFormatter:
             msg="Test message",
             args=(),
             exc_info=None,
-            func="test_func"
+            func="test_func",
         )
 
         # Add extra fields
@@ -154,11 +155,7 @@ class TestValidateEvent:
 
     def test_validate_event_with_all_fields(self):
         """Test validation passes with all required fields."""
-        event = {
-            "user_id": "user_123",
-            "experiment_key": "exp_001",
-            "context": {}
-        }
+        event = {"user_id": "user_123", "experiment_key": "exp_001", "context": {}}
         required = ["user_id", "experiment_key"]
 
         # Should not raise
@@ -235,9 +232,7 @@ class TestFormatErrorResponse:
     def test_format_error_response_with_type(self):
         """Test error response with custom type."""
         response = format_error_response(
-            404,
-            "Resource not found",
-            error_type="NotFoundError"
+            404, "Resource not found", error_type="NotFoundError"
         )
 
         body = json.loads(response["body"])
@@ -284,10 +279,11 @@ class TestAWSClientGetters:
     def setup_method(self):
         """Reset global AWS client caches before each test."""
         import utils
+
         utils._dynamodb = None
         utils._kinesis = None
 
-    @patch('utils.boto3')
+    @patch("utils.boto3")
     def test_get_dynamodb_client(self, mock_boto3):
         """Test getting DynamoDB client."""
         mock_client = Mock()
@@ -302,7 +298,7 @@ class TestAWSClientGetters:
         client2 = get_dynamodb_client()
         assert client1 is client2
 
-    @patch('utils.boto3')
+    @patch("utils.boto3")
     def test_get_dynamodb_resource(self, mock_boto3):
         """Test getting DynamoDB resource."""
         mock_resource = Mock()
@@ -312,7 +308,7 @@ class TestAWSClientGetters:
         assert mock_boto3.resource.called
         assert resource is mock_resource
 
-    @patch('utils.boto3')
+    @patch("utils.boto3")
     def test_get_kinesis_client(self, mock_boto3):
         """Test getting Kinesis client."""
         mock_client = Mock()
@@ -325,7 +321,7 @@ class TestAWSClientGetters:
 class TestPutDynamoDBItem:
     """Test suite for put_dynamodb_item function."""
 
-    @patch('utils.get_dynamodb_resource')
+    @patch("utils.get_dynamodb_resource")
     def test_put_dynamodb_item_success(self, mock_get_resource):
         """Test successful DynamoDB put operation."""
         mock_table = Mock()
@@ -339,7 +335,7 @@ class TestPutDynamoDBItem:
         assert result is True
         mock_table.put_item.assert_called_once()
 
-    @patch('utils.get_dynamodb_resource')
+    @patch("utils.get_dynamodb_resource")
     def test_put_dynamodb_item_with_condition(self, mock_get_resource):
         """Test DynamoDB put with condition expression."""
         mock_table = Mock()
@@ -355,7 +351,7 @@ class TestPutDynamoDBItem:
         call_kwargs = mock_table.put_item.call_args[1]
         assert "ConditionExpression" in call_kwargs
 
-    @patch('utils.get_dynamodb_resource')
+    @patch("utils.get_dynamodb_resource")
     def test_put_dynamodb_item_failure(self, mock_get_resource):
         """Test DynamoDB put handles errors."""
         mock_table = Mock()
@@ -373,7 +369,7 @@ class TestPutDynamoDBItem:
 class TestGetDynamoDBItem:
     """Test suite for get_dynamodb_item function."""
 
-    @patch('utils.get_dynamodb_resource')
+    @patch("utils.get_dynamodb_resource")
     def test_get_dynamodb_item_found(self, mock_get_resource):
         """Test getting item that exists."""
         expected_item = {"id": "123", "value": "test"}
@@ -388,7 +384,7 @@ class TestGetDynamoDBItem:
         assert result == expected_item
         mock_table.get_item.assert_called_once_with(Key={"id": "123"})
 
-    @patch('utils.get_dynamodb_resource')
+    @patch("utils.get_dynamodb_resource")
     def test_get_dynamodb_item_not_found(self, mock_get_resource):
         """Test getting item that doesn't exist."""
         mock_table = Mock()
@@ -401,7 +397,7 @@ class TestGetDynamoDBItem:
 
         assert result is None
 
-    @patch('utils.get_dynamodb_resource')
+    @patch("utils.get_dynamodb_resource")
     def test_get_dynamodb_item_error(self, mock_get_resource):
         """Test get_item handles errors."""
         mock_table = Mock()
@@ -418,7 +414,7 @@ class TestGetDynamoDBItem:
 class TestPutKinesisRecord:
     """Test suite for put_kinesis_record function."""
 
-    @patch('utils.get_kinesis_client')
+    @patch("utils.get_kinesis_client")
     def test_put_kinesis_record_success(self, mock_get_client):
         """Test successful Kinesis put operation."""
         mock_client = Mock()
@@ -430,7 +426,7 @@ class TestPutKinesisRecord:
         assert result is True
         mock_client.put_record.assert_called_once()
 
-    @patch('utils.get_kinesis_client')
+    @patch("utils.get_kinesis_client")
     def test_put_kinesis_record_error(self, mock_get_client):
         """Test Kinesis put handles errors."""
         mock_client = Mock()
@@ -446,17 +442,14 @@ class TestPutKinesisRecord:
 class TestBatchPutKinesisRecords:
     """Test suite for batch_put_kinesis_records function."""
 
-    @patch('utils.get_kinesis_client')
+    @patch("utils.get_kinesis_client")
     def test_batch_put_kinesis_records_success(self, mock_get_client):
         """Test successful batch put operation."""
         mock_client = Mock()
         mock_client.put_records.return_value = {"FailedRecordCount": 0}
         mock_get_client.return_value = mock_client
 
-        records = [
-            {"user_id": f"user_{i}", "event": "test"}
-            for i in range(10)
-        ]
+        records = [{"user_id": f"user_{i}", "event": "test"} for i in range(10)]
 
         successful, failed = batch_put_kinesis_records("test_stream", records)
 
@@ -464,34 +457,28 @@ class TestBatchPutKinesisRecords:
         assert failed == 0
         mock_client.put_records.assert_called_once()
 
-    @patch('utils.get_kinesis_client')
+    @patch("utils.get_kinesis_client")
     def test_batch_put_kinesis_records_partial_failure(self, mock_get_client):
         """Test batch put with partial failures."""
         mock_client = Mock()
         mock_client.put_records.return_value = {"FailedRecordCount": 2}
         mock_get_client.return_value = mock_client
 
-        records = [
-            {"user_id": f"user_{i}", "event": "test"}
-            for i in range(10)
-        ]
+        records = [{"user_id": f"user_{i}", "event": "test"} for i in range(10)]
 
         successful, failed = batch_put_kinesis_records("test_stream", records)
 
         assert successful == 8
         assert failed == 2
 
-    @patch('utils.get_kinesis_client')
+    @patch("utils.get_kinesis_client")
     def test_batch_put_kinesis_records_large_batch(self, mock_get_client):
         """Test batch put with > 500 records (multiple batches)."""
         mock_client = Mock()
         mock_client.put_records.return_value = {"FailedRecordCount": 0}
         mock_get_client.return_value = mock_client
 
-        records = [
-            {"user_id": f"user_{i}", "event": "test"}
-            for i in range(1000)
-        ]
+        records = [{"user_id": f"user_{i}", "event": "test"} for i in range(1000)]
 
         successful, failed = batch_put_kinesis_records("test_stream", records)
 
@@ -500,7 +487,7 @@ class TestBatchPutKinesisRecords:
         # Should be called twice (500 + 500)
         assert mock_client.put_records.call_count == 2
 
-    @patch('utils.get_kinesis_client')
+    @patch("utils.get_kinesis_client")
     def test_batch_put_kinesis_records_error(self, mock_get_client):
         """Test batch put handles errors."""
         mock_client = Mock()

@@ -1,0 +1,258 @@
+name: Platform
+
+# =============================================================================
+# Reusable workflow: boot the platform, run one named suite against it.
+#
+# Every job that needs a *running* Experimently — the SDK live contract, the
+# nightly suites — used to repeat the same twenty lines: pg + redis services,
+# Python, bootstrap, seeds, uvicorn from the repository root, poll /health.
+# This is that sequence, once.
+#
+#   jobs:
+#     live-contract:
+#       uses: ./.github/workflows/_platform.yml
+#       with:
+#         edition: ce
+#         seed: sdk-contract
+#         suite: sdk-live-contract
+#         sdks: python js go java
+#
+# `seed` uses the same vocabulary as docker-compose's SEED and
+# backend/docker-entrypoint.sh: a comma list of demo, shoplab, streampulse,
+# sdk-contract. `suite` picks what runs once the API answers; add a new one to
+# the case statement in "Run suite" rather than re-inlining a boot sequence.
+#
+# Toolchains beyond Python are installed only when the suite asks for them
+# (`sdks` names them), so a pytest suite does not wait for .NET.
+# =============================================================================
+
+on:
+  workflow_call:
+    inputs:
+      edition:
+        description: 'ce | ee — which edition to boot (ee additionally installs ee/requirements.txt when present).'
+        type: string
+        default: ce
+      seed:
+        description: 'Comma list of seeds to apply: demo, shoplab, streampulse, sdk-contract. Empty for none.'
+        type: string
+        default: demo
+      suite:
+        description: 'Named suite to run: sdk-live-contract | integration | smoke.'
+        type: string
+        required: true
+      sdks:
+        description: 'For sdk-live-contract: space-separated SDK names to run (and the toolchains to install).'
+        type: string
+        default: ''
+      timeout-minutes:
+        description: 'Job timeout.'
+        type: number
+        default: 30
+
+jobs:
+  platform:
+    name: ${{ inputs.suite }} (${{ inputs.edition }})
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_DB: experimentation
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      # Identical to what the sdk-live-contract job in pr-qa-gate.yml set inline.
+      APP_ENV: development
+      ENVIRONMENT: development
+      EXPERIMENTLY_EDITION: ${{ inputs.edition }}
+      # The app reads POSTGRES_SERVER for the host; POSTGRES_HOST is what the
+      # seed scripts and tests read. Both are set, as before.
+      POSTGRES_SERVER: localhost
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: experimentation
+      POSTGRES_SCHEMA: experimentation
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      REDIS_HOST: localhost
+      REDIS_PORT: 6379
+      SECRET_KEY: ci-only-platform-secret-key-0123456789abcdef0123456789
+      AUTH_PROVIDER: local
+      DEV_AUTH_BYPASS: 'false'
+      EXPERIMENTLY_API_URL: http://127.0.0.1:8000
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ── toolchains ──────────────────────────────────────────────────────────
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Set up Node.js
+        if: contains(inputs.sdks, 'js') || contains(inputs.sdks, 'react') || contains(inputs.sdks, 'edge') || contains(inputs.sdks, 'openfeature')
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Set up Go
+        if: contains(inputs.sdks, 'go')
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22.x'
+          # The Go SDK is stdlib-only: there is no go.sum to key a cache on.
+          cache: false
+
+      # Covers both `java` and `android` (the Android SDK's JVM variant compiles
+      # the same Kotlin sources for a plain JVM — see sdk/android/jvm/pom.xml).
+      # Maven itself comes from each module's ./mvnw, not from the runner.
+      - name: Set up Java
+        if: contains(inputs.sdks, 'java') || contains(inputs.sdks, 'android')
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+
+      - name: Set up Ruby
+        if: contains(inputs.sdks, 'ruby')
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.2'
+
+      - name: Set up PHP
+        if: contains(inputs.sdks, 'php')
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: json, curl
+
+      - name: Set up .NET
+        if: contains(inputs.sdks, 'dotnet')
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '6.0.x'
+
+      # ── dependencies ────────────────────────────────────────────────────────
+      - name: Install backend dependencies
+        run: pip install -r backend/requirements.txt
+
+      - name: Install enterprise dependencies
+        if: inputs.edition == 'ee'
+        run: |
+          if [ -f ee/requirements.txt ]; then
+            pip install -r ee/requirements.txt
+          else
+            echo "::error::edition=ee requested but ee/requirements.txt does not exist yet (P2)"
+            exit 1
+          fi
+
+      - name: Install SDK dependencies
+        if: inputs.suite == 'sdk-live-contract'
+        env:
+          SDKS: ${{ inputs.sdks }}
+        run: |
+          set -euo pipefail
+          for sdk in $SDKS; do
+            case "$sdk" in
+              openfeature-python) pip install "openfeature-sdk>=0.9.0" ;;
+              js|openfeature|edge|react)
+                (cd "sdk/$sdk" && (npm ci --no-audit --no-fund 2>/dev/null || npm install --no-audit --no-fund)) ;;
+              react-native)
+                (cd sdk/react-native && (npm ci --no-audit --no-fund 2>/dev/null || npm install --no-audit --no-fund)) ;;
+              python|go|java|android|ruby|php|dotnet|ios|elixir|flutter) ;;
+              *) echo "::error::unknown sdk '$sdk'"; exit 1 ;;
+            esac
+          done
+
+      # ── boot ────────────────────────────────────────────────────────────────
+      # Everything runs from the repository root: the code imports backend.app.*
+      # and `cd backend` breaks those imports.
+      - name: Create the schema
+        run: python -m backend.app.db.bootstrap
+
+      - name: Apply seeds
+        if: inputs.seed != ''
+        env:
+          SEED: ${{ inputs.seed }}
+        run: |
+          set -euo pipefail
+          # Same names as docker-compose's SEED / backend/docker-entrypoint.sh.
+          IFS=',' read -r -a seeds <<< "$SEED"
+          for name in "${seeds[@]}"; do
+            name="$(echo "$name" | tr -d '[:space:]')"
+            [ -z "$name" ] && continue
+            case "$name" in
+              demo)         script=backend/scripts/seed_demo_data.py ;;
+              shoplab)      script=backend/scripts/seed_shoplab.py ;;
+              streampulse)  script=backend/scripts/seed_streampulse.py ;;
+              sdk-contract) script=backend/scripts/seed_sdk_contract.py ;;
+              *) echo "::error::unknown seed '$name'"; exit 1 ;;
+            esac
+            echo "::group::seed $name"
+            python "$script"
+            echo "::endgroup::"
+          done
+
+      - name: Start the API
+        run: |
+          nohup python -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000 > backend.log 2>&1 &
+          for _ in $(seq 1 60); do
+            curl -sf http://127.0.0.1:8000/health > /dev/null && exit 0
+            sleep 1
+          done
+          echo "backend did not become healthy"; tail -n 100 backend.log; exit 1
+
+      # ── suite ───────────────────────────────────────────────────────────────
+      - name: Run suite
+        env:
+          SUITE: ${{ inputs.suite }}
+          SDKS: ${{ inputs.sdks }}
+        run: |
+          set -euo pipefail
+          case "$SUITE" in
+            sdk-live-contract)
+              args=""
+              for sdk in $SDKS; do args="$args --sdk $sdk"; done
+              # shellcheck disable=SC2086
+              python tests/sdk-contract/live/run_live_contract.py --strict $args
+              ;;
+            integration)
+              python -m pytest backend/tests/integration -p no:cov -q --tb=short
+              ;;
+            smoke)
+              python -m pytest backend/tests/smoke -p no:cov -q --tb=short
+              ;;
+            *)
+              echo "::error::unknown suite '$SUITE'. Known: sdk-live-contract, integration, smoke."
+              echo "Add a new suite to the case statement in .github/workflows/_platform.yml."
+              exit 1
+              ;;
+          esac
+
+      - name: Backend log (on failure)
+        if: failure()
+        run: tail -n 200 backend.log

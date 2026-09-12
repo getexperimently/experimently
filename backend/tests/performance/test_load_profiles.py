@@ -9,11 +9,12 @@ Note: These tests require locust to be importable. On some Python 3.9 / macOS
 environments, locust triggers an SSL recursion error during import. Tests are
 skipped automatically in that case.
 """
+
 import pytest
 
 # Guard against locust import failures (Python 3.9 SSL recursion on macOS)
 try:
-    import locust  # noqa: F401
+    import locust
 except (ImportError, RecursionError):
     pytest.skip(
         "locust not available or import error (Python 3.9 SSL recursion on macOS)",
@@ -31,39 +32,49 @@ class TestBreakpointShape:
 
     def test_shape_has_stages(self):
         """BreakpointShape must define ramp stages."""
-        from backend.tests.performance.locustfiles.breakpoint_test import BreakpointShape
+        from backend.tests.performance.locustfiles.breakpoint_test import (
+            BreakpointShape,
+        )
 
         shape = BreakpointShape()
-        assert hasattr(shape, "stages"), "BreakpointShape must have a 'stages' attribute"
+        assert hasattr(shape, "stages"), (
+            "BreakpointShape must have a 'stages' attribute"
+        )
         assert len(shape.stages) >= 5, (
             f"Expected at least 5 ramp stages, got {len(shape.stages)}"
         )
 
     def test_stages_have_increasing_user_counts(self):
         """Each successive stage should have equal or greater user count (ramp up)."""
-        from backend.tests.performance.locustfiles.breakpoint_test import BreakpointShape
+        from backend.tests.performance.locustfiles.breakpoint_test import (
+            BreakpointShape,
+        )
 
         shape = BreakpointShape()
         user_counts = [s["users"] for s in shape.stages]
         for i in range(1, len(user_counts)):
             assert user_counts[i] >= user_counts[i - 1], (
-                f"Stage {i} users ({user_counts[i]}) < stage {i-1} users ({user_counts[i-1]})"
+                f"Stage {i} users ({user_counts[i]}) < stage {i - 1} users ({user_counts[i - 1]})"
             )
 
     def test_stages_have_increasing_durations(self):
         """Stage durations must be cumulative and increasing."""
-        from backend.tests.performance.locustfiles.breakpoint_test import BreakpointShape
+        from backend.tests.performance.locustfiles.breakpoint_test import (
+            BreakpointShape,
+        )
 
         shape = BreakpointShape()
         durations = [s["duration"] for s in shape.stages]
         for i in range(1, len(durations)):
             assert durations[i] > durations[i - 1], (
-                f"Stage {i} duration ({durations[i]}) must be > stage {i-1} ({durations[i-1]})"
+                f"Stage {i} duration ({durations[i]}) must be > stage {i - 1} ({durations[i - 1]})"
             )
 
     def test_stages_have_positive_spawn_rate(self):
         """Each stage must have a positive spawn rate."""
-        from backend.tests.performance.locustfiles.breakpoint_test import BreakpointShape
+        from backend.tests.performance.locustfiles.breakpoint_test import (
+            BreakpointShape,
+        )
 
         shape = BreakpointShape()
         for i, stage in enumerate(shape.stages):
@@ -73,18 +84,24 @@ class TestBreakpointShape:
 
     def test_tick_returns_tuple_at_start(self):
         """tick() at time 0 should return a (users, spawn_rate) tuple."""
-        from backend.tests.performance.locustfiles.breakpoint_test import BreakpointShape
+        from backend.tests.performance.locustfiles.breakpoint_test import (
+            BreakpointShape,
+        )
 
         shape = BreakpointShape()
         # Mock get_run_time to return 0
         shape.get_run_time = lambda: 0.0
         result = shape.tick()
         assert result is not None, "tick() should return a tuple at t=0"
-        assert len(result) == 2, f"tick() should return a 2-tuple, got {len(result)}-tuple"
+        assert len(result) == 2, (
+            f"tick() should return a 2-tuple, got {len(result)}-tuple"
+        )
 
     def test_tick_returns_none_after_last_stage(self):
         """tick() should return None after all stages complete."""
-        from backend.tests.performance.locustfiles.breakpoint_test import BreakpointShape
+        from backend.tests.performance.locustfiles.breakpoint_test import (
+            BreakpointShape,
+        )
 
         shape = BreakpointShape()
         # Set run time well past the last stage duration
@@ -95,7 +112,9 @@ class TestBreakpointShape:
 
     def test_final_stage_has_high_user_count(self):
         """The final stage should target a high user count (>=1000) for breakpoint detection."""
-        from backend.tests.performance.locustfiles.breakpoint_test import BreakpointShape
+        from backend.tests.performance.locustfiles.breakpoint_test import (
+            BreakpointShape,
+        )
 
         shape = BreakpointShape()
         final_users = shape.stages[-1]["users"]
@@ -150,7 +169,10 @@ class TestCrudUsers:
 
     def test_write_user_has_higher_weight(self):
         """CrudWriteUser should have higher weight (write-heavy test)."""
-        from backend.tests.performance.locustfiles.crud_load_test import CrudWriteUser, CrudReadUser
+        from backend.tests.performance.locustfiles.crud_load_test import (
+            CrudReadUser,
+            CrudWriteUser,
+        )
 
         assert CrudWriteUser.weight > CrudReadUser.weight, (
             f"CrudWriteUser weight ({CrudWriteUser.weight}) should be > "

@@ -11,17 +11,18 @@ Tests cover:
 """
 
 import os
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from backend.app.services.ai_experiment_planner_service import (
     AIExperimentPlannerService,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_mock_anthropic_client(response_text: str = "AI planning advice here."):
     """Return a mock anthropic.Anthropic() client."""
@@ -44,8 +45,8 @@ def _planner() -> AIExperimentPlannerService:
 # TestIsAIAvailable
 # ---------------------------------------------------------------------------
 
-class TestIsAIAvailable:
 
+class TestIsAIAvailable:
     def test_returns_false_when_no_api_key(self, monkeypatch):
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
         assert AIExperimentPlannerService.is_ai_available() is False
@@ -58,6 +59,7 @@ class TestIsAIAvailable:
 # ---------------------------------------------------------------------------
 # TestGetPlanningAdviceReturnsDict
 # ---------------------------------------------------------------------------
+
 
 class TestGetPlanningAdviceReturnsDict:
     """get_planning_advice must always return a dict with 'advice' and 'generated_by'."""
@@ -120,6 +122,7 @@ class TestGetPlanningAdviceReturnsDict:
 # TestTemplateAdvice
 # ---------------------------------------------------------------------------
 
+
 class TestTemplateAdvice:
     """Tests for the template-based fallback advice."""
 
@@ -148,7 +151,10 @@ class TestTemplateAdvice:
             mde=0.50,
             runtime_days=3.0,
         )
-        assert "good runtime" in result["advice"].lower() or "excellent" in result["advice"].lower()
+        assert (
+            "good runtime" in result["advice"].lower()
+            or "excellent" in result["advice"].lower()
+        )
 
     @pytest.mark.asyncio
     async def test_long_runtime_mentions_reduce_scope(self, monkeypatch):
@@ -242,7 +248,11 @@ class TestTemplateAdvice:
             runtime_days=200.0,
         )
         advice_lower = result["advice"].lower()
-        assert "warning" in advice_lower or "small" in advice_lower or "tiny" in advice_lower
+        assert (
+            "warning" in advice_lower
+            or "small" in advice_lower
+            or "tiny" in advice_lower
+        )
 
     @pytest.mark.asyncio
     async def test_reasonable_runtime_mentions_normal_window(self, monkeypatch):
@@ -257,12 +267,17 @@ class TestTemplateAdvice:
             runtime_days=14.0,
         )
         advice_lower = result["advice"].lower()
-        assert "reasonable" in advice_lower or "normal" in advice_lower or "14" in result["advice"]
+        assert (
+            "reasonable" in advice_lower
+            or "normal" in advice_lower
+            or "14" in result["advice"]
+        )
 
 
 # ---------------------------------------------------------------------------
 # TestAIAdvice
 # ---------------------------------------------------------------------------
+
 
 def _make_mock_anthropic_module(response_text: str = "AI planning advice here."):
     """Return a mock 'anthropic' module with a mock Anthropic class."""
@@ -278,7 +293,9 @@ class TestAIAdvice:
     @pytest.mark.asyncio
     async def test_ai_advice_called_when_api_key_set(self, monkeypatch):
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-key")
-        mock_module, mock_client = _make_mock_anthropic_module("Great experiment design!")
+        mock_module, mock_client = _make_mock_anthropic_module(
+            "Great experiment design!"
+        )
 
         planner = _planner()
         with patch.dict("sys.modules", {"anthropic": mock_module}):

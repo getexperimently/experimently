@@ -17,30 +17,30 @@ Tests cover:
 """
 
 import uuid
-import pytest
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
+import pytest
 from fastapi.testclient import TestClient
 
-from backend.app.main import app
 from backend.app.api import deps
-from backend.app.models.user import User, UserRole
+from backend.app.main import app
 from backend.app.models.compliance_audit_event import (
-    ComplianceAuditEvent,
     AuditAction,
     AuditOutcome,
+    ComplianceAuditEvent,
 )
+from backend.app.models.user import User, UserRole
 from backend.app.schemas.compliance_audit import (
-    ComplianceAuditEventResponse,
     ComplianceAuditEventListResponse,
+    ComplianceAuditEventResponse,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def make_user(role: UserRole, superuser: bool = False) -> User:
     """Create an in-memory User object with the given role."""
@@ -59,24 +59,24 @@ def make_mock_audit_event(**kwargs):
     """Create a mock ComplianceAuditEvent with sensible defaults."""
     event_id = uuid.uuid4()
     actor_id = uuid.uuid4()
-    defaults = dict(
-        id=event_id,
-        timestamp=datetime(2024, 6, 1, 12, 0, 0, tzinfo=timezone.utc),
-        actor_id=actor_id,
-        actor_ip="10.0.0.1",
-        actor_user_agent="TestAgent/1.0",
-        session_id=None,
-        request_id=None,
-        action=AuditAction.CREATE,
-        resource_type="feature_flag",
-        resource_id=str(uuid.uuid4()),
-        old_value=None,
-        new_value={"key": "my-flag", "name": "My Flag"},
-        outcome=AuditOutcome.SUCCESS,
-        hmac_signature="a" * 64,
-        archived_at=None,
-        retention_expires_at=datetime(2025, 6, 1, 12, 0, 0, tzinfo=timezone.utc),
-    )
+    defaults = {
+        "id": event_id,
+        "timestamp": datetime(2024, 6, 1, 12, 0, 0, tzinfo=timezone.utc),
+        "actor_id": actor_id,
+        "actor_ip": "10.0.0.1",
+        "actor_user_agent": "TestAgent/1.0",
+        "session_id": None,
+        "request_id": None,
+        "action": AuditAction.CREATE,
+        "resource_type": "feature_flag",
+        "resource_id": str(uuid.uuid4()),
+        "old_value": None,
+        "new_value": {"key": "my-flag", "name": "My Flag"},
+        "outcome": AuditOutcome.SUCCESS,
+        "hmac_signature": "a" * 64,
+        "archived_at": None,
+        "retention_expires_at": datetime(2025, 6, 1, 12, 0, 0, tzinfo=timezone.utc),
+    }
     defaults.update(kwargs)
     event = MagicMock(spec=ComplianceAuditEvent)
     for k, v in defaults.items():
@@ -114,6 +114,7 @@ def override_deps_for_user(user: User, mock_db=None):
 # ---------------------------------------------------------------------------
 # Tests: GET /api/v1/compliance/audit-events — role-based access
 # ---------------------------------------------------------------------------
+
 
 class TestComplianceAuditEventListPermissions:
     """Role-based access control tests for the compliance endpoint."""
@@ -178,6 +179,7 @@ class TestComplianceAuditEventListPermissions:
 # ---------------------------------------------------------------------------
 # Tests: GET /api/v1/compliance/audit-events — filtering and pagination
 # ---------------------------------------------------------------------------
+
 
 class TestComplianceAuditEventListFiltering:
     """Tests for query filters and pagination on the compliance endpoint."""
@@ -249,6 +251,7 @@ class TestComplianceAuditEventListFiltering:
 # Tests: Audit event generated on feature_flag CRUD endpoints
 # ---------------------------------------------------------------------------
 
+
 class TestFeatureFlagAuditGeneration:
     """Tests that verify audit log events are generated when CRUD ops happen."""
 
@@ -275,39 +278,57 @@ class TestFeatureFlagAuditGeneration:
         flag_response = self._make_flag_response()
 
         with override_deps_for_user(admin):
-            with patch("backend.app.api.v1.endpoints.feature_flags.FeatureFlagService") as MockSvc, \
-                 patch("backend.app.api.v1.endpoints.feature_flags.AuditLogService") as MockAudit, \
-                 patch("backend.app.api.v1.endpoints.feature_flags.db") if False else patch(
-                     "backend.app.api.v1.endpoints.feature_flags.FeatureFlagService"
-                 ) as _:
+            with (
+                patch(
+                    "backend.app.api.v1.endpoints.feature_flags.FeatureFlagService"
+                ) as MockSvc,
+                patch(
+                    "backend.app.api.v1.endpoints.feature_flags.AuditLogService"
+                ) as MockAudit,
+                patch("backend.app.api.v1.endpoints.feature_flags.db")
+                if False
+                else patch(
+                    "backend.app.api.v1.endpoints.feature_flags.FeatureFlagService"
+                ) as _,
+            ):
                 pass
 
         # The real test: after a successful create, the endpoint should call AuditLogService.log()
         # We test this by checking the endpoint source wires audit logging.
-        from backend.app.api.v1.endpoints import feature_flags as ff_module
         import inspect
+
+        from backend.app.api.v1.endpoints import feature_flags as ff_module
+
         source = inspect.getsource(ff_module)
-        assert "AuditLogService" in source, "feature_flags.py must import AuditLogService"
+        assert "AuditLogService" in source, (
+            "feature_flags.py must import AuditLogService"
+        )
         assert "AuditAction.CREATE" in source, "feature_flags.py must log CREATE action"
 
     def test_feature_flag_update_generates_audit_event(self):
         """PUT /feature-flags/{id} logs an UPDATE event."""
-        from backend.app.api.v1.endpoints import feature_flags as ff_module
         import inspect
+
+        from backend.app.api.v1.endpoints import feature_flags as ff_module
+
         source = inspect.getsource(ff_module)
         assert "AuditAction.UPDATE" in source, "feature_flags.py must log UPDATE action"
 
     def test_feature_flag_delete_generates_audit_event(self):
         """DELETE /feature-flags/{id} logs a DELETE event."""
-        from backend.app.api.v1.endpoints import feature_flags as ff_module
         import inspect
+
+        from backend.app.api.v1.endpoints import feature_flags as ff_module
+
         source = inspect.getsource(ff_module)
         assert "AuditAction.DELETE" in source, "feature_flags.py must log DELETE action"
 
     def test_experiment_create_generates_audit_event(self):
         """POST /experiments logs a CREATE event."""
-        from backend.app.api.v1.endpoints import experiments as exp_module
         import inspect
+
+        from backend.app.api.v1.endpoints import experiments as exp_module
+
         source = inspect.getsource(exp_module)
         assert "AuditLogService" in source, "experiments.py must import AuditLogService"
         assert "AuditAction.CREATE" in source, "experiments.py must log CREATE action"
@@ -317,13 +338,14 @@ class TestFeatureFlagAuditGeneration:
 # Tests: Audit event integrity fields
 # ---------------------------------------------------------------------------
 
+
 class TestAuditEventIntegrityFields:
     """Tests verifying hmac_signature and retention_expires_at on events."""
 
     def test_audit_event_has_hmac_signature(self):
         """AuditLogService.log() produces events with a non-empty hmac_signature."""
-        from backend.app.services.audit_log_service import AuditLogService
         from backend.app.models.compliance_audit_event import AuditAction, AuditOutcome
+        from backend.app.services.audit_log_service import AuditLogService
 
         db = MagicMock()
         db.add = MagicMock()
@@ -341,8 +363,8 @@ class TestAuditEventIntegrityFields:
 
     def test_audit_event_has_retention_expiry(self):
         """AuditLogService.log() produces events with a retention_expires_at."""
-        from backend.app.services.audit_log_service import AuditLogService
         from backend.app.models.compliance_audit_event import AuditAction, AuditOutcome
+        from backend.app.services.audit_log_service import AuditLogService
 
         db = MagicMock()
         db.add = MagicMock()
@@ -359,8 +381,8 @@ class TestAuditEventIntegrityFields:
 
     def test_audit_event_hmac_is_64_hex_chars(self):
         """HMAC signature is exactly 64 hex characters (SHA-256)."""
-        from backend.app.services.audit_log_service import AuditLogService
         from backend.app.models.compliance_audit_event import AuditAction, AuditOutcome
+        from backend.app.services.audit_log_service import AuditLogService
 
         db = MagicMock()
         db.add = MagicMock()

@@ -40,6 +40,7 @@ router = APIRouter()
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _require_developer(user: User) -> None:
     """Raise 403 if user lacks DEVELOPER-level access."""
     if not check_permission(user, ResourceType.EXPERIMENT, Action.CREATE):
@@ -61,6 +62,7 @@ def _require_admin(user: User) -> None:
 # ---------------------------------------------------------------------------
 # Get active holdout
 # ---------------------------------------------------------------------------
+
 
 @router.get(
     "",
@@ -86,6 +88,7 @@ def get_active_holdout(
 # List all holdouts
 # ---------------------------------------------------------------------------
 
+
 @router.get(
     "/all",
     response_model=GlobalHoldoutListResponse,
@@ -110,6 +113,7 @@ def list_all_holdouts(
 # ---------------------------------------------------------------------------
 # Create holdout
 # ---------------------------------------------------------------------------
+
 
 @router.post(
     "",
@@ -140,6 +144,7 @@ def create_holdout(
 # ---------------------------------------------------------------------------
 # Update holdout
 # ---------------------------------------------------------------------------
+
 
 @router.put(
     "/{holdout_id}",
@@ -175,6 +180,7 @@ def update_holdout(
 # ---------------------------------------------------------------------------
 # Check user holdout status
 # ---------------------------------------------------------------------------
+
 
 @router.get(
     "/check/{user_id}",

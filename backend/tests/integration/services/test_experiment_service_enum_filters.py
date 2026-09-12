@@ -11,6 +11,7 @@ Two bugs live here, both invisible to mock-based unit tests:
    for ``MULTIVARIATE`` (whose value is ``"mv"``), so multivariate experiments
    were silently downgraded to A/B.
 """
+
 import uuid
 
 import pytest
@@ -50,6 +51,7 @@ def _create_payload(name: str, experiment_type: str = "a_b") -> dict:
 # Status filter
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.integration
 class TestStatusFilterSpellings:
     """Every spelling of a status filter must find the same rows."""
@@ -59,7 +61,9 @@ class TestStatusFilterSpellings:
         """One DRAFT and one ACTIVE experiment sharing a unique name marker."""
         marker = _marker()
         draft = make_experiment(name=f"Draft {marker}", status=ExperimentStatus.DRAFT)
-        active = make_experiment(name=f"Active {marker}", status=ExperimentStatus.ACTIVE)
+        active = make_experiment(
+            name=f"Active {marker}", status=ExperimentStatus.ACTIVE
+        )
         return marker, draft, active, admin_user
 
     @pytest.mark.parametrize(
@@ -89,9 +93,9 @@ class TestStatusFilterSpellings:
         service = ExperimentService(db_session)
 
         listed = service.get_experiments_by_owner(owner_id=owner.id, status="draft")
-        assert service.count_experiments_by_owner(owner_id=owner.id, status="draft") == len(
-            listed
-        )
+        assert service.count_experiments_by_owner(
+            owner_id=owner.id, status="draft"
+        ) == len(listed)
 
     @pytest.mark.parametrize("garbage", ["not-a-status", "drafts", "123", "  "])
     def test_unknown_status_returns_empty_rather_than_raising(
@@ -104,7 +108,9 @@ class TestStatusFilterSpellings:
         assert service.get_experiments(status=garbage) == []
         assert service.count_experiments(status=garbage) == 0
         assert service.get_experiments_by_owner(owner_id=owner.id, status=garbage) == []
-        assert service.count_experiments_by_owner(owner_id=owner.id, status=garbage) == 0
+        assert (
+            service.count_experiments_by_owner(owner_id=owner.id, status=garbage) == 0
+        )
         assert service.search_experiments(search_term=marker, status=garbage) == []
         assert service.count_search_results(search_term=marker, status=garbage) == 0
 
@@ -121,7 +127,9 @@ class TestStatusFilterThroughTheApi:
     """GET /api/v1/experiments/?status_filter=... — what the dashboard sends."""
 
     def _create(self, client, marker: str) -> str:
-        response = client.post("/api/v1/experiments/", json=_create_payload(f"API {marker}"))
+        response = client.post(
+            "/api/v1/experiments/", json=_create_payload(f"API {marker}")
+        )
         assert response.status_code == 201, response.text
         return response.json()["id"]
 
@@ -157,6 +165,7 @@ class TestStatusFilterThroughTheApi:
 # Experiment type
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.integration
 class TestExperimentTypeResolution:
     """create_experiment must store the type the caller asked for."""
@@ -165,13 +174,17 @@ class TestExperimentTypeResolution:
     def test_type_resolved_from_its_value(self, db_session, admin_user, member):
         """``"mv"`` must become MULTIVARIATE, not a silent A/B downgrade."""
         service = ExperimentService(db_session)
-        payload = _create_payload(f"By value {member.value} {uuid.uuid4().hex[:8]}", member.value)
+        payload = _create_payload(
+            f"By value {member.value} {uuid.uuid4().hex[:8]}", member.value
+        )
 
         created = service.create_experiment(
             obj_in=ExperimentCreate(**payload), user_id=admin_user.id
         )
 
-        row = db_session.query(Experiment).filter(Experiment.id == created["id"]).first()
+        row = (
+            db_session.query(Experiment).filter(Experiment.id == created["id"]).first()
+        )
         assert row.experiment_type is member
 
     @pytest.mark.parametrize("member", list(ExperimentType), ids=lambda m: m.name)
@@ -183,7 +196,9 @@ class TestExperimentTypeResolution:
 
         created = service.create_experiment(obj_in=payload, user_id=admin_user.id)
 
-        row = db_session.query(Experiment).filter(Experiment.id == created["id"]).first()
+        row = (
+            db_session.query(Experiment).filter(Experiment.id == created["id"]).first()
+        )
         assert row.experiment_type is member
 
     def test_unknown_type_falls_back_to_ab_with_a_warning(
@@ -196,7 +211,9 @@ class TestExperimentTypeResolution:
         with caplog.at_level("WARNING"):
             created = service.create_experiment(obj_in=payload, user_id=admin_user.id)
 
-        row = db_session.query(Experiment).filter(Experiment.id == created["id"]).first()
+        row = (
+            db_session.query(Experiment).filter(Experiment.id == created["id"]).first()
+        )
         assert row.experiment_type is ExperimentType.A_B
         assert any("teleportation" in record.getMessage() for record in caplog.records)
 
@@ -206,7 +223,9 @@ class TestExperimentTypeResolution:
         created = service.create_experiment(
             obj_in=ExperimentCreate(**payload), user_id=admin_user.id
         )
-        row = db_session.query(Experiment).filter(Experiment.id == created["id"]).first()
+        row = (
+            db_session.query(Experiment).filter(Experiment.id == created["id"]).first()
+        )
 
         service.update_experiment(row, {"experiment_type": "mv"})
 

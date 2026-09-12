@@ -13,6 +13,10 @@ jest.mock('@/services/api', () => ({
 const mockRouter = makeRouter({ pathname: '/experiments', asPath: '/experiments' });
 jest.mock('next/router', () => ({ useRouter: () => mockRouter }));
 
+// The page asks for the current role to decide whether to offer "+ New Experiment".
+const mockAuth = jest.fn().mockReturnValue(null);
+jest.mock('@/contexts/AuthContext', () => ({ useOptionalAuth: () => mockAuth() }));
+
 jest.mock('next/head', () => {
   const Head = ({ children }: { children: React.ReactNode }) => <>{children}</>;
   Head.displayName = 'MockHead';
@@ -166,5 +170,61 @@ describe('ExperimentsPage', () => {
     render(<ExperimentsPage />);
     expect(await screen.findByTestId('experiments-error')).toHaveTextContent('database is on fire');
     expect(screen.queryByTestId('first-run-checklist')).not.toBeInTheDocument();
+  });
+});
+
+describe('ExperimentsPage — create button by role', () => {
+  const renderAs = (role: string | null) => {
+    mockAuth.mockReturnValue(
+      role === null
+        ? null
+        : {
+            user: {
+              id: 'u1',
+              email: 'u@example.com',
+              username: 'u',
+              role,
+              is_superuser: false,
+              is_active: true,
+            },
+            status: 'authenticated' as const,
+            login: jest.fn(),
+            logout: jest.fn(),
+            hasRole: (...roles: string[]) => roles.includes(role),
+          },
+    );
+    return render(<ExperimentsPage />);
+  };
+
+  it.each(['ADMIN', 'DEVELOPER'])('offers "+ New Experiment" to %s', async (role) => {
+    renderAs(role);
+    expect(await screen.findByTestId('new-experiment-btn')).toBeInTheDocument();
+  });
+
+  it.each(['ANALYST', 'VIEWER'])('hides it from %s, whom the API refuses', async (role) => {
+    renderAs(role);
+    await screen.findByTestId('status-filter');
+    expect(screen.queryByTestId('new-experiment-btn')).not.toBeInTheDocument();
+  });
+
+  it('offers it to a superuser whatever their role says', async () => {
+    // check_permission lets a superuser through before it reads the role
+    // table, so hiding the button from them would be stricter than the API.
+    mockAuth.mockReturnValue({
+      user: {
+        id: 'u1',
+        email: 'root@example.com',
+        username: 'root',
+        role: 'VIEWER',
+        is_superuser: true,
+        is_active: true,
+      },
+      status: 'authenticated' as const,
+      login: jest.fn(),
+      logout: jest.fn(),
+      hasRole: () => false,
+    });
+    render(<ExperimentsPage />);
+    expect(await screen.findByTestId('new-experiment-btn')).toBeInTheDocument();
   });
 });

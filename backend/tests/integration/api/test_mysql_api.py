@@ -23,18 +23,18 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from backend.app.main import app
 from backend.app.api import deps
+from backend.app.main import app
 from backend.app.models.user import User, UserRole
 from backend.app.services.mysql_connector import (
     MySQLConnectionError,
     MySQLQueryError,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers / Fixtures
 # ---------------------------------------------------------------------------
+
 
 def _make_user(role: UserRole = UserRole.DEVELOPER, is_superuser: bool = False) -> User:
     """Build a minimal User object for mocking auth."""
@@ -98,6 +98,7 @@ def client_as_viewer(viewer_user):
 # POST /test-connection
 # ===========================================================================
 
+
 class TestMySQLTestConnection:
     """Tests for the POST /mysql/test-connection endpoint."""
 
@@ -120,7 +121,9 @@ class TestMySQLTestConnection:
             response = client_as_developer.post(self.ENDPOINT, json=self.VALID_PAYLOAD)
         assert response.status_code == 200
 
-    def test_test_connection_response_contains_status_connected(self, client_as_developer):
+    def test_test_connection_response_contains_status_connected(
+        self, client_as_developer
+    ):
         """Response body has status='connected' when connection succeeds."""
         with patch(
             "backend.app.api.v1.endpoints.warehouse_mysql.MySQLConnector"
@@ -200,6 +203,7 @@ class TestMySQLTestConnection:
 # ===========================================================================
 # POST /query
 # ===========================================================================
+
 
 class TestMySQLQuery:
     """Tests for the POST /mysql/query endpoint."""
@@ -320,6 +324,7 @@ class TestMySQLQuery:
 # GET /metrics/experiments/{experiment_id}
 # ===========================================================================
 
+
 class TestMySQLExperimentMetrics:
     """Tests for GET /mysql/metrics/experiments/{experiment_id}."""
 
@@ -391,8 +396,8 @@ class TestMySQLExperimentMetrics:
         ) as MockConn:
             MockConn.return_value.__enter__ = lambda s: s
             MockConn.return_value.__exit__ = MagicMock(return_value=False)
-            MockConn.return_value.get_experiment_metrics.side_effect = (
-                MySQLQueryError("Table does not exist")
+            MockConn.return_value.get_experiment_metrics.side_effect = MySQLQueryError(
+                "Table does not exist"
             )
             response = client_as_developer.get(
                 self._endpoint(exp_id), params=self.CONN_PARAMS
@@ -402,9 +407,7 @@ class TestMySQLExperimentMetrics:
     def test_get_experiment_metrics_requires_developer_role(self, client_as_viewer):
         """VIEWER role gets 403."""
         exp_id = str(uuid.uuid4())
-        response = client_as_viewer.get(
-            self._endpoint(exp_id), params=self.CONN_PARAMS
-        )
+        response = client_as_viewer.get(self._endpoint(exp_id), params=self.CONN_PARAMS)
         assert response.status_code == 403
 
     def test_get_experiment_metrics_returns_empty_for_unknown_id(
@@ -435,6 +438,7 @@ class TestMySQLExperimentMetrics:
 # ===========================================================================
 # GET /metrics/flags/{flag_id}
 # ===========================================================================
+
 
 class TestMySQLFeatureFlagMetrics:
     """Tests for GET /mysql/metrics/flags/{flag_id}."""
@@ -523,9 +527,7 @@ class TestMySQLFeatureFlagMetrics:
         )
         assert response.status_code == 403
 
-    def test_get_flag_metrics_returns_empty_for_unknown_flag(
-        self, client_as_developer
-    ):
+    def test_get_flag_metrics_returns_empty_for_unknown_flag(self, client_as_developer):
         """Returns 200 with empty metrics when flag has no data."""
         flag_id = str(uuid.uuid4())
         with patch(

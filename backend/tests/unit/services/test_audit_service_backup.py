@@ -10,18 +10,18 @@ This module tests the AuditService functionality including:
 - Error handling
 """
 
-import pytest
 import asyncio
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
+from unittest.mock import AsyncMock, Mock, patch
 from uuid import uuid4
-from unittest.mock import Mock, patch, AsyncMock
 
-from sqlalchemy.orm import Session
+import pytest
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Session
 
-from backend.app.services.audit_service import AuditService
-from backend.app.models.audit_log import AuditLog, ActionType, EntityType
+from backend.app.models.audit_log import ActionType, AuditLog, EntityType
 from backend.app.models.user import User, UserRole
+from backend.app.services.audit_service import AuditService
 
 
 class TestAuditServiceLogging:
@@ -59,7 +59,9 @@ class TestAuditServiceLogging:
         assert audit_log_id is not None
 
         # Retrieve and verify the audit log
-        audit_log = db_session.query(AuditLog).filter(AuditLog.id == audit_log_id).first()
+        audit_log = (
+            db_session.query(AuditLog).filter(AuditLog.id == audit_log_id).first()
+        )
         assert audit_log is not None
         assert audit_log.user_id == user.id
         assert audit_log.user_email == user.email
@@ -87,7 +89,7 @@ class TestAuditServiceLogging:
 
         entity_id = uuid4()
 
-        with patch('asyncio.get_event_loop') as mock_get_loop:
+        with patch("asyncio.get_event_loop") as mock_get_loop:
             mock_loop = Mock()
             mock_get_loop.return_value = mock_loop
 
@@ -114,7 +116,9 @@ class TestAuditServiceLogging:
             assert audit_log_id is not None
 
             # Retrieve and verify the audit log
-            audit_log = db_session.query(AuditLog).filter(AuditLog.id == audit_log_id).first()
+            audit_log = (
+                db_session.query(AuditLog).filter(AuditLog.id == audit_log_id).first()
+            )
             assert audit_log is not None
             assert audit_log.user_id == user.id
             assert audit_log.user_email == user.email
@@ -127,7 +131,7 @@ class TestAuditServiceLogging:
         """Test logging system actions without user_id."""
         entity_id = uuid4()
 
-        with patch('asyncio.get_event_loop') as mock_get_loop:
+        with patch("asyncio.get_event_loop") as mock_get_loop:
             mock_loop = Mock()
             mock_get_loop.return_value = mock_loop
 
@@ -150,7 +154,9 @@ class TestAuditServiceLogging:
             # Verify system audit log was created
             assert audit_log_id is not None
 
-            audit_log = db_session.query(AuditLog).filter(AuditLog.id == audit_log_id).first()
+            audit_log = (
+                db_session.query(AuditLog).filter(AuditLog.id == audit_log_id).first()
+            )
             assert audit_log is not None
             assert audit_log.user_id is None
             assert audit_log.user_email == "system@example.com"
@@ -159,7 +165,9 @@ class TestAuditServiceLogging:
     @pytest.mark.asyncio
     async def test_log_toggle_operation_database_error(self, db_session: Session):
         """Test toggle operation logging with database error."""
-        with patch.object(db_session, 'commit', side_effect=SQLAlchemyError("Database error")):
+        with patch.object(
+            db_session, "commit", side_effect=SQLAlchemyError("Database error")
+        ):
             with pytest.raises(SQLAlchemyError):
                 await AuditService.log_toggle_operation(
                     db=db_session,
@@ -175,12 +183,14 @@ class TestAuditServiceLogging:
     @pytest.mark.asyncio
     async def test_log_action_error_handling(self, db_session: Session):
         """Test that log_action handles errors gracefully without raising."""
-        with patch('asyncio.get_event_loop') as mock_get_loop:
+        with patch("asyncio.get_event_loop") as mock_get_loop:
             mock_loop = Mock()
             mock_get_loop.return_value = mock_loop
 
             # Mock executor to raise an exception
-            mock_loop.run_in_executor = AsyncMock(side_effect=Exception("Logging failed"))
+            mock_loop.run_in_executor = AsyncMock(
+                side_effect=Exception("Logging failed")
+            )
 
             # Should not raise exception, returns None on error
             result = await AuditService.log_action(
@@ -226,7 +236,9 @@ class TestAuditServiceLogging:
         # Verify audit log was created
         assert audit_log_id is not None
 
-        audit_log = db_session.query(AuditLog).filter(AuditLog.id == audit_log_id).first()
+        audit_log = (
+            db_session.query(AuditLog).filter(AuditLog.id == audit_log_id).first()
+        )
         assert audit_log is not None
         assert audit_log.user_id == user.id
         assert audit_log.action_type == ActionType.EXPERIMENT_CREATE.value
@@ -382,9 +394,7 @@ class TestAuditServiceQueries:
         # Filter to last 15 minutes
         from_date = datetime.now(timezone.utc) - timedelta(minutes=15)
 
-        logs, total_count = AuditService.get_audit_logs(
-            db_session, from_date=from_date
-        )
+        logs, total_count = AuditService.get_audit_logs(db_session, from_date=from_date)
 
         assert len(logs) >= 2  # Should get the last 2 logs
         assert total_count >= 2
@@ -404,9 +414,7 @@ class TestAuditServiceQueries:
         assert total_count >= 4
 
         # Test second page
-        logs_page2, _ = AuditService.get_audit_logs(
-            db_session, page=2, limit=2
-        )
+        logs_page2, _ = AuditService.get_audit_logs(db_session, page=2, limit=2)
 
         assert len(logs_page2) >= 1
 
@@ -448,9 +456,7 @@ class TestAuditServiceQueries:
         """Test getting user activity logs."""
         test_data = self.setup_test_data(db_session)
 
-        logs = AuditService.get_user_activity(
-            db_session, user_id=test_data["user1"].id
-        )
+        logs = AuditService.get_user_activity(db_session, user_id=test_data["user1"].id)
 
         assert len(logs) == 2
         for log in logs:

@@ -12,11 +12,9 @@ Test-Driven Development (TDD) - RED phase:
 - Write tests first, implementation follows
 """
 
-import pytest
 import base64
 import json
-from unittest.mock import Mock, patch, MagicMock
-from typing import List, Dict, Any
+from unittest.mock import patch
 
 
 def create_valid_event_b64(event_id: str) -> str:
@@ -25,7 +23,7 @@ def create_valid_event_b64(event_id: str) -> str:
         "event_id": event_id,
         "event_type": "page_view",
         "user_id": f"user_{event_id}",
-        "timestamp": "2024-12-19T10:30:00Z"
+        "timestamp": "2024-12-19T10:30:00Z",
     }
     return base64.b64encode(json.dumps(event).encode()).decode()
 
@@ -47,21 +45,21 @@ class TestBatchProcessor:
                 {
                     "kinesis": {
                         "data": create_valid_event_b64("evt_1"),
-                        "sequenceNumber": "seq_1"
+                        "sequenceNumber": "seq_1",
                     }
                 },
                 {
                     "kinesis": {
                         "data": create_valid_event_b64("evt_2"),
-                        "sequenceNumber": "seq_2"
+                        "sequenceNumber": "seq_2",
                     }
                 },
                 {
                     "kinesis": {
                         "data": create_valid_event_b64("evt_3"),
-                        "sequenceNumber": "seq_3"
+                        "sequenceNumber": "seq_3",
                     }
-                }
+                },
             ]
         }
 
@@ -89,21 +87,21 @@ class TestBatchProcessor:
                 {
                     "kinesis": {
                         "data": create_valid_event_b64("evt_1"),  # Valid
-                        "sequenceNumber": "seq_1"
+                        "sequenceNumber": "seq_1",
                     }
                 },
                 {
                     "kinesis": {
                         "data": "invalid_base64!!!",  # Invalid
-                        "sequenceNumber": "seq_2"
+                        "sequenceNumber": "seq_2",
                     }
                 },
                 {
                     "kinesis": {
                         "data": create_valid_event_b64("evt_3"),  # Valid
-                        "sequenceNumber": "seq_3"
+                        "sequenceNumber": "seq_3",
                     }
-                }
+                },
             ]
         }
 
@@ -132,7 +130,7 @@ class TestBatchProcessor:
                 {
                     "kinesis": {
                         "data": "invalid_json_base64",
-                        "sequenceNumber": "seq_fail"
+                        "sequenceNumber": "seq_fail",
                     }
                 }
             ]
@@ -141,9 +139,13 @@ class TestBatchProcessor:
         from batch_processor import process_batch
 
         # Act
-        with patch('batch_processor.sqs_client') as mock_sqs:
+        with patch("batch_processor.sqs_client") as mock_sqs:
             mock_sqs.send_message.return_value = {"MessageId": "msg_123"}
-            result = process_batch(kinesis_event, dlq_enabled=True, dlq_url="https://sqs.us-east-1.amazonaws.com/123/dlq")
+            result = process_batch(
+                kinesis_event,
+                dlq_enabled=True,
+                dlq_url="https://sqs.us-east-1.amazonaws.com/123/dlq",
+            )
 
         # Assert
         assert mock_sqs.send_message.called
@@ -165,7 +167,7 @@ class TestBatchProcessor:
                 {
                     "kinesis": {
                         "data": "eyJldmVudF9pZCI6ICJldnRfMSJ9",
-                        "sequenceNumber": "seq_1"
+                        "sequenceNumber": "seq_1",
                     }
                 }
             ]
@@ -199,7 +201,7 @@ class TestBatchProcessor:
                 {
                     "kinesis": {
                         "data": create_valid_event_b64("evt_1"),
-                        "sequenceNumber": "seq_1"
+                        "sequenceNumber": "seq_1",
                     }
                 }
             ]
@@ -232,7 +234,7 @@ class TestBatchProcessor:
                 {
                     "kinesis": {
                         "data": "completely_invalid_data!!!",
-                        "sequenceNumber": "seq_bad"
+                        "sequenceNumber": "seq_bad",
                     }
                 }
             ]
@@ -241,7 +243,7 @@ class TestBatchProcessor:
         from batch_processor import process_batch
 
         # Act
-        with patch('batch_processor.validate_events_batch') as mock_validate:
+        with patch("batch_processor.validate_events_batch") as mock_validate:
             result = process_batch(kinesis_event)
 
         # Assert
@@ -263,15 +265,15 @@ class TestBatchProcessor:
                 {
                     "kinesis": {
                         "data": create_valid_event_b64("evt_good"),  # Valid
-                        "sequenceNumber": "seq_good"
+                        "sequenceNumber": "seq_good",
                     }
                 },
                 {
                     "kinesis": {
                         "data": "bad_data",  # Invalid
-                        "sequenceNumber": "seq_bad"
+                        "sequenceNumber": "seq_bad",
                     }
-                }
+                },
             ]
         }
 
@@ -295,12 +297,7 @@ class TestBatchProcessor:
         # Arrange
         kinesis_event = {
             "Records": [
-                {
-                    "kinesis": {
-                        "data": "invalid",
-                        "sequenceNumber": "seq_fail_1"
-                    }
-                }
+                {"kinesis": {"data": "invalid", "sequenceNumber": "seq_fail_1"}}
             ]
         }
 
@@ -350,7 +347,7 @@ class TestBatchProcessor:
                 {
                     "kinesis": {
                         "data": create_valid_event_b64("evt_time"),
-                        "sequenceNumber": "seq_time"
+                        "sequenceNumber": "seq_time",
                     }
                 }
             ]

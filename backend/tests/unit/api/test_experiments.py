@@ -1,31 +1,40 @@
 # backend/tests/unit/api/v1/endpoints/test_experiments.py
-import pytest
 import uuid
 from datetime import datetime
-from unittest.mock import patch, MagicMock, AsyncMock
+from typing import Any, Dict, List, Optional
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from pydantic import BaseModel, ConfigDict
-from typing import Optional, Dict, List, Any
 
 from backend.app.api.v1.endpoints import experiments
+from backend.app.models.experiment import (
+    Experiment,
+)
+from backend.app.models.experiment import (
+    ExperimentStatus as ModelExperimentStatus,
+)
+from backend.app.models.user import User, UserRole
 from backend.app.schemas.experiment import (
     ExperimentCreate,
-    ExperimentUpdate,
-    ExperimentResponse,
     ExperimentListResponse,
+    ExperimentResponse,
     ExperimentType,
-    ExperimentStatus as SchemaExperimentStatus,
-    VariantBase,
+    ExperimentUpdate,
     MetricBase,
     MetricType,
+    VariantBase,
 )
-from backend.app.models.experiment import Experiment, ExperimentStatus as ModelExperimentStatus
-from backend.app.models.user import User, UserRole
+from backend.app.schemas.experiment import (
+    ExperimentStatus as SchemaExperimentStatus,
+)
 
 
 class MockVariant(BaseModel):
     """Mock variant model."""
+
     id: uuid.UUID
     name: str
     is_control: bool
@@ -49,6 +58,7 @@ class MockVariant(BaseModel):
 
 class MockMetric(BaseModel):
     """Mock metric model."""
+
     id: uuid.UUID
     name: str
     event_name: str
@@ -85,6 +95,7 @@ class MockUser(BaseModel):
     ``check_permission(user, ResourceType.EXPERIMENT, ...)``, which reads it
     and treats a user without one as a VIEWER.
     """
+
     id: uuid.UUID
     username: str
     email: str
@@ -106,6 +117,7 @@ class MockUser(BaseModel):
 
 class MockExperiment(BaseModel):
     """Mock experiment model."""
+
     id: uuid.UUID
     name: str
     description: Optional[str]
@@ -164,8 +176,12 @@ class MockExperiment(BaseModel):
             "owner_id": str(self.owner_id),
             "variants": [v.model_dump() for v in self.variants],
             "metrics": [m.model_dump() for m in self.metrics],
-            "created_at": self.created_at.isoformat() if isinstance(self.created_at, datetime) else self.created_at,
-            "updated_at": self.updated_at.isoformat() if isinstance(self.updated_at, datetime) else self.updated_at,
+            "created_at": self.created_at.isoformat()
+            if isinstance(self.created_at, datetime)
+            else self.created_at,
+            "updated_at": self.updated_at.isoformat()
+            if isinstance(self.updated_at, datetime)
+            else self.updated_at,
         }
 
 
@@ -194,6 +210,7 @@ def mock_user():
 def mock_cache_control():
     """Mock cache control."""
     from backend.app.api.deps import CacheControl
+
     return CacheControl(enabled=False, skip=False, redis=None)
 
 
@@ -218,7 +235,7 @@ async def test_list_experiments(
             is_primary=True,
             aggregation_method="average",
             minimum_sample_size=100,
-            lower_is_better=False
+            lower_is_better=False,
         )
     ]
 
@@ -234,7 +251,7 @@ async def test_list_experiments(
             is_primary=True,
             aggregation_method="average",
             minimum_sample_size=100,
-            lower_is_better=False
+            lower_is_better=False,
         )
     ]
 
@@ -313,14 +330,14 @@ async def test_create_experiment(
             is_control=True,
             traffic_allocation=50,
             description="Control variant",
-            configuration={"button_color": "green"}
+            configuration={"button_color": "green"},
         ),
         VariantBase(
             name="Variant A",
             is_control=False,
             traffic_allocation=50,
             description="Treatment variant",
-            configuration={"button_color": "blue"}
+            configuration={"button_color": "blue"},
         ),
     ]
     mock_metrics = [
@@ -334,7 +351,7 @@ async def test_create_experiment(
             minimum_sample_size=100,
             expected_effect=0.05,
             event_value_path="value",
-            lower_is_better=False
+            lower_is_better=False,
         )
     ]
 
@@ -377,7 +394,7 @@ async def test_create_experiment(
                 "configuration": {"button_color": "green"},
                 "experiment_id": experiment_id,
                 "created_at": now,
-                "updated_at": now
+                "updated_at": now,
             },
             {
                 "id": uuid.uuid4(),
@@ -388,8 +405,8 @@ async def test_create_experiment(
                 "configuration": {"button_color": "blue"},
                 "experiment_id": experiment_id,
                 "created_at": now,
-                "updated_at": now
-            }
+                "updated_at": now,
+            },
         ],
         "metrics": [
             {
@@ -406,9 +423,9 @@ async def test_create_experiment(
                 "lower_is_better": False,
                 "experiment_id": experiment_id,
                 "created_at": now,
-                "updated_at": now
+                "updated_at": now,
             }
-        ]
+        ],
     }
 
     # Set up the return value for create_experiment
@@ -453,14 +470,16 @@ async def test_get_experiment_found(
         variants=[],
         metrics=[],
         created_at=datetime.now(),
-        updated_at=datetime.now()
+        updated_at=datetime.now(),
     )
 
     # Configure mocks
     mock_experiment_service.get_experiment_by_id.return_value = mock_experiment
 
     # Create a mock for deps.get_experiment_access to return the same mock experiment
-    with patch("backend.app.api.deps.get_experiment_access", return_value=mock_experiment):
+    with patch(
+        "backend.app.api.deps.get_experiment_access", return_value=mock_experiment
+    ):
         # Call the endpoint
         response = await experiments.get_experiment(
             experiment_id=experiment_id,
@@ -510,14 +529,14 @@ async def test_update_experiment(
         variants=[],
         metrics=[],
         created_at=datetime.now(),
-        updated_at=datetime.now()
+        updated_at=datetime.now(),
     )
 
     # Create update data with only the fields we want to update
     experiment_update = ExperimentUpdate(
         name="Updated Experiment",
         description="Updated Description",
-        hypothesis="Updated Hypothesis"
+        hypothesis="Updated Hypothesis",
     )
 
     # Mock updated experiment as Experiment object
@@ -534,7 +553,7 @@ async def test_update_experiment(
         variants=[],
         metrics=[],
         created_at=datetime.now(),
-        updated_at=datetime.now()
+        updated_at=datetime.now(),
     )
 
     # Setup db query mocks
@@ -548,7 +567,9 @@ async def test_update_experiment(
     mock_experiment_service.update_experiment.return_value = mock_updated
 
     # Create custom response for the actual function
-    with patch.object(ExperimentResponse, "from_orm", return_value=mock_updated.model_dump()):
+    with patch.object(
+        ExperimentResponse, "from_orm", return_value=mock_updated.model_dump()
+    ):
         # Mock the access dependency
         with patch(
             "backend.app.api.deps.get_experiment_access", return_value=mock_experiment
@@ -635,7 +656,9 @@ async def test_start_experiment(
     mock_experiment_service.start_experiment.return_value = mock_started
 
     # Create custom response for the actual function
-    with patch.object(ExperimentResponse, "from_orm", return_value=mock_started.model_dump()):
+    with patch.object(
+        ExperimentResponse, "from_orm", return_value=mock_started.model_dump()
+    ):
         # Mock the access dependency
         with patch(
             "backend.app.api.deps.get_experiment_access", return_value=mock_experiment
@@ -743,7 +766,7 @@ async def test_start_experiment_not_found(mock_db, mock_user, mock_cache_control
         tags=["test"],
         owner_id=mock_user.id,
         variants=[],
-        metrics=[]
+        metrics=[],
     )
 
     # Setup db query mocks
@@ -780,9 +803,9 @@ async def test_start_experiment_not_found(mock_db, mock_user, mock_cache_control
     [
         (UserRole.ADMIN, "alice", True),
         (UserRole.DEVELOPER, "alice", True),
-        (UserRole.DEVELOPER, "viewer.smith", True),   # name says viewer, role does not
+        (UserRole.DEVELOPER, "viewer.smith", True),  # name says viewer, role does not
         (UserRole.ANALYST, "alice", False),
-        (UserRole.VIEWER, "alice", False),            # name says nothing, role refuses
+        (UserRole.VIEWER, "alice", False),  # name says nothing, role refuses
         (UserRole.VIEWER, "testviewer", False),
     ],
 )

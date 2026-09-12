@@ -11,14 +11,13 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from backend.app.main import app
 from backend.app.api import deps
+from backend.app.main import app
 from backend.app.models.user import User, UserRole
 from backend.app.services.experiment_wizard_service import (
     ExperimentWizardService,
     _drafts,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -122,7 +121,10 @@ class TestCreateDraft:
         # No dependency override → auth should fail
         with patch("backend.app.api.deps.get_current_active_user") as mock_dep:
             from fastapi import HTTPException
-            mock_dep.side_effect = HTTPException(status_code=401, detail="Not authenticated")
+
+            mock_dep.side_effect = HTTPException(
+                status_code=401, detail="Not authenticated"
+            )
             response = client.post(
                 "/api/v1/wizard/drafts",
                 json={"experiment_type": "ab"},
@@ -243,7 +245,9 @@ class TestValidateStep:
         )
         assert response.status_code == 200
 
-    def test_validate_choose_type_valid_returns_is_valid_true(self, authenticated_client):
+    def test_validate_choose_type_valid_returns_is_valid_true(
+        self, authenticated_client
+    ):
         """POST /wizard/validate with valid choose_type data → is_valid=True."""
         client, mock_user = authenticated_client
         response = client.post(
@@ -254,12 +258,17 @@ class TestValidateStep:
         assert data["is_valid"] is True
         assert data["errors"] == []
 
-    def test_validate_choose_type_invalid_returns_is_valid_false(self, authenticated_client):
+    def test_validate_choose_type_invalid_returns_is_valid_false(
+        self, authenticated_client
+    ):
         """POST /wizard/validate with invalid choose_type data → is_valid=False."""
         client, mock_user = authenticated_client
         response = client.post(
             "/api/v1/wizard/validate",
-            json={"step": "choose_type", "data": {"experiment_type": "not_a_real_type"}},
+            json={
+                "step": "choose_type",
+                "data": {"experiment_type": "not_a_real_type"},
+            },
         )
         data = response.json()
         assert data["is_valid"] is False
@@ -379,7 +388,9 @@ class TestSubmitDraft:
         response = client.post(f"/api/v1/wizard/drafts/{draft_id}/submit")
         assert response.status_code == 200
 
-    def test_submit_complete_draft_creates_a_real_experiment(self, authenticated_client, db_session):
+    def test_submit_complete_draft_creates_a_real_experiment(
+        self, authenticated_client, db_session
+    ):
         """The returned experiment_id names a row in ``experiments``, owned by the caller."""
         from backend.app.models.experiment import Experiment
 
@@ -391,7 +402,9 @@ class TestSubmitDraft:
         assert data["experiment_id"] is not None
 
         experiment = (
-            db_session.query(Experiment).filter(Experiment.id == data["experiment_id"]).first()
+            db_session.query(Experiment)
+            .filter(Experiment.id == data["experiment_id"])
+            .first()
         )
         assert experiment is not None
         assert str(experiment.owner_id) == str(owner.id)
@@ -405,8 +418,13 @@ class TestSubmitDraft:
         """A submitted draft is gone, so it cannot create the experiment twice."""
         client, owner = authenticated_client
         draft_id = self._create_complete_draft(client, owner)
-        assert client.post(f"/api/v1/wizard/drafts/{draft_id}/submit").json()["success"] is True
-        assert client.post(f"/api/v1/wizard/drafts/{draft_id}/submit").status_code == 404
+        assert (
+            client.post(f"/api/v1/wizard/drafts/{draft_id}/submit").json()["success"]
+            is True
+        )
+        assert (
+            client.post(f"/api/v1/wizard/drafts/{draft_id}/submit").status_code == 404
+        )
 
     def test_submit_incomplete_draft_returns_errors(self, authenticated_client):
         """POST /wizard/drafts/{id}/submit with incomplete draft returns errors."""
@@ -441,7 +459,11 @@ class TestSubmitDraft:
         response = client.post(f"/api/v1/wizard/drafts/{draft_id}/submit")
 
         assert response.status_code == 403, response.text
-        owned = db_session.query(Experiment).filter(Experiment.owner_id == viewer.id).count()
+        owned = (
+            db_session.query(Experiment)
+            .filter(Experiment.owner_id == viewer.id)
+            .count()
+        )
         assert owned == 0
 
     def test_developer_can_create_an_experiment_through_the_wizard(
@@ -523,7 +545,12 @@ class TestSubmitDraft:
         assert data["success"] is False
         assert data["errors"], data
         body = response.text
-        for secret in ("experiments_owner_id_fkey", "relation", "constraint", "test_experimentation"):
+        for secret in (
+            "experiments_owner_id_fkey",
+            "relation",
+            "constraint",
+            "test_experimentation",
+        ):
             assert secret not in body, f"{secret!r} leaked to the client: {body}"
 
     def test_validation_errors_are_still_returned_verbatim(self, authenticated_client):
@@ -585,6 +612,9 @@ class TestListDrafts:
         """GET /wizard/drafts returns 401 without authentication."""
         with patch("backend.app.api.deps.get_current_active_user") as mock_dep:
             from fastapi import HTTPException
-            mock_dep.side_effect = HTTPException(status_code=401, detail="Not authenticated")
+
+            mock_dep.side_effect = HTTPException(
+                status_code=401, detail="Not authenticated"
+            )
             response = client.get("/api/v1/wizard/drafts")
         assert response.status_code == 401

@@ -14,21 +14,22 @@ Tests cover:
 """
 
 import uuid
-import pytest
-from datetime import datetime, timezone, timedelta
-from unittest.mock import MagicMock, patch, call
+from datetime import datetime, timedelta, timezone
+from unittest.mock import MagicMock, call, patch
 
-from backend.app.services.audit_log_service import AuditLogService, _redact_sensitive
+import pytest
+
 from backend.app.models.compliance_audit_event import (
-    ComplianceAuditEvent,
     AuditAction,
     AuditOutcome,
+    ComplianceAuditEvent,
 )
-
+from backend.app.services.audit_log_service import AuditLogService, _redact_sensitive
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def make_mock_db():
     """Return a mock SQLAlchemy Session."""
@@ -41,6 +42,7 @@ def make_mock_db():
 # ---------------------------------------------------------------------------
 # Tests: _redact_sensitive helper
 # ---------------------------------------------------------------------------
+
 
 class TestRedactSensitive:
     """Tests for the _redact_sensitive() module-level helper."""
@@ -109,6 +111,7 @@ class TestRedactSensitive:
 # Tests: AuditLogService.log()
 # ---------------------------------------------------------------------------
 
+
 class TestAuditLogServiceLog:
     """Tests for AuditLogService.log()."""
 
@@ -168,6 +171,7 @@ class TestAuditLogServiceLog:
     def test_log_event_sets_retention_expiry_for_soc2(self):
         """log() sets retention_expires_at based on SOC2 retention days."""
         from backend.app.core.config import settings
+
         before = datetime.now(timezone.utc)
         self.service.log(
             action=AuditAction.CREATE,
@@ -185,6 +189,7 @@ class TestAuditLogServiceLog:
     def test_log_event_sets_retention_expiry_for_iso27001(self):
         """log() sets retention_expires_at based on ISO27001 retention days."""
         from backend.app.core.config import settings
+
         before = datetime.now(timezone.utc)
         self.service.log(
             action=AuditAction.CREATE,
@@ -374,6 +379,7 @@ class TestAuditLogServiceLog:
 # ---------------------------------------------------------------------------
 # Tests: AuditLogService.get_events()
 # ---------------------------------------------------------------------------
+
 
 class TestAuditLogServiceGetEvents:
     """Tests for AuditLogService.get_events() query/filter/pagination."""

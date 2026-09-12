@@ -6,6 +6,7 @@ The endpoints resolve ``feature_flag_key`` / ``experiment_key`` to ids and
 persist ``ErrorLog`` rows that safety monitoring reads. Every test removes the
 rows it created (same cleanup pattern as ``test_tracking_api.py``).
 """
+
 import uuid
 from datetime import datetime, timedelta, timezone
 

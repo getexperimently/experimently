@@ -1,7 +1,8 @@
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock, AsyncMock
-from fastapi import HTTPException, Depends
 import redis.asyncio as redis
+from fastapi import Depends, HTTPException
 
 from backend.app.api import deps
 from backend.app.core.config import settings
@@ -33,7 +34,7 @@ class MockUser:
 
     def __init__(self, **kwargs):
         # Extract full_name if present and not None
-        full_name = kwargs.pop('full_name', None)
+        full_name = kwargs.pop("full_name", None)
 
         for key, value in kwargs.items():
             setattr(self, key, value)
@@ -57,7 +58,7 @@ class MockUser:
     def full_name(self, value):
         """Set first_name and last_name based on the full name provided."""
         if value:
-            parts = value.split(' ', 1)
+            parts = value.split(" ", 1)
             self.first_name = parts[0]
             self.last_name = parts[1] if len(parts) > 1 else None
         else:
@@ -134,36 +135,39 @@ class MockExperiment:
         """Convert to dict for Pydantic."""
         from datetime import datetime
 
-        result = {key: value for key, value in self.__dict__.items()
-                 if not key.startswith('_') and key != '__table__'}
+        result = {
+            key: value
+            for key, value in self.__dict__.items()
+            if not key.startswith("_") and key != "__table__"
+        }
 
         # Convert UUID fields to strings
-        if 'id' in result and result['id'] is not None:
-            result['id'] = str(result['id'])
-        if 'owner_id' in result and result['owner_id'] is not None:
-            result['owner_id'] = str(result['owner_id'])
+        if "id" in result and result["id"] is not None:
+            result["id"] = str(result["id"])
+        if "owner_id" in result and result["owner_id"] is not None:
+            result["owner_id"] = str(result["owner_id"])
 
         # Handle status
-        if 'status' in result and result['status'] is not None:
-            if hasattr(result['status'], 'value'):
-                result['status'] = result['status'].value
+        if "status" in result and result["status"] is not None:
+            if hasattr(result["status"], "value"):
+                result["status"] = result["status"].value
 
         # Convert datetime fields
-        if 'created_at' in result and isinstance(result['created_at'], datetime):
-            result['created_at'] = result['created_at'].isoformat()
-        if 'updated_at' in result and isinstance(result['updated_at'], datetime):
-            result['updated_at'] = result['updated_at'].isoformat()
+        if "created_at" in result and isinstance(result["created_at"], datetime):
+            result["created_at"] = result["created_at"].isoformat()
+        if "updated_at" in result and isinstance(result["updated_at"], datetime):
+            result["updated_at"] = result["updated_at"].isoformat()
 
         # Handle variants and metrics
-        if 'variants' in result and result['variants'] is not None:
-            result['variants'] = [
-                v.model_dump() if hasattr(v, 'model_dump') else v
-                for v in result['variants']
+        if "variants" in result and result["variants"] is not None:
+            result["variants"] = [
+                v.model_dump() if hasattr(v, "model_dump") else v
+                for v in result["variants"]
             ]
-        if 'metrics' in result and result['metrics'] is not None:
-            result['metrics'] = [
-                m.model_dump() if hasattr(m, 'model_dump') else m
-                for m in result['metrics']
+        if "metrics" in result and result["metrics"] is not None:
+            result["metrics"] = [
+                m.model_dump() if hasattr(m, "model_dump") else m
+                for m in result["metrics"]
             ]
 
         return result
@@ -224,7 +228,7 @@ class TestAuthDependencies:
                     "given_name": "Test",
                     "family_name": "User",
                 },
-                "groups": ["developer-group"]
+                "groups": ["developer-group"],
             }
             mock_auth_service.get_user_with_groups.return_value = mock_user_data
 
@@ -238,30 +242,39 @@ class TestAuthDependencies:
                 first_name="Test",
                 last_name="User",
                 is_active=True,
-                role="developer"
+                role="developer",
             )
             mock_db.query.return_value.filter.return_value.first.return_value = (
                 mock_user
             )
 
             # Patch the User model import and other necessary patching
-            with patch("backend.app.api.deps.User", MockUser), \
-                 patch("backend.app.api.deps.User.username", MockUser.username), \
-                 patch("backend.app.api.deps.UserRole"), \
-                 patch("backend.app.api.deps.map_cognito_groups_to_role", return_value="developer"), \
-                 patch("backend.app.api.deps.should_be_superuser", return_value=False):
+            with (
+                patch("backend.app.api.deps.User", MockUser),
+                patch("backend.app.api.deps.User.username", MockUser.username),
+                patch("backend.app.api.deps.UserRole"),
+                patch(
+                    "backend.app.api.deps.map_cognito_groups_to_role",
+                    return_value="developer",
+                ),
+                patch("backend.app.api.deps.should_be_superuser", return_value=False),
+            ):
                 # Call function
                 user = deps.get_current_user("valid_token", mock_db)
 
                 # Verify
                 assert user == mock_user
-                mock_auth_service.get_user_with_groups.assert_called_once_with("valid_token")
+                mock_auth_service.get_user_with_groups.assert_called_once_with(
+                    "valid_token"
+                )
 
     def test_get_current_user_invalid_token(self):
         """Test get_current_user with invalid token."""
         with patch("backend.app.api.deps.auth_service") as mock_auth_service:
             # Mock error from auth service
-            mock_auth_service.get_user_with_groups.side_effect = ValueError("Invalid token")
+            mock_auth_service.get_user_with_groups.side_effect = ValueError(
+                "Invalid token"
+            )
 
             # Call function
             with pytest.raises(HTTPException) as excinfo:
@@ -338,6 +351,7 @@ class TestExperimentAccessDependency:
 
     def test_get_experiment_access_not_found(self):
         """Test get_experiment_access with non-existent experiment."""
+
         # Mock implementation of get_experiment_access that raises the correct error for None
         def mock_get_experiment_access(experiment, current_user):
             if experiment is None:
@@ -345,7 +359,10 @@ class TestExperimentAccessDependency:
             return deps.get_experiment_access(experiment, current_user)
 
         # Patch the function with our mock implementation
-        with patch("backend.app.api.deps.get_experiment_access", side_effect=mock_get_experiment_access):
+        with patch(
+            "backend.app.api.deps.get_experiment_access",
+            side_effect=mock_get_experiment_access,
+        ):
             # Call function with None experiment
             with pytest.raises(HTTPException) as excinfo:
                 deps.get_experiment_access(None, MagicMock())
@@ -436,8 +453,10 @@ class TestExperimentByKeyDependency:
         mock_db.query().filter().first.return_value = mock_experiment
 
         # Patch the Experiment model
-        with patch("backend.app.api.deps.Experiment", MockExperiment), \
-             patch("backend.app.api.deps.ExperimentStatus", ExperimentStatus):
+        with (
+            patch("backend.app.api.deps.Experiment", MockExperiment),
+            patch("backend.app.api.deps.ExperimentStatus", ExperimentStatus),
+        ):
             # Call function
             experiment = deps.get_experiment_by_key("test_experiment", mock_db)
 
@@ -472,8 +491,10 @@ class TestExperimentByKeyDependency:
         mock_db.query().filter().first.return_value = mock_experiment
 
         # Patch the Experiment model
-        with patch("backend.app.api.deps.Experiment", MockExperiment), \
-             patch("backend.app.api.deps.ExperimentStatus", ExperimentStatus):
+        with (
+            patch("backend.app.api.deps.Experiment", MockExperiment),
+            patch("backend.app.api.deps.ExperimentStatus", ExperimentStatus),
+        ):
             # Call function
             with pytest.raises(HTTPException) as excinfo:
                 deps.get_experiment_by_key("inactive_experiment", mock_db)
@@ -529,7 +550,7 @@ class TestCacheDependency:
         with (
             patch("backend.app.api.deps.get_redis_pool", return_value=mock_redis),
             patch("backend.app.api.deps.REDIS_AVAILABLE", True),
-            patch.object(deps, "get_cache_control", patched_get_cache_control)
+            patch.object(deps, "get_cache_control", patched_get_cache_control),
         ):
             # Call function - use the patched function directly
             cache_control = await patched_get_cache_control(False)
@@ -590,7 +611,7 @@ class TestCacheDependency:
         with (
             patch("backend.app.api.deps.get_redis_pool", return_value=mock_redis),
             patch("backend.app.api.deps.REDIS_AVAILABLE", True),
-            patch.object(deps, "get_cache_control", patched_get_cache_control)
+            patch.object(deps, "get_cache_control", patched_get_cache_control),
         ):
             # Call function - use the patched function directly
             cache_control = await patched_get_cache_control(False)

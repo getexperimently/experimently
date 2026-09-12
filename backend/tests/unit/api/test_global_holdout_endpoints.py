@@ -12,15 +12,15 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from backend.app.main import app
 from backend.app.api import deps
-from backend.app.models.user import User, UserRole
+from backend.app.main import app
 from backend.app.models.global_holdout import GlobalHoldout
-
+from backend.app.models.user import User, UserRole
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_user(role=UserRole.DEVELOPER, is_superuser=False):
     user = MagicMock(spec=User)
@@ -55,6 +55,7 @@ def _make_holdout(
 # ---------------------------------------------------------------------------
 # Test: Get active holdout
 # ---------------------------------------------------------------------------
+
 
 class TestGetActiveHoldout:
     """GET /api/v1/holdout"""
@@ -123,6 +124,7 @@ class TestGetActiveHoldout:
 # ---------------------------------------------------------------------------
 # Test: List all holdouts
 # ---------------------------------------------------------------------------
+
 
 class TestListAllHoldouts:
     """GET /api/v1/holdout/all"""
@@ -206,6 +208,7 @@ class TestListAllHoldouts:
 # ---------------------------------------------------------------------------
 # Test: Create holdout
 # ---------------------------------------------------------------------------
+
 
 class TestCreateHoldout:
     """POST /api/v1/holdout"""
@@ -305,6 +308,7 @@ class TestCreateHoldout:
 # Test: Update holdout
 # ---------------------------------------------------------------------------
 
+
 class TestUpdateHoldout:
     """PUT /api/v1/holdout/{holdout_id}"""
 
@@ -379,6 +383,7 @@ class TestUpdateHoldout:
 # ---------------------------------------------------------------------------
 # Test: Check user holdout status
 # ---------------------------------------------------------------------------
+
 
 class TestCheckUserHoldout:
     """GET /api/v1/holdout/check/{user_id}"""

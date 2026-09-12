@@ -7,6 +7,7 @@ real test database.  Every assertion is scoped to rows created by the test
 (unique keys, user ids and experiment ids) because the shared test database is
 not truncated between tests.
 """
+
 import json
 import uuid
 

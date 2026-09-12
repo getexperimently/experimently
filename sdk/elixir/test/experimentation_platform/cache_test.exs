@@ -23,7 +23,7 @@ defmodule ExperimentationPlatform.CacheTest do
   setup do
     config = test_config()
     {:ok, pid} = Cache.start_link_unnamed(config)
-    on_exit(fn -> GenServer.stop(pid) end)
+    on_exit(fn -> if Process.alive?(pid), do: GenServer.stop(pid) end)
     %{cache: pid, config: config}
   end
 
@@ -76,7 +76,7 @@ defmodule ExperimentationPlatform.CacheTest do
       # Use a 1-second TTL config
       fast_config = %{config | cache_ttl: 1}
       {:ok, cache} = Cache.start_link_unnamed(fast_config)
-      on_exit(fn -> GenServer.stop(cache) end)
+      on_exit(fn -> if Process.alive?(cache), do: GenServer.stop(cache) end)
 
       Cache.put(cache, "expiring-key", "expiring-value")
       :timer.sleep(10)
@@ -101,7 +101,7 @@ defmodule ExperimentationPlatform.CacheTest do
     test "non-expired entry still available within TTL", %{config: config} do
       fast_config = %{config | cache_ttl: 5}
       {:ok, cache} = Cache.start_link_unnamed(fast_config)
-      on_exit(fn -> GenServer.stop(cache) end)
+      on_exit(fn -> if Process.alive?(cache), do: GenServer.stop(cache) end)
 
       Cache.put(cache, "fresh-key", "fresh-value")
       :timer.sleep(10)
@@ -225,7 +225,7 @@ defmodule ExperimentationPlatform.CacheTest do
     test "does not exceed max_cache_size", %{config: config} do
       small_config = %{config | max_cache_size: 5}
       {:ok, cache} = Cache.start_link_unnamed(small_config)
-      on_exit(fn -> GenServer.stop(cache) end)
+      on_exit(fn -> if Process.alive?(cache), do: GenServer.stop(cache) end)
 
       for i <- 1..10 do
         Cache.put(cache, "key-#{i}", "value-#{i}")
@@ -240,7 +240,7 @@ defmodule ExperimentationPlatform.CacheTest do
     test "eviction keeps cache functional after max is reached", %{config: config} do
       small_config = %{config | max_cache_size: 3}
       {:ok, cache} = Cache.start_link_unnamed(small_config)
-      on_exit(fn -> GenServer.stop(cache) end)
+      on_exit(fn -> if Process.alive?(cache), do: GenServer.stop(cache) end)
 
       # Fill the cache
       Cache.put(cache, "a", "1")

@@ -10,10 +10,10 @@ Classes:
     ResultsImporter          — maps warehouse query rows to MetricResult format
 """
 
-import re
 import logging
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Any
+import re
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional
 from uuid import UUID
 
 logger = logging.getLogger(__name__)
@@ -23,8 +23,15 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 DANGEROUS_KEYWORDS = {
-    "drop", "delete", "insert", "update", "truncate",
-    "alter", "create", "grant", "revoke",
+    "drop",
+    "delete",
+    "insert",
+    "update",
+    "truncate",
+    "alter",
+    "create",
+    "grant",
+    "revoke",
 }
 
 # Quote character used around identifiers for each dialect
@@ -39,6 +46,7 @@ DIALECT_QUOTE: Dict[str, str] = {
 # ---------------------------------------------------------------------------
 # Dataclasses
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class ConnectionTestResult:
@@ -63,6 +71,7 @@ class WarehouseSyncResult:
 # ---------------------------------------------------------------------------
 # WarehouseQueryGenerator
 # ---------------------------------------------------------------------------
+
 
 class WarehouseQueryGenerator:
     """
@@ -219,6 +228,7 @@ class WarehouseQueryGenerator:
 # WarehouseConnectionManager
 # ---------------------------------------------------------------------------
 
+
 class WarehouseConnectionManager:
     """
     Manage warehouse connection configurations stored in the application DB.
@@ -244,8 +254,8 @@ class WarehouseConnectionManager:
           1. The plaintext never appears in the stored string.
           2. Tests can verify round-trip without a KMS dependency.
         """
-        import json
         import base64
+        import json
 
         serialised = json.dumps(config, sort_keys=True)
         return base64.b64encode(serialised.encode()).decode()
@@ -256,8 +266,8 @@ class WarehouseConnectionManager:
 
         Inverse of :meth:`encrypt_credentials`.
         """
-        import json
         import base64
+        import json
 
         return json.loads(base64.b64decode(encrypted.encode()).decode())
 
@@ -352,7 +362,7 @@ class WarehouseConnectionManager:
             self.db.query(WarehouseConnection)
             .filter(
                 WarehouseConnection.id == connection_id,
-                WarehouseConnection.is_active == True,  # noqa: E712
+                WarehouseConnection.is_active == True,
             )
             .first()
         )
@@ -368,7 +378,7 @@ class WarehouseConnectionManager:
 
         return (
             self.db.query(WarehouseConnection)
-            .filter(WarehouseConnection.is_active == True)  # noqa: E712
+            .filter(WarehouseConnection.is_active == True)
             .all()
         )
 
@@ -389,6 +399,7 @@ class WarehouseConnectionManager:
 # ---------------------------------------------------------------------------
 # ResultsImporter
 # ---------------------------------------------------------------------------
+
 
 class ResultsImporter:
     """

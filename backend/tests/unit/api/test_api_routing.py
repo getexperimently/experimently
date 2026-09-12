@@ -3,18 +3,21 @@ API routing tests.
 
 This module contains unit and integration tests for the API routing system.
 """
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from backend.app.main import app
 from backend.app.api import deps
 from backend.app.core.database_config import get_schema_name
+from backend.app.main import app
+
 
 @pytest.fixture(scope="function")
 def test_client(db_session: Session):
     """Create a test client with database session."""
+
     def override_get_db():
         try:
             db_session.execute(text("SET search_path TO test_experimentation"))
@@ -27,6 +30,7 @@ def test_client(db_session: Session):
     client = TestClient(app)
     yield client
     app.dependency_overrides = {}
+
 
 class TestAPIRouting:
     """Tests for API routing functionality."""
@@ -107,13 +111,26 @@ class TestAPIRouting:
         # "Segments" tag, and exclude mutual-exclusion-group sub-routes which
         # use the "Mutual Exclusion Groups" tag)
         for path, methods in openapi_schema["paths"].items():
-            if "/experiments" in path and "/export/" not in path and "/segments/" not in path and "/mutual-exclusion-groups/" not in path and "/warehouse/" not in path and "/ws/" not in path:
+            if (
+                "/experiments" in path
+                and "/export/" not in path
+                and "/segments/" not in path
+                and "/mutual-exclusion-groups/" not in path
+                and "/warehouse/" not in path
+                and "/ws/" not in path
+            ):
                 for method in methods.values():
-                    assert "Experiments" in method["tags"], f"Experiments tag missing for {path}"
+                    assert "Experiments" in method["tags"], (
+                        f"Experiments tag missing for {path}"
+                    )
             elif "/tracking" in path:
                 for method in methods.values():
-                    assert "Tracking" in method["tags"], f"Tracking tag missing for {path}"
+                    assert "Tracking" in method["tags"], (
+                        f"Tracking tag missing for {path}"
+                    )
             elif "/auth" in path:
                 for method in methods.values():
                     auth_tags = {"Authentication", "SSO", "sso"}
-                    assert auth_tags & set(method["tags"]), f"Authentication/SSO tag missing for {path}"
+                    assert auth_tags & set(method["tags"]), (
+                        f"Authentication/SSO tag missing for {path}"
+                    )

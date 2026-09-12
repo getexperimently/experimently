@@ -22,10 +22,10 @@ from backend.app.schemas.warehouse import (
     WarehouseType,
 )
 
-
 # ---------------------------------------------------------------------------
 # TestWarehouseTypeEnum
 # ---------------------------------------------------------------------------
+
 
 class TestWarehouseTypeEnum:
     """WarehouseType enum correctness."""
@@ -54,6 +54,7 @@ class TestWarehouseTypeEnum:
 # ---------------------------------------------------------------------------
 # TestWarehouseConnectionCreate
 # ---------------------------------------------------------------------------
+
 
 class TestWarehouseConnectionCreate:
     """Validation of the connection creation request schema."""
@@ -111,6 +112,7 @@ class TestWarehouseConnectionCreate:
 # TestWarehouseConnectionResponse
 # ---------------------------------------------------------------------------
 
+
 class TestWarehouseConnectionResponse:
     """Response schema must never expose credentials."""
 
@@ -155,6 +157,7 @@ class TestWarehouseConnectionResponse:
 # TestSyncRequest
 # ---------------------------------------------------------------------------
 
+
 class TestSyncRequest:
     """SyncRequest required and optional field validation."""
 
@@ -194,6 +197,7 @@ class TestSyncRequest:
 # TestSyncStatusResponse
 # ---------------------------------------------------------------------------
 
+
 class TestSyncStatusResponse:
     """SyncStatusResponse field structure."""
 
@@ -223,6 +227,7 @@ class TestSyncStatusResponse:
 # ---------------------------------------------------------------------------
 # TestConnectionTestResponse
 # ---------------------------------------------------------------------------
+
 
 class TestConnectionTestResponse:
     """ConnectionTestResponse field structure."""

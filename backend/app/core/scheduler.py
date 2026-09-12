@@ -6,22 +6,23 @@ such as experiment status updates based on scheduled dates.
 """
 
 import asyncio
-import logging
-from datetime import datetime, timezone, timedelta
-from typing import Any, Optional, Dict, List
-from sqlalchemy.orm import Session
-from sqlalchemy import and_, or_
+from datetime import datetime, timezone
+from typing import Dict, Optional
 
-from backend.app.db.session import SessionLocal
-from backend.app.models.experiment import Experiment, ExperimentStatus
-from backend.app.services.notification_service import NotificationService
+from sqlalchemy import and_
+from sqlalchemy.orm import Session
+
 from backend.app.core.logging import get_logger
 from backend.app.core.metrics import update_active_experiments
 from backend.app.core.scheduler_tick import run_locked_tick
+from backend.app.db.session import SessionLocal
+from backend.app.models.experiment import Experiment, ExperimentStatus
+from backend.app.services.notification_service import NotificationService
 
 logger = get_logger(__name__)
 
 SCHEDULER_NAME = "experiment"
+
 
 class ExperimentScheduler:
     """Handles scheduled tasks for experiments."""
@@ -46,7 +47,9 @@ class ExperimentScheduler:
 
         self.is_running = True
         self.task = asyncio.create_task(self._run_scheduler())
-        logger.info(f"Experiment scheduler started with {self.interval_minutes} minute interval")
+        logger.info(
+            f"Experiment scheduler started with {self.interval_minutes} minute interval"
+        )
 
     async def stop(self):
         """Stop the scheduler."""
@@ -69,14 +72,16 @@ class ExperimentScheduler:
             try:
                 # One tick under the advisory lock; records the run and
                 # skips when another replica holds the lock.
-                await run_locked_tick(SCHEDULER_NAME, self.process_scheduled_experiments)
+                await run_locked_tick(
+                    SCHEDULER_NAME, self.process_scheduled_experiments
+                )
 
                 # Wait for the next interval
                 await asyncio.sleep(self.interval_minutes * 60)
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error(f"Error in experiment scheduler: {str(e)}")
+                logger.error(f"Error in experiment scheduler: {e!s}")
                 # Wait a bit before trying again
                 await asyncio.sleep(60)
 
@@ -105,13 +110,19 @@ class ExperimentScheduler:
             current_time = datetime.now(timezone.utc)
 
             # Find experiments to activate (start_date has passed)
-            experiments_to_activate = db.query(Experiment).filter(
-                and_(
-                    Experiment.status.in_([ExperimentStatus.DRAFT, ExperimentStatus.PAUSED]),
-                    Experiment.start_date.isnot(None),
-                    Experiment.start_date <= current_time
+            experiments_to_activate = (
+                db.query(Experiment)
+                .filter(
+                    and_(
+                        Experiment.status.in_(
+                            [ExperimentStatus.DRAFT, ExperimentStatus.PAUSED]
+                        ),
+                        Experiment.start_date.isnot(None),
+                        Experiment.start_date <= current_time,
+                    )
                 )
-            ).all()
+                .all()
+            )
 
             # Activate experiments
             for experiment in experiments_to_activate:
@@ -133,20 +144,24 @@ class ExperimentScheduler:
                         logger.warning("Notification failed (non-critical): %s", exc)
                 except Exception as e:
                     failed_count += 1
-                    logger.error(f"Error activating experiment {experiment.id}: {str(e)}")
+                    logger.error(f"Error activating experiment {experiment.id}: {e!s}")
 
             # Commit all activation changes before checking for experiments to complete
             if activated_count > 0:
                 db.commit()
 
             # Find experiments to complete (end_date has passed)
-            experiments_to_complete = db.query(Experiment).filter(
-                and_(
-                    Experiment.status == ExperimentStatus.ACTIVE,
-                    Experiment.end_date.isnot(None),
-                    Experiment.end_date <= current_time
+            experiments_to_complete = (
+                db.query(Experiment)
+                .filter(
+                    and_(
+                        Experiment.status == ExperimentStatus.ACTIVE,
+                        Experiment.end_date.isnot(None),
+                        Experiment.end_date <= current_time,
+                    )
                 )
-            ).all()
+                .all()
+            )
 
             # Complete experiments
             for experiment in experiments_to_complete:
@@ -168,7 +183,7 @@ class ExperimentScheduler:
                         logger.warning("Notification failed (non-critical): %s", exc)
                 except Exception as e:
                     failed_count += 1
-                    logger.error(f"Error completing experiment {experiment.id}: {str(e)}")
+                    logger.error(f"Error completing experiment {experiment.id}: {e!s}")
 
             # Commit completion changes
             if completed_count > 0:
@@ -178,12 +193,16 @@ class ExperimentScheduler:
             # is STOP_WINNER or STOP_FUTILE (Bayesian stopping rules triggered).
             try:
                 _bayesian_stop_decisions = ("STOP_WINNER", "STOP_FUTILE")
-                experiments_to_bayesian_stop = db.query(Experiment).filter(
-                    and_(
-                        Experiment.status == ExperimentStatus.ACTIVE,
-                        Experiment.bayesian_decision.in_(_bayesian_stop_decisions),
+                experiments_to_bayesian_stop = (
+                    db.query(Experiment)
+                    .filter(
+                        and_(
+                            Experiment.status == ExperimentStatus.ACTIVE,
+                            Experiment.bayesian_decision.in_(_bayesian_stop_decisions),
+                        )
                     )
-                ).all()
+                    .all()
+                )
 
                 for experiment in experiments_to_bayesian_stop:
                     try:
@@ -208,16 +227,13 @@ class ExperimentScheduler:
                     except Exception as e:
                         failed_count += 1
                         logger.error(
-                            f"Error bayesian-stopping experiment {experiment.id}: "
-                            f"{str(e)}"
+                            f"Error bayesian-stopping experiment {experiment.id}: {e!s}"
                         )
 
                 if bayesian_stopped_count > 0:
                     db.commit()
             except Exception as e:
-                logger.error(
-                    f"Error processing bayesian stopping rules: {str(e)}"
-                )
+                logger.error(f"Error processing bayesian stopping rules: {e!s}")
 
             # Log the results
             total_completed = completed_count + bayesian_stopped_count
@@ -235,12 +251,14 @@ class ExperimentScheduler:
 
         except Exception as e:
             failed_count += 1
-            logger.error(f"Error processing scheduled experiments: {str(e)}")
+            logger.error(f"Error processing scheduled experiments: {e!s}")
         finally:
             db.close()
 
         return {
-            "items_processed": activated_count + completed_count + bayesian_stopped_count,
+            "items_processed": activated_count
+            + completed_count
+            + bayesian_stopped_count,
             "items_failed": failed_count,
             "metadata": {
                 "activated": activated_count,
@@ -262,6 +280,7 @@ class ExperimentScheduler:
                 update_active_experiments(count)
         except Exception as exc:  # pragma: no cover - metrics must never break the tick
             logger.debug(f"Could not update active_experiments_gauge: {exc}")
+
 
 # Create a singleton instance of the scheduler
 experiment_scheduler = ExperimentScheduler()

@@ -4,14 +4,12 @@ Test API Key Schemas.
 This module contains tests for the Pydantic v2 API key schema validation.
 """
 
-import pytest
-from datetime import datetime
 import uuid
+from datetime import datetime
 
-from backend.app.routers.api_key_routes import (
-    APIKeyResponse,
-    APIKeyList
-)
+import pytest
+
+from backend.app.routers.api_key_routes import APIKeyList, APIKeyResponse
 
 
 class TestAPIKeySchemasValidation:
@@ -31,7 +29,7 @@ class TestAPIKeySchemasValidation:
             "is_active": True,
             "expires_at": current_time.replace(year=current_time.year + 1),
             "created_at": current_time,
-            "updated_at": current_time
+            "updated_at": current_time,
         }
 
         api_key = APIKeyResponse(**data)
@@ -63,7 +61,7 @@ class TestAPIKeySchemasValidation:
             "is_active": True,
             "expires_at": current_time.replace(year=current_time.year + 1),
             "created_at": current_time,
-            "updated_at": current_time
+            "updated_at": current_time,
         }
 
         api_key_list = APIKeyList(**data)

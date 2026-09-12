@@ -21,6 +21,7 @@ What this validates:
 """
 
 import os
+
 import pytest
 
 API_URL = os.environ.get("REALISTIC_API_URL", "http://localhost:8000")
@@ -36,6 +37,7 @@ def _get_schemathesis():
     """Lazily import schemathesis — not a required dependency for normal test runs."""
     try:
         import schemathesis
+
         return schemathesis
     except ImportError:
         pytest.skip("schemathesis not installed. Run: pip install schemathesis")
@@ -113,6 +115,7 @@ class TestAPIFuzzing:
         Successful responses (2xx) should conform to the declared response schema.
         This validates that the API contract is honoured.
         """
+
         @schema.parametrize()
         def _run(case):
             response = case.call()
@@ -158,12 +161,15 @@ class TestOpenAPISpec:
 
     def test_openapi_spec_is_reachable(self):
         import requests
+
         resp = requests.get(OPENAPI_URL, timeout=10)
         assert resp.status_code == 200, f"OpenAPI spec not reachable at {OPENAPI_URL}"
 
     def test_openapi_spec_is_valid_json(self):
         import json
+
         import requests
+
         resp = requests.get(OPENAPI_URL, timeout=10)
         try:
             spec = resp.json()
@@ -174,6 +180,7 @@ class TestOpenAPISpec:
     def test_all_endpoints_have_response_schemas(self):
         """Every endpoint should declare at least one response schema."""
         import requests
+
         resp = requests.get(OPENAPI_URL, timeout=10)
         spec = resp.json()
         paths = spec.get("paths", {})
@@ -184,6 +191,5 @@ class TestOpenAPISpec:
                     if not details.get("responses"):
                         missing.append(f"{method.upper()} {path}")
         assert not missing, (
-            f"The following endpoints have no response schemas:\n"
-            + "\n".join(missing)
+            "The following endpoints have no response schemas:\n" + "\n".join(missing)
         )

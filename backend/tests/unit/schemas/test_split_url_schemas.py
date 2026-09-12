@@ -8,19 +8,20 @@ Tests cover:
 - SplitUrlConfig: optional fields (cookie_name, cookie_ttl_days, canonical_url)
 - SplitUrlExperimentCreate inheriting from ExperimentCreate
 """
+
 import pytest
 from pydantic import ValidationError
 
 # These imports will FAIL (red phase) until the implementation exists.
 from backend.app.schemas.split_url import (
-    SplitUrlVariant,
     SplitUrlConfig,
+    SplitUrlVariant,
 )
-
 
 # ──────────────────────────────────────────────────────────────────────────
 # SplitUrlVariant
 # ──────────────────────────────────────────────────────────────────────────
+
 
 class TestSplitUrlVariant:
     def test_valid_variant(self):
@@ -47,11 +48,15 @@ class TestSplitUrlVariant:
 
     def test_variant_zero_allocation_allowed(self):
         # A zero allocation variant should be creatable (validation at config level)
-        v = SplitUrlVariant(name="v1", url="https://example.com", traffic_allocation=0.0)
+        v = SplitUrlVariant(
+            name="v1", url="https://example.com", traffic_allocation=0.0
+        )
         assert v.traffic_allocation == 0.0
 
     def test_variant_100_allocation_allowed(self):
-        v = SplitUrlVariant(name="v1", url="https://example.com", traffic_allocation=100.0)
+        v = SplitUrlVariant(
+            name="v1", url="https://example.com", traffic_allocation=100.0
+        )
         assert v.traffic_allocation == 100.0
 
     def test_variant_from_attributes(self):
@@ -69,6 +74,7 @@ class TestSplitUrlVariant:
 # ──────────────────────────────────────────────────────────────────────────
 # SplitUrlConfig — variant count validation
 # ──────────────────────────────────────────────────────────────────────────
+
 
 class TestSplitUrlConfigVariantCount:
     def _make_variant(self, name: str, url: str, alloc: float) -> SplitUrlVariant:
@@ -96,9 +102,7 @@ class TestSplitUrlConfigVariantCount:
     def test_one_variant_raises(self):
         with pytest.raises(ValidationError) as exc_info:
             SplitUrlConfig(
-                variants=[
-                    self._make_variant("only", "https://example.com", 100.0)
-                ]
+                variants=[self._make_variant("only", "https://example.com", 100.0)]
             )
         assert "2" in str(exc_info.value) or "variant" in str(exc_info.value).lower()
 
@@ -110,6 +114,7 @@ class TestSplitUrlConfigVariantCount:
 # ──────────────────────────────────────────────────────────────────────────
 # SplitUrlConfig — traffic allocation sum validation
 # ──────────────────────────────────────────────────────────────────────────
+
 
 class TestSplitUrlConfigTrafficSum:
     def _make_variant(self, name: str, url: str, alloc: float) -> SplitUrlVariant:
@@ -159,12 +164,17 @@ class TestSplitUrlConfigTrafficSum:
 # SplitUrlConfig — optional fields
 # ──────────────────────────────────────────────────────────────────────────
 
+
 class TestSplitUrlConfigOptionalFields:
     def _two_variant_config_kwargs(self):
         return {
             "variants": [
-                SplitUrlVariant(name="a", url="https://example.com/a", traffic_allocation=50.0),
-                SplitUrlVariant(name="b", url="https://example.com/b", traffic_allocation=50.0),
+                SplitUrlVariant(
+                    name="a", url="https://example.com/a", traffic_allocation=50.0
+                ),
+                SplitUrlVariant(
+                    name="b", url="https://example.com/b", traffic_allocation=50.0
+                ),
             ]
         }
 
@@ -173,7 +183,9 @@ class TestSplitUrlConfigOptionalFields:
         assert config.cookie_name is None
 
     def test_cookie_name_can_be_set(self):
-        config = SplitUrlConfig(cookie_name="my_cookie", **self._two_variant_config_kwargs())
+        config = SplitUrlConfig(
+            cookie_name="my_cookie", **self._two_variant_config_kwargs()
+        )
         assert config.cookie_name == "my_cookie"
 
     def test_cookie_ttl_days_default_30(self):
@@ -200,8 +212,12 @@ class TestSplitUrlConfigOptionalFields:
 
         class FakeOrm:
             variants = [
-                SplitUrlVariant(name="a", url="https://example.com/a", traffic_allocation=50.0),
-                SplitUrlVariant(name="b", url="https://example.com/b", traffic_allocation=50.0),
+                SplitUrlVariant(
+                    name="a", url="https://example.com/a", traffic_allocation=50.0
+                ),
+                SplitUrlVariant(
+                    name="b", url="https://example.com/b", traffic_allocation=50.0
+                ),
             ]
             cookie_name = None
             cookie_ttl_days = 30

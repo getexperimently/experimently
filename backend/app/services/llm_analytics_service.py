@@ -13,7 +13,7 @@ Also provides:
 import logging
 import math
 import statistics
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 from uuid import UUID
 
 from sqlalchemy.orm import Session
@@ -21,7 +21,6 @@ from sqlalchemy.orm import Session
 from backend.app.models.llm_experiment import (
     LLMEvaluation,
     LLMExperiment,
-    LLMExperimentStatus,
 )
 from backend.app.schemas.llm_experiments import (
     LLMExperimentResults,
@@ -129,10 +128,9 @@ def _approx_p_value(t: float, df: float) -> float:
     """
     # For large df use normal approximation
     if df >= 30:
-        import statistics as _s
-
         try:
             from statistics import NormalDist  # Python 3.8+
+
             p_one_tail = 1 - NormalDist().cdf(t)
             return min(2 * p_one_tail, 1.0)
         except Exception:
@@ -166,8 +164,7 @@ def _cohens_d(a: List[float], b: List[float]) -> Optional[float]:
         return None
     mean_diff = statistics.mean(b) - statistics.mean(a)
     pooled_var = (
-        (len(a) - 1) * statistics.variance(a)
-        + (len(b) - 1) * statistics.variance(b)
+        (len(a) - 1) * statistics.variance(a) + (len(b) - 1) * statistics.variance(b)
     ) / (len(a) + len(b) - 2)
     if pooled_var <= 0:
         return 0.0
@@ -197,9 +194,7 @@ class LLMEvaluationAnalyticsService:
         - winner determination
         """
         experiment = (
-            db.query(LLMExperiment)
-            .filter(LLMExperiment.id == experiment_id)
-            .first()
+            db.query(LLMExperiment).filter(LLMExperiment.id == experiment_id).first()
         )
         if experiment is None:
             raise ValueError(f"Experiment {experiment_id} not found")
@@ -221,9 +216,7 @@ class LLMEvaluationAnalyticsService:
             evals_by_variant[vid].append(ev)
 
         # Find control variant evaluations
-        control_variant = next(
-            (v for v in experiment.variants if v.is_control), None
-        )
+        control_variant = next((v for v in experiment.variants if v.is_control), None)
         control_bm: List[float] = []
         control_ae: List[float] = []
         if control_variant:
@@ -249,10 +242,18 @@ class LLMEvaluationAnalyticsService:
             evals = evals_by_variant.get(vid, [])
 
             latencies = [e.latency_ms for e in evals if e.latency_ms is not None]
-            costs = [e.estimated_cost_usd for e in evals if e.estimated_cost_usd is not None]
-            ae_scores = [e.auto_eval_score for e in evals if e.auto_eval_score is not None]
+            costs = [
+                e.estimated_cost_usd for e in evals if e.estimated_cost_usd is not None
+            ]
+            ae_scores = [
+                e.auto_eval_score for e in evals if e.auto_eval_score is not None
+            ]
             hr_scores = [e.human_rating for e in evals if e.human_rating is not None]
-            bm_values = [e.business_metric_value for e in evals if e.business_metric_value is not None]
+            bm_values = [
+                e.business_metric_value
+                for e in evals
+                if e.business_metric_value is not None
+            ]
 
             lat_ci = _confidence_interval_95(latencies)
             cost_ci = _confidence_interval_95(costs)
@@ -329,9 +330,7 @@ class LLMEvaluationAnalyticsService:
         if not 1.0 <= rating <= 5.0:
             raise ValueError("human_rating must be between 1.0 and 5.0")
         evaluation = (
-            db.query(LLMEvaluation)
-            .filter(LLMEvaluation.id == evaluation_id)
-            .first()
+            db.query(LLMEvaluation).filter(LLMEvaluation.id == evaluation_id).first()
         )
         if evaluation is None:
             raise ValueError(f"Evaluation {evaluation_id} not found")
@@ -348,9 +347,7 @@ class LLMEvaluationAnalyticsService:
     ) -> LLMEvaluation:
         """Persist a business metric value on an existing evaluation."""
         evaluation = (
-            db.query(LLMEvaluation)
-            .filter(LLMEvaluation.id == evaluation_id)
-            .first()
+            db.query(LLMEvaluation).filter(LLMEvaluation.id == evaluation_id).first()
         )
         if evaluation is None:
             raise ValueError(f"Evaluation {evaluation_id} not found")
@@ -426,7 +423,7 @@ class LLMEvaluationAnalyticsService:
             f"Original prompt:\n{prompt}\n\n"
             f"Response:\n{response}\n\n"
             f"Reply with ONLY a JSON object: "
-            f'{{\"score\": <float 0-1>, \"reasoning\": \"<one sentence>\"}}'
+            f'{{"score": <float 0-1>, "reasoning": "<one sentence>"}}'
         )
         try:
             import anthropic  # type: ignore

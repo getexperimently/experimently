@@ -4,8 +4,10 @@ Test cases for time_window operator in rules engine.
 Tests time-based targeting functionality for temporal rules.
 """
 
-import pytest
 from datetime import datetime, time, timezone
+
+import pytest
+
 from backend.app.core.rules_engine import apply_operator
 from backend.app.schemas.targeting_rule import OperatorType
 
@@ -21,7 +23,7 @@ class TestTimeWindowDayOfWeek:
         result = apply_operator(
             OperatorType.TIME_WINDOW,
             monday,
-            {"days": [0]}  # Monday only
+            {"days": [0]},  # Monday only
         )
         assert result is True
 
@@ -32,7 +34,7 @@ class TestTimeWindowDayOfWeek:
         result = apply_operator(
             OperatorType.TIME_WINDOW,
             monday,
-            {"days": [2]}  # Wednesday only
+            {"days": [2]},  # Wednesday only
         )
         assert result is False
 
@@ -43,7 +45,7 @@ class TestTimeWindowDayOfWeek:
         result = apply_operator(
             OperatorType.TIME_WINDOW,
             tuesday,
-            {"days": [0, 1, 2, 3, 4]}  # Monday-Friday
+            {"days": [0, 1, 2, 3, 4]},  # Monday-Friday
         )
         assert result is True
 
@@ -54,7 +56,7 @@ class TestTimeWindowDayOfWeek:
         result = apply_operator(
             OperatorType.TIME_WINDOW,
             saturday,
-            {"days": [5, 6]}  # Saturday-Sunday
+            {"days": [5, 6]},  # Saturday-Sunday
         )
         assert result is True
 
@@ -65,7 +67,7 @@ class TestTimeWindowDayOfWeek:
         result = apply_operator(
             OperatorType.TIME_WINDOW,
             monday,
-            {"days": [5, 6]}  # Saturday-Sunday
+            {"days": [5, 6]},  # Saturday-Sunday
         )
         assert result is False
 
@@ -80,7 +82,7 @@ class TestTimeWindowTimeOfDay:
         result = apply_operator(
             OperatorType.TIME_WINDOW,
             morning,
-            {"start_time": "09:00", "end_time": "17:00"}  # 9 AM - 5 PM
+            {"start_time": "09:00", "end_time": "17:00"},  # 9 AM - 5 PM
         )
         assert result is True
 
@@ -91,7 +93,7 @@ class TestTimeWindowTimeOfDay:
         result = apply_operator(
             OperatorType.TIME_WINDOW,
             early,
-            {"start_time": "09:00", "end_time": "17:00"}
+            {"start_time": "09:00", "end_time": "17:00"},
         )
         assert result is False
 
@@ -100,9 +102,7 @@ class TestTimeWindowTimeOfDay:
         late = datetime(2024, 1, 1, 19, 0, 0)  # 7:00 PM
 
         result = apply_operator(
-            OperatorType.TIME_WINDOW,
-            late,
-            {"start_time": "09:00", "end_time": "17:00"}
+            OperatorType.TIME_WINDOW, late, {"start_time": "09:00", "end_time": "17:00"}
         )
         assert result is False
 
@@ -113,7 +113,7 @@ class TestTimeWindowTimeOfDay:
         result = apply_operator(
             OperatorType.TIME_WINDOW,
             exact_start,
-            {"start_time": "09:00", "end_time": "17:00"}
+            {"start_time": "09:00", "end_time": "17:00"},
         )
         assert result is True
 
@@ -124,7 +124,7 @@ class TestTimeWindowTimeOfDay:
         result = apply_operator(
             OperatorType.TIME_WINDOW,
             exact_end,
-            {"start_time": "09:00", "end_time": "17:00"}
+            {"start_time": "09:00", "end_time": "17:00"},
         )
         assert result is True
 
@@ -135,7 +135,7 @@ class TestTimeWindowTimeOfDay:
         result = apply_operator(
             OperatorType.TIME_WINDOW,
             evening,
-            {"start_time": "22:00", "end_time": "02:00"}  # 10 PM - 2 AM
+            {"start_time": "22:00", "end_time": "02:00"},  # 10 PM - 2 AM
         )
         assert result is True
 
@@ -146,7 +146,7 @@ class TestTimeWindowTimeOfDay:
         result = apply_operator(
             OperatorType.TIME_WINDOW,
             early_morning,
-            {"start_time": "22:00", "end_time": "02:00"}
+            {"start_time": "22:00", "end_time": "02:00"},
         )
         assert result is True
 
@@ -157,7 +157,7 @@ class TestTimeWindowTimeOfDay:
         result = apply_operator(
             OperatorType.TIME_WINDOW,
             afternoon,
-            {"start_time": "22:00", "end_time": "02:00"}
+            {"start_time": "22:00", "end_time": "02:00"},
         )
         assert result is False
 
@@ -172,7 +172,7 @@ class TestTimeWindowDateRange:
         result = apply_operator(
             OperatorType.TIME_WINDOW,
             mid_date,
-            {"start_date": "2024-01-01", "end_date": "2024-12-31"}
+            {"start_date": "2024-01-01", "end_date": "2024-12-31"},
         )
         assert result is True
 
@@ -183,7 +183,7 @@ class TestTimeWindowDateRange:
         result = apply_operator(
             OperatorType.TIME_WINDOW,
             early_date,
-            {"start_date": "2024-01-01", "end_date": "2024-12-31"}
+            {"start_date": "2024-01-01", "end_date": "2024-12-31"},
         )
         assert result is False
 
@@ -194,7 +194,7 @@ class TestTimeWindowDateRange:
         result = apply_operator(
             OperatorType.TIME_WINDOW,
             late_date,
-            {"start_date": "2024-01-01", "end_date": "2024-12-31"}
+            {"start_date": "2024-01-01", "end_date": "2024-12-31"},
         )
         assert result is False
 
@@ -205,7 +205,7 @@ class TestTimeWindowDateRange:
         result = apply_operator(
             OperatorType.TIME_WINDOW,
             start_date,
-            {"start_date": "2024-01-01", "end_date": "2024-12-31"}
+            {"start_date": "2024-01-01", "end_date": "2024-12-31"},
         )
         assert result is True
 
@@ -216,7 +216,7 @@ class TestTimeWindowDateRange:
         result = apply_operator(
             OperatorType.TIME_WINDOW,
             end_date,
-            {"start_date": "2024-01-01", "end_date": "2024-12-31"}
+            {"start_date": "2024-01-01", "end_date": "2024-12-31"},
         )
         assert result is True
 
@@ -234,8 +234,8 @@ class TestTimeWindowCombined:
             {
                 "days": [0, 1, 2, 3, 4],  # Monday-Friday
                 "start_time": "09:00",
-                "end_time": "17:00"
-            }
+                "end_time": "17:00",
+            },
         )
         assert result is True
 
@@ -246,11 +246,7 @@ class TestTimeWindowCombined:
         result = apply_operator(
             OperatorType.TIME_WINDOW,
             tuesday_evening,
-            {
-                "days": [0, 1, 2, 3, 4],
-                "start_time": "09:00",
-                "end_time": "17:00"
-            }
+            {"days": [0, 1, 2, 3, 4], "start_time": "09:00", "end_time": "17:00"},
         )
         assert result is False
 
@@ -264,8 +260,8 @@ class TestTimeWindowCombined:
             {
                 "days": [0, 1, 2, 3, 4],  # Monday-Friday only
                 "start_time": "09:00",
-                "end_time": "17:00"
-            }
+                "end_time": "17:00",
+            },
         )
         assert result is False
 
@@ -280,8 +276,8 @@ class TestTimeWindowCombined:
                 "start_date": "2024-12-20",
                 "end_date": "2024-12-31",
                 "start_time": "10:00",
-                "end_time": "18:00"
-            }
+                "end_time": "18:00",
+            },
         )
         assert result is True
 
@@ -296,11 +292,7 @@ class TestTimeWindowTimezone:
         result = apply_operator(
             OperatorType.TIME_WINDOW,
             utc_time,
-            {
-                "start_time": "14:00",
-                "end_time": "16:00",
-                "timezone": "UTC"
-            }
+            {"start_time": "14:00", "end_time": "16:00", "timezone": "UTC"},
         )
         assert result is True
 
@@ -315,8 +307,8 @@ class TestTimeWindowTimezone:
             {
                 "start_time": "09:00",
                 "end_time": "17:00",
-                "timezone": "America/Los_Angeles"
-            }
+                "timezone": "America/Los_Angeles",
+            },
         )
         assert result is True
 
@@ -332,8 +324,8 @@ class TestTimeWindowFormats:
             {
                 "days": [1],  # Tuesday
                 "start_time": "09:00",
-                "end_time": "17:00"
-            }
+                "end_time": "17:00",
+            },
         )
         assert result is True
 
@@ -345,10 +337,7 @@ class TestTimeWindowFormats:
         result = apply_operator(
             OperatorType.TIME_WINDOW,
             timestamp,
-            {
-                "start_date": "2024-01-01",
-                "end_date": "2024-12-31"
-            }
+            {"start_date": "2024-01-01", "end_date": "2024-12-31"},
         )
         assert result is True
 
@@ -360,7 +349,7 @@ class TestTimeWindowFormats:
             None,  # Should default to current time
             {
                 "days": list(range(7))  # All days
-            }
+            },
         )
         assert result is True
 
@@ -375,7 +364,7 @@ class TestTimeWindowInvalidInputs:
         result = apply_operator(
             OperatorType.TIME_WINDOW,
             monday,
-            {"days": [7, 8]}  # Invalid day numbers
+            {"days": [7, 8]},  # Invalid day numbers
         )
         assert result is False
 
@@ -386,7 +375,7 @@ class TestTimeWindowInvalidInputs:
         result = apply_operator(
             OperatorType.TIME_WINDOW,
             morning,
-            {"start_time": "9am", "end_time": "5pm"}  # Invalid format
+            {"start_time": "9am", "end_time": "5pm"},  # Invalid format
         )
         assert result is False
 
@@ -397,7 +386,7 @@ class TestTimeWindowInvalidInputs:
         result = apply_operator(
             OperatorType.TIME_WINDOW,
             mid_date,
-            {"start_date": "January 1, 2024", "end_date": "December 31, 2024"}
+            {"start_date": "January 1, 2024", "end_date": "December 31, 2024"},
         )
         assert result is False
 
@@ -409,7 +398,7 @@ class TestTimeWindowInvalidInputs:
         result = apply_operator(
             OperatorType.TIME_WINDOW,
             evening,
-            {"start_time": "22:00", "end_time": "02:00"}  # Overnight window
+            {"start_time": "22:00", "end_time": "02:00"},  # Overnight window
         )
         assert result is True
 
@@ -420,7 +409,7 @@ class TestTimeWindowInvalidInputs:
         result = apply_operator(
             OperatorType.TIME_WINDOW,
             mid_date,
-            {"start_date": "2024-12-31", "end_date": "2024-01-01"}
+            {"start_date": "2024-12-31", "end_date": "2024-01-01"},
         )
         assert result is False
 
@@ -432,7 +421,7 @@ class TestTimeWindowInvalidInputs:
         result = apply_operator(
             OperatorType.TIME_WINDOW,
             morning,
-            {"days": [0]}  # Monday, no time bounds
+            {"days": [0]},  # Monday, no time bounds
         )
         assert result is True
 
@@ -441,20 +430,12 @@ class TestTimeWindowInvalidInputs:
         morning = datetime(2024, 1, 1, 10, 0, 0)
 
         # Empty config should match everything
-        result = apply_operator(
-            OperatorType.TIME_WINDOW,
-            morning,
-            {}
-        )
+        result = apply_operator(OperatorType.TIME_WINDOW, morning, {})
         assert result is True
 
     def test_invalid_actual_value_string(self):
         """Test invalid actual value (not a valid datetime string)."""
-        result = apply_operator(
-            OperatorType.TIME_WINDOW,
-            "not a date",
-            {"days": [0]}
-        )
+        result = apply_operator(OperatorType.TIME_WINDOW, "not a date", {"days": [0]})
         assert result is False
 
     def test_invalid_timezone(self):
@@ -467,8 +448,8 @@ class TestTimeWindowInvalidInputs:
             {
                 "start_time": "14:00",
                 "end_time": "16:00",
-                "timezone": "Invalid/Timezone"
-            }
+                "timezone": "Invalid/Timezone",
+            },
         )
         assert result is False
 
@@ -483,7 +464,7 @@ class TestTimeWindowEdgeCases:
         result = apply_operator(
             OperatorType.TIME_WINDOW,
             leap_day,
-            {"start_date": "2024-02-01", "end_date": "2024-03-01"}
+            {"start_date": "2024-02-01", "end_date": "2024-03-01"},
         )
         assert result is True
 
@@ -494,7 +475,7 @@ class TestTimeWindowEdgeCases:
         result = apply_operator(
             OperatorType.TIME_WINDOW,
             midnight,
-            {"start_time": "00:00", "end_time": "23:59"}
+            {"start_time": "00:00", "end_time": "23:59"},
         )
         assert result is True
 
@@ -505,7 +486,7 @@ class TestTimeWindowEdgeCases:
         result = apply_operator(
             OperatorType.TIME_WINDOW,
             end_of_day,
-            {"start_time": "00:00", "end_time": "23:59"}
+            {"start_time": "00:00", "end_time": "23:59"},
         )
         assert result is True
 
@@ -516,7 +497,7 @@ class TestTimeWindowEdgeCases:
         result = apply_operator(
             OperatorType.TIME_WINDOW,
             new_years_eve,
-            {"start_date": "2023-12-01", "end_date": "2024-01-31"}
+            {"start_date": "2023-12-01", "end_date": "2024-01-31"},
         )
         assert result is True
 
@@ -530,7 +511,7 @@ class TestTimeWindowEdgeCases:
             {
                 "days": list(range(7)),  # All days
                 "start_time": "00:00",
-                "end_time": "23:59"
-            }
+                "end_time": "23:59",
+            },
         )
         assert result is True

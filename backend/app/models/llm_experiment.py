@@ -8,14 +8,11 @@ metrics.
 """
 
 import enum
-import uuid
 
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
     Column,
-    DateTime,
-    Enum as SQLAEnum,
     Float,
     ForeignKey,
     Index,
@@ -23,12 +20,15 @@ from sqlalchemy import (
     String,
     Text,
 )
+from sqlalchemy import (
+    Enum as SQLAEnum,
+)
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.ext.declarative import declared_attr
 from sqlalchemy.orm import relationship
 
-from backend.app.models.base import Base, BaseModel
 from backend.app.core.database_config import get_schema_name
+from backend.app.models.base import Base, BaseModel
 
 
 class LLMExperimentStatus(enum.Enum):
@@ -231,8 +231,8 @@ class LLMEvaluation(Base, BaseModel):
     estimated_cost_usd = Column(Float, default=0.0)
 
     # Evaluation scores (nullable — filled in post-hoc)
-    human_rating = Column(Float, nullable=True)       # 1–5 scale
-    auto_eval_score = Column(Float, nullable=True)    # LLM-as-judge: 0–1
+    human_rating = Column(Float, nullable=True)  # 1–5 scale
+    auto_eval_score = Column(Float, nullable=True)  # LLM-as-judge: 0–1
     business_metric_value = Column(Float, nullable=True)  # downstream metric
 
     # Relationships

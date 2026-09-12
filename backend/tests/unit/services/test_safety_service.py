@@ -6,31 +6,31 @@ feature flags for safety issues and rollback functionality.
 """
 
 import unittest
-from unittest.mock import MagicMock, patch, ANY
 from datetime import datetime, timedelta
+from unittest.mock import ANY, MagicMock, patch
 from uuid import uuid4
-import pytest
 
+import pytest
 from sqlalchemy.orm import Session
 
-from backend.app.models.safety import (
-    SafetySettings,
-    FeatureFlagSafetyConfig,
-    SafetyRollbackRecord,
-    RollbackTriggerType
-)
 from backend.app.models.feature_flag import FeatureFlag, FeatureFlagStatus
+from backend.app.models.safety import (
+    FeatureFlagSafetyConfig,
+    RollbackTriggerType,
+    SafetyRollbackRecord,
+    SafetySettings,
+)
 from backend.app.schemas.safety import (
-    SafetySettingsCreate,
-    SafetySettingsUpdate,
     FeatureFlagSafetyConfigCreate,
+    FeatureFlagSafetyConfigResponse,
     FeatureFlagSafetyConfigUpdate,
     HealthStatus,
     MetricThreshold,
-    SafetySettingsResponse,
-    FeatureFlagSafetyConfigResponse,
     RollbackResponse,
-    SafetyRollbackRecordCreate
+    SafetyRollbackRecordCreate,
+    SafetySettingsCreate,
+    SafetySettingsResponse,
+    SafetySettingsUpdate,
 )
 from backend.app.services.safety_service import SafetyService
 
@@ -56,7 +56,9 @@ class TestSafetyService:
         mock_response = MagicMock(spec=SafetySettingsResponse)
 
         # Mock the from_orm method
-        with patch.object(SafetySettingsResponse, 'model_validate', return_value=mock_response):
+        with patch.object(
+            SafetySettingsResponse, "model_validate", return_value=mock_response
+        ):
             # Call the async method
             result = await self.safety_service.async_get_safety_settings()
 
@@ -70,7 +72,9 @@ class TestSafetyService:
         mock_response = MagicMock(spec=SafetySettingsResponse)
 
         # Patch the entire method
-        with patch.object(self.safety_service, 'async_get_safety_settings', return_value=mock_response):
+        with patch.object(
+            self.safety_service, "async_get_safety_settings", return_value=mock_response
+        ):
             # Call the method
             result = await self.safety_service.async_get_safety_settings()
 
@@ -88,10 +92,9 @@ class TestSafetyService:
             enable_automatic_rollbacks=False,
             default_metrics={
                 "error_rate": MetricThreshold(
-                    warning_threshold=0.05,
-                    critical_threshold=0.1
+                    warning_threshold=0.05, critical_threshold=0.1
                 )
-            }
+            },
         )
 
         # Mock the created object
@@ -103,12 +106,18 @@ class TestSafetyService:
         self.db.refresh.side_effect = lambda obj: setattr(obj, "id", uuid4())
 
         # Mock SafetySettings constructor
-        with patch("backend.app.models.safety.SafetySettings", return_value=mock_settings):
+        with patch(
+            "backend.app.models.safety.SafetySettings", return_value=mock_settings
+        ):
             # Mock the from_orm method
             mock_response = MagicMock(spec=SafetySettingsResponse)
-            with patch.object(SafetySettingsResponse, 'model_validate', return_value=mock_response):
+            with patch.object(
+                SafetySettingsResponse, "model_validate", return_value=mock_response
+            ):
                 # Call the method
-                result = await self.safety_service.create_or_update_safety_settings(data)
+                result = await self.safety_service.create_or_update_safety_settings(
+                    data
+                )
 
                 # Assert that the ORM operations were called
                 self.db.add.assert_called_once()
@@ -120,19 +129,27 @@ class TestSafetyService:
 
     def test_get_feature_flag_safety_config(self):
         """Test getting a feature flag safety configuration."""
+
         # Create a class to patch the static method
         class MockSafetyService:
             @staticmethod
             def get_feature_flag_safety_config(db, feature_flag_id):
                 db.query(FeatureFlagSafetyConfig)
-                db.query.return_value.filter.return_value.first.return_value = MagicMock(spec=FeatureFlagSafetyConfig)
+                db.query.return_value.filter.return_value.first.return_value = (
+                    MagicMock(spec=FeatureFlagSafetyConfig)
+                )
                 return db.query.return_value.filter.return_value.first.return_value
 
         # Replace the static method with our mock
-        with patch.object(SafetyService, 'get_feature_flag_safety_config',
-                         MockSafetyService.get_feature_flag_safety_config):
+        with patch.object(
+            SafetyService,
+            "get_feature_flag_safety_config",
+            MockSafetyService.get_feature_flag_safety_config,
+        ):
             # Call the method
-            result = SafetyService.get_feature_flag_safety_config(self.db, self.feature_flag_id)
+            result = SafetyService.get_feature_flag_safety_config(
+                self.db, self.feature_flag_id
+            )
 
             # Since we're mocking at the method level, we can't check intermediate calls
             # Just verify we got a result
@@ -145,7 +162,9 @@ class TestSafetyService:
         self.db.query.return_value.filter.return_value.first.side_effect = [mock_config]
 
         # Call the method
-        result = SafetyService.get_or_create_safety_config(self.db, self.feature_flag_id)
+        result = SafetyService.get_or_create_safety_config(
+            self.db, self.feature_flag_id
+        )
 
         # Assert that the query was called correctly
         self.db.query.assert_called_once_with(FeatureFlagSafetyConfig)
@@ -162,13 +181,22 @@ class TestSafetyService:
         """Test getting a feature flag safety configuration using the async method."""
         # Mock the feature flag
         mock_feature_flag = MagicMock(spec=FeatureFlag)
-        self.db.query.return_value.filter.return_value.first.side_effect = [mock_feature_flag, MagicMock(spec=FeatureFlagSafetyConfig)]
+        self.db.query.return_value.filter.return_value.first.side_effect = [
+            mock_feature_flag,
+            MagicMock(spec=FeatureFlagSafetyConfig),
+        ]
 
         # Mock the from_orm method
         mock_response = MagicMock(spec=FeatureFlagSafetyConfigResponse)
-        with patch.object(FeatureFlagSafetyConfigResponse, 'model_validate', return_value=mock_response):
+        with patch.object(
+            FeatureFlagSafetyConfigResponse,
+            "model_validate",
+            return_value=mock_response,
+        ):
             # Call the method
-            result = await self.safety_service.async_get_feature_flag_safety_config(self.feature_flag_id)
+            result = await self.safety_service.async_get_feature_flag_safety_config(
+                self.feature_flag_id
+            )
 
             # Check the result
             assert result == mock_response
@@ -183,7 +211,7 @@ class TestSafetyService:
         # No existing config, but feature flag exists
         self.db.query.return_value.filter.return_value.first.side_effect = [
             mock_feature_flag,  # Feature flag check
-            None  # No existing config
+            None,  # No existing config
         ]
 
         # Mock the config to be created
@@ -199,16 +227,22 @@ class TestSafetyService:
             enabled=True,
             metrics={
                 "error_rate": MetricThreshold(
-                    warning_threshold=0.05,
-                    critical_threshold=0.1
+                    warning_threshold=0.05, critical_threshold=0.1
                 )
-            }
+            },
         )
 
         # Mock the constructor and from_orm
-        with patch("backend.app.models.safety.FeatureFlagSafetyConfig", return_value=mock_config):
+        with patch(
+            "backend.app.models.safety.FeatureFlagSafetyConfig",
+            return_value=mock_config,
+        ):
             mock_response = MagicMock(spec=FeatureFlagSafetyConfigResponse)
-            with patch.object(FeatureFlagSafetyConfigResponse, 'model_validate', return_value=mock_response):
+            with patch.object(
+                FeatureFlagSafetyConfigResponse,
+                "model_validate",
+                return_value=mock_response,
+            ):
                 # Call the method
                 result = await self.safety_service.create_or_update_feature_flag_safety_config(
                     self.feature_flag_id, config_data
@@ -225,27 +259,31 @@ class TestSafetyService:
         mock_feature_flag.id = self.feature_flag_id
         mock_feature_flag.rollout_percentage = 50
         mock_feature_flag.key = "test-flag"
-        self.db.query.return_value.filter.return_value.first.return_value = mock_feature_flag
+        self.db.query.return_value.filter.return_value.first.return_value = (
+            mock_feature_flag
+        )
         # execute_rollback locks the row (`with_for_update`) before updating it
         self.db.query.return_value.filter.return_value.with_for_update.return_value.first.return_value = mock_feature_flag
 
         # Patch the RollbackResponse creation - we'll use the actual class but control the validation
-        with patch.object(RollbackResponse, 'model_validate',
-                         return_value=RollbackResponse(
-                             success=True,
-                             feature_flag_id=self.feature_flag_id,
-                             message=f"Feature flag 'test-flag' rolled back from 50% to 0%",
-                             trigger_type="manual",
-                             previous_percentage=50,
-                             new_percentage=0,
-                             details={"reason": "Test rollback"}
-                         )):
-
+        with patch.object(
+            RollbackResponse,
+            "model_validate",
+            return_value=RollbackResponse(
+                success=True,
+                feature_flag_id=self.feature_flag_id,
+                message="Feature flag 'test-flag' rolled back from 50% to 0%",
+                trigger_type="manual",
+                previous_percentage=50,
+                new_percentage=0,
+                details={"reason": "Test rollback"},
+            ),
+        ):
             # Call the method
             result = await self.safety_service.async_rollback_feature_flag(
                 feature_flag_id=self.feature_flag_id,
                 percentage=0,
-                reason="Test rollback"
+                reason="Test rollback",
             )
 
             # Check the feature flag was updated
@@ -270,7 +308,7 @@ class TestSafetyService:
             trigger_type="manual",
             trigger_reason="Test rollback",
             previous_percentage=50,
-            target_percentage=0
+            target_percentage=0,
         )
 
         # Create actual output object (since the real method is being called)
@@ -285,11 +323,14 @@ class TestSafetyService:
             success=False,
             executed_by_user_id=user_id,  # This field exists in the model but not in the schema
             created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow()
+            updated_at=datetime.utcnow(),
         )
 
         # Patch the SafetyRollbackRecord class
-        with patch('backend.app.models.safety.SafetyRollbackRecord', return_value=expected_record):
+        with patch(
+            "backend.app.models.safety.SafetyRollbackRecord",
+            return_value=expected_record,
+        ):
             # Call the method
             result = SafetyService.create_rollback_record(self.db, data)
 

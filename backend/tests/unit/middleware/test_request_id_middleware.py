@@ -9,10 +9,11 @@ Covers:
 """
 
 import uuid
+
 import pytest
 from fastapi import FastAPI
-from starlette.testclient import TestClient
 from starlette.responses import JSONResponse
+from starlette.testclient import TestClient
 
 
 def _make_app() -> FastAPI:
@@ -42,7 +43,9 @@ def test_new_uuid_generated_when_absent():
     response = client.get("/ping")
 
     # Locate the header (headers dict is case-insensitive in httpx)
-    request_id = response.headers.get("x-request-id") or response.headers.get("X-Request-ID")
+    request_id = response.headers.get("x-request-id") or response.headers.get(
+        "X-Request-ID"
+    )
     assert request_id is not None
 
     # Must be a valid UUID
@@ -56,7 +59,9 @@ def test_existing_request_id_propagated():
     sent_id = "my-custom-request-id-abc"
     response = client.get("/ping", headers={"X-Request-ID": sent_id})
 
-    returned_id = response.headers.get("x-request-id") or response.headers.get("X-Request-ID")
+    returned_id = response.headers.get("x-request-id") or response.headers.get(
+        "X-Request-ID"
+    )
     assert returned_id == sent_id
 
 
@@ -76,7 +81,9 @@ def test_request_id_valid_uuid_format():
     client = TestClient(_make_app())
     response = client.get("/ping")
 
-    request_id = response.headers.get("x-request-id") or response.headers.get("X-Request-ID")
+    request_id = response.headers.get("x-request-id") or response.headers.get(
+        "X-Request-ID"
+    )
     # Should not raise
     parsed = uuid.UUID(str(request_id))
     assert parsed.version == 4

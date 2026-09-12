@@ -12,12 +12,13 @@ Tests cover:
 All endpoints are tested with mocked auth and mocked AI service.
 """
 
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
 from fastapi.testclient import TestClient
 
-from backend.app.main import app
 from backend.app.api import deps
+from backend.app.main import app
 from backend.app.models.user import User, UserRole
 from backend.app.services.ai_design_service import (
     AIDesignService,
@@ -27,10 +28,10 @@ from backend.app.services.ai_design_service import (
 )
 from backend.app.services.experiment_template_service import ExperimentTemplateService
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 def _make_user(role: UserRole = UserRole.DEVELOPER, is_superuser: bool = False) -> User:
     user = MagicMock(spec=User)
@@ -87,12 +88,16 @@ def client_no_auth():
 # POST /api/v1/ai/design
 # ---------------------------------------------------------------------------
 
+
 class TestDesignEndpoint:
     def test_design_endpoint_returns_200(self, client_with_developer):
         """POST /ai/design returns 200 with a valid design suggestion."""
         response = client_with_developer.post(
             "/api/v1/ai/design",
-            json={"description": "Test button colour to improve conversions", "experiment_type": "checkout"},
+            json={
+                "description": "Test button colour to improve conversions",
+                "experiment_type": "checkout",
+            },
         )
         assert response.status_code == 200
         data = response.json()
@@ -119,7 +124,9 @@ class TestDesignEndpoint:
         assert response.status_code == 200
         assert "confidence" in response.json()
 
-    def test_design_endpoint_template_based_when_no_api_key(self, client_with_developer):
+    def test_design_endpoint_template_based_when_no_api_key(
+        self, client_with_developer
+    ):
         """POST /ai/design returns 'template_based' confidence when AI is not available."""
         with patch.object(AIDesignService, "is_ai_available", return_value=False):
             response = client_with_developer.post(
@@ -133,6 +140,7 @@ class TestDesignEndpoint:
 # ---------------------------------------------------------------------------
 # POST /api/v1/ai/interpret/{experiment_id}
 # ---------------------------------------------------------------------------
+
 
 class TestInterpretEndpoint:
     def test_interpret_returns_200(self, client_with_developer):
@@ -184,12 +192,17 @@ class TestInterpretEndpoint:
                 },
             )
             assert response.status_code == 200
-            assert response.json()["recommendation"] in {"ship", "continue_testing", "stop_futility"}
+            assert response.json()["recommendation"] in {
+                "ship",
+                "continue_testing",
+                "stop_futility",
+            }
 
 
 # ---------------------------------------------------------------------------
 # GET /api/v1/ai/sample-size
 # ---------------------------------------------------------------------------
+
 
 class TestSampleSizeEndpoint:
     def test_sample_size_returns_200(self, client_with_developer):
@@ -226,6 +239,7 @@ class TestSampleSizeEndpoint:
 # GET /api/v1/ai/templates
 # ---------------------------------------------------------------------------
 
+
 class TestTemplatesListEndpoint:
     def test_templates_returns_list(self, client_with_developer):
         """GET /ai/templates returns a list of templates."""
@@ -237,7 +251,9 @@ class TestTemplatesListEndpoint:
 
     def test_templates_filter_by_checkout(self, client_with_developer):
         """GET /ai/templates?type=checkout filters by experiment type."""
-        response = client_with_developer.get("/api/v1/ai/templates", params={"type": "checkout"})
+        response = client_with_developer.get(
+            "/api/v1/ai/templates", params={"type": "checkout"}
+        )
         assert response.status_code == 200
         data = response.json()
         assert len(data) > 0
@@ -257,6 +273,7 @@ class TestTemplatesListEndpoint:
 # GET /api/v1/ai/templates/{template_id}
 # ---------------------------------------------------------------------------
 
+
 class TestTemplateSingleEndpoint:
     def test_get_single_template_returns_200(self, client_with_developer):
         """GET /ai/templates/{id} returns 200 for a known template."""
@@ -274,6 +291,7 @@ class TestTemplateSingleEndpoint:
 # ---------------------------------------------------------------------------
 # Authentication / RBAC tests
 # ---------------------------------------------------------------------------
+
 
 class TestAuthRequirements:
     def test_design_endpoint_requires_auth(self, client_no_auth):
@@ -306,6 +324,7 @@ class TestAuthRequirements:
 # ---------------------------------------------------------------------------
 # GET /api/v1/mcp/manifest
 # ---------------------------------------------------------------------------
+
 
 class TestMCPManifestEndpoint:
     def test_mcp_manifest_returns_200(self, client_no_auth):

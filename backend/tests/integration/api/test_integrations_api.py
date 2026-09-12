@@ -18,6 +18,7 @@ Permission model:
 
 All tests use the conftest.py role-specific client fixtures.
 """
+
 import hashlib
 import hmac as hmac_lib
 import json
@@ -30,10 +31,10 @@ from sqlalchemy.orm import Session
 from backend.app.models.integration_config import IntegrationConfig, IntegrationType
 from backend.app.models.user import User
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _create_integration_in_db(
     db_session: Session,
@@ -90,6 +91,7 @@ def _compute_github_signature(secret: str, body: bytes) -> str:
 # GET /api/v1/integrations — list all
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.integration
 @pytest.mark.requires_db
 class TestListIntegrations:
@@ -135,6 +137,7 @@ class TestListIntegrations:
 # GET /api/v1/integrations/{type} — single config
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.integration
 @pytest.mark.requires_db
 class TestGetIntegration:
@@ -173,6 +176,7 @@ class TestGetIntegration:
 # ---------------------------------------------------------------------------
 # POST /api/v1/integrations — create
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.integration
 @pytest.mark.requires_db
@@ -266,6 +270,7 @@ class TestCreateIntegration:
 # PUT /api/v1/integrations/{type} — update
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.integration
 @pytest.mark.requires_db
 class TestUpdateIntegration:
@@ -315,6 +320,7 @@ class TestUpdateIntegration:
 # DELETE /api/v1/integrations/{type} — delete
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.integration
 @pytest.mark.requires_db
 class TestDeleteIntegration:
@@ -347,12 +353,15 @@ class TestDeleteIntegration:
 # Webhook endpoints
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.integration
 @pytest.mark.requires_db
 class TestJiraWebhook:
     """Tests for POST /api/v1/integrations/webhooks/jira."""
 
-    def test_jira_webhook_returns_200_with_active_config(self, admin_client, db_session):
+    def test_jira_webhook_returns_200_with_active_config(
+        self, admin_client, db_session
+    ):
         """Jira webhook with active config returns 200 {status: received}."""
         _create_integration_in_db(
             db_session,
@@ -381,6 +390,7 @@ class TestJiraWebhook:
     def test_jira_webhook_invalid_json_returns_400(self, admin_client):
         """Jira webhook with non-JSON body returns 400."""
         from fastapi.testclient import TestClient
+
         response = admin_client.post(
             "/api/v1/integrations/webhooks/jira",
             content=b"not-json",
@@ -456,7 +466,9 @@ class TestGitHubWebhook:
         assert response.status_code == 200, response.text
         assert response.json()["status"] == "received"
 
-    def test_github_webhook_invalid_signature_returns_400(self, admin_client, db_session):
+    def test_github_webhook_invalid_signature_returns_400(
+        self, admin_client, db_session
+    ):
         """GitHub webhook with wrong HMAC signature returns 400.
 
         GitHubService.from_config() requires token, repo_owner, and repo_name
@@ -478,7 +490,9 @@ class TestGitHubWebhook:
             },
         )
 
-        bad_sig = "sha256=deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+        bad_sig = (
+            "sha256=deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+        )
         response = admin_client.post(
             "/api/v1/integrations/webhooks/github",
             content=body,

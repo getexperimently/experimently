@@ -11,8 +11,6 @@ Permission model:
       via HMAC or similar mechanism per integration)
 """
 
-import hashlib
-import hmac as hmac_lib
 import json
 import logging
 from typing import List
@@ -25,12 +23,12 @@ from backend.app.models.integration_config import IntegrationConfig, Integration
 from backend.app.models.user import User, UserRole
 from backend.app.schemas.integration import (
     IntegrationConfigCreate,
-    IntegrationConfigUpdate,
     IntegrationConfigResponse,
+    IntegrationConfigUpdate,
 )
+from backend.app.services.integrations.github_service import GitHubService
 from backend.app.services.integrations.jira_service import JiraService
 from backend.app.services.integrations.salesforce_service import SalesforceService
-from backend.app.services.integrations.github_service import GitHubService
 
 logger = logging.getLogger(__name__)
 
@@ -41,13 +39,16 @@ router = APIRouter()
 # Permission helpers
 # ---------------------------------------------------------------------------
 
+
 def _require_admin(current_user: User) -> None:
     """Raise HTTP 403 if the caller is not ADMIN (or superuser)."""
     if current_user.is_superuser:
         return
     if getattr(current_user, "role", None) == UserRole.ADMIN:
         return
-    raise HTTPException(status_code=403, detail="Only ADMIN users can manage integrations")
+    raise HTTPException(
+        status_code=403, detail="Only ADMIN users can manage integrations"
+    )
 
 
 def _require_admin_or_developer(current_user: User) -> None:
@@ -63,6 +64,7 @@ def _require_admin_or_developer(current_user: User) -> None:
 # ---------------------------------------------------------------------------
 # CRUD endpoints
 # ---------------------------------------------------------------------------
+
 
 @router.get("", response_model=List[IntegrationConfigResponse])
 def list_integrations(
@@ -187,6 +189,7 @@ def delete_integration(
 # Webhook endpoints
 # ---------------------------------------------------------------------------
 
+
 @router.post("/webhooks/jira", status_code=200)
 async def jira_webhook(
     request: Request,
@@ -217,7 +220,7 @@ async def jira_webhook(
             service = JiraService.from_config(config)
             if service:
                 service.parse_webhook_event(payload)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.warning("jira_webhook processing error: %s", exc)
 
     return {"status": "received"}
@@ -251,7 +254,7 @@ async def salesforce_webhook(
             service = SalesforceService.from_config(config)
             if service:
                 service.parse_webhook_event(payload)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.warning("salesforce_webhook processing error: %s", exc)
 
     return {"status": "received"}
@@ -288,17 +291,19 @@ async def github_webhook(
             service = GitHubService.from_config(config)
             if service and signature:
                 if not service.verify_webhook_signature(body, signature):
-                    raise HTTPException(status_code=400, detail="Invalid webhook signature")
+                    raise HTTPException(
+                        status_code=400, detail="Invalid webhook signature"
+                    )
                 try:
                     parsed = json.loads(body)
                     service.parse_webhook_event(event_type, parsed)
                 except HTTPException:
                     raise
-                except Exception as exc:  # noqa: BLE001
+                except Exception as exc:
                     logger.warning("github_webhook parse error: %s", exc)
         except HTTPException:
             raise
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.warning("github_webhook processing error: %s", exc)
 
     return {"status": "received"}

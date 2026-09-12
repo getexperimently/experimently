@@ -175,7 +175,7 @@ async def run_locked_tick(
             # Shutdown: release the lock (context manager) and propagate
             # without recording a bogus "failed" run.
             raise
-        except Exception as exc:  # noqa: BLE001 - recorded then re-raised
+        except Exception as exc:
             status = STATUS_FAILED
             error = str(exc) or exc.__class__.__name__
             exc_to_raise = exc
@@ -206,11 +206,11 @@ async def run_locked_tick(
 
 
 __all__ = [
-    "TickResult",
-    "TickOutcome",
-    "run_locked_tick",
-    "STATUS_SUCCESS",
-    "STATUS_PARTIAL",
     "STATUS_FAILED",
+    "STATUS_PARTIAL",
     "STATUS_SKIPPED",
+    "STATUS_SUCCESS",
+    "TickOutcome",
+    "TickResult",
+    "run_locked_tick",
 ]

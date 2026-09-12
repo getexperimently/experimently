@@ -4,15 +4,17 @@ Test cases for evaluation result caching.
 Tests the caching layer for rule evaluation results.
 """
 
-import pytest
 import time
-from backend.app.core.evaluation_cache import EvaluationCache, CacheKey, CacheEntry
+
+import pytest
+
+from backend.app.core.evaluation_cache import CacheEntry, CacheKey, EvaluationCache
 from backend.app.schemas.targeting_rule import (
-    TargetingRule,
-    RuleGroup,
     Condition,
     LogicalOperator,
-    OperatorType
+    OperatorType,
+    RuleGroup,
+    TargetingRule,
 )
 
 
@@ -21,11 +23,7 @@ class TestCacheKeyGeneration:
 
     def test_generate_cache_key(self):
         """Test basic cache key generation."""
-        user_context = {
-            "user_id": "user_123",
-            "country": "US",
-            "age": 25
-        }
+        user_context = {"user_id": "user_123", "country": "US", "age": 25}
 
         rule_id = "rule_1"
 
@@ -38,11 +36,7 @@ class TestCacheKeyGeneration:
 
     def test_same_inputs_same_key(self):
         """Test that same inputs produce same cache key."""
-        user_context = {
-            "user_id": "user_123",
-            "country": "US",
-            "age": 25
-        }
+        user_context = {"user_id": "user_123", "country": "US", "age": 25}
 
         rule_id = "rule_1"
 

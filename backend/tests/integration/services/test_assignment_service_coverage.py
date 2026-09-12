@@ -35,13 +35,13 @@ against explicitly in the relevant tests):
   re-raised and counted, so the failing user is counted in `errors` only
   and no row is committed for them.
 """
+
 import json
 import uuid
 from uuid import uuid4
 
 import pytest
 
-from backend.app.services.assignment_service import AssignmentService
 from backend.app.models.assignment import Assignment
 from backend.app.models.event import Event, EventType
 from backend.app.models.experiment import Experiment, ExperimentStatus, Variant
@@ -53,7 +53,7 @@ from backend.app.schemas.targeting_rule import (
     TargetingRule,
     TargetingRules,
 )
-
+from backend.app.services.assignment_service import AssignmentService
 
 pytestmark = [pytest.mark.integration, pytest.mark.requires_db]
 
@@ -61,6 +61,7 @@ pytestmark = [pytest.mark.integration, pytest.mark.requires_db]
 # ---------------------------------------------------------------------------
 # Local helpers
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def service(db_session):
@@ -91,6 +92,7 @@ def _uid(prefix):
 # get_assignment
 # ---------------------------------------------------------------------------
 
+
 class TestGetAssignment:
     def test_returns_none_when_no_assignment(self, service):
         result = service.get_assignment(_uid("nobody"), uuid4())
@@ -120,6 +122,7 @@ class TestGetAssignment:
 # ---------------------------------------------------------------------------
 # assign_user
 # ---------------------------------------------------------------------------
+
 
 class TestAssignUser:
     def test_new_assignment_created(self, service, make_experiment, make_variant):
@@ -191,10 +194,10 @@ class TestAssignUser:
             service.assign_user(_uid("assign-missing"), uuid4(), track_exposure=False)
 
     def test_inactive_experiment_raises(self, service, make_experiment, make_variant):
-        exp = make_experiment(
-            name="AssignUser Inactive", status=ExperimentStatus.DRAFT
+        exp = make_experiment(name="AssignUser Inactive", status=ExperimentStatus.DRAFT)
+        make_variant(
+            experiment=exp, name="Control", is_control=True, traffic_allocation=100
         )
-        make_variant(experiment=exp, name="Control", is_control=True, traffic_allocation=100)
 
         with pytest.raises(ValueError, match="Cannot assign users"):
             service.assign_user(_uid("assign-inactive"), exp.id, track_exposure=False)
@@ -221,7 +224,9 @@ class TestAssignUser:
             calls.append((user_id, experiment_id, variant_id, properties))
             return {}
 
-        monkeypatch.setattr(service.event_service, "track_exposure", fake_track_exposure)
+        monkeypatch.setattr(
+            service.event_service, "track_exposure", fake_track_exposure
+        )
 
         result = service.assign_user(
             user_id, exp.id, track_exposure=True, context={"platform": "web"}
@@ -286,6 +291,7 @@ class TestAssignUser:
 # get_user_assignments
 # ---------------------------------------------------------------------------
 
+
 class TestGetUserAssignments:
     def test_active_only_filters_inactive_experiments(
         self, service, make_experiment, make_variant, make_assignment
@@ -297,7 +303,10 @@ class TestGetUserAssignments:
             name="GetUserAssignments Draft", status=ExperimentStatus.DRAFT
         )
         draft_control = make_variant(
-            experiment=draft_exp, name="Control", is_control=True, traffic_allocation=100
+            experiment=draft_exp,
+            name="Control",
+            is_control=True,
+            traffic_allocation=100,
         )
 
         user_id = _uid("user-assignments")
@@ -343,8 +352,11 @@ class TestGetUserAssignments:
 # bulk_assign_users
 # ---------------------------------------------------------------------------
 
+
 class TestBulkAssignUsers:
-    def test_empty_user_list_returns_zero_counts(self, service, make_experiment, make_variant):
+    def test_empty_user_list_returns_zero_counts(
+        self, service, make_experiment, make_variant
+    ):
         exp, _ = _active_experiment(make_experiment, make_variant, "Bulk Empty")
         result = service.bulk_assign_users([], exp.id)
         assert result == {"assigned": 0, "skipped": 0, "errors": 0}
@@ -355,7 +367,9 @@ class TestBulkAssignUsers:
 
     def test_inactive_experiment_raises(self, service, make_experiment, make_variant):
         exp = make_experiment(name="Bulk Inactive", status=ExperimentStatus.DRAFT)
-        make_variant(experiment=exp, name="Control", is_control=True, traffic_allocation=100)
+        make_variant(
+            experiment=exp, name="Control", is_control=True, traffic_allocation=100
+        )
 
         with pytest.raises(ValueError, match="Cannot assign users"):
             service.bulk_assign_users([_uid("bulk-inactive")], exp.id)
@@ -399,7 +413,9 @@ class TestBulkAssignUsers:
         """When exposure tracking raises for a user, that user is counted
         in 'errors' only (not 'assigned'), and no Assignment row is
         committed for them; unaffected users are still assigned normally."""
-        exp, _ = _active_experiment(make_experiment, make_variant, "Bulk Exposure Error")
+        exp, _ = _active_experiment(
+            make_experiment, make_variant, "Bulk Exposure Error"
+        )
         user_ids = [_uid(f"bulk-err-{i}") for i in range(3)]
         flaky_user = user_ids[1]
 
@@ -408,7 +424,9 @@ class TestBulkAssignUsers:
                 raise RuntimeError("simulated exposure failure")
             return {}
 
-        monkeypatch.setattr(service.event_service, "track_exposure", flaky_track_exposure)
+        monkeypatch.setattr(
+            service.event_service, "track_exposure", flaky_track_exposure
+        )
 
         result = service.bulk_assign_users(user_ids, exp.id, track_exposure=True)
 
@@ -463,7 +481,9 @@ PREMIUM_RULES = {
 
 
 class TestAssignUserWithTargeting:
-    def _experiment_with_rules(self, db_session, make_experiment, make_variant, name, rules):
+    def _experiment_with_rules(
+        self, db_session, make_experiment, make_variant, name, rules
+    ):
         exp, variants = _active_experiment(make_experiment, make_variant, name)
         exp.targeting_rules = rules
         db_session.commit()
@@ -473,9 +493,7 @@ class TestAssignUserWithTargeting:
     def test_no_targeting_rules_assigns_everyone(
         self, service, db_session, make_experiment, make_variant
     ):
-        exp, _ = _active_experiment(
-            make_experiment, make_variant, "Targeting No Rules"
-        )
+        exp, _ = _active_experiment(make_experiment, make_variant, "Targeting No Rules")
         user_id = _uid("targeting-no-rules")
 
         result = service.assign_user_with_targeting(
@@ -516,7 +534,11 @@ class TestAssignUserWithTargeting:
         self, service, db_session, make_experiment, make_variant
     ):
         exp, _ = self._experiment_with_rules(
-            db_session, make_experiment, make_variant, "Targeting No Match", PREMIUM_RULES
+            db_session,
+            make_experiment,
+            make_variant,
+            "Targeting No Match",
+            PREMIUM_RULES,
         )
         user_id = _uid("targeting-no-match")
 
@@ -543,7 +565,11 @@ class TestAssignUserWithTargeting:
         self, service, db_session, make_experiment, make_variant, make_assignment
     ):
         exp, variants = self._experiment_with_rules(
-            db_session, make_experiment, make_variant, "Targeting Existing", PREMIUM_RULES
+            db_session,
+            make_experiment,
+            make_variant,
+            "Targeting Existing",
+            PREMIUM_RULES,
         )
         control = variants[0]
         user_id = _uid("targeting-existing")
@@ -568,7 +594,9 @@ class TestAssignUserWithTargeting:
 
     def test_inactive_experiment_raises(self, service, make_experiment, make_variant):
         exp = make_experiment(name="Targeting Inactive", status=ExperimentStatus.DRAFT)
-        make_variant(experiment=exp, name="Control", is_control=True, traffic_allocation=100)
+        make_variant(
+            experiment=exp, name="Control", is_control=True, traffic_allocation=100
+        )
 
         with pytest.raises(ValueError, match="Cannot assign users"):
             service.assign_user_with_targeting(
@@ -600,7 +628,11 @@ class TestAssignUserWithTargeting:
             ],
         }
         exp, _ = self._experiment_with_rules(
-            db_session, make_experiment, make_variant, "Targeting Validation Error", version_rules
+            db_session,
+            make_experiment,
+            make_variant,
+            "Targeting Validation Error",
+            version_rules,
         )
         user_id = _uid("targeting-invalid-version")
 
@@ -620,7 +652,11 @@ class TestAssignUserWithTargeting:
         self, service, db_session, make_experiment, make_variant, monkeypatch
     ):
         exp, _ = self._experiment_with_rules(
-            db_session, make_experiment, make_variant, "Targeting Exposure", PREMIUM_RULES
+            db_session,
+            make_experiment,
+            make_variant,
+            "Targeting Exposure",
+            PREMIUM_RULES,
         )
         user_id = _uid("targeting-exposure")
 
@@ -645,12 +681,22 @@ class TestAssignUserWithTargeting:
         assert properties["plan"] == "premium"
 
     def test_existing_assignment_tracks_exposure(
-        self, service, db_session, make_experiment, make_variant, make_assignment, monkeypatch
+        self,
+        service,
+        db_session,
+        make_experiment,
+        make_variant,
+        make_assignment,
+        monkeypatch,
     ):
         """Covers the exposure-tracking branch taken when a user already
         has an assignment (targeting rules are not re-evaluated)."""
         exp, variants = self._experiment_with_rules(
-            db_session, make_experiment, make_variant, "Targeting Existing Exposure", PREMIUM_RULES
+            db_session,
+            make_experiment,
+            make_variant,
+            "Targeting Existing Exposure",
+            PREMIUM_RULES,
         )
         control = variants[0]
         user_id = _uid("targeting-existing-exposure")
@@ -682,6 +728,7 @@ class TestAssignUserWithTargeting:
 # ---------------------------------------------------------------------------
 # _evaluate_experiment_targeting
 # ---------------------------------------------------------------------------
+
 
 class TestEvaluateExperimentTargeting:
     def test_no_rules_defined_eligible(self, service, make_experiment):
@@ -781,6 +828,7 @@ class TestEvaluateExperimentTargeting:
 # get_targeting_performance_stats / clear_targeting_metrics
 # ---------------------------------------------------------------------------
 
+
 class TestTargetingPerformanceStats:
     def test_empty_stats_before_any_evaluation(self, service):
         assert service.get_targeting_performance_stats() == {}
@@ -818,6 +866,7 @@ class TestTargetingPerformanceStats:
 # reassign_user
 # ---------------------------------------------------------------------------
 
+
 class TestReassignUser:
     def test_reassign_new_user_with_explicit_variant(
         self, service, make_experiment, make_variant
@@ -833,8 +882,12 @@ class TestReassignUser:
 
         assert result["variant_id"] == str(treatment.id)
 
-    def test_reassign_invalid_variant_raises(self, service, make_experiment, make_variant):
-        exp, _ = _active_experiment(make_experiment, make_variant, "Reassign Invalid Variant")
+    def test_reassign_invalid_variant_raises(
+        self, service, make_experiment, make_variant
+    ):
+        exp, _ = _active_experiment(
+            make_experiment, make_variant, "Reassign Invalid Variant"
+        )
         user_id = _uid("reassign-invalid-variant")
 
         with pytest.raises(ValueError, match="not valid for experiment"):
@@ -844,12 +897,16 @@ class TestReassignUser:
 
     def test_reassign_experiment_not_found_raises(self, service):
         with pytest.raises(ValueError, match="not found"):
-            service.reassign_user(_uid("reassign-missing"), uuid4(), track_exposure=False)
+            service.reassign_user(
+                _uid("reassign-missing"), uuid4(), track_exposure=False
+            )
 
     def test_reassign_uses_hash_when_no_variant_given(
         self, service, make_experiment, make_variant
     ):
-        exp, _ = _active_experiment(make_experiment, make_variant, "Reassign Hash Default")
+        exp, _ = _active_experiment(
+            make_experiment, make_variant, "Reassign Hash Default"
+        )
         user_id = _uid("reassign-hash")
 
         result = service.reassign_user(user_id, exp.id, track_exposure=False)
@@ -960,6 +1017,7 @@ class TestReassignUser:
 # _hash_user_to_variant
 # ---------------------------------------------------------------------------
 
+
 class TestHashUserToVariant:
     def test_deterministic_for_same_user_and_experiment(
         self, service, make_experiment, make_variant
@@ -1018,6 +1076,7 @@ class TestHashUserToVariant:
 # ---------------------------------------------------------------------------
 # delete_assignments_by_experiment
 # ---------------------------------------------------------------------------
+
 
 class TestDeleteAssignmentsByExperiment:
     def test_deletes_all_assignments_and_returns_count(

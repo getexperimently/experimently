@@ -17,7 +17,9 @@ Usage:
     export APP_ENV=test TESTING=true
     python -m pytest backend/tests/smoke/test_wiring.py -v
 """
+
 import inspect
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -25,10 +27,12 @@ from fastapi.testclient import TestClient
 # App fixture — real app, no mocks
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture(scope="module")
 def app():
     """Import and return the real FastAPI app (triggers full startup)."""
     from backend.app.main import app as _app
+
     return _app
 
 
@@ -43,6 +47,7 @@ def client(app):
 # 1. Database schema — column existence
 # ===========================================================================
 
+
 class TestDatabaseColumns:
     """
     Verify that critical columns declared in SQLAlchemy models actually exist
@@ -52,6 +57,7 @@ class TestDatabaseColumns:
 
     def test_user_model_has_role_column(self):
         from backend.app.models.user import User
+
         col_names = {c.key for c in User.__table__.columns}
         assert "role" in col_names, (
             "users.role column missing — run the Alembic migration that adds it"
@@ -59,6 +65,7 @@ class TestDatabaseColumns:
 
     def test_user_model_has_external_id_column(self):
         from backend.app.models.user import User
+
         col_names = {c.key for c in User.__table__.columns}
         assert "external_id" in col_names, (
             "users.external_id column missing — required for SSO/Cognito JIT provisioning"
@@ -66,34 +73,47 @@ class TestDatabaseColumns:
 
     def test_user_model_has_hashed_password_column(self):
         from backend.app.models.user import User
+
         col_names = {c.key for c in User.__table__.columns}
         assert "hashed_password" in col_names
 
     def test_user_model_has_is_active_column(self):
         from backend.app.models.user import User
+
         col_names = {c.key for c in User.__table__.columns}
         assert "is_active" in col_names
 
     def test_user_model_has_is_superuser_column(self):
         from backend.app.models.user import User
+
         col_names = {c.key for c in User.__table__.columns}
         assert "is_superuser" in col_names
 
     def test_user_role_column_has_correct_enum_values(self):
         from backend.app.models.user import User, UserRole
+
         role_col = User.__table__.columns["role"]
         # The column should be an Enum type
-        assert hasattr(role_col.type, "enums") or str(role_col.type.__class__.__name__) in ("Enum", "VARCHAR")
+        assert hasattr(role_col.type, "enums") or str(
+            role_col.type.__class__.__name__
+        ) in ("Enum", "VARCHAR")
         # UserRole enum must include all four roles
-        assert set(UserRole) == {UserRole.ADMIN, UserRole.DEVELOPER, UserRole.ANALYST, UserRole.VIEWER}
+        assert set(UserRole) == {
+            UserRole.ADMIN,
+            UserRole.DEVELOPER,
+            UserRole.ANALYST,
+            UserRole.VIEWER,
+        }
 
     def test_experiment_model_has_status_column(self):
         from backend.app.models.experiment import Experiment
+
         col_names = {c.key for c in Experiment.__table__.columns}
         assert "status" in col_names
 
     def test_feature_flag_model_has_status_column(self):
         from backend.app.models.feature_flag import FeatureFlag
+
         col_names = {c.key for c in FeatureFlag.__table__.columns}
         # FeatureFlag uses 'status' (ACTIVE/INACTIVE) rather than a boolean 'enabled'
         assert "status" in col_names, (
@@ -104,9 +124,12 @@ class TestDatabaseColumns:
         """EP-046 LLM experiments model wiring check."""
         try:
             from backend.app.models.llm_experiment import LLMExperiment
+
             col_names = {c.key for c in LLMExperiment.__table__.columns}
             for required in ("status", "task_type", "evaluation_metric"):
-                assert required in col_names, f"llm_experiments.{required} column missing"
+                assert required in col_names, (
+                    f"llm_experiments.{required} column missing"
+                )
         except ImportError:
             pytest.skip("LLMExperiment model not present (EP-046 not deployed)")
 
@@ -114,6 +137,7 @@ class TestDatabaseColumns:
         """EP-037 SSO config model wiring check."""
         try:
             from backend.app.models.sso_config import SSOConfig
+
             col_names = {c.key for c in SSOConfig.__table__.columns}
             for required in ("provider_type", "entity_id", "sso_url"):
                 assert required in col_names, f"sso_configs.{required} column missing"
@@ -124,6 +148,7 @@ class TestDatabaseColumns:
 # ===========================================================================
 # 2. CORS headers — middleware wiring
 # ===========================================================================
+
 
 class TestCORSWiring:
     """
@@ -182,7 +207,9 @@ class TestCORSWiring:
             f"Unexpected status {resp.status_code} from /health"
         )
         acao = resp.headers.get("access-control-allow-origin", "")
-        assert acao, "access-control-allow-origin header missing on GET from allowed origin"
+        assert acao, (
+            "access-control-allow-origin header missing on GET from allowed origin"
+        )
 
     def test_unknown_origin_does_not_get_acao(self, client):
         resp = client.get(
@@ -227,6 +254,7 @@ class TestCORSWiring:
 # 3. OAuth2 / auth wiring — no mocks
 # ===========================================================================
 
+
 class TestAuthWiring:
     """
     Verify auth wiring WITHOUT mocking deps.get_current_user.
@@ -243,6 +271,7 @@ class TestAuthWiring:
     @pytest.fixture
     def settings(self):
         from backend.app.core.config import settings as _settings
+
         return _settings
 
     @pytest.fixture
@@ -259,14 +288,18 @@ class TestAuthWiring:
         finally:
             app.dependency_overrides.pop(deps.get_db, None)
 
-    def test_unauthenticated_request_returns_401_when_bypass_off(self, client, settings, monkeypatch):
+    def test_unauthenticated_request_returns_401_when_bypass_off(
+        self, client, settings, monkeypatch
+    ):
         monkeypatch.setattr(settings, "DEV_AUTH_BYPASS", False)
         resp = client.get("/api/v1/experiments/")
         assert resp.status_code == 401, resp.text
         assert resp.json()["detail"]
         assert resp.headers.get("www-authenticate", "").lower().startswith("bearer")
 
-    def test_invalid_bearer_token_returns_401_when_bypass_off(self, client, settings, monkeypatch):
+    def test_invalid_bearer_token_returns_401_when_bypass_off(
+        self, client, settings, monkeypatch
+    ):
         monkeypatch.setattr(settings, "DEV_AUTH_BYPASS", False)
         resp = client.get(
             "/api/v1/experiments/",
@@ -274,7 +307,9 @@ class TestAuthWiring:
         )
         assert resp.status_code == 401, resp.text
 
-    def test_wrong_auth_scheme_returns_401_when_bypass_off(self, client, settings, monkeypatch):
+    def test_wrong_auth_scheme_returns_401_when_bypass_off(
+        self, client, settings, monkeypatch
+    ):
         monkeypatch.setattr(settings, "DEV_AUTH_BYPASS", False)
         resp = client.get(
             "/api/v1/experiments/",
@@ -282,7 +317,9 @@ class TestAuthWiring:
         )
         assert resp.status_code == 401, resp.text
 
-    def test_bypass_on_serves_request_as_dev_admin(self, client, settings, monkeypatch, db_override):
+    def test_bypass_on_serves_request_as_dev_admin(
+        self, client, settings, monkeypatch, db_override
+    ):
         monkeypatch.setattr(settings, "DEV_AUTH_BYPASS", True)
         assert settings.ENVIRONMENT == "test"
         resp = client.get("/api/v1/experiments/")
@@ -290,10 +327,17 @@ class TestAuthWiring:
 
         from backend.app.api import deps
         from backend.app.models.user import User
-        dev_user = db_override.query(User).filter(User.username == deps.DEV_BYPASS_USERNAME).first()
+
+        dev_user = (
+            db_override.query(User)
+            .filter(User.username == deps.DEV_BYPASS_USERNAME)
+            .first()
+        )
         assert dev_user is not None and dev_user.is_superuser
 
-    def test_bypass_is_ignored_outside_development_and_test(self, client, settings, monkeypatch):
+    def test_bypass_is_ignored_outside_development_and_test(
+        self, client, settings, monkeypatch
+    ):
         monkeypatch.setattr(settings, "DEV_AUTH_BYPASS", True)
         monkeypatch.setattr(settings, "ENVIRONMENT", "production")
         resp = client.get("/api/v1/experiments/")
@@ -354,6 +398,7 @@ class TestAuthWiring:
     def test_docs_endpoint_is_accessible(self, client):
         """/api/v1/openapi.json must return the schema without auth."""
         from backend.app.core.config import settings
+
         resp = client.get(f"{settings.API_V1_STR}/openapi.json")
         assert resp.status_code == 200
         data = resp.json()
@@ -364,6 +409,7 @@ class TestAuthWiring:
 # ===========================================================================
 # 4. Security headers — middleware wiring
 # ===========================================================================
+
 
 class TestSecurityHeaders:
     """
@@ -400,6 +446,7 @@ class TestSecurityHeaders:
 # ===========================================================================
 # 5. App startup — all routers register without import errors
 # ===========================================================================
+
 
 def _iter_http_routes(app):
     """Yield ``(path, methods)`` for every HTTP route the app serves.
@@ -453,6 +500,7 @@ class TestAppStartup:
     def test_openapi_schema_includes_llm_experiments(self, client):
         """Verify EP-046 LLM endpoints are wired into the schema."""
         from backend.app.core.config import settings
+
         resp = client.get(f"{settings.API_V1_STR}/openapi.json")
         data = resp.json()
         paths = data.get("paths", {})
@@ -464,6 +512,7 @@ class TestAppStartup:
     def test_openapi_schema_includes_warehouse_connectors(self, client):
         """Verify warehouse routers (Databricks, ClickHouse, MySQL) are wired."""
         from backend.app.core.config import settings
+
         resp = client.get(f"{settings.API_V1_STR}/openapi.json")
         data = resp.json()
         paths = data.get("paths", {})
@@ -475,6 +524,7 @@ class TestAppStartup:
     def test_openapi_schema_includes_power_calculator(self, client):
         """Verify EP-056 power calculator endpoints are wired."""
         from backend.app.core.config import settings
+
         resp = client.get(f"{settings.API_V1_STR}/openapi.json")
         data = resp.json()
         paths = data.get("paths", {})
@@ -486,6 +536,7 @@ class TestAppStartup:
     def test_openapi_schema_includes_workspaces(self, client):
         """Verify EP-057 workspace endpoints are wired into the schema."""
         from backend.app.core.config import settings
+
         resp = client.get(f"{settings.API_V1_STR}/openapi.json")
         paths = resp.json().get("paths", {})
         assert any("/workspaces" in p for p in paths), (
@@ -495,6 +546,7 @@ class TestAppStartup:
     def test_settings_loads_without_exception(self):
         """Config must be importable without crashing."""
         from backend.app.core.config import settings
+
         assert settings.PROJECT_NAME
         assert settings.API_V1_STR.startswith("/api")
 
@@ -515,17 +567,20 @@ class TestAppStartup:
             if not any(c in path for c in ["{", "}"])
         ]
         counts = Counter(route_keys)
-        duplicates = {f"{p} [{' '.join(sorted(m))}]": n for (p, m), n in counts.items() if n > 1}
+        duplicates = {
+            f"{p} [{' '.join(sorted(m))}]": n for (p, m), n in counts.items() if n > 1
+        }
         assert not duplicates, (
-            f"Duplicate (path + method) APIRoute registrations found:\n"
-            + "\n".join(f"  {k}: registered {v}x" for k, v in duplicates.items()) +
-            "\nA router may be included twice in api.py — the first registration silently wins."
+            "Duplicate (path + method) APIRoute registrations found:\n"
+            + "\n".join(f"  {k}: registered {v}x" for k, v in duplicates.items())
+            + "\nA router may be included twice in api.py — the first registration silently wins."
         )
 
 
 # ===========================================================================
 # 6. Service imports — critical services import without errors
 # ===========================================================================
+
 
 class TestServiceImports:
     """
@@ -535,43 +590,66 @@ class TestServiceImports:
     """
 
     def test_bayesian_service_imports(self):
-        from backend.app.services.bayesian_service import BayesianService, compute_posterior
+        from backend.app.services.bayesian_service import (
+            BayesianService,
+            compute_posterior,
+        )
+
         assert BayesianService is not None
 
     def test_cuped_service_imports(self):
         from backend.app.services.cuped_service import CupedService
+
         assert CupedService is not None
 
     def test_sequential_testing_service_imports(self):
-        from backend.app.services.sequential_testing_service import SequentialTestingService
+        from backend.app.services.sequential_testing_service import (
+            SequentialTestingService,
+        )
+
         assert SequentialTestingService is not None
 
     def test_bandit_service_imports(self):
-        from backend.app.services.bandit_service import ThompsonSampling, UCB1, EpsilonGreedy
+        from backend.app.services.bandit_service import (
+            UCB1,
+            EpsilonGreedy,
+            ThompsonSampling,
+        )
+
         assert ThompsonSampling is not None
         assert UCB1 is not None
         assert EpsilonGreedy is not None
 
     def test_llm_experiment_service_imports(self):
         from backend.app.services.llm_experiment_service import LLMExperimentService
+
         assert LLMExperimentService is not None
 
     def test_llm_analytics_service_imports(self):
-        from backend.app.services.llm_analytics_service import LLMEvaluationAnalyticsService
+        from backend.app.services.llm_analytics_service import (
+            LLMEvaluationAnalyticsService,
+        )
+
         assert LLMEvaluationAnalyticsService is not None
 
     def test_llm_proxy_service_imports(self):
-        from backend.app.services.llm_proxy_service import LLMProxyService, estimate_cost
+        from backend.app.services.llm_proxy_service import (
+            LLMProxyService,
+            estimate_cost,
+        )
+
         assert LLMProxyService is not None
 
     def test_workspace_service_imports(self):
         from backend.app.services.workspace_service import WorkspaceService
+
         assert WorkspaceService is not None
 
 
 # ===========================================================================
 # 7. Model imports — critical models import and have expected structure
 # ===========================================================================
+
 
 class TestModelImports:
     """
@@ -581,37 +659,44 @@ class TestModelImports:
 
     def test_llm_experiment_model_table_name(self):
         from backend.app.models.llm_experiment import LLMExperiment
+
         assert LLMExperiment.__tablename__ == "llm_experiments"
 
     def test_llm_variant_model_table_name(self):
         from backend.app.models.llm_experiment import LLMVariant
+
         assert LLMVariant.__tablename__ == "llm_variants"
 
     def test_llm_evaluation_model_table_name(self):
         from backend.app.models.llm_experiment import LLMEvaluation
+
         assert LLMEvaluation.__tablename__ == "llm_evaluations"
 
     def test_workspace_model_table_name(self):
         from backend.app.models.workspace import Workspace
+
         assert Workspace.__tablename__ == "workspaces"
 
     def test_workspace_member_model_table_name(self):
         from backend.app.models.workspace import WorkspaceMember
+
         assert WorkspaceMember.__tablename__ == "workspace_members"
 
     def test_llm_experiment_enums_exist(self):
         from backend.app.models.llm_experiment import (
-            LLMExperimentStatus,
-            LLMTaskType,
             LLMEvaluationMetric,
+            LLMExperimentStatus,
             LLMProvider,
+            LLMTaskType,
         )
+
         assert len(LLMExperimentStatus) >= 4
         assert len(LLMTaskType) >= 4
         assert len(LLMProvider) >= 4
 
     def test_workspace_enums_exist(self):
-        from backend.app.models.workspace import WorkspacePlan, WorkspaceMemberRole
+        from backend.app.models.workspace import WorkspaceMemberRole, WorkspacePlan
+
         assert len(WorkspacePlan) >= 3
         assert len(WorkspaceMemberRole) >= 5
 
@@ -619,6 +704,7 @@ class TestModelImports:
 # ===========================================================================
 # 8. OpenAPI schema — new feature endpoints registered
 # ===========================================================================
+
 
 class TestNewFeatureEndpoints:
     """
@@ -630,6 +716,7 @@ class TestNewFeatureEndpoints:
     def test_openapi_schema_includes_bandit(self, client):
         """Verify MAB/bandit endpoints are wired (Bayesian served via results)."""
         from backend.app.core.config import settings
+
         resp = client.get(f"{settings.API_V1_STR}/openapi.json")
         paths = resp.json().get("paths", {})
         bandit_paths = [p for p in paths if "bandit" in p.lower()]
@@ -640,6 +727,7 @@ class TestNewFeatureEndpoints:
     def test_openapi_schema_includes_sequential_testing(self, client):
         """Verify EP-021 sequential testing endpoints are wired."""
         from backend.app.core.config import settings
+
         resp = client.get(f"{settings.API_V1_STR}/openapi.json")
         paths = resp.json().get("paths", {})
         seq_paths = [p for p in paths if "sequential" in p.lower()]
@@ -650,6 +738,7 @@ class TestNewFeatureEndpoints:
     def test_openapi_schema_includes_cuped(self, client):
         """Verify CUPED variance reduction endpoints are wired."""
         from backend.app.core.config import settings
+
         resp = client.get(f"{settings.API_V1_STR}/openapi.json")
         paths = resp.json().get("paths", {})
         cuped_paths = [p for p in paths if "cuped" in p.lower()]
@@ -660,9 +749,12 @@ class TestNewFeatureEndpoints:
     def test_openapi_schema_includes_compliance(self, client):
         """Verify EP-033 compliance audit endpoints are wired."""
         from backend.app.core.config import settings
+
         resp = client.get(f"{settings.API_V1_STR}/openapi.json")
         paths = resp.json().get("paths", {})
-        compliance_paths = [p for p in paths if "compliance" in p.lower() or "audit" in p.lower()]
+        compliance_paths = [
+            p for p in paths if "compliance" in p.lower() or "audit" in p.lower()
+        ]
         assert compliance_paths, (
             "No compliance/audit paths in OpenAPI schema — EP-033 router not registered"
         )
@@ -670,6 +762,7 @@ class TestNewFeatureEndpoints:
     def test_openapi_schema_includes_integrations(self, client):
         """Verify EP-034 third-party integration endpoints are wired."""
         from backend.app.core.config import settings
+
         resp = client.get(f"{settings.API_V1_STR}/openapi.json")
         paths = resp.json().get("paths", {})
         int_paths = [p for p in paths if "integration" in p.lower()]

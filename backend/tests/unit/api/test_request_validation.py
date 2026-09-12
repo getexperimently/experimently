@@ -4,22 +4,23 @@ Request validation tests.
 This module contains tests for the Pydantic model validation system.
 """
 
-import pytest
 import uuid
-from pydantic import ValidationError
 from datetime import datetime, timezone
+
+import pytest
+from pydantic import ValidationError
 
 from backend.app.schemas.experiment import (
     ExperimentCreate,
-    ExperimentUpdate,
-    VariantBase,
-    MetricBase,
     ExperimentType,
+    ExperimentUpdate,
+    MetricBase,
     MetricType,
+    VariantBase,
 )
-from backend.app.schemas.user import UserCreate, PasswordChange
-from backend.app.schemas.tracking import EventRequest, AssignmentRequest
 from backend.app.schemas.feature_flag import FeatureFlagCreate
+from backend.app.schemas.tracking import AssignmentRequest, EventRequest
+from backend.app.schemas.user import PasswordChange, UserCreate
 
 
 class TestExperimentValidation:
@@ -172,7 +173,9 @@ class TestUserValidation:
             UserCreate(**weak_data)
 
         # Check that the error message matches Pydantic 2.x format
-        assert "Password must contain at least one uppercase letter" in str(excinfo.value)
+        assert "Password must contain at least one uppercase letter" in str(
+            excinfo.value
+        )
 
         # Test with weak password (no lowercase)
         weak_data = {
@@ -187,7 +190,9 @@ class TestUserValidation:
             UserCreate(**weak_data)
 
         # Check that the error message matches Pydantic 2.x format
-        assert "Password must contain at least one lowercase letter" in str(excinfo.value)
+        assert "Password must contain at least one lowercase letter" in str(
+            excinfo.value
+        )
 
         # Test with weak password (no digit)
         weak_data = {

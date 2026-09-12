@@ -36,6 +36,7 @@ class NotificationService:
     def _make_slack_notifier(self):
         try:
             from backend.app.services.slack_notifier import SlackNotifier
+
             return SlackNotifier()
         except Exception:
             return _NullNotifier()
@@ -43,6 +44,7 @@ class NotificationService:
     def _make_email_notifier(self):
         try:
             from backend.app.services.email_notifier import EmailNotifier
+
             return EmailNotifier()
         except Exception:
             return _NullNotifier()
@@ -68,6 +70,7 @@ class NotificationService:
             return
         try:
             from backend.app.models.notification import NotificationDeliveryLog
+
             record = NotificationDeliveryLog(
                 event_type=event_type,
                 channel=channel,
@@ -313,10 +316,12 @@ class NotificationService:
 # Null notifier — used when SDK is unavailable
 # ---------------------------------------------------------------------------
 
+
 class _NullNotifier:
     """No-op notifier that returns False for all calls."""
 
     def __getattr__(self, name):
         def _noop(*args, **kwargs):
             return False
+
         return _noop

@@ -13,3 +13,14 @@ repos:
       - id: check-case-conflict
 
   # Frontend checks
+
+  # Backend lint + format. Same ruff version and the same [tool.ruff] config as
+  # `make lint` and the `lint` CI job, so a clean commit is a green job.
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.7
+    hooks:
+      - id: ruff
+        args: [--fix]
+        files: ^backend/
+      - id: ruff-format
+        files: ^backend/

@@ -1,0 +1,23 @@
+# hadolint configuration for the four images (backend, frontend, demo/shoplab,
+# demo/streampulse). The `lint` workflow runs `hadolint` with this file; any
+# finding not listed here fails the job.
+#
+# Each ignored rule is a deliberate choice, not a backlog item:
+ignored:
+  # Pinning Debian/Alpine package versions makes the image unbuildable the
+  # moment the distro moves a point release. The base image tag is pinned
+  # instead, which is what actually reproduces a build.
+  - DL3008  # apt-get install without a version
+  - DL3018  # apk add without a version
+  # The only unpinned pip install is `pip install --upgrade pip`; every
+  # application dependency comes from a fully pinned requirements file.
+  - DL3013  # pip install without a version
+  # `USER appuser` / `USER nginx` / `USER node` are named accounts created in
+  # the image itself; the numeric-uid advice is for images mounted into hosts.
+  - DL3066  # non-numeric user id
+  # HEALTHCHECK/CMD use shell form on purpose: they expand ${PORT:-8000} and
+  # fall through to `|| exit 1`, neither of which works in exec form.
+  - DL3025  # CMD/ENTRYPOINT not in JSON notation
+  # Consecutive RUN layers in the demo images are split so the dependency
+  # install layer caches independently of the build layer.
+  - DL3059  # multiple consecutive RUN instructions

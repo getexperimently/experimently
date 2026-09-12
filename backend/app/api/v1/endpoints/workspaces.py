@@ -14,12 +14,8 @@ from sqlalchemy.orm import Session
 from backend.app.api.deps import get_current_active_user, get_db
 from backend.app.models.user import User
 from backend.app.models.workspace import (
-    ROLE_HIERARCHY,
     Workspace,
-    WorkspaceAPIKey,
-    WorkspaceInvite,
     WorkspaceMember,
-    WorkspaceMemberRole,
 )
 from backend.app.schemas.workspaces import (
     AddMemberRequest,
@@ -134,7 +130,9 @@ def create_workspace(
             description=payload.description,
         )
     except WorkspaceSlugInvalid as exc:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        )
     except WorkspaceSlugTaken as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
     return WorkspaceResponse(
@@ -310,7 +308,9 @@ def add_member(
     except AlreadyMember as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
     except PlanLimitExceeded as exc:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        )
 
     return _member_to_response(member)
 
@@ -337,7 +337,9 @@ def update_member_role(
     except WorkspaceMemberNotFound as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
     except CannotDemoteLastOwner as exc:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        )
 
     return _member_to_response(member)
 

@@ -170,7 +170,7 @@ bash sdk/java/examples/contract_smoke.sh
 # {"sdk":"java","assign":{"variant_name":"control","is_control":true,"sticky":true},"flag":{"enabled":true},"track":{"ok":true},"fanout":{"ok":true}}
 ```
 
-The script runs `mvn -q -pl core -am package -DskipTests` when `core/target` is stale (Maven output
+The script runs `./mvnw -q -B -pl core -am package -DskipTests` when `core/target` is stale (Maven output
 goes to stderr) and then `java -cp "core/target/classes:core/target/lib/*"
 com.experimentationplatform.sdk.examples.ContractSmoke`; `FORCE_BUILD=1` forces a rebuild. Env:
 `EXPERIMENTLY_API_URL` (default `http://localhost:8000`), `EXPERIMENTLY_API_KEY` (required),
@@ -183,5 +183,18 @@ Verified against a live backend: yes (2026-09-11)
 ## Tests
 
 ```bash
-cd sdk/java && mvn test   # core: 77 tests (MockWebServer); spring-boot-starter: 30 tests
+cd sdk/java && ./mvnw clean test   # core: 77 tests (MockWebServer); spring-boot-starter: 35 tests
 ```
+
+`./mvnw` pins Maven 3.9.9 and verifies the download against a SHA-256 in
+`.mvn/wrapper/maven-wrapper.properties` (no `maven-wrapper.jar` is committed —
+`distributionType=only-script`). The pin matters: `ExperimentationClientTest` is a `@Nested`-heavy
+JUnit 5 suite and only Surefire 3.x discovers those, so "whichever Maven the runner ships" must not
+be part of the answer.
+
+`clean` matters too. Without it a stale `target/classes` keeps a deleted
+`META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports` on the test
+classpath, and `ExperimentationStarterRegistrationTest` — the suite that checks the starter is
+actually registered rather than hand-instantiated — passes when it should not.
+
+Both run in `.github/workflows/sdk-unit-tests.yml`.

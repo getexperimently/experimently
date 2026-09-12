@@ -7,7 +7,7 @@ Ensures that the same user always gets the same variant for an experiment.
 
 import hashlib
 import struct
-from typing import List, Dict, Optional
+from typing import Dict, List, Optional
 
 
 class ConsistentHasher:
@@ -20,12 +20,11 @@ class ConsistentHasher:
     - Respect for traffic allocation percentages
     """
 
-    MURMURHASH_SEED = 0x9747b28c
+    MURMURHASH_SEED = 0x9747B28C
     MAX_HASH_VALUE = 0xFFFFFFFF  # 2^32 - 1
 
     def __init__(self):
         """Initialize the consistent hasher."""
-        pass
 
     def assign_variant(
         self,
@@ -33,7 +32,7 @@ class ConsistentHasher:
         experiment_key: str,
         variants: List[Dict[str, any]],
         traffic_allocation: float = 1.0,
-        salt: Optional[str] = None
+        salt: Optional[str] = None,
     ) -> Optional[str]:
         """
         Assign a user to a variant using consistent hashing.
@@ -67,7 +66,9 @@ class ConsistentHasher:
         # Validate variant allocations sum to ~1.0
         total_allocation = sum(v.get("allocation", 0) for v in variants)
         if not (0.99 <= total_allocation <= 1.01):
-            raise ValueError(f"Variant allocations must sum to 1.0, got {total_allocation}")
+            raise ValueError(
+                f"Variant allocations must sum to 1.0, got {total_allocation}"
+            )
 
         # Use experiment_key as salt if none provided
         hash_salt = salt or experiment_key
@@ -109,11 +110,11 @@ class ConsistentHasher:
             32-bit unsigned integer hash value
         """
         # Combine user_id and salt
-        combined = f"{user_id}:{salt}".encode('utf-8')
+        combined = f"{user_id}:{salt}".encode("utf-8")
 
         # Use MD5 for deterministic hashing (first 4 bytes as uint32)
         hash_bytes = hashlib.md5(combined).digest()[:4]
-        hash_value = struct.unpack('<I', hash_bytes)[0]
+        hash_value = struct.unpack("<I", hash_bytes)[0]
 
         return hash_value
 
@@ -132,10 +133,7 @@ class ConsistentHasher:
         return hash_value / (self.MAX_HASH_VALUE + 1)
 
     def get_bucket(
-        self,
-        user_id: str,
-        experiment_key: str,
-        num_buckets: int = 10000
+        self, user_id: str, experiment_key: str, num_buckets: int = 10000
     ) -> int:
         """
         Get the bucket number for a user in an experiment.

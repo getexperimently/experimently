@@ -17,11 +17,12 @@ Authentication:
   The key is validated against the api_keys table; the associated user's
   feature flags are returned.
 """
+
 from __future__ import annotations
 
 import hashlib
-import struct
 import logging
+import struct
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -100,7 +101,7 @@ def _hash_user(user_id: str, flag_key: str) -> float:
     hash_user("user-123", "my-flag") ≈ 0.69274
     """
     input_str = f"{user_id}:{flag_key}"
-    digest = hashlib.md5(input_str.encode("utf-8"), usedforsecurity=False).digest()  # noqa: S324
+    digest = hashlib.md5(input_str.encode("utf-8"), usedforsecurity=False).digest()
     (uint32,) = struct.unpack_from("<I", digest[:4])
     return uint32 / _HASH_DIVISOR
 
@@ -128,11 +129,17 @@ def _evaluate_flag(flag: FeatureFlag, user_id: str) -> EvaluateResponse:
         variant_hash = h / rollout_fraction if rollout_fraction > 0.0 else 0.0
         cumulative = 0.0
         for v in variants:
-            weight = v.get("weight", 0.0) if isinstance(v, dict) else getattr(v, "weight", 0.0)
+            weight = (
+                v.get("weight", 0.0)
+                if isinstance(v, dict)
+                else getattr(v, "weight", 0.0)
+            )
             cumulative += weight
             if variant_hash < cumulative:
                 v_key = v.get("key") if isinstance(v, dict) else getattr(v, "key", None)
-                v_val = v.get("value") if isinstance(v, dict) else getattr(v, "value", None)
+                v_val = (
+                    v.get("value") if isinstance(v, dict) else getattr(v, "value", None)
+                )
                 return EvaluateResponse(
                     value=v_val if v_val is not None else v_key,
                     variant=v_key,
@@ -141,8 +148,14 @@ def _evaluate_flag(flag: FeatureFlag, user_id: str) -> EvaluateResponse:
                 )
         # Fallback to last variant.
         last = variants[-1]
-        last_key = last.get("key") if isinstance(last, dict) else getattr(last, "key", None)
-        last_val = last.get("value") if isinstance(last, dict) else getattr(last, "value", None)
+        last_key = (
+            last.get("key") if isinstance(last, dict) else getattr(last, "key", None)
+        )
+        last_val = (
+            last.get("value")
+            if isinstance(last, dict)
+            else getattr(last, "value", None)
+        )
         return EvaluateResponse(
             value=last_val if last_val is not None else last_key,
             variant=last_key,
@@ -161,27 +174,31 @@ def _flag_to_definition(flag: FeatureFlag) -> FeatureFlagDefinition:
     variants = []
     for v in variants_raw:
         if isinstance(v, dict):
-            variants.append(FlagVariantResponse(
-                key=v.get("key", ""),
-                weight=float(v.get("weight", 0.0)),
-                value=v.get("value"),
-            ))
+            variants.append(
+                FlagVariantResponse(
+                    key=v.get("key", ""),
+                    weight=float(v.get("weight", 0.0)),
+                    value=v.get("value"),
+                )
+            )
 
     rules_raw = flag.targeting_rules or []
     rules = []
     for r in rules_raw:
         if isinstance(r, dict):
-            rules.append(TargetingRuleResponse(
-                attribute=r.get("attribute", ""),
-                operator=r.get("operator", "eq"),
-                value=r.get("value"),
-            ))
+            rules.append(
+                TargetingRuleResponse(
+                    attribute=r.get("attribute", ""),
+                    operator=r.get("operator", "eq"),
+                    value=r.get("value"),
+                )
+            )
 
     return FeatureFlagDefinition(
         key=flag.key,
-        enabled=flag.enabled if hasattr(flag, "enabled") else (
-            flag.status == FeatureFlagStatus.ACTIVE
-        ),
+        enabled=flag.enabled
+        if hasattr(flag, "enabled")
+        else (flag.status == FeatureFlagStatus.ACTIVE),
         rollout_percentage=float(flag.rollout_percentage or 0.0),
         variants=variants,
         rules=rules,
@@ -220,9 +237,7 @@ def get_openfeature_flags(
         flags = db.query(FeatureFlag).all()
     else:
         flags = (
-            db.query(FeatureFlag)
-            .filter(FeatureFlag.owner_id == api_key_user.id)
-            .all()
+            db.query(FeatureFlag).filter(FeatureFlag.owner_id == api_key_user.id).all()
         )
 
     definitions = [_flag_to_definition(f) for f in flags]
@@ -296,19 +311,23 @@ def bulk_evaluate_openfeature_flags(
     for body in bodies:
         flag = db.query(FeatureFlag).filter(FeatureFlag.key == body.flagKey).first()
         if flag is None:
-            results.append(EvaluateResponse(
-                value=None,
-                variant=None,
-                reason="FLAG_NOT_FOUND",
-                flagKey=body.flagKey,
-            ))
+            results.append(
+                EvaluateResponse(
+                    value=None,
+                    variant=None,
+                    reason="FLAG_NOT_FOUND",
+                    flagKey=body.flagKey,
+                )
+            )
         elif not api_key_user.is_superuser and flag.owner_id != api_key_user.id:
-            results.append(EvaluateResponse(
-                value=None,
-                variant=None,
-                reason="FORBIDDEN",
-                flagKey=body.flagKey,
-            ))
+            results.append(
+                EvaluateResponse(
+                    value=None,
+                    variant=None,
+                    reason="FORBIDDEN",
+                    flagKey=body.flagKey,
+                )
+            )
         else:
             results.append(_evaluate_flag(flag, body.userId))
 

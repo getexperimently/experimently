@@ -19,10 +19,10 @@ import pytest
 
 from backend.app.services.hipaa_service import HIPAAService
 
-
 # ---------------------------------------------------------------------------
 # Helpers / shared fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def svc() -> HIPAAService:
@@ -498,8 +498,8 @@ class TestGenerateHipaaReport:
         baas = baas or []
 
         def query_side_effect(model):
-            from backend.app.models.phi_audit_log import PHIAuditLog
             from backend.app.models.baa_config import BAAConfig
+            from backend.app.models.phi_audit_log import PHIAuditLog
 
             mock_q = MagicMock()
             mock_q.filter.return_value = mock_q

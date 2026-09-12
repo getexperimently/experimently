@@ -16,17 +16,20 @@ from sqlalchemy import (
     Index,
     String,
     Text,
-    Enum as SQLAEnum,
     func,
+)
+from sqlalchemy import (
+    Enum as SQLAEnum,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 
-from backend.app.models.base import Base
 from backend.app.core.database_config import get_schema_name
+from backend.app.models.base import Base
 
 
 class NotificationChannel(str, Enum):
     """Delivery channel for a notification."""
+
     SLACK = "slack"
     EMAIL = "email"
     WEBHOOK = "webhook"
@@ -34,6 +37,7 @@ class NotificationChannel(str, Enum):
 
 class NotificationStatus(str, Enum):
     """Delivery status recorded in the log."""
+
     SENT = "sent"
     FAILED = "failed"
     SKIPPED = "skipped"

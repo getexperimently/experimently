@@ -15,12 +15,12 @@ Covers the acceptance flow from the P0 contract:
 """
 
 import uuid
+from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker
-from unittest.mock import patch
 
 from backend.app.api import deps
 from backend.app.core.config import settings
@@ -34,7 +34,8 @@ pytestmark = pytest.mark.integration
 PASSWORD = "Demo1234!"
 WS_BASE = "/api/v1/ws/experiments"
 PATCH_SNAPSHOT = (
-    "backend.app.services.results_streaming_service." "ResultsStreamingService.get_live_snapshot"
+    "backend.app.services.results_streaming_service."
+    "ResultsStreamingService.get_live_snapshot"
 )
 
 
@@ -50,7 +51,12 @@ def _local_provider(monkeypatch):
 
 
 def _make_user(
-    db_session, *, role=UserRole.ADMIN, is_superuser=True, is_active=True, password=PASSWORD
+    db_session,
+    *,
+    role=UserRole.ADMIN,
+    is_superuser=True,
+    is_active=True,
+    password=PASSWORD,
 ):
     suffix = uuid.uuid4().hex[:8]
     user = User(
@@ -101,7 +107,9 @@ def real_auth_client(db_session):
 
 
 def _login(client, email, password=PASSWORD):
-    return client.post("/api/v1/auth/login", json={"email": email, "password": password})
+    return client.post(
+        "/api/v1/auth/login", json={"email": email, "password": password}
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -161,7 +169,10 @@ class TestLoginFlow:
         listed = real_auth_client.get("/api/v1/experiments/", headers=headers)
         assert listed.status_code == 200, listed.text
 
-        assert real_auth_client.post("/api/v1/auth/logout", headers=headers).status_code == 204
+        assert (
+            real_auth_client.post("/api/v1/auth/logout", headers=headers).status_code
+            == 204
+        )
 
     def test_email_case_insensitive(self, real_auth_client, admin):
         resp = _login(real_auth_client, admin.email.upper())
@@ -169,7 +180,9 @@ class TestLoginFlow:
 
     def test_viewer_role_in_me(self, real_auth_client, viewer):
         token = _login(real_auth_client, viewer.email).json()["access_token"]
-        me = real_auth_client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"})
+        me = real_auth_client.get(
+            "/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"}
+        )
         assert me.status_code == 200
         assert me.json()["role"] == "VIEWER"
         assert me.json()["is_superuser"] is False
@@ -181,7 +194,9 @@ class TestLoginFlow:
         assert resp.status_code == 200, resp.text
         assert resp.json()["user"]["id"] == str(admin.id)
         headers = {"Authorization": f"Bearer {resp.json()['access_token']}"}
-        assert real_auth_client.get("/api/v1/auth/me", headers=headers).status_code == 200
+        assert (
+            real_auth_client.get("/api/v1/auth/me", headers=headers).status_code == 200
+        )
 
     def test_wrong_password(self, real_auth_client, admin):
         resp = _login(real_auth_client, admin.email, "wrong-password")
@@ -199,11 +214,15 @@ class TestLoginFlow:
         assert resp.status_code == 401
         assert resp.json() == {"detail": "Invalid email or password"}
 
-    def test_deactivated_after_login_gets_400(self, real_auth_client, db_session, admin):
+    def test_deactivated_after_login_gets_400(
+        self, real_auth_client, db_session, admin
+    ):
         token = _login(real_auth_client, admin.email).json()["access_token"]
         admin.is_active = False
         db_session.commit()
-        resp = real_auth_client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"})
+        resp = real_auth_client.get(
+            "/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"}
+        )
         assert resp.status_code == 400
         assert resp.json()["detail"] == "Inactive user"
 
@@ -212,14 +231,20 @@ class TestLoginFlow:
         token = create_local_access_token(user)
         db_session.delete(user)
         db_session.commit()
-        resp = real_auth_client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"})
+        resp = real_auth_client.get(
+            "/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"}
+        )
         assert resp.status_code == 401
 
-    def test_token_signed_with_other_secret_is_rejected(self, real_auth_client, admin, monkeypatch):
+    def test_token_signed_with_other_secret_is_rejected(
+        self, real_auth_client, admin, monkeypatch
+    ):
         monkeypatch.setattr(settings, "SECRET_KEY", "x" * 64)
         token = create_local_access_token(admin)
         monkeypatch.setattr(settings, "SECRET_KEY", "y" * 64)
-        resp = real_auth_client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"})
+        resp = real_auth_client.get(
+            "/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"}
+        )
         assert resp.status_code == 401
 
 
@@ -268,7 +293,9 @@ class TestLockout:
 
 
 class TestBypass:
-    def test_bypass_on_serves_dev_admin(self, real_auth_client, db_session, monkeypatch):
+    def test_bypass_on_serves_dev_admin(
+        self, real_auth_client, db_session, monkeypatch
+    ):
         monkeypatch.setattr(settings, "DEV_AUTH_BYPASS", True)
         resp = real_auth_client.get("/api/v1/experiments/")
         assert resp.status_code == 200, resp.text
@@ -276,7 +303,11 @@ class TestBypass:
         assert me.status_code == 200
         assert me.json()["username"] == deps.DEV_BYPASS_USERNAME
         assert me.json()["role"] == "ADMIN"
-        assert db_session.query(User).filter(User.username == deps.DEV_BYPASS_USERNAME).first()
+        assert (
+            db_session.query(User)
+            .filter(User.username == deps.DEV_BYPASS_USERNAME)
+            .first()
+        )
 
     def test_bypass_ignored_outside_dev_test(self, real_auth_client, monkeypatch):
         monkeypatch.setattr(settings, "DEV_AUTH_BYPASS", True)
@@ -296,7 +327,9 @@ class TestWebSocketAuth:
     def test_query_token_accepted(self, real_auth_client, admin):
         token = create_local_access_token(admin)
         with patch(PATCH_SNAPSHOT, return_value=self._snapshot()):
-            with real_auth_client.websocket_connect(f"{WS_BASE}/exp-1/results?token={token}") as ws:
+            with real_auth_client.websocket_connect(
+                f"{WS_BASE}/exp-1/results?token={token}"
+            ) as ws:
                 data = ws.receive_json()
         assert data["event"] == "results_update"
 
@@ -324,7 +357,8 @@ class TestWebSocketAuth:
         token = create_local_access_token(admin)
         with patch(PATCH_SNAPSHOT, return_value=self._snapshot()):
             with real_auth_client.websocket_connect(
-                f"{WS_BASE}/exp-1/results?token=stale", subprotocols=["experimently.bearer", token]
+                f"{WS_BASE}/exp-1/results?token=stale",
+                subprotocols=["experimently.bearer", token],
             ) as ws:
                 data = ws.receive_json()
         assert data["event"] == "results_update"
@@ -345,7 +379,9 @@ class TestWebSocketAuth:
         assert message["code"] == 4401
 
     def test_invalid_token_closes_4401(self, real_auth_client):
-        with real_auth_client.websocket_connect(f"{WS_BASE}/exp-1/results?token=garbage") as ws:
+        with real_auth_client.websocket_connect(
+            f"{WS_BASE}/exp-1/results?token=garbage"
+        ) as ws:
             message = ws.receive()
         assert message["type"] == "websocket.close"
         assert message["code"] == 4401
@@ -353,7 +389,9 @@ class TestWebSocketAuth:
     def test_inactive_user_closes_4401(self, real_auth_client, db_session):
         user = _make_user(db_session, is_active=False)
         token = create_local_access_token(user)
-        with real_auth_client.websocket_connect(f"{WS_BASE}/exp-1/results?token={token}") as ws:
+        with real_auth_client.websocket_connect(
+            f"{WS_BASE}/exp-1/results?token={token}"
+        ) as ws:
             message = ws.receive()
         assert message["code"] == 4401
 

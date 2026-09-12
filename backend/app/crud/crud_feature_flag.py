@@ -5,11 +5,9 @@ This module provides database operations for FeatureFlag models.
 """
 
 from typing import Any, Dict, List, Optional, Union
-from uuid import UUID
 
 from fastapi.encoders import jsonable_encoder
 from sqlalchemy.orm import Session
-from sqlalchemy import func, or_
 
 from backend.app.crud.base import CRUDBase
 from backend.app.models.feature_flag import FeatureFlag, FeatureFlagStatus
@@ -44,12 +42,20 @@ class CRUDFeatureFlag(CRUDBase[FeatureFlag, FeatureFlagCreate, FeatureFlagUpdate
             The created feature flag
         """
         # Convert Pydantic model to dict
-        obj_in_data = obj_in.model_dump() if hasattr(obj_in, "model_dump") else jsonable_encoder(obj_in)
+        obj_in_data = (
+            obj_in.model_dump()
+            if hasattr(obj_in, "model_dump")
+            else jsonable_encoder(obj_in)
+        )
 
         # Handle is_active to status conversion
         if "is_active" in obj_in_data:
             is_active = obj_in_data.pop("is_active")
-            obj_in_data["status"] = FeatureFlagStatus.ACTIVE.value if is_active else FeatureFlagStatus.INACTIVE.value
+            obj_in_data["status"] = (
+                FeatureFlagStatus.ACTIVE.value
+                if is_active
+                else FeatureFlagStatus.INACTIVE.value
+            )
 
         # Remove any fields that don't exist in the model
         model_fields = [c.name for c in FeatureFlag.__table__.columns]
@@ -63,7 +69,11 @@ class CRUDFeatureFlag(CRUDBase[FeatureFlag, FeatureFlagCreate, FeatureFlagUpdate
         return db_obj
 
     def update(
-        self, db: Session, *, db_obj: FeatureFlag, obj_in: Union[FeatureFlagUpdate, Dict[str, Any]]
+        self,
+        db: Session,
+        *,
+        db_obj: FeatureFlag,
+        obj_in: Union[FeatureFlagUpdate, Dict[str, Any]],
     ) -> FeatureFlag:
         """
         Update a feature flag.
@@ -87,7 +97,11 @@ class CRUDFeatureFlag(CRUDBase[FeatureFlag, FeatureFlagCreate, FeatureFlagUpdate
         # Handle is_active to status conversion
         if "is_active" in update_data:
             is_active = update_data.pop("is_active")
-            update_data["status"] = FeatureFlagStatus.ACTIVE.value if is_active else FeatureFlagStatus.INACTIVE.value
+            update_data["status"] = (
+                FeatureFlagStatus.ACTIVE.value
+                if is_active
+                else FeatureFlagStatus.INACTIVE.value
+            )
 
         # Remove fields that don't exist in the model
         model_fields = [c.name for c in FeatureFlag.__table__.columns]
@@ -105,7 +119,11 @@ class CRUDFeatureFlag(CRUDBase[FeatureFlag, FeatureFlagCreate, FeatureFlagUpdate
         Returns:
             List of active feature flags
         """
-        return db.query(FeatureFlag).filter(FeatureFlag.status == FeatureFlagStatus.ACTIVE.value).all()
+        return (
+            db.query(FeatureFlag)
+            .filter(FeatureFlag.status == FeatureFlagStatus.ACTIVE.value)
+            .all()
+        )
 
     def activate(self, db: Session, *, db_obj: FeatureFlag) -> FeatureFlag:
         """

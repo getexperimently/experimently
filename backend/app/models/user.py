@@ -1,30 +1,31 @@
-from sqlalchemy import (
-    Column,
-    String,
-    Boolean,
-    Integer,
-    ForeignKey,
-    Table,
-    Enum,
-    Text,
-    DateTime,
-)
-from sqlalchemy.dialects.postgresql import UUID, JSONB
-from sqlalchemy.orm import relationship
-from sqlalchemy.ext.declarative import declared_attr
 import enum
 
-from .base import Base, BaseModel
+from sqlalchemy import (
+    Boolean,
+    Column,
+    Enum,
+    ForeignKey,
+    String,
+    Table,
+)
+from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.ext.declarative import declared_attr
+from sqlalchemy.orm import relationship
+
 from backend.app.core.database_config import get_schema_name
-import typing
+
+from .base import Base, BaseModel
+
 
 # Define UserRole enum for direct role assignment
 class UserRole(str, enum.Enum):
     """User roles in the system."""
+
     ADMIN = "admin"
     ANALYST = "analyst"
     DEVELOPER = "developer"
     VIEWER = "viewer"
+
 
 # Many-to-many relationship table for users and roles
 def _get_users_table_name():
@@ -99,21 +100,27 @@ class User(Base, BaseModel):
     feature_flags = relationship("FeatureFlag", back_populates="owner")
     reports = relationship("Report", back_populates="owner")
     audit_logs = relationship("AuditLog", back_populates="user")
-    api_keys = relationship("APIKey", back_populates="user", cascade="all, delete-orphan")
-    segments = relationship("Segment", back_populates="owner", cascade="all, delete-orphan")
-    rollout_schedules = relationship("RolloutSchedule", back_populates="owner", cascade="all, delete-orphan")
+    api_keys = relationship(
+        "APIKey", back_populates="user", cascade="all, delete-orphan"
+    )
+    segments = relationship(
+        "Segment", back_populates="owner", cascade="all, delete-orphan"
+    )
+    rollout_schedules = relationship(
+        "RolloutSchedule", back_populates="owner", cascade="all, delete-orphan"
+    )
 
     def __init__(self, **kwargs):
         """Initialize a user with proper handling of full_name and preferences."""
         # Extract full_name if present and not None
-        full_name = kwargs.pop('full_name', None)
+        full_name = kwargs.pop("full_name", None)
 
         # Extract preferences if present or set to default empty dict
-        preferences = kwargs.pop('preferences', {})
+        preferences = kwargs.pop("preferences", {})
 
         # Make sure we handle the case where full_name is passed but is None
-        if 'full_name' in kwargs:
-            kwargs.pop('full_name')
+        if "full_name" in kwargs:
+            kwargs.pop("full_name")
 
         # Initialize using parent class
         super().__init__(**kwargs)
@@ -140,7 +147,7 @@ class User(Base, BaseModel):
     def full_name(self, value):
         """Set first_name based on the full name provided."""
         if value:
-            parts = value.split(' ', 1)
+            parts = value.split(" ", 1)
             self.first_name = parts[0]
             self.last_name = parts[1] if len(parts) > 1 else None
         else:

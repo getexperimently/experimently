@@ -9,7 +9,7 @@ import base64
 import json
 import os
 import time
-from typing import Dict, Any, Optional, List
+from typing import Any, Dict, List, Optional
 
 
 def get_auth_header(token: str = None) -> Dict[str, str]:
@@ -33,7 +33,7 @@ def create_test_experiment(
     name: str = "Test Experiment",
     description: str = "Test description",
     status: str = "draft",
-    auth_token: str = None
+    auth_token: str = None,
 ) -> str:
     """
     Helper function to create a test experiment.
@@ -65,7 +65,7 @@ def create_test_experiment(
                 "description": "Treatment variant",
                 "is_control": False,
                 "traffic_allocation": 50,
-            }
+            },
         ],
         "metrics": [
             {
@@ -73,18 +73,22 @@ def create_test_experiment(
                 "description": "Percentage of users who convert",
                 "event_name": "conversion",
                 "metric_type": "conversion",
-                "is_primary": True
+                "is_primary": True,
             }
-        ]
+        ],
     }
 
     headers = get_auth_header(auth_token)
 
-    response = client.post("/api/v1/experiments/", json=experiment_data, headers=headers)
+    response = client.post(
+        "/api/v1/experiments/", json=experiment_data, headers=headers
+    )
 
     # Handle different response formats
     if response.status_code != 201:
-        print(f"Warning: Failed to create experiment: {response.status_code} - {response.text}")
+        print(
+            f"Warning: Failed to create experiment: {response.status_code} - {response.text}"
+        )
         return "test-experiment-id"  # Return dummy ID for testing
 
     try:
@@ -102,7 +106,7 @@ def create_test_feature_flag(
     status: str = "inactive",
     rollout_percentage: int = 0,
     targeting_rules: Optional[Dict[str, Any]] = None,
-    auth_token: str = None
+    auth_token: str = None,
 ) -> str:
     """
     Helper function to create a test feature flag.
@@ -126,7 +130,7 @@ def create_test_feature_flag(
         "description": description,
         "status": status,
         "rollout_percentage": rollout_percentage,
-        "targeting_rules": targeting_rules or {}
+        "targeting_rules": targeting_rules or {},
     }
 
     headers = get_auth_header(auth_token)
@@ -135,7 +139,9 @@ def create_test_feature_flag(
 
     # Handle different response formats
     if response.status_code != 201:
-        print(f"Warning: Failed to create feature flag: {response.status_code} - {response.text}")
+        print(
+            f"Warning: Failed to create feature flag: {response.status_code} - {response.text}"
+        )
         return "test-flag-id"  # Return dummy ID for testing
 
     try:
@@ -150,7 +156,7 @@ def generate_dummy_events(
     experiment_id: str,
     count: int = 100,
     segments: Optional[Dict[str, List[str]]] = None,
-    auth_token: str = None
+    auth_token: str = None,
 ) -> None:
     """
     Helper function to generate dummy event data for testing results endpoints.
@@ -176,7 +182,7 @@ def generate_dummy_events(
                 "user_id": user_id,
                 "experiment_key": experiment_id,  # Use experiment_key
                 "value": 1.0,
-                "metadata": {}
+                "metadata": {},
             }
 
             # Add segment data if provided
@@ -193,4 +199,4 @@ def generate_dummy_events(
             # client.post("/api/v1/tracking/track", json=event_data, headers=headers)
 
     except Exception as e:
-        print(f"Error generating dummy events: {str(e)}")
+        print(f"Error generating dummy events: {e!s}")

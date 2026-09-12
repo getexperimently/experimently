@@ -5,29 +5,28 @@ This module provides functionality for creating, updating, and managing
 rollout schedules for feature flags.
 """
 
-import logging
 from datetime import datetime, timezone
-from typing import List, Dict, Any, Optional, Union, Tuple
+from typing import List, Optional, Tuple
 from uuid import UUID
 
+from sqlalchemy import and_, func
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, or_, func
 
-from backend.app.models.feature_flag import FeatureFlag, FeatureFlagStatus
+from backend.app.core.logging import get_logger
+from backend.app.models.feature_flag import FeatureFlag
 from backend.app.models.rollout_schedule import (
     RolloutSchedule,
-    RolloutStage,
     RolloutScheduleStatus,
+    RolloutStage,
     RolloutStageStatus,
-    TriggerType
+    TriggerType,
 )
 from backend.app.schemas.rollout_schedule import (
     RolloutScheduleCreate,
     RolloutScheduleUpdate,
     RolloutStageCreate,
-    RolloutStageUpdate
+    RolloutStageUpdate,
 )
-from backend.app.core.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -45,9 +44,7 @@ class RolloutService:
 
     @staticmethod
     def create_rollout_schedule(
-        db: Session,
-        data: RolloutScheduleCreate,
-        owner_id: UUID
+        db: Session, data: RolloutScheduleCreate, owner_id: UUID
     ) -> RolloutSchedule:
         """
         Create a new rollout schedule with the provided stages.
@@ -61,9 +58,9 @@ class RolloutService:
             The created schedule
         """
         # First check if the feature flag exists
-        feature_flag = db.query(FeatureFlag).filter(
-            FeatureFlag.id == data.feature_flag_id
-        ).first()
+        feature_flag = (
+            db.query(FeatureFlag).filter(FeatureFlag.id == data.feature_flag_id).first()
+        )
 
         if not feature_flag:
             raise ValueError(f"Feature flag with ID {data.feature_flag_id} not found")
@@ -107,7 +104,9 @@ class RolloutService:
         return schedule
 
     @staticmethod
-    def get_rollout_schedule(db: Session, schedule_id: UUID) -> Optional[RolloutSchedule]:
+    def get_rollout_schedule(
+        db: Session, schedule_id: UUID
+    ) -> Optional[RolloutSchedule]:
         """
         Get a rollout schedule by ID.
 
@@ -118,7 +117,9 @@ class RolloutService:
         Returns:
             The schedule if found, None otherwise
         """
-        return db.query(RolloutSchedule).filter(RolloutSchedule.id == schedule_id).first()
+        return (
+            db.query(RolloutSchedule).filter(RolloutSchedule.id == schedule_id).first()
+        )
 
     @staticmethod
     def get_rollout_schedules(
@@ -127,7 +128,7 @@ class RolloutService:
         owner_id: Optional[UUID] = None,
         status: Optional[RolloutScheduleStatus] = None,
         skip: int = 0,
-        limit: int = 100
+        limit: int = 100,
     ) -> Tuple[List[RolloutSchedule], int]:
         """
         Get rollout schedules with optional filtering.
@@ -158,15 +159,18 @@ class RolloutService:
         total = query.count()
 
         # Apply pagination
-        schedules = query.order_by(RolloutSchedule.created_at.desc()).offset(skip).limit(limit).all()
+        schedules = (
+            query.order_by(RolloutSchedule.created_at.desc())
+            .offset(skip)
+            .limit(limit)
+            .all()
+        )
 
         return schedules, total
 
     @staticmethod
     def update_rollout_schedule(
-        db: Session,
-        schedule_id: UUID,
-        data: RolloutScheduleUpdate
+        db: Session, schedule_id: UUID, data: RolloutScheduleUpdate
     ) -> Optional[RolloutSchedule]:
         """
         Update an existing rollout schedule.
@@ -179,23 +183,29 @@ class RolloutService:
         Returns:
             The updated schedule if found, None otherwise
         """
-        schedule = db.query(RolloutSchedule).filter(RolloutSchedule.id == schedule_id).first()
+        schedule = (
+            db.query(RolloutSchedule).filter(RolloutSchedule.id == schedule_id).first()
+        )
 
         if not schedule:
             return None
 
         # Validate status transition
         if data.status and data.status != schedule.status:
-            if not RolloutService._validate_status_transition(schedule.status, data.status):
+            if not RolloutService._validate_status_transition(
+                schedule.status, data.status
+            ):
                 raise ValueError(
                     f"Invalid status transition from {schedule.status.value} to {data.status.value}"
                 )
 
             # If activating, ensure there's at least one stage
             if data.status == RolloutScheduleStatus.ACTIVE:
-                stages_count = db.query(RolloutStage).filter(
-                    RolloutStage.rollout_schedule_id == schedule_id
-                ).count()
+                stages_count = (
+                    db.query(RolloutStage)
+                    .filter(RolloutStage.rollout_schedule_id == schedule_id)
+                    .count()
+                )
 
                 if stages_count == 0:
                     raise ValueError("Cannot activate a schedule with no stages")
@@ -204,7 +214,7 @@ class RolloutService:
         update_data = data.model_dump(exclude_unset=True)
 
         # Handle stages update if provided
-        stages_data = update_data.pop('stages', None)
+        stages_data = update_data.pop("stages", None)
 
         for key, value in update_data.items():
             setattr(schedule, key, value)
@@ -212,15 +222,17 @@ class RolloutService:
         # Update stages if provided
         if stages_data:
             # First, update existing stages
-            existing_stages = db.query(RolloutStage).filter(
-                RolloutStage.rollout_schedule_id == schedule_id
-            ).all()
+            existing_stages = (
+                db.query(RolloutStage)
+                .filter(RolloutStage.rollout_schedule_id == schedule_id)
+                .all()
+            )
 
             # Create a lookup map for existing stages
             existing_stage_map = {stage.id: stage for stage in existing_stages}
 
             for stage_data in stages_data:
-                stage_id = getattr(stage_data, 'id', None)
+                stage_id = getattr(stage_data, "id", None)
 
                 if stage_id and stage_id in existing_stage_map:
                     # Update existing stage
@@ -240,9 +252,7 @@ class RolloutService:
 
     @staticmethod
     def add_rollout_stage(
-        db: Session,
-        schedule_id: UUID,
-        data: RolloutStageCreate
+        db: Session, schedule_id: UUID, data: RolloutStageCreate
     ) -> Optional[RolloutStage]:
         """
         Add a new stage to an existing rollout schedule.
@@ -255,15 +265,20 @@ class RolloutService:
         Returns:
             The created stage if successful, None otherwise
         """
-        schedule = db.query(RolloutSchedule).filter(RolloutSchedule.id == schedule_id).first()
+        schedule = (
+            db.query(RolloutSchedule).filter(RolloutSchedule.id == schedule_id).first()
+        )
 
         if not schedule:
             return None
 
         # Get max order of existing stages
-        max_order = db.query(func.max(RolloutStage.stage_order)).filter(
-            RolloutStage.rollout_schedule_id == schedule_id
-        ).scalar() or 0
+        max_order = (
+            db.query(func.max(RolloutStage.stage_order))
+            .filter(RolloutStage.rollout_schedule_id == schedule_id)
+            .scalar()
+            or 0
+        )
 
         # If no order is specified, put it at the end
         if data.stage_order is None:
@@ -271,12 +286,16 @@ class RolloutService:
 
         # If order is in the middle, we need to shift other stages
         if data.stage_order <= max_order:
-            stages_to_shift = db.query(RolloutStage).filter(
-                and_(
-                    RolloutStage.rollout_schedule_id == schedule_id,
-                    RolloutStage.stage_order >= data.stage_order
+            stages_to_shift = (
+                db.query(RolloutStage)
+                .filter(
+                    and_(
+                        RolloutStage.rollout_schedule_id == schedule_id,
+                        RolloutStage.stage_order >= data.stage_order,
+                    )
                 )
-            ).all()
+                .all()
+            )
 
             for stage in stages_to_shift:
                 stage.stage_order += 1
@@ -303,9 +322,7 @@ class RolloutService:
 
     @staticmethod
     def update_rollout_stage(
-        db: Session,
-        stage_id: UUID,
-        data: RolloutStageUpdate
+        db: Session, stage_id: UUID, data: RolloutStageUpdate
     ) -> Optional[RolloutStage]:
         """
         Update an existing rollout stage.
@@ -326,42 +343,56 @@ class RolloutService:
         # If changing order, handle order shifts
         if data.stage_order is not None and data.stage_order != stage.stage_order:
             # Get the schedule to validate
-            schedule = db.query(RolloutSchedule).filter(
-                RolloutSchedule.id == stage.rollout_schedule_id
-            ).first()
+            schedule = (
+                db.query(RolloutSchedule)
+                .filter(RolloutSchedule.id == stage.rollout_schedule_id)
+                .first()
+            )
 
             if not schedule:
                 raise ValueError("Schedule not found")
 
             # Don't allow changing order for stages that are not in PENDING status
             if stage.status != RolloutStageStatus.PENDING:
-                raise ValueError("Cannot change order of stages that are not in PENDING status")
+                raise ValueError(
+                    "Cannot change order of stages that are not in PENDING status"
+                )
 
             # Handle shifting other stages
             if data.stage_order > stage.stage_order:
                 # Moving down - shift up stages in between
-                stages_to_shift = db.query(RolloutStage).filter(
-                    and_(
-                        RolloutStage.rollout_schedule_id == stage.rollout_schedule_id,
-                        RolloutStage.stage_order > stage.stage_order,
-                        RolloutStage.stage_order <= data.stage_order,
-                        RolloutStage.id != stage.id
+                stages_to_shift = (
+                    db.query(RolloutStage)
+                    .filter(
+                        and_(
+                            RolloutStage.rollout_schedule_id
+                            == stage.rollout_schedule_id,
+                            RolloutStage.stage_order > stage.stage_order,
+                            RolloutStage.stage_order <= data.stage_order,
+                            RolloutStage.id != stage.id,
+                        )
                     )
-                ).all()
+                    .all()
+                )
 
                 for s in stages_to_shift:
                     s.stage_order -= 1
                     db.add(s)
             else:
                 # Moving up - shift down stages in between
-                stages_to_shift = db.query(RolloutStage).filter(
-                    and_(
-                        RolloutStage.rollout_schedule_id == stage.rollout_schedule_id,
-                        RolloutStage.stage_order < stage.stage_order,
-                        RolloutStage.stage_order >= data.stage_order,
-                        RolloutStage.id != stage.id
+                stages_to_shift = (
+                    db.query(RolloutStage)
+                    .filter(
+                        and_(
+                            RolloutStage.rollout_schedule_id
+                            == stage.rollout_schedule_id,
+                            RolloutStage.stage_order < stage.stage_order,
+                            RolloutStage.stage_order >= data.stage_order,
+                            RolloutStage.id != stage.id,
+                        )
                     )
-                ).all()
+                    .all()
+                )
 
                 for s in stages_to_shift:
                     s.stage_order += 1
@@ -370,8 +401,8 @@ class RolloutService:
         # Update fields
         update_data = data.model_dump(exclude_unset=True)
 
-        if 'trigger_type' in update_data:
-            update_data['trigger_type'] = TriggerType(update_data['trigger_type'].value)
+        if "trigger_type" in update_data:
+            update_data["trigger_type"] = TriggerType(update_data["trigger_type"].value)
 
         for key, value in update_data.items():
             setattr(stage, key, value)
@@ -404,9 +435,11 @@ class RolloutService:
             raise ValueError("Cannot delete stages that are not in PENDING status")
 
         # Get the schedule to validate
-        schedule = db.query(RolloutSchedule).filter(
-            RolloutSchedule.id == stage.rollout_schedule_id
-        ).first()
+        schedule = (
+            db.query(RolloutSchedule)
+            .filter(RolloutSchedule.id == stage.rollout_schedule_id)
+            .first()
+        )
 
         if not schedule:
             return False
@@ -416,12 +449,16 @@ class RolloutService:
             raise ValueError("Cannot delete stages from active schedules")
 
         # Update order of subsequent stages
-        stages_to_shift = db.query(RolloutStage).filter(
-            and_(
-                RolloutStage.rollout_schedule_id == stage.rollout_schedule_id,
-                RolloutStage.stage_order > stage.stage_order
+        stages_to_shift = (
+            db.query(RolloutStage)
+            .filter(
+                and_(
+                    RolloutStage.rollout_schedule_id == stage.rollout_schedule_id,
+                    RolloutStage.stage_order > stage.stage_order,
+                )
             )
-        ).all()
+            .all()
+        )
 
         for s in stages_to_shift:
             s.stage_order -= 1
@@ -434,7 +471,9 @@ class RolloutService:
         return True
 
     @staticmethod
-    def activate_rollout_schedule(db: Session, schedule_id: UUID) -> Optional[RolloutSchedule]:
+    def activate_rollout_schedule(
+        db: Session, schedule_id: UUID
+    ) -> Optional[RolloutSchedule]:
         """
         Activate a rollout schedule.
 
@@ -445,19 +484,28 @@ class RolloutService:
         Returns:
             The activated schedule if successful, None otherwise
         """
-        schedule = db.query(RolloutSchedule).filter(RolloutSchedule.id == schedule_id).first()
+        schedule = (
+            db.query(RolloutSchedule).filter(RolloutSchedule.id == schedule_id).first()
+        )
 
         if not schedule:
             return None
 
         # Validate status transition
-        if schedule.status != RolloutScheduleStatus.DRAFT and schedule.status != RolloutScheduleStatus.PAUSED:
-            raise ValueError(f"Cannot activate schedule in {schedule.status.value} status")
+        if (
+            schedule.status != RolloutScheduleStatus.DRAFT
+            and schedule.status != RolloutScheduleStatus.PAUSED
+        ):
+            raise ValueError(
+                f"Cannot activate schedule in {schedule.status.value} status"
+            )
 
         # Check that there's at least one stage
-        stages_count = db.query(RolloutStage).filter(
-            RolloutStage.rollout_schedule_id == schedule_id
-        ).count()
+        stages_count = (
+            db.query(RolloutStage)
+            .filter(RolloutStage.rollout_schedule_id == schedule_id)
+            .count()
+        )
 
         if stages_count == 0:
             raise ValueError("Cannot activate a schedule with no stages")
@@ -471,7 +519,9 @@ class RolloutService:
         return schedule
 
     @staticmethod
-    def pause_rollout_schedule(db: Session, schedule_id: UUID) -> Optional[RolloutSchedule]:
+    def pause_rollout_schedule(
+        db: Session, schedule_id: UUID
+    ) -> Optional[RolloutSchedule]:
         """
         Pause an active rollout schedule.
 
@@ -482,7 +532,9 @@ class RolloutService:
         Returns:
             The paused schedule if successful, None otherwise
         """
-        schedule = db.query(RolloutSchedule).filter(RolloutSchedule.id == schedule_id).first()
+        schedule = (
+            db.query(RolloutSchedule).filter(RolloutSchedule.id == schedule_id).first()
+        )
 
         if not schedule:
             return None
@@ -500,7 +552,9 @@ class RolloutService:
         return schedule
 
     @staticmethod
-    def cancel_rollout_schedule(db: Session, schedule_id: UUID) -> Optional[RolloutSchedule]:
+    def cancel_rollout_schedule(
+        db: Session, schedule_id: UUID
+    ) -> Optional[RolloutSchedule]:
         """
         Cancel a rollout schedule.
 
@@ -511,7 +565,9 @@ class RolloutService:
         Returns:
             The cancelled schedule if successful, None otherwise
         """
-        schedule = db.query(RolloutSchedule).filter(RolloutSchedule.id == schedule_id).first()
+        schedule = (
+            db.query(RolloutSchedule).filter(RolloutSchedule.id == schedule_id).first()
+        )
 
         if not schedule:
             return None
@@ -540,14 +596,18 @@ class RolloutService:
         Returns:
             True if the schedule was deleted, False otherwise
         """
-        schedule = db.query(RolloutSchedule).filter(RolloutSchedule.id == schedule_id).first()
+        schedule = (
+            db.query(RolloutSchedule).filter(RolloutSchedule.id == schedule_id).first()
+        )
 
         if not schedule:
             return False
 
         # Cannot delete active schedules
         if schedule.status == RolloutScheduleStatus.ACTIVE:
-            raise ValueError("Cannot delete an active schedule. Pause or cancel it first.")
+            raise ValueError(
+                "Cannot delete an active schedule. Pause or cancel it first."
+            )
 
         # Delete the schedule (cascades to stages)
         db.delete(schedule)
@@ -574,7 +634,9 @@ class RolloutService:
 
         # Must be a manual trigger type
         if stage.trigger_type != TriggerType.MANUAL:
-            raise ValueError("Can only manually advance stages with manual trigger type")
+            raise ValueError(
+                "Can only manually advance stages with manual trigger type"
+            )
 
         # Must be in PENDING or IN_PROGRESS status
         valid_statuses = [RolloutStageStatus.PENDING, RolloutStageStatus.IN_PROGRESS]
@@ -582,16 +644,20 @@ class RolloutService:
             raise ValueError(f"Cannot advance stage in {stage.status.value} status")
 
         # Get the schedule
-        schedule = db.query(RolloutSchedule).filter(
-            RolloutSchedule.id == stage.rollout_schedule_id
-        ).first()
+        schedule = (
+            db.query(RolloutSchedule)
+            .filter(RolloutSchedule.id == stage.rollout_schedule_id)
+            .first()
+        )
 
         if not schedule:
             raise ValueError("Schedule not found")
 
         # Schedule must be active
         if schedule.status != RolloutScheduleStatus.ACTIVE:
-            raise ValueError(f"Cannot advance stage for schedule in {schedule.status.value} status")
+            raise ValueError(
+                f"Cannot advance stage for schedule in {schedule.status.value} status"
+            )
 
         current_time = datetime.now(timezone.utc)
 
@@ -601,9 +667,12 @@ class RolloutService:
             stage.updated_at = current_time
 
             # Update feature flag percentage
-            feature_flag = db.query(FeatureFlag).filter(
-                FeatureFlag.id == schedule.feature_flag_id
-            ).with_for_update().first()
+            feature_flag = (
+                db.query(FeatureFlag)
+                .filter(FeatureFlag.id == schedule.feature_flag_id)
+                .with_for_update()
+                .first()
+            )
 
             if feature_flag:
                 feature_flag.rollout_percentage = stage.target_percentage
@@ -617,13 +686,18 @@ class RolloutService:
             stage.updated_at = current_time
 
             # Check for next stage
-            next_stage = db.query(RolloutStage).filter(
-                and_(
-                    RolloutStage.rollout_schedule_id == schedule.id,
-                    RolloutStage.stage_order > stage.stage_order,
-                    RolloutStage.status == RolloutStageStatus.PENDING
+            next_stage = (
+                db.query(RolloutStage)
+                .filter(
+                    and_(
+                        RolloutStage.rollout_schedule_id == schedule.id,
+                        RolloutStage.stage_order > stage.stage_order,
+                        RolloutStage.status == RolloutStageStatus.PENDING,
+                    )
                 )
-            ).order_by(RolloutStage.stage_order).first()
+                .order_by(RolloutStage.stage_order)
+                .first()
+            )
 
             if next_stage:
                 # Activate next stage
@@ -632,9 +706,12 @@ class RolloutService:
                 db.add(next_stage)
 
                 # Update feature flag percentage
-                feature_flag = db.query(FeatureFlag).filter(
-                    FeatureFlag.id == schedule.feature_flag_id
-                ).with_for_update().first()
+                feature_flag = (
+                    db.query(FeatureFlag)
+                    .filter(FeatureFlag.id == schedule.feature_flag_id)
+                    .with_for_update()
+                    .first()
+                )
 
                 if feature_flag:
                     feature_flag.rollout_percentage = next_stage.target_percentage
@@ -653,7 +730,9 @@ class RolloutService:
         return stage
 
     @staticmethod
-    def _validate_status_transition(current_status: RolloutScheduleStatus, new_status: RolloutScheduleStatus) -> bool:
+    def _validate_status_transition(
+        current_status: RolloutScheduleStatus, new_status: RolloutScheduleStatus
+    ) -> bool:
         """
         Validate if a status transition is allowed.
 
@@ -668,16 +747,16 @@ class RolloutService:
         allowed_transitions = {
             RolloutScheduleStatus.DRAFT: [
                 RolloutScheduleStatus.ACTIVE,
-                RolloutScheduleStatus.CANCELLED
+                RolloutScheduleStatus.CANCELLED,
             ],
             RolloutScheduleStatus.ACTIVE: [
                 RolloutScheduleStatus.PAUSED,
                 RolloutScheduleStatus.COMPLETED,
-                RolloutScheduleStatus.CANCELLED
+                RolloutScheduleStatus.CANCELLED,
             ],
             RolloutScheduleStatus.PAUSED: [
                 RolloutScheduleStatus.ACTIVE,
-                RolloutScheduleStatus.CANCELLED
+                RolloutScheduleStatus.CANCELLED,
             ],
             RolloutScheduleStatus.COMPLETED: [],  # No transitions from completed
             RolloutScheduleStatus.CANCELLED: [],  # No transitions from cancelled

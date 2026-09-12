@@ -42,8 +42,12 @@ RUN npm ci --no-audit --no-fund \
 COPY demo/streampulse /app/demo/streampulse
 
 ARG NEXT_PUBLIC_EXPERIMENTLY_API_URL=http://localhost:8000
+# The demo storefronts ship a NEXT_PUBLIC_ demo API key baked at build time:
+# it is a public, seeded, demo-only key, which is what NEXT_PUBLIC_ means.
+# hadolint ignore=DL3064
 ARG NEXT_PUBLIC_EXPERIMENTLY_API_KEY=""
 ARG NEXT_PUBLIC_EXPERIMENTLY_DASHBOARD_URL=http://localhost:3000
+# hadolint ignore=DL3064
 ENV NEXT_PUBLIC_EXPERIMENTLY_API_URL=${NEXT_PUBLIC_EXPERIMENTLY_API_URL} \
     NEXT_PUBLIC_EXPERIMENTLY_API_KEY=${NEXT_PUBLIC_EXPERIMENTLY_API_KEY} \
     NEXT_PUBLIC_EXPERIMENTLY_DASHBOARD_URL=${NEXT_PUBLIC_EXPERIMENTLY_DASHBOARD_URL}

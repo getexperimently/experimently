@@ -14,6 +14,7 @@ Each ``BanditScheduler.update_experiment`` tick must:
 The scheduler runs with DynamoDB patched out so PostgreSQL is the stats
 source.  Every row is deleted in fixture teardown.
 """
+
 import uuid
 from datetime import datetime, timezone
 from unittest.mock import patch

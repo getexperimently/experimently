@@ -12,18 +12,18 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from backend.app.main import app
 from backend.app.api import deps
-from backend.app.models.user import User, UserRole
+from backend.app.main import app
 from backend.app.models.mutual_exclusion_group import (
     MutualExclusionGroup,
     MutualExclusionGroupStatus,
 )
-
+from backend.app.models.user import User, UserRole
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_user(role=UserRole.DEVELOPER, is_superuser=False):
     user = MagicMock(spec=User)
@@ -59,6 +59,7 @@ def _make_group(
 # ---------------------------------------------------------------------------
 # Test: List groups
 # ---------------------------------------------------------------------------
+
 
 class TestListGroups:
     """GET /api/v1/mutual-exclusion-groups"""
@@ -150,6 +151,7 @@ class TestListGroups:
 # Test: Create group
 # ---------------------------------------------------------------------------
 
+
 class TestCreateGroup:
     """POST /api/v1/mutual-exclusion-groups"""
 
@@ -240,6 +242,7 @@ class TestCreateGroup:
 # Test: Get group
 # ---------------------------------------------------------------------------
 
+
 class TestGetGroup:
     """GET /api/v1/mutual-exclusion-groups/{group_id}"""
 
@@ -292,6 +295,7 @@ class TestGetGroup:
 # ---------------------------------------------------------------------------
 # Test: Update group
 # ---------------------------------------------------------------------------
+
 
 class TestUpdateGroup:
     """PUT /api/v1/mutual-exclusion-groups/{group_id}"""
@@ -350,6 +354,7 @@ class TestUpdateGroup:
 # ---------------------------------------------------------------------------
 # Test: Archive group
 # ---------------------------------------------------------------------------
+
 
 class TestArchiveGroup:
     """DELETE /api/v1/mutual-exclusion-groups/{group_id}"""
@@ -426,6 +431,7 @@ class TestArchiveGroup:
 # ---------------------------------------------------------------------------
 # Test: Add experiment to group
 # ---------------------------------------------------------------------------
+
 
 class TestAddExperimentToGroup:
     """POST /api/v1/mutual-exclusion-groups/{group_id}/experiments"""
@@ -515,6 +521,7 @@ class TestAddExperimentToGroup:
 # ---------------------------------------------------------------------------
 # Test: Remove experiment from group
 # ---------------------------------------------------------------------------
+
 
 class TestRemoveExperimentFromGroup:
     """DELETE /api/v1/mutual-exclusion-groups/{group_id}/experiments/{experiment_id}"""

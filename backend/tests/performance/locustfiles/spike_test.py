@@ -22,11 +22,12 @@ Usage (interactive web UI):
     locust -f spike_test.py --host http://localhost:8000
     # Then open http://localhost:8089 in your browser
 """
+
 import os
 import random
 import uuid
 
-from locust import HttpUser, task, between, LoadTestShape
+from locust import HttpUser, LoadTestShape, between, task
 
 # ---------------------------------------------------------------------------
 # Test data
@@ -59,9 +60,9 @@ class SpikeTestShape(LoadTestShape):
     """
 
     stages: list[dict[str, int]] = [
-        {"duration": 30, "users": 10, "spawn_rate": 10},    # Baseline
+        {"duration": 30, "users": 10, "spawn_rate": 10},  # Baseline
         {"duration": 60, "users": 1000, "spawn_rate": 100},  # Spike ramp
-        {"duration": 90, "users": 1000, "spawn_rate": 1},   # Sustain peak
+        {"duration": 90, "users": 1000, "spawn_rate": 1},  # Sustain peak
         {"duration": 120, "users": 10, "spawn_rate": 100},  # Recovery
     ]
 

@@ -12,7 +12,7 @@ Tests cover:
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 
@@ -20,13 +20,12 @@ from backend.app.models.experiment import Experiment, ExperimentStatus
 from backend.app.schemas.bayesian import (
     BayesianConfig,
     BayesianDecision,
+    BayesianPosteriorResult,
     BayesianResultsResponse,
     BayesianVariantResult,
-    BayesianPosteriorResult,
 )
 from backend.app.services.analysis_service import AnalysisService
 from backend.app.services.bayesian_service import BayesianService
-
 
 # ---------------------------------------------------------------------------
 # Helpers / Factories
@@ -148,8 +147,7 @@ class TestAnalysisServiceBayesianIntegration:
         experiment = _make_mock_experiment()
         n_variants = len(experiment.variants)
         metrics_data = {
-            str(v.id): {"conversions": 100, "total": 1000}
-            for v in experiment.variants
+            str(v.id): {"conversions": 100, "total": 1000} for v in experiment.variants
         }
 
         result = analysis_service._compute_bayesian_results(experiment, metrics_data)
@@ -161,13 +159,12 @@ class TestAnalysisServiceBayesianIntegration:
         """The decision field must be a valid BayesianDecision value."""
         experiment = _make_mock_experiment()
         metrics_data = {
-            str(v.id): {"conversions": 100, "total": 1000}
-            for v in experiment.variants
+            str(v.id): {"conversions": 100, "total": 1000} for v in experiment.variants
         }
 
         result = analysis_service._compute_bayesian_results(experiment, metrics_data)
 
-        valid_decisions = {d for d in BayesianDecision}
+        valid_decisions = set(BayesianDecision)
         assert result.decision in valid_decisions, (
             f"Invalid decision {result.decision!r}"
         )
@@ -186,8 +183,7 @@ class TestAnalysisServiceBayesianIntegration:
         }
         experiment = _make_mock_experiment(bayesian_config=config)
         metrics_data = {
-            str(v.id): {"conversions": 50, "total": 500}
-            for v in experiment.variants
+            str(v.id): {"conversions": 50, "total": 500} for v in experiment.variants
         }
 
         with patch(
@@ -265,8 +261,7 @@ class TestAnalysisServiceBayesianIntegration:
         """Each probability_to_be_best value must be in [0, 1]."""
         experiment = _make_mock_experiment()
         metrics_data = {
-            str(v.id): {"conversions": 100, "total": 1000}
-            for v in experiment.variants
+            str(v.id): {"conversions": 100, "total": 1000} for v in experiment.variants
         }
 
         result = analysis_service._compute_bayesian_results(experiment, metrics_data)
@@ -283,8 +278,7 @@ class TestAnalysisServiceBayesianIntegration:
         """Each expected_loss value must be >= 0."""
         experiment = _make_mock_experiment()
         metrics_data = {
-            str(v.id): {"conversions": 100, "total": 1000}
-            for v in experiment.variants
+            str(v.id): {"conversions": 100, "total": 1000} for v in experiment.variants
         }
 
         result = analysis_service._compute_bayesian_results(experiment, metrics_data)
@@ -309,17 +303,13 @@ class TestGetExperimentResultsBayesian:
         return db
 
     @pytest.mark.unit
-    def test_get_results_includes_bayesian_results_key_when_enabled(
-        self, mock_db
-    ):
+    def test_get_results_includes_bayesian_results_key_when_enabled(self, mock_db):
         """
         When bayesian_enabled=True and bayesian_config is set,
         get_experiment_results() must include 'bayesian_results' in the returned dict.
         """
         experiment = _make_mock_experiment(bayesian_enabled=True)
-        mock_db.query.return_value.options.return_value.filter.return_value.first.return_value = (
-            experiment
-        )
+        mock_db.query.return_value.options.return_value.filter.return_value.first.return_value = experiment
         # Mock scalar queries for assignments/events to return 0
         mock_db.query.return_value.filter.return_value.scalar.return_value = 0
 
@@ -345,9 +335,7 @@ class TestGetExperimentResultsBayesian:
         When bayesian_enabled=False, bayesian_results must be None in the dict.
         """
         experiment = _make_mock_experiment(bayesian_enabled=False)
-        mock_db.query.return_value.options.return_value.filter.return_value.first.return_value = (
-            experiment
-        )
+        mock_db.query.return_value.options.return_value.filter.return_value.first.return_value = experiment
         mock_db.query.return_value.filter.return_value.scalar.return_value = 0
 
         service = AnalysisService(mock_db)
@@ -364,9 +352,7 @@ class TestGetExperimentResultsBayesian:
         experiment.bayesian_decision.
         """
         experiment = _make_mock_experiment(bayesian_enabled=True)
-        mock_db.query.return_value.options.return_value.filter.return_value.first.return_value = (
-            experiment
-        )
+        mock_db.query.return_value.options.return_value.filter.return_value.first.return_value = experiment
         mock_db.query.return_value.filter.return_value.scalar.return_value = 0
 
         service = AnalysisService(mock_db)
@@ -408,13 +394,10 @@ class TestExperimentSchedulerBayesianStopping:
         from backend.app.core.scheduler import ExperimentScheduler
 
         scheduler = ExperimentScheduler()
-        has_method = (
-            hasattr(scheduler, "process_bayesian_stops")
-            or hasattr(scheduler, "process_scheduled_experiments")
+        has_method = hasattr(scheduler, "process_bayesian_stops") or hasattr(
+            scheduler, "process_scheduled_experiments"
         )
-        assert has_method, (
-            "ExperimentScheduler must have bayesian stop logic"
-        )
+        assert has_method, "ExperimentScheduler must have bayesian stop logic"
 
     @pytest.mark.unit
     @pytest.mark.asyncio
@@ -481,6 +464,7 @@ class TestExperimentSchedulerBayesianStopping:
         that bayesian stop experiments are processed.
         """
         import inspect
+
         from backend.app.core.scheduler import ExperimentScheduler
 
         source = inspect.getsource(ExperimentScheduler.process_scheduled_experiments)
