@@ -70,6 +70,11 @@ services:
     environment:
       # --- edition / environment ---
       ENVIRONMENT: ${ENVIRONMENT:-development}
+      # Enterprise licence (optional). Mint a development one with
+      # `python scripts/make_dev_license.py --env-file .env`; compose reads
+      # `.env` next to this file. Without a key the stack is Community.
+      EXPERIMENTLY_LICENSE_KEY: ${EXPERIMENTLY_LICENSE_KEY:-}
+      EXPERIMENTLY_DEV_LICENSE_PUBLIC_KEY: ${EXPERIMENTLY_DEV_LICENSE_PUBLIC_KEY:-}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       LOG_FORMAT: ${LOG_FORMAT:-console}          # json | console
       WEB_CONCURRENCY: ${WEB_CONCURRENCY:-1}       # 1 worker per container; scale containers instead

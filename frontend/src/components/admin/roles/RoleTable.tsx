@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { CustomRole } from '@/types/admin';
-import { AdminService } from '@/services/admin';
+import { RbacService } from '@ee/rbac';
 
 interface RoleTableProps {
   onEditRole: (role: CustomRole) => void;
@@ -15,7 +15,7 @@ export function RoleTable({ onEditRole }: RoleTableProps) {
     setLoading(true);
     setError(null);
     try {
-      const data = await AdminService.listRoles();
+      const data = await RbacService.listRoles();
       setRoles(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch roles');
@@ -35,7 +35,7 @@ export function RoleTable({ onEditRole }: RoleTableProps) {
     if (!confirmed) return;
 
     try {
-      await AdminService.deleteRole(role.name);
+      await RbacService.deleteRole(role.name);
       await fetchRoles();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete role');

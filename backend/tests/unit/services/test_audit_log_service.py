@@ -157,6 +157,7 @@ class TestAuditLogServiceLog:
         event = self.db.add.call_args[0][0]
         assert event.outcome == AuditOutcome.DENIED
 
+    @pytest.mark.enterprise
     def test_log_event_signs_event_with_hmac(self):
         """log() sets a non-empty hmac_signature on the event."""
         self.service.log(

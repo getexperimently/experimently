@@ -7,7 +7,9 @@ fresh weights.
 
 Stats sources, in order of preference
 -------------------------------------
-1. DynamoDB real-time counters (``DynamoDBCounterService.get_experiment_counters``).
+1. DynamoDB real-time counters (``DynamoDBCounterService.get_experiment_counters``),
+   an optional module reached through ``core.enterprise_features``; a build
+   without it simply starts at source 2.
 2. PostgreSQL: ``count(Assignment)`` per variant for pulls and the number of
    distinct converting users (events whose ``event_type`` equals the
    experiment's primary metric ``event_name``) for successes.  Used when
@@ -38,6 +40,7 @@ from sqlalchemy import and_, func
 from sqlalchemy.orm import Session
 
 from backend.app.core.config import settings
+from backend.app.core.enterprise_features import realtime_counter_service
 from backend.app.core.scheduler_tick import run_locked_tick
 from backend.app.core.stats_engine import ENGINE_VERSION, as_of_bucket, derive_seed
 from backend.app.models.analysis_snapshot import AnalysisKind
@@ -413,16 +416,31 @@ class BanditScheduler:
         # No data at all — use zero-count priors
         return {vid: VariantStats(variant_id=vid) for vid in variant_ids}
 
+    @staticmethod
+    def _load_counter_service_class() -> Optional[type]:
+        """
+        Return the DynamoDB counter service class, or ``None`` when absent.
+
+        Real-time DynamoDB counters are an optional (Enterprise) module, so
+        Community never imports it directly — it asks the
+        ``core.enterprise_features`` seam.  A build that does not ship the
+        service is a supported configuration, not an error: the caller simply
+        falls through to the next stats source (PostgreSQL).
+        """
+        return realtime_counter_service()
+
     def _stats_from_dynamodb(
         self, experiment_id: UUID, variant_ids: List[str]
     ) -> Optional[Dict[str, VariantStats]]:
         """Read counters from DynamoDB; ``None`` when the service is unavailable."""
         try:
-            from backend.app.services.dynamodb_counter_service import (
-                DynamoDBCounterService,
-            )
-
-            counter_service = DynamoDBCounterService()
+            # Inside the try: the provider resolves the class at each call and
+            # can raise (an import that fails mid-process); that is a reason to
+            # fall through to PostgreSQL, not to abandon the tick.
+            counter_service_cls = self._load_counter_service_class()
+            if counter_service_cls is None:
+                return None
+            counter_service = counter_service_cls()
             counters = counter_service.get_experiment_counters(str(experiment_id))
         except Exception as exc:
             logger.warning(

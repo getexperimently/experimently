@@ -11,7 +11,7 @@ Tests cover:
 
 import pytest
 
-from backend.app.schemas.split_url import SplitUrlConfig, SplitUrlVariant
+from backend.app.schemas.split_url_config import SplitUrlConfig, SplitUrlVariant
 
 # ---------------------------------------------------------------------------
 # These imports will FAIL (red phase) until the implementation exists.

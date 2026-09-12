@@ -44,6 +44,14 @@ from backend.app.services import sso_service
 
 router = APIRouter()
 
+#: The login flow: SP metadata, the SAML ACS and the OIDC login/callback.
+#: Reached by a browser that has no session yet, so it carries no user
+#: authentication; the Enterprise registration mounts it behind the licence
+#: gate only (and read-only, since signing in is not a data write).  The
+#: configuration CRUD stays on `router`, which is mounted behind
+#: authentication *and* the gate.
+public_router = APIRouter()
+
 
 # ---------------------------------------------------------------------------
 # Pydantic schemas
@@ -183,7 +191,7 @@ def _get_redirect_uri(
 # ---------------------------------------------------------------------------
 
 
-@router.get(
+@public_router.get(
     "/saml/{config_id}/metadata",
     response_class=Response,
     summary="SAML SP metadata",
@@ -209,7 +217,7 @@ def saml_metadata(
     return Response(content=xml, media_type="application/xml")
 
 
-@router.post(
+@public_router.post(
     "/saml/{config_id}/acs",
     response_model=SAMLLoginResponse,
     summary="SAML Assertion Consumer Service",
@@ -260,7 +268,7 @@ def saml_acs(
 # ---------------------------------------------------------------------------
 
 
-@router.get(
+@public_router.get(
     "/oidc/{provider}/login",
     summary="Initiate OIDC login",
     tags=["sso"],
@@ -296,7 +304,7 @@ async def oidc_login(
     return RedirectResponse(url=auth_url, status_code=302)
 
 
-@router.get(
+@public_router.get(
     "/oidc/{provider}/callback",
     response_model=OIDCLoginResponse,
     summary="OIDC callback",

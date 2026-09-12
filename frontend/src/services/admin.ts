@@ -4,7 +4,6 @@ import {
   AuditLogListResponse,
   CreateUserRequest,
   CreatedUser,
-  CustomRole,
   FlagHealth,
   FlagSafetyStatus,
   NotificationChannel,
@@ -120,30 +119,10 @@ export const AdminService = {
     });
   },
 
-  // Roles
-  async listRoles(): Promise<CustomRole[]> {
-    return apiFetch<CustomRole[]>('/api/v1/rbac/roles');
-  },
-
-  async createRole(data: {
-    name: string;
-    description: string;
-    permissions: string[];
-  }): Promise<CustomRole> {
-    return apiFetch<CustomRole>('/api/v1/rbac/roles', { method: 'POST', json: data });
-  },
-
-  async updateRole(name: string, data: Partial<CustomRole>): Promise<CustomRole> {
-    return apiFetch<CustomRole>(`/api/v1/rbac/roles/${name}`, { method: 'PUT', json: data });
-  },
-
-  async deleteRole(name: string): Promise<void> {
-    await apiFetch<void>(`/api/v1/rbac/roles/${name}`, { method: 'DELETE' });
-  },
-
-  async getUserPermissions(userId: string): Promise<{ permissions: string[] }> {
-    return apiFetch<{ permissions: string[] }>(`/api/v1/rbac/users/${userId}/permissions`);
-  },
+  // Roles, permission grants and effective permissions (`/api/v1/rbac/*`) are
+  // Enterprise: see `src/ee/rbac.ts`, reached through the `@ee/rbac` alias.
+  // They used to live here, which shipped Community builds with calls to
+  // routes their backend does not serve (`ee-coupling-report.md` §6).
 
   // Safety (`backend/app/api/v1/endpoints/safety.py`)
   async getSafetySettings(): Promise<SafetySettings> {

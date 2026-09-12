@@ -11,6 +11,7 @@ const sections = [
       { label: 'Core Concepts', href: '/docs/concepts', desc: 'Feature flags, experiments, variants, and metrics' },
       { label: 'Architecture Overview', href: '/docs/architecture', desc: 'How Experimently works under the hood' },
       { label: 'FAQ', href: '/docs/faq', desc: 'Common questions answered' },
+      { label: 'Editions & Licensing', href: '/docs/editions', desc: 'What is in Community, what is in Enterprise, and how licences behave' },
     ],
   },
   {

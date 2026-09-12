@@ -13,6 +13,7 @@ const SLUG_TO_FILE: Record<string, string> = {
   'concepts':                      'getting-started/concepts.md',
   'architecture':                  'getting-started/architecture.md',
   'faq':                           'getting-started/faq.md',
+  'editions':                      'getting-started/editions.md',
 
   // Feature Flags
   'feature-flags/create':          'feature-flags/create.md',
@@ -117,6 +118,7 @@ const SLUG_TITLES: Record<string, string> = {
   'concepts': 'Core Concepts',
   'architecture': 'Architecture Overview',
   'faq': 'FAQ',
+  'editions': 'Editions & Licensing',
   'feature-flags/create': 'Creating Feature Flags',
   'feature-flags/targeting': 'Targeting & Rules',
   'feature-flags/rollouts': 'Gradual Rollouts',
@@ -187,6 +189,7 @@ const FILE_TO_SLUG: Record<string, string> = {
   'getting-started/concepts.md':           'concepts',
   'getting-started/architecture.md':       'architecture',
   'getting-started/faq.md':               'faq',
+  'getting-started/editions.md':          'editions',
   'feature-flags/create.md':              'feature-flags/create',
   'Enhanced_Rules_Engine_Reference.md':    'feature-flags/targeting',
   'feature-flags/rollouts.md':            'feature-flags/rollouts',

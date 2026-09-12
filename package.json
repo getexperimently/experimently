@@ -10,7 +10,7 @@
     "type": "git",
     "url": "git+https://github.com/amarkanday/experimentation-platform.git"
   },
-  "license": "ISC",
+  "license": "AGPL-3.0-only",
   "author": "",
   "type": "commonjs",
   "main": "index.js",
@@ -19,5 +19,6 @@
   },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
-  }
+  },
+  "private": true
 }

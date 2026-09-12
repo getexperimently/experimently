@@ -97,9 +97,16 @@ def has_alembic_version(engine: Engine, schema: str) -> bool:
 
 def _point_models_at_schema(schema: str):
     """Import every model and point all tables at *schema*; return ``Base``."""
-    # Importing the package registers all models on the shared metadata.
-    import backend.app.models  # noqa: F401
-    from backend.app.models.base import Base
+    # Open-core seam: register the Community models explicitly, then let the
+    # Enterprise package add its own through hooks.register_model_module().
+    # A Community build has no `ee` package and creates the 37 CE tables only.
+    from backend.app.ee_loader import require_enterprise_or_absent
+    from backend.app.models import register_core_models
+
+    Base = register_core_models()
+    # Strict: a fresh database built while the Enterprise registration is
+    # broken would be missing the tables the Enterprise routers need.
+    require_enterprise_or_absent()
 
     # (models.base.set_schema does the same, but derives the name from APP_ENV
     # rather than POSTGRES_SCHEMA.)

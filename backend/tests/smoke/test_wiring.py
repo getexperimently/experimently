@@ -133,6 +133,7 @@ class TestDatabaseColumns:
         except ImportError:
             pytest.skip("LLMExperiment model not present (EP-046 not deployed)")
 
+    @pytest.mark.enterprise
     def test_sso_config_model_has_required_columns(self):
         """EP-037 SSO config model wiring check."""
         try:
@@ -509,6 +510,7 @@ class TestAppStartup:
             "No /llm-experiments/* paths in OpenAPI schema — EP-046 router not registered"
         )
 
+    @pytest.mark.enterprise
     def test_openapi_schema_includes_warehouse_connectors(self, client):
         """Verify warehouse routers (Databricks, ClickHouse, MySQL) are wired."""
         from backend.app.core.config import settings
@@ -533,6 +535,7 @@ class TestAppStartup:
             "No /power/* paths in OpenAPI schema — power calculator router not registered"
         )
 
+    @pytest.mark.enterprise
     def test_openapi_schema_includes_workspaces(self, client):
         """Verify EP-057 workspace endpoints are wired into the schema."""
         from backend.app.core.config import settings
@@ -640,6 +643,7 @@ class TestServiceImports:
 
         assert LLMProxyService is not None
 
+    @pytest.mark.enterprise
     def test_workspace_service_imports(self):
         from backend.app.services.workspace_service import WorkspaceService
 
@@ -672,11 +676,13 @@ class TestModelImports:
 
         assert LLMEvaluation.__tablename__ == "llm_evaluations"
 
+    @pytest.mark.enterprise
     def test_workspace_model_table_name(self):
         from backend.app.models.workspace import Workspace
 
         assert Workspace.__tablename__ == "workspaces"
 
+    @pytest.mark.enterprise
     def test_workspace_member_model_table_name(self):
         from backend.app.models.workspace import WorkspaceMember
 
@@ -694,6 +700,7 @@ class TestModelImports:
         assert len(LLMTaskType) >= 4
         assert len(LLMProvider) >= 4
 
+    @pytest.mark.enterprise
     def test_workspace_enums_exist(self):
         from backend.app.models.workspace import WorkspaceMemberRole, WorkspacePlan
 
@@ -759,6 +766,7 @@ class TestNewFeatureEndpoints:
             "No compliance/audit paths in OpenAPI schema — EP-033 router not registered"
         )
 
+    @pytest.mark.enterprise
     def test_openapi_schema_includes_integrations(self, client):
         """Verify EP-034 third-party integration endpoints are wired."""
         from backend.app.core.config import settings

@@ -164,9 +164,7 @@ class TestGenerateSoc2Report:
         db = make_mock_db_with_events(events)
         service = ComplianceReportService(db)
 
-        with patch(
-            "backend.app.services.compliance_report_service._signer"
-        ) as mock_signer:
+        with patch("backend.app.core.hooks.audit_signer") as mock_signer:
             mock_signer.verify.return_value = True
             report = service.generate_report(standard="soc2")
 
@@ -182,9 +180,7 @@ class TestGenerateSoc2Report:
         service = ComplianceReportService(db)
 
         # First verify passes, second fails (tampered)
-        with patch(
-            "backend.app.services.compliance_report_service._signer"
-        ) as mock_signer:
+        with patch("backend.app.core.hooks.audit_signer") as mock_signer:
             mock_signer.verify.side_effect = [True, False]
             report = service.generate_report(standard="soc2")
 
@@ -267,9 +263,7 @@ class TestGenerateSoc2Report:
         db = make_mock_db_with_events(events)
         service = ComplianceReportService(db)
 
-        with patch(
-            "backend.app.services.compliance_report_service._signer"
-        ) as mock_signer:
+        with patch("backend.app.core.hooks.audit_signer") as mock_signer:
             mock_signer.verify.return_value = True
             report = service.generate_report(standard="soc2")
 
@@ -281,9 +275,7 @@ class TestGenerateSoc2Report:
         db = make_mock_db_with_events(events)
         service = ComplianceReportService(db)
 
-        with patch(
-            "backend.app.services.compliance_report_service._signer"
-        ) as mock_signer:
+        with patch("backend.app.core.hooks.audit_signer") as mock_signer:
             mock_signer.verify.return_value = False
             report = service.generate_report(standard="soc2")
 
@@ -305,6 +297,91 @@ class TestGenerateSoc2Report:
 # ---------------------------------------------------------------------------
 # TestExportAuditEvents
 # ---------------------------------------------------------------------------
+
+
+class TestUnsignedRowsAreReported:
+    """Unsigned rows are a reachable state now, and the report must say so.
+
+    The Community signer writes no signature, and a process whose Enterprise
+    registration failed falls back to it; counting only signed rows showed a
+    1.0 pass rate over a period with no integrity at all.
+    """
+
+    @pytest.mark.regression
+    def test_unsigned_events_and_coverage_are_counted(self):
+        from backend.app.core import hooks
+
+        events = [
+            make_mock_event(hmac_signature="a" * 64),
+            make_mock_event(hmac_signature="b" * 64),
+            make_mock_event(hmac_signature=None),
+            make_mock_event(hmac_signature=None),
+            make_mock_event(hmac_signature=None),
+            make_mock_event(hmac_signature=None),
+        ]
+        service = ComplianceReportService(make_mock_db_with_events(events))
+        with patch("backend.app.core.hooks.audit_signer") as mock_signer:
+            mock_signer.verify.return_value = True
+            mock_signer.name = "hmac-sha256"
+            report = service.generate_report(standard="soc2")
+
+        assert report.integrity_checks == 2
+        assert report.unsigned_events == 4
+        # The pass rate is still over *checked* rows...
+        assert report.integrity_pass_rate == 1.0
+        # ...but coverage says two of six were verifiable.
+        assert report.integrity_coverage == pytest.approx(2 / 6)
+        assert report.signing_enabled is True
+        assert isinstance(hooks.audit_signer.name, str)
+
+    def test_signing_disabled_is_reported_when_the_null_signer_is_installed(self):
+        from backend.app.core import hooks
+
+        service = ComplianceReportService(make_mock_db_with_events([]))
+        previous = hooks.set_audit_signer(hooks.NullAuditSigner())
+        try:
+            report = service.generate_report(standard="soc2")
+        finally:
+            hooks.set_audit_signer(previous)
+        assert report.signing_enabled is False
+        assert report.integrity_coverage == 1.0  # no events, nothing unverified
+
+
+class TestVerifierIsTheInstalledSigner:
+    """Signer and verifier must be the same object.
+
+    The report used to verify with a module-level ``AuditSigningService()`` of
+    its own while ``AuditLogService`` signed through ``hooks.audit_signer``, so
+    a signer installed through the seam with a different key would have had
+    every event it signed reported as tampered.
+    """
+
+    @pytest.mark.regression
+    def test_report_verifies_through_hooks_audit_signer(self):
+        from backend.app.core import hooks
+
+        class CountingSigner:
+            name = "counting"
+            calls = 0
+
+            def sign(self, event):
+                return "x" * 64
+
+            def verify(self, event):
+                CountingSigner.calls += 1
+                return True
+
+        events = [make_mock_event(hmac_signature="a" * 64)]
+        service = ComplianceReportService(make_mock_db_with_events(events))
+        previous = hooks.set_audit_signer(CountingSigner())
+        try:
+            report = service.generate_report(standard="soc2")
+        finally:
+            hooks.set_audit_signer(previous)
+
+        assert CountingSigner.calls == 1
+        assert report.integrity_checks == 1
+        assert report.tampered_events == 0
 
 
 class TestExportAuditEvents:

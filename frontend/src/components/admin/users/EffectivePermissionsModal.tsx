@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { AdminService } from '@/services/admin';
+import { RbacService } from '@ee/rbac';
 
 interface EffectivePermissionsModalProps {
   isOpen: boolean;
@@ -24,7 +24,7 @@ export function EffectivePermissionsModal({
       setError(null);
       setPermissions([]);
 
-      AdminService.getUserPermissions(userId)
+      RbacService.getUserPermissions(userId)
         .then((data) => {
           setPermissions(data.permissions);
         })

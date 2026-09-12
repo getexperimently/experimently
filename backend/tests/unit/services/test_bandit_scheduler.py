@@ -10,7 +10,10 @@ Coverage:
 - Pure-logic integration tests (no DB)
 """
 
+import logging
+import sys
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 from unittest.mock import MagicMock, PropertyMock, patch
@@ -289,6 +292,7 @@ class TestBanditScheduler:
     # -----------------------------------------------------------------------
     # 9. get_variant_stats_from_counters — mocked DynamoDB fetch
     # -----------------------------------------------------------------------
+    @pytest.mark.enterprise
     def test_get_variant_stats_from_counters_uses_dynamodb(self):
         """get_variant_stats_from_counters reads DynamoDB via get_experiment_counters."""
         from backend.app.schemas.realtime_counters import (
@@ -544,6 +548,32 @@ class TestBanditSchedulerIntegration:
 # ===========================================================================
 
 
+@contextmanager
+def _counter_capability(provider):
+    """Register *provider* under ``counters.service`` for the duration.
+
+    ``None`` unregisters it -- a build that does not ship the service; a
+    provider answering ``None`` is one that ships it but is not licensed for
+    it.  Both must fall through to PostgreSQL.
+    """
+    from backend.app.core import hooks
+
+    saved = hooks.get_capability("counters.service")
+    if provider is None:
+        with hooks._lock:
+            hooks._capabilities.pop("counters.service", None)
+    else:
+        hooks.register_capability("counters.service", provider)
+    try:
+        yield
+    finally:
+        if saved is None:
+            with hooks._lock:
+                hooks._capabilities.pop("counters.service", None)
+        else:
+            hooks.register_capability("counters.service", saved)
+
+
 def _mock_metric(event_name: str, is_primary: bool):
     metric = MagicMock()
     metric.event_name = event_name
@@ -561,6 +591,97 @@ class TestBanditSchedulerStatsFallback:
         exp.metric_definitions = metrics if metrics is not None else []
         exp.metrics = legacy_metrics
         return db, scheduler, exp
+
+    def test_falls_back_to_postgres_when_counter_module_is_absent(self):
+        """
+        A build without the optional real-time counter module is a normal
+        configuration: _stats_from_dynamodb returns None and PostgreSQL is
+        used, with no exception escaping and nothing logged as a warning.
+        """
+        db, scheduler, exp = self._scheduler_with_experiment(
+            metrics=[_mock_metric("purchase", True)]
+        )
+        vid1, vid2 = (str(v.id) for v in exp.variants)
+
+        with (
+            _counter_capability(None),
+            patch.object(
+                scheduler,
+                "_count_assignments_by_variant",
+                return_value={vid1: 20, vid2: 20},
+            ) as count_pulls,
+            patch.object(
+                scheduler,
+                "_count_conversions_by_variant",
+                return_value={vid1: 6, vid2: 2},
+            ),
+        ):
+            assert scheduler._load_counter_service_class() is None
+            assert scheduler._stats_from_dynamodb(exp.id, [vid1, vid2]) is None
+            stats = scheduler.get_variant_stats_from_counters(
+                exp.id, [vid1, vid2], experiment=exp
+            )
+
+        count_pulls.assert_called_once_with(exp.id)
+        assert stats[vid1].pulls == 20
+        assert stats[vid1].successes == 6
+        assert stats[vid2].successes == 2
+
+    @pytest.mark.regression
+    def test_missing_counter_service_is_not_logged_as_a_warning(self):
+        """A build without the optional service is normal, not a warning.
+
+        The earlier version patched ``bandit_scheduler.logger`` while the
+        message it was checking for came from the seam module's own logger,
+        so it could not fail. The seam module no longer logs at all -- it is
+        a registry lookup -- so the scheduler's logger is the only one on this
+        path, and patching it is the whole check. (``caplog`` cannot be used
+        here: ``backend/tests/unit/conftest.py`` replaces ``logging.getLogger``
+        for every unit test.)
+        """
+        from backend.app.core import enterprise_features
+
+        assert not hasattr(enterprise_features, "logger")
+
+        db, scheduler, _ = self._scheduler_with_experiment()
+        with (
+            _counter_capability(None),
+            patch("backend.app.core.bandit_scheduler.logger") as mock_logger,
+        ):
+            assert scheduler._load_counter_service_class() is None
+            assert scheduler._stats_from_dynamodb(uuid.uuid4(), ["a"]) is None
+
+        assert mock_logger.warning.call_count == 0
+        assert mock_logger.error.call_count == 0
+
+    def test_falls_back_to_postgres_when_the_licence_lapsed(self):
+        """The service is installed but the provider answers None: the
+        licence no longer covers real-time counters. PostgreSQL it is."""
+        db, scheduler, exp = self._scheduler_with_experiment(
+            metrics=[_mock_metric("purchase", True)]
+        )
+        vid1, vid2 = (str(v.id) for v in exp.variants)
+
+        with (
+            _counter_capability(lambda: None),
+            patch.object(
+                scheduler,
+                "_count_assignments_by_variant",
+                return_value={vid1: 10, vid2: 10},
+            ) as count_pulls,
+            patch.object(
+                scheduler,
+                "_count_conversions_by_variant",
+                return_value={vid1: 1, vid2: 3},
+            ),
+        ):
+            assert scheduler._load_counter_service_class() is None
+            stats = scheduler.get_variant_stats_from_counters(
+                exp.id, [vid1, vid2], experiment=exp
+            )
+
+        count_pulls.assert_called_once_with(exp.id)
+        assert stats[vid2].successes == 3
 
     def test_falls_back_to_postgres_when_dynamodb_raises(self):
         """DynamoDB unavailable → pulls/successes come from PostgreSQL counts."""
@@ -595,6 +716,7 @@ class TestBanditSchedulerStatsFallback:
         assert stats[vid2].successes == 5
         assert stats[vid2].failures == 95
 
+    @pytest.mark.enterprise
     def test_falls_back_to_postgres_when_dynamodb_has_no_pulls(self):
         """DynamoDB reachable but empty for this experiment → PostgreSQL."""
         from backend.app.schemas.realtime_counters import ExperimentCounters

@@ -947,6 +947,7 @@ class TestTriggerScheduleProcessing:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.enterprise
 @pytest.mark.integration
 class TestPreviewSplitUrlAssignment:
     """GET /api/v1/experiments/{id}/split-url/preview"""

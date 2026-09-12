@@ -62,6 +62,8 @@ ignore = [
 # Operational scripts are CLIs: printing is their output, and they set
 # os.environ / sys.path before importing the app (hence E402).
 "backend/scripts/**" = ["T20", "E402"]
+# Repository-root scripts are CLIs too, and `make lint` now covers them.
+"scripts/**" = ["T20", "E402"]
 "backend/app/db/bootstrap.py" = ["T20"]  # also a CLI (`python -m ...bootstrap`)
 "demo/**" = ["T20"]
 # Lambda packages insert ../shared on sys.path before importing from it, and
@@ -107,6 +109,7 @@ markers = [
     "integration: integration tests (require the database)",
     "e2e: end-to-end tests (require the full stack)",
     "regression: guards a specific past bug",
+    "enterprise: needs the Enterprise registration; skipped in a Community build",
     "slow: slow running tests",
     "api: API tests",
     "contract: API contract tests",
@@ -145,11 +148,32 @@ exclude_lines = [
 [tool.coverage.html]
 directory = "coverage_html_report"
 
+[build-system]
+# Without this table a PEP 517 frontend falls back to the legacy setuptools
+# path, which ignores [project] entirely -- so `pip install .` produced a
+# distribution with no name, no version and no licence metadata.
+#
+# 77 is the floor because `license = "<SPDX>"` and `license-files` below are
+# PEP 639 fields, which setuptools accepts from 77.0.0 (its NEWS: #4833,
+# #4837, #4840); a build resolved to anything older rejects the metadata.
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "experimentation-platform"
 version = "0.1.0"
 description = "Experimently — experimentation platform for A/B testing and feature flags"
 requires-python = ">=3.11"
+# The Community Edition is AGPL-3.0-only. `ee/` is proprietary (ee/LICENSE) and
+# `sdk/` is MIT (sdk/LICENSE); neither belongs in this distribution.
+#
+# UNTIL ISSUE #89: the Enterprise modules still live under backend/ (listed in
+# ee-manifest.txt), so a wheel built from this tree would carry proprietary
+# code under an AGPL licence expression. No release step builds one -- CI only
+# runs `pip install -e . --no-deps` -- and the packaging becomes honest when
+# the move lands. Do not publish a wheel from this tree before then.
+license = "AGPL-3.0-only"
+license-files = ["LICENSE", "NOTICE"]
 
 [tool.setuptools.packages.find]
 include = ["backend*"]
