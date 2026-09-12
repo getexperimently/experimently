@@ -27,8 +27,26 @@ class CognitoAuthService:
         if not self.user_pool_id or not self.client_id:
             logger.warning("COGNITO_USER_POOL_ID or COGNITO_CLIENT_ID not set")
 
-        # Initialize Cognito Identity Provider client
-        self.client = boto3.client("cognito-idp", region_name=self.region)
+        self._client = None
+
+    @property
+    def client(self) -> Any:
+        """The Cognito Identity Provider client, created on first use.
+
+        Not in ``__init__``: a module-level instance of this class is built at
+        import, and ``boto3.client`` validates the region then -- with
+        ``AWS_REGION=''`` it raises "Invalid endpoint" -- which made importing
+        ``backend.app.api.deps`` (and everything that imports the API, the
+        Enterprise registration included) fail on a configuration detail
+        that only matters once Cognito is actually called.
+        """
+        if self._client is None:
+            self._client = boto3.client("cognito-idp", region_name=self.region)
+        return self._client
+
+    @client.setter
+    def client(self, value: Any) -> None:  # tests install a fake client
+        self._client = value
 
     def sign_up(
         self,

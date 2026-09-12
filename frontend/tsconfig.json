@@ -21,6 +21,10 @@
     "paths": {
       "@/*": [
         "./src/*"
+      ],
+      "@ee/*": [
+        "./src/ee/*",
+        "./src/ee-stub/*"
       ]
     },
     "incremental": true

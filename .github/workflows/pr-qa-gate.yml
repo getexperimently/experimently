@@ -122,6 +122,29 @@ jobs:
       - name: Build
         run: cd frontend && npm run build
 
+      # The Community seam, exercised the way a Community build resolves it:
+      # `@ee/*` to the stub tree only. Without these three steps a stub-shape
+      # drift -- an `@ee/x` import with no stub, a method added to src/ee/rbac.ts
+      # and used from a Community page -- ships through a green CI, because
+      # every other step resolves `@ee/*` to the real tree first.
+      - name: tsc against the Community tsconfig
+        run: cd frontend && npx tsc --noEmit -p tsconfig.ce.json
+
+      - name: Jest as Community
+        run: cd frontend && EXPERIMENTLY_EDITION=ce npx jest --passWithNoTests --watchAll=false
+
+      - name: Community build carries no Enterprise route
+        run: |
+          cd frontend
+          rm -rf .next out
+          EXPERIMENTLY_EDITION=ce npm run build
+          if grep -rlE '/api/v1/workspaces|/api/v1/rbac/|/api/v1/hipaa' out/_next/static; then
+            echo "::error::Community bundle references Enterprise routes"; exit 1
+          fi
+          if [ -z "$(find out/_next/static/chunks/pages -maxdepth 1 -name 'workspaces*' -print -quit)" ]; then
+            echo "::error::Community bundle has no workspaces stub page"; exit 1
+          fi
+
   sdk-contracts:
     name: SDK Contract Tests
     runs-on: ubuntu-latest

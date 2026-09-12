@@ -1,10 +1,10 @@
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { CreateRoleModal } from '@/components/admin/roles/CreateRoleModal';
-import { AdminService } from '@/services/admin';
+import { RbacService } from '@ee/rbac';
 import { CustomRole } from '@/types/admin';
 
-jest.mock('@/services/admin');
+jest.mock('@ee/rbac');
 jest.mock('@/components/admin/roles/PermissionCheckboxGrid', () => ({
   PermissionCheckboxGrid: ({
     selectedPermissions,
@@ -37,8 +37,8 @@ jest.mock('@/components/admin/roles/PermissionCheckboxGrid', () => ({
   ),
 }));
 
-const mockCreateRole = AdminService.createRole as jest.Mock;
-const mockUpdateRole = AdminService.updateRole as jest.Mock;
+const mockCreateRole = RbacService.createRole as jest.Mock;
+const mockUpdateRole = RbacService.updateRole as jest.Mock;
 
 beforeEach(() => {
   jest.clearAllMocks();
@@ -109,7 +109,7 @@ describe('CreateRoleModal', () => {
     expect(submitButton).toBeDisabled();
   });
 
-  it('calls AdminService.createRole with correct data on submit in create mode', async () => {
+  it('calls RbacService.createRole with correct data on submit in create mode', async () => {
     mockCreateRole.mockResolvedValue({
       name: 'new-role',
       description: 'A new role',
@@ -165,7 +165,7 @@ describe('CreateRoleModal', () => {
     expect(screen.getByTestId('role-description-input')).toHaveValue('An existing role');
   });
 
-  it('calls AdminService.updateRole in edit mode', async () => {
+  it('calls RbacService.updateRole in edit mode', async () => {
     mockUpdateRole.mockResolvedValue({
       ...mockRole,
       description: 'Updated description',

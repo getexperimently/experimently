@@ -8,10 +8,23 @@ Endpoints:
   GET /audit-events      — Paginated audit event listing (ADMIN/ANALYST)
   GET /reports/{standard} — On-demand compliance report (ADMIN/ANALYST)
   GET /export             — Full audit export as JSON or CSV (ADMIN only)
+
+EDITION SPLIT
+-------------
+``/audit-events`` is Community: it reads ``audit_events_v2`` through the
+Community ``AuditLogService`` and must keep answering in every build
+(``backend/tests/smoke/test_wiring.py`` asserts it, and the SOC 2
+documentation points at it).
+
+``/reports/{standard}`` and ``/export`` are Enterprise: their bodies live in
+``compliance_reports.py`` and are reached through the
+``core/enterprise_features`` seam. The routes stay declared here so the URLs
+and their OpenAPI entries exist in every edition; a build without the
+Enterprise module answers HTTP 501 rather than 404, so the refusal is
+explicit.
 """
 
 import logging
-from dataclasses import asdict as dataclasses_asdict
 from datetime import datetime
 from typing import Any, Dict, Optional
 from uuid import UUID
@@ -21,6 +34,11 @@ from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from backend.app.api import deps
+from backend.app.core.enterprise_features import (
+    COMPLIANCE_REPORTING_UNAVAILABLE_DETAIL,
+    compliance_export_handler,
+    compliance_report_handler,
+)
 from backend.app.db.session import get_db
 from backend.app.models.compliance_audit_event import AuditAction
 from backend.app.models.user import User, UserRole
@@ -28,17 +46,27 @@ from backend.app.schemas.compliance_audit import (
     ComplianceAuditEventListResponse,
 )
 from backend.app.services.audit_log_service import AuditLogService
-from backend.app.services.compliance_report_service import ComplianceReportService
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# Roles that may read compliance audit data (reports + event listing)
+# Roles that may read the Community compliance audit event listing
 _ALLOWED_ROLES = (UserRole.ADMIN, UserRole.ANALYST)
 
-# Supported compliance standards for report generation
-_SUPPORTED_STANDARDS = {"soc2", "iso27001"}
+
+def _require_role(current_user: User, allowed: tuple, detail: str) -> None:
+    """The route's own access policy, checked before the seam is consulted.
+
+    Who may call a route is a property of the route, not of the edition: a
+    VIEWER asking for the SOC 2 report is refused with the same 403 in every
+    build, rather than learning from a 501 which bodies this build lacks.
+    """
+    if getattr(current_user, "is_superuser", False):
+        return
+    if getattr(current_user, "role", None) in allowed:
+        return
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=detail)
 
 
 @router.get(
@@ -113,7 +141,7 @@ def list_audit_events(
 
 
 # ---------------------------------------------------------------------------
-# Report generation
+# Report generation — Enterprise body (compliance_reports.py)
 # ---------------------------------------------------------------------------
 
 
@@ -127,6 +155,9 @@ def list_audit_events(
         },
         status.HTTP_403_FORBIDDEN: {
             "description": "Caller does not have ADMIN or ANALYST role",
+        },
+        status.HTTP_501_NOT_IMPLEMENTED: {
+            "description": "Compliance reporting is not available in this edition",
         },
     },
 )
@@ -149,41 +180,30 @@ def generate_compliance_report(
     - **soc2**: SOC 2 Type 2 — default look-back is 365 days.
     - **iso27001**: ISO 27001 — default look-back is 730 days.
 
-    The response includes event breakdowns by action, outcome, and resource
-    type, as well as HMAC integrity verification statistics.
-
     **Access control**: Requires ADMIN or ANALYST role.
+
+    **Edition**: Enterprise. Builds without compliance reporting answer 501.
     """
-    # Permission check
-    is_superuser = hasattr(current_user, "is_superuser") and current_user.is_superuser
-    has_allowed_role = (
-        hasattr(current_user, "role") and current_user.role in _ALLOWED_ROLES
+    _require_role(
+        current_user, _ALLOWED_ROLES, "Compliance reports require ADMIN or ANALYST role"
     )
-    if not is_superuser and not has_allowed_role:
+    handler = compliance_report_handler()
+    if handler is None:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Compliance reports require ADMIN or ANALYST role",
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail=COMPLIANCE_REPORTING_UNAVAILABLE_DETAIL,
         )
-
-    # Validate the requested standard
-    if standard not in _SUPPORTED_STANDARDS:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Unknown compliance standard '{standard}'. Supported: {sorted(_SUPPORTED_STANDARDS)}",
-        )
-
-    service = ComplianceReportService(db)
-    report = service.generate_report(
+    return handler(
         standard=standard,
         start_time=start_time,
         end_time=end_time,
+        current_user=current_user,
+        db=db,
     )
-
-    return dataclasses_asdict(report)
 
 
 # ---------------------------------------------------------------------------
-# Audit export
+# Audit export — Enterprise body (compliance_reports.py)
 # ---------------------------------------------------------------------------
 
 
@@ -195,13 +215,16 @@ def generate_compliance_report(
         status.HTTP_403_FORBIDDEN: {
             "description": "Caller does not have ADMIN role",
         },
+        status.HTTP_501_NOT_IMPLEMENTED: {
+            "description": "Audit export is not available in this edition",
+        },
     },
 )
 def export_audit_events(
     format: str = Query(
         "json",
         description="Export format: 'json' or 'csv'",
-        regex="^(json|csv)$",
+        pattern="^(json|csv)$",
     ),
     start_time: Optional[datetime] = Query(
         None,
@@ -216,35 +239,22 @@ def export_audit_events(
 ) -> Response:
     """Export all audit events for chain-of-custody review.
 
-    Returns a downloadable file containing all matching audit events with
-    their HMAC signatures.
-
     **Access control**: Requires ADMIN role only (stricter than report
     generation — this is a full data dump).
 
-    **Format**: 'json' (default) or 'csv'.
+    **Edition**: Enterprise. Builds without audit export answer 501.
     """
-    # Only ADMIN (or superuser) may perform full exports
-    is_superuser = hasattr(current_user, "is_superuser") and current_user.is_superuser
-    is_admin = hasattr(current_user, "role") and current_user.role == UserRole.ADMIN
-    if not is_superuser and not is_admin:
+    _require_role(current_user, (UserRole.ADMIN,), "Audit export requires ADMIN role")
+    handler = compliance_export_handler()
+    if handler is None:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Audit export requires ADMIN role",
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail=COMPLIANCE_REPORTING_UNAVAILABLE_DETAIL,
         )
-
-    service = ComplianceReportService(db)
-    content = service.export_events(
+    return handler(
         format=format,
         start_time=start_time,
         end_time=end_time,
-    )
-
-    media_type = "text/csv" if format == "csv" else "application/json"
-    filename = f"audit_export.{format}"
-
-    return Response(
-        content=content,
-        media_type=media_type,
-        headers={"Content-Disposition": f"attachment; filename={filename}"},
+        current_user=current_user,
+        db=db,
     )

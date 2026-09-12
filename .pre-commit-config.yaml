@@ -4,6 +4,10 @@ repos:
     hooks:
       - id: check-yaml
       - id: check-json
+        # tsconfig files are JSONC: TypeScript reads `//` comments in them, and
+        # tsconfig.ce.json documents why the Community type-check exists at all.
+        # The hook is a strict JSON parser, so it is wrong about these two.
+        exclude: '(^|/)tsconfig[^/]*\.json$'
       - id: check-added-large-files
       - id: check-merge-conflict
       - id: debug-statements

@@ -14,7 +14,7 @@ from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
 from fastapi.openapi.utils import get_openapi
 
 # Import routers and settings
-from backend.app.api.api import api_router
+from backend.app.api.api import api_router, tags_metadata
 from backend.app.core.bandit_scheduler import bandit_scheduler_runner
 from backend.app.core.config import settings
 from backend.app.core.health import is_development_or_test
@@ -23,6 +23,7 @@ from backend.app.core.metrics_scheduler import metrics_scheduler
 from backend.app.core.rollout_scheduler import rollout_scheduler
 from backend.app.core.safety_scheduler import safety_scheduler
 from backend.app.core.scheduler import experiment_scheduler
+from backend.app.ee_loader import load_enterprise
 from backend.app.middleware.rate_limiter import RateLimitMiddleware
 from backend.app.middleware.security_middleware import SecurityHeadersMiddleware
 
@@ -63,6 +64,14 @@ if _monitoring_imports_ok:
 
 # Standard-library logger (used by the existing schedulers etc.)
 logger = logging.getLogger(__name__)
+
+# Open-core seam: install the Enterprise hooks (routers, models, tags, audit
+# signer).  Importing backend.app.api.api above already triggered this while
+# it built the v1 router; the call is repeated here (it is idempotent) so that
+# main.py — the process entry point — names the seam explicitly.  A Community
+# build has no `ee` package: nothing loads and every hook keeps its default.
+if load_enterprise():
+    logger.info("Enterprise edition hooks installed")
 
 if settings.dev_auth_bypass_active:
     logger.warning(
@@ -131,6 +140,10 @@ app = FastAPI(
     docs_url=None,
     redoc_url=None,
     openapi_url=f"{settings.API_V1_STR}/openapi.json",
+    # Community tag descriptions plus whatever the Enterprise registration
+    # contributed through hooks.register_tags(); computed at router build, so
+    # it is read here after `api_router` has been imported above.
+    openapi_tags=tags_metadata,
     lifespan=lifespan,
 )
 

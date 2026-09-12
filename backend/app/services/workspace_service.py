@@ -270,8 +270,34 @@ class WorkspaceService:
         return workspace
 
     def delete_workspace(self, db: Session, workspace_id: uuid.UUID) -> None:
-        """Delete a workspace and all associated resources (via cascade)."""
+        """Delete a workspace, its members, invites and API keys.
+
+        Experiments and feature flags are **not** deleted: they are Community
+        rows that merely carried this workspace's id, and they return to the
+        unscoped pool.
+
+        That used to happen by itself, through the database's
+        ``ON DELETE SET NULL`` on ``experiments.workspace_id`` and
+        ``feature_flags.workspace_id``.  The open-core seam dropped those two
+        constraints (migration ``a7b8c9d0e1f2``) because they were the entire
+        ORM coupling between a Community table and an Enterprise one, so
+        nothing clears the column any more unless this does: a deleted
+        workspace would otherwise leave rows pointing at an id that no longer
+        exists.  The members, invites and API keys still cascade -- those
+        constraints are between Enterprise tables and were never touched.
+        """
         workspace = self.get_workspace(db, workspace_id)
+
+        # Imported here rather than at module scope: these are the Community
+        # models, and the import direction matters more than the microsecond.
+        from backend.app.models.experiment import Experiment
+        from backend.app.models.feature_flag import FeatureFlag
+
+        for model in (Experiment, FeatureFlag):
+            db.query(model).filter(model.workspace_id == workspace_id).update(
+                {"workspace_id": None}, synchronize_session=False
+            )
+
         db.delete(workspace)
         db.commit()
 

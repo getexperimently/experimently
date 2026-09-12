@@ -17,14 +17,15 @@ from typing import Dict, Optional
 
 from sqlalchemy.orm import Session
 
+from backend.app.core import hooks
 from backend.app.core.config import settings
 from backend.app.models.compliance_audit_event import (
     ComplianceAuditEvent,
 )
-from backend.app.services.audit_signing_service import AuditSigningService
 
-# Module-level signer instance (one instance is sufficient — stateless)
-_signer = AuditSigningService()
+# Verified through the seam, with whatever signer the Enterprise registration
+# installed: signer and verifier must be the same object, or a signer with a
+# different key would report every event it signed as tampered.
 
 
 @dataclass
@@ -43,6 +44,18 @@ class ComplianceReport:
         integrity_checks: Number of events that carried an HMAC signature (checked).
         tampered_events: Number of events whose HMAC signature failed verification.
         integrity_pass_rate: Fraction of checked events that passed (0.0–1.0).
+        unsigned_events: Events that carried no signature and so could not be
+            checked at all. Unsigned rows are a reachable state -- the
+            Community signer writes none, and a process whose Enterprise
+            registration failed falls back to it -- so a report that counted
+            only signed rows showed a 1.0 pass rate over a period with no
+            integrity at all. This is that number, and ``integrity_coverage``
+            is the fraction of the period it leaves verified.
+        integrity_coverage: Fraction of all events that were checked (0.0–1.0).
+            1.0 only when every row in the period carried a signature.
+        signing_enabled: Whether the signer installed in this process signs
+            new events. False means every event written from now on is
+            unsigned, whatever the period above shows.
     """
 
     standard: str
@@ -56,6 +69,9 @@ class ComplianceReport:
     integrity_checks: int = 0
     tampered_events: int = 0
     integrity_pass_rate: float = 1.0
+    unsigned_events: int = 0
+    integrity_coverage: float = 1.0
+    signing_enabled: bool = True
 
 
 class ComplianceReportService:
@@ -121,6 +137,7 @@ class ComplianceReportService:
         by_outcome: Dict[str, int] = {}
         by_resource: Dict[str, int] = {}
         integrity_checks = 0
+        unsigned = 0
         tampered = 0
 
         for event in events:
@@ -149,12 +166,15 @@ class ComplianceReportService:
             # --- HMAC integrity check ---
             if event.hmac_signature:
                 integrity_checks += 1
-                if not _signer.verify(event):
+                if not hooks.audit_signer.verify(event):
                     tampered += 1
+            else:
+                unsigned += 1
 
         pass_rate: float = 1.0
         if integrity_checks > 0:
             pass_rate = (integrity_checks - tampered) / integrity_checks
+        coverage: float = 1.0 if total == 0 else integrity_checks / total
 
         return ComplianceReport(
             standard=standard,
@@ -168,6 +188,9 @@ class ComplianceReportService:
             integrity_checks=integrity_checks,
             tampered_events=tampered,
             integrity_pass_rate=pass_rate,
+            unsigned_events=unsigned,
+            integrity_coverage=coverage,
+            signing_enabled=getattr(hooks.audit_signer, "name", "") != "null",
         )
 
     # ------------------------------------------------------------------

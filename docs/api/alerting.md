@@ -200,6 +200,6 @@ curl -X POST "http://localhost:8000/api/v1/notifications/test" \
 **Emails not arriving**
 1. Confirm `EMAIL_ENABLED=true`
 2. For SendGrid: check API key has `Mail Send` permission
-3. For SMTP: verify host, port, and credentials with `scripts/test_pg_connection.py` equivalent
+3. For SMTP: verify host, port and credentials from the API container with `python -c "import smtplib; smtplib.SMTP('$SMTP_HOST', $SMTP_PORT).starttls()"`
 4. Check spam folder — add `EMAIL_FROM_ADDRESS` domain to allowlist
 5. Delivery log errors like `unauthorized` indicate a bad API key

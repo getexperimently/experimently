@@ -4,6 +4,7 @@ import Head from "next/head";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { NotificationProvider } from "@/contexts/NotificationContext";
+import { EditionProvider } from "@/contexts/EditionContext";
 import { ToastContainer } from "@/components/ToastContainer";
 import { AppShell } from "@/components/AppShell";
 import { RequireAuth } from "@/components/RequireAuth";
@@ -27,12 +28,14 @@ export default function App({ Component, pageProps, router }: AppProps) {
         <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
         <title>Experimently</title>
       </Head>
-      <AuthProvider>
-        <NotificationProvider>
-          {page}
-          <ToastContainer />
-        </NotificationProvider>
-      </AuthProvider>
+      <EditionProvider>
+        <AuthProvider>
+          <NotificationProvider>
+            {page}
+            <ToastContainer />
+          </NotificationProvider>
+        </AuthProvider>
+      </EditionProvider>
     </ErrorBoundary>
   );
 }

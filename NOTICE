@@ -1,0 +1,70 @@
+Experimently
+Copyright (c) 2024-2026 Experimently
+
+This product includes software developed by Experimently and by third parties.
+
+--------------------------------------------------------------------------------
+Licensing of this repository
+--------------------------------------------------------------------------------
+
+  Community Edition (everything except `ee/` and `sdk/`)
+      GNU Affero General Public License v3.0 only (AGPL-3.0-only)
+      See `LICENSE`.
+
+  Enterprise Edition (`ee/`)
+      Experimently Enterprise Licence 1.0 — proprietary, source-available.
+      See `ee/LICENSE`. Not open source. Requires a valid licence key.
+
+  Client SDKs and OpenFeature providers (`sdk/`)
+      MIT Licence. See `sdk/LICENSE` and the `LICENSE` file in each SDK
+      directory.
+
+  Documentation (`docs/`)
+      AGPL-3.0-only, as part of the Community Edition.
+
+If you redistribute this software, in source or binary form, you must keep this
+NOTICE file and the `LICENSE` files intact.
+
+--------------------------------------------------------------------------------
+Third-party software
+--------------------------------------------------------------------------------
+
+This product depends on third-party software. A generated inventory of those
+dependencies and their licences is in `THIRD_PARTY_LICENSES.md`.
+
+The following dependencies are distributed under the Apache License 2.0 and
+ship their own NOTICE files. Where a built artefact (a container image, a wheel,
+a bundle) includes them, those NOTICE files are reproduced alongside this one and
+must not be removed:
+
+  boto3, botocore, s3transfer          Copyright Amazon.com, Inc. or its affiliates
+  aws-xray-sdk                         Copyright Amazon.com, Inc. or its affiliates
+  aws-cdk-lib, constructs,             Copyright Amazon.com, Inc. or its affiliates
+    aws-cdk.asset-* (build-time only)
+  pyarrow                              Copyright The Apache Software Foundation
+  playwright, playwright-core,         Copyright (c) Microsoft Corporation
+    @playwright/test (test-time only)
+
+The following dependencies carry weak-copyleft licences. They are used as
+separate, unmodified libraries; no Experimently source code is a derivative work
+of them, and each remains under its own licence:
+
+  psycopg2-binary                      LGPL-3.0-or-later (with OpenSSL exception)
+  certifi, pathspec, bidict            MPL-2.0
+  orjson                               MPL-2.0 AND (Apache-2.0 OR MIT)
+
+  If you modify any of these libraries, the obligation to publish those
+  modifications is yours under their licences, not under the AGPL-3.0.
+
+`caniuse-lite`, pulled in transitively by the dashboard build toolchain, carries
+a CC-BY-4.0 licence over its browser-support database. It is a build-time
+dependency only and its data is not redistributed by Experimently.
+
+--------------------------------------------------------------------------------
+Trademarks
+--------------------------------------------------------------------------------
+
+"Experimently" and the Experimently logo are trademarks of Experimently. The
+AGPL-3.0 and the MIT Licence grant no trademark rights. You may state that your
+product is built on Experimently; you may not name a fork or a hosted service
+"Experimently" without written permission.

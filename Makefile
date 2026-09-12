@@ -47,11 +47,14 @@ bootstrap: ## Create the schema and the first administrator (idempotent)
 # ---------------------------------------------------------------------------
 
 .PHONY: dev
+# ENVIRONMENT is declared on the `dev` recipe, not left to the default: the
+# licence verifier honours a development licence only when the *process*
+# environment says so (a value in .env.dev does not reach os.environ).
 dev: db bootstrap ## Run the API (:8000) with reload; start the dashboard with `make web`
-	AUTH_PROVIDER=local $(VENV)/bin/uvicorn backend.app.main:app --reload --port 8000
+	ENVIRONMENT=development AUTH_PROVIDER=local $(VENV)/bin/uvicorn backend.app.main:app --reload --port 8000
 
 .PHONY: web
-web: ## Run the dashboard dev server (:3000)
+web: ## Run the dashboard dev server (:3100, see frontend/package.json)
 	cd frontend && npm run dev
 
 .PHONY: demo
@@ -109,8 +112,8 @@ test-sdk: ## Cross-SDK golden-vector contract tests
 
 .PHONY: lint
 lint: ## Everything the `lint` CI job runs: ruff, eslint, tsc, hadolint, actionlint
-	$(VENV)/bin/ruff check backend/
-	$(VENV)/bin/ruff format --check backend/
+	$(VENV)/bin/ruff check backend/ scripts/
+	$(VENV)/bin/ruff format --check backend/ scripts/
 	cd frontend && npm run lint && npx tsc --noEmit
 	@if command -v hadolint >/dev/null; then \
 		hadolint backend/Dockerfile frontend/Dockerfile \
@@ -122,8 +125,8 @@ lint: ## Everything the `lint` CI job runs: ruff, eslint, tsc, hadolint, actionl
 
 .PHONY: format
 format: ## Format and auto-fix the backend in place (ruff replaces black + isort)
-	$(VENV)/bin/ruff format backend/
-	$(VENV)/bin/ruff check backend/ --fix
+	$(VENV)/bin/ruff format backend/ scripts/
+	$(VENV)/bin/ruff check backend/ scripts/ --fix
 
 .PHONY: openapi
 openapi: ## Regenerate the OpenAPI fixture the URL guard checks against

@@ -250,3 +250,52 @@ class WorkspaceAPIKey(Base, BaseModel):
 
     def __repr__(self):
         return f"<WorkspaceAPIKey {self.name} prefix={self.key_prefix}>"
+
+
+# ---------------------------------------------------------------------------
+# The cross-edition foreign keys, attached from the Enterprise side
+# ---------------------------------------------------------------------------
+#
+# `experiments.workspace_id` and `feature_flags.workspace_id` are bare indexed
+# UUIDs in the Community models: a ForeignKey there was the only thing in the
+# Community ORM that reached across the edition boundary, and importing those
+# models without this one raised NoReferencedTableError. The constraint is
+# therefore declared *here*, by the module that owns the referenced table, and
+# only exists on a metadata that has loaded the Enterprise models:
+#
+# * a fresh Enterprise bootstrap (`create_all`) emits it as an ALTER TABLE
+#   after both tables exist (`use_alter=True`), with the same ON DELETE SET
+#   NULL the original ep057 migration gave it;
+# * a Community metadata never sees this module, so its schema has no such
+#   constraint and no dangling reference;
+# * an *existing* Enterprise database that ran migration a7b8c9d0e1f2 (which
+#   dropped the constraint) gets it back from the Enterprise alembic branch
+#   (issue #89). Until then `WorkspaceService.delete_workspace` clears the
+#   column itself, so the ON DELETE behaviour holds either way.
+
+
+def _attach_workspace_foreign_keys() -> None:
+    from sqlalchemy import ForeignKeyConstraint
+
+    from backend.app.models.experiment import Experiment
+    from backend.app.models.feature_flag import FeatureFlag
+
+    for model, name in (
+        (Experiment, "experiments_workspace_id_fkey"),
+        (FeatureFlag, "feature_flags_workspace_id_fkey"),
+    ):
+        table = model.__table__
+        if any(getattr(c, "name", None) == name for c in table.constraints):
+            continue  # already attached (the module was imported twice)
+        table.append_constraint(
+            ForeignKeyConstraint(
+                ["workspace_id"],
+                [Workspace.__table__.c.id],
+                name=name,
+                ondelete="SET NULL",
+                use_alter=True,
+            )
+        )
+
+
+_attach_workspace_foreign_keys()

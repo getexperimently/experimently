@@ -7,6 +7,8 @@ import { EffectivePermissionsModal } from '@/components/admin/users/EffectivePer
 import { AdminUser } from '@/types/admin';
 import { AdminService } from '@/services/admin';
 import { withAdminGuard } from '@/components/admin/withAdminGuard';
+import { RequiresFeature } from '@/contexts/EditionContext';
+import { FEATURES } from '@/services/edition';
 
 export function UserManagementPage() {
   const [inviteOpen, setInviteOpen] = useState(false);
@@ -67,13 +69,16 @@ export function UserManagementPage() {
           onSave={handleSaveUser}
         />
 
-        {/* Effective Permissions Modal */}
-        <EffectivePermissionsModal
-          isOpen={permissionsUser !== null}
-          userId={permissionsUser?.id ?? null}
-          userEmail={permissionsUser?.email}
-          onClose={() => setPermissionsUser(null)}
-        />
+        {/* Effective Permissions Modal — reads `/api/v1/rbac/users/{id}/permissions`,
+            an Enterprise route, so it is not mounted at all without the licence. */}
+        <RequiresFeature name={FEATURES.RBAC}>
+          <EffectivePermissionsModal
+            isOpen={permissionsUser !== null}
+            userId={permissionsUser?.id ?? null}
+            userEmail={permissionsUser?.email}
+            onClose={() => setPermissionsUser(null)}
+          />
+        </RequiresFeature>
       </div>
     </AdminLayout>
   );

@@ -19,7 +19,7 @@ from pydantic import (
 )
 
 from backend.app.schemas.bandit import OptimizationType
-from backend.app.schemas.split_url import SplitUrlConfig
+from backend.app.schemas.split_url_config import SplitUrlConfig
 from backend.app.schemas.variance_reduction import VarianceReductionConfig
 
 

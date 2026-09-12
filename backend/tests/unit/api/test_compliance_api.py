@@ -339,27 +339,12 @@ class TestFeatureFlagAuditGeneration:
 # ---------------------------------------------------------------------------
 
 
-class TestAuditEventIntegrityFields:
-    """Tests verifying hmac_signature and retention_expires_at on events."""
+class TestAuditEventRetention:
+    """AuditLogService.log() stamps retention_expires_at in every edition.
 
-    def test_audit_event_has_hmac_signature(self):
-        """AuditLogService.log() produces events with a non-empty hmac_signature."""
-        from backend.app.models.compliance_audit_event import AuditAction, AuditOutcome
-        from backend.app.services.audit_log_service import AuditLogService
-
-        db = MagicMock()
-        db.add = MagicMock()
-        db.flush = MagicMock()
-        service = AuditLogService(db)
-
-        event = service.log(
-            action=AuditAction.CREATE,
-            resource_type="feature_flag",
-            outcome=AuditOutcome.SUCCESS,
-            new_value={"key": "my-flag"},
-        )
-        assert event.hmac_signature is not None
-        assert len(event.hmac_signature) == 64
+    The HMAC signature tests that used to live here are Enterprise
+    (``test_compliance_signing.py``): the Community signer writes none.
+    """
 
     def test_audit_event_has_retention_expiry(self):
         """AuditLogService.log() produces events with a retention_expires_at."""
@@ -378,23 +363,3 @@ class TestAuditEventIntegrityFields:
         )
         assert event.retention_expires_at is not None
         assert event.retention_expires_at > datetime.now(timezone.utc)
-
-    def test_audit_event_hmac_is_64_hex_chars(self):
-        """HMAC signature is exactly 64 hex characters (SHA-256)."""
-        from backend.app.models.compliance_audit_event import AuditAction, AuditOutcome
-        from backend.app.services.audit_log_service import AuditLogService
-
-        db = MagicMock()
-        db.add = MagicMock()
-        db.flush = MagicMock()
-        service = AuditLogService(db)
-
-        event = service.log(
-            action=AuditAction.LOGIN,
-            resource_type="session",
-            outcome=AuditOutcome.SUCCESS,
-        )
-        sig = event.hmac_signature
-        assert len(sig) == 64
-        # Must be valid hex
-        int(sig, 16)

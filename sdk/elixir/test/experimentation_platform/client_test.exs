@@ -10,6 +10,8 @@ defmodule ExperimentationPlatform.ClientTest do
 
   use ExUnit.Case, async: true
 
+  alias ExperimentationPlatform.TestSupport.ProcessHelpers
+
   alias ExperimentationPlatform.{
     Assignment,
     BatchResult,
@@ -147,9 +149,20 @@ defmodule ExperimentationPlatform.ClientTest do
 
   setup do
     # The spy sends to a registered name so requests made from the client's
-    # spawned track processes reach the test process too. Registration is
-    # released automatically when the test process exits.
+    # spawned track processes reach the test process too.
+    #
+    # The name is released when the previous test's process exits, but the
+    # next test's setup can run before that release has landed, and then
+    # `Process.register/2` raises "the name is already taken" -- a flake seen
+    # in CI. Wait for the release, and give the name back explicitly on exit
+    # rather than relying on the exit to do it in time.
+    ProcessHelpers.await_release(@spy)
     Process.register(self(), @spy)
+
+    on_exit(fn ->
+      if Process.whereis(@spy), do: Process.unregister(@spy)
+    end)
+
     :ok
   end
 
@@ -157,7 +170,7 @@ defmodule ExperimentationPlatform.ClientTest do
     base_opts = [base_url: "http://localhost:8000", api_key: "test-key", http_client: SpyHttp]
     config = Config.new(Keyword.merge(base_opts, opts))
     {:ok, pid} = Client.start_link(config)
-    on_exit(fn -> if Process.alive?(pid), do: Client.stop(pid) end)
+    on_exit(fn -> ProcessHelpers.stop_if_alive(pid, &Client.stop/1) end)
     pid
   end
 
@@ -700,7 +713,7 @@ defmodule ExperimentationPlatform.ClientTest do
   describe "start_link/1 and stop/1" do
     test "accepts a keyword list config" do
       {:ok, pid} = Client.start_link(base_url: "http://localhost", api_key: "k", http_client: SpyHttp)
-      on_exit(fn -> if Process.alive?(pid), do: Client.stop(pid) end)
+      on_exit(fn -> ProcessHelpers.stop_if_alive(pid, &Client.stop/1) end)
       assert Process.alive?(pid)
     end
 
@@ -708,14 +721,14 @@ defmodule ExperimentationPlatform.ClientTest do
       {:ok, pid} =
         Client.start_link(%{base_url: "http://localhost", api_key: "k", http_client: SpyHttp})
 
-      on_exit(fn -> if Process.alive?(pid), do: Client.stop(pid) end)
+      on_exit(fn -> ProcessHelpers.stop_if_alive(pid, &Client.stop/1) end)
       assert Process.alive?(pid)
     end
 
     test "accepts a Config struct" do
       config = Config.new(base_url: "http://localhost", api_key: "k", http_client: SpyHttp)
       {:ok, pid} = Client.start_link(config)
-      on_exit(fn -> if Process.alive?(pid), do: Client.stop(pid) end)
+      on_exit(fn -> ProcessHelpers.stop_if_alive(pid, &Client.stop/1) end)
       assert Process.alive?(pid)
     end
 
@@ -728,7 +741,7 @@ defmodule ExperimentationPlatform.ClientTest do
           name: :client_test_named
         )
 
-      on_exit(fn -> if Process.alive?(pid), do: Client.stop(pid) end)
+      on_exit(fn -> ProcessHelpers.stop_if_alive(pid, &Client.stop/1) end)
       assert Process.whereis(:client_test_named) == pid
       assert {:ok, _} = Client.evaluate_flag(:client_test_named, "dark-mode", "user-1")
     end
