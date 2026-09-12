@@ -1,10 +1,16 @@
 """Unit tests for RBAC Pydantic schemas."""
+
 import pytest
 from pydantic import ValidationError
+
 from backend.app.schemas.rbac import (
-    CustomRoleCreate, CustomRoleUpdate, PermissionGrant,
-    PermissionAction, PermissionResource, AssignRoleRequest,
+    AssignRoleRequest,
+    CustomRoleCreate,
+    CustomRoleUpdate,
     DelegatePermissionRequest,
+    PermissionAction,
+    PermissionGrant,
+    PermissionResource,
 )
 
 
@@ -40,7 +46,9 @@ class TestCustomRoleCreate:
 
 class TestPermissionGrant:
     def test_valid_grant(self):
-        grant = PermissionGrant(resource=PermissionResource.EXPERIMENT, actions=[PermissionAction.READ])
+        grant = PermissionGrant(
+            resource=PermissionResource.EXPERIMENT, actions=[PermissionAction.READ]
+        )
         assert grant.resource == PermissionResource.EXPERIMENT
 
     def test_empty_actions_rejected(self):

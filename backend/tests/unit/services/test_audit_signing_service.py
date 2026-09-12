@@ -13,35 +13,35 @@ Tests cover:
 - Signature changes when any canonical field changes
 """
 
-import pytest
-import uuid
-import hmac as hmac_lib
 import hashlib
+import hmac as hmac_lib
 import json
+import uuid
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
+import pytest
 
-from backend.app.services.audit_signing_service import AuditSigningService
 from backend.app.models.compliance_audit_event import (
-    ComplianceAuditEvent,
     AuditAction,
     AuditOutcome,
+    ComplianceAuditEvent,
 )
+from backend.app.services.audit_signing_service import AuditSigningService
 
 
 def make_event(**kwargs):
     """Helper: create a ComplianceAuditEvent with sensible defaults."""
-    defaults = dict(
-        id=uuid.uuid4(),
-        timestamp=datetime(2024, 1, 15, 12, 0, 0, tzinfo=timezone.utc),
-        action=AuditAction.CREATE,
-        resource_type="feature_flag",
-        resource_id="flag_001",
-        actor_id=uuid.uuid4(),
-        outcome=AuditOutcome.SUCCESS,
-        hmac_signature=None,
-    )
+    defaults = {
+        "id": uuid.uuid4(),
+        "timestamp": datetime(2024, 1, 15, 12, 0, 0, tzinfo=timezone.utc),
+        "action": AuditAction.CREATE,
+        "resource_type": "feature_flag",
+        "resource_id": "flag_001",
+        "actor_id": uuid.uuid4(),
+        "outcome": AuditOutcome.SUCCESS,
+        "hmac_signature": None,
+    }
     defaults.update(kwargs)
     event = ComplianceAuditEvent()
     for k, v in defaults.items():
@@ -59,14 +59,18 @@ class TestAuditSigningServiceInstantiation:
 
     def test_service_reads_key_from_settings(self):
         """Service reads AUDIT_HMAC_KEY from settings on construction."""
-        with patch("backend.app.services.audit_signing_service.settings") as mock_settings:
+        with patch(
+            "backend.app.services.audit_signing_service.settings"
+        ) as mock_settings:
             mock_settings.AUDIT_HMAC_KEY = "test-key-for-unit-test"
             svc = AuditSigningService()
             assert svc._key == b"test-key-for-unit-test"
 
     def test_service_accepts_bytes_key(self):
         """Service accepts a bytes AUDIT_HMAC_KEY."""
-        with patch("backend.app.services.audit_signing_service.settings") as mock_settings:
+        with patch(
+            "backend.app.services.audit_signing_service.settings"
+        ) as mock_settings:
             mock_settings.AUDIT_HMAC_KEY = b"bytes-key"
             svc = AuditSigningService()
             assert svc._key == b"bytes-key"
@@ -126,7 +130,14 @@ class TestAuditSigningServiceSign:
         event1 = make_event(id=uuid.UUID("11111111-1111-1111-1111-111111111111"))
         event2 = make_event(id=uuid.UUID("22222222-2222-2222-2222-222222222222"))
         # Copy all other fields from event1
-        for field in ["timestamp", "action", "resource_type", "resource_id", "actor_id", "outcome"]:
+        for field in [
+            "timestamp",
+            "action",
+            "resource_type",
+            "resource_id",
+            "actor_id",
+            "outcome",
+        ]:
             setattr(event2, field, getattr(event1, field))
         assert self.svc.sign(event1) != self.svc.sign(event2)
 
@@ -134,7 +145,14 @@ class TestAuditSigningServiceSign:
         """Changing the action changes the signature."""
         event1 = make_event(action=AuditAction.CREATE)
         event2 = make_event(action=AuditAction.DELETE)
-        for field in ["id", "timestamp", "resource_type", "resource_id", "actor_id", "outcome"]:
+        for field in [
+            "id",
+            "timestamp",
+            "resource_type",
+            "resource_id",
+            "actor_id",
+            "outcome",
+        ]:
             setattr(event2, field, getattr(event1, field))
         assert self.svc.sign(event1) != self.svc.sign(event2)
 
@@ -142,7 +160,14 @@ class TestAuditSigningServiceSign:
         """Changing resource_type changes the signature."""
         event1 = make_event(resource_type="feature_flag")
         event2 = make_event(resource_type="experiment")
-        for field in ["id", "timestamp", "action", "resource_id", "actor_id", "outcome"]:
+        for field in [
+            "id",
+            "timestamp",
+            "action",
+            "resource_id",
+            "actor_id",
+            "outcome",
+        ]:
             setattr(event2, field, getattr(event1, field))
         assert self.svc.sign(event1) != self.svc.sign(event2)
 
@@ -150,7 +175,14 @@ class TestAuditSigningServiceSign:
         """Changing resource_id changes the signature."""
         event1 = make_event(resource_id="res_001")
         event2 = make_event(resource_id="res_002")
-        for field in ["id", "timestamp", "action", "resource_type", "actor_id", "outcome"]:
+        for field in [
+            "id",
+            "timestamp",
+            "action",
+            "resource_type",
+            "actor_id",
+            "outcome",
+        ]:
             setattr(event2, field, getattr(event1, field))
         assert self.svc.sign(event1) != self.svc.sign(event2)
 
@@ -158,7 +190,14 @@ class TestAuditSigningServiceSign:
         """Changing actor_id changes the signature."""
         event1 = make_event(actor_id=uuid.UUID("aaaa0000-0000-0000-0000-000000000001"))
         event2 = make_event(actor_id=uuid.UUID("bbbb0000-0000-0000-0000-000000000002"))
-        for field in ["id", "timestamp", "action", "resource_type", "resource_id", "outcome"]:
+        for field in [
+            "id",
+            "timestamp",
+            "action",
+            "resource_type",
+            "resource_id",
+            "outcome",
+        ]:
             setattr(event2, field, getattr(event1, field))
         assert self.svc.sign(event1) != self.svc.sign(event2)
 
@@ -166,7 +205,14 @@ class TestAuditSigningServiceSign:
         """Changing outcome changes the signature."""
         event1 = make_event(outcome=AuditOutcome.SUCCESS)
         event2 = make_event(outcome=AuditOutcome.DENIED)
-        for field in ["id", "timestamp", "action", "resource_type", "resource_id", "actor_id"]:
+        for field in [
+            "id",
+            "timestamp",
+            "action",
+            "resource_type",
+            "resource_id",
+            "actor_id",
+        ]:
             setattr(event2, field, getattr(event1, field))
         assert self.svc.sign(event1) != self.svc.sign(event2)
 
@@ -174,14 +220,30 @@ class TestAuditSigningServiceSign:
         """Changing timestamp changes the signature."""
         event1 = make_event(timestamp=datetime(2024, 1, 1, tzinfo=timezone.utc))
         event2 = make_event(timestamp=datetime(2024, 1, 2, tzinfo=timezone.utc))
-        for field in ["id", "action", "resource_type", "resource_id", "actor_id", "outcome"]:
+        for field in [
+            "id",
+            "action",
+            "resource_type",
+            "resource_id",
+            "actor_id",
+            "outcome",
+        ]:
             setattr(event2, field, getattr(event1, field))
         assert self.svc.sign(event1) != self.svc.sign(event2)
 
     def test_sign_includes_all_canonical_fields(self):
         """sign() canonical string includes all 7 required fields."""
         from backend.app.services.audit_signing_service import _CANONICAL_FIELDS
-        expected_fields = {"id", "timestamp", "action", "resource_type", "resource_id", "actor_id", "outcome"}
+
+        expected_fields = {
+            "id",
+            "timestamp",
+            "action",
+            "resource_type",
+            "resource_id",
+            "actor_id",
+            "outcome",
+        }
         assert expected_fields == set(_CANONICAL_FIELDS)
 
     def test_sign_handles_none_fields_gracefully(self):
@@ -271,8 +333,10 @@ class TestAuditSigningServiceVerify:
         event = make_event()
         event.hmac_signature = self.svc.sign(event)
 
-        with patch("backend.app.services.audit_signing_service.hmac_lib.compare_digest",
-                   wraps=hmac_lib.compare_digest) as mock_cd:
+        with patch(
+            "backend.app.services.audit_signing_service.hmac_lib.compare_digest",
+            wraps=hmac_lib.compare_digest,
+        ) as mock_cd:
             result = self.svc.verify(event)
             mock_cd.assert_called_once()
             assert result is True

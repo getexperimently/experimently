@@ -8,6 +8,7 @@ Percentile calculation uses numpy.percentile with method='lower', which matches
 the behaviour expected by the spec tests (integer-valued percentiles for integer
 input — no interpolation between adjacent values).
 """
+
 import csv
 from dataclasses import dataclass, field
 from typing import List, Optional
@@ -121,7 +122,9 @@ class RequestStats:
             ZeroDivisionError: If duration_seconds is zero.
         """
         if duration_seconds == 0.0:
-            raise ZeroDivisionError("duration_seconds must be non-zero to calculate RPS")
+            raise ZeroDivisionError(
+                "duration_seconds must be non-zero to calculate RPS"
+            )
         return self.num_requests / duration_seconds
 
 
@@ -174,23 +177,17 @@ def validate_against_target(
     # Check p50
     actual_p50 = stats.p50
     if actual_p50 > target.p50_ms:
-        failures.append(
-            f"p50 exceeded: {actual_p50:.1f}ms > {target.p50_ms}ms target"
-        )
+        failures.append(f"p50 exceeded: {actual_p50:.1f}ms > {target.p50_ms}ms target")
 
     # Check p95
     actual_p95 = stats.p95
     if actual_p95 > target.p95_ms:
-        failures.append(
-            f"p95 exceeded: {actual_p95:.1f}ms > {target.p95_ms}ms target"
-        )
+        failures.append(f"p95 exceeded: {actual_p95:.1f}ms > {target.p95_ms}ms target")
 
     # Check p99
     actual_p99 = stats.p99
     if actual_p99 > target.p99_ms:
-        failures.append(
-            f"p99 exceeded: {actual_p99:.1f}ms > {target.p99_ms}ms target"
-        )
+        failures.append(f"p99 exceeded: {actual_p99:.1f}ms > {target.p99_ms}ms target")
 
     # Check error rate
     actual_error_rate = stats.failure_rate
@@ -464,7 +461,9 @@ def generate_enhanced_report(
             f"Stages completed    : {breakpoint.stages_completed}",
         ]
         if breakpoint.breaking_error_rate == 0.0:
-            bp_lines.append("Status: System handled all load stages without degradation")
+            bp_lines.append(
+                "Status: System handled all load stages without degradation"
+            )
         else:
             bp_lines.append("Status: Degradation detected — consider scaling")
         bp_lines.append("=" * 60)

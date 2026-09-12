@@ -25,14 +25,13 @@ from __future__ import annotations
 import uuid
 from datetime import date, datetime, timezone
 from typing import Any, Dict
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from backend.app.models.user import User
-
 
 # ---------------------------------------------------------------------------
 # Helpers / payload builders
@@ -347,9 +346,7 @@ class TestListAuditLogs:
         # Return the requested page/page_size to verify they are passed through
         mock_result = {"items": [], "total": 0, "page": 2, "page_size": 25}
         with patch(self._SVC_GET_LOGS, return_value=mock_result):
-            response = admin_client.get(
-                "/api/v1/hipaa/audit-logs?page=2&page_size=25"
-            )
+            response = admin_client.get("/api/v1/hipaa/audit-logs?page=2&page_size=25")
         assert response.status_code == 200, response.text
         assert response.json()["page"] == 2
         assert response.json()["page_size"] == 25
@@ -407,7 +404,9 @@ class TestCreateAuditLog:
 class TestHipaaReport:
     """Tests for GET /api/v1/hipaa/report."""
 
-    _SVC_REPORT = "backend.app.api.v1.endpoints.hipaa.HIPAAService.generate_hipaa_report"
+    _SVC_REPORT = (
+        "backend.app.api.v1.endpoints.hipaa.HIPAAService.generate_hipaa_report"
+    )
 
     def _mock_report(self) -> Dict[str, Any]:
         return {
@@ -695,7 +694,10 @@ class TestHipaaStatus:
 
     def test_phi_encryption_false_when_key_not_set(self, admin_client):
         """phi_encryption_configured is False when key is not set."""
-        with patch(self._SVC_STATUS, return_value=self._mock_status(phi_encryption_configured=False)):
+        with patch(
+            self._SVC_STATUS,
+            return_value=self._mock_status(phi_encryption_configured=False),
+        ):
             response = admin_client.get("/api/v1/hipaa/status")
         assert response.status_code == 200
         assert response.json()["phi_encryption_configured"] is False
@@ -704,7 +706,9 @@ class TestHipaaStatus:
         """overall_hipaa_ready is False without an active BAA."""
         with patch(
             self._SVC_STATUS,
-            return_value=self._mock_status(has_active_baa=False, overall_hipaa_ready=False),
+            return_value=self._mock_status(
+                has_active_baa=False, overall_hipaa_ready=False
+            ),
         ):
             response = admin_client.get("/api/v1/hipaa/status")
         assert response.status_code == 200
@@ -755,6 +759,7 @@ class TestUnauthenticatedAccess:
     def test_unauthenticated_baa_list_returns_401(self):
         """Unauthenticated GET /baa returns 401 (or 500 in dev without DB)."""
         from fastapi.testclient import TestClient
+
         from backend.app.main import app
 
         client = TestClient(app, raise_server_exceptions=False)
@@ -765,6 +770,7 @@ class TestUnauthenticatedAccess:
     def test_unauthenticated_status_returns_401(self):
         """Unauthenticated GET /status returns 401 (or 500 in dev without DB)."""
         from fastapi.testclient import TestClient
+
         from backend.app.main import app
 
         client = TestClient(app, raise_server_exceptions=False)
@@ -774,6 +780,7 @@ class TestUnauthenticatedAccess:
     def test_unauthenticated_encrypt_returns_401(self):
         """Unauthenticated POST /encrypt returns 401 (or 500 in dev without DB)."""
         from fastapi.testclient import TestClient
+
         from backend.app.main import app
 
         client = TestClient(app, raise_server_exceptions=False)

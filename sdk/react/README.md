@@ -136,10 +136,30 @@ Every request carries `X-API-Key: <key>` and `Content-Type: application/json`.
 | `trackEvent` with a key | `POST /api/v1/tracking/track` | `{event_type, event_name, user_id, experiment_key?, feature_flag_key?, value?, metadata?, timestamp?}` | ignored |
 | `trackEvent` without keys | `POST /api/v1/tracking/batch` | `{events: [<track body>, …]}` (≤ 100 per request) | ignored |
 
+## Contract smoke
+
+```bash
+cd sdk/react && npm run build --silent && node examples/contract_smoke.mjs
+# {"sdk":"react","assign":{"variant_name":"control","is_control":true,"sticky":true},"flag":{"enabled":true},"track":{"ok":true},"fanout":{"ok":true}}
+```
+
+Drives the SSR entry point (`ServerClient`) plus `ExperimentationClient` for tracking under plain
+node — no DOM, no React render. Env: `EXPERIMENTLY_API_URL` (default `http://localhost:8000`),
+`EXPERIMENTLY_API_KEY` (required), `CONTRACT_EXPERIMENT_KEY` (default `sdk_contract_ab`),
+`CONTRACT_FLAG_KEY` (default `sdk_contract_flag`), `CONTRACT_USER_ID` (default random
+`smoke-<uuid>`). Repo-wide runner:
+`python tests/sdk-contract/live/run_live_contract.py --sdk react`.
+
+`trackEvent` never throws, so the smoke wraps `fetch` and fails when a tracking call did not come
+back 2xx — which is what catches a path the backend does not serve.
+
 ## Development
 
 ```bash
-cd sdk/react && npm install
-npx jest            # 215 unit tests (fetch is mocked)
+cd sdk/react && npm ci
+npm test            # 218 unit tests (fetch is mocked)
 npm run build       # tsc, strict
 ```
+
+The unit tests run in `.github/workflows/sdk-unit-tests.yml` on every pull request (react is one of
+the always-on core SDKs).

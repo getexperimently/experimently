@@ -235,7 +235,7 @@ def record_snapshot(
         )
         with _audit_session(db) as session:
             return _upsert(session, snapshot)
-    except Exception as exc:  # noqa: BLE001 - snapshots are best-effort by design
+    except Exception as exc:
         logger.warning(
             "analysis_snapshots write failed for experiment %s (%s): %s",
             experiment_id,
@@ -291,7 +291,7 @@ def purge_expired_history(
                 pass
             # `_audit_session` never commits on its own.
             session.commit()
-    except Exception as exc:  # noqa: BLE001 - retention is best-effort
+    except Exception as exc:
         logger.warning("analysis history purge failed: %s", exc)
         return {"analysis_snapshots": 0, "bandit_state_history": 0}
 

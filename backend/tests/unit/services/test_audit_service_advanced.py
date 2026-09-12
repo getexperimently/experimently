@@ -3,9 +3,12 @@ Unit tests for advanced AuditService methods added in P1-B.
 Tests compute_diff, log_bulk_toggle, get_flag_change_history.
 All use MagicMock DB — no real database.
 """
-import pytest
-from unittest.mock import MagicMock, AsyncMock, patch
+
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
+
+import pytest
+
 from backend.app.services.audit_service import AuditService
 
 
@@ -98,7 +101,9 @@ class TestGetFlagChangeHistory:
         mock_query.limit.return_value = mock_query
         mock_query.all.return_value = []
 
-        result = AuditService.get_flag_change_history(mock_db, uuid4(), limit=10, offset=0)
+        result = AuditService.get_flag_change_history(
+            mock_db, uuid4(), limit=10, offset=0
+        )
         assert isinstance(result, tuple)
         assert len(result) == 2
         logs, count = result

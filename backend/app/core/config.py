@@ -9,7 +9,16 @@ import logging
 import os
 import warnings
 from typing import Annotated, Any, Dict, List, Literal, Optional, Union
-from pydantic import field_validator, model_validator, AnyHttpUrl, EmailStr, PostgresDsn, RedisDsn, ValidationInfo
+
+from pydantic import (
+    AnyHttpUrl,
+    EmailStr,
+    PostgresDsn,
+    RedisDsn,
+    ValidationInfo,
+    field_validator,
+    model_validator,
+)
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 logger = logging.getLogger(__name__)
@@ -111,9 +120,7 @@ def canonical_environment(value: Any) -> Any:
     normalised = value.strip().lower()
     if normalised in _LEGACY_ENVIRONMENT_ALIASES:
         canonical = _LEGACY_ENVIRONMENT_ALIASES[normalised]
-        message = (
-            f"ENVIRONMENT={value!r} is deprecated; use ENVIRONMENT={canonical!r} instead."
-        )
+        message = f"ENVIRONMENT={value!r} is deprecated; use ENVIRONMENT={canonical!r} instead."
         warnings.warn(message, DeprecationWarning, stacklevel=3)
         logger.warning(message)
         return canonical
@@ -250,7 +257,9 @@ class Settings(BaseSettings):
 
     # Observability (read by backend/app/core/health.py, logger.py, main.py)
     LOG_LEVEL: str = "INFO"
-    LOG_FORMAT: Optional[Literal["json", "console"]] = None  # None -> json in staging/production, console otherwise
+    LOG_FORMAT: Optional[Literal["json", "console"]] = (
+        None  # None -> json in staging/production, console otherwise
+    )
     # Days of `analysis_snapshots` and `bandit_state_history` to keep. The
     # request path writes at most one snapshot per experiment, kind and day,
     # but the bandit scheduler records every tick, so the tables still grow
@@ -258,7 +267,9 @@ class Settings(BaseSettings):
     ANALYSIS_HISTORY_RETENTION_DAYS: int = 90
 
     METRICS_ENABLED: bool = True
-    METRICS_TOKEN: Optional[str] = None  # required to read /metrics outside development/test
+    METRICS_TOKEN: Optional[str] = (
+        None  # required to read /metrics outside development/test
+    )
     REDIS_REQUIRED: bool = False  # when true, /health/ready fails without Redis
 
     # Process model (documented: one worker per container; scheduler ticks are advisory-locked)
@@ -270,7 +281,7 @@ class Settings(BaseSettings):
 
     # Compliance audit settings (EP-033)
     AUDIT_HMAC_KEY: str = "dev-audit-key-change-in-production"
-    AUDIT_RETENTION_DAYS_SOC2: int = 365    # 12 months
+    AUDIT_RETENTION_DAYS_SOC2: int = 365  # 12 months
     AUDIT_RETENTION_DAYS_ISO27001: int = 730  # 24 months
 
     # EP-050: HIPAA Compliance settings
@@ -334,7 +345,9 @@ class Settings(BaseSettings):
     # SSO / SAML / OIDC settings (EP-037)
     SSO_ENABLED: bool = True
     SAML_SP_ENTITY_ID: str = "https://experimentation-platform.example.com"
-    SAML_SP_ACS_URL: str = "https://experimentation-platform.example.com/auth/sso/saml/acs"
+    SAML_SP_ACS_URL: str = (
+        "https://experimentation-platform.example.com/auth/sso/saml/acs"
+    )
     OIDC_GOOGLE_CLIENT_ID: str = ""
     OIDC_GOOGLE_CLIENT_SECRET: str = ""
     OIDC_GITHUB_CLIENT_ID: str = ""
@@ -348,14 +361,14 @@ class Settings(BaseSettings):
         "Admins": "admin",
         "Developers": "developer",
         "Analysts": "analyst",
-        "Viewers": "viewer"
+        "Viewers": "viewer",
     }
     COGNITO_ADMIN_GROUPS: List[str] = ["Admins", "SuperUsers"]
     SYNC_ROLES_ON_LOGIN: bool = True
 
     model_config = SettingsConfigDict(
         case_sensitive=True,
-        extra="ignore"  # Ignore unknown fields to catch typos
+        extra="ignore",  # Ignore unknown fields to catch typos
     )
 
     # ------------------------------------------------------------------
@@ -380,7 +393,10 @@ class Settings(BaseSettings):
     @property
     def dev_auth_bypass_active(self) -> bool:
         """True only when the dev-admin bypass is both enabled and permitted."""
-        return self.DEV_AUTH_BYPASS is True and self.ENVIRONMENT in BYPASS_ALLOWED_ENVIRONMENTS
+        return (
+            self.DEV_AUTH_BYPASS is True
+            and self.ENVIRONMENT in BYPASS_ALLOWED_ENVIRONMENTS
+        )
 
     @field_validator("ENVIRONMENT", mode="before")
     @classmethod
@@ -443,7 +459,7 @@ class Settings(BaseSettings):
                     f"SECRET_KEY must be at least {_MIN_SECRET_KEY_LENGTH} characters "
                     "and must not be a placeholder from the repository (docker-compose.yml, "
                     ".env.example or the class default) in staging/production. "
-                    "Generate one with: python -c \"import secrets; print(secrets.token_hex(32))\""
+                    'Generate one with: python -c "import secrets; print(secrets.token_hex(32))"'
                 )
         return v
 
@@ -455,7 +471,14 @@ class Settings(BaseSettings):
             # ``Demo1234!`` is the seeded demo password and appears in the
             # public docs and docker-compose.yml; it is never acceptable
             # for a real deployment's first administrator.
-            weak_defaults = {"admin", "password", "changeme", "admin123", "", "demo1234!"}
+            weak_defaults = {
+                "admin",
+                "password",
+                "changeme",
+                "admin123",
+                "",
+                "demo1234!",
+            }
             if v.lower() in weak_defaults or len(v) < 8:
                 raise ValueError(
                     "FIRST_SUPERUSER_PASSWORD must be at least 8 characters "
@@ -478,7 +501,7 @@ class Settings(BaseSettings):
                 raise ValueError(
                     f"AUDIT_HMAC_KEY must be at least {_MIN_SECRET_KEY_LENGTH} characters "
                     "and must not be the dev default in staging/production. "
-                    "Generate one with: python -c \"import secrets; print(secrets.token_hex(32))\""
+                    'Generate one with: python -c "import secrets; print(secrets.token_hex(32))"'
                 )
         return v
 
@@ -496,13 +519,15 @@ class Settings(BaseSettings):
                 raise ValueError(
                     f"SSO_STATE_SECRET must be at least {_MIN_SECRET_KEY_LENGTH} characters "
                     "and must not be the dev default in staging/production. "
-                    "Generate one with: python -c \"import secrets; print(secrets.token_hex(32))\""
+                    'Generate one with: python -c "import secrets; print(secrets.token_hex(32))"'
                 )
         return v
 
     @field_validator("DATABASE_URI", mode="before")
     @classmethod
-    def assemble_database_connection(cls, v: Optional[str], info: ValidationInfo) -> Any:
+    def assemble_database_connection(
+        cls, v: Optional[str], info: ValidationInfo
+    ) -> Any:
         """Assemble database connection string if not provided directly."""
         if isinstance(v, str):
             return v
@@ -512,7 +537,7 @@ class Settings(BaseSettings):
             password=info.data.get("POSTGRES_PASSWORD"),
             host=info.data.get("POSTGRES_SERVER"),
             port=int(info.data.get("POSTGRES_PORT", 5432)),
-            path=info.data.get('POSTGRES_DB', ''),
+            path=info.data.get("POSTGRES_DB", ""),
         )
 
     @field_validator("SQLALCHEMY_DATABASE_URI", mode="before")
@@ -532,7 +557,7 @@ class Settings(BaseSettings):
             password=info.data.get("POSTGRES_PASSWORD"),
             host=info.data.get("POSTGRES_SERVER"),
             port=int(info.data.get("POSTGRES_PORT", 5432)),
-            path=info.data.get('POSTGRES_DB', ''),
+            path=info.data.get("POSTGRES_DB", ""),
         )
 
     @field_validator("REDIS_URI", mode="before")
@@ -557,7 +582,9 @@ class DevSettings(Settings):
     """Development environment settings."""
 
     ENVIRONMENT: EnvironmentName = "development"
-    LOG_LEVEL: str = "INFO"  # set LOG_LEVEL=DEBUG explicitly; DEBUG makes every library chatty
+    LOG_LEVEL: str = (
+        "INFO"  # set LOG_LEVEL=DEBUG explicitly; DEBUG makes every library chatty
+    )
     CORS_ORIGINS: Annotated[List[str], NoDecode] = [
         "http://localhost:3100",
         "http://localhost:3000",
@@ -575,7 +602,9 @@ class DevSettings(Settings):
     POSTGRES_PASSWORD: str = "postgres"
     POSTGRES_DB: str = "experimentation"
 
-    model_config = SettingsConfigDict(env_file=".env.dev", case_sensitive=True, extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=".env.dev", case_sensitive=True, extra="ignore"
+    )
 
 
 class TestSettings(Settings):
@@ -584,9 +613,13 @@ class TestSettings(Settings):
     ENVIRONMENT: EnvironmentName = "test"
     ENV: str = "test"
     TESTING: bool = True
-    LOG_LEVEL: str = "INFO"  # set LOG_LEVEL=DEBUG explicitly; DEBUG makes every library chatty
+    LOG_LEVEL: str = (
+        "INFO"  # set LOG_LEVEL=DEBUG explicitly; DEBUG makes every library chatty
+    )
     PROJECT_NAME: str = "Experimentation Platform"
-    PROJECT_DESCRIPTION: str = "API for managing experiments and feature flags in test environment"
+    PROJECT_DESCRIPTION: str = (
+        "API for managing experiments and feature flags in test environment"
+    )
     DEBUG: bool = True
     POSTGRES_SERVER: str = "localhost"  # Use localhost for testing
     POSTGRES_USER: str = "postgres"
@@ -596,7 +629,9 @@ class TestSettings(Settings):
     CACHE_ENABLED: bool = False
     CACHE_CONTROL: Dict[str, Any] = {"enabled": False, "redis": None, "ttl": 3600}
 
-    model_config = SettingsConfigDict(env_file=".env.test", case_sensitive=True, extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=".env.test", case_sensitive=True, extra="ignore"
+    )
 
 
 class ProdSettings(Settings):
@@ -608,7 +643,9 @@ class ProdSettings(Settings):
     CACHE_ENABLED: bool = True
     CACHE_CONTROL: Dict[str, Any] = {"enabled": True, "redis": None, "ttl": 3600}
 
-    model_config = SettingsConfigDict(env_file=".env.prod", case_sensitive=True, extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=".env.prod", case_sensitive=True, extra="ignore"
+    )
 
     def get_db_url(self) -> str:
         """
@@ -621,7 +658,8 @@ class ProdSettings(Settings):
         """
         if self.ENVIRONMENT == "production" and not self.POSTGRES_PASSWORD:
             try:
-                from backend.app.core.secrets import get_secret, build_secret_name
+                from backend.app.core.secrets import build_secret_name, get_secret
+
                 password = get_secret(build_secret_name("db-password"))
                 return (
                     f"postgresql://{self.POSTGRES_USER}:{password}"
@@ -656,14 +694,14 @@ else:
 
 # Make settings accessible at module level
 __all__ = [
-    "settings",
-    "Settings",
-    "DevSettings",
-    "TestSettings",
-    "ProdSettings",
-    "EnvironmentName",
-    "CANONICAL_ENVIRONMENTS",
     "BYPASS_ALLOWED_ENVIRONMENTS",
+    "CANONICAL_ENVIRONMENTS",
+    "DevSettings",
+    "EnvironmentName",
+    "ProdSettings",
+    "Settings",
+    "TestSettings",
     "canonical_environment",
     "resolve_environment_from_process_env",
+    "settings",
 ]

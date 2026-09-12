@@ -45,16 +45,16 @@ PASSWORD = "Demo1234!"
 
 
 def _user(**overrides) -> User:
-    fields = dict(
-        id=uuid.uuid4(),
-        username="alice",
-        email="alice@example.com",
-        full_name="Alice Example",
-        hashed_password=get_password_hash(PASSWORD),
-        is_active=True,
-        is_superuser=False,
-        role=UserRole.DEVELOPER,
-    )
+    fields = {
+        "id": uuid.uuid4(),
+        "username": "alice",
+        "email": "alice@example.com",
+        "full_name": "Alice Example",
+        "hashed_password": get_password_hash(PASSWORD),
+        "is_active": True,
+        "is_superuser": False,
+        "role": UserRole.DEVELOPER,
+    }
     fields.update(overrides)
     return User(**fields)
 
@@ -84,7 +84,9 @@ class TestLocalTokens:
         assert claims["email"] == user.email
         assert claims["role"] == "DEVELOPER"
         assert claims["iss"] == LOCAL_TOKEN_ISSUER
-        assert claims["exp"] - claims["iat"] == settings.LOCAL_AUTH_TOKEN_TTL_MINUTES * 60
+        assert (
+            claims["exp"] - claims["iat"] == settings.LOCAL_AUTH_TOKEN_TTL_MINUTES * 60
+        )
         assert len(claims["jti"]) == 32
 
     def test_header_is_hs256(self):
@@ -131,7 +133,9 @@ class TestLocalTokens:
             decode_local_token(token)
 
     def test_missing_required_claims_rejected(self):
-        token = jwt.encode({"iss": LOCAL_TOKEN_ISSUER}, settings.SECRET_KEY, algorithm="HS256")
+        token = jwt.encode(
+            {"iss": LOCAL_TOKEN_ISSUER}, settings.SECRET_KEY, algorithm="HS256"
+        )
         with pytest.raises(InvalidTokenError):
             decode_local_token(token)
 
@@ -154,7 +158,12 @@ class TestLocalTokens:
 
     @pytest.mark.parametrize(
         "role,expected",
-        [(UserRole.ADMIN, "ADMIN"), ("viewer", "VIEWER"), (None, "VIEWER"), ("ANALYST", "ANALYST")],
+        [
+            (UserRole.ADMIN, "ADMIN"),
+            ("viewer", "VIEWER"),
+            (None, "VIEWER"),
+            ("ANALYST", "ANALYST"),
+        ],
     )
     def test_role_name(self, role, expected):
         assert role_name(role) == expected
@@ -209,7 +218,9 @@ class TestLoginAttemptTracker:
         assert len(t) == 1
 
     def test_size_cap_evicts_oldest_addresses(self):
-        t = LoginAttemptTracker(max_attempts=5, window_seconds=3600, max_tracked=50, sweep_interval=0)
+        t = LoginAttemptTracker(
+            max_attempts=5, window_seconds=3600, max_tracked=50, sweep_interval=0
+        )
         for i in range(60):
             t.record_failure(f"u{i}@x.com", float(i))
         assert len(t) <= 51  # cap is enforced before the new key is added
@@ -221,7 +232,9 @@ class TestLoginAttemptTracker:
         t = LoginAttemptTracker(max_attempts=3, window_seconds=100, sweep_interval=0)
         t.record_failure("live@x.com", 0.0)
         t.record_failure("live@x.com", 50.0)
-        t.record_failure("other@x.com", 60.0)  # sweep runs: live has a failure at 50 (still in window)
+        t.record_failure(
+            "other@x.com", 60.0
+        )  # sweep runs: live has a failure at 50 (still in window)
         assert t.status("live@x.com", 60.0).failures == 2
 
 
@@ -284,7 +297,9 @@ class TestLocalAuthService:
         import backend.app.services.local_auth_service as mod
 
         calls = []
-        monkeypatch.setattr(mod, "verify_password", lambda pw, h: calls.append(h) or False)
+        monkeypatch.setattr(
+            mod, "verify_password", lambda pw, h: calls.append(h) or False
+        )
         svc = LocalAuthService(LoginAttemptTracker(3, 60))
         with pytest.raises(InvalidCredentialsError):
             svc.authenticate(self._db_with(None), "ghost@example.com", "x")
@@ -294,7 +309,9 @@ class TestLocalAuthService:
         import backend.app.services.local_auth_service as mod
 
         calls = []
-        monkeypatch.setattr(mod, "verify_password", lambda pw, h: calls.append(h) or False)
+        monkeypatch.setattr(
+            mod, "verify_password", lambda pw, h: calls.append(h) or False
+        )
         user = _user(hashed_password=None)
         svc = LocalAuthService(LoginAttemptTracker(3, 60))
         with pytest.raises(InvalidCredentialsError):
@@ -394,7 +411,9 @@ class TestGetCurrentUserLocal:
 
     def test_bypass_returns_dev_admin_without_token(self, local_provider, monkeypatch):
         monkeypatch.setattr(settings, "DEV_AUTH_BYPASS", True)
-        dev = _user(username=deps.DEV_BYPASS_USERNAME, role=UserRole.ADMIN, is_superuser=True)
+        dev = _user(
+            username=deps.DEV_BYPASS_USERNAME, role=UserRole.ADMIN, is_superuser=True
+        )
         assert deps.get_current_user(None, self._db_with(dev)) is dev
 
     def test_bypass_ignored_in_production(self, local_provider, monkeypatch):
@@ -492,7 +511,9 @@ class TestLoginEndpoint:
     def test_login_success_shape(self, http):
         user = _user()
         http.state.user = user
-        resp = http.post("/api/v1/auth/login", json={"email": user.email, "password": PASSWORD})
+        resp = http.post(
+            "/api/v1/auth/login", json={"email": user.email, "password": PASSWORD}
+        )
         assert resp.status_code == 200, resp.text
         body = resp.json()
         assert set(body) == {"access_token", "token_type", "expires_in", "user"}
@@ -513,36 +534,47 @@ class TestLoginEndpoint:
     def test_wrong_password_401_generic_message(self, http):
         user = _user()
         http.state.user = user
-        resp = http.post("/api/v1/auth/login", json={"email": user.email, "password": "wrong"})
+        resp = http.post(
+            "/api/v1/auth/login", json={"email": user.email, "password": "wrong"}
+        )
         assert resp.status_code == 401
         assert resp.json() == {"detail": "Invalid email or password"}
 
     def test_unknown_user_same_message(self, http):
         http.state.user = None
-        resp = http.post("/api/v1/auth/login", json={"email": "ghost@example.com", "password": "x"})
+        resp = http.post(
+            "/api/v1/auth/login", json={"email": "ghost@example.com", "password": "x"}
+        )
         assert resp.status_code == 401
         assert resp.json() == {"detail": "Invalid email or password"}
 
     def test_inactive_user_same_message(self, http):
         http.state.user = _user(is_active=False)
         resp = http.post(
-            "/api/v1/auth/login", json={"email": http.state.user.email, "password": PASSWORD}
+            "/api/v1/auth/login",
+            json={"email": http.state.user.email, "password": PASSWORD},
         )
         assert resp.status_code == 401
         assert resp.json() == {"detail": "Invalid email or password"}
 
     def test_missing_fields_422(self, http):
         assert http.post("/api/v1/auth/login", json={}).status_code == 422
-        assert http.post("/api/v1/auth/login", json={"email": "a@b.c"}).status_code == 422
+        assert (
+            http.post("/api/v1/auth/login", json={"email": "a@b.c"}).status_code == 422
+        )
 
     def test_lockout_returns_423_after_max_failures(self, http, monkeypatch):
         monkeypatch.setattr(login_attempt_tracker, "max_attempts", 3)
         user = _user()
         http.state.user = user
         for _ in range(3):
-            r = http.post("/api/v1/auth/login", json={"email": user.email, "password": "wrong"})
+            r = http.post(
+                "/api/v1/auth/login", json={"email": user.email, "password": "wrong"}
+            )
             assert r.status_code == 401
-        r = http.post("/api/v1/auth/login", json={"email": user.email, "password": PASSWORD})
+        r = http.post(
+            "/api/v1/auth/login", json={"email": user.email, "password": PASSWORD}
+        )
         assert r.status_code == 423, r.text
         assert "Retry-After" in r.headers
         assert "locked" in r.json()["detail"].lower()
@@ -553,7 +585,10 @@ class TestLoginEndpoint:
         assert resp.status_code == 404
 
     def test_login_is_rate_limited(self):
-        from backend.app.middleware.rate_limiter import RATE_LIMIT_CONFIG, resolve_rate_limit
+        from backend.app.middleware.rate_limiter import (
+            RATE_LIMIT_CONFIG,
+            resolve_rate_limit,
+        )
 
         assert RATE_LIMIT_CONFIG["/api/v1/auth/login"] == (10, 60)
         assert resolve_rate_limit("/api/v1/auth/login") == (10, 60)
@@ -563,7 +598,9 @@ class TestTokenFormEndpoint:
     def test_form_login_returns_same_shape(self, http):
         user = _user()
         http.state.user = user
-        resp = http.post("/api/v1/auth/token", data={"username": user.email, "password": PASSWORD})
+        resp = http.post(
+            "/api/v1/auth/token", data={"username": user.email, "password": PASSWORD}
+        )
         assert resp.status_code == 200, resp.text
         body = resp.json()
         assert body["token_type"] == "bearer"
@@ -573,7 +610,9 @@ class TestTokenFormEndpoint:
     def test_form_login_wrong_password(self, http):
         user = _user()
         http.state.user = user
-        resp = http.post("/api/v1/auth/token", data={"username": user.email, "password": "no"})
+        resp = http.post(
+            "/api/v1/auth/token", data={"username": user.email, "password": "no"}
+        )
         assert resp.status_code == 401
         assert resp.json()["detail"] == "Invalid email or password"
 

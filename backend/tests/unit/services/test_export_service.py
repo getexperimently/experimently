@@ -2,13 +2,16 @@
 Unit tests for ExportService — data export and report generation.
 Uses mock DB session, no real database required.
 """
-import pytest
+
 import csv
 import io
 import json
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
-from backend.app.schemas.export import ExportRequest, ExportFormat, ExportScope
+
+import pytest
+
+from backend.app.schemas.export import ExportFormat, ExportRequest, ExportScope
 from backend.app.services.export_service import ExportService
 
 
@@ -34,7 +37,9 @@ def mock_experiment():
 class TestExportExperimentsCSV:
     def test_returns_csv_content_type(self, mock_db, mock_experiment):
         """CSV export returns text/csv content type"""
-        mock_db.query.return_value.filter.return_value.filter.return_value.all.return_value = [mock_experiment]
+        mock_db.query.return_value.filter.return_value.filter.return_value.all.return_value = [
+            mock_experiment
+        ]
         mock_db.query.return_value.all.return_value = [mock_experiment]
 
         service = ExportService(mock_db)
@@ -283,13 +288,23 @@ class TestPlatformOverviewReport:
 class TestToCSV:
     def test_to_csv_uses_schema_field_names_as_headers(self, mock_db):
         from backend.app.schemas.export import ExperimentExportRow
+
         service = ExportService(mock_db)
-        rows = [ExperimentExportRow(
-            experiment_id="e1", experiment_name="Test", status="active",
-            experiment_type="a_b", start_date=None, end_date=None,
-            duration_days=None, total_assignments=0, total_events=0,
-            winner_variant=None, recommendation=None,
-        )]
+        rows = [
+            ExperimentExportRow(
+                experiment_id="e1",
+                experiment_name="Test",
+                status="active",
+                experiment_type="a_b",
+                start_date=None,
+                end_date=None,
+                duration_days=None,
+                total_assignments=0,
+                total_events=0,
+                winner_variant=None,
+                recommendation=None,
+            )
+        ]
         csv_content = service._to_csv(rows, ExperimentExportRow)
         reader = csv.DictReader(io.StringIO(csv_content))
         headers = reader.fieldnames
@@ -297,26 +312,30 @@ class TestToCSV:
 
     def test_to_csv_empty_list_returns_empty_string(self, mock_db):
         from backend.app.schemas.export import ExperimentExportRow
+
         service = ExportService(mock_db)
         assert service._to_csv([], ExperimentExportRow) == ""
 
     def test_to_csv_values_match_row_data(self, mock_db):
         """CSV data rows match the values from the input rows"""
         from backend.app.schemas.export import ExperimentExportRow
+
         service = ExportService(mock_db)
-        rows = [ExperimentExportRow(
-            experiment_id="exp-123",
-            experiment_name="My Experiment",
-            status="completed",
-            experiment_type="a_b",
-            start_date="2024-01-01",
-            end_date="2024-01-31",
-            duration_days=30.0,
-            total_assignments=1000,
-            total_events=500,
-            winner_variant="Treatment",
-            recommendation="SHIP_VARIANT",
-        )]
+        rows = [
+            ExperimentExportRow(
+                experiment_id="exp-123",
+                experiment_name="My Experiment",
+                status="completed",
+                experiment_type="a_b",
+                start_date="2024-01-01",
+                end_date="2024-01-31",
+                duration_days=30.0,
+                total_assignments=1000,
+                total_events=500,
+                winner_variant="Treatment",
+                recommendation="SHIP_VARIANT",
+            )
+        ]
         csv_content = service._to_csv(rows, ExperimentExportRow)
         reader = csv.DictReader(io.StringIO(csv_content))
         data_rows = list(reader)
@@ -329,6 +348,7 @@ class TestToCSV:
     def test_to_csv_multiple_rows(self, mock_db):
         """CSV serializer correctly handles multiple rows"""
         from backend.app.schemas.export import ExperimentExportRow
+
         service = ExportService(mock_db)
         rows = [
             ExperimentExportRow(

@@ -88,9 +88,7 @@ class SlackNotifier:
             return False
 
         if not self._sdk_available:
-            logger.debug(
-                "slack_sdk is not installed; Slack notification skipped."
-            )
+            logger.debug("slack_sdk is not installed; Slack notification skipped.")
             return False
 
         target_channel = channel or self._default_channel
@@ -107,11 +105,9 @@ class SlackNotifier:
             )
             return True
         except SlackApiError as exc:
-            logger.error(
-                "SlackApiError sending to channel=%s: %s", target_channel, exc
-            )
+            logger.error("SlackApiError sending to channel=%s: %s", target_channel, exc)
             return False
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.error(
                 "Unexpected error sending Slack message to channel=%s: %s",
                 target_channel,
@@ -171,9 +167,7 @@ class SlackNotifier:
 
         if details:
             for key, value in details.items():
-                fields.append(
-                    {"type": "mrkdwn", "text": f"*{key.title()}:*\n{value}"}
-                )
+                fields.append({"type": "mrkdwn", "text": f"*{key.title()}:*\n{value}"})
 
         return [
             {
@@ -218,7 +212,7 @@ class SlackNotifier:
                 f"error rate {error_rate:.1%} exceeded threshold {threshold:.1%}."
             )
             return self._send_message(channel=channel, blocks=blocks, text=text)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.error("Error in send_safety_rollback_alert: %s", exc)
             return False
 
@@ -246,7 +240,7 @@ class SlackNotifier:
             )
             text = f"Experiment '{experiment_name}' has started."
             return self._send_message(channel=channel, blocks=blocks, text=text)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.error("Error in send_experiment_started: %s", exc)
             return False
 
@@ -276,7 +270,7 @@ class SlackNotifier:
             if winner:
                 text += f" Winner: {winner}."
             return self._send_message(channel=channel, blocks=blocks, text=text)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.error("Error in send_experiment_completed: %s", exc)
             return False
 
@@ -312,7 +306,11 @@ class SlackNotifier:
                             "type": "mrkdwn",
                             "text": f"*Progress:*\n{from_pct}% → {to_pct}%",
                         },
-                        *([{"type": "mrkdwn", "text": f"*Stage:*\n{stage_name}"}] if stage_name else []),
+                        *(
+                            [{"type": "mrkdwn", "text": f"*Stage:*\n{stage_name}"}]
+                            if stage_name
+                            else []
+                        ),
                     ],
                 },
                 {"type": "divider"},
@@ -322,7 +320,7 @@ class SlackNotifier:
                 f"{to_pct}%{stage_label}."
             )
             return self._send_message(channel=channel, blocks=blocks, text=text)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.error("Error in send_rollout_advanced: %s", exc)
             return False
 
@@ -359,11 +357,9 @@ class SlackNotifier:
                 },
                 {"type": "divider"},
             ]
-            text = (
-                f"Rollout for '{flag_name}' is complete at {final_pct}% of users."
-            )
+            text = f"Rollout for '{flag_name}' is complete at {final_pct}% of users."
             return self._send_message(channel=channel, blocks=blocks, text=text)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.error("Error in send_rollout_completed: %s", exc)
             return False
 
@@ -422,8 +418,10 @@ class SlackNotifier:
                 {"type": "divider"},
             ]
             return self._send_message(
-                channel=channel, blocks=blocks, text=f"[{severity.upper()}] {title}: {message}"
+                channel=channel,
+                blocks=blocks,
+                text=f"[{severity.upper()}] {title}: {message}",
             )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.error("Error in send_generic_alert: %s", exc)
             return False

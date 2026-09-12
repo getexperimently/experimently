@@ -5,17 +5,18 @@ Tests comprehensive error scenarios including validation errors,
 not found errors, and internal server errors.
 """
 
-import pytest
 import sys
-from pathlib import Path
 from datetime import datetime, timezone
+from pathlib import Path
 from unittest.mock import Mock, patch
+
+import pytest
 
 # Add parent directories to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "shared"))
 
-from models import ExperimentConfig, VariantConfig, ExperimentStatus
+from models import ExperimentConfig, ExperimentStatus, VariantConfig
 
 
 class TestValidationErrors:
@@ -32,8 +33,8 @@ class TestValidationErrors:
             status=ExperimentStatus.ACTIVE,
             variants=[
                 VariantConfig(key="control", allocation=0.5),
-                VariantConfig(key="treatment", allocation=0.5)
-            ]
+                VariantConfig(key="treatment", allocation=0.5),
+            ],
         )
 
         # Empty user_id should raise ValueError
@@ -51,8 +52,8 @@ class TestValidationErrors:
             status=ExperimentStatus.ACTIVE,
             variants=[
                 VariantConfig(key="control", allocation=0.5),
-                VariantConfig(key="treatment", allocation=0.5)
-            ]
+                VariantConfig(key="treatment", allocation=0.5),
+            ],
         )
 
         # None user_id should raise ValueError
@@ -69,7 +70,7 @@ class TestValidationErrors:
                 experiment_id="exp_no_variants",
                 key="test",
                 status=ExperimentStatus.ACTIVE,
-                variants=[]
+                variants=[],
             )
 
     def test_validate_experiment_config_with_single_variant(self):
@@ -82,9 +83,7 @@ class TestValidationErrors:
                 experiment_id="exp_single_variant",
                 key="test",
                 status=ExperimentStatus.ACTIVE,
-                variants=[
-                    VariantConfig(key="control", allocation=1.0)
-                ]
+                variants=[VariantConfig(key="control", allocation=1.0)],
             )
 
     def test_targeting_rules_with_invalid_operator(self):
@@ -92,9 +91,7 @@ class TestValidationErrors:
         from assignment_service import AssignmentService
 
         service = AssignmentService()
-        rules = [
-            {"attribute": "country", "operator": "invalid_op", "value": "US"}
-        ]
+        rules = [{"attribute": "country", "operator": "invalid_op", "value": "US"}]
         context = {"country": "US"}
 
         # Should return False for invalid operator
@@ -105,7 +102,7 @@ class TestValidationErrors:
 class TestNotFoundErrors:
     """Test suite for 404 Not Found errors."""
 
-    @patch('assignment_service.get_dynamodb_resource')
+    @patch("assignment_service.get_dynamodb_resource")
     def test_get_experiment_config_not_found(self, mock_get_resource):
         """Test handling of non-existent experiment."""
         from assignment_service import AssignmentService
@@ -122,7 +119,7 @@ class TestNotFoundErrors:
 
         assert config is None
 
-    @patch('utils.get_dynamodb_item')
+    @patch("utils.get_dynamodb_item")
     def test_get_assignment_not_found(self, mock_get_item):
         """Test handling of non-existent assignment."""
         from assignment_service import AssignmentService
@@ -138,7 +135,7 @@ class TestNotFoundErrors:
 class TestInternalServerErrors:
     """Test suite for 500 Internal Server errors."""
 
-    @patch('assignment_service.get_dynamodb_resource')
+    @patch("assignment_service.get_dynamodb_resource")
     def test_get_experiment_config_dynamodb_error(self, mock_get_resource):
         """Test handling of DynamoDB errors when fetching experiment."""
         from assignment_service import AssignmentService
@@ -156,7 +153,7 @@ class TestInternalServerErrors:
         # Should handle error gracefully and return None
         assert config is None
 
-    @patch('utils.put_dynamodb_item')
+    @patch("utils.put_dynamodb_item")
     def test_store_assignment_dynamodb_error(self, mock_put_item):
         """Test handling of DynamoDB errors when storing assignment."""
         from assignment_service import AssignmentService
@@ -171,7 +168,7 @@ class TestInternalServerErrors:
             experiment_id="exp_789",
             experiment_key="test",
             variant="control",
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
         service = AssignmentService()
@@ -180,7 +177,7 @@ class TestInternalServerErrors:
         with pytest.raises(Exception):
             service.store_assignment(assignment)
 
-    @patch('utils.get_dynamodb_item')
+    @patch("utils.get_dynamodb_item")
     def test_get_assignment_dynamodb_error(self, mock_get_item):
         """Test handling of DynamoDB errors when retrieving assignment."""
         from assignment_service import AssignmentService
@@ -194,7 +191,7 @@ class TestInternalServerErrors:
         # Should handle error gracefully and return None
         assert assignment is None
 
-    @patch('assignment_service.get_dynamodb_resource')
+    @patch("assignment_service.get_dynamodb_resource")
     def test_get_experiment_config_cached_error_handling(self, mock_get_resource):
         """Test that caching layer handles errors gracefully."""
         from assignment_service import AssignmentService
@@ -227,12 +224,14 @@ class TestInternalServerErrors:
             status=ExperimentStatus.ACTIVE,
             variants=[
                 VariantConfig(key="control", allocation=0.5),
-                VariantConfig(key="treatment", allocation=0.5)
-            ]
+                VariantConfig(key="treatment", allocation=0.5),
+            ],
         )
 
         # Mock hasher to raise error
-        with patch.object(service.hasher, 'assign_variant', side_effect=Exception("Hash error")):
+        with patch.object(
+            service.hasher, "assign_variant", side_effect=Exception("Hash error")
+        ):
             with pytest.raises(Exception):
                 service.assign_variant("user_123", experiment)
 
@@ -251,9 +250,9 @@ class TestEdgeCases:
             status=ExperimentStatus.ACTIVE,
             variants=[
                 VariantConfig(key="control", allocation=0.5),
-                VariantConfig(key="treatment", allocation=0.5)
+                VariantConfig(key="treatment", allocation=0.5),
             ],
-            traffic_allocation=0.0
+            traffic_allocation=0.0,
         )
 
         # No user should be assigned
@@ -272,9 +271,9 @@ class TestEdgeCases:
             status=ExperimentStatus.ACTIVE,
             variants=[
                 VariantConfig(key="control", allocation=0.5),
-                VariantConfig(key="treatment", allocation=0.5)
+                VariantConfig(key="treatment", allocation=0.5),
             ],
-            traffic_allocation=1.0
+            traffic_allocation=1.0,
         )
 
         # All users should be assigned
@@ -288,8 +287,9 @@ class TestEdgeCases:
 
     def test_cache_with_expired_ttl(self):
         """Test that expired cache entries are not used."""
-        from assignment_service import AssignmentService
         from time import sleep
+
+        from assignment_service import AssignmentService
 
         service = AssignmentService()
         service.cache_ttl = 0.1  # 100ms TTL
@@ -311,9 +311,7 @@ class TestEdgeCases:
         from assignment_service import AssignmentService
 
         service = AssignmentService()
-        rules = [
-            {"attribute": "country", "operator": "equals", "value": "US"}
-        ]
+        rules = [{"attribute": "country", "operator": "equals", "value": "US"}]
         context = {"country": None, "platform": "web"}
 
         # Should not match due to None value
@@ -325,16 +323,14 @@ class TestEdgeCases:
         from assignment_service import AssignmentService
 
         service = AssignmentService()
-        rules = [
-            {"attribute": "country", "operator": "equals", "value": "US"}
-        ]
+        rules = [{"attribute": "country", "operator": "equals", "value": "US"}]
         context = {}
 
         # Should not match due to missing attribute
         matches = service.evaluate_targeting_rules(rules, context)
         assert matches is False
 
-    @patch('utils.put_dynamodb_item')
+    @patch("utils.put_dynamodb_item")
     def test_store_assignment_without_context(self, mock_put_item):
         """Test storing assignment without user context."""
         from assignment_service import AssignmentService
@@ -349,7 +345,7 @@ class TestEdgeCases:
             experiment_key="test",
             variant="control",
             timestamp=datetime.now(timezone.utc),
-            context=None
+            context=None,
         )
 
         service = AssignmentService()
@@ -359,8 +355,8 @@ class TestEdgeCases:
 
         # Verify context was not included in item
         call_kwargs = mock_put_item.call_args.kwargs
-        item = call_kwargs['item']
-        assert 'context' not in item
+        item = call_kwargs["item"]
+        assert "context" not in item
 
     def test_variant_allocation_sum_not_one(self):
         """Test handling of variant allocations that don't sum to 1.0."""
@@ -374,6 +370,6 @@ class TestEdgeCases:
                 status=ExperimentStatus.ACTIVE,
                 variants=[
                     VariantConfig(key="control", allocation=0.4),
-                    VariantConfig(key="treatment", allocation=0.5)
-                ]
+                    VariantConfig(key="treatment", allocation=0.5),
+                ],
             )

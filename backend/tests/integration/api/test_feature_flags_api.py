@@ -19,15 +19,16 @@ Architecture note on transaction isolation:
 
 All previously documented application bugs in this file have been fixed.
 """
+
 import pytest
 
-from backend.tests.integration.helpers import assert_feature_flag_in_db, unique_flag_key
 from backend.app.models.feature_flag import FeatureFlag, FeatureFlagStatus
-
+from backend.tests.integration.helpers import assert_feature_flag_in_db, unique_flag_key
 
 # ─────────────────────────────────────────────────────────────────────────────
 # GROUP 1: Read-only and validation tests (safe to run first — no DB commits)
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 @pytest.mark.integration
 @pytest.mark.requires_db
@@ -73,7 +74,9 @@ class TestFeatureFlagsList:
         for item in by_key.values():
             assert item["is_active"] is (item["status"] == "active"), item
 
-    def test_list_status_filter_uses_db_enum_casing(self, admin_client, make_feature_flag):
+    def test_list_status_filter_uses_db_enum_casing(
+        self, admin_client, make_feature_flag
+    ):
         """``?status=INACTIVE`` (the DB enum value) only returns inactive flags."""
         inactive = make_feature_flag(
             key=unique_flag_key("filter-inactive"), status=FeatureFlagStatus.INACTIVE
@@ -179,7 +182,9 @@ class TestFeatureFlagsValidation:
         response = admin_client.post(f"/api/v1/feature-flags/{flag.id}/toggle")
         assert response.status_code == 422, response.text
 
-    def test_evaluate_missing_user_id_returns_422(self, admin_client, make_feature_flag):
+    def test_evaluate_missing_user_id_returns_422(
+        self, admin_client, make_feature_flag
+    ):
         """Omitting the required user_id query param returns 422."""
         flag = make_feature_flag(
             key=unique_flag_key("eval-noid"),
@@ -190,7 +195,9 @@ class TestFeatureFlagsValidation:
         response = admin_client.get(f"/api/v1/feature-flags/evaluate/{flag.key}")
         assert response.status_code == 422, response.text
 
-    def test_create_flag_duplicate_key_returns_409(self, admin_client, make_feature_flag):
+    def test_create_flag_duplicate_key_returns_409(
+        self, admin_client, make_feature_flag
+    ):
         """Creating a flag with a duplicate key returns 409 Conflict."""
         flag = make_feature_flag(key=unique_flag_key("dup"), name="First Flag")
         response = admin_client.post(
@@ -256,7 +263,9 @@ class TestFeatureFlagsGet:
 class TestFeatureFlagsEvaluateRead:
     """Evaluate endpoint read tests — read-only, no DB commits triggered."""
 
-    def test_evaluate_inactive_flag_is_off_not_404(self, admin_client, make_feature_flag):
+    def test_evaluate_inactive_flag_is_off_not_404(
+        self, admin_client, make_feature_flag
+    ):
         """A flag that exists but is INACTIVE (kill switch) evaluates to off with
         reason "inactive"; only an unknown key is a 404."""
         flag = make_feature_flag(
@@ -320,6 +329,7 @@ class TestFeatureFlagsEvaluateRead:
 # GROUP 2: Write tests (activate, deactivate, update, delete) — placed LAST
 # These endpoints call db.commit() internally which can corrupt transaction isolation.
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 @pytest.mark.integration
 @pytest.mark.requires_db
@@ -437,14 +447,19 @@ class TestFeatureFlagsActivateDeactivate:
         response = admin_client.post(f"/api/v1/feature-flags/{flag.id}/deactivate")
         assert response.status_code == 200, response.text
         data = response.json()
-        assert data["status"] in ("inactive", "INACTIVE", FeatureFlagStatus.INACTIVE.value)
+        assert data["status"] in (
+            "inactive",
+            "INACTIVE",
+            FeatureFlagStatus.INACTIVE.value,
+        )
 
     def test_activate_response_contains_expected_fields(
         self, admin_client, make_feature_flag
     ):
         """Activate response contains id, key, name, status fields."""
         flag = make_feature_flag(
-            key=unique_flag_key(), name="Fields Check Activate",
+            key=unique_flag_key(),
+            name="Fields Check Activate",
             status=FeatureFlagStatus.INACTIVE,
         )
         response = admin_client.post(f"/api/v1/feature-flags/{flag.id}/activate")

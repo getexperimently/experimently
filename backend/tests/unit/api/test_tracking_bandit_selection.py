@@ -3,6 +3,7 @@ Unit tests for ``_select_bandit_variant`` (tracking endpoint helper).
 
 Pure-logic tests: no database, MagicMock experiments and bandit states.
 """
+
 import uuid
 from collections import Counter
 from unittest.mock import MagicMock

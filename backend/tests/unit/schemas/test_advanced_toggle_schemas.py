@@ -2,15 +2,18 @@
 Unit tests for advanced toggle Pydantic schemas.
 Tests validation, defaults, and field constraints.
 """
-import pytest
+
 from uuid import uuid4
+
+import pytest
 from pydantic import ValidationError
+
 from backend.app.schemas.advanced_toggle import (
-    BulkToggleRequest,
+    AuditDiff,
     BulkToggleAction,
+    BulkToggleRequest,
     BulkToggleResponse,
     BulkToggleResult,
-    AuditDiff,
 )
 
 

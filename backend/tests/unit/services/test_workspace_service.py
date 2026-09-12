@@ -38,11 +38,11 @@ from backend.app.services.workspace_service import (
     PlanLimitExceeded,
     WorkspaceMemberNotFound,
     WorkspaceNotFound,
+    WorkspaceService,
     WorkspaceSlugInvalid,
     WorkspaceSlugTaken,
-    WorkspaceService,
-    _hash_key,
     _generate_api_key,
+    _hash_key,
 )
 
 HASHED_PASSWORD = "$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW"
@@ -162,7 +162,9 @@ class TestCreateWorkspace:
     ):
         uid = _make_user(db_session).id
         suffix = uuid.uuid4().hex[:8]
-        ws = svc.create_workspace(db_session, "Pro Co", f"pro-{suffix}", uid, plan="pro")
+        ws = svc.create_workspace(
+            db_session, "Pro Co", f"pro-{suffix}", uid, plan="pro"
+        )
         assert ws.max_members == 50
         assert ws.max_experiments == 1000
 
@@ -171,7 +173,9 @@ class TestCreateWorkspace:
     ):
         uid = _make_user(db_session).id
         suffix = uuid.uuid4().hex[:8]
-        ws = svc.create_workspace(db_session, "Free Co", f"free-{suffix}", uid, plan="free")
+        ws = svc.create_workspace(
+            db_session, "Free Co", f"free-{suffix}", uid, plan="free"
+        )
         assert ws.max_members == 5
         assert ws.max_experiments == 10
 
@@ -433,8 +437,12 @@ class TestCreateInvite:
         workspace: Workspace,
         user_id: uuid.UUID,
     ):
-        inv1 = svc.create_invite(db_session, workspace.id, "a@ex.com", "VIEWER", user_id)
-        inv2 = svc.create_invite(db_session, workspace.id, "b@ex.com", "VIEWER", user_id)
+        inv1 = svc.create_invite(
+            db_session, workspace.id, "a@ex.com", "VIEWER", user_id
+        )
+        inv2 = svc.create_invite(
+            db_session, workspace.id, "b@ex.com", "VIEWER", user_id
+        )
         assert inv1.token != inv2.token
 
     def test_create_invite_expires_in_7_days(
@@ -545,9 +553,7 @@ class TestCreateAPIKey:
         svc: WorkspaceService,
         workspace: Workspace,
     ):
-        key_obj, plaintext = svc.create_api_key(
-            db_session, workspace.id, "Hash Check"
-        )
+        key_obj, plaintext = svc.create_api_key(db_session, workspace.id, "Hash Check")
         assert key_obj.key_hash != plaintext
         assert key_obj.key_hash == _hash_key(plaintext)
 

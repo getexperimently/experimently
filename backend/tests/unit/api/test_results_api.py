@@ -12,16 +12,16 @@ Expected endpoint layout (to be implemented):
   POST /api/v1/results/{experiment_id}/invalidate-cache
 """
 
-import pytest
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from unittest.mock import MagicMock, patch
 
+import pytest
 from fastapi.testclient import TestClient
 
+from backend.app.api.deps import get_current_user, get_db
 from backend.app.main import app
-from backend.app.api.deps import get_db, get_current_user
 from backend.app.models.user import User
 
 # TODO: implement — these schemas don't exist yet; they will be created as part of EP-016
@@ -30,10 +30,8 @@ from backend.app.models.user import User
 #     DailyResultsResponse,
 #     SampleSizeStatusResponse,
 # )
-
 # TODO: implement — AnalysisService will gain new methods as part of EP-016
 from backend.app.services.analysis_service import AnalysisService
-
 
 # ---------------------------------------------------------------------------
 # Shared UUIDs used across fixtures
@@ -305,9 +303,7 @@ class TestGetExperimentResults:
             "get_experiment_results",
             side_effect=ValueError(f"Experiment {UNKNOWN_EXPERIMENT_UUID} not found"),
         ):
-            response = client.get(
-                f"/api/v1/results/{UNKNOWN_EXPERIMENT_UUID}"
-            )
+            response = client.get(f"/api/v1/results/{UNKNOWN_EXPERIMENT_UUID}")
 
         assert response.status_code == 404
 
@@ -329,7 +325,9 @@ class TestGetExperimentResults:
         with patch.object(
             AnalysisService,
             "get_experiment_results",
-            side_effect=ValueError("Experiment has no assignments; cannot compute results"),
+            side_effect=ValueError(
+                "Experiment has no assignments; cannot compute results"
+            ),
         ):
             # use_cache=false ensures the service is called (not served from Redis cache)
             response = client.get(
@@ -546,9 +544,7 @@ class TestGetDailyResults:
             "get_daily_results",
             return_value=mock_daily_results,
         ):
-            response = client.get(
-                f"/api/v1/results/{experiment_id}/daily"
-            )
+            response = client.get(f"/api/v1/results/{experiment_id}/daily")
 
         assert response.status_code == 200
         data = response.json()
@@ -587,7 +583,9 @@ class TestGetDailyResults:
         assert len(data["series"]) > 0
         for variant_series in data["series"]:
             assert "values" in variant_series, "Each series must have a 'values' list"
-            assert "cumulative" in variant_series, "Each series must have a 'cumulative' list"
+            assert "cumulative" in variant_series, (
+                "Each series must have a 'cumulative' list"
+            )
             assert len(variant_series["values"]) > 0, "values must not be empty"
             assert len(variant_series["cumulative"]) > 0, "cumulative must not be empty"
 
@@ -663,14 +661,15 @@ class TestGetSampleSize:
             return_value=adequate_response,
             create=True,
         ):
-            response = client.get(
-                f"/api/v1/results/{experiment_id}/sample-size"
-            )
+            response = client.get(f"/api/v1/results/{experiment_id}/sample-size")
 
         assert response.status_code == 200
         data = response.json()
         assert data["is_adequate"] is True
-        assert data["current_sample_size_per_variant"] >= data["required_sample_size_per_variant"]
+        assert (
+            data["current_sample_size_per_variant"]
+            >= data["required_sample_size_per_variant"]
+        )
 
     @pytest.mark.unit
     def test_sample_size_returns_inadequate_when_small(
@@ -705,14 +704,15 @@ class TestGetSampleSize:
             return_value=inadequate_response,
             create=True,
         ):
-            response = client.get(
-                f"/api/v1/results/{experiment_id}/sample-size"
-            )
+            response = client.get(f"/api/v1/results/{experiment_id}/sample-size")
 
         assert response.status_code == 200
         data = response.json()
         assert data["is_adequate"] is False
-        assert data["current_sample_size_per_variant"] < data["required_sample_size_per_variant"]
+        assert (
+            data["current_sample_size_per_variant"]
+            < data["required_sample_size_per_variant"]
+        )
 
     @pytest.mark.unit
     def test_sample_size_validates_baseline_rate_range(
@@ -757,9 +757,7 @@ class TestInvalidateCache:
         so the next request recomputes fresh results.
         """
         # TODO: implement — cache invalidation method on AnalysisService
-        response = client.post(
-            f"/api/v1/results/{experiment_id}/invalidate-cache"
-        )
+        response = client.post(f"/api/v1/results/{experiment_id}/invalidate-cache")
 
         assert response.status_code == 200
         data = response.json()
@@ -794,9 +792,7 @@ class TestInvalidateCache:
         app.dependency_overrides[get_current_user] = viewer_get_current_user
 
         try:
-            response = client.post(
-                f"/api/v1/results/{experiment_id}/invalidate-cache"
-            )
+            response = client.post(f"/api/v1/results/{experiment_id}/invalidate-cache")
         finally:
             # Restore original override (admin user) so other tests are not affected
             if original_override is not None:

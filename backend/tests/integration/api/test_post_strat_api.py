@@ -20,11 +20,10 @@ from backend.app.models.experiment import (
     Experiment,
     ExperimentStatus,
     ExperimentType,
-    Variant,
     Metric,
     MetricType,
+    Variant,
 )
-
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -208,7 +207,12 @@ class TestPostStratificationEndpoint:
 
         mock_result = _make_post_strat_result()
         mock_result["n_strata"] = 4
-        mock_result["strata_sizes"] = {"US_mobile": 200, "US_desktop": 200, "UK_mobile": 150, "UK_desktop": 150}
+        mock_result["strata_sizes"] = {
+            "US_mobile": 200,
+            "US_desktop": 200,
+            "UK_mobile": 150,
+            "UK_desktop": 150,
+        }
 
         with patch(
             "backend.app.api.v1.endpoints.post_stratification.PostStratificationService.compute",
@@ -378,7 +382,9 @@ class TestFDRCorrectionEndpoint:
         ]
         for item in data:
             for field in required_fields:
-                assert field in item, f"Missing field '{field}' in response item: {item}"
+                assert field in item, (
+                    f"Missing field '{field}' in response item: {item}"
+                )
 
     def test_fdr_correction_nonexistent_experiment_returns_404(self, admin_client):
         """POST fdr-correction with nonexistent experiment_id returns 404."""
@@ -498,8 +504,8 @@ class TestPostStratAuthRequired:
 
     def test_post_strat_requires_auth(self):
         """POST post-stratification without auth returns 401 or 403."""
-        from backend.app.main import app
         from backend.app.api import deps
+        from backend.app.main import app
 
         unauthenticated_client = TestClient(app, raise_server_exceptions=False)
         response = unauthenticated_client.post(

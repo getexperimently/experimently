@@ -1,16 +1,16 @@
 import React from 'react';
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+
 export const ResponsiveContainer = ({ children }: any) => (
   <div data-testid="responsive-container">{children}</div>
 );
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+
 export const BarChart = ({ children }: any) => (
   <div data-testid="bar-chart">{children}</div>
 );
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+
 export const Bar = ({ name, children, 'data-is-control': dataIsControl, ...rest }: any) => (
   <div
     data-testid="variant-bar"
@@ -22,12 +22,12 @@ export const Bar = ({ name, children, 'data-is-control': dataIsControl, ...rest 
   </div>
 );
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+
 export const LineChart = ({ children }: any) => (
   <div data-testid="line-chart">{children}</div>
 );
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+
 export const Line = ({ name, children }: any) => (
   <div data-testid="trend-line">
     {String(name ?? '')}

@@ -6,12 +6,21 @@ These models are used for experiment assignment and event tracking.
 """
 
 from datetime import datetime
-from typing import List, Dict, Any, Optional, Union
-from pydantic import BaseModel, Field, field_validator, model_validator, ConfigDict, UUID4
+from typing import Any, Dict, List, Optional
+
+from pydantic import (
+    UUID4,
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
 
 
 class EventBase(BaseModel):
     """Base model for event data."""
+
     event_name: str = Field(..., min_length=1, max_length=100)
     event_type: str = Field("custom", min_length=1, max_length=100)
     user_id: Optional[str] = Field(None, max_length=255)
@@ -52,11 +61,11 @@ class EventBase(BaseModel):
 
 class EventCreate(EventBase):
     """Model for creating a new event."""
-    pass
 
 
 class EventResponse(EventBase):
     """Model for event responses."""
+
     id: str
     created_at: datetime
     updated_at: datetime
@@ -66,6 +75,7 @@ class EventResponse(EventBase):
 
 class AssignmentBase(BaseModel):
     """Base model for assignment data."""
+
     user_id: Optional[str] = Field(None, max_length=255)
     session_id: Optional[str] = Field(None, max_length=255)
     experiment_id: Optional[str] = Field(None, max_length=255)
@@ -86,11 +96,11 @@ class AssignmentBase(BaseModel):
 
 class AssignmentCreate(AssignmentBase):
     """Model for creating a new assignment."""
-    pass
 
 
 class AssignmentResponse(AssignmentBase):
     """Model for assignment responses."""
+
     id: str
     created_at: datetime
     updated_at: datetime
@@ -100,6 +110,7 @@ class AssignmentResponse(AssignmentBase):
 
 class ExperimentMetrics(BaseModel):
     """Model for experiment metrics."""
+
     experiment_id: str
     start_date: datetime
     end_date: datetime
@@ -118,6 +129,7 @@ class ExperimentMetrics(BaseModel):
 
 class MetricResult(BaseModel):
     """Model for metric results."""
+
     metric_name: str
     variant_id: str
     value: float
@@ -130,6 +142,7 @@ class MetricResult(BaseModel):
 
 class ExperimentResults(BaseModel):
     """Model for experiment results."""
+
     experiment_id: str
     start_date: datetime
     end_date: datetime
@@ -140,9 +153,16 @@ class ExperimentResults(BaseModel):
 
 class AssignmentRequest(BaseModel):
     """Model for requesting a variant assignment."""
-    experiment_key: str = Field(..., min_length=1, max_length=100, description="Experiment identifier")
-    user_id: str = Field(..., min_length=1, max_length=255, description="User identifier")
-    context: Optional[Dict[str, Any]] = Field(None, description="User context for targeting")
+
+    experiment_key: str = Field(
+        ..., min_length=1, max_length=100, description="Experiment identifier"
+    )
+    user_id: str = Field(
+        ..., min_length=1, max_length=255, description="User identifier"
+    )
+    context: Optional[Dict[str, Any]] = Field(
+        None, description="User context for targeting"
+    )
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -168,6 +188,7 @@ class VariantAssignmentResponse(BaseModel):
     so SDKs render the default experience; ``assigned`` is ``False`` and
     ``reason`` says why.  No assignment or exposure is recorded for them.
     """
+
     experiment_key: str
     user_id: str
     variant_id: str
@@ -208,6 +229,7 @@ class EventRequest(BaseModel):
     (the SDKs do not know internal ids); the endpoint resolves them and picks
     up the user's variant assignment automatically.
     """
+
     event_type: str = Field(..., min_length=1, max_length=100)
     event_name: Optional[str] = Field(None, max_length=255)
     user_id: str = Field(..., min_length=1, max_length=255)
@@ -220,7 +242,9 @@ class EventRequest(BaseModel):
     @model_validator(mode="after")
     def validate_experiment_or_feature_flag(self) -> "EventRequest":
         if not self.experiment_key and not self.feature_flag_key:
-            raise ValueError("Either experiment_key or feature_flag_key must be provided")
+            raise ValueError(
+                "Either experiment_key or feature_flag_key must be provided"
+            )
         return self
 
     model_config = ConfigDict(
@@ -242,6 +266,7 @@ class EventRequest(BaseModel):
 
 class EventBatchRequest(BaseModel):
     """Model for batch tracking multiple events."""
+
     events: List[EventRequest] = Field(
         ..., min_length=1, max_length=100, description="List of events to track"
     )
@@ -274,9 +299,12 @@ class EventBatchRequest(BaseModel):
 
 class EventBatchResponse(BaseModel):
     """Model for batch event tracking response."""
+
     success_count: int = Field(..., description="Number of events successfully tracked")
     failure_count: int = Field(..., description="Number of events that failed to track")
-    errors: Optional[List[Dict[str, Any]]] = Field(None, description="Details of failed events")
+    errors: Optional[List[Dict[str, Any]]] = Field(
+        None, description="Details of failed events"
+    )
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -298,13 +326,26 @@ class EventBatchResponse(BaseModel):
 
 class EventQueryParams(BaseModel):
     """Model for querying events."""
+
     experiment_id: Optional[UUID4] = Field(None, description="Filter by experiment ID")
-    feature_flag_id: Optional[UUID4] = Field(None, description="Filter by feature flag ID")
-    user_id: Optional[str] = Field(None, max_length=255, description="Filter by user ID")
-    event_type: Optional[str] = Field(None, max_length=100, description="Filter by event type")
-    start_date: Optional[datetime] = Field(None, description="Filter events after this date")
-    end_date: Optional[datetime] = Field(None, description="Filter events before this date")
-    limit: int = Field(100, ge=1, le=1000, description="Maximum number of events to return")
+    feature_flag_id: Optional[UUID4] = Field(
+        None, description="Filter by feature flag ID"
+    )
+    user_id: Optional[str] = Field(
+        None, max_length=255, description="Filter by user ID"
+    )
+    event_type: Optional[str] = Field(
+        None, max_length=100, description="Filter by event type"
+    )
+    start_date: Optional[datetime] = Field(
+        None, description="Filter events after this date"
+    )
+    end_date: Optional[datetime] = Field(
+        None, description="Filter events before this date"
+    )
+    limit: int = Field(
+        100, ge=1, le=1000, description="Maximum number of events to return"
+    )
     offset: int = Field(0, ge=0, description="Number of events to skip")
 
     model_config = ConfigDict(

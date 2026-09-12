@@ -4,19 +4,20 @@ Fixtures for unit testing the rollout scheduler.
 This module provides test fixtures for the rollout scheduler tests.
 """
 
-import pytest
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
 
+import pytest
+
 from backend.app.core.rollout_scheduler import RolloutScheduler
+from backend.app.models.feature_flag import FeatureFlag
 from backend.app.models.rollout_schedule import (
-    RolloutStage,
     RolloutSchedule,
     RolloutScheduleStatus,
+    RolloutStage,
     RolloutStageStatus,
-    TriggerType
+    TriggerType,
 )
-from backend.app.models.feature_flag import FeatureFlag
 
 
 @pytest.fixture

@@ -18,7 +18,6 @@ from backend.app.schemas.bayesian import BayesianResultsResponse
 from backend.app.schemas.dimensional import DimensionalBreakdownResponse
 from backend.app.schemas.sequential import SequentialTestingResponse
 
-
 # ---------------------------------------------------------------------------
 # SRMResult (sample-ratio mismatch)
 # ---------------------------------------------------------------------------
@@ -246,8 +245,7 @@ class VariantResult(BaseModel):
     statistical_test_used: Optional[StatisticalTest] = Field(
         None,
         description=(
-            "The statistical test that produced p_value.  "
-            "None for the control variant."
+            "The statistical test that produced p_value.  None for the control variant."
         ),
     )
 
@@ -258,9 +256,7 @@ class VariantResult(BaseModel):
         if v is None:
             return v
         if not (0.0 <= v <= 1.0):
-            raise ValueError(
-                f"p-value must be in the range [0.0, 1.0], got {v!r}."
-            )
+            raise ValueError(f"p-value must be in the range [0.0, 1.0], got {v!r}.")
         return v
 
 
@@ -279,7 +275,9 @@ class MetricResult(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-    metric_id: UUID = Field(..., description="Unique identifier of the metric definition.")
+    metric_id: UUID = Field(
+        ..., description="Unique identifier of the metric definition."
+    )
     metric_name: str = Field(..., description="Human-readable name of the metric.")
     metric_type: str = Field(
         ...,
@@ -379,9 +377,7 @@ class ExperimentSummary(BaseModel):
     )
     recommendation_reason: str = Field(
         ...,
-        description=(
-            "Human-readable explanation of why this recommendation was made."
-        ),
+        description=("Human-readable explanation of why this recommendation was made."),
     )
 
 
@@ -716,7 +712,6 @@ class SampleSizeResult(BaseModel):
         """Validate that required_sample_size_per_variant is at least 1."""
         if v < 1:
             raise ValueError(
-                "required_sample_size_per_variant must be >= 1, "
-                f"got {v!r}."
+                f"required_sample_size_per_variant must be >= 1, got {v!r}."
             )
         return v

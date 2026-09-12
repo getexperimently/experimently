@@ -9,19 +9,20 @@ Tests cover:
 - Index definitions
 """
 
-import pytest
 import uuid
 from datetime import datetime, timezone
+
+import pytest
 from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.orm import Session
 
+from backend.app.core.database_config import get_schema_name
+from backend.app.models.base import Base
 from backend.app.models.compliance_audit_event import (
-    ComplianceAuditEvent,
     AuditAction,
     AuditOutcome,
+    ComplianceAuditEvent,
 )
-from backend.app.models.base import Base
-from backend.app.core.database_config import get_schema_name
 
 
 class TestComplianceAuditEventModel:
@@ -136,10 +137,22 @@ class TestComplianceAuditEventModel:
         """Model has exactly the expected columns (15+)."""
         columns = {c.name for c in ComplianceAuditEvent.__table__.columns}
         expected = {
-            "id", "timestamp", "actor_id", "actor_ip", "actor_user_agent",
-            "session_id", "request_id", "action", "resource_type", "resource_id",
-            "old_value", "new_value", "outcome", "hmac_signature",
-            "archived_at", "retention_expires_at",
+            "id",
+            "timestamp",
+            "actor_id",
+            "actor_ip",
+            "actor_user_agent",
+            "session_id",
+            "request_id",
+            "action",
+            "resource_type",
+            "resource_id",
+            "old_value",
+            "new_value",
+            "outcome",
+            "hmac_signature",
+            "archived_at",
+            "retention_expires_at",
         }
         assert expected.issubset(columns)
 
@@ -228,7 +241,8 @@ class TestComplianceAuditEventModel:
         index_names = {idx.name for idx in ComplianceAuditEvent.__table__.indexes}
         # At least one index should reference 'timestamp'
         timestamp_indexes = [
-            idx for idx in ComplianceAuditEvent.__table__.indexes
+            idx
+            for idx in ComplianceAuditEvent.__table__.indexes
             if any(col.name == "timestamp" for col in idx.columns)
         ]
         assert len(timestamp_indexes) >= 1
@@ -236,7 +250,8 @@ class TestComplianceAuditEventModel:
     def test_actor_id_index_exists(self):
         """Index on 'actor_id' exists."""
         actor_id_indexes = [
-            idx for idx in ComplianceAuditEvent.__table__.indexes
+            idx
+            for idx in ComplianceAuditEvent.__table__.indexes
             if any(col.name == "actor_id" for col in idx.columns)
         ]
         assert len(actor_id_indexes) >= 1
@@ -339,11 +354,19 @@ class TestAuditActionEnum:
     def test_all_expected_actions_present(self):
         """All 13 expected AuditAction values are present."""
         expected = {
-            "CREATE", "READ", "UPDATE", "DELETE",
-            "LOGIN", "LOGOUT", "LOGIN_FAILED",
-            "ROLE_GRANT", "ROLE_REVOKE",
-            "KEY_CREATE", "KEY_REVOKE",
-            "EXPORT", "REPORT_GENERATED",
+            "CREATE",
+            "READ",
+            "UPDATE",
+            "DELETE",
+            "LOGIN",
+            "LOGOUT",
+            "LOGIN_FAILED",
+            "ROLE_GRANT",
+            "ROLE_REVOKE",
+            "KEY_CREATE",
+            "KEY_REVOKE",
+            "EXPORT",
+            "REPORT_GENERATED",
         }
         actual = {action.value for action in AuditAction}
         assert expected == actual

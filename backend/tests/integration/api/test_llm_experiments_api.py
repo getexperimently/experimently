@@ -36,10 +36,10 @@ from backend.app.api import deps
 from backend.app.api.deps import CacheControl
 from backend.app.main import app
 
-
 # ---------------------------------------------------------------------------
 # Helper: create a TestClient authenticated as a given user
 # ---------------------------------------------------------------------------
+
 
 def _make_client(db_session: Session, user) -> TestClient:
     """Create a TestClient authenticated as *user* without clearing overrides."""
@@ -76,8 +76,12 @@ def _make_client(db_session: Session, user) -> TestClient:
 
     app.dependency_overrides[deps.get_db] = override_get_db
     app.dependency_overrides[deps.get_current_user] = override_get_current_user
-    app.dependency_overrides[deps.get_current_active_user] = override_get_current_active_user
-    app.dependency_overrides[deps.get_current_superuser] = override_get_current_superuser
+    app.dependency_overrides[deps.get_current_active_user] = (
+        override_get_current_active_user
+    )
+    app.dependency_overrides[deps.get_current_superuser] = (
+        override_get_current_superuser
+    )
     app.dependency_overrides[deps.get_cache_control] = override_get_cache_control
     app.dependency_overrides[deps.get_api_key] = override_get_api_key
     return TestClient(app)
@@ -86,6 +90,7 @@ def _make_client(db_session: Session, user) -> TestClient:
 # ---------------------------------------------------------------------------
 # Test payload helpers
 # ---------------------------------------------------------------------------
+
 
 def _base_payload(name: str = "Test LLM Exp") -> dict:
     return {
@@ -124,10 +129,10 @@ def _base_payload(name: str = "Test LLM Exp") -> dict:
 # CRUD Tests
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.integration
 @pytest.mark.requires_db
 class TestCreateLLMExperiment:
-
     def test_admin_can_create_experiment(self, admin_client: TestClient):
         payload = _base_payload("Admin Creates LLM Exp")
         response = admin_client.post("/api/v1/llm-experiments/", json=payload)
@@ -168,7 +173,9 @@ class TestCreateLLMExperiment:
         response = admin_client.post("/api/v1/llm-experiments/", json=payload)
         assert response.status_code == 422
 
-    def test_traffic_split_not_summing_to_one_returns_422(self, admin_client: TestClient):
+    def test_traffic_split_not_summing_to_one_returns_422(
+        self, admin_client: TestClient
+    ):
         payload = _base_payload()
         payload["variants"][0]["traffic_split"] = 0.3
         payload["variants"][1]["traffic_split"] = 0.3
@@ -200,9 +207,10 @@ class TestCreateLLMExperiment:
 @pytest.mark.integration
 @pytest.mark.requires_db
 class TestGetLLMExperiment:
-
     def test_get_existing_experiment(self, admin_client: TestClient):
-        create_resp = admin_client.post("/api/v1/llm-experiments/", json=_base_payload("Get Test"))
+        create_resp = admin_client.post(
+            "/api/v1/llm-experiments/", json=_base_payload("Get Test")
+        )
         assert create_resp.status_code == 201
         exp_id = create_resp.json()["id"]
 
@@ -217,7 +225,9 @@ class TestGetLLMExperiment:
 
     def test_viewer_can_get_experiment(self, db_session, admin_user, viewer_user):
         admin_c = _make_client(db_session, admin_user)
-        create_resp = admin_c.post("/api/v1/llm-experiments/", json=_base_payload("Viewer Read"))
+        create_resp = admin_c.post(
+            "/api/v1/llm-experiments/", json=_base_payload("Viewer Read")
+        )
         assert create_resp.status_code == 201, create_resp.text
         exp_id = create_resp.json()["id"]
 
@@ -227,7 +237,9 @@ class TestGetLLMExperiment:
         assert response.status_code == 200
 
     def test_experiment_includes_variants(self, admin_client: TestClient):
-        create_resp = admin_client.post("/api/v1/llm-experiments/", json=_base_payload("With Variants"))
+        create_resp = admin_client.post(
+            "/api/v1/llm-experiments/", json=_base_payload("With Variants")
+        )
         exp_id = create_resp.json()["id"]
         get_resp = admin_client.get(f"/api/v1/llm-experiments/{exp_id}")
         data = get_resp.json()
@@ -237,10 +249,11 @@ class TestGetLLMExperiment:
 @pytest.mark.integration
 @pytest.mark.requires_db
 class TestListLLMExperiments:
-
     def test_list_returns_created_experiments(self, admin_client: TestClient):
         for i in range(3):
-            admin_client.post("/api/v1/llm-experiments/", json=_base_payload(f"List Test {i}"))
+            admin_client.post(
+                "/api/v1/llm-experiments/", json=_base_payload(f"List Test {i}")
+            )
         response = admin_client.get("/api/v1/llm-experiments/")
         assert response.status_code == 200
         data = response.json()
@@ -268,9 +281,10 @@ class TestListLLMExperiments:
 @pytest.mark.integration
 @pytest.mark.requires_db
 class TestUpdateLLMExperiment:
-
     def test_admin_can_update_name(self, admin_client: TestClient):
-        create_resp = admin_client.post("/api/v1/llm-experiments/", json=_base_payload("Original"))
+        create_resp = admin_client.post(
+            "/api/v1/llm-experiments/", json=_base_payload("Original")
+        )
         exp_id = create_resp.json()["id"]
         update_resp = admin_client.put(
             f"/api/v1/llm-experiments/{exp_id}",
@@ -281,12 +295,16 @@ class TestUpdateLLMExperiment:
 
     def test_viewer_cannot_update(self, db_session, admin_user, viewer_user):
         admin_c = _make_client(db_session, admin_user)
-        create_resp = admin_c.post("/api/v1/llm-experiments/", json=_base_payload("Viewer Update Test"))
+        create_resp = admin_c.post(
+            "/api/v1/llm-experiments/", json=_base_payload("Viewer Update Test")
+        )
         assert create_resp.status_code == 201, create_resp.text
         exp_id = create_resp.json()["id"]
 
         viewer_c = _make_client(db_session, viewer_user)
-        response = viewer_c.put(f"/api/v1/llm-experiments/{exp_id}", json={"name": "Hacked"})
+        response = viewer_c.put(
+            f"/api/v1/llm-experiments/{exp_id}", json={"name": "Hacked"}
+        )
         app.dependency_overrides.clear()
         assert response.status_code == 403
 
@@ -300,16 +318,19 @@ class TestUpdateLLMExperiment:
 @pytest.mark.integration
 @pytest.mark.requires_db
 class TestStartPauseLLMExperiment:
-
     def test_start_draft_experiment(self, admin_client: TestClient):
-        create_resp = admin_client.post("/api/v1/llm-experiments/", json=_base_payload("Start Test"))
+        create_resp = admin_client.post(
+            "/api/v1/llm-experiments/", json=_base_payload("Start Test")
+        )
         exp_id = create_resp.json()["id"]
         start_resp = admin_client.post(f"/api/v1/llm-experiments/{exp_id}/start")
         assert start_resp.status_code == 200
         assert start_resp.json()["status"] == "ACTIVE"
 
     def test_pause_active_experiment(self, admin_client: TestClient):
-        create_resp = admin_client.post("/api/v1/llm-experiments/", json=_base_payload("Pause Test"))
+        create_resp = admin_client.post(
+            "/api/v1/llm-experiments/", json=_base_payload("Pause Test")
+        )
         exp_id = create_resp.json()["id"]
         admin_client.post(f"/api/v1/llm-experiments/{exp_id}/start")
         pause_resp = admin_client.post(f"/api/v1/llm-experiments/{exp_id}/pause")
@@ -325,14 +346,18 @@ class TestStartPauseLLMExperiment:
         assert response.status_code == 404
 
     def test_pause_draft_returns_400(self, admin_client: TestClient):
-        create_resp = admin_client.post("/api/v1/llm-experiments/", json=_base_payload("Pause Draft"))
+        create_resp = admin_client.post(
+            "/api/v1/llm-experiments/", json=_base_payload("Pause Draft")
+        )
         exp_id = create_resp.json()["id"]
         response = admin_client.post(f"/api/v1/llm-experiments/{exp_id}/pause")
         assert response.status_code == 400
 
     def test_viewer_cannot_start(self, db_session, admin_user, viewer_user):
         admin_c = _make_client(db_session, admin_user)
-        create_resp = admin_c.post("/api/v1/llm-experiments/", json=_base_payload("Viewer Start"))
+        create_resp = admin_c.post(
+            "/api/v1/llm-experiments/", json=_base_payload("Viewer Start")
+        )
         assert create_resp.status_code == 201, create_resp.text
         exp_id = create_resp.json()["id"]
 
@@ -345,9 +370,10 @@ class TestStartPauseLLMExperiment:
 @pytest.mark.integration
 @pytest.mark.requires_db
 class TestLLMVariantCRUD:
-
     def test_add_variant_to_experiment(self, admin_client: TestClient):
-        create_resp = admin_client.post("/api/v1/llm-experiments/", json=_base_payload("Variant Add Test"))
+        create_resp = admin_client.post(
+            "/api/v1/llm-experiments/", json=_base_payload("Variant Add Test")
+        )
         exp_id = create_resp.json()["id"]
         new_variant = {
             "name": "treatment_2",
@@ -360,14 +386,18 @@ class TestLLMVariantCRUD:
             "temperature": 0.5,
             "max_tokens": 100,
         }
-        response = admin_client.post(f"/api/v1/llm-experiments/{exp_id}/variants", json=new_variant)
+        response = admin_client.post(
+            f"/api/v1/llm-experiments/{exp_id}/variants", json=new_variant
+        )
         assert response.status_code == 201
         data = response.json()
         assert data["name"] == "treatment_2"
         assert data["provider"] == "google"
 
     def test_update_variant(self, admin_client: TestClient):
-        create_resp = admin_client.post("/api/v1/llm-experiments/", json=_base_payload("Variant Update Test"))
+        create_resp = admin_client.post(
+            "/api/v1/llm-experiments/", json=_base_payload("Variant Update Test")
+        )
         exp_id = create_resp.json()["id"]
         variant_id = create_resp.json()["variants"][0]["id"]
         update_resp = admin_client.put(
@@ -379,7 +409,9 @@ class TestLLMVariantCRUD:
         assert update_resp.json()["temperature"] == pytest.approx(0.1)
 
     def test_update_nonexistent_variant_returns_404(self, admin_client: TestClient):
-        create_resp = admin_client.post("/api/v1/llm-experiments/", json=_base_payload("Variant 404"))
+        create_resp = admin_client.post(
+            "/api/v1/llm-experiments/", json=_base_payload("Variant 404")
+        )
         exp_id = create_resp.json()["id"]
         response = admin_client.put(
             f"/api/v1/llm-experiments/{exp_id}/variants/{uuid.uuid4()}",
@@ -392,10 +424,10 @@ class TestLLMVariantCRUD:
 # Completion tests (mocked LLM provider)
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.integration
 @pytest.mark.requires_db
 class TestLLMComplete:
-
     def _create_active_experiment(self, client: TestClient, name: str) -> str:
         create_resp = client.post("/api/v1/llm-experiments/", json=_base_payload(name))
         exp_id = create_resp.json()["id"]
@@ -430,7 +462,10 @@ class TestLLMComplete:
             ):
                 response = admin_client.post(
                     f"/api/v1/llm-experiments/{exp_id}/complete",
-                    json={"user_id": "user-1", "input_variables": {"question": "What is the capital?"}},
+                    json={
+                        "user_id": "user-1",
+                        "input_variables": {"question": "What is the capital?"},
+                    },
                 )
         assert response.status_code == 200, response.text
         data = response.json()
@@ -439,7 +474,9 @@ class TestLLMComplete:
         assert "evaluation_id" in data
 
     def test_complete_inactive_experiment_returns_400(self, admin_client: TestClient):
-        create_resp = admin_client.post("/api/v1/llm-experiments/", json=_base_payload("Inactive Complete"))
+        create_resp = admin_client.post(
+            "/api/v1/llm-experiments/", json=_base_payload("Inactive Complete")
+        )
         exp_id = create_resp.json()["id"]
         # Don't start the experiment — it stays DRAFT
         response = admin_client.post(
@@ -448,7 +485,9 @@ class TestLLMComplete:
         )
         assert response.status_code == 400
 
-    def test_complete_nonexistent_experiment_returns_404(self, admin_client: TestClient):
+    def test_complete_nonexistent_experiment_returns_404(
+        self, admin_client: TestClient
+    ):
         response = admin_client.post(
             f"/api/v1/llm-experiments/{uuid.uuid4()}/complete",
             json={"user_id": "user-1", "input_variables": {}},
@@ -497,15 +536,17 @@ class TestLLMComplete:
 # Evaluation / rating tests
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.integration
 @pytest.mark.requires_db
 class TestSubmitEvaluation:
-
     def test_submit_human_rating(self, admin_client: TestClient, db_session: Session):
         from backend.app.models.llm_experiment import LLMEvaluation
 
         # Create a real experiment
-        create_resp = admin_client.post("/api/v1/llm-experiments/", json=_base_payload("Rating Test"))
+        create_resp = admin_client.post(
+            "/api/v1/llm-experiments/", json=_base_payload("Rating Test")
+        )
         exp_id = uuid.UUID(create_resp.json()["id"])
         variant_id = uuid.UUID(create_resp.json()["variants"][0]["id"])
 
@@ -534,10 +575,14 @@ class TestSubmitEvaluation:
         assert response.status_code == 200, response.text
         assert response.json()["human_rating"] == 4.5
 
-    def test_submit_business_metric(self, admin_client: TestClient, db_session: Session):
+    def test_submit_business_metric(
+        self, admin_client: TestClient, db_session: Session
+    ):
         from backend.app.models.llm_experiment import LLMEvaluation
 
-        create_resp = admin_client.post("/api/v1/llm-experiments/", json=_base_payload("BM Test"))
+        create_resp = admin_client.post(
+            "/api/v1/llm-experiments/", json=_base_payload("BM Test")
+        )
         exp_id = uuid.UUID(create_resp.json()["id"])
         variant_id = uuid.UUID(create_resp.json()["variants"][0]["id"])
 
@@ -565,7 +610,9 @@ class TestSubmitEvaluation:
         assert response.json()["business_metric_value"] == 1.0
 
     def test_submit_nonexistent_evaluation_returns_404(self, admin_client: TestClient):
-        create_resp = admin_client.post("/api/v1/llm-experiments/", json=_base_payload("Eval 404"))
+        create_resp = admin_client.post(
+            "/api/v1/llm-experiments/", json=_base_payload("Eval 404")
+        )
         exp_id = create_resp.json()["id"]
         response = admin_client.post(
             f"/api/v1/llm-experiments/{exp_id}/evaluate",
@@ -577,7 +624,9 @@ class TestSubmitEvaluation:
         from backend.app.models.llm_experiment import LLMEvaluation
 
         admin_c = _make_client(db_session, admin_user)
-        create_resp = admin_c.post("/api/v1/llm-experiments/", json=_base_payload("Viewer Eval"))
+        create_resp = admin_c.post(
+            "/api/v1/llm-experiments/", json=_base_payload("Viewer Eval")
+        )
         assert create_resp.status_code == 201, create_resp.text
         exp_id = uuid.UUID(create_resp.json()["id"])
         variant_id = uuid.UUID(create_resp.json()["variants"][0]["id"])
@@ -611,12 +660,14 @@ class TestSubmitEvaluation:
 # Results tests
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.integration
 @pytest.mark.requires_db
 class TestGetResults:
-
     def test_results_empty_experiment(self, admin_client: TestClient):
-        create_resp = admin_client.post("/api/v1/llm-experiments/", json=_base_payload("Results Empty"))
+        create_resp = admin_client.post(
+            "/api/v1/llm-experiments/", json=_base_payload("Results Empty")
+        )
         exp_id = create_resp.json()["id"]
         response = admin_client.get(f"/api/v1/llm-experiments/{exp_id}/results")
         assert response.status_code == 200
@@ -630,7 +681,9 @@ class TestGetResults:
 
     def test_viewer_can_get_results(self, db_session, admin_user, viewer_user):
         admin_c = _make_client(db_session, admin_user)
-        create_resp = admin_c.post("/api/v1/llm-experiments/", json=_base_payload("Viewer Results"))
+        create_resp = admin_c.post(
+            "/api/v1/llm-experiments/", json=_base_payload("Viewer Results")
+        )
         assert create_resp.status_code == 201, create_resp.text
         exp_id = create_resp.json()["id"]
 
@@ -644,12 +697,14 @@ class TestGetResults:
 # Judge tests
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.integration
 @pytest.mark.requires_db
 class TestJudgeEndpoint:
-
     def test_judge_endpoint_returns_list(self, admin_client: TestClient):
-        create_resp = admin_client.post("/api/v1/llm-experiments/", json=_base_payload("Judge Test"))
+        create_resp = admin_client.post(
+            "/api/v1/llm-experiments/", json=_base_payload("Judge Test")
+        )
         exp_id = create_resp.json()["id"]
 
         # No evaluations — should return empty list
@@ -659,7 +714,10 @@ class TestJudgeEndpoint:
         ):
             response = admin_client.post(
                 f"/api/v1/llm-experiments/{exp_id}/judge",
-                json={"criteria": "helpfulness", "judge_model": "claude-3-5-sonnet-20241022"},
+                json={
+                    "criteria": "helpfulness",
+                    "judge_model": "claude-3-5-sonnet-20241022",
+                },
             )
         assert response.status_code == 200
         assert response.json() == []
@@ -673,7 +731,9 @@ class TestJudgeEndpoint:
 
     def test_viewer_cannot_run_judge(self, db_session, admin_user, viewer_user):
         admin_c = _make_client(db_session, admin_user)
-        create_resp = admin_c.post("/api/v1/llm-experiments/", json=_base_payload("Judge Auth"))
+        create_resp = admin_c.post(
+            "/api/v1/llm-experiments/", json=_base_payload("Judge Auth")
+        )
         assert create_resp.status_code == 201, create_resp.text
         exp_id = create_resp.json()["id"]
 

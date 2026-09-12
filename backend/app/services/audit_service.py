@@ -8,18 +8,16 @@ for compliance, debugging, and analysis purposes.
 
 import asyncio
 import json
-from enum import Enum
 import logging
 from datetime import datetime, timezone
-from typing import List, Optional, Tuple, Dict, Any
+from enum import Enum
+from typing import Any, Dict, List, Optional, Tuple
 from uuid import UUID
 
+from sqlalchemy import and_, desc, func
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, or_, desc, func
 
-from backend.app.models.audit_log import AuditLog, ActionType, EntityType
-from backend.app.models.user import User
-
+from backend.app.models.audit_log import ActionType, AuditLog, EntityType
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +101,7 @@ class AuditService:
             return audit_log.id
 
         except Exception as e:
-            logger.error(f"Failed to create audit log: {str(e)}")
+            logger.error(f"Failed to create audit log: {e!s}")
             db.rollback()
             raise
 
@@ -160,7 +158,7 @@ class AuditService:
             )
 
         except Exception as e:
-            logger.error(f"Failed to create audit log: {str(e)}")
+            logger.error(f"Failed to create audit log: {e!s}")
             # Don't re-raise to avoid breaking the main operation
             return None
 

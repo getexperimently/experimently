@@ -1,12 +1,13 @@
 """
 Pydantic v2 schemas for third-party integration configuration — EP-034 Batch 1.
 """
+
 import enum
 from datetime import datetime
 from typing import Any, Dict, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict
 
 
 class IntegrationType(str, enum.Enum):
@@ -19,8 +20,10 @@ class IntegrationType(str, enum.Enum):
 # Integration Config schemas
 # ---------------------------------------------------------------------------
 
+
 class IntegrationConfigCreate(BaseModel):
     """Payload for creating a new integration config."""
+
     integration_type: IntegrationType
     is_active: bool = False
     encrypted_config: Optional[Dict[str, Any]] = None
@@ -28,6 +31,7 @@ class IntegrationConfigCreate(BaseModel):
 
 class IntegrationConfigUpdate(BaseModel):
     """Payload for updating an existing integration config."""
+
     is_active: Optional[bool] = None
     encrypted_config: Optional[Dict[str, Any]] = None
     last_error: Optional[str] = None
@@ -35,6 +39,7 @@ class IntegrationConfigUpdate(BaseModel):
 
 class IntegrationConfigResponse(BaseModel):
     """Response schema for an integration config record."""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
@@ -51,8 +56,10 @@ class IntegrationConfigResponse(BaseModel):
 # Jira-specific schemas
 # ---------------------------------------------------------------------------
 
+
 class JiraIssueCreateRequest(BaseModel):
     """Request body for creating a Jira issue linked to an experiment."""
+
     project_key: str
     experiment_name: str
     experiment_id: str
@@ -64,6 +71,7 @@ class JiraIssueCreateRequest(BaseModel):
 
 class JiraWebhookEvent(BaseModel):
     """Parsed Jira webhook event."""
+
     event_type: str
     issue_key: str
     new_status: Optional[str] = None

@@ -9,11 +9,10 @@ import hashlib
 import re
 import secrets
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import List, Optional, Tuple
-from dataclasses import dataclass
 
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from backend.app.models.workspace import (
@@ -232,23 +231,15 @@ class WorkspaceService:
             raise WorkspaceNotFound(f"Workspace with slug '{slug}' not found.")
         return workspace
 
-    def list_user_workspaces(
-        self, db: Session, user_id: uuid.UUID
-    ) -> List[Workspace]:
+    def list_user_workspaces(self, db: Session, user_id: uuid.UUID) -> List[Workspace]:
         """Return all workspaces the user is a member of."""
         members = (
-            db.query(WorkspaceMember)
-            .filter(WorkspaceMember.user_id == user_id)
-            .all()
+            db.query(WorkspaceMember).filter(WorkspaceMember.user_id == user_id).all()
         )
         workspace_ids = [m.workspace_id for m in members]
         if not workspace_ids:
             return []
-        return (
-            db.query(Workspace)
-            .filter(Workspace.id.in_(workspace_ids))
-            .all()
-        )
+        return db.query(Workspace).filter(Workspace.id.in_(workspace_ids)).all()
 
     def update_workspace(
         self,
@@ -318,7 +309,9 @@ class WorkspaceService:
             .first()
         )
         if existing:
-            raise AlreadyMember(f"User {user_id} is already a member of this workspace.")
+            raise AlreadyMember(
+                f"User {user_id} is already a member of this workspace."
+            )
 
         try:
             role_enum = WorkspaceMemberRole[role.upper()]
@@ -397,10 +390,7 @@ class WorkspaceService:
             )
 
         # Prevent an owner from demoting themselves if they are the last owner
-        if (
-            member.role == WorkspaceMemberRole.OWNER
-            and new_role.upper() != "OWNER"
-        ):
+        if member.role == WorkspaceMemberRole.OWNER and new_role.upper() != "OWNER":
             owner_count = (
                 db.query(WorkspaceMember)
                 .filter(
@@ -470,12 +460,10 @@ class WorkspaceService:
     def get_invite_by_token(self, db: Session, token: str) -> WorkspaceInvite:
         """Return an invite by its token or raise InviteNotFound."""
         invite = (
-            db.query(WorkspaceInvite)
-            .filter(WorkspaceInvite.token == token)
-            .first()
+            db.query(WorkspaceInvite).filter(WorkspaceInvite.token == token).first()
         )
         if not invite:
-            raise InviteNotFound(f"Invite token not found.")
+            raise InviteNotFound("Invite token not found.")
         return invite
 
     def accept_invite(
@@ -559,15 +547,9 @@ class WorkspaceService:
         db.refresh(api_key)
         return api_key, plaintext
 
-    def revoke_api_key(
-        self, db: Session, api_key_id: uuid.UUID
-    ) -> None:
+    def revoke_api_key(self, db: Session, api_key_id: uuid.UUID) -> None:
         """Deactivate a workspace API key."""
-        key = (
-            db.query(WorkspaceAPIKey)
-            .filter(WorkspaceAPIKey.id == api_key_id)
-            .first()
-        )
+        key = db.query(WorkspaceAPIKey).filter(WorkspaceAPIKey.id == api_key_id).first()
         if not key:
             raise APIKeyNotFound(f"API key {api_key_id} not found.")
         key.is_active = False
@@ -583,9 +565,7 @@ class WorkspaceService:
         created. Returns (new_WorkspaceAPIKey, new_plaintext_key).
         """
         old_key = (
-            db.query(WorkspaceAPIKey)
-            .filter(WorkspaceAPIKey.id == api_key_id)
-            .first()
+            db.query(WorkspaceAPIKey).filter(WorkspaceAPIKey.id == api_key_id).first()
         )
         if not old_key:
             raise APIKeyNotFound(f"API key {api_key_id} not found.")
@@ -662,6 +642,7 @@ class WorkspaceService:
         # Experiments and flags linked via workspace_id FK (may be NULL for legacy rows)
         try:
             from backend.app.models.experiment import Experiment
+
             experiment_count = (
                 db.query(Experiment)
                 .filter(Experiment.workspace_id == workspace_id)
@@ -672,6 +653,7 @@ class WorkspaceService:
 
         try:
             from backend.app.models.feature_flag import FeatureFlag
+
             flag_count = (
                 db.query(FeatureFlag)
                 .filter(FeatureFlag.workspace_id == workspace_id)

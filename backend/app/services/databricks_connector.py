@@ -148,7 +148,7 @@ class DatabricksConnector:
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         self.close()
-        return None  # Do not suppress exceptions
+        return  # Do not suppress exceptions
 
     # ------------------------------------------------------------------
     # Connection management

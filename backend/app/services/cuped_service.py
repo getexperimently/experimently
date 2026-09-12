@@ -17,7 +17,6 @@ from typing import Tuple
 import numpy as np
 from scipy import stats
 
-
 # ---------------------------------------------------------------------------
 # CupedEffect — result dataclass
 # ---------------------------------------------------------------------------
@@ -189,9 +188,7 @@ class CupedService:
 
         # Step 3: Adjust both groups
         control_Y_adj = CupedService.apply_cuped(control_Y, control_X, theta, E_X)
-        treatment_Y_adj = CupedService.apply_cuped(
-            treatment_Y, treatment_X, theta, E_X
-        )
+        treatment_Y_adj = CupedService.apply_cuped(treatment_Y, treatment_X, theta, E_X)
 
         # Step 4: Adjusted means and effect
         adj_control_mean = float(control_Y_adj.mean())

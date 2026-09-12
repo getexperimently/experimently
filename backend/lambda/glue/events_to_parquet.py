@@ -28,21 +28,17 @@ Output schema (Parquet, snappy):
 Partitioned by: experiment_id / date  (date format YYYY-MM-DD)
 """
 
-import sys
-import json
 import logging
+import sys
 
-from awsglue.transforms import *  # noqa: F401, F403  (Glue transform API)
-from awsglue.utils import getResolvedOptions
-from pyspark.context import SparkContext
 from awsglue.context import GlueContext
 from awsglue.job import Job
-from pyspark.sql.functions import col, to_timestamp, date_format, lit, coalesce
+from awsglue.transforms import *
+from awsglue.utils import getResolvedOptions
+from pyspark.context import SparkContext
+from pyspark.sql.functions import coalesce, col, lit, to_timestamp
 from pyspark.sql.types import (
-    StructType,
-    StructField,
     StringType,
-    TimestampType,
 )
 
 # ---------------------------------------------------------------------------
@@ -187,9 +183,7 @@ try:
         .partitionBy("experiment_id", "year", "month", "day")
         .parquet(output_path)
     )
-    logger.info(
-        f"Successfully wrote {output_count} events to {output_path}"
-    )
+    logger.info(f"Successfully wrote {output_count} events to {output_path}")
 except Exception as exc:
     logger.error(f"Failed to write Parquet output: {exc}")
     job.commit()

@@ -10,33 +10,34 @@ This service provides advanced rule evaluation capabilities with:
 - Batch evaluation support
 """
 
+import hashlib
 import json
 import logging
-import time
-import hashlib
-from datetime import datetime, timedelta
-from typing import Dict, Any, List, Optional, Tuple
-from dataclasses import dataclass, field
-from collections import defaultdict, deque
-import re
 import math
+import re
+import time
+from collections import defaultdict, deque
+from dataclasses import dataclass, field
+from datetime import datetime
+from typing import Any, Dict, List, Optional, Tuple
 
-from backend.app.schemas.targeting_rule import (
-    TargetingRule,
-    TargetingRules,
-    Condition,
-    RuleGroup,
-    OperatorType,
-    AttributeType,
-    LogicalOperator,
-)
+from backend.app.core.evaluation_cache import EvaluationCache
+from backend.app.core.rule_compiler import RuleCompiler
 from backend.app.core.rules_engine import (
-    evaluate_targeting_rules as base_evaluate_targeting_rules,
-    apply_operator as base_apply_operator,
     UserContext,
 )
-from backend.app.core.rule_compiler import RuleCompiler
-from backend.app.core.evaluation_cache import EvaluationCache
+from backend.app.core.rules_engine import (
+    apply_operator as base_apply_operator,
+)
+from backend.app.schemas.targeting_rule import (
+    AttributeType,
+    Condition,
+    LogicalOperator,
+    OperatorType,
+    RuleGroup,
+    TargetingRule,
+    TargetingRules,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -212,7 +213,7 @@ class RulesEvaluationService:
                 self.performance_stats["evaluation_time"].append(evaluation_time)
 
         except Exception as e:
-            logger.error(f"Error evaluating rules: {str(e)}")
+            logger.error(f"Error evaluating rules: {e!s}")
             self.error_counts["evaluation_error"] += 1
 
             if track_metrics:
@@ -269,7 +270,7 @@ class RulesEvaluationService:
         except Exception as e:
             return AttributeValidationResult(
                 is_valid=False,
-                error_message=f"Validation error: {str(e)}",
+                error_message=f"Validation error: {e!s}",
             )
 
     def _validate_attribute_value(
@@ -360,7 +361,7 @@ class RulesEvaluationService:
         except Exception as e:
             return AttributeValidationResult(
                 is_valid=False,
-                error_message=f"Validation error for attribute '{attr_name}': {str(e)}",
+                error_message=f"Validation error for attribute '{attr_name}': {e!s}",
             )
 
     def _evaluate_targeting_rules_enhanced(
@@ -545,7 +546,7 @@ class RulesEvaluationService:
             return distance <= max_dist
 
         except (ValueError, TypeError):
-            logger.warning(f"Failed to evaluate geo distance")
+            logger.warning("Failed to evaluate geo distance")
             return False
 
     def _evaluate_time_window(self, actual_time: Any, time_window: Any) -> bool:
@@ -580,7 +581,7 @@ class RulesEvaluationService:
             return start_dt <= actual_dt <= end_dt
 
         except (ValueError, TypeError):
-            logger.warning(f"Failed to evaluate time window")
+            logger.warning("Failed to evaluate time window")
             return False
 
     def _evaluate_percentage_bucket(self, user_id: Any, percentage: Any) -> bool:
@@ -596,7 +597,7 @@ class RulesEvaluationService:
             return bucket < float(percentage)
 
         except (ValueError, TypeError):
-            logger.warning(f"Failed to evaluate percentage bucket")
+            logger.warning("Failed to evaluate percentage bucket")
             return False
 
     def _evaluate_json_path(
@@ -642,7 +643,7 @@ class RulesEvaluationService:
             return len(array_value) == int(expected_length)
 
         except (ValueError, TypeError):
-            logger.warning(f"Failed to evaluate array length")
+            logger.warning("Failed to evaluate array length")
             return False
 
     def _extract_required_attributes(

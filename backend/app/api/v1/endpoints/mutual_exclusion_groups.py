@@ -41,6 +41,7 @@ router = APIRouter()
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _require_developer(user: User) -> None:
     """Raise 403 if user lacks DEVELOPER-level access to experiments."""
     if not check_permission(user, ResourceType.EXPERIMENT, Action.CREATE):
@@ -62,6 +63,7 @@ def _require_admin(user: User) -> None:
 # ---------------------------------------------------------------------------
 # List groups
 # ---------------------------------------------------------------------------
+
 
 @router.get(
     "",
@@ -88,6 +90,7 @@ def list_groups(
 # ---------------------------------------------------------------------------
 # Create group
 # ---------------------------------------------------------------------------
+
 
 @router.post(
     "",
@@ -118,6 +121,7 @@ def create_group(
 # Get group
 # ---------------------------------------------------------------------------
 
+
 @router.get(
     "/{group_id}",
     response_model=MutualExclusionGroupResponse,
@@ -145,6 +149,7 @@ def get_group(
 # ---------------------------------------------------------------------------
 # Update group
 # ---------------------------------------------------------------------------
+
 
 @router.put(
     "/{group_id}",
@@ -181,6 +186,7 @@ def update_group(
 # Archive (soft delete) group
 # ---------------------------------------------------------------------------
 
+
 @router.delete(
     "/{group_id}",
     response_model=MutualExclusionGroupResponse,
@@ -209,6 +215,7 @@ def archive_group(
 # Add experiment to group
 # ---------------------------------------------------------------------------
 
+
 @router.post(
     "/{group_id}/experiments",
     status_code=status.HTTP_200_OK,
@@ -226,8 +233,12 @@ def add_experiment_to_group(
     _require_developer(current_user)
     service = MutualExclusionService(db)
     try:
-        experiment = service.add_experiment_to_group(group_id, data.experiment_id)
-        return {"status": "ok", "experiment_id": str(data.experiment_id), "group_id": str(group_id)}
+        service.add_experiment_to_group(group_id, data.experiment_id)
+        return {
+            "status": "ok",
+            "experiment_id": str(data.experiment_id),
+            "group_id": str(group_id),
+        }
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -238,6 +249,7 @@ def add_experiment_to_group(
 # ---------------------------------------------------------------------------
 # Remove experiment from group
 # ---------------------------------------------------------------------------
+
 
 @router.delete(
     "/{group_id}/experiments/{experiment_id}",
@@ -257,7 +269,11 @@ def remove_experiment_from_group(
     service = MutualExclusionService(db)
     try:
         service.remove_experiment_from_group(group_id, experiment_id)
-        return {"status": "ok", "experiment_id": str(experiment_id), "group_id": str(group_id)}
+        return {
+            "status": "ok",
+            "experiment_id": str(experiment_id),
+            "group_id": str(group_id),
+        }
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

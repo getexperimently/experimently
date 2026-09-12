@@ -15,15 +15,14 @@ import pytest
 from pydantic import ValidationError
 
 from backend.app.schemas.scheduler import (
-    SchedulerName,
-    SchedulerRunStatus,
-    SchedulerRunRecord,
-    SchedulerHealthResponse,
-    SchedulerNotificationConfig,
     NotificationEvent,
     SchedulerConfigUpdate,
+    SchedulerHealthResponse,
+    SchedulerName,
+    SchedulerNotificationConfig,
+    SchedulerRunRecord,
+    SchedulerRunStatus,
 )
-
 
 # ---------------------------------------------------------------------------
 # SchedulerName enum

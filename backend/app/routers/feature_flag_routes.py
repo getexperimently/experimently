@@ -1,14 +1,16 @@
-from typing import List, Optional, Dict, Any
-from fastapi import APIRouter, Depends, HTTPException, status, Query
-from sqlalchemy.orm import Session
 import json
+from typing import List, Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy.orm import Session
+
 from backend.app.api import deps
+from backend.app.models.feature_flag import FeatureFlag
 from backend.app.models.user import User
-from backend.app.models.feature_flag import FeatureFlag, FeatureFlagStatus
 from backend.app.schemas.feature_flag import (
     FeatureFlagCreate,
-    FeatureFlagUpdate,
     FeatureFlagInDB,
+    FeatureFlagUpdate,
 )
 from backend.app.services.feature_flag_service import FeatureFlagService
 
@@ -137,7 +139,7 @@ def delete_feature_flag(
     flag_service = FeatureFlagService(db)
     flag_service.delete_feature_flag(flag)
 
-    return None
+    return
 
 
 @router.post("/{flag_id}/activate", response_model=FeatureFlagInDB)

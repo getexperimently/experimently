@@ -32,7 +32,7 @@ from backend.app.schemas.variance_reduction import (
     VarianceReductionMethod,
 )
 from backend.app.services import bayesian_service
-from backend.app.services.analysis_service import AnalysisService, BAYESIAN_N_SAMPLES
+from backend.app.services.analysis_service import BAYESIAN_N_SAMPLES, AnalysisService
 from backend.app.services.bandit_service import (
     BanditService,
     ThompsonSampling,
@@ -138,9 +138,7 @@ class TestBayesianDeterminism:
         assert a == b
         # The seedless fallback is keyed on the posteriors being analysed,
         # not on a single platform-wide stream.
-        assert bayesian_service.resolve_seed(
-            None, 20_000, POSTERIORS
-        ) == derive_seed(
+        assert bayesian_service.resolve_seed(None, 20_000, POSTERIORS) == derive_seed(
             "bayesian_service",
             bayesian_service.posterior_fingerprint(POSTERIORS),
             20_000,
@@ -402,11 +400,15 @@ class TestBanditDeterminism:
         }
         tick = datetime(2026, 9, 11, 10, 0, tzinfo=timezone.utc)
 
-        with patch.object(
-            scheduler, "get_variant_stats_from_counters", return_value=stats
-        ), patch("backend.app.core.bandit_scheduler.datetime") as mock_dt, patch.object(
-            BanditService, "compute_weights", wraps=BanditService.compute_weights
-        ) as spy:
+        with (
+            patch.object(
+                scheduler, "get_variant_stats_from_counters", return_value=stats
+            ),
+            patch("backend.app.core.bandit_scheduler.datetime") as mock_dt,
+            patch.object(
+                BanditService, "compute_weights", wraps=BanditService.compute_weights
+            ) as spy,
+        ):
             mock_dt.now.return_value = tick
             assert scheduler.update_experiment(exp) is True
 

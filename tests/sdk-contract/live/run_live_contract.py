@@ -47,8 +47,24 @@ MANIFEST: dict[str, tuple[str, tuple[str, ...]]] = {
         ("node", "npm"),
     ),
     "edge": ("cd sdk/edge && npm run build --silent && node examples/contract_smoke.mjs", ("node", "npm")),
+    # The React SDK through its SSR entry point (ServerClient): no DOM, no React
+    # render, so it runs under plain node like the other JS SDKs.
+    "react": ("cd sdk/react && npm run build --silent && node examples/contract_smoke.mjs", ("node", "npm")),
+    # React Native ships no build output and its client is plain TypeScript over
+    # fetch, so the smoke is a Jest test under `testEnvironment: node` (no device,
+    # no emulator, no Metro). Jest owns stdout, so its output goes to stderr and
+    # the report is read back from the file the test writes.
+    "react-native": (
+        "cd sdk/react-native && npx jest --config jest.contract.config.js --runInBand 1>&2 "
+        "&& cat .contract_smoke.json",
+        ("node", "npx"),
+    ),
     "go": ("cd sdk/go && go run ./examples/contract_smoke", ("go",)),
-    "java": ("bash sdk/java/examples/contract_smoke.sh", ("java", "mvn")),
+    "java": ("bash sdk/java/examples/contract_smoke.sh", ("java",)),  # Maven via ./mvnw
+    # The Android SDK's Kotlin sources touch no android.* API, so sdk/android/jvm
+    # compiles them for a plain JVM and the smoke runs on a Linux runner with no
+    # Android SDK and no emulator (the Gradle/AAR build still runs nightly).
+    "android": ("bash sdk/android/examples/contract_smoke.sh", ("java",)),  # Maven via ./mvnw
     "ios": ("cd sdk/ios && swift run -q contract-smoke", ("swift",)),
     "ruby": ("ruby -Isdk/ruby/lib sdk/ruby/examples/contract_smoke.rb", ("ruby",)),
     "php": ("php sdk/php/examples/contract_smoke.php", ("php",)),

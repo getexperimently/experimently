@@ -29,13 +29,14 @@ Usage (interactive web UI):
     locust -f endurance_test.py --host http://localhost:8000
     # Then open http://localhost:8089 in your browser
 """
+
 import os
 import random
 import time
 import uuid
 from typing import Any
 
-from locust import HttpUser, task, between, events
+from locust import HttpUser, between, events, task
 from locust.env import Environment
 
 # ---------------------------------------------------------------------------

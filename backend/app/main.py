@@ -10,29 +10,30 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.openapi.docs import get_swagger_ui_html, get_redoc_html
+from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
 from fastapi.openapi.utils import get_openapi
 
 # Import routers and settings
 from backend.app.api.api import api_router
-from backend.app.core.config import settings
-from backend.app.middleware.security_middleware import SecurityHeadersMiddleware
-from backend.app.middleware.rate_limiter import RateLimitMiddleware
-from backend.app.middleware.logging_middleware import LoggingMiddleware, RequestLoggingMiddleware
-from backend.app.middleware.error_middleware import ErrorMiddleware
-from backend.app.middleware.metrics_middleware import MetricsMiddleware
-from backend.app.core.scheduler import experiment_scheduler
-from backend.app.core.rollout_scheduler import rollout_scheduler
-from backend.app.core.metrics_scheduler import metrics_scheduler
-from backend.app.core.safety_scheduler import safety_scheduler
 from backend.app.core.bandit_scheduler import bandit_scheduler_runner
-from backend.app.core.health import is_development_or_test, router as health_router
+from backend.app.core.config import settings
+from backend.app.core.health import is_development_or_test
+from backend.app.core.health import router as health_router
+from backend.app.core.metrics_scheduler import metrics_scheduler
+from backend.app.core.rollout_scheduler import rollout_scheduler
+from backend.app.core.safety_scheduler import safety_scheduler
+from backend.app.core.scheduler import experiment_scheduler
+from backend.app.middleware.rate_limiter import RateLimitMiddleware
+from backend.app.middleware.security_middleware import SecurityHeadersMiddleware
 
 # --- EP-013 additions ---
 try:
     from backend.app.core.logger import configure_logging, log_format_from_env
+    from backend.app.middleware.prometheus_metrics_middleware import (
+        PrometheusMetricsMiddleware,
+    )
     from backend.app.middleware.request_id_middleware import RequestIDMiddleware
-    from backend.app.middleware.prometheus_metrics_middleware import PrometheusMetricsMiddleware
+
     _monitoring_imports_ok = True
 except Exception:  # pragma: no cover
     _monitoring_imports_ok = False
@@ -47,7 +48,9 @@ except Exception:  # pragma: no cover
 # ---------------------------------------------------------------------------
 _log_format: str = "console"
 if _monitoring_imports_ok:
-    _log_format = str(getattr(settings, "LOG_FORMAT", "") or "").lower() or log_format_from_env(
+    _log_format = str(
+        getattr(settings, "LOG_FORMAT", "") or ""
+    ).lower() or log_format_from_env(
         default="console" if is_development_or_test() else "json"
     )
 _json_logs: bool = _log_format == "json"
@@ -70,6 +73,7 @@ if settings.dev_auth_bypass_active:
 
 # Maximum request body size (1 MB) — prevents DoS via oversized payloads
 MAX_REQUEST_BODY_SIZE: int = 1_048_576  # 1 MB
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -185,6 +189,7 @@ app.include_router(health_router)
 # ---------------------------------------------------------------------------
 # OpenAPI documentation routes
 # ---------------------------------------------------------------------------
+
 
 @app.get("/api/v1/openapi.json", include_in_schema=False)
 async def get_openapi_schema():

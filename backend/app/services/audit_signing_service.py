@@ -3,6 +3,7 @@ HMAC-SHA256 signing and verification for ComplianceAuditEvent records.
 Uses a secret key from settings (AUDIT_HMAC_KEY).
 Signing makes audit records tamper-evident.
 """
+
 import hashlib
 import hmac as hmac_lib
 import json
@@ -12,11 +13,19 @@ from typing import TYPE_CHECKING
 from backend.app.core.config import settings
 
 if TYPE_CHECKING:
-    from backend.app.models.compliance_audit_event import ComplianceAuditEvent
+    pass
 
 logger = logging.getLogger(__name__)
 
-_CANONICAL_FIELDS = ["id", "timestamp", "action", "resource_type", "resource_id", "actor_id", "outcome"]
+_CANONICAL_FIELDS = [
+    "id",
+    "timestamp",
+    "action",
+    "resource_type",
+    "resource_id",
+    "actor_id",
+    "outcome",
+]
 
 
 class AuditSigningService:

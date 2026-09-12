@@ -1,8 +1,7 @@
 from fastapi import APIRouter, HTTPException, status
-from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.param_functions import Depends
+from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel, EmailStr
-from typing import Optional
 
 from backend.app.services.auth_service import CognitoAuthService
 

@@ -6,29 +6,29 @@ Tests for:
   GET /api/v1/results/{experiment_id}/sequential — dedicated sequential endpoint
 """
 
-import pytest
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict
 from unittest.mock import MagicMock, patch
 
+import pytest
 from fastapi.testclient import TestClient
 
+from backend.app.api.deps import get_current_user, get_db
 from backend.app.main import app
-from backend.app.api.deps import get_db, get_current_user
 from backend.app.models.user import User
 from backend.app.services.analysis_service import AnalysisService
 from backend.app.services.sequential_testing_service import (
-    SequentialTestingService,
-    MSPRTResult,
-    ConfidenceSequence,
     AlphaSpendingBoundary,
+    ConfidenceSequence,
     EvidencePoint,
+    EvidenceStrength,
     LongRunningRisk,
+    MSPRTResult,
     SequentialAnalysis,
     SequentialTestingMethod,
+    SequentialTestingService,
     SpendingFunction,
-    EvidenceStrength,
 )
 
 # ---------------------------------------------------------------------------
@@ -173,13 +173,32 @@ def mock_sequential_analysis():
             sample_size=10000,
         ),
         evidence_trajectory=[
-            EvidencePoint(sample_size=2000, lambda_ratio=3.5, always_valid_p_value=0.28, can_stop=False),
-            EvidencePoint(sample_size=5000, lambda_ratio=12.0, always_valid_p_value=0.08, can_stop=False),
-            EvidencePoint(sample_size=10000, lambda_ratio=25.0, always_valid_p_value=0.04, can_stop=True),
+            EvidencePoint(
+                sample_size=2000,
+                lambda_ratio=3.5,
+                always_valid_p_value=0.28,
+                can_stop=False,
+            ),
+            EvidencePoint(
+                sample_size=5000,
+                lambda_ratio=12.0,
+                always_valid_p_value=0.08,
+                can_stop=False,
+            ),
+            EvidencePoint(
+                sample_size=10000,
+                lambda_ratio=25.0,
+                always_valid_p_value=0.04,
+                can_stop=True,
+            ),
         ],
         alpha_spending=[
-            AlphaSpendingBoundary(look_number=1, cumulative_alpha=0.001, boundary_z=3.29, boundary_p=0.001),
-            AlphaSpendingBoundary(look_number=2, cumulative_alpha=0.01, boundary_z=2.58, boundary_p=0.01),
+            AlphaSpendingBoundary(
+                look_number=1, cumulative_alpha=0.001, boundary_z=3.29, boundary_p=0.001
+            ),
+            AlphaSpendingBoundary(
+                look_number=2, cumulative_alpha=0.01, boundary_z=2.58, boundary_p=0.01
+            ),
         ],
         long_running_risk=None,
         recommended_action="stop_for_effect",
@@ -206,9 +225,7 @@ class TestSequentialTestingInResults:
         }
         results.pop("sequential_testing", None)
 
-        with patch(
-            "backend.app.api.v1.endpoints.results.AnalysisService"
-        ) as MockCls:
+        with patch("backend.app.api.v1.endpoints.results.AnalysisService") as MockCls:
             mock_instance = MagicMock()
             mock_instance.get_experiment_results.return_value = results
             MockCls.return_value = mock_instance
@@ -238,7 +255,10 @@ class TestSequentialTestingInResults:
                     "boundary": 20.0,
                 },
                 "confidence_sequence": {
-                    "lower": 0.01, "upper": 0.08, "width": 0.07, "sample_size": 10000,
+                    "lower": 0.01,
+                    "upper": 0.08,
+                    "width": 0.07,
+                    "sample_size": 10000,
                 },
                 "evidence_trajectory": [],
                 "alpha_spending": [],
@@ -247,9 +267,7 @@ class TestSequentialTestingInResults:
             },
         }
 
-        with patch(
-            "backend.app.api.v1.endpoints.results.AnalysisService"
-        ) as MockCls:
+        with patch("backend.app.api.v1.endpoints.results.AnalysisService") as MockCls:
             mock_instance = MagicMock()
             mock_instance.get_experiment_results.return_value = results
             MockCls.return_value = mock_instance
@@ -286,9 +304,7 @@ class TestSequentialTestingInResults:
             },
         }
 
-        with patch(
-            "backend.app.api.v1.endpoints.results.AnalysisService"
-        ) as MockCls:
+        with patch("backend.app.api.v1.endpoints.results.AnalysisService") as MockCls:
             mock_instance = MagicMock()
             mock_instance.get_experiment_results.return_value = results
             MockCls.return_value = mock_instance
@@ -314,7 +330,10 @@ class TestSequentialTestingInResults:
             "sequential_testing": {
                 "method": "msprt",
                 "confidence_sequence": {
-                    "lower": 0.01, "upper": 0.08, "width": 0.07, "sample_size": 10000,
+                    "lower": 0.01,
+                    "upper": 0.08,
+                    "width": 0.07,
+                    "sample_size": 10000,
                 },
                 "evidence_trajectory": [],
                 "alpha_spending": [],
@@ -322,9 +341,7 @@ class TestSequentialTestingInResults:
             },
         }
 
-        with patch(
-            "backend.app.api.v1.endpoints.results.AnalysisService"
-        ) as MockCls:
+        with patch("backend.app.api.v1.endpoints.results.AnalysisService") as MockCls:
             mock_instance = MagicMock()
             mock_instance.get_experiment_results.return_value = results
             MockCls.return_value = mock_instance
@@ -355,7 +372,9 @@ class TestGetSequentialResults:
             "backend.app.api.v1.endpoints.results.SequentialTestingService"
         ) as MockService:
             mock_instance = MockService.return_value
-            mock_instance.run_sequential_analysis.return_value = mock_sequential_analysis
+            mock_instance.run_sequential_analysis.return_value = (
+                mock_sequential_analysis
+            )
 
             # Also need to mock the experiment lookup
             mock_experiment = MagicMock()
@@ -392,9 +411,7 @@ class TestGetSequentialResults:
             "backend.app.api.v1.endpoints.results._get_experiment_for_sequential",
             return_value=mock_experiment,
         ):
-            response = client.get(
-                f"/api/v1/results/{EXPERIMENT_UUID}/sequential"
-            )
+            response = client.get(f"/api/v1/results/{EXPERIMENT_UUID}/sequential")
 
         assert response.status_code == 404
 
@@ -407,7 +424,9 @@ class TestGetSequentialResults:
             "backend.app.api.v1.endpoints.results.SequentialTestingService"
         ) as MockService:
             mock_instance = MockService.return_value
-            mock_instance.run_sequential_analysis.return_value = mock_sequential_analysis
+            mock_instance.run_sequential_analysis.return_value = (
+                mock_sequential_analysis
+            )
 
             mock_experiment = MagicMock()
             mock_experiment.sequential_testing_enabled = True
@@ -442,7 +461,9 @@ class TestGetSequentialResults:
             "backend.app.api.v1.endpoints.results.SequentialTestingService"
         ) as MockService:
             mock_instance = MockService.return_value
-            mock_instance.run_sequential_analysis.return_value = mock_sequential_analysis
+            mock_instance.run_sequential_analysis.return_value = (
+                mock_sequential_analysis
+            )
 
             mock_experiment = MagicMock()
             mock_experiment.sequential_testing_enabled = True
@@ -475,9 +496,7 @@ class TestGetSequentialResults:
             "backend.app.api.v1.endpoints.results._get_experiment_for_sequential",
             return_value=None,
         ):
-            response = client.get(
-                f"/api/v1/results/{EXPERIMENT_UUID}/sequential"
-            )
+            response = client.get(f"/api/v1/results/{EXPERIMENT_UUID}/sequential")
 
         assert response.status_code == 404
 

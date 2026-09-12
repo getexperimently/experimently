@@ -13,8 +13,8 @@ Tests cover:
 """
 
 import asyncio
-from datetime import datetime, timezone, timedelta
-from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
+from datetime import datetime, timedelta, timezone
+from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
 
@@ -22,7 +22,6 @@ from backend.app.services.results_streaming_service import (
     ResultsStreamingService,
     _norm_cdf,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers

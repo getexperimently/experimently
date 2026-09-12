@@ -4,12 +4,13 @@ Unit tests for performance target specifications.
 Tests that the SLA contracts are well-formed, internally consistent,
 and cover all required endpoints.
 """
+
 import pytest
 
 from backend.tests.performance.specs.performance_targets import (
     PERFORMANCE_TARGETS,
-    PerformanceTarget,
     TARGET_GROUPS,
+    PerformanceTarget,
     TargetGroup,
 )
 
@@ -17,9 +18,9 @@ from backend.tests.performance.specs.performance_targets import (
 def test_all_required_endpoints_have_targets():
     """All required high-traffic endpoints must have defined performance targets."""
     required = {"assign", "track", "evaluate_flag", "list_experiments", "health"}
-    assert required.issubset(
-        set(PERFORMANCE_TARGETS.keys())
-    ), f"Missing required endpoint targets: {required - set(PERFORMANCE_TARGETS.keys())}"
+    assert required.issubset(set(PERFORMANCE_TARGETS.keys())), (
+        f"Missing required endpoint targets: {required - set(PERFORMANCE_TARGETS.keys())}"
+    )
 
 
 def test_sla_values_are_reasonable():
@@ -29,7 +30,9 @@ def test_sla_values_are_reasonable():
             f"{name}: p50 < p95 < p99 must hold, "
             f"got p50={target.p50_ms}, p95={target.p95_ms}, p99={target.p99_ms}"
         )
-        assert target.min_rps > 0, f"{name}: min_rps must be positive, got {target.min_rps}"
+        assert target.min_rps > 0, (
+            f"{name}: min_rps must be positive, got {target.min_rps}"
+        )
 
 
 def test_tracking_endpoints_are_faster_than_list_experiments():
@@ -210,7 +213,12 @@ def test_write_endpoints_use_post_or_put_or_delete():
 
 def test_read_endpoints_use_get():
     """Read-only targets should use the GET method."""
-    read_keys = ["list_experiments", "get_experiment_results", "evaluate_flag", "health"]
+    read_keys = [
+        "list_experiments",
+        "get_experiment_results",
+        "evaluate_flag",
+        "health",
+    ]
     for key in read_keys:
         target = PERFORMANCE_TARGETS[key]
         assert target.method == "GET", (
@@ -223,9 +231,7 @@ def test_all_targets_have_unique_endpoints():
     seen: set[tuple[str, str]] = set()
     for name, target in PERFORMANCE_TARGETS.items():
         pair = (target.endpoint, target.method)
-        assert pair not in seen, (
-            f"{name}: duplicate (endpoint, method) pair: {pair}"
-        )
+        assert pair not in seen, f"{name}: duplicate (endpoint, method) pair: {pair}"
         seen.add(pair)
 
 

@@ -16,10 +16,12 @@ platform.
 """
 
 import math
+
 import pytest
 
 try:
     import numpy as np
+
     HAS_NUMPY = True
 except ImportError:
     HAS_NUMPY = False
@@ -31,6 +33,7 @@ skip_no_numpy = pytest.mark.skipif(not HAS_NUMPY, reason="numpy not installed")
 # CUPED Variance Reduction (Issue #21)
 # ===========================================================================
 
+
 @skip_no_numpy
 class TestCupedTheta:
     """Validate OLS theta = Cov(Y,X)/Var(X) computation."""
@@ -41,7 +44,9 @@ class TestCupedTheta:
         Y = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
         X = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
         theta = CupedService.compute_theta(Y, X)
-        assert abs(theta - 1.0) < 1e-6, f"Perfect correlation should give theta=1, got {theta}"
+        assert abs(theta - 1.0) < 1e-6, (
+            f"Perfect correlation should give theta=1, got {theta}"
+        )
 
     def test_zero_variance_covariate_returns_zero(self):
         from backend.app.services.cuped_service import CupedService
@@ -200,56 +205,75 @@ class TestWinsorization:
 # Sequential Testing / mSPRT (EP-021)
 # ===========================================================================
 
+
 class TestMSPRT:
     """Validate mSPRT computation for sequential testing."""
 
     def test_significant_result_can_stop(self):
-        from backend.app.services.sequential_testing_service import SequentialTestingService
+        from backend.app.services.sequential_testing_service import (
+            SequentialTestingService,
+        )
 
         service = SequentialTestingService()
         result = service.compute_msprt(
-            control_successes=500, control_total=5000,
-            treatment_successes=600, treatment_total=5000,
+            control_successes=500,
+            control_total=5000,
+            treatment_successes=600,
+            treatment_total=5000,
         )
         assert hasattr(result, "can_stop")
         assert hasattr(result, "lambda_ratio")
         assert result.lambda_ratio > 0
 
     def test_no_difference_does_not_stop(self):
-        from backend.app.services.sequential_testing_service import SequentialTestingService
+        from backend.app.services.sequential_testing_service import (
+            SequentialTestingService,
+        )
 
         service = SequentialTestingService()
         result = service.compute_msprt(
-            control_successes=100, control_total=1000,
-            treatment_successes=100, treatment_total=1000,
+            control_successes=100,
+            control_total=1000,
+            treatment_successes=100,
+            treatment_total=1000,
         )
         assert not result.can_stop, "Equal rates should not trigger early stop"
 
     def test_lambda_ratio_increases_with_more_data(self):
-        from backend.app.services.sequential_testing_service import SequentialTestingService
+        from backend.app.services.sequential_testing_service import (
+            SequentialTestingService,
+        )
 
         service = SequentialTestingService()
         # Small sample
         r1 = service.compute_msprt(
-            control_successes=50, control_total=500,
-            treatment_successes=65, treatment_total=500,
+            control_successes=50,
+            control_total=500,
+            treatment_successes=65,
+            treatment_total=500,
         )
         # Larger sample, same rate
         r2 = service.compute_msprt(
-            control_successes=500, control_total=5000,
-            treatment_successes=650, treatment_total=5000,
+            control_successes=500,
+            control_total=5000,
+            treatment_successes=650,
+            treatment_total=5000,
         )
         assert r2.lambda_ratio >= r1.lambda_ratio, (
             "More data with same effect should increase lambda ratio"
         )
 
     def test_evidence_strength_is_populated(self):
-        from backend.app.services.sequential_testing_service import SequentialTestingService
+        from backend.app.services.sequential_testing_service import (
+            SequentialTestingService,
+        )
 
         service = SequentialTestingService()
         result = service.compute_msprt(
-            control_successes=100, control_total=1000,
-            treatment_successes=150, treatment_total=1000,
+            control_successes=100,
+            control_total=1000,
+            treatment_successes=150,
+            treatment_total=1000,
         )
         assert result.evidence_strength is not None
 
@@ -258,24 +282,32 @@ class TestAlwaysValidCI:
     """Validate always-valid confidence intervals."""
 
     def test_ci_contains_zero_when_no_effect(self):
-        from backend.app.services.sequential_testing_service import SequentialTestingService
+        from backend.app.services.sequential_testing_service import (
+            SequentialTestingService,
+        )
 
         service = SequentialTestingService()
         cs = service.compute_always_valid_ci(
-            control_successes=100, control_total=1000,
-            treatment_successes=100, treatment_total=1000,
+            control_successes=100,
+            control_total=1000,
+            treatment_successes=100,
+            treatment_total=1000,
         )
         assert cs.lower <= 0 <= cs.upper, (
             f"No-effect CI [{cs.lower:.4f}, {cs.upper:.4f}] should contain 0"
         )
 
     def test_ci_excludes_zero_when_strong_effect(self):
-        from backend.app.services.sequential_testing_service import SequentialTestingService
+        from backend.app.services.sequential_testing_service import (
+            SequentialTestingService,
+        )
 
         service = SequentialTestingService()
         cs = service.compute_always_valid_ci(
-            control_successes=100, control_total=5000,
-            treatment_successes=500, treatment_total=5000,
+            control_successes=100,
+            control_total=5000,
+            treatment_successes=500,
+            treatment_total=5000,
         )
         # Large effect (2% vs 10%) — CI should exclude 0
         assert cs.lower > 0 or cs.upper < 0, (
@@ -283,12 +315,16 @@ class TestAlwaysValidCI:
         )
 
     def test_ci_width_is_positive(self):
-        from backend.app.services.sequential_testing_service import SequentialTestingService
+        from backend.app.services.sequential_testing_service import (
+            SequentialTestingService,
+        )
 
         service = SequentialTestingService()
         cs = service.compute_always_valid_ci(
-            control_successes=50, control_total=500,
-            treatment_successes=60, treatment_total=500,
+            control_successes=50,
+            control_total=500,
+            treatment_successes=60,
+            treatment_total=500,
         )
         assert cs.width > 0
 
@@ -329,10 +365,14 @@ class TestAlphaSpending:
         z_values = [b.boundary_z for b in boundaries]
         # Pocock boundaries should be approximately equal
         z_range = max(z_values) - min(z_values)
-        assert z_range < 1.0, f"Pocock boundaries should be roughly constant, range={z_range}"
+        assert z_range < 1.0, (
+            f"Pocock boundaries should be roughly constant, range={z_range}"
+        )
 
     def test_cumulative_alpha_does_not_exceed_total(self):
-        from backend.app.services.sequential_testing_service import SequentialTestingService
+        from backend.app.services.sequential_testing_service import (
+            SequentialTestingService,
+        )
 
         service = SequentialTestingService()
         boundaries = service.compute_alpha_spending(
@@ -348,7 +388,9 @@ class TestEvidenceTrajectory:
     """Validate evidence trajectory tracking over sequential looks."""
 
     def test_trajectory_length_matches_input(self):
-        from backend.app.services.sequential_testing_service import SequentialTestingService
+        from backend.app.services.sequential_testing_service import (
+            SequentialTestingService,
+        )
 
         service = SequentialTestingService()
         n_looks = 5
@@ -358,12 +400,17 @@ class TestEvidenceTrajectory:
         treat_t = [100 * (i + 1) for i in range(n_looks)]
 
         trajectory = service.compute_evidence_trajectory(
-            ctrl_s, ctrl_t, treat_s, treat_t,
+            ctrl_s,
+            ctrl_t,
+            treat_s,
+            treat_t,
         )
         assert len(trajectory) == n_looks
 
     def test_trajectory_sample_sizes_increase(self):
-        from backend.app.services.sequential_testing_service import SequentialTestingService
+        from backend.app.services.sequential_testing_service import (
+            SequentialTestingService,
+        )
 
         service = SequentialTestingService()
         ctrl_s = [10, 20, 30, 40, 50]
@@ -372,7 +419,10 @@ class TestEvidenceTrajectory:
         treat_t = [100, 200, 300, 400, 500]
 
         trajectory = service.compute_evidence_trajectory(
-            ctrl_s, ctrl_t, treat_s, treat_t,
+            ctrl_s,
+            ctrl_t,
+            treat_s,
+            treat_t,
         )
         sample_sizes = [ep.sample_size for ep in trajectory]
         for i in range(1, len(sample_sizes)):
@@ -383,7 +433,9 @@ class TestLongRunningRisk:
     """Validate long-running experiment risk detection."""
 
     def test_at_risk_when_way_over_expected_duration(self):
-        from backend.app.services.sequential_testing_service import SequentialTestingService
+        from backend.app.services.sequential_testing_service import (
+            SequentialTestingService,
+        )
 
         service = SequentialTestingService()
         risk = service.estimate_long_running_risk(
@@ -395,7 +447,9 @@ class TestLongRunningRisk:
         assert risk.is_at_risk
 
     def test_not_at_risk_when_on_track(self):
-        from backend.app.services.sequential_testing_service import SequentialTestingService
+        from backend.app.services.sequential_testing_service import (
+            SequentialTestingService,
+        )
 
         service = SequentialTestingService()
         risk = service.estimate_long_running_risk(
@@ -407,7 +461,9 @@ class TestLongRunningRisk:
         assert not risk.is_at_risk
 
     def test_risk_ratio_computed_correctly(self):
-        from backend.app.services.sequential_testing_service import SequentialTestingService
+        from backend.app.services.sequential_testing_service import (
+            SequentialTestingService,
+        )
 
         service = SequentialTestingService()
         risk = service.estimate_long_running_risk(

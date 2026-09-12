@@ -11,16 +11,16 @@ Following TDD (Test-Driven Development) - GREEN phase: Implementation to pass te
 """
 
 import sys
-from pathlib import Path
-from typing import Optional, Dict, Any
 from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Dict, Optional
 
 # Add shared module to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "shared"))
 
 from consistent_hash import get_hasher
 from models import FeatureFlagConfig, VariantConfig
-from utils import get_dynamodb_resource, get_logger, get_env_variable
+from utils import get_dynamodb_resource, get_env_variable, get_logger
 
 logger = get_logger(__name__)
 
@@ -37,8 +37,7 @@ class FeatureFlagEvaluator:
         """Initialize the feature flag evaluator."""
         self.hasher = get_hasher()
         self.flags_table_name = get_env_variable(
-            'FLAGS_TABLE',
-            default='experimently-feature-flags'
+            "FLAGS_TABLE", default="experimently-feature-flags"
         )
 
         # Cache for flag configurations (Lambda warm-start optimization)
@@ -53,7 +52,7 @@ class FeatureFlagEvaluator:
         self,
         user_id: str,
         flag_config: FeatureFlagConfig,
-        context: Optional[Dict[str, Any]] = None
+        context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Evaluate a feature flag for a user.
@@ -80,48 +79,29 @@ class FeatureFlagEvaluator:
 
         # Check if flag is globally disabled
         if not flag_config.enabled:
-            return {
-                "enabled": False,
-                "reason": "flag_disabled",
-                "variant": None
-            }
+            return {"enabled": False, "reason": "flag_disabled", "variant": None}
 
         # Evaluate targeting rules if they exist
         if flag_config.targeting_rules:
-            if not self.evaluate_targeting_rules(
-                flag_config.targeting_rules,
-                context
-            ):
+            if not self.evaluate_targeting_rules(flag_config.targeting_rules, context):
                 return {
                     "enabled": False,
                     "reason": "targeting_rules_not_met",
-                    "variant": None
+                    "variant": None,
                 }
 
         # Check rollout percentage
         if not self.is_user_in_rollout(user_id, flag_config):
-            return {
-                "enabled": False,
-                "reason": "not_in_rollout",
-                "variant": None
-            }
+            return {"enabled": False, "reason": "not_in_rollout", "variant": None}
 
         # Flag is enabled - assign variant if configured
         variant = None
         if flag_config.variants:
             variant = self.assign_variant(user_id, flag_config)
 
-        return {
-            "enabled": True,
-            "reason": "enabled",
-            "variant": variant
-        }
+        return {"enabled": True, "reason": "enabled", "variant": variant}
 
-    def is_user_in_rollout(
-        self,
-        user_id: str,
-        flag_config: FeatureFlagConfig
-    ) -> bool:
+    def is_user_in_rollout(self, user_id: str, flag_config: FeatureFlagConfig) -> bool:
         """
         Determine if user is in rollout percentage using consistent hashing.
 
@@ -145,18 +125,14 @@ class FeatureFlagEvaluator:
         # Use consistent hashing to determine if user is in rollout
         # Get bucket from 0-99 (100 buckets for percentage)
         bucket = self.hasher.get_bucket(
-            user_id=user_id,
-            experiment_key=flag_config.key,
-            num_buckets=100
+            user_id=user_id, experiment_key=flag_config.key, num_buckets=100
         )
 
         # User is included if their bucket is less than rollout percentage
         return bucket < rollout_percentage
 
     def evaluate_targeting_rules(
-        self,
-        targeting_rules: Optional[list],
-        context: Optional[Dict[str, Any]]
+        self, targeting_rules: Optional[list], context: Optional[Dict[str, Any]]
     ) -> bool:
         """
         Evaluate targeting rules against user context.
@@ -178,9 +154,9 @@ class FeatureFlagEvaluator:
 
         # Evaluate each rule (AND logic - all must match)
         for rule in targeting_rules:
-            attribute = rule.get('attribute')
-            operator = rule.get('operator')
-            value = rule.get('value')
+            attribute = rule.get("attribute")
+            operator = rule.get("operator")
+            value = rule.get("value")
 
             # Get user's attribute value from context
             user_value = context.get(attribute)
@@ -190,16 +166,16 @@ class FeatureFlagEvaluator:
                 return False
 
             # Evaluate based on operator
-            if operator == 'equals':
+            if operator == "equals":
                 if user_value != value:
                     return False
-            elif operator == 'in':
+            elif operator == "in":
                 if user_value not in value:
                     return False
-            elif operator == 'greater_than':
+            elif operator == "greater_than":
                 if user_value <= value:
                     return False
-            elif operator == 'less_than':
+            elif operator == "less_than":
                 if user_value >= value:
                     return False
             else:
@@ -210,9 +186,7 @@ class FeatureFlagEvaluator:
         return True
 
     def assign_variant(
-        self,
-        user_id: str,
-        flag_config: FeatureFlagConfig
+        self, user_id: str, flag_config: FeatureFlagConfig
     ) -> Optional[str]:
         """
         Assign a user to a variant using consistent hashing.
@@ -229,11 +203,7 @@ class FeatureFlagEvaluator:
 
         # Convert variants to format expected by hasher
         variants = [
-            {
-                "key": v.key,
-                "allocation": v.allocation
-            }
-            for v in flag_config.variants
+            {"key": v.key, "allocation": v.allocation} for v in flag_config.variants
         ]
 
         # Use consistent hashing to assign variant
@@ -243,7 +213,7 @@ class FeatureFlagEvaluator:
             experiment_key=flag_config.key,
             variants=variants,
             traffic_allocation=1.0,
-            salt=None
+            salt=None,
         )
 
         return variant if variant else flag_config.default_variant
@@ -262,32 +232,28 @@ class FeatureFlagEvaluator:
             dynamodb = get_dynamodb_resource()
             table = dynamodb.Table(self.flags_table_name)
 
-            response = table.get_item(
-                Key={'key': flag_key}
-            )
+            response = table.get_item(Key={"key": flag_key})
 
-            if 'Item' not in response:
+            if "Item" not in response:
                 logger.warning(f"Feature flag not found: {flag_key}")
                 return None
 
-            item = response['Item']
+            item = response["Item"]
 
             # Parse variants if present
             variants = None
-            if 'variants' in item and item['variants']:
-                variants = [
-                    VariantConfig(**v) for v in item['variants']
-                ]
+            if "variants" in item and item["variants"]:
+                variants = [VariantConfig(**v) for v in item["variants"]]
 
             # Parse DynamoDB item into FeatureFlagConfig
             config = FeatureFlagConfig(
-                flag_id=item['flag_id'],
-                key=item['key'],
-                enabled=item.get('enabled', False),
-                rollout_percentage=item.get('rollout_percentage', 0.0),
-                targeting_rules=item.get('targeting_rules'),
-                default_variant=item.get('default_variant'),
-                variants=variants
+                flag_id=item["flag_id"],
+                key=item["key"],
+                enabled=item.get("enabled", False),
+                rollout_percentage=item.get("rollout_percentage", 0.0),
+                targeting_rules=item.get("targeting_rules"),
+                default_variant=item.get("default_variant"),
+                variants=variants,
             )
 
             logger.info(f"Retrieved feature flag config: {flag_key}")
@@ -295,8 +261,7 @@ class FeatureFlagEvaluator:
 
         except Exception as e:
             logger.error(
-                f"Failed to get flag config: {str(e)}",
-                extra={'flag_key': flag_key}
+                f"Failed to get flag config: {e!s}", extra={"flag_key": flag_key}
             )
             return None
 
@@ -315,7 +280,7 @@ class FeatureFlagEvaluator:
             if self._is_cache_valid(flag_key):
                 self._record_cache_hit()
                 logger.debug(f"Cache hit for flag: {flag_key}")
-                return self._flag_cache[flag_key]['config']
+                return self._flag_cache[flag_key]["config"]
             else:
                 # Cache expired, remove it
                 del self._flag_cache[flag_key]
@@ -345,16 +310,14 @@ class FeatureFlagEvaluator:
             return False
 
         cache_entry = self._flag_cache[flag_key]
-        cached_timestamp = cache_entry['timestamp']
+        cached_timestamp = cache_entry["timestamp"]
         current_timestamp = datetime.now(timezone.utc).timestamp()
 
         # Check if cache has expired
         return (current_timestamp - cached_timestamp) < self.cache_ttl
 
     def _cache_flag_config(
-        self,
-        flag_key: str,
-        config: Optional[FeatureFlagConfig]
+        self, flag_key: str, config: Optional[FeatureFlagConfig]
     ) -> None:
         """
         Store flag config in cache with timestamp.
@@ -364,8 +327,8 @@ class FeatureFlagEvaluator:
             config: Feature flag configuration (can be None)
         """
         self._flag_cache[flag_key] = {
-            'config': config,
-            'timestamp': datetime.now(timezone.utc).timestamp()
+            "config": config,
+            "timestamp": datetime.now(timezone.utc).timestamp(),
         }
 
     def _record_cache_hit(self) -> None:
@@ -392,7 +355,7 @@ class FeatureFlagEvaluator:
         self,
         user_id: str,
         flag_keys: list[str],
-        context: Optional[Dict[str, Any]] = None
+        context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Dict[str, Any]]:
         """
         Evaluate multiple feature flags for a user in a single call.
@@ -441,15 +404,13 @@ class FeatureFlagEvaluator:
                 results[flag_key] = {
                     "enabled": False,
                     "reason": "flag_not_found",
-                    "variant": None
+                    "variant": None,
                 }
                 continue
 
             # Evaluate flag
             evaluation_result = self.evaluate(
-                user_id=user_id,
-                flag_config=flag_config,
-                context=context
+                user_id=user_id, flag_config=flag_config, context=context
             )
 
             results[flag_key] = evaluation_result

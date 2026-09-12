@@ -27,10 +27,10 @@ from typing import Any, Optional
 
 import requests
 
-
 # ---------------------------------------------------------------------------
 # Data structures
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class UserEvent:
@@ -89,6 +89,7 @@ class ScenarioResult:
 # ---------------------------------------------------------------------------
 # Core data generator
 # ---------------------------------------------------------------------------
+
 
 class DataScenario:
     """
@@ -149,7 +150,9 @@ class DataScenario:
         self.session_decay = session_decay
         self.experiment_duration_days = experiment_duration_days
         self._rng = random.Random(seed)
-        self._start_date = datetime.now(timezone.utc) - timedelta(days=experiment_duration_days)
+        self._start_date = datetime.now(timezone.utc) - timedelta(
+            days=experiment_duration_days
+        )
 
     # ------------------------------------------------------------------
     # Public API
@@ -310,9 +313,13 @@ class DataScenario:
     ) -> None:
         """Add extra conversion events in the second half of the experiment to simulate drift."""
         midpoint = self._start_date + timedelta(days=self.experiment_duration_days / 2)
-        late_users = [u for u in users if u.assigned_at > midpoint and u.variant_name == "control"]
+        late_users = [
+            u for u in users if u.assigned_at > midpoint and u.variant_name == "control"
+        ]
         # Inject conversions for 10% of late control users (baseline drift)
-        for user in self._rng.sample(late_users, min(len(late_users) // 10, len(late_users))):
+        for user in self._rng.sample(
+            late_users, min(len(late_users) // 10, len(late_users))
+        ):
             events.append(
                 UserEvent(
                     user_id=user.user_id,
@@ -333,12 +340,17 @@ class DataScenario:
         subgroup.
         """
         mobile_treatment = [
-            u for u in users
+            u
+            for u in users
             if u.variant_name == "treatment" and u.properties.get("device") == "mobile"
         ]
         # Remove any existing conversions for this subgroup
         mobile_ids = {u.user_id for u in mobile_treatment}
-        events[:] = [e for e in events if e.user_id not in mobile_ids or e.properties.get("injected")]
+        events[:] = [
+            e
+            for e in events
+            if e.user_id not in mobile_ids or e.properties.get("injected")
+        ]
         # Give mobile treatment users a lower CVR than control
         for user in mobile_treatment:
             if self._rng.random() < self.control_cvr * 0.5:  # half the control rate
@@ -357,6 +369,7 @@ class DataScenario:
 # ---------------------------------------------------------------------------
 # API seeder
 # ---------------------------------------------------------------------------
+
 
 class PlatformSeeder:
     """Seeds a running platform instance with scenario data via REST API."""
@@ -452,6 +465,7 @@ class PlatformSeeder:
 # ---------------------------------------------------------------------------
 # Pre-built scenario factories
 # ---------------------------------------------------------------------------
+
 
 def make_ab_test_scenario(seed: int = 42) -> DataScenario:
     """
@@ -566,6 +580,7 @@ SCENARIOS: dict[str, DataScenario] = {
 # ---------------------------------------------------------------------------
 # CLI entry-point
 # ---------------------------------------------------------------------------
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(

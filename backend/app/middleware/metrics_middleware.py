@@ -1,25 +1,30 @@
-import os
-import time
 import logging
-from typing import Dict, Any, Callable, Awaitable, Optional
+import os
+from typing import Optional
 
 try:
-    import psutil
     import fastapi
+    import psutil
     from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
     from starlette.requests import Request
     from starlette.responses import Response
 except ImportError:
     # For linting purposes, define placeholder types if imports fail
     BaseHTTPMiddleware = object
-    class Request: pass
-    class Response: pass
+
+    class Request:
+        pass
+
+    class Response:
+        pass
+
     psutil = None
 
 from backend.app.utils.aws_client import AWSClient
 from backend.app.utils.metrics import MetricsCollector
 
 logger = logging.getLogger(__name__)
+
 
 class MetricsMiddleware(BaseHTTPMiddleware):
     """
@@ -47,7 +52,9 @@ class MetricsMiddleware(BaseHTTPMiddleware):
         else:
             logger.info("Metrics collection disabled")
 
-    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+    async def dispatch(
+        self, request: Request, call_next: RequestResponseEndpoint
+    ) -> Response:
         if not self.enable_metrics:
             return await call_next(request)
 
@@ -145,7 +152,7 @@ class MetricsMiddleware(BaseHTTPMiddleware):
         memory_usage: Optional[float],
         cpu_usage: Optional[float],
         memory_change: float,
-        cpu_change: float
+        cpu_change: float,
     ) -> None:
         """Log metrics locally."""
         metrics = {
@@ -154,6 +161,6 @@ class MetricsMiddleware(BaseHTTPMiddleware):
             "memory_usage": memory_usage,
             "cpu_usage": cpu_usage,
             "memory_change": memory_change,
-            "cpu_change": cpu_change
+            "cpu_change": cpu_change,
         }
         logger.info(f"Request metrics: {metrics}")

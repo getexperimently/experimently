@@ -14,6 +14,7 @@ The AnalysisService is patched to return mock result dicts so the tests
 are not sensitive to data volume or Redis availability.  The experiment
 is created via the experiments API to ensure real DB rows exist.
 """
+
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -27,9 +28,9 @@ from backend.app.models.experiment import (
     Experiment,
     ExperimentStatus,
     ExperimentType,
-    Variant,
     Metric,
     MetricType,
+    Variant,
 )
 from backend.app.schemas.bayesian import (
     BayesianConfig,
@@ -38,7 +39,6 @@ from backend.app.schemas.bayesian import (
     BayesianResultsResponse,
     BayesianVariantResult,
 )
-
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -53,6 +53,7 @@ METRIC_UUID = uuid.UUID("dddddddd-dddd-dddd-dddd-dddddddddddd")
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _valid_experiment_payload(name: str = "Bayesian Integration Test") -> dict:
     """Return a valid ExperimentCreate payload."""
@@ -201,6 +202,7 @@ def _make_bayesian_results(
 # Tests: bayesian_results absent / null when disabled
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.integration
 @pytest.mark.requires_db
 class TestBayesianResultsDisabled:
@@ -251,6 +253,7 @@ class TestBayesianResultsDisabled:
 # ---------------------------------------------------------------------------
 # Tests: bayesian_results populated when enabled
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.integration
 @pytest.mark.requires_db
@@ -393,6 +396,7 @@ class TestBayesianResultsEnabled:
 # ---------------------------------------------------------------------------
 # Tests: access control for results endpoint
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.integration
 @pytest.mark.requires_db

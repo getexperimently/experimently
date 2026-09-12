@@ -5,6 +5,7 @@ Covers the dashboard -> engine operator mapping (every operator), the
 dotted-key / prefix-alias context expansion, numeric coercion, legacy list
 passthrough (``None``) and native ``TargetingRules`` passthrough.
 """
+
 import pytest
 
 from backend.app.core.rules_engine import apply_operator, evaluate_condition

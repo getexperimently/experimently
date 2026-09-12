@@ -7,18 +7,18 @@ run durations.
 """
 
 import logging
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from sqlalchemy.orm import Session
 from sqlalchemy import desc
+from sqlalchemy.orm import Session
 
 from backend.app.models.scheduler_run import SchedulerRun
 from backend.app.schemas.scheduler import (
-    SchedulerName,
-    SchedulerRunStatus,
     SchedulerHealthResponse,
+    SchedulerName,
     SchedulerRunRecord,
+    SchedulerRunStatus,
 )
 
 logger = logging.getLogger(__name__)
@@ -135,7 +135,9 @@ class SchedulerHealthService:
             consecutive += 1
         return consecutive
 
-    def get_health(self, db: Session, scheduler_name: SchedulerName) -> SchedulerHealthResponse:
+    def get_health(
+        self, db: Session, scheduler_name: SchedulerName
+    ) -> SchedulerHealthResponse:
         """
         Compute the current health state for a single scheduler.
 
@@ -147,7 +149,9 @@ class SchedulerHealthService:
             SchedulerHealthResponse with is_running, consecutive_failures,
             last_run_at, last_run_status, and average_duration_seconds.
         """
-        name_str = scheduler_name.value if hasattr(scheduler_name, "value") else scheduler_name
+        name_str = (
+            scheduler_name.value if hasattr(scheduler_name, "value") else scheduler_name
+        )
         runs = self._fetch_recent_runs(db, name_str)
 
         if not runs:
@@ -170,9 +174,7 @@ class SchedulerHealthService:
         if latest_started and latest_started.tzinfo is None:
             latest_started = latest_started.replace(tzinfo=timezone.utc)
 
-        is_running = bool(
-            latest_completed and latest_completed >= threshold
-        ) or bool(
+        is_running = bool(latest_completed and latest_completed >= threshold) or bool(
             latest_started and latest_started >= threshold
         )
 
@@ -188,8 +190,10 @@ class SchedulerHealthService:
         # Last run timestamp as ISO string
         last_run_at = None
         if latest_started:
-            last_run_at = latest_started.isoformat() if latest_started.tzinfo else (
-                latest_started.replace(tzinfo=timezone.utc).isoformat()
+            last_run_at = (
+                latest_started.isoformat()
+                if latest_started.tzinfo
+                else (latest_started.replace(tzinfo=timezone.utc).isoformat())
             )
 
         # Consecutive failures
@@ -213,7 +217,9 @@ class SchedulerHealthService:
                 if duration >= 0:
                     durations.append(duration)
 
-        average_duration_seconds = sum(durations) / len(durations) if durations else None
+        average_duration_seconds = (
+            sum(durations) / len(durations) if durations else None
+        )
 
         return SchedulerHealthResponse(
             scheduler_name=scheduler_name,

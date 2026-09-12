@@ -6,6 +6,7 @@ Complements ``test_feature_flag_evaluation.py`` (legacy list rules, global
 rollout). Every test cleans up the metric rows the evaluation records and the
 flag it created.
 """
+
 import pytest
 
 from backend.app.models.feature_flag import FeatureFlag, FeatureFlagStatus

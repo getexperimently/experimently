@@ -1,21 +1,22 @@
 """Unit tests for metrics API endpoints."""
-import pytest
+
 from datetime import datetime, timedelta, timezone
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 from uuid import UUID
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
+from backend.app.api.deps import get_current_user, get_db
 from backend.app.main import app
-from backend.app.api.deps import get_db, get_current_user
+from backend.app.models.metrics.metric import AggregationPeriod, MetricType
 from backend.app.models.user import User
-from backend.app.models.metrics.metric import MetricType, AggregationPeriod
 from backend.app.schemas.metrics import (
-    MetricsSummary,
     AggregatedMetricResponse,
     ErrorLogResponse,
     MetricsFilterParams,
+    MetricsSummary,
 )
 from backend.app.services.metrics_service import MetricsService
 
@@ -23,6 +24,7 @@ from backend.app.services.metrics_service import MetricsService
 @pytest.fixture
 def client():
     """Create a test client with mocked dependencies."""
+
     # Mock the get_db dependency
     def override_get_db():
         try:
@@ -61,7 +63,7 @@ def test_get_metrics_summary(client):
             unique_users=250,
             avg_latency=45.5,
             rule_match_rate=75.0,
-            error_rate=2.5
+            error_rate=2.5,
         )
 
         # Make the request
@@ -71,8 +73,8 @@ def test_get_metrics_summary(client):
                 "feature_flag_id": "12345678-1234-5678-1234-567812345678",
                 "period": "day",
                 "start_date": "2023-01-01T00:00:00Z",
-                "end_date": "2023-01-31T23:59:59Z"
-            }
+                "end_date": "2023-01-31T23:59:59Z",
+            },
         )
 
         # Verify the response
@@ -107,7 +109,7 @@ def test_get_aggregated_metrics(client):
             distinct_users=120,
             feature_flag_id=UUID("12345678-1234-5678-1234-567812345678"),
             created_at=datetime(2023, 1, 1, 1, 0, 0, tzinfo=timezone.utc),
-            updated_at=datetime(2023, 1, 1, 1, 0, 0, tzinfo=timezone.utc)
+            updated_at=datetime(2023, 1, 1, 1, 0, 0, tzinfo=timezone.utc),
         )
 
         metric2 = AggregatedMetricResponse(
@@ -119,7 +121,7 @@ def test_get_aggregated_metrics(client):
             distinct_users=150,
             feature_flag_id=UUID("12345678-1234-5678-1234-567812345678"),
             created_at=datetime(2023, 1, 2, 1, 0, 0, tzinfo=timezone.utc),
-            updated_at=datetime(2023, 1, 2, 1, 0, 0, tzinfo=timezone.utc)
+            updated_at=datetime(2023, 1, 2, 1, 0, 0, tzinfo=timezone.utc),
         )
 
         # Configure the mock to return the metrics objects
@@ -135,8 +137,8 @@ def test_get_aggregated_metrics(client):
                 "start_date": "2023-01-01T00:00:00Z",
                 "end_date": "2023-01-31T23:59:59Z",
                 "skip": 0,
-                "limit": 10
-            }
+                "limit": 10,
+            },
         )
 
         # Verify the response
@@ -151,7 +153,9 @@ def test_get_aggregated_metrics(client):
         # Check that the params object was created correctly
         assert isinstance(kwargs["params"], MetricsFilterParams)
         assert kwargs["params"].metric_type == MetricType.FLAG_EVALUATION
-        assert kwargs["params"].feature_flag_id == UUID("12345678-1234-5678-1234-567812345678")
+        assert kwargs["params"].feature_flag_id == UUID(
+            "12345678-1234-5678-1234-567812345678"
+        )
         assert kwargs["params"].period == AggregationPeriod.DAY
         assert kwargs["skip"] == 0
         assert kwargs["limit"] == 10
@@ -173,7 +177,7 @@ def test_get_error_logs(client):
             metadata={"additional": "debug data"},
             timestamp=datetime(2023, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
             created_at=datetime(2023, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
-            updated_at=datetime(2023, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+            updated_at=datetime(2023, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
         )
 
         error2 = ErrorLogResponse(
@@ -187,7 +191,7 @@ def test_get_error_logs(client):
             metadata={"additional": "debug data"},
             timestamp=datetime(2023, 1, 2, 15, 0, 0, tzinfo=timezone.utc),
             created_at=datetime(2023, 1, 2, 15, 0, 0, tzinfo=timezone.utc),
-            updated_at=datetime(2023, 1, 2, 15, 0, 0, tzinfo=timezone.utc)
+            updated_at=datetime(2023, 1, 2, 15, 0, 0, tzinfo=timezone.utc),
         )
 
         # Configure the mock to return the error objects
@@ -202,8 +206,8 @@ def test_get_error_logs(client):
                 "end_date": "2023-01-31T23:59:59Z",
                 "error_type": "rule_evaluation_error",
                 "skip": 0,
-                "limit": 10
-            }
+                "limit": 10,
+            },
         )
 
         # Verify the response
@@ -237,8 +241,8 @@ def test_trigger_aggregation(client):
                 "feature_flag_id": "12345678-1234-5678-1234-567812345678",
                 "metric_type": "flag_evaluation",
                 "start_time": "2023-01-01T00:00:00Z",
-                "end_time": "2023-01-31T23:59:59Z"
-            }
+                "end_time": "2023-01-31T23:59:59Z",
+            },
         )
 
         # Verify the response

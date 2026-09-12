@@ -1,21 +1,23 @@
 """Unit tests for metrics service."""
-import pytest
+
 from datetime import datetime, timedelta, timezone
-from unittest.mock import patch, MagicMock, call
-from uuid import uuid4, UUID
+from unittest.mock import MagicMock, call, patch
+from uuid import UUID, uuid4
+
+import pytest
 
 from backend.app.models.metrics.metric import (
-    RawMetric,
     AggregatedMetric,
+    AggregationPeriod,
     ErrorLog,
     MetricType,
-    AggregationPeriod,
+    RawMetric,
 )
 from backend.app.schemas.metrics import (
-    RawMetricCreate,
     ErrorLogCreate,
     MetricsFilterParams,
     MetricsSummary,
+    RawMetricCreate,
 )
 from backend.app.services.metrics_service import MetricsService
 
@@ -58,7 +60,7 @@ def test_record_metric(mock_db_session):
         value=4.5,
         count=1,
         timestamp=timestamp,
-        meta_data={"browser": "Chrome", "device": "mobile"}
+        meta_data={"browser": "Chrome", "device": "mobile"},
     )
 
     # Setup mock
@@ -119,7 +121,7 @@ def test_record_flag_evaluation(mock_db_session, sample_feature_flag_id):
             mock_flag_metric,
             mock_latency_metric,
             mock_rule_metric,
-            mock_segment_metric
+            mock_segment_metric,
         ]
 
         # Call the service method
@@ -131,7 +133,7 @@ def test_record_flag_evaluation(mock_db_session, sample_feature_flag_id):
             targeting_rule_id=targeting_rule_id,
             segment_id=segment_id,
             latency_ms=latency_ms,
-            metadata=metadata
+            metadata=metadata,
         )
 
         # Verify record_metric was called 4 times for different metric types
@@ -146,8 +148,8 @@ def test_record_flag_evaluation(mock_db_session, sample_feature_flag_id):
                 user_id=user_id,
                 targeting_rule_id=targeting_rule_id,
                 segment_id=segment_id,
-                meta_data={"result": True, "context": {"country": "US"}}
-            )
+                meta_data={"result": True, "context": {"country": "US"}},
+            ),
         )
 
         latency_call = call(
@@ -156,8 +158,8 @@ def test_record_flag_evaluation(mock_db_session, sample_feature_flag_id):
                 metric_type=MetricType.LATENCY,
                 feature_flag_id=sample_feature_flag_id,
                 user_id=user_id,
-                value=latency_ms
-            )
+                value=latency_ms,
+            ),
         )
 
         rule_call = call(
@@ -166,8 +168,8 @@ def test_record_flag_evaluation(mock_db_session, sample_feature_flag_id):
                 metric_type=MetricType.RULE_MATCH,
                 feature_flag_id=sample_feature_flag_id,
                 user_id=user_id,
-                targeting_rule_id=targeting_rule_id
-            )
+                targeting_rule_id=targeting_rule_id,
+            ),
         )
 
         segment_call = call(
@@ -176,16 +178,13 @@ def test_record_flag_evaluation(mock_db_session, sample_feature_flag_id):
                 metric_type=MetricType.SEGMENT_MATCH,
                 feature_flag_id=sample_feature_flag_id,
                 user_id=user_id,
-                segment_id=segment_id
-            )
+                segment_id=segment_id,
+            ),
         )
 
-        mock_record_metric.assert_has_calls([
-            flag_eval_call,
-            latency_call,
-            rule_call,
-            segment_call
-        ])
+        mock_record_metric.assert_has_calls(
+            [flag_eval_call, latency_call, rule_call, segment_call]
+        )
 
         # Verify the result is the first metric (flag evaluation)
         assert result == mock_flag_metric
@@ -204,7 +203,7 @@ def test_log_error(mock_db_session, sample_feature_flag_id):
         user_id="user123",
         message="Failed to evaluate targeting rule",
         timestamp=timestamp,
-        request_data={"context": {"country": "US"}}
+        request_data={"context": {"country": "US"}},
     )
 
     # Setup mock
@@ -287,7 +286,9 @@ def test_aggregate_metrics(mock_db_session, sample_feature_flag_id):
     mock_agg_query.first.return_value = None  # No existing aggregations
 
     # Create a patch for AggregatedMetric
-    with patch("backend.app.services.metrics_service.AggregatedMetric") as mock_agg_metric:
+    with patch(
+        "backend.app.services.metrics_service.AggregatedMetric"
+    ) as mock_agg_metric:
         # Call the service method
         metrics_created = MetricsService.aggregate_metrics(
             db=mock_db_session,
@@ -352,7 +353,7 @@ def test_get_metrics_summary(mock_db_session, sample_feature_flag_id):
             mock_user_query,  # For unique users query
             mock_latency_query,  # For latency query
             mock_rule_query,  # For rule match query
-            mock_error_query  # For error count query
+            mock_error_query,  # For error count query
         ]
 
         # Call the service method
@@ -361,7 +362,7 @@ def test_get_metrics_summary(mock_db_session, sample_feature_flag_id):
             feature_flag_id=sample_feature_flag_id,
             start_date=start_date,
             end_date=end_date,
-            period=period
+            period=period,
         )
 
         # Verify the result is a MetricsSummary with expected data
@@ -384,7 +385,7 @@ def test_get_aggregated_metrics(mock_db_session, sample_feature_flag_id):
         feature_flag_id=sample_feature_flag_id,
         start_date=datetime.now(timezone.utc) - timedelta(days=7),
         end_date=datetime.now(timezone.utc),
-        period=AggregationPeriod.DAY
+        period=AggregationPeriod.DAY,
     )
 
     # Mock aggregated metrics
@@ -402,15 +403,14 @@ def test_get_aggregated_metrics(mock_db_session, sample_feature_flag_id):
 
     # Call the service method
     result = MetricsService.get_aggregated_metrics(
-        db=mock_db_session,
-        params=params,
-        skip=0,
-        limit=10
+        db=mock_db_session, params=params, skip=0, limit=10
     )
 
     # Verify the query operations
     mock_db_session.query.assert_called_once()
-    assert mock_query.filter.call_count >= 3  # Should filter by metric_type, feature_flag_id, period, dates
+    assert (
+        mock_query.filter.call_count >= 3
+    )  # Should filter by metric_type, feature_flag_id, period, dates
     mock_query.order_by.assert_called_once()
     mock_query.offset.assert_called_once_with(0)
     mock_query.limit.assert_called_once_with(10)
@@ -447,12 +447,14 @@ def test_get_error_logs(mock_db_session, sample_feature_flag_id):
         end_date=end_date,
         error_type=error_type,
         skip=0,
-        limit=10
+        limit=10,
     )
 
     # Verify the query operations
     mock_db_session.query.assert_called_once()
-    assert mock_query.filter.call_count == 4  # Should filter by feature_flag_id, start_date, end_date, error_type
+    assert (
+        mock_query.filter.call_count == 4
+    )  # Should filter by feature_flag_id, start_date, end_date, error_type
     mock_query.order_by.assert_called_once()
     mock_query.offset.assert_called_once_with(0)
     mock_query.limit.assert_called_once_with(10)

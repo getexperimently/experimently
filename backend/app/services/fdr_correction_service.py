@@ -17,7 +17,6 @@ Reference:
 from dataclasses import dataclass
 from typing import Dict, List, Tuple
 
-
 # ---------------------------------------------------------------------------
 # Result dataclass
 # ---------------------------------------------------------------------------

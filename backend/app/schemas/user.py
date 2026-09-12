@@ -5,19 +5,16 @@ This module defines Pydantic models for user-related data structures.
 These models are used for request/response validation and documentation.
 """
 
-import uuid
 from datetime import datetime
-from typing import List, Dict, Any, Optional
+from typing import Any, Dict, List, Optional
+
 from pydantic import (
     BaseModel,
-    Field,
-    validator,
-    root_validator,
-    UUID4,
+    ConfigDict,
     EmailStr,
+    Field,
     SecretStr,
     field_validator,
-    ConfigDict,
 )
 
 from backend.app.schemas.auth import RoleName
@@ -25,6 +22,7 @@ from backend.app.schemas.auth import RoleName
 
 class UserBase(BaseModel):
     """Base user model."""
+
     username: str = Field(..., min_length=3, max_length=50)
     email: EmailStr
     full_name: Optional[str] = None
@@ -36,6 +34,7 @@ class UserBase(BaseModel):
 
 class UserCreate(UserBase):
     """User creation model."""
+
     password: SecretStr = Field(..., min_length=8)
     role: Optional[RoleName] = Field(
         None,
@@ -72,6 +71,7 @@ class UserCreate(UserBase):
 
 class UserUpdate(UserBase):
     """User update model."""
+
     password: Optional[SecretStr] = None
 
     model_config = ConfigDict(from_attributes=True)
@@ -79,6 +79,7 @@ class UserUpdate(UserBase):
 
 class UserInDBBase(UserBase):
     """Base model for users in DB."""
+
     id: str
 
     model_config = ConfigDict(from_attributes=True)
@@ -86,11 +87,11 @@ class UserInDBBase(UserBase):
 
 class User(UserInDBBase):
     """User model for responses."""
-    pass
 
 
 class UserInDB(UserInDBBase):
     """User model with hashed password."""
+
     hashed_password: str
 
     model_config = ConfigDict(from_attributes=True)
@@ -98,6 +99,7 @@ class UserInDB(UserInDBBase):
 
 class PasswordChange(BaseModel):
     """Password change model."""
+
     current_password: SecretStr
     new_password: SecretStr = Field(..., min_length=8)
 
@@ -119,6 +121,7 @@ class PasswordChange(BaseModel):
 
 class Token(BaseModel):
     """Token model."""
+
     access_token: str
     token_type: str
 
@@ -127,6 +130,7 @@ class Token(BaseModel):
 
 class TokenPayload(BaseModel):
     """Token payload model."""
+
     sub: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
@@ -141,23 +145,37 @@ class UserResponse(BaseModel):
     full_name: Optional[str] = None
     is_active: bool
     is_superuser: bool
+    # The RBAC role. Optional because a few legacy rows predate the column;
+    # the dashboard needs it to render the role chip and decide what to offer.
+    role: Optional[RoleName] = None
     created_at: datetime
     updated_at: datetime
     # Make all optional fields truly optional
     last_login: Optional[datetime] = None
     preferences: Optional[Dict[str, Any]] = None
 
+    @field_validator("role", mode="before")
+    @classmethod
+    def _role_name(cls, v: Any) -> Any:
+        """Accept the ``UserRole`` enum, its value or its name."""
+        if v is None or isinstance(v, str):
+            return v.upper() if isinstance(v, str) else v
+        name = getattr(v, "name", None)
+        return name or str(v)
+
     model_config = ConfigDict(
         from_attributes=True,
         arbitrary_types_allowed=True,
-        extra="ignore"  # Ignore extra fields to prevent validation errors
+        extra="ignore",  # Ignore extra fields to prevent validation errors
     )
 
 
 class UserListResponse(BaseModel):
     """Model for paginated user list response."""
 
-    items: List[Dict[str, Any]]
+    # ``UserResponse``, not ``Dict``: the endpoints hand this ORM objects, which
+    # a dict annotation rejects (every call to GET /api/v1/admin/users was a 500).
+    items: List[UserResponse]
     total: int
     skip: int = 0
     limit: int = 100

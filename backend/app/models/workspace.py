@@ -6,20 +6,21 @@ safely within one instance.
 """
 
 import enum
-import uuid
 from datetime import datetime
 
 from sqlalchemy import (
     Boolean,
     Column,
     DateTime,
-    Enum as SQLAEnum,
     ForeignKey,
     Index,
     Integer,
     String,
     Text,
     UniqueConstraint,
+)
+from sqlalchemy import (
+    Enum as SQLAEnum,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.ext.declarative import declared_attr

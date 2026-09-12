@@ -26,7 +26,9 @@ from backend.app.schemas.power_calculator import (
     SampleSizeRequest,
     SampleSizeResponse,
 )
-from backend.app.services.ai_experiment_planner_service import AIExperimentPlannerService
+from backend.app.services.ai_experiment_planner_service import (
+    AIExperimentPlannerService,
+)
 from backend.app.services.power_calculator_service import PowerCalculatorService
 
 logger = logging.getLogger(__name__)
@@ -39,6 +41,7 @@ _planner = AIExperimentPlannerService()
 # ---------------------------------------------------------------------------
 # POST /sample-size
 # ---------------------------------------------------------------------------
+
 
 @router.post(
     "/sample-size",
@@ -92,6 +95,7 @@ def compute_sample_size(body: SampleSizeRequest) -> SampleSizeResponse:
 # POST /mde
 # ---------------------------------------------------------------------------
 
+
 @router.post(
     "/mde",
     response_model=MDEResponse,
@@ -135,6 +139,7 @@ def compute_mde(body: MDERequest) -> MDEResponse:
 # POST /runtime
 # ---------------------------------------------------------------------------
 
+
 @router.post(
     "/runtime",
     response_model=RuntimeResponse,
@@ -171,6 +176,7 @@ def compute_runtime(body: RuntimeRequest) -> RuntimeResponse:
 # ---------------------------------------------------------------------------
 # GET /curve
 # ---------------------------------------------------------------------------
+
 
 @router.get(
     "/curve",
@@ -238,6 +244,7 @@ def get_power_curve(
 # ---------------------------------------------------------------------------
 # POST /plan
 # ---------------------------------------------------------------------------
+
 
 @router.post(
     "/plan",

@@ -52,7 +52,10 @@ MCP_TOOLS = [
         description="Enable or disable a feature flag by key",
         parameters={
             "flag_key": {"type": "string", "description": "Feature flag key"},
-            "enabled": {"type": "boolean", "description": "True to enable, False to disable"},
+            "enabled": {
+                "type": "boolean",
+                "description": "True to enable, False to disable",
+            },
         },
     ),
     MCPToolSchema(
@@ -85,6 +88,7 @@ MCP_TOOLS = [
 # ---------------------------------------------------------------------------
 # Manifest endpoint
 # ---------------------------------------------------------------------------
+
 
 @router.get(
     "/manifest",

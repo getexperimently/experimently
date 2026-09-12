@@ -7,6 +7,7 @@ The unit tests in ``backend/tests/unit/api/test_users.py`` patch
 calls ``password.encode()``.  Nothing here patches hashing, so the endpoint
 has to produce a hash the auth service can actually verify.
 """
+
 import uuid
 
 import pytest
@@ -77,3 +78,31 @@ class TestCreateUserHashesPassword:
         """Only superusers may invite: the permission check still applies."""
         response = developer_client.post("/api/v1/users/", json=_payload())
         assert response.status_code == 403, response.text
+
+
+@pytest.mark.regression
+def test_user_list_carries_the_role(admin_client, db_session):
+    """`GET /api/v1/users/` used to hand-build dicts without `role`, so every
+    user came back with `"role": null` while the schema accepted it."""
+    from backend.app.core.security import get_password_hash
+    from backend.app.models.user import User, UserRole
+
+    suffix = uuid.uuid4().hex[:8]
+    analyst = User(
+        username=f"list_role_{suffix}",
+        email=f"list_role_{suffix}@example.com",
+        full_name="List Role",
+        hashed_password=get_password_hash("Str0ng-Passw0rd"),
+        is_active=True,
+        is_superuser=False,
+        role=UserRole.ANALYST,
+    )
+    db_session.add(analyst)
+    db_session.commit()
+
+    response = admin_client.get("/api/v1/users/", params={"limit": 100})
+    assert response.status_code == 200, response.text
+    listed = {item["email"]: item for item in response.json()["items"]}
+    assert analyst.email in listed, "the new user is not on the first page"
+    assert listed[analyst.email]["role"] == "ANALYST"
+    assert all("hashed_password" not in item for item in response.json()["items"])

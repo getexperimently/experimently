@@ -5,17 +5,18 @@ These tests verify that sensitive data masking works correctly.
 """
 
 import os
-import pytest
 from unittest.mock import patch
 
+import pytest
+
 from backend.app.utils.masking import (
-    mask_sensitive_data,
-    mask_request_data,
-    mask_email,
+    FIELDS_TO_MASK,
     mask_credit_card,
-    mask_phone,
+    mask_email,
     mask_ip_address,
-    FIELDS_TO_MASK
+    mask_phone,
+    mask_request_data,
+    mask_sensitive_data,
 )
 
 
@@ -98,7 +99,7 @@ class TestMaskSensitiveData:
             "password": "securepassword123",
             "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9",
             "credit_card": "4111111111111111",
-            "notes": "Some non-sensitive data"
+            "notes": "Some non-sensitive data",
         }
 
         masked = mask_sensitive_data(data)
@@ -120,18 +121,10 @@ class TestMaskSensitiveData:
         data = {
             "user": {
                 "name": "John Doe",
-                "contact": {
-                    "email": "john@example.com",
-                    "phone": "555-123-4567"
-                },
-                "security": {
-                    "password": "secret123",
-                    "api_key": "abcdef1234567890"
-                }
+                "contact": {"email": "john@example.com", "phone": "555-123-4567"},
+                "security": {"password": "secret123", "api_key": "abcdef1234567890"},
             },
-            "metadata": {
-                "ip_address": "192.168.1.1"
-            }
+            "metadata": {"ip_address": "192.168.1.1"},
         }
 
         masked = mask_sensitive_data(data)
@@ -153,9 +146,9 @@ class TestMaskSensitiveData:
         data = {
             "users": [
                 {"name": "User 1", "email": "user1@example.com", "password": "pass1"},
-                {"name": "User 2", "email": "user2@example.com", "password": "pass2"}
+                {"name": "User 2", "email": "user2@example.com", "password": "pass2"},
             ],
-            "tokens": ["token1", "token2", "token3"]
+            "tokens": ["token1", "token2", "token3"],
         }
 
         masked = mask_sensitive_data(data)
@@ -173,7 +166,7 @@ class TestMaskSensitiveData:
         """Test masking of text containing sensitive patterns."""
         data = {
             "message": "Please contact me at user@example.com or call 555-123-4567",
-            "debug": "Server IP is 192.168.1.1, credit card 4111-1111-1111-1111"
+            "debug": "Server IP is 192.168.1.1, credit card 4111-1111-1111-1111",
         }
 
         masked = mask_sensitive_data(data)
@@ -193,7 +186,9 @@ class TestMaskSensitiveData:
 
         # Force reload of the module to pick up environment changes
         import importlib
+
         import backend.app.utils.masking
+
         importlib.reload(backend.app.utils.masking)
 
         from backend.app.utils.masking import FIELDS_TO_MASK
@@ -206,7 +201,7 @@ class TestMaskSensitiveData:
         data = {
             "username": "testuser",
             "custom_field": "should be masked",
-            "extra_field": "also masked"
+            "extra_field": "also masked",
         }
 
         masked = mask_sensitive_data(data)
@@ -228,8 +223,8 @@ class TestMaskRequestData:
                 "authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9",
                 "content-type": "application/json",
                 "x-api-key": "abcdef1234567890",
-                "user-agent": "Mozilla/5.0"
-            }
+                "user-agent": "Mozilla/5.0",
+            },
         }
 
         masked = mask_request_data(request_data)
@@ -257,8 +252,8 @@ class TestMaskRequestData:
                 "email": "newuser@example.com",
                 "password": "securepass123",
                 "creditCard": "4111111111111111",
-                "preferences": {"theme": "dark"}
-            }
+                "preferences": {"theme": "dark"},
+            },
         }
 
         masked = mask_request_data(request_data)
@@ -279,36 +274,36 @@ class TestMaskRequestData:
             "path": "/api/transactions",
             "headers": {
                 "authorization": "Bearer token123",
-                "content-type": "application/json"
+                "content-type": "application/json",
             },
             "body": {
                 "user": {
                     "id": "user123",
                     "contactInfo": {
                         "email": "user@example.com",
-                        "phone": "555-123-4567"
-                    }
+                        "phone": "555-123-4567",
+                    },
                 },
                 "payment": {
                     "token": "payment_token_xyz",
                     "creditCard": {
                         "number": "4111111111111111",
                         "expiry": "12/25",
-                        "cvv": "123"
-                    }
+                        "cvv": "123",
+                    },
                 },
                 "items": [
                     {"id": "item1", "price": 9.99},
-                    {"id": "item2", "price": 19.99}
+                    {"id": "item2", "price": 19.99},
                 ],
                 "shippingAddress": {
                     "street": "123 Main St",
                     "city": "Anytown",
                     "zip": "12345",
-                    "country": "US"
-                }
+                    "country": "US",
+                },
             },
-            "client_host": "192.168.1.100"
+            "client_host": "192.168.1.100",
         }
 
         masked = mask_request_data(request_data)
@@ -320,7 +315,9 @@ class TestMaskRequestData:
         assert masked["body"]["user"]["contactInfo"]["email"] == "us**@example.com"
         assert masked["body"]["user"]["contactInfo"]["phone"] == "***-***-4567"
         assert masked["body"]["payment"]["token"] == "***MASKED***"
-        assert masked["body"]["payment"]["creditCard"]["number"] == "****-****-****-1111"
+        assert (
+            masked["body"]["payment"]["creditCard"]["number"] == "****-****-****-1111"
+        )
 
         # Client IP should be masked
         assert masked["client_host"] == "192.***.***"

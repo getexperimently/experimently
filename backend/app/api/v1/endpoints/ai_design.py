@@ -40,6 +40,7 @@ router = APIRouter()
 # POST /design
 # ---------------------------------------------------------------------------
 
+
 @router.post(
     "/design",
     response_model=ExperimentDesignSuggestionResponse,
@@ -64,6 +65,7 @@ def suggest_design(
 # ---------------------------------------------------------------------------
 # POST /interpret/{experiment_id}
 # ---------------------------------------------------------------------------
+
 
 @router.post(
     "/interpret/{experiment_id}",
@@ -93,6 +95,7 @@ def interpret_results(
 # GET /sample-size
 # ---------------------------------------------------------------------------
 
+
 @router.get(
     "/sample-size",
     response_model=SampleSizeEstimateResponse,
@@ -100,10 +103,18 @@ def interpret_results(
     description="Calculate the required sample size for an experiment using statistical formulas.",
 )
 def estimate_sample_size(
-    baseline_rate: float = Query(..., description="Current baseline conversion rate (0–1)"),
-    mde: float = Query(..., description="Minimum detectable effect — absolute change (0–1)"),
-    confidence: float = Query(default=0.95, description="Desired confidence level (default 0.95)"),
-    power: float = Query(default=0.80, description="Desired statistical power (default 0.80)"),
+    baseline_rate: float = Query(
+        ..., description="Current baseline conversion rate (0–1)"
+    ),
+    mde: float = Query(
+        ..., description="Minimum detectable effect — absolute change (0–1)"
+    ),
+    confidence: float = Query(
+        default=0.95, description="Desired confidence level (default 0.95)"
+    ),
+    power: float = Query(
+        default=0.80, description="Desired statistical power (default 0.80)"
+    ),
     daily_traffic: Optional[int] = Query(
         default=None, description="Daily traffic to compute days_to_significance"
     ),
@@ -124,6 +135,7 @@ def estimate_sample_size(
 # GET /templates
 # ---------------------------------------------------------------------------
 
+
 @router.get(
     "/templates",
     response_model=List[ExperimentTemplateResponse],
@@ -142,6 +154,7 @@ def list_templates(
 # ---------------------------------------------------------------------------
 # GET /templates/{template_id}
 # ---------------------------------------------------------------------------
+
 
 @router.get(
     "/templates/{template_id}",

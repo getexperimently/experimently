@@ -1,146 +1,159 @@
 # Centralized model imports and initialization
 
+from .analysis_snapshot import AnalysisKind, AnalysisSnapshot
+from .api_key import APIKey
+from .assignment import Assignment
+from .audit_log import ActionType, AuditLog, EntityType
+from .baa_config import BAAConfig
+from .bandit_state import BanditState, BanditStateHistory
 from .base import Base, BaseModel, BaseModelMixin
-from .user import (
-    User,
-    Role,
-    Permission,
-    user_role_association,
-    role_permission_association,
-    UserRole,
-)
+from .compliance_audit_event import AuditAction, AuditOutcome, ComplianceAuditEvent
+from .custom_role import CustomRole
+from .event import Event, EventType
 from .experiment import (
     Experiment,
-    Variant,
-    Metric,
     ExperimentStatus,
     ExperimentType,
+    Metric,
     MetricType,
+    Variant,
 )
 from .feature_flag import FeatureFlag, FeatureFlagOverride, FeatureFlagStatus
-from .event import Event, EventType
-from .assignment import Assignment
-from .api_key import APIKey
-from .segment import Segment
-from .rollout_schedule import (
-    RolloutSchedule,
-    RolloutStage,
-    RolloutScheduleStatus,
-    RolloutStageStatus,
-    TriggerType,
+from .global_holdout import GlobalHoldout
+from .integration_config import (
+    IntegrationConfig,
+)
+from .integration_config import (
+    IntegrationType as IntegrationTypeEnum,
+)
+from .llm_experiment import (
+    LLMEvaluation,
+    LLMEvaluationMetric,
+    LLMExperiment,
+    LLMExperimentStatus,
+    LLMProvider,
+    LLMTaskType,
+    LLMVariant,
 )
 from .metrics.metric import (
-    RawMetric,
     AggregatedMetric,
-    ErrorLog,
-    MetricType as MetricsMetricType,
     AggregationPeriod,
+    ErrorLog,
+    RawMetric,
 )
-from .audit_log import AuditLog, ActionType, EntityType
-from .compliance_audit_event import ComplianceAuditEvent, AuditAction, AuditOutcome
+from .metrics.metric import (
+    MetricType as MetricsMetricType,
+)
 from .mutual_exclusion_group import MutualExclusionGroup, MutualExclusionGroupStatus
-from .global_holdout import GlobalHoldout
-from .bandit_state import BanditState, BanditStateHistory
-from .analysis_snapshot import AnalysisSnapshot, AnalysisKind
+from .notification import (
+    NotificationChannel,
+    NotificationDeliveryLog,
+    NotificationPreference,
+    NotificationStatus,
+)
+from .phi_audit_log import PHIAuditLog
+
 # Several models reference these classes by name in relationship() strings
 # (Report, FeatureFlagSafetyConfig, CustomRole, ...). Importing every module
 # here lets scripts that only import backend.app.models configure the mappers.
 from .report import Report
-from .safety import SafetySettings, FeatureFlagSafetyConfig, SafetyRollbackRecord
-from .custom_role import CustomRole
-from .scheduler_run import SchedulerRun
-from .sso_config import SSOConfig
-from .baa_config import BAAConfig
-from .phi_audit_log import PHIAuditLog
-from .warehouse_connection import WarehouseConnection
-from .notification import NotificationPreference, NotificationDeliveryLog, NotificationChannel, NotificationStatus
-from .integration_config import IntegrationConfig, IntegrationType as IntegrationTypeEnum
-from .llm_experiment import (
-    LLMExperiment,
-    LLMVariant,
-    LLMEvaluation,
-    LLMExperimentStatus,
-    LLMTaskType,
-    LLMEvaluationMetric,
-    LLMProvider,
+from .rollout_schedule import (
+    RolloutSchedule,
+    RolloutScheduleStatus,
+    RolloutStage,
+    RolloutStageStatus,
+    TriggerType,
 )
+from .safety import FeatureFlagSafetyConfig, SafetyRollbackRecord, SafetySettings
+from .scheduler_run import SchedulerRun
+from .segment import Segment
+from .sso_config import SSOConfig
+from .user import (
+    Permission,
+    Role,
+    User,
+    UserRole,
+    role_permission_association,
+    user_role_association,
+)
+from .warehouse_connection import WarehouseConnection
 from .workspace import (
     Workspace,
-    WorkspaceMember,
-    WorkspaceInvite,
     WorkspaceAPIKey,
-    WorkspacePlan,
+    WorkspaceInvite,
+    WorkspaceMember,
     WorkspaceMemberRole,
+    WorkspacePlan,
 )
 
 # Explicitly list all models that should be part of the base metadata
 __all__ = [
+    "APIKey",
+    "ActionType",
+    "AggregatedMetric",
+    "AggregationPeriod",
+    "AnalysisKind",
+    "AnalysisSnapshot",
+    "Assignment",
+    "AuditAction",
+    "AuditLog",
+    "AuditOutcome",
+    "BanditState",
+    "BanditStateHistory",
     "Base",
     "BaseModel",
     "BaseModelMixin",
-    "User",
-    "Role",
-    "Permission",
-    "Experiment",
-    "Variant",
-    "Metric",
-    "FeatureFlag",
-    "FeatureFlagOverride",
+    "ComplianceAuditEvent",
+    "EntityType",
+    "ErrorLog",
     "Event",
-    "Assignment",
-    "APIKey",
-    "Segment",
-    "user_role_association",
-    "role_permission_association",
+    "EventType",
+    "Experiment",
     "ExperimentStatus",
     "ExperimentType",
-    "MetricType",
+    "FeatureFlag",
+    "FeatureFlagOverride",
     "FeatureFlagStatus",
-    "EventType",
-    "UserRole",
-    "RolloutSchedule",
-    "RolloutStage",
-    "RolloutScheduleStatus",
-    "RolloutStageStatus",
-    "TriggerType",
-    "RawMetric",
-    "AggregatedMetric",
-    "ErrorLog",
-    "MetricsMetricType",
-    "AggregationPeriod",
-    "AuditLog",
-    "ActionType",
-    "EntityType",
-    "ComplianceAuditEvent",
-    "AuditAction",
-    "AuditOutcome",
-    "MutualExclusionGroup",
-    "MutualExclusionGroupStatus",
     "GlobalHoldout",
-    "BanditState",
-    "BanditStateHistory",
-    "AnalysisSnapshot",
-    "AnalysisKind",
-    "WarehouseConnection",
-    "NotificationPreference",
-    "NotificationDeliveryLog",
-    "NotificationChannel",
-    "NotificationStatus",
     "IntegrationConfig",
     "IntegrationTypeEnum",
-    "LLMExperiment",
-    "LLMVariant",
     "LLMEvaluation",
-    "LLMExperimentStatus",
-    "LLMTaskType",
     "LLMEvaluationMetric",
+    "LLMExperiment",
+    "LLMExperimentStatus",
     "LLMProvider",
+    "LLMTaskType",
+    "LLMVariant",
+    "Metric",
+    "MetricType",
+    "MetricsMetricType",
+    "MutualExclusionGroup",
+    "MutualExclusionGroupStatus",
+    "NotificationChannel",
+    "NotificationDeliveryLog",
+    "NotificationPreference",
+    "NotificationStatus",
+    "Permission",
+    "RawMetric",
+    "Role",
+    "RolloutSchedule",
+    "RolloutScheduleStatus",
+    "RolloutStage",
+    "RolloutStageStatus",
+    "Segment",
+    "TriggerType",
+    "User",
+    "UserRole",
+    "Variant",
+    "WarehouseConnection",
     "Workspace",
-    "WorkspaceMember",
-    "WorkspaceInvite",
     "WorkspaceAPIKey",
-    "WorkspacePlan",
+    "WorkspaceInvite",
+    "WorkspaceMember",
     "WorkspaceMemberRole",
+    "WorkspacePlan",
+    "role_permission_association",
+    "user_role_association",
 ]
 
 # Remove or comment out any premature configuration

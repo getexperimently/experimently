@@ -7,7 +7,6 @@ Gracefully degrades to template-based advice when the API is unavailable.
 
 import logging
 import os
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -15,6 +14,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # AIExperimentPlannerService
 # ---------------------------------------------------------------------------
+
 
 class AIExperimentPlannerService:
     """

@@ -5,8 +5,10 @@ These tests exercise the evaluate_flag() method and related helpers with
 a real DB session, verifying rollout percentage logic, targeting rules,
 and the get_user_flags() aggregation method.
 """
-import pytest
+
 import uuid
+
+import pytest
 
 from backend.app.models.feature_flag import FeatureFlag, FeatureFlagStatus
 from backend.app.services.feature_flag_service import FeatureFlagService
@@ -18,9 +20,7 @@ from backend.tests.integration.helpers import unique_flag_key
 class TestFeatureFlagEvaluationService:
     """Direct service-layer evaluation tests with a real DB session."""
 
-    def test_inactive_flag_evaluates_to_false(
-        self, db_session, make_feature_flag
-    ):
+    def test_inactive_flag_evaluates_to_false(self, db_session, make_feature_flag):
         """An INACTIVE flag always returns False regardless of rollout percentage."""
         flag = make_feature_flag(
             key=unique_flag_key("inactive"),
@@ -60,9 +60,7 @@ class TestFeatureFlagEvaluationService:
         result = service.evaluate_flag(flag, "any-user")
         assert result is False
 
-    def test_archived_flag_evaluates_to_false(
-        self, db_session, make_feature_flag
-    ):
+    def test_archived_flag_evaluates_to_false(self, db_session, make_feature_flag):
         """An ARCHIVED flag evaluates to False (not ACTIVE)."""
         flag = make_feature_flag(
             key=unique_flag_key("archived"),
@@ -103,9 +101,7 @@ class TestFeatureFlagEvaluationService:
         service = FeatureFlagService(db_session)
 
         # Evaluate a large set of users; expect a mix of True and False
-        results = {
-            service.evaluate_flag(flag, f"user-bucket-{i}") for i in range(50)
-        }
+        results = {service.evaluate_flag(flag, f"user-bucket-{i}") for i in range(50)}
         # With 50 users and 50% rollout it's statistically near-impossible to get all same
         assert True in results and False in results
 
@@ -132,9 +128,7 @@ class TestFeatureFlagEvaluationService:
         assert service.evaluate_flag(flag, "allowed-user-1") is True
         assert service.evaluate_flag(flag, "not-allowed-user") is False
 
-    def test_evaluate_flag_with_context_rule(
-        self, db_session, make_feature_flag
-    ):
+    def test_evaluate_flag_with_context_rule(self, db_session, make_feature_flag):
         """A context-based targeting rule evaluates correctly against user context."""
         targeting_rules = [
             {
@@ -201,9 +195,7 @@ class TestFeatureFlagEvaluationService:
 
         assert inactive_flag.key not in flags
 
-    def test_get_feature_flag_returns_dict(
-        self, db_session, make_feature_flag
-    ):
+    def test_get_feature_flag_returns_dict(self, db_session, make_feature_flag):
         """get_feature_flag() returns a dict with expected keys."""
         flag = make_feature_flag(
             key=unique_flag_key("get-service"),

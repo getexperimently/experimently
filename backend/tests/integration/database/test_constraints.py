@@ -4,18 +4,20 @@ Integration tests for database constraints.
 Tests that verify unique, not-null, and foreign key constraints are enforced
 at the database layer for Experiment, Variant, Metric, and FeatureFlag models.
 """
-import pytest
+
 import uuid
+
+import pytest
 from sqlalchemy.exc import IntegrityError
 
+from backend.app.models.assignment import Assignment
 from backend.app.models.experiment import (
     Experiment,
     ExperimentStatus,
-    Variant,
     Metric,
+    Variant,
 )
 from backend.app.models.feature_flag import FeatureFlag, FeatureFlagStatus
-from backend.app.models.assignment import Assignment
 
 
 @pytest.mark.integration
@@ -98,9 +100,7 @@ class TestExperimentConstraints:
             db_session.flush()
         db_session.rollback()
 
-    def test_metric_name_unique_within_experiment(
-        self, db_session, make_experiment
-    ):
+    def test_metric_name_unique_within_experiment(self, db_session, make_experiment):
         """Metric names must be unique within an experiment — second insert raises."""
         exp = make_experiment(name="Metric Unique Test")
         m1 = Metric(
@@ -120,9 +120,7 @@ class TestExperimentConstraints:
             db_session.flush()
         db_session.rollback()
 
-    def test_metric_name_unique_per_experiment_only(
-        self, db_session, make_experiment
-    ):
+    def test_metric_name_unique_per_experiment_only(self, db_session, make_experiment):
         """Same metric name is allowed across different experiments."""
         exp1 = make_experiment(name="Exp Metric A")
         exp2 = make_experiment(name="Exp Metric B")

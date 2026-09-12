@@ -13,13 +13,12 @@ Reference:
 """
 
 import math
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from dataclasses import dataclass
+from typing import Dict, List, Tuple
 
 import numpy as np
 import pandas as pd
 from scipy import stats
-
 
 # ---------------------------------------------------------------------------
 # Result dataclass
@@ -133,13 +132,9 @@ class PostStratificationService:
 
         # Validate metric column
         if metric_col not in control_data.columns:
-            raise KeyError(
-                f"Metric column '{metric_col}' not found in control_data"
-            )
+            raise KeyError(f"Metric column '{metric_col}' not found in control_data")
         if metric_col not in treatment_data.columns:
-            raise KeyError(
-                f"Metric column '{metric_col}' not found in treatment_data"
-            )
+            raise KeyError(f"Metric column '{metric_col}' not found in treatment_data")
 
         # Create stratum labels (combine stratum cols into a single label string)
         control_df = control_data.copy()
@@ -193,8 +188,8 @@ class PostStratificationService:
         strata_sizes: Dict[str, int] = {}
         weighted_ctrl_mean = 0.0
         weighted_trt_mean = 0.0
-        weighted_ctrl_var = 0.0   # Cochran's formula: Σ W_h² * s²_{ctrl,h} / n_{ctrl,h}
-        weighted_trt_var = 0.0    # Cochran's formula: Σ W_h² * s²_{trt,h}  / n_{trt,h}
+        weighted_ctrl_var = 0.0  # Cochran's formula: Σ W_h² * s²_{ctrl,h} / n_{ctrl,h}
+        weighted_trt_var = 0.0  # Cochran's formula: Σ W_h² * s²_{trt,h}  / n_{trt,h}
 
         for stratum in all_strata:
             ctrl_mask = control_df["_stratum"] == stratum
@@ -222,8 +217,8 @@ class PostStratificationService:
             weighted_trt_mean += W_h * mean_trt_h
 
             # Cochran's variance formula for stratified estimator
-            weighted_ctrl_var += (W_h ** 2) * (var_ctrl_h / n_ctrl_h)
-            weighted_trt_var += (W_h ** 2) * (var_trt_h / n_trt_h)
+            weighted_ctrl_var += (W_h**2) * (var_ctrl_h / n_ctrl_h)
+            weighted_trt_var += (W_h**2) * (var_trt_h / n_trt_h)
 
             strata_sizes[stratum] = int(N_h)
 
@@ -254,13 +249,14 @@ class PostStratificationService:
         n_ctrl = len(ctrl_vals)
         n_trt = len(trt_vals)
         raw_trt_var = float(np.var(trt_vals, ddof=1)) if len(trt_vals) > 1 else 0.0
-        raw_se_sq = (
-            (raw_ctrl_var / n_ctrl if n_ctrl > 0 else 0.0)
-            + (raw_trt_var / n_trt if n_trt > 0 else 0.0)
+        raw_se_sq = (raw_ctrl_var / n_ctrl if n_ctrl > 0 else 0.0) + (
+            raw_trt_var / n_trt if n_trt > 0 else 0.0
         )
         poststrat_se_sq = weighted_ctrl_var + weighted_trt_var
 
-        variance_reduction = self._compute_variance_reduction(raw_se_sq, poststrat_se_sq)
+        variance_reduction = self._compute_variance_reduction(
+            raw_se_sq, poststrat_se_sq
+        )
 
         return PostStratResult(
             metric_name=metric_col,

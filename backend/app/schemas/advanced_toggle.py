@@ -2,10 +2,12 @@
 Spec / Pydantic schemas for advanced toggle operations (P1-B).
 Defines the API contract for bulk operations and enhanced audit logging.
 """
-from pydantic import BaseModel, Field, ConfigDict
-from typing import List, Optional, Dict, Any
+
 from datetime import datetime
 from enum import Enum
+from typing import Any, List, Optional
+
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class BulkToggleAction(str, Enum):
@@ -16,6 +18,7 @@ class BulkToggleAction(str, Enum):
 
 class BulkToggleRequest(BaseModel):
     """Request body for bulk feature flag toggle operations."""
+
     flag_ids: List[str] = Field(
         ...,
         min_length=1,
@@ -32,6 +35,7 @@ class BulkToggleRequest(BaseModel):
 
 class BulkToggleResult(BaseModel):
     """Result for a single flag in a bulk operation."""
+
     flag_id: str
     flag_key: str
     success: bool
@@ -42,6 +46,7 @@ class BulkToggleResult(BaseModel):
 
 class BulkToggleResponse(BaseModel):
     """Response for bulk toggle operation."""
+
     total: int
     succeeded: int
     failed: int
@@ -51,6 +56,7 @@ class BulkToggleResponse(BaseModel):
 
 class AuditDiff(BaseModel):
     """Structured diff between old and new state of an entity."""
+
     field: str
     old_value: Any
     new_value: Any
@@ -59,6 +65,7 @@ class AuditDiff(BaseModel):
 
 class DetailedAuditLogResponse(BaseModel):
     """Extended audit log entry with structured diff and metadata."""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: str
@@ -79,6 +86,7 @@ class DetailedAuditLogResponse(BaseModel):
 
 class AuditLogStreamEvent(BaseModel):
     """Single event in the audit log SSE stream."""
+
     event_type: str = "audit_log"
     data: DetailedAuditLogResponse
     sequence: int
@@ -86,6 +94,7 @@ class AuditLogStreamEvent(BaseModel):
 
 class FlagChangeHistoryResponse(BaseModel):
     """Complete change history for a single feature flag."""
+
     flag_id: str
     flag_key: str
     flag_name: str

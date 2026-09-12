@@ -4,10 +4,10 @@ Lambda handler for experiment variant assignments.
 Handles API Gateway requests for assigning users to experiment variants.
 """
 
-import sys
 import json
+import sys
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Any, Dict
 
 # Add shared module to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "shared"))
@@ -51,28 +51,24 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
     try:
         # Extract request metadata
-        request_id = event.get('requestContext', {}).get('requestId', 'unknown')
-        source_ip = event.get('requestContext', {}).get('sourceIp', 'unknown')
+        request_id = event.get("requestContext", {}).get("requestId", "unknown")
+        source_ip = event.get("requestContext", {}).get("sourceIp", "unknown")
 
         logger.info(
-            f"Assignment request received",
-            extra={
-                'request_id': request_id,
-                'source_ip': source_ip
-            }
+            "Assignment request received",
+            extra={"request_id": request_id, "source_ip": source_ip},
         )
 
         # Parse query parameters
-        query_params = event.get('queryStringParameters')
+        query_params = event.get("queryStringParameters")
         if not query_params:
             logger.warning("Missing query parameters")
             return create_error_response(
-                400,
-                "Missing query parameters. Required: user_id, experiment_key"
+                400, "Missing query parameters. Required: user_id, experiment_key"
             )
 
-        user_id = query_params.get('user_id')
-        experiment_key = query_params.get('experiment_key')
+        user_id = query_params.get("user_id")
+        experiment_key = query_params.get("experiment_key")
 
         # Validate required parameters
         if not user_id:
@@ -81,7 +77,9 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
         if not experiment_key:
             logger.warning("Missing experiment_key parameter")
-            return create_error_response(400, "Missing required parameter: experiment_key")
+            return create_error_response(
+                400, "Missing required parameter: experiment_key"
+            )
 
         # Validate user_id is not empty
         if not user_id.strip():
@@ -90,10 +88,10 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
         # Parse request body for user context
         user_context = None
-        if event.get('body'):
+        if event.get("body"):
             try:
-                body = json.loads(event['body'])
-                user_context = body.get('context')
+                body = json.loads(event["body"])
+                user_context = body.get("context")
             except json.JSONDecodeError:
                 logger.warning("Invalid JSON in request body")
                 # Continue without context rather than failing
@@ -105,78 +103,72 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         experiment_config = service.get_experiment_config_cached(experiment_key)
         if not experiment_config:
             logger.warning(
-                f"Experiment not found",
-                extra={
-                    'experiment_key': experiment_key,
-                    'user_id': user_id
-                }
+                "Experiment not found",
+                extra={"experiment_key": experiment_key, "user_id": user_id},
             )
-            return create_error_response(
-                404,
-                f"Experiment not found: {experiment_key}"
-            )
+            return create_error_response(404, f"Experiment not found: {experiment_key}")
 
         # Get or create assignment
         assignment = service.get_or_create_assignment(
-            user_id=user_id,
-            experiment_config=experiment_config,
-            context=user_context
+            user_id=user_id, experiment_config=experiment_config, context=user_context
         )
 
         # Handle excluded users
         if assignment is None:
             logger.info(
-                f"User excluded from experiment",
-                extra={
-                    'user_id': user_id,
-                    'experiment_key': experiment_key
+                "User excluded from experiment",
+                extra={"user_id": user_id, "experiment_key": experiment_key},
+            )
+            return create_success_response(
+                {
+                    "user_id": user_id,
+                    "experiment_key": experiment_key,
+                    "variant": None,
+                    "excluded": True,
                 }
             )
-            return create_success_response({
-                'user_id': user_id,
-                'experiment_key': experiment_key,
-                'variant': None,
-                'excluded': True
-            })
 
         # Return successful assignment
         logger.info(
-            f"Assignment returned",
+            "Assignment returned",
             extra={
-                'user_id': user_id,
-                'experiment_key': experiment_key,
-                'variant': assignment.variant,
-                'assignment_id': assignment.assignment_id
+                "user_id": user_id,
+                "experiment_key": experiment_key,
+                "variant": assignment.variant,
+                "assignment_id": assignment.assignment_id,
+            },
+        )
+
+        return create_success_response(
+            {
+                "user_id": assignment.user_id,
+                "experiment_key": assignment.experiment_key,
+                "experiment_id": assignment.experiment_id,
+                "variant": assignment.variant,
+                "assignment_id": assignment.assignment_id,
+                "excluded": False,
             }
         )
 
-        return create_success_response({
-            'user_id': assignment.user_id,
-            'experiment_key': assignment.experiment_key,
-            'experiment_id': assignment.experiment_id,
-            'variant': assignment.variant,
-            'assignment_id': assignment.assignment_id,
-            'excluded': False
-        })
-
     except ValueError as e:
         # Handle validation errors
-        logger.warning(f"Validation error: {str(e)}")
+        logger.warning(f"Validation error: {e!s}")
         return create_error_response(400, str(e))
 
     except Exception as e:
         # Handle unexpected errors
         logger.error(
-            f"Internal server error: {str(e)}",
+            f"Internal server error: {e!s}",
             extra={
-                'error_type': type(e).__name__,
-                'request_id': event.get('requestContext', {}).get('requestId', 'unknown')
+                "error_type": type(e).__name__,
+                "request_id": event.get("requestContext", {}).get(
+                    "requestId", "unknown"
+                ),
             },
-            exc_info=True
+            exc_info=True,
         )
         return create_error_response(
-            500,
-            "Internal server error occurred while processing assignment request"
+            500, "Internal server error occurred while processing assignment request"
         )
 
 
@@ -191,14 +183,14 @@ def create_success_response(data: Dict[str, Any]) -> Dict[str, Any]:
         API Gateway response dict
     """
     return {
-        'statusCode': 200,
-        'headers': {
-            'Content-Type': 'application/json',
-            'Access-Control-Allow-Origin': '*',
-            'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key',
-            'Access-Control-Allow-Methods': 'GET,OPTIONS'
+        "statusCode": 200,
+        "headers": {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Headers": "Content-Type,X-Amz-Date,Authorization,X-Api-Key",
+            "Access-Control-Allow-Methods": "GET,OPTIONS",
         },
-        'body': json.dumps(data)
+        "body": json.dumps(data),
     }
 
 
@@ -214,14 +206,12 @@ def create_error_response(status_code: int, error_message: str) -> Dict[str, Any
         API Gateway response dict
     """
     return {
-        'statusCode': status_code,
-        'headers': {
-            'Content-Type': 'application/json',
-            'Access-Control-Allow-Origin': '*',
-            'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key',
-            'Access-Control-Allow-Methods': 'GET,OPTIONS'
+        "statusCode": status_code,
+        "headers": {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Headers": "Content-Type,X-Amz-Date,Authorization,X-Api-Key",
+            "Access-Control-Allow-Methods": "GET,OPTIONS",
         },
-        'body': json.dumps({
-            'error': error_message
-        })
+        "body": json.dumps({"error": error_message}),
     }

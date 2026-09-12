@@ -17,11 +17,12 @@ Usage (interactive web UI):
     locust -f api_load_test.py --host http://localhost:8000
     # Then open http://localhost:8089 in your browser
 """
+
 import os
 import random
 import uuid
 
-from locust import HttpUser, task, between, events
+from locust import HttpUser, between, events, task
 from locust.env import Environment
 
 # ---------------------------------------------------------------------------
@@ -235,7 +236,9 @@ def on_quitting(environment: Environment, **kwargs: object) -> None:
 
     total_requests = stats.total.num_requests
     total_failures = stats.total.num_failures
-    failure_rate = (total_failures / total_requests * 100) if total_requests > 0 else 0.0
+    failure_rate = (
+        (total_failures / total_requests * 100) if total_requests > 0 else 0.0
+    )
 
     print("\n" + "=" * 60)
     print("LOAD TEST COMPLETED")

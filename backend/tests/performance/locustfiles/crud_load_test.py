@@ -20,11 +20,12 @@ Usage (interactive web UI):
     locust -f crud_load_test.py --host http://localhost:8000
     # Then open http://localhost:8089 in your browser
 """
+
 import os
 import random
 import uuid
 
-from locust import HttpUser, task, between, events
+from locust import HttpUser, between, events, task
 from locust.env import Environment
 
 # ---------------------------------------------------------------------------
@@ -222,7 +223,9 @@ class CrudWriteUser(HttpUser):
         """
         # Select a random subset of flag IDs to toggle
         num_flags = random.randint(2, 5)
-        selected_flags = random.sample(FEATURE_FLAG_IDS, min(num_flags, len(FEATURE_FLAG_IDS)))
+        selected_flags = random.sample(
+            FEATURE_FLAG_IDS, min(num_flags, len(FEATURE_FLAG_IDS))
+        )
         payload = {
             "flag_ids": selected_flags,
             "enabled": random.choice([True, False]),
@@ -352,7 +355,9 @@ def on_quitting(environment: Environment, **kwargs: object) -> None:
 
     total_requests = stats.total.num_requests
     total_failures = stats.total.num_failures
-    failure_rate = (total_failures / total_requests * 100) if total_requests > 0 else 0.0
+    failure_rate = (
+        (total_failures / total_requests * 100) if total_requests > 0 else 0.0
+    )
 
     print("\n" + "=" * 60)
     print("CRUD LOAD TEST COMPLETED")

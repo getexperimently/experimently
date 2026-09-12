@@ -15,6 +15,7 @@ Two properties the results endpoints depend on:
 
 Rows created here are deleted in fixture teardown.
 """
+
 import uuid
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
@@ -155,15 +156,11 @@ class TestOneRowPerDay:
         session = _fresh_session(db_session)
         try:
             session.add(
-                build_snapshot(
-                    experiment.id, AnalysisKind.CUPED, {"n": 1}, as_of=as_of
-                )
+                build_snapshot(experiment.id, AnalysisKind.CUPED, {"n": 1}, as_of=as_of)
             )
             session.commit()
             session.add(
-                build_snapshot(
-                    experiment.id, AnalysisKind.CUPED, {"n": 2}, as_of=as_of
-                )
+                build_snapshot(experiment.id, AnalysisKind.CUPED, {"n": 2}, as_of=as_of)
             )
             with pytest.raises(IntegrityError):
                 session.commit()
@@ -239,7 +236,9 @@ class TestCallerTransactionIsUntouched:
             )
 
         # Still pending in the caller's transaction, and still committable.
-        assert experiment in db_session.dirty or experiment.bayesian_decision == "CONTINUE"
+        assert (
+            experiment in db_session.dirty or experiment.bayesian_decision == "CONTINUE"
+        )
         db_session.commit()
         db_session.refresh(experiment)
         assert experiment.bayesian_decision == "CONTINUE"

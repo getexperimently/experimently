@@ -4,10 +4,11 @@ Unit tests for Pydantic data models.
 Tests all shared data models for validation and serialization.
 """
 
-import pytest
 import sys
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
+
+import pytest
 from pydantic import ValidationError
 
 # Add parent directory to path to import shared modules
@@ -15,12 +16,12 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from models import (
     Assignment,
-    VariantConfig,
+    EventData,
     ExperimentConfig,
     ExperimentStatus,
     FeatureFlagConfig,
-    EventData,
     LambdaResponse,
+    VariantConfig,
 )
 
 
@@ -34,7 +35,7 @@ class TestAssignment:
             user_id="user_456",
             experiment_id="exp_789",
             experiment_key="checkout_redesign",
-            variant="treatment"
+            variant="treatment",
         )
 
         assert assignment.assignment_id == "assign_123"
@@ -53,7 +54,7 @@ class TestAssignment:
             experiment_id="exp_789",
             experiment_key="test_exp",
             variant="control",
-            context=context
+            context=context,
         )
 
         assert assignment.context == context
@@ -70,7 +71,7 @@ class TestAssignment:
             user_id="user_456",
             experiment_id="exp_789",
             experiment_key="test_exp",
-            variant="treatment"
+            variant="treatment",
         )
 
         data = assignment.model_dump()
@@ -84,10 +85,7 @@ class TestVariantConfig:
 
     def test_valid_variant_config(self):
         """Test creating a valid variant config."""
-        variant = VariantConfig(
-            key="treatment",
-            allocation=0.5
-        )
+        variant = VariantConfig(key="treatment", allocation=0.5)
 
         assert variant.key == "treatment"
         assert variant.allocation == 0.5
@@ -96,11 +94,7 @@ class TestVariantConfig:
     def test_variant_with_payload(self):
         """Test variant with payload data."""
         payload = {"button_color": "blue", "size": "large"}
-        variant = VariantConfig(
-            key="variant_a",
-            allocation=0.33,
-            payload=payload
-        )
+        variant = VariantConfig(key="variant_a", allocation=0.33, payload=payload)
 
         assert variant.payload == payload
 
@@ -130,14 +124,14 @@ class TestExperimentConfig:
         """Test creating a valid experiment config."""
         variants = [
             VariantConfig(key="control", allocation=0.5),
-            VariantConfig(key="treatment", allocation=0.5)
+            VariantConfig(key="treatment", allocation=0.5),
         ]
 
         experiment = ExperimentConfig(
             experiment_id="exp_123",
             key="checkout_test",
             status=ExperimentStatus.ACTIVE,
-            variants=variants
+            variants=variants,
         )
 
         assert experiment.experiment_id == "exp_123"
@@ -150,7 +144,7 @@ class TestExperimentConfig:
         """Test experiment with custom traffic allocation."""
         variants = [
             VariantConfig(key="control", allocation=0.5),
-            VariantConfig(key="treatment", allocation=0.5)
+            VariantConfig(key="treatment", allocation=0.5),
         ]
 
         experiment = ExperimentConfig(
@@ -158,7 +152,7 @@ class TestExperimentConfig:
             key="test",
             status=ExperimentStatus.ACTIVE,
             variants=variants,
-            traffic_allocation=0.5
+            traffic_allocation=0.5,
         )
 
         assert experiment.traffic_allocation == 0.5
@@ -167,7 +161,7 @@ class TestExperimentConfig:
         """Test experiment with targeting rules."""
         variants = [
             VariantConfig(key="control", allocation=0.5),
-            VariantConfig(key="treatment", allocation=0.5)
+            VariantConfig(key="treatment", allocation=0.5),
         ]
         rules = [{"attribute": "country", "operator": "equals", "value": "US"}]
 
@@ -176,7 +170,7 @@ class TestExperimentConfig:
             key="test",
             status=ExperimentStatus.ACTIVE,
             variants=variants,
-            targeting_rules=rules
+            targeting_rules=rules,
         )
 
         assert experiment.targeting_rules == rules
@@ -185,15 +179,17 @@ class TestExperimentConfig:
         """Test that variant allocations must sum to ~1.0."""
         variants = [
             VariantConfig(key="control", allocation=0.4),
-            VariantConfig(key="treatment", allocation=0.4)
+            VariantConfig(key="treatment", allocation=0.4),
         ]
 
-        with pytest.raises(ValidationError, match="Variant allocations must sum to 1.0"):
+        with pytest.raises(
+            ValidationError, match="Variant allocations must sum to 1.0"
+        ):
             ExperimentConfig(
                 experiment_id="exp_123",
                 key="test",
                 status=ExperimentStatus.ACTIVE,
-                variants=variants
+                variants=variants,
             )
 
     def test_variant_allocations_sum_with_tolerance(self):
@@ -201,14 +197,14 @@ class TestExperimentConfig:
         # 0.995 should be accepted (within 0.99-1.01 range)
         variants = [
             VariantConfig(key="control", allocation=0.495),
-            VariantConfig(key="treatment", allocation=0.5)
+            VariantConfig(key="treatment", allocation=0.5),
         ]
 
         experiment = ExperimentConfig(
             experiment_id="exp_123",
             key="test",
             status=ExperimentStatus.ACTIVE,
-            variants=variants
+            variants=variants,
         )
 
         assert experiment is not None
@@ -222,23 +218,24 @@ class TestExperimentConfig:
                 experiment_id="exp_123",
                 key="test",
                 status=ExperimentStatus.ACTIVE,
-                variants=variants
+                variants=variants,
             )
 
     def test_experiment_status_enum_values(self):
         """Test all experiment status enum values."""
         variants = [
             VariantConfig(key="control", allocation=0.5),
-            VariantConfig(key="treatment", allocation=0.5)
+            VariantConfig(key="treatment", allocation=0.5),
         ]
 
-        for status in [ExperimentStatus.DRAFT, ExperimentStatus.ACTIVE,
-                       ExperimentStatus.PAUSED, ExperimentStatus.COMPLETED]:
+        for status in [
+            ExperimentStatus.DRAFT,
+            ExperimentStatus.ACTIVE,
+            ExperimentStatus.PAUSED,
+            ExperimentStatus.COMPLETED,
+        ]:
             experiment = ExperimentConfig(
-                experiment_id="exp_123",
-                key="test",
-                status=status,
-                variants=variants
+                experiment_id="exp_123", key="test", status=status, variants=variants
             )
             assert experiment.status == status
 
@@ -252,7 +249,7 @@ class TestFeatureFlagConfig:
             flag_id="flag_123",
             key="new_checkout",
             enabled=True,
-            rollout_percentage=50.0
+            rollout_percentage=50.0,
         )
 
         assert flag.flag_id == "flag_123"
@@ -265,10 +262,7 @@ class TestFeatureFlagConfig:
         rules = [{"attribute": "beta_user", "operator": "equals", "value": True}]
 
         flag = FeatureFlagConfig(
-            flag_id="flag_123",
-            key="beta_feature",
-            enabled=True,
-            targeting_rules=rules
+            flag_id="flag_123", key="beta_feature", enabled=True, targeting_rules=rules
         )
 
         assert flag.targeting_rules == rules
@@ -277,7 +271,7 @@ class TestFeatureFlagConfig:
         """Test feature flag with multiple variants."""
         variants = [
             VariantConfig(key="small", allocation=0.5),
-            VariantConfig(key="large", allocation=0.5)
+            VariantConfig(key="large", allocation=0.5),
         ]
 
         flag = FeatureFlagConfig(
@@ -285,7 +279,7 @@ class TestFeatureFlagConfig:
             key="button_size",
             enabled=True,
             variants=variants,
-            default_variant="small"
+            default_variant="small",
         )
 
         assert len(flag.variants) == 2
@@ -293,9 +287,7 @@ class TestFeatureFlagConfig:
 
     def test_rollout_percentage_boundaries(self):
         """Test rollout percentage boundary values."""
-        flag_0 = FeatureFlagConfig(
-            flag_id="flag_1", key="test", rollout_percentage=0.0
-        )
+        flag_0 = FeatureFlagConfig(flag_id="flag_1", key="test", rollout_percentage=0.0)
         flag_100 = FeatureFlagConfig(
             flag_id="flag_2", key="test", rollout_percentage=100.0
         )
@@ -306,25 +298,14 @@ class TestFeatureFlagConfig:
     def test_invalid_rollout_percentage(self):
         """Test that invalid rollout percentage raises ValidationError."""
         with pytest.raises(ValidationError):
-            FeatureFlagConfig(
-                flag_id="flag_123",
-                key="test",
-                rollout_percentage=150.0
-            )
+            FeatureFlagConfig(flag_id="flag_123", key="test", rollout_percentage=150.0)
 
         with pytest.raises(ValidationError):
-            FeatureFlagConfig(
-                flag_id="flag_123",
-                key="test",
-                rollout_percentage=-10.0
-            )
+            FeatureFlagConfig(flag_id="flag_123", key="test", rollout_percentage=-10.0)
 
     def test_disabled_flag_defaults(self):
         """Test default values for disabled flag."""
-        flag = FeatureFlagConfig(
-            flag_id="flag_123",
-            key="test_flag"
-        )
+        flag = FeatureFlagConfig(flag_id="flag_123", key="test_flag")
 
         assert flag.enabled is False
         assert flag.rollout_percentage == 0.0
@@ -338,9 +319,7 @@ class TestEventData:
     def test_valid_event_data(self):
         """Test creating valid event data."""
         event = EventData(
-            event_id="evt_123",
-            event_type="conversion",
-            user_id="user_456"
+            event_id="evt_123", event_type="conversion", user_id="user_456"
         )
 
         assert event.event_id == "evt_123"
@@ -354,7 +333,7 @@ class TestEventData:
             event_id="evt_123",
             event_type="click",
             user_id="user_456",
-            experiment_id="exp_789"
+            experiment_id="exp_789",
         )
 
         assert event.experiment_id == "exp_789"
@@ -367,7 +346,7 @@ class TestEventData:
             event_id="evt_123",
             event_type="purchase",
             user_id="user_456",
-            properties=properties
+            properties=properties,
         )
 
         assert event.properties == properties
@@ -380,7 +359,7 @@ class TestEventData:
             event_id="evt_123",
             event_type="page_view",
             user_id="user_456",
-            metadata=metadata
+            metadata=metadata,
         )
 
         assert event.metadata == metadata
@@ -393,9 +372,7 @@ class TestEventData:
     def test_event_serialization(self):
         """Test that event can be serialized."""
         event = EventData(
-            event_id="evt_123",
-            event_type="conversion",
-            user_id="user_456"
+            event_id="evt_123", event_type="conversion", user_id="user_456"
         )
 
         data = event.model_dump()
@@ -410,10 +387,7 @@ class TestLambdaResponse:
         """Test creating a valid Lambda response."""
         body = {"variant": "treatment", "experiment_id": "exp_123"}
 
-        response = LambdaResponse(
-            statusCode=200,
-            body=body
-        )
+        response = LambdaResponse(statusCode=200, body=body)
 
         assert response.statusCode == 200
         assert response.body == body
@@ -422,16 +396,9 @@ class TestLambdaResponse:
     def test_lambda_response_with_custom_headers(self):
         """Test Lambda response with custom headers."""
         body = {"message": "success"}
-        headers = {
-            "Content-Type": "application/json",
-            "X-Custom-Header": "value"
-        }
+        headers = {"Content-Type": "application/json", "X-Custom-Header": "value"}
 
-        response = LambdaResponse(
-            statusCode=200,
-            body=body,
-            headers=headers
-        )
+        response = LambdaResponse(statusCode=200, body=body, headers=headers)
 
         assert response.headers == headers
         assert response.headers["X-Custom-Header"] == "value"
@@ -440,20 +407,14 @@ class TestLambdaResponse:
         """Test Lambda error response."""
         body = {"error": "Invalid request"}
 
-        response = LambdaResponse(
-            statusCode=400,
-            body=body
-        )
+        response = LambdaResponse(statusCode=400, body=body)
 
         assert response.statusCode == 400
         assert "error" in response.body
 
     def test_lambda_response_serialization(self):
         """Test that Lambda response can be serialized."""
-        response = LambdaResponse(
-            statusCode=200,
-            body={"success": True}
-        )
+        response = LambdaResponse(statusCode=200, body={"success": True})
 
         data = response.model_dump()
         assert isinstance(data, dict)

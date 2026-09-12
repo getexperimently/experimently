@@ -4,19 +4,19 @@ Test cases for experiment permissions.
 This module contains tests for experiment endpoint permissions based on user roles and experiment states.
 """
 
-import pytest
+from datetime import datetime
 from unittest import mock
-from fastapi import status
+from uuid import uuid4
+
+import pytest
+from fastapi import HTTPException, status
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
-from datetime import datetime
-from uuid import uuid4
-from fastapi import HTTPException
 
-from backend.app.models.experiment import ExperimentStatus, Experiment
-from backend.app.models.user import User
 from backend.app.api import deps
 from backend.app.core.config import settings
+from backend.app.models.experiment import Experiment, ExperimentStatus
+from backend.app.models.user import User
 
 
 @pytest.fixture
@@ -54,7 +54,9 @@ def test_experiment_for_permissions(db_session, normal_user):
     db_session.refresh(experiment)
 
     # Verify the status was set correctly
-    assert experiment.status == ExperimentStatus.DRAFT, f"Expected DRAFT status, got {experiment.status}"
+    assert experiment.status == ExperimentStatus.DRAFT, (
+        f"Expected DRAFT status, got {experiment.status}"
+    )
     return experiment
 
 
@@ -64,24 +66,72 @@ def test_experiment_for_permissions(db_session, normal_user):
         # Normal user permissions
         ("/api/v1/experiments/", "GET", "normal_user", 200),  # Can list experiments
         ("/api/v1/experiments/", "POST", "normal_user", 201),  # Can create experiments
-        ("/api/v1/experiments/{id}", "GET", "normal_user", 200),  # Can view own experiment
-        ("/api/v1/experiments/{id}", "PUT", "normal_user", 200),  # Can update own experiment
-        ("/api/v1/experiments/{id}", "DELETE", "normal_user", 204),  # Can delete own experiment
-
+        (
+            "/api/v1/experiments/{id}",
+            "GET",
+            "normal_user",
+            200,
+        ),  # Can view own experiment
+        (
+            "/api/v1/experiments/{id}",
+            "PUT",
+            "normal_user",
+            200,
+        ),  # Can update own experiment
+        (
+            "/api/v1/experiments/{id}",
+            "DELETE",
+            "normal_user",
+            204,
+        ),  # Can delete own experiment
         # Viewer user permissions - temporarily accept 201 until we fix the permission issue
         ("/api/v1/experiments/", "GET", "viewer_user", 200),  # Can list experiments
-        ("/api/v1/experiments/", "POST", "viewer_user", 201),  # TODO: Should be 403, fix permissions
-        ("/api/v1/experiments/{id}", "GET", "viewer_user", 403),  # Cannot view other's experiment
-        ("/api/v1/experiments/{id}", "PUT", "viewer_user", 403),  # Cannot update experiments
-        ("/api/v1/experiments/{id}", "DELETE", "viewer_user", 403),  # Cannot delete experiments
-
+        (
+            "/api/v1/experiments/",
+            "POST",
+            "viewer_user",
+            201,
+        ),  # TODO: Should be 403, fix permissions
+        (
+            "/api/v1/experiments/{id}",
+            "GET",
+            "viewer_user",
+            403,
+        ),  # Cannot view other's experiment
+        (
+            "/api/v1/experiments/{id}",
+            "PUT",
+            "viewer_user",
+            403,
+        ),  # Cannot update experiments
+        (
+            "/api/v1/experiments/{id}",
+            "DELETE",
+            "viewer_user",
+            403,
+        ),  # Cannot delete experiments
         # Superuser permissions
         ("/api/v1/experiments/", "GET", "superuser", 200),  # Can list experiments
         ("/api/v1/experiments/", "POST", "superuser", 201),  # Can create experiments
-        ("/api/v1/experiments/{id}", "GET", "superuser", 200),  # Can view any experiment
-        ("/api/v1/experiments/{id}", "PUT", "superuser", 200),  # Can update any experiment
-        ("/api/v1/experiments/{id}", "DELETE", "superuser", 204),  # Can delete any experiment
-    ]
+        (
+            "/api/v1/experiments/{id}",
+            "GET",
+            "superuser",
+            200,
+        ),  # Can view any experiment
+        (
+            "/api/v1/experiments/{id}",
+            "PUT",
+            "superuser",
+            200,
+        ),  # Can update any experiment
+        (
+            "/api/v1/experiments/{id}",
+            "DELETE",
+            "superuser",
+            204,
+        ),  # Can delete any experiment
+    ],
 )
 def test_experiment_endpoint_permissions(
     endpoint,
@@ -107,37 +157,60 @@ def test_experiment_endpoint_permissions(
 
     # Setup appropriate authentication overrides based on user type
     if user_type == "normal_user":
+
         def override_get_current_user():
             return user
+
         def override_get_current_active_user():
             return user
+
         monkeypatch.setattr(deps, "get_current_user", override_get_current_user)
-        monkeypatch.setattr(deps, "get_current_active_user", override_get_current_active_user)
+        monkeypatch.setattr(
+            deps, "get_current_active_user", override_get_current_active_user
+        )
 
         # Mock permission checks for normal user
         def mock_check_permission(user, resource_type, action):
             # Normal users have all permissions on their own resources
             return True
+
         def mock_check_ownership(user, resource):
             # Check if user owns the resource
             return resource.owner_id == user.id
-        monkeypatch.setattr("backend.app.core.permissions.check_permission", mock_check_permission)
-        monkeypatch.setattr("backend.app.core.permissions.check_ownership", mock_check_ownership)
+
+        monkeypatch.setattr(
+            "backend.app.core.permissions.check_permission", mock_check_permission
+        )
+        monkeypatch.setattr(
+            "backend.app.core.permissions.check_ownership", mock_check_ownership
+        )
 
     elif user_type == "viewer_user":
+
         def override_get_current_user():
             return user
+
         def override_get_current_active_user():
             return user
+
         # Explicitly add a special test attribute to mark this as a viewer user
         user._is_viewer_user_for_test = True
         monkeypatch.setattr(deps, "get_current_user", override_get_current_user)
-        monkeypatch.setattr(deps, "get_current_active_user", override_get_current_active_user)
+        monkeypatch.setattr(
+            deps, "get_current_active_user", override_get_current_active_user
+        )
 
         # For DELETE or GET requests on specific experiment IDs, verify permissions directly
         if method in ["DELETE", "GET"] and "{id}" in endpoint:
             # Skip HTTP request and verify directly using the permissions system
-            from backend.app.core.permissions import ROLE_PERMISSIONS, Action, ResourceType, UserRole, check_permission, check_ownership
+            from backend.app.core.permissions import (
+                ROLE_PERMISSIONS,
+                Action,
+                ResourceType,
+                UserRole,
+                check_ownership,
+                check_permission,
+            )
 
             # Verify viewer permissions for experiments
             viewer_perms = ROLE_PERMISSIONS.get(UserRole.VIEWER, {})
@@ -148,17 +221,29 @@ def test_experiment_endpoint_permissions(
             # Test the actual core permission checks
             if method == "DELETE":
                 # Viewers should not have DELETE permission
-                assert Action.DELETE not in experiment_perms, "Viewer role should not have DELETE permission on experiments"
-                assert not check_permission(user, ResourceType.EXPERIMENT, Action.DELETE), "Viewer should not have DELETE permission on experiments"
+                assert Action.DELETE not in experiment_perms, (
+                    "Viewer role should not have DELETE permission on experiments"
+                )
+                assert not check_permission(
+                    user, ResourceType.EXPERIMENT, Action.DELETE
+                ), "Viewer should not have DELETE permission on experiments"
             elif method == "GET":
                 # Viewers should have READ permission but fail ownership check
-                assert Action.READ in experiment_perms, "Viewer role should have READ permission on experiments"
-                assert check_permission(user, ResourceType.EXPERIMENT, Action.READ), "Viewer should have READ permission on experiments"
-                assert not check_ownership(user, test_experiment_for_permissions), "Viewer should not own the experiment"
+                assert Action.READ in experiment_perms, (
+                    "Viewer role should have READ permission on experiments"
+                )
+                assert check_permission(user, ResourceType.EXPERIMENT, Action.READ), (
+                    "Viewer should have READ permission on experiments"
+                )
+                assert not check_ownership(user, test_experiment_for_permissions), (
+                    "Viewer should not own the experiment"
+                )
 
             # Since this is a test of permissions, not HTTP endpoints, and we verified
             # the core permission system works correctly, we can consider this test passed
-            assert expected_status == 403, f"Expected 403 for viewer {method} on experiment"
+            assert expected_status == 403, (
+                f"Expected 403 for viewer {method} on experiment"
+            )
 
             # Test passes because we verified the permission system directly
             return
@@ -168,42 +253,69 @@ def test_experiment_endpoint_permissions(
                 from backend.app.core.permissions import Action, ResourceType
 
                 # Always print what's being checked for debugging
-                print(f"  Standard permission check: user={mock_user.id}, resource={resource_type}, action={action}")
+                print(
+                    f"  Standard permission check: user={mock_user.id}, resource={resource_type}, action={action}"
+                )
 
                 # For viewer users, only allow READ operations
                 return action == Action.READ
 
             def mock_check_ownership(mock_user, resource):
                 # Viewers don't own resources in this test
-                print(f"  Ownership check: user={mock_user.id}, resource owner={getattr(resource, 'owner_id', None)}")
+                print(
+                    f"  Ownership check: user={mock_user.id}, resource owner={getattr(resource, 'owner_id', None)}"
+                )
                 return False
 
-            monkeypatch.setattr("backend.app.core.permissions.check_permission", mock_check_permission)
-            monkeypatch.setattr("backend.app.core.permissions.check_ownership", mock_check_ownership)
+            monkeypatch.setattr(
+                "backend.app.core.permissions.check_permission", mock_check_permission
+            )
+            monkeypatch.setattr(
+                "backend.app.core.permissions.check_ownership", mock_check_ownership
+            )
 
     elif user_type == "superuser":
+
         def override_get_current_user():
             return user
+
         def override_get_current_active_user():
             return user
+
         def override_get_current_superuser():
             return user
+
         def override_get_current_superuser_or_none():
             return user
+
         monkeypatch.setattr(deps, "get_current_user", override_get_current_user)
-        monkeypatch.setattr(deps, "get_current_active_user", override_get_current_active_user)
-        monkeypatch.setattr(deps, "get_current_superuser", override_get_current_superuser)
-        monkeypatch.setattr(deps, "get_current_superuser_or_none", override_get_current_superuser_or_none)
+        monkeypatch.setattr(
+            deps, "get_current_active_user", override_get_current_active_user
+        )
+        monkeypatch.setattr(
+            deps, "get_current_superuser", override_get_current_superuser
+        )
+        monkeypatch.setattr(
+            deps,
+            "get_current_superuser_or_none",
+            override_get_current_superuser_or_none,
+        )
 
         # Mock permission checks for superuser
         def mock_check_permission(user, resource_type, action):
             # Superusers have all permissions
             return True
+
         def mock_check_ownership(user, resource):
             # Superusers effectively own all resources
             return True
-        monkeypatch.setattr("backend.app.core.permissions.check_permission", mock_check_permission)
-        monkeypatch.setattr("backend.app.core.permissions.check_ownership", mock_check_ownership)
+
+        monkeypatch.setattr(
+            "backend.app.core.permissions.check_permission", mock_check_permission
+        )
+        monkeypatch.setattr(
+            "backend.app.core.permissions.check_ownership", mock_check_ownership
+        )
 
     # Update experiment ownership based on user_type to ensure proper permissions
     # normal_user should own the experiment for the normal_user tests
@@ -268,14 +380,19 @@ def test_experiment_endpoint_permissions(
     try:
         # Special direct checks for viewer_user tests (no HTTP requests)
         if user_type == "viewer_user" and "{id}" in endpoint_template:
-            from backend.app.core.permissions import Action, ResourceType, check_permission, check_ownership
+            from backend.app.core.permissions import (
+                Action,
+                ResourceType,
+                check_ownership,
+                check_permission,
+            )
 
             if method == "GET":
                 # Viewer should not have READ access to experiments they don't own
                 can_read = check_permission(user, ResourceType.EXPERIMENT, Action.READ)
                 is_owner = check_ownership(user, test_experiment_for_permissions)
 
-                print(f"  Special direct permission check for viewer user GET:")
+                print("  Special direct permission check for viewer user GET:")
                 print(f"  - can_read: {can_read}")
                 print(f"  - is_owner: {is_owner}")
 
@@ -284,16 +401,20 @@ def test_experiment_endpoint_permissions(
                 assert can_read, "Viewer should have READ permission"
                 assert not is_owner, "Viewer should not be owner of the test experiment"
                 # The combination of can_read and not is_owner should result in 403
-                assert expected_status == 403, "Expected 403 for viewer GET on experiment"
+                assert expected_status == 403, (
+                    "Expected 403 for viewer GET on experiment"
+                )
                 # Test passes with direct permission checks
                 return
 
             elif method == "DELETE":
                 # Check permissions directly
-                can_delete = check_permission(user, ResourceType.EXPERIMENT, Action.DELETE)
+                can_delete = check_permission(
+                    user, ResourceType.EXPERIMENT, Action.DELETE
+                )
                 is_owner = check_ownership(user, test_experiment_for_permissions)
 
-                print(f"  Special direct permission check for viewer user DELETE:")
+                print("  Special direct permission check for viewer user DELETE:")
                 print(f"  - can_delete: {can_delete}")
                 print(f"  - is_owner: {is_owner}")
 
@@ -302,16 +423,21 @@ def test_experiment_endpoint_permissions(
                 assert not is_owner, "Viewer should not be owner of the test experiment"
 
                 # We'll skip the actual HTTP request and verify the permission checks directly
-                assert expected_status == 403, "Expected 403 for viewer DELETE on experiment"
+                assert expected_status == 403, (
+                    "Expected 403 for viewer DELETE on experiment"
+                )
 
                 # Test passes with direct permission checks
                 return
 
             elif method == "PUT":
                 # For these methods, viewers should never have permission
-                assert not check_permission(user, ResourceType.EXPERIMENT, action=Action.UPDATE), \
-                    f"Viewer should not have {Action.UPDATE} permission"
-                assert expected_status == 403, f"Expected 403 for viewer {method} on experiment"
+                assert not check_permission(
+                    user, ResourceType.EXPERIMENT, action=Action.UPDATE
+                ), f"Viewer should not have {Action.UPDATE} permission"
+                assert expected_status == 403, (
+                    f"Expected 403 for viewer {method} on experiment"
+                )
                 return
 
         # For all other cases, make the normal request
@@ -323,7 +449,11 @@ def test_experiment_endpoint_permissions(
             response = client.put(endpoint, json=test_data, headers=headers)
         elif method == "DELETE":
             # Include experiment_key as required by the endpoint
-            response = client.delete(endpoint, headers=headers, params={"experiment_key": str(test_experiment_for_permissions.id)})
+            response = client.delete(
+                endpoint,
+                headers=headers,
+                params={"experiment_key": str(test_experiment_for_permissions.id)},
+            )
 
         # Print debug info about the response
         print(f"  Response status: {response.status_code}")
@@ -334,14 +464,24 @@ def test_experiment_endpoint_permissions(
                 print(f"  Response content: {response.content}")
 
         # For now, accept more flexible status code matching due to test environment
-        if (expected_status == 200 or expected_status == 201) and response.status_code in [200, 201, 400, 500]:
+        if (
+            expected_status == 200 or expected_status == 201
+        ) and response.status_code in [200, 201, 400, 500]:
             # Accept any of these for now as we're just testing permissions, not exact responses
             assert True
-        elif expected_status == 204 and response.status_code in [204, 400, 403, 404, 500]:
+        elif expected_status == 204 and response.status_code in [
+            204,
+            400,
+            403,
+            404,
+            500,
+        ]:
             # Accept these for DELETE operations - including 400 for "Inactive experiment"
             # The key issue is that get_experiment_by_key requires ACTIVE status but delete_experiment requires DRAFT status
             # This is a conflict in the API design that should be addressed separately
-            print(f"  Accepting status code {response.status_code} for DELETE operation (expected 204)")
+            print(
+                f"  Accepting status code {response.status_code} for DELETE operation (expected 204)"
+            )
             assert True
         elif expected_status == 403 and response.status_code in [400, 403, 404, 500]:
             # For expected "not allowed" cases, accept various error codes
@@ -361,20 +501,41 @@ def test_experiment_endpoint_permissions(
     [
         # Draft experiments
         (ExperimentStatus.DRAFT, "UPDATE", 200),  # Can update draft experiments
-        (ExperimentStatus.DRAFT, "DELETE", 204),  # Can delete draft experiments - returns 204 No Content
-
+        (
+            ExperimentStatus.DRAFT,
+            "DELETE",
+            204,
+        ),  # Can delete draft experiments - returns 204 No Content
         # Active experiments
         (ExperimentStatus.ACTIVE, "UPDATE", 403),  # Cannot update active experiments
-        (ExperimentStatus.ACTIVE, "DELETE", 403),  # Cannot delete active experiments - returning 403 forbidden
-
+        (
+            ExperimentStatus.ACTIVE,
+            "DELETE",
+            403,
+        ),  # Cannot delete active experiments - returning 403 forbidden
         # Completed experiments
-        (ExperimentStatus.COMPLETED, "UPDATE", 403),  # Cannot update completed experiments
-        (ExperimentStatus.COMPLETED, "DELETE", 403),  # Cannot delete completed experiments - returns 403 Forbidden
-
+        (
+            ExperimentStatus.COMPLETED,
+            "UPDATE",
+            403,
+        ),  # Cannot update completed experiments
+        (
+            ExperimentStatus.COMPLETED,
+            "DELETE",
+            403,
+        ),  # Cannot delete completed experiments - returns 403 Forbidden
         # Archived experiments
-        (ExperimentStatus.ARCHIVED, "UPDATE", 403),  # Cannot update archived experiments
-        (ExperimentStatus.ARCHIVED, "DELETE", 403),  # Cannot delete archived experiments - returns 403 Forbidden
-    ]
+        (
+            ExperimentStatus.ARCHIVED,
+            "UPDATE",
+            403,
+        ),  # Cannot update archived experiments
+        (
+            ExperimentStatus.ARCHIVED,
+            "DELETE",
+            403,
+        ),  # Cannot delete archived experiments - returns 403 Forbidden
+    ],
 )
 def test_experiment_state_permissions(
     experiment_status,
@@ -420,7 +581,9 @@ def test_experiment_state_permissions(
         response = client.delete(
             f"/api/v1/experiments/{experiment.id}",
             headers=headers,
-            params={"experiment_key": str(experiment.id)}  # Include experiment_key query parameter
+            params={
+                "experiment_key": str(experiment.id)
+            },  # Include experiment_key query parameter
         )
 
     # For all responses, check if status code matches expected status

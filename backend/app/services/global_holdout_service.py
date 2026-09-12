@@ -58,22 +58,16 @@ class GlobalHoldoutService:
     def get_holdout(self, holdout_id: UUID) -> Optional[GlobalHoldout]:
         """Get a holdout by ID."""
         return (
-            self.db.query(GlobalHoldout)
-            .filter(GlobalHoldout.id == holdout_id)
-            .first()
+            self.db.query(GlobalHoldout).filter(GlobalHoldout.id == holdout_id).first()
         )
 
     def get_active_holdout(self) -> Optional[GlobalHoldout]:
         """Get the currently active global holdout (at most one should be active)."""
         return (
-            self.db.query(GlobalHoldout)
-            .filter(GlobalHoldout.is_active == True)
-            .first()
+            self.db.query(GlobalHoldout).filter(GlobalHoldout.is_active == True).first()
         )
 
-    def list_holdouts(
-        self, skip: int = 0, limit: int = 100
-    ) -> List[GlobalHoldout]:
+    def list_holdouts(self, skip: int = 0, limit: int = 100) -> List[GlobalHoldout]:
         """List all holdouts."""
         return self.db.query(GlobalHoldout).offset(skip).limit(limit).all()
 
@@ -172,7 +166,7 @@ class GlobalHoldoutService:
 
     def _deactivate_all(self) -> None:
         """Deactivate all currently active holdouts."""
-        self.db.query(GlobalHoldout).filter(
-            GlobalHoldout.is_active == True
-        ).update({"is_active": False})
+        self.db.query(GlobalHoldout).filter(GlobalHoldout.is_active == True).update(
+            {"is_active": False}
+        )
         self.db.flush()

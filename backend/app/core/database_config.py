@@ -2,18 +2,17 @@
 """
 Dynamic schema configuration for database models.
 """
-from functools import lru_cache
-from backend.app.core.config import settings
-import os
+
 import logging
+import os
 
 logger = logging.getLogger(__name__)
+
 
 # Add this to backend/app/core/database_config.py
 def clear_schema_cache():
     """Clear the cached schema name."""
     # No-op when cache is disabled
-    pass
 
 
 # REMOVED @lru_cache for development to avoid caching issues with environment variables
@@ -31,8 +30,10 @@ def get_schema_name() -> str:
         schema_name = "experimentation"
 
     # Log only first time to avoid spam (use a module-level flag)
-    if not hasattr(get_schema_name, '_logged'):
-        logger.info(f"Using schema: {schema_name} (APP_ENV={repr(app_env)}, TESTING={repr(testing)})")
+    if not hasattr(get_schema_name, "_logged"):
+        logger.info(
+            f"Using schema: {schema_name} (APP_ENV={app_env!r}, TESTING={testing!r})"
+        )
         get_schema_name._logged = True
 
     return schema_name

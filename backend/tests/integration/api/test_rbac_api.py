@@ -21,21 +21,22 @@ Design notes:
   - When a non-admin client needs to test against a real role, we use
     make_client_for_user inline so the whole test shares one db_session.
 """
+
 import uuid
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
+from backend.app.main import app
 from backend.app.models.user import User
 from backend.tests.integration.conftest import make_client_for_user
-from backend.app.main import app
-
 
 # ---------------------------------------------------------------------------
 # Helper utilities
 # ---------------------------------------------------------------------------
+
 
 def _unique_role_name() -> str:
     """Return a unique lowercase role name satisfying schema pattern ^[a-z][a-z0-9_-]*$."""
@@ -65,6 +66,7 @@ def _create_role(client: TestClient, name: str = None) -> dict:
 # ---------------------------------------------------------------------------
 # TestListRoles — GET /api/v1/rbac/roles
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.integration
 @pytest.mark.requires_db
@@ -137,14 +139,22 @@ class TestListRoles:
         # Find our created role
         created = next((r for r in roles if r["name"] == role_name), None)
         assert created is not None
-        for field in ("id", "name", "description", "is_system_role",
-                      "permissions", "created_at", "user_count"):
+        for field in (
+            "id",
+            "name",
+            "description",
+            "is_system_role",
+            "permissions",
+            "created_at",
+            "user_count",
+        ):
             assert field in created, f"Missing field: {field}"
 
 
 # ---------------------------------------------------------------------------
 # TestCreateRole — POST /api/v1/rbac/roles
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.integration
 @pytest.mark.requires_db
@@ -247,9 +257,7 @@ class TestCreateRole:
         """A permission with an invalid resource type returns 422."""
         payload = {
             "name": _unique_role_name(),
-            "permissions": [
-                {"resource": "not_a_real_resource", "actions": ["read"]}
-            ],
+            "permissions": [{"resource": "not_a_real_resource", "actions": ["read"]}],
         }
         resp = admin_client.post("/api/v1/rbac/roles", json=payload)
         assert resp.status_code == 422, resp.text
@@ -258,9 +266,7 @@ class TestCreateRole:
         """A permission with an invalid action returns 422."""
         payload = {
             "name": _unique_role_name(),
-            "permissions": [
-                {"resource": "experiment", "actions": ["fly"]}
-            ],
+            "permissions": [{"resource": "experiment", "actions": ["fly"]}],
         }
         resp = admin_client.post("/api/v1/rbac/roles", json=payload)
         assert resp.status_code == 422, resp.text
@@ -285,6 +291,7 @@ class TestCreateRole:
 # TestGetRole — GET /api/v1/rbac/roles/{role_name}
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.integration
 @pytest.mark.requires_db
 class TestGetRole:
@@ -307,8 +314,15 @@ class TestGetRole:
         resp = admin_client.get(f"/api/v1/rbac/roles/{name}")
         assert resp.status_code == 200, resp.text
         data = resp.json()
-        for field in ("id", "name", "description", "is_system_role",
-                      "permissions", "created_at", "user_count"):
+        for field in (
+            "id",
+            "name",
+            "description",
+            "is_system_role",
+            "permissions",
+            "created_at",
+            "user_count",
+        ):
             assert field in data, f"Missing field: {field}"
 
     def test_get_role_permissions_match_create(self, admin_client):
@@ -361,6 +375,7 @@ class TestGetRole:
 # ---------------------------------------------------------------------------
 # TestUpdateRole — PUT /api/v1/rbac/roles/{role_name}
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.integration
 @pytest.mark.requires_db
@@ -474,6 +489,7 @@ class TestUpdateRole:
 # TestDeleteRole — DELETE /api/v1/rbac/roles/{role_name}
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.integration
 @pytest.mark.requires_db
 class TestDeleteRole:
@@ -549,6 +565,7 @@ class TestDeleteRole:
 # ---------------------------------------------------------------------------
 # TestAssignRevokeRole — POST /api/v1/rbac/roles/assign & /revoke
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.integration
 @pytest.mark.requires_db
@@ -702,6 +719,7 @@ class TestAssignRevokeRole:
 # TestEffectivePermissions — GET /api/v1/rbac/users/{user_id}/permissions
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.integration
 @pytest.mark.requires_db
 class TestEffectivePermissions:
@@ -713,14 +731,22 @@ class TestEffectivePermissions:
         resp = admin_client.get(f"/api/v1/rbac/users/{user_id}/permissions")
         assert resp.status_code == 200, resp.text
 
-    def test_permissions_response_has_expected_structure(self, admin_client, admin_user):
+    def test_permissions_response_has_expected_structure(
+        self, admin_client, admin_user
+    ):
         """Effective permissions response has all required top-level fields."""
         user_id = str(admin_user.id)
         resp = admin_client.get(f"/api/v1/rbac/users/{user_id}/permissions")
         assert resp.status_code == 200, resp.text
         data = resp.json()
-        for field in ("user_id", "username", "base_role", "custom_roles",
-                      "permissions", "is_superuser"):
+        for field in (
+            "user_id",
+            "username",
+            "base_role",
+            "custom_roles",
+            "permissions",
+            "is_superuser",
+        ):
             assert field in data, f"Missing field: {field}"
 
     def test_superuser_has_all_permissions(self, admin_client, admin_user):
@@ -742,7 +768,9 @@ class TestEffectivePermissions:
         # Admin user has is_superuser=True, so base_role may be "admin"
         assert data["base_role"] in ("admin", "ADMIN")
 
-    def test_developer_user_permissions_structure(self, developer_client, developer_user):
+    def test_developer_user_permissions_structure(
+        self, developer_client, developer_user
+    ):
         """Developer can view their own permissions — base_role is developer."""
         user_id = str(developer_user.id)
         resp = developer_client.get(f"/api/v1/rbac/users/{user_id}/permissions")
@@ -778,25 +806,17 @@ class TestEffectivePermissions:
         data = resp.json()
         assert data["user_id"] == user_id
 
-    def test_developer_cannot_view_nonexistent_user_permissions(
-        self, developer_client
-    ):
+    def test_developer_cannot_view_nonexistent_user_permissions(self, developer_client):
         """Developer cannot view a non-existent user's permissions — 403 or 404."""
         fake_user_id = str(uuid.uuid4())
-        resp = developer_client.get(
-            f"/api/v1/rbac/users/{fake_user_id}/permissions"
-        )
+        resp = developer_client.get(f"/api/v1/rbac/users/{fake_user_id}/permissions")
         # Admin check fires for other users; developer gets 403
         assert resp.status_code in (403, 404), resp.text
 
-    def test_get_permissions_nonexistent_user_returns_404(
-        self, admin_client
-    ):
+    def test_get_permissions_nonexistent_user_returns_404(self, admin_client):
         """GET permissions for a non-existent user UUID returns 404 (admin can look up anyone)."""
         fake_user_id = str(uuid.uuid4())
-        resp = admin_client.get(
-            f"/api/v1/rbac/users/{fake_user_id}/permissions"
-        )
+        resp = admin_client.get(f"/api/v1/rbac/users/{fake_user_id}/permissions")
         assert resp.status_code == 404, resp.text
 
     def test_custom_roles_list_is_empty_by_default(self, admin_client, admin_user):
@@ -812,7 +832,9 @@ class TestEffectivePermissions:
         assert resp.status_code == 200, resp.text
         assert resp.json()["custom_roles"] == []
 
-    def test_developer_base_role_has_experiment_read(self, developer_client, developer_user):
+    def test_developer_base_role_has_experiment_read(
+        self, developer_client, developer_user
+    ):
         """Developer's effective permissions include experiment read access."""
         user_id = str(developer_user.id)
         resp = developer_client.get(f"/api/v1/rbac/users/{user_id}/permissions")
@@ -840,6 +862,7 @@ class TestEffectivePermissions:
 # ---------------------------------------------------------------------------
 # TestDirectPermissionGrants — POST and DELETE .../grant
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.integration
 @pytest.mark.requires_db
@@ -874,7 +897,9 @@ class TestDirectPermissionGrants:
         assert "resource" in data
         assert "actions" in data
 
-    def test_grant_appears_in_effective_permissions(self, developer_client, developer_user):
+    def test_grant_appears_in_effective_permissions(
+        self, developer_client, developer_user
+    ):
         """Developer grants themselves access — appears in their effective permissions.
 
         Note: Developer viewing own permissions is allowed; granting is ADMIN-only,
@@ -899,9 +924,7 @@ class TestDirectPermissionGrants:
         }
         admin_client.post(f"/api/v1/rbac/users/{user_id}/grant", json=payload)
 
-        resp = admin_client.delete(
-            f"/api/v1/rbac/users/{user_id}/grant/audit_log"
-        )
+        resp = admin_client.delete(f"/api/v1/rbac/users/{user_id}/grant/audit_log")
         assert resp.status_code == 200, resp.text
         data = resp.json()
         assert data["status"] == "revoked"
@@ -961,17 +984,15 @@ class TestDirectPermissionGrants:
             "resource": "experiment",
             "actions": ["delete"],
         }
-        resp = analyst_client.post(
-            f"/api/v1/rbac/users/{user_id}/grant", json=payload
-        )
+        resp = analyst_client.post(f"/api/v1/rbac/users/{user_id}/grant", json=payload)
         assert resp.status_code == 403, resp.text
 
-    def test_developer_cannot_revoke_direct_permission(self, developer_client, developer_user):
+    def test_developer_cannot_revoke_direct_permission(
+        self, developer_client, developer_user
+    ):
         """Developer cannot revoke direct permissions — returns 403."""
         user_id = str(developer_user.id)
-        resp = developer_client.delete(
-            f"/api/v1/rbac/users/{user_id}/grant/experiment"
-        )
+        resp = developer_client.delete(f"/api/v1/rbac/users/{user_id}/grant/experiment")
         assert resp.status_code == 403, resp.text
 
     def test_grant_with_expiry_date_accepted(self, admin_client, admin_user):
@@ -1010,12 +1031,12 @@ class TestDirectPermissionGrants:
         resp = admin_client.post(f"/api/v1/rbac/users/{user_id}/grant", json=payload)
         assert resp.status_code == 422, resp.text
 
-    def test_revoke_nonexistent_grant_returns_zero_count(self, admin_client, admin_user):
+    def test_revoke_nonexistent_grant_returns_zero_count(
+        self, admin_client, admin_user
+    ):
         """Revoking a resource with no grants returns 200 with count=0."""
         user_id = str(admin_user.id)
-        resp = admin_client.delete(
-            f"/api/v1/rbac/users/{user_id}/grant/permission"
-        )
+        resp = admin_client.delete(f"/api/v1/rbac/users/{user_id}/grant/permission")
         assert resp.status_code == 200, resp.text
         assert resp.json()["count"] == 0
 

@@ -18,17 +18,19 @@ Endpoint coverage:
   POST   /api/v1/experiments/{id}/start   start
   POST   /api/v1/experiments/{id}/pause   pause
 """
+
 import uuid
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from backend.app.models.experiment import Experiment, ExperimentStatus, MetricType
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _valid_create_payload(name: str = "Integration Test Experiment") -> dict:
     """Return a minimal valid ExperimentCreate payload."""
@@ -73,6 +75,7 @@ def _create_experiment(client: TestClient, name: str = "Test Experiment") -> dic
 # ---------------------------------------------------------------------------
 # Create experiment
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.integration
 class TestCreateExperiment:
@@ -142,8 +145,8 @@ class TestCreateExperiment:
         The endpoint checks for 'viewer' in the username and blocks the request.
         viewer_user from conftest has username='viewer_int' which contains 'viewer'.
         """
-        from backend.tests.integration.conftest import make_client_for_user
         from backend.app.main import app
+        from backend.tests.integration.conftest import make_client_for_user
 
         viewer_client = make_client_for_user(db_session, viewer_user)
         payload = _valid_create_payload("Viewer Attempt")
@@ -187,6 +190,7 @@ class TestCreateExperiment:
 # ---------------------------------------------------------------------------
 # List experiments
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.integration
 class TestListExperiments:
@@ -256,6 +260,7 @@ class TestListExperiments:
 # Get single experiment
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.integration
 class TestGetExperiment:
     """GET /api/v1/experiments/{id}"""
@@ -308,6 +313,7 @@ class TestGetExperiment:
 # Update experiment
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.integration
 class TestUpdateExperiment:
     """PUT /api/v1/experiments/{id}"""
@@ -344,7 +350,9 @@ class TestUpdateExperiment:
         exp = _create_experiment(admin_client, "DB Update Check")
 
         payload = {"name": "Persisted Update Name"}
-        put_response = admin_client.put(f"/api/v1/experiments/{exp['id']}", json=payload)
+        put_response = admin_client.put(
+            f"/api/v1/experiments/{exp['id']}", json=payload
+        )
         assert put_response.status_code == 200, put_response.text
 
         # Verify persistence by re-fetching via API
@@ -356,6 +364,7 @@ class TestUpdateExperiment:
 # ---------------------------------------------------------------------------
 # Delete experiment
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.integration
 class TestDeleteExperiment:
@@ -419,6 +428,7 @@ class TestDeleteExperiment:
 # ---------------------------------------------------------------------------
 # Start experiment
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.integration
 class TestStartExperiment:
@@ -485,6 +495,7 @@ class TestStartExperiment:
 # Pause experiment
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.integration
 class TestPauseExperiment:
     """POST /api/v1/experiments/{id}/pause"""
@@ -514,6 +525,7 @@ class TestPauseExperiment:
 # ---------------------------------------------------------------------------
 # Authorization boundary tests
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.integration
 class TestExperimentAuthorization:

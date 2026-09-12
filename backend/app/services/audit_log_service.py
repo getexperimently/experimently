@@ -5,16 +5,21 @@ Used by API endpoints to log create/update/delete operations.
 Events are HMAC-signed for tamper-evidence and carry configurable
 retention expiry dates for SOC 2 Type 2 and ISO 27001 compliance.
 """
+
 import logging
 import uuid
-from datetime import datetime, timezone, timedelta
-from typing import Optional, Any, Dict
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, Optional
 
 from sqlalchemy.orm import Session
 
-from backend.app.models.compliance_audit_event import ComplianceAuditEvent, AuditAction, AuditOutcome
-from backend.app.services.audit_signing_service import AuditSigningService
 from backend.app.core.config import settings
+from backend.app.models.compliance_audit_event import (
+    AuditAction,
+    AuditOutcome,
+    ComplianceAuditEvent,
+)
+from backend.app.services.audit_signing_service import AuditSigningService
 
 logger = logging.getLogger(__name__)
 

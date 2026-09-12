@@ -9,9 +9,9 @@ Tests cover:
 """
 
 import sys
-from pathlib import Path
 from collections import Counter
-from unittest.mock import patch, MagicMock
+from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -20,20 +20,20 @@ _lambda_dir = Path(__file__).resolve().parents[3] / "lambda"
 sys.path.insert(0, str(_lambda_dir / "shared"))
 sys.path.insert(0, str(_lambda_dir / "assignment"))
 
+from assignment_service import AssignmentService
 from consistent_hash import ConsistentHasher
 from models import (
     ExperimentConfig,
     ExperimentStatus,
-    VariantConfig,
-    MutualExclusionGroupConfig,
     GlobalHoldoutConfig,
+    MutualExclusionGroupConfig,
+    VariantConfig,
 )
-from assignment_service import AssignmentService
-
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_experiment_config(
     experiment_id: str = "exp_001",
@@ -63,6 +63,7 @@ def _make_service() -> AssignmentService:
 # ===========================================================================
 # TestConsistentHasherExtension (6 tests)
 # ===========================================================================
+
 
 class TestConsistentHasherExtension:
     """Tests for ConsistentHasher.get_normalized_hash."""
@@ -118,6 +119,7 @@ class TestConsistentHasherExtension:
 # TestGlobalHoldoutCheck (10 tests)
 # ===========================================================================
 
+
 class TestGlobalHoldoutCheck:
     """Tests for AssignmentService.check_global_holdout."""
 
@@ -158,7 +160,8 @@ class TestGlobalHoldoutCheck:
         """With holdout_percentage=1 (minimum), very few users excluded."""
         config = GlobalHoldoutConfig(holdout_percentage=1, is_active=True)
         excluded_count = sum(
-            1 for i in range(1000)
+            1
+            for i in range(1000)
             if self.service.check_global_holdout(f"user_{i}", config)
         )
         # ~1% of 1000 = ~10, allow generous range
@@ -168,11 +171,14 @@ class TestGlobalHoldoutCheck:
         """With holdout_percentage=20 (max), roughly 20% excluded."""
         config = GlobalHoldoutConfig(holdout_percentage=20, is_active=True)
         excluded_count = sum(
-            1 for i in range(1000)
+            1
+            for i in range(1000)
             if self.service.check_global_holdout(f"user_{i}", config)
         )
         # ~20% of 1000 = ~200, allow generous range
-        assert 100 < excluded_count < 350, f"Unexpected exclusion count: {excluded_count}"
+        assert 100 < excluded_count < 350, (
+            f"Unexpected exclusion count: {excluded_count}"
+        )
 
     def test_deterministic_same_user(self):
         """Same user always gets the same holdout result."""
@@ -187,11 +193,13 @@ class TestGlobalHoldoutCheck:
         config_15 = GlobalHoldoutConfig(holdout_percentage=15, is_active=True)
 
         excluded_5 = sum(
-            1 for i in range(1000)
+            1
+            for i in range(1000)
             if self.service.check_global_holdout(f"user_{i}", config_5)
         )
         excluded_15 = sum(
-            1 for i in range(1000)
+            1
+            for i in range(1000)
             if self.service.check_global_holdout(f"user_{i}", config_15)
         )
         assert excluded_15 > excluded_5
@@ -208,16 +216,20 @@ class TestGlobalHoldoutCheck:
         """1% holdout excludes approximately 1% of users."""
         config = GlobalHoldoutConfig(holdout_percentage=1, is_active=True)
         excluded_count = sum(
-            1 for i in range(10000)
+            1
+            for i in range(10000)
             if self.service.check_global_holdout(f"user_{i}", config)
         )
         # ~1% of 10000 = ~100, allow generous range
-        assert 30 < excluded_count < 250, f"Unexpected exclusion count: {excluded_count}"
+        assert 30 < excluded_count < 250, (
+            f"Unexpected exclusion count: {excluded_count}"
+        )
 
 
 # ===========================================================================
 # TestMutualExclusionCheck (12 tests)
 # ===========================================================================
+
 
 class TestMutualExclusionCheck:
     """Tests for AssignmentService.check_mutual_exclusion."""
@@ -394,7 +406,9 @@ class TestMutualExclusionCheck:
             r_b = self.service.check_mutual_exclusion(uid, "exp_1", config_b)
             if r_a != r_b:
                 differences += 1
-        assert differences > 0, "Expected different group_ids to produce different selections"
+        assert differences > 0, (
+            "Expected different group_ids to produce different selections"
+        )
 
     def test_empty_experiment_ids_excluded(self):
         """Empty experiment_ids list results in exclusion (fallback)."""
@@ -411,6 +425,7 @@ class TestMutualExclusionCheck:
 # ===========================================================================
 # TestAssignmentFlowIntegration (6 tests)
 # ===========================================================================
+
 
 class TestAssignmentFlowIntegration:
     """Tests for the complete assignment flow with holdout and exclusion checks."""

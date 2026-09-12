@@ -9,9 +9,10 @@ Tests validating compliance with OWASP Top 10 security requirements:
 7. Authentication Failures
 9. Logging & Monitoring Failures
 """
-import pytest
-from unittest.mock import patch, MagicMock
 
+from unittest.mock import MagicMock, patch
+
+import pytest
 
 # ---------------------------------------------------------------------------
 # OWASP #1: Broken Access Control
@@ -29,13 +30,11 @@ class TestBrokenAccessControl:
         for role in UserRole:
             resources_covered = set(ROLE_PERMISSIONS.get(role, {}).keys())
             missing = required_resources - resources_covered
-            assert not missing, (
-                f"Role {role.value} missing permissions for: {missing}"
-            )
+            assert not missing, f"Role {role.value} missing permissions for: {missing}"
 
     def test_viewer_cannot_create(self):
         """VIEWER role must not have CREATE permission on any resource."""
-        from backend.app.core.permissions import has_permission, UserRole
+        from backend.app.core.permissions import UserRole, has_permission
 
         resources = ["experiment", "feature_flag", "user"]
         for resource in resources:
@@ -45,7 +44,7 @@ class TestBrokenAccessControl:
 
     def test_viewer_cannot_update(self):
         """VIEWER role must not have UPDATE permission on any resource."""
-        from backend.app.core.permissions import has_permission, UserRole
+        from backend.app.core.permissions import UserRole, has_permission
 
         resources = ["experiment", "feature_flag", "user"]
         for resource in resources:
@@ -55,7 +54,7 @@ class TestBrokenAccessControl:
 
     def test_viewer_cannot_delete(self):
         """VIEWER role must not have DELETE permission on any resource."""
-        from backend.app.core.permissions import has_permission, UserRole
+        from backend.app.core.permissions import UserRole, has_permission
 
         resources = ["experiment", "feature_flag", "user"]
         for resource in resources:
@@ -65,7 +64,7 @@ class TestBrokenAccessControl:
 
     def test_analyst_cannot_create_experiments(self):
         """ANALYST role must not be able to create experiments."""
-        from backend.app.core.permissions import has_permission, UserRole
+        from backend.app.core.permissions import UserRole, has_permission
 
         assert not has_permission(UserRole.ANALYST, "experiment", "CREATE"), (
             "ANALYST should not have CREATE on experiment"
@@ -73,9 +72,18 @@ class TestBrokenAccessControl:
 
     def test_admin_has_full_access(self):
         """ADMIN role must have all permissions on all resources."""
-        from backend.app.core.permissions import has_permission, UserRole, ResourceType, Action
+        from backend.app.core.permissions import (
+            Action,
+            ResourceType,
+            UserRole,
+            has_permission,
+        )
 
-        resources = [ResourceType.EXPERIMENT, ResourceType.FEATURE_FLAG, ResourceType.USER]
+        resources = [
+            ResourceType.EXPERIMENT,
+            ResourceType.FEATURE_FLAG,
+            ResourceType.USER,
+        ]
         actions = [Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE]
         for resource in resources:
             for action in actions:
@@ -171,6 +179,7 @@ class TestInjectionPrevention:
     def test_feature_flag_key_rejects_special_chars(self):
         """Feature flag keys must only allow safe characters (lowercase alphanumeric, hyphens, underscores)."""
         from pydantic import ValidationError
+
         from backend.app.schemas.feature_flag import FeatureFlagCreate
 
         invalid_keys = [
@@ -282,6 +291,7 @@ class TestAuthenticationSecurity:
     def test_password_min_length_enforced(self):
         """Passwords must have minimum length of 8 characters."""
         from pydantic import ValidationError
+
         from backend.app.schemas.auth import SignUpRequest
 
         with pytest.raises(ValidationError):
@@ -296,6 +306,7 @@ class TestAuthenticationSecurity:
     def test_username_min_length_enforced(self):
         """Usernames must have minimum length of 3 characters."""
         from pydantic import ValidationError
+
         from backend.app.schemas.auth import SignUpRequest
 
         with pytest.raises(ValidationError):
@@ -310,6 +321,7 @@ class TestAuthenticationSecurity:
     def test_email_validation(self):
         """Email must be validated as a proper email address."""
         from pydantic import ValidationError
+
         from backend.app.schemas.auth import SignUpRequest
 
         with pytest.raises(ValidationError):

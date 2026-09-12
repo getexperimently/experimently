@@ -52,7 +52,7 @@ export function useApi<T>(
     return () => {
       mountedRef.current = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+
   }, [execute, immediate]);
 
   return { data, loading, error, refetch: execute, setData };

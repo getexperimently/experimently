@@ -1,10 +1,11 @@
-import pytest
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
+import pytest
+
 from backend.app.models.experiment import Experiment, ExperimentStatus
-from backend.app.services.experiment_service import ExperimentService
 from backend.app.schemas.experiment import ScheduleConfig
+from backend.app.services.experiment_service import ExperimentService
 
 
 @pytest.fixture
@@ -43,16 +44,14 @@ def draft_experiment(db_session):
 class TestExperimentScheduling:
     """Tests for experiment scheduling functionality."""
 
-    def test_update_experiment_schedule_valid(self, experiment_service, draft_experiment):
+    def test_update_experiment_schedule_valid(
+        self, experiment_service, draft_experiment
+    ):
         """Test updating experiment schedule with valid data."""
         # Set up test data
         start_date = datetime.now(timezone.utc) + timedelta(days=1)
         end_date = start_date + timedelta(days=7)
-        schedule = {
-            "start_date": start_date,
-            "end_date": end_date,
-            "time_zone": "UTC"
-        }
+        schedule = {"start_date": start_date, "end_date": end_date, "time_zone": "UTC"}
 
         # Update schedule
         updated_experiment = experiment_service.update_experiment_schedule(
@@ -68,7 +67,9 @@ class TestExperimentScheduling:
         assert draft_experiment.start_date.replace(tzinfo=timezone.utc) == start_date
         assert draft_experiment.end_date.replace(tzinfo=timezone.utc) == end_date
 
-    def test_update_experiment_schedule_custom_timezone(self, experiment_service, draft_experiment):
+    def test_update_experiment_schedule_custom_timezone(
+        self, experiment_service, draft_experiment
+    ):
         """Test updating experiment schedule with custom timezone."""
         # Set up test data
         start_date = datetime.now(timezone.utc) + timedelta(days=1)
@@ -76,7 +77,7 @@ class TestExperimentScheduling:
         schedule = {
             "start_date": start_date,
             "end_date": end_date,
-            "time_zone": "America/New_York"
+            "time_zone": "America/New_York",
         }
 
         # Set metadata to empty dictionary
@@ -94,16 +95,14 @@ class TestExperimentScheduling:
         assert "time_zone" in draft_experiment.metadata
         assert draft_experiment.metadata["time_zone"] == "America/New_York"
 
-    def test_update_experiment_schedule_invalid_dates(self, experiment_service, draft_experiment):
+    def test_update_experiment_schedule_invalid_dates(
+        self, experiment_service, draft_experiment
+    ):
         """Test updating experiment schedule with invalid dates."""
         # Set up test data with end date before start date
         start_date = datetime.now(timezone.utc) + timedelta(days=2)
         end_date = datetime.now(timezone.utc) + timedelta(days=1)
-        schedule = {
-            "start_date": start_date,
-            "end_date": end_date,
-            "time_zone": "UTC"
-        }
+        schedule = {"start_date": start_date, "end_date": end_date, "time_zone": "UTC"}
 
         # Update schedule should fail
         with pytest.raises(ValueError) as exc_info:
@@ -111,7 +110,9 @@ class TestExperimentScheduling:
 
         assert "End date must be after start date" in str(exc_info.value)
 
-    def test_update_experiment_schedule_active_experiment(self, experiment_service, draft_experiment, db_session):
+    def test_update_experiment_schedule_active_experiment(
+        self, experiment_service, draft_experiment, db_session
+    ):
         """Test updating schedule for an active experiment which should fail."""
         # Set experiment to active
         draft_experiment.status = ExperimentStatus.ACTIVE
@@ -120,7 +121,7 @@ class TestExperimentScheduling:
         schedule = {
             "start_date": datetime.now(timezone.utc) + timedelta(days=1),
             "end_date": datetime.now(timezone.utc) + timedelta(days=7),
-            "time_zone": "UTC"
+            "time_zone": "UTC",
         }
 
         # Update schedule should fail

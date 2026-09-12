@@ -70,13 +70,11 @@ class LLMExperimentService:
         db.refresh(experiment)
         return experiment
 
-    def get_experiment(self, db: Session, experiment_id: UUID) -> Optional[LLMExperiment]:
+    def get_experiment(
+        self, db: Session, experiment_id: UUID
+    ) -> Optional[LLMExperiment]:
         """Retrieve a single LLM experiment with its variants."""
-        return (
-            db.query(LLMExperiment)
-            .filter(LLMExperiment.id == experiment_id)
-            .first()
-        )
+        return db.query(LLMExperiment).filter(LLMExperiment.id == experiment_id).first()
 
     def list_experiments(
         self,
@@ -89,13 +87,9 @@ class LLMExperimentService:
         """List LLM experiments with optional filters, returns (items, total)."""
         query = db.query(LLMExperiment)
         if status:
-            query = query.filter(
-                LLMExperiment.status == LLMExperimentStatus(status)
-            )
+            query = query.filter(LLMExperiment.status == LLMExperimentStatus(status))
         if task_type:
-            query = query.filter(
-                LLMExperiment.task_type == LLMTaskType(task_type)
-            )
+            query = query.filter(LLMExperiment.task_type == LLMTaskType(task_type))
         total = query.count()
         items = (
             query.order_by(LLMExperiment.created_at.desc())

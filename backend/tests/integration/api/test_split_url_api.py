@@ -25,6 +25,7 @@ depending on the service bug being fixed.
 
 All tests use the conftest.py role-specific client fixtures.
 """
+
 import uuid
 from typing import Any, Dict, List
 from unittest.mock import patch
@@ -33,10 +34,10 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _split_url_payload(
     name: str = "Split URL Integration Test",
@@ -45,8 +46,16 @@ def _split_url_payload(
     """Return a valid ExperimentCreate payload for a split_url experiment."""
     if url_variants is None:
         url_variants = [
-            {"name": "Control", "url": "https://example.com/original", "traffic_allocation": 50.0},
-            {"name": "Variant B", "url": "https://example.com/new", "traffic_allocation": 50.0},
+            {
+                "name": "Control",
+                "url": "https://example.com/original",
+                "traffic_allocation": 50.0,
+            },
+            {
+                "name": "Variant B",
+                "url": "https://example.com/new",
+                "traffic_allocation": 50.0,
+            },
         ]
     return {
         "name": name,
@@ -90,13 +99,16 @@ def _create_split_url_experiment(
     """Create a split URL experiment via the API and return response JSON."""
     payload = _split_url_payload(name=name, url_variants=url_variants)
     response = client.post("/api/v1/experiments/", json=payload)
-    assert response.status_code == 201, f"Failed to create split URL experiment: {response.text}"
+    assert response.status_code == 201, (
+        f"Failed to create split URL experiment: {response.text}"
+    )
     return response.json()
 
 
 # ---------------------------------------------------------------------------
 # Create Split URL experiments
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.integration
 @pytest.mark.requires_db
@@ -148,9 +160,21 @@ class TestCreateSplitUrlExperiment:
     def test_three_variant_split_url_creates_successfully(self, admin_client):
         """Split URL experiment with 3 URL variants (traffic=33/33/34) is accepted."""
         three_way_variants = [
-            {"name": "Control", "url": "https://example.com/a", "traffic_allocation": 33.0},
-            {"name": "Variant B", "url": "https://example.com/b", "traffic_allocation": 33.0},
-            {"name": "Variant C", "url": "https://example.com/c", "traffic_allocation": 34.0},
+            {
+                "name": "Control",
+                "url": "https://example.com/a",
+                "traffic_allocation": 33.0,
+            },
+            {
+                "name": "Variant B",
+                "url": "https://example.com/b",
+                "traffic_allocation": 33.0,
+            },
+            {
+                "name": "Variant C",
+                "url": "https://example.com/c",
+                "traffic_allocation": 34.0,
+            },
         ]
         payload = _split_url_payload("Three Way Split Test", three_way_variants)
         # Add third standard variant for experiment
@@ -181,6 +205,7 @@ class TestCreateSplitUrlExperiment:
 # Validation — split_url_config rejected payloads
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.integration
 @pytest.mark.requires_db
 class TestSplitUrlValidation:
@@ -189,7 +214,11 @@ class TestSplitUrlValidation:
     def test_single_variant_rejected(self, admin_client):
         """split_url_config with fewer than 2 URL variants is rejected with 422/400."""
         one_variant = [
-            {"name": "Only", "url": "https://example.com/only", "traffic_allocation": 100.0},
+            {
+                "name": "Only",
+                "url": "https://example.com/only",
+                "traffic_allocation": 100.0,
+            },
         ]
         payload = _split_url_payload("Single Variant Test", one_variant)
         response = admin_client.post("/api/v1/experiments/", json=payload)
@@ -198,8 +227,16 @@ class TestSplitUrlValidation:
     def test_traffic_not_summing_to_100_rejected(self, admin_client):
         """Traffic allocations that do not sum to 100 are rejected."""
         bad_variants = [
-            {"name": "Control", "url": "https://example.com/a", "traffic_allocation": 40.0},
-            {"name": "Variant B", "url": "https://example.com/b", "traffic_allocation": 40.0},
+            {
+                "name": "Control",
+                "url": "https://example.com/a",
+                "traffic_allocation": 40.0,
+            },
+            {
+                "name": "Variant B",
+                "url": "https://example.com/b",
+                "traffic_allocation": 40.0,
+            },
         ]
         payload = _split_url_payload("Bad Traffic Sum Test", bad_variants)
         response = admin_client.post("/api/v1/experiments/", json=payload)
@@ -208,8 +245,16 @@ class TestSplitUrlValidation:
     def test_traffic_exceeding_100_rejected(self, admin_client):
         """Traffic allocations that sum to more than 100 are rejected."""
         bad_variants = [
-            {"name": "Control", "url": "https://example.com/a", "traffic_allocation": 60.0},
-            {"name": "Variant B", "url": "https://example.com/b", "traffic_allocation": 60.0},
+            {
+                "name": "Control",
+                "url": "https://example.com/a",
+                "traffic_allocation": 60.0,
+            },
+            {
+                "name": "Variant B",
+                "url": "https://example.com/b",
+                "traffic_allocation": 60.0,
+            },
         ]
         payload = _split_url_payload("Traffic Over 100 Test", bad_variants)
         response = admin_client.post("/api/v1/experiments/", json=payload)
@@ -225,6 +270,7 @@ class TestSplitUrlValidation:
 # ---------------------------------------------------------------------------
 # GET /api/v1/experiments/{id} — retrieve experiment
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.integration
 @pytest.mark.requires_db
@@ -256,8 +302,13 @@ class TestGetSplitUrlExperiment:
                 {"name": "Variant B", "is_control": False, "traffic_allocation": 50},
             ],
             "metrics": [
-                {"name": "CR", "event_name": "purchase", "metric_type": "conversion",
-                 "is_primary": True, "minimum_sample_size": 100}
+                {
+                    "name": "CR",
+                    "event_name": "purchase",
+                    "metric_type": "conversion",
+                    "is_primary": True,
+                    "minimum_sample_size": 100,
+                }
             ],
         }
         response = admin_client.post("/api/v1/experiments/", json=ab_payload)
@@ -275,6 +326,7 @@ class TestGetSplitUrlExperiment:
 # ---------------------------------------------------------------------------
 # PUT /api/v1/experiments/{id} — update experiment
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.integration
 @pytest.mark.requires_db
@@ -447,8 +499,13 @@ class TestSplitUrlPreview:
                 {"name": "Variant B", "is_control": False, "traffic_allocation": 50},
             ],
             "metrics": [
-                {"name": "CR", "event_name": "purchase", "metric_type": "conversion",
-                 "is_primary": True, "minimum_sample_size": 100}
+                {
+                    "name": "CR",
+                    "event_name": "purchase",
+                    "metric_type": "conversion",
+                    "is_primary": True,
+                    "minimum_sample_size": 100,
+                }
             ],
         }
         resp = admin_client.post("/api/v1/experiments/", json=ab_payload)

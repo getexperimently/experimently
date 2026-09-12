@@ -108,16 +108,22 @@ test-sdk: ## Cross-SDK golden-vector contract tests
 # ---------------------------------------------------------------------------
 
 .PHONY: lint
-lint: ## Format check, import order, type check and lint
-	$(VENV)/bin/black --check backend/
-	$(VENV)/bin/isort --check-only backend/
-	$(VENV)/bin/flake8 backend/
-	cd frontend && npm run lint
+lint: ## Everything the `lint` CI job runs: ruff, eslint, tsc, hadolint, actionlint
+	$(VENV)/bin/ruff check backend/
+	$(VENV)/bin/ruff format --check backend/
+	cd frontend && npm run lint && npx tsc --noEmit
+	@if command -v hadolint >/dev/null; then \
+		hadolint backend/Dockerfile frontend/Dockerfile \
+			demo/shoplab/Dockerfile demo/streampulse/Dockerfile; \
+	else echo "hadolint not installed (brew install hadolint) - skipped"; fi
+	@if command -v actionlint >/dev/null; then \
+		SHELLCHECK_OPTS='-e SC2086 -e SC2034 -e SC2015 -e SC2046 -e SC2251' actionlint; \
+	else echo "actionlint not installed (brew install actionlint) - skipped"; fi
 
 .PHONY: format
-format: ## Format the backend in place
-	$(VENV)/bin/black backend/
-	$(VENV)/bin/isort backend/
+format: ## Format and auto-fix the backend in place (ruff replaces black + isort)
+	$(VENV)/bin/ruff format backend/
+	$(VENV)/bin/ruff check backend/ --fix
 
 .PHONY: openapi
 openapi: ## Regenerate the OpenAPI fixture the URL guard checks against

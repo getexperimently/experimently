@@ -1,14 +1,25 @@
-import pytest
 from unittest.mock import MagicMock, patch
+
+import pytest
 from fastapi import HTTPException
 
 from backend.app.api.deps import (
-    get_experiment_access, can_create_experiment, can_update_experiment, can_delete_experiment,
-    get_feature_flag_access, can_create_feature_flag, can_update_feature_flag, can_delete_feature_flag,
-    get_report_access, can_create_report, can_update_report, can_delete_report
+    can_create_experiment,
+    can_create_feature_flag,
+    can_create_report,
+    can_delete_experiment,
+    can_delete_feature_flag,
+    can_delete_report,
+    can_update_experiment,
+    can_update_feature_flag,
+    can_update_report,
+    get_experiment_access,
+    get_feature_flag_access,
+    get_report_access,
 )
-from backend.app.core.permissions import ResourceType, Action
+from backend.app.core.permissions import Action, ResourceType
 from backend.app.models.user import UserRole
+
 
 # Mock users with different roles
 @pytest.fixture
@@ -19,6 +30,7 @@ def admin_user():
     user.is_superuser = False
     return user
 
+
 @pytest.fixture
 def developer_user():
     user = MagicMock()
@@ -26,6 +38,7 @@ def developer_user():
     user.role = UserRole.DEVELOPER
     user.is_superuser = False
     return user
+
 
 @pytest.fixture
 def analyst_user():
@@ -35,6 +48,7 @@ def analyst_user():
     user.is_superuser = False
     return user
 
+
 @pytest.fixture
 def viewer_user():
     user = MagicMock()
@@ -43,6 +57,7 @@ def viewer_user():
     user.is_superuser = False
     return user
 
+
 @pytest.fixture
 def superuser():
     user = MagicMock()
@@ -50,6 +65,7 @@ def superuser():
     user.role = UserRole.ADMIN
     user.is_superuser = True
     return user
+
 
 # Mock resources
 @pytest.fixture
@@ -60,6 +76,7 @@ def mock_experiment():
     experiment.owner_id = 2  # Owned by developer
     return experiment
 
+
 @pytest.fixture
 def mock_feature_flag():
     feature_flag = MagicMock()
@@ -68,12 +85,14 @@ def mock_feature_flag():
     feature_flag.owner_id = 2  # Owned by developer
     return feature_flag
 
+
 @pytest.fixture
 def mock_report():
     report = MagicMock()
     report.id = 1
     report.owner_id = 3  # Owned by analyst
     return report
+
 
 class TestExperimentPermissionDeps:
     """Tests for experiment permission dependency functions."""
@@ -112,15 +131,24 @@ class TestExperimentPermissionDeps:
         # Assert
         assert result == mock_experiment
         # Verify both permission checks happened
-        mock_check_permission.assert_any_call(admin_user, ResourceType.EXPERIMENT, Action.READ)
-        mock_check_permission.assert_any_call(admin_user, ResourceType.EXPERIMENT, Action.UPDATE)
+        mock_check_permission.assert_any_call(
+            admin_user, ResourceType.EXPERIMENT, Action.READ
+        )
+        mock_check_permission.assert_any_call(
+            admin_user, ResourceType.EXPERIMENT, Action.UPDATE
+        )
 
     @patch("backend.app.api.deps.check_permission")
     @patch("backend.app.api.deps.check_ownership")
     def test_get_experiment_access_owner(
-        self, mock_check_ownership, mock_check_permission, mock_experiment, developer_user
+        self,
+        mock_check_ownership,
+        mock_check_permission,
+        mock_experiment,
+        developer_user,
     ):
         """Test experiment owner has access to their own experiment."""
+
         # Arrange - use a side_effect function that tracks calls
         def mock_check_permission_side_effect(user, resource, action):
             if action == Action.READ:
@@ -139,8 +167,12 @@ class TestExperimentPermissionDeps:
         assert result == mock_experiment
         # Verify both permission checks happened in the right order
         assert len(mock_check_permission.call_args_list) >= 2
-        mock_check_permission.assert_any_call(developer_user, ResourceType.EXPERIMENT, Action.READ)
-        mock_check_permission.assert_any_call(developer_user, ResourceType.EXPERIMENT, Action.UPDATE)
+        mock_check_permission.assert_any_call(
+            developer_user, ResourceType.EXPERIMENT, Action.READ
+        )
+        mock_check_permission.assert_any_call(
+            developer_user, ResourceType.EXPERIMENT, Action.UPDATE
+        )
         mock_check_ownership.assert_called_with(developer_user, mock_experiment)
 
     @patch("backend.app.api.deps.check_permission")
@@ -149,6 +181,7 @@ class TestExperimentPermissionDeps:
         self, mock_check_ownership, mock_check_permission, mock_experiment, analyst_user
     ):
         """Test non-owner without update permission is denied access if ownership check is required."""
+
         # Arrange
         def mock_check_permission_side_effect(user, resource, action):
             if action == Action.READ:
@@ -165,10 +198,16 @@ class TestExperimentPermissionDeps:
             get_experiment_access(mock_experiment, analyst_user)
 
         assert exc_info.value.status_code == 403
-        assert "You don't have permission to access this experiment" in str(exc_info.value.detail)
+        assert "You don't have permission to access this experiment" in str(
+            exc_info.value.detail
+        )
         # Verify both permission checks happened
-        mock_check_permission.assert_any_call(analyst_user, ResourceType.EXPERIMENT, Action.READ)
-        mock_check_permission.assert_any_call(analyst_user, ResourceType.EXPERIMENT, Action.UPDATE)
+        mock_check_permission.assert_any_call(
+            analyst_user, ResourceType.EXPERIMENT, Action.READ
+        )
+        mock_check_permission.assert_any_call(
+            analyst_user, ResourceType.EXPERIMENT, Action.UPDATE
+        )
 
     @patch("backend.app.api.deps.check_permission")
     def test_can_create_experiment_with_permission(
@@ -183,7 +222,9 @@ class TestExperimentPermissionDeps:
 
         # Assert
         assert result is True
-        mock_check_permission.assert_called_with(developer_user, ResourceType.EXPERIMENT, Action.CREATE)
+        mock_check_permission.assert_called_with(
+            developer_user, ResourceType.EXPERIMENT, Action.CREATE
+        )
 
     @patch("backend.app.api.deps.check_permission")
     def test_can_create_experiment_without_permission(
@@ -198,7 +239,9 @@ class TestExperimentPermissionDeps:
             can_create_experiment(viewer_user)
 
         assert exc_info.value.status_code == 403
-        mock_check_permission.assert_called_with(viewer_user, ResourceType.EXPERIMENT, Action.CREATE)
+        mock_check_permission.assert_called_with(
+            viewer_user, ResourceType.EXPERIMENT, Action.CREATE
+        )
 
 
 class TestFeatureFlagPermissionDeps:
@@ -230,6 +273,7 @@ class TestFeatureFlagPermissionDeps:
         self, mock_check_ownership, mock_check_permission, mock_feature_flag, admin_user
     ):
         """Test non-owner with update permission has access to feature flags."""
+
         # Arrange - simulate READ permission first, then UPDATE permission
         def mock_check_permission_side_effect(user, resource, action):
             if action == Action.READ:
@@ -256,9 +300,14 @@ class TestFeatureFlagPermissionDeps:
     @patch("backend.app.api.deps.check_permission")
     @patch("backend.app.api.deps.check_ownership")
     async def test_get_feature_flag_access_owner_no_update_permission(
-        self, mock_check_ownership, mock_check_permission, mock_feature_flag, developer_user
+        self,
+        mock_check_ownership,
+        mock_check_permission,
+        mock_feature_flag,
+        developer_user,
     ):
         """Test feature flag owner with READ but without UPDATE permission still has access."""
+
         # Arrange - has READ permission but not UPDATE permission
         def mock_check_permission_side_effect(user, resource, action):
             if action == Action.READ:
@@ -295,7 +344,9 @@ class TestFeatureFlagPermissionDeps:
 
         # Assert
         assert result is True
-        mock_check_permission.assert_called_with(developer_user, ResourceType.FEATURE_FLAG, Action.CREATE)
+        mock_check_permission.assert_called_with(
+            developer_user, ResourceType.FEATURE_FLAG, Action.CREATE
+        )
 
     @pytest.mark.asyncio
     @patch("backend.app.api.deps.check_permission")
@@ -311,7 +362,10 @@ class TestFeatureFlagPermissionDeps:
             await can_create_feature_flag(viewer_user)
 
         assert exc_info.value.status_code == 403
-        mock_check_permission.assert_called_with(viewer_user, ResourceType.FEATURE_FLAG, Action.CREATE)
+        mock_check_permission.assert_called_with(
+            viewer_user, ResourceType.FEATURE_FLAG, Action.CREATE
+        )
+
 
 # Add the new TestFeatureFlagPermissions class
 class TestFeatureFlagPermissions:
@@ -320,7 +374,9 @@ class TestFeatureFlagPermissions:
     @pytest.mark.asyncio
     @patch("backend.app.api.deps.check_permission")
     @patch("backend.app.api.deps.check_ownership")
-    async def test_admin_can_access_all_feature_flags(self, mock_check_ownership, mock_check_permission, admin_user, mock_feature_flag):
+    async def test_admin_can_access_all_feature_flags(
+        self, mock_check_ownership, mock_check_permission, admin_user, mock_feature_flag
+    ):
         """Test that admin users can access all feature flags."""
         # Arrange
         mock_check_permission.return_value = True
@@ -331,11 +387,15 @@ class TestFeatureFlagPermissions:
 
         # Assert
         assert result == mock_feature_flag
-        mock_check_permission.assert_any_call(admin_user, ResourceType.FEATURE_FLAG, Action.READ)
+        mock_check_permission.assert_any_call(
+            admin_user, ResourceType.FEATURE_FLAG, Action.READ
+        )
 
     @pytest.mark.asyncio
     @patch("backend.app.api.deps.check_permission")
-    async def test_developer_can_create_feature_flags(self, mock_check_permission, developer_user):
+    async def test_developer_can_create_feature_flags(
+        self, mock_check_permission, developer_user
+    ):
         """Test that developers can create feature flags."""
         # Arrange
         mock_check_permission.return_value = True
@@ -345,13 +405,22 @@ class TestFeatureFlagPermissions:
 
         # Assert
         assert result is True
-        mock_check_permission.assert_called_with(developer_user, ResourceType.FEATURE_FLAG, Action.CREATE)
+        mock_check_permission.assert_called_with(
+            developer_user, ResourceType.FEATURE_FLAG, Action.CREATE
+        )
 
     @pytest.mark.asyncio
     @patch("backend.app.api.deps.check_permission")
     @patch("backend.app.api.deps.check_ownership")
-    async def test_analyst_can_view_feature_flags(self, mock_check_ownership, mock_check_permission, analyst_user, mock_feature_flag):
+    async def test_analyst_can_view_feature_flags(
+        self,
+        mock_check_ownership,
+        mock_check_permission,
+        analyst_user,
+        mock_feature_flag,
+    ):
         """Test that analysts can view feature flags but not create them."""
+
         # Set up for READ and UPDATE access test
         def read_permission_side_effect(user, resource, action):
             if action == Action.READ:
@@ -381,8 +450,15 @@ class TestFeatureFlagPermissions:
     @pytest.mark.asyncio
     @patch("backend.app.api.deps.check_permission")
     @patch("backend.app.api.deps.check_ownership")
-    async def test_viewer_has_read_only_access(self, mock_check_ownership, mock_check_permission, viewer_user, mock_feature_flag):
+    async def test_viewer_has_read_only_access(
+        self,
+        mock_check_ownership,
+        mock_check_permission,
+        viewer_user,
+        mock_feature_flag,
+    ):
         """Test that viewers have read-only access to feature flags."""
+
         # First test READ permission but no UPDATE permission
         def permission_side_effect(user, resource, action):
             if action == Action.READ:
@@ -421,7 +497,13 @@ class TestFeatureFlagPermissions:
     @pytest.mark.asyncio
     @patch("backend.app.api.deps.check_permission")
     @patch("backend.app.api.deps.check_ownership")
-    async def test_unauthorized_attempts_return_403(self, mock_check_ownership, mock_check_permission, viewer_user, mock_feature_flag):
+    async def test_unauthorized_attempts_return_403(
+        self,
+        mock_check_ownership,
+        mock_check_permission,
+        viewer_user,
+        mock_feature_flag,
+    ):
         """Test that unauthorized actions return 403 Forbidden."""
         # Set up mock behavior to deny all access
         mock_check_permission.return_value = False
@@ -440,6 +522,7 @@ class TestFeatureFlagPermissions:
             await can_delete_feature_flag(mock_feature_flag, viewer_user)
         assert exc_info.value.status_code == 403
 
+
 class TestReportPermissionDeps:
     """Tests for report permission dependency functions."""
 
@@ -450,6 +533,7 @@ class TestReportPermissionDeps:
         self, mock_check_ownership, mock_check_permission, mock_report, analyst_user
     ):
         """Test report owner has access to their own report."""
+
         # Arrange - has READ permission but not UPDATE permission
         def mock_check_permission_side_effect(user, resource, action):
             if action == Action.READ:
@@ -479,6 +563,7 @@ class TestReportPermissionDeps:
         self, mock_check_ownership, mock_check_permission, mock_report, viewer_user
     ):
         """Test non-owner without update permission is denied access."""
+
         # Arrange - has READ permission but not UPDATE permission
         def mock_check_permission_side_effect(user, resource, action):
             if action == Action.READ:
@@ -515,7 +600,9 @@ class TestReportPermissionDeps:
 
         # Assert
         assert result is True
-        mock_check_permission.assert_called_with(analyst_user, ResourceType.REPORT, Action.UPDATE)
+        mock_check_permission.assert_called_with(
+            analyst_user, ResourceType.REPORT, Action.UPDATE
+        )
 
     @pytest.mark.asyncio
     @patch("backend.app.api.deps.check_permission")
@@ -531,4 +618,6 @@ class TestReportPermissionDeps:
             await can_delete_report(mock_report, viewer_user)
 
         assert exc_info.value.status_code == 403
-        mock_check_permission.assert_called_with(viewer_user, ResourceType.REPORT, Action.DELETE)
+        mock_check_permission.assert_called_with(
+            viewer_user, ResourceType.REPORT, Action.DELETE
+        )

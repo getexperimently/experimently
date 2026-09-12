@@ -10,23 +10,25 @@ Tests cover:
 - Field validation and error handling
 """
 
-import pytest
 import uuid
 from datetime import datetime, timezone
 from typing import List
 
+import pytest
 from pydantic import ValidationError
 
-from backend.app.schemas.compliance_audit import (
-    ComplianceAuditEventCreate,
-    ComplianceAuditEventResponse,
-    ComplianceAuditEventListResponse,
-    AuditAction,
-    AuditOutcome,
-)
 from backend.app.models.compliance_audit_event import (
     AuditAction as ModelAuditAction,
+)
+from backend.app.models.compliance_audit_event import (
     AuditOutcome as ModelAuditOutcome,
+)
+from backend.app.schemas.compliance_audit import (
+    AuditAction,
+    AuditOutcome,
+    ComplianceAuditEventCreate,
+    ComplianceAuditEventListResponse,
+    ComplianceAuditEventResponse,
 )
 
 

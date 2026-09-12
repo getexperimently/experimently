@@ -12,10 +12,10 @@ from typing import List, Optional, Set
 import numpy as np
 from scipy import stats
 
-
 # ---------------------------------------------------------------------------
 # Result dataclasses
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class InteractionResult:
@@ -63,6 +63,7 @@ class InteractionAnalysis:
 # ---------------------------------------------------------------------------
 # Service implementation
 # ---------------------------------------------------------------------------
+
 
 class InteractionDetectionService:
     """Service for detecting interactions between simultaneously running experiments."""
@@ -140,8 +141,12 @@ class InteractionDetectionService:
         total = table.sum()
         row_marginal_both = both_treatments + treatment_a_only
         col_marginal_both = both_treatments + treatment_b_only
-        expected_both = (row_marginal_both * col_marginal_both) / total if total > 0 else 0
-        interaction_effect_size = (both_treatments - expected_both) / total if total > 0 else 0.0
+        expected_both = (
+            (row_marginal_both * col_marginal_both) / total if total > 0 else 0
+        )
+        interaction_effect_size = (
+            (both_treatments - expected_both) / total if total > 0 else 0.0
+        )
 
         has_interaction = bool(p_value < 0.05)
         warning_message = (
@@ -397,7 +402,10 @@ class InteractionDetectionService:
         Falls back to an empty set if the query fails or returns nothing.
         """
         try:
-            from backend.app.models.assignment import Assignment  # noqa: WPS433 — local import
+            from backend.app.models.assignment import (
+                Assignment,  # noqa: WPS433 — local import
+            )
+
             rows = (
                 db.query(Assignment.user_id)
                 .filter(Assignment.experiment_id == experiment_id)
@@ -410,7 +418,11 @@ class InteractionDetectionService:
     def _get_active_experiment_ids(self, db) -> List[str]:
         """Return a list of IDs for all currently active experiments."""
         try:
-            from backend.app.models.experiment import Experiment, ExperimentStatus  # noqa: WPS433
+            from backend.app.models.experiment import (  # noqa: WPS433
+                Experiment,
+                ExperimentStatus,
+            )
+
             rows = (
                 db.query(Experiment.id)
                 .filter(Experiment.status == ExperimentStatus.ACTIVE)

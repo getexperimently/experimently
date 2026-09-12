@@ -1,17 +1,17 @@
 """Metrics models package."""
 
 from backend.app.models.metrics.metric import (
-    MetricType,
-    AggregationPeriod,
-    RawMetric,
     AggregatedMetric,
+    AggregationPeriod,
     ErrorLog,
+    MetricType,
+    RawMetric,
 )
 
 __all__ = [
-    "MetricType",
-    "AggregationPeriod",
-    "RawMetric",
     "AggregatedMetric",
+    "AggregationPeriod",
     "ErrorLog",
+    "MetricType",
+    "RawMetric",
 ]

@@ -6,48 +6,54 @@ experiments in the experimentation platform. It implements the core functionalit
 AB testing and feature experimentation.
 """
 
-from uuid import UUID
-from typing import List, Dict, Any, Optional
 from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
+from uuid import UUID
 
 from fastapi import (
     APIRouter,
+    BackgroundTasks,
+    Body,
     Depends,
     HTTPException,
-    Query,
     Path,
-    Body,
-    status,
+    Query,
     Response,
-    BackgroundTasks,
+    status,
 )
-from sqlalchemy.orm import Session
 from fastapi.encoders import jsonable_encoder
+from sqlalchemy.orm import Session
 
 from backend.app.api import deps
-from backend.app.models.user import User
+from backend.app.api.v1.endpoints import results as results_endpoints
+from backend.app.core.logging import logger
+from backend.app.core.permissions import (
+    Action,
+    ResourceType,
+    check_ownership,
+    check_permission,
+    get_permission_error_message,
+)
+from backend.app.core.scheduler import experiment_scheduler
+from backend.app.models.compliance_audit_event import AuditAction, AuditOutcome
 from backend.app.models.experiment import Experiment, ExperimentStatus
+from backend.app.models.user import User
 from backend.app.schemas.experiment import (
     ExperimentCreate,
-    ExperimentUpdate,
-    ExperimentResponse,
     ExperimentListResponse,
+    ExperimentResponse,
+    ExperimentUpdate,
     ScheduleConfig,
 )
 from backend.app.schemas.results import ExperimentResultsResponse
-from backend.app.api.v1.endpoints import results as results_endpoints
+from backend.app.schemas.split_url import SplitUrlConfig
+from backend.app.services import split_url_service
+from backend.app.services.analysis_service import AnalysisService
+from backend.app.services.audit_log_service import AuditLogService
 from backend.app.services.experiment_service import (
     ExperimentService,
     resolve_experiment_status,
 )
-from backend.app.services.analysis_service import AnalysisService
-from backend.app.core.logging import logger
-from backend.app.core.permissions import check_permission, ResourceType, Action, get_permission_error_message, check_ownership
-from backend.app.core.scheduler import experiment_scheduler
-from backend.app.services.audit_log_service import AuditLogService
-from backend.app.models.compliance_audit_event import AuditAction, AuditOutcome
-from backend.app.services import split_url_service
-from backend.app.schemas.split_url import SplitUrlConfig
 
 # Create router with tag for documentation grouping
 router = APIRouter(
@@ -182,7 +188,7 @@ async def list_experiments(
         # Let deliberate 4xx responses through instead of wrapping them in a 500.
         raise
     except Exception as e:
-        logger.error(f"Error listing experiments: {str(e)}")
+        logger.error(f"Error listing experiments: {e!s}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -194,9 +200,7 @@ async def list_experiments(
     response_description="Returns the created experiment",
 )
 async def create_experiment(
-    experiment_in: ExperimentCreate = Body(
-        ..., description="Experiment creation data"
-    ),
+    experiment_in: ExperimentCreate = Body(..., description="Experiment creation data"),
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_active_user),
     cache_control: Dict[str, Any] = Depends(deps.get_cache_control),
@@ -223,7 +227,6 @@ async def create_experiment(
         )
 
     try:
-
         # Create experiment service
         experiment_service = ExperimentService(db)
 
@@ -234,6 +237,7 @@ async def create_experiment(
         # Ensure status is a string (convert enum to value if needed)
         if "status" in experiment_data:
             from backend.app.models.experiment import ExperimentStatus
+
             if isinstance(experiment_data["status"], ExperimentStatus):
                 experiment_data["status"] = experiment_data["status"].value
             elif not isinstance(experiment_data["status"], str):
@@ -260,7 +264,9 @@ async def create_experiment(
                 new_value={"name": exp_name},
             )
         except Exception as _audit_err:
-            logger.warning(f"Compliance audit logging failed for experiment create: {_audit_err}")
+            logger.warning(
+                f"Compliance audit logging failed for experiment create: {_audit_err}"
+            )
 
         # Invalidate cache if enabled
         if cache_control.enabled and cache_control.redis:
@@ -276,14 +282,14 @@ async def create_experiment(
                     for key in cache_control.redis.scan_iter(match=pattern):
                         cache_control.redis.delete(key)
                 except Exception as e:
-                    logger.warning(f"Cache invalidation failed: {str(e)}")
+                    logger.warning(f"Cache invalidation failed: {e!s}")
 
         return ExperimentResponse.model_validate(experiment)
     except HTTPException:
         # Let deliberate 4xx responses through instead of wrapping them in a 500.
         raise
     except Exception as e:
-        logger.error(f"Error creating experiment: {str(e)}")
+        logger.error(f"Error creating experiment: {e!s}")
         raise HTTPException(status_code=400, detail=str(e))
 
 
@@ -337,7 +343,9 @@ async def get_experiment(
         elif not check_permission(current_user, ResourceType.EXPERIMENT, Action.READ):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=get_permission_error_message(ResourceType.EXPERIMENT, Action.READ),
+                detail=get_permission_error_message(
+                    ResourceType.EXPERIMENT, Action.READ
+                ),
             )
         # Non-superusers must be the owner (this applies to viewers)
         elif not check_ownership(current_user, experiment):
@@ -359,22 +367,37 @@ async def get_experiment(
                 if "model_dump() got an unexpected keyword argument 'mode'" in str(e):
                     try:
                         # Try to use model_dump if it exists
-                        if hasattr(experiment, 'model_dump'):
+                        if hasattr(experiment, "model_dump"):
                             experiment_dict = experiment.model_dump()
-                            response = ExperimentResponse.model_validate(experiment_dict)
+                            response = ExperimentResponse.model_validate(
+                                experiment_dict
+                            )
                         # Fall back to dict() for older pydantic versions
-                        elif hasattr(experiment, '__table__') and hasattr(experiment.__table__, 'columns'):
-                            experiment_dict = {c.name: getattr(experiment, c.name) for c in experiment.__table__.columns}
-                            response = ExperimentResponse.model_validate(experiment_dict)
+                        elif hasattr(experiment, "__table__") and hasattr(
+                            experiment.__table__, "columns"
+                        ):
+                            experiment_dict = {
+                                c.name: getattr(experiment, c.name)
+                                for c in experiment.__table__.columns
+                            }
+                            response = ExperimentResponse.model_validate(
+                                experiment_dict
+                            )
                         else:
                             # Final fallback - convert all attributes
-                            experiment_dict = {k: v for k, v in experiment.__dict__.items() if not k.startswith('_')}
-                            response = ExperimentResponse.model_validate(experiment_dict)
+                            experiment_dict = {
+                                k: v
+                                for k, v in experiment.__dict__.items()
+                                if not k.startswith("_")
+                            }
+                            response = ExperimentResponse.model_validate(
+                                experiment_dict
+                            )
                     except Exception as ex:
-                        logger.error(f"Error serializing experiment: {str(ex)}")
+                        logger.error(f"Error serializing experiment: {ex!s}")
                         raise HTTPException(
                             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                            detail=f"Error serializing experiment: {str(ex)}"
+                            detail=f"Error serializing experiment: {ex!s}",
                         )
                 else:
                     raise
@@ -392,7 +415,7 @@ async def get_experiment(
         # Let deliberate 4xx responses through instead of wrapping them in a 500.
         raise
     except Exception as e:
-        logger.error(f"Error getting experiment: {str(e)}")
+        logger.error(f"Error getting experiment: {e!s}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -440,10 +463,13 @@ async def update_experiment(
         experiment = deps.get_experiment_access(experiment, current_user)
 
         # Prevent updates to non-draft experiments unless user is superuser
-        if experiment.status != ExperimentStatus.DRAFT and not current_user.is_superuser:
+        if (
+            experiment.status != ExperimentStatus.DRAFT
+            and not current_user.is_superuser
+        ):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Cannot update experiments in {experiment.status.value} status"
+                detail=f"Cannot update experiments in {experiment.status.value} status",
             )
 
         # Get update data
@@ -465,7 +491,7 @@ async def update_experiment(
                 if field in update_data:
                     raise HTTPException(
                         status_code=status.HTTP_403_FORBIDDEN,
-                        detail=f"Cannot update {field} for experiments in {experiment.status.value} status"
+                        detail=f"Cannot update {field} for experiments in {experiment.status.value} status",
                     )
 
         # Capture pre-update snapshot for audit trail
@@ -478,7 +504,9 @@ async def update_experiment(
         experiment_service = ExperimentService(db)
 
         # Update experiment
-        updated_experiment = experiment_service.update_experiment(experiment, update_data)
+        updated_experiment = experiment_service.update_experiment(
+            experiment, update_data
+        )
 
         # Compliance audit logging (non-fatal)
         try:
@@ -493,7 +521,9 @@ async def update_experiment(
                 new_value={"name": getattr(updated_experiment, "name", None)},
             )
         except Exception as _audit_err:
-            logger.warning(f"Compliance audit logging failed for experiment update: {_audit_err}")
+            logger.warning(
+                f"Compliance audit logging failed for experiment update: {_audit_err}"
+            )
 
         # Invalidate cache if enabled
         if cache_control.enabled and cache_control.redis:
@@ -516,22 +546,31 @@ async def update_experiment(
             if "model_dump() got an unexpected keyword argument 'mode'" in str(e):
                 try:
                     # Try to use model_dump if it exists
-                    if hasattr(updated_experiment, 'model_dump'):
+                    if hasattr(updated_experiment, "model_dump"):
                         experiment_dict = updated_experiment.model_dump()
                         return ExperimentResponse.model_validate(experiment_dict)
                     # Fall back to dict() for older pydantic versions
-                    elif hasattr(updated_experiment, '__table__') and hasattr(updated_experiment.__table__, 'columns'):
-                        experiment_dict = {c.name: getattr(updated_experiment, c.name) for c in updated_experiment.__table__.columns}
+                    elif hasattr(updated_experiment, "__table__") and hasattr(
+                        updated_experiment.__table__, "columns"
+                    ):
+                        experiment_dict = {
+                            c.name: getattr(updated_experiment, c.name)
+                            for c in updated_experiment.__table__.columns
+                        }
                         return ExperimentResponse.model_validate(experiment_dict)
                     else:
                         # Final fallback - convert all attributes
-                        experiment_dict = {k: v for k, v in updated_experiment.__dict__.items() if not k.startswith('_')}
+                        experiment_dict = {
+                            k: v
+                            for k, v in updated_experiment.__dict__.items()
+                            if not k.startswith("_")
+                        }
                         return ExperimentResponse.model_validate(experiment_dict)
                 except Exception as ex:
-                    logger.error(f"Error serializing experiment update: {str(ex)}")
+                    logger.error(f"Error serializing experiment update: {ex!s}")
                     raise HTTPException(
                         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                        detail=f"Error serializing experiment update: {str(ex)}"
+                        detail=f"Error serializing experiment update: {ex!s}",
                     )
             else:
                 raise
@@ -539,7 +578,7 @@ async def update_experiment(
         # Let deliberate 4xx responses through instead of wrapping them in a 500.
         raise
     except Exception as e:
-        logger.error(f"Error updating experiment: {str(e)}")
+        logger.error(f"Error updating experiment: {e!s}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -580,7 +619,10 @@ async def update_experiment(
             "content": {
                 "application/json": {
                     "example": {
-                        "error": {"status_code": 400, "message": "Experiment not in DRAFT status"}
+                        "error": {
+                            "status_code": 400,
+                            "message": "Experiment not in DRAFT status",
+                        }
                     }
                 }
             },
@@ -589,7 +631,10 @@ async def update_experiment(
 )
 async def delete_experiment(
     experiment_id: UUID = Path(..., description="The ID of the experiment to delete"),
-    experiment_key: str = Query(..., description="Key or ID of the experiment to delete (must match experiment_id)"),
+    experiment_key: str = Query(
+        ...,
+        description="Key or ID of the experiment to delete (must match experiment_id)",
+    ),
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_active_user),
     cache_control: Dict[str, Any] = Depends(deps.get_cache_control),
@@ -626,7 +671,7 @@ async def delete_experiment(
     if str(experiment.id) != experiment_key:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="experiment_key does not match experiment_id"
+            detail="experiment_key does not match experiment_id",
         )
 
     # Check permission to delete experiment
@@ -642,7 +687,9 @@ async def delete_experiment(
         if not check_permission(current_user, ResourceType.EXPERIMENT, Action.DELETE):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=get_permission_error_message(ResourceType.EXPERIMENT, Action.DELETE),
+                detail=get_permission_error_message(
+                    ResourceType.EXPERIMENT, Action.DELETE
+                ),
             )
 
     # Additional check for experiment status for non-draft experiments
@@ -675,7 +722,9 @@ async def delete_experiment(
             old_value=deleted_exp_snapshot,
         )
     except Exception as _audit_err:
-        logger.warning(f"Compliance audit logging failed for experiment delete: {_audit_err}")
+        logger.warning(
+            f"Compliance audit logging failed for experiment delete: {_audit_err}"
+        )
 
     # Invalidate cache if enabled
     if cache_control.enabled and cache_control.redis:
@@ -792,7 +841,7 @@ async def start_experiment(
         # Let deliberate 4xx responses through instead of wrapping them in a 500.
         raise
     except Exception as e:
-        logger.error(f"Error starting experiment: {str(e)}")
+        logger.error(f"Error starting experiment: {e!s}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -869,7 +918,7 @@ async def pause_experiment(
         # Let deliberate 4xx responses through instead of wrapping them in a 500.
         raise
     except Exception as e:
-        logger.error(f"Error pausing experiment: {str(e)}")
+        logger.error(f"Error pausing experiment: {e!s}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -918,14 +967,14 @@ async def update_experiment_schedule(
         if not check_permission(current_user, ResourceType.EXPERIMENT, Action.UPDATE):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"You don't have permission to update experiments",
+                detail="You don't have permission to update experiments",
             )
 
         # Step 2: Check ownership for non-superusers
         if not current_user.is_superuser and experiment.owner_id != current_user.id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"You don't have permission to update this experiment",
+                detail="You don't have permission to update this experiment",
             )
 
         # Create experiment service
@@ -936,7 +985,7 @@ async def update_experiment_schedule(
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Cannot schedule experiment with status {experiment.status}. "
-                f"Experiment must be in DRAFT or PAUSED status."
+                f"Experiment must be in DRAFT or PAUSED status.",
             )
 
         # Update experiment schedule
@@ -945,20 +994,21 @@ async def update_experiment_schedule(
             schedule_dict = {
                 "start_date": schedule.start_date,
                 "end_date": schedule.end_date,
-                "time_zone": schedule.time_zone
+                "time_zone": schedule.time_zone,
             }
 
             # Update the experiment
             updated_experiment = experiment_service.update_experiment_schedule(
-                experiment=experiment,
-                schedule=schedule_dict
+                experiment=experiment, schedule=schedule_dict
             )
 
         except ValueError as e:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
         # Invalidate cache if enabled
-        if getattr(cache_control, 'enabled', False) and getattr(cache_control, 'redis', None):
+        if getattr(cache_control, "enabled", False) and getattr(
+            cache_control, "redis", None
+        ):
             # Delete specific experiment cache
             experiment_cache_key = f"experiment:{experiment_id}"
             cache_control.redis.delete(experiment_cache_key)
@@ -970,7 +1020,7 @@ async def update_experiment_schedule(
 
         return ExperimentResponse.model_validate(updated_experiment)
     except Exception as e:
-        logger.error(f"Error updating experiment schedule: {str(e)}")
+        logger.error(f"Error updating experiment schedule: {e!s}")
         if isinstance(e, HTTPException):
             raise e
         raise HTTPException(status_code=500, detail=str(e))
@@ -1054,7 +1104,7 @@ async def complete_experiment(
         # Let deliberate 4xx responses through instead of wrapping them in a 500.
         raise
     except Exception as e:
-        logger.error(f"Error completing experiment: {str(e)}")
+        logger.error(f"Error completing experiment: {e!s}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -1188,7 +1238,7 @@ async def archive_experiment(
         # Let deliberate 4xx responses through instead of wrapping them in a 500.
         raise
     except Exception as e:
-        logger.error(f"Error archiving experiment: {str(e)}")
+        logger.error(f"Error archiving experiment: {e!s}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -1256,7 +1306,7 @@ async def clone_experiment(
         # Let deliberate 4xx responses through instead of wrapping them in a 500.
         raise
     except Exception as e:
-        logger.error(f"Error cloning experiment: {str(e)}")
+        logger.error(f"Error cloning experiment: {e!s}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -1333,7 +1383,9 @@ async def get_daily_experiment_results(
                     experiment_id=experiment_id, metric_id=metric_id
                 )
             else:
-                results = analysis_service.get_daily_results(experiment_id=experiment_id)
+                results = analysis_service.get_daily_results(
+                    experiment_id=experiment_id
+                )
         except ValueError as e:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
@@ -1354,7 +1406,7 @@ async def get_daily_experiment_results(
         # Let deliberate 4xx responses through instead of wrapping them in a 500.
         raise
     except Exception as e:
-        logger.error(f"Error getting daily experiment results: {str(e)}")
+        logger.error(f"Error getting daily experiment results: {e!s}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -1416,9 +1468,7 @@ async def get_segmented_experiment_results(
         # Try to get from cache if enabled
         if cache_control.enabled and cache_control.redis:
             metric_part = f":{metric_id}" if metric_id else ""
-            cache_key = (
-                f"experiment_segmented_results:{experiment_id}:{segment_by}{metric_part}"
-            )
+            cache_key = f"experiment_segmented_results:{experiment_id}:{segment_by}{metric_part}"
             cached_data = await cache_control.redis.get(cache_key)
             if cached_data:
                 import json
@@ -1432,7 +1482,9 @@ async def get_segmented_experiment_results(
         try:
             if metric_id:
                 results = analysis_service.get_segmented_results(
-                    experiment_id=experiment_id, segment_by=segment_by, metric_id=metric_id
+                    experiment_id=experiment_id,
+                    segment_by=segment_by,
+                    metric_id=metric_id,
                 )
             else:
                 results = analysis_service.get_segmented_results(
@@ -1446,9 +1498,7 @@ async def get_segmented_experiment_results(
             import json
 
             metric_part = f":{metric_id}" if metric_id else ""
-            cache_key = (
-                f"experiment_segmented_results:{experiment_id}:{segment_by}{metric_part}"
-            )
+            cache_key = f"experiment_segmented_results:{experiment_id}:{segment_by}{metric_part}"
             cache_control.redis.setex(
                 cache_key,
                 3600,  # Cache for 1 hour
@@ -1460,7 +1510,7 @@ async def get_segmented_experiment_results(
         # Let deliberate 4xx responses through instead of wrapping them in a 500.
         raise
     except Exception as e:
-        logger.error(f"Error getting segmented experiment results: {str(e)}")
+        logger.error(f"Error getting segmented experiment results: {e!s}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -1528,7 +1578,7 @@ async def update_experiment_metadata(
         # Let deliberate 4xx responses through instead of wrapping them in a 500.
         raise
     except Exception as e:
-        logger.error(f"Error updating experiment metadata: {str(e)}")
+        logger.error(f"Error updating experiment metadata: {e!s}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -1767,7 +1817,7 @@ async def trigger_schedule_processing(
     if not current_user.is_superuser:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only administrators can trigger scheduled processing"
+            detail="Only administrators can trigger scheduled processing",
         )
 
     # Process the scheduled experiments in the background
@@ -1828,7 +1878,11 @@ async def preview_split_url_assignment(
         )
 
     # Validate it's a split_url experiment
-    exp_type = experiment.get("experiment_type") if isinstance(experiment, dict) else getattr(experiment, "experiment_type", None)
+    exp_type = (
+        experiment.get("experiment_type")
+        if isinstance(experiment, dict)
+        else getattr(experiment, "experiment_type", None)
+    )
     if hasattr(exp_type, "value"):
         exp_type = exp_type.value
     if exp_type != "split_url":
@@ -1838,7 +1892,11 @@ async def preview_split_url_assignment(
         )
 
     # Validate split_url_config is present
-    raw_config = experiment.get("split_url_config") if isinstance(experiment, dict) else getattr(experiment, "split_url_config", None)
+    raw_config = (
+        experiment.get("split_url_config")
+        if isinstance(experiment, dict)
+        else getattr(experiment, "split_url_config", None)
+    )
     if not raw_config:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -1852,7 +1910,11 @@ async def preview_split_url_assignment(
         config = raw_config
 
     # Derive experiment key: use the experiment id string as the key
-    exp_id_str = experiment.get("id") if isinstance(experiment, dict) else str(getattr(experiment, "id", experiment_id))
+    exp_id_str = (
+        experiment.get("id")
+        if isinstance(experiment, dict)
+        else str(getattr(experiment, "id", experiment_id))
+    )
     experiment_key = str(exp_id_str)
 
     # Get deterministic variant assignment

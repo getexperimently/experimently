@@ -19,6 +19,7 @@ Covers:
   - Multiple flags produce multiple entries in response
   - Flags from other owners are not returned
 """
+
 import hashlib
 import json
 import uuid
@@ -28,10 +29,10 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from backend.app.main import app
 from backend.app.api import deps
-from backend.app.models.feature_flag import FeatureFlag, FeatureFlagStatus
+from backend.app.main import app
 from backend.app.models.experiment import Experiment, ExperimentStatus, Variant
+from backend.app.models.feature_flag import FeatureFlag, FeatureFlagStatus
 from backend.app.models.user import User, UserRole
 
 BOOTSTRAP_URL = "/api/v1/edge/bootstrap"
@@ -153,7 +154,12 @@ class TestEdgeBootstrapAuthenticated:
 
     def test_bootstrap_returns_active_flag(self, db_session, admin_client, admin_user):
         """An active flag owned by the user appears in the response."""
-        flag = _make_flag(db_session, admin_user.id, status=FeatureFlagStatus.ACTIVE, rollout_percentage=50)
+        flag = _make_flag(
+            db_session,
+            admin_user.id,
+            status=FeatureFlagStatus.ACTIVE,
+            rollout_percentage=50,
+        )
 
         response = admin_client.get(BOOTSTRAP_URL)
         assert response.status_code == 200
@@ -161,7 +167,9 @@ class TestEdgeBootstrapAuthenticated:
         flag_keys = [f["key"] for f in data["flags"]]
         assert flag.key in flag_keys
 
-    def test_bootstrap_flag_has_correct_enabled_state_for_active(self, db_session, admin_client, admin_user):
+    def test_bootstrap_flag_has_correct_enabled_state_for_active(
+        self, db_session, admin_client, admin_user
+    ):
         """An ACTIVE flag has enabled=true in the response."""
         flag = _make_flag(db_session, admin_user.id, status=FeatureFlagStatus.ACTIVE)
 
@@ -171,7 +179,9 @@ class TestEdgeBootstrapAuthenticated:
         assert matched is not None
         assert matched["enabled"] is True
 
-    def test_bootstrap_flag_has_correct_enabled_state_for_inactive(self, db_session, admin_client, admin_user):
+    def test_bootstrap_flag_has_correct_enabled_state_for_inactive(
+        self, db_session, admin_client, admin_user
+    ):
         """An INACTIVE flag has enabled=false in the response."""
         flag = _make_flag(db_session, admin_user.id, status=FeatureFlagStatus.INACTIVE)
 
@@ -181,7 +191,9 @@ class TestEdgeBootstrapAuthenticated:
         assert matched is not None
         assert matched["enabled"] is False
 
-    def test_bootstrap_flag_includes_rollout_percentage(self, db_session, admin_client, admin_user):
+    def test_bootstrap_flag_includes_rollout_percentage(
+        self, db_session, admin_client, admin_user
+    ):
         """Flag response includes rolloutPercentage field."""
         flag = _make_flag(db_session, admin_user.id, rollout_percentage=75)
 
@@ -192,7 +204,9 @@ class TestEdgeBootstrapAuthenticated:
         assert "rolloutPercentage" in matched
         assert matched["rolloutPercentage"] == 75.0
 
-    def test_bootstrap_flag_includes_variants_field(self, db_session, admin_client, admin_user):
+    def test_bootstrap_flag_includes_variants_field(
+        self, db_session, admin_client, admin_user
+    ):
         """Flag response includes variants array (empty if none defined)."""
         flag = _make_flag(db_session, admin_user.id)
 
@@ -203,7 +217,9 @@ class TestEdgeBootstrapAuthenticated:
         assert "variants" in matched
         assert isinstance(matched["variants"], list)
 
-    def test_bootstrap_flag_includes_rules_field(self, db_session, admin_client, admin_user):
+    def test_bootstrap_flag_includes_rules_field(
+        self, db_session, admin_client, admin_user
+    ):
         """Flag response includes rules array (empty if none defined)."""
         flag = _make_flag(db_session, admin_user.id)
 
@@ -214,7 +230,9 @@ class TestEdgeBootstrapAuthenticated:
         assert "rules" in matched
         assert isinstance(matched["rules"], list)
 
-    def test_bootstrap_flag_with_targeting_rules(self, db_session, admin_client, admin_user):
+    def test_bootstrap_flag_with_targeting_rules(
+        self, db_session, admin_client, admin_user
+    ):
         """Flag with targeting rules includes them in response."""
         rules = [{"attribute": "country", "operator": "eq", "value": "US"}]
         flag = _make_flag(db_session, admin_user.id, targeting_rules=rules)
@@ -227,7 +245,9 @@ class TestEdgeBootstrapAuthenticated:
         assert matched["rules"][0]["attribute"] == "country"
         assert matched["rules"][0]["operator"] == "eq"
 
-    def test_bootstrap_returns_multiple_flags(self, db_session, admin_client, admin_user):
+    def test_bootstrap_returns_multiple_flags(
+        self, db_session, admin_client, admin_user
+    ):
         """Multiple flags owned by the user all appear in the response."""
         flag1 = _make_flag(db_session, admin_user.id)
         flag2 = _make_flag(db_session, admin_user.id)
@@ -251,9 +271,13 @@ class TestEdgeBootstrapAuthenticated:
         exp_keys = [e["key"] for e in data["experiments"]]
         assert exp_key in exp_keys
 
-    def test_bootstrap_experiment_has_enabled_field(self, db_session, admin_client, admin_user):
+    def test_bootstrap_experiment_has_enabled_field(
+        self, db_session, admin_client, admin_user
+    ):
         """Experiment in response has enabled field."""
-        exp = _make_experiment_with_variants(db_session, admin_user.id, status=ExperimentStatus.ACTIVE)
+        exp = _make_experiment_with_variants(
+            db_session, admin_user.id, status=ExperimentStatus.ACTIVE
+        )
 
         response = admin_client.get(BOOTSTRAP_URL)
         data = response.json()
@@ -263,7 +287,9 @@ class TestEdgeBootstrapAuthenticated:
         assert "enabled" in matched
         assert matched["enabled"] is True
 
-    def test_bootstrap_experiment_has_variants(self, db_session, admin_client, admin_user):
+    def test_bootstrap_experiment_has_variants(
+        self, db_session, admin_client, admin_user
+    ):
         """Experiment in response has variants with key, name, weight."""
         exp = _make_experiment_with_variants(db_session, admin_user.id)
 
@@ -278,7 +304,9 @@ class TestEdgeBootstrapAuthenticated:
             assert "name" in variant
             assert "weight" in variant
 
-    def test_bootstrap_experiment_variant_weights_sum_to_one(self, db_session, admin_client, admin_user):
+    def test_bootstrap_experiment_variant_weights_sum_to_one(
+        self, db_session, admin_client, admin_user
+    ):
         """Experiment variant weights are normalized to sum to 1.0."""
         exp = _make_experiment_with_variants(db_session, admin_user.id)
 
@@ -309,7 +337,9 @@ class TestEdgeBootstrapVersionDeterminism:
         assert r2.status_code == 200
         assert r1.json()["version"] == r2.json()["version"]
 
-    def test_version_changes_when_flag_is_added(self, db_session, admin_client, admin_user):
+    def test_version_changes_when_flag_is_added(
+        self, db_session, admin_client, admin_user
+    ):
         """Adding a flag changes the version hash."""
         r1 = admin_client.get(BOOTSTRAP_URL)
         version_before = r1.json()["version"]

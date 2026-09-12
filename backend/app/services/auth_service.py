@@ -1,14 +1,14 @@
-import boto3
-import os
-import logging
-from typing import Dict, Any, Optional
-
 """
 AWS Cognito authentication service.
 
 This module provides a service for handling authentication operations using AWS Cognito.
 """
 
+import logging
+import os
+from typing import Any, Dict
+
+import boto3
 from botocore.exceptions import ClientError
 
 # Configure logging
@@ -63,10 +63,10 @@ class CognitoAuthService:
             }
 
         except ClientError as e:
-            logger.error(f"Sign-up error: {str(e)}")
+            logger.error(f"Sign-up error: {e!s}")
             raise ValueError(str(e))
         except Exception as e:
-            logger.error(f"Unexpected error during sign-up: {str(e)}")
+            logger.error(f"Unexpected error during sign-up: {e!s}")
             # Pass through the original error message
             raise ValueError(str(e))
 
@@ -86,10 +86,10 @@ class CognitoAuthService:
             }
 
         except ClientError as e:
-            logger.error(f"Confirmation error: {str(e)}")
+            logger.error(f"Confirmation error: {e!s}")
             raise ValueError(str(e))
         except Exception as e:
-            logger.error(f"Unexpected error during confirmation: {str(e)}")
+            logger.error(f"Unexpected error during confirmation: {e!s}")
             # Pass through the original error message
             raise ValueError(str(e))
 
@@ -118,10 +118,10 @@ class CognitoAuthService:
             }
 
         except ClientError as e:
-            logger.error(f"Sign-in error: {str(e)}")
+            logger.error(f"Sign-in error: {e!s}")
             raise ValueError(str(e))
         except Exception as e:
-            logger.error(f"Unexpected error during sign-in: {str(e)}")
+            logger.error(f"Unexpected error during sign-in: {e!s}")
             # Pass through the original error message
             raise ValueError(str(e))
 
@@ -134,10 +134,10 @@ class CognitoAuthService:
             return {"message": "Password reset code has been sent to your email."}
 
         except ClientError as e:
-            logger.error(f"Forgot password error: {str(e)}")
+            logger.error(f"Forgot password error: {e!s}")
             raise ValueError(str(e))
         except Exception as e:
-            logger.error(f"Unexpected error during forgot password: {str(e)}")
+            logger.error(f"Unexpected error during forgot password: {e!s}")
             # Pass through the original error message
             raise ValueError(str(e))
 
@@ -159,10 +159,10 @@ class CognitoAuthService:
             }
 
         except ClientError as e:
-            logger.error(f"Confirm forgot password error: {str(e)}")
+            logger.error(f"Confirm forgot password error: {e!s}")
             raise ValueError(str(e))
         except Exception as e:
-            logger.error(f"Unexpected error during password reset: {str(e)}")
+            logger.error(f"Unexpected error during password reset: {e!s}")
             # Pass through the original error message
             raise ValueError(str(e))
 
@@ -189,10 +189,10 @@ class CognitoAuthService:
             }
 
         except ClientError as e:
-            logger.error(f"Token refresh error: {str(e)}")
+            logger.error(f"Token refresh error: {e!s}")
             raise ValueError(str(e))
         except Exception as e:
-            logger.error(f"Unexpected error during token refresh: {str(e)}")
+            logger.error(f"Unexpected error during token refresh: {e!s}")
             raise ValueError("An unexpected error occurred during token refresh")
 
     def get_user(self, access_token: str) -> Dict[str, Any]:
@@ -213,10 +213,10 @@ class CognitoAuthService:
             return {"username": response.get("Username"), "attributes": user_attributes}
 
         except ClientError as e:
-            logger.error(f"Get user error: {str(e)}")
+            logger.error(f"Get user error: {e!s}")
             raise ValueError(str(e))
         except Exception as e:
-            logger.error(f"Unexpected error getting user details: {str(e)}")
+            logger.error(f"Unexpected error getting user details: {e!s}")
             raise ValueError("An unexpected error occurred retrieving user details")
 
     def get_user_with_groups(self, access_token: str) -> Dict[str, Any]:
@@ -248,12 +248,14 @@ class CognitoAuthService:
                 try:
                     # Use admin_list_groups_for_user to get group membership
                     group_response = self.client.admin_list_groups_for_user(
-                        UserPoolId=self.user_pool_id,
-                        Username=username
+                        UserPoolId=self.user_pool_id, Username=username
                     )
-                    groups = [group.get("GroupName") for group in group_response.get("Groups", [])]
+                    groups = [
+                        group.get("GroupName")
+                        for group in group_response.get("Groups", [])
+                    ]
                 except Exception as e:
-                    logger.warning(f"Error getting user groups: {str(e)}")
+                    logger.warning(f"Error getting user groups: {e!s}")
 
             logger.info(
                 f"User details with groups retrieved for username: {username}, groups: {groups}"
@@ -262,13 +264,13 @@ class CognitoAuthService:
             return {
                 "username": username,
                 "attributes": user_attributes,
-                "groups": groups
+                "groups": groups,
             }
         except ClientError as e:
-            logger.error(f"Get user with groups error: {str(e)}")
+            logger.error(f"Get user with groups error: {e!s}")
             raise ValueError(str(e))
         except Exception as e:
-            logger.error(f"Unexpected error getting user details with groups: {str(e)}")
+            logger.error(f"Unexpected error getting user details with groups: {e!s}")
             raise ValueError("An unexpected error occurred retrieving user details")
 
 

@@ -1,13 +1,13 @@
 import pytest
 
 from backend.app.core.permissions import (
-    ResourceType,
     Action,
-    has_permission,
-    check_permission,
+    ResourceType,
     check_ownership,
+    check_permission,
     get_permission_error_message,
-    get_required_role
+    get_required_role,
+    has_permission,
 )
 from backend.app.models.user import UserRole
 
@@ -74,9 +74,13 @@ class TestHasPermission:
     def test_developer_permissions(self):
         """Test specific developer permissions."""
         # Developer can create experiments
-        assert has_permission(UserRole.DEVELOPER, ResourceType.EXPERIMENT, Action.CREATE)
+        assert has_permission(
+            UserRole.DEVELOPER, ResourceType.EXPERIMENT, Action.CREATE
+        )
         # Developer can create feature flags
-        assert has_permission(UserRole.DEVELOPER, ResourceType.FEATURE_FLAG, Action.CREATE)
+        assert has_permission(
+            UserRole.DEVELOPER, ResourceType.FEATURE_FLAG, Action.CREATE
+        )
         # Developer cannot create users
         assert not has_permission(UserRole.DEVELOPER, ResourceType.USER, Action.CREATE)
 
@@ -84,7 +88,9 @@ class TestHasPermission:
         """Test specific analyst permissions."""
         # Analyst can read experiments but not create them
         assert has_permission(UserRole.ANALYST, ResourceType.EXPERIMENT, Action.READ)
-        assert not has_permission(UserRole.ANALYST, ResourceType.EXPERIMENT, Action.CREATE)
+        assert not has_permission(
+            UserRole.ANALYST, ResourceType.EXPERIMENT, Action.CREATE
+        )
 
         # Analyst can create reports
         assert has_permission(UserRole.ANALYST, ResourceType.REPORT, Action.CREATE)
@@ -93,7 +99,9 @@ class TestHasPermission:
         """Test specific viewer permissions."""
         # Viewer can read experiments but not edit them
         assert has_permission(UserRole.VIEWER, ResourceType.EXPERIMENT, Action.READ)
-        assert not has_permission(UserRole.VIEWER, ResourceType.EXPERIMENT, Action.UPDATE)
+        assert not has_permission(
+            UserRole.VIEWER, ResourceType.EXPERIMENT, Action.UPDATE
+        )
 
 
 class TestCheckPermission:
@@ -110,7 +118,9 @@ class TestCheckPermission:
         assert check_permission(admin_user, ResourceType.EXPERIMENT, Action.CREATE)
         assert check_permission(admin_user, ResourceType.USER, Action.CREATE)
 
-    def test_only_admin_may_act_on_other_users_api_keys(self, admin_user, developer_user, analyst_user, viewer_user):
+    def test_only_admin_may_act_on_other_users_api_keys(
+        self, admin_user, developer_user, analyst_user, viewer_user
+    ):
         """ResourceType.API_KEY governs cross-user key access (``/api/v1/api-keys?all=true``)."""
         for action in (Action.LIST, Action.DELETE):
             assert check_permission(admin_user, ResourceType.API_KEY, action)
@@ -124,7 +134,9 @@ class TestCheckPermission:
 
     def test_analyst_permission(self, analyst_user):
         """Test analyst user permissions."""
-        assert not check_permission(analyst_user, ResourceType.EXPERIMENT, Action.CREATE)
+        assert not check_permission(
+            analyst_user, ResourceType.EXPERIMENT, Action.CREATE
+        )
         assert check_permission(analyst_user, ResourceType.REPORT, Action.CREATE)
 
     def test_viewer_permission(self, viewer_user):
@@ -134,6 +146,7 @@ class TestCheckPermission:
 
     def test_user_with_no_role(self, mocker):
         """Test a user with no role defaults to viewer permissions."""
+
         # Create a simple object instead of MagicMock since MagicMock has special handling
         class SimpleUser:
             pass
@@ -196,7 +209,10 @@ class TestGetRequiredRole:
     def test_get_required_role_for_experiment_create(self):
         """Test getting required role for creating experiments."""
         # Developer is the minimum role required to create experiments
-        assert get_required_role(ResourceType.EXPERIMENT, Action.CREATE) == UserRole.DEVELOPER
+        assert (
+            get_required_role(ResourceType.EXPERIMENT, Action.CREATE)
+            == UserRole.DEVELOPER
+        )
 
     def test_get_required_role_for_report_create(self):
         """Test getting required role for creating reports."""
@@ -206,7 +222,9 @@ class TestGetRequiredRole:
     def test_get_required_role_for_experiment_read(self):
         """Test getting required role for reading experiments."""
         # Viewer is the minimum role required to read experiments
-        assert get_required_role(ResourceType.EXPERIMENT, Action.READ) == UserRole.VIEWER
+        assert (
+            get_required_role(ResourceType.EXPERIMENT, Action.READ) == UserRole.VIEWER
+        )
 
     def test_get_required_role_for_user_create(self):
         """Test getting required role for creating users."""

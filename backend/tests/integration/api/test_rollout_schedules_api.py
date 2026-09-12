@@ -29,26 +29,30 @@ Endpoint coverage:
   DELETE /api/v1/rollout-schedules/stages/{stage_id}         delete stage (204)
   POST   /api/v1/rollout-schedules/stages/{stage_id}/advance advance stage
 """
+
 import os
 import uuid
-import pytest
 from datetime import datetime, timedelta, timezone
-from sqlalchemy import create_engine, text, event as sa_event
-from sqlalchemy.orm import sessionmaker
 
+import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
+from sqlalchemy import create_engine, text
+from sqlalchemy import event as sa_event
+from sqlalchemy.orm import sessionmaker
 
-from backend.app.main import app
 from backend.app.api import deps
 from backend.app.api.deps import CacheControl
-from backend.app.models.user import User, UserRole
+from backend.app.main import app
 from backend.app.models.feature_flag import FeatureFlag, FeatureFlagStatus
 from backend.app.models.rollout_schedule import (
-    RolloutSchedule, RolloutStage,
-    RolloutScheduleStatus, RolloutStageStatus, TriggerType,
+    RolloutSchedule,
+    RolloutScheduleStatus,
+    RolloutStage,
+    RolloutStageStatus,
+    TriggerType,
 )
-
+from backend.app.models.user import User, UserRole
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -64,6 +68,7 @@ DB_URL = f"postgresql://postgres:postgres@localhost:5432/experimentation_test_{_
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _future_dt(hours: int = 24) -> str:
     """Return ISO 8601 datetime string `hours` into the future (UTC)."""
@@ -105,13 +110,16 @@ def _create_schedule_via_api(
         "/api/v1/rollout-schedules/",
         json=_valid_schedule_payload(feature_flag_id, name),
     )
-    assert response.status_code == 201, f"Create failed ({response.status_code}): {response.text}"
+    assert response.status_code == 201, (
+        f"Create failed ({response.status_code}): {response.text}"
+    )
     return response.json()
 
 
 # ---------------------------------------------------------------------------
 # Module-scoped fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture(scope="module")
 def _module_engine(test_db):
@@ -148,8 +156,9 @@ def _module_engine(test_db):
 @pytest.fixture(scope="module")
 def _module_factory(_module_engine):
     """Return a sessionmaker bound to the module-scoped engine."""
-    return sessionmaker(bind=_module_engine, autocommit=False, autoflush=False,
-                        expire_on_commit=False)
+    return sessionmaker(
+        bind=_module_engine, autocommit=False, autoflush=False, expire_on_commit=False
+    )
 
 
 @pytest.fixture(scope="module")
@@ -202,9 +211,7 @@ def shared_client(_module_data, _module_factory):
     # Load the admin user for auth overrides.
     setup_session = _module_factory()
     try:
-        user = setup_session.query(User).filter_by(
-            id=_module_data["admin_id"]
-        ).one()
+        user = setup_session.query(User).filter_by(id=_module_data["admin_id"]).one()
         setup_session.expunge(user)
     finally:
         setup_session.close()
@@ -241,8 +248,12 @@ def shared_client(_module_data, _module_factory):
 
     app.dependency_overrides[deps.get_db] = override_get_db
     app.dependency_overrides[deps.get_current_user] = override_get_current_user
-    app.dependency_overrides[deps.get_current_active_user] = override_get_current_active_user
-    app.dependency_overrides[deps.get_current_superuser] = override_get_current_superuser
+    app.dependency_overrides[deps.get_current_active_user] = (
+        override_get_current_active_user
+    )
+    app.dependency_overrides[deps.get_current_superuser] = (
+        override_get_current_superuser
+    )
     app.dependency_overrides[deps.get_cache_control] = override_get_cache_control
     app.dependency_overrides[deps.get_api_key] = override_get_api_key
 
@@ -271,6 +282,7 @@ def seeded_schedule(shared_client, flag_id):
 # =============================================================================
 # GROUP 1: READ-ONLY / VALIDATION TESTS  (no API db.commit())
 # =============================================================================
+
 
 @pytest.mark.integration
 @pytest.mark.requires_db
@@ -430,7 +442,9 @@ class TestGetRolloutSchedule:
         assert data["id"] == schedule_id
         assert data["name"] == seeded_schedule["name"]
 
-    def test_get_schedule_response_contains_stages(self, shared_client, seeded_schedule):
+    def test_get_schedule_response_contains_stages(
+        self, shared_client, seeded_schedule
+    ):
         schedule_id = seeded_schedule["id"]
         response = shared_client.get(f"/api/v1/rollout-schedules/{schedule_id}")
         assert response.status_code == 200, response.text
@@ -441,7 +455,15 @@ class TestGetRolloutSchedule:
         response = shared_client.get(f"/api/v1/rollout-schedules/{schedule_id}")
         assert response.status_code == 200, response.text
         data = response.json()
-        for field in ("id", "name", "status", "feature_flag_id", "stages", "created_at", "updated_at"):
+        for field in (
+            "id",
+            "name",
+            "status",
+            "feature_flag_id",
+            "stages",
+            "created_at",
+            "updated_at",
+        ):
             assert field in data, f"Missing field: {field}"
 
 
@@ -497,6 +519,7 @@ class TestCreateScheduleValidation:
 # =============================================================================
 # GROUP 2: WRITE TESTS (API db.commit() per test)
 # =============================================================================
+
 
 @pytest.mark.integration
 @pytest.mark.requires_db
@@ -606,7 +629,9 @@ class TestRolloutScheduleLifecycle:
 
     def test_activate_draft_schedule(self, shared_client, flag_id):
         data = _create_schedule_via_api(shared_client, flag_id, "Activate Me")
-        response = shared_client.post(f"/api/v1/rollout-schedules/{data['id']}/activate")
+        response = shared_client.post(
+            f"/api/v1/rollout-schedules/{data['id']}/activate"
+        )
         assert response.status_code == 200, response.text
         assert response.json()["status"] == "active"
 
@@ -623,7 +648,9 @@ class TestRolloutScheduleLifecycle:
         schedule_id = data["id"]
         shared_client.post(f"/api/v1/rollout-schedules/{schedule_id}/activate")
         shared_client.post(f"/api/v1/rollout-schedules/{schedule_id}/pause")
-        response = shared_client.post(f"/api/v1/rollout-schedules/{schedule_id}/activate")
+        response = shared_client.post(
+            f"/api/v1/rollout-schedules/{schedule_id}/activate"
+        )
         assert response.status_code == 200, response.text
         assert response.json()["status"] == "active"
 
@@ -788,7 +815,9 @@ class TestRolloutStages:
         data = _create_schedule_via_api(shared_client, flag_id, "Time Advance")
         schedule_id = data["id"]
 
-        time_stage = next(s for s in data["stages"] if s["trigger_type"] == "time_based")
+        time_stage = next(
+            s for s in data["stages"] if s["trigger_type"] == "time_based"
+        )
         shared_client.post(f"/api/v1/rollout-schedules/{schedule_id}/activate")
 
         response = shared_client.post(
@@ -824,13 +853,19 @@ class TestRolloutScheduleAuthorization:
         assert create_resp.status_code == 201
         schedule_id = create_resp.json()["id"]
 
-        assert shared_client.post(
-            f"/api/v1/rollout-schedules/{schedule_id}/activate"
-        ).status_code == 200
+        assert (
+            shared_client.post(
+                f"/api/v1/rollout-schedules/{schedule_id}/activate"
+            ).status_code
+            == 200
+        )
 
-        assert shared_client.post(
-            f"/api/v1/rollout-schedules/{schedule_id}/pause"
-        ).status_code == 200
+        assert (
+            shared_client.post(
+                f"/api/v1/rollout-schedules/{schedule_id}/pause"
+            ).status_code
+            == 200
+        )
 
         cancel_resp = shared_client.post(
             f"/api/v1/rollout-schedules/{schedule_id}/cancel"

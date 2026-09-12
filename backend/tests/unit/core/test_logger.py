@@ -9,8 +9,9 @@ Covers:
 - Context is independent per logical thread (contextvar isolation)
 """
 
-import pytest
 import contextvars
+
+import pytest
 
 
 def test_configure_logging_sets_level():
@@ -40,10 +41,10 @@ def test_get_logger_returns_bound_logger():
 
 
 def test_bind_log_context_accumulates():
-    from backend.app.core.logger import bind_log_context, get_log_context
-
     # Reset context by setting an empty dict in a fresh token
     import backend.app.core.logger as _mod
+    from backend.app.core.logger import bind_log_context, get_log_context
+
     token = _mod._log_context.set({})
 
     try:
@@ -57,9 +58,9 @@ def test_bind_log_context_accumulates():
 
 
 def test_bind_log_context_overwrites_existing_key():
+    import backend.app.core.logger as _mod
     from backend.app.core.logger import bind_log_context, get_log_context
 
-    import backend.app.core.logger as _mod
     token = _mod._log_context.set({})
 
     try:
@@ -72,9 +73,9 @@ def test_bind_log_context_overwrites_existing_key():
 
 
 def test_get_log_context_empty_by_default():
+    import backend.app.core.logger as _mod
     from backend.app.core.logger import get_log_context
 
-    import backend.app.core.logger as _mod
     token = _mod._log_context.set({})
 
     try:
@@ -85,9 +86,9 @@ def test_get_log_context_empty_by_default():
 
 
 def test_bind_log_context_multiple_keys_at_once():
+    import backend.app.core.logger as _mod
     from backend.app.core.logger import bind_log_context, get_log_context
 
-    import backend.app.core.logger as _mod
     token = _mod._log_context.set({})
 
     try:

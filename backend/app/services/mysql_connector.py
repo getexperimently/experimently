@@ -136,7 +136,9 @@ class MySQLConnector:
         self.user = user if user is not None else settings.MYSQL_USER
         self.password = password if password is not None else settings.MYSQL_PASSWORD
         self.charset = charset
-        self.timeout = timeout if timeout is not None else settings.MYSQL_TIMEOUT_SECONDS
+        self.timeout = (
+            timeout if timeout is not None else settings.MYSQL_TIMEOUT_SECONDS
+        )
 
         # Live connection — None until connect() is called.
         self._connection: Optional[Any] = None
@@ -151,7 +153,7 @@ class MySQLConnector:
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         self.close()
-        return None  # Do not suppress exceptions
+        return  # Do not suppress exceptions
 
     # ------------------------------------------------------------------
     # Connection management
@@ -205,9 +207,7 @@ class MySQLConnector:
                 return True
             except Exception as exc:
                 last_error = exc
-                logger.warning(
-                    "MySQL connection attempt %d failed: %s", attempt, exc
-                )
+                logger.warning("MySQL connection attempt %d failed: %s", attempt, exc)
                 if attempt < max_retries:
                     time.sleep(backoff)
                     backoff *= 2  # exponential backoff
@@ -215,17 +215,23 @@ class MySQLConnector:
         # Classify the error type
         err_lower = str(last_error).lower() if last_error else ""
 
-        if any(kw in err_lower for kw in ("timeout", "timed out", "connection timed out")):
+        if any(
+            kw in err_lower for kw in ("timeout", "timed out", "connection timed out")
+        ):
             raise MySQLTimeoutError(
-                f"MySQL connection timed out after {max_retries} attempts: "
-                f"{last_error}"
+                f"MySQL connection timed out after {max_retries} attempts: {last_error}"
             ) from last_error
 
         if any(
             kw in err_lower
             for kw in (
-                "access denied", "authentication", "password", "1045",
-                "auth", "forbidden", "unauthorized",
+                "access denied",
+                "authentication",
+                "password",
+                "1045",
+                "auth",
+                "forbidden",
+                "unauthorized",
             )
         ):
             raise MySQLAuthError(
@@ -234,8 +240,7 @@ class MySQLConnector:
             ) from last_error
 
         raise MySQLConnectionError(
-            f"Could not connect to MySQL after {max_retries} attempts: "
-            f"{last_error}"
+            f"Could not connect to MySQL after {max_retries} attempts: {last_error}"
         ) from last_error
 
     def close(self) -> None:

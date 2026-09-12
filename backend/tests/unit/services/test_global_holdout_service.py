@@ -1,13 +1,15 @@
 """Unit tests for GlobalHoldoutService (EP-022)."""
-import pytest
-from unittest.mock import MagicMock, patch, call
+
+from unittest.mock import MagicMock, call, patch
 from uuid import uuid4
 
-from backend.app.services.global_holdout_service import (
-    GlobalHoldoutService,
-    HOLDOUT_SALT,
-)
+import pytest
+
 from backend.app.models.global_holdout import GlobalHoldout
+from backend.app.services.global_holdout_service import (
+    HOLDOUT_SALT,
+    GlobalHoldoutService,
+)
 
 
 @pytest.fixture
@@ -169,7 +171,7 @@ class TestIsUserInHoldout:
         assert pct == 0
         assert bucket == 0
 
-    @patch.object(GlobalHoldoutService, '_get_holdout_bucket')
+    @patch.object(GlobalHoldoutService, "_get_holdout_bucket")
     def test_user_in_holdout(self, mock_bucket, service, mock_db):
         """User with bucket < holdout_percentage should be in holdout."""
         mock_holdout = MagicMock(spec=GlobalHoldout)
@@ -183,7 +185,7 @@ class TestIsUserInHoldout:
         assert pct == 10
         assert bucket == 5
 
-    @patch.object(GlobalHoldoutService, '_get_holdout_bucket')
+    @patch.object(GlobalHoldoutService, "_get_holdout_bucket")
     def test_user_not_in_holdout(self, mock_bucket, service, mock_db):
         """User with bucket >= holdout_percentage should NOT be in holdout."""
         mock_holdout = MagicMock(spec=GlobalHoldout)
@@ -211,9 +213,7 @@ class TestIsUserInHoldoutStatic:
 
     def test_user_not_in_holdout_static(self):
         """Static method: bucket >= percentage => not in holdout."""
-        is_in, bucket = GlobalHoldoutService.is_user_in_holdout_static(
-            "user_123", 0
-        )
+        is_in, bucket = GlobalHoldoutService.is_user_in_holdout_static("user_123", 0)
         assert is_in is False
 
 

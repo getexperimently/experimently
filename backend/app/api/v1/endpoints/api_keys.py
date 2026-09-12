@@ -133,7 +133,9 @@ def delete_api_key(
     """Permanently delete an API key (owner or ADMIN)."""
     api_key: Optional[APIKey] = db.query(APIKey).filter(APIKey.id == key_id).first()
     if api_key is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="API key not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="API key not found"
+        )
     if api_key.user_id != current_user.id and not _may_act_on_others_keys(
         current_user, Action.DELETE
     ):

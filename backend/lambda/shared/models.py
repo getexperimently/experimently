@@ -5,13 +5,15 @@ Provides Pydantic models for type safety and validation across all Lambda functi
 """
 
 from datetime import datetime
-from typing import Dict, List, Optional, Any
 from enum import Enum
-from pydantic import BaseModel, Field, field_validator, ConfigDict
+from typing import Any, Dict, List, Optional
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class ExperimentStatus(str, Enum):
     """Experiment status enum."""
+
     DRAFT = "draft"
     ACTIVE = "active"
     PAUSED = "paused"
@@ -24,13 +26,18 @@ class Assignment(BaseModel):
 
     Represents a user's assignment to an experiment variant.
     """
+
     assignment_id: str = Field(..., description="Unique assignment identifier")
     user_id: str = Field(..., description="User identifier")
     experiment_id: str = Field(..., description="Experiment identifier")
     experiment_key: str = Field(..., description="Experiment key")
     variant: str = Field(..., description="Assigned variant key")
-    timestamp: datetime = Field(default_factory=datetime.utcnow, description="Assignment timestamp")
-    context: Optional[Dict[str, Any]] = Field(default=None, description="User context at assignment")
+    timestamp: datetime = Field(
+        default_factory=datetime.utcnow, description="Assignment timestamp"
+    )
+    context: Optional[Dict[str, Any]] = Field(
+        default=None, description="User context at assignment"
+    )
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -41,7 +48,7 @@ class Assignment(BaseModel):
                 "experiment_key": "checkout_redesign",
                 "variant": "treatment",
                 "timestamp": "2025-12-18T10:30:00Z",
-                "context": {"country": "US", "platform": "web"}
+                "context": {"country": "US", "platform": "web"},
             }
         }
     )
@@ -53,9 +60,14 @@ class VariantConfig(BaseModel):
 
     Represents a single variant in an experiment.
     """
+
     key: str = Field(..., description="Variant key")
-    allocation: float = Field(..., ge=0.0, le=1.0, description="Traffic allocation (0.0-1.0)")
-    payload: Optional[Dict[str, Any]] = Field(default=None, description="Variant configuration payload")
+    allocation: float = Field(
+        ..., ge=0.0, le=1.0, description="Traffic allocation (0.0-1.0)"
+    )
+    payload: Optional[Dict[str, Any]] = Field(
+        default=None, description="Variant configuration payload"
+    )
 
 
 class ExperimentConfig(BaseModel):
@@ -64,15 +76,22 @@ class ExperimentConfig(BaseModel):
 
     Contains all configuration needed for assignment logic.
     """
+
     experiment_id: str = Field(..., description="Unique experiment identifier")
     key: str = Field(..., description="Experiment key")
     status: ExperimentStatus = Field(..., description="Current status")
-    variants: List[VariantConfig] = Field(..., min_length=2, description="List of variants")
-    traffic_allocation: float = Field(default=1.0, ge=0.0, le=1.0, description="Overall traffic allocation")
-    targeting_rules: Optional[List[Dict[str, Any]]] = Field(default=None, description="Targeting rules")
+    variants: List[VariantConfig] = Field(
+        ..., min_length=2, description="List of variants"
+    )
+    traffic_allocation: float = Field(
+        default=1.0, ge=0.0, le=1.0, description="Overall traffic allocation"
+    )
+    targeting_rules: Optional[List[Dict[str, Any]]] = Field(
+        default=None, description="Targeting rules"
+    )
     salt: Optional[str] = Field(default=None, description="Salt for hashing")
 
-    @field_validator('variants')
+    @field_validator("variants")
     @classmethod
     def validate_variant_allocations(cls, v):
         """Validate that variant allocations sum to ~1.0."""
@@ -90,13 +109,13 @@ class ExperimentConfig(BaseModel):
                 "status": "active",
                 "variants": [
                     {"key": "control", "allocation": 0.5},
-                    {"key": "treatment", "allocation": 0.5}
+                    {"key": "treatment", "allocation": 0.5},
                 ],
                 "traffic_allocation": 1.0,
                 "targeting_rules": [],
-                "salt": None
+                "salt": None,
             }
-        }
+        },
     )
 
 
@@ -106,13 +125,22 @@ class FeatureFlagConfig(BaseModel):
 
     Contains all configuration needed for feature flag evaluation.
     """
+
     flag_id: str = Field(..., description="Unique flag identifier")
     key: str = Field(..., description="Flag key")
     enabled: bool = Field(default=False, description="Global enabled state")
-    rollout_percentage: float = Field(default=0.0, ge=0.0, le=100.0, description="Rollout percentage (0-100)")
-    targeting_rules: Optional[List[Dict[str, Any]]] = Field(default=None, description="Targeting rules")
-    default_variant: Optional[str] = Field(default=None, description="Default variant key")
-    variants: Optional[List[VariantConfig]] = Field(default=None, description="List of variants")
+    rollout_percentage: float = Field(
+        default=0.0, ge=0.0, le=100.0, description="Rollout percentage (0-100)"
+    )
+    targeting_rules: Optional[List[Dict[str, Any]]] = Field(
+        default=None, description="Targeting rules"
+    )
+    default_variant: Optional[str] = Field(
+        default=None, description="Default variant key"
+    )
+    variants: Optional[List[VariantConfig]] = Field(
+        default=None, description="List of variants"
+    )
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -123,7 +151,7 @@ class FeatureFlagConfig(BaseModel):
                 "rollout_percentage": 50.0,
                 "targeting_rules": [],
                 "default_variant": None,
-                "variants": None
+                "variants": None,
             }
         }
     )
@@ -135,13 +163,24 @@ class EventData(BaseModel):
 
     Represents an incoming event from client applications.
     """
+
     event_id: str = Field(..., description="Unique event identifier")
-    event_type: str = Field(..., description="Event type (e.g., 'conversion', 'page_view')")
+    event_type: str = Field(
+        ..., description="Event type (e.g., 'conversion', 'page_view')"
+    )
     user_id: str = Field(..., description="User identifier")
-    experiment_id: Optional[str] = Field(default=None, description="Associated experiment ID")
-    timestamp: datetime = Field(default_factory=datetime.utcnow, description="Event timestamp")
-    properties: Optional[Dict[str, Any]] = Field(default=None, description="Event properties")
-    metadata: Optional[Dict[str, Any]] = Field(default=None, description="Event metadata")
+    experiment_id: Optional[str] = Field(
+        default=None, description="Associated experiment ID"
+    )
+    timestamp: datetime = Field(
+        default_factory=datetime.utcnow, description="Event timestamp"
+    )
+    properties: Optional[Dict[str, Any]] = Field(
+        default=None, description="Event properties"
+    )
+    metadata: Optional[Dict[str, Any]] = Field(
+        default=None, description="Event metadata"
+    )
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -152,7 +191,7 @@ class EventData(BaseModel):
                 "experiment_id": "exp_789",
                 "timestamp": "2025-12-18T10:30:00Z",
                 "properties": {"revenue": 99.99, "item_count": 3},
-                "metadata": {"source": "mobile_app", "version": "1.2.3"}
+                "metadata": {"source": "mobile_app", "version": "1.2.3"},
             }
         }
     )
@@ -166,9 +205,17 @@ class MutualExclusionGroupConfig(BaseModel):
     Traffic is divided among experiments based on equal slotting within the
     group's overall traffic allocation.
     """
+
     group_id: str = Field(..., description="Unique group identifier used as hash salt")
-    traffic_allocation: float = Field(..., ge=0.0, le=1.0, description="Overall traffic allocation for the group (0.0-1.0)")
-    experiment_ids: List[str] = Field(..., description="Sorted list of active experiment IDs in the group")
+    traffic_allocation: float = Field(
+        ...,
+        ge=0.0,
+        le=1.0,
+        description="Overall traffic allocation for the group (0.0-1.0)",
+    )
+    experiment_ids: List[str] = Field(
+        ..., description="Sorted list of active experiment IDs in the group"
+    )
 
 
 class GlobalHoldoutConfig(BaseModel):
@@ -178,8 +225,13 @@ class GlobalHoldoutConfig(BaseModel):
     A percentage of users are held out from all experiments to serve as a
     platform-wide control group.
     """
-    holdout_percentage: int = Field(..., ge=1, le=20, description="Holdout percentage (1-20)")
-    is_active: bool = Field(default=True, description="Whether holdout is currently active")
+
+    holdout_percentage: int = Field(
+        ..., ge=1, le=20, description="Holdout percentage (1-20)"
+    )
+    is_active: bool = Field(
+        default=True, description="Whether holdout is currently active"
+    )
 
 
 class BanditWeightsConfig(BaseModel):
@@ -222,11 +274,11 @@ class LambdaResponse(BaseModel):
 
     Provides consistent response structure across all Lambda functions.
     """
+
     statusCode: int = Field(..., description="HTTP status code")
     body: Dict[str, Any] = Field(..., description="Response body")
     headers: Optional[Dict[str, str]] = Field(
-        default={"Content-Type": "application/json"},
-        description="Response headers"
+        default={"Content-Type": "application/json"}, description="Response headers"
     )
 
     model_config = ConfigDict(
@@ -234,7 +286,7 @@ class LambdaResponse(BaseModel):
             "example": {
                 "statusCode": 200,
                 "body": {"variant": "treatment", "experiment_id": "exp_123"},
-                "headers": {"Content-Type": "application/json"}
+                "headers": {"Content-Type": "application/json"},
             }
         }
     )

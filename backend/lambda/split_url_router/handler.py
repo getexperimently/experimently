@@ -21,10 +21,10 @@ Flow:
    - ``X-Split-URL-Variant`` naming the selected variant.
    - ``Cache-Control: no-store, no-cache`` to prevent CDN caching.
 """
+
 import hashlib
 import json
-from typing import Any, Dict, Optional
-
+from typing import Any, Dict
 
 COOKIE_PREFIX = "split_url_"
 
@@ -32,6 +32,7 @@ COOKIE_PREFIX = "split_url_"
 # ──────────────────────────────────────────────────────────────────────────
 # Internal helpers (importable for unit testing)
 # ──────────────────────────────────────────────────────────────────────────
+
 
 def _parse_cookies(cookie_header: str) -> Dict[str, str]:
     """Parse a raw ``Cookie`` header string into a name→value dict.
@@ -92,6 +93,7 @@ def _pick_variant(user_hash: float, variants: list) -> dict:
 # ──────────────────────────────────────────────────────────────────────────
 # Lambda entry-point
 # ──────────────────────────────────────────────────────────────────────────
+
 
 def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """Lambda@Edge viewer-request handler.
@@ -173,9 +175,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     # ── 6. Build 302 redirect response ────────────────────────────────────
     max_age_seconds = cookie_ttl_days * 86400
     cookie_value = (
-        f"{cookie_name}={assigned_url}; "
-        f"Max-Age={max_age_seconds}; "
-        f"Path=/; SameSite=Lax"
+        f"{cookie_name}={assigned_url}; Max-Age={max_age_seconds}; Path=/; SameSite=Lax"
     )
 
     return {
@@ -187,8 +187,6 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             "x-split-url-variant": [
                 {"key": "X-Split-URL-Variant", "value": variant_name}
             ],
-            "cache-control": [
-                {"key": "Cache-Control", "value": "no-store, no-cache"}
-            ],
+            "cache-control": [{"key": "Cache-Control", "value": "no-store, no-cache"}],
         },
     }

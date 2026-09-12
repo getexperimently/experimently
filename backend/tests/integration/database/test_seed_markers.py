@@ -34,7 +34,9 @@ class TestSeedMarkerModel:
     def test_script_table_matches_model(self):
         table = seed_markers.seed_markers_table("any_schema")
         assert table.schema == "any_schema"
-        assert [c.name for c in table.columns] == [c.name for c in SeedMarker.__table__.columns]
+        assert [c.name for c in table.columns] == [
+            c.name for c in SeedMarker.__table__.columns
+        ]
         assert [c.name for c in table.primary_key.columns] == ["name"]
 
     def test_create_all_created_it_in_the_test_schema(self, test_db):
@@ -52,7 +54,9 @@ class TestSeedMarkerScript:
     def test_mark_is_idempotent(self, engine):
         seed_markers.mark_applied(engine, "shoplab", schema=SCHEMA)
         seed_markers.mark_applied(engine, "shoplab", schema=SCHEMA)
-        assert [n for n, _ in seed_markers.applied(engine, SCHEMA)].count("shoplab") == 1
+        assert [n for n, _ in seed_markers.applied(engine, SCHEMA)].count(
+            "shoplab"
+        ) == 1
 
     def test_clear(self, engine):
         seed_markers.mark_applied(engine, "demo", schema=SCHEMA)

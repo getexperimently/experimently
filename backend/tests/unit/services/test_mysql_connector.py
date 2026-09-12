@@ -22,22 +22,22 @@ No real MySQL connection required — uses MagicMock throughout.
 """
 
 import time
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 
 from backend.app.services.mysql_connector import (
-    MySQLConnector,
-    MySQLConnectionError,
-    MySQLQueryError,
     MySQLAuthError,
+    MySQLConnectionError,
+    MySQLConnector,
+    MySQLQueryError,
     MySQLTimeoutError,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers / Fixtures
 # ---------------------------------------------------------------------------
+
 
 def _make_connector(**overrides) -> MySQLConnector:
     """Build a MySQLConnector with sensible defaults."""
@@ -82,6 +82,7 @@ def _make_mock_connection(cursor=None):
 # 1. Initialization Tests (7 tests)
 # ===========================================================================
 
+
 class TestMySQLConnectorInit:
     """Tests for connector initialisation and config storage."""
 
@@ -124,6 +125,7 @@ class TestMySQLConnectorInit:
     def test_init_uses_settings_defaults(self):
         """Connector falls back to settings when no args supplied."""
         from backend.app.core.config import settings
+
         connector = MySQLConnector()
         assert connector.host == settings.MYSQL_HOST
         assert connector.port == settings.MYSQL_PORT
@@ -132,6 +134,7 @@ class TestMySQLConnectorInit:
 # ===========================================================================
 # 2. Connection Establishment Tests (6 tests)
 # ===========================================================================
+
 
 class TestMySQLConnectorConnect:
     """Tests for connection establishment."""
@@ -176,7 +179,9 @@ class TestMySQLConnectorConnect:
     @patch("backend.app.services.mysql_connector.pymysql")
     def test_connect_raises_auth_error_on_bad_credentials(self, mock_pymysql):
         """connect() raises MySQLAuthError on authentication failure."""
-        mock_pymysql.connect.side_effect = Exception("Access denied for user 'analyst'@'host'")
+        mock_pymysql.connect.side_effect = Exception(
+            "Access denied for user 'analyst'@'host'"
+        )
 
         connector = _make_connector(password="wrong")
         with pytest.raises((MySQLConnectionError, MySQLAuthError)):
@@ -220,6 +225,7 @@ class TestMySQLConnectorConnect:
 # ===========================================================================
 # 3. Query Execution Tests (9 tests)
 # ===========================================================================
+
 
 class TestMySQLConnectorExecuteQuery:
     """Tests for execute_query() method."""
@@ -336,6 +342,7 @@ class TestMySQLConnectorExecuteQuery:
 # 4. Cursor Cleanup Tests (2 tests)
 # ===========================================================================
 
+
 class TestMySQLConnectorCursorCleanup:
     """Tests that cursor is closed after query execution."""
 
@@ -373,6 +380,7 @@ class TestMySQLConnectorCursorCleanup:
 # ===========================================================================
 # 5. Experiment Metrics Tests (6 tests)
 # ===========================================================================
+
 
 class TestMySQLConnectorExperimentMetrics:
     """Tests for get_experiment_metrics() method."""
@@ -477,6 +485,7 @@ class TestMySQLConnectorExperimentMetrics:
 # 6. Feature Flag Metrics Tests (5 tests)
 # ===========================================================================
 
+
 class TestMySQLConnectorFeatureFlagMetrics:
     """Tests for get_feature_flag_metrics() method."""
 
@@ -557,6 +566,7 @@ class TestMySQLConnectorFeatureFlagMetrics:
 # 7. test_connection() Tests (5 tests)
 # ===========================================================================
 
+
 class TestMySQLConnectorTestConnection:
     """Tests for the test_connection() method."""
 
@@ -619,6 +629,7 @@ class TestMySQLConnectorTestConnection:
 # 8. close() Tests (3 tests)
 # ===========================================================================
 
+
 class TestMySQLConnectorClose:
     """Tests for the close() method."""
 
@@ -656,6 +667,7 @@ class TestMySQLConnectorClose:
 # ===========================================================================
 # 9. Context Manager Tests (3 tests)
 # ===========================================================================
+
 
 class TestMySQLConnectorContextManager:
     """Tests for __enter__ / __exit__ context manager protocol."""
@@ -700,6 +712,7 @@ class TestMySQLConnectorContextManager:
 # ===========================================================================
 # 10. Retry / Resilience Tests (4 tests)
 # ===========================================================================
+
 
 class TestMySQLConnectorRetry:
     """Tests for retry logic on transient failures."""
@@ -764,6 +777,7 @@ class TestMySQLConnectorRetry:
 # 11. SQL Injection Prevention Tests (5 tests)
 # ===========================================================================
 
+
 class TestMySQLSQLInjectionPrevention:
     """Tests for SQL injection safeguards."""
 
@@ -806,6 +820,7 @@ class TestMySQLSQLInjectionPrevention:
 # 12. NULL / Unicode Handling Tests (3 tests)
 # ===========================================================================
 
+
 class TestMySQLConnectorDataHandling:
     """Tests for NULL values and character encoding."""
 
@@ -819,7 +834,9 @@ class TestMySQLConnectorDataHandling:
 
         connector = _make_connector()
         connector.connect()
-        result = connector.execute_query("SELECT variant_id, sample_size, conversions FROM t")
+        result = connector.execute_query(
+            "SELECT variant_id, sample_size, conversions FROM t"
+        )
 
         assert result[0]["variant_id"] == "control"
         assert result[0]["sample_size"] is None

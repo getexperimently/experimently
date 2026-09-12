@@ -92,7 +92,9 @@ class TestNaiveStageTimestamps:
 class TestNextStageRespectsItsOwnStartDate:
     @pytest.mark.asyncio
     @patch("backend.app.core.rollout_scheduler.SessionLocal")
-    async def test_completed_stage_does_not_activate_future_stage(self, mock_session_class):
+    async def test_completed_stage_does_not_activate_future_stage(
+        self, mock_session_class
+    ):
         """
         Finishing stage 1 must not jump straight to stage 2 when stage 2's
         TIME_BASED start_date is still in the future (the ShopLab search

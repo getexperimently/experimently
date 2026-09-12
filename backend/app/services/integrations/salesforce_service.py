@@ -3,8 +3,9 @@ Salesforce integration service.
 Creates/updates Salesforce Opportunities linked to platform experiments.
 All methods swallow exceptions — Salesforce failures never disrupt platform.
 """
+
 import logging
-from typing import Optional, Dict, Any
+from typing import Any, Dict, Optional
 
 import httpx
 
@@ -92,8 +93,7 @@ class SalesforceService:
                     "StageName": "Prospecting",
                     "CloseDate": "2099-12-31",
                     "Description": (
-                        f"Experiment ID: {experiment_id}\n"
-                        f"Hypothesis: {hypothesis}"
+                        f"Experiment ID: {experiment_id}\nHypothesis: {hypothesis}"
                     ),
                 },
                 timeout=10,
@@ -123,7 +123,11 @@ class SalesforceService:
             response.raise_for_status()
             return True
         except Exception as exc:
-            logger.warning("SalesforceService update_opportunity failed for %s: %s", opportunity_id, exc)
+            logger.warning(
+                "SalesforceService update_opportunity failed for %s: %s",
+                opportunity_id,
+                exc,
+            )
             return None
 
     def sync_experiment(
@@ -160,7 +164,11 @@ class SalesforceService:
             response.raise_for_status()
             return response.json()
         except Exception as exc:
-            logger.warning("SalesforceService get_opportunity failed for %s: %s", opportunity_id, exc)
+            logger.warning(
+                "SalesforceService get_opportunity failed for %s: %s",
+                opportunity_id,
+                exc,
+            )
             return None
 
     def parse_webhook_event(self, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:

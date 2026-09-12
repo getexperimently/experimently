@@ -28,14 +28,14 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from backend.app.main import app
 from backend.app.api import deps
+from backend.app.main import app
 from backend.app.models.user import User, UserRole
-
 
 # ---------------------------------------------------------------------------
 # Helpers / Fixtures
 # ---------------------------------------------------------------------------
+
 
 def _make_user(role: UserRole = UserRole.DEVELOPER, is_superuser: bool = False) -> User:
     """Build a minimal User object for mocking auth."""
@@ -67,6 +67,7 @@ def _make_mock_connection(
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def developer_user():
@@ -105,6 +106,7 @@ def client_as_viewer(viewer_user):
 # Test: GET /warehouse/connections
 # ---------------------------------------------------------------------------
 
+
 class TestListConnections:
     BASE_URL = "/api/v1/warehouse/connections"
 
@@ -138,6 +140,7 @@ class TestListConnections:
 # ---------------------------------------------------------------------------
 # Test: POST /warehouse/connections
 # ---------------------------------------------------------------------------
+
 
 class TestCreateConnection:
     BASE_URL = "/api/v1/warehouse/connections"
@@ -211,6 +214,7 @@ class TestCreateConnection:
 # Test: DELETE /warehouse/connections/{id}
 # ---------------------------------------------------------------------------
 
+
 class TestDeleteConnection:
     # Test 5: DELETE soft-deletes → 200
     def test_delete_connection_returns_200(self, client_as_developer):
@@ -242,6 +246,7 @@ class TestDeleteConnection:
 # Test: GET /warehouse/connections/{id}
 # ---------------------------------------------------------------------------
 
+
 class TestGetConnection:
     # Test 14: GET unknown id → 404
     def test_get_unknown_connection_returns_404(self, client_as_developer):
@@ -272,6 +277,7 @@ class TestGetConnection:
 # Test: POST /warehouse/connections/test
 # ---------------------------------------------------------------------------
 
+
 class TestTestConnection:
     BASE_URL = "/api/v1/warehouse/connections/test"
 
@@ -283,6 +289,7 @@ class TestTestConnection:
             "host": "account.snowflakecomputing.com",
         }
         from backend.app.services.warehouse_service import ConnectionTestResult
+
         with patch(
             "backend.app.api.v1.endpoints.warehouse.WarehouseConnectionManager"
         ) as MockMgr:
@@ -303,6 +310,7 @@ class TestTestConnection:
             "project_id": "my-gcp-project",
         }
         from backend.app.services.warehouse_service import ConnectionTestResult
+
         with patch(
             "backend.app.api.v1.endpoints.warehouse.WarehouseConnectionManager"
         ) as MockMgr:
@@ -325,6 +333,7 @@ class TestTestConnection:
 # ---------------------------------------------------------------------------
 # Test: POST /warehouse/sync/{experiment_id}
 # ---------------------------------------------------------------------------
+
 
 class TestSyncExperiment:
     # Test 10: Returns SyncStatusResponse
@@ -367,7 +376,9 @@ class TestSyncExperiment:
             )
         body = response.json()
         assert body.get("generated_sql") == expected_sql or body.get("status") in (
-            "success", "pending", "running"
+            "success",
+            "pending",
+            "running",
         )
 
     # Test 12: VIEWER gets 403

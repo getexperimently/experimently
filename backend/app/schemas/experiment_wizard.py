@@ -14,9 +14,7 @@ class WizardStepUpdate(BaseModel):
     """Request body for updating a draft with a completed step."""
 
     step: str = Field(..., description="The wizard step name being completed.")
-    data: Dict[str, Any] = Field(
-        ..., description="Step-specific data payload."
-    )
+    data: Dict[str, Any] = Field(..., description="Step-specific data payload.")
 
 
 class WizardDraftCreate(BaseModel):
@@ -51,9 +49,7 @@ class WizardValidationRequest(BaseModel):
     """Request body for validating a wizard step."""
 
     step: str = Field(..., description="The wizard step name to validate.")
-    data: Dict[str, Any] = Field(
-        ..., description="Step data to validate."
-    )
+    data: Dict[str, Any] = Field(..., description="Step data to validate.")
 
 
 class WizardValidationResponse(BaseModel):

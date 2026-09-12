@@ -2,14 +2,17 @@
 Custom role and direct permission grant models for RBAC Post-MVP.
 These supplement the static ROLE_PERMISSIONS dict in permissions.py.
 """
-from sqlalchemy import Column, String, Boolean, ForeignKey, DateTime, Text, Index
-from sqlalchemy.dialects.postgresql import UUID, JSONB
-from sqlalchemy.orm import relationship
-from sqlalchemy.ext.declarative import declared_attr
+
 from datetime import datetime, timezone
 
-from .base import Base, BaseModel
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Index, String, Text
+from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.ext.declarative import declared_attr
+from sqlalchemy.orm import relationship
+
 from backend.app.core.database_config import get_schema_name
+
+from .base import Base, BaseModel
 
 
 class CustomRole(Base, BaseModel):
@@ -17,6 +20,7 @@ class CustomRole(Base, BaseModel):
     DB-backed custom role with configurable permissions.
     Supplements the 4 built-in roles in UserRole enum.
     """
+
     __tablename__ = "custom_roles"
 
     name = Column(String(64), nullable=False, unique=True, index=True)
@@ -42,6 +46,7 @@ class CustomRole(Base, BaseModel):
 
 class UserCustomRole(Base, BaseModel):
     """Many-to-many: users <-> custom roles (with audit fields)."""
+
     __tablename__ = "user_custom_roles"
 
     user_id = Column(
@@ -85,6 +90,7 @@ class UserCustomRole(Base, BaseModel):
 
 class DirectPermissionGrant(Base, BaseModel):
     """Direct permission grant to a specific user (not via role)."""
+
     __tablename__ = "direct_permission_grants"
 
     user_id = Column(

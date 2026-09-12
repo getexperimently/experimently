@@ -6,15 +6,14 @@ This module handles database table creation and initial data seeding.
 """
 
 import logging
-from sqlalchemy.ext.asyncio import AsyncEngine
-from sqlalchemy.ext.asyncio import create_async_engine
-from sqlalchemy.ext.asyncio import AsyncSession
+
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from sqlalchemy.future import select
 
 from backend.app.core.config import settings
 from backend.app.core.security import get_password_hash
 from backend.app.db.base import Base
-from backend.app.models.user import User, Role, Permission
+from backend.app.models.user import Permission, Role, User
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +42,7 @@ async def init_db(engine: AsyncEngine) -> None:
         await seed_initial_data(engine)
 
     except Exception as e:
-        logger.error(f"Error initializing database: {str(e)}")
+        logger.error(f"Error initializing database: {e!s}")
         raise
 
 

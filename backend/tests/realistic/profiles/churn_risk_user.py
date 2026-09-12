@@ -35,7 +35,7 @@ class ChurnRiskBehavior:
     initial_conversion_rate: float = 0.10
     final_conversion_rate: float = 0.02
     decay_weeks: int = 4
-    re_engagement_boost: float = 0.15    # treatment uplift potential
+    re_engagement_boost: float = 0.15  # treatment uplift potential
     sensitivity_to_negative_ux: float = 2.0  # 2× more likely to leave on bad UX
 
     def _decay_factor(self, week: int) -> float:
@@ -51,9 +51,8 @@ class ChurnRiskBehavior:
 
     def conversion_rate_at_week(self, week: int) -> float:
         factor = self._decay_factor(week)
-        return (
-            self.initial_conversion_rate * factor
-            + self.final_conversion_rate * (1 - factor)
+        return self.initial_conversion_rate * factor + self.final_conversion_rate * (
+            1 - factor
         )
 
     def simulate_session(
@@ -122,13 +121,15 @@ def make_churn_risk_population(
             session["user_id"] = user_id
             session["session_week"] = week
             user_sessions.append(session)
-        users.append({
-            "user_id": user_id,
-            "variant": variant,
-            "profile": "churn_risk",
-            "sessions": user_sessions,
-            "total_conversions": sum(1 for s in user_sessions if s["converted"]),
-        })
+        users.append(
+            {
+                "user_id": user_id,
+                "variant": variant,
+                "profile": "churn_risk",
+                "sessions": user_sessions,
+                "total_conversions": sum(1 for s in user_sessions if s["converted"]),
+            }
+        )
 
     return users
 

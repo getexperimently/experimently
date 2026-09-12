@@ -12,17 +12,17 @@ This module provides compilation and validation of targeting rules, including:
 import hashlib
 import json
 import logging
-from typing import Dict, Any, List, Set, Optional
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from datetime import datetime
-from collections import OrderedDict
+from typing import Any, Dict, List, Optional, Set
 
 from backend.app.schemas.targeting_rule import (
-    TargetingRule,
-    RuleGroup,
     Condition,
+    LogicalOperator,
     OperatorType,
-    LogicalOperator
+    RuleGroup,
+    TargetingRule,
 )
 
 logger = logging.getLogger(__name__)
@@ -30,7 +30,6 @@ logger = logging.getLogger(__name__)
 
 class RuleValidationError(Exception):
     """Raised when rule validation fails."""
-    pass
 
 
 @dataclass
@@ -95,7 +94,9 @@ class RuleCompiler:
         """Get current cache size."""
         return len(self._cache)
 
-    def compile(self, rule: TargetingRule, force_recompile: bool = False) -> CompiledRule:
+    def compile(
+        self, rule: TargetingRule, force_recompile: bool = False
+    ) -> CompiledRule:
         """
         Compile and validate a targeting rule.
 
@@ -153,7 +154,7 @@ class RuleCompiler:
             "id": rule.id,
             "rule": self._serialize_rule_group(rule.rule),
             "rollout_percentage": rule.rollout_percentage,
-            "priority": rule.priority
+            "priority": rule.priority,
         }
 
         rule_json = json.dumps(rule_dict, sort_keys=True)
@@ -164,7 +165,7 @@ class RuleCompiler:
         return {
             "operator": group.operator.value,
             "conditions": [self._serialize_condition(c) for c in group.conditions],
-            "groups": [self._serialize_rule_group(g) for g in (group.groups or [])]
+            "groups": [self._serialize_rule_group(g) for g in (group.groups or [])],
         }
 
     def _serialize_condition(self, condition: Condition) -> Dict[str, Any]:
@@ -173,7 +174,9 @@ class RuleCompiler:
             "attribute": condition.attribute,
             "operator": condition.operator.value,
             "value": str(condition.value),  # Convert to string for consistent hashing
-            "additional_value": str(condition.additional_value) if condition.additional_value else None
+            "additional_value": str(condition.additional_value)
+            if condition.additional_value
+            else None,
         }
 
     def _compile_rule(self, rule: TargetingRule, rule_hash: str) -> CompiledRule:
@@ -192,7 +195,7 @@ class RuleCompiler:
             rule_hash=rule_hash,
             compiled_at=datetime.now(),
             is_valid=True,  # Assume valid until proven otherwise
-            original_rule=rule
+            original_rule=rule,
         )
 
         # Validate and extract metadata
@@ -200,7 +203,7 @@ class RuleCompiler:
             self._analyze_rule_group(rule.rule, compiled, depth=1)
         except Exception as e:
             compiled.is_valid = False
-            compiled.validation_errors.append(f"Compilation error: {str(e)}")
+            compiled.validation_errors.append(f"Compilation error: {e!s}")
             logger.error(f"Error compiling rule {rule.id}: {e}")
 
         # Check for contradictions
@@ -208,12 +211,7 @@ class RuleCompiler:
 
         return compiled
 
-    def _analyze_rule_group(
-        self,
-        group: RuleGroup,
-        compiled: CompiledRule,
-        depth: int
-    ):
+    def _analyze_rule_group(self, group: RuleGroup, compiled: CompiledRule, depth: int):
         """
         Recursively analyze a rule group.
 
@@ -239,7 +237,7 @@ class RuleCompiler:
             self._analyze_condition(condition, compiled)
 
         # Analyze nested groups
-        for nested_group in (group.groups or []):
+        for nested_group in group.groups or []:
             self._analyze_rule_group(nested_group, compiled, depth + 1)
 
     def _analyze_condition(self, condition: Condition, compiled: CompiledRule):
@@ -345,5 +343,5 @@ class RuleCompiler:
                         attr_values[attr] = condition.value
 
         # Recursively check nested groups
-        for nested_group in (group.groups or []):
+        for nested_group in group.groups or []:
             self._check_contradictions(nested_group, compiled)

@@ -5,14 +5,14 @@ Tests verify that Assignment records can be created, queried, and
 cascade-deleted through the ORM relationships, forming the foundation
 for future assignment service integration.
 """
-import pytest
+
 import uuid
 
+import pytest
 from sqlalchemy.exc import IntegrityError
 
 from backend.app.models.assignment import Assignment
-from backend.app.models.experiment import Experiment, ExperimentStatus
-from backend.app.models.experiment import Variant
+from backend.app.models.experiment import Experiment, ExperimentStatus, Variant
 
 
 @pytest.mark.integration
@@ -218,8 +218,12 @@ class TestAssignmentFlow:
         """Can query all assignments for a given user_id across all experiments."""
         exp1 = make_experiment(name="User Query Exp 1")
         exp2 = make_experiment(name="User Query Exp 2")
-        c1 = make_variant(experiment=exp1, name="C", is_control=True, traffic_allocation=100)
-        c2 = make_variant(experiment=exp2, name="C", is_control=True, traffic_allocation=100)
+        c1 = make_variant(
+            experiment=exp1, name="C", is_control=True, traffic_allocation=100
+        )
+        c2 = make_variant(
+            experiment=exp2, name="C", is_control=True, traffic_allocation=100
+        )
 
         target_user = f"target-user-{uuid.uuid4().hex[:8]}"
         make_assignment(experiment=exp1, variant=c1, user_id=target_user)
@@ -230,9 +234,7 @@ class TestAssignmentFlow:
         make_assignment(experiment=exp1, variant=c1, user_id=other_user)
 
         user_assignments = (
-            db_session.query(Assignment)
-            .filter(Assignment.user_id == target_user)
-            .all()
+            db_session.query(Assignment).filter(Assignment.user_id == target_user).all()
         )
         assert len(user_assignments) == 2
         exp_ids = {str(a.experiment_id) for a in user_assignments}

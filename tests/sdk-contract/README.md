@@ -38,5 +38,13 @@ Each SDK documents its smoke command in its README; the runner's `MANIFEST` list
 toolchains are skipped (reported as `SKIP`) unless `--strict` is given. The seeded API key can be
 overridden with `EXPERIMENTLY_API_KEY`, the backend with `EXPERIMENTLY_API_URL`.
 
+Three entries need no toolchain beyond node or a JVM, but get there differently from the rest:
+
+| SDK | How it runs under the contract |
+| --- | --- |
+| `react` | `sdk/react/examples/contract_smoke.mjs` drives the SSR entry point (`ServerClient`) plus `ExperimentationClient` for tracking, under plain node — no DOM, no React render. `trackEvent` never throws, so the smoke wraps `fetch` and fails on any tracking call that did not return 2xx. |
+| `react-native` | A Jest test (`sdk/react-native/examples/contract_smoke.test.ts`, `jest.contract.config.js`) under `testEnvironment: node` with the in-memory AsyncStorage mock — no device, emulator or Metro. The package ships no build output, so Jest's ts-jest transform is the build. Jest owns stdout, so the report is written to `.contract_smoke.json` and the MANIFEST command `cat`s it. |
+| `android` | `sdk/android/jvm/` compiles the Android SDK's Kotlin sources for a plain JVM (they touch no `android.*` API) with Maven, and `sdk/android/examples/contract_smoke.sh` runs the smoke from that build — no Android SDK, no emulator. The same module runs the SDK's 78 unit tests: `cd sdk/android/jvm && ./mvnw clean test`. |
+
 Contract details (endpoints, bodies, fan-out rule, smoke output format) live in
 `docs/sdk-guide.md` ("Endpoint contract").

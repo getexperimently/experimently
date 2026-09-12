@@ -12,8 +12,9 @@ Follows TDD (Test-Driven Development) - GREEN phase implementation.
 """
 
 import logging
-from typing import Dict, Any, List, Optional
 from datetime import datetime
+from typing import Any, Dict, List, Optional
+
 from botocore.exceptions import ClientError
 
 logger = logging.getLogger(__name__)
@@ -23,10 +24,7 @@ dynamodb_table = None
 
 
 def create_aggregation_key(
-    experiment_id: str,
-    variant: str,
-    timestamp: str,
-    window: str = "hourly"
+    experiment_id: str, variant: str, timestamp: str, window: str = "hourly"
 ) -> str:
     """
     Create aggregation partition key from experiment, variant, and time window.
@@ -44,7 +42,7 @@ def create_aggregation_key(
     """
     # Parse timestamp
     if isinstance(timestamp, str):
-        dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+        dt = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
     else:
         dt = timestamp
 
@@ -65,9 +63,7 @@ def create_aggregation_key(
 
 
 def aggregate_event(
-    enriched_event: Dict[str, Any],
-    window: str = "hourly",
-    max_retries: int = 3
+    enriched_event: Dict[str, Any], window: str = "hourly", max_retries: int = 3
 ) -> Optional[Dict[str, Any]]:
     """
     Aggregate a single enriched event to DynamoDB.
@@ -88,23 +84,25 @@ def aggregate_event(
         5. Return updated counts
     """
     # Skip events without experiment_id or variant
-    experiment_id = enriched_event.get('experiment_id')
-    variant = enriched_event.get('variant')
+    experiment_id = enriched_event.get("experiment_id")
+    variant = enriched_event.get("variant")
 
     if not experiment_id or not variant:
-        logger.debug(f"Skipping aggregation for event {enriched_event.get('event_id')} - no experiment/variant")
+        logger.debug(
+            f"Skipping aggregation for event {enriched_event.get('event_id')} - no experiment/variant"
+        )
         return {"skipped": True}
 
     # Create partition key
-    timestamp = enriched_event.get('timestamp')
+    timestamp = enriched_event.get("timestamp")
     partition_key = create_aggregation_key(experiment_id, variant, timestamp, window)
 
     # Event type for sort key
-    event_type = enriched_event.get('event_type', 'unknown')
+    event_type = enriched_event.get("event_type", "unknown")
     sort_key = f"event_type#{event_type}"
 
     # User ID for unique user tracking
-    user_id = enriched_event.get('user_id')
+    user_id = enriched_event.get("user_id")
 
     # Attempt update with retries
     for attempt in range(max_retries):
@@ -120,13 +118,10 @@ def aggregate_event(
 
             # Perform atomic update
             response = dynamodb_table.update_item(
-                Key={
-                    "partition_key": partition_key,
-                    "sort_key": sort_key
-                },
+                Key={"partition_key": partition_key, "sort_key": sort_key},
                 UpdateExpression=update_expression,
                 ExpressionAttributeValues=expression_attribute_values,
-                ReturnValues="ALL_NEW"
+                ReturnValues="ALL_NEW",
             )
 
             # Extract updated attributes
@@ -134,26 +129,37 @@ def aggregate_event(
             result = {
                 "event_count": attributes.get("event_count", 0),
                 "unique_users": len(attributes.get("unique_user_ids", set())),
-                "partition_key": partition_key
+                "partition_key": partition_key,
             }
 
-            logger.debug(f"Aggregated event {enriched_event.get('event_id')} to {partition_key}")
+            logger.debug(
+                f"Aggregated event {enriched_event.get('event_id')} to {partition_key}"
+            )
             return result
 
         except ClientError as e:
             error_code = e.response.get("Error", {}).get("Code", "")
 
-            if error_code == "ConditionalCheckFailedException" and attempt < max_retries - 1:
+            if (
+                error_code == "ConditionalCheckFailedException"
+                and attempt < max_retries - 1
+            ):
                 # Retry on conditional check failure
-                logger.warning(f"Conditional check failed, retrying ({attempt + 1}/{max_retries})")
+                logger.warning(
+                    f"Conditional check failed, retrying ({attempt + 1}/{max_retries})"
+                )
                 continue
             else:
                 # Re-raise for other errors or max retries exceeded
-                logger.error(f"Failed to aggregate event {enriched_event.get('event_id')}: {e}")
+                logger.error(
+                    f"Failed to aggregate event {enriched_event.get('event_id')}: {e}"
+                )
                 raise
 
         except Exception as e:
-            logger.error(f"Unexpected error aggregating event {enriched_event.get('event_id')}: {e}")
+            logger.error(
+                f"Unexpected error aggregating event {enriched_event.get('event_id')}: {e}"
+            )
             raise
 
     # Should not reach here, but return None if all retries exhausted
@@ -163,7 +169,7 @@ def aggregate_event(
 def aggregate_events_batch(
     enriched_events: List[Dict[str, Any]],
     window: str = "hourly",
-    return_summary: bool = False
+    return_summary: bool = False,
 ) -> Any:
     """
     Aggregate a batch of enriched events to DynamoDB.
@@ -199,7 +205,7 @@ def aggregate_events_batch(
             "success_count": success_count,
             "failure_count": failure_count,
             "total_events": len(enriched_events),
-            "results": results
+            "results": results,
         }
 
     return results

@@ -1,18 +1,19 @@
 # backend/tests/unit/api/test_users_fixed.py
-import pytest
 import uuid
-from unittest.mock import MagicMock, patch
-from fastapi import status, HTTPException
-from fastapi.testclient import TestClient
-from sqlalchemy.orm import Session
-from pydantic import SecretStr
 from datetime import datetime, timezone
+from unittest.mock import MagicMock, patch
 
+import pytest
+from fastapi import HTTPException, status
+from fastapi.testclient import TestClient
+from pydantic import SecretStr
+from sqlalchemy.orm import Session
+
+from backend.app.api.deps import get_current_active_user, get_current_superuser, get_db
+from backend.app.core.security import get_password_hash
+from backend.app.main import app
 from backend.app.models.user import User
 from backend.app.schemas.user import UserCreate, UserUpdate
-from backend.app.api.deps import get_current_active_user, get_current_superuser, get_db
-from backend.app.main import app
-from backend.app.core.security import get_password_hash
 
 
 @pytest.fixture

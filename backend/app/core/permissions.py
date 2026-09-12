@@ -1,10 +1,12 @@
 from enum import Enum
-from typing import List, Dict, Any, Optional, Union
+from typing import Any, Dict, List, Optional
 
 from backend.app.models.user import UserRole
 
+
 class ResourceType(str, Enum):
     """Types of resources that can be protected."""
+
     EXPERIMENT = "experiment"
     FEATURE_FLAG = "feature_flag"
     USER = "user"
@@ -17,29 +19,86 @@ class ResourceType(str, Enum):
     # else's key), which only ADMIN may do.
     API_KEY = "api_key"
 
+
 class Action(str, Enum):
     """Actions that can be performed on resources."""
+
     CREATE = "create"
     READ = "read"
     UPDATE = "update"
     DELETE = "delete"
     LIST = "list"
 
+
 # Role-based access control (RBAC) permissions mapping
 ROLE_PERMISSIONS: Dict[UserRole, Dict[ResourceType, List[Action]]] = {
     UserRole.ADMIN: {
-        ResourceType.EXPERIMENT: [Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.LIST],
-        ResourceType.FEATURE_FLAG: [Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.LIST],
-        ResourceType.USER: [Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.LIST],
-        ResourceType.ROLE: [Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.LIST],
-        ResourceType.PERMISSION: [Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.LIST],
-        ResourceType.REPORT: [Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.LIST],
-        ResourceType.API_KEY: [Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.LIST],
+        ResourceType.EXPERIMENT: [
+            Action.CREATE,
+            Action.READ,
+            Action.UPDATE,
+            Action.DELETE,
+            Action.LIST,
+        ],
+        ResourceType.FEATURE_FLAG: [
+            Action.CREATE,
+            Action.READ,
+            Action.UPDATE,
+            Action.DELETE,
+            Action.LIST,
+        ],
+        ResourceType.USER: [
+            Action.CREATE,
+            Action.READ,
+            Action.UPDATE,
+            Action.DELETE,
+            Action.LIST,
+        ],
+        ResourceType.ROLE: [
+            Action.CREATE,
+            Action.READ,
+            Action.UPDATE,
+            Action.DELETE,
+            Action.LIST,
+        ],
+        ResourceType.PERMISSION: [
+            Action.CREATE,
+            Action.READ,
+            Action.UPDATE,
+            Action.DELETE,
+            Action.LIST,
+        ],
+        ResourceType.REPORT: [
+            Action.CREATE,
+            Action.READ,
+            Action.UPDATE,
+            Action.DELETE,
+            Action.LIST,
+        ],
+        ResourceType.API_KEY: [
+            Action.CREATE,
+            Action.READ,
+            Action.UPDATE,
+            Action.DELETE,
+            Action.LIST,
+        ],
     },
     UserRole.DEVELOPER: {
         ResourceType.API_KEY: [Action.READ],
-        ResourceType.EXPERIMENT: [Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.LIST],
-        ResourceType.FEATURE_FLAG: [Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.LIST],
+        ResourceType.EXPERIMENT: [
+            Action.CREATE,
+            Action.READ,
+            Action.UPDATE,
+            Action.DELETE,
+            Action.LIST,
+        ],
+        ResourceType.FEATURE_FLAG: [
+            Action.CREATE,
+            Action.READ,
+            Action.UPDATE,
+            Action.DELETE,
+            Action.LIST,
+        ],
         ResourceType.USER: [Action.READ, Action.LIST],
         ResourceType.ROLE: [Action.READ, Action.LIST],
         ResourceType.PERMISSION: [Action.READ],
@@ -52,7 +111,13 @@ ROLE_PERMISSIONS: Dict[UserRole, Dict[ResourceType, List[Action]]] = {
         ResourceType.USER: [Action.READ],
         ResourceType.ROLE: [Action.READ],
         ResourceType.PERMISSION: [Action.READ],
-        ResourceType.REPORT: [Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.LIST],
+        ResourceType.REPORT: [
+            Action.CREATE,
+            Action.READ,
+            Action.UPDATE,
+            Action.DELETE,
+            Action.LIST,
+        ],
     },
     UserRole.VIEWER: {
         ResourceType.API_KEY: [Action.READ],
@@ -65,6 +130,7 @@ ROLE_PERMISSIONS: Dict[UserRole, Dict[ResourceType, List[Action]]] = {
     },
 }
 
+
 def has_permission(role: UserRole, resource: ResourceType, action: Action) -> bool:
     """Check if a role has permission to perform an action on a resource."""
     if role not in ROLE_PERMISSIONS:
@@ -72,6 +138,7 @@ def has_permission(role: UserRole, resource: ResourceType, action: Action) -> bo
     if resource not in ROLE_PERMISSIONS[role]:
         return False
     return action in ROLE_PERMISSIONS[role][resource]
+
 
 def check_permission(user: Any, resource: ResourceType, action: Action) -> bool:
     """
@@ -86,18 +153,19 @@ def check_permission(user: Any, resource: ResourceType, action: Action) -> bool:
         bool: True if the user has permission, False otherwise
     """
     # Superusers always have all permissions
-    if hasattr(user, 'is_superuser') and user.is_superuser:
+    if hasattr(user, "is_superuser") and user.is_superuser:
         return True
 
     # Get user's role
     try:
-        role = getattr(user, 'role', UserRole.VIEWER)
+        role = getattr(user, "role", UserRole.VIEWER)
     except (AttributeError, TypeError):
         # Default to Viewer role if there's any issue
         role = UserRole.VIEWER
 
     # Check role permissions
     return has_permission(role, resource, action)
+
 
 def check_ownership(user: Any, resource_obj: Any) -> bool:
     """
@@ -111,9 +179,10 @@ def check_ownership(user: Any, resource_obj: Any) -> bool:
         bool: True if the user owns the resource, False otherwise
     """
     # Check if the resource has an owner_id attribute
-    if hasattr(resource_obj, 'owner_id') and hasattr(user, 'id'):
+    if hasattr(resource_obj, "owner_id") and hasattr(user, "id"):
         return str(resource_obj.owner_id) == str(user.id)
     return False
+
 
 def get_permission_error_message(resource: ResourceType, action: Action) -> str:
     """
@@ -147,6 +216,7 @@ def get_permission_error_message(resource: ResourceType, action: Action) -> str:
     resource_name = resource_names.get(resource, str(resource))
 
     return f"You don't have permission to {action_name} {resource_name}"
+
 
 def get_required_role(resource: ResourceType, action: Action) -> Optional[UserRole]:
     """

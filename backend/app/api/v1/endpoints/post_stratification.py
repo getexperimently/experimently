@@ -65,9 +65,8 @@ def _build_mock_data_from_db(
         (control_df, treatment_df) as pandas DataFrames.
     """
     import numpy as np
-    from sqlalchemy import func
+
     from backend.app.models.assignment import Assignment
-    from backend.app.models.event import Event
 
     # Identify control / treatment variants
     control_variant = next((v for v in experiment.variants if v.is_control), None)
@@ -171,7 +170,9 @@ def compute_post_stratification(
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to build experiment data: {exc}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to build experiment data: {exc}"
+        )
 
     # Run post-stratification
     service = PostStratificationService()

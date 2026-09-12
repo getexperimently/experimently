@@ -87,9 +87,9 @@ variant = hasher.assign_variant(
     experiment_key="checkout_redesign",
     variants=[
         {"key": "control", "allocation": 0.5},
-        {"key": "treatment", "allocation": 0.5}
+        {"key": "treatment", "allocation": 0.5},
     ],
-    traffic_allocation=1.0
+    traffic_allocation=1.0,
 )
 # Returns: "control" or "treatment" deterministically
 ```

@@ -4,8 +4,9 @@ Tests for Cognito integration.
 This module tests the functionality of mapping Cognito groups to user roles.
 """
 
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
 
 from backend.app.core.cognito import map_cognito_groups_to_role, should_be_superuser
 from backend.app.models.user import UserRole
@@ -14,7 +15,10 @@ from backend.app.models.user import UserRole
 def test_map_cognito_groups_to_role_admin():
     """Test mapping Admin group to ADMIN role."""
     with patch("backend.app.core.cognito.settings") as mock_settings:
-        mock_settings.COGNITO_GROUP_ROLE_MAPPING = {"Admins": "admin", "Developers": "developer"}
+        mock_settings.COGNITO_GROUP_ROLE_MAPPING = {
+            "Admins": "admin",
+            "Developers": "developer",
+        }
         mock_settings.COGNITO_ADMIN_GROUPS = ["Admins"]
 
         # Test with admin group
@@ -25,7 +29,10 @@ def test_map_cognito_groups_to_role_admin():
 def test_map_cognito_groups_to_role_developer():
     """Test mapping Developer group to DEVELOPER role."""
     with patch("backend.app.core.cognito.settings") as mock_settings:
-        mock_settings.COGNITO_GROUP_ROLE_MAPPING = {"Admins": "admin", "Developers": "developer"}
+        mock_settings.COGNITO_GROUP_ROLE_MAPPING = {
+            "Admins": "admin",
+            "Developers": "developer",
+        }
         mock_settings.COGNITO_ADMIN_GROUPS = ["Admins"]
 
         # Test with developer group
@@ -40,7 +47,7 @@ def test_map_cognito_groups_to_role_multiple_groups():
             "Admins": "admin",
             "Developers": "developer",
             "Analysts": "analyst",
-            "Viewers": "viewer"
+            "Viewers": "viewer",
         }
         mock_settings.COGNITO_ADMIN_GROUPS = ["Admins"]
 
@@ -52,7 +59,10 @@ def test_map_cognito_groups_to_role_multiple_groups():
 def test_map_cognito_groups_to_role_default_to_viewer():
     """Test default to VIEWER role if no matching groups."""
     with patch("backend.app.core.cognito.settings") as mock_settings:
-        mock_settings.COGNITO_GROUP_ROLE_MAPPING = {"Admins": "admin", "Developers": "developer"}
+        mock_settings.COGNITO_GROUP_ROLE_MAPPING = {
+            "Admins": "admin",
+            "Developers": "developer",
+        }
         mock_settings.COGNITO_ADMIN_GROUPS = ["Admins"]
 
         # Test with no matching groups
@@ -66,7 +76,7 @@ def test_map_cognito_groups_to_role_admin_groups_override():
         mock_settings.COGNITO_GROUP_ROLE_MAPPING = {
             "Admins": "admin",
             "SuperUsers": "developer",  # Even though mapped as developer
-            "Developers": "developer"
+            "Developers": "developer",
         }
         mock_settings.COGNITO_ADMIN_GROUPS = ["Admins", "SuperUsers"]
 

@@ -6,17 +6,17 @@ Tests structure, column definitions, and enum values.
 import pytest
 from sqlalchemy import inspect
 
+from backend.app.core.database_config import get_schema_name
+from backend.app.models.base import Base
 from backend.app.models.notification import (
-    NotificationPreference,
-    NotificationDeliveryLog,
     NotificationChannel,
+    NotificationDeliveryLog,
+    NotificationPreference,
     NotificationStatus,
 )
-from backend.app.models.base import Base
-from backend.app.core.database_config import get_schema_name
-
 
 # ── Enum tests ──────────────────────────────────────────────────────────────
+
 
 def test_notification_channel_values():
     assert NotificationChannel.SLACK == "slack"
@@ -31,6 +31,7 @@ def test_notification_status_values():
 
 
 # ── NotificationPreference model ────────────────────────────────────────────
+
 
 def test_notification_preference_inherits_base():
     assert issubclass(NotificationPreference, Base)
@@ -91,6 +92,7 @@ def test_notification_preference_boolean_defaults():
 
 # ── NotificationDeliveryLog model ───────────────────────────────────────────
 
+
 def test_notification_delivery_log_inherits_base():
     assert issubclass(NotificationDeliveryLog, Base)
 
@@ -149,8 +151,10 @@ def test_notification_delivery_log_recipient_nullable_false():
 
 # ── Schema tests ─────────────────────────────────────────────────────────────
 
+
 def test_notification_preference_schema_defaults():
     from backend.app.schemas.notification import NotificationPreferenceCreate
+
     prefs = NotificationPreferenceCreate()
     assert prefs.notify_experiment_started is True
     assert prefs.notify_experiment_completed is True
@@ -162,6 +166,7 @@ def test_notification_preference_schema_defaults():
 
 def test_notification_preference_schema_update_partial():
     from backend.app.schemas.notification import NotificationPreferenceUpdate
+
     update = NotificationPreferenceUpdate(notify_safety_rollback=False)
     assert update.notify_safety_rollback is False
     assert update.notify_experiment_started is None  # unset = None for partial update
@@ -170,7 +175,9 @@ def test_notification_preference_schema_update_partial():
 def test_notification_delivery_log_response_schema():
     import uuid
     from datetime import datetime
+
     from backend.app.schemas.notification import NotificationDeliveryLogResponse
+
     data = NotificationDeliveryLogResponse(
         id=uuid.uuid4(),
         event_type="safety_rollback",
@@ -185,6 +192,7 @@ def test_notification_delivery_log_response_schema():
 
 def test_test_notification_request_schema():
     from backend.app.schemas.notification import TestNotificationRequest
+
     req = TestNotificationRequest()
     assert req.channel == NotificationChannel.SLACK
     assert "Test notification" in req.message

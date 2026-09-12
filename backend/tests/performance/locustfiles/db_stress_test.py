@@ -27,11 +27,12 @@ Usage (interactive web UI):
     locust -f db_stress_test.py --host http://localhost:8000
     # Then open http://localhost:8089 in your browser
 """
+
 import os
 import random
 import uuid
 
-from locust import HttpUser, task, between, events
+from locust import HttpUser, between, events, task
 from locust.env import Environment
 
 # ---------------------------------------------------------------------------
@@ -167,10 +168,12 @@ class DbStressUser(HttpUser):
         """
         experiment_key = random.choice(EXPERIMENT_KEYS)
         # Use the key as a pseudo-ID to generate a deterministic UUID
-        experiment_id = str(uuid.uuid5(
-            uuid.UUID("12345678-1234-5678-1234-567812345678"),
-            experiment_key,
-        ))
+        experiment_id = str(
+            uuid.uuid5(
+                uuid.UUID("12345678-1234-5678-1234-567812345678"),
+                experiment_key,
+            )
+        )
         self.client.get(
             f"/api/v1/experiments/{experiment_id}/results",
             headers=self.headers,
@@ -235,7 +238,9 @@ class DbStressUser(HttpUser):
         """
         # Select a random subset of flags to evaluate in one batch
         num_flags = random.randint(3, 8)
-        selected_flags = random.sample(FEATURE_FLAG_KEYS, min(num_flags, len(FEATURE_FLAG_KEYS)))
+        selected_flags = random.sample(
+            FEATURE_FLAG_KEYS, min(num_flags, len(FEATURE_FLAG_KEYS))
+        )
         payload = {
             "flag_keys": selected_flags,
             "user_id": _random_user_id(),
@@ -269,7 +274,9 @@ def on_quitting(environment: Environment, **kwargs: object) -> None:
 
     total_requests = stats.total.num_requests
     total_failures = stats.total.num_failures
-    failure_rate = (total_failures / total_requests * 100) if total_requests > 0 else 0.0
+    failure_rate = (
+        (total_failures / total_requests * 100) if total_requests > 0 else 0.0
+    )
 
     print("\n" + "=" * 60)
     print("DATABASE STRESS TEST COMPLETED")

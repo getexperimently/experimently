@@ -5,24 +5,26 @@ This module provides endpoints for creating, updating, and monitoring
 feature flag rollout schedules.
 """
 
-from typing import Any, Optional, List
+from typing import Any, Optional
 from uuid import UUID
-from fastapi import APIRouter, Depends, HTTPException, Query, Path, Body, status
 
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from sqlalchemy.orm import Session
 
 from backend.app.api import deps
 from backend.app.core.logging import get_logger
+from backend.app.models.rollout_schedule import (
+    RolloutScheduleStatus,
+)
 from backend.app.models.user import User
-from backend.app.models.rollout_schedule import RolloutScheduleStatus, RolloutStageStatus
 from backend.app.schemas.rollout_schedule import (
     RolloutScheduleCreate,
-    RolloutScheduleUpdate,
-    RolloutScheduleResponse,
     RolloutScheduleListResponse,
+    RolloutScheduleResponse,
+    RolloutScheduleUpdate,
     RolloutStageCreate,
+    RolloutStageResponse,
     RolloutStageUpdate,
-    RolloutStageResponse
 )
 from backend.app.services.rollout_service import RolloutService
 
@@ -35,7 +37,7 @@ router = APIRouter()
     "/",
     response_model=RolloutScheduleResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="Create a new rollout schedule"
+    summary="Create a new rollout schedule",
 )
 def create_rollout_schedule(
     *,
@@ -51,36 +53,37 @@ def create_rollout_schedule(
     """
     try:
         schedule = RolloutService.create_rollout_schedule(
-            db=db,
-            data=data,
-            owner_id=current_user.id
+            db=db, data=data, owner_id=current_user.id
         )
         return schedule
     except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
-        logger.error(f"Error creating rollout schedule: {str(e)}")
+        logger.error(f"Error creating rollout schedule: {e!s}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="An error occurred while creating the rollout schedule"
+            detail="An error occurred while creating the rollout schedule",
         )
 
 
 @router.get(
     "/",
     response_model=RolloutScheduleListResponse,
-    summary="Get list of rollout schedules"
+    summary="Get list of rollout schedules",
 )
 def get_rollout_schedules(
     *,
     db: Session = Depends(deps.get_db),
-    feature_flag_id: Optional[UUID] = Query(None, description="Filter by feature flag ID"),
-    status: Optional[RolloutScheduleStatus] = Query(None, description="Filter by status"),
+    feature_flag_id: Optional[UUID] = Query(
+        None, description="Filter by feature flag ID"
+    ),
+    status: Optional[RolloutScheduleStatus] = Query(
+        None, description="Filter by status"
+    ),
     skip: int = Query(0, ge=0, description="Number of records to skip"),
-    limit: int = Query(100, ge=1, le=1000, description="Maximum number of records to return"),
+    limit: int = Query(
+        100, ge=1, le=1000, description="Maximum number of records to return"
+    ),
     current_user: User = Depends(deps.get_current_active_user),
 ) -> Any:
     """
@@ -96,27 +99,22 @@ def get_rollout_schedules(
             owner_id=None,  # Don't filter by owner - allow viewing all schedules
             status=status,
             skip=skip,
-            limit=limit
+            limit=limit,
         )
 
-        return {
-            "items": schedules,
-            "total": total,
-            "skip": skip,
-            "limit": limit
-        }
+        return {"items": schedules, "total": total, "skip": skip, "limit": limit}
     except Exception as e:
-        logger.error(f"Error getting rollout schedules: {str(e)}")
+        logger.error(f"Error getting rollout schedules: {e!s}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="An error occurred while retrieving rollout schedules"
+            detail="An error occurred while retrieving rollout schedules",
         )
 
 
 @router.get(
     "/{schedule_id}",
     response_model=RolloutScheduleResponse,
-    summary="Get a specific rollout schedule"
+    summary="Get a specific rollout schedule",
 )
 def get_rollout_schedule(
     *,
@@ -135,7 +133,7 @@ def get_rollout_schedule(
     if not schedule:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Rollout schedule not found with ID: {schedule_id}"
+            detail=f"Rollout schedule not found with ID: {schedule_id}",
         )
 
     return schedule
@@ -144,7 +142,7 @@ def get_rollout_schedule(
 @router.put(
     "/{schedule_id}",
     response_model=RolloutScheduleResponse,
-    summary="Update a rollout schedule"
+    summary="Update a rollout schedule",
 )
 def update_rollout_schedule(
     *,
@@ -161,35 +159,30 @@ def update_rollout_schedule(
     """
     try:
         schedule = RolloutService.update_rollout_schedule(
-            db=db,
-            schedule_id=schedule_id,
-            data=data
+            db=db, schedule_id=schedule_id, data=data
         )
 
         if not schedule:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Rollout schedule not found with ID: {schedule_id}"
+                detail=f"Rollout schedule not found with ID: {schedule_id}",
             )
 
         return schedule
     except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
-        logger.error(f"Error updating rollout schedule: {str(e)}")
+        logger.error(f"Error updating rollout schedule: {e!s}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="An error occurred while updating the rollout schedule"
+            detail="An error occurred while updating the rollout schedule",
         )
 
 
 @router.delete(
     "/{schedule_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    summary="Delete a rollout schedule"
+    summary="Delete a rollout schedule",
 )
 def delete_rollout_schedule(
     *,
@@ -204,34 +197,28 @@ def delete_rollout_schedule(
     cannot be deleted and must be paused or cancelled first.
     """
     try:
-        success = RolloutService.delete_rollout_schedule(
-            db=db,
-            schedule_id=schedule_id
-        )
+        success = RolloutService.delete_rollout_schedule(db=db, schedule_id=schedule_id)
 
         if not success:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Rollout schedule not found with ID: {schedule_id}"
+                detail=f"Rollout schedule not found with ID: {schedule_id}",
             )
 
     except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
-        logger.error(f"Error deleting rollout schedule: {str(e)}")
+        logger.error(f"Error deleting rollout schedule: {e!s}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="An error occurred while deleting the rollout schedule"
+            detail="An error occurred while deleting the rollout schedule",
         )
 
 
 @router.post(
     "/{schedule_id}/activate",
     response_model=RolloutScheduleResponse,
-    summary="Activate a rollout schedule"
+    summary="Activate a rollout schedule",
 )
 def activate_rollout_schedule(
     *,
@@ -247,34 +234,30 @@ def activate_rollout_schedule(
     """
     try:
         schedule = RolloutService.activate_rollout_schedule(
-            db=db,
-            schedule_id=schedule_id
+            db=db, schedule_id=schedule_id
         )
 
         if not schedule:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Rollout schedule not found with ID: {schedule_id}"
+                detail=f"Rollout schedule not found with ID: {schedule_id}",
             )
 
         return schedule
     except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
-        logger.error(f"Error activating rollout schedule: {str(e)}")
+        logger.error(f"Error activating rollout schedule: {e!s}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="An error occurred while activating the rollout schedule"
+            detail="An error occurred while activating the rollout schedule",
         )
 
 
 @router.post(
     "/{schedule_id}/pause",
     response_model=RolloutScheduleResponse,
-    summary="Pause a rollout schedule"
+    summary="Pause a rollout schedule",
 )
 def pause_rollout_schedule(
     *,
@@ -289,35 +272,29 @@ def pause_rollout_schedule(
     which temporarily suspends its processing by the scheduler.
     """
     try:
-        schedule = RolloutService.pause_rollout_schedule(
-            db=db,
-            schedule_id=schedule_id
-        )
+        schedule = RolloutService.pause_rollout_schedule(db=db, schedule_id=schedule_id)
 
         if not schedule:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Rollout schedule not found with ID: {schedule_id}"
+                detail=f"Rollout schedule not found with ID: {schedule_id}",
             )
 
         return schedule
     except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
-        logger.error(f"Error pausing rollout schedule: {str(e)}")
+        logger.error(f"Error pausing rollout schedule: {e!s}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="An error occurred while pausing the rollout schedule"
+            detail="An error occurred while pausing the rollout schedule",
         )
 
 
 @router.post(
     "/{schedule_id}/cancel",
     response_model=RolloutScheduleResponse,
-    summary="Cancel a rollout schedule"
+    summary="Cancel a rollout schedule",
 )
 def cancel_rollout_schedule(
     *,
@@ -333,27 +310,23 @@ def cancel_rollout_schedule(
     """
     try:
         schedule = RolloutService.cancel_rollout_schedule(
-            db=db,
-            schedule_id=schedule_id
+            db=db, schedule_id=schedule_id
         )
 
         if not schedule:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Rollout schedule not found with ID: {schedule_id}"
+                detail=f"Rollout schedule not found with ID: {schedule_id}",
             )
 
         return schedule
     except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
-        logger.error(f"Error cancelling rollout schedule: {str(e)}")
+        logger.error(f"Error cancelling rollout schedule: {e!s}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="An error occurred while cancelling the rollout schedule"
+            detail="An error occurred while cancelling the rollout schedule",
         )
 
 
@@ -361,7 +334,7 @@ def cancel_rollout_schedule(
     "/{schedule_id}/stages",
     response_model=RolloutStageResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="Add a stage to a rollout schedule"
+    summary="Add a stage to a rollout schedule",
 )
 def add_rollout_stage(
     *,
@@ -378,35 +351,30 @@ def add_rollout_stage(
     """
     try:
         stage = RolloutService.add_rollout_stage(
-            db=db,
-            schedule_id=schedule_id,
-            data=data
+            db=db, schedule_id=schedule_id, data=data
         )
 
         if not stage:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Rollout schedule not found with ID: {schedule_id}"
+                detail=f"Rollout schedule not found with ID: {schedule_id}",
             )
 
         return stage
     except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
-        logger.error(f"Error adding rollout stage: {str(e)}")
+        logger.error(f"Error adding rollout stage: {e!s}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="An error occurred while adding the rollout stage"
+            detail="An error occurred while adding the rollout stage",
         )
 
 
 @router.put(
     "/stages/{stage_id}",
     response_model=RolloutStageResponse,
-    summary="Update a rollout stage"
+    summary="Update a rollout stage",
 )
 def update_rollout_stage(
     *,
@@ -422,36 +390,29 @@ def update_rollout_stage(
     including its target percentage and trigger criteria.
     """
     try:
-        stage = RolloutService.update_rollout_stage(
-            db=db,
-            stage_id=stage_id,
-            data=data
-        )
+        stage = RolloutService.update_rollout_stage(db=db, stage_id=stage_id, data=data)
 
         if not stage:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Rollout stage not found with ID: {stage_id}"
+                detail=f"Rollout stage not found with ID: {stage_id}",
             )
 
         return stage
     except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
-        logger.error(f"Error updating rollout stage: {str(e)}")
+        logger.error(f"Error updating rollout stage: {e!s}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="An error occurred while updating the rollout stage"
+            detail="An error occurred while updating the rollout stage",
         )
 
 
 @router.delete(
     "/stages/{stage_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    summary="Delete a rollout stage"
+    summary="Delete a rollout stage",
 )
 def delete_rollout_stage(
     *,
@@ -466,34 +427,28 @@ def delete_rollout_stage(
     Stages that are already in progress or completed cannot be deleted.
     """
     try:
-        success = RolloutService.delete_rollout_stage(
-            db=db,
-            stage_id=stage_id
-        )
+        success = RolloutService.delete_rollout_stage(db=db, stage_id=stage_id)
 
         if not success:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Rollout stage not found with ID: {stage_id}"
+                detail=f"Rollout stage not found with ID: {stage_id}",
             )
 
     except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
-        logger.error(f"Error deleting rollout stage: {str(e)}")
+        logger.error(f"Error deleting rollout stage: {e!s}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="An error occurred while deleting the rollout stage"
+            detail="An error occurred while deleting the rollout stage",
         )
 
 
 @router.post(
     "/stages/{stage_id}/advance",
     response_model=RolloutStageResponse,
-    summary="Manually advance a stage"
+    summary="Manually advance a stage",
 )
 def manually_advance_stage(
     *,
@@ -508,26 +463,20 @@ def manually_advance_stage(
     for stages with manual trigger types.
     """
     try:
-        stage = RolloutService.manually_advance_stage(
-            db=db,
-            stage_id=stage_id
-        )
+        stage = RolloutService.manually_advance_stage(db=db, stage_id=stage_id)
 
         if not stage:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Rollout stage not found with ID: {stage_id}"
+                detail=f"Rollout stage not found with ID: {stage_id}",
             )
 
         return stage
     except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
-        logger.error(f"Error advancing rollout stage: {str(e)}")
+        logger.error(f"Error advancing rollout stage: {e!s}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="An error occurred while advancing the rollout stage"
+            detail="An error occurred while advancing the rollout stage",
         )

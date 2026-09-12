@@ -1,7 +1,9 @@
 """Pydantic v2 schemas for Bayesian experimentation (EP-035)."""
-from typing import Optional, List
+
 import enum
-from pydantic import BaseModel, Field, field_validator, ConfigDict
+from typing import List, Optional
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from backend.app.core.stats_engine import ENGINE_VERSION
 

@@ -23,16 +23,17 @@ connection, since the power calculator endpoints perform pure CPU math
 with no DB access.
 """
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from fastapi.testclient import TestClient
-from backend.app.main import app
 
+from backend.app.main import app
 
 # ---------------------------------------------------------------------------
 # Local client fixture — no DB required for pure-math endpoints
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def client():
@@ -49,6 +50,7 @@ def client():
 # ---------------------------------------------------------------------------
 # Sample-size payload helpers
 # ---------------------------------------------------------------------------
+
 
 def _sample_size_payload(**overrides) -> dict:
     base = {
@@ -104,6 +106,7 @@ def _plan_payload(**overrides) -> dict:
 # ===========================================================================
 # TestSampleSizeEndpoint
 # ===========================================================================
+
 
 class TestSampleSizeEndpoint:
     """POST /api/v1/power/sample-size"""
@@ -233,6 +236,7 @@ class TestSampleSizeEndpoint:
 # TestMDEEndpoint
 # ===========================================================================
 
+
 class TestMDEEndpoint:
     """POST /api/v1/power/mde"""
 
@@ -280,6 +284,7 @@ class TestMDEEndpoint:
 # TestRuntimeEndpoint
 # ===========================================================================
 
+
 class TestRuntimeEndpoint:
     """POST /api/v1/power/runtime"""
 
@@ -302,10 +307,14 @@ class TestRuntimeEndpoint:
         assert len(data["confidence_interval_days"]) == 2
 
     def test_weeks_is_days_over_seven(self, client: TestClient):
-        payload = _runtime_payload(required_sample_size=7000, daily_traffic=1000, traffic_allocation=1.0)
+        payload = _runtime_payload(
+            required_sample_size=7000, daily_traffic=1000, traffic_allocation=1.0
+        )
         resp = client.post("/api/v1/power/runtime", json=payload)
         data = resp.json()
-        assert abs(data["weeks_to_significance"] - data["days_to_significance"] / 7) < 0.01
+        assert (
+            abs(data["weeks_to_significance"] - data["days_to_significance"] / 7) < 0.01
+        )
 
     def test_higher_traffic_fewer_days(self, client: TestClient):
         days_low = client.post(
@@ -341,6 +350,7 @@ class TestRuntimeEndpoint:
 # ===========================================================================
 # TestPowerCurveEndpoint
 # ===========================================================================
+
 
 class TestPowerCurveEndpoint:
     """GET /api/v1/power/curve"""
@@ -405,6 +415,7 @@ class TestPowerCurveEndpoint:
 # ===========================================================================
 # TestPlanEndpoint
 # ===========================================================================
+
 
 class TestPlanEndpoint:
     """POST /api/v1/power/plan (AI planning advice, Claude mocked)."""

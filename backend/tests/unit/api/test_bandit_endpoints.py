@@ -17,16 +17,16 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from backend.app.main import app
 from backend.app.api import deps
-from backend.app.models.user import User, UserRole
-from backend.app.models.experiment import Experiment, ExperimentStatus
+from backend.app.main import app
 from backend.app.models.bandit_state import BanditState
-
+from backend.app.models.experiment import Experiment, ExperimentStatus
+from backend.app.models.user import User, UserRole
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_user(role: UserRole = UserRole.DEVELOPER, is_superuser: bool = False) -> User:
     """Construct a fake User with the given role."""
@@ -95,6 +95,7 @@ def _make_bandit_state(
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def client():
     return TestClient(app, raise_server_exceptions=True)
@@ -118,6 +119,7 @@ def viewer_user():
 # ===========================================================================
 # Tests
 # ===========================================================================
+
 
 class TestGetBanditStatus:
     """GET /api/v1/bandit/{experiment_id}"""
@@ -147,7 +149,9 @@ class TestGetBanditStatus:
         assert body["experiment_id"] == str(exp.id)
         assert body["algorithm"] == "thompson_sampling"
 
-    def test_get_bandit_status_returns_404_for_unknown_experiment(self, client, developer_user):
+    def test_get_bandit_status_returns_404_for_unknown_experiment(
+        self, client, developer_user
+    ):
         """Returns 404 when the experiment UUID does not exist."""
         unknown_id = uuid.uuid4()
 
@@ -164,7 +168,9 @@ class TestGetBanditStatus:
 
         assert response.status_code == 404
 
-    def test_get_bandit_status_returns_404_for_fixed_experiment(self, client, developer_user):
+    def test_get_bandit_status_returns_404_for_fixed_experiment(
+        self, client, developer_user
+    ):
         """Returns 404 for experiments with optimization_type='fixed'."""
         exp = _make_experiment(optimization_type="fixed")
 
@@ -181,7 +187,9 @@ class TestGetBanditStatus:
 
         assert response.status_code == 404
 
-    def test_get_bandit_status_returns_weights_from_bandit_state(self, client, developer_user):
+    def test_get_bandit_status_returns_weights_from_bandit_state(
+        self, client, developer_user
+    ):
         """Returns the persisted variant weights from BanditState."""
         exp = _make_experiment()
         v_ids = [v.id for v in exp.variants]
@@ -209,7 +217,9 @@ class TestGetBanditStatus:
         assert weights_in_response[str(v_ids[0])] == pytest.approx(0.7)
         assert weights_in_response[str(v_ids[1])] == pytest.approx(0.3)
 
-    def test_get_bandit_status_returns_equal_weights_when_no_state(self, client, developer_user):
+    def test_get_bandit_status_returns_equal_weights_when_no_state(
+        self, client, developer_user
+    ):
         """Returns equal weights when no BanditState has been computed yet."""
         exp = _make_experiment()
 
@@ -314,9 +324,7 @@ class TestTriggerBanditUpdate:
         # 1st call: experiment (in endpoint), 2nd call: experiment (in scheduler),
         # 3rd call: BanditState query in scheduler update_experiment,
         # 4th call: BanditState query after update
-        db_mock.query.return_value.filter.return_value.first.side_effect = [
-            exp, state
-        ]
+        db_mock.query.return_value.filter.return_value.first.side_effect = [exp, state]
         app.dependency_overrides[deps.get_db] = lambda: db_mock
 
         with patch(
@@ -360,12 +368,16 @@ class TestTriggerBanditUpdate:
 
         assert response.status_code == 403
 
-    def test_trigger_update_returns_correct_exploring_status(self, client, developer_user):
+    def test_trigger_update_returns_correct_exploring_status(
+        self, client, developer_user
+    ):
         """After update, returns response with appropriate recommendation string."""
         exp = _make_experiment()
         v_ids = [v.id for v in exp.variants]
         # Equal weights → EXPLORING
-        state = _make_bandit_state(exp.id, v_ids, weights={str(v_ids[0]): 0.5, str(v_ids[1]): 0.5})
+        state = _make_bandit_state(
+            exp.id, v_ids, weights={str(v_ids[0]): 0.5, str(v_ids[1]): 0.5}
+        )
         state.total_pulls = 10
 
         app.dependency_overrides[deps.get_current_active_user] = lambda: developer_user
@@ -385,7 +397,12 @@ class TestTriggerBanditUpdate:
 
         assert response.status_code == 200
         body = response.json()
-        assert body["recommendation"] in ("EXPLORING", "CONVERGING", "DEPLOYING_Control", "DEPLOYING_Treatment")
+        assert body["recommendation"] in (
+            "EXPLORING",
+            "CONVERGING",
+            "DEPLOYING_Control",
+            "DEPLOYING_Treatment",
+        )
 
 
 class TestOverrideBanditWeights:
@@ -400,7 +417,11 @@ class TestOverrideBanditWeights:
         app.dependency_overrides[deps.get_current_active_user] = lambda: admin_user
 
         db_mock = MagicMock()
-        db_mock.query.return_value.filter.return_value.first.side_effect = [exp, None, None]
+        db_mock.query.return_value.filter.return_value.first.side_effect = [
+            exp,
+            None,
+            None,
+        ]
         app.dependency_overrides[deps.get_db] = lambda: db_mock
 
         try:
@@ -477,7 +498,9 @@ class TestOverrideBanditWeights:
         """
         exp = _make_experiment()
         v_ids = [v.id for v in exp.variants]
-        state = _make_bandit_state(exp.id, v_ids, weights={str(v_ids[0]): 0.5, str(v_ids[1]): 0.5})
+        state = _make_bandit_state(
+            exp.id, v_ids, weights={str(v_ids[0]): 0.5, str(v_ids[1]): 0.5}
+        )
 
         app.dependency_overrides[deps.get_current_active_user] = lambda: developer_user
 

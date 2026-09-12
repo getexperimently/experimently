@@ -2,15 +2,20 @@
 Tests for SalesforceService.
 All HTTP calls are mocked with unittest.mock — no real Salesforce required.
 """
-import pytest
+
 from unittest.mock import MagicMock, patch
+
 import httpx
+import pytest
 
 
 class TestSalesforceServiceInit:
     def test_init_with_credentials(self):
         """Service stores instance_url, client_id, client_secret."""
-        from backend.app.services.integrations.salesforce_service import SalesforceService
+        from backend.app.services.integrations.salesforce_service import (
+            SalesforceService,
+        )
+
         svc = SalesforceService(
             instance_url="https://myorg.salesforce.com",
             client_id="client123",
@@ -22,7 +27,10 @@ class TestSalesforceServiceInit:
 
     def test_init_strips_trailing_slash(self):
         """Trailing slash is removed from instance_url."""
-        from backend.app.services.integrations.salesforce_service import SalesforceService
+        from backend.app.services.integrations.salesforce_service import (
+            SalesforceService,
+        )
+
         svc = SalesforceService(
             instance_url="https://myorg.salesforce.com/",
             client_id="c",
@@ -32,7 +40,10 @@ class TestSalesforceServiceInit:
 
     def test_from_config_extracts_credentials(self):
         """from_config(integration_config) reads encrypted_config dict."""
-        from backend.app.services.integrations.salesforce_service import SalesforceService
+        from backend.app.services.integrations.salesforce_service import (
+            SalesforceService,
+        )
+
         mock_config = MagicMock()
         mock_config.encrypted_config = {
             "instance_url": "https://myorg.salesforce.com",
@@ -47,7 +58,10 @@ class TestSalesforceServiceInit:
 
     def test_from_config_missing_credentials_returns_none(self):
         """Returns None if required fields missing from config."""
-        from backend.app.services.integrations.salesforce_service import SalesforceService
+        from backend.app.services.integrations.salesforce_service import (
+            SalesforceService,
+        )
+
         mock_config = MagicMock()
         mock_config.encrypted_config = {
             "instance_url": "https://myorg.salesforce.com",
@@ -58,7 +72,10 @@ class TestSalesforceServiceInit:
 
     def test_from_config_none_config_returns_none(self):
         """Returns None if encrypted_config is None."""
-        from backend.app.services.integrations.salesforce_service import SalesforceService
+        from backend.app.services.integrations.salesforce_service import (
+            SalesforceService,
+        )
+
         mock_config = MagicMock()
         mock_config.encrypted_config = None
         svc = SalesforceService.from_config(mock_config)
@@ -68,7 +85,10 @@ class TestSalesforceServiceInit:
 class TestSalesforceOAuth:
     def test_get_access_token_makes_oauth_request(self):
         """POST to /services/oauth2/token with client credentials grant."""
-        from backend.app.services.integrations.salesforce_service import SalesforceService
+        from backend.app.services.integrations.salesforce_service import (
+            SalesforceService,
+        )
+
         svc = SalesforceService(
             instance_url="https://myorg.salesforce.com",
             client_id="cid",
@@ -77,7 +97,10 @@ class TestSalesforceOAuth:
         with patch("httpx.post") as mock_post:
             mock_resp = MagicMock()
             mock_resp.status_code = 200
-            mock_resp.json.return_value = {"access_token": "tok123", "instance_url": "https://myorg.salesforce.com"}
+            mock_resp.json.return_value = {
+                "access_token": "tok123",
+                "instance_url": "https://myorg.salesforce.com",
+            }
             mock_post.return_value = mock_resp
             token = svc.get_access_token()
             mock_post.assert_called_once()
@@ -87,7 +110,10 @@ class TestSalesforceOAuth:
 
     def test_get_access_token_returns_token_string(self):
         """Returns access_token from response JSON."""
-        from backend.app.services.integrations.salesforce_service import SalesforceService
+        from backend.app.services.integrations.salesforce_service import (
+            SalesforceService,
+        )
+
         svc = SalesforceService(
             instance_url="https://myorg.salesforce.com",
             client_id="cid",
@@ -103,7 +129,10 @@ class TestSalesforceOAuth:
 
     def test_get_access_token_returns_none_on_error(self):
         """Returns None if request fails (never raises)."""
-        from backend.app.services.integrations.salesforce_service import SalesforceService
+        from backend.app.services.integrations.salesforce_service import (
+            SalesforceService,
+        )
+
         svc = SalesforceService(
             instance_url="https://myorg.salesforce.com",
             client_id="cid",
@@ -115,7 +144,10 @@ class TestSalesforceOAuth:
 
     def test_get_access_token_sends_client_credentials(self):
         """Sends grant_type=client_credentials with client_id and client_secret."""
-        from backend.app.services.integrations.salesforce_service import SalesforceService
+        from backend.app.services.integrations.salesforce_service import (
+            SalesforceService,
+        )
+
         svc = SalesforceService(
             instance_url="https://myorg.salesforce.com",
             client_id="my_client_id",
@@ -136,7 +168,10 @@ class TestSalesforceOAuth:
 
 class TestSalesforceExperimentSync:
     def _make_service(self):
-        from backend.app.services.integrations.salesforce_service import SalesforceService
+        from backend.app.services.integrations.salesforce_service import (
+            SalesforceService,
+        )
+
         svc = SalesforceService(
             instance_url="https://myorg.salesforce.com",
             client_id="cid",
@@ -220,7 +255,9 @@ class TestSalesforceExperimentSync:
     def test_sync_experiment_creates_if_no_opportunity_id(self):
         """sync_experiment() creates if no opportunity_id."""
         svc = self._make_service()
-        with patch.object(svc, "create_opportunity", return_value="006NEW") as mock_create:
+        with patch.object(
+            svc, "create_opportunity", return_value="006NEW"
+        ) as mock_create:
             result = svc.sync_experiment(
                 experiment_id="exp-1",
                 name="Test",
@@ -268,7 +305,10 @@ class TestSalesforceExperimentSync:
 
     def test_parse_webhook_event_opportunity_updated(self):
         """parse_webhook_event() handles outbound message with status changes."""
-        from backend.app.services.integrations.salesforce_service import SalesforceService
+        from backend.app.services.integrations.salesforce_service import (
+            SalesforceService,
+        )
+
         svc = SalesforceService("https://myorg.salesforce.com", "c", "s")
         payload = {
             "event_type": "Opportunity",
@@ -282,14 +322,20 @@ class TestSalesforceExperimentSync:
 
     def test_parse_webhook_event_unsupported_returns_none(self):
         """Returns None for unrecognized event types (empty payload)."""
-        from backend.app.services.integrations.salesforce_service import SalesforceService
+        from backend.app.services.integrations.salesforce_service import (
+            SalesforceService,
+        )
+
         svc = SalesforceService("https://myorg.salesforce.com", "c", "s")
         result = svc.parse_webhook_event({})
         assert result is None
 
     def test_parse_webhook_event_never_raises(self):
         """parse_webhook_event() never raises even on malformed payload."""
-        from backend.app.services.integrations.salesforce_service import SalesforceService
+        from backend.app.services.integrations.salesforce_service import (
+            SalesforceService,
+        )
+
         svc = SalesforceService("https://myorg.salesforce.com", "c", "s")
         # Even None or weird types should not raise
         result = svc.parse_webhook_event({"event_type": None})

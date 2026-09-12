@@ -18,28 +18,28 @@ Key design decisions:
 - Run E2E tests in a separate pytest invocation when mixing with other test suites
   to avoid pool state interference.
 """
+
 import os
-import pytest
 import uuid
+
+import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import NullPool
 
-from backend.app.main import app
 from backend.app.api import deps
-from backend.app.models.user import User, UserRole
-from backend.app.models.experiment import (
-    Experiment, ExperimentStatus, Variant, Metric
-)
+from backend.app.main import app
+from backend.app.models.experiment import Experiment, ExperimentStatus, Metric, Variant
 from backend.app.models.feature_flag import FeatureFlag, FeatureFlagStatus
+from backend.app.models.user import User, UserRole
 
 HASHED_PASSWORD = "$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW"
 # Use the per-process database that the root conftest's `test_db` fixture
 # creates (experimentation_test_<pid>) rather than a fixed name, so the E2E
 # engine points at a database that actually has the schema.
-from backend.tests.conftest import DEFAULT_TEST_DB_URL  # noqa: E402
+from backend.tests.conftest import DEFAULT_TEST_DB_URL
 
 
 class DictLikeCacheControl:
@@ -50,6 +50,7 @@ class DictLikeCacheControl:
     (dict-style) instead of cache_control.enabled (attribute access), which
     raises AttributeError on the real Pydantic CacheControl object.
     """
+
     enabled = False
     skip = True
     redis = None
@@ -73,6 +74,7 @@ def e2e_engine(test_db):
     runs or earlier in this pytest session) interfere with the E2E tests.
     """
     from backend.app.db.session import engine as app_engine
+
     app_engine.dispose()
 
     # Always the per-process database that `test_db` just created; an
@@ -136,6 +138,7 @@ def admin_client(e2e_db_session, admin_user):
     create_feature_flag endpoint that calls cache_control.get() dict-style
     on a Pydantic CacheControl model instance.
     """
+
     def override_get_db():
         try:
             yield e2e_db_session
@@ -162,11 +165,17 @@ def admin_client(e2e_db_session, admin_user):
 
     app.dependency_overrides[deps.get_db] = override_get_db
     app.dependency_overrides[deps.get_current_user] = override_get_current_user
-    app.dependency_overrides[deps.get_current_active_user] = override_get_current_active_user
-    app.dependency_overrides[deps.get_current_superuser] = override_get_current_superuser
+    app.dependency_overrides[deps.get_current_active_user] = (
+        override_get_current_active_user
+    )
+    app.dependency_overrides[deps.get_current_superuser] = (
+        override_get_current_superuser
+    )
     app.dependency_overrides[deps.get_cache_control] = override_get_cache_control
     app.dependency_overrides[deps.get_api_key] = override_get_api_key
-    app.dependency_overrides[deps.can_create_feature_flag] = override_can_create_feature_flag
+    app.dependency_overrides[deps.can_create_feature_flag] = (
+        override_can_create_feature_flag
+    )
 
     client = TestClient(app)
     yield client
@@ -177,9 +186,11 @@ def admin_client(e2e_db_session, admin_user):
 # DB factory fixtures using the e2e_db_session
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def make_experiment(e2e_db_session, admin_user):
     """Factory for creating Experiment objects in E2E tests."""
+
     def _make(**kwargs):
         defaults = {
             "name": "E2E Test Experiment",
@@ -194,13 +205,17 @@ def make_experiment(e2e_db_session, admin_user):
         e2e_db_session.commit()
         e2e_db_session.refresh(exp)
         return exp
+
     return _make
 
 
 @pytest.fixture
 def make_variant(e2e_db_session):
     """Factory for creating Variant objects in E2E tests."""
-    def _make(experiment, name="Control", is_control=True, traffic_allocation=50, **kwargs):
+
+    def _make(
+        experiment, name="Control", is_control=True, traffic_allocation=50, **kwargs
+    ):
         variant = Variant(
             experiment_id=experiment.id,
             name=name,
@@ -212,13 +227,21 @@ def make_variant(e2e_db_session):
         e2e_db_session.commit()
         e2e_db_session.refresh(variant)
         return variant
+
     return _make
 
 
 @pytest.fixture
 def make_metric(e2e_db_session):
     """Factory for creating Metric objects in E2E tests."""
-    def _make(experiment, name="Conversion", event_name="purchase", metric_type="conversion", **kwargs):
+
+    def _make(
+        experiment,
+        name="Conversion",
+        event_name="purchase",
+        metric_type="conversion",
+        **kwargs,
+    ):
         metric = Metric(
             experiment_id=experiment.id,
             name=name,
@@ -230,12 +253,14 @@ def make_metric(e2e_db_session):
         e2e_db_session.commit()
         e2e_db_session.refresh(metric)
         return metric
+
     return _make
 
 
 @pytest.fixture
 def make_feature_flag(e2e_db_session, admin_user):
     """Factory for creating FeatureFlag objects in E2E tests."""
+
     def _make(**kwargs):
         defaults = {
             "key": f"e2e-flag-{uuid.uuid4().hex[:8]}",
@@ -250,4 +275,5 @@ def make_feature_flag(e2e_db_session, admin_user):
         e2e_db_session.commit()
         e2e_db_session.refresh(flag)
         return flag
+
     return _make

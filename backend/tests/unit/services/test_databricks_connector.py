@@ -19,22 +19,22 @@ No real Databricks connection required — uses MagicMock throughout.
 import time
 import uuid
 from contextlib import contextmanager
-from unittest.mock import MagicMock, patch, PropertyMock, call
+from unittest.mock import MagicMock, PropertyMock, call, patch
 
 import pytest
 
 from backend.app.services.databricks_connector import (
-    DatabricksConnector,
-    DatabricksConnectionError,
-    DatabricksQueryError,
     DatabricksAuthError,
+    DatabricksConnectionError,
+    DatabricksConnector,
+    DatabricksQueryError,
     DatabricksTimeoutError,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers / Fixtures
 # ---------------------------------------------------------------------------
+
 
 def _make_connector(**overrides) -> DatabricksConnector:
     """Build a DatabricksConnector with sensible defaults."""
@@ -77,6 +77,7 @@ def _make_mock_connection(cursor=None):
 # ===========================================================================
 # 1. Initialization Tests (5 tests)
 # ===========================================================================
+
 
 class TestDatabricksConnectorInit:
     """Tests for connector initialisation and config storage."""
@@ -122,6 +123,7 @@ class TestDatabricksConnectorInit:
 # ===========================================================================
 # 2. Connection Establishment Tests (6 tests)
 # ===========================================================================
+
 
 class TestDatabricksConnectorConnect:
     """Tests for connection establishment."""
@@ -204,6 +206,7 @@ class TestDatabricksConnectorConnect:
 # ===========================================================================
 # 3. Query Execution Tests (8 tests)
 # ===========================================================================
+
 
 class TestDatabricksConnectorExecuteQuery:
     """Tests for execute_query() method."""
@@ -311,6 +314,7 @@ class TestDatabricksConnectorExecuteQuery:
 # ===========================================================================
 # 4. Experiment Metrics Tests (6 tests)
 # ===========================================================================
+
 
 class TestDatabricksConnectorExperimentMetrics:
     """Tests for get_experiment_metrics() method."""
@@ -431,6 +435,7 @@ class TestDatabricksConnectorExperimentMetrics:
 # 5. Feature Flag Metrics Tests (5 tests)
 # ===========================================================================
 
+
 class TestDatabricksConnectorFeatureFlagMetrics:
     """Tests for get_feature_flag_metrics() method."""
 
@@ -519,6 +524,7 @@ class TestDatabricksConnectorFeatureFlagMetrics:
 # 6. test_connection() Tests (5 tests)
 # ===========================================================================
 
+
 class TestDatabricksConnectorTestConnection:
     """Tests for the test_connection() method."""
 
@@ -584,6 +590,7 @@ class TestDatabricksConnectorTestConnection:
 # 7. close() Tests (3 tests)
 # ===========================================================================
 
+
 class TestDatabricksConnectorClose:
     """Tests for the close() method."""
 
@@ -622,6 +629,7 @@ class TestDatabricksConnectorClose:
 # ===========================================================================
 # 8. Context Manager Tests (3 tests)
 # ===========================================================================
+
 
 class TestDatabricksConnectorContextManager:
     """Tests for __enter__ / __exit__ context manager protocol."""
@@ -666,6 +674,7 @@ class TestDatabricksConnectorContextManager:
 # ===========================================================================
 # 9. Retry / Resilience Tests (4 tests)
 # ===========================================================================
+
 
 class TestDatabricksConnectorRetry:
     """Tests for retry logic on transient failures."""
@@ -732,6 +741,7 @@ class TestDatabricksConnectorRetry:
 # ===========================================================================
 # 10. SQL Injection Prevention Tests (5 tests)
 # ===========================================================================
+
 
 class TestDatabricksSQLInjectionPrevention:
     """Tests for SQL injection safeguards."""

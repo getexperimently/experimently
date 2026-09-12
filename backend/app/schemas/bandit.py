@@ -14,10 +14,10 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from backend.app.core.stats_engine import ENGINE_VERSION
 
-
 # ---------------------------------------------------------------------------
 # Enum
 # ---------------------------------------------------------------------------
+
 
 class OptimizationType(str, Enum):
     """Traffic-optimization algorithm for an experiment."""
@@ -31,6 +31,7 @@ class OptimizationType(str, Enum):
 # ---------------------------------------------------------------------------
 # Component schemas
 # ---------------------------------------------------------------------------
+
 
 class BanditVariantWeight(BaseModel):
     """
@@ -62,8 +63,12 @@ class BanditVariantWeight(BaseModel):
         le=1.0,
         description="Current traffic allocation weight [0.0, 1.0]",
     )
-    successes: int = Field(..., ge=0, description="Cumulative success / conversion count")
-    pulls: int = Field(..., ge=0, description="Total impressions / pulls for this variant")
+    successes: int = Field(
+        ..., ge=0, description="Cumulative success / conversion count"
+    )
+    pulls: int = Field(
+        ..., ge=0, description="Total impressions / pulls for this variant"
+    )
     conversion_rate: float = Field(
         ...,
         ge=0.0,
@@ -75,6 +80,7 @@ class BanditVariantWeight(BaseModel):
 # ---------------------------------------------------------------------------
 # Response schema
 # ---------------------------------------------------------------------------
+
 
 class BanditStatusResponse(BaseModel):
     """
@@ -111,7 +117,9 @@ class BanditStatusResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     experiment_id: str = Field(..., description="Parent experiment identifier")
-    algorithm: OptimizationType = Field(..., description="Active optimization algorithm")
+    algorithm: OptimizationType = Field(
+        ..., description="Active optimization algorithm"
+    )
     current_weights: List[BanditVariantWeight] = Field(
         ...,
         description="Per-variant allocation weights",
@@ -151,6 +159,7 @@ class BanditStatusResponse(BaseModel):
 # ---------------------------------------------------------------------------
 # Update request schema
 # ---------------------------------------------------------------------------
+
 
 class BanditUpdateRequest(BaseModel):
     """

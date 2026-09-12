@@ -9,14 +9,14 @@ This module tests the AuditLog model functionality including:
 - Schema constraints
 """
 
-import pytest
 from datetime import datetime, timezone
 from uuid import uuid4
 
+import pytest
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from backend.app.models.audit_log import AuditLog, ActionType, EntityType
+from backend.app.models.audit_log import ActionType, AuditLog, EntityType
 from backend.app.models.user import User, UserRole
 
 

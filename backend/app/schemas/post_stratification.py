@@ -6,10 +6,9 @@ Pydantic v2 schemas for:
 - FDRCorrectionRequest / FDRResult (response)
 """
 
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 # ---------------------------------------------------------------------------
 # Post-Stratification schemas
@@ -69,8 +68,12 @@ class PostStratResultResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     metric_name: str = Field(..., description="Name of the metric analysed.")
-    control_mean: float = Field(..., description="Post-stratification-weighted control mean.")
-    treatment_mean: float = Field(..., description="Post-stratification-weighted treatment mean.")
+    control_mean: float = Field(
+        ..., description="Post-stratification-weighted control mean."
+    )
+    treatment_mean: float = Field(
+        ..., description="Post-stratification-weighted treatment mean."
+    )
     effect_size: float = Field(
         ..., description="Absolute treatment effect: treatment_mean - control_mean."
     )
@@ -159,7 +162,8 @@ class FDRResultResponse(BaseModel):
         ),
     )
     rank: int = Field(
-        ..., description="Rank of this metric when p-values are sorted ascending (1 = smallest)."
+        ...,
+        description="Rank of this metric when p-values are sorted ascending (1 = smallest).",
     )
     is_significant: bool = Field(
         ..., description="True if this metric is rejected after BH correction."

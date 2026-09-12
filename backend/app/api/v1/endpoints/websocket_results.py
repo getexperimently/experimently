@@ -31,13 +31,20 @@ import logging
 import os
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    Query,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
 from backend.app.api import deps
-from backend.app.services.websocket_manager import ConnectionManager
 from backend.app.services.results_streaming_service import ResultsStreamingService
+from backend.app.services.websocket_manager import ConnectionManager
 
 logger = logging.getLogger(__name__)
 
@@ -94,10 +101,14 @@ def _extract_ws_token(websocket: WebSocket, token: Optional[str]) -> Optional[st
 
 def _accepted_subprotocol(websocket: WebSocket) -> Optional[str]:
     """Echo ``experimently.bearer`` when the client offered it (RFC 6455 requires a match)."""
-    return WS_AUTH_SUBPROTOCOL if _token_from_subprotocol(websocket) is not None else None
+    return (
+        WS_AUTH_SUBPROTOCOL if _token_from_subprotocol(websocket) is not None else None
+    )
 
 
-def _authenticate_websocket(websocket: WebSocket, token: Optional[str], db: Session) -> bool:
+def _authenticate_websocket(
+    websocket: WebSocket, token: Optional[str], db: Session
+) -> bool:
     """
     Run the HTTP authentication chain for a WebSocket handshake.
 
@@ -126,7 +137,9 @@ def _authenticate_websocket(websocket: WebSocket, token: Optional[str], db: Sess
 async def stream_results(
     websocket: WebSocket,
     experiment_id: str,
-    token: Optional[str] = Query(None, description="Access token (alternative to the bearer header)"),
+    token: Optional[str] = Query(
+        None, description="Access token (alternative to the bearer header)"
+    ),
     db: Session = Depends(deps.get_db),
 ) -> None:
     """

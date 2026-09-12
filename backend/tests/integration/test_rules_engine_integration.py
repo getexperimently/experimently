@@ -8,20 +8,21 @@ Tests complex, real-world scenarios combining multiple features:
 - Performance under realistic loads
 """
 
-import pytest
 import time
 from datetime import datetime
-from typing import Dict, Any
+from typing import Any, Dict
 
-from backend.app.services.rules_evaluation_service import RulesEvaluationService
+import pytest
+
 from backend.app.schemas.targeting_rule import (
-    TargetingRule,
-    TargetingRules,
-    RuleGroup,
     Condition,
     LogicalOperator,
-    OperatorType
+    OperatorType,
+    RuleGroup,
+    TargetingRule,
+    TargetingRules,
 )
+from backend.app.services.rules_evaluation_service import RulesEvaluationService
 
 
 class TestComplexNestedRules:
@@ -35,29 +36,46 @@ class TestComplexNestedRules:
         level_3_group = RuleGroup(
             operator=LogicalOperator.OR,
             conditions=[
-                Condition(attribute="premium", operator=OperatorType.EQUALS, value=True),
-                Condition(attribute="lifetime_value", operator=OperatorType.GREATER_THAN, value=1000)
+                Condition(
+                    attribute="premium", operator=OperatorType.EQUALS, value=True
+                ),
+                Condition(
+                    attribute="lifetime_value",
+                    operator=OperatorType.GREATER_THAN,
+                    value=1000,
+                ),
             ],
-            groups=[]
+            groups=[],
         )
 
         # Level 2
         level_2_group = RuleGroup(
             operator=LogicalOperator.AND,
             conditions=[
-                Condition(attribute="age", operator=OperatorType.BETWEEN, value=18, additional_value=65),
-                Condition(attribute="verified", operator=OperatorType.EQUALS, value=True)
+                Condition(
+                    attribute="age",
+                    operator=OperatorType.BETWEEN,
+                    value=18,
+                    additional_value=65,
+                ),
+                Condition(
+                    attribute="verified", operator=OperatorType.EQUALS, value=True
+                ),
             ],
-            groups=[level_3_group]
+            groups=[level_3_group],
         )
 
         # Level 1 (top)
         level_1_group = RuleGroup(
             operator=LogicalOperator.AND,
             conditions=[
-                Condition(attribute="country", operator=OperatorType.IN, value=["US", "CA", "UK"])
+                Condition(
+                    attribute="country",
+                    operator=OperatorType.IN,
+                    value=["US", "CA", "UK"],
+                )
             ],
-            groups=[level_2_group]
+            groups=[level_2_group],
         )
 
         rules = TargetingRules(
@@ -66,10 +84,10 @@ class TestComplexNestedRules:
                     id="complex_nested",
                     rule=level_1_group,
                     priority=1,
-                    rollout_percentage=100
+                    rollout_percentage=100,
                 )
             ],
-            default_rule=None
+            default_rule=None,
         )
 
         # User that matches all conditions
@@ -79,7 +97,7 @@ class TestComplexNestedRules:
             "age": 30,
             "verified": True,
             "premium": True,
-            "lifetime_value": 5000
+            "lifetime_value": 5000,
         }
 
         result = service.evaluate(rules, matching_user)
@@ -93,7 +111,7 @@ class TestComplexNestedRules:
             "age": 30,
             "verified": True,
             "premium": False,
-            "lifetime_value": 500
+            "lifetime_value": 500,
         }
 
         result2 = service.evaluate(rules, non_matching_user)
@@ -107,25 +125,31 @@ class TestComplexNestedRules:
         group1 = RuleGroup(
             operator=LogicalOperator.AND,
             conditions=[
-                Condition(attribute="country", operator=OperatorType.EQUALS, value="US"),
-                Condition(attribute="age", operator=OperatorType.GREATER_THAN, value=18)
+                Condition(
+                    attribute="country", operator=OperatorType.EQUALS, value="US"
+                ),
+                Condition(
+                    attribute="age", operator=OperatorType.GREATER_THAN, value=18
+                ),
             ],
-            groups=[]
+            groups=[],
         )
 
         group2 = RuleGroup(
             operator=LogicalOperator.AND,
             conditions=[
-                Condition(attribute="country", operator=OperatorType.EQUALS, value="CA"),
-                Condition(attribute="verified", operator=OperatorType.EQUALS, value=True)
+                Condition(
+                    attribute="country", operator=OperatorType.EQUALS, value="CA"
+                ),
+                Condition(
+                    attribute="verified", operator=OperatorType.EQUALS, value=True
+                ),
             ],
-            groups=[]
+            groups=[],
         )
 
         top_group = RuleGroup(
-            operator=LogicalOperator.OR,
-            conditions=[],
-            groups=[group1, group2]
+            operator=LogicalOperator.OR, conditions=[], groups=[group1, group2]
         )
 
         rules = TargetingRules(
@@ -134,10 +158,10 @@ class TestComplexNestedRules:
                     id="mixed_operators",
                     rule=top_group,
                     priority=1,
-                    rollout_percentage=100
+                    rollout_percentage=100,
                 )
             ],
-            default_rule=None
+            default_rule=None,
         )
 
         # Matches first group (US, age > 18)
@@ -168,21 +192,37 @@ class TestRealWorldScenarios:
                         operator=LogicalOperator.AND,
                         conditions=[
                             # Geographic targeting
-                            Condition(attribute="country", operator=OperatorType.IN, value=["US", "CA", "UK"]),
+                            Condition(
+                                attribute="country",
+                                operator=OperatorType.IN,
+                                value=["US", "CA", "UK"],
+                            ),
                             # Premium status
-                            Condition(attribute="subscription_tier", operator=OperatorType.IN, value=["premium", "enterprise"]),
+                            Condition(
+                                attribute="subscription_tier",
+                                operator=OperatorType.IN,
+                                value=["premium", "enterprise"],
+                            ),
                             # Active in last 7 days
-                            Condition(attribute="days_since_active", operator=OperatorType.LESS_THAN, value=7),
+                            Condition(
+                                attribute="days_since_active",
+                                operator=OperatorType.LESS_THAN,
+                                value=7,
+                            ),
                             # High engagement
-                            Condition(attribute="session_count", operator=OperatorType.GREATER_THAN, value=10)
+                            Condition(
+                                attribute="session_count",
+                                operator=OperatorType.GREATER_THAN,
+                                value=10,
+                            ),
                         ],
-                        groups=[]
+                        groups=[],
                     ),
                     priority=1,
-                    rollout_percentage=100
+                    rollout_percentage=100,
                 )
             ],
-            default_rule=None
+            default_rule=None,
         )
 
         # Matching premium user
@@ -191,7 +231,7 @@ class TestRealWorldScenarios:
             "country": "US",
             "subscription_tier": "premium",
             "days_since_active": 2,
-            "session_count": 25
+            "session_count": 25,
         }
 
         result = service.evaluate(rules, premium_user)
@@ -203,7 +243,7 @@ class TestRealWorldScenarios:
             "country": "US",
             "subscription_tier": "free",
             "days_since_active": 1,
-            "session_count": 30
+            "session_count": 30,
         }
 
         result2 = service.evaluate(rules, free_user)
@@ -221,21 +261,38 @@ class TestRealWorldScenarios:
                         operator=LogicalOperator.AND,
                         conditions=[
                             # Platform
-                            Condition(attribute="platform", operator=OperatorType.EQUALS, value="iOS"),
+                            Condition(
+                                attribute="platform",
+                                operator=OperatorType.EQUALS,
+                                value="iOS",
+                            ),
                             # Version (using semantic versioning)
-                            Condition(attribute="os_version", operator=OperatorType.SEMANTIC_VERSION, value="15.0.0", additional_value="gte"),
+                            Condition(
+                                attribute="os_version",
+                                operator=OperatorType.SEMANTIC_VERSION,
+                                value="15.0.0",
+                                additional_value="gte",
+                            ),
                             # Device type
-                            Condition(attribute="device_type", operator=OperatorType.IN, value=["iPhone", "iPad"]),
+                            Condition(
+                                attribute="device_type",
+                                operator=OperatorType.IN,
+                                value=["iPhone", "iPad"],
+                            ),
                             # Geographic
-                            Condition(attribute="country", operator=OperatorType.IN, value=["US", "CA"])
+                            Condition(
+                                attribute="country",
+                                operator=OperatorType.IN,
+                                value=["US", "CA"],
+                            ),
                         ],
-                        groups=[]
+                        groups=[],
                     ),
                     priority=1,
-                    rollout_percentage=100
+                    rollout_percentage=100,
                 )
             ],
-            default_rule=None
+            default_rule=None,
         )
 
         # Matching user
@@ -244,7 +301,7 @@ class TestRealWorldScenarios:
             "platform": "iOS",
             "os_version": "16.2.0",
             "device_type": "iPhone",
-            "country": "US"
+            "country": "US",
         }
 
         result = service.evaluate(rules, ios_user)
@@ -256,7 +313,7 @@ class TestRealWorldScenarios:
             "platform": "iOS",
             "os_version": "14.5.0",
             "device_type": "iPhone",
-            "country": "US"
+            "country": "US",
         }
 
         result2 = service.evaluate(rules, old_ios_user)
@@ -281,25 +338,29 @@ class TestRealWorldScenarios:
                                 attribute="location",
                                 operator=OperatorType.GEO_DISTANCE,
                                 value=sf_coords,
-                                additional_value=20  # radius in kilometers
+                                additional_value=20,  # radius in kilometers
                             ),
                             # Active user
-                            Condition(attribute="active", operator=OperatorType.EQUALS, value=True)
+                            Condition(
+                                attribute="active",
+                                operator=OperatorType.EQUALS,
+                                value=True,
+                            ),
                         ],
-                        groups=[]
+                        groups=[],
                     ),
                     priority=1,
-                    rollout_percentage=100
+                    rollout_percentage=100,
                 )
             ],
-            default_rule=None
+            default_rule=None,
         )
 
         # User near San Francisco (Oakland - ~16km away)
         nearby_user = {
             "user_id": "nearby_123",
             "location": [37.8044, -122.2712],  # Oakland coords
-            "active": True
+            "active": True,
         }
 
         result = service.evaluate(rules, nearby_user)
@@ -309,7 +370,7 @@ class TestRealWorldScenarios:
         far_user = {
             "user_id": "far_456",
             "location": [34.0522, -118.2437],  # LA coords
-            "active": True
+            "active": True,
         }
 
         result2 = service.evaluate(rules, far_user)
@@ -336,19 +397,23 @@ class TestRealWorldScenarios:
                                 operator=OperatorType.TIME_WINDOW,
                                 value={
                                     "start": start_time.isoformat(),
-                                    "end": end_time.isoformat()
-                                }
+                                    "end": end_time.isoformat(),
+                                },
                             ),
                             # Active subscription
-                            Condition(attribute="has_subscription", operator=OperatorType.EQUALS, value=True)
+                            Condition(
+                                attribute="has_subscription",
+                                operator=OperatorType.EQUALS,
+                                value=True,
+                            ),
                         ],
-                        groups=[]
+                        groups=[],
                     ),
                     priority=1,
-                    rollout_percentage=100
+                    rollout_percentage=100,
                 )
             ],
-            default_rule=None
+            default_rule=None,
         )
 
         # Jan 2 at 10am (within window)
@@ -356,7 +421,7 @@ class TestRealWorldScenarios:
         user1 = {
             "user_id": "user_1",
             "current_time": within_window_time.isoformat(),  # Convert to string for caching
-            "has_subscription": True
+            "has_subscription": True,
         }
 
         result1 = service.evaluate(rules, user1)
@@ -367,7 +432,7 @@ class TestRealWorldScenarios:
         user2 = {
             "user_id": "user_2",
             "current_time": outside_window_time.isoformat(),  # Convert to string for caching
-            "has_subscription": True
+            "has_subscription": True,
         }
 
         result2 = service.evaluate(rules, user2)
@@ -389,15 +454,19 @@ class TestBackwardCompatibility:
                     rule=RuleGroup(
                         operator=LogicalOperator.AND,
                         conditions=[
-                            Condition(attribute="country", operator=OperatorType.EQUALS, value="US")
+                            Condition(
+                                attribute="country",
+                                operator=OperatorType.EQUALS,
+                                value="US",
+                            )
                         ],
-                        groups=[]
+                        groups=[],
                     ),
                     priority=1,
-                    rollout_percentage=100
+                    rollout_percentage=100,
                 )
             ],
-            default_rule=None
+            default_rule=None,
         )
 
         user = {"user_id": "user_123", "country": "US"}
@@ -417,18 +486,34 @@ class TestBackwardCompatibility:
                     rule=RuleGroup(
                         operator=LogicalOperator.AND,
                         conditions=[
-                            Condition(attribute="country", operator=OperatorType.EQUALS, value="US"),
-                            Condition(attribute="age", operator=OperatorType.GREATER_THAN, value=18),
-                            Condition(attribute="role", operator=OperatorType.IN, value=["admin", "user"]),
-                            Condition(attribute="banned", operator=OperatorType.NOT_EQUALS, value=True)
+                            Condition(
+                                attribute="country",
+                                operator=OperatorType.EQUALS,
+                                value="US",
+                            ),
+                            Condition(
+                                attribute="age",
+                                operator=OperatorType.GREATER_THAN,
+                                value=18,
+                            ),
+                            Condition(
+                                attribute="role",
+                                operator=OperatorType.IN,
+                                value=["admin", "user"],
+                            ),
+                            Condition(
+                                attribute="banned",
+                                operator=OperatorType.NOT_EQUALS,
+                                value=True,
+                            ),
                         ],
-                        groups=[]
+                        groups=[],
                     ),
                     priority=1,
-                    rollout_percentage=100
+                    rollout_percentage=100,
                 )
             ],
-            default_rule=None
+            default_rule=None,
         )
 
         user = {
@@ -436,7 +521,7 @@ class TestBackwardCompatibility:
             "country": "US",
             "age": 25,
             "role": "user",
-            "banned": False
+            "banned": False,
         }
 
         result = service.evaluate(rules, user)
@@ -454,15 +539,19 @@ class TestBackwardCompatibility:
                     rule=RuleGroup(
                         operator=LogicalOperator.AND,
                         conditions=[
-                            Condition(attribute="country", operator=OperatorType.EQUALS, value="US")
+                            Condition(
+                                attribute="country",
+                                operator=OperatorType.EQUALS,
+                                value="US",
+                            )
                         ],
-                        groups=[]
+                        groups=[],
                     ),
                     priority=1,
-                    rollout_percentage=0
+                    rollout_percentage=0,
                 )
             ],
-            default_rule=None
+            default_rule=None,
         )
 
         user = {"user_id": "user_123", "country": "US"}
@@ -477,15 +566,19 @@ class TestBackwardCompatibility:
                     rule=RuleGroup(
                         operator=LogicalOperator.AND,
                         conditions=[
-                            Condition(attribute="country", operator=OperatorType.EQUALS, value="US")
+                            Condition(
+                                attribute="country",
+                                operator=OperatorType.EQUALS,
+                                value="US",
+                            )
                         ],
-                        groups=[]
+                        groups=[],
                     ),
                     priority=1,
-                    rollout_percentage=100
+                    rollout_percentage=100,
                 )
             ],
-            default_rule=None
+            default_rule=None,
         )
 
         result2 = service.evaluate(rules_100_percent, user)
@@ -507,18 +600,35 @@ class TestPerformanceIntegration:
                     rule=RuleGroup(
                         operator=LogicalOperator.AND,
                         conditions=[
-                            Condition(attribute="country", operator=OperatorType.IN, value=["US", "CA", "UK"]),
-                            Condition(attribute="age", operator=OperatorType.BETWEEN, value=18, additional_value=65),
-                            Condition(attribute="verified", operator=OperatorType.EQUALS, value=True),
-                            Condition(attribute="premium", operator=OperatorType.EQUALS, value=True)
+                            Condition(
+                                attribute="country",
+                                operator=OperatorType.IN,
+                                value=["US", "CA", "UK"],
+                            ),
+                            Condition(
+                                attribute="age",
+                                operator=OperatorType.BETWEEN,
+                                value=18,
+                                additional_value=65,
+                            ),
+                            Condition(
+                                attribute="verified",
+                                operator=OperatorType.EQUALS,
+                                value=True,
+                            ),
+                            Condition(
+                                attribute="premium",
+                                operator=OperatorType.EQUALS,
+                                value=True,
+                            ),
                         ],
-                        groups=[]
+                        groups=[],
                     ),
                     priority=1,
-                    rollout_percentage=100
+                    rollout_percentage=100,
                 )
             ],
-            default_rule=None
+            default_rule=None,
         )
 
         # Generate 1000 user contexts
@@ -528,7 +638,7 @@ class TestPerformanceIntegration:
                 "country": ["US", "CA", "UK"][i % 3],
                 "age": 20 + (i % 45),
                 "verified": i % 2 == 0,
-                "premium": i % 3 == 0
+                "premium": i % 3 == 0,
             }
             for i in range(1000)
         ]
@@ -553,25 +663,32 @@ class TestPerformanceIntegration:
                     rule=RuleGroup(
                         operator=LogicalOperator.AND,
                         conditions=[
-                            Condition(attribute="country", operator=OperatorType.IN, value=["US", "CA", "UK"]),
-                            Condition(attribute="age", operator=OperatorType.GREATER_THAN, value=18),
-                            Condition(attribute="verified", operator=OperatorType.EQUALS, value=True)
+                            Condition(
+                                attribute="country",
+                                operator=OperatorType.IN,
+                                value=["US", "CA", "UK"],
+                            ),
+                            Condition(
+                                attribute="age",
+                                operator=OperatorType.GREATER_THAN,
+                                value=18,
+                            ),
+                            Condition(
+                                attribute="verified",
+                                operator=OperatorType.EQUALS,
+                                value=True,
+                            ),
                         ],
-                        groups=[]
+                        groups=[],
                     ),
                     priority=1,
-                    rollout_percentage=100
+                    rollout_percentage=100,
                 )
             ],
-            default_rule=None
+            default_rule=None,
         )
 
-        user = {
-            "user_id": "user_123",
-            "country": "US",
-            "age": 25,
-            "verified": True
-        }
+        user = {"user_id": "user_123", "country": "US", "age": 25, "verified": True}
 
         # First 100 evaluations (building cache)
         start1 = time.time()
@@ -608,12 +725,16 @@ class TestPerformanceIntegration:
                     rule=RuleGroup(
                         operator=LogicalOperator.AND,
                         conditions=[
-                            Condition(attribute="score", operator=OperatorType.GREATER_THAN, value=i * 10)
+                            Condition(
+                                attribute="score",
+                                operator=OperatorType.GREATER_THAN,
+                                value=i * 10,
+                            )
                         ],
-                        groups=[]
+                        groups=[],
                     ),
                     priority=i,
-                    rollout_percentage=100
+                    rollout_percentage=100,
                 )
             )
 
@@ -645,15 +766,19 @@ class TestEdgeCases:
                     rule=RuleGroup(
                         operator=LogicalOperator.AND,
                         conditions=[
-                            Condition(attribute="country", operator=OperatorType.EQUALS, value="US")
+                            Condition(
+                                attribute="country",
+                                operator=OperatorType.EQUALS,
+                                value="US",
+                            )
                         ],
-                        groups=[]
+                        groups=[],
                     ),
                     priority=1,
-                    rollout_percentage=100
+                    rollout_percentage=100,
                 )
             ],
-            default_rule=None
+            default_rule=None,
         )
 
         empty_context = {}
@@ -672,15 +797,19 @@ class TestEdgeCases:
                     rule=RuleGroup(
                         operator=LogicalOperator.AND,
                         conditions=[
-                            Condition(attribute="premium", operator=OperatorType.EQUALS, value=True)
+                            Condition(
+                                attribute="premium",
+                                operator=OperatorType.EQUALS,
+                                value=True,
+                            )
                         ],
-                        groups=[]
+                        groups=[],
                     ),
                     priority=1,
-                    rollout_percentage=100
+                    rollout_percentage=100,
                 )
             ],
-            default_rule=None
+            default_rule=None,
         )
 
         user_with_null = {"user_id": "user_123", "premium": None}
@@ -704,15 +833,19 @@ class TestEdgeCases:
                     rule=RuleGroup(
                         operator=LogicalOperator.AND,
                         conditions=[
-                            Condition(attribute="country", operator=OperatorType.IN, value=large_country_list)
+                            Condition(
+                                attribute="country",
+                                operator=OperatorType.IN,
+                                value=large_country_list,
+                            )
                         ],
-                        groups=[]
+                        groups=[],
                     ),
                     priority=1,
-                    rollout_percentage=100
+                    rollout_percentage=100,
                 )
             ],
-            default_rule=None
+            default_rule=None,
         )
 
         user = {"user_id": "user_123", "country": "US"}

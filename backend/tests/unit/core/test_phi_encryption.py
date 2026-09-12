@@ -18,7 +18,6 @@ import pytest
 
 from backend.app.core.phi_encryption import PHIEncryption
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -113,14 +112,16 @@ class TestInitialisation:
             lambda k: (_ for _ in ()).throw(Exception("should not be reached")),
         )
         # Override the settings import so PHI_ENCRYPTION_KEY is None
-        import backend.app.core.phi_encryption as phi_module
-
         # Patch at settings level
         import unittest.mock as mock
 
+        import backend.app.core.phi_encryption as phi_module
+
         with mock.patch("backend.app.core.config.settings") as mock_settings:
             mock_settings.PHI_ENCRYPTION_KEY = None
-            with pytest.raises(RuntimeError, match="PHI_ENCRYPTION_KEY is not configured"):
+            with pytest.raises(
+                RuntimeError, match="PHI_ENCRYPTION_KEY is not configured"
+            ):
                 PHIEncryption(key=None)
 
     def test_short_string_key_raises_runtime_error(self):

@@ -10,25 +10,26 @@ All tests are pure computation -- no database or mocking required.
 """
 
 import math
+
 import pytest
 
 from backend.app.services.sequential_testing_service import (
-    SequentialTestingService,
-    MSPRTResult,
-    ConfidenceSequence,
     AlphaSpendingBoundary,
+    ConfidenceSequence,
     EvidencePoint,
+    EvidenceStrength,
     LongRunningRisk,
+    MSPRTResult,
     SequentialAnalysis,
     SequentialTestingMethod,
+    SequentialTestingService,
     SpendingFunction,
-    EvidenceStrength,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def service():
@@ -115,7 +116,9 @@ class TestRunSequentialAnalysisOrchestration:
             direct_msprt.always_valid_p_value, rel=1e-9
         )
         assert full_result.msprt_result.can_stop == direct_msprt.can_stop
-        assert full_result.msprt_result.evidence_strength == direct_msprt.evidence_strength
+        assert (
+            full_result.msprt_result.evidence_strength == direct_msprt.evidence_strength
+        )
 
     def test_confidence_sequence_matches_direct_call(self, service, default_config):
         """Confidence sequence from orchestrator should match direct computation."""
@@ -382,8 +385,8 @@ class TestAlphaSpendingMonotonicity:
         cumulative_alphas = [b.cumulative_alpha for b in boundaries]
         for i in range(len(cumulative_alphas) - 1):
             assert cumulative_alphas[i + 1] >= cumulative_alphas[i], (
-                f"Cumulative alpha decreased from look {i+1} ({cumulative_alphas[i]}) "
-                f"to look {i+2} ({cumulative_alphas[i+1]})"
+                f"Cumulative alpha decreased from look {i + 1} ({cumulative_alphas[i]}) "
+                f"to look {i + 2} ({cumulative_alphas[i + 1]})"
             )
 
     def test_pocock_cumulative_alpha_monotonically_increasing(self, service):
@@ -397,7 +400,7 @@ class TestAlphaSpendingMonotonicity:
         cumulative_alphas = [b.cumulative_alpha for b in boundaries]
         for i in range(len(cumulative_alphas) - 1):
             assert cumulative_alphas[i + 1] > cumulative_alphas[i], (
-                f"Cumulative alpha did not increase from look {i+1} to look {i+2}"
+                f"Cumulative alpha did not increase from look {i + 1} to look {i + 2}"
             )
 
 
@@ -421,7 +424,7 @@ class TestEvidenceTrajectoryOrdering:
         sample_sizes = [p.sample_size for p in trajectory]
         for i in range(len(sample_sizes) - 1):
             assert sample_sizes[i + 1] > sample_sizes[i], (
-                f"Sample sizes not increasing: {sample_sizes[i]} >= {sample_sizes[i+1]}"
+                f"Sample sizes not increasing: {sample_sizes[i]} >= {sample_sizes[i + 1]}"
             )
 
 
@@ -451,6 +454,6 @@ class TestConfidenceSequenceNarrowing:
         # Each subsequent width should be smaller
         for i in range(len(widths) - 1):
             assert widths[i + 1] < widths[i], (
-                f"CI width did not decrease from n={[100,500,1000,5000,10000][i]} "
-                f"({widths[i]:.6f}) to n={[100,500,1000,5000,10000][i+1]} ({widths[i+1]:.6f})"
+                f"CI width did not decrease from n={[100, 500, 1000, 5000, 10000][i]} "
+                f"({widths[i]:.6f}) to n={[100, 500, 1000, 5000, 10000][i + 1]} ({widths[i + 1]:.6f})"
             )

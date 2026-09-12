@@ -18,24 +18,25 @@ Tests cover:
 - ANALYST cannot export (403, export is ADMIN-only)
 - Superuser can generate report regardless of role
 """
+
 import uuid
-import pytest
 from contextlib import contextmanager
-from dataclasses import dataclass, field, asdict
-from datetime import datetime, timezone, timedelta
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timedelta, timezone
 from typing import Dict
 from unittest.mock import MagicMock, patch
 
+import pytest
 from fastapi.testclient import TestClient
 
-from backend.app.main import app
 from backend.app.api import deps
+from backend.app.main import app
 from backend.app.models.user import User, UserRole
-
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def make_user(role: UserRole, superuser: bool = False) -> User:
     """Create an in-memory User with the given role."""
@@ -70,7 +71,9 @@ def _make_report_dict(
         "events_by_resource_type": {"feature_flag": 30, "experiment": 12},
         "integrity_checks": integrity_checks,
         "tampered_events": tampered_events,
-        "integrity_pass_rate": 1.0 if tampered_events == 0 else (integrity_checks - tampered_events) / integrity_checks,
+        "integrity_pass_rate": 1.0
+        if tampered_events == 0
+        else (integrity_checks - tampered_events) / integrity_checks,
     }
 
 
@@ -98,6 +101,7 @@ def override_deps_for_user(user: User, mock_db=None):
 # ---------------------------------------------------------------------------
 # TestComplianceReportPermissions
 # ---------------------------------------------------------------------------
+
 
 class TestComplianceReportPermissions:
     """Role-based access tests for GET /api/v1/compliance/reports/{standard}."""
@@ -185,10 +189,13 @@ class TestComplianceReportPermissions:
 # TestComplianceReportStructure
 # ---------------------------------------------------------------------------
 
+
 class TestComplianceReportStructure:
     """Tests verifying the structure of the report response."""
 
-    def _admin_get_report(self, standard: str = "soc2", report_dict=None, params: str = ""):
+    def _admin_get_report(
+        self, standard: str = "soc2", report_dict=None, params: str = ""
+    ):
         admin = make_user(UserRole.ADMIN, superuser=True)
         if report_dict is None:
             report_dict = _make_report_dict(standard=standard)
@@ -276,10 +283,13 @@ class TestComplianceReportStructure:
 # TestAuditExportEndpoints
 # ---------------------------------------------------------------------------
 
+
 class TestAuditExportEndpoints:
     """Tests for GET /api/v1/compliance/export."""
 
-    def _admin_export(self, format: str = "json", content: str = "[]", params: str = ""):
+    def _admin_export(
+        self, format: str = "json", content: str = "[]", params: str = ""
+    ):
         admin = make_user(UserRole.ADMIN, superuser=True)
 
         with override_deps_for_user(admin):

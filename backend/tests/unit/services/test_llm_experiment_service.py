@@ -27,10 +27,10 @@ from backend.app.schemas.llm_experiments import (
 )
 from backend.app.services.llm_experiment_service import LLMExperimentService
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_variant_req(
     name: str = "control",
@@ -112,6 +112,7 @@ def _make_mock_experiment(
 # Service instantiation
 # ---------------------------------------------------------------------------
 
+
 class TestLLMExperimentServiceInit:
     def test_can_instantiate(self):
         svc = LLMExperimentService()
@@ -122,16 +123,20 @@ class TestLLMExperimentServiceInit:
 # Schema validation tests (no DB needed)
 # ---------------------------------------------------------------------------
 
-class TestCreateLLMExperimentRequestValidation:
 
+class TestCreateLLMExperimentRequestValidation:
     def test_valid_request_passes(self):
         req = _make_experiment_req()
         assert req.name == "Test LLM Exp"
 
     def test_all_task_types_accepted(self):
         task_types = [
-            "chat_completion", "text_generation", "classification",
-            "summarization", "code_generation", "embedding",
+            "chat_completion",
+            "text_generation",
+            "classification",
+            "summarization",
+            "code_generation",
+            "embedding",
         ]
         for tt in task_types:
             req = _make_experiment_req(task_type=tt)
@@ -139,8 +144,13 @@ class TestCreateLLMExperimentRequestValidation:
 
     def test_all_evaluation_metrics_accepted(self):
         metrics = [
-            "human_rating", "latency", "cost", "accuracy",
-            "relevance", "fluency", "business_metric",
+            "human_rating",
+            "latency",
+            "cost",
+            "accuracy",
+            "relevance",
+            "fluency",
+            "business_metric",
         ]
         for m in metrics:
             req = _make_experiment_req(evaluation_metric=m)
@@ -240,15 +250,21 @@ class TestCreateLLMExperimentRequestValidation:
 # CRUD with mock DB session
 # ---------------------------------------------------------------------------
 
-class TestLLMExperimentCRUD:
 
+class TestLLMExperimentCRUD:
     def _make_mock_db(self, experiment=None):
         db = MagicMock()
         db.query.return_value.filter.return_value.first.return_value = experiment
-        db.query.return_value.filter.return_value.count.return_value = 1 if experiment else 0
-        db.query.return_value.filter.return_value.order_by.return_value.offset.return_value.limit.return_value.all.return_value = [experiment] if experiment else []
+        db.query.return_value.filter.return_value.count.return_value = (
+            1 if experiment else 0
+        )
+        db.query.return_value.filter.return_value.order_by.return_value.offset.return_value.limit.return_value.all.return_value = (
+            [experiment] if experiment else []
+        )
         db.query.return_value.count.return_value = 1 if experiment else 0
-        db.query.return_value.order_by.return_value.offset.return_value.limit.return_value.all.return_value = [experiment] if experiment else []
+        db.query.return_value.order_by.return_value.offset.return_value.limit.return_value.all.return_value = (
+            [experiment] if experiment else []
+        )
         return db
 
     def test_create_experiment_draft_status(self):
@@ -264,13 +280,17 @@ class TestLLMExperimentCRUD:
         db.add.return_value = None
 
         # Patch the ORM constructor to return our mock
-        with patch("backend.app.services.llm_experiment_service.LLMExperiment") as MockExp:
+        with patch(
+            "backend.app.services.llm_experiment_service.LLMExperiment"
+        ) as MockExp:
             instance = MagicMock()
             instance.id = uuid.uuid4()
             instance.status = LLMExperimentStatus.DRAFT
             instance.variants = []
             MockExp.return_value = instance
-            with patch("backend.app.services.llm_experiment_service.LLMVariant") as MockVar:
+            with patch(
+                "backend.app.services.llm_experiment_service.LLMVariant"
+            ) as MockVar:
                 var_instance = MagicMock()
                 MockVar.return_value = var_instance
                 result = svc.create_experiment(db, req)
@@ -292,7 +312,9 @@ class TestLLMExperimentCRUD:
     def test_update_experiment_returns_none_when_missing(self):
         svc = LLMExperimentService()
         db = self._make_mock_db(experiment=None)
-        result = svc.update_experiment(db, uuid.uuid4(), UpdateLLMExperimentRequest(name="new"))
+        result = svc.update_experiment(
+            db, uuid.uuid4(), UpdateLLMExperimentRequest(name="new")
+        )
         assert result is None
 
     def test_update_experiment_changes_name(self):
@@ -301,7 +323,9 @@ class TestLLMExperimentCRUD:
         db = self._make_mock_db(experiment=exp)
         db.commit.return_value = None
         db.refresh.return_value = None
-        result = svc.update_experiment(db, exp.id, UpdateLLMExperimentRequest(name="updated"))
+        result = svc.update_experiment(
+            db, exp.id, UpdateLLMExperimentRequest(name="updated")
+        )
         assert exp.name == "updated"
 
     def test_start_experiment_transitions_to_active(self):
@@ -368,7 +392,9 @@ class TestLLMExperimentCRUD:
         db = self._make_mock_db(experiment=exp)
         db.commit.return_value = None
         db.refresh.return_value = None
-        svc.update_experiment(db, exp.id, UpdateLLMExperimentRequest(task_type="summarization"))
+        svc.update_experiment(
+            db, exp.id, UpdateLLMExperimentRequest(task_type="summarization")
+        )
         assert exp.task_type == LLMTaskType.SUMMARIZATION
 
     def test_list_experiments_with_no_filters(self):
@@ -376,7 +402,9 @@ class TestLLMExperimentCRUD:
         exp = _make_mock_experiment()
         db = MagicMock()
         db.query.return_value.count.return_value = 1
-        db.query.return_value.order_by.return_value.offset.return_value.limit.return_value.all.return_value = [exp]
+        db.query.return_value.order_by.return_value.offset.return_value.limit.return_value.all.return_value = [
+            exp
+        ]
         items, total = svc.list_experiments(db)
         assert total == 1
 
@@ -387,7 +415,9 @@ class TestLLMExperimentCRUD:
         filter_chain = MagicMock()
         filter_chain.filter.return_value = filter_chain
         filter_chain.count.return_value = 1
-        filter_chain.order_by.return_value.offset.return_value.limit.return_value.all.return_value = [exp]
+        filter_chain.order_by.return_value.offset.return_value.limit.return_value.all.return_value = [
+            exp
+        ]
         db.query.return_value.filter.return_value = filter_chain
         items, total = svc.list_experiments(db, status="ACTIVE")
         assert total == 1
@@ -397,8 +427,8 @@ class TestLLMExperimentCRUD:
 # Hash bucket tests (pure-function, no DB)
 # ---------------------------------------------------------------------------
 
-class TestHashBucket:
 
+class TestHashBucket:
     def test_same_inputs_same_output(self):
         b1 = LLMExperimentService._hash_bucket("exp-1", "user-1")
         b2 = LLMExperimentService._hash_bucket("exp-1", "user-1")
@@ -406,8 +436,7 @@ class TestHashBucket:
 
     def test_different_users_different_buckets(self):
         buckets = {
-            LLMExperimentService._hash_bucket("exp-1", f"user-{i}")
-            for i in range(100)
+            LLMExperimentService._hash_bucket("exp-1", f"user-{i}") for i in range(100)
         }
         assert len(buckets) > 50  # Not all same
 
@@ -425,8 +454,8 @@ class TestHashBucket:
 # Variant assignment tests
 # ---------------------------------------------------------------------------
 
-class TestVariantAssignment:
 
+class TestVariantAssignment:
     def _make_active_experiment(self, num_variants=2) -> LLMExperiment:
         return _make_mock_experiment(
             status=LLMExperimentStatus.ACTIVE,
@@ -447,7 +476,7 @@ class TestVariantAssignment:
         db = MagicMock()
         db.query.return_value.filter.return_value.first.return_value = exp
         assignments = [svc.assign_variant(db, exp.id, "user-99") for _ in range(10)]
-        assert len(set(str(a.id) for a in assignments)) == 1
+        assert len({str(a.id) for a in assignments}) == 1
 
     def test_different_users_get_different_variants(self):
         svc = LLMExperimentService()
@@ -455,8 +484,7 @@ class TestVariantAssignment:
         db = MagicMock()
         db.query.return_value.filter.return_value.first.return_value = exp
         assigned = [
-            str(svc.assign_variant(db, exp.id, f"user-{i}").id)
-            for i in range(200)
+            str(svc.assign_variant(db, exp.id, f"user-{i}").id) for i in range(200)
         ]
         unique = set(assigned)
         assert len(unique) == 2  # Two variants
@@ -477,7 +505,9 @@ class TestVariantAssignment:
 
         # Each variant should be within 10% of expected 500
         for vid, count in counts.items():
-            assert 400 <= count <= 600, f"Variant {vid} got {count} assignments (expected ~500)"
+            assert 400 <= count <= 600, (
+                f"Variant {vid} got {count} assignments (expected ~500)"
+            )
 
     def test_three_way_split_at_scale(self):
         """33/33/34 split should distribute roughly equally over 900 users."""
@@ -519,42 +549,54 @@ class TestVariantAssignment:
 # Cost estimation tests
 # ---------------------------------------------------------------------------
 
-class TestCostEstimation:
 
+class TestCostEstimation:
     def test_openai_gpt4o_cost(self):
         from backend.app.services.llm_proxy_service import estimate_cost
+
         cost = estimate_cost("openai", "gpt-4o", input_tokens=1000, output_tokens=1000)
         assert cost == pytest.approx(0.0025 + 0.010, rel=1e-4)
 
     def test_anthropic_claude_sonnet_cost(self):
         from backend.app.services.llm_proxy_service import estimate_cost
+
         cost = estimate_cost(
-            "anthropic", "claude-3-5-sonnet-20241022", input_tokens=1000, output_tokens=1000
+            "anthropic",
+            "claude-3-5-sonnet-20241022",
+            input_tokens=1000,
+            output_tokens=1000,
         )
         assert cost == pytest.approx(0.003 + 0.015, rel=1e-4)
 
     def test_google_gemini_flash_cost(self):
         from backend.app.services.llm_proxy_service import estimate_cost
-        cost = estimate_cost("google", "gemini-1.5-flash", input_tokens=1000, output_tokens=1000)
+
+        cost = estimate_cost(
+            "google", "gemini-1.5-flash", input_tokens=1000, output_tokens=1000
+        )
         assert cost == pytest.approx(0.000075 + 0.0003, rel=1e-4)
 
     def test_unknown_provider_returns_zero(self):
         from backend.app.services.llm_proxy_service import estimate_cost
+
         cost = estimate_cost("unknown_provider", "unknown-model", 500, 500)
         assert cost == 0.0
 
     def test_unknown_model_returns_zero(self):
         from backend.app.services.llm_proxy_service import estimate_cost
+
         cost = estimate_cost("openai", "nonexistent-model", 500, 500)
         assert cost == 0.0
 
     def test_zero_tokens_zero_cost(self):
         from backend.app.services.llm_proxy_service import estimate_cost
+
         cost = estimate_cost("openai", "gpt-4o", 0, 0)
         assert cost == 0.0
 
     def test_cost_scales_with_tokens(self):
         from backend.app.services.llm_proxy_service import estimate_cost
+
         cost1 = estimate_cost("anthropic", "claude-opus-4-6", 500, 500)
         cost2 = estimate_cost("anthropic", "claude-opus-4-6", 1000, 1000)
         assert cost2 == pytest.approx(cost1 * 2, rel=1e-4)
@@ -564,15 +606,17 @@ class TestCostEstimation:
 # Prompt template rendering
 # ---------------------------------------------------------------------------
 
-class TestPromptRendering:
 
+class TestPromptRendering:
     def test_render_with_single_variable(self):
         from backend.app.services.llm_proxy_service import render_prompt_template
+
         result = render_prompt_template("Hello {{name}}!", {"name": "World"})
         assert result == "Hello World!"
 
     def test_render_with_multiple_variables(self):
         from backend.app.services.llm_proxy_service import render_prompt_template
+
         result = render_prompt_template(
             "{{greeting}} {{name}}, you are {{age}} years old.",
             {"greeting": "Hi", "name": "Alice", "age": 30},
@@ -581,20 +625,26 @@ class TestPromptRendering:
 
     def test_render_missing_variable_raises(self):
         from backend.app.services.llm_proxy_service import render_prompt_template
+
         with pytest.raises(ValueError, match="Missing variables"):
             render_prompt_template("Hello {{name}} from {{city}}!", {"name": "Bob"})
 
     def test_render_no_variables_returns_template(self):
         from backend.app.services.llm_proxy_service import render_prompt_template
+
         result = render_prompt_template("Just static text", {})
         assert result == "Just static text"
 
     def test_render_extra_variables_ignored(self):
         from backend.app.services.llm_proxy_service import render_prompt_template
-        result = render_prompt_template("Hello {{name}}!", {"name": "Eve", "extra": "ignored"})
+
+        result = render_prompt_template(
+            "Hello {{name}}!", {"name": "Eve", "extra": "ignored"}
+        )
         assert result == "Hello Eve!"
 
     def test_render_numeric_variable(self):
         from backend.app.services.llm_proxy_service import render_prompt_template
+
         result = render_prompt_template("Count: {{n}}", {"n": 42})
         assert result == "Count: 42"

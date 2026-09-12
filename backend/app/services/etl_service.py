@@ -76,7 +76,9 @@ class ETLService:
 
     def _athena(self):
         if self._athena_client is None:
-            self._athena_client = boto3.client("athena", region_name=settings.AWS_REGION)
+            self._athena_client = boto3.client(
+                "athena", region_name=settings.AWS_REGION
+            )
         return self._athena_client
 
     # ------------------------------------------------------------------
@@ -282,7 +284,9 @@ class ETLService:
                 for page in pages:
                     result_set = page.get("ResultSet", {})
                     result_rows = result_set.get("Rows", [])
-                    col_info = result_set.get("ResultSetMetadata", {}).get("ColumnInfo", [])
+                    col_info = result_set.get("ResultSetMetadata", {}).get(
+                        "ColumnInfo", []
+                    )
 
                     if first_page and col_info:
                         column_names = [c["Name"] for c in col_info]
@@ -291,16 +295,16 @@ class ETLService:
                         data = row.get("Data", [])
                         if first_page and not column_names:
                             # Header row — extract column names
-                            column_names = [
-                                d.get("VarCharValue", "") for d in data
-                            ]
+                            column_names = [d.get("VarCharValue", "") for d in data]
                             first_page = False
                             continue
                         if first_page:
                             first_page = False
                         row_dict = {}
                         for i, cell in enumerate(data):
-                            key = column_names[i] if i < len(column_names) else f"col_{i}"
+                            key = (
+                                column_names[i] if i < len(column_names) else f"col_{i}"
+                            )
                             row_dict[key] = cell.get("VarCharValue", "")
                         rows.append(row_dict)
             except Exception as exc:
@@ -382,9 +386,7 @@ class ETLService:
                 }
             )
 
-        logger.info(
-            f"Adding 24 partitions to {database}.{table} for date={date}"
-        )
+        logger.info(f"Adding 24 partitions to {database}.{table} for date={date}")
 
         try:
             self._glue().batch_create_partition(
@@ -501,6 +503,10 @@ class ETLService:
             state=state,
             last_run_status=last_run_status,
             last_run_time=last_run_time.isoformat() if last_run_time else None,
-            tables_created=crawl_count.get("TablesCreated", 0) if isinstance(crawl_count, dict) else 0,
-            tables_updated=crawl_count.get("TablesUpdated", 0) if isinstance(crawl_count, dict) else 0,
+            tables_created=crawl_count.get("TablesCreated", 0)
+            if isinstance(crawl_count, dict)
+            else 0,
+            tables_updated=crawl_count.get("TablesUpdated", 0)
+            if isinstance(crawl_count, dict)
+            else 0,
         )

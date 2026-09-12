@@ -5,29 +5,27 @@ This module provides functionality for recording metrics during
 feature flag evaluation and querying aggregated metrics for analysis.
 """
 
-import logging
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any, Union, Tuple
+from typing import Any, Dict, List, Optional
 from uuid import UUID
-from sqlalchemy import func, and_, or_, desc, text
-from sqlalchemy.orm import Session
-from sqlalchemy.sql import extract
-from sqlalchemy.dialects.postgresql import insert
 
+from sqlalchemy import desc, func
+from sqlalchemy.orm import Session
+
+from backend.app.core.logging import get_logger
 from backend.app.models.metrics.metric import (
-    RawMetric,
     AggregatedMetric,
+    AggregationPeriod,
     ErrorLog,
     MetricType,
-    AggregationPeriod,
+    RawMetric,
 )
 from backend.app.schemas.metrics import (
-    RawMetricCreate,
     ErrorLogCreate,
     MetricsFilterParams,
     MetricsSummary,
+    RawMetricCreate,
 )
-from backend.app.core.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -111,10 +109,7 @@ class MetricsService:
             user_id=user_id,
             targeting_rule_id=targeting_rule_id,
             segment_id=segment_id,
-            meta_data={
-                "result": value,
-                **(metadata or {})
-            }
+            meta_data={"result": value, **(metadata or {})},
         )
 
         metric = MetricsService.record_metric(db, metric_data)
@@ -125,7 +120,7 @@ class MetricsService:
                 metric_type=MetricType.LATENCY,
                 feature_flag_id=feature_flag_id,
                 user_id=user_id,
-                value=latency_ms
+                value=latency_ms,
             )
             MetricsService.record_metric(db, latency_data)
 
@@ -135,7 +130,7 @@ class MetricsService:
                 metric_type=MetricType.RULE_MATCH,
                 feature_flag_id=feature_flag_id,
                 user_id=user_id,
-                targeting_rule_id=targeting_rule_id
+                targeting_rule_id=targeting_rule_id,
             )
             MetricsService.record_metric(db, rule_data)
 
@@ -145,7 +140,7 @@ class MetricsService:
                 metric_type=MetricType.SEGMENT_MATCH,
                 feature_flag_id=feature_flag_id,
                 user_id=user_id,
-                segment_id=segment_id
+                segment_id=segment_id,
             )
             MetricsService.record_metric(db, segment_data)
 
@@ -212,15 +207,15 @@ class MetricsService:
         # Define the SQL truncation function based on the period
         trunc_func = None
         if period == AggregationPeriod.MINUTE:
-            trunc_func = func.date_trunc('minute', RawMetric.timestamp)
+            trunc_func = func.date_trunc("minute", RawMetric.timestamp)
         elif period == AggregationPeriod.HOUR:
-            trunc_func = func.date_trunc('hour', RawMetric.timestamp)
+            trunc_func = func.date_trunc("hour", RawMetric.timestamp)
         elif period == AggregationPeriod.DAY:
-            trunc_func = func.date_trunc('day', RawMetric.timestamp)
+            trunc_func = func.date_trunc("day", RawMetric.timestamp)
         elif period == AggregationPeriod.WEEK:
-            trunc_func = func.date_trunc('week', RawMetric.timestamp)
+            trunc_func = func.date_trunc("week", RawMetric.timestamp)
         elif period == AggregationPeriod.MONTH:
-            trunc_func = func.date_trunc('month', RawMetric.timestamp)
+            trunc_func = func.date_trunc("month", RawMetric.timestamp)
         elif period == AggregationPeriod.TOTAL:
             # For total, we use a fixed date as the period start
             trunc_func = func.to_timestamp(0)
@@ -228,21 +223,21 @@ class MetricsService:
         # Build the base query
         query = db.query(
             RawMetric.metric_type,
-            trunc_func.label('period_start'),
+            trunc_func.label("period_start"),
             RawMetric.feature_flag_id,
             RawMetric.targeting_rule_id,
             RawMetric.segment_id,
-            func.sum(RawMetric.count).label('count'),
-            func.sum(RawMetric.value * RawMetric.count).label('sum_value'),
-            func.min(RawMetric.value).label('min_value'),
-            func.max(RawMetric.value).label('max_value'),
-            func.count(func.distinct(RawMetric.user_id)).label('distinct_users')
+            func.sum(RawMetric.count).label("count"),
+            func.sum(RawMetric.value * RawMetric.count).label("sum_value"),
+            func.min(RawMetric.value).label("min_value"),
+            func.max(RawMetric.value).label("max_value"),
+            func.count(func.distinct(RawMetric.user_id)).label("distinct_users"),
         ).group_by(
             RawMetric.metric_type,
-            'period_start',
+            "period_start",
             RawMetric.feature_flag_id,
             RawMetric.targeting_rule_id,
-            RawMetric.segment_id
+            RawMetric.segment_id,
         )
 
         # Apply filters
@@ -265,14 +260,18 @@ class MetricsService:
 
         for result in aggregation_results:
             # Check if an aggregation record already exists
-            existing = db.query(AggregatedMetric).filter(
-                AggregatedMetric.metric_type == result.metric_type,
-                AggregatedMetric.period == period,
-                AggregatedMetric.period_start == result.period_start,
-                AggregatedMetric.feature_flag_id == result.feature_flag_id,
-                AggregatedMetric.targeting_rule_id == result.targeting_rule_id,
-                AggregatedMetric.segment_id == result.segment_id
-            ).first()
+            existing = (
+                db.query(AggregatedMetric)
+                .filter(
+                    AggregatedMetric.metric_type == result.metric_type,
+                    AggregatedMetric.period == period,
+                    AggregatedMetric.period_start == result.period_start,
+                    AggregatedMetric.feature_flag_id == result.feature_flag_id,
+                    AggregatedMetric.targeting_rule_id == result.targeting_rule_id,
+                    AggregatedMetric.segment_id == result.segment_id,
+                )
+                .first()
+            )
 
             if existing:
                 # Update existing record
@@ -295,7 +294,7 @@ class MetricsService:
                     sum_value=result.sum_value,
                     min_value=result.min_value,
                     max_value=result.max_value,
-                    distinct_users=result.distinct_users
+                    distinct_users=result.distinct_users,
                 )
                 db.add(agg_metric)
                 metrics_created += 1
@@ -310,7 +309,7 @@ class MetricsService:
         feature_flag_id: Optional[UUID] = None,
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None,
-        period: AggregationPeriod = AggregationPeriod.DAY
+        period: AggregationPeriod = AggregationPeriod.DAY,
     ) -> MetricsSummary:
         """
         Get summary statistics for metrics.
@@ -333,25 +332,29 @@ class MetricsService:
         query = db.query(AggregatedMetric).filter(
             AggregatedMetric.period == period,
             AggregatedMetric.period_start >= start_date,
-            AggregatedMetric.period_start <= end_date
+            AggregatedMetric.period_start <= end_date,
         )
 
         if feature_flag_id:
             query = query.filter(AggregatedMetric.feature_flag_id == feature_flag_id)
 
         # Get total evaluations
-        evaluations_query = query.filter(AggregatedMetric.metric_type == MetricType.FLAG_EVALUATION)
+        evaluations_query = query.filter(
+            AggregatedMetric.metric_type == MetricType.FLAG_EVALUATION
+        )
         total_evaluations = sum(m.count for m in evaluations_query.all())
 
         # Get unique users
         unique_users = db.query(func.count(func.distinct(RawMetric.user_id))).filter(
             RawMetric.timestamp >= start_date,
             RawMetric.timestamp <= end_date,
-            RawMetric.metric_type == MetricType.FLAG_EVALUATION
+            RawMetric.metric_type == MetricType.FLAG_EVALUATION,
         )
 
         if feature_flag_id:
-            unique_users = unique_users.filter(RawMetric.feature_flag_id == feature_flag_id)
+            unique_users = unique_users.filter(
+                RawMetric.feature_flag_id == feature_flag_id
+            )
 
         unique_users = unique_users.scalar() or 0
 
@@ -367,7 +370,9 @@ class MetricsService:
             avg_latency = total_latency_sum / total_latency_count
 
         # Get rule match rate
-        rule_match_query = query.filter(AggregatedMetric.metric_type == MetricType.RULE_MATCH)
+        rule_match_query = query.filter(
+            AggregatedMetric.metric_type == MetricType.RULE_MATCH
+        )
         rule_match_count = sum(m.count for m in rule_match_query.all())
 
         rule_match_rate = None
@@ -376,12 +381,13 @@ class MetricsService:
 
         # Get error rate
         error_count = db.query(func.count(ErrorLog.id)).filter(
-            ErrorLog.timestamp >= start_date,
-            ErrorLog.timestamp <= end_date
+            ErrorLog.timestamp >= start_date, ErrorLog.timestamp <= end_date
         )
 
         if feature_flag_id:
-            error_count = error_count.filter(ErrorLog.feature_flag_id == feature_flag_id)
+            error_count = error_count.filter(
+                ErrorLog.feature_flag_id == feature_flag_id
+            )
 
         error_count = error_count.scalar() or 0
 
@@ -395,15 +401,12 @@ class MetricsService:
             unique_users=unique_users,
             avg_latency=avg_latency,
             rule_match_rate=rule_match_rate,
-            error_rate=error_rate
+            error_rate=error_rate,
         )
 
     @staticmethod
     def get_aggregated_metrics(
-        db: Session,
-        params: MetricsFilterParams,
-        skip: int = 0,
-        limit: int = 100
+        db: Session, params: MetricsFilterParams, skip: int = 0, limit: int = 100
     ) -> List[AggregatedMetric]:
         """
         Get aggregated metrics based on filter criteria.
@@ -424,13 +427,17 @@ class MetricsService:
             query = query.filter(AggregatedMetric.metric_type == params.metric_type)
 
         if params.feature_flag_id:
-            query = query.filter(AggregatedMetric.feature_flag_id == params.feature_flag_id)
+            query = query.filter(
+                AggregatedMetric.feature_flag_id == params.feature_flag_id
+            )
 
         if params.segment_id:
             query = query.filter(AggregatedMetric.segment_id == params.segment_id)
 
         if params.targeting_rule_id:
-            query = query.filter(AggregatedMetric.targeting_rule_id == params.targeting_rule_id)
+            query = query.filter(
+                AggregatedMetric.targeting_rule_id == params.targeting_rule_id
+            )
 
         if params.period:
             query = query.filter(AggregatedMetric.period == params.period)
@@ -442,7 +449,9 @@ class MetricsService:
             query = query.filter(AggregatedMetric.period_start <= params.end_date)
 
         # Order by period start (descending) and metric type
-        query = query.order_by(desc(AggregatedMetric.period_start), AggregatedMetric.metric_type)
+        query = query.order_by(
+            desc(AggregatedMetric.period_start), AggregatedMetric.metric_type
+        )
 
         # Apply pagination
         return query.offset(skip).limit(limit).all()
@@ -455,7 +464,7 @@ class MetricsService:
         end_date: Optional[datetime] = None,
         error_type: Optional[str] = None,
         skip: int = 0,
-        limit: int = 100
+        limit: int = 100,
     ) -> List[ErrorLog]:
         """
         Get error logs based on filter criteria.

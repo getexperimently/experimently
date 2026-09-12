@@ -32,20 +32,21 @@ Response format:
 Authentication: X-API-Key header (validated against the api_keys table).
 Response is deterministic for the same set of flags (stable version hash).
 """
+
 from __future__ import annotations
 
 import hashlib
 import json
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from backend.app.api import deps
-from backend.app.models.feature_flag import FeatureFlag, FeatureFlagStatus
 from backend.app.models.experiment import Experiment, ExperimentStatus, Variant
+from backend.app.models.feature_flag import FeatureFlag, FeatureFlagStatus
 from backend.app.models.user import User
 
 logger = logging.getLogger(__name__)
@@ -64,6 +65,7 @@ router = APIRouter(
 
 class EdgeTargetingRule(BaseModel):
     """Targeting rule used for local evaluation in edge environments."""
+
     attribute: str
     operator: str
     value: Any
@@ -72,6 +74,7 @@ class EdgeTargetingRule(BaseModel):
 
 class EdgeFlagVariant(BaseModel):
     """Feature flag variant for local evaluation."""
+
     key: str
     weight: float
     value: Optional[Any] = None
@@ -82,6 +85,7 @@ class EdgeFeatureFlag(BaseModel):
     Minimal feature flag definition for edge SDK local evaluation.
     Uses camelCase keys to match the TypeScript SDK conventions.
     """
+
     key: str
     enabled: bool
     rolloutPercentage: float
@@ -91,6 +95,7 @@ class EdgeFeatureFlag(BaseModel):
 
 class EdgeExperimentVariant(BaseModel):
     """Experiment variant for assignment / bucketing."""
+
     key: str
     name: str
     weight: float
@@ -98,6 +103,7 @@ class EdgeExperimentVariant(BaseModel):
 
 class EdgeExperiment(BaseModel):
     """Minimal experiment definition for edge SDK assignment."""
+
     key: str
     enabled: bool
     variants: List[EdgeExperimentVariant] = []
@@ -112,6 +118,7 @@ class EdgeBootstrapResponse(BaseModel):
       - Verified via the `version` hash (SHA-256 of the sorted JSON payload)
       - Consumed by the Edge SDK's `refreshFlags()` method
     """
+
     flags: List[EdgeFeatureFlag]
     experiments: List[EdgeExperiment]
     ttl_seconds: int = 60
@@ -130,11 +137,13 @@ def _flag_to_edge(flag: FeatureFlag) -> EdgeFeatureFlag:
     variants: List[EdgeFlagVariant] = []
     for v in variants_raw:
         if isinstance(v, dict):
-            variants.append(EdgeFlagVariant(
-                key=v.get("key", ""),
-                weight=float(v.get("weight", 0.0)),
-                value=v.get("value"),
-            ))
+            variants.append(
+                EdgeFlagVariant(
+                    key=v.get("key", ""),
+                    weight=float(v.get("weight", 0.0)),
+                    value=v.get("value"),
+                )
+            )
 
     # Parse targeting rules
     rules_raw = flag.targeting_rules if isinstance(flag.targeting_rules, list) else []
@@ -142,12 +151,14 @@ def _flag_to_edge(flag: FeatureFlag) -> EdgeFeatureFlag:
     for r in rules_raw:
         if isinstance(r, dict):
             rollout = r.get("rollout_percentage") or r.get("rolloutPercentage")
-            rules.append(EdgeTargetingRule(
-                attribute=r.get("attribute", ""),
-                operator=r.get("operator", "eq"),
-                value=r.get("value"),
-                rolloutPercentage=float(rollout) if rollout is not None else None,
-            ))
+            rules.append(
+                EdgeTargetingRule(
+                    attribute=r.get("attribute", ""),
+                    operator=r.get("operator", "eq"),
+                    value=r.get("value"),
+                    rolloutPercentage=float(rollout) if rollout is not None else None,
+                )
+            )
 
     # Resolve enabled state
     enabled: bool
@@ -165,17 +176,21 @@ def _flag_to_edge(flag: FeatureFlag) -> EdgeFeatureFlag:
     )
 
 
-def _experiment_to_edge(experiment: Experiment, db_variants: List[Variant]) -> EdgeExperiment:
+def _experiment_to_edge(
+    experiment: Experiment, db_variants: List[Variant]
+) -> EdgeExperiment:
     """Convert a SQLAlchemy Experiment to an EdgeExperiment schema."""
     edge_variants: List[EdgeExperimentVariant] = []
     total_allocation = sum(v.traffic_allocation or 0 for v in db_variants) or 100
     for v in db_variants:
         allocation = v.traffic_allocation or 0
-        edge_variants.append(EdgeExperimentVariant(
-            key=v.name.lower().replace(" ", "-"),
-            name=v.name,
-            weight=allocation / total_allocation,  # normalize to [0, 1]
-        ))
+        edge_variants.append(
+            EdgeExperimentVariant(
+                key=v.name.lower().replace(" ", "-"),
+                name=v.name,
+                weight=allocation / total_allocation,  # normalize to [0, 1]
+            )
+        )
 
     enabled = experiment.status == ExperimentStatus.ACTIVE
 
@@ -186,7 +201,9 @@ def _experiment_to_edge(experiment: Experiment, db_variants: List[Variant]) -> E
     )
 
 
-def _compute_version(flags: List[EdgeFeatureFlag], experiments: List[EdgeExperiment]) -> str:
+def _compute_version(
+    flags: List[EdgeFeatureFlag], experiments: List[EdgeExperiment]
+) -> str:
     """
     Compute a stable SHA-256 version hash of the payload.
 
@@ -245,16 +262,12 @@ def get_edge_bootstrap(
 
     # Fetch all feature flags for this user
     db_flags: List[FeatureFlag] = (
-        db.query(FeatureFlag)
-        .filter(FeatureFlag.owner_id == api_key_user.id)
-        .all()
+        db.query(FeatureFlag).filter(FeatureFlag.owner_id == api_key_user.id).all()
     )
 
     # Fetch all experiments for this user
     db_experiments: List[Experiment] = (
-        db.query(Experiment)
-        .filter(Experiment.owner_id == api_key_user.id)
-        .all()
+        db.query(Experiment).filter(Experiment.owner_id == api_key_user.id).all()
     )
 
     # Convert to edge schema

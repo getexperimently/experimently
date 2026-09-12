@@ -16,15 +16,15 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import datetime, date
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
-from backend.app.models.phi_audit_log import PHIAuditLog
-from backend.app.models.baa_config import BAAConfig
-from backend.app.core.phi_encryption import PHIEncryption
 from backend.app.core.config import settings
+from backend.app.core.phi_encryption import PHIEncryption
+from backend.app.models.baa_config import BAAConfig
+from backend.app.models.phi_audit_log import PHIAuditLog
 
 logger = logging.getLogger(__name__)
 
@@ -307,7 +307,8 @@ class HIPAAService:
                 "reason": "Access logged without a recognised purpose",
             }
             for log in all_logs
-            if not log.purpose or log.purpose not in {"treatment", "operations", "research"}
+            if not log.purpose
+            or log.purpose not in {"treatment", "operations", "research"}
         ]
 
         # BAA coverage summary

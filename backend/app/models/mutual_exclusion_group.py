@@ -6,24 +6,26 @@ experiment within the group, preventing cross-contamination of results.
 """
 
 import enum
-import uuid
 
 from sqlalchemy import (
-    Column,
-    String,
-    Float,
-    Text,
-    ForeignKey,
-    Enum as SQLAEnum,
-    Index,
     CheckConstraint,
+    Column,
+    Float,
+    ForeignKey,
+    Index,
+    String,
+    Text,
+)
+from sqlalchemy import (
+    Enum as SQLAEnum,
 )
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import relationship
 from sqlalchemy.ext.declarative import declared_attr
+from sqlalchemy.orm import relationship
+
+from backend.app.core.database_config import get_schema_name
 
 from .base import Base, BaseModel
-from backend.app.core.database_config import get_schema_name
 
 
 class MutualExclusionGroupStatus(enum.Enum):
