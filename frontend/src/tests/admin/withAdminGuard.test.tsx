@@ -1,95 +1,161 @@
 import React from 'react';
-import { render, screen } from '@testing-library/react';
-import { withAdminGuard } from '@/components/admin/withAdminGuard';
-import { AdminUser, UserRole } from '@/types/admin';
+import { render, screen, waitFor } from '@testing-library/react';
+import { withAdminGuard, rolesAtLeast, ADMIN_AREA_ROLES } from '@/components/admin/withAdminGuard';
+import { AuthProvider } from '@/contexts/AuthContext';
+import { TOKEN_STORAGE_KEY, UserMe } from '@/services/api';
+import { UserRole } from '@/types/admin';
+
+const mockReplace = jest.fn();
 
 // Mock Next.js router
 jest.mock('next/router', () => ({
   useRouter: () => ({
     push: jest.fn(),
-    pathname: '/',
+    replace: mockReplace,
+    pathname: '/admin',
+    asPath: '/admin',
+    query: {},
+    isReady: true,
   }),
 }));
+
+jest.mock('next/link', () => {
+  const MockLink = ({ children, href, ...rest }: { children: React.ReactNode; href: string }) => (
+    <a href={href} {...rest}>
+      {children}
+    </a>
+  );
+  MockLink.displayName = 'MockLink';
+  return MockLink;
+});
+
+const mockFetch = jest.fn();
+global.fetch = mockFetch;
 
 // Simple test component
 const TestComponent: React.FC<{ title?: string }> = ({ title = 'Test Content' }) => (
   <div data-testid="protected-content">{title}</div>
 );
 
-const mockAdminUser: AdminUser = {
-  id: '1',
-  username: 'admin',
-  email: 'admin@example.com',
-  role: 'ADMIN',
-  is_active: true,
-  created_at: '2024-01-01T00:00:00Z',
-};
+function user(role: UserRole): UserMe {
+  return {
+    id: '1',
+    username: role.toLowerCase(),
+    email: `${role.toLowerCase()}@example.com`,
+    full_name: null,
+    role,
+    is_superuser: role === 'ADMIN',
+    is_active: true,
+    auth_provider: 'local',
+  };
+}
 
-const mockDeveloperUser: AdminUser = {
-  id: '2',
-  username: 'developer',
-  email: 'dev@example.com',
-  role: 'DEVELOPER',
-  is_active: true,
-  created_at: '2024-01-01T00:00:00Z',
-};
+function signInAs(role: UserRole) {
+  localStorage.setItem(TOKEN_STORAGE_KEY, 'tok');
+  mockFetch.mockResolvedValueOnce({
+    ok: true,
+    status: 200,
+    headers: { get: () => 'application/json' },
+    json: () => Promise.resolve(user(role)),
+    text: () => Promise.resolve(JSON.stringify(user(role))),
+  } as unknown as Response);
+}
 
-function setLocalStorage(user: AdminUser | null) {
-  if (user) {
-    localStorage.setItem('admin_user', JSON.stringify(user));
-  } else {
-    localStorage.removeItem('admin_user');
-  }
+function renderGuarded(Guarded: React.FC<{ title?: string }>) {
+  return render(
+    <AuthProvider>
+      <Guarded />
+    </AuthProvider>,
+  );
 }
 
 beforeEach(() => {
   localStorage.clear();
+  mockFetch.mockReset();
+  mockReplace.mockReset();
 });
 
 describe('withAdminGuard', () => {
-  it('renders component when user is ADMIN', () => {
-    setLocalStorage(mockAdminUser);
+  it('renders component when user is ADMIN', async () => {
+    signInAs('ADMIN');
     const GuardedComponent = withAdminGuard(TestComponent);
-    render(<GuardedComponent />);
-    expect(screen.getByTestId('protected-content')).toBeInTheDocument();
+    renderGuarded(GuardedComponent);
+    await waitFor(() => expect(screen.getByTestId('protected-content')).toBeInTheDocument());
   });
 
-  it('redirects to "/" when no user in localStorage', () => {
+  it('admits DEVELOPER by default (matches the Admin nav item)', async () => {
+    signInAs('DEVELOPER');
     const GuardedComponent = withAdminGuard(TestComponent);
-    render(<GuardedComponent />);
+    renderGuarded(GuardedComponent);
+    await waitFor(() => expect(screen.getByTestId('protected-content')).toBeInTheDocument());
+    expect(ADMIN_AREA_ROLES).toEqual(['ADMIN', 'DEVELOPER']);
+  });
+
+  it('redirects to /login when there is no session', async () => {
+    const GuardedComponent = withAdminGuard(TestComponent);
+    renderGuarded(GuardedComponent);
+    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith('/login?next=%2Fadmin'));
     expect(screen.queryByTestId('protected-content')).not.toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /go to home/i })).toBeInTheDocument();
   });
 
-  it('redirects when user role does not match requiredRole', () => {
-    setLocalStorage(mockDeveloperUser);
+  it('shows the 403 view when user role is below requiredRole', async () => {
+    signInAs('DEVELOPER');
     const GuardedComponent = withAdminGuard(TestComponent, { requiredRole: 'ADMIN' });
-    render(<GuardedComponent />);
+    renderGuarded(GuardedComponent);
+    await waitFor(() => expect(screen.getByTestId('require-auth-forbidden')).toBeInTheDocument());
     expect(screen.queryByTestId('protected-content')).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: /go to home/i })).toBeInTheDocument();
+  });
+
+  it('shows the 403 view for VIEWER on the default admin audience', async () => {
+    signInAs('VIEWER');
+    const GuardedComponent = withAdminGuard(TestComponent);
+    renderGuarded(GuardedComponent);
+    await waitFor(() => expect(screen.getByTestId('require-auth-forbidden')).toBeInTheDocument());
   });
 
   it('shows loading state initially', () => {
-    // localStorage is sync but we still check it renders without crash
-    setLocalStorage(mockAdminUser);
+    localStorage.setItem(TOKEN_STORAGE_KEY, 'tok');
+    mockFetch.mockImplementation(() => new Promise(() => {}));
     const GuardedComponent = withAdminGuard(TestComponent);
-    const { container } = render(<GuardedComponent />);
-    // Component should render (either loading or content after sync check)
-    expect(container).toBeTruthy();
-  });
-
-  it('works with DEVELOPER role when requiredRole is DEVELOPER', () => {
-    setLocalStorage(mockDeveloperUser);
-    const GuardedComponent = withAdminGuard(TestComponent, { requiredRole: 'DEVELOPER' });
-    render(<GuardedComponent />);
-    expect(screen.getByTestId('protected-content')).toBeInTheDocument();
-  });
-
-  it('handles invalid JSON in localStorage gracefully', () => {
-    localStorage.setItem('admin_user', 'invalid-json{{{');
-    const GuardedComponent = withAdminGuard(TestComponent);
-    render(<GuardedComponent />);
+    renderGuarded(GuardedComponent);
+    expect(screen.getByTestId('require-auth-loading')).toBeInTheDocument();
     expect(screen.queryByTestId('protected-content')).not.toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /go to home/i })).toBeInTheDocument();
+  });
+
+  it('works with DEVELOPER role when requiredRole is DEVELOPER', async () => {
+    signInAs('DEVELOPER');
+    const GuardedComponent = withAdminGuard(TestComponent, { requiredRole: 'DEVELOPER' });
+    renderGuarded(GuardedComponent);
+    await waitFor(() => expect(screen.getByTestId('protected-content')).toBeInTheDocument());
+  });
+
+  it('requiredRole is hierarchical: ADMIN passes a DEVELOPER requirement', async () => {
+    signInAs('ADMIN');
+    const GuardedComponent = withAdminGuard(TestComponent, { requiredRole: 'DEVELOPER' });
+    renderGuarded(GuardedComponent);
+    await waitFor(() => expect(screen.getByTestId('protected-content')).toBeInTheDocument());
+    expect(rolesAtLeast('DEVELOPER')).toEqual(['DEVELOPER', 'ADMIN']);
+    expect(rolesAtLeast('VIEWER')).toEqual(['VIEWER', 'ANALYST', 'DEVELOPER', 'ADMIN']);
+  });
+
+  it('explicit roles list takes precedence', async () => {
+    signInAs('ANALYST');
+    const GuardedComponent = withAdminGuard(TestComponent, { roles: ['ANALYST'] });
+    renderGuarded(GuardedComponent);
+    await waitFor(() => expect(screen.getByTestId('protected-content')).toBeInTheDocument());
+  });
+
+  it('ignores a stale admin_user object in localStorage', async () => {
+    localStorage.setItem('admin_user', JSON.stringify(user('ADMIN')));
+    const GuardedComponent = withAdminGuard(TestComponent);
+    renderGuarded(GuardedComponent);
+    await waitFor(() => expect(mockReplace).toHaveBeenCalled());
+    expect(screen.queryByTestId('protected-content')).not.toBeInTheDocument();
+  });
+
+  it('sets a helpful displayName', () => {
+    const GuardedComponent = withAdminGuard(TestComponent);
+    expect(GuardedComponent.displayName).toBe('withAdminGuard(TestComponent)');
   });
 });

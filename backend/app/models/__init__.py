@@ -141,3 +141,4 @@ __all__ = [
 
 # Remove or comment out any premature configuration
 # configure_mappers()
+from .seed_marker import SeedMarker

@@ -4,8 +4,73 @@ Pydantic schemas for authentication.
 This module defines the request and response schemas for authentication operations.
 """
 
-from typing import Dict, Any, Optional
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from typing import Dict, Any, Literal, Optional
+from uuid import UUID
+
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
+
+
+# ---------------------------------------------------------------------------
+# Local provider (Community Edition) — /auth/login, /auth/me, /auth/logout
+# ---------------------------------------------------------------------------
+
+
+RoleName = Literal["ADMIN", "DEVELOPER", "ANALYST", "VIEWER"]
+
+
+class LoginRequest(BaseModel):
+    """Body for ``POST /api/v1/auth/login`` (local provider)."""
+
+    # Plain ``str`` (not EmailStr): a malformed address is simply an unknown
+    # user (401), and local accounts such as ``admin@localhost`` stay usable.
+    email: str = Field(..., min_length=1, max_length=320)
+    password: str = Field(..., min_length=1, max_length=256)
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def _strip_email(cls, v: Any) -> Any:
+        return v.strip() if isinstance(v, str) else v
+
+
+class UserMe(BaseModel):
+    """
+    The authenticated user's own profile, as returned by ``GET /auth/me`` and
+    embedded in the login response.  ``role`` is the upper-case name of the
+    ``UserRole`` enum (matches the frontend ``UserRole`` type).
+    """
+
+    id: UUID
+    email: str
+    username: str
+    full_name: Optional[str] = None
+    role: RoleName
+    is_superuser: bool
+    is_active: bool
+    auth_provider: Literal["local", "cognito"]
+
+    model_config = ConfigDict(from_attributes=True)
+
+    @field_validator("role", mode="before")
+    @classmethod
+    def _role_to_name(cls, v: Any) -> Any:
+        """Accept a ``UserRole`` enum member, its name, or its lower-case value."""
+        if v is None:
+            return "VIEWER"
+        name = getattr(v, "name", None)
+        if isinstance(name, str):
+            return name.upper()
+        if isinstance(v, str):
+            return v.upper()
+        return v
+
+
+class LoginResponse(BaseModel):
+    """Token response for the local provider."""
+
+    access_token: str
+    token_type: Literal["bearer"] = "bearer"
+    expires_in: int = Field(..., description="Seconds until the token expires")
+    user: UserMe
 
 
 class SignUpRequest(BaseModel):

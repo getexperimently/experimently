@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import Head from 'next/head';
+import { PageTitle } from '@/components/PageTitle';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { Workspace, WorkspaceMember, workspaceService } from '@/services/workspaces';
@@ -234,7 +234,7 @@ export default function WorkspaceMembersPage() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+      <div className="flex-1 bg-slate-50 flex items-center justify-center">
         <div className="inline-block w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
       </div>
     );
@@ -242,7 +242,7 @@ export default function WorkspaceMembersPage() {
 
   if (error) {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+      <div className="flex-1 bg-slate-50 flex items-center justify-center">
         <p className="text-red-600">{error}</p>
       </div>
     );
@@ -250,20 +250,10 @@ export default function WorkspaceMembersPage() {
 
   return (
     <>
-      <Head>
-        <title>Members — {workspace?.name ?? 'Workspace'} — Experimently</title>
-      </Head>
+      <PageTitle title={`Members · ${workspace?.name ?? 'Workspace'}`} />
 
-      <div className="min-h-screen bg-slate-50">
+      <div className="flex-1 bg-slate-50">
         {/* Nav */}
-        <nav className="bg-white border-b border-slate-200 px-6 h-14 flex items-center gap-6">
-          <Link href="/" className="text-lg font-semibold text-slate-900">Experimently</Link>
-          <div className="flex items-center gap-4 text-sm">
-            <Link href="/experiments" className="text-slate-600 hover:text-slate-900">Experiments</Link>
-            <Link href="/feature-flags" className="text-slate-600 hover:text-slate-900">Feature Flags</Link>
-            <Link href="/workspaces" className="text-slate-600 hover:text-slate-900">Workspaces</Link>
-          </div>
-        </nav>
 
         <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           {/* Breadcrumb */}

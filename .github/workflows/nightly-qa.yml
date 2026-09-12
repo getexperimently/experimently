@@ -216,22 +216,27 @@ jobs:
 
       - name: Start backend
         env:
-          APP_ENV: test
-          TESTING: 'true'
+          ENVIRONMENT: development
+          APP_ENV: development
+          AUTH_PROVIDER: local
+          SECRET_KEY: ci-only-nightly-e2e-secret-key-0123456789abcdef0123456789
           # The app reads POSTGRES_SERVER (not POSTGRES_HOST) for the DB host.
           POSTGRES_SERVER: localhost
           POSTGRES_PORT: 5432
           POSTGRES_DB: experimentation
+          POSTGRES_SCHEMA: experimentation
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
         run: |
-          cd backend
-          uvicorn app.main:app --host 0.0.0.0 --port 8000 &
-          for i in $(seq 1 30); do
-            curl -sf http://localhost:8000/health >/dev/null && break
+          # The code imports backend.app.*, so everything runs from the repo root.
+          python -m backend.app.db.bootstrap
+          python backend/scripts/seed_demo_data.py
+          nohup python -m uvicorn backend.app.main:app --host 0.0.0.0 --port 8000 > backend.log 2>&1 &
+          for i in $(seq 1 60); do
+            curl -sf http://localhost:8000/health/ready >/dev/null && exit 0
             sleep 1
           done
-          curl -s http://localhost:8000/health || true
+          echo "backend did not become ready"; tail -n 100 backend.log; exit 1
 
       - name: Install frontend dependencies
         run: cd frontend && npm ci

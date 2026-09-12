@@ -32,6 +32,7 @@ function StatusBadge({ status }: { status: ConnectionStatus }) {
     connecting: { dotClass: 'bg-yellow-400 animate-pulse', label: 'Connecting…' },
     disconnected: { dotClass: 'bg-slate-400', label: 'Disconnected' },
     error: { dotClass: 'bg-red-500', label: 'Error' },
+    unauthorized: { dotClass: 'bg-red-500', label: 'Not authorized' },
   };
 
   const { dotClass, label } = configs[status];

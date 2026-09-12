@@ -1,0 +1,53 @@
+# Runtime dependencies for the API image (backend/Dockerfile).
+#
+# This is the subset of backend/requirements.txt the application imports at
+# runtime. Test, lint, docs, load-test and infrastructure tooling (pytest,
+# moto, locust, aws-cdk-lib, black, mkdocs, ...) stay in backend/requirements.txt,
+# which CI installs. Keep the pins identical to backend/requirements.txt.
+
+# API framework
+fastapi==0.141.1
+uvicorn==0.52.4
+websockets==15.0.1     # uvicorn WebSocket support (/api/v1/ws/...); uvicorn alone serves 404 for upgrades
+pydantic==2.13.5
+pydantic-settings==2.15.0
+email-validator==2.3.0
+python-multipart==0.0.32
+PyJWT==2.13.0
+bcrypt==4.3.0
+
+# Database, cache
+SQLAlchemy==2.0.52
+alembic==1.19.2
+psycopg2-binary==2.9.12
+redis==8.1.0
+
+# AWS (Cognito auth provider, SSM secrets, DynamoDB counters, CloudWatch logs)
+boto3==1.43.89
+watchtower==3.4.0
+
+# HTTP clients (notifications, integrations)
+httpx==0.28.1
+requests==2.34.2
+slack-sdk==3.44.1
+sendgrid==6.12.5
+
+# Statistics
+numpy==1.26.4
+scipy==1.17.1
+pandas==2.2.3
+statsmodels==0.15.0
+
+# Utilities
+python-dateutil==2.9.0.post0
+pytz==2023.3
+semver==3.0.4
+loguru==0.7.3
+cryptography==50.0.1
+defusedxml==0.7.1
+
+# Observability
+structlog==23.1.0
+prometheus-client==0.26.0
+python-json-logger==2.0.7
+psutil==5.9.8

@@ -1,5 +1,6 @@
 import React from 'react';
 import { AdminSidebar } from './AdminSidebar';
+import { PageTitle } from '@/components/PageTitle';
 
 interface AdminLayoutProps {
   children: React.ReactNode;
@@ -7,25 +8,25 @@ interface AdminLayoutProps {
   currentPath: string;
 }
 
+/**
+ * Admin area layout: sidebar + content column. The top navigation comes from
+ * the application shell (`AppShell`), so this only adds the section heading.
+ */
 export function AdminLayout({ children, title, currentPath }: AdminLayoutProps) {
   return (
-    <div data-testid="admin-layout" className="min-h-screen bg-slate-50 flex flex-col">
-      {/* Top Header Bar */}
-      <header className="bg-white border-b border-slate-200 h-14 flex items-center px-6 flex-shrink-0">
-        <span className="text-lg font-semibold text-slate-900">Admin Panel</span>
-        <span className="mx-3 text-slate-300">|</span>
-        <span className="text-sm text-slate-600">{title}</span>
-      </header>
+    <div data-testid="admin-layout" className="flex-1 bg-slate-50 flex">
+      <PageTitle title={`${title} · Admin`} />
+      <AdminSidebar currentPath={currentPath} />
 
-      {/* Body: Sidebar + Content */}
-      <div className="flex flex-1 overflow-hidden">
-        <AdminSidebar currentPath={currentPath} />
-
-        {/* Main Content Area */}
-        <main className="flex-1 overflow-auto p-6">
-          {children}
-        </main>
-      </div>
+      {/* Main Content Area */}
+      <main className="flex-1 min-w-0 overflow-auto p-6">
+        <header className="flex items-center gap-3 mb-6">
+          <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">Admin</span>
+          <span className="text-slate-300">/</span>
+          <h1 className="text-lg font-semibold text-slate-900">{title}</h1>
+        </header>
+        {children}
+      </main>
     </div>
   );
 }

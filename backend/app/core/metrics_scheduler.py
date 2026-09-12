@@ -15,8 +15,11 @@ from backend.app.db.session import SessionLocal
 from backend.app.models.metrics.metric import AggregationPeriod
 from backend.app.services.metrics_service import MetricsService
 from backend.app.core.logging import get_logger
+from backend.app.core.scheduler_tick import run_locked_tick
 
 logger = get_logger(__name__)
+
+SCHEDULER_NAME = "metrics"
 
 
 class MetricsScheduler:
@@ -65,8 +68,9 @@ class MetricsScheduler:
         """Run the scheduler loop."""
         while self.is_running:
             try:
-                # Process metrics aggregation
-                await self.aggregate_metrics()
+                # One tick under the advisory lock; records the run and
+                # skips when another replica holds the lock.
+                await run_locked_tick(SCHEDULER_NAME, self.aggregate_metrics)
 
                 # Wait for the next interval
                 await asyncio.sleep(self.interval_minutes * 60)
@@ -77,7 +81,7 @@ class MetricsScheduler:
                 # Wait a bit before trying again
                 await asyncio.sleep(60)
 
-    async def aggregate_metrics(self):
+    async def aggregate_metrics(self) -> Dict[str, int]:
         """
         Aggregate raw metrics into summary data.
 
@@ -86,8 +90,13 @@ class MetricsScheduler:
         2. Last day at hour granularity
         3. Last month at day granularity
         4. All-time totals
+
+        Returns ``{"items_processed": n, "items_failed": m}`` for the run record.
         """
         logger.info("Aggregating metrics")
+
+        total_records = 0
+        failed_periods = 0
 
         # Use a new database session for this task
         db = SessionLocal()
@@ -110,8 +119,6 @@ class MetricsScheduler:
                 (AggregationPeriod.TOTAL, None),
             ]
 
-            total_records = 0
-
             # Run each aggregation task
             for period, start_time in aggregation_tasks:
                 try:
@@ -124,6 +131,7 @@ class MetricsScheduler:
                     total_records += records
                     logger.info(f"Aggregated {records} records for {period} period")
                 except Exception as e:
+                    failed_periods += 1
                     logger.error(f"Error aggregating {period} metrics: {str(e)}")
 
             if total_records > 0:
@@ -132,9 +140,15 @@ class MetricsScheduler:
                 logger.info("No metrics required aggregation")
 
         except Exception as e:
+            failed_periods += 1
             logger.error(f"Error processing metrics aggregation: {str(e)}")
         finally:
             db.close()
+
+        return {
+            "items_processed": int(total_records) if isinstance(total_records, int) else 0,
+            "items_failed": failed_periods,
+        }
 
 
 # Create a singleton instance of the scheduler

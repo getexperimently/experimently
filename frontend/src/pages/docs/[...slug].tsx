@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import Link from 'next/link';
-import Head from 'next/head';
+import { PageTitle } from '@/components/PageTitle';
 import { GetStaticPaths, GetStaticProps } from 'next';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -280,15 +280,20 @@ export const getStaticProps: GetStaticProps<Props> = ({ params }) => {
   const title = SLUG_TITLES[slug] ?? slug;
   const relFile = SLUG_TO_FILE[slug];
 
-  const docsRoot = path.join(process.cwd(), '..', 'docs');
+  // The markdown lives in the repository's docs/ directory, next to frontend/.
+  // DOCS_ROOT overrides the location (e.g. an unusual container layout).
+  const docsRoot = process.env.DOCS_ROOT || path.join(process.cwd(), '..', 'docs');
   const filePath = path.join(docsRoot, relFile);
 
-  let content = '';
-  if (fs.existsSync(filePath)) {
-    content = fs.readFileSync(filePath, 'utf-8');
-  } else {
-    content = `# ${title}\n\nDocumentation coming soon. [Contact us](mailto:hello@getexperimently.com) if you need help.`;
+  if (!fs.existsSync(filePath)) {
+    // Fail the build rather than ship a placeholder page: every slug in
+    // SLUG_TO_FILE must point at a real file.
+    throw new Error(
+      `Docs page "${slug}" maps to ${relFile}, but ${filePath} does not exist. ` +
+        'Is docs/ available to the build (docker context = repository root)?',
+    );
   }
+  const content = fs.readFileSync(filePath, 'utf-8');
 
   return { props: { slug, title, content, currentFile: relFile } };
 };
@@ -298,42 +303,25 @@ export default function DocPage({ slug, title, content, currentFile }: Props) {
 
   return (
     <>
-      <Head>
-        <title>{title} — Experimently Docs</title>
-        <meta name="description" content={`Experimently documentation: ${title}`} />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <link rel="icon" href="/favicon.ico" />
-      </Head>
+      <PageTitle title={`${title} · Docs`} description={`Experimently documentation: ${title}`} />
 
-      <div className="min-h-screen bg-white">
-        {/* Nav */}
-        <nav className="border-b border-gray-100 bg-white sticky top-0 z-50">
+      <div className="flex-1 bg-white">
+        {/* Breadcrumbs */}
+        <div className="border-b border-gray-100 bg-white">
           <div className="max-w-7xl mx-auto px-6 lg:px-8">
-            <div className="flex justify-between items-center h-16">
-              <div className="flex items-center gap-2 text-sm text-gray-500">
-                <Link href="/" className="text-gray-900 font-semibold text-base hover:text-blue-600 transition">
-                  Experimently
-                </Link>
-                <span>/</span>
-                <Link href="/docs" className="hover:text-gray-900 transition">Docs</Link>
-                {breadcrumbs.map((crumb, i) => (
-                  <span key={i} className="flex items-center gap-2">
-                    <span>/</span>
-                    <span className={i === breadcrumbs.length - 1 ? 'text-gray-900 font-medium' : ''}>
-                      {crumb.replace(/-/g, ' ')}
-                    </span>
+            <nav aria-label="Breadcrumb" className="flex items-center gap-2 h-12 text-sm text-gray-500">
+              <Link href="/docs" className="hover:text-gray-900 transition">Docs</Link>
+              {breadcrumbs.map((crumb, i) => (
+                <span key={i} className="flex items-center gap-2">
+                  <span>/</span>
+                  <span className={i === breadcrumbs.length - 1 ? 'text-gray-900 font-medium' : ''}>
+                    {crumb.replace(/-/g, ' ')}
                   </span>
-                ))}
-              </div>
-              <div className="flex items-center gap-4">
-                <a href="/experiments" className="text-gray-600 hover:text-gray-900 text-sm font-medium">Sign in</a>
-                <a href="/docs/quick-start" className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition">
-                  Get started free
-                </a>
-              </div>
-            </div>
+                </span>
+              ))}
+            </nav>
           </div>
-        </nav>
+        </div>
 
         <div className="max-w-4xl mx-auto px-6 lg:px-8 py-12">
           <article className="prose prose-gray prose-headings:font-semibold prose-a:text-blue-600 max-w-none">

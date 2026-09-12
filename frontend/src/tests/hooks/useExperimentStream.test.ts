@@ -1,5 +1,12 @@
 import { renderHook, act } from '@testing-library/react';
-import { useExperimentStream } from '@/hooks/useExperimentStream';
+import {
+  buildStreamProtocols,
+  buildStreamUrl,
+  useExperimentStream,
+  WS_AUTH_SUBPROTOCOL,
+  WS_CLOSE_UNAUTHORIZED,
+} from '@/hooks/useExperimentStream';
+import { TOKEN_STORAGE_KEY } from '@/services/api';
 
 // Mock WebSocket
 class MockWebSocket {
@@ -7,16 +14,18 @@ class MockWebSocket {
   static CLOSED = 3;
 
   url: string;
+  protocols: string[] | undefined;
   readyState = MockWebSocket.OPEN;
   onopen: (() => void) | null = null;
   onmessage: ((e: { data: string }) => void) | null = null;
   onerror: (() => void) | null = null;
-  onclose: (() => void) | null = null;
+  onclose: ((e?: { code: number }) => void) | null = null;
   sentMessages: string[] = [];
   closeCalled = false;
 
-  constructor(url: string) {
+  constructor(url: string, protocols?: string[]) {
     this.url = url;
+    this.protocols = protocols;
     // Simulate async open
     setTimeout(() => this.onopen?.(), 0);
   }
@@ -39,8 +48,8 @@ let wsInstances: MockWebSocket[] = [];
 beforeEach(() => {
   wsInstances = [];
   (global as unknown as Record<string, unknown>).WebSocket = class extends MockWebSocket {
-    constructor(url: string) {
-      super(url);
+    constructor(url: string, protocols?: string[]) {
+      super(url, protocols);
       wsInstances.push(this);
     }
   };
@@ -53,6 +62,41 @@ beforeEach(() => {
 
 afterEach(() => {
   jest.restoreAllMocks();
+  localStorage.clear();
+  delete process.env.NEXT_PUBLIC_API_URL;
+  delete process.env.NEXT_PUBLIC_WS_URL;
+});
+
+describe('buildStreamUrl', () => {
+  it('derives ws origin from the page when the API is same-origin', () => {
+    expect(buildStreamUrl('exp-1')).toBe('ws://localhost/api/v1/ws/experiments/exp-1/results');
+  });
+
+  it('derives wss origin from NEXT_PUBLIC_API_URL', () => {
+    process.env.NEXT_PUBLIC_API_URL = 'https://api.example.com';
+    expect(buildStreamUrl('exp-1')).toBe('wss://api.example.com/api/v1/ws/experiments/exp-1/results');
+  });
+
+  it('prefers NEXT_PUBLIC_WS_URL when set', () => {
+    process.env.NEXT_PUBLIC_WS_URL = 'ws://stream.local:9000';
+    expect(buildStreamUrl('exp-1')).toBe('ws://stream.local:9000/api/v1/ws/experiments/exp-1/results');
+  });
+
+  it('never puts the token in the URL (URLs end up in access logs)', () => {
+    localStorage.setItem(TOKEN_STORAGE_KEY, 'tok/123');
+    expect(buildStreamUrl('exp-1')).toBe('ws://localhost/api/v1/ws/experiments/exp-1/results');
+  });
+});
+
+describe('buildStreamProtocols', () => {
+  it('is undefined without a token', () => {
+    expect(buildStreamProtocols()).toBeUndefined();
+  });
+
+  it('offers the marker subprotocol followed by the token', () => {
+    localStorage.setItem(TOKEN_STORAGE_KEY, 'abc.def-ghi_jkl');
+    expect(buildStreamProtocols()).toEqual([WS_AUTH_SUBPROTOCOL, 'abc.def-ghi_jkl']);
+  });
 });
 
 describe('useExperimentStream', () => {
@@ -67,12 +111,74 @@ describe('useExperimentStream', () => {
     expect(result.current.status).toBe('connecting');
     expect(wsInstances.length).toBe(1);
     expect(wsInstances[0].url).toContain('/api/v1/ws/experiments/exp-1/results');
+    expect(wsInstances[0].url).not.toContain('token=');
 
     // Simulate open
     await act(async () => {
       wsInstances[0].onopen?.();
     });
     expect(result.current.status).toBe('connected');
+  });
+
+  it('sends the token as a subprotocol, not in the URL, when one is stored', () => {
+    localStorage.setItem(TOKEN_STORAGE_KEY, 'abc');
+    renderHook(() => useExperimentStream('exp-2'));
+    expect(wsInstances[0].url).toBe('ws://localhost/api/v1/ws/experiments/exp-2/results');
+    expect(wsInstances[0].protocols).toEqual([WS_AUTH_SUBPROTOCOL, 'abc']);
+  });
+
+  it('opens the socket without a protocol list when there is no token', () => {
+    renderHook(() => useExperimentStream('exp-2'));
+    expect(wsInstances[0].protocols).toBeUndefined();
+  });
+
+  it('stops reconnecting and reports unauthorized on close code 4401', async () => {
+    jest.useFakeTimers();
+    try {
+      const { result } = renderHook(() =>
+        useExperimentStream('exp-1', { reconnectDelayMs: 10, maxReconnectAttempts: 5 }),
+      );
+      await act(async () => {
+        jest.advanceTimersByTime(0);
+      });
+      expect(result.current.status).toBe('connected');
+
+      // The backend accepts, then closes 4401: onopen already fired (count reset).
+      await act(async () => {
+        wsInstances[0].onclose?.({ code: WS_CLOSE_UNAUTHORIZED });
+      });
+      expect(result.current.status).toBe('unauthorized');
+      expect(result.current.error).toMatch(/not authorized/i);
+
+      await act(async () => {
+        jest.advanceTimersByTime(1000);
+      });
+      expect(wsInstances.length).toBe(1); // no reconnect attempt
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('still reconnects after an ordinary close', async () => {
+    jest.useFakeTimers();
+    try {
+      const { result } = renderHook(() =>
+        useExperimentStream('exp-1', { reconnectDelayMs: 10, maxReconnectAttempts: 5 }),
+      );
+      await act(async () => {
+        jest.advanceTimersByTime(0);
+      });
+      await act(async () => {
+        wsInstances[0].onclose?.({ code: 1006 });
+      });
+      expect(result.current.status).toBe('connecting');
+      await act(async () => {
+        jest.advanceTimersByTime(20);
+      });
+      expect(wsInstances.length).toBe(2);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it('does not auto-connect when autoConnect is false', () => {

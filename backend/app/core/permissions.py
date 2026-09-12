@@ -11,6 +11,11 @@ class ResourceType(str, Enum):
     ROLE = "role"
     PERMISSION = "permission"
     REPORT = "report"
+    # User-owned SDK keys (``/api/v1/api-keys``).  Every authenticated user
+    # manages their *own* keys without consulting this resource; it governs
+    # acting on *other* users' keys (``?all=true`` listing, deleting someone
+    # else's key), which only ADMIN may do.
+    API_KEY = "api_key"
 
 class Action(str, Enum):
     """Actions that can be performed on resources."""
@@ -29,8 +34,10 @@ ROLE_PERMISSIONS: Dict[UserRole, Dict[ResourceType, List[Action]]] = {
         ResourceType.ROLE: [Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.LIST],
         ResourceType.PERMISSION: [Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.LIST],
         ResourceType.REPORT: [Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.LIST],
+        ResourceType.API_KEY: [Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.LIST],
     },
     UserRole.DEVELOPER: {
+        ResourceType.API_KEY: [Action.READ],
         ResourceType.EXPERIMENT: [Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.LIST],
         ResourceType.FEATURE_FLAG: [Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.LIST],
         ResourceType.USER: [Action.READ, Action.LIST],
@@ -39,6 +46,7 @@ ROLE_PERMISSIONS: Dict[UserRole, Dict[ResourceType, List[Action]]] = {
         ResourceType.REPORT: [Action.READ, Action.LIST],
     },
     UserRole.ANALYST: {
+        ResourceType.API_KEY: [Action.READ],
         ResourceType.EXPERIMENT: [Action.READ, Action.LIST],
         ResourceType.FEATURE_FLAG: [Action.READ, Action.LIST],
         ResourceType.USER: [Action.READ],
@@ -47,6 +55,7 @@ ROLE_PERMISSIONS: Dict[UserRole, Dict[ResourceType, List[Action]]] = {
         ResourceType.REPORT: [Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.LIST],
     },
     UserRole.VIEWER: {
+        ResourceType.API_KEY: [Action.READ],
         ResourceType.EXPERIMENT: [Action.READ, Action.LIST],
         ResourceType.FEATURE_FLAG: [Action.READ, Action.LIST],
         ResourceType.USER: [Action.READ],

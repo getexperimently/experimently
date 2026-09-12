@@ -1,8 +1,9 @@
 'use client';
 
-import Head from 'next/head';
 import Link from 'next/link';
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { apiFetch } from '@/services/api';
+import { PageTitle } from '@/components/PageTitle';
 import {
   LineChart,
   Line,
@@ -54,12 +55,6 @@ interface PlanAdvice {
   mde: number;
   runtime_days: number;
 }
-
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 // ---------------------------------------------------------------------------
 // Utilities
@@ -114,16 +109,7 @@ async function fetchSampleSize(params: {
   if (params.daily_traffic !== null && params.daily_traffic > 0) {
     body.daily_traffic = params.daily_traffic;
   }
-  const resp = await fetch(`${API_BASE}/api/v1/power/sample-size`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  if (!resp.ok) {
-    const err = await resp.json().catch(() => ({}));
-    throw new Error(err.detail ?? `HTTP ${resp.status}`);
-  }
-  return resp.json();
+  return apiFetch<SampleSizeResult>('/api/v1/power/sample-size', { method: 'POST', json: body });
 }
 
 async function fetchPowerCurve(params: {
@@ -132,14 +118,14 @@ async function fetchPowerCurve(params: {
   power: number;
   mde: number;
 }): Promise<PowerCurveResponse> {
-  const url = new URL(`${API_BASE}/api/v1/power/curve`);
-  url.searchParams.set('baseline', String(params.baseline));
-  url.searchParams.set('alpha', String(params.alpha));
-  url.searchParams.set('power', String(params.power));
-  url.searchParams.set('mde', String(params.mde));
-  const resp = await fetch(url.toString());
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-  return resp.json();
+  return apiFetch<PowerCurveResponse>('/api/v1/power/curve', {
+    query: {
+      baseline: params.baseline,
+      alpha: params.alpha,
+      power: params.power,
+      mde: params.mde,
+    },
+  });
 }
 
 async function fetchPlanningAdvice(params: {
@@ -150,16 +136,7 @@ async function fetchPlanningAdvice(params: {
   runtime_days: number;
   business_context: string;
 }): Promise<PlanAdvice> {
-  const resp = await fetch(`${API_BASE}/api/v1/power/plan`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(params),
-  });
-  if (!resp.ok) {
-    const err = await resp.json().catch(() => ({}));
-    throw new Error(err.detail ?? `HTTP ${resp.status}`);
-  }
-  return resp.json();
+  return apiFetch<PlanAdvice>('/api/v1/power/plan', { method: 'POST', json: params });
 }
 
 // ---------------------------------------------------------------------------
@@ -311,42 +288,12 @@ export default function PowerCalculatorPage() {
 
   return (
     <>
-      <Head>
-        <title>Power Calculator — Experimently</title>
-        <meta
-          name="description"
-          content="Pre-experiment statistical power calculator: compute sample size, MDE, and runtime estimates for A/B tests. No login required."
-        />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <link rel="icon" href="/favicon.ico" />
-      </Head>
+      <PageTitle
+        title="Power Calculator"
+        description="Pre-experiment statistical power calculator: compute sample size, MDE, and runtime estimates for A/B tests. No login required."
+      />
 
-      <div className="min-h-screen bg-gray-50">
-        {/* Nav */}
-        <nav className="border-b border-gray-100 bg-white sticky top-0 z-50">
-          <div className="max-w-7xl mx-auto px-6 lg:px-8">
-            <div className="flex justify-between items-center h-16">
-              <div className="flex items-center gap-6">
-                <Link href="/" className="text-xl font-semibold text-gray-900 hover:text-blue-600 transition">
-                  Experimently
-                </Link>
-                <span className="text-gray-300">|</span>
-                <span className="text-sm font-medium text-gray-700">Power Calculator</span>
-              </div>
-              <div className="flex items-center gap-4">
-                <Link href="/docs/statistics/power-analysis" className="text-gray-500 hover:text-gray-900 text-sm">
-                  Learn more
-                </Link>
-                <Link href="/docs" className="text-gray-500 hover:text-gray-900 text-sm">
-                  Docs
-                </Link>
-                <Link href="/experiments" className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition">
-                  Sign in
-                </Link>
-              </div>
-            </div>
-          </div>
-        </nav>
+      <div className="flex-1 bg-gray-50">
 
         <div className="max-w-7xl mx-auto px-6 lg:px-8 py-10">
           {/* Header */}
@@ -356,7 +303,10 @@ export default function PowerCalculatorPage() {
             </h1>
             <p className="text-gray-500 text-base">
               Calculate the required sample size, detect the minimum effect size, and estimate
-              how long your experiment needs to run. No account required.
+              how long your experiment needs to run. No account required.{' '}
+              <Link href="/docs/statistics/power-analysis" className="text-blue-600 hover:text-blue-700">
+                Learn more
+              </Link>
             </p>
           </div>
 

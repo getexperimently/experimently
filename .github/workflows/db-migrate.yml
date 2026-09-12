@@ -18,10 +18,14 @@ on:
         required: false
         default: 'head'
 
+env:
+  AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+
 jobs:
   migrate:
     name: Run Database Migration (${{ inputs.environment }})
     runs-on: ubuntu-latest
+    if: github.repository == 'amarkanday/experimentation-platform' && vars.AWS_ACCOUNT_ID != ''
     environment: ${{ inputs.environment }}
     permissions:
       id-token: write

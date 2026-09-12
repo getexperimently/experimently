@@ -9,7 +9,7 @@ import asyncio
 import json
 import logging
 from collections import defaultdict
-from typing import Dict, Set
+from typing import Optional, Dict, Set
 
 from fastapi import WebSocket
 
@@ -28,9 +28,11 @@ class ConnectionManager:
         self._connections: Dict[str, Set[WebSocket]] = defaultdict(set)
         self._lock = asyncio.Lock()
 
-    async def connect(self, websocket: WebSocket, experiment_id: str) -> None:
+    async def connect(
+        self, websocket: WebSocket, experiment_id: str, subprotocol: Optional[str] = None
+    ) -> None:
         """Accept a new WebSocket connection and register it for the given experiment."""
-        await websocket.accept()
+        await websocket.accept(subprotocol=subprotocol)
         async with self._lock:
             self._connections[experiment_id].add(websocket)
         logger.info(

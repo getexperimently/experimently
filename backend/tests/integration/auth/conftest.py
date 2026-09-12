@@ -9,6 +9,13 @@ per request, we must ensure moto is active for the entire module scope.
 
 Environment variables are set before app import so that configuration is
 picked up at module load time.
+
+This package is the only place in the test suite that runs the Cognito
+provider: the Cognito env vars used to live in the root conftest, but the
+Community Edition default is ``AUTH_PROVIDER=local`` (with the dev-admin
+bypass enabled for the rest of the suite), so everything Cognito-specific is
+scoped here.  ``_cognito_provider`` below flips the settings singleton to the
+Cognito provider with the bypass off for every test in this directory.
 """
 import os
 import pytest
@@ -17,7 +24,8 @@ from moto import mock_cognitoidp
 from unittest.mock import patch
 from fastapi.testclient import TestClient
 
-# Set env vars BEFORE importing app (moto requires this order)
+# Set env vars BEFORE importing app (moto requires this order).
+# CognitoAuthService reads COGNITO_* from os.environ on every instantiation.
 os.environ.setdefault("COGNITO_USER_POOL_ID", "us-east-1_TestPool")
 os.environ.setdefault("COGNITO_CLIENT_ID", "test-client-id")
 os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
@@ -28,6 +36,16 @@ os.environ.setdefault("AWS_SECURITY_TOKEN", "testing")
 os.environ.setdefault("AWS_SESSION_TOKEN", "testing")
 os.environ.setdefault("TESTING", "true")
 os.environ.setdefault("APP_ENV", "test")
+
+
+@pytest.fixture(autouse=True)
+def _cognito_provider(monkeypatch):
+    """Run every test in this package against the Cognito provider, fail-closed."""
+    from backend.app.core.config import settings
+
+    monkeypatch.setattr(settings, "AUTH_PROVIDER", "cognito")
+    monkeypatch.setattr(settings, "DEV_AUTH_BYPASS", False)
+    yield
 
 
 @pytest.fixture(scope="module")

@@ -53,8 +53,9 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         if "x-powered-by" in response.headers:
             del response.headers["x-powered-by"]
 
-        # HSTS — only in non-dev environments to avoid local HTTPS issues
-        if settings.ENVIRONMENT != "dev":
+        # HSTS — only in non-dev environments to avoid local HTTPS issues.
+        # "dev" is the legacy spelling of "development" (see core/config.py).
+        if settings.ENVIRONMENT not in ("development", "dev"):
             response.headers["Strict-Transport-Security"] = (
                 "max-age=31536000; includeSubDomains; preload"
             )

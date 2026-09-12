@@ -17,31 +17,34 @@ An enterprise experimentation platform that enables teams to make data-driven de
 - **Enhanced Rules Engine**: 20+ operators including semantic versioning, geo-distance, time windows
 - **Real-time Analytics**: High-throughput event collection and comprehensive metrics
 - **Enterprise RBAC**: Role-based access control with AWS Cognito integration
-- **Complete Audit Trail**: SOC 2 / GDPR compliant audit logging
+- **Complete Audit Trail**: append-only audit log of every change, exportable for your compliance program
 - **Automated Safety**: Real-time monitoring with automatic rollback capabilities
 
-### Performance at Scale
+### Measured, not marketed
 
-- **58M+ evaluations/month** with sub-15ms P50 latency
-- **99.97% uptime** exceeding 99.9% SLA
-- **125k+ ops/sec** for simple rule evaluations
-- **89% cache hit rate** for optimal performance
-- **Auto-scaling** infrastructure handling 3x traffic variance
+Numbers in this README come from the repository's own test and benchmark suites, not from a
+production deployment we cannot show you:
+
+- **Rules engine**: 125k+ simple-operator evaluations/second in the benchmark suite
+  (`backend/tests/performance/`)
+- **Statistical engine**: sequential testing (mSPRT), CUPED, Bayesian and multi-armed bandits, each
+  with a DB-backed test that drives the public API
+- **5,400+ backend tests, 640+ dashboard tests, 15 SDKs** verified against a live backend in CI
 
 ---
 
-## 📊 Public Preview
+## 🎬 See it running
 
-Explore sample data demonstrating platform capabilities in the **[`public-preview/`](public-preview/)** directory:
+Two demo applications ship in the repo and drive the platform through the public SDK path, exactly as
+a customer app would. `./demo/setup-local.sh` starts everything.
 
-- **[Audit Logs](public-preview/audit-logs/)**: Feature flag lifecycle, experiment tracking, RBAC events
-- **[Performance Metrics](public-preview/metrics/performance/)**: Rules engine benchmarks, platform performance
-- **[Quality Metrics](public-preview/metrics/quality/)**: Test coverage reports (847 tests, 82% coverage)
-- **[Analytics](public-preview/metrics/analytics/)**: Experiment results with statistical analysis
-- **[Examples](public-preview/examples/)**: Advanced targeting rules and real-world use cases
-- **[Architecture](public-preview/architecture/)**: System design and technical overview
+- **ShopLab** (`demo/shoplab`, http://localhost:3200): an e-commerce storefront running an A/B test,
+  a multi-armed bandit, a multivariate test, a CUPED checkout test and a gradual-rollout flag.
+- **StreamPulse** (`demo/streampulse`, http://localhost:3300): a simulated mobile app with a device
+  picker, targeting by OS version/region/tier, a kill switch, mutual exclusion and a scripted rollout
+  story in which a crash spike triggers an automatic safety rollback.
 
-[View Public Preview →](public-preview/README.md)
+Walkthrough: [demo/DEMO_GUIDE.md](demo/DEMO_GUIDE.md).
 
 ---
 
@@ -58,7 +61,7 @@ Built using modern, scalable architecture leveraging AWS services:
 
 **Technology Stack**: Python 3.11+, FastAPI, SQLAlchemy, Pydantic v2, Next.js, React, TypeScript, PostgreSQL, Redis
 
-[View Architecture Details →](public-preview/architecture/system-overview.md)
+[View Architecture Details →](docs/architecture/overview.md)
 
 ---
 
@@ -82,10 +85,11 @@ Built using modern, scalable architecture leveraging AWS services:
 - **Multiple Testing Correction**: Bonferroni and other methods
 - **Sample Size Calculations**: Automatic power analysis
 
-### Enterprise Security & Compliance
-- **SOC 2 Ready**: Audit-friendly architecture
-- **GDPR Compliant**: Data retention, right to erasure
-- **Complete Audit Logs**: Immutable record of all actions
+### Security controls
+- **Audit trail**: append-only log of every change (the enterprise edition adds HMAC signing and
+  report packs to support a SOC 2 or ISO 27001 program)
+- **Data controls**: retention settings and export endpoints (right-to-erasure tooling is on the roadmap)
+- **Complete Audit Logs**: record of all actions
 - **RBAC**: 4-tier role system (Admin, Developer, Analyst, Viewer)
 - **Encryption**: At-rest (KMS) and in-transit (TLS 1.2+)
 
@@ -97,7 +101,7 @@ Built using modern, scalable architecture leveraging AWS services:
 
 Interested in using this platform for your organization?
 
-1. **Explore the Public Preview**: See [sample audit logs, metrics, and examples](public-preview/)
+1. **Run the demos**: see [demo/DEMO_GUIDE.md](demo/DEMO_GUIDE.md)
 2. **Run the demo**: `./demo/setup-local.sh` starts Postgres and Redis, seeds demo data, and launches the
    dashboard (http://localhost:3100), the API (http://localhost:8000) and the **ShopLab** storefront
    (http://localhost:3200) — a small e-commerce site running five live experiments through the React SDK,
@@ -117,10 +121,9 @@ Refer to the documentation for:
 
 ## 📖 Documentation
 
-- **[Public Preview](public-preview/README.md)**: Sample data and examples
-- **[Architecture Overview](public-preview/architecture/system-overview.md)**: System design
-- **[Advanced Targeting Examples](public-preview/examples/advanced-targeting-rules.json)**: Real-world use cases
-- **[Performance Benchmarks](public-preview/metrics/performance/)**: Scale and reliability metrics
+- **[Architecture Overview](docs/architecture/overview.md)**: System design
+- **[Targeting rules](docs/feature-flags/create.md)**: operators, attribute aliases, examples
+- **[Testing audit](docs/testing/testing-audit-2026-09.md)**: what is tested, what gates, what is missing
 - **[Development Guide](CLAUDE.md)**: Complete development guidelines and best practices
 
 ---
@@ -147,32 +150,14 @@ Refer to the documentation for:
 
 ---
 
-## 📊 Production Metrics
+## 🛡️ Security
 
-From our production deployment (December 2024):
-
-| Metric | Value |
-|--------|-------|
-| **Uptime** | 99.97% (exceeds 99.9% SLA) |
-| **Monthly Evaluations** | 58M+ |
-| **API Latency (P50)** | 15.3ms |
-| **API Latency (P95)** | 89.2ms |
-| **Unique Users Tracked** | 2.8M+ |
-| **Cache Hit Rate** | 89-96% |
-| **Auto-Scaling Range** | 2-10 instances |
-| **Cost per Million Evals** | $48.67 |
-
-[View Detailed Performance Metrics →](public-preview/metrics/performance/platform-performance.json)
-
----
-
-## 🛡️ Compliance & Security
-
-- **SOC 2 Type II Ready**: Audit-friendly architecture with complete audit trails
-- **GDPR Compliant**: Data portability, right to erasure, 7-year audit retention
-- **HIPAA Eligible**: AWS infrastructure supports HIPAA workloads
-- **Encryption**: AES-256 at rest, TLS 1.2+ in transit
-- **Network Security**: VPC isolation, Security Groups, WAF, DDoS protection
+- **Controls that support your compliance program**: append-only audit log, role-based access,
+  per-flag safety monitoring with automatic rollback; the enterprise edition adds tamper-evident
+  audit signing, compliance report packs and PHI encryption. We do not hold SOC 2, ISO 27001 or
+  HIPAA attestations and do not claim them.
+- **Encryption**: AES-256 at rest (KMS) and TLS 1.2+ in transit when deployed with the provided CDK
+- **Network Security**: VPC isolation, Security Groups, WAF, DDoS protection (CDK deployment)
 
 ---
 
@@ -205,19 +190,15 @@ From our production deployment (December 2024):
 For questions and issues:
 - Check the [documentation](docs/) directory
 - Review [CLAUDE.md](CLAUDE.md) for development guidelines
-- Explore the [public preview](public-preview/) examples
+- Run the demos (`./demo/setup-local.sh`)
 
 ---
 
 ## 📄 License
 
-This repository contains:
-
-1. **Public Preview Materials** (`public-preview/` directory): Sample audit logs, metrics, and examples provided for evaluation purposes only.
-
-2. **Platform Source Code**: Available for evaluation and development purposes.
-
-See [LICENSE.txt](LICENSE.txt) for complete terms.
+The licensing split is in progress (see `docs/planning/open-core-launch-plan-2026-09.md`): the core
+platform will be released under AGPL-3.0, the SDKs under MIT, and the enterprise modules under a
+proprietary licence in `ee/`. Until that lands, [LICENSE.txt](LICENSE.txt) applies.
 
 ---
 
@@ -228,9 +209,9 @@ See [LICENSE.txt](LICENSE.txt) for complete terms.
 | **Advanced Targeting** | 20+ operators (semver, geo, time, JSON path) | Basic operators only |
 | **Safety Monitoring** | Automated rollback with configurable thresholds | Manual monitoring |
 | **Statistical Methods** | Bayesian + Frequentist analysis | Single method |
-| **Audit Logging** | Complete immutable trail | Limited or none |
+| **Audit Logging** | Append-only trail; tamper-evident signing in the enterprise edition | Limited or none |
 | **Performance** | 125k ops/sec, sub-10ms latency | Varies widely |
-| **Enterprise RBAC** | 4-tier with AWS Cognito | Basic or none |
+| **RBAC** | 4 roles; local auth or AWS Cognito | Basic or none |
 | **Deployment** | Self-hosted on your AWS account | SaaS only |
 | **Customization** | Full platform access | Limited APIs |
 

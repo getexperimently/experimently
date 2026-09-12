@@ -112,7 +112,7 @@ class TestGetAllSchedulerHealth:
 
         assert response.status_code == 200
 
-    def test_returns_list_of_four(self):
+    def test_returns_one_entry_per_scheduler(self):
         admin_user = make_admin_user()
         mock_db = make_mock_db()
 
@@ -130,7 +130,7 @@ class TestGetAllSchedulerHealth:
 
         data = response.json()
         assert isinstance(data, list)
-        assert len(data) == 4
+        assert len(data) == len(SchedulerName)
 
     def test_unauthenticated_returns_401(self):
         # No dependency override — no auth provided

@@ -1,76 +1,46 @@
-import React, { useEffect, useState } from 'react';
-import Link from 'next/link';
-import { AdminUser, UserRole } from '@/types/admin';
+import React from 'react';
+import { UserRole } from '@/types/admin';
+import { RequireAuth } from '@/components/RequireAuth';
 
 export interface AdminGuardOptions {
+  /**
+   * Minimum role required (hierarchical: ADMIN > DEVELOPER > ANALYST > VIEWER).
+   * `requiredRole: 'DEVELOPER'` admits DEVELOPER and ADMIN.
+   */
   requiredRole?: UserRole;
+  /** Explicit allow-list; takes precedence over `requiredRole`. */
+  roles?: UserRole[];
+  /** Where the 403 view links back to. Default `/experiments`. */
   fallbackPath?: string;
 }
 
-type Status = 'loading' | 'authorized' | 'unauthorized';
+const ROLE_ORDER: UserRole[] = ['VIEWER', 'ANALYST', 'DEVELOPER', 'ADMIN'];
 
+/** Roles at or above `minimum` in the hierarchy. */
+export function rolesAtLeast(minimum: UserRole): UserRole[] {
+  const index = ROLE_ORDER.indexOf(minimum);
+  return ROLE_ORDER.slice(index < 0 ? 0 : index);
+}
+
+/** Default admin-area audience: matches the "Admin" nav item in the AppShell. */
+export const ADMIN_AREA_ROLES: UserRole[] = ['ADMIN', 'DEVELOPER'];
+
+/**
+ * Page-level guard for the admin area, implemented on top of `RequireAuth`
+ * and the `AuthContext` (no localStorage user object).
+ */
 export function withAdminGuard<P extends object>(
   Component: React.ComponentType<P>,
   options: AdminGuardOptions = {}
 ): React.FC<P> {
-  const { requiredRole, fallbackPath = '/' } = options;
+  const { requiredRole, roles, fallbackPath = '/experiments' } = options;
+  const allowed = roles ?? (requiredRole ? rolesAtLeast(requiredRole) : ADMIN_AREA_ROLES);
 
-  const GuardedComponent: React.FC<P> = (props) => {
-    const [status, setStatus] = useState<Status>('loading');
-
-    useEffect(() => {
-      let user: AdminUser | null = null;
-
-      try {
-        const raw = localStorage.getItem('admin_user');
-        if (raw) {
-          user = JSON.parse(raw) as AdminUser;
-        }
-      } catch {
-        user = null;
-      }
-
-      if (!user) {
-        setStatus('unauthorized');
-        return;
-      }
-
-      if (requiredRole && user.role !== requiredRole) {
-        setStatus('unauthorized');
-        return;
-      }
-
-      setStatus('authorized');
-    }, []);
-
-    if (status === 'loading') {
-      return (
-        <div data-testid="admin-guard-loading" className="flex items-center justify-center min-h-screen">
-          <div className="text-slate-500">Loading...</div>
-        </div>
-      );
-    }
-
-    if (status === 'unauthorized') {
-      return (
-        <div
-          data-testid="admin-guard-unauthorized"
-          className="flex flex-col items-center justify-center min-h-screen gap-4"
-        >
-          <p className="text-slate-700 text-lg">You do not have permission to access this page.</p>
-          <Link
-            href={fallbackPath}
-            className="text-blue-600 hover:underline"
-            aria-label="Go to Home"
-          >
-            Go to Home
-          </Link>
-        </div>
-      );
-    }
-
-    return <Component {...props} />;
-  };
+  const GuardedComponent: React.FC<P> = (props) => (
+    <RequireAuth roles={allowed} fallbackPath={fallbackPath}>
+      <Component {...props} />
+    </RequireAuth>
+  );
 
   GuardedComponent.displayName = `withAdminGuard(${Component.displayName ?? Component.name ?? 'Component'})`;
 

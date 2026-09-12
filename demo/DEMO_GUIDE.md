@@ -200,19 +200,19 @@ See `demo/streampulse/README.md`.
 - Navigate to `/admin/users`
 - Show 4 roles: Admin, Developer, Analyst, Viewer
   - "Analyst can view everything but can't create or modify. Viewer is read-only."
-- Show **ReadOnlyAnalyst** custom role
-  - "You can create custom roles. ReadOnlyAnalyst has read access to experiments and results but nothing else."
-- "You can grant permissions at the resource level too — this person can manage feature flags but not experiments."
+- Four built-in roles are enforced today. Custom roles and resource-level grants exist in the data model but are
+  not yet enforced by the permission checks, so do not demo them (tracked in the launch plan, P5).
 
 **API / Integrations:**
 - Navigate to `/api/v1/docs` (Swagger UI)
-  - "Full REST API. Your team can automate everything — CI/CD triggers experiments, Slack gets notified when tests complete, Jira tickets auto-close."
-- Show the Jira integration config
-  - "Point this at your Jira instance and experiment completions automatically update tickets."
+  - "Full REST API. Your team can automate everything — CI/CD can create and start experiments, and Slack/email
+    alerts fire when tests complete."
+- Jira/Salesforce/GitHub integrations are configurable but their outbound delivery has only been exercised with
+  mocks; treat them as roadmap in demos until the P5 path tests are green.
 
 **Key talking points:**
 - SOC 2 / ISO 27001 ready — HMAC audit trail, compliance reports
-- RBAC with custom roles and resource-level grants
+- RBAC with four built-in roles (custom roles: roadmap)
 - Full REST API + SDKs (Python, JavaScript, Java, React, Go)
 - Deployable to your AWS account — you own the data, it never leaves your VPC
 
@@ -224,7 +224,7 @@ See `demo/streampulse/README.md`.
 > Yes. Snowflake, BigQuery, and Redshift are all supported via the warehouse-native analytics feature. You can query your existing event data without moving it.
 
 **"Is it SOC 2 compliant?"**
-> The audit logging system uses HMAC-SHA256 signing (EP-033). Every action is cryptographically signed and the system can export SOC 2 and ISO 27001 compliance reports on demand.
+> The platform is not certified and we do not claim it. What it gives you are controls that support your own program: an append-only audit log of every change in the community edition, and in the enterprise edition HMAC-SHA256 signed audit events with exportable report packs. Your auditor decides what they satisfy.
 
 **"What about our tech stack?"**
 > We have SDKs for Python, JavaScript/TypeScript, Java (Spring Boot auto-configuration), and React (with hooks and SSR support). The REST API means you can integrate from anything.
