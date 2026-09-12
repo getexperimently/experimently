@@ -162,7 +162,7 @@ Backend API is accessible at `http://localhost:8000`, frontend at `http://localh
 
 ### Backend Development
 
-Mount your backend directory for hot-reloading during development. Modify code within `./backend`, and the changes will reflect automatically without rebuilding the container. Ensure your backend Dockerfile or Docker Compose configuration uses a command like `uvicorn app.main:app --reload` for FastAPI or similar tools for your chosen framework to enable automatic reloading.
+Mount your backend directory for hot-reloading during development. Modify code within `./backend`, and the changes will reflect automatically without rebuilding the container. Ensure your backend Dockerfile or Docker Compose configuration uses a command like `uvicorn backend.app.main:app --reload` for FastAPI or similar tools for your chosen framework to enable automatic reloading.
 
 **Example (FastAPI)**:
 

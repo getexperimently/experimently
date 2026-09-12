@@ -16,6 +16,55 @@ from backend.app.schemas.experiment import ExperimentCreate, ExperimentUpdate
 logger = logging.getLogger(__name__)
 
 
+def _resolve_enum_member(enum_cls, value: Any):
+    """
+    Resolve *value* to a member of *enum_cls* by value or by name.
+
+    Callers hand us any of three spellings for the same thing: the enum member
+    itself (``ExperimentStatus.DRAFT``), its *value* (``"draft"`` — what the
+    REST API and the dashboard send) or its *name* (``"DRAFT"`` — what the
+    database stores).  Matching is case-insensitive and value-first, because
+    the two differ for members like ``ExperimentType.MULTIVARIATE`` whose
+    value is ``"mv"``.
+
+    Args:
+        enum_cls: The enum class to resolve against.
+        value: Member, value or name.
+
+    Returns:
+        The matching member, or ``None`` when nothing matches.
+    """
+    if isinstance(value, enum_cls):
+        return value
+    if value is None:
+        return None
+
+    text = str(getattr(value, "value", value)).strip().lower()
+    if not text:
+        return None
+
+    for member in enum_cls:
+        if str(member.value).lower() == text or member.name.lower() == text:
+            return member
+    return None
+
+
+def resolve_experiment_status(value: Any) -> Optional[ExperimentStatus]:
+    """Return the ``ExperimentStatus`` for *value*, or ``None`` if unknown.
+
+    ``Experiment.status`` is a SQLAlchemy ``Enum(ExperimentStatus)``, which
+    stores enum *names* (``DRAFT``).  Filtering with the raw string the client
+    sent (``"draft"``) passes straight through to SQL and matches no rows, so
+    every status filter must go through this helper first.
+    """
+    return _resolve_enum_member(ExperimentStatus, value)
+
+
+def resolve_experiment_type(value: Any) -> Optional[ExperimentType]:
+    """Return the ``ExperimentType`` for *value*, or ``None`` if unknown."""
+    return _resolve_enum_member(ExperimentType, value)
+
+
 class ExperimentService:
     """
     Service for managing experiments, including creation, retrieval, updates, and status changes.
@@ -84,7 +133,11 @@ class ExperimentService:
         )
 
         if status:
-            query = query.filter(Experiment.status == status)
+            status_enum = resolve_experiment_status(status)
+            if status_enum is None:
+                logger.warning("Unknown experiment status filter %r; returning no rows", status)
+                return []
+            query = query.filter(Experiment.status == status_enum)
 
         if search:
             search_pattern = f"%{search}%"
@@ -139,7 +192,11 @@ class ExperimentService:
         )
 
         if status:
-            query = query.filter(Experiment.status == status)
+            status_enum = resolve_experiment_status(status)
+            if status_enum is None:
+                logger.warning("Unknown experiment status filter %r; returning no rows", status)
+                return []
+            query = query.filter(Experiment.status == status_enum)
 
         if search:
             search_pattern = f"%{search}%"
@@ -181,7 +238,11 @@ class ExperimentService:
         )
 
         if status:
-            query = query.filter(Experiment.status == status)
+            status_enum = resolve_experiment_status(status)
+            if status_enum is None:
+                logger.warning("Unknown experiment status filter %r; counting zero rows", status)
+                return 0
+            query = query.filter(Experiment.status == status_enum)
 
         if search:
             search_pattern = f"%{search}%"
@@ -232,25 +293,28 @@ class ExperimentService:
         metrics_data = obj_data.pop("metrics", [])
 
         # Set default values and owner
-        # Handle string status values by converting to enum
+        # Handle string status values by converting to enum ("draft" or "DRAFT")
         if "status" in obj_data and isinstance(obj_data["status"], str):
-            try:
-                # Convert string status (e.g., "draft") to enum (e.g., ExperimentStatus.DRAFT)
-                obj_data["status"] = ExperimentStatus[obj_data["status"].upper()]
-            except (KeyError, ValueError):
-                # Fallback to default if conversion fails
-                obj_data["status"] = ExperimentStatus.DRAFT
+            resolved_status = resolve_experiment_status(obj_data["status"])
+            if resolved_status is None:
+                logger.warning(
+                    "Unknown experiment status %r; defaulting to DRAFT", obj_data["status"]
+                )
+                resolved_status = ExperimentStatus.DRAFT
+            obj_data["status"] = resolved_status
         else:
             obj_data["status"] = ExperimentStatus.DRAFT
 
-        # Handle string experiment type values by converting to enum
+        # Handle string experiment type values by converting to enum.  Values
+        # and names differ ("mv" -> MULTIVARIATE), so resolve by both.
         if "experiment_type" in obj_data and isinstance(obj_data["experiment_type"], str):
-            try:
-                # Convert string type (e.g., "a_b") to enum (e.g., ExperimentType.A_B)
-                obj_data["experiment_type"] = ExperimentType[obj_data["experiment_type"].upper()]
-            except (KeyError, ValueError):
-                # Fallback to default if conversion fails
-                obj_data["experiment_type"] = ExperimentType.A_B
+            resolved_type = resolve_experiment_type(obj_data["experiment_type"])
+            if resolved_type is None:
+                logger.warning(
+                    "Unknown experiment type %r; defaulting to A_B", obj_data["experiment_type"]
+                )
+                resolved_type = ExperimentType.A_B
+            obj_data["experiment_type"] = resolved_type
         else:
             obj_data["experiment_type"] = ExperimentType.A_B
 
@@ -312,23 +376,31 @@ class ExperimentService:
         else:
             update_data = experiment_in.dict(exclude_unset=True)
 
-        # Handle string status values by converting to enum
+        # Handle string status values by converting to enum ("draft" or "DRAFT")
         if "status" in update_data and isinstance(update_data["status"], str):
-            try:
-                # Convert string status (e.g., "draft") to enum (e.g., ExperimentStatus.DRAFT)
-                update_data["status"] = ExperimentStatus[update_data["status"].upper()]
-            except (KeyError, ValueError):
+            resolved_status = resolve_experiment_status(update_data["status"])
+            if resolved_status is None:
                 # If conversion fails, keep the existing status
+                logger.warning(
+                    "Unknown experiment status %r; leaving status unchanged", update_data["status"]
+                )
                 del update_data["status"]
+            else:
+                update_data["status"] = resolved_status
 
-        # Handle string experiment type values by converting to enum
+        # Handle string experiment type values by converting to enum.  Values
+        # and names differ ("mv" -> MULTIVARIATE), so resolve by both.
         if "experiment_type" in update_data and isinstance(update_data["experiment_type"], str):
-            try:
-                # Convert string type (e.g., "a_b") to enum (e.g., ExperimentType.A_B)
-                update_data["experiment_type"] = ExperimentType[update_data["experiment_type"].upper()]
-            except (KeyError, ValueError):
+            resolved_type = resolve_experiment_type(update_data["experiment_type"])
+            if resolved_type is None:
                 # If conversion fails, keep the existing type
+                logger.warning(
+                    "Unknown experiment type %r; leaving type unchanged",
+                    update_data["experiment_type"],
+                )
                 del update_data["experiment_type"]
+            else:
+                update_data["experiment_type"] = resolved_type
 
         # Extract nested objects if present
         variants_data = update_data.pop("variants", None)
@@ -702,7 +774,11 @@ class ExperimentService:
             query = query.filter(Experiment.owner_id == owner_id)
 
         if status:
-            query = query.filter(Experiment.status == status)
+            status_enum = resolve_experiment_status(status)
+            if status_enum is None:
+                logger.warning("Unknown experiment status filter %r; returning no rows", status)
+                return []
+            query = query.filter(Experiment.status == status_enum)
 
         # Execute query with pagination
         experiments = query.offset(skip).limit(limit).all()
@@ -744,7 +820,11 @@ class ExperimentService:
             query = query.filter(Experiment.owner_id == owner_id)
 
         if status:
-            query = query.filter(Experiment.status == status)
+            status_enum = resolve_experiment_status(status)
+            if status_enum is None:
+                logger.warning("Unknown experiment status filter %r; counting zero rows", status)
+                return 0
+            query = query.filter(Experiment.status == status_enum)
 
         return query.scalar()
 
@@ -940,7 +1020,11 @@ class ExperimentService:
         query = self.db.query(func.count(Experiment.id))
 
         if status:
-            query = query.filter(Experiment.status == status)
+            status_enum = resolve_experiment_status(status)
+            if status_enum is None:
+                logger.warning("Unknown experiment status filter %r; counting zero rows", status)
+                return 0
+            query = query.filter(Experiment.status == status_enum)
 
         if search:
             search_pattern = f"%{search}%"

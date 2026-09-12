@@ -158,7 +158,7 @@ api_router_v1.include_router(
     mcp.router, prefix="/mcp", tags=["MCP"]
 )
 
-# Issue #27: No-Code Visual Experiment Wizard (EP-003 Extension)
+# Issue #27: guided experiment builder (draft-and-submit API; no dashboard UI)
 api_router_v1.include_router(
     experiment_wizard.router, prefix="/wizard", tags=["Experiment Wizard"]
 )
@@ -373,7 +373,7 @@ tags_metadata = [
     },
     {
         "name": "Experiment Wizard",
-        "description": "No-code step-by-step wizard for non-technical users to design and launch experiments",
+        "description": "Step-by-step draft-and-submit flow for designing an experiment; submitting creates it",
     },
     {
         "name": "Warehouse",

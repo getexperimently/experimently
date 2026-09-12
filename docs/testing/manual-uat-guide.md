@@ -162,7 +162,7 @@ The repo already has a `data-generator` agent (EP-047) and a `validator` agent. 
 | 1 | **Winning variant** | 10k users, B has +8% conversion vs A | p < 0.05 around day 7; results UI shows clear winner | Stats engine sanity |
 | 2 | **Null result** | 10k users, A and B identical | p stays > 0.05; UI calls it inconclusive at planned end | False-positive control |
 | 3 | **Novelty effect** | B wins week 1 (+15%), regresses to flat by week 3 | Sequential test (mSPRT) doesn't prematurely declare winner; final result is null | EP-021 sequential testing |
-| 4 | **Sample ratio mismatch** | Assignment is broken — 60/40 split when targeting 50/50 | Platform alerts SRM; results flagged as untrustworthy | SRM detection (EP-025/EP-028) |
+| 4 | **Sample ratio mismatch** | Assignment is broken — 60/40 split when targeting 50/50 | `GET /results/{id}` returns `srm.warning: true` (chi-square, p < 0.001) | SRM check in `services/srm_service.py` |
 | 5 | **Interaction effect** | Two concurrent experiments with overlapping users contaminate each other | Mutual exclusion (EP-022) prevents overlap; or interaction detection flags it | EP-022 / Issue #25 |
 
 ### Track 3 checklist (per scenario)

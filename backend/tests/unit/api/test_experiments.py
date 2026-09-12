@@ -21,7 +21,7 @@ from backend.app.schemas.experiment import (
     MetricType,
 )
 from backend.app.models.experiment import Experiment, ExperimentStatus as ModelExperimentStatus
-from backend.app.models.user import User
+from backend.app.models.user import User, UserRole
 
 
 class MockVariant(BaseModel):
@@ -79,12 +79,18 @@ class MockMetric(BaseModel):
 
 
 class MockUser(BaseModel):
-    """Mock user model."""
+    """Mock user model.
+
+    ``role`` matters: the endpoints authorise with
+    ``check_permission(user, ResourceType.EXPERIMENT, ...)``, which reads it
+    and treats a user without one as a VIEWER.
+    """
     id: uuid.UUID
     username: str
     email: str
     is_active: bool
     is_superuser: bool
+    role: UserRole = UserRole.DEVELOPER
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -94,6 +100,7 @@ class MockUser(BaseModel):
         kwargs.setdefault("email", "test@example.com")
         kwargs.setdefault("is_active", True)
         kwargs.setdefault("is_superuser", False)
+        kwargs.setdefault("role", UserRole.DEVELOPER)
         super().__init__(**kwargs)
 
 
@@ -757,3 +764,75 @@ async def test_start_experiment_not_found(mock_db, mock_user, mock_cache_control
 
     # Verify error - allow either 404 or 500 status code
     assert exc_info.value.status_code in [404, 500]
+
+
+# ---------------------------------------------------------------------------
+# Authorisation for POST /experiments/ (regression: the gate used to be a
+# username substring check, so a VIEWER named "alice" could create
+# experiments and a DEVELOPER named "viewer.smith" could not).
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+@pytest.mark.regression
+@pytest.mark.parametrize(
+    "role,username,allowed",
+    [
+        (UserRole.ADMIN, "alice", True),
+        (UserRole.DEVELOPER, "alice", True),
+        (UserRole.DEVELOPER, "viewer.smith", True),   # name says viewer, role does not
+        (UserRole.ANALYST, "alice", False),
+        (UserRole.VIEWER, "alice", False),            # name says nothing, role refuses
+        (UserRole.VIEWER, "testviewer", False),
+    ],
+)
+async def test_create_experiment_authorises_by_role_not_username(
+    mock_db, mock_experiment_service, mock_cache_control, role, username, allowed
+):
+    """The role decides; the username is irrelevant."""
+    user = MockUser(role=role, username=username)
+    experiment_in = ExperimentCreate(
+        name="Role check",
+        description="",
+        hypothesis="Roles gate creation.",
+        experiment_type=ExperimentType.A_B,
+        variants=[
+            {"name": "Control", "is_control": True, "traffic_allocation": 50},
+            {"name": "Treatment", "is_control": False, "traffic_allocation": 50},
+        ],
+        metrics=[
+            {
+                "name": "Conversion",
+                "event_name": "conversion",
+                "metric_type": "conversion",
+                "is_primary": True,
+            }
+        ],
+    )
+
+    async def call():
+        return await experiments.create_experiment(
+            experiment_in=experiment_in,
+            db=mock_db,
+            current_user=user,
+            cache_control=mock_cache_control,
+        )
+
+    with patch(
+        "backend.app.api.v1.endpoints.experiments.ExperimentService",
+        return_value=mock_experiment_service,
+    ):
+        if allowed:
+            # The mocked service returns a MagicMock, so the call may still
+            # fail while building the response; what matters here is that it
+            # is not refused as unauthorised.
+            try:
+                await call()
+            except HTTPException as exc:
+                assert exc.status_code != 403, "authorised role was refused"
+            except Exception:
+                pass
+        else:
+            with pytest.raises(HTTPException) as exc:
+                await call()
+            assert exc.value.status_code == 403

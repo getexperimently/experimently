@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 from backend.app.api import deps
 from backend.app.core.bandit_scheduler import BanditScheduler
 from backend.app.core.permissions import Action, ResourceType, check_permission
+from backend.app.core.stats_engine import ENGINE_VERSION
 from backend.app.models.bandit_state import BanditState
 from backend.app.models.experiment import Experiment, ExperimentStatus
 from backend.app.models.user import User, UserRole
@@ -68,6 +69,13 @@ def _get_mab_experiment(experiment_id: UUID, db: Session) -> Experiment:
     return experiment
 
 
+def _int_or_none(value: object) -> Optional[int]:
+    """Coerce a persisted provenance column to ``int`` (``None`` when unset)."""
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return int(value)
+
+
 def _build_status_response(
     experiment: Experiment,
     bandit_state: Optional[BanditState],
@@ -81,6 +89,9 @@ def _build_status_response(
     variant_id_to_name = {
         str(v.id): v.name for v in experiment.variants
     }
+    seed: Optional[int] = None
+    n_samples: Optional[int] = None
+    engine_version = ENGINE_VERSION
 
     if bandit_state is None or not bandit_state.variant_weights:
         # No state yet — return equal weights
@@ -102,6 +113,11 @@ def _build_status_response(
         regret_pct: Optional[float] = None
         last_updated: Optional[str] = None
     else:
+        seed = _int_or_none(getattr(bandit_state, "seed", None))
+        n_samples = _int_or_none(getattr(bandit_state, "n_samples", None))
+        stored_version = getattr(bandit_state, "engine_version", None)
+        if isinstance(stored_version, str) and stored_version:
+            engine_version = stored_version
         current_weights = []
         weight_map: dict = {}
 
@@ -136,6 +152,9 @@ def _build_status_response(
         regret_reduction_pct=regret_pct,
         recommendation=recommendation,
         last_updated=last_updated,
+        seed=seed,
+        n_samples=n_samples,
+        engine_version=engine_version,
     )
 
 
@@ -256,11 +275,18 @@ def override_bandit_weights(
             total_pulls=0,
             regret_reduction_pct=None,
             last_computed_at=now_iso,
+            seed=None,
+            n_samples=None,
+            engine_version=ENGINE_VERSION,
         )
         db.add(bandit_state)
     else:
         bandit_state.variant_weights = weights_payload
         bandit_state.last_computed_at = now_iso
+        # A manual override draws no samples: clear the sampling provenance.
+        bandit_state.seed = None
+        bandit_state.n_samples = None
+        bandit_state.engine_version = ENGINE_VERSION
 
     db.commit()
     db.refresh(bandit_state)

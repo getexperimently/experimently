@@ -12,6 +12,8 @@ from typing import Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from backend.app.core.stats_engine import ENGINE_VERSION
+
 
 # ---------------------------------------------------------------------------
 # Enum
@@ -95,6 +97,15 @@ class BanditStatusResponse(BaseModel):
         or ``"DEPLOYING_<VariantName>"``.
     last_updated:
         ISO-8601 timestamp of the last weight update (None if never updated).
+    seed:
+        Deterministic RNG seed used by the last Thompson-sampling tick
+        (``blake2b(experiment_id | tick day | n_samples)``); ``None`` for
+        deterministic algorithms or before the first tick.
+    n_samples:
+        Monte Carlo draws per variant used by the last Thompson-sampling
+        tick; ``None`` for deterministic algorithms or before the first tick.
+    engine_version:
+        Version of the statistics engine that computed the current weights.
     """
 
     model_config = ConfigDict(from_attributes=True)
@@ -120,6 +131,20 @@ class BanditStatusResponse(BaseModel):
     last_updated: Optional[str] = Field(
         None,
         description="ISO-8601 timestamp of the last weight update",
+    )
+    seed: Optional[int] = Field(
+        None,
+        ge=0,
+        description="Deterministic RNG seed used by the last Thompson-sampling tick",
+    )
+    n_samples: Optional[int] = Field(
+        None,
+        ge=1,
+        description="Monte Carlo draws per variant used by the last Thompson-sampling tick",
+    )
+    engine_version: str = Field(
+        ENGINE_VERSION,
+        description="Statistics engine version that computed the current weights",
     )
 
 

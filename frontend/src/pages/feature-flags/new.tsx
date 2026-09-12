@@ -49,6 +49,9 @@ export default function NewFeatureFlagPage() {
         name,
         key: key || generateKey(name),
         description: description || undefined,
+        // `FeatureFlagCreate.is_active` defaults to true server-side; new flags
+        // start off so turning them on is an explicit, audited action.
+        is_active: false,
         rollout_percentage: rolloutPercentage,
         targeting_rules: rules.groups.length > 0 ? rules : null,
       });

@@ -279,10 +279,17 @@ class TestWizardDraftManagement:
                 "primary_metric_id": "metric-123",
             },
         )
+        # No db/user_id: validated dry run, nothing written.
         result = ExperimentWizardService.validate_and_submit(draft.id)
         assert result["success"] is True
-        assert "experiment_id" in result
-        assert result["experiment_id"] is not None
+        assert result["persisted"] is False
+        assert result["experiment_id"] is None
+        payload = result["payload"]
+        assert payload["experiment_type"] == "a_b"
+        assert payload["metrics"][0]["is_primary"] is True
+        assert all("traffic_allocation" in v for v in payload["variants"])
+        # The draft survives a dry run.
+        assert ExperimentWizardService.get_draft(draft.id) is not None
 
     def test_validate_and_submit_returns_errors_when_draft_incomplete(self):
         """validate_and_submit returns errors when draft is missing required fields."""
@@ -383,13 +390,18 @@ class TestWizardExperimentCreation:
         payload = ExperimentWizardService.build_experiment_payload(draft)
         assert len(payload["variants"]) >= 3
 
-    def test_rollout_type_produces_single_variant(self):
-        """build_experiment_payload for feature_flag_rollout creates 1 variant."""
+    def test_rollout_type_produces_a_control_and_a_treatment(self):
+        """feature_flag_rollout needs a held-back control to measure against.
+
+        A lone 100% "Treatment" arm has no baseline, and every analysis path
+        does ``next(v for v in variants if v['is_control'])``.
+        """
         draft = ExperimentWizardService.create_draft(
             user_id="user-1", experiment_type="feature_flag_rollout"
         )
         payload = ExperimentWizardService.build_experiment_payload(draft)
-        assert len(payload["variants"]) == 1
+        assert len(payload["variants"]) == 2
+        assert [v["is_control"] for v in payload["variants"]].count(True) == 1
 
     def test_rollout_variant_has_traffic_percentage(self):
         """build_experiment_payload for rollout variant includes traffic_percentage."""
@@ -398,6 +410,26 @@ class TestWizardExperimentCreation:
         )
         payload = ExperimentWizardService.build_experiment_payload(draft)
         assert "traffic_percentage" in payload["variants"][0]
+
+    @pytest.mark.parametrize("wizard_type", sorted(EXPERIMENT_TYPES))
+    def test_every_wizard_type_builds_a_payload_ExperimentCreate_accepts(self, wizard_type):
+        """Exactly one control and allocations summing to 100, for every type."""
+        from backend.app.schemas.experiment import ExperimentCreate
+
+        draft = ExperimentWizardService.create_draft(
+            user_id="user-1", experiment_type=wizard_type
+        )
+        draft.hypothesis = "We believe this change will lift conversion measurably."
+        draft.primary_metric_id = "metric-001"
+        payload = ExperimentWizardService.build_experiment_payload(draft)
+
+        assert [v["is_control"] for v in payload["variants"]].count(True) == 1
+        assert sum(v["traffic_percentage"] for v in payload["variants"]) == 100
+
+        # Must survive the schema the submit endpoint feeds it to.
+        created = ExperimentCreate(**payload)
+        assert sum(v.traffic_allocation for v in created.variants) == 100
+        assert sum(1 for v in created.variants if v.is_control) == 1
 
     def test_payload_name_uses_draft_name_if_set(self):
         """build_experiment_payload uses draft.name when provided."""
@@ -408,11 +440,19 @@ class TestWizardExperimentCreation:
         payload = ExperimentWizardService.build_experiment_payload(draft)
         assert payload["name"] == "My Custom Experiment"
 
-    def test_payload_uses_targeting_rules_from_draft(self):
-        """build_experiment_payload includes targeting_rules from draft."""
+    def test_payload_wraps_targeting_rules_in_the_dashboard_shape(self):
+        """The wizard's flat condition list becomes the grouped shape ExperimentCreate takes."""
         draft = ExperimentWizardService.create_draft(
             user_id="user-1", experiment_type="ab"
         )
-        draft.targeting_rules = [{"attribute": "country", "operator": "eq", "value": "US"}]
+        conditions = [{"attribute": "country", "operator": "eq", "value": "US"}]
+        draft.targeting_rules = conditions
         payload = ExperimentWizardService.build_experiment_payload(draft)
-        assert payload["targeting_rules"] == draft.targeting_rules
+        assert payload["targeting_rules"] == {
+            "logical_operator": "and",
+            "groups": [{"logical_operator": "and", "conditions": conditions}],
+        }
+
+    def test_payload_omits_targeting_rules_when_the_draft_has_none(self):
+        draft = ExperimentWizardService.create_draft(user_id="user-1", experiment_type="ab")
+        assert ExperimentWizardService.build_experiment_payload(draft)["targeting_rules"] is None

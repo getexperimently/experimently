@@ -39,11 +39,18 @@ from sqlalchemy.orm import Session
 
 from backend.app.core.config import settings
 from backend.app.core.scheduler_tick import run_locked_tick
+from backend.app.core.stats_engine import ENGINE_VERSION, as_of_bucket, derive_seed
+from backend.app.models.analysis_snapshot import AnalysisKind
 from backend.app.models.assignment import Assignment
-from backend.app.models.bandit_state import BanditState
+from backend.app.models.bandit_state import BanditState, BanditStateHistory
 from backend.app.models.event import Event
 from backend.app.models.experiment import Experiment, ExperimentStatus
-from backend.app.services.bandit_service import BanditService, VariantStats
+from backend.app.services.analysis_snapshot_service import build_snapshot
+from backend.app.services.bandit_service import (
+    BanditService,
+    ThompsonSampling,
+    VariantStats,
+)
 from backend.app.services.event_matching import (
     EXPOSURE_EVENT_TYPES,
     conversion_event_filter,
@@ -168,15 +175,29 @@ class BanditScheduler:
             for vid, vs in variant_stats.items()
         }
 
+        # Deterministic seed for the Monte Carlo algorithms:
+        # blake2b(experiment_id | tick UTC day | n_samples).  Only Thompson
+        # sampling draws random numbers; the others record NULL provenance.
+        tick_at = datetime.now(timezone.utc)
+        algorithm = experiment.optimization_type
+        stochastic = BanditService.is_stochastic(algorithm)
+        n_samples: Optional[int] = ThompsonSampling.N_SAMPLES if stochastic else None
+        seed: Optional[int] = (
+            derive_seed(experiment.id, as_of_bucket(tick_at), n_samples)
+            if stochastic
+            else None
+        )
+
         # Compute new weights
         new_weights: Dict[str, float] = BanditService.compute_weights(
-            algorithm=experiment.optimization_type,
+            algorithm=algorithm,
             variant_data=variant_data,
+            seed=seed,
         )
 
         total_pulls = sum(vs.pulls for vs in variant_stats.values())
         regret_pct = self.estimate_regret_reduction(new_weights, variant_stats)
-        now_iso = datetime.now(timezone.utc).isoformat()
+        now_iso = tick_at.isoformat()
 
         # Build full variant_weights payload (weights + stats per variant)
         weights_payload: Dict[str, Dict] = {}
@@ -199,19 +220,39 @@ class BanditScheduler:
         if bandit_state is None:
             bandit_state = BanditState(
                 experiment_id=experiment.id,
-                algorithm=experiment.optimization_type,
+                algorithm=algorithm,
                 variant_weights=weights_payload,
                 total_pulls=total_pulls,
                 regret_reduction_pct=regret_pct if regret_pct > 0 else None,
                 last_computed_at=now_iso,
+                seed=seed,
+                n_samples=n_samples,
+                engine_version=ENGINE_VERSION,
             )
             self.db.add(bandit_state)
         else:
-            bandit_state.algorithm = experiment.optimization_type
+            bandit_state.algorithm = algorithm
             bandit_state.variant_weights = weights_payload
             bandit_state.total_pulls = total_pulls
             bandit_state.regret_reduction_pct = regret_pct if regret_pct > 0 else None
             bandit_state.last_computed_at = now_iso
+            bandit_state.seed = seed
+            bandit_state.n_samples = n_samples
+            bandit_state.engine_version = ENGINE_VERSION
+
+        # Audit trail: one bandit_state_history row per variant plus one
+        # analysis_snapshots row for the tick.  Best-effort inside a savepoint
+        # so a failure here never loses the weight update itself.
+        self._record_tick_history(
+            experiment=experiment,
+            algorithm=algorithm,
+            weights_payload=weights_payload,
+            total_pulls=total_pulls,
+            regret_pct=regret_pct,
+            seed=seed,
+            n_samples=n_samples,
+            tick_at=tick_at,
+        )
 
         self.db.commit()
 
@@ -221,6 +262,108 @@ class BanditScheduler:
             experiment.optimization_type,
         )
         return True
+
+    # ------------------------------------------------------------------
+    # Audit trail
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def build_tick_history(
+        experiment_id: UUID,
+        algorithm: str,
+        weights_payload: Dict[str, Dict],
+        tick_at: datetime,
+        seed: Optional[int],
+        n_samples: Optional[int],
+    ) -> List[BanditStateHistory]:
+        """Build the ``bandit_state_history`` rows for one tick (not persisted).
+
+        ``alpha``/``beta`` are the Beta-Bernoulli posterior parameters the
+        tick used (``prior + successes`` / ``prior + failures``).  Variant ids
+        that are not UUIDs are skipped: they cannot reference ``variants.id``.
+        """
+        rows: List[BanditStateHistory] = []
+        for vid, vdata in weights_payload.items():
+            try:
+                variant_uuid = vid if isinstance(vid, UUID) else UUID(str(vid))
+            except (ValueError, TypeError, AttributeError):
+                logger.warning(
+                    "BanditScheduler: skipping history for non-UUID variant id %r", vid
+                )
+                continue
+            successes = int(vdata.get("successes", 0))
+            failures = int(vdata.get("failures", 0))
+            rows.append(
+                BanditStateHistory(
+                    experiment_id=experiment_id,
+                    variant_id=variant_uuid,
+                    algorithm=algorithm,
+                    alpha=ThompsonSampling.PRIOR_ALPHA + successes,
+                    beta=ThompsonSampling.PRIOR_BETA + failures,
+                    weight=float(vdata.get("weight", 0.0)),
+                    successes=successes,
+                    failures=failures,
+                    pulls=int(vdata.get("pulls", 0)),
+                    seed=seed,
+                    n_samples=n_samples,
+                    engine_version=ENGINE_VERSION,
+                    tick_at=tick_at,
+                )
+            )
+        return rows
+
+    def _record_tick_history(
+        self,
+        experiment: Experiment,
+        algorithm: str,
+        weights_payload: Dict[str, Dict],
+        total_pulls: int,
+        regret_pct: float,
+        seed: Optional[int],
+        n_samples: Optional[int],
+        tick_at: datetime,
+    ) -> None:
+        """Stage the history rows and the tick snapshot; never raises.
+
+        The rows join the caller's transaction (so a single commit covers
+        state + history), but they are flushed inside a savepoint: if the
+        audit insert fails only the savepoint is rolled back and the weight
+        update still commits.
+        """
+        try:
+            rows: List[Any] = list(
+                self.build_tick_history(
+                    experiment_id=experiment.id,
+                    algorithm=algorithm,
+                    weights_payload=weights_payload,
+                    tick_at=tick_at,
+                    seed=seed,
+                    n_samples=n_samples,
+                )
+            )
+            rows.append(
+                build_snapshot(
+                    experiment.id,
+                    AnalysisKind.BANDIT,
+                    {
+                        "algorithm": algorithm,
+                        "variant_weights": weights_payload,
+                        "total_pulls": int(total_pulls),
+                        "regret_reduction_pct": regret_pct if regret_pct > 0 else None,
+                    },
+                    seed=seed,
+                    n_samples=n_samples,
+                    as_of=tick_at,
+                )
+            )
+            with self.db.begin_nested():
+                self.db.add_all(rows)
+        except Exception as exc:  # noqa: BLE001 - audit rows are best-effort
+            logger.warning(
+                "BanditScheduler: could not record tick history for experiment %s: %s",
+                experiment.id,
+                exc,
+            )
 
     # ------------------------------------------------------------------
     # Stats sources

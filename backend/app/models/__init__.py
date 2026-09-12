@@ -40,7 +40,8 @@ from .audit_log import AuditLog, ActionType, EntityType
 from .compliance_audit_event import ComplianceAuditEvent, AuditAction, AuditOutcome
 from .mutual_exclusion_group import MutualExclusionGroup, MutualExclusionGroupStatus
 from .global_holdout import GlobalHoldout
-from .bandit_state import BanditState
+from .bandit_state import BanditState, BanditStateHistory
+from .analysis_snapshot import AnalysisSnapshot, AnalysisKind
 # Several models reference these classes by name in relationship() strings
 # (Report, FeatureFlagSafetyConfig, CustomRole, ...). Importing every module
 # here lets scripts that only import backend.app.models configure the mappers.
@@ -117,6 +118,9 @@ __all__ = [
     "MutualExclusionGroupStatus",
     "GlobalHoldout",
     "BanditState",
+    "BanditStateHistory",
+    "AnalysisSnapshot",
+    "AnalysisKind",
     "WarehouseConnection",
     "NotificationPreference",
     "NotificationDeliveryLog",

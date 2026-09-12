@@ -95,6 +95,16 @@ class MetricsScheduler:
         """
         logger.info("Aggregating metrics")
 
+        # Piggyback the analysis-history purge on this tick: it is the
+        # lowest-frequency scheduler that already holds an advisory lock, and
+        # retention needs to run somewhere.
+        try:
+            from backend.app.services.analysis_snapshot_service import purge_expired_history
+
+            purge_expired_history()
+        except Exception as exc:  # noqa: BLE001 - never fail the tick on retention
+            logger.warning("analysis history purge skipped: %s", exc)
+
         total_records = 0
         failed_periods = 0
 

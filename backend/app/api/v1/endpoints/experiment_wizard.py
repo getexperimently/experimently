@@ -9,8 +9,15 @@ import logging
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
 
 from backend.app.api import deps
+from backend.app.core.permissions import (
+    Action,
+    ResourceType,
+    check_permission,
+    get_permission_error_message,
+)
 from backend.app.models.user import User
 from backend.app.schemas.experiment_wizard import (
     WizardDraftCreate,
@@ -174,15 +181,25 @@ def validate_step(
     response_model=WizardSubmitResponse,
     summary="Submit a completed wizard draft to create an experiment",
     description=(
-        "Validate the completed draft and create an experiment from it. "
-        "Returns the new experiment_id on success or validation errors on failure."
+        "Validate the completed draft and create the experiment it describes "
+        "(status DRAFT, owned by the caller), then discard the draft. Returns "
+        "the new experiment_id on success or validation errors on failure."
     ),
 )
 def submit_draft(
     draft_id: str,
+    db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_active_user),
 ) -> WizardSubmitResponse:
-    """Submit a completed wizard draft and create an experiment."""
+    """Submit a completed wizard draft and create the experiment."""
+    # Submitting writes a real experiment, so it needs the same permission as
+    # POST /api/v1/experiments/ — a VIEWER must not be able to create one here.
+    if not check_permission(current_user, ResourceType.EXPERIMENT, Action.CREATE):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=get_permission_error_message(ResourceType.EXPERIMENT, Action.CREATE),
+        )
+
     # Check draft exists before attempting submission
     draft = ExperimentWizardService.get_draft(draft_id)
     if not draft:
@@ -191,7 +208,9 @@ def submit_draft(
             detail=f"Draft '{draft_id}' not found.",
         )
 
-    result = ExperimentWizardService.validate_and_submit(draft_id)
+    result = ExperimentWizardService.validate_and_submit(
+        draft_id, db=db, user_id=current_user.id
+    )
 
     return WizardSubmitResponse(
         success=result["success"],

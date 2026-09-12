@@ -135,7 +135,7 @@ Then initialize the database with Alembic:
 alembic revision --autogenerate -m "Initial migration"
 
 # Apply the migration
-alembic upgrade head
+python -m alembic -c backend/app/db/alembic.ini upgrade head
 ```
 
 ### Creating New Migrations
@@ -147,14 +147,14 @@ Whenever you make changes to the models:
 alembic revision --autogenerate -m "Description of changes"
 
 # Apply the migration
-alembic upgrade head
+python -m alembic -c backend/app/db/alembic.ini upgrade head
 ```
 
 ### Migration Commands Reference
 
 ```bash
 # Upgrade to the latest version
-alembic upgrade head
+python -m alembic -c backend/app/db/alembic.ini upgrade head
 
 # Downgrade to the previous version
 alembic downgrade -1

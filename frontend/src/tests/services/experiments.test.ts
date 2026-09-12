@@ -46,19 +46,21 @@ describe('ExperimentsService.list', () => {
     expect(url).toBe(`${BASE}/api/v1/experiments`);
   });
 
-  it('appends status filter param', async () => {
+  it('appends the backend status_filter param', async () => {
     mockOk({ items: [] });
     await ExperimentsService.list({ status: 'active' });
     const url = mockFetch.mock.calls[0][0] as string;
-    expect(url).toContain('status=active');
+    expect(url).toContain('status_filter=active');
+    expect(url).not.toContain('status=active');
   });
 
-  it('appends page and limit params', async () => {
+  it('appends skip and limit params (offset pagination)', async () => {
     mockOk({ items: [] });
-    await ExperimentsService.list({ page: 2, limit: 10 });
+    await ExperimentsService.list({ skip: 20, limit: 10 });
     const url = mockFetch.mock.calls[0][0] as string;
-    expect(url).toContain('page=2');
+    expect(url).toContain('skip=20');
     expect(url).toContain('limit=10');
+    expect(url).not.toContain('page=');
   });
 
   it('returns parsed JSON on success', async () => {
@@ -100,7 +102,7 @@ describe('ExperimentsService.get', () => {
 
 describe('ExperimentsService.create', () => {
   it('sends POST with JSON body', async () => {
-    const data = { name: 'Test', type: 'a_b', traffic_allocation: 100, variants: [] };
+    const data = { name: 'Test', experiment_type: 'a_b', variants: [], metrics: [] };
     mockOk({ id: '1', ...data });
     await ExperimentsService.create(data as never);
     expect(mockFetch).toHaveBeenCalledWith(`${BASE}/api/v1/experiments`, jsonInit('POST', data));
@@ -139,5 +141,33 @@ describe('ExperimentsService.delete', () => {
   it('throws on error', async () => {
     mockError(404, 'Not Found');
     await expect(ExperimentsService.delete('abc')).rejects.toThrow('Not Found');
+  });
+});
+
+describe('ExperimentsService lifecycle actions', () => {
+  it.each([
+    ['start', 'start'],
+    ['pause', 'pause'],
+    ['complete', 'complete'],
+    ['archive', 'archive'],
+  ] as const)('%s POSTs to /experiments/{id}/%s', async (method, segment) => {
+    mockOk({ id: 'abc', status: 'active' });
+    await ExperimentsService[method]('abc');
+    expect(mockFetch).toHaveBeenCalledWith(
+      `${BASE}/api/v1/experiments/abc/${segment}`,
+      expect.objectContaining({ method: 'POST' }),
+    );
+  });
+
+  it('surfaces the backend detail on a rejected transition', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 400,
+      statusText: 'Bad Request',
+      text: () => Promise.resolve(JSON.stringify({ detail: 'Cannot start experiment with status: active' })),
+    } as unknown as Response);
+    await expect(ExperimentsService.start('abc')).rejects.toThrow(
+      'Cannot start experiment with status: active',
+    );
   });
 });

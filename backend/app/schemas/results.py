@@ -9,7 +9,7 @@ top-level experiment results response.
 
 from datetime import datetime
 from enum import Enum
-from typing import Annotated, List, Optional
+from typing import Annotated, Dict, List, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -17,6 +17,53 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from backend.app.schemas.bayesian import BayesianResultsResponse
 from backend.app.schemas.dimensional import DimensionalBreakdownResponse
 from backend.app.schemas.sequential import SequentialTestingResponse
+
+
+# ---------------------------------------------------------------------------
+# SRMResult (sample-ratio mismatch)
+# ---------------------------------------------------------------------------
+
+
+class SRMResult(BaseModel):
+    """Sample-ratio-mismatch check of assignment counts vs. traffic allocation.
+
+    A Pearson chi-square goodness-of-fit test of the observed per-variant
+    assignment counts against the counts implied by each variant's
+    ``traffic_allocation``.  ``warning`` is ``True`` when ``p_value`` is below
+    0.001, in which case the randomisation is suspect and the per-metric
+    results should not be trusted.
+
+    Only reported for experiments with a fixed allocation.  A multi-armed
+    bandit reallocates traffic deliberately (from ``BanditState`` weights,
+    which are never written back to ``traffic_allocation``), so the whole
+    block is ``null`` there rather than a permanent false alarm.
+
+    Caveat: an allocation edited while the experiment was running is still
+    tested against its *current* split, so the counts accumulated under the
+    old split can trip the warning.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    chi2: float = Field(..., ge=0.0, description="Pearson chi-square statistic.")
+    p_value: float = Field(
+        ...,
+        ge=0.0,
+        le=1.0,
+        description="Upper-tail probability with (variants - 1) degrees of freedom.",
+    )
+    warning: bool = Field(
+        ...,
+        description="True when p_value < 0.001 (the observed split does not match the allocation).",
+    )
+    expected: Dict[str, float] = Field(
+        default_factory=dict,
+        description="Expected assignment count per variant id, from traffic_allocation.",
+    )
+    observed: Dict[str, int] = Field(
+        default_factory=dict,
+        description="Observed assignment count per variant id.",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -435,6 +482,18 @@ class ExperimentResultsResponse(BaseModel):
             "Bayesian inference results including posterior distributions, "
             "probability to be best, expected loss, and stopping decision. "
             "Null when bayesian_enabled=False on the experiment."
+        ),
+    )
+
+    # P0 statistical credibility: sample-ratio mismatch (null when undefined)
+    srm: Optional[SRMResult] = Field(
+        None,
+        description=(
+            "Sample-ratio-mismatch chi-square test of assignment counts against "
+            "the variants' traffic allocation. Null when the experiment has fewer "
+            "than two allocated variants, has no assignments yet, or allocates "
+            "traffic adaptively (optimization_type other than 'fixed'), where the "
+            "bandit's own weights — not traffic_allocation — decide the split."
         ),
     )
 
