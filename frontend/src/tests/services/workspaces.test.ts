@@ -1,4 +1,5 @@
 import { workspaceService } from '@/services/workspaces';
+import { ApiError, TOKEN_STORAGE_KEY } from '@/services/api';
 
 const mockFetch = jest.fn();
 global.fetch = mockFetch;
@@ -7,6 +8,11 @@ const BASE = 'http://localhost:8000';
 
 beforeEach(() => {
   mockFetch.mockReset();
+  localStorage.clear();
+  process.env.NEXT_PUBLIC_API_URL = BASE;
+});
+
+afterAll(() => {
   delete process.env.NEXT_PUBLIC_API_URL;
 });
 
@@ -27,6 +33,8 @@ function mockError(status = 500, body = 'Internal Server Error') {
   } as Response);
 }
 
+const deleteInit = expect.objectContaining({ method: 'DELETE' });
+
 describe('workspaceService.list', () => {
   it('calls the correct URL', async () => {
     mockOk([]);
@@ -40,6 +48,14 @@ describe('workspaceService.list', () => {
     const result = await workspaceService.list();
     expect(result).toEqual(payload);
   });
+
+  it('sends the bearer token when one is stored', async () => {
+    localStorage.setItem(TOKEN_STORAGE_KEY, 'tok');
+    mockOk([]);
+    await workspaceService.list();
+    const [, opts] = mockFetch.mock.calls[0];
+    expect(opts.headers.Authorization).toBe('Bearer tok');
+  });
 });
 
 describe('workspaceService.create', () => {
@@ -50,6 +66,7 @@ describe('workspaceService.create', () => {
     const [url, opts] = mockFetch.mock.calls[0];
     expect(url).toBe(`${BASE}/api/v1/workspaces/`);
     expect(opts.method).toBe('POST');
+    expect(opts.headers['Content-Type']).toBe('application/json');
     expect(JSON.parse(opts.body)).toEqual(data);
   });
 });
@@ -77,7 +94,7 @@ describe('workspaceService.delete', () => {
   it('sends DELETE request', async () => {
     mockFetch.mockResolvedValueOnce({ ok: true } as Response);
     await workspaceService.delete('w1');
-    expect(mockFetch).toHaveBeenCalledWith(`${BASE}/api/v1/workspaces/w1`, { method: 'DELETE' });
+    expect(mockFetch).toHaveBeenCalledWith(`${BASE}/api/v1/workspaces/w1`, deleteInit);
   });
 
   it('throws on error', async () => {
@@ -120,7 +137,7 @@ describe('workspaceService.removeMember', () => {
   it('sends DELETE', async () => {
     mockFetch.mockResolvedValueOnce({ ok: true } as Response);
     await workspaceService.removeMember('w1', 'u1');
-    expect(mockFetch).toHaveBeenCalledWith(`${BASE}/api/v1/workspaces/w1/members/u1`, { method: 'DELETE' });
+    expect(mockFetch).toHaveBeenCalledWith(`${BASE}/api/v1/workspaces/w1/members/u1`, deleteInit);
   });
 });
 
@@ -168,6 +185,7 @@ describe('workspaceService.createAPIKey', () => {
     const [url, opts] = mockFetch.mock.calls[0];
     expect(url).toBe(`${BASE}/api/v1/workspaces/w1/api-keys`);
     expect(opts.method).toBe('POST');
+    expect(JSON.parse(opts.body)).toEqual(data);
   });
 });
 
@@ -175,7 +193,7 @@ describe('workspaceService.revokeAPIKey', () => {
   it('sends DELETE', async () => {
     mockFetch.mockResolvedValueOnce({ ok: true } as Response);
     await workspaceService.revokeAPIKey('w1', 'k1');
-    expect(mockFetch).toHaveBeenCalledWith(`${BASE}/api/v1/workspaces/w1/api-keys/k1`, { method: 'DELETE' });
+    expect(mockFetch).toHaveBeenCalledWith(`${BASE}/api/v1/workspaces/w1/api-keys/k1`, deleteInit);
   });
 });
 
@@ -195,13 +213,26 @@ describe('error handling', () => {
     await expect(workspaceService.get('w1')).rejects.toThrow('Validation failed');
   });
 
+  it('throws with the JSON detail on error', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 403,
+      statusText: 'Forbidden',
+      text: () => Promise.resolve(JSON.stringify({ detail: { code: 'feature_not_licensed' } })),
+    } as Response);
+    const err = await workspaceService.get('w1').catch((e) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect(err.status).toBe(403);
+    expect(err.code).toBe('feature_not_licensed');
+  });
+
   it('throws with status on empty body', async () => {
     mockFetch.mockResolvedValueOnce({
       ok: false,
       status: 500,
-      statusText: 'Internal Server Error',
+      statusText: '',
       text: () => Promise.resolve(''),
     } as Response);
-    await expect(workspaceService.get('w1')).rejects.toThrow('Request failed: 500');
+    await expect(workspaceService.get('w1')).rejects.toThrow('Request failed with status 500');
   });
 });

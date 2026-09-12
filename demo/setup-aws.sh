@@ -26,8 +26,9 @@ err()  { echo -e "${RED}[demo-aws] ERROR:${NC} $*" >&2; }
 if [[ "${1:-}" == "--destroy" ]]; then
     log "Destroying AWS demo environment..."
     export ENVIRONMENT=demo
-    export AWS_ACCOUNT_ID=214117827798
-    export AWS_REGION=us-west-2
+    : "${AWS_ACCOUNT_ID:?set AWS_ACCOUNT_ID to the target AWS account id}"
+    export AWS_ACCOUNT_ID
+    export AWS_REGION="${AWS_REGION:-us-west-2}"
 
     cd "$REPO_ROOT/infrastructure"
     ENVIRONMENT=demo npx cdk destroy --all --force
@@ -83,8 +84,10 @@ ok "AWS credentials OK (account: $ACTUAL_ACCOUNT)."
 # 3. Environment variables
 # ---------------------------------------------------------------------------
 export ENVIRONMENT=demo
-export AWS_ACCOUNT_ID=214117827798
-export AWS_REGION=us-west-2
+# Target account comes from the environment (never hard-coded); default to the
+# account the active credentials belong to.
+export AWS_ACCOUNT_ID="${AWS_ACCOUNT_ID:-$ACTUAL_ACCOUNT}"
+export AWS_REGION="${AWS_REGION:-us-west-2}"
 
 if [[ "$ACTUAL_ACCOUNT" != "$AWS_ACCOUNT_ID" ]]; then
     warn "Active AWS account ($ACTUAL_ACCOUNT) differs from target ($AWS_ACCOUNT_ID)."

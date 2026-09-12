@@ -1,6 +1,6 @@
 # Compliance Audit Logging API
 
-This document describes the compliance audit logging endpoints. The system provides SOC 2 Type II and ISO 27001-aligned audit trails with HMAC-SHA256 tamper-evident signing for all platform events.
+This document describes the compliance audit logging endpoints. The system provides audit trails with HMAC-SHA256 tamper-evident signing for platform events, as evidence for a customer's SOC 2 or ISO 27001 program (the platform itself holds no certification).
 
 ---
 

@@ -183,9 +183,25 @@ python -m pytest \
 
 All tests mock the DB session; no live PostgreSQL required.
 
-## Security Notes
+## Authentication
 
-- WebSocket endpoint currently has no authentication (open for real-time access).
-  For production, add token validation in the `stream_results` handler using a
-  query parameter (`?token=...`) before calling `manager.connect()`.
-- HTTP companion endpoints are also unauthenticated (informational only).
+The stream requires the same credentials as the HTTP API. The token is validated
+before the socket is registered; a missing or invalid token is answered with an
+accepted-then-closed socket, close code **4401**, so browser clients can tell
+"unauthorized" from a network failure and must not reconnect with the same token.
+
+Ways to present the token, in order of preference:
+
+1. **Subprotocol** (what the dashboard uses):
+   `new WebSocket(url, ['experimently.bearer', token])`. The server echoes
+   `experimently.bearer` as the accepted subprotocol. This keeps the token out of
+   URLs and therefore out of access logs.
+2. **`Authorization: Bearer <token>` header** for non-browser clients.
+3. **`?token=<token>` query parameter**, supported for compatibility only. URLs are
+   written to proxy and server access logs, so prefer 1 or 2.
+
+`frontend/src/hooks/useExperimentStream.ts` stops reconnecting and reports
+`status: 'unauthorized'` on close code 4401.
+
+The HTTP companion endpoints (subscriber counts, active experiments) are read-only
+and informational.

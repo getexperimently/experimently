@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { UserRole, USER_ROLE_LABELS } from '@/types/admin';
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+import { apiFetch } from '@/services/api';
 
 interface InviteUserModalProps {
   isOpen: boolean;
@@ -27,15 +26,10 @@ export function InviteUserModal({ isOpen, onClose, onSuccess }: InviteUserModalP
     setError(null);
 
     try {
-      const response = await fetch(`${API_URL}/api/v1/admin/users`, {
+      await apiFetch('/api/v1/admin/users', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: email.trim(), role }),
+        json: { email: email.trim(), role },
       });
-
-      if (!response.ok) {
-        throw new Error(`Failed to invite user: ${response.statusText}`);
-      }
 
       // Reset form
       setEmail('');

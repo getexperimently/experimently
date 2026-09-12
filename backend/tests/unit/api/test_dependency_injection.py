@@ -8,6 +8,18 @@ from backend.app.core.config import settings
 from backend.app.models.experiment import ExperimentStatus
 
 
+@pytest.fixture(autouse=True)
+def _cognito_provider(monkeypatch):
+    """
+    ``deps.get_current_user`` is exercised here through its Cognito branch
+    (``auth_service.get_user_with_groups`` is patched).  The suite default is
+    the Community Edition local provider (P0 open-core), so select Cognito for
+    this module; the local branch is covered by tests/unit/api/test_local_auth.py.
+    """
+    monkeypatch.setattr(settings, "AUTH_PROVIDER", "cognito")
+    monkeypatch.setattr(settings, "DEV_AUTH_BYPASS", False)
+
+
 # Create mock models instead of importing the actual ones to avoid circular dependencies
 class MockUser:
     # Add class attributes that would be accessed in deps.py

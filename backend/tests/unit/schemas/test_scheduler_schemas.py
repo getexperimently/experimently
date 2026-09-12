@@ -43,8 +43,17 @@ class TestSchedulerNameEnum:
     def test_safety_value(self):
         assert SchedulerName.SAFETY == "safety"
 
-    def test_all_four_values(self):
-        assert len(list(SchedulerName)) == 4
+    def test_bandit_value(self):
+        assert SchedulerName.BANDIT == "bandit"
+
+    def test_all_values(self):
+        assert {m.value for m in SchedulerName} == {
+            "experiment",
+            "rollout",
+            "metrics",
+            "safety",
+            "bandit",
+        }
 
 
 # ---------------------------------------------------------------------------

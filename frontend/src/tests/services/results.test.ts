@@ -1,4 +1,5 @@
 import { ResultsService } from '@/services/results';
+import { ApiError, TOKEN_STORAGE_KEY } from '@/services/api';
 
 const mockFetch = jest.fn();
 global.fetch = mockFetch;
@@ -7,7 +8,11 @@ const BASE = 'http://localhost:8000';
 
 beforeEach(() => {
   mockFetch.mockReset();
-  // Remove env override so tests use the default
+  localStorage.clear();
+  process.env.NEXT_PUBLIC_API_URL = BASE;
+});
+
+afterAll(() => {
   delete process.env.NEXT_PUBLIC_API_URL;
 });
 
@@ -30,7 +35,7 @@ describe('ResultsService.getResults', () => {
   it('calls the correct URL', async () => {
     mockOk({ experiment_id: 'abc' });
     await ResultsService.getResults('abc');
-    expect(mockFetch).toHaveBeenCalledWith(`${BASE}/api/v1/results/abc`);
+    expect(mockFetch).toHaveBeenCalledWith(`${BASE}/api/v1/results/abc`, expect.any(Object));
   });
 
   it('appends metric_id param when provided', async () => {
@@ -40,6 +45,13 @@ describe('ResultsService.getResults', () => {
     expect(url).toContain('metric_id=m1');
   });
 
+  it('appends breakdown param when provided', async () => {
+    mockOk({});
+    await ResultsService.getResults('abc', { breakdown: 'country' });
+    const url = mockFetch.mock.calls[0][0] as string;
+    expect(url).toContain('breakdown=country');
+  });
+
   it('returns parsed JSON on success', async () => {
     const payload = { experiment_id: 'abc', experiment_name: 'Test' };
     mockOk(payload);
@@ -47,11 +59,20 @@ describe('ResultsService.getResults', () => {
     expect(result).toEqual(payload);
   });
 
-  it('throws on non-ok response', async () => {
+  it('sends the bearer token when one is stored', async () => {
+    localStorage.setItem(TOKEN_STORAGE_KEY, 'tok');
+    mockOk({});
+    await ResultsService.getResults('abc');
+    const init = mockFetch.mock.calls[0][1] as RequestInit;
+    expect((init.headers as Record<string, string>).Authorization).toBe('Bearer tok');
+  });
+
+  it('throws ApiError on non-ok response', async () => {
     mockError(404, 'Not Found');
-    await expect(ResultsService.getResults('abc')).rejects.toThrow(
-      'Failed to fetch results: Not Found'
-    );
+    const err = await ResultsService.getResults('abc').catch((e) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect(err.status).toBe(404);
+    expect(err.message).toBe('Not Found');
   });
 });
 
@@ -59,7 +80,7 @@ describe('ResultsService.getDailyResults', () => {
   it('calls the correct URL', async () => {
     mockOk({ experiment_id: 'abc', series: [] });
     await ResultsService.getDailyResults('abc');
-    expect(mockFetch).toHaveBeenCalledWith(`${BASE}/api/v1/results/abc/daily`);
+    expect(mockFetch).toHaveBeenCalledWith(`${BASE}/api/v1/results/abc/daily`, expect.any(Object));
   });
 
   it('appends metric_id when provided', async () => {
@@ -71,9 +92,7 @@ describe('ResultsService.getDailyResults', () => {
 
   it('throws on non-ok response', async () => {
     mockError(500, 'Server Error');
-    await expect(ResultsService.getDailyResults('abc')).rejects.toThrow(
-      'Failed to fetch daily results: Server Error'
-    );
+    await expect(ResultsService.getDailyResults('abc')).rejects.toThrow('Server Error');
   });
 });
 
@@ -81,7 +100,10 @@ describe('ResultsService.getSampleSize', () => {
   it('calls the correct URL', async () => {
     mockOk({ is_adequate: true });
     await ResultsService.getSampleSize('abc');
-    expect(mockFetch).toHaveBeenCalledWith(`${BASE}/api/v1/results/abc/sample-size`);
+    expect(mockFetch).toHaveBeenCalledWith(
+      `${BASE}/api/v1/results/abc/sample-size`,
+      expect.any(Object),
+    );
   });
 
   it('appends mde and power params', async () => {
@@ -93,13 +115,24 @@ describe('ResultsService.getSampleSize', () => {
   });
 });
 
+describe('ResultsService.getSequentialResults', () => {
+  it('calls the correct URL', async () => {
+    mockOk({ experiment_id: 'abc' });
+    await ResultsService.getSequentialResults('abc');
+    expect(mockFetch).toHaveBeenCalledWith(
+      `${BASE}/api/v1/results/abc/sequential`,
+      expect.any(Object),
+    );
+  });
+});
+
 describe('ResultsService.invalidateCache', () => {
   it('calls the correct URL with POST', async () => {
     mockOk({ status: 'ok', experiment_id: 'abc' });
     await ResultsService.invalidateCache('abc');
     expect(mockFetch).toHaveBeenCalledWith(
       `${BASE}/api/v1/results/abc/invalidate-cache`,
-      { method: 'POST' }
+      expect.objectContaining({ method: 'POST' }),
     );
   });
 

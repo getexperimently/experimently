@@ -76,14 +76,17 @@ export interface SchedulerRun {
   error_message?: string;
 }
 
+/** `GET /api/v1/api-keys` item (`APIKeyRead`). No secret and no prefix are ever returned. */
 export interface ApiKey {
   id: string;
   name: string;
-  prefix: string;
-  created_by: string;
-  created_at: string;
-  last_used?: string;
+  description?: string | null;
+  scopes: string[];
   is_active: boolean;
+  user_id: string;
+  created_at: string;
+  expires_at?: string | null;
+  last_used_at?: string | null;
 }
 
 export interface AdminStats {

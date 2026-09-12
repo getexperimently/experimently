@@ -1,24 +1,19 @@
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { ApiKeyTable } from '@/components/admin/api-keys/ApiKeyTable';
+import { ApiKeyTable, keyState } from '@/components/admin/api-keys/ApiKeyTable';
+import type { ApiKey } from '@/types/admin';
 
-interface ApiKey {
-  id: string;
-  name: string;
-  prefix: string;
-  created_by: string;
-  created_at: string;
-  last_used?: string;
-  is_active: boolean;
-}
-
+/** Shape of `GET /api/v1/api-keys` items (`APIKeyRead`): no prefix, no secret. */
 const makeApiKey = (overrides: Partial<ApiKey> = {}): ApiKey => ({
   id: 'key-1',
   name: 'My API Key',
-  prefix: 'abcd1234',
-  created_by: 'user-1',
-  created_at: '2024-06-15T10:00:00Z',
+  description: null,
+  scopes: [],
   is_active: true,
+  user_id: 'user-1',
+  created_at: '2024-06-15T10:00:00Z',
+  expires_at: null,
+  last_used_at: null,
   ...overrides,
 });
 
@@ -31,9 +26,28 @@ const mockFetch = (responseData: unknown, ok = true, status = 200) => {
   });
 };
 
+const calledUrls = (fetchMock: jest.Mock): string[] =>
+  fetchMock.mock.calls.map((call: [string, ...unknown[]]) => String(call[0]));
+
 beforeEach(() => {
   jest.clearAllMocks();
-  window.confirm = jest.fn(() => true);
+});
+
+describe('keyState', () => {
+  const now = new Date('2026-01-01T00:00:00Z');
+
+  it('is active for a live key without expiry', () => {
+    expect(keyState(makeApiKey(), now)).toBe('active');
+  });
+
+  it('is inactive when the API says so', () => {
+    expect(keyState(makeApiKey({ is_active: false }), now)).toBe('inactive');
+  });
+
+  it('is expired when expires_at is in the past', () => {
+    expect(keyState(makeApiKey({ expires_at: '2025-12-31T00:00:00Z' }), now)).toBe('expired');
+    expect(keyState(makeApiKey({ expires_at: '2026-06-01T00:00:00Z' }), now)).toBe('active');
+  });
 });
 
 describe('ApiKeyTable', () => {
@@ -43,88 +57,143 @@ describe('ApiKeyTable', () => {
     expect(screen.getByTestId('api-key-table-loading')).toBeInTheDocument();
   });
 
-  it('renders api key rows after data loads (mock GET /api/v1/api-keys)', async () => {
+  it("lists the caller's keys from GET /api/v1/api-keys (no query by default)", async () => {
     const keys = [
       makeApiKey({ id: 'key-1', name: 'Production Key' }),
-      makeApiKey({ id: 'key-2', name: 'Dev Key', prefix: 'xyz99999' }),
+      makeApiKey({ id: 'key-2', name: 'Dev Key', scopes: ['assign', 'track'] }),
     ];
-    global.fetch = mockFetch(keys);
+    const fetchMock = mockFetch(keys);
+    global.fetch = fetchMock;
     render(<ApiKeyTable onCreateKey={jest.fn()} />);
     await waitFor(() => {
       expect(screen.getByTestId('api-key-row-key-1')).toBeInTheDocument();
       expect(screen.getByTestId('api-key-row-key-2')).toBeInTheDocument();
     });
+    expect(calledUrls(fetchMock)[0]).toMatch(/\/api\/v1\/api-keys$/);
+    expect(screen.getByText('assign, track')).toBeInTheDocument();
+    expect(screen.queryByText(/prefix/i)).not.toBeInTheDocument();
   });
 
-  it('shows key name in each row', async () => {
-    const keys = [makeApiKey({ id: 'key-1', name: 'My Important Key' })];
-    global.fetch = mockFetch(keys);
-    render(<ApiKeyTable onCreateKey={jest.fn()} />);
-    await waitFor(() => {
-      expect(screen.getByText('My Important Key')).toBeInTheDocument();
-    });
-  });
-
-  it('shows created_at in each row', async () => {
-    const keys = [makeApiKey({ id: 'key-1', created_at: '2024-06-15T10:00:00Z' })];
+  it('shows created_at, last used and expiry per row', async () => {
+    const keys = [
+      makeApiKey({
+        id: 'key-1',
+        created_at: '2024-06-15T10:00:00Z',
+        last_used_at: null,
+        expires_at: null,
+      }),
+    ];
     global.fetch = mockFetch(keys);
     render(<ApiKeyTable onCreateKey={jest.fn()} />);
     await waitFor(() => {
       expect(screen.getByTestId('created-at-key-1')).toBeInTheDocument();
     });
+    // Unset dates render as a dash rather than "Invalid Date".
+    expect(screen.getAllByText('—').length).toBeGreaterThanOrEqual(2);
   });
 
-  it('shows status badge (active/revoked)', async () => {
+  it('derives the status badge from is_active and expires_at', async () => {
     const keys = [
-      makeApiKey({ id: 'key-active', name: 'Active Key', is_active: true }),
-      makeApiKey({ id: 'key-revoked', name: 'Revoked Key', is_active: false }),
+      makeApiKey({ id: 'key-active', name: 'Active Key' }),
+      makeApiKey({ id: 'key-inactive', name: 'Inactive Key', is_active: false }),
+      makeApiKey({ id: 'key-expired', name: 'Expired Key', expires_at: '2000-01-01T00:00:00Z' }),
     ];
     global.fetch = mockFetch(keys);
     render(<ApiKeyTable onCreateKey={jest.fn()} />);
     await waitFor(() => {
       expect(screen.getByTestId('status-badge-key-active')).toHaveTextContent('active');
-      expect(screen.getByTestId('status-badge-key-revoked')).toHaveTextContent('revoked');
+      expect(screen.getByTestId('status-badge-key-inactive')).toHaveTextContent('inactive');
+      expect(screen.getByTestId('status-badge-key-expired')).toHaveTextContent('expired');
     });
   });
 
-  it('revoke button calls DELETE /api/v1/api-keys/{id} with confirmation', async () => {
-    const keys = [makeApiKey({ id: 'key-99', name: 'To Revoke' })];
-    const fetchMock = jest.fn()
-      // First call: GET /api/v1/api-keys
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => keys,
-      })
-      // Second call: DELETE /api/v1/api-keys/key-99
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({}),
-      })
-      // Third call: GET /api/v1/api-keys (refetch)
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => [],
-      });
+  it('"All users" and "Include inactive" toggles add the query parameters', async () => {
+    const fetchMock = mockFetch([]);
+    global.fetch = fetchMock;
+    render(<ApiKeyTable onCreateKey={jest.fn()} />);
+    await waitFor(() => expect(screen.getByTestId('api-key-empty-state')).toBeInTheDocument());
 
+    fireEvent.click(screen.getByTestId('show-all-keys'));
+    await waitFor(() => expect(calledUrls(fetchMock).some((u) => u.includes('all=true'))).toBe(true));
+
+    fireEvent.click(screen.getByTestId('include-inactive-keys'));
+    await waitFor(() =>
+      expect(
+        calledUrls(fetchMock).some((u) => u.includes('all=true') && u.includes('include_inactive=true')),
+      ).toBe(true),
+    );
+  });
+
+  it('delete asks for inline confirmation, then calls DELETE /api/v1/api-keys/{id}', async () => {
+    const keys = [makeApiKey({ id: 'key-99', name: 'To Delete' })];
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => keys }) // GET
+      .mockResolvedValueOnce({ ok: true, status: 204, json: async () => ({}) }) // DELETE
+      .mockResolvedValueOnce({ ok: true, json: async () => [] }); // GET (refetch)
     global.fetch = fetchMock;
     render(<ApiKeyTable onCreateKey={jest.fn()} />);
 
-    await waitFor(() => {
-      expect(screen.getByTestId('revoke-button-key-99')).toBeInTheDocument();
-    });
+    await waitFor(() => expect(screen.getByTestId('delete-button-key-99')).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId('delete-button-key-99'));
 
-    fireEvent.click(screen.getByTestId('revoke-button-key-99'));
+    // Nothing deleted yet; the confirmation names the key.
+    expect(screen.getByTestId('delete-confirm')).toHaveTextContent('To Delete');
+    expect(
+      fetchMock.mock.calls.some((c: [string, { method?: string }?]) => c[1]?.method === 'DELETE'),
+    ).toBe(false);
 
+    fireEvent.click(screen.getByTestId('confirm-delete'));
     await waitFor(() => {
-      expect(window.confirm).toHaveBeenCalled();
       const deleteCall = fetchMock.mock.calls.find(
         (call: [string, ...unknown[]]) =>
-          typeof call[0] === 'string' &&
-          call[0].includes('/api/v1/api-keys/key-99') &&
-          (call[1] as { method?: string })?.method === 'DELETE'
+          String(call[0]).includes('/api/v1/api-keys/key-99') &&
+          (call[1] as { method?: string })?.method === 'DELETE',
       );
       expect(deleteCall).toBeTruthy();
     });
+    await waitFor(() => expect(screen.getByTestId('api-key-empty-state')).toBeInTheDocument());
+  });
+
+  it('cancel dismisses the confirmation without calling the API', async () => {
+    const keys = [makeApiKey({ id: 'key-5', name: 'Keep me' })];
+    const fetchMock = mockFetch(keys);
+    global.fetch = fetchMock;
+    render(<ApiKeyTable onCreateKey={jest.fn()} />);
+    await waitFor(() => expect(screen.getByTestId('delete-button-key-5')).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId('delete-button-key-5'));
+    fireEvent.click(screen.getByTestId('cancel-delete'));
+    expect(screen.queryByTestId('delete-confirm')).not.toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows a delete error inline and keeps the row', async () => {
+    const keys = [makeApiKey({ id: 'key-7', name: 'Stubborn' })];
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => keys })
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 403,
+        statusText: 'Forbidden',
+        json: async () => ({ detail: 'You do not have permission to delete api_key' }),
+      });
+    global.fetch = fetchMock;
+    render(<ApiKeyTable onCreateKey={jest.fn()} />);
+    await waitFor(() => expect(screen.getByTestId('delete-button-key-7')).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId('delete-button-key-7'));
+    fireEvent.click(screen.getByTestId('confirm-delete'));
+    await waitFor(() => expect(screen.getByTestId('delete-error')).toBeInTheDocument());
+    expect(screen.getByTestId('api-key-row-key-7')).toBeInTheDocument();
+  });
+
+  it('refetches when refreshToken changes', async () => {
+    const fetchMock = mockFetch([]);
+    global.fetch = fetchMock;
+    const { rerender } = render(<ApiKeyTable onCreateKey={jest.fn()} refreshToken={0} />);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    rerender(<ApiKeyTable onCreateKey={jest.fn()} refreshToken={1} />);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
   });
 
   it('shows empty state when no keys', async () => {
@@ -143,17 +212,12 @@ describe('ApiKeyTable', () => {
     });
   });
 
-  it('"Create API Key" button is rendered', async () => {
+  it('"Create API Key" button is rendered and wired', async () => {
+    const onCreateKey = jest.fn();
     global.fetch = mockFetch([]);
-    render(<ApiKeyTable onCreateKey={jest.fn()} />);
-    await waitFor(() => {
-      expect(screen.getByTestId('create-api-key-button')).toBeInTheDocument();
-    });
-  });
-
-  it('renders with data-testid="api-key-table"', () => {
-    global.fetch = jest.fn().mockImplementation(() => new Promise(() => {}));
-    render(<ApiKeyTable onCreateKey={jest.fn()} />);
-    expect(screen.getByTestId('api-key-table')).toBeInTheDocument();
+    render(<ApiKeyTable onCreateKey={onCreateKey} />);
+    await waitFor(() => expect(screen.getByTestId('create-api-key-button')).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId('create-api-key-button'));
+    expect(onCreateKey).toHaveBeenCalled();
   });
 });

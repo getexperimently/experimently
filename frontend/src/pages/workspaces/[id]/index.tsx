@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import Head from 'next/head';
+import { PageTitle } from '@/components/PageTitle';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { Workspace, workspaceService } from '@/services/workspaces';
@@ -201,7 +201,7 @@ export default function WorkspaceOverviewPage() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+      <div className="flex-1 bg-slate-50 flex items-center justify-center">
         <div className="inline-block w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
       </div>
     );
@@ -209,7 +209,7 @@ export default function WorkspaceOverviewPage() {
 
   if (error || !workspace) {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+      <div className="flex-1 bg-slate-50 flex items-center justify-center">
         <div className="text-center">
           <p className="text-red-600 mb-4">{error ?? 'Workspace not found'}</p>
           <Link href="/workspaces" className="text-blue-600 hover:underline text-sm">
@@ -225,22 +225,10 @@ export default function WorkspaceOverviewPage() {
 
   return (
     <>
-      <Head>
-        <title>{workspace.name} — Experimently</title>
-      </Head>
+      <PageTitle title={workspace.name} />
 
-      <div className="min-h-screen bg-slate-50">
+      <div className="flex-1 bg-slate-50">
         {/* Nav */}
-        <nav className="bg-white border-b border-slate-200 px-6 h-14 flex items-center gap-6">
-          <Link href="/" className="text-lg font-semibold text-slate-900">
-            Experimently
-          </Link>
-          <div className="flex items-center gap-4 text-sm">
-            <Link href="/experiments" className="text-slate-600 hover:text-slate-900">Experiments</Link>
-            <Link href="/feature-flags" className="text-slate-600 hover:text-slate-900">Feature Flags</Link>
-            <Link href="/workspaces" className="text-slate-600 hover:text-slate-900">Workspaces</Link>
-          </div>
-        </nav>
 
         <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           {/* Breadcrumb */}

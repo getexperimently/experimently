@@ -25,6 +25,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
 from backend.app.api import deps
+from backend.app.core.metrics import record_cache_hit, record_cache_miss, record_flag_evaluation
 from backend.app.models.user import User
 from backend.app.models.feature_flag import FeatureFlag, FeatureFlagStatus
 from backend.app.schemas.feature_flag import (
@@ -132,6 +133,7 @@ async def list_feature_flags(
         redis_client = settings.CACHE_CONTROL.get("redis")
         cached_data = redis_client.get(cache_key)
         if cached_data:
+            record_cache_hit("feature_flag_list")
             cached_response = json.loads(cached_data)
             # Convert cached data to FeatureFlagListResponse
             return FeatureFlagListResponse(
@@ -140,6 +142,7 @@ async def list_feature_flags(
                 skip=cached_response["skip"],
                 limit=cached_response["limit"]
             )
+        record_cache_miss("feature_flag_list")
 
     # Get feature flags based on user role and permissions
     if current_user.is_superuser:
@@ -326,7 +329,9 @@ async def get_feature_flag(
         if cached_data:
             import json
 
+            record_cache_hit("feature_flag")
             return json.loads(cached_data)
+        record_cache_miss("feature_flag")
 
     # Create feature flag service
     feature_flag_service = FeatureFlagService(db)
@@ -815,6 +820,7 @@ def _evaluate_flag_by_key(
 
     feature_flag_service = FeatureFlagService(db)
     evaluation = feature_flag_service.evaluate_flag_detailed(db_flag, user_id, context)
+    record_flag_evaluation(flag_key, "enabled" if evaluation["enabled"] else "disabled")
 
     # ``config`` has always been ``None`` here (the flag dict has no ``value``);
     # kept for backwards compatibility with existing SDKs.

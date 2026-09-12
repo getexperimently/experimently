@@ -1,14 +1,23 @@
 import React, { useState } from 'react';
+import { apiFetch } from '@/services/api';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-
+/**
+ * `POST /api/v1/api-keys` response. The plaintext key is returned once as
+ * `key` (older builds used `key_value`; both are accepted).
+ */
 interface CreatedApiKey {
   id: string;
   name: string;
-  key_value: string;
+  key?: string;
+  key_value?: string;
   prefix: string;
   created_at: string;
-  is_active: boolean;
+  expires_at?: string | null;
+  is_active?: boolean;
+}
+
+function plaintextKey(created: CreatedApiKey): string {
+  return created.key ?? created.key_value ?? '';
 }
 
 interface CreateApiKeyModalProps {
@@ -37,19 +46,12 @@ export function CreateApiKeyModal({ isOpen, onClose, onSuccess }: CreateApiKeyMo
     setError(null);
 
     try {
-      const response = await fetch(`${API_URL}/api/v1/api-keys`, {
+      const data = await apiFetch<CreatedApiKey>('/api/v1/api-keys', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: name.trim(), scope }),
+        json: { name: name.trim(), scopes: [scope] },
       });
-
-      if (!response.ok) {
-        throw new Error(`Failed to create API key: ${response.statusText}`);
-      }
-
-      const data: CreatedApiKey = await response.json();
       setCreatedKey(data);
-      onSuccess(data.key_value);
+      onSuccess(plaintextKey(data));
     } catch (err) {
       setError((err as Error).message || 'Failed to create API key');
     } finally {
@@ -66,7 +68,7 @@ export function CreateApiKeyModal({ isOpen, onClose, onSuccess }: CreateApiKeyMo
   };
 
   const maskedKeyDisplay = createdKey
-    ? `${createdKey.key_value.slice(0, 8)}...`
+    ? `${plaintextKey(createdKey).slice(0, 8)}...`
     : null;
 
   return (
@@ -96,7 +98,7 @@ export function CreateApiKeyModal({ isOpen, onClose, onSuccess }: CreateApiKeyMo
               </span>
               <button
                 data-testid="copy-key-button"
-                onClick={() => navigator.clipboard.writeText(createdKey.key_value)}
+                onClick={() => navigator.clipboard.writeText(plaintextKey(createdKey))}
                 className="ml-3 text-xs text-blue-600 hover:text-blue-800 font-medium"
               >
                 Copy

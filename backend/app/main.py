@@ -6,18 +6,12 @@ routers, and configuration.
 """
 
 import logging
-import os
-import shutil
-import time
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import get_swagger_ui_html, get_redoc_html
 from fastapi.openapi.utils import get_openapi
-from fastapi.responses import JSONResponse, PlainTextResponse
-from starlette.middleware.base import BaseHTTPMiddleware
 
 # Import routers and settings
 from backend.app.api.api import api_router
@@ -32,10 +26,11 @@ from backend.app.core.rollout_scheduler import rollout_scheduler
 from backend.app.core.metrics_scheduler import metrics_scheduler
 from backend.app.core.safety_scheduler import safety_scheduler
 from backend.app.core.bandit_scheduler import bandit_scheduler_runner
+from backend.app.core.health import is_development_or_test, router as health_router
 
 # --- EP-013 additions ---
 try:
-    from backend.app.core.logger import configure_logging, get_logger as _get_struct_logger
+    from backend.app.core.logger import configure_logging, log_format_from_env
     from backend.app.middleware.request_id_middleware import RequestIDMiddleware
     from backend.app.middleware.prometheus_metrics_middleware import PrometheusMetricsMiddleware
     _monitoring_imports_ok = True
@@ -45,11 +40,20 @@ except Exception:  # pragma: no cover
 # ---------------------------------------------------------------------------
 # Structured logging — initialise before anything else so that startup
 # log messages are captured in the correct format.
+#
+# LOG_FORMAT=json  -> every line (structlog, stdlib, uvicorn) is one JSON object
+# LOG_FORMAT=console -> coloured console output
+# unset            -> console in development/test, JSON everywhere else
 # ---------------------------------------------------------------------------
-_json_logs: bool = os.environ.get("APP_ENV", "dev") not in ("dev", "test")
+_log_format: str = "console"
+if _monitoring_imports_ok:
+    _log_format = str(getattr(settings, "LOG_FORMAT", "") or "").lower() or log_format_from_env(
+        default="console" if is_development_or_test() else "json"
+    )
+_json_logs: bool = _log_format == "json"
 if _monitoring_imports_ok:
     configure_logging(
-        log_level=os.environ.get("LOG_LEVEL", "INFO"),
+        log_level=str(settings.LOG_LEVEL or "INFO").upper(),
         json_logs=_json_logs,
         service_name="experimentation-platform",
     )
@@ -57,12 +61,31 @@ if _monitoring_imports_ok:
 # Standard-library logger (used by the existing schedulers etc.)
 logger = logging.getLogger(__name__)
 
+if settings.dev_auth_bypass_active:
+    logger.warning(
+        "DEV_AUTH_BYPASS is active (ENVIRONMENT=%s): every request is served as the "
+        "synthetic dev-admin superuser without credentials. Never expose this instance.",
+        settings.ENVIRONMENT,
+    )
+
 # Maximum request body size (1 MB) — prevents DoS via oversized payloads
 MAX_REQUEST_BODY_SIZE: int = 1_048_576  # 1 MB
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Manage background scheduler lifecycle for the FastAPI app."""
+    """Manage background scheduler lifecycle for the FastAPI app.
+
+    Under the test profile the schedulers are not started: a ``TestClient``
+    used as a context manager would otherwise run real ticks against the test
+    database in the middle of unrelated tests (they patch the same service
+    functions, and the ticks open and drop connections). Scheduler behaviour
+    is covered directly in ``backend/tests/unit/core/test_scheduler_*``.
+    """
+    if settings.is_test:
+        logger.info("Test environment: background schedulers are not started")
+        yield
+        return
+
     logger.info("Starting experiment scheduler")
     await experiment_scheduler.start()
 
@@ -141,121 +164,22 @@ app.add_middleware(
 app.add_middleware(SecurityHeadersMiddleware)
 
 # Rate limiter — disabled during tests to avoid interfering with test assertions
-_rate_limit_enabled = os.environ.get("APP_ENV", "dev") not in ("test",)
+_rate_limit_enabled = not settings.is_test
 app.add_middleware(RateLimitMiddleware, enabled=_rate_limit_enabled)
 
 # Prometheus latency / request-count middleware (EP-013)
 if _monitoring_imports_ok:
     app.add_middleware(PrometheusMetricsMiddleware)
+    # X-Request-ID on every response + request_id/path/method bound into the
+    # log context. Registered last so it is the outermost layer and every
+    # log line from the middlewares above already carries the id.
+    app.add_middleware(RequestIDMiddleware)
 
 # Include API router
 app.include_router(api_router, prefix=settings.API_V1_STR)
 
-
-# ---------------------------------------------------------------------------
-# Prometheus /metrics endpoint
-# ---------------------------------------------------------------------------
-
-@app.get("/metrics", include_in_schema=False)
-async def prometheus_metrics() -> PlainTextResponse:
-    """Expose Prometheus metrics in text exposition format.
-
-    This endpoint is intended for scraping by a Prometheus server or a
-    local ``curl`` during development.  It should **not** be exposed
-    publicly — protect it with a network policy or API gateway rule.
-    """
-    try:
-        from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
-
-        return PlainTextResponse(
-            content=generate_latest().decode("utf-8"),
-            media_type=CONTENT_TYPE_LATEST,
-        )
-    except Exception as exc:  # pragma: no cover
-        logger.warning("Failed to generate Prometheus metrics: %s", exc)
-        return PlainTextResponse(content="# metrics unavailable\n", status_code=503)
-
-
-# ---------------------------------------------------------------------------
-# Enhanced health-check endpoint
-# ---------------------------------------------------------------------------
-
-@app.get("/health", include_in_schema=False)
-async def health_check() -> JSONResponse:
-    """Detailed health check including database, Redis, and disk sub-checks.
-
-    Returns HTTP 200 when all checks pass, HTTP 503 otherwise.
-    """
-    checks: dict = {}
-    overall_healthy: bool = True
-
-    # --- Database check ---
-    try:
-        from backend.app.db.session import SessionLocal
-
-        t0 = time.perf_counter()
-        db = SessionLocal()
-        try:
-            from sqlalchemy import text
-            db.execute(text("SELECT 1"))
-            latency_ms = round((time.perf_counter() - t0) * 1000, 2)
-            checks["database"] = {"status": "healthy", "latency_ms": latency_ms}
-        finally:
-            db.close()
-    except Exception as exc:
-        checks["database"] = {"status": "unhealthy", "error": str(exc)}
-        overall_healthy = False
-
-    # --- Redis check ---
-    try:
-        import redis as redis_lib
-
-        t0 = time.perf_counter()
-        r = redis_lib.Redis(
-            host=settings.REDIS_HOST,
-            port=int(settings.REDIS_PORT),
-            password=settings.REDIS_PASSWORD or None,
-            socket_connect_timeout=1,
-        )
-        r.ping()
-        latency_ms = round((time.perf_counter() - t0) * 1000, 2)
-        checks["redis"] = {"status": "healthy", "latency_ms": latency_ms}
-    except Exception as exc:
-        checks["redis"] = {"status": "unhealthy", "error": str(exc)}
-        overall_healthy = False
-
-    # --- Disk check ---
-    try:
-        disk = shutil.disk_usage("/")
-        free_gb = round(disk.free / (1024 ** 3), 2)
-        checks["disk"] = {
-            "status": "healthy" if free_gb > 1.0 else "low",
-            "free_gb": free_gb,
-        }
-        if free_gb <= 1.0:
-            overall_healthy = False
-    except Exception as exc:
-        checks["disk"] = {"status": "unhealthy", "error": str(exc)}
-        overall_healthy = False
-
-    body: dict = {
-        "status": "healthy" if overall_healthy else "unhealthy",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-    }
-
-    # Only expose detailed check info and environment in non-production
-    if settings.ENVIRONMENT != "prod":
-        body["version"] = settings.VERSION
-        body["environment"] = settings.ENVIRONMENT
-        body["checks"] = checks
-    else:
-        # In production, only expose aggregate status — no internal details
-        body["checks"] = {
-            name: {"status": data.get("status", "unknown")}
-            for name, data in checks.items()
-        }
-
-    return JSONResponse(content=body, status_code=200 if overall_healthy else 503)
+# Health probes (/health/live, /health/ready, /health) and Prometheus /metrics
+app.include_router(health_router)
 
 
 # ---------------------------------------------------------------------------

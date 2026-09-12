@@ -15,7 +15,21 @@ from unittest.mock import MagicMock, patch, AsyncMock
 import pytest
 from fastapi.testclient import TestClient
 
+from backend.app.core.config import settings
 from backend.app.main import app
+
+
+@pytest.fixture(autouse=True)
+def _dev_auth_bypass(monkeypatch):
+    """
+    These tests exercise the streaming protocol, not authentication, and
+    connect without a token.  The endpoint requires ``?token=`` / a bearer
+    header unless the dev-admin bypass is on (P0 open-core); the auth
+    behaviour itself is covered by
+    backend/tests/integration/api/test_local_auth_path.py::TestWebSocketAuth.
+    """
+    monkeypatch.setattr(settings, "DEV_AUTH_BYPASS", True)
+    monkeypatch.setattr(settings, "ENVIRONMENT", "test")
 
 
 # ---------------------------------------------------------------------------

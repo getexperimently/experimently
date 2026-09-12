@@ -1,4 +1,4 @@
-import Head from 'next/head';
+import { PageTitle } from '@/components/PageTitle';
 import Link from 'next/link';
 
 const sections = [
@@ -104,7 +104,7 @@ const sections = [
     icon: '🔒',
     description: 'Enterprise-grade security, audit logging, and compliance reports.',
     links: [
-      { label: 'SOC 2 Compliance', href: '/docs/security/soc2', desc: 'SOC 2 Type II audit report export' },
+      { label: 'Compliance audit logging', href: '/docs/api/compliance', desc: 'Signed audit events and report export' },
       { label: 'ISO 27001', href: '/docs/security/iso27001', desc: 'ISO 27001 compliance report export' },
       { label: 'Audit Logging', href: '/docs/security/audit-logging', desc: 'HMAC-SHA256 tamper-proof audit trail' },
       { label: 'RBAC', href: '/docs/security/rbac', desc: 'Role-based access control: Admin, Developer, Analyst, Viewer' },
@@ -167,36 +167,12 @@ const quickLinks = [
 export default function DocsIndex() {
   return (
     <>
-      <Head>
-        <title>Documentation — Experimently</title>
-        <meta name="description" content="Experimently documentation: quick start, 14 SDK guides, API reference, integrations, HIPAA compliance, and self-hosting." />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <link rel="icon" href="/favicon.ico" />
-      </Head>
+      <PageTitle
+        title="Documentation"
+        description="Experimently documentation: quick start, 14 SDK guides, API reference, integrations, HIPAA compliance, and self-hosting."
+      />
 
-      <div className="min-h-screen bg-white">
-        {/* Navigation */}
-        <nav className="border-b border-gray-100 bg-white sticky top-0 z-50">
-          <div className="max-w-7xl mx-auto px-6 lg:px-8">
-            <div className="flex justify-between items-center h-16">
-              <div className="flex items-center gap-8">
-                <Link href="/" className="text-xl font-semibold text-gray-900">
-                  Experimently
-                </Link>
-                <span className="text-gray-300">/</span>
-                <span className="text-sm font-medium text-gray-600">Documentation</span>
-              </div>
-              <div className="flex items-center gap-4">
-                <a href="/experiments" className="text-gray-600 hover:text-gray-900 text-sm font-medium">
-                  Sign in
-                </a>
-                <a href="/docs/quick-start" className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition">
-                  Get started free
-                </a>
-              </div>
-            </div>
-          </div>
-        </nav>
+      <div className="flex-1 bg-white">
 
         {/* Hero */}
         <div className="bg-gray-50 border-b border-gray-100 py-16 px-6">

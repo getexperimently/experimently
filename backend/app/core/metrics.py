@@ -81,6 +81,29 @@ active_experiments_gauge: Gauge = Gauge(
 )
 
 # ---------------------------------------------------------------------------
+# Background scheduler metrics (set by backend.app.core.scheduler_tick)
+# ---------------------------------------------------------------------------
+
+scheduler_last_success_timestamp: Gauge = Gauge(
+    "scheduler_last_success_timestamp",
+    "Unix timestamp of the last successful tick of each background scheduler",
+    ["name"],
+)
+
+scheduler_tick_duration_seconds: Histogram = Histogram(
+    "scheduler_tick_duration_seconds",
+    "Wall-clock duration of background scheduler ticks",
+    ["name"],
+    buckets=[0.01, 0.05, 0.1, 0.5, 1.0, 5.0, 15.0, 60.0, 300.0],
+)
+
+scheduler_ticks_total: Counter = Counter(
+    "scheduler_ticks_total",
+    "Background scheduler ticks by outcome (success, partial, failed, skipped)",
+    ["name", "status"],
+)
+
+# ---------------------------------------------------------------------------
 # Helper recording functions
 # ---------------------------------------------------------------------------
 
@@ -112,9 +135,24 @@ def record_experiment_assignment(experiment_id: str, variant_id: str) -> None:
     ).inc()
 
 
+# ``event_type`` on the tracking API is a free-form, client-supplied string
+# (``"purchase"``, ``"cta_click"``, ...).  A label must be bounded, so only
+# the platform's well-known types are used verbatim; everything else is
+# counted as ``custom``.
+KNOWN_EVENT_TYPES: frozenset = frozenset(
+    {"exposure", "experiment_exposure", "conversion", "click", "page_view", "custom"}
+)
+
+
+def event_type_label(event_type: str) -> str:
+    """Map a client-supplied event type to a bounded label value."""
+    value = (event_type or "").strip().lower()
+    return value if value in KNOWN_EVENT_TYPES else "custom"
+
+
 def record_event_tracked(event_type: str) -> None:
-    """Increment the events-tracked counter."""
-    events_tracked_total.labels(event_type=event_type).inc()
+    """Increment the events-tracked counter (label cardinality is bounded)."""
+    events_tracked_total.labels(event_type=event_type_label(event_type)).inc()
 
 
 def record_flag_evaluation(flag_key: str, result: str) -> None:
@@ -145,3 +183,15 @@ def record_rate_limit_hit(endpoint: str) -> None:
 def record_rate_limit_rejection(endpoint: str) -> None:
     """Increment the rate-limit rejections counter."""
     rate_limit_rejections_total.labels(endpoint=endpoint).inc()
+
+
+def record_scheduler_tick(name: str, status: str, duration_seconds: float) -> None:
+    """Count a scheduler tick outcome and observe its duration."""
+    scheduler_ticks_total.labels(name=name, status=status).inc()
+    if status != "skipped":
+        scheduler_tick_duration_seconds.labels(name=name).observe(duration_seconds)
+
+
+def record_scheduler_success(name: str) -> None:
+    """Stamp ``scheduler_last_success_timestamp{name}`` with the current time."""
+    scheduler_last_success_timestamp.labels(name=name).set_to_current_time()

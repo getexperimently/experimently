@@ -5,6 +5,7 @@ import { TargetingRuleBuilder } from '@/components/targeting';
 import { TargetingRules } from '@/types/targeting';
 import { jsonToRules } from '@/utils/targeting';
 import { FeatureFlag, FeatureFlagsService } from '@/services/featureFlags';
+import { PageTitle } from '@/components/PageTitle';
 
 const STATUS_COLORS: Record<string, string> = {
   active: 'bg-green-100 text-green-800',
@@ -71,7 +72,8 @@ export default function FeatureFlagDetailPage() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+      <div className="flex-1 bg-slate-50 flex items-center justify-center">
+        <PageTitle title="Feature Flag" />
         <div className="text-center">
           <div className="inline-block w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
           <p className="text-slate-500 mt-2 text-sm">Loading feature flag...</p>
@@ -82,7 +84,8 @@ export default function FeatureFlagDetailPage() {
 
   if (error || !flag) {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+      <div className="flex-1 bg-slate-50 flex items-center justify-center">
+        <PageTitle title="Feature Flag" />
         <div className="text-center">
           <p className="text-red-600 mb-4">{error ?? 'Feature flag not found'}</p>
           <Link
@@ -97,7 +100,8 @@ export default function FeatureFlagDetailPage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="flex-1 bg-slate-50">
+      <PageTitle title={flag.name} />
       <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Header */}
         <div className="flex items-center gap-4 mb-6">

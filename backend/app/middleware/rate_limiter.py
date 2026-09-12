@@ -163,6 +163,7 @@ class RedisRateLimiter:
 RATE_LIMIT_CONFIG: Dict[str, Tuple[int, int]] = {
     # Authentication endpoints — strict limits to slow brute-force attempts
     "/api/v1/auth/token": (10, 60),
+    "/api/v1/auth/login": (10, 60),
     "/api/v1/auth/signup": (5, 60),
     "/api/v1/auth/forgot-password": (5, 60),
     "/api/v1/auth/reset-password": (5, 60),

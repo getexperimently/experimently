@@ -1,4 +1,5 @@
 from typing import Generator, Optional, Union, Any, Dict
+from uuid import UUID
 import asyncio
 from fastapi import Depends, HTTPException, status, Header, Request, Query
 from fastapi.security import OAuth2PasswordBearer, APIKeyHeader, HTTPBearer, HTTPAuthorizationCredentials
@@ -7,7 +8,12 @@ from pydantic import BaseModel, SecretStr
 
 from backend.app.core.config import settings
 from backend.app.core.pagination import Paginator
-from backend.app.core.security import oauth2_scheme, hash_api_key
+from backend.app.core.security import (
+    oauth2_scheme,
+    hash_api_key,
+    decode_local_token,
+    InvalidTokenError,
+)
 from backend.app.core.permissions import ResourceType, Action, check_permission, check_ownership, get_permission_error_message
 from backend.app.core.cognito import map_cognito_groups_to_role, should_be_superuser
 from backend.app.db.session import SessionLocal
@@ -34,8 +40,9 @@ except ImportError:
 
 
 # OAuth2 scheme for token authentication
-# oauth2_scheme is imported from backend.app.core.security (line 11)
-# Do NOT redefine here — the imported version has auto_error=False in dev mode
+# oauth2_scheme is imported from backend.app.core.security.
+# Do NOT redefine here — the imported version has auto_error=False so that a
+# missing token reaches get_current_user (dev bypass vs. 401 is decided there).
 
 # API key header extraction
 API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
@@ -130,13 +137,31 @@ def get_token(request: Request) -> str:
     return token
 
 
+DEV_BYPASS_USERNAME = "dev-admin"
+DEV_BYPASS_EMAIL = "dev@localhost"
+
+
+def dev_auth_bypass_active() -> bool:
+    """
+    True only when the dev-admin bypass is enabled *and* permitted.
+
+    Both conditions are read from ``settings`` at call time so tests can
+    toggle them, and both must hold: ``DEV_AUTH_BYPASS`` must be exactly
+    ``True`` and ``ENVIRONMENT`` must be ``development`` or ``test``.  No
+    other environment variable (``TESTING``, ``DEBUG`` ...) unlocks it.
+    """
+    # ``is True`` also guards against a mocked settings object, whose
+    # attribute would be a truthy MagicMock.
+    return getattr(settings, "dev_auth_bypass_active", False) is True
+
+
 def _get_or_create_dev_user(db: Session) -> User:
-    """Return a local dev admin user when Cognito is not configured."""
-    user = db.query(User).filter(User.username == "dev-admin").first()
+    """Return the synthetic dev-admin user used by the dev-auth bypass."""
+    user = db.query(User).filter(User.username == DEV_BYPASS_USERNAME).first()
     if not user:
         user = User(
-            username="dev-admin",
-            email="dev@localhost",
+            username=DEV_BYPASS_USERNAME,
+            email=DEV_BYPASS_EMAIL,
             full_name="Dev Admin",
             hashed_password="not-a-real-hash",
             is_active=True,
@@ -149,15 +174,59 @@ def _get_or_create_dev_user(db: Session) -> User:
     return user
 
 
+def _credentials_exception(detail: str = "Could not validate credentials") -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail=detail,
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+
+def _authenticate_local_token(token: str, db: Session) -> User:
+    """
+    Resolve a locally issued JWT to its ``User`` row.
+
+    401 for any decode/lookup failure, 400 when the account is inactive.
+    """
+    try:
+        claims = decode_local_token(token)
+        user_id = UUID(str(claims.get("sub")))
+    except (InvalidTokenError, ValueError, TypeError) as exc:
+        logger.debug(f"Local token rejected: {exc}")
+        raise _credentials_exception()
+
+    try:
+        user = db.query(User).filter(User.id == user_id).first()
+    except Exception as exc:  # pragma: no cover - defensive; DB errors are not auth errors
+        logger.error(f"User lookup failed during local token auth: {exc}")
+        raise _credentials_exception()
+
+    if user is None:
+        raise _credentials_exception()
+    if not user.is_active:
+        raise HTTPException(status_code=400, detail="Inactive user")
+    return user
+
+
 def get_current_user(
     token: Optional[str] = Depends(oauth2_scheme), db: Session = Depends(get_db)
 ) -> User:
     """
-    Get the current authenticated user from the provided JWT token.
-    Syncs user role with Cognito groups on each authentication.
+    Get the current authenticated user from the provided bearer token.
+
+    Resolution order:
+
+    1. Dev-admin bypass (``DEV_AUTH_BYPASS=true`` **and** ``ENVIRONMENT`` in
+       development/test): returns the synthetic ``dev-admin`` superuser.
+    2. No token: 401.
+    3. ``AUTH_PROVIDER=local``: decode the HS256 JWT issued by
+       ``/api/v1/auth/login`` and load the user by id (401 on any failure,
+       400 if the account is inactive).
+    4. ``AUTH_PROVIDER=cognito``: validate the token with Cognito and sync the
+       user's role from its groups (unchanged legacy path).
 
     Args:
-        token (str): JWT access token
+        token (str): Bearer access token (may be None)
         db (Session): Database session
 
     Returns:
@@ -166,14 +235,18 @@ def get_current_user(
     Raises:
         HTTPException: If authentication fails
     """
-    # Dev mode bypass: when Cognito is not configured, return a local admin
-    import os
-    if not os.environ.get("COGNITO_USER_POOL_ID") or not os.environ.get("COGNITO_CLIENT_ID"):
+    if dev_auth_bypass_active():
         try:
             return _get_or_create_dev_user(db)
         except Exception as dev_err:
             logger.error(f"Dev user creation failed: {dev_err}")
             raise HTTPException(status_code=500, detail=f"Dev auth error: {dev_err}")
+
+    if not token:
+        raise _credentials_exception("Not authenticated")
+
+    if settings.AUTH_PROVIDER == "local":
+        return _authenticate_local_token(token, db)
 
     try:
         # Get user details and groups from Cognito

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import Head from 'next/head';
+import { PageTitle } from '@/components/PageTitle';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { Workspace, workspaceService } from '@/services/workspaces';
@@ -226,36 +226,9 @@ export default function WorkspacesPage() {
 
   return (
     <>
-      <Head>
-        <title>Workspaces — Experimently</title>
-      </Head>
+      <PageTitle title="Workspaces" />
 
-      <div className="min-h-screen bg-slate-50">
-        {/* Top nav bar */}
-        <nav className="bg-white border-b border-slate-200 px-6 h-14 flex items-center justify-between">
-          <div className="flex items-center gap-6">
-            <Link href="/" className="text-lg font-semibold text-slate-900">
-              Experimently
-            </Link>
-            <div className="flex items-center gap-4 text-sm">
-              <Link href="/experiments" className="text-slate-600 hover:text-slate-900">
-                Experiments
-              </Link>
-              <Link href="/feature-flags" className="text-slate-600 hover:text-slate-900">
-                Feature Flags
-              </Link>
-              <Link
-                href="/workspaces"
-                className="text-blue-700 font-medium border-b-2 border-blue-600 pb-0.5"
-              >
-                Workspaces
-              </Link>
-              <Link href="/admin" className="text-slate-600 hover:text-slate-900">
-                Admin
-              </Link>
-            </div>
-          </div>
-        </nav>
+      <div className="flex-1 bg-slate-50">
 
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           <div className="flex items-center justify-between mb-6">
