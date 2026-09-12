@@ -1,104 +1,53 @@
-# Experimently - Marketing Website
+# Experimently dashboard
 
-This is the marketing website for Experimently, a modern experimentation platform for A/B testing and feature flags.
+The web dashboard for Experimently: experiments, feature flags, results and administration.
+It is a Next.js 14 application exported as static HTML (`output: 'export'`) and served by
+nginx in the `experimently-web` image, which proxies `/api/`, `/health*` and `/ws/` to
+the API container.
 
-## Tech Stack
-
-- **Framework**: Next.js 14
-- **Language**: TypeScript
-- **Styling**: Tailwind CSS
-- **Deployment**: Vercel (recommended)
-
-## Getting Started
-
-### Prerequisites
-
-- Node.js 18+ and npm
-
-### Installation
+## Develop
 
 ```bash
-# Install dependencies
-npm install
-
-# Run the development server
-npm run dev
+npm ci
+npm run dev          # http://localhost:3000, API at http://localhost:8000 by default
 ```
 
-Open [http://localhost:3000](http://localhost:3000) in your browser to see the marketing website.
+The API must be running (`docker compose up -d --wait api` from the repository root, or
+`uvicorn backend.app.main:app --reload`). Sign in with the seeded administrator
+(`admin@demo.com` / `Demo1234!`).
 
-### Build for Production
+## Test and build
 
 ```bash
-# Create production build
-npm run build
-
-# Start production server
-npm run start
+npm test             # jest + testing-library
+npx tsc --noEmit     # type check
+npm run lint
+npm run build        # static export to out/ (what the container serves)
+npm run test:visual  # Playwright visual regression (needs the stack running)
 ```
 
-## Project Structure
+The `Frontend Tests` CI check runs the first four. Playwright journeys live in
+`tests/e2e/` and log in through the real `/login` page.
+
+## Structure
 
 ```
-frontend/
-├── src/
-│   ├── pages/           # Next.js pages
-│   │   ├── index.tsx    # Marketing landing page
-│   │   ├── _app.tsx     # App wrapper
-│   │   └── ...          # Other pages
-│   └── styles/
-│       └── globals.css  # Global styles with Tailwind
-├── public/              # Static assets
-├── tailwind.config.js   # Tailwind configuration
-├── tsconfig.json        # TypeScript configuration
-└── package.json
+src/
+├── pages/            # one file per route: experiments/, feature-flags/, results/, admin/, login.tsx
+├── components/       # AppShell (nav, user menu), RequireAuth, PageTitle, feature components
+├── contexts/         # AuthContext (current user, login, logout)
+├── services/         # api.ts (apiFetch: bearer token, 401 handling) and per-resource clients
+├── types/
+├── utils/
+└── tests/            # jest tests mirroring src/
+tests/e2e/            # Playwright journeys and page objects
+scripts/nginx-routes.mjs   # generates nginx try_files for dynamic routes from the export
 ```
 
-## Marketing Website Features
+Every request to the backend goes through `apiFetch` in `src/services/api.ts`; there are
+no bare `fetch` calls in `src/`.
 
-The landing page includes:
-
-- **Hero Section**: Main headline with CTA buttons
-- **Features Grid**: 9 key features with icons and descriptions
-- **Benefits Section**: Value propositions with stats
-- **Pricing Section**: Three-tier pricing (Starter, Pro, Enterprise)
-- **CTA Section**: Strong call-to-action with trial offer
-- **About Section**: Company information
-- **Footer**: Links and contact information
-
-## Branding
-
-- **Brand Name**: Experimently
-- **Domain**: getexperimently.com
-- **Tagline**: "Run experiments that matter"
-- **Color Scheme**: Blue (#2563eb) to Indigo (#4f46e5) gradient
-- **Email**:
-  - General: hello@getexperimently.com
-  - Support: support@getexperimently.com
-
-## Subdomain Structure
-
-- **Marketing**: getexperimently.com (this site)
-- **App**: app.getexperimently.com (application dashboard)
-- **API**: api.getexperimently.com (API endpoints)
-- **Docs**: docs.getexperimently.com (documentation)
-
-## Deployment
-
-### Vercel (Recommended)
-
-1. Connect your GitHub repository to Vercel
-2. Set the root directory to `frontend`
-3. Deploy
-
-### Manual Deployment
-
-```bash
-npm run build
-npm run start
-```
-
-## Environment Variables
+## Environment variables
 
 | Variable | Default | Purpose |
 |---|---|---|
@@ -110,36 +59,17 @@ Values are inlined at build time (`next build`), so rebuild the static export af
 ## Authentication
 
 The dashboard signs in through `POST /api/v1/auth/login` and keeps only the bearer token in
-`localStorage["experimently.token"]`. `src/services/api.ts` (`apiFetch`) attaches the token to every
-request and redirects to `/login?next=…` on a 401. There is no public sign-up: accounts are created by
-an administrator (the demo seed creates `admin@demo.com` / `Demo1234!`).
+`localStorage["experimently.token"]`. `apiFetch` attaches the token to every request and
+redirects to `/login?next=…` on a 401. There is no public sign-up: accounts are created by
+an administrator. `<RequireAuth roles={[...]}>` guards pages by role; the `AppShell` hides
+navigation the current role cannot use.
 
-## Customization
+## Container image
 
-### Update Contact Information
+```bash
+docker build -t experimently-web:ce frontend/
+```
 
-Edit `/src/pages/index.tsx` and search for:
-- `hello@getexperimently.com` - General contact
-- `support@getexperimently.com` - Support contact
-
-### Update Pricing
-
-Edit the pricing section in `/src/pages/index.tsx` starting around line 273.
-
-### Update Features
-
-Edit the features grid in `/src/pages/index.tsx` starting around line 90.
-
-## Next Steps
-
-1. Add real dashboard screenshot to hero section
-2. Connect to actual signup/login pages when backend is ready
-3. Add blog/resources section
-4. Implement contact form
-5. Add customer testimonials
-6. Set up analytics (Google Analytics, Mixpanel, etc.)
-7. Add SEO optimizations (meta tags, sitemap, robots.txt)
-
-## Support
-
-For questions or issues, contact: hello@getexperimently.com
+`frontend/Dockerfile` runs `npm ci`, `npm run build`, generates the nginx route map, and
+serves `out/` with `nginxinc/nginx-unprivileged` on port 8080. `docker-compose.yml` at the
+repository root wires it to the API.

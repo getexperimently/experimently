@@ -1,238 +1,70 @@
-# Setting Up GitHub Actions for Python Backend Testing
+# CI workflows
 
-This guide explains how to set up and configure a comprehensive GitHub Actions workflow for testing your Python backend code.
+What runs on a pull request, what is required to merge, and what runs on a schedule.
+All workflows live in `.github/workflows/`. Required checks are enforced by branch
+protection on `main`; a pull request cannot be merged while any of them is red.
 
-## What This Workflow Does
+## Required checks on every pull request
 
-The workflow we've created:
+| Check (status name) | Workflow | What it runs |
+|---------------------|----------|--------------|
+| Unit Tests | `pr-qa-gate.yml` | `backend/tests/unit` (+ Lambda tests) against a Postgres service |
+| Smoke Tests | `pr-qa-gate.yml` | `backend/tests/smoke`: app import, route wiring, auth wiring |
+| Frontend Tests | `pr-qa-gate.yml` | `npm test`, `tsc --noEmit`, `next build` |
+| SDK Contract Tests | `pr-qa-gate.yml` | cross-SDK golden vectors (`tests/sdk-contract`) |
+| SDK Live Contract | `pr-qa-gate.yml` | boots the API with `seed_sdk_contract`, drives every SDK through assign / evaluate / track |
+| integration-tests | `integration-tests.yml` | `backend/tests/integration` with Postgres and Redis services |
+| Security Scan Summary | `security-scan.yml` | Bandit, npm audit, Semgrep (`p/python`, `p/security-audit`, `p/secrets`, `p/owasp-top-ten`), Gitleaks, Trivy on the built image |
+| Release Gate Summary | `release-gate.yml` | backend gate (unit + smoke), frontend gate (test + build), security gate (Bandit + Gitleaks) |
 
-1. **Automates testing** on pull requests and pushes to main
-2. **Tests against Python 3.11**
-3. **Sets up a PostgreSQL database** for integration tests
-4. **Collects and reports code coverage**
-5. **Publishes detailed test reports** in GitHub's UI
-6. **Optimizes testing performance** with caching and parallel execution
+`Docker Smoke` (`pr-qa-gate.yml`) also runs on every pull request: it builds
+`experimently-api:ce` and `experimently-web:ce`, starts `docker-compose.yml`, checks
+`/health/ready`, that `/api/v1/experiments` is a 401 without credentials, logs in as the
+seeded admin, mints an API key, assigns a user to `sdk_contract_ab` and verifies nginx
+routing for a dynamic dashboard route. It becomes a required check in phase P1 of the
+launch plan.
 
-## File Structure
+## Other pull-request and push workflows
 
-Place these files in your repository:
+| Workflow | Trigger | Purpose |
+|----------|---------|---------|
+| `cognito-integration-tests.yml` | changes under `backend/app/**` or `backend/tests/integration/auth/**` | `backend/tests/integration/auth` with moto's Cognito mock; no database, so DB-backed auth tests live in `backend/tests/integration/api` instead |
+| `infrastructure-tests.yml` | changes under `infrastructure/` | CDK stack unit tests |
+| `security-scan.yml` | push, pull request, weekly | as above |
 
-```
-.github/
-  workflows/
-    backend-tests.yml  # Main workflow file
-pytest.ini            # Pytest configuration
-.coveragerc           # Coverage configuration
-```
+## Scheduled workflows
 
-## Setup Steps
+| Workflow | Schedule | Purpose |
+|----------|----------|---------|
+| `nightly-qa.yml` | nightly | unit, integration, smoke, SDK contract, frontend and accessibility suites in one run |
+| `performance-tests.yml` | weekly and on demand | Locust load test against a freshly started API; SLA thresholds in `backend/tests/performance` |
+| `security-scan.yml` | weekly | full scan including the container image |
 
-### 1. Create the Workflow File
+## AWS deployment workflows
 
-Create the directory `.github/workflows/` in your repository and save the `backend-tests.yml` file there.
+`deploy-dev.yml`, `deploy-prod.yml`, `db-migrate.yml` and `rollback.yml` deploy the CDK
+stacks to AWS. They run only when the repository variable `AWS_ACCOUNT_ID` is set on the
+upstream repository, so forks and the Community Edition never attempt a deploy. See
+[docs/deployment](../deployment/README.md).
 
-This workflow is triggered on:
-- Pushes to the `main` branch
-- Pull requests targeting the `main` branch
-
-But only when relevant files change (Python files, requirements, or the workflow itself).
-
-### 2. Configure Pytest
-
-Add the `pytest.ini` file to your repository root. This configures:
-- Where to find tests
-- Test markers for categorizing tests
-- Environment variables for testing
-- Coverage settings
-
-### 3. Configure Coverage
-
-Add the `.coveragerc` file to your repository root to configure:
-- What files to include/exclude from coverage
-- Which lines to exclude from coverage calculation
-- How to format coverage reports
-
-## How It Works
-
-When a PR is created or code is pushed to main:
-
-1. **GitHub starts the workflow** with separate jobs for each Python version
-2. **Dependencies are installed** (cached for faster runs)
-3. **A PostgreSQL database** is started for integration tests
-4. **Tests run with pytest** in parallel with coverage measurement
-5. **Test results are uploaded** as artifacts
-6. **Test report is generated** showing pass/fail status
-7. **Coverage data is uploaded** to Codecov (if configured)
-
-## Key Features
-
-### Matrix Testing
-
-The workflow tests against multiple Python versions simultaneously:
-
-```yaml
-strategy:
-  matrix:
-    python-version: ["3.11"]
-```
-
-Add more versions as needed.
-
-### Dependency Caching
-
-The workflow caches pip dependencies to speed up subsequent runs:
-
-```yaml
-- uses: actions/setup-python@v4
-  with:
-    python-version: ${{ matrix.python-version }}
-    cache: 'pip'  # Built-in pip caching
-    
-- uses: actions/cache@v3  # Additional caching layer
-  with:
-    path: ~/.cache/pip
-    key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements*.txt') }}-${{ matrix.python-version }}
-```
-
-### Database Services
-
-The workflow spins up a PostgreSQL database for integration tests:
-
-```yaml
-services:
-  postgres:
-    image: postgres:14
-    env:
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_USER: postgres
-      POSTGRES_DB: test_db
-    ports:
-      - 5432:5432
-```
-
-Access it in tests via `postgresql://postgres:postgres@localhost:5432/test_db`.
-
-### Parallel Test Execution
-
-Tests run in parallel with pytest-xdist:
+## Running the same checks locally
 
 ```bash
-python -m pytest \
-  --cov=. \
-  --cov-report=xml \
-  --cov-report=term \
-  -v \
-  --junitxml=pytest.xml \
-  -n auto
+source venv/bin/activate && export APP_ENV=test TESTING=true
+python -m pytest backend/tests/unit backend/tests/smoke -q -p no:cov     # Unit + Smoke
+python -m pytest backend/tests/integration -q -p no:cov                   # integration-tests
+cd frontend && npm test && npx tsc --noEmit && npm run build              # Frontend Tests
+python -m pytest tests/sdk-contract/test_python_sdk.py -o addopts="" && node tests/sdk-contract/test_js_sdk.js   # SDK Contract Tests
+docker compose up -d --wait && curl -sf localhost:8000/health/ready       # Docker Smoke, first half
 ```
 
-The `-n auto` flag distributes tests across available CPU cores.
+Postgres must be reachable on `localhost:5432` for the backend suites (`docker compose up -d postgres`).
 
-### Test Reporting
+## Conventions
 
-The workflow publishes detailed test reports using action-junit-report:
-
-```yaml
-- uses: mikepenz/action-junit-report@v3
-  with:
-    report_paths: 'pytest.xml'
-    check_name: Test Results - Python ${{ matrix.python-version }}
-```
-
-This shows test results directly in the GitHub UI.
-
-## Customizing the Workflow
-
-### Adding Testing Dependencies
-
-If you need additional test libraries, add them to the installation step:
-
-```yaml
-pip install pytest pytest-cov pytest-xdist pytest-env pytest-mock pytest-django
-```
-
-### Adding More Services
-
-For Redis or other services, add them to the services section:
-
-```yaml
-services:
-  postgres:
-    # existing config
-  redis:
-    image: redis:7
-    ports:
-      - 6379:6379
-```
-
-### Running Specific Test Subsets
-
-To run different test groups, modify the pytest command:
-
-```yaml
-# Run only unit tests
-python -m pytest -m unit --cov=.
-
-# Run only specific modules
-python -m pytest path/to/specific/tests
-```
-
-### Configuration for Different Environments
-
-For different environments (dev/staging/prod), use environment-specific variables:
-
-```yaml
-env:
-  ENVIRONMENT: ${{ github.ref == 'refs/heads/main' && 'prod' || 'dev' }}
-```
-
-## Test Writing Best Practices
-
-1. **Use markers** to categorize tests:
-   ```python
-   @pytest.mark.unit
-   def test_my_function():
-       # Test implementation
-   ```
-
-2. **Use fixtures** for common setup:
-   ```python
-   @pytest.fixture
-   def db_connection():
-       # Setup database connection
-       yield connection
-       # Cleanup
-   ```
-
-3. **Mock external services**:
-   ```python
-   @pytest.fixture
-   def mock_aws():
-       with patch('boto3.client') as mock:
-           yield mock
-   ```
-
-4. **Parametrize tests** for multiple inputs:
-   ```python
-   @pytest.mark.parametrize("input,expected", [
-       (1, 1),
-       (2, 4),
-       (3, 9)
-   ])
-   def test_square(input, expected):
-       assert square(input) == expected
-   ```
-
-## Troubleshooting
-
-- **Tests pass locally but fail in CI**: Check environment differences or add `-v` to see more details
-- **Missing dependencies**: Ensure all requirements are in requirements.txt
-- **Database connection errors**: Verify service configuration and connection string
-- **Slow tests**: Use `-n auto` for parallel execution and consider skipping slow tests with markers
-
-## Resources
-
-- [GitHub Actions Documentation](https://docs.github.com/en/actions)
-- [Pytest Documentation](https://docs.pytest.org/)
-- [Coverage.py Documentation](https://coverage.readthedocs.io/)
-- [pytest-cov Documentation](https://pytest-cov.readthedocs.io/)
+- Backend tests are organised by directory (`unit`, `integration`, `smoke`, `contract`, `e2e`);
+  the PR gates run by directory, not by marker, so an unmarked test still runs. Markers are
+  declared in `pytest.ini`.
+- Every bug fix ships with a regression test in the suite that would have caught it.
+- A new workflow must either be added to the required-checks list in branch protection
+  or documented here as advisory.

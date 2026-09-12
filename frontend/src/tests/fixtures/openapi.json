@@ -1,0 +1,1499 @@
+{
+  "info": {
+    "title": "Experimentation Platform",
+    "version": "1.0.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/v1/admin/cache/clear": {
+      "post": {
+        "operationId": "clear_cache_api_v1_admin_cache_clear_post",
+        "summary": "Clear Cache"
+      }
+    },
+    "/api/v1/admin/stats": {
+      "get": {
+        "operationId": "get_system_stats_api_v1_admin_stats_get",
+        "summary": "Get System Stats"
+      }
+    },
+    "/api/v1/admin/users": {
+      "get": {
+        "operationId": "list_users_api_v1_admin_users_get",
+        "summary": "List Users"
+      }
+    },
+    "/api/v1/admin/users/{user_id}": {
+      "delete": {
+        "operationId": "delete_user_api_v1_admin_users__user_id__delete",
+        "summary": "Delete User"
+      },
+      "get": {
+        "operationId": "get_user_api_v1_admin_users__user_id__get",
+        "summary": "Get User"
+      },
+      "put": {
+        "operationId": "update_user_api_v1_admin_users__user_id__put",
+        "summary": "Update User"
+      }
+    },
+    "/api/v1/ai/design": {
+      "post": {
+        "operationId": "suggest_design_api_v1_ai_design_post",
+        "summary": "AI Experiment Design Assistant"
+      }
+    },
+    "/api/v1/ai/interpret/{experiment_id}": {
+      "post": {
+        "operationId": "interpret_results_api_v1_ai_interpret__experiment_id__post",
+        "summary": "AI Results Interpreter"
+      }
+    },
+    "/api/v1/ai/sample-size": {
+      "get": {
+        "operationId": "estimate_sample_size_api_v1_ai_sample_size_get",
+        "summary": "Sample Size Calculator"
+      }
+    },
+    "/api/v1/ai/templates": {
+      "get": {
+        "operationId": "list_templates_api_v1_ai_templates_get",
+        "summary": "List Experiment Templates"
+      }
+    },
+    "/api/v1/ai/templates/{template_id}": {
+      "get": {
+        "operationId": "get_template_api_v1_ai_templates__template_id__get",
+        "summary": "Get Experiment Template"
+      }
+    },
+    "/api/v1/api-keys": {
+      "get": {
+        "operationId": "list_api_keys_api_v1_api_keys_get",
+        "summary": "List Api Keys"
+      },
+      "post": {
+        "operationId": "create_api_key_api_v1_api_keys_post",
+        "summary": "Create Api Key"
+      }
+    },
+    "/api/v1/api-keys/{key_id}": {
+      "delete": {
+        "operationId": "delete_api_key_api_v1_api_keys__key_id__delete",
+        "summary": "Delete Api Key"
+      }
+    },
+    "/api/v1/assignments/": {
+      "get": {
+        "operationId": "get_assignments_api_v1_assignments__get",
+        "summary": "Get Assignments"
+      }
+    },
+    "/api/v1/audit-logs/": {
+      "get": {
+        "operationId": "list_audit_logs_api_v1_audit_logs__get",
+        "summary": "List audit logs"
+      }
+    },
+    "/api/v1/audit-logs/entity/{entity_type}/{entity_id}": {
+      "get": {
+        "operationId": "get_entity_audit_history_api_v1_audit_logs_entity__entity_type___entity_id__get",
+        "summary": "Get audit history for a specific entity"
+      }
+    },
+    "/api/v1/audit-logs/stats": {
+      "get": {
+        "operationId": "get_audit_stats_api_v1_audit_logs_stats_get",
+        "summary": "Get audit log statistics"
+      }
+    },
+    "/api/v1/audit-logs/stream": {
+      "get": {
+        "operationId": "stream_audit_logs_api_v1_audit_logs_stream_get",
+        "summary": "SSE stream of recent audit log events"
+      }
+    },
+    "/api/v1/audit-logs/user/{user_id}": {
+      "get": {
+        "operationId": "get_user_activity_api_v1_audit_logs_user__user_id__get",
+        "summary": "Get audit logs for a specific user"
+      }
+    },
+    "/api/v1/auth/confirm": {
+      "post": {
+        "operationId": "confirm_signup_api_v1_auth_confirm_post",
+        "summary": "Confirm Signup"
+      }
+    },
+    "/api/v1/auth/forgot-password": {
+      "post": {
+        "operationId": "forgot_password_api_v1_auth_forgot_password_post",
+        "summary": "Forgot Password"
+      }
+    },
+    "/api/v1/auth/login": {
+      "post": {
+        "operationId": "login_local_api_v1_auth_login_post",
+        "summary": "Login Local"
+      }
+    },
+    "/api/v1/auth/logout": {
+      "post": {
+        "operationId": "logout_local_api_v1_auth_logout_post",
+        "summary": "Logout Local"
+      }
+    },
+    "/api/v1/auth/me": {
+      "get": {
+        "operationId": "get_user_info_api_v1_auth_me_get",
+        "summary": "Get User Info"
+      }
+    },
+    "/api/v1/auth/refresh": {
+      "post": {
+        "operationId": "refresh_token_api_v1_auth_refresh_post",
+        "summary": "Refresh Token"
+      }
+    },
+    "/api/v1/auth/reset-password": {
+      "post": {
+        "operationId": "reset_password_api_v1_auth_reset_password_post",
+        "summary": "Reset Password"
+      }
+    },
+    "/api/v1/auth/signup": {
+      "post": {
+        "operationId": "signup_api_v1_auth_signup_post",
+        "summary": "Signup"
+      }
+    },
+    "/api/v1/auth/sso/configs": {
+      "get": {
+        "operationId": "list_sso_configs_api_v1_auth_sso_configs_get",
+        "summary": "List SSO configs"
+      },
+      "post": {
+        "operationId": "create_sso_config_api_v1_auth_sso_configs_post",
+        "summary": "Create SSO config"
+      }
+    },
+    "/api/v1/auth/sso/configs/{config_id}": {
+      "delete": {
+        "operationId": "delete_sso_config_api_v1_auth_sso_configs__config_id__delete",
+        "summary": "Delete SSO config"
+      },
+      "get": {
+        "operationId": "get_sso_config_api_v1_auth_sso_configs__config_id__get",
+        "summary": "Get SSO config"
+      },
+      "put": {
+        "operationId": "update_sso_config_api_v1_auth_sso_configs__config_id__put",
+        "summary": "Update SSO config"
+      }
+    },
+    "/api/v1/auth/sso/oidc/{provider}/callback": {
+      "get": {
+        "operationId": "oidc_callback_api_v1_auth_sso_oidc__provider__callback_get",
+        "summary": "OIDC callback"
+      }
+    },
+    "/api/v1/auth/sso/oidc/{provider}/login": {
+      "get": {
+        "operationId": "oidc_login_api_v1_auth_sso_oidc__provider__login_get",
+        "summary": "Initiate OIDC login"
+      }
+    },
+    "/api/v1/auth/sso/saml/{config_id}/acs": {
+      "post": {
+        "operationId": "saml_acs_api_v1_auth_sso_saml__config_id__acs_post",
+        "summary": "SAML Assertion Consumer Service"
+      }
+    },
+    "/api/v1/auth/sso/saml/{config_id}/metadata": {
+      "get": {
+        "operationId": "saml_metadata_api_v1_auth_sso_saml__config_id__metadata_get",
+        "summary": "SAML SP metadata"
+      }
+    },
+    "/api/v1/auth/token": {
+      "post": {
+        "operationId": "login_api_v1_auth_token_post",
+        "summary": "Login"
+      }
+    },
+    "/api/v1/bandit/{experiment_id}": {
+      "get": {
+        "operationId": "get_bandit_status_api_v1_bandit__experiment_id__get",
+        "summary": "Get Bandit Status"
+      }
+    },
+    "/api/v1/bandit/{experiment_id}/update": {
+      "post": {
+        "operationId": "trigger_bandit_update_api_v1_bandit__experiment_id__update_post",
+        "summary": "Trigger Bandit Update"
+      }
+    },
+    "/api/v1/bandit/{experiment_id}/weights": {
+      "put": {
+        "operationId": "override_bandit_weights_api_v1_bandit__experiment_id__weights_put",
+        "summary": "Override Bandit Weights"
+      }
+    },
+    "/api/v1/compliance/audit-events": {
+      "get": {
+        "operationId": "list_audit_events_api_v1_compliance_audit_events_get",
+        "summary": "List compliance audit events"
+      }
+    },
+    "/api/v1/compliance/export": {
+      "get": {
+        "operationId": "export_audit_events_api_v1_compliance_export_get",
+        "summary": "Export audit events"
+      }
+    },
+    "/api/v1/compliance/reports/{standard}": {
+      "get": {
+        "operationId": "generate_compliance_report_api_v1_compliance_reports__standard__get",
+        "summary": "Generate compliance report"
+      }
+    },
+    "/api/v1/counters/{experiment_id}": {
+      "get": {
+        "operationId": "get_experiment_counters_api_v1_counters__experiment_id__get",
+        "summary": "Get real-time counters for an experiment"
+      }
+    },
+    "/api/v1/counters/{experiment_id}/bulk": {
+      "post": {
+        "operationId": "bulk_increment_api_v1_counters__experiment_id__bulk_post",
+        "summary": "Bulk-increment multiple counters"
+      }
+    },
+    "/api/v1/counters/{experiment_id}/increment": {
+      "post": {
+        "operationId": "increment_counter_api_v1_counters__experiment_id__increment_post",
+        "summary": "Atomically increment a single counter"
+      }
+    },
+    "/api/v1/counters/{experiment_id}/reset": {
+      "post": {
+        "operationId": "reset_counters_api_v1_counters__experiment_id__reset_post",
+        "summary": "Reset counters (ADMIN only)"
+      }
+    },
+    "/api/v1/edge/bootstrap": {
+      "get": {
+        "operationId": "get_edge_bootstrap_api_v1_edge_bootstrap_get",
+        "summary": "Edge SDK bootstrap \u2014 all flags and experiments in one call"
+      }
+    },
+    "/api/v1/etl/crawler/run": {
+      "post": {
+        "operationId": "run_crawler_api_v1_etl_crawler_run_post",
+        "summary": "Trigger the Glue crawler"
+      }
+    },
+    "/api/v1/etl/crawler/status": {
+      "get": {
+        "operationId": "get_crawler_status_api_v1_etl_crawler_status_get",
+        "summary": "Get Glue crawler status"
+      }
+    },
+    "/api/v1/etl/jobs/run": {
+      "post": {
+        "operationId": "run_etl_job_api_v1_etl_jobs_run_post",
+        "summary": "Trigger an ETL job run"
+      }
+    },
+    "/api/v1/etl/jobs/{run_id}/status": {
+      "get": {
+        "operationId": "get_job_status_api_v1_etl_jobs__run_id__status_get",
+        "summary": "Get ETL job run status"
+      }
+    },
+    "/api/v1/etl/partitions/add": {
+      "post": {
+        "operationId": "add_partitions_api_v1_etl_partitions_add_post",
+        "summary": "Add S3 partitions to the Glue catalog"
+      }
+    },
+    "/api/v1/etl/query": {
+      "post": {
+        "operationId": "run_athena_query_api_v1_etl_query_post",
+        "summary": "Run an Athena SQL query"
+      }
+    },
+    "/api/v1/events/": {
+      "get": {
+        "operationId": "get_events_api_v1_events__get",
+        "summary": "Get Events"
+      }
+    },
+    "/api/v1/experiments/": {
+      "get": {
+        "operationId": "list_experiments_api_v1_experiments__get",
+        "summary": "List experiments"
+      },
+      "post": {
+        "operationId": "create_experiment_api_v1_experiments__post",
+        "summary": "Create experiment"
+      }
+    },
+    "/api/v1/experiments/analysis/sample-size": {
+      "get": {
+        "operationId": "calculate_experiment_sample_size_api_v1_experiments_analysis_sample_size_get",
+        "summary": "Calculate required sample size"
+      }
+    },
+    "/api/v1/experiments/schedules/process": {
+      "post": {
+        "operationId": "trigger_schedule_processing_api_v1_experiments_schedules_process_post",
+        "summary": "Manually trigger experiment schedule processing"
+      }
+    },
+    "/api/v1/experiments/{experiment_id}": {
+      "delete": {
+        "operationId": "delete_experiment_api_v1_experiments__experiment_id__delete",
+        "summary": "Delete experiment"
+      },
+      "get": {
+        "operationId": "get_experiment_api_v1_experiments__experiment_id__get",
+        "summary": "Get experiment"
+      },
+      "put": {
+        "operationId": "update_experiment_api_v1_experiments__experiment_id__put",
+        "summary": "Update experiment"
+      }
+    },
+    "/api/v1/experiments/{experiment_id}/archive": {
+      "post": {
+        "operationId": "archive_experiment_api_v1_experiments__experiment_id__archive_post",
+        "summary": "Archive experiment"
+      }
+    },
+    "/api/v1/experiments/{experiment_id}/clone": {
+      "post": {
+        "operationId": "clone_experiment_api_v1_experiments__experiment_id__clone_post",
+        "summary": "Clone experiment"
+      }
+    },
+    "/api/v1/experiments/{experiment_id}/complete": {
+      "post": {
+        "operationId": "complete_experiment_api_v1_experiments__experiment_id__complete_post",
+        "summary": "Complete experiment"
+      }
+    },
+    "/api/v1/experiments/{experiment_id}/daily-results": {
+      "get": {
+        "operationId": "get_daily_experiment_results_api_v1_experiments__experiment_id__daily_results_get",
+        "summary": "Get daily experiment results"
+      }
+    },
+    "/api/v1/experiments/{experiment_id}/metadata": {
+      "post": {
+        "operationId": "update_experiment_metadata_api_v1_experiments__experiment_id__metadata_post",
+        "summary": "Update experiment metadata"
+      }
+    },
+    "/api/v1/experiments/{experiment_id}/pause": {
+      "post": {
+        "operationId": "pause_experiment_api_v1_experiments__experiment_id__pause_post",
+        "summary": "Pause experiment"
+      }
+    },
+    "/api/v1/experiments/{experiment_id}/results": {
+      "get": {
+        "operationId": "get_experiment_results_api_v1_experiments__experiment_id__results_get",
+        "summary": "Get experiment results"
+      }
+    },
+    "/api/v1/experiments/{experiment_id}/schedule": {
+      "put": {
+        "operationId": "update_experiment_schedule_api_v1_experiments__experiment_id__schedule_put",
+        "summary": "Update experiment schedule"
+      }
+    },
+    "/api/v1/experiments/{experiment_id}/segmented-results/{segment_by}": {
+      "get": {
+        "operationId": "get_segmented_experiment_results_api_v1_experiments__experiment_id__segmented_results__segment_by__get",
+        "summary": "Get segmented experiment results"
+      }
+    },
+    "/api/v1/experiments/{experiment_id}/split-url/preview": {
+      "get": {
+        "operationId": "preview_split_url_assignment_api_v1_experiments__experiment_id__split_url_preview_get",
+        "summary": "Preview split URL assignment for a user"
+      }
+    },
+    "/api/v1/experiments/{experiment_id}/start": {
+      "post": {
+        "operationId": "start_experiment_api_v1_experiments__experiment_id__start_post",
+        "summary": "Start experiment"
+      }
+    },
+    "/api/v1/export/experiments": {
+      "get": {
+        "operationId": "export_experiments_api_v1_export_experiments_get",
+        "summary": "Export experiments to CSV or JSON"
+      }
+    },
+    "/api/v1/export/feature-flags": {
+      "get": {
+        "operationId": "export_feature_flags_api_v1_export_feature_flags_get",
+        "summary": "Export feature flag data to CSV or JSON"
+      }
+    },
+    "/api/v1/export/reports/experiments/{experiment_id}": {
+      "get": {
+        "operationId": "get_experiment_report_api_v1_export_reports_experiments__experiment_id__get",
+        "summary": "Full experiment report"
+      }
+    },
+    "/api/v1/export/reports/overview": {
+      "get": {
+        "operationId": "get_overview_report_api_v1_export_reports_overview_get",
+        "summary": "Platform overview report"
+      }
+    },
+    "/api/v1/export/variants": {
+      "get": {
+        "operationId": "export_variants_api_v1_export_variants_get",
+        "summary": "Export variant results to CSV or JSON"
+      }
+    },
+    "/api/v1/feature-flags/": {
+      "get": {
+        "operationId": "list_feature_flags_api_v1_feature_flags__get",
+        "summary": "List feature flags"
+      },
+      "post": {
+        "operationId": "create_feature_flag_api_v1_feature_flags__post",
+        "summary": "Create feature flag"
+      }
+    },
+    "/api/v1/feature-flags/bulk-toggle": {
+      "post": {
+        "operationId": "bulk_toggle_flags_api_v1_feature_flags_bulk_toggle_post",
+        "summary": "Bulk enable/disable/archive feature flags"
+      }
+    },
+    "/api/v1/feature-flags/evaluate/{flag_key}": {
+      "get": {
+        "operationId": "evaluate_feature_flag_api_v1_feature_flags_evaluate__flag_key__get",
+        "summary": "Evaluate feature flag for a user"
+      },
+      "post": {
+        "operationId": "evaluate_feature_flag_post_api_v1_feature_flags_evaluate__flag_key__post",
+        "summary": "Evaluate feature flag for a user (with context body)"
+      }
+    },
+    "/api/v1/feature-flags/user/{user_id}": {
+      "get": {
+        "operationId": "get_user_flags_api_v1_feature_flags_user__user_id__get",
+        "summary": "Get all feature flags for a user"
+      }
+    },
+    "/api/v1/feature-flags/{flag_id}": {
+      "delete": {
+        "operationId": "delete_feature_flag_api_v1_feature_flags__flag_id__delete",
+        "summary": "Delete feature flag"
+      },
+      "get": {
+        "operationId": "get_feature_flag_api_v1_feature_flags__flag_id__get",
+        "summary": "Get feature flag"
+      },
+      "put": {
+        "operationId": "update_feature_flag_api_v1_feature_flags__flag_id__put",
+        "summary": "Update feature flag"
+      }
+    },
+    "/api/v1/feature-flags/{flag_id}/activate": {
+      "post": {
+        "operationId": "activate_feature_flag_api_v1_feature_flags__flag_id__activate_post",
+        "summary": "Activate feature flag"
+      }
+    },
+    "/api/v1/feature-flags/{flag_id}/deactivate": {
+      "post": {
+        "operationId": "deactivate_feature_flag_api_v1_feature_flags__flag_id__deactivate_post",
+        "summary": "Deactivate feature flag"
+      }
+    },
+    "/api/v1/feature-flags/{flag_id}/disable": {
+      "post": {
+        "operationId": "disable_feature_flag_api_v1_feature_flags__flag_id__disable_post",
+        "summary": "Disable feature flag"
+      }
+    },
+    "/api/v1/feature-flags/{flag_id}/enable": {
+      "post": {
+        "operationId": "enable_feature_flag_api_v1_feature_flags__flag_id__enable_post",
+        "summary": "Enable feature flag"
+      }
+    },
+    "/api/v1/feature-flags/{flag_id}/history": {
+      "get": {
+        "operationId": "get_flag_history_api_v1_feature_flags__flag_id__history_get",
+        "summary": "Get change history for a feature flag"
+      }
+    },
+    "/api/v1/feature-flags/{flag_id}/toggle": {
+      "post": {
+        "operationId": "toggle_feature_flag_api_v1_feature_flags__flag_id__toggle_post",
+        "summary": "Toggle feature flag"
+      }
+    },
+    "/api/v1/hipaa/audit-logs": {
+      "get": {
+        "operationId": "list_audit_logs_api_v1_hipaa_audit_logs_get",
+        "summary": "List PHI audit log entries"
+      },
+      "post": {
+        "operationId": "create_audit_log_api_v1_hipaa_audit_logs_post",
+        "summary": "Manually log a PHI access event"
+      }
+    },
+    "/api/v1/hipaa/baa": {
+      "get": {
+        "operationId": "list_baas_api_v1_hipaa_baa_get",
+        "summary": "List BAA configurations"
+      },
+      "post": {
+        "operationId": "create_baa_api_v1_hipaa_baa_post",
+        "summary": "Create a BAA configuration"
+      }
+    },
+    "/api/v1/hipaa/baa/{baa_id}": {
+      "delete": {
+        "operationId": "deactivate_baa_api_v1_hipaa_baa__baa_id__delete",
+        "summary": "Deactivate a BAA configuration"
+      },
+      "get": {
+        "operationId": "get_baa_api_v1_hipaa_baa__baa_id__get",
+        "summary": "Get a specific BAA configuration"
+      }
+    },
+    "/api/v1/hipaa/data-residency": {
+      "get": {
+        "operationId": "get_data_residency_api_v1_hipaa_data_residency_get",
+        "summary": "Get data residency configuration"
+      }
+    },
+    "/api/v1/hipaa/decrypt": {
+      "post": {
+        "operationId": "decrypt_phi_api_v1_hipaa_decrypt_post",
+        "summary": "Decrypt a PHI field value"
+      }
+    },
+    "/api/v1/hipaa/encrypt": {
+      "post": {
+        "operationId": "encrypt_phi_api_v1_hipaa_encrypt_post",
+        "summary": "Encrypt a PHI field value"
+      }
+    },
+    "/api/v1/hipaa/report": {
+      "get": {
+        "operationId": "get_hipaa_report_api_v1_hipaa_report_get",
+        "summary": "Generate HIPAA compliance report"
+      }
+    },
+    "/api/v1/hipaa/status": {
+      "get": {
+        "operationId": "get_hipaa_status_api_v1_hipaa_status_get",
+        "summary": "HIPAA readiness status"
+      }
+    },
+    "/api/v1/holdout": {
+      "get": {
+        "operationId": "get_active_holdout_api_v1_holdout_get",
+        "summary": "Get the active global holdout"
+      },
+      "post": {
+        "operationId": "create_holdout_api_v1_holdout_post",
+        "summary": "Create a global holdout"
+      }
+    },
+    "/api/v1/holdout/all": {
+      "get": {
+        "operationId": "list_all_holdouts_api_v1_holdout_all_get",
+        "summary": "List all global holdouts"
+      }
+    },
+    "/api/v1/holdout/check/{user_id}": {
+      "get": {
+        "operationId": "check_user_holdout_api_v1_holdout_check__user_id__get",
+        "summary": "Check if a user is in the global holdout"
+      }
+    },
+    "/api/v1/holdout/{holdout_id}": {
+      "put": {
+        "operationId": "update_holdout_api_v1_holdout__holdout_id__put",
+        "summary": "Update a global holdout"
+      }
+    },
+    "/api/v1/integrations": {
+      "get": {
+        "operationId": "list_integrations_api_v1_integrations_get",
+        "summary": "List Integrations"
+      },
+      "post": {
+        "operationId": "create_integration_api_v1_integrations_post",
+        "summary": "Create Integration"
+      }
+    },
+    "/api/v1/integrations/webhooks/github": {
+      "post": {
+        "operationId": "github_webhook_api_v1_integrations_webhooks_github_post",
+        "summary": "Github Webhook"
+      }
+    },
+    "/api/v1/integrations/webhooks/jira": {
+      "post": {
+        "operationId": "jira_webhook_api_v1_integrations_webhooks_jira_post",
+        "summary": "Jira Webhook"
+      }
+    },
+    "/api/v1/integrations/webhooks/salesforce": {
+      "post": {
+        "operationId": "salesforce_webhook_api_v1_integrations_webhooks_salesforce_post",
+        "summary": "Salesforce Webhook"
+      }
+    },
+    "/api/v1/integrations/{integration_type}": {
+      "delete": {
+        "operationId": "delete_integration_api_v1_integrations__integration_type__delete",
+        "summary": "Delete Integration"
+      },
+      "get": {
+        "operationId": "get_integration_api_v1_integrations__integration_type__get",
+        "summary": "Get Integration"
+      },
+      "put": {
+        "operationId": "update_integration_api_v1_integrations__integration_type__put",
+        "summary": "Update Integration"
+      }
+    },
+    "/api/v1/interactions/scan": {
+      "get": {
+        "operationId": "scan_interactions_api_v1_interactions_scan_get",
+        "summary": "Scan Interactions"
+      }
+    },
+    "/api/v1/interactions/{exp_a_id}/{exp_b_id}": {
+      "get": {
+        "operationId": "analyze_pair_api_v1_interactions__exp_a_id___exp_b_id__get",
+        "summary": "Analyze Pair"
+      }
+    },
+    "/api/v1/interactions/{exp_a_id}/{exp_b_id}/novelty": {
+      "get": {
+        "operationId": "analyze_novelty_api_v1_interactions__exp_a_id___exp_b_id__novelty_get",
+        "summary": "Analyze Novelty"
+      }
+    },
+    "/api/v1/llm-experiments/": {
+      "get": {
+        "operationId": "list_llm_experiments_api_v1_llm_experiments__get",
+        "summary": "List LLM experiments"
+      },
+      "post": {
+        "operationId": "create_llm_experiment_api_v1_llm_experiments__post",
+        "summary": "Create LLM experiment"
+      }
+    },
+    "/api/v1/llm-experiments/{experiment_id}": {
+      "get": {
+        "operationId": "get_llm_experiment_api_v1_llm_experiments__experiment_id__get",
+        "summary": "Get LLM experiment"
+      },
+      "put": {
+        "operationId": "update_llm_experiment_api_v1_llm_experiments__experiment_id__put",
+        "summary": "Update LLM experiment"
+      }
+    },
+    "/api/v1/llm-experiments/{experiment_id}/complete": {
+      "post": {
+        "operationId": "llm_complete_api_v1_llm_experiments__experiment_id__complete_post",
+        "summary": "Get LLM completion for assigned variant"
+      }
+    },
+    "/api/v1/llm-experiments/{experiment_id}/evaluate": {
+      "post": {
+        "operationId": "submit_evaluation_api_v1_llm_experiments__experiment_id__evaluate_post",
+        "summary": "Submit evaluation scores"
+      }
+    },
+    "/api/v1/llm-experiments/{experiment_id}/judge": {
+      "post": {
+        "operationId": "run_judge_api_v1_llm_experiments__experiment_id__judge_post",
+        "summary": "Run LLM-as-judge scoring"
+      }
+    },
+    "/api/v1/llm-experiments/{experiment_id}/pause": {
+      "post": {
+        "operationId": "pause_llm_experiment_api_v1_llm_experiments__experiment_id__pause_post",
+        "summary": "Pause LLM experiment"
+      }
+    },
+    "/api/v1/llm-experiments/{experiment_id}/results": {
+      "get": {
+        "operationId": "get_llm_results_api_v1_llm_experiments__experiment_id__results_get",
+        "summary": "Get LLM experiment analytics results"
+      }
+    },
+    "/api/v1/llm-experiments/{experiment_id}/start": {
+      "post": {
+        "operationId": "start_llm_experiment_api_v1_llm_experiments__experiment_id__start_post",
+        "summary": "Start LLM experiment"
+      }
+    },
+    "/api/v1/llm-experiments/{experiment_id}/variants": {
+      "post": {
+        "operationId": "add_llm_variant_api_v1_llm_experiments__experiment_id__variants_post",
+        "summary": "Add variant to LLM experiment"
+      }
+    },
+    "/api/v1/llm-experiments/{experiment_id}/variants/{variant_id}": {
+      "put": {
+        "operationId": "update_llm_variant_api_v1_llm_experiments__experiment_id__variants__variant_id__put",
+        "summary": "Update LLM variant"
+      }
+    },
+    "/api/v1/mcp/manifest": {
+      "get": {
+        "operationId": "get_mcp_manifest_api_v1_mcp_manifest_get",
+        "summary": "MCP Server Manifest"
+      }
+    },
+    "/api/v1/metrics/aggregate": {
+      "post": {
+        "operationId": "trigger_aggregation_api_v1_metrics_aggregate_post",
+        "summary": "Trigger metrics aggregation"
+      }
+    },
+    "/api/v1/metrics/aggregated": {
+      "get": {
+        "operationId": "get_aggregated_metrics_api_v1_metrics_aggregated_get",
+        "summary": "Get aggregated metrics"
+      }
+    },
+    "/api/v1/metrics/errors": {
+      "get": {
+        "operationId": "get_error_logs_api_v1_metrics_errors_get",
+        "summary": "Get error logs"
+      }
+    },
+    "/api/v1/metrics/summary": {
+      "get": {
+        "operationId": "get_metrics_summary_api_v1_metrics_summary_get",
+        "summary": "Get metrics summary"
+      }
+    },
+    "/api/v1/mutual-exclusion-groups": {
+      "get": {
+        "operationId": "list_groups_api_v1_mutual_exclusion_groups_get",
+        "summary": "List mutual exclusion groups"
+      },
+      "post": {
+        "operationId": "create_group_api_v1_mutual_exclusion_groups_post",
+        "summary": "Create a mutual exclusion group"
+      }
+    },
+    "/api/v1/mutual-exclusion-groups/{group_id}": {
+      "delete": {
+        "operationId": "archive_group_api_v1_mutual_exclusion_groups__group_id__delete",
+        "summary": "Archive a mutual exclusion group"
+      },
+      "get": {
+        "operationId": "get_group_api_v1_mutual_exclusion_groups__group_id__get",
+        "summary": "Get a mutual exclusion group"
+      },
+      "put": {
+        "operationId": "update_group_api_v1_mutual_exclusion_groups__group_id__put",
+        "summary": "Update a mutual exclusion group"
+      }
+    },
+    "/api/v1/mutual-exclusion-groups/{group_id}/experiments": {
+      "post": {
+        "operationId": "add_experiment_to_group_api_v1_mutual_exclusion_groups__group_id__experiments_post",
+        "summary": "Add experiment to mutual exclusion group"
+      }
+    },
+    "/api/v1/mutual-exclusion-groups/{group_id}/experiments/{experiment_id}": {
+      "delete": {
+        "operationId": "remove_experiment_from_group_api_v1_mutual_exclusion_groups__group_id__experiments__experiment_id__delete",
+        "summary": "Remove experiment from mutual exclusion group"
+      }
+    },
+    "/api/v1/notifications/admin/preferences": {
+      "get": {
+        "operationId": "list_all_preferences_api_v1_notifications_admin_preferences_get",
+        "summary": "List All Preferences"
+      }
+    },
+    "/api/v1/notifications/delivery-log": {
+      "get": {
+        "operationId": "get_delivery_log_api_v1_notifications_delivery_log_get",
+        "summary": "Get Delivery Log"
+      }
+    },
+    "/api/v1/notifications/preferences": {
+      "get": {
+        "operationId": "get_my_preferences_api_v1_notifications_preferences_get",
+        "summary": "Get My Preferences"
+      },
+      "put": {
+        "operationId": "update_my_preferences_api_v1_notifications_preferences_put",
+        "summary": "Update My Preferences"
+      }
+    },
+    "/api/v1/notifications/test": {
+      "post": {
+        "operationId": "send_test_notification_api_v1_notifications_test_post",
+        "summary": "Send Test Notification"
+      }
+    },
+    "/api/v1/openfeature/bulk-evaluate": {
+      "post": {
+        "operationId": "bulk_evaluate_openfeature_flags_api_v1_openfeature_bulk_evaluate_post",
+        "summary": "Bulk server-side flag evaluation (OpenFeature)"
+      }
+    },
+    "/api/v1/openfeature/evaluate": {
+      "post": {
+        "operationId": "evaluate_openfeature_flag_api_v1_openfeature_evaluate_post",
+        "summary": "Server-side flag evaluation (OpenFeature)"
+      }
+    },
+    "/api/v1/openfeature/flags": {
+      "get": {
+        "operationId": "get_openfeature_flags_api_v1_openfeature_flags_get",
+        "summary": "List all flags for OpenFeature local evaluation"
+      }
+    },
+    "/api/v1/power/curve": {
+      "get": {
+        "operationId": "get_power_curve_api_v1_power_curve_get",
+        "summary": "Get Power Curve"
+      }
+    },
+    "/api/v1/power/mde": {
+      "post": {
+        "operationId": "compute_mde_api_v1_power_mde_post",
+        "summary": "Compute Minimum Detectable Effect"
+      }
+    },
+    "/api/v1/power/plan": {
+      "post": {
+        "operationId": "get_planning_advice_api_v1_power_plan_post",
+        "summary": "Get AI Planning Advice"
+      }
+    },
+    "/api/v1/power/runtime": {
+      "post": {
+        "operationId": "compute_runtime_api_v1_power_runtime_post",
+        "summary": "Estimate Experiment Runtime"
+      }
+    },
+    "/api/v1/power/sample-size": {
+      "post": {
+        "operationId": "compute_sample_size_api_v1_power_sample_size_post",
+        "summary": "Compute Required Sample Size"
+      }
+    },
+    "/api/v1/rbac/roles": {
+      "get": {
+        "operationId": "list_roles_api_v1_rbac_roles_get",
+        "summary": "List Roles"
+      },
+      "post": {
+        "operationId": "create_role_api_v1_rbac_roles_post",
+        "summary": "Create Role"
+      }
+    },
+    "/api/v1/rbac/roles/assign": {
+      "post": {
+        "operationId": "assign_role_api_v1_rbac_roles_assign_post",
+        "summary": "Assign Role"
+      }
+    },
+    "/api/v1/rbac/roles/revoke": {
+      "post": {
+        "operationId": "revoke_role_api_v1_rbac_roles_revoke_post",
+        "summary": "Revoke Role"
+      }
+    },
+    "/api/v1/rbac/roles/{role_name}": {
+      "delete": {
+        "operationId": "delete_role_api_v1_rbac_roles__role_name__delete",
+        "summary": "Delete Role"
+      },
+      "get": {
+        "operationId": "get_role_api_v1_rbac_roles__role_name__get",
+        "summary": "Get Role"
+      },
+      "put": {
+        "operationId": "update_role_api_v1_rbac_roles__role_name__put",
+        "summary": "Update Role"
+      }
+    },
+    "/api/v1/rbac/users/{user_id}/grant": {
+      "post": {
+        "operationId": "grant_permission_api_v1_rbac_users__user_id__grant_post",
+        "summary": "Grant Permission"
+      }
+    },
+    "/api/v1/rbac/users/{user_id}/grant/{resource}": {
+      "delete": {
+        "operationId": "revoke_permission_api_v1_rbac_users__user_id__grant__resource__delete",
+        "summary": "Revoke Permission"
+      }
+    },
+    "/api/v1/rbac/users/{user_id}/permissions": {
+      "get": {
+        "operationId": "get_effective_permissions_api_v1_rbac_users__user_id__permissions_get",
+        "summary": "Get Effective Permissions"
+      }
+    },
+    "/api/v1/results/{experiment_id}": {
+      "get": {
+        "operationId": "get_experiment_results_api_v1_results__experiment_id__get",
+        "summary": "Get Experiment Results"
+      }
+    },
+    "/api/v1/results/{experiment_id}/bayesian": {
+      "get": {
+        "operationId": "get_bayesian_results_api_v1_results__experiment_id__bayesian_get",
+        "summary": "Get Bayesian Results"
+      }
+    },
+    "/api/v1/results/{experiment_id}/cuped": {
+      "get": {
+        "operationId": "get_cuped_results_api_v1_results__experiment_id__cuped_get",
+        "summary": "Get Cuped Results"
+      }
+    },
+    "/api/v1/results/{experiment_id}/daily": {
+      "get": {
+        "operationId": "get_experiment_daily_results_api_v1_results__experiment_id__daily_get",
+        "summary": "Get Experiment Daily Results"
+      }
+    },
+    "/api/v1/results/{experiment_id}/fdr-correction": {
+      "post": {
+        "operationId": "compute_fdr_correction_api_v1_results__experiment_id__fdr_correction_post",
+        "summary": "Benjamini-Hochberg FDR correction"
+      }
+    },
+    "/api/v1/results/{experiment_id}/invalidate-cache": {
+      "post": {
+        "operationId": "invalidate_results_cache_api_v1_results__experiment_id__invalidate_cache_post",
+        "summary": "Invalidate Results Cache"
+      }
+    },
+    "/api/v1/results/{experiment_id}/post-stratification": {
+      "post": {
+        "operationId": "compute_post_stratification_api_v1_results__experiment_id__post_stratification_post",
+        "summary": "Post-stratification variance reduction"
+      }
+    },
+    "/api/v1/results/{experiment_id}/sample-size": {
+      "get": {
+        "operationId": "get_sample_size_status_api_v1_results__experiment_id__sample_size_get",
+        "summary": "Get Sample Size Status"
+      }
+    },
+    "/api/v1/results/{experiment_id}/sequential": {
+      "get": {
+        "operationId": "get_sequential_results_api_v1_results__experiment_id__sequential_get",
+        "summary": "Get Sequential Results"
+      }
+    },
+    "/api/v1/rollout-schedules/": {
+      "get": {
+        "operationId": "get_rollout_schedules_api_v1_rollout_schedules__get",
+        "summary": "Get list of rollout schedules"
+      },
+      "post": {
+        "operationId": "create_rollout_schedule_api_v1_rollout_schedules__post",
+        "summary": "Create a new rollout schedule"
+      }
+    },
+    "/api/v1/rollout-schedules/stages/{stage_id}": {
+      "delete": {
+        "operationId": "delete_rollout_stage_api_v1_rollout_schedules_stages__stage_id__delete",
+        "summary": "Delete a rollout stage"
+      },
+      "put": {
+        "operationId": "update_rollout_stage_api_v1_rollout_schedules_stages__stage_id__put",
+        "summary": "Update a rollout stage"
+      }
+    },
+    "/api/v1/rollout-schedules/stages/{stage_id}/advance": {
+      "post": {
+        "operationId": "manually_advance_stage_api_v1_rollout_schedules_stages__stage_id__advance_post",
+        "summary": "Manually advance a stage"
+      }
+    },
+    "/api/v1/rollout-schedules/{schedule_id}": {
+      "delete": {
+        "operationId": "delete_rollout_schedule_api_v1_rollout_schedules__schedule_id__delete",
+        "summary": "Delete a rollout schedule"
+      },
+      "get": {
+        "operationId": "get_rollout_schedule_api_v1_rollout_schedules__schedule_id__get",
+        "summary": "Get a specific rollout schedule"
+      },
+      "put": {
+        "operationId": "update_rollout_schedule_api_v1_rollout_schedules__schedule_id__put",
+        "summary": "Update a rollout schedule"
+      }
+    },
+    "/api/v1/rollout-schedules/{schedule_id}/activate": {
+      "post": {
+        "operationId": "activate_rollout_schedule_api_v1_rollout_schedules__schedule_id__activate_post",
+        "summary": "Activate a rollout schedule"
+      }
+    },
+    "/api/v1/rollout-schedules/{schedule_id}/cancel": {
+      "post": {
+        "operationId": "cancel_rollout_schedule_api_v1_rollout_schedules__schedule_id__cancel_post",
+        "summary": "Cancel a rollout schedule"
+      }
+    },
+    "/api/v1/rollout-schedules/{schedule_id}/pause": {
+      "post": {
+        "operationId": "pause_rollout_schedule_api_v1_rollout_schedules__schedule_id__pause_post",
+        "summary": "Pause a rollout schedule"
+      }
+    },
+    "/api/v1/rollout-schedules/{schedule_id}/stages": {
+      "post": {
+        "operationId": "add_rollout_stage_api_v1_rollout_schedules__schedule_id__stages_post",
+        "summary": "Add a stage to a rollout schedule"
+      }
+    },
+    "/api/v1/safety/feature-flags/{feature_flag_id}/check": {
+      "get": {
+        "operationId": "check_feature_flag_safety_api_v1_safety_feature_flags__feature_flag_id__check_get",
+        "summary": "Check Feature Flag Safety"
+      }
+    },
+    "/api/v1/safety/feature-flags/{feature_flag_id}/config": {
+      "get": {
+        "operationId": "get_feature_flag_safety_config_api_v1_safety_feature_flags__feature_flag_id__config_get",
+        "summary": "Get Feature Flag Safety Config"
+      },
+      "post": {
+        "operationId": "update_feature_flag_safety_config_api_v1_safety_feature_flags__feature_flag_id__config_post",
+        "summary": "Update Feature Flag Safety Config"
+      }
+    },
+    "/api/v1/safety/feature-flags/{feature_flag_id}/rollback": {
+      "post": {
+        "operationId": "rollback_feature_flag_api_v1_safety_feature_flags__feature_flag_id__rollback_post",
+        "summary": "Rollback Feature Flag"
+      }
+    },
+    "/api/v1/safety/settings": {
+      "get": {
+        "operationId": "get_safety_settings_api_v1_safety_settings_get",
+        "summary": "Get Safety Settings"
+      },
+      "post": {
+        "operationId": "update_safety_settings_api_v1_safety_settings_post",
+        "summary": "Update Safety Settings"
+      }
+    },
+    "/api/v1/scheduler/health": {
+      "get": {
+        "operationId": "get_all_health_api_v1_scheduler_health_get",
+        "summary": "Get All Health"
+      }
+    },
+    "/api/v1/scheduler/health/{name}": {
+      "get": {
+        "operationId": "get_health_by_name_api_v1_scheduler_health__name__get",
+        "summary": "Get Health By Name"
+      }
+    },
+    "/api/v1/scheduler/notify/test": {
+      "post": {
+        "operationId": "send_test_notification_api_v1_scheduler_notify_test_post",
+        "summary": "Send Test Notification"
+      }
+    },
+    "/api/v1/scheduler/{name}/history": {
+      "get": {
+        "operationId": "get_run_history_api_v1_scheduler__name__history_get",
+        "summary": "Get Run History"
+      }
+    },
+    "/api/v1/segments": {
+      "get": {
+        "operationId": "list_segments_api_v1_segments_get",
+        "summary": "List audience segments"
+      },
+      "post": {
+        "operationId": "create_segment_api_v1_segments_post",
+        "summary": "Create an audience segment"
+      }
+    },
+    "/api/v1/segments/bulk-evaluate": {
+      "post": {
+        "operationId": "bulk_evaluate_segments_api_v1_segments_bulk_evaluate_post",
+        "summary": "Bulk segment membership evaluation"
+      }
+    },
+    "/api/v1/segments/{segment_id}": {
+      "delete": {
+        "operationId": "delete_segment_api_v1_segments__segment_id__delete",
+        "summary": "Archive an audience segment"
+      },
+      "get": {
+        "operationId": "get_segment_api_v1_segments__segment_id__get",
+        "summary": "Get an audience segment"
+      },
+      "put": {
+        "operationId": "update_segment_api_v1_segments__segment_id__put",
+        "summary": "Update an audience segment"
+      }
+    },
+    "/api/v1/segments/{segment_id}/evaluate": {
+      "post": {
+        "operationId": "evaluate_segment_membership_api_v1_segments__segment_id__evaluate_post",
+        "summary": "Evaluate user membership in a segment"
+      }
+    },
+    "/api/v1/segments/{segment_id}/experiments": {
+      "get": {
+        "operationId": "get_segment_experiments_api_v1_segments__segment_id__experiments_get",
+        "summary": "List experiments using this segment"
+      }
+    },
+    "/api/v1/segments/{segment_id}/preview": {
+      "post": {
+        "operationId": "preview_audience_size_api_v1_segments__segment_id__preview_post",
+        "summary": "Preview estimated audience size"
+      }
+    },
+    "/api/v1/tracking/": {
+      "get": {
+        "operationId": "get_tracking_api_v1_tracking__get",
+        "summary": "Get Tracking"
+      }
+    },
+    "/api/v1/tracking/assign": {
+      "post": {
+        "operationId": "assign_user_to_experiment_api_v1_tracking_assign_post",
+        "summary": "Assign user to experiment variant"
+      }
+    },
+    "/api/v1/tracking/assignments/{user_id}": {
+      "get": {
+        "operationId": "get_user_assignments_api_v1_tracking_assignments__user_id__get",
+        "summary": "Get user's experiment assignments"
+      }
+    },
+    "/api/v1/tracking/batch": {
+      "post": {
+        "operationId": "track_events_batch_api_v1_tracking_batch_post",
+        "summary": "Track multiple events in batch"
+      }
+    },
+    "/api/v1/tracking/errors": {
+      "post": {
+        "operationId": "report_client_error_api_v1_tracking_errors_post",
+        "summary": "Report a client-side error"
+      }
+    },
+    "/api/v1/tracking/errors/batch": {
+      "post": {
+        "operationId": "report_client_errors_batch_api_v1_tracking_errors_batch_post",
+        "summary": "Report multiple client-side errors"
+      }
+    },
+    "/api/v1/tracking/events": {
+      "post": {
+        "operationId": "track_event_by_ids_api_v1_tracking_events_post",
+        "summary": "Track event by ids"
+      }
+    },
+    "/api/v1/tracking/track": {
+      "post": {
+        "operationId": "track_event_api_v1_tracking_track_post",
+        "summary": "Track event"
+      }
+    },
+    "/api/v1/users/": {
+      "get": {
+        "operationId": "list_users_api_v1_users__get",
+        "summary": "List Users"
+      },
+      "post": {
+        "operationId": "create_user_api_v1_users__post",
+        "summary": "Create User"
+      }
+    },
+    "/api/v1/users/me": {
+      "get": {
+        "operationId": "get_user_me_api_v1_users_me_get",
+        "summary": "Get User Me"
+      }
+    },
+    "/api/v1/users/{user_id}": {
+      "delete": {
+        "operationId": "delete_user_api_v1_users__user_id__delete",
+        "summary": "Delete User"
+      },
+      "get": {
+        "operationId": "get_user_api_v1_users__user_id__get",
+        "summary": "Get User"
+      },
+      "put": {
+        "operationId": "update_user_api_v1_users__user_id__put",
+        "summary": "Update User"
+      }
+    },
+    "/api/v1/utils/utils/sample-size": {
+      "post": {
+        "operationId": "calculate_sample_size_api_v1_utils_utils_sample_size_post",
+        "summary": "Calculate required sample size"
+      }
+    },
+    "/api/v1/warehouse/clickhouse/metrics/experiments/{experiment_id}": {
+      "get": {
+        "operationId": "get_experiment_metrics_api_v1_warehouse_clickhouse_metrics_experiments__experiment_id__get",
+        "summary": "Get experiment metrics from ClickHouse"
+      }
+    },
+    "/api/v1/warehouse/clickhouse/metrics/flags/{flag_id}": {
+      "get": {
+        "operationId": "get_feature_flag_metrics_api_v1_warehouse_clickhouse_metrics_flags__flag_id__get",
+        "summary": "Get feature flag metrics from ClickHouse"
+      }
+    },
+    "/api/v1/warehouse/clickhouse/query": {
+      "post": {
+        "operationId": "execute_query_api_v1_warehouse_clickhouse_query_post",
+        "summary": "Execute a read-only ClickHouse query"
+      }
+    },
+    "/api/v1/warehouse/clickhouse/test-connection": {
+      "post": {
+        "operationId": "test_connection_api_v1_warehouse_clickhouse_test_connection_post",
+        "summary": "Test ClickHouse connection"
+      }
+    },
+    "/api/v1/warehouse/connections": {
+      "get": {
+        "operationId": "list_connections_api_v1_warehouse_connections_get",
+        "summary": "List warehouse connections"
+      },
+      "post": {
+        "operationId": "create_connection_api_v1_warehouse_connections_post",
+        "summary": "Create warehouse connection"
+      }
+    },
+    "/api/v1/warehouse/connections/test": {
+      "post": {
+        "operationId": "test_connection_api_v1_warehouse_connections_test_post",
+        "summary": "Test warehouse connection"
+      }
+    },
+    "/api/v1/warehouse/connections/{connection_id}": {
+      "delete": {
+        "operationId": "delete_connection_api_v1_warehouse_connections__connection_id__delete",
+        "summary": "Delete warehouse connection"
+      },
+      "get": {
+        "operationId": "get_connection_api_v1_warehouse_connections__connection_id__get",
+        "summary": "Get warehouse connection"
+      }
+    },
+    "/api/v1/warehouse/databricks/metrics/experiments/{experiment_id}": {
+      "get": {
+        "operationId": "get_experiment_metrics_api_v1_warehouse_databricks_metrics_experiments__experiment_id__get",
+        "summary": "Get experiment metrics from Databricks"
+      }
+    },
+    "/api/v1/warehouse/databricks/metrics/flags/{flag_id}": {
+      "get": {
+        "operationId": "get_feature_flag_metrics_api_v1_warehouse_databricks_metrics_flags__flag_id__get",
+        "summary": "Get feature flag metrics from Databricks"
+      }
+    },
+    "/api/v1/warehouse/databricks/query": {
+      "post": {
+        "operationId": "execute_query_api_v1_warehouse_databricks_query_post",
+        "summary": "Execute a read-only Databricks query"
+      }
+    },
+    "/api/v1/warehouse/databricks/test-connection": {
+      "post": {
+        "operationId": "test_connection_api_v1_warehouse_databricks_test_connection_post",
+        "summary": "Test Databricks connection"
+      }
+    },
+    "/api/v1/warehouse/mysql/metrics/experiments/{experiment_id}": {
+      "get": {
+        "operationId": "get_experiment_metrics_api_v1_warehouse_mysql_metrics_experiments__experiment_id__get",
+        "summary": "Get experiment metrics from MySQL"
+      }
+    },
+    "/api/v1/warehouse/mysql/metrics/flags/{flag_id}": {
+      "get": {
+        "operationId": "get_feature_flag_metrics_api_v1_warehouse_mysql_metrics_flags__flag_id__get",
+        "summary": "Get feature flag metrics from MySQL"
+      }
+    },
+    "/api/v1/warehouse/mysql/query": {
+      "post": {
+        "operationId": "execute_query_api_v1_warehouse_mysql_query_post",
+        "summary": "Execute a read-only MySQL query"
+      }
+    },
+    "/api/v1/warehouse/mysql/test-connection": {
+      "post": {
+        "operationId": "test_connection_api_v1_warehouse_mysql_test_connection_post",
+        "summary": "Test MySQL connection"
+      }
+    },
+    "/api/v1/warehouse/sync/{experiment_id}": {
+      "post": {
+        "operationId": "sync_experiment_api_v1_warehouse_sync__experiment_id__post",
+        "summary": "Sync experiment results from warehouse"
+      }
+    },
+    "/api/v1/wizard/drafts": {
+      "get": {
+        "operationId": "list_drafts_api_v1_wizard_drafts_get",
+        "summary": "List wizard drafts for the current user"
+      },
+      "post": {
+        "operationId": "create_draft_api_v1_wizard_drafts_post",
+        "summary": "Create a new experiment wizard draft"
+      }
+    },
+    "/api/v1/wizard/drafts/{draft_id}": {
+      "get": {
+        "operationId": "get_draft_api_v1_wizard_drafts__draft_id__get",
+        "summary": "Get a wizard draft by ID"
+      }
+    },
+    "/api/v1/wizard/drafts/{draft_id}/step": {
+      "put": {
+        "operationId": "update_draft_step_api_v1_wizard_drafts__draft_id__step_put",
+        "summary": "Update a wizard draft with step data"
+      }
+    },
+    "/api/v1/wizard/drafts/{draft_id}/submit": {
+      "post": {
+        "operationId": "submit_draft_api_v1_wizard_drafts__draft_id__submit_post",
+        "summary": "Submit a completed wizard draft to create an experiment"
+      }
+    },
+    "/api/v1/wizard/validate": {
+      "post": {
+        "operationId": "validate_step_api_v1_wizard_validate_post",
+        "summary": "Validate wizard step data"
+      }
+    },
+    "/api/v1/workspaces/": {
+      "get": {
+        "operationId": "list_my_workspaces_api_v1_workspaces__get",
+        "summary": "List My Workspaces"
+      },
+      "post": {
+        "operationId": "create_workspace_api_v1_workspaces__post",
+        "summary": "Create Workspace"
+      }
+    },
+    "/api/v1/workspaces/invites/{token}": {
+      "get": {
+        "operationId": "get_invite_api_v1_workspaces_invites__token__get",
+        "summary": "Get Invite"
+      }
+    },
+    "/api/v1/workspaces/invites/{token}/accept": {
+      "post": {
+        "operationId": "accept_invite_api_v1_workspaces_invites__token__accept_post",
+        "summary": "Accept Invite"
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}": {
+      "delete": {
+        "operationId": "delete_workspace_api_v1_workspaces__workspace_id__delete",
+        "summary": "Delete Workspace"
+      },
+      "get": {
+        "operationId": "get_workspace_api_v1_workspaces__workspace_id__get",
+        "summary": "Get Workspace"
+      },
+      "put": {
+        "operationId": "update_workspace_api_v1_workspaces__workspace_id__put",
+        "summary": "Update Workspace"
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/api-keys": {
+      "get": {
+        "operationId": "list_api_keys_api_v1_workspaces__workspace_id__api_keys_get",
+        "summary": "List Api Keys"
+      },
+      "post": {
+        "operationId": "create_api_key_api_v1_workspaces__workspace_id__api_keys_post",
+        "summary": "Create Api Key"
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/api-keys/{key_id}": {
+      "delete": {
+        "operationId": "revoke_api_key_api_v1_workspaces__workspace_id__api_keys__key_id__delete",
+        "summary": "Revoke Api Key"
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/api-keys/{key_id}/rotate": {
+      "post": {
+        "operationId": "rotate_api_key_api_v1_workspaces__workspace_id__api_keys__key_id__rotate_post",
+        "summary": "Rotate Api Key"
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/invites": {
+      "post": {
+        "operationId": "create_invite_api_v1_workspaces__workspace_id__invites_post",
+        "summary": "Create Invite"
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/members": {
+      "get": {
+        "operationId": "list_members_api_v1_workspaces__workspace_id__members_get",
+        "summary": "List Members"
+      },
+      "post": {
+        "operationId": "add_member_api_v1_workspaces__workspace_id__members_post",
+        "summary": "Add Member"
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/members/{user_id}": {
+      "delete": {
+        "operationId": "remove_member_api_v1_workspaces__workspace_id__members__user_id__delete",
+        "summary": "Remove Member"
+      },
+      "put": {
+        "operationId": "update_member_role_api_v1_workspaces__workspace_id__members__user_id__put",
+        "summary": "Update Member Role"
+      }
+    },
+    "/api/v1/ws/active-experiments": {
+      "get": {
+        "operationId": "get_active_experiments_api_v1_ws_active_experiments_get",
+        "summary": "Get Active Experiments"
+      }
+    },
+    "/api/v1/ws/experiments/{experiment_id}/results/subscribers": {
+      "get": {
+        "operationId": "get_subscriber_count_api_v1_ws_experiments__experiment_id__results_subscribers_get",
+        "summary": "Get Subscriber Count"
+      }
+    }
+  }
+}

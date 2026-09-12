@@ -17,9 +17,7 @@ Architecture note on transaction isolation:
   - Read-only and validation tests (GET, list, 404, 422, 403) are placed first.
   - Tests that depend on `db_session` after API writes are avoided.
 
-Known application bugs documented in tests:
-  2. GET /feature-flags/ (list) — FeatureFlagReadExtended.id is str but gets UUID → 500
-  (Bugs 1, 3, 4 have been fixed)
+All previously documented application bugs in this file have been fixed.
 """
 import pytest
 
@@ -33,23 +31,65 @@ from backend.app.models.feature_flag import FeatureFlag, FeatureFlagStatus
 
 @pytest.mark.integration
 @pytest.mark.requires_db
-class TestFeatureFlagsListEmpty:
-    """List endpoint tests that work with an empty result set (no schema bug triggered).
-
-    IMPORTANT: This class must run FIRST — before any make_feature_flag calls
-    create flags in the DB. The list endpoint has a known Pydantic validation
-    bug (FeatureFlagReadExtended.id is str but gets UUID) that causes 500 when
-    any flags exist in the DB. Testing with an empty list avoids this bug.
-    """
+class TestFeatureFlagsList:
+    """GET /api/v1/feature-flags/ — list items are validated by FeatureFlagReadExtended."""
 
     def test_list_returns_200_and_paginated_structure(self, admin_client):
-        """List endpoint returns 200 with a proper paginated response when list is empty."""
+        """List endpoint returns 200 with a proper paginated response."""
         response = admin_client.get("/api/v1/feature-flags/")
         assert response.status_code == 200, response.text
         data = response.json()
         assert "items" in data
         assert "total" in data
         assert isinstance(data["items"], list)
+
+    def test_list_items_report_status_and_derived_is_active(
+        self, admin_client, make_feature_flag
+    ):
+        """Each listed flag carries its lower-cased ``status`` and a matching
+        ``is_active`` — an INACTIVE flag must not be listed as ``is_active: true``
+        (the schema default) just because the model has no ``is_active`` column."""
+        inactive = make_feature_flag(
+            key=unique_flag_key("list-inactive"),
+            name="Listed Inactive",
+            status=FeatureFlagStatus.INACTIVE,
+        )
+        active = make_feature_flag(
+            key=unique_flag_key("list-active"),
+            name="Listed Active",
+            status=FeatureFlagStatus.ACTIVE,
+        )
+
+        response = admin_client.get("/api/v1/feature-flags/", params={"limit": 100})
+        assert response.status_code == 200, response.text
+        by_key = {item["key"]: item for item in response.json()["items"]}
+
+        assert by_key[inactive.key]["status"] == "inactive"
+        assert by_key[inactive.key]["is_active"] is False
+        assert by_key[active.key]["status"] == "active"
+        assert by_key[active.key]["is_active"] is True
+
+        # Every item agrees with itself, whatever other tests left behind.
+        for item in by_key.values():
+            assert item["is_active"] is (item["status"] == "active"), item
+
+    def test_list_status_filter_uses_db_enum_casing(self, admin_client, make_feature_flag):
+        """``?status=INACTIVE`` (the DB enum value) only returns inactive flags."""
+        inactive = make_feature_flag(
+            key=unique_flag_key("filter-inactive"), status=FeatureFlagStatus.INACTIVE
+        )
+        active = make_feature_flag(
+            key=unique_flag_key("filter-active"), status=FeatureFlagStatus.ACTIVE
+        )
+
+        response = admin_client.get(
+            "/api/v1/feature-flags/", params={"status": "INACTIVE", "limit": 100}
+        )
+        assert response.status_code == 200, response.text
+        keys = {item["key"] for item in response.json()["items"]}
+        assert inactive.key in keys
+        assert active.key not in keys
+        assert all(item["status"] == "inactive" for item in response.json()["items"])
 
 
 @pytest.mark.integration
@@ -67,14 +107,11 @@ class TestFeatureFlagsPermissions:
         response = analyst_client.post("/api/v1/feature-flags/", json=payload)
         assert response.status_code in (403, 401), response.text
 
-    def test_analyst_can_list_flags_empty_result(self, analyst_client):
-        """Analysts have LIST permission; endpoint returns 200 with empty own-flags list.
-
-        Note: This may return 500 if there are already flags in the DB due to the
-        list endpoint Pydantic validation bug. We only verify that it's not a 404.
-        """
+    def test_analyst_can_list_flags(self, analyst_client):
+        """Analysts have LIST permission; endpoint returns 200 with their own flags."""
         response = analyst_client.get("/api/v1/feature-flags/")
-        assert response.status_code != 404, response.text
+        assert response.status_code == 200, response.text
+        assert isinstance(response.json()["items"], list)
 
 
 @pytest.mark.integration

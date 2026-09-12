@@ -57,12 +57,34 @@ class InvalidTokenError(ValueError):
     """Raised when a local access token cannot be decoded or fails validation."""
 
 
+def unwrap_secret(password: Any) -> str:
+    """
+    Return the plain-text value of *password*.
+
+    Request schemas carry passwords as pydantic ``SecretStr`` (so they never
+    leak into logs or ``repr``), while internal callers pass plain ``str``.
+    ``get_password_hash``/``verify_password`` need the raw text, so every call
+    site funnels through here rather than reaching for ``.get_secret_value()``
+    on something that may already be a string.
+
+    Args:
+        password: A ``str`` or anything exposing ``get_secret_value()``.
+
+    Returns:
+        The plain-text password.
+    """
+    get_secret_value = getattr(password, "get_secret_value", None)
+    if callable(get_secret_value):
+        return get_secret_value()
+    return password
+
+
 def get_password_hash(password: str) -> str:
     """
     Hash a password using bcrypt.
 
     Args:
-        password: Plain text password
+        password: Plain text password (see ``unwrap_secret`` for ``SecretStr``)
 
     Returns:
         Hashed password (bcrypt-format str)

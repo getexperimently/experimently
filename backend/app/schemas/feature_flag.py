@@ -84,12 +84,36 @@ class FeatureFlagEvaluation(BaseModel):
 class FeatureFlagReadExtended(FeatureFlagInDBBase):
     """
     Extended feature flag read model with additional information.
-    Used for detailed feature flag reads.
+    Used for detailed feature flag reads (``GET /feature-flags/`` items).
+
+    The ORM model only carries ``status`` (``FeatureFlagStatus``); this schema
+    exposes it lower-cased (``"active"`` / ``"inactive"`` / ``"archived"``),
+    the same casing ``GET /feature-flags/{flag_id}`` uses, and derives
+    ``is_active`` from it so the two never disagree.
     """
+    status: Optional[str] = Field(
+        None, description='Lower-cased flag status: "active", "inactive" or "archived"'
+    )
     owner_id: Optional[UUID] = None
     metrics: Optional[List[Dict[str, Any]]] = None
     variants: Optional[List[Dict[str, Any]]] = None
     last_evaluated: Optional[datetime] = None
+
+    @field_validator("status", mode="before")
+    @classmethod
+    def normalise_status(cls, v: Any) -> Optional[str]:
+        """Accept the ``FeatureFlagStatus`` enum or a string in any casing."""
+        if v is None:
+            return None
+        value = getattr(v, "value", v)
+        return str(value).lower()
+
+    @model_validator(mode="after")
+    def derive_is_active(self) -> "FeatureFlagReadExtended":
+        """``is_active`` mirrors ``status`` whenever a status is known."""
+        if self.status is not None:
+            self.is_active = self.status == "active"
+        return self
 
 
 class FeatureFlagListResponse(BaseModel):
@@ -110,6 +134,7 @@ class FeatureFlagListResponse(BaseModel):
                         "key": "new_feature",
                         "name": "New Feature Flag",
                         "description": "Controls access to new feature",
+                        "status": "active",
                         "is_active": True,
                         "created_at": "2023-01-01T00:00:00Z",
                         "updated_at": "2023-01-01T00:00:00Z"

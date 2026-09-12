@@ -133,7 +133,7 @@ const sections = [
       { label: 'Your First A/B Test', href: '/docs/guides/first-ab-test', desc: 'End-to-end experiment walkthrough' },
       { label: 'Bayesian Experimentation', href: '/docs/guides/bayesian', desc: 'Beta-Binomial posteriors and stopping rules' },
       { label: 'Warehouse-Native Analytics', href: '/docs/guides/warehouse-analytics', desc: 'Query Snowflake/BigQuery directly' },
-      { label: 'No-Code Experiment Builder', href: '/docs/guides/no-code-builder', desc: '5-step visual wizard' },
+      { label: 'Guided Experiment Builder', href: '/docs/guides/no-code-builder', desc: '5-step draft-and-submit API' },
       { label: 'Interaction Detection', href: '/docs/guides/interaction-detection', desc: 'Detect and handle experiment interactions' },
     ],
   },

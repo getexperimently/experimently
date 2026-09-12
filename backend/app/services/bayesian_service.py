@@ -10,16 +10,107 @@ Provides pure-function implementations of:
 - Bayesian stopping decision rules
 
 All methods are stateless (no DB access) and thread-safe.
+
+Randomness
+----------
+Every Monte Carlo draw comes from ``numpy.random.default_rng(seed)``.  Callers
+that know the experiment pass a seed derived with
+:func:`backend.app.core.stats_engine.derive_seed`; when no seed is given the
+fallback is derived from the posteriors themselves, so different data draws a
+different stream (Monte Carlo error averages out across experiments instead of
+becoming a fixed bias) while a repeated call on the same data stays
+reproducible.  Two calls with identical inputs therefore return byte-identical
+sample arrays.
+
+Sampling cost
+-------------
+One analysis needs exactly **one** posterior sample matrix.  The private
+``_*_from_samples`` helpers derive every statistic (PtBB, expected loss, ROPE)
+from an already-drawn matrix; the public functions draw one when the caller has
+none, so they remain usable standalone, and :meth:`BayesianService.analyze`
+draws once and threads the matrix through.
 """
 import logging
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 from scipy import stats as scipy_stats
 
+from backend.app.core.stats_engine import ENGINE_VERSION, derive_seed, make_rng
 from backend.app.schemas.bayesian import BayesianConfig, BayesianDecision
 
 logger = logging.getLogger(__name__)
+
+#: Monte Carlo samples per variant used by the results API.
+DEFAULT_N_SAMPLES: int = 100_000
+
+#: Namespace for the fallback seed used when a caller passes ``seed=None``.
+_FALLBACK_SEED_NAMESPACE = "bayesian_service"
+
+
+def posterior_fingerprint(
+    posteriors: Optional[Sequence[Dict[str, float]]],
+) -> str:
+    """Return a stable string identifying a set of Beta posteriors.
+
+    Used as the reproducibility bucket of the seedless fallback so that the
+    stream depends on the data being analysed.  ``%.17g`` round-trips a
+    float exactly, so two runs on the same posteriors produce the same
+    fingerprint and two different posterior sets (almost surely) do not.
+    """
+    if not posteriors:
+        return ""
+    return ";".join(
+        f"{float(p['alpha']):.17g}:{float(p['beta']):.17g}" for p in posteriors
+    )
+
+
+def resolve_seed(
+    seed: Optional[int],
+    n_samples: int,
+    posteriors: Optional[Sequence[Dict[str, float]]] = None,
+) -> int:
+    """Return ``seed``, or a fallback derived from the data being analysed.
+
+    A caller that knows the experiment passes a seed derived from
+    ``(experiment_id, UTC day, n_samples)``.  Without one the seed is derived
+    from ``(namespace, posterior fingerprint, n_samples)``: every distinct set
+    of posteriors gets its own stream — so Monte Carlo error stays random
+    noise across experiments rather than one fixed bias shared by the whole
+    platform — while repeating a call on the same posteriors reproduces it
+    exactly.  ``posteriors=None`` (no data to key on) keeps the old
+    single-stream behaviour.
+    """
+    if seed is not None:
+        return int(seed)
+    return derive_seed(
+        _FALLBACK_SEED_NAMESPACE, posterior_fingerprint(posteriors), n_samples
+    )
+
+
+def _draw_posterior_samples(
+    posteriors: List[Dict[str, float]],
+    n_samples: int,
+    seed: Optional[int],
+) -> np.ndarray:
+    """Draw ``n_samples`` from each Beta posterior; shape ``[n_variants, n_samples]``."""
+    rng = make_rng(resolve_seed(seed, n_samples, posteriors))
+    return np.array([
+        rng.beta(float(p["alpha"]), float(p["beta"]), n_samples)
+        for p in posteriors
+    ])
+
+
+def _ptbb_from_samples(samples: np.ndarray) -> List[float]:
+    """Probability to be best per variant from an already-drawn sample matrix."""
+    winner = np.argmax(samples, axis=0)  # shape: [n_samples]
+    return [float(np.mean(winner == i)) for i in range(samples.shape[0])]
+
+
+def _expected_loss_from_samples(samples: np.ndarray) -> List[float]:
+    """Expected loss per variant from an already-drawn sample matrix."""
+    max_samples = np.max(samples, axis=0)  # shape: [n_samples]
+    return [float(np.mean(max_samples - samples[i])) for i in range(samples.shape[0])]
 
 
 # ---------------------------------------------------------------------------
@@ -137,7 +228,10 @@ def compute_credible_interval(
 
 def compute_probability_to_be_best(
     posteriors: List[Dict[str, float]],
-    n_samples: int = 100_000,
+    n_samples: int = DEFAULT_N_SAMPLES,
+    seed: Optional[int] = None,
+    *,
+    samples: Optional[np.ndarray] = None,
 ) -> List[float]:
     """Compute Probability to Be Best (PtBB) via Monte Carlo sampling.
 
@@ -148,6 +242,12 @@ def compute_probability_to_be_best(
         posteriors: List of dicts, each with 'alpha' and 'beta' keys.
             Must have at least 2 elements.
         n_samples: Number of Monte Carlo samples (higher → more precision).
+        seed: RNG seed (see :func:`backend.app.core.stats_engine.derive_seed`);
+            ``None`` derives one from the posteriors (see :func:`resolve_seed`).
+        samples: Posterior draws already made for these posteriors, shape
+            ``[n_variants, n_samples]``.  Supplied by callers that need more
+            than one statistic from the same matrix; omit it and the function
+            draws its own.
 
     Returns:
         List of probabilities (floats in [0, 1]) summing to 1.0.
@@ -161,20 +261,18 @@ def compute_probability_to_be_best(
         )
 
     # Draw samples from each posterior (shape: [n_variants, n_samples])
-    samples = np.array([
-        np.random.beta(p["alpha"], p["beta"], n_samples)
-        for p in posteriors
-    ])
+    if samples is None:
+        samples = _draw_posterior_samples(posteriors, n_samples, seed)
 
-    # For each sample, find which variant is the winner
-    winner = np.argmax(samples, axis=0)  # shape: [n_samples]
-
-    return [float(np.mean(winner == i)) for i in range(len(posteriors))]
+    return _ptbb_from_samples(samples)
 
 
 def compute_expected_loss(
     posteriors: List[Dict[str, float]],
-    n_samples: int = 100_000,
+    n_samples: int = DEFAULT_N_SAMPLES,
+    seed: Optional[int] = None,
+    *,
+    samples: Optional[np.ndarray] = None,
 ) -> List[float]:
     """Compute Expected Loss (regret) for each variant via Monte Carlo.
 
@@ -186,6 +284,10 @@ def compute_expected_loss(
         posteriors: List of dicts, each with 'alpha' and 'beta' keys.
             Must have at least 2 elements.
         n_samples: Number of Monte Carlo samples.
+        seed: RNG seed; ``None`` derives one from the posteriors
+            (see :func:`resolve_seed`).
+        samples: Posterior draws already made for these posteriors, shape
+            ``[n_variants, n_samples]``; omit it and the function draws its own.
 
     Returns:
         List of expected loss values (floats >= 0), one per variant.
@@ -199,16 +301,10 @@ def compute_expected_loss(
         )
 
     # Draw samples from each posterior (shape: [n_variants, n_samples])
-    samples = np.array([
-        np.random.beta(p["alpha"], p["beta"], n_samples)
-        for p in posteriors
-    ])
+    if samples is None:
+        samples = _draw_posterior_samples(posteriors, n_samples, seed)
 
-    # The best possible outcome for each sample
-    max_samples = np.max(samples, axis=0)  # shape: [n_samples]
-
-    # Expected loss for variant i = E[max(theta) - theta_i]
-    return [float(np.mean(max_samples - samples[i])) for i in range(len(posteriors))]
+    return _expected_loss_from_samples(samples)
 
 
 def compute_bayes_factor(
@@ -295,7 +391,11 @@ def get_bayes_factor_label(bf: float) -> str:
 def should_stop(
     posteriors: List[Dict[str, float]],
     config: BayesianConfig,
-    n_samples: int = 100_000,
+    n_samples: int = DEFAULT_N_SAMPLES,
+    seed: Optional[int] = None,
+    *,
+    samples: Optional[np.ndarray] = None,
+    losses: Optional[List[float]] = None,
 ) -> BayesianDecision:
     """Apply Bayesian stopping rules to determine whether to stop the experiment.
 
@@ -307,29 +407,47 @@ def should_stop(
        falls within ROPE is > 0.95, stop as equivalent.
     3. CONTINUE: Otherwise, keep running.
 
+    One sample matrix is enough for both rules: the ROPE comparison reuses
+    the draws the expected loss was computed from.
+
     Args:
         posteriors: List of posterior dicts (alpha, beta per variant).
         config: BayesianConfig with thresholds.
         n_samples: Monte Carlo samples for loss calculation.
+        seed: RNG seed; ``None`` derives one from the posteriors
+            (see :func:`resolve_seed`).
+        samples: Posterior draws already made for these posteriors, shape
+            ``[n_variants, n_samples]``.
+        losses: Expected loss per variant already computed from ``samples``.
+            Supply both from :meth:`BayesianService.analyze`, which has them;
+            supply neither and the function draws once itself.
 
     Returns:
         BayesianDecision enum value.
+
+    Raises:
+        ValueError: If fewer than 2 posteriors are provided.
     """
-    losses = compute_expected_loss(posteriors, n_samples=n_samples)
+    if len(posteriors) < 2:
+        raise ValueError(
+            f"At least 2 posteriors are required for a stopping decision, "
+            f"got {len(posteriors)}"
+        )
+
+    # Draw only when something below still needs the samples.
+    if samples is None and (losses is None or config.rope is not None):
+        samples = _draw_posterior_samples(posteriors, n_samples, seed)
+    if losses is None:
+        losses = _expected_loss_from_samples(samples)
     min_loss = min(losses)
 
     # Rule 1: STOP_WINNER when expected loss of the best arm is below threshold
     if min_loss < config.loss_threshold:
         return BayesianDecision.STOP_WINNER
 
-    # Rule 2: STOP_EQUIVALENT via ROPE
+    # Rule 2: STOP_EQUIVALENT via ROPE (same draws as the loss above)
     if config.rope is not None:
         rope_lower, rope_upper = config.rope
-        # Sample from all posteriors and check if differences fall within ROPE
-        samples = np.array([
-            np.random.beta(p["alpha"], p["beta"], n_samples)
-            for p in posteriors
-        ])
         # Compare each non-best variant to the best
         best_idx = losses.index(min_loss)
         best_samples = samples[best_idx]
@@ -375,7 +493,8 @@ class BayesianService:
     def analyze(
         self,
         variant_observations: List[Dict[str, int]],
-        n_samples: int = 100_000,
+        n_samples: int = DEFAULT_N_SAMPLES,
+        seed: Optional[int] = None,
     ) -> Dict:
         """Run full Bayesian analysis for all variants.
 
@@ -383,9 +502,20 @@ class BayesianService:
             variant_observations: List of dicts with 'conversions' and 'total'
                 per variant.
             n_samples: Monte Carlo samples.
+            seed: RNG seed shared by every Monte Carlo step of this analysis
+                (see :func:`backend.app.core.stats_engine.derive_seed`);
+                ``None`` derives one from the posteriors
+                (see :func:`resolve_seed`).
 
         Returns:
-            Dict with posteriors, PtBBs, losses, and decision.
+            Dict with posteriors, PtBBs, losses, decision, and the
+            ``seed`` / ``n_samples`` / ``engine_version`` that produced them.
+
+        Note:
+            The posterior matrix is drawn **once** and reused for PtBB, the
+            expected loss and the ROPE check.  Because every step previously
+            shared one seed it also shared one matrix, so the numbers are
+            unchanged — only the redundant draws are gone.
         """
         prior = {"alpha": self.config.alpha, "beta": self.config.beta}
 
@@ -393,6 +523,13 @@ class BayesianService:
         posteriors = [
             compute_posterior(prior, obs) for obs in variant_observations
         ]
+        if len(posteriors) < 2:
+            raise ValueError(
+                f"At least 2 posteriors are required for PtBB, got {len(posteriors)}"
+            )
+
+        # Seedless callers key the stream off the posteriors themselves.
+        seed = resolve_seed(seed, n_samples, posteriors)
 
         # Compute credible intervals
         credible_intervals = [
@@ -400,12 +537,20 @@ class BayesianService:
             for p in posteriors
         ]
 
-        # PtBB and expected loss
-        ptbb = compute_probability_to_be_best(posteriors, n_samples=n_samples)
-        losses = compute_expected_loss(posteriors, n_samples=n_samples)
+        # One matrix of draws feeds PtBB, expected loss and the ROPE check.
+        samples = _draw_posterior_samples(posteriors, n_samples, seed)
+        ptbb = _ptbb_from_samples(samples)
+        losses = _expected_loss_from_samples(samples)
 
         # Stopping decision
-        decision = should_stop(posteriors, self.config, n_samples=n_samples)
+        decision = should_stop(
+            posteriors,
+            self.config,
+            n_samples=n_samples,
+            seed=seed,
+            samples=samples,
+            losses=losses,
+        )
 
         return {
             "posteriors": posteriors,
@@ -413,4 +558,7 @@ class BayesianService:
             "probability_to_be_best": ptbb,
             "expected_loss": losses,
             "decision": decision,
+            "seed": seed,
+            "n_samples": int(n_samples),
+            "engine_version": ENGINE_VERSION,
         }

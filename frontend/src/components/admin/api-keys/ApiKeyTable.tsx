@@ -56,8 +56,11 @@ export function ApiKeyTable({ onCreateKey, refreshToken = 0 }: ApiKeyTableProps)
     if (showAll) params.set('all', 'true');
     if (includeInactive) params.set('include_inactive', 'true');
     const query = params.toString();
+    // Path and query stay separate so the URL literal is a plain string
+    // (src/tests/services/url-literals.test.ts checks it against the OpenAPI dump).
+    const path = '/api/v1/api-keys';
     try {
-      const data = await apiFetch<ApiKey[]>(`/api/v1/api-keys${query ? `?${query}` : ''}`);
+      const data = await apiFetch<ApiKey[]>(query ? `${path}?${query}` : path);
       setKeys(Array.isArray(data) ? data : []);
     } catch (err) {
       setError((err as Error).message || 'Failed to load API keys');

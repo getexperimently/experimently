@@ -69,8 +69,8 @@ source /Users/ashishmarkanday/github/experimentation-platform/venv/bin/activate
 pip install -r backend/requirements.txt
 
 # Start the backend API server (in a separate terminal)
-cd backend
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+# from the repository root
+uvicorn backend.app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 ### Option A: Locust Web UI (interactive)

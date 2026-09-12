@@ -5,9 +5,21 @@ Stores draft state in memory (or DB in future) for multi-step wizard UX.
 Provides validation for each wizard step and builds the final experiment
 payload ready for submission to ExperimentService.
 """
+import logging
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
+
+logger = logging.getLogger(__name__)
+
+# Wizard type -> ``ExperimentType`` value used by ``ExperimentCreate``.
+_EXPERIMENT_TYPE_MAP: Dict[str, str] = {
+    "ab": "a_b",
+    "a_b": "a_b",
+    "multivariate": "mv",
+    "bandit": "bandit",
+    "feature_flag_rollout": "a_b",
+}
 
 EXPERIMENT_TYPES = {"ab", "multivariate", "feature_flag_rollout"}
 
@@ -134,6 +146,11 @@ class ExperimentWizardService:
         return _drafts.get(draft_id)
 
     @staticmethod
+    def delete_draft(draft_id: str) -> bool:
+        """Drop a draft. Returns True when one was removed."""
+        return _drafts.pop(draft_id, None) is not None
+
+    @staticmethod
     def update_draft(
         draft_id: str, step: str, data: Dict[str, Any]
     ) -> Optional[WizardDraft]:
@@ -181,10 +198,16 @@ class ExperimentWizardService:
     def build_experiment_payload(draft: WizardDraft) -> Dict[str, Any]:
         """Construct a valid experiment creation payload from a completed draft.
 
-        Builds variants based on experiment type:
-        - ab: 2 variants (control + treatment)
-        - multivariate: 3 variants (control + 2 treatments)
-        - feature_flag_rollout: 1 variant at 100% traffic
+        Builds variants based on experiment type.  Every type produces exactly
+        one control and allocations summing to 100 — ``ExperimentCreate``
+        rejects anything else, and every analysis path looks the control up
+        with ``next(v for v in variants if v["is_control"])``:
+
+        - ab: 2 variants (control + treatment), 50/50
+        - multivariate: 3 variants (control + 2 treatments), 33/33/34
+        - feature_flag_rollout: 2 variants — a held-back control with the
+          feature off and a treatment with it on, 50/50.  (A single 100%
+          "Treatment" arm has nothing to measure against.)
 
         Args:
             draft: The completed WizardDraft.
@@ -228,35 +251,90 @@ class ExperimentWizardService:
         else:  # feature_flag_rollout
             variants = [
                 {
+                    "name": "Control",
+                    "description": "Feature off (held back)",
+                    "is_control": True,
+                    "traffic_percentage": 50,
+                    "configuration": {"enabled": False},
+                },
+                {
                     "name": "Treatment",
+                    "description": "Feature on",
                     "is_control": False,
-                    "traffic_percentage": 100,
-                }
+                    "traffic_percentage": 50,
+                    "configuration": {"enabled": True},
+                },
             ]
+
+        metric_name = draft.primary_metric_id or "conversion"
+        metrics = [
+            {
+                "name": metric_name,
+                "event_name": metric_name,
+                "metric_type": "conversion",
+                "is_primary": True,
+            }
+        ] + [
+            {
+                "name": guardrail,
+                "event_name": guardrail,
+                "metric_type": "conversion",
+                "is_primary": False,
+            }
+            for guardrail in (draft.guardrail_metric_ids or [])
+        ]
 
         return {
             "name": draft.name or f"Experiment {draft.id[:8]}",
             "description": draft.description or draft.hypothesis or "",
             "hypothesis": draft.hypothesis,
-            "variants": variants,
+            "experiment_type": _EXPERIMENT_TYPE_MAP.get(exp_type, "a_b"),
+            # ``traffic_allocation`` is what ``ExperimentCreate`` expects;
+            # ``traffic_percentage`` is kept as an alias for older callers.
+            "variants": [
+                dict(v, traffic_allocation=v["traffic_percentage"]) for v in variants
+            ],
+            "metrics": metrics,
             "primary_metric_id": draft.primary_metric_id,
-            "targeting_rules": draft.targeting_rules or [],
+            # The wizard collects a list of condition dicts; ExperimentCreate
+            # takes the dashboard's grouped shape (see core/targeting_adapter).
+            "targeting_rules": (
+                {
+                    "logical_operator": "and",
+                    "groups": [
+                        {"logical_operator": "and", "conditions": list(draft.targeting_rules)}
+                    ],
+                }
+                if draft.targeting_rules
+                else None
+            ),
         }
 
     @classmethod
-    def validate_and_submit(cls, draft_id: str, db: Any = None) -> Dict[str, Any]:
-        """Validate a completed draft and create an experiment from it.
+    def validate_and_submit(
+        cls, draft_id: str, db: Any = None, user_id: Any = None
+    ) -> Dict[str, Any]:
+        """Validate a completed draft and create the experiment it describes.
+
+        With *db* and *user_id* the draft is turned into a real DRAFT
+        experiment through :class:`ExperimentService`, exactly as
+        ``POST /api/v1/experiments/`` would; the draft is then dropped.
+        Without them (unit tests, dry runs) only the payload is built and
+        validated and no experiment is created — the caller can tell the
+        cases apart by ``persisted``.
 
         Args:
             draft_id: The ID of the draft to submit.
-            db: Optional database session (for future integration with ExperimentService).
+            db: SQLAlchemy session. Required to create the experiment.
+            user_id: Owner of the new experiment. Required with *db*.
 
         Returns:
-            Dict with 'success' bool, 'experiment_id' on success, or 'errors' on failure.
+            Dict with ``success``, ``persisted``, ``experiment_id`` on
+            success, or ``errors`` on failure.
         """
         draft = cls.get_draft(draft_id)
         if not draft:
-            return {"success": False, "errors": ["Draft not found"]}
+            return {"success": False, "persisted": False, "errors": ["Draft not found"]}
 
         review_data = {
             "experiment_type": draft.experiment_type,
@@ -265,13 +343,58 @@ class ExperimentWizardService:
         }
         validation = cls.validate_wizard_step("review", review_data)
         if not validation.is_valid:
-            return {"success": False, "errors": validation.errors}
+            return {"success": False, "persisted": False, "errors": validation.errors}
 
         payload = cls.build_experiment_payload(draft)
-        # In production: delegate to ExperimentService.create(db, payload)
-        experiment_id = str(uuid.uuid4())
+
+        if db is None or user_id is None:
+            # Dry run: validated, nothing written.
+            return {
+                "success": True,
+                "persisted": False,
+                "experiment_id": None,
+                "payload": payload,
+            }
+
+        from pydantic import ValidationError
+
+        from backend.app.schemas.experiment import ExperimentCreate
+        from backend.app.services.experiment_service import ExperimentService
+
+        try:
+            obj_in = ExperimentCreate(**payload)
+        except ValidationError as exc:
+            # Schema errors describe the caller's own payload, so they are
+            # safe (and useful) to return.
+            logger.info("Wizard draft %s failed validation: %s", draft_id, exc)
+            return {
+                "success": False,
+                "persisted": False,
+                "errors": [
+                    f"{'.'.join(str(part) for part in error['loc']) or 'payload'}: {error['msg']}"
+                    for error in exc.errors()
+                ],
+                "payload": payload,
+            }
+
+        try:
+            created = ExperimentService(db).create_experiment(obj_in=obj_in, user_id=user_id)
+        except Exception:  # noqa: BLE001 - never surface internals to the client
+            # Driver/ORM messages name tables, columns and constraints, so the
+            # detail stays in the server log and the caller gets a generic message.
+            logger.exception("Wizard draft %s could not be created", draft_id)
+            return {
+                "success": False,
+                "persisted": False,
+                "errors": ["The experiment could not be created. Please try again."],
+                "payload": payload,
+            }
+
+        cls.delete_draft(draft_id)
+        experiment_id = str(created["id"] if isinstance(created, dict) else created.id)
         return {
             "success": True,
+            "persisted": True,
             "experiment_id": experiment_id,
             "payload": payload,
         }

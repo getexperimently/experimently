@@ -177,7 +177,7 @@ const SLUG_TITLES: Record<string, string> = {
   'guides/first-ab-test': 'Your First A/B Test',
   'guides/bayesian': 'Bayesian Experimentation',
   'guides/warehouse-analytics': 'Warehouse-Native Analytics',
-  'guides/no-code-builder': 'No-Code Experiment Builder',
+  'guides/no-code-builder': 'Guided Experiment Builder',
   'guides/interaction-detection': 'Interaction Detection',
 };
 

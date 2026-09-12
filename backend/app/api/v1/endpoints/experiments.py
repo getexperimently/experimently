@@ -36,7 +36,10 @@ from backend.app.schemas.experiment import (
 )
 from backend.app.schemas.results import ExperimentResultsResponse
 from backend.app.api.v1.endpoints import results as results_endpoints
-from backend.app.services.experiment_service import ExperimentService
+from backend.app.services.experiment_service import (
+    ExperimentService,
+    resolve_experiment_status,
+)
 from backend.app.services.analysis_service import AnalysisService
 from backend.app.core.logging import logger
 from backend.app.core.permissions import check_permission, ResourceType, Action, get_permission_error_message, check_ownership
@@ -210,22 +213,16 @@ async def create_experiment(
     Raises:
         HTTPException: If the experiment data is invalid or creation fails
     """
-    try:
-        # Check for special test attribute that identifies viewer users in tests
-        if hasattr(current_user, '_is_viewer_user_for_test') and current_user._is_viewer_user_for_test:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Viewer users cannot create experiments"
-            )
+    # Role decides, not the username: this used to gate on the substring
+    # "viewer" appearing in `username`, which both let a VIEWER named e.g.
+    # "alice" create experiments and blocked a DEVELOPER named "viewer.smith".
+    if not check_permission(current_user, ResourceType.EXPERIMENT, Action.CREATE):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=get_permission_error_message(ResourceType.EXPERIMENT, Action.CREATE),
+        )
 
-        # Check if user is a viewer (users with username containing 'viewer' or exactly 'testviewer')
-        if hasattr(current_user, 'username'):
-            username = current_user.username.lower() if current_user.username else ""
-            if (username == "testviewer" or "viewer" in username) and not current_user.is_superuser:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Viewer users cannot create experiments"
-                )
+    try:
 
         # Create experiment service
         experiment_service = ExperimentService(db)
@@ -452,13 +449,14 @@ async def update_experiment(
         # Get update data
         update_data = experiment_in.model_dump(exclude_unset=True)
 
-        # Handle status conversion if needed
+        # Handle status conversion if needed.  Accepts the enum value
+        # ("draft") or its name ("DRAFT"); anything else leaves the status be.
         if "status" in update_data and isinstance(update_data["status"], str):
-            try:
-                update_data["status"] = ExperimentStatus[update_data["status"].upper()]
-            except (KeyError, ValueError):
-                # If conversion fails, keep the existing status
+            resolved_status = resolve_experiment_status(update_data["status"])
+            if resolved_status is None:
                 del update_data["status"]
+            else:
+                update_data["status"] = resolved_status
 
         # For non-draft experiments, prevent updates to restricted fields
         if experiment.status != ExperimentStatus.DRAFT:

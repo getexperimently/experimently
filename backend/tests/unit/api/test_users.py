@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from pydantic import SecretStr
 from datetime import datetime, timezone
 
-from backend.app.models.user import User
+from backend.app.models.user import User, UserRole
 from backend.app.schemas.user import UserCreate, UserUpdate
 from backend.app.api.deps import get_current_active_user, get_current_superuser, get_db
 from backend.app.main import app
@@ -254,6 +254,49 @@ def test_create_user(mock_hash, client, mock_db, mock_db_query, superuser):
     app.dependency_overrides = {}
 
 
+@patch("backend.app.api.v1.endpoints.users.get_password_hash")
+def test_create_user_with_role(mock_hash, client, mock_db, mock_db_query, superuser):
+    """``role`` (any casing) is stored as the ``UserRole`` member and echoed back."""
+    mock_hash.return_value = "hashed_password"
+    mock_db_query.filter.return_value = mock_db_query
+    mock_db_query.first.return_value = None
+    mock_db.refresh.side_effect = lambda x: None
+    added = []
+    mock_db.add.side_effect = added.append
+
+    app.dependency_overrides[get_current_active_user] = lambda: superuser
+
+    response = client.post(
+        "/api/v1/users/",
+        json={
+            "username": "devuser",
+            "email": "dev@example.com",
+            "password": "StrongPass123",
+            "role": "developer",
+        },
+    )
+    assert response.status_code == 201, response.text
+    assert response.json()["role"] == "DEVELOPER"
+    assert added and added[0].role is UserRole.DEVELOPER
+
+    app.dependency_overrides = {}
+
+
+def test_create_user_rejects_unknown_role(client, mock_db, superuser):
+    app.dependency_overrides[get_current_active_user] = lambda: superuser
+    response = client.post(
+        "/api/v1/users/",
+        json={
+            "username": "devuser",
+            "email": "dev@example.com",
+            "password": "StrongPass123",
+            "role": "SUPERHERO",
+        },
+    )
+    assert response.status_code == 422, response.text
+    app.dependency_overrides = {}
+
+
 def test_create_user_normal_user(client, mock_db, normal_user):
     """Test that normal users cannot create new users."""
     # Setup mocks - this is important to handle the forbidden case properly
@@ -392,9 +435,12 @@ def test_update_user_superuser(
     assert data["full_name"] == update_data["full_name"]
     assert data["is_superuser"] == update_data["is_superuser"]
 
-    # Verify mock calls
+    # Verify mock calls.  ``get_password_hash`` hashes the *plain text*: it
+    # calls ``.encode()``, so handing it the SecretStr wrapper is a 500.
     assert mock_hash.call_count == 1
-    assert isinstance(mock_hash.call_args[0][0], SecretStr)
+    hashed_arg = mock_hash.call_args[0][0]
+    assert not isinstance(hashed_arg, SecretStr)
+    assert hashed_arg == update_data["password"]
     mock_db.commit.assert_called_once()
 
     # Reset overrides

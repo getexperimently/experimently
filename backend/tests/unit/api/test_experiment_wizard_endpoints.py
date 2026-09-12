@@ -14,7 +14,10 @@ from fastapi.testclient import TestClient
 from backend.app.main import app
 from backend.app.api import deps
 from backend.app.models.user import User, UserRole
-from backend.app.services.experiment_wizard_service import _drafts
+from backend.app.services.experiment_wizard_service import (
+    ExperimentWizardService,
+    _drafts,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -296,9 +299,53 @@ class TestValidateStep:
 
 
 class TestSubmitDraft:
-    """POST /api/v1/wizard/drafts/{id}/submit — submit a completed draft."""
+    """POST /api/v1/wizard/drafts/{id}/submit — submit a completed draft.
+
+    Submission writes a real experiment, so these tests use the test
+    database and a persisted owner rather than the mocked user.
+    """
 
     def teardown_method(self):
+        app.dependency_overrides.clear()
+
+    @staticmethod
+    def _persisted_user(db_session, role: UserRole):
+        """Create and commit a real ``users`` row with the given role."""
+        from backend.app.core.security import get_password_hash
+        from backend.app.models.user import User as UserModel
+
+        owner = UserModel(
+            username=f"wizard_{uuid.uuid4().hex[:8]}",
+            email=f"wizard_{uuid.uuid4().hex[:8]}@example.com",
+            full_name="Wizard Owner",
+            hashed_password=get_password_hash("Wizard-Passw0rd"),
+            is_active=True,
+            is_superuser=False,
+            role=role,
+        )
+        db_session.add(owner)
+        db_session.commit()
+        db_session.refresh(owner)
+        return owner
+
+    @pytest.fixture
+    def authenticated_client(self, client, db_session):
+        """Client whose caller is a real ``users`` row and whose db is the test session."""
+        owner = self._persisted_user(db_session, UserRole.DEVELOPER)
+
+        app.dependency_overrides[deps.get_current_active_user] = lambda: owner
+        app.dependency_overrides[deps.get_db] = lambda: db_session
+        yield client, owner
+        app.dependency_overrides.clear()
+
+    @pytest.fixture
+    def viewer_client(self, client, db_session):
+        """Same, but the caller is a VIEWER — read-only by RBAC."""
+        viewer = self._persisted_user(db_session, UserRole.VIEWER)
+
+        app.dependency_overrides[deps.get_current_active_user] = lambda: viewer
+        app.dependency_overrides[deps.get_db] = lambda: db_session
+        yield client, viewer
         app.dependency_overrides.clear()
 
     def _create_complete_draft(self, client, mock_user):
@@ -332,15 +379,34 @@ class TestSubmitDraft:
         response = client.post(f"/api/v1/wizard/drafts/{draft_id}/submit")
         assert response.status_code == 200
 
-    def test_submit_complete_draft_returns_experiment_id(self, authenticated_client):
-        """POST /wizard/drafts/{id}/submit returns experiment_id on success."""
-        client, mock_user = authenticated_client
-        draft_id = self._create_complete_draft(client, mock_user)
+    def test_submit_complete_draft_creates_a_real_experiment(self, authenticated_client, db_session):
+        """The returned experiment_id names a row in ``experiments``, owned by the caller."""
+        from backend.app.models.experiment import Experiment
+
+        client, owner = authenticated_client
+        draft_id = self._create_complete_draft(client, owner)
         response = client.post(f"/api/v1/wizard/drafts/{draft_id}/submit")
         data = response.json()
-        assert data["success"] is True
-        assert "experiment_id" in data
+        assert data["success"] is True, data
         assert data["experiment_id"] is not None
+
+        experiment = (
+            db_session.query(Experiment).filter(Experiment.id == data["experiment_id"]).first()
+        )
+        assert experiment is not None
+        assert str(experiment.owner_id) == str(owner.id)
+        assert experiment.status.value.lower() == "draft"
+        assert len(experiment.variants) == 2
+        assert sum(v.traffic_allocation for v in experiment.variants) == 100
+        # ``metric_definitions`` is the relationship; ``metrics`` is a JSONB column.
+        assert any(m.is_primary for m in experiment.metric_definitions)
+
+    def test_submitted_draft_is_discarded(self, authenticated_client):
+        """A submitted draft is gone, so it cannot create the experiment twice."""
+        client, owner = authenticated_client
+        draft_id = self._create_complete_draft(client, owner)
+        assert client.post(f"/api/v1/wizard/drafts/{draft_id}/submit").json()["success"] is True
+        assert client.post(f"/api/v1/wizard/drafts/{draft_id}/submit").status_code == 404
 
     def test_submit_incomplete_draft_returns_errors(self, authenticated_client):
         """POST /wizard/drafts/{id}/submit with incomplete draft returns errors."""
@@ -362,6 +428,119 @@ class TestSubmitDraft:
         client, mock_user = authenticated_client
         response = client.post(f"/api/v1/wizard/drafts/{uuid.uuid4()}/submit")
         assert response.status_code == 404
+
+    def test_viewer_cannot_create_an_experiment_through_the_wizard(
+        self, viewer_client, db_session
+    ):
+        """A VIEWER is refused here exactly as at POST /api/v1/experiments/."""
+        from backend.app.models.experiment import Experiment
+
+        client, viewer = viewer_client
+        draft_id = self._create_complete_draft(client, viewer)
+
+        response = client.post(f"/api/v1/wizard/drafts/{draft_id}/submit")
+
+        assert response.status_code == 403, response.text
+        owned = db_session.query(Experiment).filter(Experiment.owner_id == viewer.id).count()
+        assert owned == 0
+
+    def test_developer_can_create_an_experiment_through_the_wizard(
+        self, authenticated_client, db_session
+    ):
+        """The contrast case for the permission check: DEVELOPER may create."""
+        from backend.app.models.experiment import Experiment
+
+        client, owner = authenticated_client
+        draft_id = self._create_complete_draft(client, owner)
+
+        response = client.post(f"/api/v1/wizard/drafts/{draft_id}/submit")
+
+        assert response.status_code == 200, response.text
+        assert response.json()["success"] is True, response.text
+        assert (
+            db_session.query(Experiment)
+            .filter(Experiment.id == response.json()["experiment_id"])
+            .count()
+            == 1
+        )
+
+    def test_rollout_draft_persists_a_control_and_a_treatment(
+        self, authenticated_client, db_session
+    ):
+        """feature_flag_rollout used to emit a single control-less variant."""
+        from backend.app.models.experiment import Experiment
+
+        client, owner = authenticated_client
+        create_resp = client.post(
+            "/api/v1/wizard/drafts", json={"experiment_type": "feature_flag_rollout"}
+        )
+        draft_id = create_resp.json()["id"]
+        client.put(
+            f"/api/v1/wizard/drafts/{draft_id}/step",
+            json={
+                "step": "define_hypothesis",
+                "data": {
+                    "hypothesis": "We believe rolling the flag out will lift activation.",
+                    "primary_metric_id": "metric-001",
+                },
+            },
+        )
+
+        response = client.post(f"/api/v1/wizard/drafts/{draft_id}/submit")
+
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert data["success"] is True, data
+        experiment = (
+            db_session.query(Experiment)
+            .filter(Experiment.id == data["experiment_id"])
+            .first()
+        )
+        assert experiment is not None
+        assert sum(1 for v in experiment.variants if v.is_control) == 1
+        assert sum(v.traffic_allocation for v in experiment.variants) == 100
+
+    def test_internal_error_does_not_leak_database_details(self, authenticated_client):
+        """SQLAlchemy messages name tables and constraints — they stay in the log."""
+        from sqlalchemy.exc import SQLAlchemyError
+
+        from backend.app.services.experiment_service import ExperimentService
+
+        client, owner = authenticated_client
+        draft_id = self._create_complete_draft(client, owner)
+
+        leak = (
+            'relation "test_experimentation.experiments" does not exist; '
+            'constraint "experiments_owner_id_fkey"'
+        )
+        with patch.object(
+            ExperimentService, "create_experiment", side_effect=SQLAlchemyError(leak)
+        ):
+            response = client.post(f"/api/v1/wizard/drafts/{draft_id}/submit")
+
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert data["success"] is False
+        assert data["errors"], data
+        body = response.text
+        for secret in ("experiments_owner_id_fkey", "relation", "constraint", "test_experimentation"):
+            assert secret not in body, f"{secret!r} leaked to the client: {body}"
+
+    def test_validation_errors_are_still_returned_verbatim(self, authenticated_client):
+        """Pydantic errors describe the caller's own payload, so they stay."""
+        client, owner = authenticated_client
+        draft_id = self._create_complete_draft(client, owner)
+
+        with patch.object(
+            ExperimentWizardService,
+            "build_experiment_payload",
+            return_value={"name": "", "variants": [], "metrics": []},
+        ):
+            response = client.post(f"/api/v1/wizard/drafts/{draft_id}/submit")
+
+        data = response.json()
+        assert data["success"] is False
+        assert any("variants" in error for error in data["errors"]), data
 
 
 # ---------------------------------------------------------------------------

@@ -45,11 +45,69 @@ disallow_untyped_defs = false
 disallow_incomplete_defs = false
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+# The single pytest configuration for the repository. Run pytest from the
+# repository root; the backend package is imported as ``backend.app.*``.
+testpaths = ["backend/tests"]
 python_files = "test_*.py"
 python_functions = "test_*"
 python_classes = "Test*"
-addopts = "--cov=app --cov-report=term-missing --no-cov-on-fail"
+asyncio_mode = "auto"
+# Coverage is NOT in addopts: it slows every run and silently produces no
+# report under some plugin combinations. Ask for it explicitly:
+#   pytest --cov=backend.app --cov-report=term
+addopts = ""
+markers = [
+    "unit: unit tests (fast, no external dependencies)",
+    "integration: integration tests (require the database)",
+    "e2e: end-to-end tests (require the full stack)",
+    "regression: guards a specific past bug",
+    "slow: slow running tests",
+    "api: API tests",
+    "contract: API contract tests",
+    "cors: CORS tests",
+    "security: security header tests",
+    "dependency: dependency-injection tests",
+    "validation: validation tests",
+    "realistic: realistic scenario tests (require a running platform)",
+    "requires_db: tests requiring a database connection",
+    "requires_aws: tests requiring AWS services (LocalStack)",
+    "cognito_integration: Cognito authentication tests (require moto)",
+]
+log_cli = true
+log_cli_level = "INFO"
+log_cli_format = "%(asctime)s [%(levelname)8s] %(message)s (%(filename)s:%(lineno)s)"
+log_cli_date_format = "%Y-%m-%d %H:%M:%S"
+
+[tool.coverage.run]
+source = ["backend/app"]
+omit = [
+    "backend/app/db/migrations/*",
+    "backend/app/db/init_db.py",
+    "backend/app/*/__init__.py",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "raise ImportError",
+    "except ImportError:",
+]
+
+[tool.coverage.html]
+directory = "coverage_html_report"
+
+[project]
+name = "experimentation-platform"
+version = "0.1.0"
+description = "Experimently — experimentation platform for A/B testing and feature flags"
+requires-python = ">=3.11"
+
+[tool.setuptools.packages.find]
+include = ["backend*"]
+exclude = ["backend.tests*", "venv*", "node_modules*"]
 
 [tool.bandit]
 exclude_dirs = ["tests", "venv", ".venv"]
