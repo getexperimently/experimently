@@ -60,8 +60,9 @@ This document outlines the development standards, workflows, and best practices 
 5. Run the backend server:
 
     ```bash
-    cd backend
-    uvicorn app.main:app --reload
+    # from the repository root
+    python -m backend.app.db.bootstrap
+    uvicorn backend.app.main:app --reload
     ```
 
 6. Run the frontend development server:

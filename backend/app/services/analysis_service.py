@@ -29,9 +29,13 @@ from backend.app.schemas.bayesian import (
     BayesianResultsResponse,
     BayesianVariantResult,
 )
-from backend.app.services.bayesian_service import BayesianService
+from backend.app.core.stats_engine import ENGINE_VERSION, as_of_bucket, derive_seed
+from backend.app.services.bayesian_service import BayesianService, DEFAULT_N_SAMPLES
 
 logger = logging.getLogger(__name__)
+
+#: Monte Carlo samples per variant for the Bayesian block of the results API.
+BAYESIAN_N_SAMPLES: int = DEFAULT_N_SAMPLES
 
 
 class AnalysisService:
@@ -96,50 +100,9 @@ class AnalysisService:
 
         # EP-035 Batch 2: Compute Bayesian results if enabled
         bayesian_results = None
-        if getattr(experiment, "bayesian_enabled", False) and getattr(experiment, "bayesian_config", None):
+        if self.is_bayesian_enabled(experiment):
             try:
-                # Build per-variant metrics_data: variant_id -> {conversions, total}
-                metrics_data: Dict[str, Dict[str, int]] = {}
-                for variant in experiment.variants:
-                    vid = str(variant.id)
-                    total = (
-                        self.db.query(func.count(Assignment.id))
-                        .filter(
-                            Assignment.experiment_id == experiment.id,
-                            Assignment.variant_id == variant.id,
-                        )
-                        .scalar()
-                        or 0
-                    )
-                    # Use primary metric conversions if available, else 0
-                    primary_metric = next(
-                        (m for m in experiment.metric_definitions if m.is_primary),
-                        experiment.metric_definitions[0] if experiment.metric_definitions else None,
-                    )
-                    if primary_metric:
-                        convs = (
-                            self.db.query(func.count(Event.id))
-                            .filter(
-                                Event.experiment_id == experiment.id,
-                                Event.variant_id == variant.id,
-                                conversion_event_filter(primary_metric.event_name),
-                            )
-                            .scalar()
-                            or 0
-                        )
-                    else:
-                        convs = 0
-                    metrics_data[vid] = {"conversions": convs, "total": total}
-
-                bayesian_response = self._compute_bayesian_results(experiment, metrics_data)
-
-                # Persist the decision back to the experiment record
-                if bayesian_response.decision is not None:
-                    experiment.bayesian_decision = bayesian_response.decision.value
-                    self.db.add(experiment)
-                    self.db.flush()
-
-                bayesian_results = bayesian_response
+                bayesian_results = self.compute_bayesian_results(experiment)
             except Exception as exc:
                 logger.warning("Bayesian analysis failed (non-critical): %s", exc)
 
@@ -783,21 +746,99 @@ class AnalysisService:
     # EP-035 Batch 2: Bayesian Analysis Helper
     # -----------------------------------------------------------------------
 
+    @staticmethod
+    def is_bayesian_enabled(experiment: Experiment) -> bool:
+        """True when the experiment opted into Bayesian analysis and has a config."""
+        return bool(
+            getattr(experiment, "bayesian_enabled", False)
+            and getattr(experiment, "bayesian_config", None)
+        )
+
+    def _bayesian_observations(self, experiment: Experiment) -> Dict[str, Dict[str, int]]:
+        """Per-variant ``{conversions, total}`` for the primary metric."""
+        primary_metric = next(
+            (m for m in experiment.metric_definitions if m.is_primary),
+            experiment.metric_definitions[0] if experiment.metric_definitions else None,
+        )
+        metrics_data: Dict[str, Dict[str, int]] = {}
+        for variant in experiment.variants:
+            vid = str(variant.id)
+            total = (
+                self.db.query(func.count(Assignment.id))
+                .filter(
+                    Assignment.experiment_id == experiment.id,
+                    Assignment.variant_id == variant.id,
+                )
+                .scalar()
+                or 0
+            )
+            if primary_metric:
+                convs = (
+                    self.db.query(func.count(Event.id))
+                    .filter(
+                        Event.experiment_id == experiment.id,
+                        Event.variant_id == variant.id,
+                        conversion_event_filter(primary_metric.event_name),
+                    )
+                    .scalar()
+                    or 0
+                )
+            else:
+                convs = 0
+            metrics_data[vid] = {"conversions": convs, "total": total}
+        return metrics_data
+
+    def compute_bayesian_results(
+        self,
+        experiment: Experiment,
+        as_of: Optional[datetime] = None,
+    ) -> BayesianResultsResponse:
+        """Read the primary-metric counts and run the Bayesian analysis.
+
+        Also persists ``experiment.bayesian_decision`` (flushed, not
+        committed) so the experiment scheduler can act on stopping rules.
+
+        Args:
+            experiment: Experiment ORM object with variants and metrics loaded.
+            as_of: Analysis time used for the reproducibility bucket
+                (defaults to now, UTC).
+        """
+        metrics_data = self._bayesian_observations(experiment)
+        bayesian_response = self._compute_bayesian_results(
+            experiment, metrics_data, as_of=as_of
+        )
+
+        # Persist the decision back to the experiment record
+        if bayesian_response.decision is not None:
+            experiment.bayesian_decision = bayesian_response.decision.value
+            self.db.add(experiment)
+            self.db.flush()
+
+        return bayesian_response
+
     def _compute_bayesian_results(
         self,
         experiment: Experiment,
         metrics_data: Dict[str, Dict[str, int]],
+        as_of: Optional[datetime] = None,
+        n_samples: int = BAYESIAN_N_SAMPLES,
     ) -> BayesianResultsResponse:
         """Compute Bayesian inference results for all variants.
+
+        The Monte Carlo seed is ``derive_seed(experiment.id, as_of day,
+        n_samples)`` so repeated calls on the same day return identical
+        posterior summaries; the seed is echoed in the response.
 
         Args:
             experiment: Experiment ORM object with bayesian_config populated.
             metrics_data: Mapping of variant_id (str) ->
                 {'conversions': int, 'total': int}.
+            as_of: Analysis time for the reproducibility bucket (default now).
+            n_samples: Monte Carlo samples per variant.
 
         Returns:
             BayesianResultsResponse with posterior distributions, PtBB,
-            expected loss, and a BayesianDecision.
+            expected loss, a BayesianDecision, and seed provenance.
         """
         # Load BayesianConfig from the JSONB column
         raw_config = experiment.bayesian_config or {}
@@ -820,8 +861,12 @@ class AnalysisService:
             variant_observations.append(obs)
             variant_keys.append(variant.name)
 
+        # Deterministic seed: same experiment + same UTC day + same n_samples
+        # → byte-identical Monte Carlo draws.
+        seed = derive_seed(experiment.id, as_of_bucket(as_of), n_samples)
+
         # Run full Bayesian analysis
-        analysis = service.analyze(variant_observations)
+        analysis = service.analyze(variant_observations, n_samples=n_samples, seed=seed)
 
         posteriors = analysis["posteriors"]
         credible_intervals = analysis["credible_intervals"]
@@ -859,6 +904,9 @@ class AnalysisService:
             is_enabled=True,
             decision=decision,
             variant_results=variant_results,
+            seed=seed,
+            n_samples=int(n_samples),
+            engine_version=ENGINE_VERSION,
         )
 
     # -----------------------------------------------------------------------

@@ -1,6 +1,7 @@
-# Quick Start Guide
+# Quick Start
 
-Get from zero to your first running experiment in under 30 minutes.
+From a fresh clone to a running experiment in about ten minutes. Everything below runs
+locally with Docker; no AWS account and no external identity provider is needed.
 
 ---
 
@@ -8,309 +9,215 @@ Get from zero to your first running experiment in under 30 minutes.
 
 | Tool | Version | Check |
 |------|---------|-------|
-| Python | 3.9+ | `python --version` |
-| Node.js | 18+ | `node --version` |
-| Docker + Compose | 24+ | `docker --version` |
-| Git | Any | `git --version` |
+| Docker with Compose v2 | 24+ | `docker compose version` |
+| `curl` and `jq` | any | `jq --version` |
+
+Only needed if you want to run the backend or dashboard outside Docker: Python 3.11+, Node.js 22+.
 
 ---
 
-## Step 1: Clone and Configure
+## Step 1: Start the stack
 
 ```bash
 git clone https://github.com/amarkanday/experimentation-platform.git
 cd experimentation-platform
-cp backend/.env.example backend/.env
+docker compose up -d --wait
 ```
 
-Edit `backend/.env`:
+The first start builds two images (`experimently-api:ce`, `experimently-web:ce`), starts
+Postgres 16 and Redis 7, creates the database schema, creates the first administrator and
+applies the `demo` seed (three experiments, two flags). Seeds run once per database.
 
-```env
-# Database
-POSTGRES_SERVER=localhost
-POSTGRES_USER=postgres
-POSTGRES_PASSWORD=postgres
-POSTGRES_DB=experimentation
-POSTGRES_SCHEMA=experimentation
+| Service | URL |
+|---------|-----|
+| Dashboard | http://localhost:3000 |
+| API and interactive docs | http://localhost:8000 and http://localhost:8000/docs |
+| Health | http://localhost:8000/health/ready |
 
-# Security (change in production!)
-SECRET_KEY=your-secret-key-min-32-chars
-ACCESS_TOKEN_EXPIRE_MINUTES=30
+Default credentials: **admin@demo.com / Demo1234!**. Change `FIRST_SUPERUSER_PASSWORD`,
+`SECRET_KEY` and `POSTGRES_PASSWORD` in a `.env` file next to `docker-compose.yml` before
+exposing the stack to anyone. The header comment of `docker-compose.yml` lists every
+variable, the optional `demo`, `tools` and `aws` profiles, and the host-port overrides.
 
-# App
-APP_ENV=development
-DEBUG=true
+Verify:
+
+```bash
+curl -s localhost:8000/health/ready | jq .status        # "healthy"
+curl -s -o /dev/null -w '%{http_code}\n' localhost:8000/api/v1/experiments/   # 401 — auth is on
 ```
 
 ---
 
-## Step 2: Start the Platform
+## Step 2: Log in
+
+In the browser, open http://localhost:3000 and sign in. From the shell:
 
 ```bash
-# Start PostgreSQL + Redis
-docker-compose up -d db redis
+TOKEN=$(curl -s -X POST localhost:8000/api/v1/auth/login \
+  -H 'content-type: application/json' \
+  -d '{"email":"admin@demo.com","password":"Demo1234!"}' | jq -r .access_token)
 
-# Verify services are healthy
-docker-compose ps
+curl -s localhost:8000/api/v1/auth/me -H "Authorization: Bearer $TOKEN" | jq .role   # "ADMIN"
 ```
 
-Expected output:
-```
-NAME                STATUS
-experimentation-db  Up (healthy)
-experimentation-redis  Up
-```
+Tokens last 12 hours (`LOCAL_AUTH_TOKEN_TTL_MINUTES`). Ten failed logins lock an account
+for 15 minutes.
 
 ---
 
-## Step 3: Set Up Backend
+## Step 3: Create an experiment
+
+Through the dashboard: **Experiments → + New Experiment**, add two variants and one
+metric, then **Start**. Through the API:
 
 ```bash
-# Create and activate virtualenv
-python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
-
-# Install dependencies
-cd backend
-pip install -r requirements.txt
-
-# Run database migrations
-export POSTGRES_DB=experimentation POSTGRES_SCHEMA=experimentation
-python -m alembic -c app/db/alembic.ini upgrade head
-
-# Start the API server
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-```
-
-Verify: open http://localhost:8000/health — should return `{"status": "ok"}`.
-
-Interactive API docs: http://localhost:8000/docs
-
----
-
-## Step 4: Set Up Frontend
-
-Open a new terminal:
-
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-Verify: open http://localhost:3000
-
----
-
-## Step 5: Create Your First Experiment
-
-### Option A: Via the UI
-
-1. Open http://localhost:3000
-2. Click **Experiments** → **New Experiment**
-3. Fill in:
-   - Name: `Homepage Button Color Test`
-   - Key: `homepage-button-color` (auto-generated)
-   - Hypothesis: "A green CTA button will increase click-through rate"
-4. Add variants:
-   - **Control** (50% traffic) — existing blue button
-   - **Treatment** (50% traffic) — new green button
-5. Add a metric: `click` event, primary metric
-6. Click **Create** → **Start Experiment**
-
-### Option B: Via the API
-
-```bash
-# 1. Login to get a token
-TOKEN=$(curl -s -X POST http://localhost:8000/api/v1/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"username":"admin","password":"admin"}' \
-  | jq -r '.access_token')
-
-# 2. Create an experiment
-curl -X POST http://localhost:8000/api/v1/experiments \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
+EXPERIMENT=$(curl -s -X POST localhost:8000/api/v1/experiments/ \
+  -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
   -d '{
-    "name": "Homepage Button Color Test",
-    "key": "homepage-button-color",
-    "description": "Test green vs blue CTA button",
-    "hypothesis": "Green button increases CTR",
-    "type": "A_B",
+    "name": "Homepage button colour",
+    "key": "homepage_button_colour",
+    "hypothesis": "A green call-to-action raises click-through",
+    "experiment_type": "a_b",
     "variants": [
-      {"name": "Control", "is_control": true, "traffic_allocation": 50},
-      {"name": "Treatment", "is_control": false, "traffic_allocation": 50}
+      {"name": "control",   "is_control": true,  "traffic_allocation": 50},
+      {"name": "green_cta", "is_control": false, "traffic_allocation": 50}
     ],
     "metrics": [
-      {"name": "Click Rate", "event_name": "click", "metric_type": "CONVERSION", "is_primary": true}
+      {"name": "CTA click", "event_name": "cta_click", "metric_type": "conversion", "is_primary": true}
     ]
-  }'
+  }')
+ID=$(jq -r .id <<<"$EXPERIMENT")
 
-# 3. Start the experiment (replace EXPERIMENT_ID)
-curl -X POST http://localhost:8000/api/v1/experiments/EXPERIMENT_ID/start \
-  -H "Authorization: Bearer $TOKEN"
+curl -s -X POST localhost:8000/api/v1/experiments/$ID/start -H "Authorization: Bearer $TOKEN" | jq .status
 ```
+
+Conversions are matched to a metric by `event_name`, so the events your app sends in
+Step 5 must use the same name.
 
 ---
 
-## Step 6: Track Events from Your Application
+## Step 4: Create an API key
 
-Once your experiment is running, integrate event tracking. All tracking endpoints use an **API key** (not a user token).
-
-### Get your API key
+SDKs and your application authenticate with an API key, not a user token. The key is
+shown once.
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/auth/api-keys \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"name": "my-app-key", "description": "Frontend app key"}'
-```
-
-### Assign a user to the experiment
-
-```javascript
-const response = await fetch('http://localhost:8000/api/v1/tracking/assign', {
-  method: 'POST',
-  headers: {
-    'Content-Type': 'application/json',
-    'X-API-Key': 'your-api-key',
-  },
-  body: JSON.stringify({
-    user_id: 'user-123',
-    experiment_key: 'homepage-button-color',
-    context: { country: 'US', device: 'mobile' },
-  }),
-});
-const { variant_name, configuration } = await response.json();
-// variant_name = "Control" or "Treatment"
-// Use this to show the right variant to the user
-```
-
-### Track a conversion event
-
-```javascript
-await fetch('http://localhost:8000/api/v1/tracking/track', {
-  method: 'POST',
-  headers: {
-    'Content-Type': 'application/json',
-    'X-API-Key': 'your-api-key',
-  },
-  body: JSON.stringify({
-    event_type: 'click',
-    user_id: 'user-123',
-    experiment_key: 'homepage-button-color',
-    value: 1.0,
-  }),
-});
+KEY=$(curl -s -X POST localhost:8000/api/v1/api-keys \
+  -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+  -d '{"name":"my-app"}' | jq -r .key)
 ```
 
 ---
 
-## Step 7: View Results
-
-Once you have collected sufficient data:
-
-1. Open http://localhost:3000/results/EXPERIMENT_ID
-2. The dashboard shows:
-   - Conversion rates per variant
-   - Statistical significance (p-value)
-   - Effect size and confidence intervals
-   - Sample size adequacy meter
-   - Recommendation: Ship / Keep Control / Continue Testing
-
-Or via API:
+## Step 5: Assign users and track events
 
 ```bash
-curl http://localhost:8000/api/v1/results/EXPERIMENT_ID \
-  -H "Authorization: Bearer $TOKEN"
+curl -s -X POST localhost:8000/api/v1/tracking/assign \
+  -H "X-API-Key: $KEY" -H 'content-type: application/json' \
+  -d '{"experiment_key":"homepage_button_colour","user_id":"user-123","context":{"country":"DE"}}' | jq
 ```
 
----
-
-## Step 8: Create a Feature Flag
-
-Feature flags let you control rollouts without deploying new code.
+The response carries `variant_name`, `variant_id`, `is_control`, `configuration`, and
+`assigned` with a `reason` (`assigned`, `holdout`, `mutual_exclusion` or `targeting`).
+Assignments are sticky: the same `user_id` always gets the same variant.
 
 ```bash
-# Create a feature flag
-curl -X POST http://localhost:8000/api/v1/feature-flags \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "key": "new-checkout-flow",
-    "name": "New Checkout Flow",
-    "description": "Redesigned checkout experience",
-    "rollout_percentage": 0
-  }'
-
-# Activate it for 10% of users
-curl -X PUT http://localhost:8000/api/v1/feature-flags/FLAG_ID \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"rollout_percentage": 10, "status": "ACTIVE"}'
+curl -s -X POST localhost:8000/api/v1/tracking/track \
+  -H "X-API-Key: $KEY" -H 'content-type: application/json' \
+  -d '{"event_type":"conversion","event_name":"cta_click","user_id":"user-123","experiment_key":"homepage_button_colour","value":1}'
 ```
 
-Evaluate the flag in your frontend:
-
-```javascript
-const flagResponse = await fetch(
-  `http://localhost:8000/api/v1/feature-flags/new-checkout-flow/evaluate`,
-  {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-API-Key': 'your-api-key' },
-    body: JSON.stringify({ user_id: 'user-123', context: {} }),
-  }
-);
-const { enabled } = await flagResponse.json();
-
-if (enabled) {
-  showNewCheckoutFlow();
-} else {
-  showCurrentCheckoutFlow();
-}
-```
+The same two calls exist in every SDK; see the [SDK guide](../sdk-guide.md).
 
 ---
 
-## What's Next?
+## Step 6: Read the results
 
-- [Technical Guide](../architecture/technical-guide.md) — Deep dive into the platform architecture
-- [User Guide](../guides/user-guide.md) — Guide for experiment designers and analysts
-- [Testing Guide](../development/testing-guide.md) — Write and run tests
-- [API Reference](http://localhost:8000/docs) — Interactive API documentation
-- [SDK Guide](../sdk-guide.md) — endpoint contract and per-SDK status; [React SDK](../sdk/react.md) is verified end to end
+Dashboard: **Experiments → your experiment → View results**. API:
+
+```bash
+curl -s localhost:8000/api/v1/results/$ID -H "Authorization: Bearer $TOKEN" | jq .summary
+```
+
+Results include per-variant conversion rates, p-values, confidence intervals and a
+sample-size check.
+
+---
+
+## Step 7: Feature flags
+
+```bash
+FLAG=$(curl -s -X POST localhost:8000/api/v1/feature-flags/ \
+  -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+  -d '{"key":"new_checkout","name":"New checkout","rollout_percentage":10}' | jq -r .id)
+
+curl -s -X POST localhost:8000/api/v1/feature-flags/$FLAG/activate -H "Authorization: Bearer $TOKEN" | jq .status
+
+curl -s "localhost:8000/api/v1/feature-flags/evaluate/new_checkout?user_id=user-123" -H "X-API-Key: $KEY" | jq
+```
+
+Evaluation returns `{key, enabled, config, reason}`. An inactive flag evaluates to
+`enabled: false` with reason `inactive`; only an unknown key is a 404.
+
+---
+
+## Running outside Docker
+
+```bash
+docker compose up -d --wait postgres redis          # database and cache only
+python3.11 -m venv venv && source venv/bin/activate
+pip install -r backend/requirements.txt
+python -m backend.app.db.bootstrap                   # schema + first admin (idempotent)
+AUTH_PROVIDER=local uvicorn backend.app.main:app --reload --port 8000
+
+cd frontend && npm ci && npm run dev                 # http://localhost:3000, proxies /api to :8000
+```
+
+Run these from the repository root; the backend is imported as `backend.app.*`.
+
+---
+
+## Demo applications
+
+`docker compose --profile demo up -d` adds ShopLab (http://localhost:3200) and StreamPulse
+(http://localhost:3300), two sample products wired to the platform through the public
+SDK path, each with a traffic simulator. See [demo/DEMO_GUIDE.md](../../demo/DEMO_GUIDE.md).
 
 ---
 
 ## Troubleshooting
 
-**Backend won't start:**
+**`api` container never becomes healthy**
+
 ```bash
-# Check PostgreSQL is running
-docker-compose ps
-# Check logs
-docker-compose logs db
-# Re-run migrations
-python -m alembic -c app/db/alembic.ini upgrade head
+docker compose logs api --tail 100
 ```
 
-**`ModuleNotFoundError`:**
+The entrypoint prints the bootstrap and seed steps. A `SECRET_KEY` shorter than 32
+characters, or `DEV_AUTH_BYPASS=true` with `ENVIRONMENT=production`, stops the API on
+purpose.
+
+**Port already in use**
+
+Set `POSTGRES_HOST_PORT`, `REDIS_HOST_PORT`, `API_HOST_PORT` or `FRONTEND_HOST_PORT` in `.env`.
+
+**Start from scratch**
+
 ```bash
-# Virtualenv not activated
-source venv/bin/activate
-pip install -r requirements.txt
+docker compose down -v      # drops the database volume; seeds run again on next start
 ```
 
-**Frontend shows blank page:**
-```bash
-# Check backend is running
-curl http://localhost:8000/health
-# Check env vars
-cat frontend/.env.local
-# NEXT_PUBLIC_API_URL=http://localhost:8000
-```
+**Events are not counted as conversions**
 
-**Tracking events not recorded:**
-- Verify your API key is valid: `curl -H "X-API-Key: KEY" http://localhost:8000/api/v1/tracking/`
-- Confirm the experiment is in `ACTIVE` status
-- Confirm the `experiment_key` matches exactly (case-sensitive)
+The event's `event_name` must equal the metric's `event_name`, the experiment must be
+`active`, and the user must have been assigned first.
+
+---
+
+## What's next
+
+- [SDK guide](../sdk-guide.md) — endpoint contract and per-SDK status
+- [Docker guide](docker-guide.md) — images, profiles, production notes
+- [User guide](../guides/user-guide.md) — for experiment designers and analysts
+- [Testing guide](../development/testing-guide.md)
+- [GDPR considerations](../security/gdpr-compliance-checklist.md)

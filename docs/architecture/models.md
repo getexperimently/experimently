@@ -247,12 +247,12 @@ To apply migrations to your database:
 
 1. **Initialize the database schema** (first time only):
    ```bash
-   alembic upgrade head
+   python -m alembic -c backend/app/db/alembic.ini upgrade head
    ```
 
 2. **Update an existing database**:
    ```bash
-   alembic upgrade head
+   python -m alembic -c backend/app/db/alembic.ini upgrade head
    ```
 
 3. **Downgrade to a previous version**:
@@ -289,7 +289,7 @@ When you make changes to the models, you need to create a new migration:
 
 4. **Apply the new migration**:
    ```bash
-   alembic upgrade head
+   python -m alembic -c backend/app/db/alembic.ini upgrade head
    ```
 
 ### Migration Best Practices
@@ -345,7 +345,7 @@ For development environments:
 
 3. Apply migrations:
    ```bash
-   alembic upgrade head
+   python -m alembic -c backend/app/db/alembic.ini upgrade head
    ```
 
 4. Verify setup:

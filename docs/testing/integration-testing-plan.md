@@ -971,7 +971,7 @@ jobs:
         with: { python-version: '3.11' }
       - run: pip install -r backend/requirements.txt
       - name: Run migrations
-        run: python -m alembic -c app/db/alembic.ini upgrade head
+        run: python -m alembic -c backend/app/db/alembic.ini upgrade head
       - name: DB + API integration tests
         run: |
           python -m pytest backend/tests/integration/database/ -v --tb=short
