@@ -148,7 +148,15 @@ class TestRBACIntegration:
             assert check_permission(user, resource_type, Action.DELETE) is False, f"VIEWER should NOT have DELETE permission for {resource_type}"
 
             # Special handling for LIST permission based on actual RBAC configuration
-            if resource_type in [ResourceType.USER, ResourceType.ROLE, ResourceType.PERMISSION]:
+            if resource_type in [
+                ResourceType.USER,
+                ResourceType.ROLE,
+                ResourceType.PERMISSION,
+                # API_KEY governs acting on OTHER users' keys; listing every
+                # user's keys (/api/v1/api-keys?all=true) is ADMIN-only. A
+                # user's own keys never go through check_permission.
+                ResourceType.API_KEY,
+            ]:
                 # According to RBAC configuration, VIEWERs can READ these resources but not LIST them
                 assert check_permission(user, resource_type, Action.LIST) is False, f"VIEWER should NOT have LIST permission for {resource_type}"
             else:

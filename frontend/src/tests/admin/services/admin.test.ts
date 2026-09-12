@@ -1,4 +1,5 @@
 import { AdminService } from '@/services/admin';
+import { ApiError, TOKEN_STORAGE_KEY } from '@/services/api';
 
 const mockFetch = jest.fn();
 global.fetch = mockFetch;
@@ -7,6 +8,11 @@ const BASE = 'http://localhost:8000';
 
 beforeEach(() => {
   mockFetch.mockReset();
+  localStorage.clear();
+  process.env.NEXT_PUBLIC_API_URL = BASE;
+});
+
+afterAll(() => {
   delete process.env.NEXT_PUBLIC_API_URL;
 });
 
@@ -32,7 +38,8 @@ describe('AdminService', () => {
       mockOk({ items: [], total: 0, page: 1, limit: 20 });
       await AdminService.listUsers();
       expect(mockFetch).toHaveBeenCalledWith(
-        expect.stringContaining(`${BASE}/api/v1/admin/users`)
+        expect.stringContaining(`${BASE}/api/v1/admin/users`),
+        expect.any(Object),
       );
     });
 
@@ -42,6 +49,21 @@ describe('AdminService', () => {
       const url = mockFetch.mock.calls[0][0] as string;
       expect(url).toContain('page=2');
       expect(url).toContain('limit=10');
+    });
+
+    it('omits an empty search param', async () => {
+      mockOk({ items: [] });
+      await AdminService.listUsers({ search: '' });
+      const url = mockFetch.mock.calls[0][0] as string;
+      expect(url).not.toContain('search=');
+    });
+
+    it('sends the bearer token when one is stored', async () => {
+      localStorage.setItem(TOKEN_STORAGE_KEY, 'tok');
+      mockOk({ items: [] });
+      await AdminService.listUsers();
+      const init = mockFetch.mock.calls[0][1] as RequestInit;
+      expect((init.headers as Record<string, string>).Authorization).toBe('Bearer tok');
     });
   });
 
@@ -55,7 +77,7 @@ describe('AdminService', () => {
         total_users: 50,
       });
       await AdminService.getStats();
-      expect(mockFetch).toHaveBeenCalledWith(`${BASE}/api/v1/admin/stats`);
+      expect(mockFetch).toHaveBeenCalledWith(`${BASE}/api/v1/admin/stats`, expect.any(Object));
     });
   });
 
@@ -104,7 +126,7 @@ describe('AdminService', () => {
     it('calls /rbac/roles endpoint', async () => {
       mockOk([]);
       await AdminService.listRoles();
-      expect(mockFetch).toHaveBeenCalledWith(`${BASE}/api/v1/rbac/roles`);
+      expect(mockFetch).toHaveBeenCalledWith(`${BASE}/api/v1/rbac/roles`, expect.any(Object));
     });
   });
 
@@ -117,7 +139,7 @@ describe('AdminService', () => {
         monitoring_window_minutes: 15,
       });
       await AdminService.getSafetySettings();
-      expect(mockFetch).toHaveBeenCalledWith(`${BASE}/api/v1/safety/settings`);
+      expect(mockFetch).toHaveBeenCalledWith(`${BASE}/api/v1/safety/settings`, expect.any(Object));
     });
   });
 
@@ -125,14 +147,27 @@ describe('AdminService', () => {
     it('calls /scheduler/health endpoint', async () => {
       mockOk([]);
       await AdminService.getSchedulerHealth();
-      expect(mockFetch).toHaveBeenCalledWith(`${BASE}/api/v1/scheduler/health`);
+      expect(mockFetch).toHaveBeenCalledWith(`${BASE}/api/v1/scheduler/health`, expect.any(Object));
+    });
+  });
+
+  describe('sendTestNotification', () => {
+    it('posts channel, message and recipient', async () => {
+      mockOk({ success: true, channel: 'slack', message: 'sent' });
+      await AdminService.sendTestNotification('slack', 'hello', '#ops');
+      const [url, init] = mockFetch.mock.calls[0];
+      expect(url).toBe(`${BASE}/api/v1/notifications/test`);
+      expect(init.method).toBe('POST');
+      expect(JSON.parse(init.body)).toEqual({ channel: 'slack', message: 'hello', recipient: '#ops' });
     });
   });
 
   describe('error handling', () => {
-    it('throws error on non-ok response', async () => {
+    it('throws ApiError on non-ok response', async () => {
       mockError(404, 'Not Found');
-      await expect(AdminService.getStats()).rejects.toThrow();
+      const err = await AdminService.getStats().catch((e) => e);
+      expect(err).toBeInstanceOf(ApiError);
+      expect(err.status).toBe(404);
     });
   });
 });

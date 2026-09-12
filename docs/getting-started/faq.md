@@ -163,7 +163,7 @@ See [Split URL Testing API](../api/split-url.md) for setup and the CDK construct
 
 ### What compliance certifications are supported?
 
-The platform provides audit trail infrastructure aligned with **SOC 2 Type II** and **ISO/IEC 27001:2022**.
+The platform holds no certifications. It provides audit-trail controls that customers use as evidence in their own **SOC 2** or **ISO/IEC 27001** programs; the enterprise edition adds tamper-evident signing and report packs.
 
 Every create, update, delete, login, permission change, and data export action is recorded as a tamper-evident audit event signed with HMAC-SHA256. The signing secret is stored in AWS Secrets Manager and rotated quarterly.
 

@@ -1,0 +1,4 @@
+# Everything CI and local development install: the runtime set plus test,
+# lint, docs, load-test and infrastructure tooling. Equivalent to
+# backend/requirements.txt (kept as the single pinned source of truth).
+-r ../requirements.txt

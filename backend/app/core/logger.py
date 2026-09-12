@@ -16,6 +16,7 @@ without callers having to pass a bound logger around.
 
 import contextvars
 import logging
+import os
 import sys
 from typing import Any
 
@@ -69,12 +70,19 @@ def configure_logging(
     log_level: str = "INFO",
     json_logs: bool = True,
     service_name: str = "experimentation-platform",
+    stream: Any = None,
 ) -> None:
-    """Configure structlog for the application.
+    """Configure structlog **and** the standard library for the application.
 
-    Should be called once at startup (e.g. from the FastAPI lifespan or
-    ``main.py``).  Safe to call multiple times — each call replaces the
-    previous configuration.
+    Should be called once at startup (e.g. from ``main.py``). Safe to call
+    multiple times — each call replaces the previous configuration.
+
+    Both structlog loggers (``get_logger``) and plain ``logging.getLogger``
+    loggers (the majority of the codebase, plus uvicorn, sqlalchemy, ...) are
+    rendered by the same :class:`structlog.stdlib.ProcessorFormatter` on a
+    single root handler, so with ``json_logs=True`` **every** line the process
+    writes is one JSON object (``LOG_FORMAT=json`` in production/containers)
+    and with ``json_logs=False`` every line is the coloured console format.
 
     Args:
         log_level: Python log-level name (``"DEBUG"``, ``"INFO"``, etc.).
@@ -82,40 +90,80 @@ def configure_logging(
             ``False`` for colourised dev output.
         service_name: Value added to every log event under the ``service``
             key for log-aggregation filtering.
+        stream: Destination stream (defaults to ``sys.stdout``).
     """
     numeric_level: int = getattr(logging, log_level.upper(), logging.INFO)
+    stream = stream or sys.stdout
 
+    def _add_service(logger: Any, method: str, event_dict: dict) -> dict:
+        event_dict.setdefault("service", service_name)
+        return event_dict
+
+    # Processors shared by structlog events and foreign (stdlib) records.
     shared_processors: list = [
         structlog.contextvars.merge_contextvars,
         _inject_context,
+        _add_service,
         structlog.stdlib.add_logger_name,
         structlog.stdlib.add_log_level,
+        structlog.stdlib.PositionalArgumentsFormatter(),
         structlog.processors.TimeStamper(fmt="iso"),
         structlog.processors.StackInfoRenderer(),
-        structlog.processors.format_exc_info,
     ]
 
     if json_logs:
-        renderer = structlog.processors.JSONRenderer()
+        renderer: Any = structlog.processors.JSONRenderer()
+        # Turn exc_info into a string field ("exception") for JSON output.
+        pre_render: list = [structlog.processors.format_exc_info]
     else:
         renderer = structlog.dev.ConsoleRenderer()
+        pre_render = []
 
     structlog.configure(
-        processors=shared_processors + [renderer],
+        processors=shared_processors
+        + [
+            # Hand the event dict to the stdlib handler/formatter below.
+            structlog.stdlib.ProcessorFormatter.wrap_for_formatter,
+        ],
         wrapper_class=structlog.make_filtering_bound_logger(numeric_level),
         context_class=dict,
-        logger_factory=structlog.PrintLoggerFactory(sys.stdout),
-        cache_logger_on_first_use=True,
+        logger_factory=structlog.stdlib.LoggerFactory(),
+        cache_logger_on_first_use=False,
     )
 
-    # Also configure the standard-library root logger so that third-party
-    # libraries that use ``logging.getLogger(...)`` are captured.
-    logging.basicConfig(
-        format="%(message)s",
-        stream=sys.stdout,
-        level=numeric_level,
-        force=True,
+    formatter = structlog.stdlib.ProcessorFormatter(
+        # Processors applied to every record right before rendering.
+        processors=[structlog.stdlib.ProcessorFormatter.remove_processors_meta]
+        + pre_render
+        + [renderer],
+        # Processors applied to records that did NOT originate from structlog.
+        foreign_pre_chain=shared_processors,
     )
+
+    handler = logging.StreamHandler(stream)
+    handler.setFormatter(formatter)
+
+    root = logging.getLogger()
+    for existing in list(root.handlers):
+        root.removeHandler(existing)
+    root.addHandler(handler)
+    root.setLevel(numeric_level)
+
+    # uvicorn installs its own handlers (plain text, propagate=False). Route
+    # them through the root handler so access/error lines share the format.
+    for name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
+        uv_logger = logging.getLogger(name)
+        for existing in list(uv_logger.handlers):
+            uv_logger.removeHandler(existing)
+        uv_logger.propagate = True
+
+
+def log_format_from_env(default: str = "console") -> str:
+    """Resolve ``LOG_FORMAT`` (``json`` | ``console``) from the environment."""
+    value = os.environ.get("LOG_FORMAT", "").strip().lower()
+    if value in ("json", "console", "text"):
+        return "json" if value == "json" else "console"
+    return default
 
 
 def get_logger(name: str = __name__) -> structlog.BoundLogger:

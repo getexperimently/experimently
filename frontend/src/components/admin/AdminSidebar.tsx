@@ -27,7 +27,7 @@ export function AdminSidebar({ currentPath }: AdminSidebarProps) {
   return (
     <aside
       data-testid="admin-sidebar"
-      className="w-56 min-h-screen bg-white border-r border-slate-200 flex flex-col"
+      className="w-56 flex-shrink-0 bg-white border-r border-slate-200 flex flex-col"
     >
       <div className="px-4 py-6">
         <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-4">

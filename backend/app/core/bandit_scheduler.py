@@ -38,6 +38,7 @@ from sqlalchemy import and_, func
 from sqlalchemy.orm import Session
 
 from backend.app.core.config import settings
+from backend.app.core.scheduler_tick import run_locked_tick
 from backend.app.models.assignment import Assignment
 from backend.app.models.bandit_state import BanditState
 from backend.app.models.event import Event
@@ -49,6 +50,8 @@ from backend.app.services.event_matching import (
 )
 
 logger = logging.getLogger(__name__)
+
+SCHEDULER_NAME = "bandit"
 
 
 def _has_pulls(stats: Optional[Dict[str, VariantStats]]) -> bool:
@@ -629,7 +632,9 @@ class BanditSchedulerRunner:
         """Loop: run one pass, sleep, repeat until stopped."""
         while self.is_running:
             try:
-                await self.run_once()
+                # One pass under the advisory lock; records the run and
+                # skips when another replica holds the lock.
+                await run_locked_tick(SCHEDULER_NAME, self._run_once_for_tick)
             except asyncio.CancelledError:
                 break
             except Exception as exc:
@@ -648,6 +653,15 @@ class BanditSchedulerRunner:
         self.run_count += 1
         self.last_result = result
         return result
+
+    async def _run_once_for_tick(self) -> Dict[str, Any]:
+        """``run_once`` reshaped for ``run_locked_tick`` (items_processed/failed)."""
+        result = await self.run_once()
+        return {
+            "items_processed": int(result.get("updated", 0)) + int(result.get("skipped", 0)),
+            "items_failed": int(result.get("errors", 0)),
+            "metadata": dict(result),
+        }
 
     @staticmethod
     def _run_sync() -> Dict[str, int]:

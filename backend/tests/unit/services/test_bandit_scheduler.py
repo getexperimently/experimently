@@ -827,6 +827,24 @@ class TestBanditSchedulerRunner:
 
     RESULT = {"updated": 1, "skipped": 0, "errors": 0}
 
+    @pytest.fixture(autouse=True)
+    def _held_lock(self, monkeypatch):
+        """The loop runs each pass under the scheduler advisory lock
+        (``backend.app.core.scheduler_tick``). These tests exercise the loop
+        with a mocked pass and no application database, so pretend the lock
+        was acquired and skip the run-history write; the lock itself is
+        covered by ``tests/unit/core/test_scheduler_lock.py``."""
+        from contextlib import asynccontextmanager
+
+        from backend.app.core import scheduler_tick
+
+        @asynccontextmanager
+        async def acquired(name, engine=None):
+            yield True
+
+        monkeypatch.setattr(scheduler_tick, "async_scheduler_lock", acquired)
+        monkeypatch.setattr(scheduler_tick, "_persist_run", lambda *a, **k: None)
+
     def _runner(self):
         from backend.app.core.bandit_scheduler import BanditSchedulerRunner
 

@@ -531,10 +531,25 @@ class TestRolloutScheduler:
         mock_session.rollback.assert_called_once()
 
     @pytest.mark.asyncio
+    @patch('backend.app.core.scheduler_tick._persist_run')
+    @patch('backend.app.core.scheduler_tick.async_scheduler_lock')
     @patch('backend.app.core.rollout_scheduler.asyncio.sleep')
     @patch('backend.app.core.rollout_scheduler.SessionLocal')
-    async def test_scheduler_exception_handling(self, mock_session_class, mock_sleep):
+    async def test_scheduler_exception_handling(
+        self, mock_session_class, mock_sleep, mock_lock, mock_persist
+    ):
         """Test scheduler exception handling during processing."""
+        # The loop runs each tick under the scheduler advisory lock; there is
+        # no application database in this unit test, so pretend the lock was
+        # acquired (the lock is covered by test_scheduler_lock.py).
+        from contextlib import asynccontextmanager
+
+        @asynccontextmanager
+        async def _acquired(name, engine=None):
+            yield True
+
+        mock_lock.side_effect = _acquired
+
         # Setup mock to raise exception
         mock_session = MagicMock()
         mock_session_class.return_value = mock_session

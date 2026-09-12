@@ -20,6 +20,7 @@ class SchedulerName(str, Enum):
     ROLLOUT = "rollout"
     METRICS = "metrics"
     SAFETY = "safety"
+    BANDIT = "bandit"
 
 
 class SchedulerRunStatus(str, Enum):

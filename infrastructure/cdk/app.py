@@ -34,8 +34,16 @@ cache_node_type = "cache.t3.micro" if is_demo else "cache.t3.small"
 fargate_desired_count = 1 if is_demo else 2
 
 # Define CDK environment (account and region)
-account = os.environ.get("CDK_DEFAULT_ACCOUNT", "214117827798")
-region = os.environ.get("CDK_DEFAULT_REGION", "us-west-2")
+# Account/region come from the environment only: CDK sets CDK_DEFAULT_ACCOUNT
+# from the active credentials; AWS_ACCOUNT_ID is what CI (vars.AWS_ACCOUNT_ID)
+# and demo/setup-aws.sh export. No account id is hard-coded in the repository.
+account = os.environ.get("CDK_DEFAULT_ACCOUNT") or os.environ.get("AWS_ACCOUNT_ID")
+region = os.environ.get("CDK_DEFAULT_REGION") or os.environ.get("AWS_REGION", "us-west-2")
+if not account:
+    raise SystemExit(
+        "AWS account id not set: export AWS_ACCOUNT_ID (or let the CDK CLI set "
+        "CDK_DEFAULT_ACCOUNT from your credentials) before synthesizing."
+    )
 env = Environment(account=account, region=region)
 
 app = App()

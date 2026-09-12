@@ -3,6 +3,7 @@ import { AdminLayout } from '@/components/admin/AdminLayout';
 import { SchedulerStatusCard } from '@/components/admin/scheduler/SchedulerStatusCard';
 import { AdminService } from '@/services/admin';
 import { SchedulerHealth } from '@/types/admin';
+import { withAdminGuard } from '@/components/admin/withAdminGuard';
 
 const REFRESH_INTERVAL_MS = 60_000;
 
@@ -73,4 +74,4 @@ export function SchedulerHealthPage() {
   );
 }
 
-export default SchedulerHealthPage;
+export default withAdminGuard(SchedulerHealthPage);

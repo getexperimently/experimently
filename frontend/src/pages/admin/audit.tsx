@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { AdminLayout } from '@/components/admin/AdminLayout';
 import { AuditLogFilter, AuditLogFilters } from '@/components/admin/audit/AuditLogFilter';
 import { AuditLogTable } from '@/components/admin/audit/AuditLogTable';
+import { withAdminGuard } from '@/components/admin/withAdminGuard';
 
 export function AuditLogPage() {
   const [filters, setFilters] = useState<AuditLogFilters>({});
@@ -17,4 +18,4 @@ export function AuditLogPage() {
   );
 }
 
-export default AuditLogPage;
+export default withAdminGuard(AuditLogPage);

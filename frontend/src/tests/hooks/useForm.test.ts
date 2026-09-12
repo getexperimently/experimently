@@ -1,11 +1,13 @@
 import { renderHook, act } from '@testing-library/react';
 import { useForm } from '@/hooks/useForm';
 
-interface TestValues {
+// A type alias (not an interface) so it satisfies `Record<string, unknown>`;
+// interfaces have no implicit index signature.
+type TestValues = {
   name: string;
   email: string;
   age: number;
-}
+};
 
 const defaults: TestValues = { name: '', email: '', age: 0 };
 

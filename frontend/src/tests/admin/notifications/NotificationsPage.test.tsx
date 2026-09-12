@@ -1,6 +1,6 @@
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import NotificationsAdminPage from '../../../pages/admin/notifications';
+import { NotificationsAdminPage } from '../../../pages/admin/notifications';
 import { AdminService } from '../../../services/admin';
 import { NotificationPreference, NotificationDeliveryLogListResponse } from '../../../types/admin';
 

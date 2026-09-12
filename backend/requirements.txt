@@ -1,6 +1,7 @@
 # API Framework
 fastapi==0.141.1
 uvicorn==0.52.4
+websockets==15.0.1     # uvicorn WebSocket support (/api/v1/ws/...); the image has no wsproto
 pydantic==2.13.5
 pydantic-settings==2.15.0
 email-validator==2.3.0

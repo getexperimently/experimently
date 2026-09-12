@@ -3,6 +3,7 @@ import { AdminLayout } from '@/components/admin/AdminLayout';
 import { RoleTable } from '@/components/admin/roles/RoleTable';
 import { CreateRoleModal } from '@/components/admin/roles/CreateRoleModal';
 import { CustomRole } from '@/types/admin';
+import { withAdminGuard } from '@/components/admin/withAdminGuard';
 
 export function RoleManagementPage() {
   const [modalOpen, setModalOpen] = useState(false);
@@ -66,4 +67,4 @@ export function RoleManagementPage() {
   );
 }
 
-export default RoleManagementPage;
+export default withAdminGuard(RoleManagementPage, { requiredRole: 'ADMIN' });

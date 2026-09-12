@@ -11,6 +11,7 @@ import {
   CreateExperimentRequest,
 } from '@/types/experiments';
 import { ExperimentsService } from '@/services/experiments';
+import { PageTitle } from '@/components/PageTitle';
 
 function generateKey(name: string): string {
   return name
@@ -117,7 +118,8 @@ export default function NewExperimentPage() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="flex-1 bg-slate-50">
+      <PageTitle title="New Experiment" />
       <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Header */}
         <div className="flex items-center gap-4 mb-6">

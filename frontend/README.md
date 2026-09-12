@@ -100,7 +100,19 @@ npm run start
 
 ## Environment Variables
 
-No environment variables are required for the marketing site. All links point to the appropriate subdomains.
+| Variable | Default | Purpose |
+|---|---|---|
+| `NEXT_PUBLIC_API_URL` | `""` (same origin) | Origin of the backend API. Leave empty in the container image (nginx proxies `/api/` to the backend). `npm run dev` falls back to `http://localhost:8000` when unset; set it in `.env.local` when the backend runs elsewhere. |
+| `NEXT_PUBLIC_WS_URL` | derived from `NEXT_PUBLIC_API_URL` | Optional explicit WebSocket origin for live results. |
+
+Values are inlined at build time (`next build`), so rebuild the static export after changing them. See `.env.example`.
+
+## Authentication
+
+The dashboard signs in through `POST /api/v1/auth/login` and keeps only the bearer token in
+`localStorage["experimently.token"]`. `src/services/api.ts` (`apiFetch`) attaches the token to every
+request and redirects to `/login?next=…` on a 401. There is no public sign-up: accounts are created by
+an administrator (the demo seed creates `admin@demo.com` / `Demo1234!`).
 
 ## Customization
 

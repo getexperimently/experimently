@@ -7,6 +7,7 @@
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { getToken, wsBase } from '@/services/api';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -35,7 +36,16 @@ export interface ExperimentSnapshot {
   error?: string;
 }
 
-export type ConnectionStatus = 'connecting' | 'connected' | 'disconnected' | 'error';
+export type ConnectionStatus = 'connecting' | 'connected' | 'disconnected' | 'error' | 'unauthorized';
+
+/** Subprotocol marker that precedes the bearer token in the handshake. */
+export const WS_AUTH_SUBPROTOCOL = 'experimently.bearer';
+
+/** Application close code the backend uses for a missing/invalid token. */
+export const WS_CLOSE_UNAUTHORIZED = 4401;
+
+/** Close codes after which reconnecting cannot help. */
+const TERMINAL_CLOSE_CODES = new Set([WS_CLOSE_UNAUTHORIZED, 4403, 1008]);
 
 export interface UseExperimentStreamOptions {
   /** Whether to auto-connect when experimentId is set. Default: true */
@@ -97,9 +107,26 @@ function parseSnapshot(raw: Record<string, unknown>): ExperimentSnapshot {
 // Hook
 // ---------------------------------------------------------------------------
 
-const WS_BASE_URL =
-  (typeof process !== 'undefined' && process.env.NEXT_PUBLIC_WS_URL) ||
-  'ws://localhost:8000';
+/**
+ * Build the streaming URL. The origin comes from `NEXT_PUBLIC_WS_URL`,
+ * `NEXT_PUBLIC_API_URL` or, for same-origin deployments, `window.location`.
+ * The token is never put in the URL (URLs end up in access logs); see
+ * `buildStreamProtocols`.
+ */
+export function buildStreamUrl(experimentId: string): string {
+  return `${wsBase()}/api/v1/ws/experiments/${encodeURIComponent(experimentId)}/results`;
+}
+
+/**
+ * Browsers cannot set headers on a WebSocket handshake, but they can offer
+ * subprotocols. The token rides as `Sec-WebSocket-Protocol: experimently.bearer, <token>`
+ * and the backend echoes `experimently.bearer` on accept. Returns `undefined`
+ * when there is no token so the socket is opened without a protocol list.
+ */
+export function buildStreamProtocols(): string[] | undefined {
+  const token = getToken();
+  return token ? [WS_AUTH_SUBPROTOCOL, token] : undefined;
+}
 
 export function useExperimentStream(
   experimentId: string | null,
@@ -128,13 +155,14 @@ export function useExperimentStream(
     if (!experimentId) return;
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) return;
 
-    const url = `${WS_BASE_URL}/api/v1/ws/experiments/${experimentId}/results`;
+    const url = buildStreamUrl(experimentId);
     setStatus('connecting');
     setError(null);
     intentionalDisconnect.current = false;
 
     try {
-      const ws = new WebSocket(url);
+      const protocols = buildStreamProtocols();
+      const ws = protocols ? new WebSocket(url, protocols) : new WebSocket(url);
       wsRef.current = ws;
 
       ws.onopen = () => {
@@ -158,11 +186,25 @@ export function useExperimentStream(
         setError('WebSocket connection error');
       };
 
-      ws.onclose = () => {
+      ws.onclose = (event?: CloseEvent) => {
         wsRef.current = null;
 
         if (intentionalDisconnect.current) {
           setStatus('disconnected');
+          return;
+        }
+
+        // The backend accepts and then closes with 4401 when the token is
+        // missing, expired or invalid. Reconnecting with the same token can
+        // only loop, so stop and surface it.
+        const code = event?.code;
+        if (code !== undefined && TERMINAL_CLOSE_CODES.has(code)) {
+          setStatus('unauthorized');
+          setError(
+            code === WS_CLOSE_UNAUTHORIZED
+              ? 'Not authorized to stream results; sign in again.'
+              : `Connection refused by the server (code ${code})`,
+          );
           return;
         }
 

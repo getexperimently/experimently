@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { AdminLayout } from '@/components/admin/AdminLayout';
 import { ApiKeyTable } from '@/components/admin/api-keys/ApiKeyTable';
 import { CreateApiKeyModal } from '@/components/admin/api-keys/CreateApiKeyModal';
+import { withAdminGuard } from '@/components/admin/withAdminGuard';
 
 export function ApiKeysPage() {
   const [modalOpen, setModalOpen] = useState(false);
@@ -11,7 +12,7 @@ export function ApiKeysPage() {
   const handleKeyCreated = (keyValue: string) => {
     setNewKeyBanner(keyValue);
     setModalOpen(false);
-    // Re-mount the table to trigger a fresh fetch
+    // Ask the table to refetch
     setTableKey((prev) => prev + 1);
   };
 
@@ -44,10 +45,7 @@ export function ApiKeysPage() {
           </div>
         )}
 
-        <ApiKeyTable
-          key={tableKey}
-          onCreateKey={() => setModalOpen(true)}
-        />
+        <ApiKeyTable refreshToken={tableKey} onCreateKey={() => setModalOpen(true)} />
 
         <CreateApiKeyModal
           isOpen={modalOpen}
@@ -59,4 +57,4 @@ export function ApiKeysPage() {
   );
 }
 
-export default ApiKeysPage;
+export default withAdminGuard(ApiKeysPage);
