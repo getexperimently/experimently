@@ -1,10 +1,12 @@
 """
 RBAC Post-MVP schemas — API contract for custom roles and permission management.
 """
-from pydantic import BaseModel, Field, ConfigDict
-from typing import List, Optional, Dict
+
 from datetime import datetime
 from enum import Enum
+from typing import Dict, List, Optional
+
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class PermissionAction(str, Enum):
@@ -32,7 +34,7 @@ class PermissionGrant(BaseModel):
 
 
 class CustomRoleCreate(BaseModel):
-    name: str = Field(..., min_length=2, max_length=64, pattern=r'^[a-z][a-z0-9_-]*$')
+    name: str = Field(..., min_length=2, max_length=64, pattern=r"^[a-z][a-z0-9_-]*$")
     description: Optional[str] = Field(None, max_length=256)
     permissions: List[PermissionGrant] = Field(default_factory=list)
 
@@ -71,9 +73,10 @@ class RevokeRoleRequest(BaseModel):
 
 class EffectivePermissionsResponse(BaseModel):
     """Complete resolved permission set for a user."""
+
     user_id: str
     username: str
-    base_role: str           # The user.role field (admin/developer/analyst/viewer)
+    base_role: str  # The user.role field (admin/developer/analyst/viewer)
     custom_roles: List[str]  # Names of custom roles assigned to this user
     permissions: Dict[str, List[str]]  # {"experiment": ["read", "list"], ...}
     is_superuser: bool
@@ -81,6 +84,7 @@ class EffectivePermissionsResponse(BaseModel):
 
 class DelegatePermissionRequest(BaseModel):
     """Grant a specific permission to a user directly (not via role)."""
+
     user_id: str
     resource: PermissionResource
     actions: List[PermissionAction] = Field(..., min_length=1)

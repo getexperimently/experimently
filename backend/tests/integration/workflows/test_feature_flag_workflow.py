@@ -12,7 +12,9 @@ These tests exercise the complete feature flag lifecycle including:
 The rollout flow being tested:
     INACTIVE (0%) → ACTIVE (0%) → ACTIVE (25%) → ACTIVE (100%) → INACTIVE (0%)
 """
+
 import uuid
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
@@ -21,10 +23,10 @@ from backend.app.models.feature_flag import FeatureFlag, FeatureFlagStatus
 from backend.app.models.user import User
 from backend.tests.integration.helpers import unique_flag_key
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _create_flag_via_api(
     client: TestClient,
@@ -72,6 +74,7 @@ def _make_flag_in_db(
 # Gradual rollout workflow tests
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.integration
 @pytest.mark.requires_db
 class TestFeatureFlagRolloutWorkflow:
@@ -93,7 +96,9 @@ class TestFeatureFlagRolloutWorkflow:
         assert data["status"] == "inactive", f"Expected inactive, got {data['status']}"
         assert data["rollout_percentage"] == 0
 
-    def test_flag_creation_to_rollout_workflow(self, admin_user, db_session, admin_client):
+    def test_flag_creation_to_rollout_workflow(
+        self, admin_user, db_session, admin_client
+    ):
         """Full lifecycle: create → enable (activate) → 25% → 100% → disable.
 
         Uses DB factory for flag creation, then exercises the activate, update,
@@ -112,7 +117,9 @@ class TestFeatureFlagRolloutWorkflow:
 
         # Step 3: Activate the flag (INACTIVE → ACTIVE)
         activate_resp = admin_client.post(f"/api/v1/feature-flags/{flag.id}/activate")
-        assert activate_resp.status_code == 200, f"Activate failed: {activate_resp.text}"
+        assert activate_resp.status_code == 200, (
+            f"Activate failed: {activate_resp.text}"
+        )
 
         # Verify active state via GET
         get_active = admin_client.get(f"/api/v1/feature-flags/{flag.id}")
@@ -139,7 +146,9 @@ class TestFeatureFlagRolloutWorkflow:
             f"/api/v1/feature-flags/{flag.id}",
             json={"rollout_percentage": 100},
         )
-        assert update_100.status_code == 200, f"Update to 100% failed: {update_100.text}"
+        assert update_100.status_code == 200, (
+            f"Update to 100% failed: {update_100.text}"
+        )
         assert update_100.json()["rollout_percentage"] == 100
 
         # Step 7: Verify 100% persisted
@@ -147,8 +156,12 @@ class TestFeatureFlagRolloutWorkflow:
         assert get_100.json()["rollout_percentage"] == 100
 
         # Step 8: Deactivate the flag (ACTIVE → INACTIVE)
-        deactivate_resp = admin_client.post(f"/api/v1/feature-flags/{flag.id}/deactivate")
-        assert deactivate_resp.status_code == 200, f"Deactivate failed: {deactivate_resp.text}"
+        deactivate_resp = admin_client.post(
+            f"/api/v1/feature-flags/{flag.id}/deactivate"
+        )
+        assert deactivate_resp.status_code == 200, (
+            f"Deactivate failed: {deactivate_resp.text}"
+        )
 
         # Step 9: Verify final inactive state
         get_final = admin_client.get(f"/api/v1/feature-flags/{flag.id}")
@@ -208,7 +221,9 @@ class TestFeatureFlagRolloutWorkflow:
         assert history_resp.status_code == 200, history_resp.text
 
         data = history_resp.json()
-        assert data["total_changes"] >= 1, "Expected at least 1 history entry after toggle"
+        assert data["total_changes"] >= 1, (
+            "Expected at least 1 history entry after toggle"
+        )
         assert len(data["history"]) >= 1
 
         # Verify history entry structure
@@ -222,13 +237,16 @@ class TestFeatureFlagRolloutWorkflow:
     ):
         """After reaching 100% rollout, flag can be cleanly deactivated."""
         flag = _make_flag_in_db(
-            db_session, admin_user,
+            db_session,
+            admin_user,
             rollout_percentage=100,
             status=FeatureFlagStatus.ACTIVE,
         )
 
         # Deactivate the 100%-rolled-out flag
-        deactivate_resp = admin_client.post(f"/api/v1/feature-flags/{flag.id}/deactivate")
+        deactivate_resp = admin_client.post(
+            f"/api/v1/feature-flags/{flag.id}/deactivate"
+        )
         assert deactivate_resp.status_code == 200, deactivate_resp.text
 
         # Confirm inactive
@@ -240,6 +258,7 @@ class TestFeatureFlagRolloutWorkflow:
 # ---------------------------------------------------------------------------
 # Targeting rules workflow tests
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.integration
 @pytest.mark.requires_db
@@ -274,7 +293,9 @@ class TestFeatureFlagTargetingWorkflow:
         assert data["key"] == flag.key
         assert data["rollout_percentage"] == 100
 
-    def test_flag_evaluate_for_matching_user(self, admin_user, db_session, admin_client):
+    def test_flag_evaluate_for_matching_user(
+        self, admin_user, db_session, admin_client
+    ):
         """Evaluate a 100%-rollout active flag for a user — should be enabled."""
         flag = _make_flag_in_db(
             db_session,
@@ -294,9 +315,7 @@ class TestFeatureFlagTargetingWorkflow:
             data = eval_resp.json()
             assert "is_enabled" in data or "enabled" in data or "variation" in data
 
-    def test_inactive_flag_evaluates_off(
-        self, admin_user, db_session, admin_client
-    ):
+    def test_inactive_flag_evaluates_off(self, admin_user, db_session, admin_client):
         """Evaluating an INACTIVE flag (kill switch pulled) is "off", not an
         error: 200 with enabled=false and reason="inactive". Only an unknown
         key is a 404."""

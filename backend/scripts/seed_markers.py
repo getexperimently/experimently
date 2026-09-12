@@ -47,7 +47,6 @@ def seed_markers_table(schema: str) -> Table:
     return SeedMarker.__table__.to_metadata(MetaData(), schema=schema)
 
 
-
 def ensure_table(engine: Engine, schema: str) -> Table:
     """Create the schema and the marker table when they do not exist yet."""
     table = seed_markers_table(schema)
@@ -67,7 +66,10 @@ def is_applied(engine: Engine, name: str, schema: Optional[str] = None) -> bool:
 
 
 def mark_applied(
-    engine: Engine, name: str, source: Optional[str] = None, schema: Optional[str] = None
+    engine: Engine,
+    name: str,
+    source: Optional[str] = None,
+    schema: Optional[str] = None,
 ) -> None:
     """Record *name* as applied (idempotent)."""
     schema = schema or schema_name()
@@ -104,11 +106,15 @@ def applied(engine: Engine, schema: Optional[str] = None) -> list[tuple[str, dat
 def main(argv: Optional[Iterable[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="Track applied seed scripts.")
     sub = parser.add_subparsers(dest="command", required=True)
-    p_check = sub.add_parser("check", help="exit 0 when the seed was applied, 1 otherwise")
+    p_check = sub.add_parser(
+        "check", help="exit 0 when the seed was applied, 1 otherwise"
+    )
     p_check.add_argument("name")
     p_mark = sub.add_parser("mark", help="record the seed as applied")
     p_mark.add_argument("name")
-    p_mark.add_argument("--source", default=None, help="free-form note (script path, image tag)")
+    p_mark.add_argument(
+        "--source", default=None, help="free-form note (script path, image tag)"
+    )
     p_clear = sub.add_parser("clear", help="forget the seed so it runs again")
     p_clear.add_argument("name")
     sub.add_parser("list", help="print applied seeds")

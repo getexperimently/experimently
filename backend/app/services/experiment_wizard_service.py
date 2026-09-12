@@ -5,6 +5,7 @@ Stores draft state in memory (or DB in future) for multi-step wizard UX.
 Provides validation for each wizard step and builds the final experiment
 payload ready for submission to ExperimentService.
 """
+
 import logging
 import uuid
 from dataclasses import dataclass, field
@@ -302,7 +303,10 @@ class ExperimentWizardService:
                 {
                     "logical_operator": "and",
                     "groups": [
-                        {"logical_operator": "and", "conditions": list(draft.targeting_rules)}
+                        {
+                            "logical_operator": "and",
+                            "conditions": list(draft.targeting_rules),
+                        }
                     ],
                 }
                 if draft.targeting_rules
@@ -378,8 +382,10 @@ class ExperimentWizardService:
             }
 
         try:
-            created = ExperimentService(db).create_experiment(obj_in=obj_in, user_id=user_id)
-        except Exception:  # noqa: BLE001 - never surface internals to the client
+            created = ExperimentService(db).create_experiment(
+                obj_in=obj_in, user_id=user_id
+            )
+        except Exception:
             # Driver/ORM messages name tables, columns and constraints, so the
             # detail stays in the server log and the caller gets a generic message.
             logger.exception("Wizard draft %s could not be created", draft_id)

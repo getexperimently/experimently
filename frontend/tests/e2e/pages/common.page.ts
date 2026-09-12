@@ -28,17 +28,18 @@ export class CommonPage {
     );
   }
 
+  /**
+   * `networkidle` is not usable here: the dashboard keeps connections open
+   * (live results WebSocket, polling panels), so callers navigate and then wait
+   * on the `data-testid` they actually need.
+   */
   async navigateTo(path: string) {
     await this.page.goto(path);
-    await this.page.waitForLoadState("networkidle");
+    await this.page.waitForLoadState("domcontentloaded");
   }
 
   async waitForPageReady() {
-    await this.page.waitForLoadState("networkidle");
-    // Wait for spinners to disappear
-    await this.spinner.waitFor({ state: "hidden", timeout: 10_000 }).catch(() => {
-      // No spinner present — that's fine
-    });
+    await this.page.waitForLoadState("domcontentloaded");
   }
 
   async expectToastMessage(text: string) {

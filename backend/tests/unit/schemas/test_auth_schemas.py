@@ -8,11 +8,11 @@ import pytest
 from pydantic import ValidationError
 
 from backend.app.schemas.auth import (
-    TokenResponse,
+    ConfirmSignUpRequest,
+    RefreshTokenRequest,
     SignUpRequest,
     SignUpResponse,
-    ConfirmSignUpRequest,
-    RefreshTokenRequest
+    TokenResponse,
 )
 
 
@@ -26,7 +26,7 @@ class TestAuthSchemasValidation:
             "id_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
             "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
             "expires_in": 3600,
-            "token_type": "bearer"
+            "token_type": "bearer",
         }
 
         token = TokenResponse(**data)
@@ -47,7 +47,7 @@ class TestAuthSchemasValidation:
             "password": "SecurePassword123",
             "email": "user@example.com",
             "given_name": "Test",
-            "family_name": "User"
+            "family_name": "User",
         }
 
         signup_request = SignUpRequest(**data)
@@ -66,7 +66,7 @@ class TestAuthSchemasValidation:
         data = {
             "user_id": "12345",
             "confirmed": False,
-            "message": "User registration successful"
+            "message": "User registration successful",
         }
 
         signup_response = SignUpResponse(**data)
@@ -80,10 +80,7 @@ class TestAuthSchemasValidation:
 
     def test_confirm_signup_request(self):
         """Test ConfirmSignUpRequest schema with valid data."""
-        data = {
-            "username": "testuser",
-            "confirmation_code": "123456"
-        }
+        data = {"username": "testuser", "confirmation_code": "123456"}
 
         confirm_signup = ConfirmSignUpRequest(**data)
 
@@ -95,9 +92,7 @@ class TestAuthSchemasValidation:
 
     def test_refresh_token_request(self):
         """Test RefreshTokenRequest schema with valid data."""
-        data = {
-            "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-        }
+        data = {"refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."}
 
         refresh_request = RefreshTokenRequest(**data)
 

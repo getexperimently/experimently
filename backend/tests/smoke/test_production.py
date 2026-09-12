@@ -9,10 +9,12 @@ Required environment variables:
   SMOKE_TEST_API_KEY   - Valid API key for tracking endpoints
   SMOKE_TEST_TOKEN     - Valid JWT bearer token for management endpoints
 """
+
 import os
+from typing import Optional
+
 import pytest
 import requests
-from typing import Optional
 
 API_URL = os.environ.get("SMOKE_TEST_API_URL", "")
 API_KEY = os.environ.get("SMOKE_TEST_API_KEY", "")
@@ -69,14 +71,16 @@ class TestAuthenticationEndpoints:
         # Should return 422 (missing body) not 404 or 500
         # Auth token endpoint is /api/v1/auth/token (OAuth2 password flow)
         response = requests.post(f"{API_URL}/api/v1/auth/token", json={}, timeout=10)
-        assert response.status_code in (422, 400), \
+        assert response.status_code in (422, 400), (
             f"Expected validation error, got {response.status_code}"
+        )
 
     def test_protected_endpoint_requires_auth(self):
         response = requests.get(f"{API_URL}/api/v1/experiments", timeout=10)
         # In dev mode the server auto-authenticates (bypass); in production expect 401
-        assert response.status_code in (200, 401), \
+        assert response.status_code in (200, 401), (
             f"Expected 200 (dev bypass) or 401 (production), got {response.status_code}"
+        )
 
     @REQUIRES_TOKEN
     def test_token_auth_works(self):

@@ -25,7 +25,7 @@ from backend.app.core.bandit_scheduler import BanditScheduler
 from backend.app.core.permissions import Action, ResourceType, check_permission
 from backend.app.core.stats_engine import ENGINE_VERSION
 from backend.app.models.bandit_state import BanditState
-from backend.app.models.experiment import Experiment, ExperimentStatus
+from backend.app.models.experiment import Experiment
 from backend.app.models.user import User, UserRole
 from backend.app.schemas.bandit import (
     BanditStatusResponse,
@@ -42,6 +42,7 @@ router = APIRouter()
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
 
 def _get_mab_experiment(experiment_id: UUID, db: Session) -> Experiment:
     """
@@ -86,9 +87,7 @@ def _build_status_response(
 
     If no state exists yet, returns equal weights for all variants.
     """
-    variant_id_to_name = {
-        str(v.id): v.name for v in experiment.variants
-    }
+    variant_id_to_name = {str(v.id): v.name for v in experiment.variants}
     seed: Optional[int] = None
     n_samples: Optional[int] = None
     engine_version = ENGINE_VERSION
@@ -162,6 +161,7 @@ def _build_status_response(
 # Endpoints
 # ---------------------------------------------------------------------------
 
+
 @router.get("/{experiment_id}", response_model=BanditStatusResponse)
 def get_bandit_status(
     experiment_id: UUID,
@@ -177,9 +177,7 @@ def get_bandit_status(
     experiment = _get_mab_experiment(experiment_id, db)
 
     bandit_state: Optional[BanditState] = (
-        db.query(BanditState)
-        .filter(BanditState.experiment_id == experiment_id)
-        .first()
+        db.query(BanditState).filter(BanditState.experiment_id == experiment_id).first()
     )
 
     scheduler = BanditScheduler(db=db)
@@ -218,9 +216,7 @@ def trigger_bandit_update(
 
     # Reload the freshly persisted state
     bandit_state: Optional[BanditState] = (
-        db.query(BanditState)
-        .filter(BanditState.experiment_id == experiment_id)
-        .first()
+        db.query(BanditState).filter(BanditState.experiment_id == experiment_id).first()
     )
     return _build_status_response(experiment, bandit_state, scheduler)
 
@@ -259,12 +255,11 @@ def override_bandit_weights(
 
     # Upsert BanditState
     bandit_state: Optional[BanditState] = (
-        db.query(BanditState)
-        .filter(BanditState.experiment_id == experiment_id)
-        .first()
+        db.query(BanditState).filter(BanditState.experiment_id == experiment_id).first()
     )
 
     from datetime import datetime, timezone
+
     now_iso = datetime.now(timezone.utc).isoformat()
 
     if bandit_state is None:

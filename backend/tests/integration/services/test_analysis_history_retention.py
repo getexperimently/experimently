@@ -56,7 +56,9 @@ def _snapshot_days(db_session, experiment_id) -> list[datetime]:
 
 
 class TestPurgeExpiredHistory:
-    def test_deletes_rows_older_than_the_window_and_keeps_newer(self, db_session, experiment):
+    def test_deletes_rows_older_than_the_window_and_keeps_newer(
+        self, db_session, experiment
+    ):
         now = datetime.now(timezone.utc)
         for age_days in (200, 120, 91, 89, 10, 0):
             record_snapshot(

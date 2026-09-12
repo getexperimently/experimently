@@ -4,10 +4,11 @@ Pytest configuration and fixtures for feature flag evaluation tests.
 Provides common fixtures and test utilities.
 """
 
-import pytest
 import sys
 from pathlib import Path
 from unittest.mock import Mock, patch
+
+import pytest
 
 # Add parent directories to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -17,7 +18,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "shared"))
 @pytest.fixture
 def mock_dynamodb_resource():
     """Mock DynamoDB resource for testing."""
-    with patch('evaluator.get_dynamodb_resource') as mock:
+    with patch("evaluator.get_dynamodb_resource") as mock:
         mock_table = Mock()
         mock_resource = Mock()
         mock_resource.Table.return_value = mock_table
@@ -28,7 +29,7 @@ def mock_dynamodb_resource():
 @pytest.fixture
 def mock_logger():
     """Mock logger for testing."""
-    with patch('evaluator.get_logger') as mock:
+    with patch("evaluator.get_logger") as mock:
         yield mock.return_value
 
 
@@ -36,11 +37,12 @@ def mock_logger():
 def reset_environment():
     """Reset environment variables before each test."""
     import os
+
     # Store original env vars
     original_env = os.environ.copy()
 
     # Set required environment variables for tests
-    os.environ['FLAGS_TABLE'] = 'experimently-feature-flags'
+    os.environ["FLAGS_TABLE"] = "experimently-feature-flags"
 
     yield
 
@@ -55,6 +57,7 @@ def reset_handler_evaluator():
     # Import here to avoid circular imports
     try:
         import handler
+
         handler.reset_evaluator()
         handler._clients_initialized = False
     except ImportError:
@@ -64,6 +67,7 @@ def reset_handler_evaluator():
 
     try:
         import handler
+
         handler.reset_evaluator()
         handler._clients_initialized = False
     except ImportError:

@@ -16,6 +16,7 @@ Covers:
   - generate_state_token / verify_state_token: roundtrip, expired, invalid
   - build_oidc_authorization_url: structure checks
 """
+
 from __future__ import annotations
 
 import base64
@@ -48,7 +49,6 @@ from backend.app.services.sso_service import (
     update_sso_config,
     verify_state_token,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers / fixtures
@@ -111,7 +111,7 @@ def _make_valid_saml_xml(name_id: str = "user@acme.com") -> str:
         ' xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion">'
         "<saml:Assertion>"
         "<saml:Subject>"
-        f'<saml:NameID>{name_id}</saml:NameID>'
+        f"<saml:NameID>{name_id}</saml:NameID>"
         "</saml:Subject>"
         "</saml:Assertion>"
         "</samlp:Response>"
@@ -153,7 +153,9 @@ class TestCreateSSOConfig:
     def test_missing_org_domain_raises_400(self):
         db = _make_db_session()
         with pytest.raises(HTTPException) as exc_info:
-            create_sso_config(db, {"org_name": "Acme", "provider_type": SSOProviderType.SAML})
+            create_sso_config(
+                db, {"org_name": "Acme", "provider_type": SSOProviderType.SAML}
+            )
         assert exc_info.value.status_code == 400
 
     def test_duplicate_domain_raises_409(self):
@@ -379,10 +381,15 @@ class TestGenerateSAMLMetadata:
         cfg = _make_saml_config()
         xml = generate_saml_metadata(cfg)
         # Either full ACS URL or SPSSODescriptor
-        assert "SPSSODescriptor" in xml or "AssertionConsumerService" in xml or "experimentation-platform" in xml
+        assert (
+            "SPSSODescriptor" in xml
+            or "AssertionConsumerService" in xml
+            or "experimentation-platform" in xml
+        )
 
     def test_xml_parseable(self):
         import xml.etree.ElementTree as ET
+
         cfg = _make_saml_config()
         xml = generate_saml_metadata(cfg)
         # Should be valid XML (may raise on invalid)
@@ -812,6 +819,7 @@ class TestStateTokens:
     def test_token_is_url_safe(self):
         token = generate_state_token()
         import re
+
         # URL-safe base64 contains only alphanumeric, -, _
         assert re.match(r"^[A-Za-z0-9_\-]+$", token)
 
@@ -872,7 +880,9 @@ class TestBuildOIDCAuthorizationURL:
     def test_google_url_structure(self):
         cfg = _make_google_config()
         state = "test-state-token"
-        url = build_oidc_authorization_url(cfg, "google", "https://example.com/callback", state)
+        url = build_oidc_authorization_url(
+            cfg, "google", "https://example.com/callback", state
+        )
         assert "accounts.google.com" in url
         assert "client_id=google-client-id" in url
         assert "state=test-state-token" in url
@@ -884,7 +894,9 @@ class TestBuildOIDCAuthorizationURL:
         cfg.entity_id = "gh-client-id"
         cfg.sso_url = None
 
-        url = build_oidc_authorization_url(cfg, "github", "https://example.com/cb", "state-abc")
+        url = build_oidc_authorization_url(
+            cfg, "github", "https://example.com/cb", "state-abc"
+        )
         assert "github.com" in url
         assert "gh-client-id" in url
 
@@ -894,13 +906,17 @@ class TestBuildOIDCAuthorizationURL:
         cfg.entity_id = "ms-client"
         cfg.sso_url = None
 
-        url = build_oidc_authorization_url(cfg, "microsoft", "https://example.com/cb", "state-xyz")
+        url = build_oidc_authorization_url(
+            cfg, "microsoft", "https://example.com/cb", "state-xyz"
+        )
         assert "microsoftonline" in url
 
     def test_unknown_provider_raises_400(self):
         cfg = _make_google_config()
         with pytest.raises(HTTPException) as exc_info:
-            build_oidc_authorization_url(cfg, "unknown_provider", "https://example.com/cb", "state")
+            build_oidc_authorization_url(
+                cfg, "unknown_provider", "https://example.com/cb", "state"
+            )
         assert exc_info.value.status_code == 400
 
     def test_redirect_uri_included(self):
@@ -911,7 +927,9 @@ class TestBuildOIDCAuthorizationURL:
 
     def test_scope_included(self):
         cfg = _make_google_config()
-        url = build_oidc_authorization_url(cfg, "google", "https://example.com/cb", "st")
+        url = build_oidc_authorization_url(
+            cfg, "google", "https://example.com/cb", "st"
+        )
         assert "scope" in url
 
     def test_okta_url_uses_sso_url(self):
@@ -920,5 +938,7 @@ class TestBuildOIDCAuthorizationURL:
         cfg.entity_id = "okta-client"
         cfg.sso_url = "https://my-org.okta.com"
 
-        url = build_oidc_authorization_url(cfg, "okta", "https://example.com/cb", "state")
+        url = build_oidc_authorization_url(
+            cfg, "okta", "https://example.com/cb", "state"
+        )
         assert "my-org.okta.com" in url

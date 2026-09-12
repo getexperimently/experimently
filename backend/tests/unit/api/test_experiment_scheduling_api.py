@@ -1,20 +1,21 @@
 from datetime import datetime, timedelta, timezone
-from unittest.mock import patch, MagicMock, AsyncMock
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
 from fastapi import status
 from fastapi.testclient import TestClient
 
+from backend.app.api.deps import get_current_active_user, get_current_user
+from backend.app.api.v1.endpoints.experiments import router
 from backend.app.main import app
 from backend.app.models.experiment import Experiment, ExperimentStatus
 from backend.app.models.user import User, UserRole
-from backend.app.api.v1.endpoints.experiments import router
 from backend.app.schemas.experiment import ScheduleConfig
-from backend.app.api.deps import get_current_user, get_current_active_user
 from backend.app.services.auth_service import auth_service
 
 client = TestClient(app)
+
 
 @pytest.fixture
 def admin_user(db_session):
@@ -25,12 +26,13 @@ def admin_user(db_session):
         email="admin@example.com",
         is_superuser=True,
         role=UserRole.ADMIN,
-        hashed_password="$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW"  # Hashed version of "password"
+        hashed_password="$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW",  # Hashed version of "password"
     )
     db_session.add(user)
     db_session.commit()
     db_session.refresh(user)
     return user
+
 
 @pytest.fixture
 def regular_user(db_session):
@@ -41,12 +43,13 @@ def regular_user(db_session):
         email="user@example.com",
         is_superuser=False,
         role=UserRole.DEVELOPER,
-        hashed_password="$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW"  # Hashed version of "password"
+        hashed_password="$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW",  # Hashed version of "password"
     )
     db_session.add(user)
     db_session.commit()
     db_session.refresh(user)
     return user
+
 
 @pytest.fixture
 def admin_token(admin_user, monkeypatch):
@@ -62,19 +65,25 @@ def admin_token(admin_user, monkeypatch):
         return admin_user
 
     # Patch both sync and async authentication functions
-    monkeypatch.setattr("backend.app.api.deps.get_current_user", mock_get_current_user_async)
-    monkeypatch.setattr("backend.app.api.deps.get_current_active_user", mock_get_current_user_sync)
+    monkeypatch.setattr(
+        "backend.app.api.deps.get_current_user", mock_get_current_user_async
+    )
+    monkeypatch.setattr(
+        "backend.app.api.deps.get_current_active_user", mock_get_current_user_sync
+    )
 
     # Mock auth_service.get_user_with_groups to bypass AWS Cognito
     def mock_get_user_with_groups(*args, **kwargs):
         return {
             "username": admin_user.username,
             "attributes": {"email": admin_user.email},
-            "groups": ["admin-group"]  # This will map to ADMIN role
+            "groups": ["admin-group"],  # This will map to ADMIN role
         }
 
-    monkeypatch.setattr("backend.app.services.auth_service.CognitoAuthService.get_user_with_groups",
-                        mock_get_user_with_groups)
+    monkeypatch.setattr(
+        "backend.app.services.auth_service.CognitoAuthService.get_user_with_groups",
+        mock_get_user_with_groups,
+    )
 
     # Also patch the token decoding to avoid AWS Cognito calls
     def mock_decode_token(*args, **kwargs):
@@ -83,6 +92,7 @@ def admin_token(admin_user, monkeypatch):
     monkeypatch.setattr("backend.app.core.security.decode_token", mock_decode_token)
 
     return token
+
 
 @pytest.fixture
 def regular_user_token(regular_user, monkeypatch):
@@ -98,19 +108,25 @@ def regular_user_token(regular_user, monkeypatch):
         return regular_user
 
     # Patch both sync and async authentication functions
-    monkeypatch.setattr("backend.app.api.deps.get_current_user", mock_get_current_user_async)
-    monkeypatch.setattr("backend.app.api.deps.get_current_active_user", mock_get_current_user_sync)
+    monkeypatch.setattr(
+        "backend.app.api.deps.get_current_user", mock_get_current_user_async
+    )
+    monkeypatch.setattr(
+        "backend.app.api.deps.get_current_active_user", mock_get_current_user_sync
+    )
 
     # Mock auth_service.get_user_with_groups to bypass AWS Cognito
     def mock_get_user_with_groups(*args, **kwargs):
         return {
             "username": regular_user.username,
             "attributes": {"email": regular_user.email},
-            "groups": ["developer-group"]  # This will map to DEVELOPER role
+            "groups": ["developer-group"],  # This will map to DEVELOPER role
         }
 
-    monkeypatch.setattr("backend.app.services.auth_service.CognitoAuthService.get_user_with_groups",
-                        mock_get_user_with_groups)
+    monkeypatch.setattr(
+        "backend.app.services.auth_service.CognitoAuthService.get_user_with_groups",
+        mock_get_user_with_groups,
+    )
 
     # Also patch the token decoding to avoid AWS Cognito calls
     def mock_decode_token(*args, **kwargs):
@@ -120,11 +136,13 @@ def regular_user_token(regular_user, monkeypatch):
 
     return token
 
+
 @pytest.fixture
 def experiment_client():
     """Create a test client for experiment endpoints."""
     client = TestClient(router)
     return client
+
 
 @pytest.fixture
 def mock_current_user(monkeypatch):
@@ -135,7 +153,7 @@ def mock_current_user(monkeypatch):
         email="test@example.com",
         is_superuser=True,
         role=UserRole.ADMIN,
-        hashed_password="$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW"  # Hashed version of "password"
+        hashed_password="$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW",  # Hashed version of "password"
     )
 
     async def mock_get_current_user():
@@ -146,14 +164,17 @@ def mock_current_user(monkeypatch):
         return {
             "username": user.username,
             "attributes": {"email": user.email},
-            "groups": ["admin-group"]  # This will map to ADMIN role
+            "groups": ["admin-group"],  # This will map to ADMIN role
         }
 
-    monkeypatch.setattr("backend.app.services.auth_service.CognitoAuthService.get_user_with_groups",
-                        mock_get_user_with_groups)
+    monkeypatch.setattr(
+        "backend.app.services.auth_service.CognitoAuthService.get_user_with_groups",
+        mock_get_user_with_groups,
+    )
 
     monkeypatch.setattr("backend.app.api.deps.get_current_user", mock_get_current_user)
     return user
+
 
 @pytest.fixture
 def draft_experiment(db_session, superuser):
@@ -164,7 +185,7 @@ def draft_experiment(db_session, superuser):
         status=ExperimentStatus.DRAFT,
         created_at=datetime.now(timezone.utc),
         updated_at=datetime.now(timezone.utc),
-        owner_id=superuser.id
+        owner_id=superuser.id,
     )
     db_session.add(experiment)
     db_session.commit()
@@ -175,7 +196,9 @@ def draft_experiment(db_session, superuser):
 class TestExperimentSchedulingAPI:
     """Tests for experiment scheduling API endpoints."""
 
-    def test_update_experiment_schedule(self, client, draft_experiment, mock_auth_superuser):
+    def test_update_experiment_schedule(
+        self, client, draft_experiment, mock_auth_superuser
+    ):
         """Test updating experiment schedule via API."""
         # Set up test data
         start_date = datetime.now(timezone.utc) + timedelta(days=1)
@@ -183,14 +206,14 @@ class TestExperimentSchedulingAPI:
         schedule = {
             "start_date": start_date.isoformat(),
             "end_date": end_date.isoformat(),
-            "time_zone": "UTC"
+            "time_zone": "UTC",
         }
 
         # Update schedule with authenticated user
         response = client.put(
             f"/api/v1/experiments/{draft_experiment.id}/schedule",
             json=schedule,
-            headers={"Authorization": "Bearer mock_token"}
+            headers={"Authorization": "Bearer mock_token"},
         )
 
         # Assert results
@@ -208,7 +231,7 @@ class TestExperimentSchedulingAPI:
         schedule = {
             "start_date": start_date.isoformat(),
             "end_date": end_date.isoformat(),
-            "time_zone": "UTC"
+            "time_zone": "UTC",
         }
         nonexistent_id = uuid4()
 
@@ -216,13 +239,15 @@ class TestExperimentSchedulingAPI:
         response = client.put(
             f"/api/v1/experiments/{nonexistent_id}/schedule",
             json=schedule,
-            headers={"Authorization": "Bearer mock_token"}
+            headers={"Authorization": "Bearer mock_token"},
         )
 
         # Assert results
         assert response.status_code == 404
 
-    def test_update_experiment_schedule_invalid_dates(self, client, draft_experiment, mock_auth_superuser):
+    def test_update_experiment_schedule_invalid_dates(
+        self, client, draft_experiment, mock_auth_superuser
+    ):
         """Test updating experiment schedule with invalid dates (end before start)."""
         start_date = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
         end_date = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
@@ -230,20 +255,20 @@ class TestExperimentSchedulingAPI:
         response = client.put(
             f"/api/v1/experiments/{draft_experiment.id}/schedule",
             headers={"Authorization": "Bearer mock_token"},
-            json={
-                "start_date": start_date,
-                "end_date": end_date,
-                "time_zone": "UTC"
-            },
+            json={"start_date": start_date, "end_date": end_date, "time_zone": "UTC"},
         )
 
         assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
         # Get the response details
         error_details = response.json()
         # Assert that at least one of the validation errors contains 'date'
-        assert any("date" in str(error).lower() for error in error_details.get("detail", []))
+        assert any(
+            "date" in str(error).lower() for error in error_details.get("detail", [])
+        )
 
-    def test_update_experiment_schedule_past_start_date(self, client, draft_experiment, mock_auth_superuser):
+    def test_update_experiment_schedule_past_start_date(
+        self, client, draft_experiment, mock_auth_superuser
+    ):
         """Test updating experiment schedule with start date in the past."""
         start_date = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
         end_date = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
@@ -251,21 +276,24 @@ class TestExperimentSchedulingAPI:
         response = client.put(
             f"/api/v1/experiments/{draft_experiment.id}/schedule",
             headers={"Authorization": "Bearer mock_token"},
-            json={
-                "start_date": start_date,
-                "end_date": end_date,
-                "time_zone": "UTC"
-            },
+            json={"start_date": start_date, "end_date": end_date, "time_zone": "UTC"},
         )
 
         assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
         # Get the response details
         error_details = response.json()
         # Assert that at least one of the validation errors contains 'future'
-        assert any("future" in str(error).lower() for error in error_details.get("detail", []))
+        assert any(
+            "future" in str(error).lower() for error in error_details.get("detail", [])
+        )
 
-    @pytest.mark.skipif(True, reason="Known issue: Permission checks for unauthorized users are not working correctly")
-    def test_update_experiment_schedule_unauthorized(self, client, draft_experiment, monkeypatch):
+    @pytest.mark.skipif(
+        True,
+        reason="Known issue: Permission checks for unauthorized users are not working correctly",
+    )
+    def test_update_experiment_schedule_unauthorized(
+        self, client, draft_experiment, monkeypatch
+    ):
         """Test updating experiment schedule without proper authorization.
 
         Note: This test is skipped due to a known issue with permission checks.
@@ -280,11 +308,7 @@ class TestExperimentSchedulingAPI:
         response = client.put(
             f"/api/v1/experiments/{draft_experiment.id}/schedule",
             headers={"Authorization": "Bearer mock_token"},
-            json={
-                "start_date": start_date,
-                "end_date": end_date,
-                "time_zone": "UTC"
-            },
+            json={"start_date": start_date, "end_date": end_date, "time_zone": "UTC"},
         )
 
         # This test should be revisited when permission checks are fixed
@@ -300,13 +324,10 @@ class TestExperimentSchedulingAPI:
         response = client.put(
             f"/api/v1/experiments/{non_existent_id}/schedule",
             headers={"Authorization": "Bearer mock_token"},
-            json={
-                "start_date": start_date,
-                "end_date": end_date,
-                "time_zone": "UTC"
-            },
+            json={"start_date": start_date, "end_date": end_date, "time_zone": "UTC"},
         )
 
         assert response.status_code == status.HTTP_404_NOT_FOUND
+
 
 # Define AsyncMock class - no need to redefine since we're importing it now

@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { apiFetch } from '@/services/api';
 import { PageTitle } from '@/components/PageTitle';
 import {
@@ -163,7 +163,6 @@ export default function PowerCalculatorPage() {
   const [curveData, setCurveData] = useState<PowerCurvePoint[]>([]);
   const [advice, setAdvice] = useState<PlanAdvice | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
-  const [curveLoading, setCurveLoading] = useState<boolean>(false);
   const [adviceLoading, setAdviceLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [adviceError, setAdviceError] = useState<string | null>(null);

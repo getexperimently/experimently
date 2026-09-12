@@ -5,19 +5,19 @@ This module provides API endpoints for user management operations
 such as creating, retrieving, updating, and deleting users.
 """
 
-from typing import List, Any, Optional, Dict
-from fastapi import APIRouter, Depends, HTTPException, status, Path, Query, Body
-from sqlalchemy.orm import Session
 import uuid
 
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy.orm import Session
+
 from backend.app.api import deps
-from backend.app.models.user import User, UserRole
 from backend.app.core.security import get_password_hash, unwrap_secret
+from backend.app.models.user import User, UserRole
 from backend.app.schemas.user import (
     UserCreate,
-    UserUpdate,
-    UserResponse,
     UserListResponse,
+    UserResponse,
+    UserUpdate,
 )
 
 router = APIRouter()
@@ -37,10 +37,11 @@ async def list_users(
     For regular users: retrieves only their own user
     """
     if current_user.is_superuser:
-        # Superusers can see all users
-        # Note: There's no call to .all() here, which would cause the test to fail
-        # The mock in the test already returns a list directly
-        query = db.query(User)
+        # Superusers can see all users. Ordered newest first: a paginated query
+        # with no ORDER BY can repeat or drop rows between pages, and a just-
+        # created account should be on page one.
+        # (No `.all()`: the unit tests mock the query chain and return a list.)
+        query = db.query(User).order_by(User.created_at.desc(), User.id)
         query_with_offset = query.offset(skip)
         users = query_with_offset.limit(limit)
         total = db.query(User).count()
@@ -49,25 +50,11 @@ async def list_users(
         users = [current_user]
         total = 1
 
-    # Convert User model objects to dictionaries for Pydantic
-    user_data = []
-    for user in users:
-        user_dict = {
-            "id": str(user.id),
-            "username": user.username,
-            "email": user.email,
-            "full_name": user.full_name,
-            "is_active": user.is_active,
-            "is_superuser": user.is_superuser,
-            "last_login": user.last_login if hasattr(user, "last_login") else None,
-            "preferences": user.preferences if hasattr(user, "preferences") else {},
-            "created_at": user.created_at,
-            "updated_at": user.updated_at,
-        }
-        user_data.append(user_dict)
-
-    # Create response with properly formatted user data
-    return UserListResponse(items=user_data, total=total, skip=skip, limit=limit)
+    # `UserResponse` reads the ORM objects directly (`from_attributes`), so the
+    # response cannot silently lose a field the way a hand-built dict did: the
+    # role was missing from that dict, and because `role` is optional every
+    # user came back with `"role": null`.
+    return UserListResponse(items=users, total=total, skip=skip, limit=limit)
 
 
 @router.post("/", response_model=None, status_code=status.HTTP_201_CREATED)

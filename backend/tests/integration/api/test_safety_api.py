@@ -30,25 +30,27 @@ KNOWN SERVICE BUGS (documented, not fixed here):
   Tests that don't involve the buggy from_orm path (like rollback, 404 checks,
   and permission checks) run directly against the real service.
 """
+
 import uuid
 from datetime import datetime
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from backend.app.main import app
 from backend.app.api import deps
 from backend.app.api.deps import CacheControl
-from backend.app.models.user import User, UserRole
+from backend.app.main import app
 from backend.app.models.feature_flag import FeatureFlag, FeatureFlagStatus
 from backend.app.models.safety import SafetySettings
+from backend.app.models.user import User, UserRole
 from backend.app.schemas.safety import (
-    SafetySettingsResponse,
     FeatureFlagSafetyConfigResponse,
-    SafetyCheckResponse,
     RollbackResponse,
+    SafetyCheckResponse,
+    SafetySettingsResponse,
 )
 
 HASHED_PASSWORD = "$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW"
@@ -57,6 +59,7 @@ HASHED_PASSWORD = "$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW"
 # ---------------------------------------------------------------------------
 # Local helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_test_client(db_session: Session, user: User) -> TestClient:
     """Create a TestClient authenticated as the given user."""
@@ -86,8 +89,12 @@ def _make_test_client(db_session: Session, user: User) -> TestClient:
 
     app.dependency_overrides[deps.get_db] = override_get_db
     app.dependency_overrides[deps.get_current_user] = override_get_current_user
-    app.dependency_overrides[deps.get_current_active_user] = override_get_current_active_user
-    app.dependency_overrides[deps.get_current_superuser] = override_get_current_superuser
+    app.dependency_overrides[deps.get_current_active_user] = (
+        override_get_current_active_user
+    )
+    app.dependency_overrides[deps.get_current_superuser] = (
+        override_get_current_superuser
+    )
     app.dependency_overrides[deps.get_cache_control] = override_get_cache_control
     app.dependency_overrides[deps.get_api_key] = override_get_api_key
 
@@ -154,6 +161,7 @@ def _make_flag_config_response(flag_id, enabled=True, metrics=None, rollback_pct
 # ---------------------------------------------------------------------------
 # Safety Settings tests
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.integration
 @pytest.mark.requires_db
@@ -253,12 +261,15 @@ class TestSafetySettings:
 # Feature Flag Safety Config tests
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.integration
 @pytest.mark.requires_db
 class TestFeatureFlagSafetyConfig:
     """Tests for GET/POST /api/v1/safety/feature-flags/{flag_id}/config."""
 
-    def test_get_safety_config_for_existing_flag(self, admin_client, admin_user, db_session):
+    def test_get_safety_config_for_existing_flag(
+        self, admin_client, admin_user, db_session
+    ):
         """GET returns 200 with a config structure for an existing flag."""
         flag = _create_feature_flag(db_session, admin_user)
         mocked_config = _make_flag_config_response(flag.id)
@@ -280,7 +291,9 @@ class TestFeatureFlagSafetyConfig:
         assert "metrics" in data
         assert "rollback_percentage" in data
 
-    def test_superuser_can_set_safety_config(self, admin_client, admin_user, db_session):
+    def test_superuser_can_set_safety_config(
+        self, admin_client, admin_user, db_session
+    ):
         """POST creates/updates safety config for a flag; returns 200."""
         flag = _create_feature_flag(db_session, admin_user)
         mocked_config = _make_flag_config_response(flag.id, rollback_pct=10)
@@ -373,12 +386,15 @@ class TestFeatureFlagSafetyConfig:
 # Safety Check tests
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.integration
 @pytest.mark.requires_db
 class TestSafetyCheck:
     """Tests for GET /api/v1/safety/feature-flags/{flag_id}/check."""
 
-    def test_check_existing_flag_returns_200(self, admin_client, admin_user, db_session):
+    def test_check_existing_flag_returns_200(
+        self, admin_client, admin_user, db_session
+    ):
         """GET /check returns 200 for an existing feature flag."""
         flag = _create_feature_flag(db_session, admin_user)
         mocked_check = SafetyCheckResponse(
@@ -394,9 +410,7 @@ class TestSafetyCheck:
             new_callable=AsyncMock,
             return_value=mocked_check,
         ):
-            response = admin_client.get(
-                f"/api/v1/safety/feature-flags/{flag.id}/check"
-            )
+            response = admin_client.get(f"/api/v1/safety/feature-flags/{flag.id}/check")
 
         assert response.status_code == 200, response.text
 
@@ -415,9 +429,7 @@ class TestSafetyCheck:
             new_callable=AsyncMock,
             return_value=mocked_check,
         ):
-            response = admin_client.get(
-                f"/api/v1/safety/feature-flags/{flag.id}/check"
-            )
+            response = admin_client.get(f"/api/v1/safety/feature-flags/{flag.id}/check")
 
         assert response.status_code == 200, response.text
         data = response.json()
@@ -439,9 +451,7 @@ class TestSafetyCheck:
             new_callable=AsyncMock,
             return_value=mocked_check,
         ):
-            response = admin_client.get(
-                f"/api/v1/safety/feature-flags/{flag.id}/check"
-            )
+            response = admin_client.get(f"/api/v1/safety/feature-flags/{flag.id}/check")
 
         assert response.status_code == 200, response.text
         data = response.json()
@@ -460,9 +470,7 @@ class TestSafetyCheck:
             new_callable=AsyncMock,
             side_effect=HTTPException(status_code=404, detail="Feature flag not found"),
         ):
-            response = admin_client.get(
-                f"/api/v1/safety/feature-flags/{fake_id}/check"
-            )
+            response = admin_client.get(f"/api/v1/safety/feature-flags/{fake_id}/check")
 
         assert response.status_code == 404, response.text
 
@@ -484,9 +492,7 @@ class TestSafetyCheck:
             new_callable=AsyncMock,
             return_value=mocked_check,
         ):
-            response = admin_client.get(
-                f"/api/v1/safety/feature-flags/{flag.id}/check"
-            )
+            response = admin_client.get(f"/api/v1/safety/feature-flags/{flag.id}/check")
 
         assert response.status_code == 200, response.text
         assert response.json()["is_healthy"] is True
@@ -495,6 +501,7 @@ class TestSafetyCheck:
 # ---------------------------------------------------------------------------
 # Safety Rollback tests
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.integration
 @pytest.mark.requires_db

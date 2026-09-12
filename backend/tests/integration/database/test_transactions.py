@@ -6,6 +6,7 @@ Tests that verify SQLAlchemy session transaction semantics:
 - Committed changes are visible in the same session
 - Objects created within a test are isolated via rollback
 """
+
 import pytest
 
 from backend.app.models.experiment import Experiment, ExperimentStatus, Variant
@@ -91,11 +92,7 @@ class TestTransactionBehavior:
         exp.name = "Updated Name"
         db_session.commit()
 
-        refreshed = (
-            db_session.query(Experiment)
-            .filter(Experiment.id == exp.id)
-            .first()
-        )
+        refreshed = db_session.query(Experiment).filter(Experiment.id == exp.id).first()
         assert refreshed.name == "Updated Name"
         assert refreshed.name != original_name
 
@@ -164,13 +161,17 @@ class TestTransactionBehavior:
 
         # The row should be gone within the same transaction after flush
         mid_query = db_session.query(Experiment).filter(Experiment.id == exp_id).first()
-        assert mid_query is None, "Row should be deleted after flush within the transaction"
+        assert mid_query is None, (
+            "Row should be deleted after flush within the transaction"
+        )
 
         # Rollback the delete — the row should reappear (if any portion of the
         # prior commit survives the rollback; behaviour depends on session nesting)
         db_session.rollback()
 
-        after_rollback = db_session.query(Experiment).filter(Experiment.id == exp_id).first()
+        after_rollback = (
+            db_session.query(Experiment).filter(Experiment.id == exp_id).first()
+        )
         # If the original commit also rolls back (outer transaction), the row is gone —
         # both outcomes are valid depending on the session nesting level.
         # The key assertion is that after the rollback the DELETE itself is undone
@@ -193,14 +194,13 @@ class TestTransactionBehavior:
         db_session.commit()
 
         for name in names:
-            found = (
-                db_session.query(Experiment).filter(Experiment.name == name).first()
-            )
+            found = db_session.query(Experiment).filter(Experiment.name == name).first()
             assert found is not None, f"Experiment '{name}' not found after commit"
 
     def test_feature_flag_committed_and_queryable(self, db_session, admin_user):
         """A FeatureFlag added and committed is findable in the same session."""
         import uuid
+
         flag = FeatureFlag(
             key=f"txn-flag-{uuid.uuid4().hex[:8]}",
             name="Transaction Test Flag",
@@ -211,11 +211,7 @@ class TestTransactionBehavior:
         db_session.add(flag)
         db_session.commit()
 
-        found = (
-            db_session.query(FeatureFlag)
-            .filter(FeatureFlag.id == flag.id)
-            .first()
-        )
+        found = db_session.query(FeatureFlag).filter(FeatureFlag.id == flag.id).first()
         assert found is not None
         assert found.name == "Transaction Test Flag"
 
@@ -225,6 +221,7 @@ class TestTransactionBehavior:
 
         # Directly update via session.execute to bypass ORM in-memory object
         from sqlalchemy import text
+
         db_session.execute(
             text(
                 "UPDATE test_experimentation.experiments SET name = 'Refreshed Name' WHERE id = :id"

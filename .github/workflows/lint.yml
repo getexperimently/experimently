@@ -1,0 +1,100 @@
+name: Lint
+
+# One fast job: everything that reads the tree without running it.
+#   ruff check / ruff format --check   backend/   (replaces black + isort + flake8)
+#   eslint + tsc                       frontend/
+#   hadolint                           the four Dockerfiles
+#   actionlint                         .github/workflows
+#
+# Locally the same checks are `make lint`.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+concurrency:
+  group: lint-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  RUFF_VERSION: '0.16.7'
+  HADOLINT_VERSION: '2.15.1'
+  ACTIONLINT_VERSION: '1.7.12'
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+
+      - name: Install ruff
+        run: pip install "ruff==${RUFF_VERSION}"
+
+      # Configuration lives in [tool.ruff] in pyproject.toml.
+      - name: ruff check
+        run: ruff check backend/ --output-format=github
+
+      - name: ruff format --check
+        run: ruff format --check backend/
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: cd frontend && npm ci
+
+      # `npm run lint` is `eslint src`; flat config in frontend/eslint.config.mjs.
+      - name: eslint
+        run: cd frontend && npm run lint
+
+      - name: tsc --noEmit
+        run: cd frontend && npx tsc --noEmit
+
+      - name: Install hadolint
+        run: |
+          curl -fsSL -o /usr/local/bin/hadolint \
+            "https://github.com/hadolint/hadolint/releases/download/v${HADOLINT_VERSION}/hadolint-Linux-x86_64"
+          chmod +x /usr/local/bin/hadolint
+
+      # Rule exclusions and their reasons live in .hadolint.yaml.
+      - name: hadolint
+        run: |
+          hadolint backend/Dockerfile frontend/Dockerfile \
+                   demo/shoplab/Dockerfile demo/streampulse/Dockerfile
+
+      - name: Install actionlint
+        run: |
+          curl -fsSL -o /tmp/actionlint.tar.gz \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          tar -xzf /tmp/actionlint.tar.gz -C /usr/local/bin actionlint
+          chmod +x /usr/local/bin/actionlint
+
+      # actionlint's own checks (expressions, action inputs, runner labels) are
+      # all on. Its embedded shellcheck runs with five codes off, because every
+      # current hit is deliberate:
+      #   SC2086 — unquoted "$VAR" in the AWS deploy scripts (values are ids)
+      #   SC2034 — `for i in $(seq 1 60)` readiness loops ignore the counter
+      #   SC2015 — `a && b || c` used as a one-line report-and-continue
+      #   SC2046 — intentional word splitting of a command substitution
+      #   SC2251 — `! cmd` used to invert a check inside a `run:` block
+      # Syntax errors and every other shellcheck finding still fail the job.
+      - name: actionlint
+        env:
+          SHELLCHECK_OPTS: '-e SC2086 -e SC2034 -e SC2015 -e SC2046 -e SC2251'
+        run: actionlint -color

@@ -19,28 +19,30 @@ Tests cover:
 - export_events() filters by date range
 - Exported events include hmac_signature
 """
+
 import csv
 import io
 import json
 import uuid
-import pytest
-from datetime import datetime, timezone, timedelta
-from unittest.mock import MagicMock, patch, call
+from datetime import datetime, timedelta, timezone
+from unittest.mock import MagicMock, call, patch
 
-from backend.app.services.compliance_report_service import (
-    ComplianceReportService,
-    ComplianceReport,
-)
+import pytest
+
 from backend.app.models.compliance_audit_event import (
-    ComplianceAuditEvent,
     AuditAction,
     AuditOutcome,
+    ComplianceAuditEvent,
 )
-
+from backend.app.services.compliance_report_service import (
+    ComplianceReport,
+    ComplianceReportService,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def make_mock_event(
     action=AuditAction.CREATE,
@@ -79,6 +81,7 @@ def make_mock_db_with_events(events):
 # ---------------------------------------------------------------------------
 # TestGenerateSoc2Report
 # ---------------------------------------------------------------------------
+
 
 class TestGenerateSoc2Report:
     """Tests for ComplianceReportService.generate_report()."""
@@ -251,7 +254,9 @@ class TestGenerateSoc2Report:
         start = datetime(2024, 1, 1, tzinfo=timezone.utc)
         end = datetime(2024, 6, 30, tzinfo=timezone.utc)
 
-        report = service.generate_report(standard="soc2", start_time=start, end_time=end)
+        report = service.generate_report(
+            standard="soc2", start_time=start, end_time=end
+        )
 
         assert report.period_start == start
         assert report.period_end == end
@@ -300,6 +305,7 @@ class TestGenerateSoc2Report:
 # ---------------------------------------------------------------------------
 # TestExportAuditEvents
 # ---------------------------------------------------------------------------
+
 
 class TestExportAuditEvents:
     """Tests for ComplianceReportService.export_events()."""
@@ -358,8 +364,14 @@ class TestExportAuditEvents:
         reader = csv.DictReader(io.StringIO(result))
         fieldnames = reader.fieldnames or []
         required_headers = {
-            "id", "timestamp", "action", "resource_type",
-            "resource_id", "actor_id", "outcome", "hmac_signature",
+            "id",
+            "timestamp",
+            "action",
+            "resource_type",
+            "resource_id",
+            "actor_id",
+            "outcome",
+            "hmac_signature",
         }
         for header in required_headers:
             assert header in fieldnames, f"Missing CSV header: {header}"
@@ -403,8 +415,14 @@ class TestExportAuditEvents:
         record = parsed[0]
 
         required_keys = {
-            "id", "timestamp", "action", "resource_type",
-            "resource_id", "actor_id", "outcome", "hmac_signature",
+            "id",
+            "timestamp",
+            "action",
+            "resource_type",
+            "resource_id",
+            "actor_id",
+            "outcome",
+            "hmac_signature",
         }
         for key in required_keys:
             assert key in record, f"Missing key in JSON export: {key}"

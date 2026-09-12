@@ -1,27 +1,21 @@
 # backend/app/services/analysis_service.py
+import json
 import logging
 import math
-import json
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple, Union
 from uuid import UUID
 
-import pandas as pd
 import numpy as np
 from scipy import stats
-from sqlalchemy import func, and_, or_, desc, text
+from sqlalchemy import func, text
 from sqlalchemy.orm import Session, joinedload
 
-from backend.app.models.experiment import Experiment, Variant, Metric, ExperimentStatus
-from backend.app.models.event import Event
-from backend.app.services.event_matching import (
-    CONVERSION_SQL_PREDICATE,
-    any_conversion_event_filter,
-    conversion_event_filter,
-)
-from backend.app.models.assignment import Assignment
-from backend.app.core.config import settings
 from backend.app.core.database_config import get_schema_name
+from backend.app.core.stats_engine import ENGINE_VERSION, as_of_bucket, derive_seed
+from backend.app.models.assignment import Assignment
+from backend.app.models.event import Event
+from backend.app.models.experiment import Experiment, Metric
 from backend.app.schemas.bayesian import (
     BayesianConfig,
     BayesianDecision,
@@ -29,8 +23,12 @@ from backend.app.schemas.bayesian import (
     BayesianResultsResponse,
     BayesianVariantResult,
 )
-from backend.app.core.stats_engine import ENGINE_VERSION, as_of_bucket, derive_seed
-from backend.app.services.bayesian_service import BayesianService, DEFAULT_N_SAMPLES
+from backend.app.services.bayesian_service import DEFAULT_N_SAMPLES, BayesianService
+from backend.app.services.event_matching import (
+    CONVERSION_SQL_PREDICATE,
+    any_conversion_event_filter,
+    conversion_event_filter,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +78,10 @@ class AnalysisService:
         # Get experiment with variants and metrics
         experiment = (
             self.db.query(Experiment)
-            .options(joinedload(Experiment.variants), joinedload(Experiment.metric_definitions))
+            .options(
+                joinedload(Experiment.variants),
+                joinedload(Experiment.metric_definitions),
+            )
             .filter(Experiment.id == experiment_id)
             .first()
         )
@@ -114,7 +115,9 @@ class AnalysisService:
             for metric, raw in zip(metric_definitions, metrics_results)
         ]
         sample_size_adequate = self._sample_size_adequate(experiment, metrics_results)
-        summary.update(self._summarise_decision(experiment, metrics, sample_size_adequate))
+        summary.update(
+            self._summarise_decision(experiment, metrics, sample_size_adequate)
+        )
 
         return {
             "experiment_id": str(experiment_id),
@@ -143,7 +146,9 @@ class AnalysisService:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _adjusted_p_values(p_values: List[Optional[float]], method: str) -> List[Optional[float]]:
+    def _adjusted_p_values(
+        p_values: List[Optional[float]], method: str
+    ) -> List[Optional[float]]:
         """Multiple-comparison correction across the treatment variants of one metric."""
         valid = [(i, p) for i, p in enumerate(p_values) if p is not None]
         adjusted: List[Optional[float]] = [None] * len(p_values)
@@ -171,7 +176,9 @@ class AnalysisService:
         control = next((v for v in raw["variant_results"] if v["is_control"]), None)
         control_rate = (control["conversion_rate"] / 100.0) if control else 0.0
         treatments = [v for v in raw["variant_results"] if not v["is_control"]]
-        adjusted = self._adjusted_p_values([v.get("p_value") for v in treatments], correction_method)
+        adjusted = self._adjusted_p_values(
+            [v.get("p_value") for v in treatments], correction_method
+        )
         adjusted_by_id = {v["variant_id"]: a for v, a in zip(treatments, adjusted)}
 
         variants: List[Dict[str, Any]] = []
@@ -208,9 +215,16 @@ class AnalysisService:
                 effect = None
                 if n > 0 and control and control["sample_size"] > 0:
                     # Cohen's h for two proportions
-                    effect = 2 * math.asin(math.sqrt(rate)) - 2 * math.asin(math.sqrt(control_rate))
+                    effect = 2 * math.asin(math.sqrt(rate)) - 2 * math.asin(
+                        math.sqrt(control_rate)
+                    )
                 power = None
-                if effect is not None and control and control["sample_size"] > 0 and n > 0:
+                if (
+                    effect is not None
+                    and control
+                    and control["sample_size"] > 0
+                    and n > 0
+                ):
                     try:
                         from statsmodels.stats.power import NormalIndPower
 
@@ -229,20 +243,30 @@ class AnalysisService:
                     adjusted_p_value=adj,
                     is_significant=bool(decisive is not None and decisive < alpha),
                     effect_size=effect,
-                    effect_size_label=self._effect_size_label(abs(effect)) if effect is not None else None,
+                    effect_size_label=self._effect_size_label(abs(effect))
+                    if effect is not None
+                    else None,
                     relative_improvement_pct=improvement,
                     power=power,
-                    statistical_test_used="fisher_exact" if p_value is not None else None,
+                    statistical_test_used="fisher_exact"
+                    if p_value is not None
+                    else None,
                 )
             variants.append(entry)
 
         winners = [
-            v for v in variants
-            if not v["is_control"] and v["is_significant"]
+            v
+            for v in variants
+            if not v["is_control"]
+            and v["is_significant"]
             and (v["relative_improvement_pct"] or 0) > 0
         ]
         winner = max(winners, key=lambda v: v["mean"]) if winners else None
-        metric_type = metric.metric_type.value if hasattr(metric.metric_type, "value") else str(metric.metric_type)
+        metric_type = (
+            metric.metric_type.value
+            if hasattr(metric.metric_type, "value")
+            else str(metric.metric_type)
+        )
         return {
             "metric_id": str(metric.id),
             "metric_name": metric.name,
@@ -254,14 +278,20 @@ class AnalysisService:
         }
 
     @staticmethod
-    def _sample_size_adequate(experiment: Experiment, metrics_results: List[Dict[str, Any]]) -> bool:
+    def _sample_size_adequate(
+        experiment: Experiment, metrics_results: List[Dict[str, Any]]
+    ) -> bool:
         """True when every variant meets the primary metric's minimum sample size."""
         if not metrics_results:
             return False
         primary = next((m for m in experiment.metric_definitions if m.is_primary), None)
         minimum = int(getattr(primary, "minimum_sample_size", None) or 100)
         raw = next(
-            (r for r in metrics_results if primary and r["metric_id"] == str(primary.id)),
+            (
+                r
+                for r in metrics_results
+                if primary and r["metric_id"] == str(primary.id)
+            ),
             metrics_results[0],
         )
         return all(v["sample_size"] >= minimum for v in raw["variant_results"])
@@ -290,9 +320,15 @@ class AnalysisService:
         primary = next((m for m in metrics if m["is_primary"]), metrics[0])
         winner_id = primary["winning_variant_id"]
         if winner_id:
-            winner = next(v for v in primary["variants"] if v["variant_id"] == winner_id)
+            winner = next(
+                v for v in primary["variants"] if v["variant_id"] == winner_id
+            )
             pct = winner["relative_improvement_pct"]
-            p = winner["adjusted_p_value"] if winner["adjusted_p_value"] is not None else winner["p_value"]
+            p = (
+                winner["adjusted_p_value"]
+                if winner["adjusted_p_value"] is not None
+                else winner["p_value"]
+            )
             reason = (
                 f"{winner['variant_name']} shows "
                 f"{pct:.1f}% improvement on {primary['metric_name']} (p={p:.4f})."
@@ -317,7 +353,8 @@ class AnalysisService:
             }
         treatments = [v for v in primary["variants"] if not v["is_control"]]
         if treatments and all(
-            v["is_significant"] and (v["relative_improvement_pct"] or 0) < 0 for v in treatments
+            v["is_significant"] and (v["relative_improvement_pct"] or 0) < 0
+            for v in treatments
         ):
             return {
                 "has_winner": False,
@@ -455,7 +492,7 @@ class AnalysisService:
                             float("inf") if rates[variant_id] > 0 else 0
                         )
                 except Exception as e:
-                    logger.error(f"Error calculating statistics: {str(e)}")
+                    logger.error(f"Error calculating statistics: {e!s}")
                     p_value = None
                     is_significant = False
                     relative_improvement = None
@@ -522,7 +559,11 @@ class AnalysisService:
         if start_date:
             try:
                 start_dt = self._parse_dt(experiment.start_date)
-                end_dt = self._parse_dt(experiment.end_date) if experiment.end_date else datetime.now(timezone.utc)
+                end_dt = (
+                    self._parse_dt(experiment.end_date)
+                    if experiment.end_date
+                    else datetime.now(timezone.utc)
+                )
                 duration_days = (end_dt - start_dt).days
             except (ValueError, TypeError):
                 duration_days = None
@@ -586,7 +627,10 @@ class AnalysisService:
         # Get experiment with variants and metrics
         experiment = (
             self.db.query(Experiment)
-            .options(joinedload(Experiment.variants), joinedload(Experiment.metric_definitions))
+            .options(
+                joinedload(Experiment.variants),
+                joinedload(Experiment.metric_definitions),
+            )
             .filter(Experiment.id == experiment_id)
             .first()
         )
@@ -754,7 +798,9 @@ class AnalysisService:
             and getattr(experiment, "bayesian_config", None)
         )
 
-    def _bayesian_observations(self, experiment: Experiment) -> Dict[str, Dict[str, int]]:
+    def _bayesian_observations(
+        self, experiment: Experiment
+    ) -> Dict[str, Dict[str, int]]:
         """Per-variant ``{conversions, total}`` for the primary metric."""
         primary_metric = next(
             (m for m in experiment.metric_definitions if m.is_primary),
@@ -966,7 +1012,9 @@ class AnalysisService:
         total = control_size + treatment_size
         pooled_p = (control_conversions + treatment_conversions) / total
 
-        se = math.sqrt(pooled_p * (1.0 - pooled_p) * (1.0 / control_size + 1.0 / treatment_size))
+        se = math.sqrt(
+            pooled_p * (1.0 - pooled_p) * (1.0 / control_size + 1.0 / treatment_size)
+        )
         if se == 0.0:
             return 1.0
 
@@ -1032,7 +1080,7 @@ class AnalysisService:
         std_c = float(np.std(arr_c, ddof=1)) if len(arr_c) > 1 else 0.0
         std_t = float(np.std(arr_t, ddof=1)) if len(arr_t) > 1 else 0.0
 
-        pooled_std = math.sqrt((std_c ** 2 + std_t ** 2) / 2.0)
+        pooled_std = math.sqrt((std_c**2 + std_t**2) / 2.0)
 
         if pooled_std == 0.0:
             if mean_t > mean_c:
@@ -1070,7 +1118,8 @@ class AnalysisService:
 
         center = (p_hat + z2 / (2.0 * n)) / (1.0 + z2 / n)
         margin = (
-            z * math.sqrt(p_hat * (1.0 - p_hat) / n + z2 / (4.0 * n * n))
+            z
+            * math.sqrt(p_hat * (1.0 - p_hat) / n + z2 / (4.0 * n * n))
             / (1.0 + z2 / n)
         )
 
@@ -1153,7 +1202,10 @@ class AnalysisService:
         # Get experiment with variants and metrics
         experiment = (
             self.db.query(Experiment)
-            .options(joinedload(Experiment.variants), joinedload(Experiment.metric_definitions))
+            .options(
+                joinedload(Experiment.variants),
+                joinedload(Experiment.metric_definitions),
+            )
             .filter(Experiment.id == experiment_id)
             .first()
         )

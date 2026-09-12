@@ -10,19 +10,19 @@ Tests cover:
 
 import uuid
 from datetime import datetime, timezone
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
 
-from backend.app.main import app
 from backend.app.api import deps
+from backend.app.main import app
 from backend.app.models.notification import NotificationChannel, NotificationStatus
-
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def make_user(role="ADMIN", user_id=None):
     """Build a mock User object with the given role."""
@@ -72,6 +72,7 @@ def make_log_entry(event_type="experiment_started", status=NotificationStatus.SE
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def client():
     return TestClient(app)
@@ -101,6 +102,7 @@ def viewer_user():
 # Preferences — GET /api/v1/notifications/preferences
 # ---------------------------------------------------------------------------
 
+
 def test_get_preferences_returns_defaults_when_none_exist(client, admin_user):
     """When no preferences row exists the endpoint creates and returns defaults."""
     mock_db = MagicMock()
@@ -111,7 +113,9 @@ def test_get_preferences_returns_defaults_when_none_exist(client, admin_user):
     # After add+commit the refresh should populate the object on mock_db
     mock_db.refresh.side_effect = lambda obj: None
 
-    with patch("backend.app.api.v1.endpoints.notifications.NotificationPreference") as MockPref:
+    with patch(
+        "backend.app.api.v1.endpoints.notifications.NotificationPreference"
+    ) as MockPref:
         MockPref.return_value = new_prefs
         app.dependency_overrides[deps.get_current_active_user] = lambda: admin_user
         app.dependency_overrides[deps.get_db] = lambda: mock_db
@@ -130,7 +134,9 @@ def test_get_preferences_returns_existing_prefs(client, admin_user):
     """When a preferences row exists the endpoint returns it without creating a new one."""
     mock_db = MagicMock()
     existing_prefs = make_prefs(user_id=admin_user.id)
-    mock_db.query.return_value.filter_by.return_value.first.return_value = existing_prefs
+    mock_db.query.return_value.filter_by.return_value.first.return_value = (
+        existing_prefs
+    )
 
     app.dependency_overrides[deps.get_current_active_user] = lambda: admin_user
     app.dependency_overrides[deps.get_db] = lambda: mock_db
@@ -160,13 +166,16 @@ def test_get_preferences_requires_auth(client):
 # Preferences — PUT /api/v1/notifications/preferences
 # ---------------------------------------------------------------------------
 
+
 def test_update_preferences_creates_if_not_exists(client, admin_user):
     """PUT creates a new prefs row when none exists for the user."""
     mock_db = MagicMock()
     mock_db.query.return_value.filter_by.return_value.first.return_value = None
     created_prefs = make_prefs(user_id=admin_user.id)
 
-    with patch("backend.app.api.v1.endpoints.notifications.NotificationPreference") as MockPref:
+    with patch(
+        "backend.app.api.v1.endpoints.notifications.NotificationPreference"
+    ) as MockPref:
         MockPref.return_value = created_prefs
         app.dependency_overrides[deps.get_current_active_user] = lambda: admin_user
         app.dependency_overrides[deps.get_db] = lambda: mock_db
@@ -188,7 +197,9 @@ def test_update_preferences_updates_existing(client, admin_user):
     """PUT updates fields on an existing prefs row."""
     mock_db = MagicMock()
     existing_prefs = make_prefs(user_id=admin_user.id)
-    mock_db.query.return_value.filter_by.return_value.first.return_value = existing_prefs
+    mock_db.query.return_value.filter_by.return_value.first.return_value = (
+        existing_prefs
+    )
 
     app.dependency_overrides[deps.get_current_active_user] = lambda: admin_user
     app.dependency_overrides[deps.get_db] = lambda: mock_db
@@ -213,7 +224,9 @@ def test_update_preferences_partial_update_preserves_others(client, admin_user):
     existing_prefs = make_prefs(user_id=admin_user.id)
     existing_prefs.notify_experiment_started = True
     existing_prefs.notify_rollout_advanced = False
-    mock_db.query.return_value.filter_by.return_value.first.return_value = existing_prefs
+    mock_db.query.return_value.filter_by.return_value.first.return_value = (
+        existing_prefs
+    )
 
     app.dependency_overrides[deps.get_current_active_user] = lambda: admin_user
     app.dependency_overrides[deps.get_db] = lambda: mock_db
@@ -249,6 +262,7 @@ def test_update_preferences_requires_auth(client):
 # ---------------------------------------------------------------------------
 # Admin preferences list — GET /api/v1/notifications/admin/preferences
 # ---------------------------------------------------------------------------
+
 
 def test_list_all_preferences_admin_only(client, admin_user):
     """ADMIN user can successfully retrieve the full preferences list."""
@@ -318,6 +332,7 @@ def test_list_all_preferences_viewer_returns_403(client, viewer_user):
 # ---------------------------------------------------------------------------
 # Delivery log — GET /api/v1/notifications/delivery-log
 # ---------------------------------------------------------------------------
+
 
 def _make_log_query_mock(mock_db, entries, total=None):
     """Wire mock_db so that the chained query calls used in delivery-log work."""
@@ -399,7 +414,9 @@ def test_delivery_log_filter_by_event_type(client, admin_user):
     app.dependency_overrides[deps.get_current_active_user] = lambda: admin_user
     app.dependency_overrides[deps.get_db] = lambda: mock_db
 
-    response = client.get("/api/v1/notifications/delivery-log?event_type=safety_rollback")
+    response = client.get(
+        "/api/v1/notifications/delivery-log?event_type=safety_rollback"
+    )
 
     app.dependency_overrides.pop(deps.get_current_active_user, None)
     app.dependency_overrides.pop(deps.get_db, None)
@@ -451,11 +468,14 @@ def test_delivery_log_returns_list_response(client, admin_user):
 # Test notification — POST /api/v1/notifications/test
 # ---------------------------------------------------------------------------
 
+
 def test_test_notification_developer_can_send(client, developer_user):
     """A DEVELOPER can send a test notification."""
     app.dependency_overrides[deps.get_current_active_user] = lambda: developer_user
 
-    with patch("backend.app.api.v1.endpoints.notifications.NotificationService") as MockSvc:
+    with patch(
+        "backend.app.api.v1.endpoints.notifications.NotificationService"
+    ) as MockSvc:
         instance = MockSvc.return_value
         instance._slack.send_generic_alert.return_value = True
 
@@ -472,7 +492,9 @@ def test_test_notification_admin_can_send(client, admin_user):
     """An ADMIN can send a test notification."""
     app.dependency_overrides[deps.get_current_active_user] = lambda: admin_user
 
-    with patch("backend.app.api.v1.endpoints.notifications.NotificationService") as MockSvc:
+    with patch(
+        "backend.app.api.v1.endpoints.notifications.NotificationService"
+    ) as MockSvc:
         instance = MockSvc.return_value
         instance._slack.send_generic_alert.return_value = True
 
@@ -515,7 +537,9 @@ def test_test_notification_slack_channel(client, admin_user):
     """Sending via the slack channel calls SlackNotifier.send_generic_alert."""
     app.dependency_overrides[deps.get_current_active_user] = lambda: admin_user
 
-    with patch("backend.app.api.v1.endpoints.notifications.NotificationService") as MockSvc:
+    with patch(
+        "backend.app.api.v1.endpoints.notifications.NotificationService"
+    ) as MockSvc:
         instance = MockSvc.return_value
         instance._slack.send_generic_alert.return_value = True
 
@@ -534,7 +558,9 @@ def test_test_notification_webhook_channel(client, admin_user):
     """Sending via the webhook channel calls NotificationService.send_webhook."""
     app.dependency_overrides[deps.get_current_active_user] = lambda: admin_user
 
-    with patch("backend.app.api.v1.endpoints.notifications.NotificationService") as MockSvc:
+    with patch(
+        "backend.app.api.v1.endpoints.notifications.NotificationService"
+    ) as MockSvc:
         instance = MockSvc.return_value
         instance._webhook_url = "http://example.com/webhook"
         instance.send_webhook.return_value = True
@@ -554,7 +580,9 @@ def test_test_notification_returns_success_field(client, admin_user):
     """The response body includes a 'success' field."""
     app.dependency_overrides[deps.get_current_active_user] = lambda: admin_user
 
-    with patch("backend.app.api.v1.endpoints.notifications.NotificationService") as MockSvc:
+    with patch(
+        "backend.app.api.v1.endpoints.notifications.NotificationService"
+    ) as MockSvc:
         instance = MockSvc.return_value
         instance._slack.send_generic_alert.return_value = True
 
@@ -576,9 +604,13 @@ def test_test_notification_default_channel_is_slack(client, admin_user):
     """When no channel is specified the default (slack) is used."""
     app.dependency_overrides[deps.get_current_active_user] = lambda: admin_user
 
-    with patch("backend.app.api.v1.endpoints.notifications.NotificationService") as MockSvc:
+    with patch(
+        "backend.app.api.v1.endpoints.notifications.NotificationService"
+    ) as MockSvc:
         instance = MockSvc.return_value
-        instance._slack.send_generic_alert.return_value = False  # returns False but no error
+        instance._slack.send_generic_alert.return_value = (
+            False  # returns False but no error
+        )
 
         response = client.post(
             "/api/v1/notifications/test",

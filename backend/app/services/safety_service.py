@@ -15,7 +15,6 @@ The async methods are the API used by the endpoints and the
 underneath them and are also handy in tests.
 """
 
-import logging
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import UUID
@@ -24,6 +23,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from backend.app.core.logging import get_logger
 from backend.app.models.feature_flag import FeatureFlag, FeatureFlagStatus
 from backend.app.models.metrics.metric import ErrorLog, MetricType, RawMetric
 from backend.app.models.safety import (
@@ -45,7 +45,6 @@ from backend.app.schemas.safety import (
     SafetySettingsResponse,
     SafetySettingsUpdate,
 )
-from backend.app.core.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -56,7 +55,13 @@ DEFAULT_CONFIG_ID = UUID("00000000-0000-0000-0000-000000000000")
 # Metric names understood by check_feature_flag_safety(). Anything else is
 # reported as "no data source" and treated as healthy.
 _ERROR_METRICS = {"error_rate", "error_count", "total_evaluations"}
-_LATENCY_METRICS = {"latency", "avg_latency", "p95_latency", "max_latency", "min_latency"}
+_LATENCY_METRICS = {
+    "latency",
+    "avg_latency",
+    "p95_latency",
+    "max_latency",
+    "min_latency",
+}
 
 
 def _metric_to_trigger(metric_name: str) -> RollbackTriggerType:
@@ -103,7 +108,9 @@ class SafetyService:
         return db.query(SafetySettings).first()
 
     @staticmethod
-    def create_safety_settings(db: Session, data: SafetySettingsCreate) -> SafetySettings:
+    def create_safety_settings(
+        db: Session, data: SafetySettingsCreate
+    ) -> SafetySettings:
         """Create the global settings row; raises ValueError if one exists."""
         if db.query(SafetySettings).first():
             raise ValueError("Safety settings already exist, use update instead")
@@ -123,7 +130,9 @@ class SafetyService:
         if not db_obj:
             return None
 
-        for field, value in _settings_columns(data.model_dump(exclude_unset=True)).items():
+        for field, value in _settings_columns(
+            data.model_dump(exclude_unset=True)
+        ).items():
             setattr(db_obj, field, value)
 
         db.add(db_obj)
@@ -179,11 +188,15 @@ class SafetyService:
         db: Session, feature_flag_id: UUID, data: FeatureFlagSafetyConfigUpdate
     ) -> Optional[FeatureFlagSafetyConfig]:
         """Update a flag's safety config; returns None if there is none."""
-        db_obj = SafetyService.get_feature_flag_safety_config_record(db, feature_flag_id)
+        db_obj = SafetyService.get_feature_flag_safety_config_record(
+            db, feature_flag_id
+        )
         if not db_obj:
             return None
 
-        for field, value in _config_columns(data.model_dump(exclude_unset=True)).items():
+        for field, value in _config_columns(
+            data.model_dump(exclude_unset=True)
+        ).items():
             setattr(db_obj, field, value)
 
         db.add(db_obj)
@@ -192,9 +205,13 @@ class SafetyService:
         return db_obj
 
     @staticmethod
-    def get_or_create_safety_config(db: Session, feature_flag_id: UUID) -> FeatureFlagSafetyConfig:
+    def get_or_create_safety_config(
+        db: Session, feature_flag_id: UUID
+    ) -> FeatureFlagSafetyConfig:
         """Return the flag's config, creating a default one if missing."""
-        config = SafetyService.get_feature_flag_safety_config_record(db, feature_flag_id)
+        config = SafetyService.get_feature_flag_safety_config_record(
+            db, feature_flag_id
+        )
         if config:
             return config
 
@@ -215,7 +232,9 @@ class SafetyService:
         executed_by_user_id: Optional[UUID] = None,
     ) -> SafetyRollbackRecord:
         """Persist a rollback record (the flag's config is created if needed)."""
-        safety_config = SafetyService.get_or_create_safety_config(db, data.feature_flag_id)
+        safety_config = SafetyService.get_or_create_safety_config(
+            db, data.feature_flag_id
+        )
         db_obj = SafetyRollbackRecord(
             feature_flag_id=data.feature_flag_id,
             safety_config_id=safety_config.id,
@@ -324,7 +343,9 @@ class SafetyService:
             )
         return stats
 
-    def _get_metric_value(self, feature_flag_id: UUID, metric_name: str) -> Optional[float]:
+    def _get_metric_value(
+        self, feature_flag_id: UUID, metric_name: str
+    ) -> Optional[float]:
         """Current value of a named metric, or None when the platform has no source for it."""
         if metric_name in _ERROR_METRICS:
             return float(self.get_error_metrics(self.db, feature_flag_id)[metric_name])
@@ -342,7 +363,9 @@ class SafetyService:
         """Return the global settings, creating the default row on first use."""
         settings = self.db.query(SafetySettings).first()
         if not settings:
-            settings = SafetySettings(enable_automatic_rollbacks=False, default_metrics=None)
+            settings = SafetySettings(
+                enable_automatic_rollbacks=False, default_metrics=None
+            )
             self.db.add(settings)
             self.db.commit()
             self.db.refresh(settings)
@@ -373,7 +396,9 @@ class SafetyService:
     # ------------------------------------------------------------------
 
     def _require_flag(self, feature_flag_id: UUID) -> FeatureFlag:
-        feature_flag = self.db.query(FeatureFlag).filter(FeatureFlag.id == feature_flag_id).first()
+        feature_flag = (
+            self.db.query(FeatureFlag).filter(FeatureFlag.id == feature_flag_id).first()
+        )
         if not feature_flag:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -419,12 +444,16 @@ class SafetyService:
 
         existing = self.get_feature_flag_safety_config_record(self.db, feature_flag_id)
         if existing:
-            for key, value in _config_columns(config.model_dump(exclude_unset=True)).items():
+            for key, value in _config_columns(
+                config.model_dump(exclude_unset=True)
+            ).items():
                 setattr(existing, key, value)
         else:
             payload = _config_columns(config.model_dump())
             payload.pop("feature_flag_id", None)
-            existing = FeatureFlagSafetyConfig(feature_flag_id=feature_flag_id, **payload)
+            existing = FeatureFlagSafetyConfig(
+                feature_flag_id=feature_flag_id, **payload
+            )
             self.db.add(existing)
 
         self.db.commit()
@@ -435,7 +464,9 @@ class SafetyService:
     # Safety checks
     # ------------------------------------------------------------------
 
-    async def check_feature_flag_safety(self, feature_flag_id: UUID) -> SafetyCheckResponse:
+    async def check_feature_flag_safety(
+        self, feature_flag_id: UUID
+    ) -> SafetyCheckResponse:
         """
         Evaluate every configured metric threshold for the flag.
 
@@ -452,7 +483,9 @@ class SafetyService:
                 is_healthy=True,
                 metrics=[],
                 last_checked=datetime.utcnow(),
-                details={"message": "Safety monitoring is disabled for this feature flag"},
+                details={
+                    "message": "Safety monitoring is disabled for this feature flag"
+                },
             )
 
         statuses: List[MetricStatus] = []
@@ -468,8 +501,12 @@ class SafetyService:
                 value = 0.0
                 critical = warning = False
             else:
-                critical = _breaches(value, threshold.critical_threshold, threshold.comparison_type)
-                warning = _breaches(value, threshold.warning_threshold, threshold.comparison_type)
+                critical = _breaches(
+                    value, threshold.critical_threshold, threshold.comparison_type
+                )
+                warning = _breaches(
+                    value, threshold.warning_threshold, threshold.comparison_type
+                )
 
             if critical:
                 is_healthy = False
@@ -518,7 +555,10 @@ class SafetyService:
         """
         feature_flag = (
             db.query(FeatureFlag)
-            .filter(FeatureFlag.id == feature_flag_id, FeatureFlag.status == FeatureFlagStatus.ACTIVE)
+            .filter(
+                FeatureFlag.id == feature_flag_id,
+                FeatureFlag.status == FeatureFlagStatus.ACTIVE,
+            )
             .first()
         )
         if not feature_flag or feature_flag.rollout_percentage == 0:
@@ -535,7 +575,9 @@ class SafetyService:
         try:
             safety_check = await self.check_feature_flag_safety(feature_flag_id)
         except Exception as exc:  # metric sources failing must not roll flags back
-            logger.error(f"Error checking safety for feature flag {feature_flag_id}: {exc}")
+            logger.error(
+                f"Error checking safety for feature flag {feature_flag_id}: {exc}"
+            )
             return False, None, None
 
         if safety_check.is_healthy:
@@ -547,15 +589,22 @@ class SafetyService:
             trigger_type = _metric_to_trigger(failing.name)
             trigger_value, threshold_value = failing.current_value, failing.threshold
         else:
-            reason, trigger_type = "Multiple issues detected", RollbackTriggerType.AUTOMATIC
+            reason, trigger_type = (
+                "Multiple issues detected",
+                RollbackTriggerType.AUTOMATIC,
+            )
             trigger_value = threshold_value = None
 
-        return True, reason, {
-            "trigger_type": trigger_type,
-            "trigger_value": trigger_value,
-            "threshold_value": threshold_value,
-            "safety_check": safety_check.model_dump(),
-        }
+        return (
+            True,
+            reason,
+            {
+                "trigger_type": trigger_type,
+                "trigger_value": trigger_value,
+                "threshold_value": threshold_value,
+                "safety_check": safety_check.model_dump(),
+            },
+        )
 
     # ------------------------------------------------------------------
     # Rollbacks
@@ -581,7 +630,10 @@ class SafetyService:
         trigger_name = str(getattr(trigger_type, "value", trigger_type))
         try:
             feature_flag = (
-                db.query(FeatureFlag).filter(FeatureFlag.id == feature_flag_id).with_for_update().first()
+                db.query(FeatureFlag)
+                .filter(FeatureFlag.id == feature_flag_id)
+                .with_for_update()
+                .first()
             )
             if not feature_flag:
                 raise ValueError(f"Feature flag {feature_flag_id} does not exist")
@@ -684,6 +736,7 @@ class SafetyService:
 # ----------------------------------------------------------------------
 # Schema -> column mapping helpers
 # ----------------------------------------------------------------------
+
 
 def _settings_columns(data: Dict[str, Any]) -> Dict[str, Any]:
     """Serialise nested MetricThreshold models so they can be stored as JSONB."""

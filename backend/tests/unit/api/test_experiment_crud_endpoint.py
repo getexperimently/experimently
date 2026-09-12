@@ -4,22 +4,23 @@ Test cases for Experiment CRUD API endpoints.
 """
 
 import os
-import pytest
-from unittest import mock
-from fastapi.testclient import TestClient
-from fastapi import status
-from sqlalchemy.orm import Session
-import boto3
 from datetime import datetime
-from uuid import uuid4, UUID
+from unittest import mock
+from uuid import UUID, uuid4
 
-from backend.app.main import app
-from backend.app.models.user import User
+import boto3
+import pytest
+from fastapi import status
+from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
+
 from backend.app.api import deps
-from backend.app.utils.aws_client import AWSClient
-from backend.app.middleware.logging_middleware import LoggingMiddleware
-from backend.app.utils.metrics import MetricsCollector
+from backend.app.main import app
 from backend.app.middleware.error_middleware import ErrorMiddleware
+from backend.app.middleware.logging_middleware import LoggingMiddleware
+from backend.app.models.user import User
+from backend.app.utils.aws_client import AWSClient
+from backend.app.utils.metrics import MetricsCollector
 
 
 class TestExperimentCreate:
@@ -65,9 +66,9 @@ class TestExperimentCreate:
 
         # Mock boto3 clients directly
         def mock_boto3_client(service, **kwargs):
-            if service == 'logs':
+            if service == "logs":
                 return mock_logs_client
-            elif service == 'cloudwatch':
+            elif service == "cloudwatch":
                 return mock_metrics_client
             else:
                 mock_client = mock.MagicMock()
@@ -85,8 +86,12 @@ class TestExperimentCreate:
     @mock.patch("backend.app.utils.metrics.MetricsCollector")
     @mock.patch("backend.app.middleware.error_middleware.ErrorMiddleware.dispatch")
     @mock.patch("backend.app.middleware.error_middleware.ErrorMiddleware._log_error")
-    @mock.patch("backend.app.middleware.error_middleware.ErrorMiddleware._send_error_metrics")
-    @mock.patch("backend.app.middleware.metrics_middleware.MetricsMiddleware._send_request_metrics")
+    @mock.patch(
+        "backend.app.middleware.error_middleware.ErrorMiddleware._send_error_metrics"
+    )
+    @mock.patch(
+        "backend.app.middleware.metrics_middleware.MetricsMiddleware._send_request_metrics"
+    )
     @mock.patch("backend.app.services.auth_service.auth_service.get_user")
     def test_create_experiment_success(
         self,
@@ -240,7 +245,9 @@ class TestExperimentCreate:
         assert UUID(response.json()["id"]) == experiment_id
         assert response.json()["name"] == "Test Experiment"
         assert response.json()["description"] == "Testing experiment creation"
-        assert response.json()["hypothesis"] == "Feature A will increase conversion by 10%"
+        assert (
+            response.json()["hypothesis"] == "Feature A will increase conversion by 10%"
+        )
         assert response.json()["experiment_type"] == "a_b"
         assert response.json()["status"] == "draft"
         assert len(response.json()["variants"]) == 2

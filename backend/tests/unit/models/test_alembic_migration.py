@@ -1,13 +1,14 @@
-import pytest
-import os
 import logging
+import os
 from pathlib import Path
-from sqlalchemy import create_engine, text, MetaData, Table, inspect
-from sqlalchemy.orm import sessionmaker
-from alembic.config import Config
+
+import pytest
 from alembic import command
-from alembic.script import ScriptDirectory
+from alembic.config import Config
 from alembic.runtime.migration import MigrationContext
+from alembic.script import ScriptDirectory
+from sqlalchemy import MetaData, Table, create_engine, inspect, text
+from sqlalchemy.orm import sessionmaker
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -93,12 +94,15 @@ def clean_test_database(test_db_url):
     # Drop and recreate test database
     try:
         # Force close all connections to the test database
-        conn.execute(text("""
+        conn.execute(
+            text("""
             SELECT pg_terminate_backend(pg_stat_activity.pid)
             FROM pg_stat_activity
             WHERE pg_stat_activity.datname = :db_name
             AND pid <> pg_backend_pid()
-        """), {"db_name": db_name})
+        """),
+            {"db_name": db_name},
+        )
         conn.execute(text("COMMIT"))
 
         # Now drop and recreate the database
@@ -125,12 +129,15 @@ def clean_test_database(test_db_url):
             conn.execute(text("COMMIT"))
 
             # Force close all connections again before final cleanup
-            conn.execute(text("""
+            conn.execute(
+                text("""
                 SELECT pg_terminate_backend(pg_stat_activity.pid)
                 FROM pg_stat_activity
                 WHERE pg_stat_activity.datname = :db_name
                 AND pid <> pg_backend_pid()
-            """), {"db_name": db_name})
+            """),
+                {"db_name": db_name},
+            )
             conn.execute(text("COMMIT"))
 
             conn.execute(text(f"DROP DATABASE IF EXISTS {db_name}"))
@@ -143,7 +150,9 @@ def clean_test_database(test_db_url):
         engine.dispose()
 
 
-@pytest.mark.skip(reason="Alembic migration tests need to be fixed for database connection issues")
+@pytest.mark.skip(
+    reason="Alembic migration tests need to be fixed for database connection issues"
+)
 def test_migrations_apply_cleanly(alembic_config, clean_test_database):
     """Test that all migrations apply cleanly from scratch."""
     # Skip test if there are no migrations yet
@@ -166,17 +175,19 @@ def test_migrations_apply_cleanly(alembic_config, clean_test_database):
             context = MigrationContext.configure(conn)
             current_rev = context.get_current_revision()
 
-        assert (
-            current_rev == head_revision
-        ), f"Expected head revision {head_revision}, got {current_rev}"
+        assert current_rev == head_revision, (
+            f"Expected head revision {head_revision}, got {current_rev}"
+        )
 
         logger.info(f"Successfully applied migrations to revision {head_revision}")
     except Exception as e:
         logger.error(f"Error applying migrations: {e}")
-        pytest.skip(f"Migration test failed: {str(e)}")
+        pytest.skip(f"Migration test failed: {e!s}")
 
 
-@pytest.mark.skip(reason="Alembic migration tests need to be fixed for database connection issues")
+@pytest.mark.skip(
+    reason="Alembic migration tests need to be fixed for database connection issues"
+)
 def test_migrations_downgrade(alembic_config, clean_test_database):
     """Test that migrations can be downgraded successfully."""
     try:
@@ -216,18 +227,20 @@ def test_migrations_downgrade(alembic_config, clean_test_database):
                 context = MigrationContext.configure(conn)
                 current_rev = context.get_current_revision()
 
-            assert (
-                current_rev == previous.revision
-            ), f"Downgrade failed: expected {previous.revision}, got {current_rev}"
+            assert current_rev == previous.revision, (
+                f"Downgrade failed: expected {previous.revision}, got {current_rev}"
+            )
 
             # Upgrade back to current revision for next test
             command.upgrade(alembic_config, current.revision)
     except Exception as e:
         logger.error(f"Error testing migration downgrade: {e}")
-        pytest.skip(f"Migration downgrade test failed: {str(e)}")
+        pytest.skip(f"Migration downgrade test failed: {e!s}")
 
 
-@pytest.mark.skip(reason="Alembic migration tests need to be fixed for database connection issues")
+@pytest.mark.skip(
+    reason="Alembic migration tests need to be fixed for database connection issues"
+)
 def test_schema_validation(alembic_config, clean_test_database):
     """Test that the schema after migrations matches expected configuration."""
     try:
@@ -327,15 +340,17 @@ def test_schema_validation(alembic_config, clean_test_database):
 
             # Check required columns
             for required_col in table_def["required_columns"]:
-                assert (
-                    required_col in column_names
-                ), f"Required column {required_col} missing from {schema_name}.{table_name}"
+                assert required_col in column_names, (
+                    f"Required column {required_col} missing from {schema_name}.{table_name}"
+                )
     except Exception as e:
         logger.error(f"Error in schema validation: {e}")
-        pytest.skip(f"Schema validation test failed: {str(e)}")
+        pytest.skip(f"Schema validation test failed: {e!s}")
 
 
-@pytest.mark.skip(reason="Alembic migration tests need to be fixed for database connection issues")
+@pytest.mark.skip(
+    reason="Alembic migration tests need to be fixed for database connection issues"
+)
 def test_verify_migrations_idempotent(alembic_config, clean_test_database):
     """Test that running migrations twice doesn't cause errors."""
     try:
@@ -355,13 +370,15 @@ def test_verify_migrations_idempotent(alembic_config, clean_test_database):
         try:
             command.upgrade(alembic_config, head_revision)
         except Exception as e:
-            pytest.fail(f"Migrations are not idempotent: {str(e)}")
+            pytest.fail(f"Migrations are not idempotent: {e!s}")
     except Exception as e:
         logger.error(f"Error testing migration idempotence: {e}")
-        pytest.skip(f"Migration idempotence test failed: {str(e)}")
+        pytest.skip(f"Migration idempotence test failed: {e!s}")
 
 
-@pytest.mark.skip(reason="Alembic migration tests need to be fixed for database connection issues")
+@pytest.mark.skip(
+    reason="Alembic migration tests need to be fixed for database connection issues"
+)
 def test_migration_data_preservation(alembic_config, clean_test_database):
     """Test that data is preserved during migrations."""
     try:
@@ -520,4 +537,4 @@ def test_migration_data_preservation(alembic_config, clean_test_database):
             session.close()
     except Exception as e:
         logger.error(f"Error testing data preservation: {e}")
-        pytest.skip(f"Data preservation test failed: {str(e)}")
+        pytest.skip(f"Data preservation test failed: {e!s}")

@@ -97,12 +97,8 @@ def service(experiment):
     """AssignmentService on a MagicMock session that finds ``experiment`` and
     no sticky assignment; holdout and MEG are stubbed as "eligible"."""
     db = MagicMock()
-    db.query.return_value.options.return_value.filter.return_value.first.return_value = (
-        experiment
-    )
-    db.query.return_value.filter.return_value.order_by.return_value.first.return_value = (
-        None
-    )
+    db.query.return_value.options.return_value.filter.return_value.first.return_value = experiment
+    db.query.return_value.filter.return_value.order_by.return_value.first.return_value = None
     svc = AssignmentService(db)
     svc.event_service = MagicMock()
     svc.global_holdout_service = MagicMock()
@@ -158,11 +154,14 @@ class TestHoldout:
 
     def test_user_outside_holdout_is_assigned(self, service, experiment):
         treatment = experiment.variants[1]
-        with patch.object(
-            service,
-            "get_assignment",
-            return_value=_assigned_dict(experiment, treatment),
-        ), patch.object(service, "_hash_user_to_variant", return_value=treatment.id):
+        with (
+            patch.object(
+                service,
+                "get_assignment",
+                return_value=_assigned_dict(experiment, treatment),
+            ),
+            patch.object(service, "_hash_user_to_variant", return_value=treatment.id),
+        ):
             result = service.assign_user("user-1", experiment.id)
 
         assert result["assigned"] is True
@@ -178,9 +177,7 @@ class TestMutualExclusion:
         self, service, experiment
     ):
         experiment.mutual_exclusion_group_id = uuid4()
-        service.mutual_exclusion_service.is_user_eligible_for_experiment.return_value = (
-            False
-        )
+        service.mutual_exclusion_service.is_user_eligible_for_experiment.return_value = False
 
         result = service.assign_user("user-1", experiment.id)
 
@@ -193,11 +190,14 @@ class TestMutualExclusion:
 
     def test_experiment_without_group_skips_the_check(self, service, experiment):
         treatment = experiment.variants[1]
-        with patch.object(
-            service,
-            "get_assignment",
-            return_value=_assigned_dict(experiment, treatment),
-        ), patch.object(service, "_hash_user_to_variant", return_value=treatment.id):
+        with (
+            patch.object(
+                service,
+                "get_assignment",
+                return_value=_assigned_dict(experiment, treatment),
+            ),
+            patch.object(service, "_hash_user_to_variant", return_value=treatment.id),
+        ):
             result = service.assign_user("user-1", experiment.id)
 
         assert result["assigned"] is True
@@ -206,9 +206,7 @@ class TestMutualExclusion:
     def test_holdout_wins_over_mutual_exclusion(self, service, experiment):
         experiment.mutual_exclusion_group_id = uuid4()
         service.global_holdout_service.is_user_in_holdout.return_value = (True, 5, 1)
-        service.mutual_exclusion_service.is_user_eligible_for_experiment.return_value = (
-            False
-        )
+        service.mutual_exclusion_service.is_user_eligible_for_experiment.return_value = False
 
         result = service.assign_user("user-1", experiment.id)
 
@@ -238,11 +236,14 @@ class TestTargeting:
     ):
         experiment.targeting_rules = json.dumps(NATIVE_US_ONLY)
         treatment = experiment.variants[1]
-        with patch.object(
-            service,
-            "get_assignment",
-            return_value=_assigned_dict(experiment, treatment),
-        ), patch.object(service, "_hash_user_to_variant", return_value=treatment.id):
+        with (
+            patch.object(
+                service,
+                "get_assignment",
+                return_value=_assigned_dict(experiment, treatment),
+            ),
+            patch.object(service, "_hash_user_to_variant", return_value=treatment.id),
+        ):
             result = service.assign_user(
                 "user-1", experiment.id, context={"country": "US"}
             )
@@ -260,11 +261,14 @@ class TestTargeting:
     def test_top_level_context_answers_user_dot_alias(self, service, experiment):
         experiment.targeting_rules = NATIVE_USER_DOT_COUNTRY
         treatment = experiment.variants[1]
-        with patch.object(
-            service,
-            "get_assignment",
-            return_value=_assigned_dict(experiment, treatment),
-        ), patch.object(service, "_hash_user_to_variant", return_value=treatment.id):
+        with (
+            patch.object(
+                service,
+                "get_assignment",
+                return_value=_assigned_dict(experiment, treatment),
+            ),
+            patch.object(service, "_hash_user_to_variant", return_value=treatment.id),
+        ):
             result = service.assign_user(
                 "user-1", experiment.id, context={"country": "US"}
             )
@@ -280,11 +284,14 @@ class TestTargeting:
         )
         _assert_not_assigned(blocked, experiment, REASON_TARGETING)
 
-        with patch.object(
-            service,
-            "get_assignment",
-            return_value=_assigned_dict(experiment, treatment),
-        ), patch.object(service, "_hash_user_to_variant", return_value=treatment.id):
+        with (
+            patch.object(
+                service,
+                "get_assignment",
+                return_value=_assigned_dict(experiment, treatment),
+            ),
+            patch.object(service, "_hash_user_to_variant", return_value=treatment.id),
+        ):
             allowed = service.assign_user(
                 "user-1", experiment.id, context={"country": "US"}
             )
@@ -314,11 +321,14 @@ class TestTargeting:
     ):
         experiment.targeting_rules = rules
         treatment = experiment.variants[1]
-        with patch.object(
-            service,
-            "get_assignment",
-            return_value=_assigned_dict(experiment, treatment),
-        ), patch.object(service, "_hash_user_to_variant", return_value=treatment.id):
+        with (
+            patch.object(
+                service,
+                "get_assignment",
+                return_value=_assigned_dict(experiment, treatment),
+            ),
+            patch.object(service, "_hash_user_to_variant", return_value=treatment.id),
+        ):
             result = service.assign_user("user-1", experiment.id)
 
         assert result["assigned"] is True, rules
@@ -326,9 +336,7 @@ class TestTargeting:
     def test_mutual_exclusion_wins_over_targeting(self, service, experiment):
         experiment.mutual_exclusion_group_id = uuid4()
         experiment.targeting_rules = NATIVE_US_ONLY
-        service.mutual_exclusion_service.is_user_eligible_for_experiment.return_value = (
-            False
-        )
+        service.mutual_exclusion_service.is_user_eligible_for_experiment.return_value = False
 
         result = service.assign_user("user-1", experiment.id, context={"country": "DE"})
 
@@ -340,15 +348,11 @@ class TestStickyAssignments:
         treatment = experiment.variants[1]
         existing = MagicMock(spec=Assignment)
         existing.variant_id = treatment.id
-        service.db.query.return_value.filter.return_value.order_by.return_value.first.return_value = (
-            existing
-        )
+        service.db.query.return_value.filter.return_value.order_by.return_value.first.return_value = existing
         # The user would now fail all three checks ...
         service.global_holdout_service.is_user_in_holdout.return_value = (True, 20, 2)
         experiment.mutual_exclusion_group_id = uuid4()
-        service.mutual_exclusion_service.is_user_eligible_for_experiment.return_value = (
-            False
-        )
+        service.mutual_exclusion_service.is_user_eligible_for_experiment.return_value = False
         experiment.targeting_rules = NATIVE_US_ONLY
 
         with patch.object(
@@ -378,9 +382,7 @@ class TestCheckEligibility:
     def test_order_is_holdout_then_group_then_targeting(self, service, experiment):
         experiment.mutual_exclusion_group_id = uuid4()
         experiment.targeting_rules = NATIVE_US_ONLY
-        service.mutual_exclusion_service.is_user_eligible_for_experiment.return_value = (
-            False
-        )
+        service.mutual_exclusion_service.is_user_eligible_for_experiment.return_value = False
         ctx = {"country": "DE"}
 
         service.global_holdout_service.is_user_in_holdout.return_value = (True, 20, 0)
@@ -395,9 +397,7 @@ class TestCheckEligibility:
             == REASON_MUTUAL_EXCLUSION
         )
 
-        service.mutual_exclusion_service.is_user_eligible_for_experiment.return_value = (
-            True
-        )
+        service.mutual_exclusion_service.is_user_eligible_for_experiment.return_value = True
         assert (
             service.check_eligibility("user-1", experiment, ctx)["reason"]
             == REASON_TARGETING

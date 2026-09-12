@@ -9,15 +9,15 @@ This module provides common functionality used across all Lambda functions inclu
 """
 
 from .consistent_hash import ConsistentHasher
-from .utils import get_logger, validate_event, format_response
 from .models import Assignment, ExperimentConfig, FeatureFlagConfig
+from .utils import format_response, get_logger, validate_event
 
 __all__ = [
-    "ConsistentHasher",
-    "get_logger",
-    "validate_event",
-    "format_response",
     "Assignment",
+    "ConsistentHasher",
     "ExperimentConfig",
     "FeatureFlagConfig",
+    "format_response",
+    "get_logger",
+    "validate_event",
 ]

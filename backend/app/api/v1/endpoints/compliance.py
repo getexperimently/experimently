@@ -9,6 +9,7 @@ Endpoints:
   GET /reports/{standard} — On-demand compliance report (ADMIN/ANALYST)
   GET /export             — Full audit export as JSON or CSV (ADMIN only)
 """
+
 import logging
 from dataclasses import asdict as dataclasses_asdict
 from datetime import datetime
@@ -115,6 +116,7 @@ def list_audit_events(
 # Report generation
 # ---------------------------------------------------------------------------
 
+
 @router.get(
     "/reports/{standard}",
     summary="Generate compliance report",
@@ -154,7 +156,9 @@ def generate_compliance_report(
     """
     # Permission check
     is_superuser = hasattr(current_user, "is_superuser") and current_user.is_superuser
-    has_allowed_role = hasattr(current_user, "role") and current_user.role in _ALLOWED_ROLES
+    has_allowed_role = (
+        hasattr(current_user, "role") and current_user.role in _ALLOWED_ROLES
+    )
     if not is_superuser and not has_allowed_role:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -181,6 +185,7 @@ def generate_compliance_report(
 # ---------------------------------------------------------------------------
 # Audit export
 # ---------------------------------------------------------------------------
+
 
 @router.get(
     "/export",

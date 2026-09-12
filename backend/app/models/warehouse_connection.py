@@ -6,15 +6,14 @@ Credentials are NEVER stored in plaintext — the `encrypted_credentials` column
 holds a base64-encoded (or KMS-encrypted in production) JSON blob.
 """
 
-import uuid as _uuid_mod
-
-from sqlalchemy import Column, String, Boolean, Text, ForeignKey, Index
+from sqlalchemy import Boolean, Column, ForeignKey, Index, String, Text
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import relationship
 from sqlalchemy.ext.declarative import declared_attr
+from sqlalchemy.orm import relationship
+
+from backend.app.core.database_config import get_schema_name
 
 from .base import Base, BaseModel
-from backend.app.core.database_config import get_schema_name
 
 
 class WarehouseConnection(Base, BaseModel):
@@ -30,7 +29,9 @@ class WarehouseConnection(Base, BaseModel):
     __tablename__ = "warehouse_connections"
 
     name = Column(String(200), nullable=False)
-    warehouse_type = Column(String(50), nullable=False)  # snowflake | bigquery | redshift
+    warehouse_type = Column(
+        String(50), nullable=False
+    )  # snowflake | bigquery | redshift
     encrypted_credentials = Column(Text, nullable=False)
     is_active = Column(Boolean, nullable=False, default=True)
     owner_id = Column(

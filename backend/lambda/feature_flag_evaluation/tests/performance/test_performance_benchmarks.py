@@ -9,13 +9,12 @@ Tests performance characteristics and validates against EP-010 requirements:
 Following TDD (Test-Driven Development) - Performance validation phase.
 """
 
-import pytest
+import statistics
 import sys
 import time
-import statistics
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from unittest.mock import Mock, patch
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Add parent directories to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -34,7 +33,7 @@ class TestPerformanceBenchmarks:
             flag_id="perf_flag_123",
             key="perf_test_flag",
             enabled=True,
-            rollout_percentage=100.0
+            rollout_percentage=100.0,
         )
 
         self.targeted_flag = FeatureFlagConfig(
@@ -44,8 +43,8 @@ class TestPerformanceBenchmarks:
             rollout_percentage=100.0,
             targeting_rules=[
                 {"attribute": "country", "operator": "equals", "value": "US"},
-                {"attribute": "age", "operator": "greater_than", "value": 18}
-            ]
+                {"attribute": "age", "operator": "greater_than", "value": 18},
+            ],
         )
 
         self.variant_flag = FeatureFlagConfig(
@@ -56,8 +55,8 @@ class TestPerformanceBenchmarks:
             default_variant="control",
             variants=[
                 VariantConfig(key="control", allocation=0.5),
-                VariantConfig(key="treatment", allocation=0.5)
-            ]
+                VariantConfig(key="treatment", allocation=0.5),
+            ],
         )
 
     # ====================================================================
@@ -73,10 +72,7 @@ class TestPerformanceBenchmarks:
 
         for i in range(num_iterations):
             start = time.perf_counter()
-            evaluator.evaluate(
-                user_id=f"user_{i}",
-                flag_config=self.simple_flag
-            )
+            evaluator.evaluate(user_id=f"user_{i}", flag_config=self.simple_flag)
             end = time.perf_counter()
             latencies.append((end - start) * 1000)  # Convert to ms
 
@@ -86,7 +82,9 @@ class TestPerformanceBenchmarks:
         p99 = statistics.quantiles(latencies, n=100)[98]  # 99th percentile
         avg = statistics.mean(latencies)
 
-        print(f"\n[Simple Flag] Latencies (ms): avg={avg:.2f}, p50={p50:.2f}, p95={p95:.2f}, p99={p99:.2f}")
+        print(
+            f"\n[Simple Flag] Latencies (ms): avg={avg:.2f}, p50={p50:.2f}, p95={p95:.2f}, p99={p99:.2f}"
+        )
 
         # Validate against targets
         assert p99 < 40, f"P99 latency {p99:.2f}ms exceeds target 40ms"
@@ -104,9 +102,7 @@ class TestPerformanceBenchmarks:
         for i in range(num_iterations):
             start = time.perf_counter()
             evaluator.evaluate(
-                user_id=f"user_{i}",
-                flag_config=self.targeted_flag,
-                context=context
+                user_id=f"user_{i}", flag_config=self.targeted_flag, context=context
             )
             end = time.perf_counter()
             latencies.append((end - start) * 1000)
@@ -115,7 +111,9 @@ class TestPerformanceBenchmarks:
         p95 = statistics.quantiles(latencies, n=100)[94]
         avg = statistics.mean(latencies)
 
-        print(f"\n[Targeted Flag] Latencies (ms): avg={avg:.2f}, p95={p95:.2f}, p99={p99:.2f}")
+        print(
+            f"\n[Targeted Flag] Latencies (ms): avg={avg:.2f}, p95={p95:.2f}, p99={p99:.2f}"
+        )
 
         # Targeting adds minimal overhead
         assert p99 < 40, f"P99 latency {p99:.2f}ms exceeds target"
@@ -130,10 +128,7 @@ class TestPerformanceBenchmarks:
 
         for i in range(num_iterations):
             start = time.perf_counter()
-            evaluator.evaluate(
-                user_id=f"user_{i}",
-                flag_config=self.variant_flag
-            )
+            evaluator.evaluate(user_id=f"user_{i}", flag_config=self.variant_flag)
             end = time.perf_counter()
             latencies.append((end - start) * 1000)
 
@@ -159,17 +154,20 @@ class TestPerformanceBenchmarks:
         for i in range(num_evaluations):
             evaluator.evaluate(
                 user_id=f"user_{i % 100}",  # Reuse users for realism
-                flag_config=self.simple_flag
+                flag_config=self.simple_flag,
             )
 
         end = time.perf_counter()
         duration = end - start
         throughput = num_evaluations / duration
 
-        print(f"\n[Throughput] Single-threaded: {throughput:.0f} eval/s over {duration:.2f}s")
+        print(
+            f"\n[Throughput] Single-threaded: {throughput:.0f} eval/s over {duration:.2f}s"
+        )
 
-        assert throughput > 1000, \
+        assert throughput > 1000, (
             f"Throughput {throughput:.0f} eval/s below target 1000 eval/s"
+        )
 
     def test_throughput_concurrent(self):
         """Test concurrent evaluation throughput with multiple threads."""
@@ -182,8 +180,7 @@ class TestPerformanceBenchmarks:
             """Evaluate a batch of flags."""
             for i in range(evaluations_per_thread):
                 evaluator.evaluate(
-                    user_id=f"user_{thread_id}_{i}",
-                    flag_config=self.simple_flag
+                    user_id=f"user_{thread_id}_{i}", flag_config=self.simple_flag
                 )
 
         start = time.perf_counter()
@@ -201,27 +198,30 @@ class TestPerformanceBenchmarks:
         total_evaluations = num_threads * evaluations_per_thread
         throughput = total_evaluations / duration
 
-        print(f"\n[Throughput] Concurrent ({num_threads} threads): {throughput:.0f} eval/s over {duration:.2f}s")
+        print(
+            f"\n[Throughput] Concurrent ({num_threads} threads): {throughput:.0f} eval/s over {duration:.2f}s"
+        )
 
         # Concurrent should still meet target
-        assert throughput > 1000, \
+        assert throughput > 1000, (
             f"Concurrent throughput {throughput:.0f} eval/s below target"
+        )
 
     # ====================================================================
     # Cache Performance: > 95% hit rate
     # ====================================================================
 
-    @patch('evaluator.get_dynamodb_resource')
+    @patch("evaluator.get_dynamodb_resource")
     def test_cache_hit_rate_with_repeated_flags(self, mock_get_resource):
         """Test cache achieves > 95% hit rate with realistic usage pattern."""
         # Mock DynamoDB
         mock_table = Mock()
         mock_table.get_item.return_value = {
-            'Item': {
-                'flag_id': 'cached_flag',
-                'key': 'cached_feature',
-                'enabled': True,
-                'rollout_percentage': 100.0
+            "Item": {
+                "flag_id": "cached_flag",
+                "key": "cached_feature",
+                "enabled": True,
+                "rollout_percentage": 100.0,
             }
         }
         mock_resource = Mock()
@@ -245,16 +245,20 @@ class TestPerformanceBenchmarks:
 
         actual_hit_rate = evaluator.get_cache_hit_rate()
 
-        print(f"\n[Cache] Hit rate: {actual_hit_rate:.2%} (expected: {expected_hit_rate:.2%})")
+        print(
+            f"\n[Cache] Hit rate: {actual_hit_rate:.2%} (expected: {expected_hit_rate:.2%})"
+        )
 
-        assert actual_hit_rate >= 0.95, \
+        assert actual_hit_rate >= 0.95, (
             f"Cache hit rate {actual_hit_rate:.2%} below target 95%"
+        )
 
         # DynamoDB should only be called once per unique flag
-        assert mock_table.get_item.call_count == num_flags, \
+        assert mock_table.get_item.call_count == num_flags, (
             f"Expected {num_flags} DynamoDB calls, got {mock_table.get_item.call_count}"
+        )
 
-    @patch('evaluator.get_dynamodb_resource')
+    @patch("evaluator.get_dynamodb_resource")
     def test_cache_reduces_latency(self, mock_get_resource):
         """Test that caching significantly reduces latency."""
         # Mock DynamoDB with artificial delay
@@ -263,11 +267,11 @@ class TestPerformanceBenchmarks:
         def slow_get_item(**kwargs):
             time.sleep(0.005)  # 5ms DynamoDB delay
             return {
-                'Item': {
-                    'flag_id': 'slow_flag',
-                    'key': 'slow_feature',
-                    'enabled': True,
-                    'rollout_percentage': 100.0
+                "Item": {
+                    "flag_id": "slow_flag",
+                    "key": "slow_feature",
+                    "enabled": True,
+                    "rollout_percentage": 100.0,
                 }
             }
 
@@ -288,15 +292,19 @@ class TestPerformanceBenchmarks:
         evaluator.get_flag_config_cached("slow_feature")
         second_call_time = (time.perf_counter() - start) * 1000
 
-        print(f"\n[Cache Latency] First call: {first_call_time:.2f}ms, Cached call: {second_call_time:.2f}ms")
+        print(
+            f"\n[Cache Latency] First call: {first_call_time:.2f}ms, Cached call: {second_call_time:.2f}ms"
+        )
 
         # Cached call should be at least 2x faster
-        assert second_call_time < first_call_time / 2, \
+        assert second_call_time < first_call_time / 2, (
             "Cache should significantly reduce latency"
+        )
 
         # Cached call should be very fast
-        assert second_call_time < 1.0, \
+        assert second_call_time < 1.0, (
             f"Cached call {second_call_time:.2f}ms should be < 1ms"
+        )
 
     # ====================================================================
     # Batch Evaluation Performance
@@ -312,24 +320,25 @@ class TestPerformanceBenchmarks:
         # Measure batch evaluation time
         start = time.perf_counter()
         for user_id in users:
-            evaluator.evaluate(
-                user_id=user_id,
-                flag_config=self.simple_flag
-            )
+            evaluator.evaluate(user_id=user_id, flag_config=self.simple_flag)
         end = time.perf_counter()
 
         duration_ms = (end - start) * 1000
         avg_per_user_ms = duration_ms / num_users
 
-        print(f"\n[Batch] {num_users} users in {duration_ms:.2f}ms (avg {avg_per_user_ms:.3f}ms/user)")
+        print(
+            f"\n[Batch] {num_users} users in {duration_ms:.2f}ms (avg {avg_per_user_ms:.3f}ms/user)"
+        )
 
         # Average should be well below P99 target
-        assert avg_per_user_ms < 5.0, \
+        assert avg_per_user_ms < 5.0, (
             f"Average per-user latency {avg_per_user_ms:.3f}ms should be < 5ms"
+        )
 
         # Total batch should be fast
-        assert duration_ms < 5000, \
+        assert duration_ms < 5000, (
             f"Batch of {num_users} users took {duration_ms:.2f}ms, should be < 5s"
+        )
 
     # ====================================================================
     # Memory Efficiency
@@ -344,20 +353,20 @@ class TestPerformanceBenchmarks:
 
         start = time.perf_counter()
         for i in range(num_evaluations):
-            evaluator.evaluate(
-                user_id=f"user_{i}",
-                flag_config=self.simple_flag
-            )
+            evaluator.evaluate(user_id=f"user_{i}", flag_config=self.simple_flag)
         end = time.perf_counter()
 
         duration = end - start
         throughput = num_evaluations / duration
 
-        print(f"\n[Memory Test] {num_evaluations} evaluations in {duration:.2f}s ({throughput:.0f} eval/s)")
+        print(
+            f"\n[Memory Test] {num_evaluations} evaluations in {duration:.2f}s ({throughput:.0f} eval/s)"
+        )
 
         # Should maintain high throughput even with many evaluations
-        assert throughput > 1000, \
+        assert throughput > 1000, (
             f"Throughput {throughput:.0f} eval/s dropped below target after many evaluations"
+        )
 
     # ====================================================================
     # Statistical Consistency
@@ -369,7 +378,7 @@ class TestPerformanceBenchmarks:
             flag_id="rollout_test",
             key="rollout_50",
             enabled=True,
-            rollout_percentage=50.0
+            rollout_percentage=50.0,
         )
 
         evaluator = FeatureFlagEvaluator()
@@ -381,8 +390,7 @@ class TestPerformanceBenchmarks:
         start = time.perf_counter()
         for i in range(num_users):
             result = evaluator.evaluate(
-                user_id=f"user_{i}",
-                flag_config=partial_rollout_flag
+                user_id=f"user_{i}", flag_config=partial_rollout_flag
             )
             if result["enabled"]:
                 enabled_count += 1
@@ -391,13 +399,17 @@ class TestPerformanceBenchmarks:
         enabled_rate = enabled_count / num_users
         duration = end - start
 
-        print(f"\n[Rollout Accuracy] {enabled_count}/{num_users} = {enabled_rate:.2%} (target: 50%) in {duration:.2f}s")
+        print(
+            f"\n[Rollout Accuracy] {enabled_count}/{num_users} = {enabled_rate:.2%} (target: 50%) in {duration:.2f}s"
+        )
 
         # Should be within ±1% of target (with large sample)
-        assert 0.49 <= enabled_rate <= 0.51, \
+        assert 0.49 <= enabled_rate <= 0.51, (
             f"Rollout rate {enabled_rate:.2%} outside ±1% of target 50%"
+        )
 
         # Should maintain good throughput
         throughput = num_users / duration
-        assert throughput > 1000, \
+        assert throughput > 1000, (
             f"Throughput {throughput:.0f} eval/s below target during accuracy test"
+        )

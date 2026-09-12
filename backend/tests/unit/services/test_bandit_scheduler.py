@@ -13,19 +13,18 @@ Coverage:
 import uuid
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
 
+from backend.app.core.bandit_scheduler import BanditScheduler
 from backend.app.services.bandit_service import (
+    UCB1,
     BanditService,
     EpsilonGreedy,
     ThompsonSampling,
-    UCB1,
     VariantStats,
 )
-from backend.app.core.bandit_scheduler import BanditScheduler
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -487,9 +486,9 @@ class TestBanditSchedulerIntegration:
         # Thompson Sampling and UCB1 produce near-equal weights with no data
         for algo in ("thompson_sampling", "ucb1"):
             weights = BanditService.compute_weights(algo, variant_data)
-            assert (
-                abs(weights["a"] - weights["b"]) < 0.3
-            ), f"{algo} weights not near equal: {weights}"
+            assert abs(weights["a"] - weights["b"]) < 0.3, (
+                f"{algo} weights not near equal: {weights}"
+            )
 
         # EpsilonGreedy still sums to 1.0 even if not equal
         eg_weights = BanditService.compute_weights("epsilon_greedy", variant_data)
@@ -505,9 +504,9 @@ class TestBanditSchedulerIntegration:
         }
         for algo in ("thompson_sampling", "ucb1", "epsilon_greedy"):
             weights = BanditService.compute_weights(algo, variant_data)
-            assert weights["only"] == pytest.approx(
-                1.0
-            ), f"{algo}: expected 1.0, got {weights}"
+            assert weights["only"] == pytest.approx(1.0), (
+                f"{algo}: expected 1.0, got {weights}"
+            )
 
     # -----------------------------------------------------------------------
     # 18. get_recommendation strings
@@ -570,17 +569,19 @@ class TestBanditSchedulerStatsFallback:
         )
         vid1, vid2 = (str(v.id) for v in exp.variants)
 
-        with patch.object(
-            scheduler, "_stats_from_dynamodb", return_value=None
-        ), patch.object(
-            scheduler,
-            "_count_assignments_by_variant",
-            return_value={vid1: 100, vid2: 100},
-        ) as count_pulls, patch.object(
-            scheduler,
-            "_count_conversions_by_variant",
-            return_value={vid1: 40, vid2: 5},
-        ) as count_conv:
+        with (
+            patch.object(scheduler, "_stats_from_dynamodb", return_value=None),
+            patch.object(
+                scheduler,
+                "_count_assignments_by_variant",
+                return_value={vid1: 100, vid2: 100},
+            ) as count_pulls,
+            patch.object(
+                scheduler,
+                "_count_conversions_by_variant",
+                return_value={vid1: 40, vid2: 5},
+            ) as count_conv,
+        ):
             stats = scheduler.get_variant_stats_from_counters(
                 exp.id, [vid1, vid2], experiment=exp
             )
@@ -613,15 +614,19 @@ class TestBanditSchedulerStatsFallback:
         mock_counter_service = MagicMock()
         mock_counter_service.get_experiment_counters.return_value = empty
 
-        with patch(
-            "backend.app.services.dynamodb_counter_service.DynamoDBCounterService",
-            return_value=mock_counter_service,
-        ), patch.object(
-            scheduler,
-            "_count_assignments_by_variant",
-            return_value={vid1: 10, vid2: 10},
-        ), patch.object(
-            scheduler, "_count_conversions_by_variant", return_value={vid1: 3}
+        with (
+            patch(
+                "backend.app.services.dynamodb_counter_service.DynamoDBCounterService",
+                return_value=mock_counter_service,
+            ),
+            patch.object(
+                scheduler,
+                "_count_assignments_by_variant",
+                return_value={vid1: 10, vid2: 10},
+            ),
+            patch.object(
+                scheduler, "_count_conversions_by_variant", return_value={vid1: 3}
+            ),
         ):
             stats = scheduler.get_variant_stats_from_counters(
                 exp.id, [vid1, vid2], experiment=exp
@@ -638,12 +643,18 @@ class TestBanditSchedulerStatsFallback:
         )
         vid1, vid2 = (str(v.id) for v in exp.variants)
 
-        with patch.object(
-            scheduler, "_stats_from_dynamodb", return_value=None
-        ), patch.object(
-            scheduler, "_count_assignments_by_variant", return_value={vid1: 5, vid2: 5}
-        ), patch.object(
-            scheduler, "_count_conversions_by_variant", return_value={vid1: 9, vid2: 0}
+        with (
+            patch.object(scheduler, "_stats_from_dynamodb", return_value=None),
+            patch.object(
+                scheduler,
+                "_count_assignments_by_variant",
+                return_value={vid1: 5, vid2: 5},
+            ),
+            patch.object(
+                scheduler,
+                "_count_conversions_by_variant",
+                return_value={vid1: 9, vid2: 0},
+            ),
         ):
             stats = scheduler.get_variant_stats_from_counters(
                 exp.id, [vid1, vid2], experiment=exp
@@ -683,13 +694,17 @@ class TestBanditSchedulerStatsFallback:
         )
         vid1, vid2 = (str(v.id) for v in exp.variants)
 
-        with patch.object(
-            scheduler, "_stats_from_dynamodb", return_value=None
-        ), patch.object(
-            scheduler, "_count_assignments_by_variant", return_value={vid1: 4, vid2: 4}
-        ), patch.object(
-            scheduler, "_count_conversions_by_variant", return_value={vid2: 2}
-        ) as count_conv:
+        with (
+            patch.object(scheduler, "_stats_from_dynamodb", return_value=None),
+            patch.object(
+                scheduler,
+                "_count_assignments_by_variant",
+                return_value={vid1: 4, vid2: 4},
+            ),
+            patch.object(
+                scheduler, "_count_conversions_by_variant", return_value={vid2: 2}
+            ) as count_conv,
+        ):
             stats = scheduler.get_variant_stats_from_counters(
                 exp.id, [vid1, vid2], experiment=exp
             )
@@ -705,15 +720,19 @@ class TestBanditSchedulerStatsFallback:
         vid1, vid2 = (str(v.id) for v in exp.variants)
         db.query.return_value.filter.return_value.first.return_value = exp
 
-        with patch.object(
-            scheduler, "_stats_from_dynamodb", return_value=None
-        ), patch.object(
-            scheduler,
-            "_count_assignments_by_variant",
-            return_value={vid1: 20, vid2: 20},
-        ), patch.object(
-            scheduler, "_count_conversions_by_variant", return_value={vid1: 7, vid2: 1}
-        ) as count_conv:
+        with (
+            patch.object(scheduler, "_stats_from_dynamodb", return_value=None),
+            patch.object(
+                scheduler,
+                "_count_assignments_by_variant",
+                return_value={vid1: 20, vid2: 20},
+            ),
+            patch.object(
+                scheduler,
+                "_count_conversions_by_variant",
+                return_value={vid1: 7, vid2: 1},
+            ) as count_conv,
+        ):
             stats = scheduler.get_variant_stats_from_counters(exp.id, [vid1, vid2])
 
         count_conv.assert_called_once_with(exp.id, "signup")
@@ -735,12 +754,10 @@ class TestBanditSchedulerStatsFallback:
         }
         db.query.return_value.filter.return_value.first.return_value = state
 
-        with patch.object(
-            scheduler, "_stats_from_dynamodb", return_value=None
-        ), patch.object(
-            scheduler, "_count_assignments_by_variant", return_value={}
-        ), patch.object(
-            scheduler, "_count_conversions_by_variant", return_value={}
+        with (
+            patch.object(scheduler, "_stats_from_dynamodb", return_value=None),
+            patch.object(scheduler, "_count_assignments_by_variant", return_value={}),
+            patch.object(scheduler, "_count_conversions_by_variant", return_value={}),
         ):
             stats = scheduler.get_variant_stats_from_counters(
                 exp.id, [vid1, vid2], experiment=exp
@@ -765,12 +782,13 @@ class TestBanditSchedulerStatsFallback:
         }
         db.query.return_value.filter.return_value.first.return_value = state
 
-        with patch.object(
-            scheduler, "_stats_from_dynamodb", return_value=None
-        ), patch.object(
-            scheduler,
-            "_count_assignments_by_variant",
-            side_effect=RuntimeError("db down"),
+        with (
+            patch.object(scheduler, "_stats_from_dynamodb", return_value=None),
+            patch.object(
+                scheduler,
+                "_count_assignments_by_variant",
+                side_effect=RuntimeError("db down"),
+            ),
         ):
             stats = scheduler.get_variant_stats_from_counters(
                 exp.id, [vid1, vid2], experiment=exp
@@ -786,12 +804,10 @@ class TestBanditSchedulerStatsFallback:
         vid1, vid2 = (str(v.id) for v in exp.variants)
         db.query.return_value.filter.return_value.first.return_value = None
 
-        with patch.object(
-            scheduler, "_stats_from_dynamodb", return_value=None
-        ), patch.object(
-            scheduler, "_count_assignments_by_variant", return_value={}
-        ), patch.object(
-            scheduler, "_count_conversions_by_variant", return_value={}
+        with (
+            patch.object(scheduler, "_stats_from_dynamodb", return_value=None),
+            patch.object(scheduler, "_count_assignments_by_variant", return_value={}),
+            patch.object(scheduler, "_count_conversions_by_variant", return_value={}),
         ):
             stats = scheduler.get_variant_stats_from_counters(
                 exp.id, [vid1, vid2], experiment=exp
@@ -899,7 +915,13 @@ class TestBanditSchedulerRunner:
         runner._run_sync = flaky_run
 
         await runner.start()
-        await asyncio.sleep(0.15)
+        # Each tick takes an advisory lock in Postgres, so the second (good)
+        # pass lands anywhere between a few ms and a second depending on load.
+        # Poll instead of sleeping a fixed slice: a fixed sleep made this test
+        # fail roughly half the time on a busy machine.
+        deadline = asyncio.get_running_loop().time() + 5.0
+        while runner.run_count < 1 and asyncio.get_running_loop().time() < deadline:
+            await asyncio.sleep(0.01)
 
         assert runner.is_running is True
         assert runner.task is not None and not runner.task.done()
@@ -937,11 +959,12 @@ class TestBanditSchedulerRunner:
         from backend.app.core.bandit_scheduler import BanditSchedulerRunner
 
         session = MagicMock()
-        with patch(
-            "backend.app.db.session.SessionLocal", return_value=session
-        ), patch.object(
-            BanditScheduler, "run_once", return_value=self.RESULT
-        ) as run_once:
+        with (
+            patch("backend.app.db.session.SessionLocal", return_value=session),
+            patch.object(
+                BanditScheduler, "run_once", return_value=self.RESULT
+            ) as run_once,
+        ):
             result = BanditSchedulerRunner._run_sync()
 
         assert result == self.RESULT

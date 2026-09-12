@@ -5,37 +5,49 @@ These fixtures extend the root conftest.py fixtures with
 integration-specific helpers: additional user roles, factory
 functions for creating test data, and role-specific API clients.
 """
+
 import os
-import pytest
 import uuid
 from typing import Callable, Optional
+
+import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import NullPool
 
-from backend.app.main import app
 from backend.app.api import deps
-from backend.app.db.session import get_db as _session_get_db
 from backend.app.api.deps import CacheControl
-from backend.app.models.user import User, UserRole
+from backend.app.db.session import get_db as _session_get_db
+from backend.app.main import app
+from backend.app.models.assignment import Assignment
+from backend.app.models.event import Event
 from backend.app.models.experiment import (
-    Experiment, ExperimentStatus, ExperimentType, Variant, Metric, MetricType
+    Experiment,
+    ExperimentStatus,
+    ExperimentType,
+    Metric,
+    MetricType,
+    Variant,
 )
 from backend.app.models.feature_flag import FeatureFlag, FeatureFlagStatus
-from backend.app.models.event import Event
-from backend.app.models.assignment import Assignment
+from backend.app.models.user import User, UserRole
 
-DEFAULT_TEST_DB_URL = "postgresql://postgres:postgres@localhost:5432/experimentation_test"
+DEFAULT_TEST_DB_URL = (
+    "postgresql://postgres:postgres@localhost:5432/experimentation_test"
+)
 
 HASHED_PASSWORD = "$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW"
-DEFAULT_TEST_DB_URL = "postgresql://postgres:postgres@localhost:5432/experimentation_test"
+DEFAULT_TEST_DB_URL = (
+    "postgresql://postgres:postgres@localhost:5432/experimentation_test"
+)
 
 
 # ---------------------------------------------------------------------------
 # User fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def admin_user(db_session: Session) -> User:
@@ -122,6 +134,7 @@ def viewer_user(db_session: Session) -> User:
 # Factory fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def make_experiment(db_session: Session, admin_user: User) -> Callable:
     """
@@ -130,6 +143,7 @@ def make_experiment(db_session: Session, admin_user: User) -> Callable:
     Returns a callable that creates and commits an Experiment to db_session.
     Default fields can be overridden via kwargs.
     """
+
     def _make_experiment(**kwargs) -> Experiment:
         defaults = {
             "name": "Test Experiment",
@@ -155,6 +169,7 @@ def make_variant(db_session: Session) -> Callable:
 
     Returns a callable that creates and commits a Variant to db_session.
     """
+
     def _make_variant(
         experiment: Experiment,
         name: str = "Control",
@@ -184,6 +199,7 @@ def make_metric(db_session: Session) -> Callable:
 
     Returns a callable that creates and commits a Metric to db_session.
     """
+
     def _make_metric(
         experiment: Experiment,
         name: str = "Conversion",
@@ -214,6 +230,7 @@ def make_feature_flag(db_session: Session, admin_user: User) -> Callable:
     Returns a callable that creates and commits a FeatureFlag to db_session.
     Default fields can be overridden via kwargs.
     """
+
     def _make_feature_flag(**kwargs) -> FeatureFlag:
         defaults = {
             "key": f"flag-{uuid.uuid4().hex[:8]}",
@@ -239,6 +256,7 @@ def make_event(db_session: Session) -> Callable:
 
     Returns a callable that creates and commits an Event to db_session.
     """
+
     def _make_event(**kwargs) -> Event:
         defaults = {
             "event_type": "track",
@@ -250,6 +268,7 @@ def make_event(db_session: Session) -> Callable:
         # created_at is required by the Event model (non-nullable string column)
         if "created_at" not in defaults:
             from datetime import datetime, timezone
+
             defaults["created_at"] = datetime.now(timezone.utc).isoformat()
         event = Event(**defaults)
         db_session.add(event)
@@ -267,6 +286,7 @@ def make_assignment(db_session: Session) -> Callable:
 
     Returns a callable that creates and commits an Assignment to db_session.
     """
+
     def _make_assignment(
         experiment: Experiment,
         variant: Variant,
@@ -290,6 +310,7 @@ def make_assignment(db_session: Session) -> Callable:
 # ---------------------------------------------------------------------------
 # Helper: make_client_for_user
 # ---------------------------------------------------------------------------
+
 
 def make_client_for_user(db_session: Session, user: User) -> TestClient:
     """Create a TestClient authenticated as the given user.
@@ -339,10 +360,16 @@ def make_client_for_user(db_session: Session, user: User) -> TestClient:
         return user
 
     app.dependency_overrides[deps.get_db] = override_get_db
-    app.dependency_overrides[_session_get_db] = override_get_db  # compliance endpoint uses session.get_db directly
+    app.dependency_overrides[_session_get_db] = (
+        override_get_db  # compliance endpoint uses session.get_db directly
+    )
     app.dependency_overrides[deps.get_current_user] = override_get_current_user
-    app.dependency_overrides[deps.get_current_active_user] = override_get_current_active_user
-    app.dependency_overrides[deps.get_current_superuser] = override_get_current_superuser
+    app.dependency_overrides[deps.get_current_active_user] = (
+        override_get_current_active_user
+    )
+    app.dependency_overrides[deps.get_current_superuser] = (
+        override_get_current_superuser
+    )
     app.dependency_overrides[deps.get_cache_control] = override_get_cache_control
     app.dependency_overrides[deps.get_api_key] = override_get_api_key
 
@@ -353,6 +380,7 @@ def make_client_for_user(db_session: Session, user: User) -> TestClient:
 # API client fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def admin_client(db_session: Session, admin_user: User, monkeypatch) -> TestClient:
     """Create a TestClient authenticated as the admin_user."""
@@ -362,7 +390,9 @@ def admin_client(db_session: Session, admin_user: User, monkeypatch) -> TestClie
 
 
 @pytest.fixture
-def developer_client(db_session: Session, developer_user: User, monkeypatch) -> TestClient:
+def developer_client(
+    db_session: Session, developer_user: User, monkeypatch
+) -> TestClient:
     """Create a TestClient authenticated as the developer_user."""
     test_client = make_client_for_user(db_session, developer_user)
     yield test_client

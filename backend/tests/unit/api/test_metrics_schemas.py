@@ -4,23 +4,24 @@ Metrics Schema Tests.
 This module contains tests for the Pydantic v2 metrics schema validation.
 """
 
-import pytest
 import uuid
 from datetime import datetime, timezone
-from typing import Dict, Any
+from typing import Any, Dict
+
+import pytest
 from pydantic import ValidationError
 
+from backend.app.models.metrics.metric import AggregationPeriod, MetricType
 from backend.app.schemas.metrics import (
-    RawMetricCreate,
-    RawMetricResponse,
     AggregatedMetricBase,
     AggregatedMetricResponse,
     ErrorLogCreate,
     ErrorLogResponse,
     MetricsFilterParams,
-    MetricsSummary
+    MetricsSummary,
+    RawMetricCreate,
+    RawMetricResponse,
 )
-from backend.app.models.metrics.metric import MetricType, AggregationPeriod
 
 
 class TestMetricsSchemaValidation:
@@ -34,7 +35,7 @@ class TestMetricsSchemaValidation:
             "user_id": "test-user-123",
             "value": 1.0,
             "count": 1,
-            "metadata": {"browser": "Chrome", "device": "mobile"}
+            "metadata": {"browser": "Chrome", "device": "mobile"},
         }
 
         # This should not raise an exception
@@ -61,7 +62,7 @@ class TestMetricsSchemaValidation:
             "timestamp": current_time,
             "created_at": current_time,
             "updated_at": current_time,
-            "metadata": {"browser": "Chrome", "device": "mobile"}
+            "metadata": {"browser": "Chrome", "device": "mobile"},
         }
 
         # This should not raise an exception
@@ -87,7 +88,7 @@ class TestMetricsSchemaValidation:
             "min_value": 0.5,
             "max_value": 10.0,
             "distinct_users": 50,
-            "metadata": {"region": "US", "version": "1.0.0"}
+            "metadata": {"region": "US", "version": "1.0.0"},
         }
 
         # This should not raise an exception
@@ -113,7 +114,7 @@ class TestMetricsSchemaValidation:
             "message": "Failed to evaluate targeting rule",
             "stack_trace": "Traceback...",
             "request_data": {"context": {"country": "US"}},
-            "metadata": {"severity": "high", "component": "targeting"}
+            "metadata": {"severity": "high", "component": "targeting"},
         }
 
         # This should not raise an exception
@@ -136,7 +137,7 @@ class TestMetricsSchemaValidation:
             "targeting_rule_id": "rule-123",
             "start_date": current_time,
             "end_date": current_time,
-            "period": AggregationPeriod.HOUR
+            "period": AggregationPeriod.HOUR,
         }
 
         # This should not raise an exception
@@ -156,7 +157,7 @@ class TestMetricsSchemaValidation:
             "unique_users": 500,
             "avg_latency": 125.5,
             "rule_match_rate": 75.0,
-            "error_rate": 2.5
+            "error_rate": 2.5,
         }
 
         # This should not raise an exception
@@ -176,7 +177,7 @@ class TestMetricsSchemaValidation:
             "metric_type": "flag_evaluation",  # String instead of enum
             "feature_flag_id": str(uuid.uuid4()),
             "user_id": "test-user",
-            "value": 1.0
+            "value": 1.0,
         }
 
         # This should work because use_enum_values=True in model_config

@@ -4,21 +4,22 @@ Integration tests for ORM relationships between models.
 Tests that verify the SQLAlchemy relationships between Experiment, Variant,
 Metric, Assignment, and FeatureFlag models work correctly end-to-end.
 """
+
 import pytest
 
 from backend.app.models.experiment import (
     Experiment,
     ExperimentStatus,
     ExperimentType,
-    Variant,
     Metric,
     MetricType,
+    Variant,
 )
 
 # MetricType.CONVERSION string value — used when creating Metric objects directly
 METRIC_TYPE_CONVERSION = MetricType.CONVERSION
-from backend.app.models.feature_flag import FeatureFlag, FeatureFlagStatus
 from backend.app.models.assignment import Assignment
+from backend.app.models.feature_flag import FeatureFlag, FeatureFlagStatus
 from backend.app.models.user import User, UserRole
 
 
@@ -39,7 +40,9 @@ class TestExperimentRelationships:
         assert "Control" in names
         assert "Treatment" in names
 
-    def test_experiment_has_control_variant(self, db_session, make_experiment, make_variant):
+    def test_experiment_has_control_variant(
+        self, db_session, make_experiment, make_variant
+    ):
         """Can identify the control variant via the relationship."""
         exp = make_experiment(name="Control Check")
         make_variant(experiment=exp, name="Control", is_control=True)
@@ -49,7 +52,9 @@ class TestExperimentRelationships:
         control = next(v for v in exp.variants if v.is_control)
         assert control.name == "Control"
 
-    def test_variant_belongs_to_experiment(self, db_session, make_experiment, make_variant):
+    def test_variant_belongs_to_experiment(
+        self, db_session, make_experiment, make_variant
+    ):
         """Variant.experiment_id is correctly set to the parent experiment."""
         exp = make_experiment(name="Parent Experiment")
         variant = make_variant(experiment=exp, name="V1")
@@ -72,8 +77,15 @@ class TestExperimentRelationships:
     def test_experiment_has_metrics(self, db_session, make_experiment, make_metric):
         """Experiment.metric_definitions relationship includes all associated metrics."""
         exp = make_experiment()
-        make_metric(experiment=exp, name="Conversion Rate", metric_type=MetricType.CONVERSION)
-        make_metric(experiment=exp, name="Revenue", event_name="purchase_value", metric_type=MetricType.REVENUE)
+        make_metric(
+            experiment=exp, name="Conversion Rate", metric_type=MetricType.CONVERSION
+        )
+        make_metric(
+            experiment=exp,
+            name="Revenue",
+            event_name="purchase_value",
+            metric_type=MetricType.REVENUE,
+        )
 
         db_session.refresh(exp)
         assert len(exp.metric_definitions) == 2
@@ -81,10 +93,17 @@ class TestExperimentRelationships:
         assert "Conversion Rate" in metric_names
         assert "Revenue" in metric_names
 
-    def test_metric_belongs_to_experiment(self, db_session, make_experiment, make_metric):
+    def test_metric_belongs_to_experiment(
+        self, db_session, make_experiment, make_metric
+    ):
         """Metric.experiment_id is correctly set to the parent experiment."""
         exp = make_experiment(name="Metric Parent")
-        metric = make_metric(experiment=exp, name="CTR", event_name="click", metric_type=MetricType.CONVERSION)
+        metric = make_metric(
+            experiment=exp,
+            name="CTR",
+            event_name="click",
+            metric_type=MetricType.CONVERSION,
+        )
 
         db_session.refresh(metric)
         assert metric.experiment_id == exp.id
@@ -94,7 +113,12 @@ class TestExperimentRelationships:
     ):
         """Metric.experiment back-reference returns the correct Experiment object."""
         exp = make_experiment(name="Metric Back-ref")
-        metric = make_metric(experiment=exp, name="CTR", event_name="click", metric_type=MetricType.CONVERSION)
+        metric = make_metric(
+            experiment=exp,
+            name="CTR",
+            event_name="click",
+            metric_type=MetricType.CONVERSION,
+        )
 
         db_session.refresh(metric)
         assert metric.experiment is not None
@@ -133,7 +157,9 @@ class TestExperimentRelationships:
         db_session.delete(exp)
         db_session.commit()
 
-        deleted_variant = db_session.query(Variant).filter(Variant.id == variant_id).first()
+        deleted_variant = (
+            db_session.query(Variant).filter(Variant.id == variant_id).first()
+        )
         assert deleted_variant is None
 
     def test_cascade_delete_metrics_with_experiment(
@@ -141,7 +167,12 @@ class TestExperimentRelationships:
     ):
         """Deleting an experiment cascades to delete its metrics."""
         exp = make_experiment(name="Cascade Metric Test")
-        m = make_metric(experiment=exp, name="Cascade Metric", event_name="ev", metric_type=MetricType.CONVERSION)
+        m = make_metric(
+            experiment=exp,
+            name="Cascade Metric",
+            event_name="ev",
+            metric_type=MetricType.CONVERSION,
+        )
         metric_id = m.id
 
         db_session.delete(exp)

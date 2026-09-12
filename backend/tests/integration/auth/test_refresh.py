@@ -8,9 +8,14 @@ NOTE: The refresh endpoint returns a TokenResponse which requires id_token.
 moto's REFRESH_TOKEN_AUTH response includes AccessToken and IdToken.
 The refresh_token field in the response is Optional per the schema.
 """
+
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
-from backend.tests.integration.auth.spec_cognito_integration import COGNITO_ENDPOINT_SPECS
+
+from backend.tests.integration.auth.spec_cognito_integration import (
+    COGNITO_ENDPOINT_SPECS,
+)
 
 SPEC = COGNITO_ENDPOINT_SPECS["refresh"]
 
@@ -18,16 +23,22 @@ SPEC = COGNITO_ENDPOINT_SPECS["refresh"]
 class TestRefreshSuccess:
     def test_refresh_returns_200(self, auth_client, auth_tokens):
         """Valid refresh token returns 200"""
-        response = auth_client.post(SPEC.path, json={
-            "refresh_token": auth_tokens["refresh_token"],
-        })
+        response = auth_client.post(
+            SPEC.path,
+            json={
+                "refresh_token": auth_tokens["refresh_token"],
+            },
+        )
         assert response.status_code == SPEC.success_status
 
     def test_refresh_returns_new_access_token(self, auth_client, auth_tokens):
         """Refresh returns a new access_token"""
-        response = auth_client.post(SPEC.path, json={
-            "refresh_token": auth_tokens["refresh_token"],
-        })
+        response = auth_client.post(
+            SPEC.path,
+            json={
+                "refresh_token": auth_tokens["refresh_token"],
+            },
+        )
         assert response.status_code == 200
         data = response.json()
         assert "access_token" in data
@@ -35,9 +46,12 @@ class TestRefreshSuccess:
 
     def test_refresh_returns_id_token(self, auth_client, auth_tokens):
         """Refresh returns an id_token (required by TokenResponse schema)"""
-        response = auth_client.post(SPEC.path, json={
-            "refresh_token": auth_tokens["refresh_token"],
-        })
+        response = auth_client.post(
+            SPEC.path,
+            json={
+                "refresh_token": auth_tokens["refresh_token"],
+            },
+        )
         assert response.status_code == 200
         data = response.json()
         assert "id_token" in data
@@ -45,9 +59,12 @@ class TestRefreshSuccess:
 
     def test_refresh_returns_expires_in(self, auth_client, auth_tokens):
         """Refresh response includes expires_in"""
-        response = auth_client.post(SPEC.path, json={
-            "refresh_token": auth_tokens["refresh_token"],
-        })
+        response = auth_client.post(
+            SPEC.path,
+            json={
+                "refresh_token": auth_tokens["refresh_token"],
+            },
+        )
         assert response.status_code == 200
         data = response.json()
         assert "expires_in" in data
@@ -55,9 +72,12 @@ class TestRefreshSuccess:
 
     def test_refresh_returns_token_type(self, auth_client, auth_tokens):
         """Refresh response includes token_type"""
-        response = auth_client.post(SPEC.path, json={
-            "refresh_token": auth_tokens["refresh_token"],
-        })
+        response = auth_client.post(
+            SPEC.path,
+            json={
+                "refresh_token": auth_tokens["refresh_token"],
+            },
+        )
         assert response.status_code == 200
         data = response.json()
         assert "token_type" in data
@@ -65,35 +85,46 @@ class TestRefreshSuccess:
 
     def test_refresh_no_auth_required(self, auth_client, auth_tokens):
         """Refresh endpoint is publicly accessible"""
-        response = auth_client.post(SPEC.path, json={
-            "refresh_token": auth_tokens["refresh_token"],
-        })
+        response = auth_client.post(
+            SPEC.path,
+            json={
+                "refresh_token": auth_tokens["refresh_token"],
+            },
+        )
         assert response.status_code not in (401, 403)
 
 
 class TestRefreshErrors:
     def test_invalid_refresh_token_returns_401(self, auth_client):
         """Invalid refresh token returns 401"""
-        with patch("backend.app.api.v1.endpoints.auth.CognitoAuthService") as MockService:
+        with patch(
+            "backend.app.api.v1.endpoints.auth.CognitoAuthService"
+        ) as MockService:
             mock_instance = MagicMock()
             mock_instance.refresh_token.side_effect = ValueError(
                 "An error occurred (NotAuthorizedException): Invalid Refresh Token"
             )
             MockService.return_value = mock_instance
 
-            response = auth_client.post(SPEC.path, json={"refresh_token": "invalid.fake.token"})
+            response = auth_client.post(
+                SPEC.path, json={"refresh_token": "invalid.fake.token"}
+            )
         assert response.status_code == 401
 
     def test_expired_refresh_token_returns_401(self, auth_client):
         """Expired refresh token returns 401"""
-        with patch("backend.app.api.v1.endpoints.auth.CognitoAuthService") as MockService:
+        with patch(
+            "backend.app.api.v1.endpoints.auth.CognitoAuthService"
+        ) as MockService:
             mock_instance = MagicMock()
             mock_instance.refresh_token.side_effect = ValueError(
                 "An error occurred (NotAuthorizedException): Refresh Token has expired"
             )
             MockService.return_value = mock_instance
 
-            response = auth_client.post(SPEC.path, json={"refresh_token": "expired.refresh.token"})
+            response = auth_client.post(
+                SPEC.path, json={"refresh_token": "expired.refresh.token"}
+            )
         assert response.status_code == 401
 
     def test_missing_refresh_token_returns_422(self, auth_client):
@@ -103,9 +134,13 @@ class TestRefreshErrors:
 
     def test_error_response_has_detail(self, auth_client):
         """401 error response has detail field"""
-        with patch("backend.app.api.v1.endpoints.auth.CognitoAuthService") as MockService:
+        with patch(
+            "backend.app.api.v1.endpoints.auth.CognitoAuthService"
+        ) as MockService:
             mock_instance = MagicMock()
-            mock_instance.refresh_token.side_effect = ValueError("NotAuthorizedException")
+            mock_instance.refresh_token.side_effect = ValueError(
+                "NotAuthorizedException"
+            )
             MockService.return_value = mock_instance
 
             response = auth_client.post(SPEC.path, json={"refresh_token": "bad.token"})
@@ -114,9 +149,13 @@ class TestRefreshErrors:
 
     def test_401_has_www_authenticate_header(self, auth_client):
         """401 responses include WWW-Authenticate: Bearer header"""
-        with patch("backend.app.api.v1.endpoints.auth.CognitoAuthService") as MockService:
+        with patch(
+            "backend.app.api.v1.endpoints.auth.CognitoAuthService"
+        ) as MockService:
             mock_instance = MagicMock()
-            mock_instance.refresh_token.side_effect = ValueError("NotAuthorizedException")
+            mock_instance.refresh_token.side_effect = ValueError(
+                "NotAuthorizedException"
+            )
             MockService.return_value = mock_instance
 
             response = auth_client.post(SPEC.path, json={"refresh_token": "bad.token"})

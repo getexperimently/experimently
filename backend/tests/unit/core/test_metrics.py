@@ -17,7 +17,9 @@ def test_record_request_increments_counter(mocker):
 
     record_request("GET", "/health", 200, 0.01)
 
-    mock_counter.labels.assert_called_with(method="GET", endpoint="/health", status_code=200)
+    mock_counter.labels.assert_called_with(
+        method="GET", endpoint="/health", status_code=200
+    )
     mock_counter.labels.return_value.inc.assert_called_once()
 
 
@@ -43,7 +45,9 @@ def test_request_duration_histogram_buckets_cover_5ms_to_10s():
     # Buckets include +Inf as the last entry; check explicit boundaries
     explicit = [b for b in buckets if b != float("inf")]
     assert min(explicit) <= 0.005, "Lower bound must reach 5ms for fast endpoints"
-    assert max(explicit) >= 10.0, "Upper bound must reach 10s for slow background queries"
+    assert max(explicit) >= 10.0, (
+        "Upper bound must reach 10s for slow background queries"
+    )
 
 
 def test_record_experiment_assignment(mocker):
@@ -52,7 +56,9 @@ def test_record_experiment_assignment(mocker):
 
     record_experiment_assignment("exp-123", "variant-A")
 
-    mock_counter.labels.assert_called_with(experiment_id="exp-123", variant_id="variant-A")
+    mock_counter.labels.assert_called_with(
+        experiment_id="exp-123", variant_id="variant-A"
+    )
     mock_counter.labels.return_value.inc.assert_called_once()
 
 
@@ -87,7 +93,9 @@ def test_record_event_tracked_bounds_label_cardinality(mocker, raw, expected):
 
 
 def test_record_flag_evaluation(mocker):
-    mock_counter = mocker.patch("backend.app.core.metrics.feature_flag_evaluations_total")
+    mock_counter = mocker.patch(
+        "backend.app.core.metrics.feature_flag_evaluations_total"
+    )
     from backend.app.core.metrics import record_flag_evaluation
 
     record_flag_evaluation("my-flag", "enabled")
@@ -131,8 +139,12 @@ def test_monitoring_config_all_metrics_valid():
     assert len(METRICS_REGISTRY) > 0, "METRICS_REGISTRY must not be empty"
 
     for name, spec in METRICS_REGISTRY.items():
-        assert spec.name == name, f"Spec name '{spec.name}' must match registry key '{name}'"
-        assert len(spec.description) > 0, f"Spec '{name}' must have a non-empty description"
+        assert spec.name == name, (
+            f"Spec name '{spec.name}' must match registry key '{name}'"
+        )
+        assert len(spec.description) > 0, (
+            f"Spec '{name}' must have a non-empty description"
+        )
         assert isinstance(spec.labels, list), f"Spec '{name}' labels must be a list"
 
 

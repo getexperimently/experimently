@@ -23,11 +23,8 @@ from backend.app.schemas.interaction import (
     RiskLevel,
 )
 from backend.app.services.interaction_detection_service import (
-    InteractionDetectionService,
     InteractionAnalysis,
-    InteractionResult,
-    NoveltyResult,
-    SUTVAResult,
+    InteractionDetectionService,
 )
 
 router = APIRouter()
@@ -36,6 +33,7 @@ router = APIRouter()
 # ---------------------------------------------------------------------------
 # Permission helper
 # ---------------------------------------------------------------------------
+
 
 def _require_developer(current_user: User) -> None:
     """Raise 403 when the user is VIEWER (read-only role).
@@ -55,6 +53,7 @@ def _require_developer(current_user: User) -> None:
 # ---------------------------------------------------------------------------
 # Serialization helpers
 # ---------------------------------------------------------------------------
+
 
 def _to_response(analysis: InteractionAnalysis) -> InteractionAnalysisResponse:
     """Convert an InteractionAnalysis dataclass to the Pydantic response schema."""
@@ -123,6 +122,7 @@ def _make_empty_response(exp_a_id: str, exp_b_id: str) -> InteractionAnalysisRes
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
+
 
 @router.get("/scan", response_model=ActiveInteractionScanResponse)
 def scan_interactions(

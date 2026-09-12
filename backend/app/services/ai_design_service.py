@@ -8,11 +8,11 @@ Provides:
 - Graceful degradation to template-based responses when AI is unavailable
 """
 
-import os
 import logging
 import math
-from dataclasses import dataclass, field
-from typing import List, Optional, Dict, Any
+import os
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -21,9 +21,11 @@ logger = logging.getLogger(__name__)
 # Data classes
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class ExperimentDesignSuggestion:
     """Structured experiment design suggestion."""
+
     hypothesis: str
     primary_metric: str
     guardrail_metrics: List[str]
@@ -37,6 +39,7 @@ class ExperimentDesignSuggestion:
 @dataclass
 class ResultsInterpretation:
     """Plain-English interpretation of experiment results."""
+
     summary: str
     recommendation: str  # "ship" | "continue_testing" | "stop_futility"
     confidence_statement: str
@@ -47,6 +50,7 @@ class ResultsInterpretation:
 @dataclass
 class SampleSizeEstimate:
     """Statistical sample size estimate."""
+
     required_per_variant: int
     total_required: int
     days_to_significance: Optional[int]
@@ -56,6 +60,7 @@ class SampleSizeEstimate:
 # ---------------------------------------------------------------------------
 # AIDesignService
 # ---------------------------------------------------------------------------
+
 
 class AIDesignService:
     """
@@ -108,7 +113,9 @@ class AIDesignService:
             try:
                 return cls._ai_suggest(description, experiment_type)
             except Exception as exc:
-                logger.warning("AI suggestion failed, falling back to template: %s", exc)
+                logger.warning(
+                    "AI suggestion failed, falling back to template: %s", exc
+                )
         return cls._template_suggest(description, experiment_type)
 
     @classmethod
@@ -177,7 +184,7 @@ class AIDesignService:
         p2 = baseline_rate + mde
         p_bar = (p1 + p2) / 2
 
-        n = (z_alpha + z_beta) ** 2 * 2 * p_bar * (1 - p_bar) / (mde ** 2)
+        n = (z_alpha + z_beta) ** 2 * 2 * p_bar * (1 - p_bar) / (mde**2)
         n = math.ceil(n)
 
         days = math.ceil(n / daily_traffic) if daily_traffic else None
@@ -213,7 +220,9 @@ class AIDesignService:
     # ---------------------------------------------------------------------------
 
     @classmethod
-    def _ai_suggest(cls, description: str, experiment_type: str) -> ExperimentDesignSuggestion:
+    def _ai_suggest(
+        cls, description: str, experiment_type: str
+    ) -> ExperimentDesignSuggestion:
         """Call Claude API to generate an experiment design suggestion."""
         try:
             import anthropic
@@ -285,7 +294,9 @@ class AIDesignService:
     # ---------------------------------------------------------------------------
 
     @classmethod
-    def _template_suggest(cls, description: str, experiment_type: str) -> ExperimentDesignSuggestion:
+    def _template_suggest(
+        cls, description: str, experiment_type: str
+    ) -> ExperimentDesignSuggestion:
         """Return a template-based experiment design suggestion."""
         metrics = cls.EXPERIMENT_METRICS.get(
             experiment_type.lower(),

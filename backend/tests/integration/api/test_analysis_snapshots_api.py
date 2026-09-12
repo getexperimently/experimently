@@ -15,6 +15,7 @@ DB-backed tests for the P0 "statistical credibility" surface of the results API.
 Rows created here are deleted in fixture teardown because the shared test
 database is not truncated between tests.
 """
+
 import uuid
 from datetime import datetime, timezone
 from unittest.mock import patch
@@ -33,7 +34,6 @@ from backend.app.models.experiment import (
     Variant,
 )
 from backend.app.services.analysis_service import BAYESIAN_N_SAMPLES
-
 
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
@@ -295,9 +295,7 @@ class TestResultsSrmAndSnapshots:
         assert len(rows) == 3
         assert {r.kind for r in rows} == {"frequentist", "bayesian", "cuped"}
         # Every row sits on the UTC day bucket, which is also the seed bucket.
-        assert {r.as_of.date() for r in rows} == {
-            datetime.now(timezone.utc).date()
-        }
+        assert {r.as_of.date() for r in rows} == {datetime.now(timezone.utc).date()}
 
     def test_experiments_results_route_shares_srm(
         self, admin_client, db_session, seeded_experiment

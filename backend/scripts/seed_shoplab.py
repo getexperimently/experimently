@@ -29,7 +29,7 @@ import math
 import os
 import random
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -39,25 +39,19 @@ sys.path.insert(0, str(PROJECT_ROOT))
 # Importing seed_demo_data applies the shared environment defaults (APP_ENV,
 # POSTGRES_*) *before* any backend.app module reads settings, and gives us
 # the helpers we reuse.  The module only runs its seeder under __main__.
-from backend.scripts.seed_demo_data import (  # noqa: E402
-    _bulk_insert,
-    days_ago,
-    ensure_schema,
-    ensure_tables,
-    now_utc,
-    seed_users,
-)
+from sqlalchemy import func
 
-from sqlalchemy import func  # noqa: E402
-
-from backend.app.core.bandit_scheduler import BanditScheduler  # noqa: E402
-from backend.app.core.security import hash_api_key  # noqa: E402
-from backend.app.db.session import SessionLocal  # noqa: E402
-from backend.app.models.api_key import APIKey, generate_api_key  # noqa: E402
-from backend.app.models.assignment import Assignment  # noqa: E402
-from backend.app.models.bandit_state import BanditState  # noqa: E402
-from backend.app.models.event import Event  # noqa: E402
-from backend.app.models.experiment import (  # noqa: E402
+# Registers the "Report" class referenced by name in User/Experiment/FeatureFlag
+# relationships; without it the first ORM query fails to configure mappers.
+import backend.app.models.report  # noqa: F401
+from backend.app.core.bandit_scheduler import BanditScheduler
+from backend.app.core.security import hash_api_key
+from backend.app.db.session import SessionLocal
+from backend.app.models.api_key import APIKey, generate_api_key
+from backend.app.models.assignment import Assignment
+from backend.app.models.bandit_state import BanditState
+from backend.app.models.event import Event
+from backend.app.models.experiment import (
     Experiment,
     ExperimentStatus,
     ExperimentType,
@@ -65,29 +59,33 @@ from backend.app.models.experiment import (  # noqa: E402
     MetricType,
     Variant,
 )
-from backend.app.models.feature_flag import FeatureFlag, FeatureFlagStatus  # noqa: E402
-from backend.app.models.metrics.metric import (  # noqa: E402
+from backend.app.models.feature_flag import FeatureFlag, FeatureFlagStatus
+from backend.app.models.metrics.metric import (
     AggregatedMetric,
     ErrorLog,
     RawMetric,
 )
-from backend.app.models.rollout_schedule import (  # noqa: E402
+from backend.app.models.rollout_schedule import (
     RolloutSchedule,
     RolloutScheduleStatus,
     RolloutStage,
     RolloutStageStatus,
     TriggerType,
 )
-from backend.app.models.safety import FeatureFlagSafetyConfig  # noqa: E402
-
-# Registers the "Report" class referenced by name in User/Experiment/FeatureFlag
-# relationships; without it the first ORM query fails to configure mappers.
-import backend.app.models.report  # noqa: E402,F401
-from backend.app.schemas.bayesian import BayesianConfig  # noqa: E402
-from backend.app.schemas.experiment import SequentialTestingConfigInput  # noqa: E402
-from backend.app.schemas.variance_reduction import (  # noqa: E402
+from backend.app.models.safety import FeatureFlagSafetyConfig
+from backend.app.schemas.bayesian import BayesianConfig
+from backend.app.schemas.experiment import SequentialTestingConfigInput
+from backend.app.schemas.variance_reduction import (
     VarianceReductionConfig,
     VarianceReductionMethod,
+)
+from backend.scripts.seed_demo_data import (
+    _bulk_insert,
+    days_ago,
+    ensure_schema,
+    ensure_tables,
+    now_utc,
+    seed_users,
 )
 
 # ---------------------------------------------------------------------------

@@ -4,13 +4,15 @@ Feature flag schema models for validation and serialization.
 """
 
 from datetime import datetime
-from typing import Optional, Dict, Any, List, Union
+from typing import Any, Dict, List, Optional
 from uuid import UUID
-from pydantic import BaseModel, Field, field_validator, model_validator, ConfigDict
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class FeatureFlagBase(BaseModel):
     """Base model for feature flag data."""
+
     key: str = Field(..., min_length=1, max_length=100)
     name: str = Field(..., min_length=1, max_length=255)
     description: Optional[str] = Field(None, max_length=2000)
@@ -31,6 +33,7 @@ class FeatureFlagBase(BaseModel):
         matching the pattern ^[a-z0-9][a-z0-9_-]*[a-z0-9]$|^[a-z0-9]$.
         """
         import re
+
         if not re.match(r"^[a-z0-9][a-z0-9_-]*$", v):
             raise ValueError(
                 "Key must be lowercase alphanumeric characters, hyphens, or underscores only"
@@ -40,11 +43,11 @@ class FeatureFlagBase(BaseModel):
 
 class FeatureFlagCreate(FeatureFlagBase):
     """Model for creating a new feature flag."""
-    pass
 
 
 class FeatureFlagUpdate(FeatureFlagBase):
     """Model for updating a feature flag."""
+
     key: Optional[str] = None
     name: Optional[str] = None
     is_active: Optional[bool] = None
@@ -53,6 +56,7 @@ class FeatureFlagUpdate(FeatureFlagBase):
 
 class FeatureFlagInDBBase(FeatureFlagBase):
     """Base model for feature flags in DB."""
+
     id: UUID
     created_at: datetime
     updated_at: datetime
@@ -62,16 +66,15 @@ class FeatureFlagInDBBase(FeatureFlagBase):
 
 class FeatureFlag(FeatureFlagInDBBase):
     """Feature flag model for responses."""
-    pass
 
 
 class FeatureFlagInDB(FeatureFlagInDBBase):
     """Feature flag model with additional DB fields."""
-    pass
 
 
 class FeatureFlagEvaluation(BaseModel):
     """Model for feature flag evaluation results."""
+
     key: str
     value: Any
     reason: str
@@ -91,6 +94,7 @@ class FeatureFlagReadExtended(FeatureFlagInDBBase):
     the same casing ``GET /feature-flags/{flag_id}`` uses, and derives
     ``is_active`` from it so the two never disagree.
     """
+
     status: Optional[str] = Field(
         None, description='Lower-cased flag status: "active", "inactive" or "archived"'
     )
@@ -120,6 +124,7 @@ class FeatureFlagListResponse(BaseModel):
     """
     Paginated response model for feature flags.
     """
+
     items: List[FeatureFlagReadExtended]
     total: int
     skip: int
@@ -137,13 +142,13 @@ class FeatureFlagListResponse(BaseModel):
                         "status": "active",
                         "is_active": True,
                         "created_at": "2023-01-01T00:00:00Z",
-                        "updated_at": "2023-01-01T00:00:00Z"
+                        "updated_at": "2023-01-01T00:00:00Z",
                     }
                 ],
                 "total": 1,
                 "skip": 0,
-                "limit": 100
+                "limit": 100,
             }
         },
-        from_attributes=True
+        from_attributes=True,
     )

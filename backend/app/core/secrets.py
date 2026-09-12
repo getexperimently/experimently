@@ -13,6 +13,7 @@ Examples:
   /prod/experimentation/redis-url
   /staging/experimentation/db-password
 """
+
 import json
 import logging
 import os
@@ -43,7 +44,6 @@ def get_secret(secret_name: str, region_name: str = "us-west-2") -> str:
     """
     try:
         import boto3
-        from botocore.exceptions import ClientError
 
         client = boto3.client("secretsmanager", region_name=region_name)
         response = client.get_secret_value(SecretId=secret_name)
@@ -52,10 +52,13 @@ def get_secret(secret_name: str, region_name: str = "us-west-2") -> str:
         if secret is None:
             # Binary secret — decode
             import base64
+
             secret = base64.b64decode(response["SecretBinary"]).decode("utf-8")
 
         # Only the secret's identifier is logged, never its value.
-        logger.info("Successfully retrieved secret: %s", secret_name)  # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure
+        logger.info(  # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure
+            "Successfully retrieved secret: %s", secret_name
+        )
         return secret
 
     except ImportError:
@@ -65,7 +68,9 @@ def get_secret(secret_name: str, region_name: str = "us-west-2") -> str:
         )
     except Exception as exc:
         # Logs the identifier and the boto error, never the secret value.
-        logger.error("Failed to retrieve secret %s: %s", secret_name, exc)  # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure
+        logger.error(  # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure
+            "Failed to retrieve secret %s: %s", secret_name, exc
+        )
         raise RuntimeError(f"Could not retrieve secret '{secret_name}': {exc}") from exc
 
 

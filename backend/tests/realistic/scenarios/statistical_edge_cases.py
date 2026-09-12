@@ -16,8 +16,9 @@ These tests do NOT require a running platform — they validate the data
 generation engine itself and the statistical properties of the output.
 """
 
-import pytest
 from datetime import timedelta
+
+import pytest
 
 from backend.tests.realistic.data_generator import DataScenario, make_edge_case_scenario
 
@@ -80,7 +81,9 @@ class TestOutlierContamination:
         outlier_events = [e for e in result.events if e.properties.get("outlier")]
         assert len(outlier_events) > 0, "Expected some outlier events"
         avg_outlier_value = sum(e.value for e in outlier_events) / len(outlier_events)
-        non_outlier_events = [e for e in result.events if not e.properties.get("outlier")]
+        non_outlier_events = [
+            e for e in result.events if not e.properties.get("outlier")
+        ]
         avg_normal_value = (
             sum(e.value for e in non_outlier_events) / len(non_outlier_events)
             if non_outlier_events
@@ -125,15 +128,19 @@ class TestSimpsonsParadox:
         result = scenario.generate()
 
         mobile_treatment_ids = {
-            u.user_id for u in result.users
+            u.user_id
+            for u in result.users
             if u.variant_name == "treatment" and u.properties.get("device") == "mobile"
         }
         mobile_control_ids = {
-            u.user_id for u in result.users
+            u.user_id
+            for u in result.users
             if u.variant_name == "control" and u.properties.get("device") == "mobile"
         }
 
-        mobile_t_events = [e for e in result.events if e.user_id in mobile_treatment_ids]
+        mobile_t_events = [
+            e for e in result.events if e.user_id in mobile_treatment_ids
+        ]
         mobile_c_events = [e for e in result.events if e.user_id in mobile_control_ids]
 
         if mobile_treatment_ids and mobile_control_ids:
@@ -161,7 +168,9 @@ class TestMultiAssignment:
 
         # Find users appearing in both variants
         control_ids = {u.user_id for u in result.users if u.variant_name == "control"}
-        treatment_ids = {u.user_id for u in result.users if u.variant_name == "treatment"}
+        treatment_ids = {
+            u.user_id for u in result.users if u.variant_name == "treatment"
+        }
         duplicates = control_ids & treatment_ids
 
         assert len(duplicates) >= 1, (

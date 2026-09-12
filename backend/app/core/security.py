@@ -50,7 +50,9 @@ LOCAL_TOKEN_ALGORITHM = "HS256"
 # dev-admin bypass and a 401.  The tokenUrl keeps Swagger's "Authorize" button
 # working with both providers (the /auth/token form accepts email+password
 # when AUTH_PROVIDER=local).
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.API_V1_STR}/auth/token", auto_error=False)
+oauth2_scheme = OAuth2PasswordBearer(
+    tokenUrl=f"{settings.API_V1_STR}/auth/token", auto_error=False
+)
 
 
 class InvalidTokenError(ValueError):
@@ -129,7 +131,9 @@ def role_name(role: Any) -> str:
     return str(role).upper()
 
 
-def create_local_access_token(user: Any, *, expires_minutes: Optional[int] = None) -> str:
+def create_local_access_token(
+    user: Any, *, expires_minutes: Optional[int] = None
+) -> str:
     """
     Issue an HS256 JWT for *user* signed with ``settings.SECRET_KEY``.
 
@@ -143,7 +147,11 @@ def create_local_access_token(user: Any, *, expires_minutes: Optional[int] = Non
     Returns:
         The encoded token as a string.
     """
-    ttl = expires_minutes if expires_minutes is not None else settings.LOCAL_AUTH_TOKEN_TTL_MINUTES
+    ttl = (
+        expires_minutes
+        if expires_minutes is not None
+        else settings.LOCAL_AUTH_TOKEN_TTL_MINUTES
+    )
     now = datetime.now(timezone.utc)
     claims: Dict[str, Any] = {
         "sub": str(user.id),

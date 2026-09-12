@@ -8,10 +8,10 @@ from typing import Any, Dict, Optional, Union
 
 from sqlalchemy.orm import Session
 
+from backend.app.core.security import get_password_hash, unwrap_secret, verify_password
 from backend.app.crud.base import CRUDBase
 from backend.app.models.user import User
 from backend.app.schemas.user import UserCreate, UserUpdate
-from backend.app.core.security import get_password_hash, unwrap_secret, verify_password
 
 
 class CRUDUser(CRUDBase[User, UserCreate, UserUpdate]):
@@ -81,7 +81,11 @@ class CRUDUser(CRUDBase[User, UserCreate, UserUpdate]):
         Returns:
             The updated user
         """
-        update_data = obj_in.model_dump(exclude_unset=True) if hasattr(obj_in, "model_dump") else obj_in
+        update_data = (
+            obj_in.model_dump(exclude_unset=True)
+            if hasattr(obj_in, "model_dump")
+            else obj_in
+        )
         if update_data.get("password"):
             hashed_password = get_password_hash(unwrap_secret(update_data["password"]))
             del update_data["password"]

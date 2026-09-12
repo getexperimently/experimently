@@ -9,22 +9,23 @@ Tests cover:
 - High-level service methods
 """
 
-import pytest
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
+import pytest
+
 from backend.app.services.interaction_detection_service import (
+    InteractionAnalysis,
     InteractionDetectionService,
     InteractionResult,
     NoveltyResult,
     SUTVAResult,
-    InteractionAnalysis,
 )
-
 
 # ---------------------------------------------------------------------------
 # TestOverlapDetection (8 tests)
 # ---------------------------------------------------------------------------
+
 
 class TestOverlapDetection:
     """Tests for user overlap / Jaccard similarity computation."""
@@ -71,20 +72,25 @@ class TestOverlapDetection:
         """has_significant_overlap returns True when Jaccard > threshold."""
         service = InteractionDetectionService()
         # Jaccard = 2/4 = 0.5  >  0.3
-        result = service.has_significant_overlap({"a", "b", "c"}, {"b", "c", "d"}, threshold=0.3)
+        result = service.has_significant_overlap(
+            {"a", "b", "c"}, {"b", "c", "d"}, threshold=0.3
+        )
         assert result is True
 
     def test_has_significant_overlap_false_below_threshold(self):
         """has_significant_overlap returns False when Jaccard ≤ threshold."""
         service = InteractionDetectionService()
         # Jaccard = 1/5 = 0.2  <  0.3
-        result = service.has_significant_overlap({"a", "b", "c"}, {"c", "d", "e"}, threshold=0.3)
+        result = service.has_significant_overlap(
+            {"a", "b", "c"}, {"c", "d", "e"}, threshold=0.3
+        )
         assert result is False
 
 
 # ---------------------------------------------------------------------------
 # TestInteractionEffect (8 tests)
 # ---------------------------------------------------------------------------
+
 
 class TestInteractionEffect:
     """Tests for 2×2 interaction effect detection."""
@@ -138,31 +144,40 @@ class TestInteractionEffect:
     def test_compute_interaction_effect_size(self):
         """compute_interaction_effect_size returns AB - A - B."""
         service = InteractionDetectionService()
-        result = service.compute_interaction_effect_size(a_effect=0.1, b_effect=0.2, ab_effect=0.5)
+        result = service.compute_interaction_effect_size(
+            a_effect=0.1, b_effect=0.2, ab_effect=0.5
+        )
         assert result == pytest.approx(0.5 - 0.1 - 0.2)
 
     def test_zero_interaction_effect_additive(self):
         """Effect size is 0 when AB == A + B."""
         service = InteractionDetectionService()
-        result = service.compute_interaction_effect_size(a_effect=0.1, b_effect=0.2, ab_effect=0.3)
+        result = service.compute_interaction_effect_size(
+            a_effect=0.1, b_effect=0.2, ab_effect=0.3
+        )
         assert result == pytest.approx(0.0, abs=1e-9)
 
     def test_large_positive_interaction_super_additive(self):
         """Large positive interaction when AB > A + B (super-additive)."""
         service = InteractionDetectionService()
-        result = service.compute_interaction_effect_size(a_effect=0.1, b_effect=0.1, ab_effect=0.5)
+        result = service.compute_interaction_effect_size(
+            a_effect=0.1, b_effect=0.1, ab_effect=0.5
+        )
         assert result > 0
 
     def test_large_negative_interaction_sub_additive(self):
         """Large negative interaction when AB < A + B (sub-additive)."""
         service = InteractionDetectionService()
-        result = service.compute_interaction_effect_size(a_effect=0.3, b_effect=0.3, ab_effect=0.2)
+        result = service.compute_interaction_effect_size(
+            a_effect=0.3, b_effect=0.3, ab_effect=0.2
+        )
         assert result < 0
 
 
 # ---------------------------------------------------------------------------
 # TestNoveltyEffectDetection (6 tests)
 # ---------------------------------------------------------------------------
+
 
 class TestNoveltyEffectDetection:
     """Tests for novelty effect detection via linear regression on daily effects."""
@@ -205,12 +220,16 @@ class TestNoveltyEffectDetection:
         service = InteractionDetectionService()
         result = service.detect_novelty_effect([0.9, 0.7, 0.5, 0.3, 0.1])
         assert result.has_novelty is True
-        assert "minimum runtime" in result.recommendation.lower() or "runtime" in result.recommendation.lower()
+        assert (
+            "minimum runtime" in result.recommendation.lower()
+            or "runtime" in result.recommendation.lower()
+        )
 
 
 # ---------------------------------------------------------------------------
 # TestSUTVAViolation (5 tests)
 # ---------------------------------------------------------------------------
+
 
 class TestSUTVAViolation:
     """Tests for SUTVA (Stable Unit Treatment Value Assumption) violation checks."""
@@ -265,6 +284,7 @@ class TestSUTVAViolation:
 # ---------------------------------------------------------------------------
 # TestInteractionService (5 tests)
 # ---------------------------------------------------------------------------
+
 
 class TestInteractionService:
     """High-level service tests that use a mocked database."""

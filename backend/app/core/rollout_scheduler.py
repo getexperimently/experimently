@@ -6,25 +6,25 @@ progressing feature flag rollout schedules based on defined triggers.
 """
 
 import asyncio
-import logging
-from datetime import datetime, timezone, timedelta
-from typing import Any, Optional, Dict, List, Tuple
+from datetime import datetime, timedelta, timezone
+from typing import Dict, Optional
+
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, or_, desc
 
 from backend.app.core.config import settings as app_settings
+from backend.app.core.logging import get_logger
+from backend.app.core.scheduler_tick import run_locked_tick
 from backend.app.db.session import SessionLocal
 from backend.app.models.feature_flag import FeatureFlag
 from backend.app.models.rollout_schedule import (
     RolloutSchedule,
-    RolloutStage,
     RolloutScheduleStatus,
+    RolloutStage,
     RolloutStageStatus,
-    TriggerType
+    TriggerType,
 )
 from backend.app.services.notification_service import NotificationService
-from backend.app.core.logging import get_logger
-from backend.app.core.scheduler_tick import run_locked_tick
 
 logger = get_logger(__name__)
 
@@ -72,7 +72,9 @@ class RolloutScheduler:
 
         self.is_running = True
         self.task = asyncio.create_task(self._run_scheduler())
-        logger.info(f"Rollout scheduler started with {self.interval_minutes} minute interval")
+        logger.info(
+            f"Rollout scheduler started with {self.interval_minutes} minute interval"
+        )
 
     async def stop(self):
         """Stop the scheduler."""
@@ -102,7 +104,7 @@ class RolloutScheduler:
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error(f"Error in rollout scheduler: {str(e)}")
+                logger.error(f"Error in rollout scheduler: {e!s}")
                 # Wait a bit before trying again
                 await asyncio.sleep(60)
 
@@ -129,15 +131,19 @@ class RolloutScheduler:
             current_time = datetime.now(timezone.utc)
 
             # Get active rollout schedules
-            active_schedules = db.query(RolloutSchedule).filter(
-                and_(
-                    RolloutSchedule.status == RolloutScheduleStatus.ACTIVE,
-                    or_(
-                        RolloutSchedule.end_date.is_(None),
-                        RolloutSchedule.end_date > current_time
+            active_schedules = (
+                db.query(RolloutSchedule)
+                .filter(
+                    and_(
+                        RolloutSchedule.status == RolloutScheduleStatus.ACTIVE,
+                        or_(
+                            RolloutSchedule.end_date.is_(None),
+                            RolloutSchedule.end_date > current_time,
+                        ),
                     )
                 )
-            ).all()
+                .all()
+            )
 
             if not active_schedules:
                 logger.info("No active rollout schedules found")
@@ -149,26 +155,39 @@ class RolloutScheduler:
             for schedule in active_schedules:
                 try:
                     # Find the current active stage and any pending stages
-                    current_active_stage = db.query(RolloutStage).filter(
-                        and_(
-                            RolloutStage.rollout_schedule_id == schedule.id,
-                            RolloutStage.status == RolloutStageStatus.IN_PROGRESS
+                    current_active_stage = (
+                        db.query(RolloutStage)
+                        .filter(
+                            and_(
+                                RolloutStage.rollout_schedule_id == schedule.id,
+                                RolloutStage.status == RolloutStageStatus.IN_PROGRESS,
+                            )
                         )
-                    ).first()
+                        .first()
+                    )
 
-                    next_pending_stages = db.query(RolloutStage).filter(
-                        and_(
-                            RolloutStage.rollout_schedule_id == schedule.id,
-                            RolloutStage.status == RolloutStageStatus.PENDING
+                    next_pending_stages = (
+                        db.query(RolloutStage)
+                        .filter(
+                            and_(
+                                RolloutStage.rollout_schedule_id == schedule.id,
+                                RolloutStage.status == RolloutStageStatus.PENDING,
+                            )
                         )
-                    ).order_by(RolloutStage.stage_order).all()
+                        .order_by(RolloutStage.stage_order)
+                        .all()
+                    )
 
                     # If there's no active stage, activate the first pending stage if it's eligible
                     if not current_active_stage and next_pending_stages:
                         next_stage = next_pending_stages[0]
-                        if self._is_stage_eligible_for_activation(next_stage, current_time):
+                        if self._is_stage_eligible_for_activation(
+                            next_stage, current_time
+                        ):
                             # Activate the stage
-                            was_updated = await self._activate_stage(db, schedule, next_stage, current_time)
+                            was_updated = await self._activate_stage(
+                                db, schedule, next_stage, current_time
+                            )
                             if was_updated:
                                 stages_processed += 1
                                 schedules_updated += 1
@@ -182,7 +201,9 @@ class RolloutScheduler:
                                 next_stage_index = i
                                 break
 
-                        if self._is_stage_eligible_for_completion(current_active_stage, current_time):
+                        if self._is_stage_eligible_for_completion(
+                            current_active_stage, current_time
+                        ):
                             # Complete the current stage
                             current_active_stage.status = RolloutStageStatus.COMPLETED
                             current_active_stage.completed_date = current_time
@@ -190,14 +211,18 @@ class RolloutScheduler:
                             db.add(current_active_stage)
 
                             # If there are more stages, activate the next one if eligible
-                            if next_pending_stages and next_stage_index < len(next_pending_stages):
+                            if next_pending_stages and next_stage_index < len(
+                                next_pending_stages
+                            ):
                                 next_stage = next_pending_stages[next_stage_index]
 
                                 # Check minimum duration between stages
                                 min_duration_hours = schedule.min_stage_duration or 0
                                 if min_duration_hours > 0:
                                     min_duration = timedelta(hours=min_duration_hours)
-                                    stage_updated_at = _as_utc(current_active_stage.updated_at)
+                                    stage_updated_at = _as_utc(
+                                        current_active_stage.updated_at
+                                    )
                                     if current_time - stage_updated_at < min_duration:
                                         logger.info(
                                             f"Minimum duration not met for next stage in schedule {schedule.id}. "
@@ -208,8 +233,12 @@ class RolloutScheduler:
                                 # Activate the next stage — but only once its own trigger
                                 # allows it (a TIME_BASED stage with a future start_date
                                 # stays PENDING and is picked up by a later run).
-                                if self._is_stage_eligible_for_activation(next_stage, current_time):
-                                    was_updated = await self._activate_stage(db, schedule, next_stage, current_time)
+                                if self._is_stage_eligible_for_activation(
+                                    next_stage, current_time
+                                ):
+                                    was_updated = await self._activate_stage(
+                                        db, schedule, next_stage, current_time
+                                    )
                                     if was_updated:
                                         stages_processed += 1
                                 else:
@@ -229,17 +258,21 @@ class RolloutScheduler:
 
                 except Exception as e:
                     failed_count += 1
-                    logger.error(f"Error processing rollout schedule {schedule.id}: {str(e)}")
+                    logger.error(
+                        f"Error processing rollout schedule {schedule.id}: {e!s}"
+                    )
                     # Continue with next schedule
 
             if schedules_updated > 0:
-                logger.info(f"Updated {schedules_updated} rollout schedules with {stages_processed} stage transitions")
+                logger.info(
+                    f"Updated {schedules_updated} rollout schedules with {stages_processed} stage transitions"
+                )
             else:
                 logger.info("No rollout schedules required updates")
 
         except Exception as e:
             failed_count += 1
-            logger.error(f"Error processing rollout schedules: {str(e)}")
+            logger.error(f"Error processing rollout schedules: {e!s}")
         finally:
             db.close()
 
@@ -249,7 +282,9 @@ class RolloutScheduler:
             "metadata": {"stage_transitions": stages_processed},
         }
 
-    def _is_stage_eligible_for_activation(self, stage: RolloutStage, current_time: datetime) -> bool:
+    def _is_stage_eligible_for_activation(
+        self, stage: RolloutStage, current_time: datetime
+    ) -> bool:
         """
         Check if a stage is eligible for activation based on its trigger.
 
@@ -275,7 +310,9 @@ class RolloutScheduler:
             # For metric-based triggers, this would check if metrics meet criteria
             # This requires integration with a metrics system and is more complex
             # For now, return False as this is not implemented
-            logger.info(f"Metric-based activation for stage {stage.id} not yet implemented")
+            logger.info(
+                f"Metric-based activation for stage {stage.id} not yet implemented"
+            )
             return False
 
         elif stage.trigger_type == TriggerType.MANUAL:
@@ -284,7 +321,9 @@ class RolloutScheduler:
 
         return False
 
-    def _is_stage_eligible_for_completion(self, stage: RolloutStage, current_time: datetime) -> bool:
+    def _is_stage_eligible_for_completion(
+        self, stage: RolloutStage, current_time: datetime
+    ) -> bool:
         """
         Check if a stage is eligible for completion based on its criteria.
 
@@ -313,7 +352,9 @@ class RolloutScheduler:
 
         elif stage.trigger_type == TriggerType.METRIC_BASED:
             # Similar to activation, this would check metrics
-            logger.info(f"Metric-based completion for stage {stage.id} not yet implemented")
+            logger.info(
+                f"Metric-based completion for stage {stage.id} not yet implemented"
+            )
             return False
 
         elif stage.trigger_type == TriggerType.MANUAL:
@@ -322,7 +363,13 @@ class RolloutScheduler:
 
         return False
 
-    async def _activate_stage(self, db: Session, schedule: RolloutSchedule, stage: RolloutStage, current_time: datetime) -> bool:
+    async def _activate_stage(
+        self,
+        db: Session,
+        schedule: RolloutSchedule,
+        stage: RolloutStage,
+        current_time: datetime,
+    ) -> bool:
         """
         Activate a rollout stage and update the feature flag.
 
@@ -342,12 +389,17 @@ class RolloutScheduler:
             db.add(stage)
 
             # Update the feature flag's rollout percentage
-            feature_flag = db.query(FeatureFlag).filter(
-                FeatureFlag.id == schedule.feature_flag_id
-            ).with_for_update().first()
+            feature_flag = (
+                db.query(FeatureFlag)
+                .filter(FeatureFlag.id == schedule.feature_flag_id)
+                .with_for_update()
+                .first()
+            )
 
             if not feature_flag:
-                logger.error(f"Feature flag {schedule.feature_flag_id} not found for rollout schedule {schedule.id}")
+                logger.error(
+                    f"Feature flag {schedule.feature_flag_id} not found for rollout schedule {schedule.id}"
+                )
                 return False
 
             feature_flag.rollout_percentage = stage.target_percentage
@@ -373,8 +425,9 @@ class RolloutScheduler:
 
         except Exception as e:
             db.rollback()
-            logger.error(f"Error activating stage {stage.id}: {str(e)}")
+            logger.error(f"Error activating stage {stage.id}: {e!s}")
             return False
+
 
 # Create a singleton instance of the scheduler
 rollout_scheduler = RolloutScheduler()

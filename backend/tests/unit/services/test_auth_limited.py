@@ -1,6 +1,7 @@
 # backend/tests/unit/services/test_auth_limited.py
-import pytest
 import uuid
+
+import pytest
 
 from backend.app.models.experiment import (
     Experiment,
@@ -60,14 +61,14 @@ def test_experiment_metric_relationship():
         assert experiment.metrics[0].name == "Conversion Rate"
         assert experiment.metrics[1].name == "Revenue"
     elif hasattr(experiment, "metric_definitions"):
-        assert (
-            len(experiment.metric_definitions) == 2
-        ), "Experiment should have 2 metrics"
+        assert len(experiment.metric_definitions) == 2, (
+            "Experiment should have 2 metrics"
+        )
         assert experiment.metric_definitions[0].name == "Conversion Rate"
         assert experiment.metric_definitions[1].name == "Revenue"
 
     # Check metrics -> experiment relationship (via experiment_id)
     for metric in metrics_list:
-        assert (
-            metric.experiment_id == experiment_id
-        ), "Metric should reference the experiment"
+        assert metric.experiment_id == experiment_id, (
+            "Metric should reference the experiment"
+        )

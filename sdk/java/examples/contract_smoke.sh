@@ -25,7 +25,7 @@ needs_build() {
 }
 
 if needs_build; then
-    mvn -q -pl core -am package -DskipTests 1>&2
+    ./mvnw -q -B -pl core -am package -DskipTests 1>&2
 fi
 
 exec java -cp "core/target/classes:core/target/lib/*" \

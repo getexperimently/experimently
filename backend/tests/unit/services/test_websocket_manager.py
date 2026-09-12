@@ -13,12 +13,11 @@ Tests cover:
 
 import asyncio
 import json
-
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from backend.app.services.websocket_manager import ConnectionManager
+import pytest
 
+from backend.app.services.websocket_manager import ConnectionManager
 
 # ---------------------------------------------------------------------------
 # Helpers

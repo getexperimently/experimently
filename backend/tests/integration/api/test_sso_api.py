@@ -15,6 +15,7 @@ Tests the full HTTP request/response cycle for:
 All tests use the conftest.py role-specific client fixtures from
 backend/tests/integration/conftest.py.
 """
+
 from __future__ import annotations
 
 import base64
@@ -28,7 +29,6 @@ from sqlalchemy.orm import Session
 
 from backend.app.models.sso_config import SSOConfig, SSOProviderType
 from backend.app.models.user import User, UserRole
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -229,11 +229,16 @@ class TestGetSSOConfig:
         assert resp.status_code == 200
         assert resp.json()["id"] == created["id"]
 
-    def test_developer_gets_403(self, developer_client: TestClient, db_session: Session):
+    def test_developer_gets_403(
+        self, developer_client: TestClient, db_session: Session
+    ):
         # Create config directly in DB so we don't need admin_client (which would
         # overwrite the global dependency overrides and confuse developer_client).
-        from backend.app.models.sso_config import SSOConfig, SSOProviderType as PT
         import uuid as _uuid
+
+        from backend.app.models.sso_config import SSOConfig
+        from backend.app.models.sso_config import SSOProviderType as PT
+
         cfg = SSOConfig(
             org_name="Dev Test Org",
             org_domain=f"devtest-{_uuid.uuid4().hex[:6]}.com",
@@ -279,9 +284,14 @@ class TestUpdateSSOConfig:
         assert resp.status_code == 200, resp.text
         assert resp.json()["org_name"] == "Updated Org Name"
 
-    def test_developer_cannot_update(self, developer_client: TestClient, db_session: Session):
-        from backend.app.models.sso_config import SSOConfig, SSOProviderType as PT
+    def test_developer_cannot_update(
+        self, developer_client: TestClient, db_session: Session
+    ):
         import uuid as _uuid
+
+        from backend.app.models.sso_config import SSOConfig
+        from backend.app.models.sso_config import SSOProviderType as PT
+
         cfg = SSOConfig(
             org_name="Dev Update Test Org",
             org_domain=f"devupdate-{_uuid.uuid4().hex[:6]}.com",
@@ -358,9 +368,14 @@ class TestDeleteSSOConfig:
         resp = admin_client.get(f"{BASE}/configs/{created['id']}")
         assert resp.status_code == 404
 
-    def test_developer_cannot_delete(self, developer_client: TestClient, db_session: Session):
-        from backend.app.models.sso_config import SSOConfig, SSOProviderType as PT
+    def test_developer_cannot_delete(
+        self, developer_client: TestClient, db_session: Session
+    ):
         import uuid as _uuid
+
+        from backend.app.models.sso_config import SSOConfig
+        from backend.app.models.sso_config import SSOProviderType as PT
+
         cfg = SSOConfig(
             org_name="Dev Delete Test Org",
             org_domain=f"devdelete-{_uuid.uuid4().hex[:6]}.com",
@@ -606,20 +621,23 @@ class TestOIDCCallback:
         payload = _google_config_payload()
         _create_config(admin_client, payload)
 
-        with patch(
-            "backend.app.services.sso_service.exchange_oidc_code",
-            new_callable=AsyncMock,
-            return_value={"access_token": "google-at"},
-        ), patch(
-            "backend.app.services.sso_service.get_oidc_user_info",
-            new_callable=AsyncMock,
-            return_value={
-                "email": "alice@acme.com",
-                "name": "Alice",
-                "sub": "google-sub-123",
-                "groups": [],
-                "raw": {},
-            },
+        with (
+            patch(
+                "backend.app.services.sso_service.exchange_oidc_code",
+                new_callable=AsyncMock,
+                return_value={"access_token": "google-at"},
+            ),
+            patch(
+                "backend.app.services.sso_service.get_oidc_user_info",
+                new_callable=AsyncMock,
+                return_value={
+                    "email": "alice@acme.com",
+                    "name": "Alice",
+                    "sub": "google-sub-123",
+                    "groups": [],
+                    "raw": {},
+                },
+            ),
         ):
             resp = admin_client.get(
                 f"{BASE}/oidc/google/callback",
@@ -648,14 +666,22 @@ class TestOIDCCallback:
         assert resp.status_code == 400
 
     def test_callback_unknown_provider_returns_404(self, admin_client: TestClient):
-        with patch(
-            "backend.app.services.sso_service.exchange_oidc_code",
-            new_callable=AsyncMock,
-            return_value={"access_token": "token"},
-        ), patch(
-            "backend.app.services.sso_service.get_oidc_user_info",
-            new_callable=AsyncMock,
-            return_value={"email": "alice@acme.com", "sub": "123", "groups": [], "raw": {}},
+        with (
+            patch(
+                "backend.app.services.sso_service.exchange_oidc_code",
+                new_callable=AsyncMock,
+                return_value={"access_token": "token"},
+            ),
+            patch(
+                "backend.app.services.sso_service.get_oidc_user_info",
+                new_callable=AsyncMock,
+                return_value={
+                    "email": "alice@acme.com",
+                    "sub": "123",
+                    "groups": [],
+                    "raw": {},
+                },
+            ),
         ):
             resp = admin_client.get(
                 f"{BASE}/oidc/nonexistent/callback",
@@ -667,20 +693,23 @@ class TestOIDCCallback:
         payload = _google_config_payload()
         _create_config(admin_client, payload)
 
-        with patch(
-            "backend.app.services.sso_service.exchange_oidc_code",
-            new_callable=AsyncMock,
-            return_value={"access_token": "google-at"},
-        ), patch(
-            "backend.app.services.sso_service.get_oidc_user_info",
-            new_callable=AsyncMock,
-            return_value={
-                "email": "bob@acme.com",
-                "name": "Bob",
-                "sub": "sub-456",
-                "groups": [],
-                "raw": {},
-            },
+        with (
+            patch(
+                "backend.app.services.sso_service.exchange_oidc_code",
+                new_callable=AsyncMock,
+                return_value={"access_token": "google-at"},
+            ),
+            patch(
+                "backend.app.services.sso_service.get_oidc_user_info",
+                new_callable=AsyncMock,
+                return_value={
+                    "email": "bob@acme.com",
+                    "name": "Bob",
+                    "sub": "sub-456",
+                    "groups": [],
+                    "raw": {},
+                },
+            ),
         ):
             resp = admin_client.get(
                 f"{BASE}/oidc/google/callback",
@@ -696,20 +725,23 @@ class TestOIDCCallback:
         payload = _google_config_payload()
         _create_config(admin_client, payload)
 
-        with patch(
-            "backend.app.services.sso_service.exchange_oidc_code",
-            new_callable=AsyncMock,
-            return_value={"access_token": "google-at"},
-        ), patch(
-            "backend.app.services.sso_service.get_oidc_user_info",
-            new_callable=AsyncMock,
-            return_value={
-                "email": f"role_user_{uuid.uuid4().hex[:4]}@acme.com",
-                "name": "Role User",
-                "sub": "sub-789",
-                "groups": [],
-                "raw": {},
-            },
+        with (
+            patch(
+                "backend.app.services.sso_service.exchange_oidc_code",
+                new_callable=AsyncMock,
+                return_value={"access_token": "google-at"},
+            ),
+            patch(
+                "backend.app.services.sso_service.get_oidc_user_info",
+                new_callable=AsyncMock,
+                return_value={
+                    "email": f"role_user_{uuid.uuid4().hex[:4]}@acme.com",
+                    "name": "Role User",
+                    "sub": "sub-789",
+                    "groups": [],
+                    "raw": {},
+                },
+            ),
         ):
             resp = admin_client.get(
                 f"{BASE}/oidc/google/callback",

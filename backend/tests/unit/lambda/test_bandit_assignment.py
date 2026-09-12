@@ -23,6 +23,7 @@ _lambda_dir = Path(__file__).resolve().parents[3] / "lambda"
 sys.path.insert(0, str(_lambda_dir / "shared"))
 sys.path.insert(0, str(_lambda_dir / "assignment"))
 
+from assignment_service import AssignmentService
 from consistent_hash import ConsistentHasher
 from models import (
     BanditWeightsConfig,
@@ -32,12 +33,11 @@ from models import (
     MutualExclusionGroupConfig,
     VariantConfig,
 )
-from assignment_service import AssignmentService
-
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_experiment(
     experiment_id: str = "exp_001",
@@ -82,6 +82,7 @@ def _make_service() -> AssignmentService:
 # ===========================================================================
 # Tests
 # ===========================================================================
+
 
 class TestBanditWeightsConfig:
     """Tests for the BanditWeightsConfig Pydantic model."""
@@ -131,7 +132,9 @@ class TestGetBanditWeights:
         mock_dynamodb.Table.return_value = mock_table
 
         with patch("assignment_service.get_env_variable", return_value="bandit-table"):
-            with patch("assignment_service.get_dynamodb_resource", return_value=mock_dynamodb):
+            with patch(
+                "assignment_service.get_dynamodb_resource", return_value=mock_dynamodb
+            ):
                 result = service.get_bandit_weights("exp_001")
 
         assert isinstance(result, BanditWeightsConfig)
@@ -150,7 +153,9 @@ class TestGetBanditWeights:
         mock_dynamodb.Table.return_value = mock_table
 
         with patch("assignment_service.get_env_variable", return_value="bandit-table"):
-            with patch("assignment_service.get_dynamodb_resource", return_value=mock_dynamodb):
+            with patch(
+                "assignment_service.get_dynamodb_resource", return_value=mock_dynamodb
+            ):
                 result = service.get_bandit_weights("exp_999")
 
         assert result is None
@@ -163,7 +168,10 @@ class TestGetBanditWeights:
         service = _make_service()
 
         with patch("assignment_service.get_env_variable", return_value="bandit-table"):
-            with patch("assignment_service.get_dynamodb_resource", side_effect=Exception("DynamoDB error")):
+            with patch(
+                "assignment_service.get_dynamodb_resource",
+                side_effect=Exception("DynamoDB error"),
+            ):
                 result = service.get_bandit_weights("exp_001")
 
         assert result is None
@@ -291,7 +299,9 @@ class TestAssignVariantMAB:
         exp = _make_experiment()
         weights = _make_bandit_weights({"control": 0.1, "treatment": 0.9})
 
-        with patch.object(service, "get_weighted_variant", wraps=service.get_weighted_variant) as mock_weighted:
+        with patch.object(
+            service, "get_weighted_variant", wraps=service.get_weighted_variant
+        ) as mock_weighted:
             service.assign_variant_mab("user_001", exp, bandit_weights=weights)
 
         mock_weighted.assert_called_once_with("user_001", exp, weights)
@@ -330,6 +340,7 @@ class TestAssignVariantMAB:
 
         # Brute-force: find a user whose bucket < 20
         from consistent_hash import ConsistentHasher
+
         hasher = ConsistentHasher()
         user_id_in_holdout = None
         for i in range(1000):
@@ -339,7 +350,9 @@ class TestAssignVariantMAB:
                 user_id_in_holdout = uid
                 break
 
-        assert user_id_in_holdout is not None, "Could not find a user in the holdout bucket"
+        assert user_id_in_holdout is not None, (
+            "Could not find a user in the holdout bucket"
+        )
 
         result = service.assign_variant_mab(
             user_id_in_holdout, exp, holdout_config=holdout, bandit_weights=weights
@@ -367,11 +380,13 @@ class TestAssignVariantMAB:
         service = _make_service()
 
         mock_table = MagicMock()
-        mock_table.get_item.return_value = {"Item": {
-            "experiment_id": "exp_001",
-            "algorithm": "thompson_sampling",
-            "weights": {"control": "0.5", "treatment": "0.5"},
-        }}
+        mock_table.get_item.return_value = {
+            "Item": {
+                "experiment_id": "exp_001",
+                "algorithm": "thompson_sampling",
+                "weights": {"control": "0.5", "treatment": "0.5"},
+            }
+        }
         mock_dynamodb = MagicMock()
         mock_dynamodb.Table.return_value = mock_table
 
@@ -382,7 +397,9 @@ class TestAssignVariantMAB:
             return "my-bandit-weights-table"
 
         with patch("assignment_service.get_env_variable", side_effect=capture_env):
-            with patch("assignment_service.get_dynamodb_resource", return_value=mock_dynamodb):
+            with patch(
+                "assignment_service.get_dynamodb_resource", return_value=mock_dynamodb
+            ):
                 service.get_bandit_weights("exp_001")
 
         assert "BANDIT_WEIGHTS_TABLE" in table_calls

@@ -5,6 +5,7 @@ The scheduler must roll an unhealthy flag back to the percentage configured
 in the flag's safety config (``rollback_percentage``) rather than always to 0,
 and must read its cadence from ``settings.SAFETY_CHECK_INTERVAL_MINUTES``.
 """
+
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -62,9 +63,10 @@ def _unhealthy_scheduler_env(
 async def test_rollback_uses_config_rollback_percentage():
     db, service, flag = _unhealthy_scheduler_env(rollback_percentage=5)
 
-    with patch(
-        "backend.app.core.safety_scheduler.SessionLocal", return_value=db
-    ), patch("backend.app.core.safety_scheduler.SafetyService", return_value=service):
+    with (
+        patch("backend.app.core.safety_scheduler.SessionLocal", return_value=db),
+        patch("backend.app.core.safety_scheduler.SafetyService", return_value=service),
+    ):
         scheduler = SafetyScheduler()
         scheduler._notification_service = MagicMock()
         await scheduler.check_feature_flags_safety()
@@ -89,9 +91,10 @@ async def test_rollback_uses_config_rollback_percentage():
 async def test_rollback_defaults_to_zero_when_config_has_no_percentage():
     db, service, _ = _unhealthy_scheduler_env(rollback_percentage=None)
 
-    with patch(
-        "backend.app.core.safety_scheduler.SessionLocal", return_value=db
-    ), patch("backend.app.core.safety_scheduler.SafetyService", return_value=service):
+    with (
+        patch("backend.app.core.safety_scheduler.SessionLocal", return_value=db),
+        patch("backend.app.core.safety_scheduler.SafetyService", return_value=service),
+    ):
         scheduler = SafetyScheduler()
         scheduler._notification_service = MagicMock()
         await scheduler.check_feature_flags_safety()
@@ -105,9 +108,10 @@ async def test_no_rollback_when_automatic_rollbacks_disabled():
         rollback_percentage=5, enable_automatic_rollbacks=False
     )
 
-    with patch(
-        "backend.app.core.safety_scheduler.SessionLocal", return_value=db
-    ), patch("backend.app.core.safety_scheduler.SafetyService", return_value=service):
+    with (
+        patch("backend.app.core.safety_scheduler.SessionLocal", return_value=db),
+        patch("backend.app.core.safety_scheduler.SafetyService", return_value=service),
+    ):
         scheduler = SafetyScheduler()
         scheduler._notification_service = MagicMock()
         await scheduler.check_feature_flags_safety()
@@ -119,9 +123,10 @@ async def test_no_rollback_when_automatic_rollbacks_disabled():
 async def test_no_rollback_when_healthy():
     db, service, _ = _unhealthy_scheduler_env(rollback_percentage=5, is_healthy=True)
 
-    with patch(
-        "backend.app.core.safety_scheduler.SessionLocal", return_value=db
-    ), patch("backend.app.core.safety_scheduler.SafetyService", return_value=service):
+    with (
+        patch("backend.app.core.safety_scheduler.SessionLocal", return_value=db),
+        patch("backend.app.core.safety_scheduler.SafetyService", return_value=service),
+    ):
         scheduler = SafetyScheduler()
         await scheduler.check_feature_flags_safety()
 
@@ -180,9 +185,10 @@ async def test_no_repeat_rollback_when_flag_is_already_at_target():
     db, service, flag = _unhealthy_scheduler_env(rollback_percentage=5)
     flag.rollout_percentage = 5
 
-    with patch(
-        "backend.app.core.safety_scheduler.SessionLocal", return_value=db
-    ), patch("backend.app.core.safety_scheduler.SafetyService", return_value=service):
+    with (
+        patch("backend.app.core.safety_scheduler.SessionLocal", return_value=db),
+        patch("backend.app.core.safety_scheduler.SafetyService", return_value=service),
+    ):
         scheduler = SafetyScheduler()
         scheduler._notification_service = MagicMock()
         await scheduler.check_feature_flags_safety()

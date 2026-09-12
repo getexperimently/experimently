@@ -13,11 +13,12 @@ Endpoint coverage:
 """
 
 import uuid
-import pytest
 from unittest.mock import MagicMock
 
-from backend.app.main import app
+import pytest
+
 from backend.app.api.v1.endpoints.realtime_counters import get_counter_service
+from backend.app.main import app
 from backend.app.schemas.realtime_counters import (
     BulkIncrementResponse,
     CounterType,
@@ -25,7 +26,6 @@ from backend.app.schemas.realtime_counters import (
     IncrementResponse,
     VariantCounters,
 )
-
 
 # ---------------------------------------------------------------------------
 # Mock factory helpers
@@ -68,8 +68,12 @@ def _make_experiment_counters(
             variants=[],
         )
     variants = [
-        _make_variant_counters(_TEST_VARIANT_A, assignments=200, events=100, conversions=30),
-        _make_variant_counters(_TEST_VARIANT_B, assignments=195, events=95, conversions=40),
+        _make_variant_counters(
+            _TEST_VARIANT_A, assignments=200, events=100, conversions=30
+        ),
+        _make_variant_counters(
+            _TEST_VARIANT_B, assignments=195, events=95, conversions=40
+        ),
     ]
     return ExperimentCounters(
         experiment_id=experiment_id,
@@ -132,6 +136,7 @@ def _mock_counter_service(
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def counter_mock():
     """Provide a mock DynamoDB counter service and clean up overrides after test."""
@@ -154,23 +159,30 @@ def counter_mock_no_data():
 # GET /api/v1/counters/{experiment_id}
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.integration
 class TestGetCounters:
     """GET /api/v1/counters/{experiment_id}"""
 
-    def test_get_counters_returns_200_when_data_exists(self, admin_client, counter_mock):
+    def test_get_counters_returns_200_when_data_exists(
+        self, admin_client, counter_mock
+    ):
         """Admin can GET counters — returns 200 with ExperimentCounters data."""
         response = admin_client.get(f"/api/v1/counters/{_TEST_EXP_ID}")
         assert response.status_code == 200, response.text
 
-    def test_get_counters_response_contains_experiment_id(self, admin_client, counter_mock):
+    def test_get_counters_response_contains_experiment_id(
+        self, admin_client, counter_mock
+    ):
         """Response body contains the correct experiment_id."""
         response = admin_client.get(f"/api/v1/counters/{_TEST_EXP_ID}")
         assert response.status_code == 200, response.text
         data = response.json()
         assert data["experiment_id"] == _TEST_EXP_ID
 
-    def test_get_counters_response_contains_variant_list(self, admin_client, counter_mock):
+    def test_get_counters_response_contains_variant_list(
+        self, admin_client, counter_mock
+    ):
         """Response body includes a list of variant counters."""
         response = admin_client.get(f"/api/v1/counters/{_TEST_EXP_ID}")
         assert response.status_code == 200, response.text
@@ -219,7 +231,9 @@ class TestGetCounters:
         assert "conversions" in first
         assert "conversion_rate" in first
 
-    def test_service_called_with_correct_experiment_id(self, admin_client, counter_mock):
+    def test_service_called_with_correct_experiment_id(
+        self, admin_client, counter_mock
+    ):
         """The service is called with the experiment_id from the path parameter."""
         custom_exp_id = "custom-experiment-xyz"
         # Override mock to handle this specific experiment_id
@@ -234,6 +248,7 @@ class TestGetCounters:
 # ---------------------------------------------------------------------------
 # POST /api/v1/counters/{experiment_id}/increment
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.integration
 class TestIncrementCounter:
@@ -252,7 +267,9 @@ class TestIncrementCounter:
         )
         assert response.status_code == 200, response.text
 
-    def test_increment_counter_response_contains_new_value(self, admin_client, counter_mock):
+    def test_increment_counter_response_contains_new_value(
+        self, admin_client, counter_mock
+    ):
         """Increment response includes new_value field."""
         payload = {
             "experiment_id": _TEST_EXP_ID,
@@ -268,7 +285,9 @@ class TestIncrementCounter:
         assert "new_value" in data
         assert data["new_value"] == 101
 
-    def test_increment_counter_response_echoes_identifiers(self, admin_client, counter_mock):
+    def test_increment_counter_response_echoes_identifiers(
+        self, admin_client, counter_mock
+    ):
         """Increment response echoes experiment_id, variant_id, counter_type."""
         payload = {
             "experiment_id": _TEST_EXP_ID,
@@ -378,7 +397,9 @@ class TestIncrementCounter:
         )
         assert response.status_code == 200, response.text
 
-    def test_service_increment_called_with_correct_args(self, admin_client, counter_mock):
+    def test_service_increment_called_with_correct_args(
+        self, admin_client, counter_mock
+    ):
         """Verify the service method is called with the correct arguments."""
         payload = {
             "experiment_id": _TEST_EXP_ID,
@@ -399,6 +420,7 @@ class TestIncrementCounter:
 # ---------------------------------------------------------------------------
 # POST /api/v1/counters/{experiment_id}/bulk
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.integration
 class TestBulkIncrement:
@@ -479,7 +501,9 @@ class TestBulkIncrement:
         )
         assert response.status_code == 200, response.text
 
-    def test_bulk_increment_too_many_items_returns_422(self, admin_client, counter_mock):
+    def test_bulk_increment_too_many_items_returns_422(
+        self, admin_client, counter_mock
+    ):
         """More than 100 items in bulk request fails validation — returns 422."""
         increments = [
             {
@@ -508,9 +532,7 @@ class TestBulkIncrement:
         self, admin_client, counter_mock
     ):
         """Missing increments field returns 422."""
-        response = admin_client.post(
-            f"/api/v1/counters/{_TEST_EXP_ID}/bulk", json={}
-        )
+        response = admin_client.post(f"/api/v1/counters/{_TEST_EXP_ID}/bulk", json={})
         assert response.status_code == 422, response.text
 
     def test_bulk_service_called_with_increment_list(self, admin_client, counter_mock):
@@ -549,6 +571,7 @@ class TestBulkIncrement:
 # ---------------------------------------------------------------------------
 # POST /api/v1/counters/{experiment_id}/reset
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.integration
 class TestResetCounters:

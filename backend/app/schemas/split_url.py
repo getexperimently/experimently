@@ -4,9 +4,10 @@ Pydantic schemas for Split URL Testing — EP-036 Batch 1.
 Defines the data structures for split URL experiment configuration,
 including URL variants, traffic allocation, and cookie settings.
 """
+
 from typing import List, Optional
 
-from pydantic import BaseModel, field_validator, model_validator, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 
 class SplitUrlVariant(BaseModel):
@@ -31,7 +32,9 @@ class SplitUrlConfig(BaseModel):
     variants: List[SplitUrlVariant]
     cookie_name: Optional[str] = None  # Auto-generated from experiment_key if not set
     cookie_ttl_days: int = 30
-    canonical_url: Optional[str] = None  # Injected as <link rel="canonical"> in served page
+    canonical_url: Optional[str] = (
+        None  # Injected as <link rel="canonical"> in served page
+    )
 
     @field_validator("variants")
     @classmethod
@@ -46,7 +49,5 @@ class SplitUrlConfig(BaseModel):
         """Ensure traffic allocations sum to 100 (within floating-point tolerance)."""
         total = sum(v.traffic_allocation for v in self.variants)
         if abs(total - 100.0) > 0.01:
-            raise ValueError(
-                f"Traffic allocations must sum to 100, got {total}"
-            )
+            raise ValueError(f"Traffic allocations must sum to 100, got {total}")
         return self

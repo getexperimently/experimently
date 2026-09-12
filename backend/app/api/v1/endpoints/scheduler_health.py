@@ -11,19 +11,19 @@ Provides:
 from datetime import datetime, timezone
 from typing import Any, List
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from backend.app.api.deps import get_current_active_user, get_current_superuser, get_db
 from backend.app.models.user import User
 from backend.app.schemas.scheduler import (
+    NotificationEvent,
+    SchedulerHealthResponse,
     SchedulerName,
     SchedulerRunRecord,
-    SchedulerHealthResponse,
-    NotificationEvent,
 )
-from backend.app.services.scheduler_health_service import SchedulerHealthService
 from backend.app.services.notification_service import NotificationService
+from backend.app.services.scheduler_health_service import SchedulerHealthService
 
 router = APIRouter()
 

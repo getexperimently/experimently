@@ -1,15 +1,20 @@
 """Unit tests for RBACService — all using MagicMock DB."""
-import pytest
+
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
-from datetime import datetime, timezone, timedelta
 
+import pytest
+
+from backend.app.models.user import UserRole
 from backend.app.schemas.rbac import (
-    CustomRoleCreate, CustomRoleUpdate, PermissionGrant,
-    PermissionAction, PermissionResource,
+    CustomRoleCreate,
+    CustomRoleUpdate,
+    PermissionAction,
+    PermissionGrant,
+    PermissionResource,
 )
 from backend.app.services.rbac_service import RBACService
-from backend.app.models.user import UserRole
 
 
 class TestCreateCustomRole:
@@ -31,7 +36,11 @@ class TestCreateCustomRole:
     def test_persists_permissions(self):
         db = MagicMock()
         db.query.return_value.filter.return_value.first.return_value = None
-        perms = [PermissionGrant(resource=PermissionResource.EXPERIMENT, actions=[PermissionAction.READ])]
+        perms = [
+            PermissionGrant(
+                resource=PermissionResource.EXPERIMENT, actions=[PermissionAction.READ]
+            )
+        ]
         data = CustomRoleCreate(name="readonly-experiments", permissions=perms)
         RBACService.create_custom_role(db, data, uuid4())
         added = db.add.call_args[0][0]
@@ -46,7 +55,9 @@ class TestUpdateCustomRole:
         mock_role.is_system_role = True
         db.query.return_value.filter.return_value.first.return_value = mock_role
         with pytest.raises(ValueError, match="Cannot modify system roles"):
-            RBACService.update_custom_role(db, "admin", CustomRoleUpdate(description="new"))
+            RBACService.update_custom_role(
+                db, "admin", CustomRoleUpdate(description="new")
+            )
 
     def test_raises_if_not_found(self):
         db = MagicMock()
@@ -59,7 +70,9 @@ class TestUpdateCustomRole:
         mock_role = MagicMock()
         mock_role.is_system_role = False
         db.query.return_value.filter.return_value.first.return_value = mock_role
-        RBACService.update_custom_role(db, "myrole", CustomRoleUpdate(description="updated"))
+        RBACService.update_custom_role(
+            db, "myrole", CustomRoleUpdate(description="updated")
+        )
         assert mock_role.description == "updated"
 
 
@@ -95,7 +108,10 @@ class TestAssignRevoke:
         mock_role = MagicMock()
         mock_role.id = uuid4()
         mock_existing = MagicMock()
-        db.query.return_value.filter.return_value.first.side_effect = [mock_role, mock_existing]
+        db.query.return_value.filter.return_value.first.side_effect = [
+            mock_role,
+            mock_existing,
+        ]
         result = RBACService.assign_role(db, uuid4(), "myrole", uuid4())
         db.add.assert_not_called()
         assert result == mock_existing
@@ -149,7 +165,7 @@ class TestGetEffectivePermissions:
         mock_assignment.role.name = "exporter"
         db.query.return_value.filter.return_value.all.side_effect = [
             [mock_assignment],  # UserCustomRole query
-            [],                 # DirectPermissionGrant query
+            [],  # DirectPermissionGrant query
             [mock_assignment],  # second UserCustomRole query for names
         ]
         user = MagicMock()
@@ -167,9 +183,9 @@ class TestGetEffectivePermissions:
         expired_grant.resource = "report"
         expired_grant.actions = ["delete"]
         db.query.return_value.filter.return_value.all.side_effect = [
-            [],               # UserCustomRole
+            [],  # UserCustomRole
             [expired_grant],  # DirectPermissionGrant
-            [],               # for custom_role_names
+            [],  # for custom_role_names
         ]
         user = MagicMock()
         user.is_superuser = False
@@ -186,9 +202,9 @@ class TestGetEffectivePermissions:
         valid_grant.resource = "report"
         valid_grant.actions = ["create"]
         db.query.return_value.filter.return_value.all.side_effect = [
-            [],              # UserCustomRole
-            [valid_grant],   # DirectPermissionGrant
-            [],              # custom_role_names
+            [],  # UserCustomRole
+            [valid_grant],  # DirectPermissionGrant
+            [],  # custom_role_names
         ]
         user = MagicMock()
         user.is_superuser = False
@@ -208,7 +224,10 @@ class TestCheckEffectivePermission:
         user.id = uuid4()
         user.username = "su"
         user.role = UserRole.ADMIN
-        assert RBACService.check_effective_permission(db, user, "experiment", "delete") is True
+        assert (
+            RBACService.check_effective_permission(db, user, "experiment", "delete")
+            is True
+        )
 
     def test_viewer_cannot_create(self):
         db = MagicMock()
@@ -218,4 +237,7 @@ class TestCheckEffectivePermission:
         user.id = uuid4()
         user.username = "viewer"
         user.role = UserRole.VIEWER
-        assert RBACService.check_effective_permission(db, user, "experiment", "create") is False
+        assert (
+            RBACService.check_effective_permission(db, user, "experiment", "create")
+            is False
+        )

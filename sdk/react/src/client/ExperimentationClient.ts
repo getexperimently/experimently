@@ -215,7 +215,7 @@ export class ExperimentationClient {
     const cached = this.flags.get(user.userId, flagKey);
     if (cached) return cached;
 
-    return this.dedupe(`flag ${user.userId} ${flagKey}`, async () => {
+    return this.dedupe(`flag\u0000${user.userId}\u0000${flagKey}`, async () => {
       const path =
         `/api/v1/feature-flags/evaluate/${encodeURIComponent(flagKey)}` +
         `?user_id=${encodeURIComponent(user.userId)}` +
@@ -246,7 +246,7 @@ export class ExperimentationClient {
     const cached = this.assignments.get(user.userId, experimentKey);
     if (cached) return cached;
 
-    return this.dedupe(`assign ${user.userId} ${experimentKey}`, async () => {
+    return this.dedupe(`assign\u0000${user.userId}\u0000${experimentKey}`, async () => {
       const data = await this.requestJson<ExperimentAssignResponse>('/api/v1/tracking/assign', {
         method: 'POST',
         body: {

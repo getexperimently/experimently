@@ -11,15 +11,17 @@ all status transitions. They test the system as a whole, verifying that:
 Experiment status flow:
     DRAFT → ACTIVE → PAUSED → ACTIVE → COMPLETED
 """
-import uuid
-import pytest
-from datetime import datetime, timezone, timedelta
-from fastapi.testclient import TestClient
 
+import uuid
+from datetime import datetime, timedelta, timezone
+
+import pytest
+from fastapi.testclient import TestClient
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _create_experiment_payload(name: str = "E2E Lifecycle Test") -> dict:
     """Return a minimal valid ExperimentCreate payload for lifecycle tests."""
@@ -56,7 +58,9 @@ def _create_experiment_payload(name: str = "E2E Lifecycle Test") -> dict:
 
 def _create_experiment(client: TestClient, name: str = "Workflow Test") -> dict:
     """Create an experiment and assert success. Returns the experiment dict."""
-    response = client.post("/api/v1/experiments/", json=_create_experiment_payload(name))
+    response = client.post(
+        "/api/v1/experiments/", json=_create_experiment_payload(name)
+    )
     assert response.status_code == 201, f"Create failed: {response.text}"
     return response.json()
 
@@ -64,6 +68,7 @@ def _create_experiment(client: TestClient, name: str = "Workflow Test") -> dict:
 # ---------------------------------------------------------------------------
 # Full lifecycle workflow tests
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.integration
 @pytest.mark.requires_db
@@ -210,7 +215,9 @@ class TestExperimentSchedulingWorkflow:
         payload["end_date"] = future_end
 
         response = admin_client.post("/api/v1/experiments/", json=payload)
-        assert response.status_code == 201, f"Create with schedule failed: {response.text}"
+        assert response.status_code == 201, (
+            f"Create with schedule failed: {response.text}"
+        )
 
         data = response.json()
         assert data["status"] == "draft"

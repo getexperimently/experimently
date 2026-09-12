@@ -14,23 +14,23 @@ Coverage:
 - POST /api/v1/etl/crawler/run       — 202 for ADMIN, 403 for DEVELOPER
 """
 
-import pytest
 from unittest.mock import MagicMock
-from fastapi.testclient import TestClient
 from uuid import uuid4
 
-from backend.app.main import app
+import pytest
+from fastapi.testclient import TestClient
+
 from backend.app.api import deps
+from backend.app.main import app
 from backend.app.models.user import User, UserRole
 from backend.app.schemas.etl import (
+    AthenaQueryResult,
     ETLJobResponse,
     ETLJobType,
-    GlueJobStatus,
-    AthenaQueryResult,
-    PartitionInfo,
     GlueCrawlerStatus,
+    GlueJobStatus,
+    PartitionInfo,
 )
-
 
 # ---------------------------------------------------------------------------
 # User factories
@@ -86,7 +86,10 @@ def _mock_athena_result() -> AthenaQueryResult:
     return AthenaQueryResult(
         query_execution_id="qe-test-001",
         status="SUCCEEDED",
-        rows=[{"event_id": "e1", "event_type": "view"}, {"event_id": "e2", "event_type": "click"}],
+        rows=[
+            {"event_id": "e1", "event_type": "view"},
+            {"event_id": "e2", "event_type": "click"},
+        ],
         column_names=["event_id", "event_type"],
         rows_returned=2,
         execution_time_ms=450,
@@ -99,7 +102,12 @@ def _mock_partition_list() -> list:
         PartitionInfo(
             database="experimentation",
             table="raw_events",
-            partition_values={"year": "2024", "month": "01", "day": "15", "hour": f"{h:02d}"},
+            partition_values={
+                "year": "2024",
+                "month": "01",
+                "day": "15",
+                "hour": f"{h:02d}",
+            },
             location=f"s3://exp-data-bucket/raw/events/year=2024/month=01/day=15/hour={h:02d}/",
         )
         for h in range(24)

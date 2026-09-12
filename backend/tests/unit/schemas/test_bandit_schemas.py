@@ -12,16 +12,16 @@ import pytest
 from pydantic import ValidationError
 
 from backend.app.schemas.bandit import (
-    OptimizationType,
-    BanditVariantWeight,
     BanditStatusResponse,
     BanditUpdateRequest,
+    BanditVariantWeight,
+    OptimizationType,
 )
-
 
 # ===========================================================================
 # TestOptimizationType
 # ===========================================================================
+
 
 class TestOptimizationType:
     """Tests for the OptimizationType enum."""
@@ -51,6 +51,7 @@ class TestOptimizationType:
 # ===========================================================================
 # TestBanditVariantWeight
 # ===========================================================================
+
 
 class TestBanditVariantWeight:
     """Tests for BanditVariantWeight schema."""
@@ -92,11 +93,13 @@ class TestBanditVariantWeight:
 # TestBanditStatusResponse
 # ===========================================================================
 
+
 class TestBanditStatusResponse:
     """Tests for BanditStatusResponse schema."""
 
-    def _variant_weight(self, vid: str, weight: float, successes: int = 50,
-                        pulls: int = 100):
+    def _variant_weight(
+        self, vid: str, weight: float, successes: int = 50, pulls: int = 100
+    ):
         return BanditVariantWeight(
             variant_id=vid,
             variant_name=f"Variant {vid}",
@@ -170,7 +173,9 @@ class TestBanditStatusResponse:
         response = BanditStatusResponse(
             experiment_id="e3",
             algorithm=OptimizationType.UCB1,
-            current_weights=[self._variant_weight("v1", 1.0, successes=900, pulls=1000)],
+            current_weights=[
+                self._variant_weight("v1", 1.0, successes=900, pulls=1000)
+            ],
             total_pulls=1000,
             regret_reduction_pct=40.0,
             recommendation="DEPLOYING_Treatment",
@@ -183,8 +188,10 @@ class TestBanditStatusResponse:
         response = BanditStatusResponse(
             experiment_id="e4",
             algorithm=OptimizationType.FIXED,
-            current_weights=[self._variant_weight("v0", 0.5),
-                             self._variant_weight("v1", 0.5)],
+            current_weights=[
+                self._variant_weight("v0", 0.5),
+                self._variant_weight("v1", 0.5),
+            ],
             total_pulls=0,
             regret_reduction_pct=None,
             recommendation="EXPLORING",
@@ -197,6 +204,7 @@ class TestBanditStatusResponse:
 # ===========================================================================
 # TestBanditUpdateRequest
 # ===========================================================================
+
 
 class TestBanditUpdateRequest:
     """Tests for BanditUpdateRequest schema."""

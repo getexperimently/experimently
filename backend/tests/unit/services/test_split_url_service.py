@@ -8,22 +8,24 @@ Tests cover:
 - Consistent routing (same user → same URL)
 - Edge cases (boundary hashes, single-character keys)
 """
+
 import pytest
+
+from backend.app.schemas.split_url import SplitUrlConfig, SplitUrlVariant
 
 # ---------------------------------------------------------------------------
 # These imports will FAIL (red phase) until the implementation exists.
 # ---------------------------------------------------------------------------
 from backend.app.services.split_url_service import (
     get_cookie_name,
-    hash_user,
     get_url_variant,
+    hash_user,
 )
-from backend.app.schemas.split_url import SplitUrlConfig, SplitUrlVariant
-
 
 # ──────────────────────────────────────────────────────────────────────────
 # Helpers
 # ──────────────────────────────────────────────────────────────────────────
+
 
 def _make_variant(name: str, url: str, allocation: float) -> SplitUrlVariant:
     return SplitUrlVariant(name=name, url=url, traffic_allocation=allocation)
@@ -63,6 +65,7 @@ def _four_variant_config() -> SplitUrlConfig:
 # Cookie name generation
 # ──────────────────────────────────────────────────────────────────────────
 
+
 class TestGetCookieName:
     def test_basic_cookie_name(self):
         assert get_cookie_name("my_experiment") == "split_url_my_experiment"
@@ -88,6 +91,7 @@ class TestGetCookieName:
 # ──────────────────────────────────────────────────────────────────────────
 # User hashing
 # ──────────────────────────────────────────────────────────────────────────
+
 
 class TestHashUser:
     def test_hash_returns_float(self):
@@ -133,6 +137,7 @@ class TestHashUser:
 # URL variant selection — 2 variants
 # ──────────────────────────────────────────────────────────────────────────
 
+
 class TestGetUrlVariantTwoVariants:
     def test_returns_variant_object(self):
         config = _two_variant_config()
@@ -155,8 +160,7 @@ class TestGetUrlVariantTwoVariants:
         """With enough users, both variants should be assigned."""
         config = _two_variant_config()
         assigned_urls = {
-            get_url_variant(f"user_{i}", "exp_two", config).url
-            for i in range(100)
+            get_url_variant(f"user_{i}", "exp_two", config).url for i in range(100)
         }
         assert len(assigned_urls) == 2
 
@@ -174,6 +178,7 @@ class TestGetUrlVariantTwoVariants:
 # URL variant selection — 3 variants
 # ──────────────────────────────────────────────────────────────────────────
 
+
 class TestGetUrlVariantThreeVariants:
     def test_returns_valid_variant(self):
         config = _three_variant_config()
@@ -190,14 +195,14 @@ class TestGetUrlVariantThreeVariants:
     def test_all_three_variants_reachable(self):
         config = _three_variant_config()
         assigned = {
-            get_url_variant(f"user_{i}", "exp_three", config).url
-            for i in range(300)
+            get_url_variant(f"user_{i}", "exp_three", config).url for i in range(300)
         }
         assert len(assigned) == 3
 
     def test_traffic_split_approx_equal_three(self):
         config = _three_variant_config()
         from collections import Counter
+
         counts = Counter()
         for i in range(1500):
             url = get_url_variant(f"u{i}", "exp_3w", config).url
@@ -209,6 +214,7 @@ class TestGetUrlVariantThreeVariants:
 # ──────────────────────────────────────────────────────────────────────────
 # URL variant selection — 4 variants
 # ──────────────────────────────────────────────────────────────────────────
+
 
 class TestGetUrlVariantFourVariants:
     def test_returns_valid_variant(self):
@@ -226,14 +232,14 @@ class TestGetUrlVariantFourVariants:
     def test_all_four_variants_reachable(self):
         config = _four_variant_config()
         assigned = {
-            get_url_variant(f"user_{i}", "exp_four", config).url
-            for i in range(400)
+            get_url_variant(f"user_{i}", "exp_four", config).url for i in range(400)
         }
         assert len(assigned) == 4
 
     def test_traffic_split_approx_equal_four(self):
         config = _four_variant_config()
         from collections import Counter
+
         counts = Counter()
         for i in range(2000):
             url = get_url_variant(f"u{i}", "exp_4w", config).url
@@ -246,6 +252,7 @@ class TestGetUrlVariantFourVariants:
 # Skewed traffic allocation
 # ──────────────────────────────────────────────────────────────────────────
 
+
 class TestSkewedTrafficAllocation:
     def test_90_10_split(self):
         config = SplitUrlConfig(
@@ -255,6 +262,7 @@ class TestSkewedTrafficAllocation:
             ]
         )
         from collections import Counter
+
         counts = Counter()
         for i in range(1000):
             url = get_url_variant(f"u{i}", "exp_skew", config).url

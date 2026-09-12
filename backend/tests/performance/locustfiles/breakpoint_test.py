@@ -28,12 +28,13 @@ Usage (interactive web UI):
     locust -f breakpoint_test.py --host http://localhost:8000
     # Then open http://localhost:8089 in your browser
 """
+
 import os
 import random
 import uuid
 from typing import Any, Optional, Tuple
 
-from locust import HttpUser, task, between, LoadTestShape, events
+from locust import HttpUser, LoadTestShape, between, events, task
 from locust.env import Environment
 
 # ---------------------------------------------------------------------------

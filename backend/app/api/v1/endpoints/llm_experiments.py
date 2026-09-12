@@ -54,8 +54,12 @@ def _to_experiment_response(exp) -> LLMExperimentResponse:
         name=exp.name,
         description=exp.description or "",
         status=exp.status.value if hasattr(exp.status, "value") else str(exp.status),
-        task_type=exp.task_type.value if hasattr(exp.task_type, "value") else str(exp.task_type),
-        evaluation_metric=exp.evaluation_metric.value if hasattr(exp.evaluation_metric, "value") else str(exp.evaluation_metric),
+        task_type=exp.task_type.value
+        if hasattr(exp.task_type, "value")
+        else str(exp.task_type),
+        evaluation_metric=exp.evaluation_metric.value
+        if hasattr(exp.evaluation_metric, "value")
+        else str(exp.evaluation_metric),
         experiment_id=str(exp.experiment_id) if exp.experiment_id else None,
         created_by=str(exp.created_by) if exp.created_by else None,
         variants=[_to_variant_response(v) for v in (exp.variants or [])],
@@ -139,10 +143,14 @@ def get_llm_experiment(
 ):
     """Retrieve a single LLM experiment with all its variants."""
     if not check_permission(current_user, ResourceType.EXPERIMENT, Action.READ):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions"
+        )
     experiment = _service.get_experiment(db, experiment_id)
     if experiment is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="LLM experiment not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="LLM experiment not found"
+        )
     return _to_experiment_response(experiment)
 
 
@@ -159,13 +167,17 @@ def update_llm_experiment(
 ):
     """Update an LLM experiment's metadata."""
     if not check_permission(current_user, ResourceType.EXPERIMENT, Action.UPDATE):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions"
+        )
     try:
         experiment = _service.update_experiment(db, experiment_id, data)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
     if experiment is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="LLM experiment not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="LLM experiment not found"
+        )
     return _to_experiment_response(experiment)
 
 
@@ -181,13 +193,17 @@ def start_llm_experiment(
 ):
     """Transition a DRAFT or PAUSED LLM experiment to ACTIVE."""
     if not check_permission(current_user, ResourceType.EXPERIMENT, Action.UPDATE):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions"
+        )
     try:
         experiment = _service.start_experiment(db, experiment_id)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
     if experiment is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="LLM experiment not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="LLM experiment not found"
+        )
     return _to_experiment_response(experiment)
 
 
@@ -203,13 +219,17 @@ def pause_llm_experiment(
 ):
     """Transition an ACTIVE LLM experiment to PAUSED."""
     if not check_permission(current_user, ResourceType.EXPERIMENT, Action.UPDATE):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions"
+        )
     try:
         experiment = _service.pause_experiment(db, experiment_id)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
     if experiment is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="LLM experiment not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="LLM experiment not found"
+        )
     return _to_experiment_response(experiment)
 
 
@@ -232,10 +252,14 @@ def add_llm_variant(
 ):
     """Add a new variant to an existing LLM experiment."""
     if not check_permission(current_user, ResourceType.EXPERIMENT, Action.UPDATE):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions"
+        )
     experiment = _service.get_experiment(db, experiment_id)
     if experiment is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="LLM experiment not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="LLM experiment not found"
+        )
     variant = _service.add_variant(db, experiment_id, data)
     return _to_variant_response(variant)
 
@@ -254,8 +278,12 @@ def update_llm_variant(
 ):
     """Update an existing LLM variant."""
     if not check_permission(current_user, ResourceType.EXPERIMENT, Action.UPDATE):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions"
+        )
     variant = _service.update_variant(db, variant_id, data)
     if variant is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="LLM variant not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="LLM variant not found"
+        )
     return _to_variant_response(variant)

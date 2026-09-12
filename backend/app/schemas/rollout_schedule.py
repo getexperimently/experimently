@@ -5,22 +5,23 @@ This module defines Pydantic models for rollout schedule-related data structures
 These models are used for request/response validation and documentation.
 """
 
-from datetime import datetime, timedelta, timezone
-from typing import List, Dict, Any, Optional, Union
-from uuid import UUID
+from datetime import datetime
 from enum import Enum
+from typing import Any, Dict, List, Optional
+from uuid import UUID
 
 from pydantic import (
     BaseModel,
+    ConfigDict,
     Field,
     field_validator,
     model_validator,
-    ConfigDict,
 )
 
 
 class TriggerType(str, Enum):
     """Types of triggers for rollout schedule stages."""
+
     TIME_BASED = "time_based"
     METRIC_BASED = "metric_based"
     MANUAL = "manual"
@@ -28,6 +29,7 @@ class TriggerType(str, Enum):
 
 class RolloutStageStatus(str, Enum):
     """Status of a rollout schedule stage."""
+
     PENDING = "pending"
     IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
@@ -36,6 +38,7 @@ class RolloutStageStatus(str, Enum):
 
 class RolloutScheduleStatus(str, Enum):
     """Status of a rollout schedule."""
+
     DRAFT = "draft"
     ACTIVE = "active"
     PAUSED = "paused"
@@ -45,23 +48,30 @@ class RolloutScheduleStatus(str, Enum):
 
 class MetricTrigger(BaseModel):
     """Configuration for a metric-based trigger."""
+
     metric_name: str = Field(..., description="Name of the metric to track")
     threshold: float = Field(..., description="Threshold value to trigger the stage")
     comparison: str = Field(..., description="Comparison operator (gt, lt, eq, etc.)")
-    duration: Optional[int] = Field(None, description="Duration in hours the metric should meet the threshold")
+    duration: Optional[int] = Field(
+        None, description="Duration in hours the metric should meet the threshold"
+    )
 
 
 class TimeTrigger(BaseModel):
     """Configuration for a time-based trigger."""
+
     scheduled_date: datetime = Field(..., description="Date and time for the trigger")
     time_zone: Optional[str] = Field("UTC", description="Time zone for the trigger")
 
 
 class RolloutStageBase(BaseModel):
     """Base model for rollout stage data."""
+
     name: str = Field(..., min_length=1, max_length=100, description="Stage name")
     description: Optional[str] = Field(None, description="Stage description")
-    stage_order: int = Field(..., ge=0, description="Order of the stage in the schedule")
+    stage_order: int = Field(
+        ..., ge=0, description="Order of the stage in the schedule"
+    )
     target_percentage: int = Field(
         ..., ge=0, le=100, description="Target rollout percentage"
     )
@@ -81,9 +91,9 @@ class RolloutStageBase(BaseModel):
                 "trigger_type": "time_based",
                 "trigger_configuration": {
                     "scheduled_date": "2023-12-01T00:00:00Z",
-                    "time_zone": "UTC"
+                    "time_zone": "UTC",
                 },
-                "start_date": "2023-12-01T00:00:00Z"
+                "start_date": "2023-12-01T00:00:00Z",
             }
         }
     )
@@ -99,18 +109,24 @@ class RolloutStageBase(BaseModel):
 
 class RolloutStageCreate(RolloutStageBase):
     """Model for creating a new rollout stage."""
-    pass
 
 
 class RolloutStageUpdate(BaseModel):
     """Model for updating a rollout stage."""
-    name: Optional[str] = Field(None, min_length=1, max_length=100, description="Stage name")
+
+    name: Optional[str] = Field(
+        None, min_length=1, max_length=100, description="Stage name"
+    )
     description: Optional[str] = Field(None, description="Stage description")
-    stage_order: Optional[int] = Field(None, ge=0, description="Order of the stage in the schedule")
+    stage_order: Optional[int] = Field(
+        None, ge=0, description="Order of the stage in the schedule"
+    )
     target_percentage: Optional[int] = Field(
         None, ge=0, le=100, description="Target rollout percentage"
     )
-    trigger_type: Optional[TriggerType] = Field(None, description="Type of trigger for this stage")
+    trigger_type: Optional[TriggerType] = Field(
+        None, description="Type of trigger for this stage"
+    )
     trigger_configuration: Optional[Dict[str, Any]] = Field(
         None, description="Configuration for the trigger"
     )
@@ -119,6 +135,7 @@ class RolloutStageUpdate(BaseModel):
 
 class RolloutStageResponse(RolloutStageBase):
     """Model for rollout stage response data."""
+
     id: UUID
     rollout_schedule_id: UUID
     status: RolloutStageStatus
@@ -131,6 +148,7 @@ class RolloutStageResponse(RolloutStageBase):
 
 class RolloutScheduleBase(BaseModel):
     """Base model for rollout schedule data."""
+
     name: str = Field(..., min_length=1, max_length=100, description="Schedule name")
     description: Optional[str] = Field(None, description="Schedule description")
     feature_flag_id: UUID = Field(..., description="ID of the feature flag")
@@ -160,10 +178,10 @@ class RolloutScheduleBase(BaseModel):
                 "end_date": "2023-12-31T23:59:59Z",
                 "config_data": {
                     "owner_email": "product@example.com",
-                    "target_user_segment": "beta_users"
+                    "target_user_segment": "beta_users",
                 },
                 "max_percentage": 100,
-                "min_stage_duration": 24
+                "min_stage_duration": 24,
             }
         }
     )
@@ -178,6 +196,7 @@ class RolloutScheduleBase(BaseModel):
 
 class RolloutScheduleCreate(RolloutScheduleBase):
     """Model for creating a new rollout schedule."""
+
     stages: List[RolloutStageCreate] = Field(
         ..., min_length=1, description="Rollout stages"
     )
@@ -195,11 +214,15 @@ class RolloutScheduleCreate(RolloutScheduleBase):
 
         # Check that max stage percentage doesn't exceed the schedule max
         if max(stage_percentages) > self.max_percentage:
-            raise ValueError(f"Stage percentages cannot exceed the maximum of {self.max_percentage}%")
+            raise ValueError(
+                f"Stage percentages cannot exceed the maximum of {self.max_percentage}%"
+            )
 
         # Check that stage orders are correct
         stage_orders = [stage.stage_order for stage in self.stages]
-        if sorted(stage_orders) != list(range(min(stage_orders), max(stage_orders) + 1)):
+        if sorted(stage_orders) != list(
+            range(min(stage_orders), max(stage_orders) + 1)
+        ):
             raise ValueError("Stage orders must be sequential without gaps")
 
         return self
@@ -207,7 +230,10 @@ class RolloutScheduleCreate(RolloutScheduleBase):
 
 class RolloutScheduleUpdate(BaseModel):
     """Model for updating a rollout schedule."""
-    name: Optional[str] = Field(None, min_length=1, max_length=100, description="Schedule name")
+
+    name: Optional[str] = Field(
+        None, min_length=1, max_length=100, description="Schedule name"
+    )
     description: Optional[str] = Field(None, description="Schedule description")
     start_date: Optional[datetime] = Field(
         None, description="Date when the schedule should start"
@@ -234,6 +260,7 @@ class RolloutScheduleUpdate(BaseModel):
 
 class RolloutScheduleResponse(RolloutScheduleBase):
     """Model for rollout schedule response data."""
+
     id: UUID
     owner_id: Optional[UUID]
     status: RolloutScheduleStatus
@@ -246,6 +273,7 @@ class RolloutScheduleResponse(RolloutScheduleBase):
 
 class RolloutScheduleListResponse(BaseModel):
     """Paginated response model for rollout schedules."""
+
     items: List[RolloutScheduleResponse]
     total: int
     skip: int
@@ -264,13 +292,13 @@ class RolloutScheduleListResponse(BaseModel):
                         "start_date": "2023-12-01T00:00:00Z",
                         "end_date": "2023-12-31T23:59:59Z",
                         "created_at": "2023-01-01T00:00:00Z",
-                        "updated_at": "2023-01-01T00:00:00Z"
+                        "updated_at": "2023-01-01T00:00:00Z",
                     }
                 ],
                 "total": 1,
                 "skip": 0,
-                "limit": 100
+                "limit": 100,
             }
         },
-        from_attributes=True
+        from_attributes=True,
     )

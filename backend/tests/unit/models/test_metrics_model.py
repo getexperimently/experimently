@@ -1,20 +1,21 @@
 """Unit tests for metrics models."""
+
 import uuid
-from uuid import uuid4
 from datetime import datetime, timezone
+from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
+from backend.app.models.feature_flag import FeatureFlag
 from backend.app.models.metrics.metric import (
-    RawMetric,
     AggregatedMetric,
+    AggregationPeriod,
     ErrorLog,
     MetricType,
-    AggregationPeriod,
+    RawMetric,
 )
-from backend.app.models.feature_flag import FeatureFlag
 
 
 def test_metric_type_enum_values():
@@ -45,7 +46,7 @@ def test_raw_metric_model(db_session):
         name="Test Flag",
         description="A test flag",
         status="ACTIVE",
-        rollout_percentage=50
+        rollout_percentage=50,
     )
     db_session.add(feature_flag)
     db_session.commit()
@@ -58,7 +59,7 @@ def test_raw_metric_model(db_session):
         user_id="test-user-123",
         value=1.0,
         count=1,
-        meta_data={"browser": "Chrome", "country": "US"}
+        meta_data={"browser": "Chrome", "country": "US"},
     )
     db_session.add(metric)
     db_session.commit()
@@ -72,7 +73,9 @@ def test_raw_metric_model(db_session):
     assert metric.updated_at is not None
 
     # Query and verify metric
-    queried_metric = db_session.query(RawMetric).filter(RawMetric.id == metric.id).first()
+    queried_metric = (
+        db_session.query(RawMetric).filter(RawMetric.id == metric.id).first()
+    )
     assert queried_metric is not None
     assert queried_metric.metric_type == MetricType.FLAG_EVALUATION
     assert queried_metric.user_id == "test-user-123"
@@ -101,7 +104,7 @@ def test_aggregated_metric_model(db_session):
         name="Test Flag",
         description="A test flag",
         status="ACTIVE",
-        rollout_percentage=50
+        rollout_percentage=50,
     )
     db_session.add(feature_flag)
     db_session.commit()
@@ -118,7 +121,7 @@ def test_aggregated_metric_model(db_session):
         sum_value=450.0,
         min_value=2.5,
         max_value=7.5,
-        distinct_users=25
+        distinct_users=25,
     )
     db_session.add(metric)
     db_session.commit()
@@ -128,7 +131,11 @@ def test_aggregated_metric_model(db_session):
     assert isinstance(metric.id, uuid.UUID)
 
     # Query and verify metric
-    queried_metric = db_session.query(AggregatedMetric).filter(AggregatedMetric.id == metric.id).first()
+    queried_metric = (
+        db_session.query(AggregatedMetric)
+        .filter(AggregatedMetric.id == metric.id)
+        .first()
+    )
     assert queried_metric is not None
     assert queried_metric.metric_type == MetricType.FLAG_EVALUATION
     assert queried_metric.period == AggregationPeriod.DAY
@@ -159,7 +166,7 @@ def test_aggregated_metric_unique_constraint(db_session):
         name="Test Flag",
         description="A test flag",
         status="ACTIVE",
-        rollout_percentage=50
+        rollout_percentage=50,
     )
     db_session.add(feature_flag)
     db_session.commit()
@@ -172,7 +179,7 @@ def test_aggregated_metric_unique_constraint(db_session):
         period_start=period_start,
         feature_flag_id=feature_flag.id,
         targeting_rule_id="rule-123",
-        count=100
+        count=100,
     )
     db_session.add(metric1)
     db_session.commit()
@@ -184,7 +191,7 @@ def test_aggregated_metric_unique_constraint(db_session):
         period_start=period_start,
         feature_flag_id=feature_flag.id,
         targeting_rule_id="rule-123",
-        count=200
+        count=200,
     )
     db_session.add(metric2)
 
@@ -193,10 +200,14 @@ def test_aggregated_metric_unique_constraint(db_session):
     db_session.commit()
 
     # Verify both metrics exist and have different IDs
-    queried_metrics = db_session.query(AggregatedMetric).filter(
-        AggregatedMetric.feature_flag_id == feature_flag.id,
-        AggregatedMetric.targeting_rule_id == "rule-123"
-    ).all()
+    queried_metrics = (
+        db_session.query(AggregatedMetric)
+        .filter(
+            AggregatedMetric.feature_flag_id == feature_flag.id,
+            AggregatedMetric.targeting_rule_id == "rule-123",
+        )
+        .all()
+    )
 
     assert len(queried_metrics) == 2
     assert queried_metrics[0].id != queried_metrics[1].id
@@ -211,7 +222,7 @@ def test_error_log_model(db_session):
         name="Test Flag",
         description="A test flag",
         status="ACTIVE",
-        rollout_percentage=50
+        rollout_percentage=50,
     )
     db_session.add(feature_flag)
     db_session.commit()
@@ -225,7 +236,7 @@ def test_error_log_model(db_session):
         message="Failed to evaluate targeting rule",
         stack_trace="Traceback...",
         request_data={"context": {"country": "US"}},
-        meta_data={"browser": "Chrome"}
+        meta_data={"browser": "Chrome"},
     )
     db_session.add(error_log)
     db_session.commit()
@@ -268,7 +279,7 @@ def test_raw_metric_default_count(db_session):
     metric = RawMetric(
         metric_type=MetricType.FLAG_EVALUATION,
         timestamp=datetime.now(timezone.utc),
-        user_id="test-user"
+        user_id="test-user",
     )
     db_session.add(metric)
     db_session.commit()
@@ -277,7 +288,9 @@ def test_raw_metric_default_count(db_session):
     assert metric.count == 1
 
     # Query and verify
-    queried_metric = db_session.query(RawMetric).filter(RawMetric.id == metric.id).first()
+    queried_metric = (
+        db_session.query(RawMetric).filter(RawMetric.id == metric.id).first()
+    )
     assert queried_metric.count == 1
 
 
@@ -287,7 +300,7 @@ def test_aggregated_metric_default_count(db_session):
     metric = AggregatedMetric(
         metric_type=MetricType.FLAG_EVALUATION,
         period=AggregationPeriod.DAY,
-        period_start=datetime.now(timezone.utc)
+        period_start=datetime.now(timezone.utc),
     )
     db_session.add(metric)
     db_session.commit()
@@ -296,7 +309,11 @@ def test_aggregated_metric_default_count(db_session):
     assert metric.count == 0
 
     # Query and verify
-    queried_metric = db_session.query(AggregatedMetric).filter(AggregatedMetric.id == metric.id).first()
+    queried_metric = (
+        db_session.query(AggregatedMetric)
+        .filter(AggregatedMetric.id == metric.id)
+        .first()
+    )
     assert queried_metric.count == 0
 
 
@@ -309,7 +326,7 @@ def test_feature_flag_metrics_relationship(db_session):
         name="Test Flag",
         description="A test flag",
         status="ACTIVE",
-        rollout_percentage=50
+        rollout_percentage=50,
     )
     db_session.add(feature_flag)
     db_session.commit()
@@ -319,7 +336,7 @@ def test_feature_flag_metrics_relationship(db_session):
         metric_type=MetricType.FLAG_EVALUATION,
         timestamp=datetime.now(timezone.utc),
         feature_flag_id=feature_flag.id,
-        user_id="test-user-123"
+        user_id="test-user-123",
     )
     db_session.add(raw_metric)
 
@@ -328,7 +345,7 @@ def test_feature_flag_metrics_relationship(db_session):
         period=AggregationPeriod.DAY,
         period_start=datetime.now(timezone.utc),
         feature_flag_id=feature_flag.id,
-        count=10
+        count=10,
     )
     db_session.add(agg_metric)
 
@@ -336,7 +353,7 @@ def test_feature_flag_metrics_relationship(db_session):
         error_type="rule_evaluation_error",
         timestamp=datetime.now(timezone.utc),
         feature_flag_id=feature_flag.id,
-        message="Test error"
+        message="Test error",
     )
     db_session.add(error_log)
 

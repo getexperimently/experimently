@@ -3,17 +3,17 @@ Monitoring configuration — single source of truth for all metrics,
 alert thresholds, and dashboard definitions.
 """
 
-from dataclasses import dataclass, field
-from typing import List, Dict, Optional
+from dataclasses import dataclass
+from typing import Dict, List, Optional
 
 
 @dataclass
 class MetricSpec:
-    name: str            # e.g., "api_request_duration_seconds"
+    name: str  # e.g., "api_request_duration_seconds"
     description: str
-    labels: List[str]    # e.g., ["method", "endpoint", "status_code"]
+    labels: List[str]  # e.g., ["method", "endpoint", "status_code"]
     alert_threshold: Optional[float] = None
-    alert_comparison: str = ">"   # ">" or "<"
+    alert_comparison: str = ">"  # ">" or "<"
 
 
 # All Prometheus metrics used by the application
@@ -67,7 +67,7 @@ METRICS_REGISTRY: Dict[str, MetricSpec] = {
         name="active_experiments_gauge",
         description="Number of currently active experiments",
         labels=[],
-        alert_threshold=100,   # Alert if > 100 active experiments
+        alert_threshold=100,  # Alert if > 100 active experiments
         alert_comparison=">",
     ),
 }
@@ -76,7 +76,7 @@ METRICS_REGISTRY: Dict[str, MetricSpec] = {
 CLOUDWATCH_ALARMS: Dict[str, Dict] = {
     "high_error_rate": {
         "metric": "5XXErrorRate",
-        "threshold": 1.0,   # 1% error rate
+        "threshold": 1.0,  # 1% error rate
         "evaluation_periods": 2,
         "period": 60,
         "comparison": "GreaterThanThreshold",
@@ -84,7 +84,7 @@ CLOUDWATCH_ALARMS: Dict[str, Dict] = {
     },
     "high_latency_p99": {
         "metric": "TargetResponseTime",
-        "threshold": 2.0,   # 2 seconds
+        "threshold": 2.0,  # 2 seconds
         "evaluation_periods": 3,
         "period": 60,
         "statistic": "p99",
@@ -99,7 +99,7 @@ CLOUDWATCH_ALARMS: Dict[str, Dict] = {
     },
     "high_db_connections": {
         "metric": "DatabaseConnections",
-        "threshold": 80,   # 80% of max
+        "threshold": 80,  # 80% of max
         "evaluation_periods": 2,
         "period": 60,
         "comparison": "GreaterThanThreshold",

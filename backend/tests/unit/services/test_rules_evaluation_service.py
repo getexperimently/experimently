@@ -8,24 +8,25 @@ Tests the high-level rules evaluation service that integrates:
 - Batch evaluation
 """
 
-import pytest
 import time
 from datetime import datetime
-from typing import Dict, Any, List
-from unittest.mock import Mock, patch, MagicMock
+from typing import Any, Dict, List
+from unittest.mock import MagicMock, Mock, patch
 
-from backend.app.services.rules_evaluation_service import (
-    RulesEvaluationService,
-    EvaluationResult,
-    EvaluationMetrics
-)
+import pytest
+
 from backend.app.schemas.targeting_rule import (
-    TargetingRule,
-    TargetingRules,
-    RuleGroup,
     Condition,
     LogicalOperator,
-    OperatorType
+    OperatorType,
+    RuleGroup,
+    TargetingRule,
+    TargetingRules,
+)
+from backend.app.services.rules_evaluation_service import (
+    EvaluationMetrics,
+    EvaluationResult,
+    RulesEvaluationService,
 )
 
 
@@ -44,9 +45,7 @@ class TestServiceInitialization:
     def test_service_initializes_with_custom_config(self):
         """Test service initialization with custom configuration."""
         service = RulesEvaluationService(
-            cache_max_size=5000,
-            cache_ttl=600.0,
-            enable_metrics=True
+            cache_max_size=5000, cache_ttl=600.0, enable_metrics=True
         )
 
         assert service.evaluation_cache.max_size == 5000
@@ -74,15 +73,19 @@ class TestBasicEvaluation:
                     rule=RuleGroup(
                         operator=LogicalOperator.AND,
                         conditions=[
-                            Condition(attribute="country", operator=OperatorType.EQUALS, value="US")
+                            Condition(
+                                attribute="country",
+                                operator=OperatorType.EQUALS,
+                                value="US",
+                            )
                         ],
-                        groups=[]
+                        groups=[],
                     ),
                     priority=1,
-                    rollout_percentage=100
+                    rollout_percentage=100,
                 )
             ],
-            default_rule=None
+            default_rule=None,
         )
 
         user_context = {"user_id": "user_123", "country": "US"}
@@ -105,15 +108,19 @@ class TestBasicEvaluation:
                     rule=RuleGroup(
                         operator=LogicalOperator.AND,
                         conditions=[
-                            Condition(attribute="country", operator=OperatorType.EQUALS, value="US")
+                            Condition(
+                                attribute="country",
+                                operator=OperatorType.EQUALS,
+                                value="US",
+                            )
                         ],
-                        groups=[]
+                        groups=[],
                     ),
                     priority=1,
-                    rollout_percentage=100
+                    rollout_percentage=100,
                 )
             ],
-            default_rule=None
+            default_rule=None,
         )
 
         user_context = {"user_id": "user_123", "country": "CA"}
@@ -129,13 +136,9 @@ class TestBasicEvaluation:
 
         default_rule = TargetingRule(
             id="default",
-            rule=RuleGroup(
-                operator=LogicalOperator.AND,
-                conditions=[],
-                groups=[]
-            ),
+            rule=RuleGroup(operator=LogicalOperator.AND, conditions=[], groups=[]),
             priority=999,
-            rollout_percentage=100
+            rollout_percentage=100,
         )
 
         rules = TargetingRules(
@@ -145,15 +148,19 @@ class TestBasicEvaluation:
                     rule=RuleGroup(
                         operator=LogicalOperator.AND,
                         conditions=[
-                            Condition(attribute="country", operator=OperatorType.EQUALS, value="US")
+                            Condition(
+                                attribute="country",
+                                operator=OperatorType.EQUALS,
+                                value="US",
+                            )
                         ],
-                        groups=[]
+                        groups=[],
                     ),
                     priority=1,
-                    rollout_percentage=100
+                    rollout_percentage=100,
                 )
             ],
-            default_rule=default_rule
+            default_rule=default_rule,
         )
 
         user_context = {"user_id": "user_123", "country": "CA"}
@@ -178,15 +185,19 @@ class TestCachingBehavior:
                     rule=RuleGroup(
                         operator=LogicalOperator.AND,
                         conditions=[
-                            Condition(attribute="country", operator=OperatorType.EQUALS, value="US")
+                            Condition(
+                                attribute="country",
+                                operator=OperatorType.EQUALS,
+                                value="US",
+                            )
                         ],
-                        groups=[]
+                        groups=[],
                     ),
                     priority=1,
-                    rollout_percentage=100
+                    rollout_percentage=100,
                 )
             ],
-            default_rule=None
+            default_rule=None,
         )
 
         user_context = {"user_id": "user_123", "country": "US"}
@@ -215,15 +226,19 @@ class TestCachingBehavior:
                     rule=RuleGroup(
                         operator=LogicalOperator.AND,
                         conditions=[
-                            Condition(attribute="country", operator=OperatorType.EQUALS, value="US")
+                            Condition(
+                                attribute="country",
+                                operator=OperatorType.EQUALS,
+                                value="US",
+                            )
                         ],
-                        groups=[]
+                        groups=[],
                     ),
                     priority=1,
-                    rollout_percentage=100
+                    rollout_percentage=100,
                 )
             ],
-            default_rule=None
+            default_rule=None,
         )
 
         # Evaluate with different users
@@ -244,15 +259,19 @@ class TestCachingBehavior:
                     rule=RuleGroup(
                         operator=LogicalOperator.AND,
                         conditions=[
-                            Condition(attribute="country", operator=OperatorType.EQUALS, value="US")
+                            Condition(
+                                attribute="country",
+                                operator=OperatorType.EQUALS,
+                                value="US",
+                            )
                         ],
-                        groups=[]
+                        groups=[],
                     ),
                     priority=1,
-                    rollout_percentage=100
+                    rollout_percentage=100,
                 )
             ],
-            default_rule=None
+            default_rule=None,
         )
 
         user_context = {"user_id": "user_123", "country": "US"}
@@ -272,15 +291,19 @@ class TestCachingBehavior:
                     rule=RuleGroup(
                         operator=LogicalOperator.AND,
                         conditions=[
-                            Condition(attribute="country", operator=OperatorType.EQUALS, value="CA")
+                            Condition(
+                                attribute="country",
+                                operator=OperatorType.EQUALS,
+                                value="CA",
+                            )
                         ],
-                        groups=[]
+                        groups=[],
                     ),
                     priority=1,
-                    rollout_percentage=100
+                    rollout_percentage=100,
                 )
             ],
-            default_rule=None
+            default_rule=None,
         )
 
         # Evaluation with new rules should reflect changes
@@ -302,15 +325,19 @@ class TestMetricsCollection:
                     rule=RuleGroup(
                         operator=LogicalOperator.AND,
                         conditions=[
-                            Condition(attribute="country", operator=OperatorType.EQUALS, value="US")
+                            Condition(
+                                attribute="country",
+                                operator=OperatorType.EQUALS,
+                                value="US",
+                            )
                         ],
-                        groups=[]
+                        groups=[],
                     ),
                     priority=1,
-                    rollout_percentage=100
+                    rollout_percentage=100,
                 )
             ],
-            default_rule=None
+            default_rule=None,
         )
 
         # Perform multiple evaluations
@@ -332,15 +359,19 @@ class TestMetricsCollection:
                     rule=RuleGroup(
                         operator=LogicalOperator.AND,
                         conditions=[
-                            Condition(attribute="country", operator=OperatorType.EQUALS, value="US")
+                            Condition(
+                                attribute="country",
+                                operator=OperatorType.EQUALS,
+                                value="US",
+                            )
                         ],
-                        groups=[]
+                        groups=[],
                     ),
                     priority=1,
-                    rollout_percentage=100
+                    rollout_percentage=100,
                 )
             ],
-            default_rule=None
+            default_rule=None,
         )
 
         user_context = {"user_id": "user_123", "country": "US"}
@@ -366,15 +397,19 @@ class TestMetricsCollection:
                     rule=RuleGroup(
                         operator=LogicalOperator.AND,
                         conditions=[
-                            Condition(attribute="country", operator=OperatorType.EQUALS, value="US")
+                            Condition(
+                                attribute="country",
+                                operator=OperatorType.EQUALS,
+                                value="US",
+                            )
                         ],
-                        groups=[]
+                        groups=[],
                     ),
                     priority=1,
-                    rollout_percentage=100
+                    rollout_percentage=100,
                 )
             ],
-            default_rule=None
+            default_rule=None,
         )
 
         service.evaluate(rules, {"user_id": "user_123", "country": "US"})
@@ -400,15 +435,19 @@ class TestBatchEvaluation:
                     rule=RuleGroup(
                         operator=LogicalOperator.AND,
                         conditions=[
-                            Condition(attribute="country", operator=OperatorType.EQUALS, value="US")
+                            Condition(
+                                attribute="country",
+                                operator=OperatorType.EQUALS,
+                                value="US",
+                            )
                         ],
-                        groups=[]
+                        groups=[],
                     ),
                     priority=1,
-                    rollout_percentage=100
+                    rollout_percentage=100,
                 )
             ],
-            default_rule=None
+            default_rule=None,
         )
 
         user_contexts = [
@@ -435,22 +474,23 @@ class TestBatchEvaluation:
                     rule=RuleGroup(
                         operator=LogicalOperator.AND,
                         conditions=[
-                            Condition(attribute="country", operator=OperatorType.IN, value=["US", "CA"])
+                            Condition(
+                                attribute="country",
+                                operator=OperatorType.IN,
+                                value=["US", "CA"],
+                            )
                         ],
-                        groups=[]
+                        groups=[],
                     ),
                     priority=1,
-                    rollout_percentage=100
+                    rollout_percentage=100,
                 )
             ],
-            default_rule=None
+            default_rule=None,
         )
 
         # Create many users
-        user_contexts = [
-            {"user_id": f"user_{i}", "country": "US"}
-            for i in range(100)
-        ]
+        user_contexts = [{"user_id": f"user_{i}", "country": "US"} for i in range(100)]
 
         # Batch evaluate
         start = time.time()
@@ -472,15 +512,19 @@ class TestBatchEvaluation:
                     rule=RuleGroup(
                         operator=LogicalOperator.AND,
                         conditions=[
-                            Condition(attribute="country", operator=OperatorType.EQUALS, value="US")
+                            Condition(
+                                attribute="country",
+                                operator=OperatorType.EQUALS,
+                                value="US",
+                            )
                         ],
-                        groups=[]
+                        groups=[],
                     ),
                     priority=1,
-                    rollout_percentage=100
+                    rollout_percentage=100,
                 )
             ],
-            default_rule=None
+            default_rule=None,
         )
 
         # Same user evaluated multiple times
@@ -512,15 +556,19 @@ class TestErrorHandling:
                     rule=RuleGroup(
                         operator=LogicalOperator.AND,
                         conditions=[
-                            Condition(attribute="country", operator=OperatorType.EQUALS, value="US")
+                            Condition(
+                                attribute="country",
+                                operator=OperatorType.EQUALS,
+                                value="US",
+                            )
                         ],
-                        groups=[]
+                        groups=[],
                     ),
                     priority=1,
-                    rollout_percentage=100
+                    rollout_percentage=100,
                 )
             ],
-            default_rule=None
+            default_rule=None,
         )
 
         # User context missing 'country' attribute
@@ -548,16 +596,16 @@ class TestErrorHandling:
                             Condition(
                                 attribute="nested_data",
                                 operator=OperatorType.EQUALS,
-                                value="expected"
+                                value="expected",
                             )
                         ],
-                        groups=[]
+                        groups=[],
                     ),
                     priority=1,
-                    rollout_percentage=100
+                    rollout_percentage=100,
                 )
             ],
-            default_rule=None
+            default_rule=None,
         )
 
         # User context with unusual data types that might cause issues
@@ -597,16 +645,16 @@ class TestErrorHandling:
                                 attribute="version",
                                 operator=OperatorType.SEMANTIC_VERSION,
                                 value="1.0.0",
-                                additional_value="gt"  # Comparison mode
+                                additional_value="gt",  # Comparison mode
                             )
                         ],
-                        groups=[]
+                        groups=[],
                     ),
                     priority=1,
-                    rollout_percentage=100
+                    rollout_percentage=100,
                 )
             ],
-            default_rule=None
+            default_rule=None,
         )
 
         # Invalid version format will cause comparison to fail gracefully
@@ -634,15 +682,19 @@ class TestPerformance:
                     rule=RuleGroup(
                         operator=LogicalOperator.AND,
                         conditions=[
-                            Condition(attribute="country", operator=OperatorType.EQUALS, value="US")
+                            Condition(
+                                attribute="country",
+                                operator=OperatorType.EQUALS,
+                                value="US",
+                            )
                         ],
-                        groups=[]
+                        groups=[],
                     ),
                     priority=1,
-                    rollout_percentage=100
+                    rollout_percentage=100,
                 )
             ],
-            default_rule=None
+            default_rule=None,
         )
 
         # Time 1000 evaluations
@@ -669,16 +721,24 @@ class TestPerformance:
                     rule=RuleGroup(
                         operator=LogicalOperator.AND,
                         conditions=[
-                            Condition(attribute="country", operator=OperatorType.IN, value=["US", "CA", "UK"]),
-                            Condition(attribute="age", operator=OperatorType.GREATER_THAN, value=18),
+                            Condition(
+                                attribute="country",
+                                operator=OperatorType.IN,
+                                value=["US", "CA", "UK"],
+                            ),
+                            Condition(
+                                attribute="age",
+                                operator=OperatorType.GREATER_THAN,
+                                value=18,
+                            ),
                         ],
-                        groups=[]
+                        groups=[],
                     ),
                     priority=1,
-                    rollout_percentage=100
+                    rollout_percentage=100,
                 )
             ],
-            default_rule=None
+            default_rule=None,
         )
 
         user_context = {"user_id": "user_123", "country": "US", "age": 25}
@@ -686,7 +746,9 @@ class TestPerformance:
         # Time first evaluation (cache miss)
         start = time.time()
         for _ in range(100):
-            service.evaluate(rules, {"user_id": f"unique_{_}", "country": "US", "age": 25})
+            service.evaluate(
+                rules, {"user_id": f"unique_{_}", "country": "US", "age": 25}
+            )
         uncached_duration = time.time() - start
 
         # Clear and prepare cache

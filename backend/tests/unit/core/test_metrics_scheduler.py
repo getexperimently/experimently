@@ -1,8 +1,10 @@
 """Unit tests for metrics scheduler."""
-import pytest
+
 import asyncio
 from datetime import datetime, timedelta, timezone
-from unittest.mock import patch, MagicMock, AsyncMock, call
+from unittest.mock import AsyncMock, MagicMock, call, patch
+
+import pytest
 
 from backend.app.core.metrics_scheduler import MetricsScheduler
 from backend.app.models.metrics.metric import AggregationPeriod
@@ -45,7 +47,7 @@ async def test_scheduler_start_stop(scheduler):
 
     # Test stopping the scheduler
     # Use patch to prevent awaiting AsyncMock directly
-    with patch.object(scheduler, 'task') as mock_task:
+    with patch.object(scheduler, "task") as mock_task:
         await scheduler.stop()
 
         # Verify the scheduler is stopped
@@ -111,7 +113,10 @@ async def test_scheduler_aggregate_metrics(scheduler, mock_db_session):
         mock_service.aggregate_metrics.side_effect = [10, 20, 30, 40, 50, 60]
 
         # Mock SessionLocal to return our mock session
-        with patch("backend.app.core.metrics_scheduler.SessionLocal", return_value=mock_db_session):
+        with patch(
+            "backend.app.core.metrics_scheduler.SessionLocal",
+            return_value=mock_db_session,
+        ):
             # Mock datetime.now to return a consistent time
             with patch("backend.app.core.metrics_scheduler.datetime") as mock_datetime:
                 mock_datetime.now.return_value = current_time
@@ -131,42 +136,42 @@ async def test_scheduler_aggregate_metrics(scheduler, mock_db_session):
                         db=mock_db_session,
                         period=AggregationPeriod.MINUTE,
                         start_time=current_time - timedelta(hours=1),
-                        end_time=current_time
+                        end_time=current_time,
                     ),
                     # Hourly aggregation for the last day
                     call(
                         db=mock_db_session,
                         period=AggregationPeriod.HOUR,
                         start_time=current_time - timedelta(days=1),
-                        end_time=current_time
+                        end_time=current_time,
                     ),
                     # Daily aggregation for the last month
                     call(
                         db=mock_db_session,
                         period=AggregationPeriod.DAY,
                         start_time=current_time - timedelta(days=30),
-                        end_time=current_time
+                        end_time=current_time,
                     ),
                     # Weekly aggregation for the last year
                     call(
                         db=mock_db_session,
                         period=AggregationPeriod.WEEK,
                         start_time=current_time - timedelta(days=365),
-                        end_time=current_time
+                        end_time=current_time,
                     ),
                     # Monthly aggregation for all time
                     call(
                         db=mock_db_session,
                         period=AggregationPeriod.MONTH,
                         start_time=None,
-                        end_time=current_time
+                        end_time=current_time,
                     ),
                     # Total aggregation (single record for all time)
                     call(
                         db=mock_db_session,
                         period=AggregationPeriod.TOTAL,
                         start_time=None,
-                        end_time=current_time
+                        end_time=current_time,
                     ),
                 ]
                 mock_service.aggregate_metrics.assert_has_calls(expected_calls)
@@ -180,10 +185,15 @@ async def test_scheduler_aggregate_metrics_exception(scheduler, mock_db_session)
     """Test that scheduler handles exceptions during metrics aggregation."""
     # Mock MetricsService to raise an exception
     with patch("backend.app.core.metrics_scheduler.MetricsService") as mock_service:
-        mock_service.aggregate_metrics.side_effect = Exception("Test aggregation exception")
+        mock_service.aggregate_metrics.side_effect = Exception(
+            "Test aggregation exception"
+        )
 
         # Mock SessionLocal to return our mock session
-        with patch("backend.app.core.metrics_scheduler.SessionLocal", return_value=mock_db_session):
+        with patch(
+            "backend.app.core.metrics_scheduler.SessionLocal",
+            return_value=mock_db_session,
+        ):
             # Run the aggregation - should not raise an exception
             await scheduler.aggregate_metrics()
 
@@ -206,7 +216,10 @@ async def test_scheduler_aggregate_metrics_partial_failure(scheduler, mock_db_se
         ]
 
         # Mock SessionLocal to return our mock session
-        with patch("backend.app.core.metrics_scheduler.SessionLocal", return_value=mock_db_session):
+        with patch(
+            "backend.app.core.metrics_scheduler.SessionLocal",
+            return_value=mock_db_session,
+        ):
             # Run the aggregation
             await scheduler.aggregate_metrics()
 

@@ -1,14 +1,16 @@
 """
 Unit tests for bulk toggle and flag history endpoints.
 """
-import pytest
-from unittest.mock import MagicMock, AsyncMock, patch, Mock
-from fastapi.testclient import TestClient
-from sqlalchemy.orm import Session
+
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 from uuid import uuid4
 
-from backend.app.main import app
+import pytest
+from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
+
 from backend.app.api import deps
+from backend.app.main import app
 from backend.app.models.feature_flag import FeatureFlag, FeatureFlagStatus
 from backend.app.models.user import User
 

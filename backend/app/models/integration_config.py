@@ -1,12 +1,24 @@
 """IntegrationConfig model — stores encrypted third-party integration credentials."""
-import uuid
+
 import enum
-from datetime import datetime
-from sqlalchemy import Column, String, Boolean, DateTime, Index, UniqueConstraint, Enum as SQLAEnum
-from sqlalchemy.dialects.postgresql import UUID, JSONB
+import uuid
+
+from sqlalchemy import (
+    Boolean,
+    Column,
+    DateTime,
+    Index,
+    String,
+    UniqueConstraint,
+)
+from sqlalchemy import (
+    Enum as SQLAEnum,
+)
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.sql import func
-from backend.app.models.base import Base
+
 from backend.app.core.database_config import get_schema_name
+from backend.app.models.base import Base
 
 
 class IntegrationType(str, enum.Enum):
@@ -29,5 +41,12 @@ class IntegrationConfig(Base):
     encrypted_config = Column(JSONB, nullable=True)  # In production, encrypted at rest
     last_sync_at = Column(DateTime(timezone=True), nullable=True)
     last_error = Column(String(1024), nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    created_at = Column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )

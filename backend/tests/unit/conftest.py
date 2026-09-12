@@ -1,6 +1,8 @@
-import pytest
-from unittest.mock import Mock, patch
 import logging
+from unittest.mock import Mock, patch
+
+import pytest
+
 
 @pytest.fixture(autouse=True)
 def mock_logging_handler():
@@ -9,7 +11,7 @@ def mock_logging_handler():
     handler.level = logging.INFO
     handler.emit = Mock()
 
-    with patch('logging.getLogger') as mock_get_logger:
+    with patch("logging.getLogger") as mock_get_logger:
         logger = logging.getLogger()
         logger.handlers = [handler]
         logger.level = logging.INFO

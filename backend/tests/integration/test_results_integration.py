@@ -25,11 +25,10 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
+from backend.app.api.deps import get_current_user, get_db
 from backend.app.main import app
-from backend.app.api.deps import get_db, get_current_user
 from backend.app.models.user import User
 from backend.app.services.analysis_service import AnalysisService
-
 
 # ---------------------------------------------------------------------------
 # Shared UUIDs
@@ -104,11 +103,13 @@ class TestAnalysisServiceIntegration:
         treatment_n = 1000
         treatment_conv = 120
 
-        p_control = control_conv / control_n    # 0.10
+        p_control = control_conv / control_n  # 0.10
         p_treatment = treatment_conv / treatment_n  # 0.12
 
         # Step 1 — test selection
-        test_name = service.select_statistical_test("conversion", control_n, treatment_n)
+        test_name = service.select_statistical_test(
+            "conversion", control_n, treatment_n
+        )
         assert test_name == "z_test", (
             f"Expected 'z_test' for large-sample conversion metric, got {test_name!r}"
         )
@@ -168,11 +169,13 @@ class TestAnalysisServiceIntegration:
         service = _make_service()
 
         # Non-constant data: cycle [3.0, 3.5, 4.0] and [3.8, 4.3, 4.8]
-        control = [3.0 + (i % 3) * 0.5 for i in range(500)]    # mean = 3.5
+        control = [3.0 + (i % 3) * 0.5 for i in range(500)]  # mean = 3.5
         treatment = [3.8 + (i % 3) * 0.5 for i in range(500)]  # mean = 4.3
 
         # Step 1 — test selection for a revenue metric
-        test_name = service.select_statistical_test("revenue", len(control), len(treatment))
+        test_name = service.select_statistical_test(
+            "revenue", len(control), len(treatment)
+        )
         assert test_name == "welch_t_test", (
             f"Expected 'welch_t_test' for revenue metric, got {test_name!r}"
         )
@@ -215,7 +218,9 @@ class TestAnalysisServiceIntegration:
 
         # Borderline p-value: significant before, not after correction
         raw_p_borderline = 0.03
-        corrected_borderline = service.apply_bonferroni_correction(raw_p_borderline, n_tests)
+        corrected_borderline = service.apply_bonferroni_correction(
+            raw_p_borderline, n_tests
+        )
         assert abs(corrected_borderline - 0.09) < 1e-9, (
             f"Expected Bonferroni-corrected p = 0.09, got {corrected_borderline}"
         )
@@ -235,7 +240,9 @@ class TestAnalysisServiceIntegration:
 
         # Edge case: Bonferroni cannot push p above 1.0
         p_near_one = service.apply_bonferroni_correction(0.9, 3)
-        assert p_near_one <= 1.0, f"Bonferroni result must be clamped to 1.0, got {p_near_one}"
+        assert p_near_one <= 1.0, (
+            f"Bonferroni result must be clamped to 1.0, got {p_near_one}"
+        )
 
     # ------------------------------------------------------------------
     # Test 4: Sample-size calculator consistency
@@ -324,15 +331,14 @@ class TestAnalysisServiceIntegration:
         assert lower > 0.0, (
             f"Wilson CI lower bound {lower:.6f} must be > 0 for extreme proportions"
         )
-        assert upper < 1.0, (
-            f"Wilson CI upper bound {upper:.6f} must be < 1"
-        )
+        assert upper < 1.0, f"Wilson CI upper bound {upper:.6f} must be < 1"
         assert lower < p_hat < upper, (
             f"Observed rate {p_hat} must lie inside Wilson CI ({lower:.6f}, {upper:.6f})"
         )
 
         # Demonstrate normal approximation failure for contrast
         import math
+
         z = 1.96
         se = math.sqrt(p_hat * (1.0 - p_hat) / total)
         normal_lower = p_hat - z * se
@@ -390,6 +396,7 @@ class TestAnalysisServiceIntegration:
         # Symmetry: reversing p1 and p2 gives the same magnitude but opposite sign
         h_rev, _ = service.cohens_h(0.50, 0.10)
         import math
+
         assert math.isclose(abs(h_large), abs(h_rev), rel_tol=1e-9), (
             "cohens_h should produce the same magnitude regardless of direction"
         )
@@ -503,8 +510,9 @@ class TestResultsEndpointCacheBehavior:
         assert response.status_code == 200, (
             f"Expected 200 on cache miss, got {response.status_code}: {response.text}"
         )
-        mock_get_results.assert_called_once(), (
-            "AnalysisService.get_experiment_results must be called on a cache miss"
+        (
+            mock_get_results.assert_called_once(),
+            ("AnalysisService.get_experiment_results must be called on a cache miss"),
         )
 
     # ------------------------------------------------------------------
@@ -521,10 +529,10 @@ class TestResultsEndpointCacheBehavior:
         """
         # Build a minimal serialisable payload that ExperimentResultsResponse accepts.
         from backend.app.schemas.results import (
+            CorrectionMethod,
             ExperimentResultsResponse,
             ExperimentSummary,
             RecommendationAction,
-            CorrectionMethod,
         )
 
         cached_response = ExperimentResultsResponse(
@@ -570,8 +578,11 @@ class TestResultsEndpointCacheBehavior:
         assert response.status_code == 200, (
             f"Expected 200 on cache hit, got {response.status_code}: {response.text}"
         )
-        mock_get_results.assert_not_called(), (
-            "AnalysisService.get_experiment_results must NOT be called when cache hits"
+        (
+            mock_get_results.assert_not_called(),
+            (
+                "AnalysisService.get_experiment_results must NOT be called when cache hits"
+            ),
         )
 
     # ------------------------------------------------------------------
@@ -588,7 +599,9 @@ class TestResultsEndpointCacheBehavior:
         """
         # Provide valid cached data — should be ignored
         mock_cache = MagicMock()
-        mock_cache.get.return_value = json.dumps({"some": "cached_data"})  # would be a hit
+        mock_cache.get.return_value = json.dumps(
+            {"some": "cached_data"}
+        )  # would be a hit
 
         with patch(
             "backend.app.api.v1.endpoints.results._get_cache_service",
@@ -607,8 +620,11 @@ class TestResultsEndpointCacheBehavior:
         assert response.status_code == 200, (
             f"Expected 200 with use_cache=false, got {response.status_code}: {response.text}"
         )
-        mock_get_results.assert_called_once(), (
-            "AnalysisService.get_experiment_results must be called when use_cache=false"
+        (
+            mock_get_results.assert_called_once(),
+            (
+                "AnalysisService.get_experiment_results must be called when use_cache=false"
+            ),
         )
 
     # ------------------------------------------------------------------
@@ -644,7 +660,7 @@ class TestResultsEndpointCacheBehavior:
         )
         data = response.json()
         assert data.get("status") == "ok", (
-            f"Response JSON must contain {{\"status\": \"ok\"}}, got {data}"
+            f'Response JSON must contain {{"status": "ok"}}, got {data}'
         )
         assert "experiment_id" in data, (
             f"Response JSON must contain 'experiment_id', got {data}"

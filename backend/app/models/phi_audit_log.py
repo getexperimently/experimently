@@ -6,15 +6,14 @@ to satisfy HIPAA's minimum necessary and audit requirements.
 HIPAA mandates a 6-year retention period for audit records.
 """
 
-import uuid
 from datetime import datetime
 
-from sqlalchemy import Column, DateTime, Integer, String, ForeignKey
-from sqlalchemy.dialects.postgresql import UUID, JSONB
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, String
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.ext.declarative import declared_attr
 
-from backend.app.models.base import Base, BaseModel
 from backend.app.core.database_config import get_schema_name
+from backend.app.models.base import Base, BaseModel
 
 
 class PHIAuditLog(Base, BaseModel):

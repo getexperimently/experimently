@@ -9,9 +9,13 @@ public class SdkCache<TValue>
     private readonly int _maxSize;
     private readonly TimeSpan _defaultTtl;
 
-    // Dictionary preserves insertion order (guaranteed in .NET 5+).
-    // We rely on this to evict the oldest entry.
+    // Dictionary<K,V> does NOT guarantee enumeration order: after a removal the
+    // freed slot is reused by the next insertion, so "the first key enumerated"
+    // is not the oldest and eviction would drop an arbitrary entry. Insertion
+    // order is tracked explicitly instead.
     private readonly Dictionary<string, CacheEntry> _store;
+    private readonly LinkedList<string> _insertionOrder = new();
+    private readonly Dictionary<string, LinkedListNode<string>> _orderNodes = new();
     private readonly object _lock = new();
 
     private struct CacheEntry
@@ -33,20 +37,47 @@ public class SdkCache<TValue>
     }
 
     /// <summary>Gets a cached value, or default if not found or expired.</summary>
+    /// <remarks>
+    /// For a value type this cannot distinguish "missing" from a cached default
+    /// (<c>SdkCache&lt;int&gt;.Get</c> returns 0 either way). Use
+    /// <see cref="TryGet"/> when that difference matters.
+    /// </remarks>
     public TValue? Get(string key)
+    {
+        return TryGet(key, out var value) ? value : default;
+    }
+
+    /// <summary>Gets a cached value; false when the key is absent or expired.</summary>
+    public bool TryGet(string key, out TValue value)
     {
         lock (_lock)
         {
             if (!_store.TryGetValue(key, out var entry))
-                return default;
+            {
+                value = default!;
+                return false;
+            }
 
             if (DateTime.UtcNow >= entry.ExpiresAt)
             {
-                _store.Remove(key);
-                return default;
+                RemoveLocked(key);
+                value = default!;
+                return false;
             }
 
-            return entry.Value;
+            value = entry.Value;
+            return true;
+        }
+    }
+
+    /// <summary>Removes a key and its order entry. Caller holds the lock.</summary>
+    private void RemoveLocked(string key)
+    {
+        _store.Remove(key);
+        if (_orderNodes.TryGetValue(key, out var node))
+        {
+            _insertionOrder.Remove(node);
+            _orderNodes.Remove(key);
         }
     }
 
@@ -59,20 +90,12 @@ public class SdkCache<TValue>
         lock (_lock)
         {
             // If key already exists, remove it first to refresh insertion order.
-            _store.Remove(key);
+            RemoveLocked(key);
 
-            // Evict oldest entry if at capacity.
-            if (_store.Count >= _maxSize)
+            // Evict the oldest entry if at capacity.
+            while (_store.Count >= _maxSize && _insertionOrder.First is { } oldest)
             {
-                // Dictionary<K,V> enumerates in insertion order — first key is oldest.
-                string? oldest = null;
-                foreach (var k in _store.Keys)
-                {
-                    oldest = k;
-                    break;
-                }
-                if (oldest != null)
-                    _store.Remove(oldest);
+                RemoveLocked(oldest.Value);
             }
 
             _store[key] = new CacheEntry
@@ -80,6 +103,7 @@ public class SdkCache<TValue>
                 Value = value,
                 ExpiresAt = DateTime.UtcNow + (ttl ?? _defaultTtl)
             };
+            _orderNodes[key] = _insertionOrder.AddLast(key);
         }
     }
 
@@ -88,7 +112,7 @@ public class SdkCache<TValue>
     {
         lock (_lock)
         {
-            _store.Remove(key);
+            RemoveLocked(key);
         }
     }
 
@@ -98,6 +122,8 @@ public class SdkCache<TValue>
         lock (_lock)
         {
             _store.Clear();
+            _insertionOrder.Clear();
+            _orderNodes.Clear();
         }
     }
 

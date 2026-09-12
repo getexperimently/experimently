@@ -171,3 +171,33 @@ demo/shoplab/.env.local
 tests/sdk-contract/live/.api_key
 demo/streampulse/.api_key
 demo/streampulse/.env.local
+
+# The react-native live contract writes its report here (Jest owns stdout, so the
+# runner reads the file instead); see sdk/react-native/examples/contract_smoke.test.ts
+sdk/react-native/.contract_smoke.json
+
+# Ruby SDK: a gem should not lock its own dependencies; `bundle install`
+# regenerates this locally and in CI (sdk-unit-tests.yml).
+sdk/ruby/Gemfile.lock
+
+# PHP SDK: composer install output
+sdk/php/vendor/
+sdk/php/composer.lock
+
+# Elixir SDK build output
+sdk/elixir/_build/
+sdk/elixir/deps/
+
+# .NET SDK build output
+sdk/dotnet/**/bin/
+sdk/dotnet/**/obj/
+
+# Flutter SDK build output
+sdk/flutter/.dart_tool/
+sdk/flutter/.packages
+sdk/flutter/pubspec.lock
+
+# Playwright run output (reports, traces, screenshots)
+frontend/playwright-results/
+frontend/playwright-report/
+

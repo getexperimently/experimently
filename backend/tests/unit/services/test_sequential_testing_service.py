@@ -13,22 +13,22 @@ All tests are pure math — no mocking needed.
 """
 
 import math
-import pytest
+
 import numpy as np
+import pytest
 
 from backend.app.services.sequential_testing_service import (
-    SequentialTestingService,
-    MSPRTResult,
-    ConfidenceSequence,
     AlphaSpendingBoundary,
+    ConfidenceSequence,
     EvidencePoint,
+    EvidenceStrength,
     LongRunningRisk,
+    MSPRTResult,
     SequentialAnalysis,
     SequentialTestingMethod,
+    SequentialTestingService,
     SpendingFunction,
-    EvidenceStrength,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -52,8 +52,10 @@ class TestMSPRT:
         """When treatment equals control, lambda should not reach the boundary."""
         service = _make_service()
         result = service.compute_msprt(
-            control_successes=100, control_total=1000,
-            treatment_successes=100, treatment_total=1000,
+            control_successes=100,
+            control_total=1000,
+            treatment_successes=100,
+            treatment_total=1000,
             tau_squared=0.001,
         )
         # With equal rates, delta=0, so the exponential term is 1.
@@ -65,8 +67,10 @@ class TestMSPRT:
         """Clear treatment win should trigger early stopping."""
         service = _make_service()
         result = service.compute_msprt(
-            control_successes=50, control_total=1000,
-            treatment_successes=100, treatment_total=1000,
+            control_successes=50,
+            control_total=1000,
+            treatment_successes=100,
+            treatment_total=1000,
             tau_squared=0.001,
         )
         # boundary = 1/0.05 = 20
@@ -77,8 +81,10 @@ class TestMSPRT:
         """The stopping boundary should equal 1/alpha."""
         service = _make_service()
         result = service.compute_msprt(
-            control_successes=100, control_total=1000,
-            treatment_successes=100, treatment_total=1000,
+            control_successes=100,
+            control_total=1000,
+            treatment_successes=100,
+            treatment_total=1000,
             alpha=0.01,
         )
         assert result.boundary == pytest.approx(100.0, rel=1e-9)
@@ -87,8 +93,10 @@ class TestMSPRT:
         """The always-valid p-value must lie in (0, 1]."""
         service = _make_service()
         result = service.compute_msprt(
-            control_successes=80, control_total=1000,
-            treatment_successes=120, treatment_total=1000,
+            control_successes=80,
+            control_total=1000,
+            treatment_successes=120,
+            treatment_total=1000,
         )
         assert 0.0 < result.always_valid_p_value <= 1.0
 
@@ -96,8 +104,10 @@ class TestMSPRT:
         """Zero control samples should return lambda_ratio=1, can_stop=False."""
         service = _make_service()
         result = service.compute_msprt(
-            control_successes=0, control_total=0,
-            treatment_successes=50, treatment_total=500,
+            control_successes=0,
+            control_total=0,
+            treatment_successes=50,
+            treatment_total=500,
         )
         assert result.lambda_ratio == 1.0
         assert not result.can_stop
@@ -106,8 +116,10 @@ class TestMSPRT:
         """Zero treatment samples should return lambda_ratio=1, can_stop=False."""
         service = _make_service()
         result = service.compute_msprt(
-            control_successes=50, control_total=500,
-            treatment_successes=0, treatment_total=0,
+            control_successes=50,
+            control_total=500,
+            treatment_successes=0,
+            treatment_total=0,
         )
         assert result.lambda_ratio == 1.0
         assert not result.can_stop
@@ -116,8 +128,10 @@ class TestMSPRT:
         """Identical conversion rates should yield inconclusive evidence."""
         service = _make_service()
         result = service.compute_msprt(
-            control_successes=200, control_total=2000,
-            treatment_successes=200, treatment_total=2000,
+            control_successes=200,
+            control_total=2000,
+            treatment_successes=200,
+            treatment_total=2000,
         )
         assert result.evidence_strength == EvidenceStrength.INCONCLUSIVE
 
@@ -125,12 +139,16 @@ class TestMSPRT:
         """Lambda should grow as we collect more data with a real effect."""
         service = _make_service()
         result_small = service.compute_msprt(
-            control_successes=10, control_total=100,
-            treatment_successes=20, treatment_total=100,
+            control_successes=10,
+            control_total=100,
+            treatment_successes=20,
+            treatment_total=100,
         )
         result_large = service.compute_msprt(
-            control_successes=100, control_total=1000,
-            treatment_successes=200, treatment_total=1000,
+            control_successes=100,
+            control_total=1000,
+            treatment_successes=200,
+            treatment_total=1000,
         )
         assert result_large.lambda_ratio > result_small.lambda_ratio
 
@@ -138,8 +156,10 @@ class TestMSPRT:
         """Very strong treatment win should produce strong_for_effect."""
         service = _make_service()
         result = service.compute_msprt(
-            control_successes=50, control_total=1000,
-            treatment_successes=150, treatment_total=1000,
+            control_successes=50,
+            control_total=1000,
+            treatment_successes=150,
+            treatment_total=1000,
         )
         assert result.evidence_strength == EvidenceStrength.STRONG_FOR_EFFECT
 
@@ -147,13 +167,17 @@ class TestMSPRT:
         """Different tau_squared mixing parameter should change the lambda."""
         service = _make_service()
         r1 = service.compute_msprt(
-            control_successes=80, control_total=1000,
-            treatment_successes=120, treatment_total=1000,
+            control_successes=80,
+            control_total=1000,
+            treatment_successes=120,
+            treatment_total=1000,
             tau_squared=0.0001,
         )
         r2 = service.compute_msprt(
-            control_successes=80, control_total=1000,
-            treatment_successes=120, treatment_total=1000,
+            control_successes=80,
+            control_total=1000,
+            treatment_successes=120,
+            treatment_total=1000,
             tau_squared=0.01,
         )
         assert r1.lambda_ratio != pytest.approx(r2.lambda_ratio, rel=1e-6)
@@ -171,8 +195,10 @@ class TestAlwaysValidCI:
         """When rates are identical the CI should contain zero."""
         service = _make_service()
         cs = service.compute_always_valid_ci(
-            control_successes=100, control_total=1000,
-            treatment_successes=100, treatment_total=1000,
+            control_successes=100,
+            control_total=1000,
+            treatment_successes=100,
+            treatment_total=1000,
         )
         assert cs.lower < 0.0 < cs.upper
 
@@ -180,12 +206,16 @@ class TestAlwaysValidCI:
         """Width of the CI should shrink as sample size grows."""
         service = _make_service()
         cs_small = service.compute_always_valid_ci(
-            control_successes=10, control_total=100,
-            treatment_successes=15, treatment_total=100,
+            control_successes=10,
+            control_total=100,
+            treatment_successes=15,
+            treatment_total=100,
         )
         cs_large = service.compute_always_valid_ci(
-            control_successes=100, control_total=1000,
-            treatment_successes=150, treatment_total=1000,
+            control_successes=100,
+            control_total=1000,
+            treatment_successes=150,
+            treatment_total=1000,
         )
         assert cs_large.width < cs_small.width
 
@@ -193,8 +223,10 @@ class TestAlwaysValidCI:
         """For a known effect (5%), the CI should contain the true value."""
         service = _make_service()
         cs = service.compute_always_valid_ci(
-            control_successes=100, control_total=1000,
-            treatment_successes=150, treatment_total=1000,
+            control_successes=100,
+            control_total=1000,
+            treatment_successes=150,
+            treatment_total=1000,
         )
         true_delta = 0.15 - 0.10  # = 0.05
         assert cs.lower <= true_delta <= cs.upper
@@ -203,8 +235,10 @@ class TestAlwaysValidCI:
         """The CI should be symmetric around delta_hat."""
         service = _make_service()
         cs = service.compute_always_valid_ci(
-            control_successes=100, control_total=1000,
-            treatment_successes=120, treatment_total=1000,
+            control_successes=100,
+            control_total=1000,
+            treatment_successes=120,
+            treatment_total=1000,
         )
         delta_hat = 0.12 - 0.10
         lower_dist = delta_hat - cs.lower
@@ -215,8 +249,10 @@ class TestAlwaysValidCI:
         """Width field should equal upper - lower."""
         service = _make_service()
         cs = service.compute_always_valid_ci(
-            control_successes=50, control_total=500,
-            treatment_successes=80, treatment_total=500,
+            control_successes=50,
+            control_total=500,
+            treatment_successes=80,
+            treatment_total=500,
         )
         assert cs.width == pytest.approx(cs.upper - cs.lower, rel=1e-9)
 
@@ -224,8 +260,10 @@ class TestAlwaysValidCI:
         """The sample_size field should equal the sum of both groups."""
         service = _make_service()
         cs = service.compute_always_valid_ci(
-            control_successes=50, control_total=500,
-            treatment_successes=80, treatment_total=800,
+            control_successes=50,
+            control_total=500,
+            treatment_successes=80,
+            treatment_total=800,
         )
         assert cs.sample_size == 1300
 
@@ -242,8 +280,10 @@ class TestAlphaSpending:
         """O'Brien-Fleming z-boundaries should decrease as looks increase."""
         service = _make_service()
         boundaries = service.compute_alpha_spending(
-            current_look=5, planned_looks=5,
-            alpha=0.05, spending_function=SpendingFunction.OBRIEN_FLEMING,
+            current_look=5,
+            planned_looks=5,
+            alpha=0.05,
+            spending_function=SpendingFunction.OBRIEN_FLEMING,
         )
         z_values = [b.boundary_z for b in boundaries]
         # OBF: z-boundaries decrease over time
@@ -254,8 +294,10 @@ class TestAlphaSpending:
         """Pocock boundaries should be the same at every look."""
         service = _make_service()
         boundaries = service.compute_alpha_spending(
-            current_look=5, planned_looks=5,
-            alpha=0.05, spending_function=SpendingFunction.POCOCK,
+            current_look=5,
+            planned_looks=5,
+            alpha=0.05,
+            spending_function=SpendingFunction.POCOCK,
         )
         z_values = [b.boundary_z for b in boundaries]
         for z in z_values:
@@ -265,8 +307,10 @@ class TestAlphaSpending:
         """The last OBF boundary's cumulative_alpha should be close to alpha."""
         service = _make_service()
         boundaries = service.compute_alpha_spending(
-            current_look=5, planned_looks=5,
-            alpha=0.05, spending_function=SpendingFunction.OBRIEN_FLEMING,
+            current_look=5,
+            planned_looks=5,
+            alpha=0.05,
+            spending_function=SpendingFunction.OBRIEN_FLEMING,
         )
         # The cumulative alpha at the final look should be the total alpha
         assert boundaries[-1].cumulative_alpha == pytest.approx(0.05, abs=0.01)
@@ -275,8 +319,10 @@ class TestAlphaSpending:
         """The last Pocock boundary's cumulative_alpha should be close to alpha."""
         service = _make_service()
         boundaries = service.compute_alpha_spending(
-            current_look=5, planned_looks=5,
-            alpha=0.05, spending_function=SpendingFunction.POCOCK,
+            current_look=5,
+            planned_looks=5,
+            alpha=0.05,
+            spending_function=SpendingFunction.POCOCK,
         )
         assert boundaries[-1].cumulative_alpha == pytest.approx(0.05, abs=0.01)
 
@@ -284,8 +330,10 @@ class TestAlphaSpending:
         """Number of boundaries should match current_look."""
         service = _make_service()
         boundaries = service.compute_alpha_spending(
-            current_look=3, planned_looks=10,
-            alpha=0.05, spending_function=SpendingFunction.OBRIEN_FLEMING,
+            current_look=3,
+            planned_looks=10,
+            alpha=0.05,
+            spending_function=SpendingFunction.OBRIEN_FLEMING,
         )
         assert len(boundaries) == 3
 
@@ -293,8 +341,10 @@ class TestAlphaSpending:
         """All boundary p-values should lie in (0, 1)."""
         service = _make_service()
         boundaries = service.compute_alpha_spending(
-            current_look=5, planned_looks=5,
-            alpha=0.05, spending_function=SpendingFunction.OBRIEN_FLEMING,
+            current_look=5,
+            planned_looks=5,
+            alpha=0.05,
+            spending_function=SpendingFunction.OBRIEN_FLEMING,
         )
         for b in boundaries:
             assert 0.0 < b.boundary_p < 1.0
@@ -381,8 +431,10 @@ class TestLongRunningRisk:
         """An on-track experiment should not be flagged at risk."""
         service = _make_service()
         risk = service.estimate_long_running_risk(
-            actual_days=7, expected_days=14,
-            current_sample_size=5000, required_sample_size=10000,
+            actual_days=7,
+            expected_days=14,
+            current_sample_size=5000,
+            required_sample_size=10000,
         )
         assert not risk.is_at_risk
 
@@ -390,8 +442,10 @@ class TestLongRunningRisk:
         """Experiment running past 1.5x expected duration should be at risk."""
         service = _make_service()
         risk = service.estimate_long_running_risk(
-            actual_days=30, expected_days=14,
-            current_sample_size=8000, required_sample_size=10000,
+            actual_days=30,
+            expected_days=14,
+            current_sample_size=8000,
+            required_sample_size=10000,
         )
         assert risk.is_at_risk
         assert risk.risk_ratio > 1.5
@@ -402,8 +456,10 @@ class TestLongRunningRisk:
         """
         service = _make_service()
         risk = service.estimate_long_running_risk(
-            actual_days=10, expected_days=14,
-            current_sample_size=2000, required_sample_size=10000,
+            actual_days=10,
+            expected_days=14,
+            current_sample_size=2000,
+            required_sample_size=10000,
         )
         assert risk.is_at_risk
 
@@ -411,8 +467,10 @@ class TestLongRunningRisk:
         """Risk ratio should be actual_days / expected_days."""
         service = _make_service()
         risk = service.estimate_long_running_risk(
-            actual_days=21, expected_days=14,
-            current_sample_size=8000, required_sample_size=10000,
+            actual_days=21,
+            expected_days=14,
+            current_sample_size=8000,
+            required_sample_size=10000,
         )
         assert risk.risk_ratio == pytest.approx(21.0 / 14.0, rel=1e-6)
 
@@ -439,8 +497,10 @@ class TestIntegration:
             "required_sample_size": 10000,
         }
         result = service.run_sequential_analysis(
-            control_successes=100, control_total=1000,
-            treatment_successes=120, treatment_total=1000,
+            control_successes=100,
+            control_total=1000,
+            treatment_successes=120,
+            treatment_total=1000,
             config=config,
         )
         assert isinstance(result, SequentialAnalysis)
@@ -464,8 +524,10 @@ class TestIntegration:
             "required_sample_size": 10000,
         }
         result = service.run_sequential_analysis(
-            control_successes=50, control_total=1000,
-            treatment_successes=150, treatment_total=1000,
+            control_successes=50,
+            control_total=1000,
+            treatment_successes=150,
+            treatment_total=1000,
             config=config,
         )
         assert result.recommended_action == "stop_for_effect"
@@ -484,8 +546,10 @@ class TestIntegration:
             "required_sample_size": 50000,
         }
         result = service.run_sequential_analysis(
-            control_successes=50, control_total=500,
-            treatment_successes=55, treatment_total=500,
+            control_successes=50,
+            control_total=500,
+            treatment_successes=55,
+            treatment_total=500,
             config=config,
         )
         assert result.recommended_action == "continue"
@@ -504,8 +568,10 @@ class TestIntegration:
             "required_sample_size": 10000,
         }
         result = service.run_sequential_analysis(
-            control_successes=200, control_total=2000,
-            treatment_successes=200, treatment_total=2000,
+            control_successes=200,
+            control_total=2000,
+            treatment_successes=200,
+            treatment_total=2000,
             config=config,
         )
         assert isinstance(result, SequentialAnalysis)

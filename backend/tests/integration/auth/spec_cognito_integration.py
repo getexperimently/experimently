@@ -10,6 +10,7 @@ is registered at /reset-password (not /confirm-forgot-password). Both the spec
 path and the actual path are tracked here. Tests use ACTUAL_PATH overrides
 where the spec path differs from the live router.
 """
+
 from dataclasses import dataclass, field
 from typing import List, Optional
 
@@ -32,10 +33,22 @@ COGNITO_ENDPOINT_SPECS = {
         auth_required=False,
         success_status=201,
         error_cases=[
-            {"scenario": "duplicate username", "status": 400, "trigger": "UsernameExistsException"},
-            {"scenario": "weak password", "status": 400, "trigger": "InvalidPasswordException"},
+            {
+                "scenario": "duplicate username",
+                "status": 400,
+                "trigger": "UsernameExistsException",
+            },
+            {
+                "scenario": "weak password",
+                "status": 400,
+                "trigger": "InvalidPasswordException",
+            },
             {"scenario": "invalid email", "status": 422, "trigger": "validation_error"},
-            {"scenario": "missing required fields", "status": 422, "trigger": "validation_error"},
+            {
+                "scenario": "missing required fields",
+                "status": 422,
+                "trigger": "validation_error",
+            },
         ],
     ),
     "confirm": EndpointSpec(
@@ -45,9 +58,21 @@ COGNITO_ENDPOINT_SPECS = {
         auth_required=False,
         success_status=200,
         error_cases=[
-            {"scenario": "wrong code", "status": 400, "trigger": "CodeMismatchException"},
-            {"scenario": "expired code", "status": 400, "trigger": "ExpiredCodeException"},
-            {"scenario": "already confirmed", "status": 400, "trigger": "NotAuthorizedException"},
+            {
+                "scenario": "wrong code",
+                "status": 400,
+                "trigger": "CodeMismatchException",
+            },
+            {
+                "scenario": "expired code",
+                "status": 400,
+                "trigger": "ExpiredCodeException",
+            },
+            {
+                "scenario": "already confirmed",
+                "status": 400,
+                "trigger": "NotAuthorizedException",
+            },
         ],
     ),
     "token": EndpointSpec(
@@ -57,9 +82,21 @@ COGNITO_ENDPOINT_SPECS = {
         auth_required=False,
         success_status=200,
         error_cases=[
-            {"scenario": "wrong password", "status": 401, "trigger": "NotAuthorizedException"},
-            {"scenario": "unconfirmed user", "status": 401, "trigger": "UserNotConfirmedException"},
-            {"scenario": "non-existent user", "status": 401, "trigger": "UserNotFoundException"},
+            {
+                "scenario": "wrong password",
+                "status": 401,
+                "trigger": "NotAuthorizedException",
+            },
+            {
+                "scenario": "unconfirmed user",
+                "status": 401,
+                "trigger": "UserNotConfirmedException",
+            },
+            {
+                "scenario": "non-existent user",
+                "status": 401,
+                "trigger": "UserNotFoundException",
+            },
         ],
     ),
     "refresh": EndpointSpec(
@@ -69,8 +106,16 @@ COGNITO_ENDPOINT_SPECS = {
         auth_required=False,
         success_status=200,
         error_cases=[
-            {"scenario": "invalid refresh token", "status": 401, "trigger": "NotAuthorizedException"},
-            {"scenario": "expired refresh token", "status": 401, "trigger": "NotAuthorizedException"},
+            {
+                "scenario": "invalid refresh token",
+                "status": 401,
+                "trigger": "NotAuthorizedException",
+            },
+            {
+                "scenario": "expired refresh token",
+                "status": 401,
+                "trigger": "NotAuthorizedException",
+            },
         ],
     ),
     "forgot_password": EndpointSpec(
@@ -82,7 +127,11 @@ COGNITO_ENDPOINT_SPECS = {
         error_cases=[
             # NOTE: The endpoint maps all ValueError to 400; the service raises
             # ValueError for UserNotFoundException too, so the real status is 400.
-            {"scenario": "non-existent user", "status": 400, "trigger": "UserNotFoundException"},
+            {
+                "scenario": "non-existent user",
+                "status": 400,
+                "trigger": "UserNotFoundException",
+            },
         ],
     ),
     "confirm_forgot_password": EndpointSpec(
@@ -94,8 +143,16 @@ COGNITO_ENDPOINT_SPECS = {
         auth_required=False,
         success_status=200,
         error_cases=[
-            {"scenario": "wrong code", "status": 400, "trigger": "CodeMismatchException"},
-            {"scenario": "expired code", "status": 400, "trigger": "ExpiredCodeException"},
+            {
+                "scenario": "wrong code",
+                "status": 400,
+                "trigger": "CodeMismatchException",
+            },
+            {
+                "scenario": "expired code",
+                "status": 400,
+                "trigger": "ExpiredCodeException",
+            },
         ],
     ),
     "me": EndpointSpec(

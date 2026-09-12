@@ -6,21 +6,21 @@ These models are used for request/response validation and documentation.
 """
 
 from datetime import datetime, timedelta, timezone
-from typing import List, Dict, Any, Optional, Union
 from enum import Enum
+from typing import Any, Dict, List, Optional
+
 from pydantic import (
+    UUID4,
     BaseModel,
+    ConfigDict,
     Field,
     field_validator,
-    field_serializer,
     model_validator,
-    ConfigDict,
-    UUID4,
 )
 
-from backend.app.schemas.variance_reduction import VarianceReductionConfig
 from backend.app.schemas.bandit import OptimizationType
 from backend.app.schemas.split_url import SplitUrlConfig
+from backend.app.schemas.variance_reduction import VarianceReductionConfig
 
 
 class ExperimentStatus(str, Enum):
@@ -56,24 +56,19 @@ class ScheduleConfig(BaseModel):
     """Configuration for experiment scheduling."""
 
     start_date: Optional[datetime] = Field(
-        None,
-        description="Date and time when experiment should automatically start"
+        None, description="Date and time when experiment should automatically start"
     )
     end_date: Optional[datetime] = Field(
-        None,
-        description="Date and time when experiment should automatically complete"
+        None, description="Date and time when experiment should automatically complete"
     )
-    time_zone: str = Field(
-        "UTC",
-        description="Time zone for interpreting dates"
-    )
+    time_zone: str = Field("UTC", description="Time zone for interpreting dates")
 
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
                 "start_date": "2023-12-01T00:00:00Z",
                 "end_date": "2023-12-31T23:59:59Z",
-                "time_zone": "UTC"
+                "time_zone": "UTC",
             }
         }
     )
@@ -82,7 +77,9 @@ class ScheduleConfig(BaseModel):
     @classmethod
     def validate_start_date(cls, v: Optional[datetime]) -> Optional[datetime]:
         """Validate that start_date is in the future if provided."""
-        if v and v < datetime.now(timezone.utc) - timedelta(minutes=10):  # Allow small buffer
+        if v and v < datetime.now(timezone.utc) - timedelta(
+            minutes=10
+        ):  # Allow small buffer
             raise ValueError("Start date must be in the future")
         return v
 
@@ -191,8 +188,12 @@ class ExperimentBase(BaseModel):
         pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]*$",
         description="Stable identifier used by SDKs (generated from the name when omitted)",
     )
-    description: Optional[str] = Field(None, max_length=2000, description="Experiment description")
-    hypothesis: Optional[str] = Field(None, max_length=2000, description="Experiment hypothesis")
+    description: Optional[str] = Field(
+        None, max_length=2000, description="Experiment description"
+    )
+    hypothesis: Optional[str] = Field(
+        None, max_length=2000, description="Experiment hypothesis"
+    )
     experiment_type: ExperimentType = Field(
         ExperimentType.A_B, description="Type of experiment"
     )
@@ -245,7 +246,8 @@ class ExperimentCreate(ExperimentBase):
         default=False, description="Enable sequential testing (mSPRT early stopping)."
     )
     sequential_testing_config: Optional[SequentialTestingConfigInput] = Field(
-        default=None, description="Sequential testing configuration.",
+        default=None,
+        description="Sequential testing configuration.",
     )
 
     # Issue #21: CUPED variance reduction
@@ -338,8 +340,12 @@ class ExperimentUpdate(BaseModel):
     name: Optional[str] = Field(
         None, min_length=1, max_length=255, description="Experiment name"
     )
-    description: Optional[str] = Field(None, max_length=2000, description="Experiment description")
-    hypothesis: Optional[str] = Field(None, max_length=2000, description="Experiment hypothesis")
+    description: Optional[str] = Field(
+        None, max_length=2000, description="Experiment description"
+    )
+    hypothesis: Optional[str] = Field(
+        None, max_length=2000, description="Experiment hypothesis"
+    )
     status: Optional[ExperimentStatus] = Field(None, description="Experiment status")
     experiment_type: Optional[ExperimentType] = Field(
         None, description="Type of experiment"
@@ -361,7 +367,8 @@ class ExperimentUpdate(BaseModel):
         default=None, description="Enable or disable sequential testing."
     )
     sequential_testing_config: Optional[SequentialTestingConfigInput] = Field(
-        default=None, description="Sequential testing configuration.",
+        default=None,
+        description="Sequential testing configuration.",
     )
 
     # Issue #21: CUPED variance reduction
@@ -402,7 +409,9 @@ class ExperimentUpdate(BaseModel):
                 raise ValueError("At least one variant must be marked as control")
 
             # Check that traffic allocations sum to 100
-            total_allocation = sum(variant.traffic_allocation for variant in self.variants)
+            total_allocation = sum(
+                variant.traffic_allocation for variant in self.variants
+            )
             if total_allocation != 100:
                 raise ValueError(
                     f"Traffic allocations must sum to 100% (currently {total_allocation}%)"
@@ -490,11 +499,11 @@ class ExperimentResponse(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-    @field_validator('status', 'experiment_type', mode='before')
+    @field_validator("status", "experiment_type", mode="before")
     @classmethod
     def convert_enum_to_string(cls, value):
         """Convert enum values to strings before validation."""
-        if hasattr(value, 'value'):
+        if hasattr(value, "value"):
             return value.value
         return value
 
@@ -517,12 +526,12 @@ class ExperimentListResponse(BaseModel):
                         "description": "Testing different button colors",
                         "status": "active",
                         "total_users": 1000,
-                        "created_at": "2023-01-01T00:00:00Z"
+                        "created_at": "2023-01-01T00:00:00Z",
                     }
                 ],
                 "total": 1,
                 "skip": 0,
-                "limit": 100
+                "limit": 100,
             }
         }
     )
@@ -571,12 +580,12 @@ class ExperimentResults(BaseModel):
                         "differences": {"Treatment": 0.02},
                         "p_values": {"Treatment": 0.03},
                         "significant": {"Treatment": True},
-                        "confidence_intervals": {"Treatment": [0.01, 0.03]}
+                        "confidence_intervals": {"Treatment": [0.01, 0.03]},
                     }
                 ],
                 "sample_sizes": {"Control": 5000, "Treatment": 5000},
                 "conclusion": "The blue button significantly improved conversion rates by 20%",
-                "recommended_variant": "Treatment"
+                "recommended_variant": "Treatment",
             }
         }
     )

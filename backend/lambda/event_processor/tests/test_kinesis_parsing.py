@@ -13,8 +13,8 @@ Test-Driven Development (TDD) - RED phase:
 
 import base64
 import json
+
 import pytest
-from typing import List, Dict, Any
 
 
 class TestKinesisEventParsing:
@@ -29,8 +29,14 @@ class TestKinesisEventParsing:
         Then: Returns a list with one decoded event dict
         """
         # Arrange
-        event_data = {"event_type": "page_view", "user_id": "user123", "timestamp": "2024-12-19T10:00:00Z"}
-        encoded_data = base64.b64encode(json.dumps(event_data).encode('utf-8')).decode('utf-8')
+        event_data = {
+            "event_type": "page_view",
+            "user_id": "user123",
+            "timestamp": "2024-12-19T10:00:00Z",
+        }
+        encoded_data = base64.b64encode(json.dumps(event_data).encode("utf-8")).decode(
+            "utf-8"
+        )
 
         kinesis_event = {
             "Records": [
@@ -38,7 +44,7 @@ class TestKinesisEventParsing:
                     "kinesis": {
                         "data": encoded_data,
                         "sequenceNumber": "49590338271490256608559692538361571095921575989136588898",
-                        "partitionKey": "user123"
+                        "partitionKey": "user123",
                     },
                     "eventID": "shardId-000000000000:49590338271490256608559692538361571095921575989136588898",
                     "eventSource": "aws:kinesis",
@@ -46,7 +52,7 @@ class TestKinesisEventParsing:
                     "eventName": "aws:kinesis:record",
                     "invokeIdentityArn": "arn:aws:iam::EXAMPLE",
                     "awsRegion": "us-west-2",
-                    "eventSourceARN": "arn:aws:kinesis:us-west-2:EXAMPLE:stream/test"
+                    "eventSourceARN": "arn:aws:kinesis:us-west-2:EXAMPLE:stream/test",
                 }
             ]
         }
@@ -75,19 +81,23 @@ class TestKinesisEventParsing:
         events_data = [
             {"event_type": "page_view", "user_id": "user1"},
             {"event_type": "button_click", "user_id": "user2"},
-            {"event_type": "purchase", "user_id": "user3", "value": 99.99}
+            {"event_type": "purchase", "user_id": "user3", "value": 99.99},
         ]
 
         records = []
         for event_data in events_data:
-            encoded_data = base64.b64encode(json.dumps(event_data).encode('utf-8')).decode('utf-8')
-            records.append({
-                "kinesis": {
-                    "data": encoded_data,
-                    "sequenceNumber": f"seq-{len(records)}",
-                    "partitionKey": event_data["user_id"]
+            encoded_data = base64.b64encode(
+                json.dumps(event_data).encode("utf-8")
+            ).decode("utf-8")
+            records.append(
+                {
+                    "kinesis": {
+                        "data": encoded_data,
+                        "sequenceNumber": f"seq-{len(records)}",
+                        "partitionKey": event_data["user_id"],
+                    }
                 }
-            })
+            )
 
         kinesis_event = {"Records": records}
 
@@ -118,7 +128,7 @@ class TestKinesisEventParsing:
                     "kinesis": {
                         "data": "not-valid-base64!!!",
                         "sequenceNumber": "seq-1",
-                        "partitionKey": "user123"
+                        "partitionKey": "user123",
                     }
                 }
             ]
@@ -140,7 +150,7 @@ class TestKinesisEventParsing:
         """
         # Arrange
         invalid_json = "{ not valid json }"
-        encoded_data = base64.b64encode(invalid_json.encode('utf-8')).decode('utf-8')
+        encoded_data = base64.b64encode(invalid_json.encode("utf-8")).decode("utf-8")
 
         kinesis_event = {
             "Records": [
@@ -148,7 +158,7 @@ class TestKinesisEventParsing:
                     "kinesis": {
                         "data": encoded_data,
                         "sequenceNumber": "seq-1",
-                        "partitionKey": "user123"
+                        "partitionKey": "user123",
                     }
                 }
             ]
@@ -195,25 +205,29 @@ class TestKinesisEventParsing:
         records = [
             {
                 "kinesis": {
-                    "data": base64.b64encode(json.dumps(valid_event_1).encode('utf-8')).decode('utf-8'),
+                    "data": base64.b64encode(
+                        json.dumps(valid_event_1).encode("utf-8")
+                    ).decode("utf-8"),
                     "sequenceNumber": "seq-1",
-                    "partitionKey": "user1"
+                    "partitionKey": "user1",
                 }
             },
             {
                 "kinesis": {
                     "data": "invalid-base64!!!",  # This one will fail
                     "sequenceNumber": "seq-2",
-                    "partitionKey": "user-bad"
+                    "partitionKey": "user-bad",
                 }
             },
             {
                 "kinesis": {
-                    "data": base64.b64encode(json.dumps(valid_event_2).encode('utf-8')).decode('utf-8'),
+                    "data": base64.b64encode(
+                        json.dumps(valid_event_2).encode("utf-8")
+                    ).decode("utf-8"),
                     "sequenceNumber": "seq-3",
-                    "partitionKey": "user2"
+                    "partitionKey": "user2",
                 }
-            }
+            },
         ]
 
         kinesis_event = {"Records": records}
@@ -242,9 +256,11 @@ class TestKinesisEventParsing:
         event_data = {
             "event_type": "message_sent",
             "user_id": "user123",
-            "message": "Hello 👋 World! Special: é, ñ, 中文"
+            "message": "Hello 👋 World! Special: é, ñ, 中文",
         }
-        encoded_data = base64.b64encode(json.dumps(event_data).encode('utf-8')).decode('utf-8')
+        encoded_data = base64.b64encode(json.dumps(event_data).encode("utf-8")).decode(
+            "utf-8"
+        )
 
         kinesis_event = {
             "Records": [
@@ -252,7 +268,7 @@ class TestKinesisEventParsing:
                     "kinesis": {
                         "data": encoded_data,
                         "sequenceNumber": "seq-1",
-                        "partitionKey": "user123"
+                        "partitionKey": "user123",
                     }
                 }
             ]
@@ -282,16 +298,15 @@ class TestKinesisEventParsing:
             "cart": {
                 "items": [
                     {"id": "item1", "price": 10.00},
-                    {"id": "item2", "price": 20.00}
+                    {"id": "item2", "price": 20.00},
                 ],
-                "total": 30.00
+                "total": 30.00,
             },
-            "metadata": {
-                "source": "mobile_app",
-                "version": "1.2.3"
-            }
+            "metadata": {"source": "mobile_app", "version": "1.2.3"},
         }
-        encoded_data = base64.b64encode(json.dumps(event_data).encode('utf-8')).decode('utf-8')
+        encoded_data = base64.b64encode(json.dumps(event_data).encode("utf-8")).decode(
+            "utf-8"
+        )
 
         kinesis_event = {
             "Records": [
@@ -299,7 +314,7 @@ class TestKinesisEventParsing:
                     "kinesis": {
                         "data": encoded_data,
                         "sequenceNumber": "seq-1",
-                        "partitionKey": "user123"
+                        "partitionKey": "user123",
                     }
                 }
             ]

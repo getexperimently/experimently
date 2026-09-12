@@ -10,38 +10,40 @@ DB isolation: The contract conftest creates a fresh SQLAlchemy engine (not shari
 the pool used by E2E tests) so that stale connections from prior test suites do not
 cause "server closed the connection" errors in the contract db_session fixture.
 """
+
 import os
+
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
-from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.orm import Session, sessionmaker
 
-from backend.app.main import app
 from backend.app.api import deps
 from backend.app.api.deps import CacheControl
+from backend.app.main import app
 from backend.app.models.user import User, UserRole
-
-# Re-import all integration fixtures so pytest discovers them
-from backend.tests.integration.conftest import (  # noqa: F401
-    admin_user,
-    developer_user,
-    analyst_user,
-    viewer_user,
-    make_experiment,
-    make_variant,
-    make_metric,
-    make_feature_flag,
-    make_event,
-    make_assignment,
-    developer_client,
-    analyst_client,
-)
 
 # Use the per-process database that the root conftest's `test_db` fixture
 # creates (experimentation_test_<pid>) rather than a fixed name, so the
 # contract engine points at a database that actually has the schema.
-from backend.tests.conftest import DEFAULT_TEST_DB_URL  # noqa: E402
+from backend.tests.conftest import DEFAULT_TEST_DB_URL
+
+# Re-import all integration fixtures so pytest discovers them
+from backend.tests.integration.conftest import (
+    admin_user,
+    analyst_client,
+    analyst_user,
+    developer_client,
+    developer_user,
+    make_assignment,
+    make_event,
+    make_experiment,
+    make_feature_flag,
+    make_metric,
+    make_variant,
+    viewer_user,
+)
 
 HASHED_PASSWORD = "$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW"
 
@@ -54,6 +56,7 @@ class DictLikeCacheControl:
     (dict-style) instead of cache_control.enabled (attribute access), which
     raises AttributeError on the real Pydantic CacheControl object.
     """
+
     enabled = False
     skip = True
     redis = None
@@ -76,6 +79,7 @@ def contract_engine(test_db):
     that might conflict with the contract tests' own pool.
     """
     from backend.app.db.session import engine as app_engine
+
     app_engine.dispose()
 
     # Always the per-process database that `test_db` just created; an
@@ -130,6 +134,7 @@ def admin_client(db_session: Session, admin_user: User, monkeypatch) -> TestClie
     Overrides `can_create_feature_flag` and uses DictLikeCacheControl to
     avoid the pre-existing CacheControl.get() bug in create_feature_flag.
     """
+
     def override_get_db():
         try:
             yield db_session
@@ -158,11 +163,17 @@ def admin_client(db_session: Session, admin_user: User, monkeypatch) -> TestClie
 
     app.dependency_overrides[deps.get_db] = override_get_db
     app.dependency_overrides[deps.get_current_user] = override_get_current_user
-    app.dependency_overrides[deps.get_current_active_user] = override_get_current_active_user
-    app.dependency_overrides[deps.get_current_superuser] = override_get_current_superuser
+    app.dependency_overrides[deps.get_current_active_user] = (
+        override_get_current_active_user
+    )
+    app.dependency_overrides[deps.get_current_superuser] = (
+        override_get_current_superuser
+    )
     app.dependency_overrides[deps.get_cache_control] = override_get_cache_control
     app.dependency_overrides[deps.get_api_key] = override_get_api_key
-    app.dependency_overrides[deps.can_create_feature_flag] = override_can_create_feature_flag
+    app.dependency_overrides[deps.can_create_feature_flag] = (
+        override_can_create_feature_flag
+    )
 
     client = TestClient(app)
     yield client

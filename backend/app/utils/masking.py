@@ -6,44 +6,53 @@ This module provides functions for masking sensitive information before logging.
 
 import os
 import re
-from typing import Dict, Any, List, Union, Pattern
-
+from typing import Any, Dict
 
 # Regular expressions for sensitive data patterns
 PATTERNS = {
     # Credit card numbers (with or without spaces/dashes)
     "credit_card": re.compile(r"\b(?:\d{4}[-\s]?){3}\d{4}\b"),
-
     # Social security numbers (with or without dashes)
     "ssn": re.compile(r"\b\d{3}[-]?\d{2}[-]?\d{4}\b"),
-
     # Email addresses
     "email": re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b"),
-
     # Phone numbers (various formats)
     "phone": re.compile(r"\b(?:\+\d{1,2}\s?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b"),
-
     # API keys and tokens (common patterns)
     "api_key": re.compile(r"\b[A-Za-z0-9_\-]{20,}\b"),
-
     # IP addresses
     "ip_address": re.compile(r"\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b"),
 }
 
 # Sensitive field names (case-insensitive)
 SENSITIVE_FIELDS = {
-    "password", "token", "api_key", "apikey", "secret", "credential",
-    "auth", "authorization", "access_token", "refresh_token",
-    "private_key", "secret_key", "key", "ssn", "credit_card",
-    "card_number", "cvv", "cvc", "pin"
+    "password",
+    "token",
+    "api_key",
+    "apikey",
+    "secret",
+    "credential",
+    "auth",
+    "authorization",
+    "access_token",
+    "refresh_token",
+    "private_key",
+    "secret_key",
+    "key",
+    "ssn",
+    "credit_card",
+    "card_number",
+    "cvv",
+    "cvc",
+    "pin",
 }
 
 # Load additional fields to mask from environment variable
-ADDITIONAL_FIELDS = set(
+ADDITIONAL_FIELDS = {
     field.strip().lower()
     for field in os.getenv("MASK_ADDITIONAL_FIELDS", "").split(",")
     if field.strip()
-)
+}
 
 # Combine default and additional fields
 FIELDS_TO_MASK = SENSITIVE_FIELDS.union(ADDITIONAL_FIELDS)
@@ -63,7 +72,7 @@ def mask_credit_card(value: str) -> str:
         return value
 
     # Keep only the last 4 digits
-    digits = re.sub(r'[^0-9]', '', value)
+    digits = re.sub(r"[^0-9]", "", value)
     if len(digits) < 8:  # Not likely a credit card
         return value
 
@@ -106,7 +115,7 @@ def mask_phone(value: str) -> str:
         return value
 
     # Keep only digits
-    digits = re.sub(r'[^0-9]', '', value)
+    digits = re.sub(r"[^0-9]", "", value)
     if len(digits) < 7:  # Not likely a phone number
         return value
 
@@ -153,28 +162,25 @@ def mask_string_value(value: str) -> str:
         )
 
     if PATTERNS["email"].search(value):
-        return PATTERNS["email"].sub(
-            lambda m: mask_email(m.group(0)), value
-        )
+        return PATTERNS["email"].sub(lambda m: mask_email(m.group(0)), value)
 
     if PATTERNS["phone"].search(value):
-        return PATTERNS["phone"].sub(
-            lambda m: mask_phone(m.group(0)), value
-        )
+        return PATTERNS["phone"].sub(lambda m: mask_phone(m.group(0)), value)
 
     if PATTERNS["ip_address"].search(value):
-        return PATTERNS["ip_address"].sub(
-            lambda m: mask_ip_address(m.group(0)), value
-        )
+        return PATTERNS["ip_address"].sub(lambda m: mask_ip_address(m.group(0)), value)
 
     if PATTERNS["ssn"].search(value):
         return PATTERNS["ssn"].sub("***-**-****", value)
 
     if PATTERNS["api_key"].search(value):
         return PATTERNS["api_key"].sub(
-            lambda m: m.group(0)[:4] + "***" + m.group(0)[-4:]
-            if len(m.group(0)) > 8 else "********",
-            value
+            lambda m: (
+                m.group(0)[:4] + "***" + m.group(0)[-4:]
+                if len(m.group(0)) > 8
+                else "********"
+            ),
+            value,
         )
 
     return value
@@ -245,7 +251,10 @@ def mask_request_data(request_data: Dict[str, Any]) -> Dict[str, Any]:
 
         for header_name, header_value in headers.items():
             header_lower = header_name.lower()
-            if any(sensitive in header_lower for sensitive in ("auth", "token", "key", "secret", "credential")):
+            if any(
+                sensitive in header_lower
+                for sensitive in ("auth", "token", "key", "secret", "credential")
+            ):
                 masked_headers[header_name] = "***MASKED***"
             else:
                 masked_headers[header_name] = header_value

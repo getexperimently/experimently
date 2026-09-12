@@ -4,9 +4,9 @@ Capacity planner for the experimentation platform.
 Extrapolates load test results to estimate production capacity requirements
 including recommended instance counts, per-instance throughput, and headroom buffers.
 """
+
 import math
 from dataclasses import dataclass
-
 
 # Default headroom buffer — 50% over peak projected load (per EP-012 ticket)
 DEFAULT_HEADROOM_PCT: float = 50.0
@@ -128,7 +128,9 @@ def generate_capacity_report(
     lines.append("-" * 70)
 
     for est in estimates:
-        endpoint_display = est.endpoint[:42] + "..." if len(est.endpoint) > 45 else est.endpoint
+        endpoint_display = (
+            est.endpoint[:42] + "..." if len(est.endpoint) > 45 else est.endpoint
+        )
         lines.append(
             f"{endpoint_display:<45} "
             f"{est.measured_rps:>9.1f} "
@@ -140,11 +142,13 @@ def generate_capacity_report(
 
     # Recommendations
     lines.append("\nRECOMMENDATIONS:")
-    lines.append(f"  - Deploy at least {max_instances} instances for {target_rps:,.0f} RPS target")
+    lines.append(
+        f"  - Deploy at least {max_instances} instances for {target_rps:,.0f} RPS target"
+    )
     lines.append(f"  - Includes {headroom:.0f}% headroom buffer for traffic spikes")
-    lines.append("  - Consider auto-scaling with min={} max={} instances".format(
-        max(1, max_instances // 2), max_instances * 2
-    ))
+    lines.append(
+        f"  - Consider auto-scaling with min={max(1, max_instances // 2)} max={max_instances * 2} instances"
+    )
     lines.append("=" * 70)
 
     return "\n".join(lines)

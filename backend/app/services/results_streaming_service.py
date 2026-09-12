@@ -72,8 +72,9 @@ class ResultsStreamingService:
         self, experiment_id: str, db: Any, now_iso: str
     ) -> dict:
         """Internal method: queries DB and builds snapshot dict."""
-        from backend.app.models.experiment import Experiment, ExperimentStatus
         from sqlalchemy.orm import joinedload
+
+        from backend.app.models.experiment import Experiment
 
         # Fetch experiment with variants
         experiment = (
@@ -158,10 +159,15 @@ class ResultsStreamingService:
 
             # Conversion counts per variant (using first available primary metric)
             primary_metric = None
-            if hasattr(experiment, "metric_definitions") and experiment.metric_definitions:
+            if (
+                hasattr(experiment, "metric_definitions")
+                and experiment.metric_definitions
+            ):
                 primary_metric = next(
                     (m for m in experiment.metric_definitions if m.is_primary),
-                    experiment.metric_definitions[0] if experiment.metric_definitions else None,
+                    experiment.metric_definitions[0]
+                    if experiment.metric_definitions
+                    else None,
                 )
 
             from backend.app.services.event_matching import conversion_event_filter
@@ -284,9 +290,7 @@ class ResultsStreamingService:
             "error": f"Experiment {experiment_id} not found",
         }
 
-    def _error_snapshot(
-        self, experiment_id: str, now_iso: str, error_msg: str
-    ) -> dict:
+    def _error_snapshot(self, experiment_id: str, now_iso: str, error_msg: str) -> dict:
         """Return a skeleton snapshot when an error occurs."""
         return {
             "event": "results_update",
@@ -313,4 +317,5 @@ class ResultsStreamingService:
 def _norm_cdf(z: float) -> float:
     """Approximate normal CDF using math.erfc."""
     import math
+
     return 0.5 * math.erfc(-z / math.sqrt(2))

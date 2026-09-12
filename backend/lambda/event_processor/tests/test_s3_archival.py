@@ -12,12 +12,9 @@ Test-Driven Development (TDD) - RED phase:
 - Write tests first, implementation follows
 """
 
-import pytest
 import gzip
 import json
-from datetime import datetime
-from unittest.mock import Mock, patch, MagicMock
-from typing import List, Dict, Any
+from unittest.mock import patch
 
 
 class TestS3Archival:
@@ -37,21 +34,23 @@ class TestS3Archival:
                 "event_id": "evt_1",
                 "event_type": "page_view",
                 "user_id": "user_1",
-                "timestamp": "2024-12-19T10:30:00Z"
+                "timestamp": "2024-12-19T10:30:00Z",
             },
             {
                 "event_id": "evt_2",
                 "event_type": "conversion",
                 "user_id": "user_2",
-                "timestamp": "2024-12-19T10:31:00Z"
-            }
+                "timestamp": "2024-12-19T10:31:00Z",
+            },
         ]
 
         from s3_archiver import archive_to_s3
 
         # Act
-        with patch('s3_archiver.s3_client') as mock_s3:
-            mock_s3.put_object.return_value = {"ResponseMetadata": {"HTTPStatusCode": 200}}
+        with patch("s3_archiver.s3_client") as mock_s3:
+            mock_s3.put_object.return_value = {
+                "ResponseMetadata": {"HTTPStatusCode": 200}
+            }
             result = archive_to_s3(enriched_events, bucket="event-archive")
 
         # Assert
@@ -81,15 +80,17 @@ class TestS3Archival:
                 "event_type": "page_view",
                 "user_id": "user_compress",
                 "timestamp": "2024-12-19T10:30:00Z",
-                "properties": {"large_data": "x" * 1000}  # Some data to compress
+                "properties": {"large_data": "x" * 1000},  # Some data to compress
             }
         ]
 
         from s3_archiver import archive_to_s3
 
         # Act
-        with patch('s3_archiver.s3_client') as mock_s3:
-            mock_s3.put_object.return_value = {"ResponseMetadata": {"HTTPStatusCode": 200}}
+        with patch("s3_archiver.s3_client") as mock_s3:
+            mock_s3.put_object.return_value = {
+                "ResponseMetadata": {"HTTPStatusCode": 200}
+            }
             result = archive_to_s3(enriched_events, bucket="event-archive")
 
         # Assert
@@ -98,7 +99,7 @@ class TestS3Archival:
 
         # Verify it's gzip compressed (can decompress)
         decompressed = gzip.decompress(uploaded_body)
-        events_list = json.loads(decompressed.decode('utf-8'))
+        events_list = json.loads(decompressed.decode("utf-8"))
         assert len(events_list) == 1
         assert events_list[0]["event_id"] == "evt_compress"
 
@@ -116,7 +117,7 @@ class TestS3Archival:
                 "event_id": f"evt_{i}",
                 "event_type": "page_view",
                 "user_id": f"user_{i}",
-                "timestamp": "2024-12-19T10:30:00Z"
+                "timestamp": "2024-12-19T10:30:00Z",
             }
             for i in range(2500)
         ]
@@ -124,12 +125,12 @@ class TestS3Archival:
         from s3_archiver import archive_to_s3_batched
 
         # Act
-        with patch('s3_archiver.s3_client') as mock_s3:
-            mock_s3.put_object.return_value = {"ResponseMetadata": {"HTTPStatusCode": 200}}
+        with patch("s3_archiver.s3_client") as mock_s3:
+            mock_s3.put_object.return_value = {
+                "ResponseMetadata": {"HTTPStatusCode": 200}
+            }
             result = archive_to_s3_batched(
-                enriched_events,
-                bucket="event-archive",
-                max_batch_size=1000
+                enriched_events, bucket="event-archive", max_batch_size=1000
             )
 
         # Assert
@@ -152,7 +153,7 @@ class TestS3Archival:
                 "event_type": "page_view",
                 "user_id": f"user_{i}",
                 "timestamp": "2024-12-19T10:30:00Z",
-                "properties": {"large_data": "x" * 10000}  # ~10KB per event
+                "properties": {"large_data": "x" * 10000},  # ~10KB per event
             }
             for i in range(600)  # ~6MB total
         ]
@@ -160,12 +161,12 @@ class TestS3Archival:
         from s3_archiver import archive_to_s3_batched
 
         # Act
-        with patch('s3_archiver.s3_client') as mock_s3:
-            mock_s3.put_object.return_value = {"ResponseMetadata": {"HTTPStatusCode": 200}}
+        with patch("s3_archiver.s3_client") as mock_s3:
+            mock_s3.put_object.return_value = {
+                "ResponseMetadata": {"HTTPStatusCode": 200}
+            }
             result = archive_to_s3_batched(
-                enriched_events,
-                bucket="event-archive",
-                max_batch_size_mb=5
+                enriched_events, bucket="event-archive", max_batch_size_mb=5
             )
 
         # Assert
@@ -187,15 +188,17 @@ class TestS3Archival:
                 "event_id": "evt_unique",
                 "event_type": "page_view",
                 "user_id": "user_unique",
-                "timestamp": "2024-12-19T10:30:00Z"
+                "timestamp": "2024-12-19T10:30:00Z",
             }
         ]
 
         from s3_archiver import archive_to_s3
 
         # Act - Upload twice
-        with patch('s3_archiver.s3_client') as mock_s3:
-            mock_s3.put_object.return_value = {"ResponseMetadata": {"HTTPStatusCode": 200}}
+        with patch("s3_archiver.s3_client") as mock_s3:
+            mock_s3.put_object.return_value = {
+                "ResponseMetadata": {"HTTPStatusCode": 200}
+            }
             result1 = archive_to_s3(enriched_events, bucket="event-archive")
             result2 = archive_to_s3(enriched_events, bucket="event-archive")
 
@@ -222,14 +225,14 @@ class TestS3Archival:
                 "event_id": "evt_error",
                 "event_type": "page_view",
                 "user_id": "user_error",
-                "timestamp": "2024-12-19T10:30:00Z"
+                "timestamp": "2024-12-19T10:30:00Z",
             }
         ]
 
         from s3_archiver import archive_to_s3
 
         # Act
-        with patch('s3_archiver.s3_client') as mock_s3:
+        with patch("s3_archiver.s3_client") as mock_s3:
             mock_s3.put_object.side_effect = Exception("S3 error: Access Denied")
             result = archive_to_s3(enriched_events, bucket="event-archive")
 
@@ -252,23 +255,21 @@ class TestS3Archival:
                 "event_id": "evt_retry",
                 "event_type": "page_view",
                 "user_id": "user_retry",
-                "timestamp": "2024-12-19T10:30:00Z"
+                "timestamp": "2024-12-19T10:30:00Z",
             }
         ]
 
         from s3_archiver import archive_to_s3
 
         # Act - Mock first two calls fail, third succeeds
-        with patch('s3_archiver.s3_client') as mock_s3:
+        with patch("s3_archiver.s3_client") as mock_s3:
             mock_s3.put_object.side_effect = [
                 Exception("Temporary error"),
                 Exception("Temporary error"),
-                {"ResponseMetadata": {"HTTPStatusCode": 200}}
+                {"ResponseMetadata": {"HTTPStatusCode": 200}},
             ]
             result = archive_to_s3(
-                enriched_events,
-                bucket="event-archive",
-                max_retries=3
+                enriched_events, bucket="event-archive", max_retries=3
             )
 
         # Assert
@@ -290,27 +291,29 @@ class TestS3Archival:
                 "event_id": "evt_10am",
                 "event_type": "page_view",
                 "user_id": "user_1",
-                "timestamp": "2024-12-19T10:30:00Z"  # 10am
+                "timestamp": "2024-12-19T10:30:00Z",  # 10am
             },
             {
                 "event_id": "evt_11am",
                 "event_type": "page_view",
                 "user_id": "user_2",
-                "timestamp": "2024-12-19T11:15:00Z"  # 11am
+                "timestamp": "2024-12-19T11:15:00Z",  # 11am
             },
             {
                 "event_id": "evt_10am_2",
                 "event_type": "page_view",
                 "user_id": "user_3",
-                "timestamp": "2024-12-19T10:45:00Z"  # 10am
-            }
+                "timestamp": "2024-12-19T10:45:00Z",  # 10am
+            },
         ]
 
         from s3_archiver import archive_to_s3_batched
 
         # Act
-        with patch('s3_archiver.s3_client') as mock_s3:
-            mock_s3.put_object.return_value = {"ResponseMetadata": {"HTTPStatusCode": 200}}
+        with patch("s3_archiver.s3_client") as mock_s3:
+            mock_s3.put_object.return_value = {
+                "ResponseMetadata": {"HTTPStatusCode": 200}
+            }
             result = archive_to_s3_batched(enriched_events, bucket="event-archive")
 
         # Assert - Should create 2 batches (one for 10am, one for 11am)
@@ -321,8 +324,9 @@ class TestS3Archival:
         key_2 = call_args_list[1][1]["Key"]
 
         # One should have hour=10, other should have hour=11
-        assert ("hour=10" in key_1 and "hour=11" in key_2) or \
-               ("hour=10" in key_2 and "hour=11" in key_1)
+        assert ("hour=10" in key_1 and "hour=11" in key_2) or (
+            "hour=10" in key_2 and "hour=11" in key_1
+        )
 
     def test_archive_includes_metadata_in_s3_object(self):
         """
@@ -338,15 +342,17 @@ class TestS3Archival:
                 "event_id": "evt_meta",
                 "event_type": "page_view",
                 "user_id": "user_meta",
-                "timestamp": "2024-12-19T10:30:00Z"
+                "timestamp": "2024-12-19T10:30:00Z",
             }
         ]
 
         from s3_archiver import archive_to_s3
 
         # Act
-        with patch('s3_archiver.s3_client') as mock_s3:
-            mock_s3.put_object.return_value = {"ResponseMetadata": {"HTTPStatusCode": 200}}
+        with patch("s3_archiver.s3_client") as mock_s3:
+            mock_s3.put_object.return_value = {
+                "ResponseMetadata": {"HTTPStatusCode": 200}
+            }
             result = archive_to_s3(enriched_events, bucket="event-archive")
 
         # Assert
@@ -372,15 +378,17 @@ class TestS3Archival:
                 "event_id": "evt_location",
                 "event_type": "page_view",
                 "user_id": "user_location",
-                "timestamp": "2024-12-19T10:30:00Z"
+                "timestamp": "2024-12-19T10:30:00Z",
             }
         ]
 
         from s3_archiver import archive_to_s3
 
         # Act
-        with patch('s3_archiver.s3_client') as mock_s3:
-            mock_s3.put_object.return_value = {"ResponseMetadata": {"HTTPStatusCode": 200}}
+        with patch("s3_archiver.s3_client") as mock_s3:
+            mock_s3.put_object.return_value = {
+                "ResponseMetadata": {"HTTPStatusCode": 200}
+            }
             result = archive_to_s3(enriched_events, bucket="event-archive")
 
         # Assert

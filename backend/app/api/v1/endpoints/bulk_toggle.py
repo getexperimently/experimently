@@ -5,6 +5,7 @@ POST /api/v1/feature-flags/bulk-toggle  — enable/disable/archive multiple flag
 GET  /api/v1/feature-flags/{id}/history — change history for a single flag
 GET  /api/v1/audit-logs/stream          — SSE stream of recent audit events (last 100)
 """
+
 import asyncio
 import json
 import logging
@@ -16,7 +17,6 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from backend.app.api import deps
-from backend.app.core.permissions import Action, ResourceType, check_permission
 from backend.app.models.audit_log import ActionType
 from backend.app.models.feature_flag import FeatureFlag, FeatureFlagStatus
 from backend.app.models.user import User
@@ -216,6 +216,7 @@ async def stream_audit_logs(
 
     async def event_generator():
         from backend.app.models.audit_log import EntityType as EntityTypeEnum
+
         entity_type_enum = None
         if entity_type:
             try:

@@ -37,20 +37,22 @@ for _p in (_lambda_shared, _lambda_assignment):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from consistent_hash import ConsistentHasher  # noqa: E402
-from models import (  # noqa: E402
+from assignment_service import AssignmentService
+from consistent_hash import ConsistentHasher
+from models import (
     ExperimentConfig,
-    ExperimentStatus as LambdaExperimentStatus,
     GlobalHoldoutConfig,
     MutualExclusionGroupConfig,
     VariantConfig,
 )
-from assignment_service import AssignmentService  # noqa: E402
-
+from models import (
+    ExperimentStatus as LambdaExperimentStatus,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_group(
     group_id=None,
@@ -179,7 +181,8 @@ class TestHoldoutExcludesFromAllExperiments:
             for exp_id in exp_ids:
                 exp_config = _make_lambda_experiment_config(experiment_id=exp_id)
                 variant = svc.assign_variant(
-                    uid, exp_config,
+                    uid,
+                    exp_config,
                     holdout_config=holdout_config,
                     exclusion_config=exclusion_config,
                 )
@@ -206,7 +209,9 @@ class TestHoldoutExcludesFromAllExperiments:
         assert non_holdout_user is not None
 
         svc = _make_assignment_service()
-        variant = svc.assign_variant(non_holdout_user, exp_config, holdout_config=holdout_config)
+        variant = svc.assign_variant(
+            non_holdout_user, exp_config, holdout_config=holdout_config
+        )
         assert variant is not None, "Non-holdout user should be assigned a variant"
 
 
@@ -234,7 +239,9 @@ class TestMultiGroupConsistency:
             result = service.select_experiment_for_user("stable_user_42", group.id)
             results.append(result)
 
-        assert len(set(results)) == 1, "All results should be identical for the same user"
+        assert len(set(results)) == 1, (
+            "All results should be identical for the same user"
+        )
 
     def test_determinism_across_service_instances(self):
         """Different service instances give the same result for the same user+group."""
@@ -247,7 +254,9 @@ class TestMultiGroupConsistency:
             db = MagicMock()
             svc = MutualExclusionService(db)
             _setup_db_for_selection(db, group, [exp_a, exp_b])
-            results.append(svc.select_experiment_for_user("cross_instance_user", group.id))
+            results.append(
+                svc.select_experiment_for_user("cross_instance_user", group.id)
+            )
 
         assert len(set(results)) == 1
 
@@ -336,7 +345,9 @@ class TestTrafficAllocationEdgeCases:
         none_count = 0
         for i in range(200):
             _setup_db_for_selection(mock_db, group, [exp])
-            result = service.select_experiment_for_user(f"alltraffic_user_{i}", group.id)
+            result = service.select_experiment_for_user(
+                f"alltraffic_user_{i}", group.id
+            )
             if result is None:
                 none_count += 1
 
@@ -648,4 +659,6 @@ class TestAddRemoveExperimentsFromGroups:
             if excluded_2 != excluded_3:
                 changed += 1
 
-        assert changed > 0, "Adding a third experiment should change some exclusion outcomes"
+        assert changed > 0, (
+            "Adding a third experiment should change some exclusion outcomes"
+        )

@@ -4,17 +4,16 @@ Unit tests for Assignment Storage (Day 2).
 Tests DynamoDB assignment storage and retrieval logic.
 """
 
-import pytest
 import sys
-from pathlib import Path
 from datetime import datetime, timezone
-from unittest.mock import Mock, patch, MagicMock
+from pathlib import Path
+from unittest.mock import patch
 
 # Add parent directories to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "shared"))
 
-from models import ExperimentConfig, VariantConfig, ExperimentStatus, Assignment
+from models import Assignment, ExperimentConfig, ExperimentStatus, VariantConfig
 
 
 class TestAssignmentStorage:
@@ -28,11 +27,11 @@ class TestAssignmentStorage:
             experiment_id="exp_789",
             experiment_key="checkout_test",
             variant="treatment",
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
     # Day 2, Task 2.5: Tests for assignment storage
-    @patch('utils.put_dynamodb_item')
+    @patch("utils.put_dynamodb_item")
     def test_store_assignment_success(self, mock_put_item):
         """Test successful assignment storage."""
         from assignment_service import AssignmentService
@@ -48,13 +47,13 @@ class TestAssignmentStorage:
         # Verify the item being stored has correct structure
         assert mock_put_item.called
         call_kwargs = mock_put_item.call_args.kwargs
-        assert 'item' in call_kwargs
-        item = call_kwargs['item']
-        assert item['user_id'] == "user_456"
-        assert item['experiment_id'] == "exp_789"
-        assert item['variant'] == "treatment"
+        assert "item" in call_kwargs
+        item = call_kwargs["item"]
+        assert item["user_id"] == "user_456"
+        assert item["experiment_id"] == "exp_789"
+        assert item["variant"] == "treatment"
 
-    @patch('utils.put_dynamodb_item')
+    @patch("utils.put_dynamodb_item")
     def test_store_assignment_with_ttl(self, mock_put_item):
         """Test that assignments are stored with TTL for cleanup."""
         from assignment_service import AssignmentService
@@ -66,11 +65,11 @@ class TestAssignmentStorage:
 
         # Verify TTL is set (90 days from now)
         call_kwargs = mock_put_item.call_args.kwargs
-        item = call_kwargs['item']
-        assert 'ttl' in item
-        assert isinstance(item['ttl'], (int, float))
+        item = call_kwargs["item"]
+        assert "ttl" in item
+        assert isinstance(item["ttl"], (int, float))
 
-    @patch('utils.put_dynamodb_item')
+    @patch("utils.put_dynamodb_item")
     def test_store_assignment_prevents_duplicates(self, mock_put_item):
         """Test that duplicate assignments use conditional writes."""
         from assignment_service import AssignmentService
@@ -82,9 +81,9 @@ class TestAssignmentStorage:
 
         # Verify condition expression is used
         call_kwargs = mock_put_item.call_args.kwargs
-        assert 'condition_expression' in call_kwargs
+        assert "condition_expression" in call_kwargs
 
-    @patch('utils.put_dynamodb_item')
+    @patch("utils.put_dynamodb_item")
     def test_store_assignment_handles_errors(self, mock_put_item):
         """Test that storage errors are handled gracefully."""
         from assignment_service import AssignmentService
@@ -96,7 +95,7 @@ class TestAssignmentStorage:
 
         assert result is False
 
-    @patch('utils.put_dynamodb_item')
+    @patch("utils.put_dynamodb_item")
     def test_store_assignment_with_context(self, mock_put_item):
         """Test storing assignment with user context."""
         from assignment_service import AssignmentService
@@ -108,7 +107,7 @@ class TestAssignmentStorage:
             experiment_id="exp_789",
             experiment_key="test",
             variant="control",
-            context=context
+            context=context,
         )
 
         mock_put_item.return_value = True
@@ -117,24 +116,24 @@ class TestAssignmentStorage:
         service.store_assignment(assignment)
 
         call_kwargs = mock_put_item.call_args.kwargs
-        item = call_kwargs['item']
-        assert 'context' in item
-        assert item['context'] == context
+        item = call_kwargs["item"]
+        assert "context" in item
+        assert item["context"] == context
 
     # Day 2, Task 2.7: Tests for assignment retrieval
-    @patch('utils.get_dynamodb_item')
+    @patch("utils.get_dynamodb_item")
     def test_get_assignment_existing_returns_assignment(self, mock_get_item):
         """Test retrieving existing assignment returns correct data."""
         from assignment_service import AssignmentService
 
         # Mock DynamoDB response
         mock_get_item.return_value = {
-            'assignment_id': 'assign_abc123',
-            'user_id': 'user_456',
-            'experiment_id': 'exp_789',
-            'experiment_key': 'checkout_test',
-            'variant': 'treatment',
-            'timestamp': '2025-12-18T10:30:00Z'
+            "assignment_id": "assign_abc123",
+            "user_id": "user_456",
+            "experiment_id": "exp_789",
+            "experiment_key": "checkout_test",
+            "variant": "treatment",
+            "timestamp": "2025-12-18T10:30:00Z",
         }
 
         service = AssignmentService()
@@ -145,7 +144,7 @@ class TestAssignmentStorage:
         assert assignment.experiment_id == "exp_789"
         assert assignment.variant == "treatment"
 
-    @patch('utils.get_dynamodb_item')
+    @patch("utils.get_dynamodb_item")
     def test_get_assignment_not_found_returns_none(self, mock_get_item):
         """Test that missing assignment returns None."""
         from assignment_service import AssignmentService
@@ -157,7 +156,7 @@ class TestAssignmentStorage:
 
         assert assignment is None
 
-    @patch('utils.get_dynamodb_item')
+    @patch("utils.get_dynamodb_item")
     def test_get_assignment_handles_errors(self, mock_get_item):
         """Test that retrieval errors are handled gracefully."""
         from assignment_service import AssignmentService
@@ -169,9 +168,9 @@ class TestAssignmentStorage:
 
         assert assignment is None
 
-    @patch('utils.get_dynamodb_item')
-    @patch('assignment_service.AssignmentService.assign_variant')
-    @patch('assignment_service.AssignmentService.store_assignment')
+    @patch("utils.get_dynamodb_item")
+    @patch("assignment_service.AssignmentService.assign_variant")
+    @patch("assignment_service.AssignmentService.store_assignment")
     def test_get_or_create_assignment_existing(
         self, mock_store, mock_assign, mock_get_item
     ):
@@ -180,12 +179,12 @@ class TestAssignmentStorage:
 
         # Mock existing assignment
         mock_get_item.return_value = {
-            'assignment_id': 'assign_abc123',
-            'user_id': 'user_456',
-            'experiment_id': 'exp_789',
-            'experiment_key': 'checkout_test',
-            'variant': 'treatment',
-            'timestamp': '2025-12-18T10:30:00Z'
+            "assignment_id": "assign_abc123",
+            "user_id": "user_456",
+            "experiment_id": "exp_789",
+            "experiment_key": "checkout_test",
+            "variant": "treatment",
+            "timestamp": "2025-12-18T10:30:00Z",
         }
 
         experiment_config = ExperimentConfig(
@@ -194,8 +193,8 @@ class TestAssignmentStorage:
             status=ExperimentStatus.ACTIVE,
             variants=[
                 VariantConfig(key="control", allocation=0.5),
-                VariantConfig(key="treatment", allocation=0.5)
-            ]
+                VariantConfig(key="treatment", allocation=0.5),
+            ],
         )
 
         service = AssignmentService()
@@ -207,12 +206,10 @@ class TestAssignmentStorage:
         mock_assign.assert_not_called()
         mock_store.assert_not_called()
 
-    @patch('utils.get_dynamodb_item')
-    @patch('assignment_service.AssignmentService.assign_variant')
-    @patch('assignment_service.AssignmentService.store_assignment')
-    def test_get_or_create_assignment_new(
-        self, mock_store, mock_assign, mock_get_item
-    ):
+    @patch("utils.get_dynamodb_item")
+    @patch("assignment_service.AssignmentService.assign_variant")
+    @patch("assignment_service.AssignmentService.store_assignment")
+    def test_get_or_create_assignment_new(self, mock_store, mock_assign, mock_get_item):
         """Test get_or_create creates new assignment when none exists."""
         from assignment_service import AssignmentService
 
@@ -227,8 +224,8 @@ class TestAssignmentStorage:
             status=ExperimentStatus.ACTIVE,
             variants=[
                 VariantConfig(key="control", allocation=0.5),
-                VariantConfig(key="treatment", allocation=0.5)
-            ]
+                VariantConfig(key="treatment", allocation=0.5),
+            ],
         )
 
         service = AssignmentService()
@@ -240,8 +237,8 @@ class TestAssignmentStorage:
         mock_assign.assert_called_once()
         mock_store.assert_called_once()
 
-    @patch('utils.get_dynamodb_item')
-    @patch('assignment_service.AssignmentService.assign_variant')
+    @patch("utils.get_dynamodb_item")
+    @patch("assignment_service.AssignmentService.assign_variant")
     def test_get_or_create_assignment_excluded_by_traffic(
         self, mock_assign, mock_get_item
     ):
@@ -259,12 +256,14 @@ class TestAssignmentStorage:
             status=ExperimentStatus.ACTIVE,
             variants=[
                 VariantConfig(key="control", allocation=0.5),
-                VariantConfig(key="treatment", allocation=0.5)
+                VariantConfig(key="treatment", allocation=0.5),
             ],
-            traffic_allocation=0.5
+            traffic_allocation=0.5,
         )
 
         service = AssignmentService()
-        assignment = service.get_or_create_assignment("user_excluded", experiment_config)
+        assignment = service.get_or_create_assignment(
+            "user_excluded", experiment_config
+        )
 
         assert assignment is None

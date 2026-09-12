@@ -11,15 +11,15 @@ Covers:
 import pytest
 
 from backend.app.services.experiment_template_service import (
-    ExperimentTemplateService,
-    ExperimentTemplate,
     TEMPLATE_LIBRARY,
+    ExperimentTemplate,
+    ExperimentTemplateService,
 )
-
 
 # ---------------------------------------------------------------------------
 # list_templates
 # ---------------------------------------------------------------------------
+
 
 class TestListTemplates:
     def test_list_templates_returns_all_five(self):
@@ -36,7 +36,9 @@ class TestListTemplates:
 
     def test_list_templates_filters_by_onboarding(self):
         """list_templates(type='onboarding') returns only onboarding templates."""
-        templates = ExperimentTemplateService.list_templates(experiment_type="onboarding")
+        templates = ExperimentTemplateService.list_templates(
+            experiment_type="onboarding"
+        )
         assert len(templates) > 0
         for t in templates:
             assert t.experiment_type == "onboarding"
@@ -50,6 +52,7 @@ class TestListTemplates:
 # ---------------------------------------------------------------------------
 # get_template
 # ---------------------------------------------------------------------------
+
 
 class TestGetTemplate:
     def test_get_template_by_id_returns_correct_template(self):
@@ -75,6 +78,7 @@ class TestGetTemplate:
 # recommend_template
 # ---------------------------------------------------------------------------
 
+
 class TestRecommendTemplate:
     def test_recommend_checkout_template_for_checkout_description(self):
         """recommend_template with checkout-related description returns checkout template."""
@@ -97,6 +101,7 @@ class TestRecommendTemplate:
 # ---------------------------------------------------------------------------
 # Structural validation of all templates
 # ---------------------------------------------------------------------------
+
 
 class TestTemplateStructure:
     def test_all_templates_have_required_fields(self):

@@ -3,26 +3,28 @@ Unit tests for the enhanced rules engine.
 
 This module tests the functionality of the enhanced rules engine for feature flag targeting.
 """
-import pytest
-from datetime import datetime, timedelta
-from typing import Dict, Any, List, Optional
 
+from datetime import datetime, timedelta
+from typing import Any, Dict, List, Optional
+
+import pytest
+
+from backend.app.core.rules_engine import (
+    apply_operator,
+    evaluate_condition,
+    evaluate_rule,
+    evaluate_rule_group,
+    evaluate_targeting_rules,
+    get_stable_user_id,
+    should_include_in_rollout,
+)
 from backend.app.schemas.targeting_rule import (
     Condition,
+    LogicalOperator,
+    OperatorType,
     RuleGroup,
     TargetingRule,
     TargetingRules,
-    LogicalOperator,
-    OperatorType
-)
-from backend.app.core.rules_engine import (
-    evaluate_targeting_rules,
-    evaluate_rule,
-    evaluate_rule_group,
-    evaluate_condition,
-    apply_operator,
-    should_include_in_rollout,
-    get_stable_user_id,
 )
 
 # Test Data
@@ -35,7 +37,7 @@ PREMIUM_USER_CONTEXT = {
     "registered_user": True,
     "signup_date": datetime.now().isoformat(),
     "tags": ["beta", "early-adopter"],
-    "permissions": ["read", "write", "admin"]
+    "permissions": ["read", "write", "admin"],
 }
 
 NON_PREMIUM_USER_CONTEXT = {
@@ -46,7 +48,7 @@ NON_PREMIUM_USER_CONTEXT = {
     "registered_user": True,
     "signup_date": (datetime.now() - timedelta(days=30)).isoformat(),
     "tags": ["free-tier"],
-    "permissions": ["read"]
+    "permissions": ["read"],
 }
 
 
@@ -56,9 +58,7 @@ class TestConditionEvaluation:
     def test_equals_operator(self):
         """Test the equals operator."""
         condition = Condition(
-            attribute="subscription_tier",
-            operator=OperatorType.EQUALS,
-            value="premium"
+            attribute="subscription_tier", operator=OperatorType.EQUALS, value="premium"
         )
 
         # Test with matching value
@@ -72,7 +72,7 @@ class TestConditionEvaluation:
         condition = Condition(
             attribute="subscription_tier",
             operator=OperatorType.NOT_EQUALS,
-            value="basic"
+            value="basic",
         )
 
         # Test with non-matching value (should be true)
@@ -84,9 +84,7 @@ class TestConditionEvaluation:
     def test_in_operator(self):
         """Test the in operator."""
         condition = Condition(
-            attribute="country",
-            operator=OperatorType.IN,
-            value=["US", "CA", "MX"]
+            attribute="country", operator=OperatorType.IN, value=["US", "CA", "MX"]
         )
 
         # Test with value in the list
@@ -99,9 +97,7 @@ class TestConditionEvaluation:
         """Test the contains operator for arrays and strings."""
         # Test array contains
         condition = Condition(
-            attribute="tags",
-            operator=OperatorType.CONTAINS,
-            value="beta"
+            attribute="tags", operator=OperatorType.CONTAINS, value="beta"
         )
 
         assert evaluate_condition(condition, PREMIUM_USER_CONTEXT) is True
@@ -110,16 +106,14 @@ class TestConditionEvaluation:
         condition = Condition(
             attribute="subscription_tier",
             operator=OperatorType.CONTAINS,
-            value="premium"
+            value="premium",
         )
 
         assert evaluate_condition(condition, PREMIUM_USER_CONTEXT) is True
 
         # Test not contains
         condition = Condition(
-            attribute="tags",
-            operator=OperatorType.CONTAINS,
-            value="non-existent"
+            attribute="tags", operator=OperatorType.CONTAINS, value="non-existent"
         )
 
         assert evaluate_condition(condition, PREMIUM_USER_CONTEXT) is False
@@ -127,9 +121,7 @@ class TestConditionEvaluation:
     def test_greater_than_operator(self):
         """Test the greater than operator."""
         condition = Condition(
-            attribute="age",
-            operator=OperatorType.GREATER_THAN,
-            value=25
+            attribute="age", operator=OperatorType.GREATER_THAN, value=25
         )
 
         # Test with greater value
@@ -147,18 +139,14 @@ class TestConditionEvaluation:
 
         # Test before
         condition = Condition(
-            attribute="signup_date",
-            operator=OperatorType.BEFORE,
-            value=tomorrow
+            attribute="signup_date", operator=OperatorType.BEFORE, value=tomorrow
         )
 
         assert evaluate_condition(condition, PREMIUM_USER_CONTEXT) is True
 
         # Test after
         condition = Condition(
-            attribute="signup_date",
-            operator=OperatorType.AFTER,
-            value=yesterday
+            attribute="signup_date", operator=OperatorType.AFTER, value=yesterday
         )
 
         assert evaluate_condition(condition, PREMIUM_USER_CONTEXT) is True
@@ -168,7 +156,7 @@ class TestConditionEvaluation:
             attribute="signup_date",
             operator=OperatorType.BETWEEN,
             value=two_months_ago,
-            additional_value=tomorrow
+            additional_value=tomorrow,
         )
 
         assert evaluate_condition(condition, PREMIUM_USER_CONTEXT) is True
@@ -179,7 +167,7 @@ class TestConditionEvaluation:
         condition = Condition(
             attribute="permissions",
             operator=OperatorType.CONTAINS_ALL,
-            value=["read", "write"]
+            value=["read", "write"],
         )
 
         assert evaluate_condition(condition, PREMIUM_USER_CONTEXT) is True
@@ -188,7 +176,7 @@ class TestConditionEvaluation:
         condition = Condition(
             attribute="permissions",
             operator=OperatorType.CONTAINS_ANY,
-            value=["admin", "superuser"]
+            value=["admin", "superuser"],
         )
 
         assert evaluate_condition(condition, PREMIUM_USER_CONTEXT) is True
@@ -197,10 +185,11 @@ class TestConditionEvaluation:
         condition = Condition(
             attribute="permissions",
             operator=OperatorType.CONTAINS_ALL,
-            value=["read", "write", "delete"]
+            value=["read", "write", "delete"],
         )
 
         assert evaluate_condition(condition, PREMIUM_USER_CONTEXT) is False
+
 
 class TestRuleGroupEvaluation:
     """Tests for rule group evaluation with different logical operators."""
@@ -211,16 +200,14 @@ class TestRuleGroupEvaluation:
             operator=LogicalOperator.AND,
             conditions=[
                 Condition(
-                    attribute="country",
-                    operator=OperatorType.EQUALS,
-                    value="US"
+                    attribute="country", operator=OperatorType.EQUALS, value="US"
                 ),
                 Condition(
                     attribute="subscription_tier",
                     operator=OperatorType.EQUALS,
-                    value="premium"
-                )
-            ]
+                    value="premium",
+                ),
+            ],
         )
 
         # Test with all conditions met
@@ -235,16 +222,14 @@ class TestRuleGroupEvaluation:
             operator=LogicalOperator.OR,
             conditions=[
                 Condition(
-                    attribute="country",
-                    operator=OperatorType.EQUALS,
-                    value="US"
+                    attribute="country", operator=OperatorType.EQUALS, value="US"
                 ),
                 Condition(
                     attribute="subscription_tier",
                     operator=OperatorType.EQUALS,
-                    value="basic"
-                )
-            ]
+                    value="basic",
+                ),
+            ],
         )
 
         # Test with one condition met
@@ -254,10 +239,7 @@ class TestRuleGroupEvaluation:
         assert evaluate_rule_group(rule_group, NON_PREMIUM_USER_CONTEXT) is True
 
         # Test with no conditions met
-        different_context = {
-            "country": "AU",
-            "subscription_tier": "enterprise"
-        }
+        different_context = {"country": "AU", "subscription_tier": "enterprise"}
         assert evaluate_rule_group(rule_group, different_context) is False
 
     def test_not_operator(self):
@@ -265,12 +247,8 @@ class TestRuleGroupEvaluation:
         rule_group = RuleGroup(
             operator=LogicalOperator.NOT,
             conditions=[
-                Condition(
-                    attribute="country",
-                    operator=OperatorType.EQUALS,
-                    value="UK"
-                )
-            ]
+                Condition(attribute="country", operator=OperatorType.EQUALS, value="UK")
+            ],
         )
 
         # Test with condition not met (should be true after NOT)
@@ -285,16 +263,14 @@ class TestRuleGroupEvaluation:
             operator=LogicalOperator.AND,
             conditions=[
                 Condition(
-                    attribute="age",
-                    operator=OperatorType.GREATER_THAN,
-                    value=20
+                    attribute="age", operator=OperatorType.GREATER_THAN, value=20
                 ),
                 Condition(
                     attribute="registered_user",
                     operator=OperatorType.EQUALS,
-                    value=True
-                )
-            ]
+                    value=True,
+                ),
+            ],
         )
 
         outer_group = RuleGroup(
@@ -303,10 +279,10 @@ class TestRuleGroupEvaluation:
                 Condition(
                     attribute="subscription_tier",
                     operator=OperatorType.EQUALS,
-                    value="premium"
+                    value="premium",
                 )
             ],
-            groups=[inner_group]
+            groups=[inner_group],
         )
 
         # Test with premium user
@@ -319,9 +295,10 @@ class TestRuleGroupEvaluation:
         different_context = {
             "subscription_tier": "free",
             "age": 18,
-            "registered_user": True
+            "registered_user": True,
         }
         assert evaluate_rule_group(outer_group, different_context) is False
+
 
 class TestCompleteTargetingRules:
     """Tests for complete targeting rules evaluation."""
@@ -340,12 +317,12 @@ class TestCompleteTargetingRules:
                             Condition(
                                 attribute="subscription_tier",
                                 operator=OperatorType.EQUALS,
-                                value="premium"
+                                value="premium",
                             )
-                        ]
+                        ],
                     ),
                     rollout_percentage=100,
-                    priority=10
+                    priority=10,
                 ),
                 TargetingRule(
                     id="basic_us_users",
@@ -356,20 +333,20 @@ class TestCompleteTargetingRules:
                             Condition(
                                 attribute="subscription_tier",
                                 operator=OperatorType.EQUALS,
-                                value="basic"
+                                value="basic",
                             ),
                             Condition(
                                 attribute="country",
                                 operator=OperatorType.EQUALS,
-                                value="US"
-                            )
-                        ]
+                                value="US",
+                            ),
+                        ],
                     ),
                     rollout_percentage=50,  # 50% rollout for this rule
-                    priority=20
-                )
+                    priority=20,
+                ),
             ],
-            default_rule=None
+            default_rule=None,
         )
 
         # Test premium user - should match first rule
@@ -383,7 +360,7 @@ class TestCompleteTargetingRules:
             "user_id": "user_that_should_be_in_rollout",
             "subscription_tier": "basic",
             "country": "US",
-            "registered_user": True
+            "registered_user": True,
         }
 
         result = evaluate_targeting_rules(targeting_rules, basic_us_context)
@@ -411,12 +388,12 @@ class TestCompleteTargetingRules:
                             Condition(
                                 attribute="registered_user",
                                 operator=OperatorType.EQUALS,
-                                value=True
+                                value=True,
                             )
-                        ]
+                        ],
                     ),
                     rollout_percentage=100,
-                    priority=100
+                    priority=100,
                 ),
                 TargetingRule(
                     id="high_priority",
@@ -427,15 +404,15 @@ class TestCompleteTargetingRules:
                             Condition(
                                 attribute="registered_user",
                                 operator=OperatorType.EQUALS,
-                                value=True
+                                value=True,
                             )
-                        ]
+                        ],
                     ),
                     rollout_percentage=100,
-                    priority=1
-                )
+                    priority=1,
+                ),
             ],
-            default_rule=None
+            default_rule=None,
         )
 
         # Both rules would match, but high_priority should be chosen
@@ -444,6 +421,7 @@ class TestCompleteTargetingRules:
 
         assert result is not None
         assert result.id == "high_priority"
+
 
 class TestBackwardCompatibility:
     """Tests for backward compatibility with legacy rule formats."""
@@ -466,15 +444,15 @@ class TestBackwardCompatibility:
                             Condition(
                                 attribute="user_id",
                                 operator=OperatorType.EQUALS,
-                                value=USER_ID
+                                value=USER_ID,
                             )
-                        ]
+                        ],
                     ),
                     rollout_percentage=100,
-                    priority=1
+                    priority=1,
                 )
             ],
-            default_rule=None
+            default_rule=None,
         )
 
         # Test with matching user ID
@@ -503,15 +481,15 @@ class TestBackwardCompatibility:
                             Condition(
                                 attribute="subscription_tier",
                                 operator=OperatorType.EQUALS,
-                                value="premium"
+                                value="premium",
                             )
-                        ]
+                        ],
                     ),
                     rollout_percentage=100,
-                    priority=1
+                    priority=1,
                 )
             ],
-            default_rule=None
+            default_rule=None,
         )
 
         # Test with matching attributes
@@ -525,6 +503,7 @@ class TestBackwardCompatibility:
 
         assert result is None
 
+
 class TestRulesEngine:
     """Tests for the rules engine implementation."""
 
@@ -537,51 +516,78 @@ class TestRulesEngine:
         assert evaluate_condition(condition, user_context) is True
 
         # Test NOT_EQUALS
-        condition = Condition(attribute="age", operator=OperatorType.NOT_EQUALS, value=30)
+        condition = Condition(
+            attribute="age", operator=OperatorType.NOT_EQUALS, value=30
+        )
         assert evaluate_condition(condition, user_context) is True
 
         # Test GREATER_THAN
-        condition = Condition(attribute="age", operator=OperatorType.GREATER_THAN, value=20)
+        condition = Condition(
+            attribute="age", operator=OperatorType.GREATER_THAN, value=20
+        )
         assert evaluate_condition(condition, user_context) is True
 
         # Test LESS_THAN
-        condition = Condition(attribute="age", operator=OperatorType.LESS_THAN, value=30)
+        condition = Condition(
+            attribute="age", operator=OperatorType.LESS_THAN, value=30
+        )
         assert evaluate_condition(condition, user_context) is True
 
         # Test IN
-        condition = Condition(attribute="country", operator=OperatorType.IN, value=["US", "CA", "UK"])
+        condition = Condition(
+            attribute="country", operator=OperatorType.IN, value=["US", "CA", "UK"]
+        )
         assert evaluate_condition(condition, user_context) is True
 
         # Test NOT_IN
-        condition = Condition(attribute="country", operator=OperatorType.NOT_IN, value=["CA", "UK"])
+        condition = Condition(
+            attribute="country", operator=OperatorType.NOT_IN, value=["CA", "UK"]
+        )
         assert evaluate_condition(condition, user_context) is True
 
         # Test attribute not found
-        condition = Condition(attribute="missing", operator=OperatorType.EQUALS, value="something")
+        condition = Condition(
+            attribute="missing", operator=OperatorType.EQUALS, value="something"
+        )
         assert evaluate_condition(condition, user_context) is False
 
     def test_string_operator_evaluation(self):
         """Test evaluation of string operators."""
-        user_context = {"email": "user@example.com", "description": "Premium user from New York"}
+        user_context = {
+            "email": "user@example.com",
+            "description": "Premium user from New York",
+        }
 
         # Test CONTAINS
-        condition = Condition(attribute="email", operator=OperatorType.CONTAINS, value="example")
+        condition = Condition(
+            attribute="email", operator=OperatorType.CONTAINS, value="example"
+        )
         assert evaluate_condition(condition, user_context) is True
 
         # Test NOT_CONTAINS
-        condition = Condition(attribute="email", operator=OperatorType.NOT_CONTAINS, value="gmail")
+        condition = Condition(
+            attribute="email", operator=OperatorType.NOT_CONTAINS, value="gmail"
+        )
         assert evaluate_condition(condition, user_context) is True
 
         # Test STARTS_WITH
-        condition = Condition(attribute="email", operator=OperatorType.STARTS_WITH, value="user")
+        condition = Condition(
+            attribute="email", operator=OperatorType.STARTS_WITH, value="user"
+        )
         assert evaluate_condition(condition, user_context) is True
 
         # Test ENDS_WITH
-        condition = Condition(attribute="email", operator=OperatorType.ENDS_WITH, value=".com")
+        condition = Condition(
+            attribute="email", operator=OperatorType.ENDS_WITH, value=".com"
+        )
         assert evaluate_condition(condition, user_context) is True
 
         # Test MATCH_REGEX
-        condition = Condition(attribute="email", operator=OperatorType.MATCH_REGEX, value=r"^user@.*\.com$")
+        condition = Condition(
+            attribute="email",
+            operator=OperatorType.MATCH_REGEX,
+            value=r"^user@.*\.com$",
+        )
         assert evaluate_condition(condition, user_context) is True
 
     def test_date_operator_evaluation(self):
@@ -597,11 +603,15 @@ class TestRulesEngine:
         }
 
         # Test BEFORE
-        condition = Condition(attribute="last_login", operator=OperatorType.BEFORE, value=now.timestamp())
+        condition = Condition(
+            attribute="last_login", operator=OperatorType.BEFORE, value=now.timestamp()
+        )
         assert evaluate_condition(condition, user_context) is True
 
         # Test AFTER
-        condition = Condition(attribute="subscription_expiry", operator=OperatorType.AFTER, value=now)
+        condition = Condition(
+            attribute="subscription_expiry", operator=OperatorType.AFTER, value=now
+        )
         assert evaluate_condition(condition, user_context) is True
 
         # Test BETWEEN with dates
@@ -621,8 +631,12 @@ class TestRulesEngine:
         rule_group = RuleGroup(
             operator=LogicalOperator.AND,
             conditions=[
-                Condition(attribute="age", operator=OperatorType.GREATER_THAN, value=20),
-                Condition(attribute="country", operator=OperatorType.EQUALS, value="US"),
+                Condition(
+                    attribute="age", operator=OperatorType.GREATER_THAN, value=20
+                ),
+                Condition(
+                    attribute="country", operator=OperatorType.EQUALS, value="US"
+                ),
             ],
         )
         assert evaluate_rule_group(rule_group, user_context) is True
@@ -631,8 +645,12 @@ class TestRulesEngine:
         rule_group = RuleGroup(
             operator=LogicalOperator.OR,
             conditions=[
-                Condition(attribute="age", operator=OperatorType.EQUALS, value=30),  # False
-                Condition(attribute="plan", operator=OperatorType.EQUALS, value="premium"),  # True
+                Condition(
+                    attribute="age", operator=OperatorType.EQUALS, value=30
+                ),  # False
+                Condition(
+                    attribute="plan", operator=OperatorType.EQUALS, value="premium"
+                ),  # True
             ],
         )
         assert evaluate_rule_group(rule_group, user_context) is True
@@ -641,7 +659,9 @@ class TestRulesEngine:
         rule_group = RuleGroup(
             operator=LogicalOperator.NOT,
             conditions=[
-                Condition(attribute="country", operator=OperatorType.EQUALS, value="CA"),
+                Condition(
+                    attribute="country", operator=OperatorType.EQUALS, value="CA"
+                ),
             ],
         )
         assert evaluate_rule_group(rule_group, user_context) is True
@@ -650,7 +670,9 @@ class TestRulesEngine:
         nested_group = RuleGroup(
             operator=LogicalOperator.AND,
             conditions=[
-                Condition(attribute="age", operator=OperatorType.GREATER_THAN, value=20),
+                Condition(
+                    attribute="age", operator=OperatorType.GREATER_THAN, value=20
+                ),
                 Condition(attribute="age", operator=OperatorType.LESS_THAN, value=30),
             ],
         )
@@ -658,7 +680,9 @@ class TestRulesEngine:
         parent_group = RuleGroup(
             operator=LogicalOperator.AND,
             conditions=[
-                Condition(attribute="country", operator=OperatorType.EQUALS, value="US"),
+                Condition(
+                    attribute="country", operator=OperatorType.EQUALS, value="US"
+                ),
             ],
             groups=[nested_group],
         )
@@ -679,8 +703,12 @@ class TestRulesEngine:
             rule=RuleGroup(
                 operator=LogicalOperator.AND,
                 conditions=[
-                    Condition(attribute="country", operator=OperatorType.EQUALS, value="US"),
-                    Condition(attribute="plan", operator=OperatorType.EQUALS, value="premium"),
+                    Condition(
+                        attribute="country", operator=OperatorType.EQUALS, value="US"
+                    ),
+                    Condition(
+                        attribute="plan", operator=OperatorType.EQUALS, value="premium"
+                    ),
                 ],
             ),
         )
@@ -704,7 +732,9 @@ class TestRulesEngine:
             rule=RuleGroup(
                 operator=LogicalOperator.AND,
                 conditions=[
-                    Condition(attribute="plan", operator=OperatorType.EQUALS, value="premium"),
+                    Condition(
+                        attribute="plan", operator=OperatorType.EQUALS, value="premium"
+                    ),
                 ],
             ),
         )
@@ -718,8 +748,12 @@ class TestRulesEngine:
             rule=RuleGroup(
                 operator=LogicalOperator.AND,
                 conditions=[
-                    Condition(attribute="country", operator=OperatorType.EQUALS, value="US"),
-                    Condition(attribute="plan", operator=OperatorType.EQUALS, value="premium"),
+                    Condition(
+                        attribute="country", operator=OperatorType.EQUALS, value="US"
+                    ),
+                    Condition(
+                        attribute="plan", operator=OperatorType.EQUALS, value="premium"
+                    ),
                 ],
             ),
         )
@@ -768,7 +802,11 @@ class TestRulesEngine:
             rule=RuleGroup(
                 operator=LogicalOperator.AND,
                 conditions=[
-                    Condition(attribute="email", operator=OperatorType.CONTAINS, value="example.com"),
+                    Condition(
+                        attribute="email",
+                        operator=OperatorType.CONTAINS,
+                        value="example.com",
+                    ),
                 ],
             ),
         )
@@ -806,7 +844,9 @@ class TestRulesEngine:
         # Test with empty context
         context = {}
         # Should return a hash of sorted items (empty string in this case)
-        assert len(get_stable_user_id(context)) > 0  # Should return a hash, not empty string
+        assert (
+            len(get_stable_user_id(context)) > 0
+        )  # Should return a hash, not empty string
 
     def test_array_operators(self):
         """Test the array operators."""

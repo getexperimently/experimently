@@ -6,13 +6,14 @@ Handles API Gateway requests for evaluating feature flags for users.
 Following TDD (Test-Driven Development) - GREEN phase: Implementation to pass tests.
 """
 
-import sys
 import json
 import os
-import boto3
-from pathlib import Path
-from typing import Dict, Any, Optional
+import sys
 from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Dict, Optional
+
+import boto3
 
 # Add shared module and current directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "shared"))
@@ -48,8 +49,8 @@ def initialize_aws_clients() -> None:
         return
 
     # Validate required environment variables
-    required_vars = ['FLAGS_TABLE']
-    optional_vars = ['KINESIS_STREAM_NAME']
+    required_vars = ["FLAGS_TABLE"]
+    optional_vars = ["KINESIS_STREAM_NAME"]
 
     missing = [var for var in required_vars if not os.environ.get(var)]
 
@@ -69,9 +70,9 @@ def initialize_aws_clients() -> None:
     logger.info(
         "AWS clients initialized successfully",
         extra={
-            'flags_table': os.environ.get('FLAGS_TABLE'),
-            'kinesis_stream': os.environ.get('KINESIS_STREAM_NAME', 'not_set')
-        }
+            "flags_table": os.environ.get("FLAGS_TABLE"),
+            "kinesis_stream": os.environ.get("KINESIS_STREAM_NAME", "not_set"),
+        },
     )
 
     _clients_initialized = True
@@ -102,7 +103,7 @@ def record_evaluation_event_async(
     user_id: str,
     flag_config: FeatureFlagConfig,
     evaluation_result: Dict[str, Any],
-    context: Optional[Dict[str, Any]] = None
+    context: Optional[Dict[str, Any]] = None,
 ) -> None:
     """
     Record evaluation event to Kinesis asynchronously.
@@ -120,51 +121,49 @@ def record_evaluation_event_async(
         Requires KINESIS_STREAM_NAME environment variable to be set.
     """
     try:
-        stream_name = os.environ.get('KINESIS_STREAM_NAME')
+        stream_name = os.environ.get("KINESIS_STREAM_NAME")
         if not stream_name:
             logger.warning("KINESIS_STREAM_NAME not set, skipping evaluation tracking")
             return
 
-        kinesis = boto3.client('kinesis')
+        kinesis = boto3.client("kinesis")
 
         # Build event data
         event_data = {
-            'event_type': 'feature_flag_evaluation',
-            'timestamp': datetime.now(timezone.utc).isoformat(),
-            'user_id': user_id,
-            'flag_id': flag_config.flag_id,
-            'flag_key': flag_config.key,
-            'enabled': evaluation_result['enabled'],
-            'reason': evaluation_result['reason'],
-            'variant': evaluation_result.get('variant'),
-            'context': context
+            "event_type": "feature_flag_evaluation",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "user_id": user_id,
+            "flag_id": flag_config.flag_id,
+            "flag_key": flag_config.key,
+            "enabled": evaluation_result["enabled"],
+            "reason": evaluation_result["reason"],
+            "variant": evaluation_result.get("variant"),
+            "context": context,
         }
 
         # Send to Kinesis
         kinesis.put_record(
-            StreamName=stream_name,
-            Data=json.dumps(event_data),
-            PartitionKey=user_id
+            StreamName=stream_name, Data=json.dumps(event_data), PartitionKey=user_id
         )
 
         logger.debug(
-            f"Evaluation event recorded to Kinesis",
+            "Evaluation event recorded to Kinesis",
             extra={
-                'flag_key': flag_config.key,
-                'user_id': user_id,
-                'enabled': evaluation_result['enabled']
-            }
+                "flag_key": flag_config.key,
+                "user_id": user_id,
+                "enabled": evaluation_result["enabled"],
+            },
         )
 
     except Exception as e:
         # Log error but don't raise - tracking failures should not block responses
         logger.warning(
-            f"Failed to record evaluation event to Kinesis: {str(e)}",
+            f"Failed to record evaluation event to Kinesis: {e!s}",
             extra={
-                'flag_key': flag_config.key if flag_config else 'unknown',
-                'user_id': user_id,
-                'error_type': type(e).__name__
-            }
+                "flag_key": flag_config.key if flag_config else "unknown",
+                "user_id": user_id,
+                "error_type": type(e).__name__,
+            },
         )
 
 
@@ -201,28 +200,24 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
     try:
         # Extract request metadata
-        request_id = event.get('requestContext', {}).get('requestId', 'unknown')
-        source_ip = event.get('requestContext', {}).get('sourceIp', 'unknown')
+        request_id = event.get("requestContext", {}).get("requestId", "unknown")
+        source_ip = event.get("requestContext", {}).get("sourceIp", "unknown")
 
         logger.info(
-            f"Feature flag evaluation request received",
-            extra={
-                'request_id': request_id,
-                'source_ip': source_ip
-            }
+            "Feature flag evaluation request received",
+            extra={"request_id": request_id, "source_ip": source_ip},
         )
 
         # Parse query parameters
-        query_params = event.get('queryStringParameters')
+        query_params = event.get("queryStringParameters")
         if not query_params:
             logger.warning("Missing query parameters")
             return create_error_response(
-                400,
-                "Missing query parameters. Required: user_id, flag_key"
+                400, "Missing query parameters. Required: user_id, flag_key"
             )
 
-        user_id = query_params.get('user_id')
-        flag_key = query_params.get('flag_key')
+        user_id = query_params.get("user_id")
+        flag_key = query_params.get("flag_key")
 
         # Validate required parameters
         if not user_id:
@@ -240,10 +235,10 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
         # Parse request body for user context
         user_context = None
-        if event.get('body'):
+        if event.get("body"):
             try:
-                body = json.loads(event['body'])
-                user_context = body.get('context')
+                body = json.loads(event["body"])
+                user_context = body.get("context")
             except json.JSONDecodeError:
                 logger.warning("Invalid JSON in request body")
                 # Continue without context rather than failing
@@ -255,22 +250,14 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         flag_config = evaluator_instance.get_flag_config_cached(flag_key)
         if not flag_config:
             logger.warning(
-                f"Feature flag not found",
-                extra={
-                    'flag_key': flag_key,
-                    'user_id': user_id
-                }
+                "Feature flag not found",
+                extra={"flag_key": flag_key, "user_id": user_id},
             )
-            return create_error_response(
-                404,
-                f"Feature flag not found: {flag_key}"
-            )
+            return create_error_response(404, f"Feature flag not found: {flag_key}")
 
         # Evaluate flag for user
         evaluation_result = evaluator_instance.evaluate(
-            user_id=user_id,
-            flag_config=flag_config,
-            context=user_context
+            user_id=user_id, flag_config=flag_config, context=user_context
         )
 
         # Record evaluation event to Kinesis (fire-and-forget)
@@ -280,60 +267,62 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 user_id=user_id,
                 flag_config=flag_config,
                 evaluation_result=evaluation_result,
-                context=user_context
+                context=user_context,
             )
         except Exception as e:
             # Log but don't raise - tracking is non-critical
             logger.warning(
-                f"Failed to record evaluation tracking: {str(e)}",
-                extra={'user_id': user_id, 'flag_key': flag_key}
+                f"Failed to record evaluation tracking: {e!s}",
+                extra={"user_id": user_id, "flag_key": flag_key},
             )
 
         # Log evaluation result
         logger.info(
-            f"Feature flag evaluated",
+            "Feature flag evaluated",
             extra={
-                'user_id': user_id,
-                'flag_key': flag_key,
-                'flag_id': flag_config.flag_id,
-                'enabled': evaluation_result['enabled'],
-                'reason': evaluation_result['reason']
-            }
+                "user_id": user_id,
+                "flag_key": flag_key,
+                "flag_id": flag_config.flag_id,
+                "enabled": evaluation_result["enabled"],
+                "reason": evaluation_result["reason"],
+            },
         )
 
         # Build response
         response_data = {
-            'user_id': user_id,
-            'flag_key': flag_key,
-            'flag_id': flag_config.flag_id,
-            'enabled': evaluation_result['enabled'],
-            'reason': evaluation_result['reason']
+            "user_id": user_id,
+            "flag_key": flag_key,
+            "flag_id": flag_config.flag_id,
+            "enabled": evaluation_result["enabled"],
+            "reason": evaluation_result["reason"],
         }
 
         # Include variant if present
-        if evaluation_result.get('variant'):
-            response_data['variant'] = evaluation_result['variant']
+        if evaluation_result.get("variant"):
+            response_data["variant"] = evaluation_result["variant"]
 
         return create_success_response(response_data)
 
     except ValueError as e:
         # Handle validation errors
-        logger.warning(f"Validation error: {str(e)}")
+        logger.warning(f"Validation error: {e!s}")
         return create_error_response(400, str(e))
 
     except Exception as e:
         # Handle unexpected errors
         logger.error(
-            f"Internal server error: {str(e)}",
+            f"Internal server error: {e!s}",
             extra={
-                'error_type': type(e).__name__,
-                'request_id': event.get('requestContext', {}).get('requestId', 'unknown')
+                "error_type": type(e).__name__,
+                "request_id": event.get("requestContext", {}).get(
+                    "requestId", "unknown"
+                ),
             },
-            exc_info=True
+            exc_info=True,
         )
         return create_error_response(
             500,
-            "Internal server error occurred while processing feature flag evaluation request"
+            "Internal server error occurred while processing feature flag evaluation request",
         )
 
 
@@ -348,18 +337,18 @@ def create_success_response(data: Dict[str, Any]) -> Dict[str, Any]:
         API Gateway response dict with 200 status
     """
     return {
-        'statusCode': 200,
-        'headers': {
-            'Content-Type': 'application/json',
-            'Access-Control-Allow-Origin': '*',
-            'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key',
-            'Access-Control-Allow-Methods': 'GET,OPTIONS',
-            'X-Content-Type-Options': 'nosniff',
-            'X-Frame-Options': 'DENY',
-            'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
-            'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0'
+        "statusCode": 200,
+        "headers": {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Headers": "Content-Type,X-Amz-Date,Authorization,X-Api-Key",
+            "Access-Control-Allow-Methods": "GET,OPTIONS",
+            "X-Content-Type-Options": "nosniff",
+            "X-Frame-Options": "DENY",
+            "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
         },
-        'body': json.dumps(data)
+        "body": json.dumps(data),
     }
 
 
@@ -375,18 +364,16 @@ def create_error_response(status_code: int, error_message: str) -> Dict[str, Any
         API Gateway response dict with error status
     """
     return {
-        'statusCode': status_code,
-        'headers': {
-            'Content-Type': 'application/json',
-            'Access-Control-Allow-Origin': '*',
-            'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key',
-            'Access-Control-Allow-Methods': 'GET,OPTIONS',
-            'X-Content-Type-Options': 'nosniff',
-            'X-Frame-Options': 'DENY',
-            'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
-            'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0'
+        "statusCode": status_code,
+        "headers": {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Headers": "Content-Type,X-Amz-Date,Authorization,X-Api-Key",
+            "Access-Control-Allow-Methods": "GET,OPTIONS",
+            "X-Content-Type-Options": "nosniff",
+            "X-Frame-Options": "DENY",
+            "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
         },
-        'body': json.dumps({
-            'error': error_message
-        })
+        "body": json.dumps({"error": error_message}),
     }

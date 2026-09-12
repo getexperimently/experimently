@@ -4,11 +4,10 @@ Pydantic schemas for authentication.
 This module defines the request and response schemas for authentication operations.
 """
 
-from typing import Dict, Any, Literal, Optional
+from typing import Any, Dict, Literal, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
-
 
 # ---------------------------------------------------------------------------
 # Local provider (Community Edition) — /auth/login, /auth/me, /auth/logout

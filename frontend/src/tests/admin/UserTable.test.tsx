@@ -1,6 +1,5 @@
 import React from 'react';
 import { render, screen, waitFor, fireEvent, act } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { UserTable } from '@/components/admin/users/UserTable';
 import { AdminService } from '@/services/admin';
 import { AdminUser, UserListResponse } from '@/types/admin';

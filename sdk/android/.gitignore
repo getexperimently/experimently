@@ -1,0 +1,16 @@
+# Gradle build output (sdk/, the published AAR)
+.gradle/
+build/
+
+# Maven build output of the JVM variant (jvm/, unit tests + contract smoke)
+target/
+
+# Java/Kotlin compiled class files
+*.class
+
+# IDE files
+.idea/
+*.iml
+
+# macOS
+.DS_Store

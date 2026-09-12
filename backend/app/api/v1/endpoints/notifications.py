@@ -15,13 +15,15 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from backend.app.api import deps
-from backend.app.models.notification import NotificationPreference, NotificationDeliveryLog
+from backend.app.models.notification import (
+    NotificationDeliveryLog,
+    NotificationPreference,
+)
 from backend.app.models.user import User, UserRole
 from backend.app.schemas.notification import (
+    NotificationDeliveryLogListResponse,
     NotificationPreferenceResponse,
     NotificationPreferenceUpdate,
-    NotificationDeliveryLogListResponse,
-    NotificationDeliveryLogResponse,
     TestNotificationRequest,
 )
 from backend.app.schemas.scheduler import NotificationEvent
@@ -96,7 +98,12 @@ def get_delivery_log(
 
     total = query.count()
     offset = (page - 1) * limit
-    items = query.order_by(NotificationDeliveryLog.created_at.desc()).offset(offset).limit(limit).all()
+    items = (
+        query.order_by(NotificationDeliveryLog.created_at.desc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
 
     return NotificationDeliveryLogListResponse(
         items=items, total=total, page=page, limit=limit
@@ -137,7 +144,11 @@ def send_test_notification(
             )
             result = svc.send_webhook(svc._webhook_url or "http://localhost", event)
 
-        return {"success": result, "channel": request.channel, "message": request.message}
+        return {
+            "success": result,
+            "channel": request.channel,
+            "message": request.message,
+        }
 
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Notification send failed: {exc}")

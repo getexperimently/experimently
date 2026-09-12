@@ -23,19 +23,19 @@ from backend.app.core.config import settings
 from backend.app.core.security import create_local_access_token, oauth2_scheme
 from backend.app.models.user import User
 from backend.app.schemas.auth import (
-    SignUpRequest,
-    SignUpResponse,
-    ConfirmSignUpRequest,
-    ConfirmSignUpResponse,
-    TokenResponse,
-    ForgotPasswordRequest,
-    ForgotPasswordResponse,
     ConfirmForgotPasswordRequest,
     ConfirmForgotPasswordResponse,
-    RefreshTokenRequest,
-    UserInfoResponse,
+    ConfirmSignUpRequest,
+    ConfirmSignUpResponse,
+    ForgotPasswordRequest,
+    ForgotPasswordResponse,
     LoginRequest,
     LoginResponse,
+    RefreshTokenRequest,
+    SignUpRequest,
+    SignUpResponse,
+    TokenResponse,
+    UserInfoResponse,
     UserMe,
 )
 from backend.app.services.auth_service import CognitoAuthService
@@ -156,7 +156,9 @@ def logout_local() -> Response:
 # ---------------------------------------------------------------------------
 
 
-@router.post("/signup", response_model=SignUpResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/signup", response_model=SignUpResponse, status_code=status.HTTP_201_CREATED
+)
 def signup(signup_data: SignUpRequest) -> Any:
     """
     Register a new user.

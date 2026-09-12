@@ -18,21 +18,21 @@ Coverage:
 - run_etl_job with force_reprocess flag
 """
 
-import pytest
-import boto3
 from unittest.mock import MagicMock, patch
-from moto import mock_glue, mock_athena, mock_s3
+
+import boto3
+import pytest
+from moto import mock_athena, mock_glue, mock_s3
 
 from backend.app.schemas.etl import (
+    AthenaQueryRequest,
+    AthenaQueryResult,
     ETLJobRequest,
     ETLJobResponse,
     ETLJobType,
-    GlueJobStatus,
-    AthenaQueryRequest,
-    AthenaQueryResult,
     GlueCrawlerStatus,
+    GlueJobStatus,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -218,7 +218,7 @@ class TestGetJobStatus:
         assert isinstance(resp, ETLJobResponse)
         assert resp.job_run_id == job_run_id
         assert resp.job_name == GLUE_ETL_JOB_NAME
-        assert resp.status in {s for s in GlueJobStatus}
+        assert resp.status in set(GlueJobStatus)
 
     @mock_glue
     def test_get_job_status_maps_job_type(self, mock_settings):
@@ -339,7 +339,9 @@ class TestAddPartitions:
                     "Location": "s3://exp-data-bucket/raw/events/",
                     "InputFormat": "org.apache.hadoop.mapred.TextInputFormat",
                     "OutputFormat": "org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat",
-                    "SerdeInfo": {"SerializationLibrary": "org.openx.data.jsonserde.JsonSerDe"},
+                    "SerdeInfo": {
+                        "SerializationLibrary": "org.openx.data.jsonserde.JsonSerDe"
+                    },
                 },
                 "PartitionKeys": [
                     {"Name": "year", "Type": "string"},
@@ -388,7 +390,9 @@ class TestAddPartitions:
                     "Location": "s3://exp-data-bucket/raw/events/",
                     "InputFormat": "org.apache.hadoop.mapred.TextInputFormat",
                     "OutputFormat": "org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat",
-                    "SerdeInfo": {"SerializationLibrary": "org.openx.data.jsonserde.JsonSerDe"},
+                    "SerdeInfo": {
+                        "SerializationLibrary": "org.openx.data.jsonserde.JsonSerDe"
+                    },
                 },
                 "PartitionKeys": [
                     {"Name": "year", "Type": "string"},
@@ -429,7 +433,9 @@ class TestAddPartitions:
                     "Location": "s3://exp-data-bucket/raw/events/",
                     "InputFormat": "org.apache.hadoop.mapred.TextInputFormat",
                     "OutputFormat": "org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat",
-                    "SerdeInfo": {"SerializationLibrary": "org.openx.data.jsonserde.JsonSerDe"},
+                    "SerdeInfo": {
+                        "SerializationLibrary": "org.openx.data.jsonserde.JsonSerDe"
+                    },
                 },
                 "PartitionKeys": [
                     {"Name": "year", "Type": "string"},

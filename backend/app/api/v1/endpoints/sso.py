@@ -15,20 +15,30 @@ Endpoints:
 Note: the router is mounted at /api/v1/auth/sso in api.py, so the
 endpoint paths below are relative to that prefix.
 """
+
 from __future__ import annotations
 
 import uuid
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request, Response, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    Form,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    status,
+)
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
 from backend.app.api import deps
 from backend.app.core.config import settings
-from backend.app.models.sso_config import SSOConfig, SSOProviderType
+from backend.app.models.sso_config import SSOProviderType
 from backend.app.models.user import User, UserRole
 from backend.app.services import sso_service
 
@@ -44,7 +54,9 @@ class SSOConfigCreate(BaseModel):
     """Schema for creating a new SSO configuration."""
 
     org_name: str = Field(..., description="Human-readable organization name")
-    org_domain: str = Field(..., description="Organization email domain (e.g. acme.com)")
+    org_domain: str = Field(
+        ..., description="Organization email domain (e.g. acme.com)"
+    )
     provider_type: SSOProviderType
     entity_id: Optional[str] = Field(
         None, description="SAML Entity ID or OIDC client_id"
@@ -151,13 +163,16 @@ def _issue_jwt(user: User) -> str:
         "username": user.username,
         "role": user.role.value if user.role else "viewer",
         "iat": datetime.utcnow(),
-        "exp": datetime.utcnow() + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES),
+        "exp": datetime.utcnow()
+        + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES),
     }
     token = jwt.encode(payload, settings.SECRET_KEY, algorithm="HS256")
     return token
 
 
-def _get_redirect_uri(request: Request, provider: str, config_id: Optional[str] = None) -> str:
+def _get_redirect_uri(
+    request: Request, provider: str, config_id: Optional[str] = None
+) -> str:
     """Build the OIDC callback redirect URI."""
     base = str(request.base_url).rstrip("/")
     return f"{base}/api/v1/auth/sso/oidc/{provider}/callback"
@@ -274,7 +289,9 @@ async def oidc_login(
 
     state = sso_service.generate_state_token()
     redirect_uri = _get_redirect_uri(request, provider)
-    auth_url = sso_service.build_oidc_authorization_url(config, provider, redirect_uri, state)
+    auth_url = sso_service.build_oidc_authorization_url(
+        config, provider, redirect_uri, state
+    )
 
     return RedirectResponse(url=auth_url, status_code=302)
 

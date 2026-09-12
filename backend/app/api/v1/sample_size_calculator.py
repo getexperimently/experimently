@@ -6,10 +6,11 @@ for experiments based on expected effect size, baseline conversion rate,
 and desired statistical power.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Body, status
-from pydantic import BaseModel, Field, field_validator, ConfigDict
-from typing import Dict, Any, Optional
 import math
+from typing import Dict, Optional
+
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from backend.app.api import deps
 from backend.app.models.user import User

@@ -9,14 +9,15 @@ for metrics, sample size, and variant descriptions.
 from dataclasses import dataclass, field
 from typing import List, Optional
 
-
 # ---------------------------------------------------------------------------
 # Data class
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class ExperimentTemplate:
     """A pre-built experiment design template."""
+
     id: str
     name: str
     description: str
@@ -119,11 +120,14 @@ TEMPLATE_LIBRARY: List[ExperimentTemplate] = [
 # Service
 # ---------------------------------------------------------------------------
 
+
 class ExperimentTemplateService:
     """Service for querying and recommending experiment templates."""
 
     @staticmethod
-    def list_templates(experiment_type: Optional[str] = None) -> List[ExperimentTemplate]:
+    def list_templates(
+        experiment_type: Optional[str] = None,
+    ) -> List[ExperimentTemplate]:
         """
         List all templates, optionally filtered by experiment type.
 

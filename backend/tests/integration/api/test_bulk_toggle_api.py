@@ -15,19 +15,21 @@ Note on route registration:
 The stream endpoint returns Server-Sent Events (text/event-stream).
 We only verify status code and content-type; we do not consume the stream body.
 """
+
 import uuid
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from backend.app.models.user import User, UserRole
 from backend.app.models.feature_flag import FeatureFlag, FeatureFlagStatus
+from backend.app.models.user import User, UserRole
 from backend.tests.integration.helpers import unique_flag_key
-
 
 # ---------------------------------------------------------------------------
 # Module-level helper: create a feature flag via the POST API
 # ---------------------------------------------------------------------------
+
 
 def _create_flag(client: TestClient, key_prefix: str = "bt") -> dict:
     """Create a feature flag via the API and return the response dict.
@@ -48,16 +50,22 @@ def _create_flag(client: TestClient, key_prefix: str = "bt") -> dict:
     # The feature-flags POST has a known cache-control bug that can return 500
     # even when the flag was persisted. Accept 200, 201, or 500 and return the
     # flag data on success codes.
-    assert resp.status_code in (200, 201, 500), f"Unexpected status creating flag: {resp.text}"
+    assert resp.status_code in (200, 201, 500), (
+        f"Unexpected status creating flag: {resp.text}"
+    )
     return resp.json() if resp.status_code in (200, 201) else {}
 
 
-def _make_flag_in_db(db_session: Session, owner: User, is_active: bool = False) -> FeatureFlag:
+def _make_flag_in_db(
+    db_session: Session, owner: User, is_active: bool = False
+) -> FeatureFlag:
     """Create a FeatureFlag directly in DB (bypasses API caching bugs)."""
     flag = FeatureFlag(
         key=f"bt-db-{uuid.uuid4().hex[:8]}",
         name="Bulk Toggle DB Flag",
-        status=FeatureFlagStatus.INACTIVE if not is_active else FeatureFlagStatus.ACTIVE,
+        status=FeatureFlagStatus.INACTIVE
+        if not is_active
+        else FeatureFlagStatus.ACTIVE,
         owner_id=owner.id,
         rollout_percentage=0,
     )
@@ -70,6 +78,7 @@ def _make_flag_in_db(db_session: Session, owner: User, is_active: bool = False) 
 # ---------------------------------------------------------------------------
 # Bulk Toggle tests
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.integration
 @pytest.mark.requires_db
@@ -119,7 +128,9 @@ class TestBulkToggle:
             assert result["success"] is True
             assert result["new_status"].lower() == "inactive"
 
-    def test_partial_success_with_nonexistent_ids(self, admin_client, admin_user, db_session):
+    def test_partial_success_with_nonexistent_ids(
+        self, admin_client, admin_user, db_session
+    ):
         """Mix of valid and non-existent IDs results in partial success."""
         valid_flag = _make_flag_in_db(db_session, admin_user)
         nonexistent_id = "00000000-0000-0000-0000-000000000001"
@@ -148,7 +159,9 @@ class TestBulkToggle:
         response = admin_client.post("/api/v1/feature-flags/bulk-toggle", json=payload)
         assert response.status_code == 422, response.text
 
-    def test_bulk_toggle_creates_audit_log_ids(self, admin_client, admin_user, db_session):
+    def test_bulk_toggle_creates_audit_log_ids(
+        self, admin_client, admin_user, db_session
+    ):
         """Successful bulk toggle returns a non-empty audit_log_ids list."""
         flag = _make_flag_in_db(db_session, admin_user)
         payload = {
@@ -194,6 +207,7 @@ class TestBulkToggle:
 # ---------------------------------------------------------------------------
 # Flag history tests
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.integration
 @pytest.mark.requires_db
@@ -261,9 +275,7 @@ class TestFlagHistory:
             )
 
         # Request with limit=2
-        response = admin_client.get(
-            f"/api/v1/feature-flags/{flag.id}/history?limit=2"
-        )
+        response = admin_client.get(f"/api/v1/feature-flags/{flag.id}/history?limit=2")
         assert response.status_code == 200, response.text
         data = response.json()
         assert len(data["history"]) <= 2
@@ -307,6 +319,7 @@ class TestFlagHistory:
 # Audit Log Stream tests
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.integration
 @pytest.mark.requires_db
 class TestAuditLogStream:
@@ -318,7 +331,9 @@ class TestAuditLogStream:
         # Using `with admin_client as client:` triggers ASGI lifespan startup/shutdown
         # which causes the scheduler background tasks to connect to and then
         # abruptly disconnect from the test database, corrupting subsequent connections.
-        response = admin_client.get("/api/v1/audit-logs/stream", headers={"Accept": "text/event-stream"})
+        response = admin_client.get(
+            "/api/v1/audit-logs/stream", headers={"Accept": "text/event-stream"}
+        )
         assert response.status_code == 200, response.text
 
     def test_stream_content_type_is_event_stream(self, admin_client):
@@ -342,7 +357,9 @@ class TestAuditLogStream:
         response = admin_client.get("/api/v1/audit-logs/stream?limit=5")
         assert response.status_code == 200, response.text
 
-    def test_stream_response_contains_event_data(self, admin_client, admin_user, db_session):
+    def test_stream_response_contains_event_data(
+        self, admin_client, admin_user, db_session
+    ):
         """SSE stream body contains 'data:' lines (SSE format) after performing a toggle."""
         # Create a flag and toggle it to generate an audit event
         flag = _make_flag_in_db(db_session, admin_user)
@@ -356,4 +373,6 @@ class TestAuditLogStream:
         assert response.status_code == 200, response.text
         # SSE format requires "data: " prefixed lines
         body = response.text
-        assert "data:" in body, f"SSE body should contain 'data:' lines, got: {body[:200]}"
+        assert "data:" in body, (
+            f"SSE body should contain 'data:' lines, got: {body[:200]}"
+        )

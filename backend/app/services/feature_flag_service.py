@@ -1,15 +1,14 @@
 # Feature flag management service
 # backend/app/services/feature_flag_service.py
-import logging
 import hashlib
-import json
+import logging
 import time
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Union, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 from uuid import UUID
 
-from sqlalchemy import func, and_, or_, desc
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import func
+from sqlalchemy.orm import Session
 
 from backend.app.core.targeting_adapter import (
     expand_context,
@@ -18,9 +17,8 @@ from backend.app.core.targeting_adapter import (
 )
 from backend.app.models.feature_flag import FeatureFlag, FeatureFlagStatus
 from backend.app.schemas.feature_flag import FeatureFlagCreate, FeatureFlagUpdate
-from backend.app.services.metrics_service import MetricsService
 from backend.app.schemas.metrics import ErrorLogCreate
-
+from backend.app.services.metrics_service import MetricsService
 
 logger = logging.getLogger(__name__)
 
@@ -114,7 +112,11 @@ class FeatureFlagService:
             # Handle is_active to status conversion
             if "is_active" in flag_dict:
                 is_active = flag_dict.pop("is_active")
-                flag_dict["status"] = FeatureFlagStatus.ACTIVE if is_active else FeatureFlagStatus.INACTIVE
+                flag_dict["status"] = (
+                    FeatureFlagStatus.ACTIVE
+                    if is_active
+                    else FeatureFlagStatus.INACTIVE
+                )
 
             # Remove any other fields that don't exist in the model
             for key in list(flag_dict.keys()):
@@ -130,7 +132,7 @@ class FeatureFlagService:
 
             return flag
         except Exception as e:
-            logger.error(f"Error creating feature flag: {str(e)}")
+            logger.error(f"Error creating feature flag: {e!s}")
             self.db.rollback()
             raise
 
@@ -144,7 +146,9 @@ class FeatureFlagService:
                 flag = flag_id
             else:
                 # Get existing flag
-                flag = self.db.query(FeatureFlag).filter(FeatureFlag.id == flag_id).first()
+                flag = (
+                    self.db.query(FeatureFlag).filter(FeatureFlag.id == flag_id).first()
+                )
 
             if not flag:
                 return None
@@ -155,7 +159,11 @@ class FeatureFlagService:
             # Handle is_active to status conversion
             if "is_active" in update_data:
                 is_active = update_data.pop("is_active")
-                update_data["status"] = FeatureFlagStatus.ACTIVE if is_active else FeatureFlagStatus.INACTIVE
+                update_data["status"] = (
+                    FeatureFlagStatus.ACTIVE
+                    if is_active
+                    else FeatureFlagStatus.INACTIVE
+                )
 
             # Remove fields that don't exist in the model
             for key in list(update_data.keys()):
@@ -171,7 +179,7 @@ class FeatureFlagService:
 
             return self._feature_flag_to_dict(flag)
         except Exception as e:
-            logger.error(f"Error updating feature flag: {str(e)}")
+            logger.error(f"Error updating feature flag: {e!s}")
             self.db.rollback()
             raise
 
@@ -315,7 +323,10 @@ class FeatureFlagService:
             # Handle both enum member (FeatureFlagStatus.ACTIVE) and string value ("ACTIVE")
             # SQLAlchemy returns the enum member when reading from the DB column,
             # but some code paths store the raw string value.
-            if flag.status not in (FeatureFlagStatus.ACTIVE, FeatureFlagStatus.ACTIVE.value):
+            if flag.status not in (
+                FeatureFlagStatus.ACTIVE,
+                FeatureFlagStatus.ACTIVE.value,
+            ):
                 result = False
                 reason = REASON_INACTIVE
             else:
@@ -334,7 +345,9 @@ class FeatureFlagService:
         except Exception as e:
             # Log and record the error
             error = str(e)
-            logger.error(f"Error evaluating flag {flag.key} for user {user_id}: {error}")
+            logger.error(
+                f"Error evaluating flag {flag.key} for user {user_id}: {error}"
+            )
 
             # Default behavior on error is to return False
             result = False
@@ -355,7 +368,7 @@ class FeatureFlagService:
                     latency_ms=latency_ms,
                     metadata={
                         "context": context,
-                    }
+                    },
                 )
 
                 # If there was an error, log it separately
@@ -365,12 +378,12 @@ class FeatureFlagService:
                         feature_flag_id=flag.id,
                         user_id=user_id,
                         message=error,
-                        request_data={"context": context}
+                        request_data={"context": context},
                     )
                     MetricsService.log_error(db=self.db, data=error_data)
             except Exception as metrics_error:
                 # Don't let metrics collection errors affect flag evaluation
-                logger.error(f"Failed to record metrics: {str(metrics_error)}")
+                logger.error(f"Failed to record metrics: {metrics_error!s}")
 
         return {"enabled": result, "reason": reason, "rule_id": targeting_rule_id}
 
@@ -506,7 +519,9 @@ class FeatureFlagService:
 
         # Create a hash using user ID and flag key for deterministic assignment
         hash_input = f"{user_id}:{flag.key}"
-        hash_value = int(hashlib.md5(hash_input.encode(), usedforsecurity=False).hexdigest(), 16)
+        hash_value = int(
+            hashlib.md5(hash_input.encode(), usedforsecurity=False).hexdigest(), 16
+        )
 
         # Get bucket (0-99)
         bucket = hash_value % 100
@@ -529,7 +544,9 @@ class FeatureFlagService:
             "name": flag.name,
             "key": flag.key,
             "description": flag.description,
-            "status": flag.status.value.lower() if hasattr(flag.status, 'value') else str(flag.status).lower(),
+            "status": flag.status.value.lower()
+            if hasattr(flag.status, "value")
+            else str(flag.status).lower(),
             "rollout_percentage": flag.rollout_percentage,
             "rules": flag.targeting_rules,
             "owner_id": str(flag.owner_id),

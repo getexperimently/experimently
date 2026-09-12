@@ -14,23 +14,22 @@ from fastapi import (
     APIRouter,
     Depends,
     HTTPException,
-    Query,
     Path,
+    Query,
     status,
 )
 from sqlalchemy.orm import Session
 
 from backend.app.api import deps
-from backend.app.models.user import User
+from backend.app.core.permissions import Action, ResourceType, check_permission
 from backend.app.models.audit_log import ActionType, EntityType
+from backend.app.models.user import User
 from backend.app.schemas.audit_log import (
     AuditLogListResponse,
     AuditLogResponse,
-    AuditLogFilterParams,
     AuditStatsResponse,
 )
 from backend.app.services.audit_service import AuditService
-from backend.app.core.permissions import ResourceType, Action, check_permission
 
 # Create router with tag for documentation grouping
 router = APIRouter(
@@ -93,8 +92,12 @@ async def list_audit_logs(
     entity_type: Optional[str] = Query(None, description="Filter by entity type"),
     entity_id: Optional[UUID] = Query(None, description="Filter by entity ID"),
     action_type: Optional[str] = Query(None, description="Filter by action type"),
-    from_date: Optional[datetime] = Query(None, description="Filter logs from this date (ISO format)"),
-    to_date: Optional[datetime] = Query(None, description="Filter logs until this date (ISO format)"),
+    from_date: Optional[datetime] = Query(
+        None, description="Filter logs from this date (ISO format)"
+    ),
+    to_date: Optional[datetime] = Query(
+        None, description="Filter logs until this date (ISO format)"
+    ),
     page: int = Query(1, ge=1, description="Page number (1-based)"),
     limit: int = Query(50, ge=1, le=1000, description="Number of records per page"),
 ) -> AuditLogListResponse:
@@ -188,7 +191,7 @@ async def list_audit_logs(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
         )
-    except Exception as e:
+    except Exception:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve audit logs",
@@ -205,9 +208,13 @@ async def get_entity_audit_history(
     *,
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_active_user),
-    entity_type: str = Path(..., description="Type of entity (feature_flag, experiment, etc.)"),
+    entity_type: str = Path(
+        ..., description="Type of entity (feature_flag, experiment, etc.)"
+    ),
     entity_id: UUID = Path(..., description="ID of the entity"),
-    limit: int = Query(100, ge=1, le=1000, description="Maximum number of records to return"),
+    limit: int = Query(
+        100, ge=1, le=1000, description="Maximum number of records to return"
+    ),
 ) -> list[AuditLogResponse]:
     """
     Get audit history for a specific entity.
@@ -251,7 +258,7 @@ async def get_entity_audit_history(
         # Convert to response models
         return [AuditLogResponse.model_validate(log) for log in audit_logs]
 
-    except Exception as e:
+    except Exception:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve entity audit history",
@@ -269,9 +276,15 @@ async def get_user_activity(
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_active_user),
     user_id: UUID = Path(..., description="ID of the user"),
-    from_date: Optional[datetime] = Query(None, description="Filter logs from this date"),
-    to_date: Optional[datetime] = Query(None, description="Filter logs until this date"),
-    limit: int = Query(100, ge=1, le=1000, description="Maximum number of records to return"),
+    from_date: Optional[datetime] = Query(
+        None, description="Filter logs from this date"
+    ),
+    to_date: Optional[datetime] = Query(
+        None, description="Filter logs until this date"
+    ),
+    limit: int = Query(
+        100, ge=1, le=1000, description="Maximum number of records to return"
+    ),
 ) -> list[AuditLogResponse]:
     """
     Get audit logs for a specific user's activity.
@@ -284,7 +297,11 @@ async def get_user_activity(
     can_view_all = check_permission(current_user, ResourceType.USER, Action.READ)
 
     # Users can view their own activity, superusers and those with READ permission can view any user's activity
-    if not can_view_all and not current_user.is_superuser and str(current_user.id) != str(user_id):
+    if (
+        not can_view_all
+        and not current_user.is_superuser
+        and str(current_user.id) != str(user_id)
+    ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not enough permissions to view this user's activity",
@@ -310,7 +327,7 @@ async def get_user_activity(
         # Convert to response models
         return [AuditLogResponse.model_validate(log) for log in audit_logs]
 
-    except Exception as e:
+    except Exception:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve user activity",
@@ -327,8 +344,12 @@ async def get_audit_stats(
     *,
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_active_user),
-    from_date: Optional[datetime] = Query(None, description="Filter logs from this date"),
-    to_date: Optional[datetime] = Query(None, description="Filter logs until this date"),
+    from_date: Optional[datetime] = Query(
+        None, description="Filter logs from this date"
+    ),
+    to_date: Optional[datetime] = Query(
+        None, description="Filter logs until this date"
+    ),
 ) -> AuditStatsResponse:
     """
     Get audit log statistics.
@@ -340,7 +361,9 @@ async def get_audit_stats(
     """
     # Check if user has permission to view audit statistics
     # Only ADMIN role can view audit statistics
-    if not current_user.is_superuser and not check_permission(current_user, ResourceType.USER, Action.READ):
+    if not current_user.is_superuser and not check_permission(
+        current_user, ResourceType.USER, Action.READ
+    ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not enough permissions to view audit statistics",
@@ -363,7 +386,7 @@ async def get_audit_stats(
 
         return AuditStatsResponse.model_validate(stats)
 
-    except Exception as e:
+    except Exception:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve audit statistics",

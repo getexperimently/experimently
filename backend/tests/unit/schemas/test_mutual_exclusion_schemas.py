@@ -2,29 +2,29 @@
 Unit tests for EP-022 Mutual Exclusion Group and Global Holdout schemas.
 """
 
-import pytest
 from datetime import datetime, timezone
 from uuid import uuid4
+
+import pytest
 from pydantic import ValidationError
 
-from backend.app.schemas.mutual_exclusion_group import (
-    MutualExclusionGroupCreate,
-    MutualExclusionGroupUpdate,
-    MutualExclusionGroupResponse,
-    MutualExclusionGroupListResponse,
-    AddExperimentToGroupRequest,
-    UserExperimentSelection,
-    MutualExclusionGroupStatus,
-    ExperimentSummary,
-)
 from backend.app.schemas.global_holdout import (
     GlobalHoldoutCreate,
-    GlobalHoldoutUpdate,
-    GlobalHoldoutResponse,
     GlobalHoldoutListResponse,
+    GlobalHoldoutResponse,
+    GlobalHoldoutUpdate,
     HoldoutCheckResponse,
 )
-
+from backend.app.schemas.mutual_exclusion_group import (
+    AddExperimentToGroupRequest,
+    ExperimentSummary,
+    MutualExclusionGroupCreate,
+    MutualExclusionGroupListResponse,
+    MutualExclusionGroupResponse,
+    MutualExclusionGroupStatus,
+    MutualExclusionGroupUpdate,
+    UserExperimentSelection,
+)
 
 # ---------------------------------------------------------------------------
 # Mutual Exclusion Group Schemas
@@ -91,9 +91,7 @@ class TestMutualExclusionGroupUpdate:
         assert data.traffic_allocation is None
 
     def test_status_update(self):
-        data = MutualExclusionGroupUpdate(
-            status=MutualExclusionGroupStatus.ARCHIVED
-        )
+        data = MutualExclusionGroupUpdate(status=MutualExclusionGroupStatus.ARCHIVED)
         assert data.status == MutualExclusionGroupStatus.ARCHIVED
 
     def test_traffic_allocation_update_validation(self):
@@ -143,6 +141,7 @@ class TestMutualExclusionGroupResponse:
         from backend.app.models.mutual_exclusion_group import (
             MutualExclusionGroupStatus as ModelStatus,
         )
+
         now = datetime.now(timezone.utc)
         resp = MutualExclusionGroupResponse(
             id=uuid4(),

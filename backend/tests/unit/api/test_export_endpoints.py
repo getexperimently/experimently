@@ -2,16 +2,17 @@
 Unit tests for export API endpoints (EP-020).
 Uses TestClient with mocked ExportService and auth dependencies.
 """
-import pytest
+
 import json
 import uuid
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
+
+import pytest
 from fastapi.testclient import TestClient
 
+from backend.app.api.deps import get_current_user, get_db
 from backend.app.main import app
-from backend.app.api.deps import get_db, get_current_user
 from backend.app.models.user import User
-
 
 USER_UUID = uuid.UUID("12345678-1234-5678-1234-567812345678")
 
@@ -64,6 +65,7 @@ def admin_token() -> str:
 # ---------------------------------------------------------------------------
 # Export experiments endpoint
 # ---------------------------------------------------------------------------
+
 
 class TestExportExperimentsEndpoint:
     def test_export_csv_returns_200(self, client, admin_token):
@@ -151,12 +153,14 @@ class TestExportExperimentsEndpoint:
                 user.is_active = True
                 user.is_superuser = True
                 return user
+
             app.dependency_overrides[get_current_user] = override_get_current_user
 
 
 # ---------------------------------------------------------------------------
 # Export variants endpoint
 # ---------------------------------------------------------------------------
+
 
 class TestExportVariantsEndpoint:
     def test_export_variants_returns_200(self, client, admin_token):
@@ -205,6 +209,7 @@ class TestExportVariantsEndpoint:
 # Export feature flags endpoint
 # ---------------------------------------------------------------------------
 
+
 class TestExportFeatureFlagsEndpoint:
     def test_export_feature_flags_returns_200(self, client, admin_token):
         """GET /export/feature-flags returns 200"""
@@ -252,11 +257,13 @@ class TestExportFeatureFlagsEndpoint:
 # Platform overview report endpoint
 # ---------------------------------------------------------------------------
 
+
 class TestPlatformOverviewEndpoint:
     def test_overview_report_returns_200(self, client, admin_token):
         """GET /export/reports/overview returns 200"""
         with patch("backend.app.api.v1.endpoints.export.ExportService") as mock_svc:
             from backend.app.schemas.export import PlatformOverviewReport
+
             mock_report = PlatformOverviewReport(
                 generated_at="2024-01-01T00:00:00+00:00",
                 period_start=None,
@@ -282,6 +289,7 @@ class TestPlatformOverviewEndpoint:
         """Platform overview report response is valid JSON"""
         with patch("backend.app.api.v1.endpoints.export.ExportService") as mock_svc:
             from backend.app.schemas.export import PlatformOverviewReport
+
             mock_report = PlatformOverviewReport(
                 generated_at="2024-01-01T00:00:00+00:00",
                 period_start=None,
@@ -311,6 +319,7 @@ class TestPlatformOverviewEndpoint:
         """Platform overview report contains correct values from service"""
         with patch("backend.app.api.v1.endpoints.export.ExportService") as mock_svc:
             from backend.app.schemas.export import PlatformOverviewReport
+
             mock_report = PlatformOverviewReport(
                 generated_at="2024-01-01T00:00:00+00:00",
                 period_start=None,
@@ -342,18 +351,21 @@ class TestPlatformOverviewEndpoint:
             response = client.get("/api/v1/export/reports/overview")
             assert response.status_code == 401
         finally:
+
             async def override_get_current_user():
                 user = MagicMock(spec=User)
                 user.id = USER_UUID
                 user.is_active = True
                 user.is_superuser = True
                 return user
+
             app.dependency_overrides[get_current_user] = override_get_current_user
 
 
 # ---------------------------------------------------------------------------
 # Experiment report endpoint
 # ---------------------------------------------------------------------------
+
 
 class TestExperimentReportEndpoint:
     def test_experiment_report_returns_200(self, client, admin_token):
@@ -379,7 +391,9 @@ class TestExperimentReportEndpoint:
         exp_id = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
         with patch("backend.app.api.v1.endpoints.export.ExportService") as mock_svc:
             mock_svc.return_value.export_experiments.return_value = (
-                '[{"experiment_id":"' + exp_id + '","experiment_name":"My Test","status":"completed"}]',
+                '[{"experiment_id":"'
+                + exp_id
+                + '","experiment_name":"My Test","status":"completed"}]',
                 "application/json",
             )
             mock_svc.return_value.export_variants.return_value = (
@@ -397,6 +411,7 @@ class TestExperimentReportEndpoint:
 # ---------------------------------------------------------------------------
 # Query parameter forwarding
 # ---------------------------------------------------------------------------
+
 
 class TestQueryParameters:
     def test_start_date_query_param_accepted(self, client, admin_token):

@@ -6,9 +6,10 @@ counter system that tracks assignments, events, and conversions
 per experiment variant using DynamoDB atomic counters.
 """
 
-from pydantic import BaseModel, ConfigDict, Field
-from typing import Optional
 from enum import Enum
+from typing import Optional
+
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class CounterType(str, Enum):

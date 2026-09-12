@@ -12,12 +12,11 @@ Test-Driven Development (TDD) - RED phase:
 - Write tests first, implementation follows
 """
 
-import pytest
 import base64
 import json
 import time
-from unittest.mock import Mock, patch, MagicMock
-from typing import List, Dict, Any
+from typing import Any, Dict
+from unittest.mock import Mock, patch
 
 
 def create_kinesis_record(event_id: str, valid: bool = True) -> Dict[str, Any]:
@@ -27,7 +26,7 @@ def create_kinesis_record(event_id: str, valid: bool = True) -> Dict[str, Any]:
             "event_id": event_id,
             "event_type": "page_view",
             "user_id": f"user_{event_id}",
-            "timestamp": "2024-12-19T10:30:00Z"
+            "timestamp": "2024-12-19T10:30:00Z",
         }
         encoded = base64.b64encode(json.dumps(event).encode()).decode()
     else:
@@ -37,7 +36,7 @@ def create_kinesis_record(event_id: str, valid: bool = True) -> Dict[str, Any]:
         "kinesis": {
             "data": encoded,
             "sequenceNumber": f"seq_{event_id}",
-            "partitionKey": f"partition_{event_id}"
+            "partitionKey": f"partition_{event_id}",
         },
         "eventID": f"event_{event_id}",
         "eventSource": "aws:kinesis",
@@ -45,7 +44,7 @@ def create_kinesis_record(event_id: str, valid: bool = True) -> Dict[str, Any]:
         "eventName": "aws:kinesis:record",
         "invokeIdentityArn": "arn:aws:iam::123456789012:role/lambda-role",
         "awsRegion": "us-east-1",
-        "eventSourceARN": "arn:aws:kinesis:us-east-1:123456789012:stream/event-stream"
+        "eventSourceARN": "arn:aws:kinesis:us-east-1:123456789012:stream/event-stream",
     }
 
 
@@ -61,9 +60,7 @@ class TestLambdaHandler:
         Then: Event is parsed, validated, enriched, aggregated, archived
         """
         # Arrange
-        lambda_event = {
-            "Records": [create_kinesis_record("evt_1")]
-        }
+        lambda_event = {"Records": [create_kinesis_record("evt_1")]}
         lambda_context = Mock()
 
         from handler import handler
@@ -184,9 +181,7 @@ class TestLambdaHandler:
         Then: Response contains batchItemFailures array
         """
         # Arrange
-        lambda_event = {
-            "Records": [create_kinesis_record("evt_1")]
-        }
+        lambda_event = {"Records": [create_kinesis_record("evt_1")]}
         lambda_context = Mock()
 
         from handler import handler
@@ -208,15 +203,13 @@ class TestLambdaHandler:
         Then: AWS clients are initialized
         """
         # Arrange
-        lambda_event = {
-            "Records": [create_kinesis_record("evt_1")]
-        }
+        lambda_event = {"Records": [create_kinesis_record("evt_1")]}
         lambda_context = Mock()
 
         from handler import handler
 
         # Act
-        with patch('handler.boto3') as mock_boto3:
+        with patch("handler.boto3") as mock_boto3:
             mock_boto3.client.return_value = Mock()
             response = handler(lambda_event, lambda_context)
 
@@ -232,15 +225,13 @@ class TestLambdaHandler:
         Then: Processing metrics are logged
         """
         # Arrange
-        lambda_event = {
-            "Records": [create_kinesis_record("evt_1")]
-        }
+        lambda_event = {"Records": [create_kinesis_record("evt_1")]}
         lambda_context = Mock()
 
         from handler import handler
 
         # Act
-        with patch('handler.logger') as mock_logger:
+        with patch("handler.logger") as mock_logger:
             response = handler(lambda_event, lambda_context)
 
         # Assert
@@ -298,12 +289,11 @@ class TestLambdaHandler:
         Then: Configuration is read from environment
         """
         # Arrange
-        lambda_event = {
-            "Records": [create_kinesis_record("evt_1")]
-        }
+        lambda_event = {"Records": [create_kinesis_record("evt_1")]}
         lambda_context = Mock()
 
         import os
+
         os.environ["S3_BUCKET"] = "test-bucket"
         os.environ["DLQ_URL"] = "https://sqs.us-east-1.amazonaws.com/123/dlq"
 
@@ -324,16 +314,14 @@ class TestLambdaHandler:
         Then: Request ID is included in log messages
         """
         # Arrange
-        lambda_event = {
-            "Records": [create_kinesis_record("evt_1")]
-        }
+        lambda_event = {"Records": [create_kinesis_record("evt_1")]}
         lambda_context = Mock()
         lambda_context.aws_request_id = "test-request-id-12345"
 
         from handler import handler
 
         # Act
-        with patch('handler.logger') as mock_logger:
+        with patch("handler.logger") as mock_logger:
             response = handler(lambda_event, lambda_context)
 
         # Assert - Request ID should be logged

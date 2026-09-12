@@ -1,27 +1,26 @@
 # Experiment assignment service
 # Analysis and reporting service
 # backend/app/services/assignment_service.py
-import logging
-import json
 import hashlib
-from datetime import datetime, timezone
+import json
+import logging
 from typing import Any, Dict, List, Optional, Tuple, Union
 from uuid import UUID
 
-from sqlalchemy import func, and_, or_, desc
+from sqlalchemy import and_, desc, func
 from sqlalchemy.orm import Session, joinedload
 
 from backend.app.core.targeting_adapter import (
     expand_context,
     normalise_targeting_rules,
 )
-from backend.app.models.experiment import Experiment, Variant, ExperimentStatus
 from backend.app.models.assignment import Assignment
+from backend.app.models.experiment import Experiment, ExperimentStatus, Variant
+from backend.app.schemas.targeting_rule import TargetingRules
 from backend.app.services.event_service import EventService
 from backend.app.services.global_holdout_service import GlobalHoldoutService
 from backend.app.services.mutual_exclusion_service import MutualExclusionService
 from backend.app.services.rules_evaluation_service import RulesEvaluationService
-from backend.app.schemas.targeting_rule import TargetingRules
 
 logger = logging.getLogger(__name__)
 
@@ -537,7 +536,7 @@ class AssignmentService:
 
             except Exception as e:
                 logger.error(
-                    f"Error assigning user {user_id} to experiment {experiment_id}: {str(e)}"
+                    f"Error assigning user {user_id} to experiment {experiment_id}: {e!s}"
                 )
                 errors += 1
 
@@ -775,11 +774,11 @@ class AssignmentService:
                 }
 
         except Exception as e:
-            logger.error(f"Error evaluating experiment targeting: {str(e)}")
+            logger.error(f"Error evaluating experiment targeting: {e!s}")
             return {
                 "eligible": False,
                 "rule_id": None,
-                "reason": f"Targeting evaluation error: {str(e)}",
+                "reason": f"Targeting evaluation error: {e!s}",
                 "validation_passed": False,
             }
 

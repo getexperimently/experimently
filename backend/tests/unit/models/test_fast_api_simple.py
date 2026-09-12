@@ -1,6 +1,7 @@
 # backend/tests/unit/models/test_fast_api_setup.py
 import os
 import sys
+
 import pytest
 
 # Add the project root to the Python path
@@ -10,8 +11,9 @@ if project_root not in sys.path:
 
 # Now test imports will work correctly
 from fastapi.testclient import TestClient
-from backend.app.main import app
+
 from backend.app.core.config import settings
+from backend.app.main import app
 
 
 # Simple test function that doesn't require any fixtures

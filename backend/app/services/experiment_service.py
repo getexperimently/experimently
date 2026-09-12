@@ -1,17 +1,22 @@
 # backend/app/services/experiment_service.py
 import logging
-from datetime import datetime, timezone, timedelta
-from typing import Any, Dict, List, Optional, Union, Tuple
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, List, Optional, Tuple, Union
 from uuid import UUID
 
-from sqlalchemy import func, and_, or_
-from sqlalchemy.orm import Session, joinedload
 from fastapi.encoders import jsonable_encoder
+from sqlalchemy import func, or_
+from sqlalchemy.orm import Session, joinedload
 
-from backend.app.models.experiment import Experiment, Variant, Metric, ExperimentStatus, ExperimentType, MetricType
-from backend.app.models.user import User
+from backend.app.models.experiment import (
+    Experiment,
+    ExperimentStatus,
+    ExperimentType,
+    Metric,
+    MetricType,
+    Variant,
+)
 from backend.app.schemas.experiment import ExperimentCreate, ExperimentUpdate
-
 
 logger = logging.getLogger(__name__)
 
@@ -95,7 +100,10 @@ class ExperimentService:
         """
         experiment = (
             self.db.query(Experiment)
-            .options(joinedload(Experiment.variants), joinedload(Experiment.metric_definitions))
+            .options(
+                joinedload(Experiment.variants),
+                joinedload(Experiment.metric_definitions),
+            )
             .filter(Experiment.id == experiment_id)
             .first()
         )
@@ -112,7 +120,7 @@ class ExperimentService:
         status: Optional[str] = None,
         search: Optional[str] = None,
         sort_by: Optional[str] = "created_at",
-        sort_order: Optional[str] = "desc"
+        sort_order: Optional[str] = "desc",
     ) -> List[Dict[str, Any]]:
         """
         Get all experiments with optional status filter.
@@ -135,7 +143,9 @@ class ExperimentService:
         if status:
             status_enum = resolve_experiment_status(status)
             if status_enum is None:
-                logger.warning("Unknown experiment status filter %r; returning no rows", status)
+                logger.warning(
+                    "Unknown experiment status filter %r; returning no rows", status
+                )
                 return []
             query = query.filter(Experiment.status == status_enum)
 
@@ -187,14 +197,19 @@ class ExperimentService:
         """
         query = (
             self.db.query(Experiment)
-            .options(joinedload(Experiment.variants), joinedload(Experiment.metric_definitions))
+            .options(
+                joinedload(Experiment.variants),
+                joinedload(Experiment.metric_definitions),
+            )
             .filter(Experiment.owner_id == owner_id)
         )
 
         if status:
             status_enum = resolve_experiment_status(status)
             if status_enum is None:
-                logger.warning("Unknown experiment status filter %r; returning no rows", status)
+                logger.warning(
+                    "Unknown experiment status filter %r; returning no rows", status
+                )
                 return []
             query = query.filter(Experiment.status == status_enum)
 
@@ -220,7 +235,10 @@ class ExperimentService:
         return [self._experiment_to_dict(exp) for exp in experiments]
 
     def count_experiments_by_owner(
-        self, owner_id: Union[str, UUID], status: Optional[str] = None, search: Optional[str] = None
+        self,
+        owner_id: Union[str, UUID],
+        status: Optional[str] = None,
+        search: Optional[str] = None,
     ) -> int:
         """
         Count experiments owned by a specific user.
@@ -240,7 +258,9 @@ class ExperimentService:
         if status:
             status_enum = resolve_experiment_status(status)
             if status_enum is None:
-                logger.warning("Unknown experiment status filter %r; counting zero rows", status)
+                logger.warning(
+                    "Unknown experiment status filter %r; counting zero rows", status
+                )
                 return 0
             query = query.filter(Experiment.status == status_enum)
 
@@ -267,7 +287,9 @@ class ExperimentService:
         import re as _re
         import uuid as _uuid
 
-        slug = _re.sub(r"[^a-z0-9]+", "-", (name or "experiment").lower()).strip("-")[:80]
+        slug = _re.sub(r"[^a-z0-9]+", "-", (name or "experiment").lower()).strip("-")[
+            :80
+        ]
         return f"{slug or 'experiment'}-{_uuid.uuid4().hex[:6]}"
 
     def create_experiment(
@@ -298,7 +320,8 @@ class ExperimentService:
             resolved_status = resolve_experiment_status(obj_data["status"])
             if resolved_status is None:
                 logger.warning(
-                    "Unknown experiment status %r; defaulting to DRAFT", obj_data["status"]
+                    "Unknown experiment status %r; defaulting to DRAFT",
+                    obj_data["status"],
                 )
                 resolved_status = ExperimentStatus.DRAFT
             obj_data["status"] = resolved_status
@@ -307,11 +330,14 @@ class ExperimentService:
 
         # Handle string experiment type values by converting to enum.  Values
         # and names differ ("mv" -> MULTIVARIATE), so resolve by both.
-        if "experiment_type" in obj_data and isinstance(obj_data["experiment_type"], str):
+        if "experiment_type" in obj_data and isinstance(
+            obj_data["experiment_type"], str
+        ):
             resolved_type = resolve_experiment_type(obj_data["experiment_type"])
             if resolved_type is None:
                 logger.warning(
-                    "Unknown experiment type %r; defaulting to A_B", obj_data["experiment_type"]
+                    "Unknown experiment type %r; defaulting to A_B",
+                    obj_data["experiment_type"],
                 )
                 resolved_type = ExperimentType.A_B
             obj_data["experiment_type"] = resolved_type
@@ -335,11 +361,15 @@ class ExperimentService:
         # Create metrics
         for metric_data in metrics_data:
             # Handle string metric type values by converting to enum
-            if "metric_type" in metric_data and isinstance(metric_data["metric_type"], str):
+            if "metric_type" in metric_data and isinstance(
+                metric_data["metric_type"], str
+            ):
                 try:
                     # Convert string type (e.g., "conversion") to enum (e.g., MetricType.CONVERSION)
                     # Note: We use lowercase since that's how the enum is defined
-                    metric_data["metric_type"] = MetricType[metric_data["metric_type"].lower()]
+                    metric_data["metric_type"] = MetricType[
+                        metric_data["metric_type"].lower()
+                    ]
                 except (KeyError, ValueError):
                     # Fallback to default if conversion fails
                     metric_data["metric_type"] = MetricType.CONVERSION
@@ -382,7 +412,8 @@ class ExperimentService:
             if resolved_status is None:
                 # If conversion fails, keep the existing status
                 logger.warning(
-                    "Unknown experiment status %r; leaving status unchanged", update_data["status"]
+                    "Unknown experiment status %r; leaving status unchanged",
+                    update_data["status"],
                 )
                 del update_data["status"]
             else:
@@ -390,7 +421,9 @@ class ExperimentService:
 
         # Handle string experiment type values by converting to enum.  Values
         # and names differ ("mv" -> MULTIVARIATE), so resolve by both.
-        if "experiment_type" in update_data and isinstance(update_data["experiment_type"], str):
+        if "experiment_type" in update_data and isinstance(
+            update_data["experiment_type"], str
+        ):
             resolved_type = resolve_experiment_type(update_data["experiment_type"])
             if resolved_type is None:
                 # If conversion fails, keep the existing type
@@ -431,11 +464,15 @@ class ExperimentService:
             # Create new metrics
             for metric_data in metrics_data:
                 # Handle string metric type values by converting to enum
-                if "metric_type" in metric_data and isinstance(metric_data["metric_type"], str):
+                if "metric_type" in metric_data and isinstance(
+                    metric_data["metric_type"], str
+                ):
                     try:
                         # Convert string type (e.g., "conversion") to enum (e.g., MetricType.CONVERSION)
                         # Note: We use lowercase since that's how the enum is defined
-                        metric_data["metric_type"] = MetricType[metric_data["metric_type"].lower()]
+                        metric_data["metric_type"] = MetricType[
+                            metric_data["metric_type"].lower()
+                        ]
                     except (KeyError, ValueError):
                         # Fallback to default if conversion fails
                         metric_data["metric_type"] = MetricType.CONVERSION
@@ -608,7 +645,7 @@ class ExperimentService:
 
         # Add timezone metadata if not using UTC
         if "time_zone" in schedule and schedule["time_zone"] != "UTC":
-            if not hasattr(experiment, 'metadata') or not experiment.metadata:
+            if not hasattr(experiment, "metadata") or not experiment.metadata:
                 experiment.metadata = {}
             experiment.metadata["time_zone"] = schedule["time_zone"]
 
@@ -776,7 +813,9 @@ class ExperimentService:
         if status:
             status_enum = resolve_experiment_status(status)
             if status_enum is None:
-                logger.warning("Unknown experiment status filter %r; returning no rows", status)
+                logger.warning(
+                    "Unknown experiment status filter %r; returning no rows", status
+                )
                 return []
             query = query.filter(Experiment.status == status_enum)
 
@@ -822,7 +861,9 @@ class ExperimentService:
         if status:
             status_enum = resolve_experiment_status(status)
             if status_enum is None:
-                logger.warning("Unknown experiment status filter %r; counting zero rows", status)
+                logger.warning(
+                    "Unknown experiment status filter %r; counting zero rows", status
+                )
                 return 0
             query = query.filter(Experiment.status == status_enum)
 
@@ -884,16 +925,19 @@ class ExperimentService:
             # Convert to UTC for storage
             if time_zone != "UTC":
                 import pytz
+
                 try:
                     tz = pytz.timezone(time_zone)
                     dt = tz.localize(dt.replace(tzinfo=None))
                     dt = dt.astimezone(pytz.UTC)
                 except Exception as e:
-                    logger.warning(f"Unknown time zone: {time_zone}, using UTC. Error: {str(e)}")
+                    logger.warning(
+                        f"Unknown time zone: {time_zone}, using UTC. Error: {e!s}"
+                    )
 
             return dt
         except ValueError as e:
-            logger.error(f"Error parsing date: {date_str}, {str(e)}")
+            logger.error(f"Error parsing date: {date_str}, {e!s}")
             raise ValueError(f"Invalid date format: {date_str}")
 
     def to_response_dict(self, experiment: Experiment) -> Dict[str, Any]:
@@ -971,14 +1015,19 @@ class ExperimentService:
             result["variants"] = []
 
         # Add metrics if loaded
-        if hasattr(experiment, "metric_definitions") and experiment.metric_definitions is not None:
+        if (
+            hasattr(experiment, "metric_definitions")
+            and experiment.metric_definitions is not None
+        ):
             result["metrics"] = [
                 {
                     "id": str(m.id),
                     "name": m.name,
                     "description": m.description,
                     "event_name": m.event_name,
-                    "metric_type": m.metric_type.value if hasattr(m.metric_type, "value") else m.metric_type,
+                    "metric_type": m.metric_type.value
+                    if hasattr(m.metric_type, "value")
+                    else m.metric_type,
                     "is_primary": m.is_primary,
                     "aggregation_method": m.aggregation_method,
                     "minimum_sample_size": m.minimum_sample_size,
@@ -1022,7 +1071,9 @@ class ExperimentService:
         if status:
             status_enum = resolve_experiment_status(status)
             if status_enum is None:
-                logger.warning("Unknown experiment status filter %r; counting zero rows", status)
+                logger.warning(
+                    "Unknown experiment status filter %r; counting zero rows", status
+                )
                 return 0
             query = query.filter(Experiment.status == status_enum)
 

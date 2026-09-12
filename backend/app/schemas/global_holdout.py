@@ -108,9 +108,7 @@ class HoldoutCheckResponse(BaseModel):
     is_in_holdout: bool = Field(
         ..., description="True if the user is in the global holdout."
     )
-    holdout_percentage: int = Field(
-        ..., description="Current holdout percentage."
-    )
+    holdout_percentage: int = Field(..., description="Current holdout percentage.")
     bucket: int = Field(
         ...,
         ge=0,

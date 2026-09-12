@@ -7,20 +7,23 @@ for the application.
 
 import os
 from typing import Generator
-from urllib.parse import urlparse
+
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.schema import CreateSchema
 
 from backend.app.core.config import settings
-from backend.app.models.base import Base
 from backend.app.core.database_config import get_schema_name
+from backend.app.models.base import Base
 
 # Check for DATABASE_URI environment variable, otherwise use settings
 database_uri = os.getenv("DATABASE_URI")
 if not database_uri:
     # Fall back to SQLALCHEMY_DATABASE_URI if set
-    if hasattr(settings, "SQLALCHEMY_DATABASE_URI") and settings.SQLALCHEMY_DATABASE_URI:
+    if (
+        hasattr(settings, "SQLALCHEMY_DATABASE_URI")
+        and settings.SQLALCHEMY_DATABASE_URI
+    ):
         database_uri = str(settings.SQLALCHEMY_DATABASE_URI)
     # Fall back to DATABASE_URI if set
     elif hasattr(settings, "DATABASE_URI") and settings.DATABASE_URI:
@@ -43,7 +46,7 @@ engine = create_engine(
         "keepalives_idle": 30,  # Idle time before sending keepalive
         "keepalives_interval": 10,  # Interval between keepalives
         "keepalives_count": 5,  # Number of keepalive attempts
-    }
+    },
 )
 
 # Session factory
@@ -67,7 +70,6 @@ async def get_db() -> Generator:
 def init_db() -> None:
     """Initialize the database by creating all tables."""
     # Import all models here to ensure they are registered with the metadata
-    from backend.app.models import user, experiment, feature_flag, event, assignment
 
     # Get schema name
     schema_name = get_schema_name()
@@ -99,7 +101,6 @@ def _ensure_schema(schema_name: str) -> None:
 def reset_db() -> None:
     """Reset the database by dropping and recreating all tables."""
     # Import all models here to ensure they are registered with the metadata
-    from backend.app.models import user, experiment, feature_flag, event, assignment
 
     # Get schema name
     schema_name = get_schema_name()

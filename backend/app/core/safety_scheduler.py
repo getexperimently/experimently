@@ -6,20 +6,18 @@ monitoring feature flags for safety issues and triggering rollbacks.
 """
 
 import asyncio
-import logging
-from datetime import datetime, timezone, timedelta
-from typing import Any, Optional, Dict, List, Tuple
-from sqlalchemy.orm import Session
+from typing import Any, Dict, Optional
+
 from sqlalchemy import and_
 
 from backend.app.core.config import settings as app_settings
+from backend.app.core.logging import get_logger
+from backend.app.core.scheduler_tick import run_locked_tick
 from backend.app.db.session import SessionLocal
 from backend.app.models.feature_flag import FeatureFlag, FeatureFlagStatus
 from backend.app.models.safety import RollbackTriggerType
-from backend.app.services.safety_service import SafetyService
 from backend.app.services.notification_service import NotificationService
-from backend.app.core.logging import get_logger
-from backend.app.core.scheduler_tick import run_locked_tick
+from backend.app.services.safety_service import SafetyService
 
 logger = get_logger(__name__)
 
@@ -97,7 +95,7 @@ class SafetyScheduler:
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error(f"Error in safety scheduler: {str(e)}")
+                logger.error(f"Error in safety scheduler: {e!s}")
                 # Wait a bit before trying again
                 await asyncio.sleep(60)
 
@@ -236,12 +234,12 @@ class SafetyScheduler:
                 except Exception as e:
                     failed_count += 1
                     logger.error(
-                        f"Error checking safety for feature flag {feature_flag.id}: {str(e)}"
+                        f"Error checking safety for feature flag {feature_flag.id}: {e!s}"
                     )
 
         except Exception as e:
             failed_count += 1
-            logger.error(f"Error checking feature flags safety: {str(e)}")
+            logger.error(f"Error checking feature flags safety: {e!s}")
         finally:
             db.close()
 

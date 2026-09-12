@@ -8,6 +8,7 @@ Tests cover:
 - BayesianVariantResult schema
 - BayesianResultsResponse schema
 """
+
 import pytest
 from pydantic import ValidationError
 
@@ -19,7 +20,6 @@ from backend.app.schemas.bayesian import (
     BayesianVariantResult,
     PriorFamily,
 )
-
 
 # ---------------------------------------------------------------------------
 # BayesianConfig tests

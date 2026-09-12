@@ -21,7 +21,6 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from backend.app.api import deps
-from backend.app.core.permissions import Action, ResourceType, check_permission
 from backend.app.models.user import User, UserRole
 from backend.app.schemas.warehouse import (
     ConnectionTestResponse,
@@ -42,6 +41,7 @@ router = APIRouter()
 # ---------------------------------------------------------------------------
 # Permission helper
 # ---------------------------------------------------------------------------
+
 
 def _require_developer(user: User) -> None:
     """Raise HTTP 403 if the user does not have DEVELOPER or ADMIN role."""
@@ -66,6 +66,7 @@ def _conn_to_response(conn) -> WarehouseConnectionResponse:
 # ---------------------------------------------------------------------------
 # POST /connections/test  — placed BEFORE /{connection_id} to avoid collision
 # ---------------------------------------------------------------------------
+
 
 @router.post(
     "/connections/test",
@@ -97,6 +98,7 @@ def test_connection(
 
     # Use a no-op db mock — test_connection doesn't touch the DB
     from unittest.mock import MagicMock
+
     manager = WarehouseConnectionManager(db=MagicMock())
     result = manager.test_connection(config)
 
@@ -110,6 +112,7 @@ def test_connection(
 # ---------------------------------------------------------------------------
 # GET /connections
 # ---------------------------------------------------------------------------
+
 
 @router.get(
     "/connections",
@@ -132,6 +135,7 @@ def list_connections(
 # ---------------------------------------------------------------------------
 # POST /connections
 # ---------------------------------------------------------------------------
+
 
 @router.post(
     "/connections",
@@ -179,6 +183,7 @@ def create_connection(
 # GET /connections/{connection_id}
 # ---------------------------------------------------------------------------
 
+
 @router.get(
     "/connections/{connection_id}",
     response_model=WarehouseConnectionResponse,
@@ -206,6 +211,7 @@ def get_connection(
 # ---------------------------------------------------------------------------
 # DELETE /connections/{connection_id}
 # ---------------------------------------------------------------------------
+
 
 @router.delete(
     "/connections/{connection_id}",
@@ -237,6 +243,7 @@ def delete_connection(
 # ---------------------------------------------------------------------------
 # POST /sync/{experiment_id}
 # ---------------------------------------------------------------------------
+
 
 @router.post(
     "/sync/{experiment_id}",

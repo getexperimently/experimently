@@ -64,14 +64,18 @@ def build_document(full: bool = False) -> Dict[str, Any]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument(
         "output",
         nargs="?",
         default="frontend/src/tests/fixtures/openapi.json",
         help="Destination file (default: frontend/src/tests/fixtures/openapi.json)",
     )
-    parser.add_argument("--full", action="store_true", help="Write the complete OpenAPI document")
+    parser.add_argument(
+        "--full", action="store_true", help="Write the complete OpenAPI document"
+    )
     args = parser.parse_args(argv)
 
     document = build_document(full=args.full)

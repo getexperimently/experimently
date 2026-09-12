@@ -4,6 +4,7 @@ Integration tests for experiment lifecycle state transitions (Phase 4).
 Tests experiment status transitions (DRAFT -> ACTIVE -> PAUSED -> COMPLETED)
 via the REST API to exercise the full stack: API layer, service layer, and DB.
 """
+
 import pytest
 
 from backend.app.models.experiment import ExperimentStatus
@@ -129,9 +130,7 @@ class TestExperimentLifecycle:
         else:
             assert response.status_code in (200, 400, 500)
 
-    def test_get_experiment_returns_correct_status(
-        self, admin_client, make_experiment
-    ):
+    def test_get_experiment_returns_correct_status(self, admin_client, make_experiment):
         """GET /experiments/{id} reflects the current status stored in DB."""
         exp = make_experiment(
             name="Get Status Check",
@@ -219,7 +218,10 @@ class TestExperimentLifecycleStartValidation:
         exp = make_experiment(name="No Control Experiment")
         # Add a non-control variant only
         make_variant(
-            experiment=exp, name="Treatment Only", is_control=False, traffic_allocation=100
+            experiment=exp,
+            name="Treatment Only",
+            is_control=False,
+            traffic_allocation=100,
         )
         response = admin_client.post(f"/api/v1/experiments/{exp.id}/start")
         assert response.status_code in (400, 500), response.text

@@ -1,39 +1,40 @@
 # pytest backend/tests/unit/models/test_core_data_models.py -v
 #  export ALEMBIC_SCRIPT_LOCATION="."
 
-import pytest
-import os
 import logging
-from sqlalchemy import inspect, create_engine, text
-from sqlalchemy.orm import sessionmaker, clear_mappers, class_mapper, relationship
-from alembic.config import Config
+import os
+
+import pytest
 from alembic import command
+from alembic.config import Config
+from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.orm import class_mapper, clear_mappers, relationship, sessionmaker
 
 # Set up logging for better error messages
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Import all necessary models
-from backend.app.models.base import Base, BaseModel
+from backend.app.core.database_config import get_schema_name
 from backend.app.models import (
-    User,
-    Role,
-    Permission,
-    Experiment,
-    Variant,
-    Metric,
-    MetricType,
-    FeatureFlag,
-    FeatureFlagOverride,
     Assignment,
     Event,
+    Experiment,
     ExperimentStatus,
     ExperimentType,
+    FeatureFlag,
+    FeatureFlagOverride,
     FeatureFlagStatus,
-    user_role_association,
+    Metric,
+    MetricType,
+    Permission,
+    Role,
+    User,
     UserRole,
+    Variant,
+    user_role_association,
 )
-from backend.app.core.database_config import get_schema_name
+from backend.app.models.base import Base, BaseModel
 
 # Add missing relationships for User-Role
 # These won't persist beyond this test run, but they'll allow the tests to pass
@@ -84,9 +85,9 @@ def test_all_models_have_required_columns():
         columns = [column.key for column in mapper.columns]
 
         for required_column in required_columns:
-            assert (
-                required_column in columns
-            ), f"{model.__name__} is missing required column {required_column}"
+            assert required_column in columns, (
+                f"{model.__name__} is missing required column {required_column}"
+            )
 
 
 def test_model_tablename_attributes():
@@ -105,9 +106,9 @@ def test_model_tablename_attributes():
     ]
 
     for model in models:
-        assert hasattr(
-            model, "__tablename__"
-        ), f"{model.__name__} does not have a __tablename__ attribute"
+        assert hasattr(model, "__tablename__"), (
+            f"{model.__name__} does not have a __tablename__ attribute"
+        )
 
 
 def test_model_schema_configuration():
@@ -132,18 +133,18 @@ def test_model_schema_configuration():
         assert table_args is not None, f"{model.__name__} does not have __table_args__"
 
         if isinstance(table_args, dict):
-            assert (
-                table_args.get("schema") == expected_schema
-            ), f"{model.__name__} does not have '{expected_schema}' schema"
+            assert table_args.get("schema") == expected_schema, (
+                f"{model.__name__} does not have '{expected_schema}' schema"
+            )
         else:
             schema_found = False
             for arg in table_args:
                 if isinstance(arg, dict) and arg.get("schema") == expected_schema:
                     schema_found = True
                     break
-            assert (
-                schema_found
-            ), f"{model.__name__} does not have '{expected_schema}' schema in __table_args__"
+            assert schema_found, (
+                f"{model.__name__} does not have '{expected_schema}' schema in __table_args__"
+            )
 
 
 def test_experiment_model_structure():
@@ -163,18 +164,18 @@ def test_experiment_model_structure():
     ]
 
     for column in required_columns:
-        assert (
-            column in columns
-        ), f"Experiment model is missing required column {column}"
+        assert column in columns, (
+            f"Experiment model is missing required column {column}"
+        )
 
     # Check relationships
     relationships = inspector.relationships.keys()
     required_relationships = ["owner", "variants", "assignments", "events"]
 
-    for relationship in required_relationships:
-        assert (
-            relationship in relationships
-        ), f"Experiment model is missing required relationship {relationship}"
+    for rel in required_relationships:
+        assert rel in relationships, (
+            f"Experiment model is missing required relationship {rel}"
+        )
 
 
 def test_user_model_structure():
@@ -214,9 +215,9 @@ def test_variant_model_structure():
     # Check foreign key constraints
     # Access foreign keys from the table object instead of the mapper
     fks = [fk.target_fullname for fk in Variant.__table__.foreign_keys]
-    assert (
-        f"{expected_schema}.experiments.id" in fks
-    ), "Variant should have a foreign key to experiments table"
+    assert f"{expected_schema}.experiments.id" in fks, (
+        "Variant should have a foreign key to experiments table"
+    )
 
 
 # ============== Check if User-Role Relationship is Now Defined ==============
@@ -241,6 +242,7 @@ def test_user_role_enum_field(db_session):
         pytest.skip("Skipping role enum test with SQLite")
 
     from uuid import uuid4
+
     uid = uuid4().hex[:8]
 
     # Create users with different roles (unique emails to avoid collisions)
@@ -250,7 +252,7 @@ def test_user_role_enum_field(db_session):
         hashed_password="hashedpassword",
         full_name="Admin User",
         is_active=True,
-        role=UserRole.ADMIN
+        role=UserRole.ADMIN,
     )
 
     analyst_user = User(
@@ -259,7 +261,7 @@ def test_user_role_enum_field(db_session):
         hashed_password="hashedpassword",
         full_name="Analyst User",
         is_active=True,
-        role=UserRole.ANALYST
+        role=UserRole.ANALYST,
     )
 
     # Save to database
@@ -268,22 +270,28 @@ def test_user_role_enum_field(db_session):
     db_session.commit()
 
     # Retrieve from database and verify roles
-    retrieved_admin = db_session.query(User).filter_by(username=f"admin_user_{uid}").first()
+    retrieved_admin = (
+        db_session.query(User).filter_by(username=f"admin_user_{uid}").first()
+    )
     assert retrieved_admin.role == UserRole.ADMIN
 
-    retrieved_analyst = db_session.query(User).filter_by(username=f"analyst_user_{uid}").first()
+    retrieved_analyst = (
+        db_session.query(User).filter_by(username=f"analyst_user_{uid}").first()
+    )
     assert retrieved_analyst.role == UserRole.ANALYST
 
     # Test default role
     default_user = User(
         username=f"default_user_{uid}",
         email=f"default_{uid}@example.com",
-        hashed_password="hashedpassword"
+        hashed_password="hashedpassword",
     )
     db_session.add(default_user)
     db_session.commit()
 
-    retrieved_default = db_session.query(User).filter_by(username=f"default_user_{uid}").first()
+    retrieved_default = (
+        db_session.query(User).filter_by(username=f"default_user_{uid}").first()
+    )
     assert retrieved_default.role == UserRole.VIEWER
 
 
@@ -297,6 +305,7 @@ def test_user_role_relationship(db_session):
         pytest.skip("Skipping relationship test with SQLite")
 
     import uuid as _uuid
+
     uid = str(_uuid.uuid4())[:8]
 
     # Create a user
@@ -319,7 +328,9 @@ def test_user_role_relationship(db_session):
     db_session.commit()
 
     # Retrieve from database and verify relationship
-    retrieved_user = db_session.query(User).filter_by(username=f"testuser_{uid}").first()
+    retrieved_user = (
+        db_session.query(User).filter_by(username=f"testuser_{uid}").first()
+    )
     assert len(retrieved_user.roles) == 1
     assert retrieved_user.roles[0].name == f"Admin_{uid}"
 
@@ -335,6 +346,7 @@ def test_experiment_variant_relationship(db_session):
         pytest.skip("Skipping relationship test with SQLite")
 
     import uuid as _uuid
+
     uid = _uuid.uuid4().hex[:8]
 
     # Create a user with unique email to avoid collisions
@@ -463,9 +475,9 @@ def test_experiment_metric_relationship(db_session):
     db_session.commit()
 
     # Check that this experiment's metrics were deleted
-    remaining = db_session.query(Metric).filter(
-        Metric.experiment_id == experiment_id
-    ).count()
+    remaining = (
+        db_session.query(Metric).filter(Metric.experiment_id == experiment_id).count()
+    )
     assert remaining == 0
 
 
@@ -483,16 +495,13 @@ def alembic_config():
 # @pytest.mark.skip(reason="Migration tests are excluded by default")
 def test_migrations_apply_cleanly(alembic_config):
     """Placeholder for migration tests."""
-    pass
 
 
 # @pytest.mark.skip(reason="Migration tests are excluded by default")
 def test_migrations_downgrade(alembic_config):
     """Placeholder for migration downgrade tests."""
-    pass
 
 
 # @pytest.mark.skip(reason="Migration tests are excluded by default")
 def test_schema_validation(alembic_config):
     """Placeholder for schema validation tests."""
-    pass

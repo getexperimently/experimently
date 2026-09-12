@@ -8,27 +8,28 @@ Tests cover:
 - Group 4: Expected Loss (8 tests)
 - Group 5: Bayes Factor via Savage-Dickey density ratio (7 tests)
 """
-import pytest
+
 import math
+
 import numpy as np
+import pytest
 from scipy import stats as scipy_stats
 
-from backend.app.services.bayesian_service import (
-    BayesianService,
-    compute_posterior,
-    compute_credible_interval,
-    compute_probability_to_be_best,
-    compute_expected_loss,
-    compute_bayes_factor,
-    get_bayes_factor_label,
-    should_stop,
-)
 from backend.app.schemas.bayesian import (
     BayesianConfig,
     BayesianDecision,
     PriorFamily,
 )
-
+from backend.app.services.bayesian_service import (
+    BayesianService,
+    compute_bayes_factor,
+    compute_credible_interval,
+    compute_expected_loss,
+    compute_posterior,
+    compute_probability_to_be_best,
+    get_bayes_factor_label,
+    should_stop,
+)
 
 # ---------------------------------------------------------------------------
 # Group 1: Beta-Binomial conjugate posterior updates (12 tests)
@@ -126,7 +127,9 @@ def test_posterior_exact_conjugate_update():
     conversions, total = 7, 50
     non_conversions = total - conversions
     prior = {"alpha": alpha_prior, "beta": beta_prior}
-    result = compute_posterior(prior, observations={"conversions": conversions, "total": total})
+    result = compute_posterior(
+        prior, observations={"conversions": conversions, "total": total}
+    )
     # alpha_posterior = alpha_prior + conversions
     # beta_posterior  = beta_prior  + non_conversions
     assert result["alpha"] == pytest.approx(alpha_prior + conversions)
@@ -137,7 +140,9 @@ def test_posterior_uniform_prior_many_observations():
     """With many observations, posterior mean should be very close to sample rate."""
     prior = {"alpha": 1.0, "beta": 1.0}
     conversions, total = 300, 10000
-    result = compute_posterior(prior, observations={"conversions": conversions, "total": total})
+    result = compute_posterior(
+        prior, observations={"conversions": conversions, "total": total}
+    )
     posterior_mean = result["alpha"] / (result["alpha"] + result["beta"])
     sample_rate = conversions / total
     # With 10k observations, difference should be tiny
@@ -173,7 +178,9 @@ def test_credible_interval_width_decreases_with_more_data():
     prior = {"alpha": 1.0, "beta": 1.0}
 
     post_small = compute_posterior(prior, observations={"conversions": 3, "total": 100})
-    post_large = compute_posterior(prior, observations={"conversions": 300, "total": 10000})
+    post_large = compute_posterior(
+        prior, observations={"conversions": 300, "total": 10000}
+    )
 
     lower_s, upper_s = compute_credible_interval(post_small, level=0.95)
     lower_l, upper_l = compute_credible_interval(post_large, level=0.95)
@@ -231,7 +238,9 @@ def test_credible_interval_contains_true_value_95pct():
         n = 100
         conversions = np.random.binomial(n, true_theta)
         prior = {"alpha": 1.0, "beta": 1.0}
-        posterior = compute_posterior(prior, observations={"conversions": int(conversions), "total": n})
+        posterior = compute_posterior(
+            prior, observations={"conversions": int(conversions), "total": n}
+        )
         lower, upper = compute_credible_interval(posterior, level=0.95)
         if lower <= true_theta <= upper:
             coverage_count += 1
@@ -348,7 +357,7 @@ def test_ptbb_all_probabilities_between_0_and_1():
 def test_ptbb_winner_index_correct():
     """The variant with highest posterior mean should have highest PtBB."""
     posteriors = [
-        {"alpha": 50.0, "beta": 950.0},   # mean ≈ 0.05
+        {"alpha": 50.0, "beta": 950.0},  # mean ≈ 0.05
         {"alpha": 200.0, "beta": 800.0},  # mean = 0.20  ← winner
         {"alpha": 100.0, "beta": 900.0},  # mean ≈ 0.10
     ]
@@ -378,8 +387,8 @@ def test_ptbb_reproducible_with_seed():
 def test_expected_loss_zero_when_variant_dominates():
     """When one variant clearly dominates, its expected loss should be near 0."""
     posteriors = [
-        {"alpha": 500.0, "beta": 500.0},   # mean = 0.5  ← dominant
-        {"alpha": 50.0, "beta": 950.0},    # mean ≈ 0.05
+        {"alpha": 500.0, "beta": 500.0},  # mean = 0.5  ← dominant
+        {"alpha": 50.0, "beta": 950.0},  # mean ≈ 0.05
     ]
     np.random.seed(10)
     losses = compute_expected_loss(posteriors, n_samples=200_000)
@@ -426,8 +435,8 @@ def test_expected_loss_minimum_below_threshold_triggers_stop():
     """When min expected loss < threshold, decision should be to stop."""
     # One clearly dominant variant → min loss will be very small
     posteriors = [
-        {"alpha": 5000.0, "beta": 5000.0},   # mean = 0.5 dominant
-        {"alpha": 500.0, "beta": 9500.0},    # mean ≈ 0.05
+        {"alpha": 5000.0, "beta": 5000.0},  # mean = 0.5 dominant
+        {"alpha": 500.0, "beta": 9500.0},  # mean ≈ 0.05
     ]
     np.random.seed(14)
     losses = compute_expected_loss(posteriors, n_samples=200_000)
@@ -439,8 +448,8 @@ def test_expected_loss_minimum_below_threshold_triggers_stop():
 def test_expected_loss_units_in_same_scale_as_metric():
     """Expected loss should be in the same probability scale as conversion rates."""
     posteriors = [
-        {"alpha": 30.0, "beta": 970.0},    # mean ≈ 0.03
-        {"alpha": 50.0, "beta": 950.0},    # mean ≈ 0.05
+        {"alpha": 30.0, "beta": 970.0},  # mean ≈ 0.03
+        {"alpha": 50.0, "beta": 950.0},  # mean ≈ 0.05
     ]
     np.random.seed(15)
     losses = compute_expected_loss(posteriors, n_samples=100_000)
@@ -454,13 +463,13 @@ def test_expected_loss_decreases_with_more_data():
     np.random.seed(16)
     # Small sample: uncertain which is better
     post_small = [
-        {"alpha": 6.0, "beta": 94.0},   # 5/100
-        {"alpha": 8.0, "beta": 92.0},   # 7/100
+        {"alpha": 6.0, "beta": 94.0},  # 5/100
+        {"alpha": 8.0, "beta": 92.0},  # 7/100
     ]
     # Large sample: more certainty
     post_large = [
-        {"alpha": 51.0, "beta": 949.0},   # 50/1000
-        {"alpha": 71.0, "beta": 929.0},   # 70/1000
+        {"alpha": 51.0, "beta": 949.0},  # 50/1000
+        {"alpha": 71.0, "beta": 929.0},  # 70/1000
     ]
     losses_small = compute_expected_loss(post_small, n_samples=100_000)
     losses_large = compute_expected_loss(post_large, n_samples=100_000)
@@ -583,7 +592,7 @@ def test_should_stop_returns_stop_winner_when_one_dominates():
     """When one variant clearly dominates, decision should be STOP_WINNER."""
     posteriors = [
         {"alpha": 5000.0, "beta": 5000.0},  # mean = 0.5 ← dominant
-        {"alpha": 500.0, "beta": 9500.0},   # mean ≈ 0.05
+        {"alpha": 500.0, "beta": 9500.0},  # mean ≈ 0.05
     ]
     config = BayesianConfig(loss_threshold=0.001)
     np.random.seed(21)

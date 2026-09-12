@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 try:
     import sendgrid
     from sendgrid import SendGridAPIClient
-    from sendgrid.helpers.mail import Mail, Email, To, Content
+    from sendgrid.helpers.mail import Content, Email, Mail, To
 
     SENDGRID_AVAILABLE = True
 except ImportError:
@@ -62,8 +62,12 @@ class EmailNotifier:
         self._smtp_port: int = getattr(settings, "SMTP_PORT", 587)
         self._smtp_username: str = getattr(settings, "SMTP_USERNAME", "")
         self._smtp_password: str = getattr(settings, "SMTP_PASSWORD", "")
-        self._from_address: str = getattr(settings, "EMAIL_FROM_ADDRESS", "platform@example.com")
-        self._from_name: str = getattr(settings, "EMAIL_FROM_NAME", "Experimentation Platform")
+        self._from_address: str = getattr(
+            settings, "EMAIL_FROM_ADDRESS", "platform@example.com"
+        )
+        self._from_name: str = getattr(
+            settings, "EMAIL_FROM_NAME", "Experimentation Platform"
+        )
         self._admin_emails: List[str] = list(
             getattr(settings, "NOTIFICATION_ADMIN_EMAILS", []) or []
         )
@@ -92,7 +96,9 @@ class EmailNotifier:
             True if sent successfully, False otherwise.
         """
         try:
-            subject = f"[Safety Rollback] Feature flag '{flag_name}' has been rolled back"
+            subject = (
+                f"[Safety Rollback] Feature flag '{flag_name}' has been rolled back"
+            )
             html_body = self._render_safety_rollback_html(flag_name, error_rate, reason)
             return self._send_email(
                 to_addresses=recipients,
@@ -418,7 +424,7 @@ class EmailNotifier:
   <h2 style="color: {status_color};">Experiment {status_display}</h2>
   <p>The experiment <strong>{experiment_name}</strong> has {status}.</p>
   {winner_section}
-  {f'<table style="border-collapse: collapse; width: 100%; max-width: 600px;">{details_rows}</table>' if details_rows else ''}
+  {f'<table style="border-collapse: collapse; width: 100%; max-width: 600px;">{details_rows}</table>' if details_rows else ""}
   <p style="color: #666; font-size: 12px; margin-top: 24px;">
     This is an automated message from the Experimentation Platform.
   </p>

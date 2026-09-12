@@ -5,19 +5,22 @@ These tests verify the request/response logging middleware functionality.
 """
 
 import json
-from unittest.mock import patch, MagicMock, AsyncMock, Mock
-import os
 import logging
+import os
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
-from fastapi import FastAPI, Request, Response, HTTPException
-from starlette.testclient import TestClient
 import watchtower
+from fastapi import FastAPI, HTTPException, Request, Response
+from starlette.testclient import TestClient
 
-from backend.app.middleware.logging_middleware import LoggingMiddleware, RequestLoggingMiddleware
-from backend.app.utils.metrics import MetricsCollector
-from backend.app.utils.aws_client import AWSClient
 from backend.app.core.logging import setup_logging
+from backend.app.middleware.logging_middleware import (
+    LoggingMiddleware,
+    RequestLoggingMiddleware,
+)
+from backend.app.utils.aws_client import AWSClient
+from backend.app.utils.metrics import MetricsCollector
 
 
 @pytest.fixture
@@ -35,7 +38,7 @@ def mock_metrics():
             "duration_ms": 100.0,
             "memory_change_mb": 5.0,
             "total_memory_mb": 50.0,
-            "cpu_percent": 10.0
+            "cpu_percent": 10.0,
         }
 
         yield mock
@@ -50,7 +53,9 @@ def mock_logger():
         mock_logger.return_value = context_mock
 
         # Mock LogContext
-        with patch("backend.app.middleware.logging_middleware.LogContext") as mock_context:
+        with patch(
+            "backend.app.middleware.logging_middleware.LogContext"
+        ) as mock_context:
             # Make context manager return logger
             mock_context.return_value.__enter__.return_value = context_mock
 
@@ -60,8 +65,12 @@ def mock_logger():
 @pytest.fixture
 def mock_masking():
     """Mock masking functions to avoid actual data masking."""
-    with patch("backend.app.middleware.logging_middleware.mask_request_data") as mock_req:
-        with patch("backend.app.middleware.logging_middleware.mask_sensitive_data") as mock_sens:
+    with patch(
+        "backend.app.middleware.logging_middleware.mask_request_data"
+    ) as mock_req:
+        with patch(
+            "backend.app.middleware.logging_middleware.mask_sensitive_data"
+        ) as mock_sens:
             # Make mask functions return their input with a label
             mock_req.side_effect = lambda data: {**data, "_masked": True}
             mock_sens.side_effect = lambda data: {**data, "_masked": True}
@@ -119,14 +128,16 @@ class TestLoggingMiddleware:
 
         # Check request headers
         request_header_calls = [
-            call for call in mock_logger.info.call_args_list
+            call
+            for call in mock_logger.info.call_args_list
             if "Request started" in call[0]
         ]
         assert len(request_header_calls) == 1
 
         # Check response headers
         response_header_calls = [
-            call for call in mock_logger.info.call_args_list
+            call
+            for call in mock_logger.info.call_args_list
             if "Request completed" in call[0]
         ]
         assert len(response_header_calls) == 1
@@ -141,8 +152,7 @@ class TestLoggingMiddleware:
         with patch.dict(os.environ, {"COLLECT_REQUEST_BODY": "true"}):
             # Send a POST request with a JSON body
             response = client.post(
-                "/test",
-                json={"username": "testuser", "password": "secret123"}
+                "/test", json={"username": "testuser", "password": "secret123"}
             )
 
             assert response.status_code == 200
@@ -274,12 +284,15 @@ class TestRequestLoggingMiddleware:
 @pytest.fixture
 def mock_cloudwatch_handler():
     """Mock CloudWatch handler and AWS credentials."""
-    with patch.dict(os.environ, {
-        'AWS_ACCESS_KEY_ID': 'test',
-        'AWS_SECRET_ACCESS_KEY': 'test',
-        'AWS_DEFAULT_REGION': 'us-east-1',
-        'APP_ENV': 'test'
-    }):
+    with patch.dict(
+        os.environ,
+        {
+            "AWS_ACCESS_KEY_ID": "test",
+            "AWS_SECRET_ACCESS_KEY": "test",
+            "AWS_DEFAULT_REGION": "us-east-1",
+            "APP_ENV": "test",
+        },
+    ):
         # Create a mock handler instance
         handler_instance = Mock(spec=watchtower.CloudWatchLogHandler)
         handler_instance.level = logging.INFO
@@ -287,10 +300,14 @@ def mock_cloudwatch_handler():
         handler_instance.handleError = Mock()
         handler_instance.filter = Mock(return_value=True)  # Always pass filter
 
-        with patch('watchtower.CloudWatchLogHandler', return_value=handler_instance) as mock_handler:
-            with patch('boto3.client'):
+        with patch(
+            "watchtower.CloudWatchLogHandler", return_value=handler_instance
+        ) as mock_handler:
+            with patch("boto3.client"):
                 # Get and patch the middleware logger
-                with patch('backend.app.middleware.logging_middleware.logger') as mock_logger:
+                with patch(
+                    "backend.app.middleware.logging_middleware.logger"
+                ) as mock_logger:
                     mock_logger_instance = MagicMock()
                     mock_logger.return_value = mock_logger_instance
 
@@ -300,11 +317,11 @@ def mock_cloudwatch_handler():
                         record = logging.LogRecord(
                             name=__name__,
                             level=logging.INFO,
-                            pathname='',
+                            pathname="",
                             lineno=0,
                             msg=message,
                             args=(),
-                            exc_info=None
+                            exc_info=None,
                         )
                         record.getMessage = lambda: message
                         handler_instance.emit(record)
@@ -313,8 +330,12 @@ def mock_cloudwatch_handler():
                     mock_logger_instance.info = MagicMock(side_effect=side_effect_info)
 
                     # Ensure LogContext returns the mock logger
-                    with patch('backend.app.middleware.logging_middleware.LogContext') as mock_context:
-                        mock_context.return_value.__enter__.return_value = mock_logger_instance
+                    with patch(
+                        "backend.app.middleware.logging_middleware.LogContext"
+                    ) as mock_context:
+                        mock_context.return_value.__enter__.return_value = (
+                            mock_logger_instance
+                        )
 
                         # Set up logging with CloudWatch enabled
                         setup_logging(enable_cloudwatch=True)
@@ -328,12 +349,15 @@ class TestCloudWatchLogging:
     @pytest.fixture
     def middleware(self, app):
         """Create middleware with CloudWatch enabled."""
-        with patch.dict(os.environ, {
-            'AWS_ACCESS_KEY_ID': 'test',
-            'AWS_SECRET_ACCESS_KEY': 'test',
-            'AWS_DEFAULT_REGION': 'us-east-1',
-            'APP_ENV': 'test'
-        }):
+        with patch.dict(
+            os.environ,
+            {
+                "AWS_ACCESS_KEY_ID": "test",
+                "AWS_SECRET_ACCESS_KEY": "test",
+                "AWS_DEFAULT_REGION": "us-east-1",
+                "APP_ENV": "test",
+            },
+        ):
             setup_logging(enable_cloudwatch=True)
             return LoggingMiddleware(app)
 

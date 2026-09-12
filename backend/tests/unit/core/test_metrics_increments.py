@@ -28,7 +28,12 @@ from prometheus_client import REGISTRY
 from backend.app.core import metrics as prom
 from backend.app.core.evaluation_cache import CACHE_METRIC_TYPE, EvaluationCache
 from backend.app.core.scheduler import ExperimentScheduler
-from backend.app.models.experiment import Experiment, ExperimentStatus, ExperimentType, Variant
+from backend.app.models.experiment import (
+    Experiment,
+    ExperimentStatus,
+    ExperimentType,
+    Variant,
+)
 from backend.app.models.feature_flag import FeatureFlag, FeatureFlagStatus
 
 
@@ -108,7 +113,9 @@ def live_flag(db_session, owner):
 
 
 class TestTrackingCounters:
-    def test_assign_increments_experiment_assignments_total(self, client, live_experiment):
+    def test_assign_increments_experiment_assignments_total(
+        self, client, live_experiment
+    ):
         user_id = f"u-{uuid.uuid4().hex[:8]}"
         resp = client.post(
             "/api/v1/tracking/assign",
@@ -149,7 +156,9 @@ class TestTrackingCounters:
         assert sample("events_tracked_total", {"event_type": "custom"}) == before + 1
         assert sample("events_tracked_total", {"event_type": event_type}) == 0.0
 
-    def test_events_by_id_increments_events_tracked_total(self, client, live_experiment):
+    def test_events_by_id_increments_events_tracked_total(
+        self, client, live_experiment
+    ):
         event_type = "click"  # a known type is labelled verbatim
         before = sample("events_tracked_total", {"event_type": event_type})
 
@@ -173,10 +182,22 @@ class TestTrackingCounters:
             "/api/v1/tracking/batch",
             json={
                 "events": [
-                    {"experiment_key": live_experiment.key, "user_id": "u-b1", "event_type": event_type},
-                    {"experiment_key": live_experiment.key, "user_id": "u-b2", "event_type": event_type},
+                    {
+                        "experiment_key": live_experiment.key,
+                        "user_id": "u-b1",
+                        "event_type": event_type,
+                    },
+                    {
+                        "experiment_key": live_experiment.key,
+                        "user_id": "u-b2",
+                        "event_type": event_type,
+                    },
                     # unknown key -> failure, must not be counted
-                    {"experiment_key": f"missing-{uuid.uuid4().hex}", "user_id": "u-b3", "event_type": event_type},
+                    {
+                        "experiment_key": f"missing-{uuid.uuid4().hex}",
+                        "user_id": "u-b3",
+                        "event_type": event_type,
+                    },
                 ]
             },
         )
@@ -192,17 +213,22 @@ class TestTrackingCounters:
 
 
 class TestFlagEvaluationCounters:
-    def test_evaluate_increments_feature_flag_evaluations_total(self, client, live_flag):
+    def test_evaluate_increments_feature_flag_evaluations_total(
+        self, client, live_flag
+    ):
         labels = {"flag_key": live_flag.key, "result": "enabled"}
         before = sample("feature_flag_evaluations_total", labels)
 
-        resp = client.get(f"/api/v1/feature-flags/evaluate/{live_flag.key}", params={"user_id": "u-1"})
+        resp = client.get(
+            f"/api/v1/feature-flags/evaluate/{live_flag.key}", params={"user_id": "u-1"}
+        )
         assert resp.status_code == 200, resp.text
         assert resp.json()["enabled"] is True
         assert sample("feature_flag_evaluations_total", labels) == before + 1
 
         resp = client.post(
-            f"/api/v1/feature-flags/evaluate/{live_flag.key}", json={"user_id": "u-2", "context": {}}
+            f"/api/v1/feature-flags/evaluate/{live_flag.key}",
+            json={"user_id": "u-2", "context": {}},
         )
         assert resp.status_code == 200, resp.text
         assert sample("feature_flag_evaluations_total", labels) == before + 2
@@ -229,7 +255,9 @@ class TestCacheCounters:
         assert sample("cache_misses_total", hits) == m0 + 1
         assert sample("cache_hits_total", hits) == h0 + 2
 
-    def test_feature_flag_redis_cache_counts_hit_and_miss(self, client, live_flag, monkeypatch):
+    def test_feature_flag_redis_cache_counts_hit_and_miss(
+        self, client, live_flag, monkeypatch
+    ):
         """``GET /feature-flags/{id}`` counts a miss, then a hit, on the Redis cache."""
         from backend.app.api import deps
         from backend.app.main import app
@@ -274,7 +302,9 @@ class TestCacheCounters:
 
 
 class TestSchedulerMetrics:
-    def test_active_experiments_gauge_reflects_database(self, db_session, live_experiment):
+    def test_active_experiments_gauge_reflects_database(
+        self, db_session, live_experiment
+    ):
         ExperimentScheduler._update_active_experiments_gauge(db_session)
         expected = (
             db_session.query(Experiment)
@@ -285,9 +315,12 @@ class TestSchedulerMetrics:
         assert sample("active_experiments_gauge") == float(expected)
 
     @pytest.mark.asyncio
-    async def test_scheduler_tick_updates_gauge(self, db_session, live_experiment, monkeypatch):
-        import backend.app.core.scheduler as scheduler_module
+    async def test_scheduler_tick_updates_gauge(
+        self, db_session, live_experiment, monkeypatch
+    ):
         from sqlalchemy.orm import sessionmaker
+
+        import backend.app.core.scheduler as scheduler_module
 
         factory = sessionmaker(bind=db_session.get_bind())
         monkeypatch.setattr(scheduler_module, "SessionLocal", factory)

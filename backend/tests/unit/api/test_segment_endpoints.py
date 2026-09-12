@@ -12,22 +12,23 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from backend.app.main import app
 from backend.app.api import deps
+from backend.app.main import app
+from backend.app.models.segment import Segment
+from backend.app.models.segment import SegmentStatus as ModelSegmentStatus
 from backend.app.models.user import User, UserRole
-from backend.app.models.segment import Segment, SegmentStatus as ModelSegmentStatus
 from backend.app.schemas.segment import (
-    SegmentStatus,
-    SegmentMembershipResponse,
+    AudiencePreviewResponse,
     BulkSegmentMembershipResponse,
     SegmentExperimentResponse,
-    AudiencePreviewResponse,
+    SegmentMembershipResponse,
+    SegmentStatus,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 def _make_user(role=UserRole.DEVELOPER, is_superuser=False):
     user = MagicMock(spec=User)

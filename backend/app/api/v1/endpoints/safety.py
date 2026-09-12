@@ -5,27 +5,21 @@ This module provides endpoints for managing safety monitoring and rollback funct
 for feature flags.
 """
 
-from typing import Any, List, Optional
+from typing import Any, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from backend.app.api.deps import (
-    get_current_active_user,
-    get_current_superuser,
-    get_db
-)
+from backend.app.api.deps import get_current_active_user, get_current_superuser, get_db
 from backend.app.models.user import User
 from backend.app.schemas.safety import (
-    SafetySettingsResponse,
-    SafetySettingsCreate,
-    SafetySettingsUpdate,
     FeatureFlagSafetyConfigResponse,
-    FeatureFlagSafetyConfigCreate,
     FeatureFlagSafetyConfigUpdate,
+    RollbackResponse,
     SafetyCheckResponse,
-    RollbackResponse
+    SafetySettingsResponse,
+    SafetySettingsUpdate,
 )
 from backend.app.services.safety_service import SafetyService
 
@@ -61,7 +55,10 @@ async def update_safety_settings(
     return await safety_service.create_or_update_safety_settings(settings)
 
 
-@router.get("/feature-flags/{feature_flag_id}/config", response_model=FeatureFlagSafetyConfigResponse)
+@router.get(
+    "/feature-flags/{feature_flag_id}/config",
+    response_model=FeatureFlagSafetyConfigResponse,
+)
 async def get_feature_flag_safety_config(
     *,
     db: Session = Depends(get_db),
@@ -75,7 +72,10 @@ async def get_feature_flag_safety_config(
     return await safety_service.async_get_feature_flag_safety_config(feature_flag_id)
 
 
-@router.post("/feature-flags/{feature_flag_id}/config", response_model=FeatureFlagSafetyConfigResponse)
+@router.post(
+    "/feature-flags/{feature_flag_id}/config",
+    response_model=FeatureFlagSafetyConfigResponse,
+)
 async def update_feature_flag_safety_config(
     *,
     db: Session = Depends(get_db),
@@ -89,10 +89,14 @@ async def update_feature_flag_safety_config(
     Requires superuser privileges.
     """
     safety_service = SafetyService(db)
-    return await safety_service.create_or_update_feature_flag_safety_config(feature_flag_id, config)
+    return await safety_service.create_or_update_feature_flag_safety_config(
+        feature_flag_id, config
+    )
 
 
-@router.get("/feature-flags/{feature_flag_id}/check", response_model=SafetyCheckResponse)
+@router.get(
+    "/feature-flags/{feature_flag_id}/check", response_model=SafetyCheckResponse
+)
 async def check_feature_flag_safety(
     *,
     db: Session = Depends(get_db),
@@ -106,7 +110,9 @@ async def check_feature_flag_safety(
     return await safety_service.check_feature_flag_safety(feature_flag_id)
 
 
-@router.post("/feature-flags/{feature_flag_id}/rollback", response_model=RollbackResponse)
+@router.post(
+    "/feature-flags/{feature_flag_id}/rollback", response_model=RollbackResponse
+)
 async def rollback_feature_flag(
     *,
     db: Session = Depends(get_db),
@@ -122,7 +128,5 @@ async def rollback_feature_flag(
     """
     safety_service = SafetyService(db)
     return await safety_service.async_rollback_feature_flag(
-        feature_flag_id=feature_flag_id,
-        percentage=percentage,
-        reason=reason
+        feature_flag_id=feature_flag_id, percentage=percentage, reason=reason
     )

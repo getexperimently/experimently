@@ -5,7 +5,9 @@ Tests the gradual feature flag rollout workflow end-to-end.
 Uses DB factories (make_feature_flag) for resource setup and the
 admin_client to validate API behaviour.
 """
+
 import pytest
+
 from backend.tests.integration.helpers import unique_flag_key
 
 
@@ -34,9 +36,12 @@ class TestFeatureFlagRolloutScenario:
         data = get_resp.json()
         assert data["key"] == flag.key
 
-    def test_feature_flag_defaults_to_inactive_status(self, admin_client, make_feature_flag):
+    def test_feature_flag_defaults_to_inactive_status(
+        self, admin_client, make_feature_flag
+    ):
         """Flags created via DB factory without explicit status are INACTIVE."""
         from backend.app.models.feature_flag import FeatureFlagStatus
+
         flag = make_feature_flag(
             key=unique_flag_key("e2e-inactive"),
             name="Inactive Default Flag",
@@ -49,7 +54,9 @@ class TestFeatureFlagRolloutScenario:
             f"Expected inactive status, got {data['status']!r}"
         )
 
-    def test_feature_flag_response_has_required_fields(self, admin_client, make_feature_flag):
+    def test_feature_flag_response_has_required_fields(
+        self, admin_client, make_feature_flag
+    ):
         """GET response for a feature flag must contain required fields."""
         flag = make_feature_flag(
             key=unique_flag_key("e2e-fields"),
@@ -103,14 +110,18 @@ class TestFeatureFlagRolloutScenario:
             status=FeatureFlagStatus.ACTIVE,
         )
 
-        deactivate_resp = admin_client.post(f"/api/v1/feature-flags/{flag.id}/deactivate")
+        deactivate_resp = admin_client.post(
+            f"/api/v1/feature-flags/{flag.id}/deactivate"
+        )
         assert deactivate_resp.status_code == 200, deactivate_resp.text
         data = deactivate_resp.json()
         assert data["status"] in ("INACTIVE", "inactive"), (
             f"Expected inactive status after deactivation, got {data['status']!r}"
         )
 
-    def test_feature_flag_list_endpoint_is_reachable(self, admin_client, make_feature_flag):
+    def test_feature_flag_list_endpoint_is_reachable(
+        self, admin_client, make_feature_flag
+    ):
         """The feature flag list endpoint is accessible without auth/permission errors.
 
         The list endpoint has a pre-existing Pydantic serialization bug (UUID vs int
@@ -119,6 +130,7 @@ class TestFeatureFlagRolloutScenario:
         works correctly — the server-side serialization issue is a known pre-existing bug.
         """
         import pytest
+
         make_feature_flag(
             key=unique_flag_key("e2e-list"),
             name="List Presence Flag",

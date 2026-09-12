@@ -4,9 +4,10 @@ Unit tests for consistent hashing implementation.
 Tests the ConsistentHasher class for deterministic variant assignments.
 """
 
-import pytest
 import sys
 from pathlib import Path
+
+import pytest
 
 # Add parent directory to path to import shared modules
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -22,7 +23,7 @@ class TestConsistentHasher:
         self.hasher = ConsistentHasher()
         self.variants = [
             {"key": "control", "allocation": 0.5},
-            {"key": "treatment", "allocation": 0.5}
+            {"key": "treatment", "allocation": 0.5},
         ]
 
     def test_same_user_experiment_returns_same_variant(self):
@@ -73,8 +74,12 @@ class TestConsistentHasher:
         treatment_pct = treatment_count / num_users
 
         # Should be within ±2% of 50/50
-        assert 0.48 <= control_pct <= 0.52, f"Control: {control_pct:.2%} (expected ~50%)"
-        assert 0.48 <= treatment_pct <= 0.52, f"Treatment: {treatment_pct:.2%} (expected ~50%)"
+        assert 0.48 <= control_pct <= 0.52, (
+            f"Control: {control_pct:.2%} (expected ~50%)"
+        )
+        assert 0.48 <= treatment_pct <= 0.52, (
+            f"Treatment: {treatment_pct:.2%} (expected ~50%)"
+        )
 
     def test_traffic_allocation_excludes_users(self):
         """Test that traffic allocation excludes correct percentage of users."""
@@ -87,7 +92,7 @@ class TestConsistentHasher:
                 f"user_{i}",
                 experiment_key,
                 self.variants,
-                traffic_allocation=traffic_allocation
+                traffic_allocation=traffic_allocation,
             )
             for i in range(num_users)
         ]
@@ -97,17 +102,15 @@ class TestConsistentHasher:
         assignment_rate = len(assigned) / num_users
 
         # Should be within ±2% of 50%
-        assert 0.48 <= assignment_rate <= 0.52, \
+        assert 0.48 <= assignment_rate <= 0.52, (
             f"Assignment rate: {assignment_rate:.2%} (expected ~50%)"
+        )
 
     def test_zero_traffic_allocation_excludes_all(self):
         """Test that 0% traffic allocation excludes all users."""
         results = [
             self.hasher.assign_variant(
-                f"user_{i}",
-                "exp_zero_traffic",
-                self.variants,
-                traffic_allocation=0.0
+                f"user_{i}", "exp_zero_traffic", self.variants, traffic_allocation=0.0
             )
             for i in range(100)
         ]
@@ -119,22 +122,21 @@ class TestConsistentHasher:
         """Test that 100% traffic allocation includes all users."""
         results = [
             self.hasher.assign_variant(
-                f"user_{i}",
-                "exp_full_traffic",
-                self.variants,
-                traffic_allocation=1.0
+                f"user_{i}", "exp_full_traffic", self.variants, traffic_allocation=1.0
             )
             for i in range(100)
         ]
 
         # All should be assigned
-        assert all(r is not None for r in results), "100% traffic should include all users"
+        assert all(r is not None for r in results), (
+            "100% traffic should include all users"
+        )
 
     def test_uneven_variant_allocation(self):
         """Test uneven variant allocation (80/20 split)."""
         variants = [
             {"key": "control", "allocation": 0.8},
-            {"key": "treatment", "allocation": 0.2}
+            {"key": "treatment", "allocation": 0.2},
         ]
         num_users = 10000
 
@@ -147,15 +149,19 @@ class TestConsistentHasher:
         treatment_pct = results.count("treatment") / num_users
 
         # Should be within ±2% of 80/20
-        assert 0.78 <= control_pct <= 0.82, f"Control: {control_pct:.2%} (expected ~80%)"
-        assert 0.18 <= treatment_pct <= 0.22, f"Treatment: {treatment_pct:.2%} (expected ~20%)"
+        assert 0.78 <= control_pct <= 0.82, (
+            f"Control: {control_pct:.2%} (expected ~80%)"
+        )
+        assert 0.18 <= treatment_pct <= 0.22, (
+            f"Treatment: {treatment_pct:.2%} (expected ~20%)"
+        )
 
     def test_three_way_variant_allocation(self):
         """Test three-way variant allocation (33/33/34 split)."""
         variants = [
             {"key": "control", "allocation": 0.33},
             {"key": "variant_a", "allocation": 0.33},
-            {"key": "variant_b", "allocation": 0.34}
+            {"key": "variant_b", "allocation": 0.34},
         ]
         num_users = 10000
 
@@ -169,9 +175,15 @@ class TestConsistentHasher:
         variant_b_pct = results.count("variant_b") / num_users
 
         # Each should be within ±3% of their target
-        assert 0.30 <= control_pct <= 0.36, f"Control: {control_pct:.2%} (expected ~33%)"
-        assert 0.30 <= variant_a_pct <= 0.36, f"Variant A: {variant_a_pct:.2%} (expected ~33%)"
-        assert 0.31 <= variant_b_pct <= 0.37, f"Variant B: {variant_b_pct:.2%} (expected ~34%)"
+        assert 0.30 <= control_pct <= 0.36, (
+            f"Control: {control_pct:.2%} (expected ~33%)"
+        )
+        assert 0.30 <= variant_a_pct <= 0.36, (
+            f"Variant A: {variant_a_pct:.2%} (expected ~33%)"
+        )
+        assert 0.31 <= variant_b_pct <= 0.37, (
+            f"Variant B: {variant_b_pct:.2%} (expected ~34%)"
+        )
 
     def test_salt_changes_assignment(self):
         """Test that different salt values produce different assignments."""
@@ -210,7 +222,7 @@ class TestConsistentHasher:
         """Test that variant allocations not summing to 1.0 raises ValueError."""
         invalid_variants = [
             {"key": "control", "allocation": 0.4},
-            {"key": "treatment", "allocation": 0.4}
+            {"key": "treatment", "allocation": 0.4},
         ]
 
         with pytest.raises(ValueError, match="Variant allocations must sum to 1.0"):
@@ -221,10 +233,7 @@ class TestConsistentHasher:
         user_id = "user_123"
         experiment_key = "exp_001"
 
-        buckets = [
-            self.hasher.get_bucket(user_id, experiment_key)
-            for _ in range(10)
-        ]
+        buckets = [self.hasher.get_bucket(user_id, experiment_key) for _ in range(10)]
 
         # All buckets should be identical
         assert len(set(buckets)) == 1
@@ -246,8 +255,7 @@ class TestConsistentHasher:
 
         # Each bucket should have roughly 100 users (±30 to account for hash variance)
         for i, count in enumerate(bucket_counts):
-            assert 70 <= count <= 130, \
-                f"Bucket {i} has {count} users (expected ~100)"
+            assert 70 <= count <= 130, f"Bucket {i} has {count} users (expected ~100)"
 
     def test_get_hasher_returns_singleton(self):
         """Test that get_hasher returns singleton instance."""
@@ -261,10 +269,7 @@ class TestConsistentHasher:
         user_id = "user_123"
         salt = "exp_001"
 
-        hash_values = [
-            self.hasher._hash(user_id, salt)
-            for _ in range(10)
-        ]
+        hash_values = [self.hasher._hash(user_id, salt) for _ in range(10)]
 
         # All hash values should be identical
         assert len(set(hash_values)) == 1
@@ -274,10 +279,7 @@ class TestConsistentHasher:
         """Test that different users get different hash values."""
         salt = "exp_001"
 
-        hashes = [
-            self.hasher._hash(f"user_{i}", salt)
-            for i in range(100)
-        ]
+        hashes = [self.hasher._hash(f"user_{i}", salt) for i in range(100)]
 
         # Should have mostly unique hashes (collisions are rare but possible)
         unique_hashes = len(set(hashes))

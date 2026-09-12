@@ -48,7 +48,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-
 # ---------------------------------------------------------------------------
 # Settings helpers (tolerant of the pre-/post-canonicalisation config)
 # ---------------------------------------------------------------------------
@@ -111,7 +110,10 @@ def check_database() -> Dict[str, Any]:
             db.execute(text("SELECT 1"))
         finally:
             db.close()
-        return {"status": "healthy", "latency_ms": round((time.perf_counter() - t0) * 1000, 2)}
+        return {
+            "status": "healthy",
+            "latency_ms": round((time.perf_counter() - t0) * 1000, 2),
+        }
     except Exception as exc:
         return {"status": "unhealthy", "error": _safe_error(exc)}
 
@@ -137,7 +139,10 @@ def check_redis() -> Dict[str, Any]:
                 client.close()
             except Exception:  # pragma: no cover - best effort
                 pass
-        return {"status": "healthy", "latency_ms": round((time.perf_counter() - t0) * 1000, 2)}
+        return {
+            "status": "healthy",
+            "latency_ms": round((time.perf_counter() - t0) * 1000, 2),
+        }
     except Exception as exc:
         return {"status": "unhealthy", "error": _safe_error(exc)}
 
@@ -195,7 +200,8 @@ def readiness_payload() -> tuple[Dict[str, Any], int]:
         body["checks"] = checks
     else:
         body["checks"] = {
-            name: {"status": data.get("status", "unknown")} for name, data in checks.items()
+            name: {"status": data.get("status", "unknown")}
+            for name, data in checks.items()
         }
 
     return body, (200 if ready else 503)
@@ -281,14 +287,14 @@ async def prometheus_metrics(request: Request) -> Response:
 
 
 __all__ = [
-    "router",
-    "liveness_payload",
-    "readiness_payload",
-    "metrics_access",
     "check_database",
-    "check_redis",
     "check_disk",
-    "is_production",
-    "is_development_or_test",
+    "check_redis",
     "environment_name",
+    "is_development_or_test",
+    "is_production",
+    "liveness_payload",
+    "metrics_access",
+    "readiness_payload",
+    "router",
 ]

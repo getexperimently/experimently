@@ -5,21 +5,20 @@ This module provides API endpoints for administrative operations
 that require superuser privileges.
 """
 
-from typing import List, Dict, Any
+import json
 import uuid
-from fastapi import APIRouter, Depends, HTTPException, Query, Path, Body, status
+from typing import Any, Dict
+
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from sqlalchemy.orm import Session
 
 from backend.app.api import deps
-from backend.app.core.config import settings
 from backend.app.models.user import User
 from backend.app.schemas.user import (
-    UserCreate,
-    UserUpdate,
-    UserResponse,
     UserListResponse,
+    UserResponse,
+    UserUpdate,
 )
-from backend.app.services.auth_service import CognitoAuthService
 
 router = APIRouter()
 
@@ -37,8 +36,17 @@ async def list_users(
     This endpoint is only accessible by superusers and returns a list of all users
     in the system with pagination.
     """
-    # Query all users with pagination
-    users = db.query(User).offset(skip).limit(limit).all()
+    # Ordered: a paginated query without ORDER BY can repeat or skip rows
+    # between pages, because the database is free to return them in any order.
+    # Newest first is what an administrator looking for a just-created account
+    # wants on page one.
+    users = (
+        db.query(User)
+        .order_by(User.created_at.desc(), User.id)
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
     total = db.query(User).count()
 
     return UserListResponse(items=users, total=total, skip=skip, limit=limit)
@@ -132,7 +140,7 @@ async def delete_user(
 async def get_system_stats(
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_superuser),
-    cache_control: Dict[str, Any] = Depends(deps.get_cache_control),
+    cache_control: deps.CacheControl = Depends(deps.get_cache_control),
 ) -> Any:
     """
     Get system statistics.
@@ -141,15 +149,16 @@ async def get_system_stats(
     system-wide statistics like user counts, experiment counts, etc.
     """
     # Try to get from cache if enabled
-    if cache_control["enabled"]:
-        cache_key = "admin:system_stats"
-        cached_data = cache_control["client"].get(cache_key)
+    cache_key = "admin:system_stats"
+    cache_available = cache_control.enabled and cache_control.redis is not None
+    if cache_available:
+        cached_data = await cache_control.redis.get(cache_key)
         if cached_data:
             return json.loads(cached_data)
 
     # Count various entities
-    from backend.app.models.experiment import Experiment, ExperimentStatus
     from backend.app.models.event import Event
+    from backend.app.models.experiment import Experiment, ExperimentStatus
     from backend.app.models.feature_flag import FeatureFlag, FeatureFlagStatus
 
     user_count = db.query(User).count()
@@ -197,18 +206,36 @@ async def get_system_stats(
     }
 
     # Cache stats if enabled
-    if cache_control["enabled"]:
-        cache_control["client"].setex(
-            cache_key, 60 * 5, json.dumps(stats)  # 5 minute TTL for stats
+    if cache_available:
+        await cache_control.redis.setex(
+            cache_key,
+            60 * 5,
+            json.dumps(stats),  # 5 minute TTL for stats
         )
 
     return stats
 
 
+# Namespaces the application writes to Redis. There is no single key prefix:
+# every cache key in `backend/app/api/v1/endpoints/` starts with one of these
+# (`admin:system_stats`, `feature_flag:{id}`, `results:{id}`, ...). Add a
+# namespace here when you add one there, or "clear cache" will quietly leave it.
+CACHE_NAMESPACES: tuple = (
+    "admin",
+    "experiment",
+    "experiments",
+    "experiment_daily_results",
+    "experiment_segmented_results",
+    "feature_flag",
+    "feature_flags",
+    "results",
+)
+
+
 @router.post("/cache/clear", status_code=status.HTTP_200_OK)
 async def clear_cache(
     current_user: User = Depends(deps.get_current_superuser),
-    cache_control: Dict[str, Any] = Depends(deps.get_cache_control),
+    cache_control: deps.CacheControl = Depends(deps.get_cache_control),
 ) -> Dict[str, Any]:
     """
     Clear system cache.
@@ -216,15 +243,17 @@ async def clear_cache(
     This endpoint is only accessible by superusers and clears all Redis cache entries
     for the application.
     """
-    if not cache_control["enabled"]:
+    if not cache_control.enabled or cache_control.redis is None:
         return {"message": "Caching is not enabled"}
 
-    # Clear all keys with the application prefix
-    pattern = f"{settings.REDIS_PREFIX}:*"
+    # This used to scan `f"{settings.REDIS_PREFIX}:*"`, a setting that does not
+    # exist, so the endpoint raised AttributeError for every caller whose cache
+    # was actually enabled. The keys carry no shared prefix, so each namespace
+    # is scanned in turn.
     keys_deleted = 0
-
-    for key in cache_control["client"].scan_iter(match=pattern):
-        cache_control["client"].delete(key)
-        keys_deleted += 1
+    for namespace in CACHE_NAMESPACES:
+        async for key in cache_control.redis.scan_iter(match=f"{namespace}:*"):
+            await cache_control.redis.delete(key)
+            keys_deleted += 1
 
     return {"message": "Cache cleared successfully", "keys_deleted": keys_deleted}
