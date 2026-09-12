@@ -287,6 +287,83 @@ class TestDeleteWorkspace:
         with pytest.raises(WorkspaceNotFound):
             svc.get_workspace(db_session, ws_id)
 
+    @pytest.mark.regression
+    def test_delete_workspace_releases_its_experiments_and_flags(
+        self, db_session: Session, svc: WorkspaceService
+    ):
+        """The open-core seam dropped the ON DELETE SET NULL that used to do this.
+
+        `experiments.workspace_id` and `feature_flags.workspace_id` were the
+        only ORM coupling between a Community table and an Enterprise one, so
+        migration a7b8c9d0e1f2 drops both constraints. Without an explicit
+        update here, deleting a workspace leaves Community rows pointing at an
+        id that no longer exists.
+        """
+        from backend.app.models.experiment import Experiment
+        from backend.app.models.feature_flag import FeatureFlag
+
+        owner = _make_user(db_session)
+        suffix = uuid.uuid4().hex[:8]
+        ws = svc.create_workspace(db_session, "Doomed", f"doomed-{suffix}", owner.id)
+        ws_id = ws.id
+
+        experiment = Experiment(
+            name=f"exp-{suffix}",
+            key=f"exp-{suffix}",
+            description="scoped to the workspace",
+            owner_id=owner.id,
+            workspace_id=ws_id,
+        )
+        flag = FeatureFlag(
+            name=f"flag-{suffix}",
+            key=f"flag-{suffix}",
+            description="scoped to the workspace",
+            owner_id=owner.id,
+            workspace_id=ws_id,
+        )
+        db_session.add_all([experiment, flag])
+        db_session.commit()
+        experiment_id, flag_id = experiment.id, flag.id
+
+        # The test schema is built from the Enterprise-loaded metadata, which
+        # attaches the ON DELETE SET NULL foreign keys -- so the database would
+        # null the columns by itself and the service body under test would be
+        # exercised by nothing. Drop them for this test, the state a migrated
+        # Enterprise database (a7b8c9d0e1f2) is in, and put them back after.
+        from sqlalchemy import text
+
+        fks = (
+            ("experiments", "experiments_workspace_id_fkey"),
+            ("feature_flags", "feature_flags_workspace_id_fkey"),
+        )
+        for table, name in fks:
+            db_session.execute(
+                text(f"ALTER TABLE {table} DROP CONSTRAINT IF EXISTS {name}")
+            )
+        db_session.commit()
+        try:
+            svc.delete_workspace(db_session, ws_id)
+        finally:
+            for table, name in fks:
+                db_session.execute(
+                    text(
+                        f"ALTER TABLE {table} ADD CONSTRAINT {name} "
+                        "FOREIGN KEY (workspace_id) REFERENCES workspaces(id) "
+                        "ON DELETE SET NULL"
+                    )
+                )
+            db_session.commit()
+
+        db_session.expire_all()
+        surviving_experiment = db_session.get(Experiment, experiment_id)
+        surviving_flag = db_session.get(FeatureFlag, flag_id)
+        # The rows survive -- they are Community data, not the workspace's.
+        assert surviving_experiment is not None
+        assert surviving_flag is not None
+        # ...and they are unscoped again, not pointing at a deleted workspace.
+        assert surviving_experiment.workspace_id is None
+        assert surviving_flag.workspace_id is None
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Members

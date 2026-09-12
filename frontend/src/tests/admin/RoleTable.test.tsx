@@ -1,13 +1,13 @@
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { RoleTable } from '@/components/admin/roles/RoleTable';
-import { AdminService } from '@/services/admin';
+import { RbacService } from '@ee/rbac';
 import { CustomRole } from '@/types/admin';
 
-jest.mock('@/services/admin');
+jest.mock('@ee/rbac');
 
-const mockListRoles = AdminService.listRoles as jest.Mock;
-const mockDeleteRole = AdminService.deleteRole as jest.Mock;
+const mockListRoles = RbacService.listRoles as jest.Mock;
+const mockDeleteRole = RbacService.deleteRole as jest.Mock;
 
 const mockRoles: CustomRole[] = [
   {
@@ -92,7 +92,7 @@ describe('RoleTable', () => {
     expect(mockDeleteRole).not.toHaveBeenCalled();
   });
 
-  it('delete calls AdminService.deleteRole', async () => {
+  it('delete calls RbacService.deleteRole', async () => {
     mockListRoles.mockResolvedValue(mockRoles);
     mockDeleteRole.mockResolvedValue(undefined);
     // mockListRoles returns the same on refetch

@@ -196,9 +196,20 @@ For questions and issues:
 
 ## 📄 License
 
-The licensing split is in progress (see `docs/planning/open-core-launch-plan-2026-09.md`): the core
-platform will be released under AGPL-3.0, the SDKs under MIT, and the enterprise modules under a
-proprietary licence in `ee/`. Until that lands, [LICENSE.txt](LICENSE.txt) applies.
+| Part of the repository | Licence |
+|---|---|
+| Everything except `ee/` and `sdk/` (Community Edition) | [AGPL-3.0-only](LICENSE) |
+| `ee/` (Enterprise Edition) | [Experimently Enterprise Licence](ee/LICENSE) — proprietary, source-available, requires a licence key |
+| `sdk/` (all client SDKs and OpenFeature providers) | [MIT](sdk/LICENSE) |
+
+The SDKs are MIT precisely so that embedding one in your application does not pull the
+AGPL-3.0 network-use obligation into your codebase. Running an unmodified Community Edition
+creates no source-disclosure obligation either; AGPL-3.0 §13 only applies if you modify it and
+let others interact with the modified version over a network.
+
+Third-party dependency licences are listed in [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md);
+attribution is in [NOTICE](NOTICE). Security reports go to [SECURITY.md](SECURITY.md), not to
+public issues. Contributions are accepted under the DCO — see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ---
 

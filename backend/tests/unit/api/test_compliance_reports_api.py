@@ -113,11 +113,11 @@ class TestComplianceReportPermissions:
 
         with override_deps_for_user(admin):
             with patch(
-                "backend.app.api.v1.endpoints.compliance.ComplianceReportService"
+                "backend.app.api.v1.endpoints.compliance_reports.ComplianceReportService"
             ) as MockSvc:
                 MockSvc.return_value.generate_report.return_value = MagicMock()
                 with patch(
-                    "backend.app.api.v1.endpoints.compliance.dataclasses_asdict",
+                    "backend.app.api.v1.endpoints.compliance_reports.dataclasses_asdict",
                     return_value=report_dict,
                 ):
                     client = TestClient(app)
@@ -132,11 +132,11 @@ class TestComplianceReportPermissions:
 
         with override_deps_for_user(analyst):
             with patch(
-                "backend.app.api.v1.endpoints.compliance.ComplianceReportService"
+                "backend.app.api.v1.endpoints.compliance_reports.ComplianceReportService"
             ) as MockSvc:
                 MockSvc.return_value.generate_report.return_value = MagicMock()
                 with patch(
-                    "backend.app.api.v1.endpoints.compliance.dataclasses_asdict",
+                    "backend.app.api.v1.endpoints.compliance_reports.dataclasses_asdict",
                     return_value=report_dict,
                 ):
                     client = TestClient(app)
@@ -172,11 +172,11 @@ class TestComplianceReportPermissions:
 
         with override_deps_for_user(super_dev):
             with patch(
-                "backend.app.api.v1.endpoints.compliance.ComplianceReportService"
+                "backend.app.api.v1.endpoints.compliance_reports.ComplianceReportService"
             ) as MockSvc:
                 MockSvc.return_value.generate_report.return_value = MagicMock()
                 with patch(
-                    "backend.app.api.v1.endpoints.compliance.dataclasses_asdict",
+                    "backend.app.api.v1.endpoints.compliance_reports.dataclasses_asdict",
                     return_value=report_dict,
                 ):
                     client = TestClient(app)
@@ -202,11 +202,11 @@ class TestComplianceReportStructure:
 
         with override_deps_for_user(admin):
             with patch(
-                "backend.app.api.v1.endpoints.compliance.ComplianceReportService"
+                "backend.app.api.v1.endpoints.compliance_reports.ComplianceReportService"
             ) as MockSvc:
                 MockSvc.return_value.generate_report.return_value = MagicMock()
                 with patch(
-                    "backend.app.api.v1.endpoints.compliance.dataclasses_asdict",
+                    "backend.app.api.v1.endpoints.compliance_reports.dataclasses_asdict",
                     return_value=report_dict,
                 ):
                     client = TestClient(app)
@@ -294,7 +294,7 @@ class TestAuditExportEndpoints:
 
         with override_deps_for_user(admin):
             with patch(
-                "backend.app.api.v1.endpoints.compliance.ComplianceReportService"
+                "backend.app.api.v1.endpoints.compliance_reports.ComplianceReportService"
             ) as MockSvc:
                 MockSvc.return_value.export_events.return_value = content
                 client = TestClient(app)

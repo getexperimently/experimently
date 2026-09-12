@@ -1,7 +1,7 @@
 name: Lint
 
 # One fast job: everything that reads the tree without running it.
-#   ruff check / ruff format --check   backend/   (replaces black + isort + flake8)
+#   ruff check / ruff format --check   backend/ scripts/  (replaces black + isort + flake8)
 #   eslint + tsc                       frontend/
 #   hadolint                           the four Dockerfiles
 #   actionlint                         .github/workflows
@@ -44,10 +44,10 @@ jobs:
 
       # Configuration lives in [tool.ruff] in pyproject.toml.
       - name: ruff check
-        run: ruff check backend/ --output-format=github
+        run: ruff check backend/ scripts/ --output-format=github
 
       - name: ruff format --check
-        run: ruff format --check backend/
+        run: ruff format --check backend/ scripts/
 
       - name: Set up Node.js
         uses: actions/setup-node@v7

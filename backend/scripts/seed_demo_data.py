@@ -6,7 +6,7 @@ Creates all demo DB records including:
 - 4 demo users (ADMIN, DEVELOPER, ANALYST, VIEWER)
 - 3 experiments with 100K+ synthetic events
 - 2 feature flags with rollout schedules and safety config
-- Audit log entries, custom RBAC role, Slack/Jira integration config
+- Audit log entries and global safety settings
 
 This script is IDEMPOTENT: safe to re-run. Checks for existing data before inserting.
 
@@ -42,8 +42,6 @@ from backend.app.core.security import get_password_hash
 from backend.app.db.session import SessionLocal, engine
 from backend.app.models.assignment import Assignment
 from backend.app.models.audit_log import AuditLog
-from backend.app.models.base import Base
-from backend.app.models.custom_role import CustomRole
 from backend.app.models.event import Event
 from backend.app.models.experiment import (
     Experiment,
@@ -54,7 +52,6 @@ from backend.app.models.experiment import (
     Variant,
 )
 from backend.app.models.feature_flag import FeatureFlag, FeatureFlagStatus
-from backend.app.models.integration_config import IntegrationConfig, IntegrationType
 from backend.app.models.rollout_schedule import (
     RolloutSchedule,
     RolloutScheduleStatus,
@@ -123,23 +120,18 @@ def backfill_experiment_keys(db) -> int:
 
 
 def ensure_tables():
-    """Create all tables if they don't already exist."""
-    # Import all models to register them
-    import backend.app.models.api_key
-    import backend.app.models.audit_log
-    import backend.app.models.bandit_state
-    import backend.app.models.custom_role
-    import backend.app.models.integration_config
-    import backend.app.models.notification
+    """Create every table of the running edition if it does not exist yet.
 
-    # User/Experiment/FeatureFlag declare a "Report" relationship by name; the
-    # mapper cannot be configured until the class is imported.
-    import backend.app.models.report
-    import backend.app.models.safety  # noqa: F401
+    The same registration bootstrap uses -- the Community models, then
+    whatever the Enterprise registration adds -- so a database seeded by hand
+    (the "pieces by hand" path in CLAUDE.md) has the tables the Enterprise
+    routers need.  Importing a handful of model modules and calling
+    ``create_all``, as this once did, built the 37 Community tables and left
+    ``GET /api/v1/workspaces`` to fail on a missing relation.
+    """
+    from backend.app.db.bootstrap import create_from_models
 
-    schema = get_schema_name()
-    Base.metadata.schema = schema
-    Base.metadata.create_all(bind=engine)
+    create_from_models(engine, get_schema_name())
 
 
 # ---------------------------------------------------------------------------
@@ -933,76 +925,6 @@ def seed_audit_logs(db, users: dict, flags: dict, experiments: list):
 
 
 # ---------------------------------------------------------------------------
-# Custom RBAC Role
-# ---------------------------------------------------------------------------
-
-
-def seed_custom_role(db, admin_user):
-    """Create a ReadOnlyAnalyst custom role."""
-    print("  Seeding custom RBAC role...")
-
-    existing = db.query(CustomRole).filter(CustomRole.name == "ReadOnlyAnalyst").first()
-    if existing:
-        print("    'ReadOnlyAnalyst' already exists, skipping.")
-        return
-
-    role = CustomRole(
-        name="ReadOnlyAnalyst",
-        description="Read-only access to experiment results and analytics. Cannot modify any resources.",
-        is_system_role=False,
-        permissions=[
-            {"resource": "experiment", "actions": ["read", "list"]},
-            {"resource": "feature_flag", "actions": ["read", "list"]},
-            {"resource": "report", "actions": ["read", "list"]},
-            {"resource": "audit_log", "actions": ["read", "list"]},
-        ],
-        created_by_id=admin_user.id,
-    )
-    db.add(role)
-    db.commit()
-    print("    Created custom role: ReadOnlyAnalyst")
-
-
-# ---------------------------------------------------------------------------
-# Integration configs (Slack, Jira)
-# ---------------------------------------------------------------------------
-
-
-def seed_integrations(db):
-    """Seed Jira integration config (demo credentials)."""
-    print("  Seeding integration configs...")
-
-    # Jira
-    slack_existing = (
-        db.query(IntegrationConfig)
-        .filter(IntegrationConfig.integration_type == IntegrationType.JIRA)
-        .first()
-    )
-
-    if not slack_existing:
-        try:
-            jira_cfg = IntegrationConfig(
-                integration_type=IntegrationType.JIRA,
-                is_active=True,
-                encrypted_config={
-                    "base_url": "https://demo-company.atlassian.net",
-                    "project_key": "EXP",
-                    "api_token": "demo_token_change_before_production",
-                    "user_email": "admin@demo.com",
-                },
-                last_sync_at=days_ago(1),
-            )
-            db.add(jira_cfg)
-            db.commit()
-            print("    Created Jira integration config (demo credentials).")
-        except Exception as e:
-            db.rollback()
-            print(f"    Skipping Jira config (table may not exist): {e}")
-    else:
-        print("    Jira integration config already exists, skipping.")
-
-
-# ---------------------------------------------------------------------------
 # Safety Settings (global)
 # ---------------------------------------------------------------------------
 
@@ -1069,29 +991,23 @@ def main():
     ensure_tables()
 
     with SessionLocal() as db:
-        print("\n[1/7] Users")
+        print("\n[1/5] Users")
         users = seed_users(db)
         admin_user = users["admin@demo.com"]
 
-        print("\n[2/7] Experiments")
+        print("\n[2/5] Experiments")
         exp1 = seed_homepage_hero_experiment(db, admin_user)
         exp2 = seed_checkout_button_experiment(db, admin_user)
         exp3 = seed_recommendation_mab_experiment(db, admin_user)
         backfill_experiment_keys(db)
 
-        print("\n[3/7] Feature Flags")
+        print("\n[3/5] Feature Flags")
         flags = seed_feature_flags(db, admin_user)
 
-        print("\n[4/7] Audit Logs")
+        print("\n[4/5] Audit Logs")
         seed_audit_logs(db, users, flags, [exp1, exp2, exp3])
 
-        print("\n[5/7] Custom RBAC Role")
-        seed_custom_role(db, admin_user)
-
-        print("\n[6/7] Integration Configs")
-        seed_integrations(db)
-
-        print("\n[7/7] Safety Settings")
+        print("\n[5/5] Safety Settings")
         seed_safety_settings(db)
 
     # Count final records

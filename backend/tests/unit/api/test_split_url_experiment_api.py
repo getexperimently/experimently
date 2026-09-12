@@ -30,7 +30,7 @@ from backend.app.schemas.experiment import (
 from backend.app.schemas.experiment import (
     ExperimentStatus as SchemaExperimentStatus,
 )
-from backend.app.schemas.split_url import SplitUrlConfig, SplitUrlVariant
+from backend.app.schemas.split_url_config import SplitUrlConfig, SplitUrlVariant
 
 # ---------------------------------------------------------------------------
 # Shared helpers / mock data
@@ -304,11 +304,19 @@ def mock_cache_control():
 
 @pytest.fixture
 def mock_experiment_service():
-    with patch(
-        "backend.app.api.v1.endpoints.experiments.ExperimentService"
-    ) as mock_cls:
-        instance = MagicMock()
+    # The preview route body lives in the Enterprise ``experiments_split_url``
+    # module (reached through the ``core.enterprise_features`` seam), while
+    # create/get/update stay in ``experiments`` — patch both so one fixture
+    # serves every test in this file.
+    instance = MagicMock()
+    with (
+        patch("backend.app.api.v1.endpoints.experiments.ExperimentService") as mock_cls,
+        patch(
+            "backend.app.api.v1.endpoints.experiments_split_url.ExperimentService"
+        ) as mock_split_url_cls,
+    ):
         mock_cls.return_value = instance
+        mock_split_url_cls.return_value = instance
         yield instance
 
 

@@ -2,8 +2,10 @@
 AuditLogService: writes ComplianceAuditEvents to the database.
 
 Used by API endpoints to log create/update/delete operations.
-Events are HMAC-signed for tamper-evidence and carry configurable
-retention expiry dates for SOC 2 Type 2 and ISO 27001 compliance.
+Events carry configurable retention expiry dates for SOC 2 Type 2 and
+ISO 27001 compliance, and are signed through ``hooks.audit_signer``.
+The Community default writes no signature (the column is nullable);
+the Enterprise edition installs the HMAC-SHA256 signer.
 """
 
 import logging
@@ -13,13 +15,13 @@ from typing import Any, Dict, Optional
 
 from sqlalchemy.orm import Session
 
+from backend.app.core import hooks
 from backend.app.core.config import settings
 from backend.app.models.compliance_audit_event import (
     AuditAction,
     AuditOutcome,
     ComplianceAuditEvent,
 )
-from backend.app.services.audit_signing_service import AuditSigningService
 
 logger = logging.getLogger(__name__)
 
@@ -33,8 +35,6 @@ _SENSITIVE_FIELDS = {
     "access_token",
     "refresh_token",
 }
-
-_signing_service = AuditSigningService()
 
 
 def _redact_sensitive(data: Optional[Dict]) -> Optional[Dict]:
@@ -151,8 +151,12 @@ class AuditLogService:
             retention_expires_at=_get_retention_expiry(retention_standard),
         )
 
-        # Sign the event for tamper detection
-        event.hmac_signature = _signing_service.sign(event)
+        # Sign the event for tamper detection. Signing is an Enterprise
+        # feature installed through the open-core seam; the Community
+        # default returns None, which the nullable hmac_signature column
+        # accepts. Looked up on the module, not bound at import time, so a
+        # signer installed after this module loaded is still used.
+        event.hmac_signature = hooks.audit_signer.sign(event)
 
         self._db.add(event)
         self._db.flush()  # Persist within caller's transaction

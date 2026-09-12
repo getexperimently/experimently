@@ -731,3 +731,33 @@ def test_get_user_with_groups_no_pool_id(
     assert result["username"] == "testuser"
     assert "attributes" in result
     assert result["groups"] == []
+
+
+class TestCognitoClientIsLazy:
+    @pytest.mark.regression
+    def test_the_client_is_not_created_at_import(self, monkeypatch):
+        """A module-level CognitoAuthService is built at import, and
+        boto3.client validated the region then: with AWS_REGION='' it raised
+        "Invalid endpoint", which made importing the API -- and everything
+        that imports the API, the Enterprise registration included -- fail
+        on a detail that only matters once Cognito is actually called."""
+        from backend.app.services import auth_service as module
+
+        created = []
+        monkeypatch.setattr(
+            module.boto3, "client", lambda *a, **k: created.append((a, k)) or object()
+        )
+        service = module.CognitoAuthService()
+        assert created == []  # nothing yet
+        service.client
+        assert len(created) == 1
+        service.client
+        assert len(created) == 1  # cached
+
+    def test_a_fake_client_can_still_be_installed(self):
+        from backend.app.services.auth_service import CognitoAuthService
+
+        service = CognitoAuthService()
+        fake = object()
+        service.client = fake
+        assert service.client is fake

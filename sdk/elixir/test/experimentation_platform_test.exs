@@ -8,6 +8,8 @@ defmodule ExperimentationPlatformTest do
 
   use ExUnit.Case, async: true
 
+  alias ExperimentationPlatform.TestSupport.ProcessHelpers
+
   alias ExperimentationPlatform.{Assignment, BatchResult, FlagEvaluation, HttpBehaviour}
 
   @spy :experimentation_platform_facade_test_spy
@@ -49,7 +51,13 @@ defmodule ExperimentationPlatformTest do
   end
 
   setup do
+    ProcessHelpers.await_release(@spy)
     Process.register(self(), @spy)
+
+    on_exit(fn ->
+      if Process.whereis(@spy), do: Process.unregister(@spy)
+    end)
+
     :ok
   end
 
@@ -61,7 +69,7 @@ defmodule ExperimentationPlatformTest do
         http_client: MockHttp
       )
 
-    on_exit(fn -> if Process.alive?(client), do: ExperimentationPlatform.stop(client) end)
+    on_exit(fn -> ProcessHelpers.stop_if_alive(client, &ExperimentationPlatform.stop/1) end)
     client
   end
 

@@ -1,0 +1,60 @@
+name: 🔒 Security vulnerability — do not file here
+description: Read this before reporting anything security related.
+title: "DO NOT FILE — use SECURITY.md"
+labels: ["invalid"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## Stop.
+
+        **Security vulnerabilities must never be reported in a public GitHub
+        issue.** Creating the issue is itself the public disclosure: it is
+        world-readable, indexed, and mirrored, and deleting it afterwards does
+        not undo that.
+
+        Report privately instead, by either route:
+
+        1. **[Report a vulnerability privately][advisory]** — Security → Report
+           a vulnerability on this repository. Only the maintainers and you can
+           see it.
+        2. **Email** — security@getexperimently.com
+
+        Read **[SECURITY.md][policy]** for what to include, the response
+        timeline (acknowledgement in 3 business days, fixes for High and
+        Critical within 14 days, public disclosure at 90 days) and the safe
+        harbour we offer to good-faith researchers.
+
+        [advisory]: https://github.com/amarkanday/experimentation-platform/security/advisories/new
+        [policy]: https://github.com/amarkanday/experimentation-platform/blob/main/SECURITY.md
+
+        ---
+
+        ### Is it actually a vulnerability?
+
+        Use the private route if the issue involves any of these:
+
+        - reading, writing or deleting data belonging to another user, workspace
+          or tenant;
+        - bypassing authentication, the role checks, or an API-key scope;
+        - forging, suppressing or tampering with an audit or PHI access record;
+        - circumventing, forging or extending an Enterprise licence key;
+        - leaking a secret, token, licence key or PHI into a log, a response, a
+          URL or a built artefact;
+        - remote code execution, SQL or template injection, SSRF, or
+          deserialisation of untrusted input;
+        - a supply-chain problem in a shipped image or published package.
+
+        If it is a plain functional bug with no security impact, close this and
+        use the **🐛 Bug report** template instead.
+
+  - type: checkboxes
+    id: acknowledge
+    attributes:
+      label: Acknowledgement
+      options:
+        - label: >-
+            I understand this form is a redirect and that I should close it
+            without submitting. I will report privately via the security
+            advisory form or security@getexperimently.com.
+          required: true

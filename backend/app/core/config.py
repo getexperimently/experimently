@@ -198,6 +198,20 @@ class Settings(BaseSettings):
     LOCAL_AUTH_TOKEN_TTL_MINUTES: int = 720  # 12 hours
     LOCAL_AUTH_MAX_FAILED_ATTEMPTS: int = 10
     LOCAL_AUTH_LOCKOUT_MINUTES: int = 15
+
+    # ------------------------------------------------------------------
+    # Enterprise licence (open-core seam; see backend/app/core/license.py)
+    # ------------------------------------------------------------------
+    # Offline-verified Ed25519 licence key, ``base64url(claims).base64url(sig)``.
+    # Empty (the default) means Community Edition: /api/v1/edition reports
+    # ``{"edition": "ce", "status": "none"}`` and every ``require_feature``
+    # dependency refuses.  Never phoned home, never logged.
+    EXPERIMENTLY_LICENSE_KEY: str = ""
+    # PEM public key for developer licences minted by
+    # ``scripts/make_dev_license.py`` (kid ``dev``).  Honoured only when
+    # ENVIRONMENT is development or test, so a leaked dev key cannot unlock a
+    # production deployment.
+    EXPERIMENTLY_DEV_LICENSE_PUBLIC_KEY: str = ""
     BACKEND_CORS_ORIGINS: List[AnyHttpUrl] = []
     # CORS_ORIGINS is a plain-string list version of BACKEND_CORS_ORIGINS that
     # can also be set via env var as a comma-separated string. NoDecode stops
@@ -677,6 +691,16 @@ class ProdSettings(Settings):
 # ``ENVIRONMENT`` (canonical) wins; legacy ``APP_ENV`` is honoured with a
 # deprecation warning.  The resolved value is passed explicitly so the chosen
 # class always reports the canonical name (``APP_ENV=prod`` -> ``production``).
+#: Whether the deployment named its environment at all.  Captured *before*
+#: the legacy ``APP_ENV`` mirror below, which would otherwise make an
+#: undeclared process indistinguishable from a declared development one to
+#: anything that reads ``os.environ`` afterwards -- and the licence verifier
+#: has to treat "nothing declared" as production (``core/license.py``).
+ENVIRONMENT_DECLARED: bool = bool(
+    (os.environ.get("ENVIRONMENT") or "").strip()
+    or (os.environ.get("APP_ENV") or "").strip()
+)
+
 _resolved_environment = resolve_environment_from_process_env()
 
 # Mirror the legacy spelling back into APP_ENV for modules that still read it

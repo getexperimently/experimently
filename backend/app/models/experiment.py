@@ -140,10 +140,17 @@ class Experiment(Base, BaseModel):
     #           "cookie_name": "split_url_exp_key"}
     split_url_config = Column(JSONB, nullable=True)
 
-    # EP-057: Multi-Tenant Workspace isolation (nullable for backwards-compatibility)
+    # EP-057: Multi-Tenant Workspace isolation (nullable for backwards-compatibility).
+    # Open-core seam: a bare indexed UUID, not a ForeignKey. `workspaces` is an
+    # Enterprise table, and a ForeignKey here is the only thing in the Community
+    # ORM that reaches across the boundary — with it, importing this module
+    # without the Enterprise models raises NoReferencedTableError. The
+    # constraint is attached from the Enterprise side instead -- see
+    # models/workspace.py, which appends it (use_alter, ON DELETE SET NULL)
+    # whenever the Enterprise models are loaded; Community leaves the column
+    # unconstrained and nothing reads it.
     workspace_id = Column(
         UUID(as_uuid=True),
-        ForeignKey(f"{get_schema_name()}.workspaces.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )
