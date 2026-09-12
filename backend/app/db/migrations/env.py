@@ -1,14 +1,11 @@
-from logging.config import fileConfig
-
-from sqlalchemy import engine_from_config
-from sqlalchemy import pool
-from sqlalchemy.schema import CreateSchema
-
-from alembic import context
-
 # Add to env.py
 import os
 import sys
+from logging.config import fileConfig
+
+from alembic import context
+from sqlalchemy import engine_from_config, pool
+from sqlalchemy.schema import CreateSchema
 
 # Add the repository root to sys.path so `import backend...` works no matter
 # which directory alembic is invoked from.  This file lives at
@@ -18,11 +15,25 @@ project_root = os.path.abspath(os.path.join(migrations_dir, "..", "..", "..", ".
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-# Import your models
-from backend.app.models import Base
+# Import your models.  Open-core seam: register the Community models, then let
+# the Enterprise package register its own through hooks.register_model_module().
+# Autogenerate therefore sees exactly the tables the running edition owns — a
+# Community build must not generate migrations that create Enterprise tables.
+from backend.app.ee_loader import require_enterprise_or_absent
+from backend.app.models import register_core_models
+
+Base = register_core_models()
+# Strict on purpose: if Enterprise code is present but fails to register,
+# target_metadata would hold only the Community tables and autogenerate would
+# propose dropping every Enterprise table. Better to refuse than to be quiet.
+require_enterprise_or_absent()
 
 # Set target_metadata to your SQLAlchemy models
 target_metadata = Base.metadata
+
+# Keep the Enterprise-managed constraints out of this chain's autogenerate
+# (see backend/app/db/autogenerate_filters.py for the reasoning).
+from backend.app.db.autogenerate_filters import include_object  # noqa: E402
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -77,6 +88,7 @@ def run_migrations_offline() -> None:
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
         version_table_schema=schema,
+        include_object=include_object,
     )
 
     with context.begin_transaction():
@@ -106,6 +118,7 @@ def run_migrations_online() -> None:
             connection=connection,
             target_metadata=target_metadata,
             version_table_schema=schema,
+            include_object=include_object,
         )
 
         with context.begin_transaction():

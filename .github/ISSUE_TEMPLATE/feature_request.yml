@@ -1,0 +1,68 @@
+name: ✨ Feature request
+description: Suggest a capability Experimently does not have.
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        Please describe the problem before the solution. The best feature
+        requests explain what you were trying to do, what you did instead, and
+        why that was worse.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to accomplish, and what stops you today?
+      placeholder: >-
+        I run experiments across three brands and cannot tell from the results
+        page which brand a lift came from, so I export raw events and pivot them
+        by hand every week.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like to happen
+      description: >-
+        The behaviour you want. API shape, UI, or SDK signature if you have a
+        concrete idea.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered
+      description: >-
+        Including "I am already working around it like this" — workarounds tell
+        us how much the gap costs.
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Experiments and assignment
+        - Feature flags, rollouts and safety
+        - Statistics and results
+        - Targeting and rules engine
+        - Dashboard
+        - SDKs
+        - Self-hosting, Docker, infrastructure
+        - Auth, roles and audit
+        - Enterprise feature
+        - Other
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: help
+    attributes:
+      label: Would you like to build it?
+      options:
+        - label: >-
+            I would be willing to open a pull request for this. (Read
+            CONTRIBUTING.md first — commits need `git commit -s`, and `ee/`
+            takes no outside contributions.)

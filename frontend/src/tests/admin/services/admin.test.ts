@@ -123,13 +123,7 @@ describe('AdminService', () => {
     });
   });
 
-  describe('listRoles', () => {
-    it('calls /rbac/roles endpoint', async () => {
-      mockOk([]);
-      await AdminService.listRoles();
-      expect(mockFetch).toHaveBeenCalledWith(`${BASE}/api/v1/rbac/roles`, expect.any(Object));
-    });
-  });
+  // `/api/v1/rbac/*` moved to the Enterprise tree; covered by src/ee/rbac.test.ts.
 
   describe('safety', () => {
     const settings: SafetySettings = {

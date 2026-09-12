@@ -46,12 +46,65 @@ from backend.app.api.deps import CacheControl
 from backend.app.core.config import TestSettings, settings
 from backend.app.core.database_config import get_schema_name
 from backend.app.db.session import Base, get_db, init_db
+from backend.app.ee_loader import require_enterprise_or_absent
 from backend.app.main import app
+from backend.app.models import register_core_models
 from backend.app.models.base import set_schema
 from backend.app.models.experiment import Experiment, ExperimentStatus
 from backend.app.models.user import User, UserRole
 
 logger = logging.getLogger(__name__)
+
+# Open-core seam.  This tree is still the Enterprise build: `load_enterprise()`
+# (run by `backend.app.main` on import, above) registers the Enterprise routers,
+# model modules, audit signer and capabilities through
+# `backend/app/ee_transitional.py` -- the same entry point a real `ee` package
+# will provide after issue #89.  Nothing Enterprise is installed by hand here.
+#
+# The Enterprise routers are behind `require_feature`, so the suite runs under
+# a development licence that grants every feature: an Ed25519 key pair made
+# for this process, a wildcard licence signed with it, and `kid="dev"` -- which
+# the verifier honours because ENVIRONMENT/APP_ENV say `test`.  Tests that
+# need a *particular* licence state use the `licensed` fixture below, and the
+# licence unit tests replace the key through monkeypatch.
+from backend.tests.licence_fixtures import (  # `licensed` is a fixture re-export
+    install_session_license,
+    licensed,
+)
+
+install_session_license()
+
+
+def pytest_collection_modifyitems(config, items):
+    """Skip `enterprise`-marked tests when the Enterprise edition did not load.
+
+    The Community build deletes the manifest paths and runs the suite that is
+    left; a test outside the manifest that exercises Enterprise behaviour
+    (the gate refusing an Enterprise route, the signer, split-URL routing)
+    says so with the marker instead of failing there.
+    """
+    from backend.app.ee_loader import enterprise_failure, load_enterprise
+
+    if load_enterprise():
+        return
+    # Absent is a Community build; *broken* is a bug, and skipping the tests
+    # that would have caught it (with exit code 0) is the one thing this hook
+    # must not do.
+    failure = enterprise_failure()
+    if failure is not None:
+        pytest.exit(
+            "The Enterprise registration is present but failed to load; refusing "
+            "to skip the enterprise-marked tests as if this were a Community "
+            f"build. Cause: {failure}",
+            returncode=3,
+        )
+    skip = pytest.mark.skip(
+        reason="needs the Enterprise registration (Community build)"
+    )
+    for item in items:
+        if "enterprise" in item.keywords:
+            item.add_marker(skip)
+
 
 # Pin the auth mode on the singleton (see the header comment) regardless of
 # what a developer's shell exports.  Set on the object rather than through
@@ -222,28 +275,16 @@ def test_db():
                 conn.execute(text(f"SET search_path TO {schema_name}"))
                 conn.execute(text("COMMIT"))
 
-                # Import ALL models to ensure they are registered with the
-                # metadata before create_all runs.  Missing imports cause
-                # create_all to fail, which triggers the retry loop.
-                import backend.app.models.api_key
-                import backend.app.models.assignment
-                import backend.app.models.audit_log
-                import backend.app.models.baa_config
-                import backend.app.models.compliance_audit_event
-                import backend.app.models.custom_role
-                import backend.app.models.event
-                import backend.app.models.experiment
-                import backend.app.models.feature_flag
-                import backend.app.models.llm_experiment
-                import backend.app.models.phi_audit_log
-                import backend.app.models.report
-                import backend.app.models.rollout_schedule
-                import backend.app.models.safety
-                import backend.app.models.scheduler_run
-                import backend.app.models.segment
-                import backend.app.models.sso_config
-                import backend.app.models.user
-                import backend.app.models.workspace
+                # Register every model on the metadata before create_all runs.
+                # Missing models cause create_all to fail, which triggers the
+                # retry loop.
+                register_core_models()
+                # The Enterprise model modules arrive through the seam -- the
+                # same seven `hooks.register_model_module()` calls bootstrap
+                # and alembic see -- so the test schema and a real one agree.
+                # Strict, like them: a broken registration must fail the
+                # session, not quietly build a 37-table schema.
+                require_enterprise_or_absent()
 
                 # Set schema for all tables
                 Base.metadata.schema = schema_name
@@ -342,9 +383,19 @@ def db_session(test_db):
     # search_path on every new NullPool connection checkout automatically.
     session.execute(text("SET search_path TO test_experimentation"))
 
+    # The licence gate audits on a session of its own (never the request's).
+    # Point it at this database: the application engine targets one the suite
+    # never creates, so without this every gated request logged a failed
+    # INSERT and the audit path was never exercised against a real table.
+    from backend.app.core import license as _license
+
+    previous_factory = _license.audit_session_factory
+    _license.audit_session_factory = Session
+
     try:
         yield session
     finally:
+        _license.audit_session_factory = previous_factory
         # Rollback any uncommitted work left by the test.
         try:
             session.rollback()

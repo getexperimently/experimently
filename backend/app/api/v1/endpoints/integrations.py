@@ -34,6 +34,11 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+#: Inbound webhooks from Jira, Salesforce and GitHub.  Authenticated by the
+#: provider's signature inside each handler, not by a user token, so the
+#: Enterprise registration mounts this behind the licence gate only.
+public_router = APIRouter()
+
 
 # ---------------------------------------------------------------------------
 # Permission helpers
@@ -190,7 +195,7 @@ def delete_integration(
 # ---------------------------------------------------------------------------
 
 
-@router.post("/webhooks/jira", status_code=200)
+@public_router.post("/webhooks/jira", status_code=200)
 async def jira_webhook(
     request: Request,
     db: Session = Depends(deps.get_db),
@@ -226,7 +231,7 @@ async def jira_webhook(
     return {"status": "received"}
 
 
-@router.post("/webhooks/salesforce", status_code=200)
+@public_router.post("/webhooks/salesforce", status_code=200)
 async def salesforce_webhook(
     request: Request,
     db: Session = Depends(deps.get_db),
@@ -260,7 +265,7 @@ async def salesforce_webhook(
     return {"status": "received"}
 
 
-@router.post("/webhooks/github", status_code=200)
+@public_router.post("/webhooks/github", status_code=200)
 async def github_webhook(
     request: Request,
     db: Session = Depends(deps.get_db),

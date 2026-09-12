@@ -31,6 +31,9 @@ _CANONICAL_FIELDS = [
 class AuditSigningService:
     """Signs and verifies ComplianceAuditEvent records with HMAC-SHA256."""
 
+    #: The ``hooks.AuditSigner`` protocol's name; "null" is the Community signer.
+    name = "hmac-sha256"
+
     def __init__(self):
         key = getattr(settings, "AUDIT_HMAC_KEY", "dev-audit-key-change-in-production")
         self._key = key.encode() if isinstance(key, str) else key

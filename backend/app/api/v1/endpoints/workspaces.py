@@ -49,6 +49,12 @@ from backend.app.services.workspace_service import (
 
 router = APIRouter()
 
+#: The invite preview: an email recipient who may not have an account yet
+#: looks the invitation up by its token before accepting.  No user
+#: authentication, so the Enterprise registration mounts it behind the
+#: licence gate only.
+public_router = APIRouter()
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Internal helpers
 # ─────────────────────────────────────────────────────────────────────────────
@@ -415,7 +421,7 @@ def create_invite(
     )
 
 
-@router.get("/invites/{token}", response_model=WorkspaceInviteResponse)
+@public_router.get("/invites/{token}", response_model=WorkspaceInviteResponse)
 def get_invite(
     token: str = Path(...),
     db: Session = Depends(get_db),

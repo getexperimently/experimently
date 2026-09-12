@@ -1,12 +1,36 @@
 import React from 'react';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
-import { AppShell, NAV_ITEMS, displayName, isNavActive } from '@/components/AppShell';
+import {
+  AppShell,
+  ENTERPRISE_NAV_ITEMS,
+  NAV_ITEMS,
+  displayName,
+  isNavActive,
+  licensedEnterpriseNav,
+} from '@/components/AppShell';
 import { AuthProvider } from '@/contexts/AuthContext';
+import { EditionProvider } from '@/contexts/EditionContext';
+import { COMMUNITY_EDITION, EditionInfo, FEATURES } from '@/services/edition';
 import { TOKEN_STORAGE_KEY, UserMe } from '@/services/api';
 
 const mockReplace = jest.fn().mockResolvedValue(true);
 let mockPathname = '/experiments';
 let mockAsPath = '/experiments';
+
+// A tiny router event bus so tests can fire `routeChangeStart` the way Next
+// does on a client-side navigation.
+const routerListeners: Record<string, Array<() => void>> = {};
+const mockRouterEvents = {
+  on: (event: string, cb: () => void) => {
+    (routerListeners[event] ??= []).push(cb);
+  },
+  off: (event: string, cb: () => void) => {
+    routerListeners[event] = (routerListeners[event] ?? []).filter((c) => c !== cb);
+  },
+  emit: (event: string) => {
+    (routerListeners[event] ?? []).forEach((cb) => cb());
+  },
+};
 
 jest.mock('next/router', () => ({
   useRouter: () => ({
@@ -16,6 +40,7 @@ jest.mock('next/router', () => ({
     asPath: mockAsPath,
     query: {},
     isReady: true,
+    events: mockRouterEvents,
   }),
 }));
 
@@ -61,13 +86,26 @@ function signInAs(user: UserMe) {
   mockFetch.mockResolvedValueOnce(jsonResponse(200, user));
 }
 
-function renderShell() {
+function enterprise(overrides: Partial<EditionInfo> = {}): EditionInfo {
+  return {
+    edition: 'enterprise',
+    features: [FEATURES.WORKSPACES],
+    status: 'active',
+    expires_at: '2026-09-12T00:00:00Z',
+    version: '1.0.0',
+    ...overrides,
+  };
+}
+
+function renderShell(edition: EditionInfo = COMMUNITY_EDITION) {
   return render(
-    <AuthProvider>
-      <AppShell>
-        <div data-testid="page-content">page</div>
-      </AppShell>
-    </AuthProvider>,
+    <EditionProvider initial={edition}>
+      <AuthProvider>
+        <AppShell>
+          <div data-testid="page-content">page</div>
+        </AppShell>
+      </AuthProvider>
+    </EditionProvider>,
   );
 }
 
@@ -175,6 +213,127 @@ describe('AppShell', () => {
     expect(screen.getByTestId('mobile-nav')).toBeInTheDocument();
     fireEvent.click(screen.getByTestId('mobile-nav-toggle'));
     expect(screen.queryByTestId('mobile-nav')).not.toBeInTheDocument();
+  });
+
+  describe('edition chrome', () => {
+    it('reflects the real edition in the pill', async () => {
+      signInAs(makeUser());
+      renderShell(enterprise());
+      await waitFor(() => expect(screen.getByTestId('user-menu')).toBeInTheDocument());
+      expect(screen.getByTestId('edition-pill')).toHaveTextContent('EE');
+    });
+
+    it('shows the grace banner inside the shell', async () => {
+      signInAs(makeUser());
+      renderShell(enterprise({ status: 'grace' }));
+      await waitFor(() => expect(screen.getByTestId('user-menu')).toBeInTheDocument());
+      expect(screen.getByTestId('edition-banner')).toHaveAttribute('data-status', 'grace');
+    });
+
+    it('shows no banner on an active licence or in Community', async () => {
+      signInAs(makeUser());
+      const view = renderShell(enterprise());
+      await waitFor(() => expect(screen.getByTestId('user-menu')).toBeInTheDocument());
+      expect(screen.queryByTestId('edition-banner')).not.toBeInTheDocument();
+      view.unmount();
+
+      localStorage.clear();
+      mockFetch.mockReset();
+      signInAs(makeUser());
+      renderShell();
+      await waitFor(() => expect(screen.getByTestId('user-menu')).toBeInTheDocument());
+      expect(screen.queryByTestId('edition-banner')).not.toBeInTheDocument();
+    });
+
+    it('keeps the primary nav free of Enterprise routes', () => {
+      expect(NAV_ITEMS.map((i) => i.href)).toEqual([
+        '/experiments',
+        '/feature-flags',
+        '/admin',
+        '/docs',
+      ]);
+    });
+
+    it('offers a collapsed Enterprise group that is closed by default', async () => {
+      signInAs(makeUser());
+      renderShell();
+      await waitFor(() => expect(screen.getByTestId('user-menu')).toBeInTheDocument());
+      const group = screen.getAllByTestId('enterprise-nav-group')[0];
+      expect(group).toBeInTheDocument();
+      expect(group).not.toHaveAttribute('open');
+      expect(screen.getAllByTestId('nav-editions-docs')[0]).toHaveAttribute(
+        'href',
+        '/docs/editions',
+      );
+    });
+
+    it('closes the Enterprise group when a link in it is followed, and on navigation', async () => {
+      // _app.tsx keeps one AppShell across client-side navigations, so an
+      // uncontrolled <details> stayed open -- a panel over the next page --
+      // after any link inside it was clicked.
+      signInAs(makeUser());
+      renderShell(enterprise());
+      await waitFor(() => expect(screen.getByTestId('user-menu')).toBeInTheDocument());
+      const group = screen.getAllByTestId('enterprise-nav-group')[0] as HTMLDetailsElement;
+
+      fireEvent.click(group.querySelector('summary')!);
+      await waitFor(() => expect(group).toHaveAttribute('open'));
+
+      fireEvent.click(screen.getAllByTestId('nav-workspaces')[0]);
+      await waitFor(() => expect(group).not.toHaveAttribute('open'));
+
+      // Opened again, then a navigation started elsewhere (browser back, say).
+      fireEvent.click(group.querySelector('summary')!);
+      await waitFor(() => expect(group).toHaveAttribute('open'));
+      act(() => mockRouterEvents.emit('routeChangeStart'));
+      await waitFor(() => expect(group).not.toHaveAttribute('open'));
+    });
+
+    it('closes the Enterprise group on an outside click and on Escape', async () => {
+      signInAs(makeUser());
+      renderShell(enterprise());
+      await waitFor(() => expect(screen.getByTestId('user-menu')).toBeInTheDocument());
+      const group = screen.getAllByTestId('enterprise-nav-group')[0] as HTMLDetailsElement;
+
+      fireEvent.click(group.querySelector('summary')!);
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0)); // let the queued toggle land
+      });
+      expect(group).toHaveAttribute('open');
+      fireEvent.mouseDown(document.body);
+      await waitFor(() => expect(group).not.toHaveAttribute('open'));
+
+      fireEvent.click(group.querySelector('summary')!);
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      expect(group).toHaveAttribute('open');
+      fireEvent.keyDown(document, { key: 'Escape' });
+      await waitFor(() => expect(group).not.toHaveAttribute('open'));
+    });
+
+    it('carries no Workspaces link in Community', async () => {
+      signInAs(makeUser());
+      renderShell();
+      await waitFor(() => expect(screen.getByTestId('user-menu')).toBeInTheDocument());
+      expect(screen.queryByTestId('nav-workspaces')).not.toBeInTheDocument();
+    });
+
+    it('adds the Workspaces link once the licence allows it', async () => {
+      signInAs(makeUser());
+      renderShell(enterprise());
+      await waitFor(() => expect(screen.getByTestId('user-menu')).toBeInTheDocument());
+      expect(screen.getAllByTestId('nav-workspaces')[0]).toHaveAttribute('href', '/workspaces');
+    });
+
+    it('licensedEnterpriseNav gates on the licence state, not just the edition', () => {
+      expect(licensedEnterpriseNav(COMMUNITY_EDITION)).toEqual([]);
+      expect(licensedEnterpriseNav(enterprise())).toHaveLength(ENTERPRISE_NAV_ITEMS.length);
+      expect(licensedEnterpriseNav(enterprise({ status: 'grace' }))).toHaveLength(1);
+      expect(licensedEnterpriseNav(enterprise({ status: 'expired' }))).toEqual([]);
+      expect(licensedEnterpriseNav(enterprise({ status: 'invalid' }))).toEqual([]);
+      expect(licensedEnterpriseNav(enterprise({ features: ['hipaa'] }))).toEqual([]);
+    });
   });
 
   it('isNavActive matches exact and nested paths only', () => {

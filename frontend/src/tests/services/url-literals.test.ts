@@ -10,14 +10,38 @@
  *
  * Regenerate the fixture after changing backend routes:
  *   npm run openapi:dump   (= python -m backend.scripts.dump_openapi from the repo root)
+ *
+ * ## Editions
+ *
+ * The dump is taken from an Enterprise build and carries 65 Enterprise paths
+ * out of 216. A Community backend serves the other 151, so the rule "every URL
+ * literal exists in the dump" needs an edition, not a single document. Rather
+ * than keeping two dumps in sync, one dump is kept and
+ * `openapi.ee-paths.json` names the Enterprise subset:
+ *
+ *   EXPERIMENTLY_EDITION=ce  →  those 65 paths are removed from the document,
+ *                               and the Enterprise sources that call them are
+ *                               removed from the scan.
+ *   anything else (default)  →  the whole document, the whole tree.
+ *
+ * Which sources count as Enterprise is read from `ee-manifest.txt`, the same
+ * file `scripts/community_build.sh` deletes, so this test and the build cannot
+ * disagree about where the boundary is.
  */
 import fs from 'fs';
 import path from 'path';
 
 const SRC_ROOT = path.resolve(__dirname, '..', '..');
+const REPO_ROOT = path.resolve(SRC_ROOT, '..', '..');
 const FIXTURE = path.join(SRC_ROOT, 'tests', 'fixtures', 'openapi.json');
+const EE_PATHS_FIXTURE = path.join(SRC_ROOT, 'tests', 'fixtures', 'openapi.ee-paths.json');
+const EE_MANIFEST = path.join(REPO_ROOT, 'ee-manifest.txt');
 const EXCLUDED_DIRS = new Set(['tests', '__mocks__', 'node_modules']);
 type HttpMethod = 'get' | 'post' | 'put' | 'patch' | 'delete';
+
+/** Which edition this run is checking. */
+export const EDITION: 'ce' | 'ee' =
+  String(process.env.EXPERIMENTLY_EDITION || '').toLowerCase() === 'ce' ? 'ce' : 'ee';
 
 interface UrlLiteral {
   file: string;
@@ -35,11 +59,45 @@ interface OpenApiDocument {
 // Source scanning
 // ---------------------------------------------------------------------------
 
-export function listSourceFiles(root: string): string[] {
+/**
+ * Frontend paths `ee-manifest.txt` marks Enterprise, relative to `src/`.
+ *
+ * `src/ee` is always included: it is what the `@ee/*` alias resolves to and
+ * `scripts/community_build.sh` removes it along with the manifest entries. A
+ * missing manifest (a published Community tarball) degrades to `src/ee` alone
+ * rather than failing.
+ */
+export function enterpriseSourcePrefixes(manifestFile: string = EE_MANIFEST): string[] {
+  const prefixes = ['ee'];
+  let text = '';
+  try {
+    text = fs.readFileSync(manifestFile, 'utf8');
+  } catch {
+    return prefixes;
+  }
+  for (const raw of text.split('\n')) {
+    const line = raw.split('#')[0].split('::')[0].trim();
+    if (!line.startsWith('frontend/src/')) continue;
+    const rel = line.slice('frontend/src/'.length).replace(/\/+$/, '');
+    if (rel && prefixes.indexOf(rel) === -1) prefixes.push(rel);
+  }
+  return prefixes.sort();
+}
+
+/** True when `rel` (a path relative to `src/`) is under one of `prefixes`. */
+export function isEnterpriseSource(rel: string, prefixes: string[]): boolean {
+  const norm = rel.split(path.sep).join('/');
+  return prefixes.some((prefix) => norm === prefix || norm.startsWith(`${prefix}/`));
+}
+
+export function listSourceFiles(root: string, excludePrefixes: string[] = []): string[] {
   const out: string[] = [];
   const walk = (dir: string) => {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
       const full = path.join(dir, entry.name);
+      if (excludePrefixes.length && isEnterpriseSource(path.relative(root, full), excludePrefixes)) {
+        continue;
+      }
       if (entry.isDirectory()) {
         if (!EXCLUDED_DIRS.has(entry.name)) walk(full);
         continue;
@@ -141,6 +199,20 @@ export function extractUrlLiterals(file: string, rawSource: string): UrlLiteral[
 }
 
 // ---------------------------------------------------------------------------
+// Per-edition document
+// ---------------------------------------------------------------------------
+
+/** The dump with the Enterprise paths removed — what a Community backend serves. */
+export function communityDocument(doc: OpenApiDocument, eePaths: string[]): OpenApiDocument {
+  const paths: OpenApiDocument['paths'] = {};
+  const ee = new Set(eePaths);
+  for (const [p, ops] of Object.entries(doc.paths)) {
+    if (!ee.has(p)) paths[p] = ops;
+  }
+  return { paths };
+}
+
+// ---------------------------------------------------------------------------
 // OpenAPI matching
 // ---------------------------------------------------------------------------
 
@@ -184,14 +256,77 @@ export function findMismatches(doc: OpenApiDocument, literals: UrlLiteral[]): st
 // Tests
 // ---------------------------------------------------------------------------
 
-describe('frontend /api/v1 URL literals match the backend OpenAPI spec', () => {
-  const doc: OpenApiDocument = JSON.parse(fs.readFileSync(FIXTURE, 'utf8'));
-  const files = listSourceFiles(SRC_ROOT);
+describe(`frontend /api/v1 URL literals match the backend OpenAPI spec (${EDITION})`, () => {
+  const fullDoc: OpenApiDocument = JSON.parse(fs.readFileSync(FIXTURE, 'utf8'));
+  const eePaths: string[] = JSON.parse(fs.readFileSync(EE_PATHS_FIXTURE, 'utf8')).paths;
+  const eePrefixes = enterpriseSourcePrefixes();
+
+  const doc = EDITION === 'ce' ? communityDocument(fullDoc, eePaths) : fullDoc;
+  const files = listSourceFiles(SRC_ROOT, EDITION === 'ce' ? eePrefixes : []);
   const literals = files.flatMap((f) => extractUrlLiterals(f, fs.readFileSync(f, 'utf8')));
 
   it('loads a populated OpenAPI fixture (run `npm run openapi:dump` to refresh it)', () => {
     expect(Object.keys(doc.paths).length).toBeGreaterThan(100);
     expect(doc.paths['/api/v1/feature-flags/']).toBeDefined();
+    expect(doc.paths['/api/v1/edition']).toBeDefined();
+  });
+
+  describe('per-edition fixture', () => {
+    it('every path listed as Enterprise is really in the dump', () => {
+      const unknown = eePaths.filter((p) => !(p in fullDoc.paths));
+      expect(unknown).toEqual([]);
+    });
+
+    it('the Enterprise subset is the 62 paths the Enterprise registration mounts', () => {
+      expect(eePaths).toHaveLength(62);
+      expect(eePaths).toContain('/api/v1/rbac/roles');
+      expect(eePaths).toContain('/api/v1/workspaces/');
+      // Routes whose URL is declared on a Community router in every edition
+      // (501 without the Enterprise body, 403 without a licence) are Community
+      // paths: a Community source may name them, so they must not be stripped
+      // from the Community document.
+      expect(eePaths).not.toContain('/api/v1/compliance/audit-events');
+      expect(eePaths).not.toContain('/api/v1/compliance/export');
+      expect(eePaths).not.toContain('/api/v1/compliance/reports/{standard}');
+      expect(eePaths).not.toContain('/api/v1/experiments/{experiment_id}/split-url/preview');
+    });
+
+    it('the Community document is the dump minus exactly those paths', () => {
+      const ce = communityDocument(fullDoc, eePaths);
+      expect(Object.keys(ce.paths)).toHaveLength(Object.keys(fullDoc.paths).length - 62);
+      expect(ce.paths['/api/v1/rbac/roles']).toBeUndefined();
+      expect(ce.paths['/api/v1/experiments/']).toBeDefined();
+      expect(ce.paths['/api/v1/edition']).toBeDefined();
+    });
+
+    it('a Community document rejects an Enterprise URL literal, an Enterprise one accepts it', () => {
+      const literal = {
+        file: 'services/admin.ts',
+        line: 125,
+        raw: '/api/v1/rbac/roles',
+        path: '/api/v1/rbac/roles',
+        method: null,
+      };
+      expect(findMismatches(fullDoc, [literal])).toEqual([]);
+      const problems = findMismatches(communityDocument(fullDoc, eePaths), [literal]);
+      expect(problems).toHaveLength(1);
+      expect(problems[0]).toContain('no backend route');
+    });
+
+    it('reads the Enterprise frontend paths out of ee-manifest.txt', () => {
+      expect(eePrefixes).toContain('ee');
+      expect(eePrefixes).toContain('components/admin/roles');
+      expect(isEnterpriseSource('ee/rbac.ts', eePrefixes)).toBe(true);
+      expect(isEnterpriseSource('services/admin.ts', eePrefixes)).toBe(false);
+      // The thin re-export pages are Community: with src/ee gone they resolve
+      // to the stub tree and render the "Enterprise feature" notice, which is
+      // the designed Community experience for those URLs, not a 404.
+      expect(eePrefixes).not.toContain('pages/workspaces');
+      expect(eePrefixes).not.toContain('pages/admin/roles.tsx');
+      expect(isEnterpriseSource('pages/workspaces/index.tsx', eePrefixes)).toBe(false);
+      // A prefix must not match a sibling that merely starts with the same text.
+      expect(isEnterpriseSource('ee-stub/rbac.ts', eePrefixes)).toBe(false);
+    });
   });
 
   it('finds the URL literals the dashboard uses', () => {

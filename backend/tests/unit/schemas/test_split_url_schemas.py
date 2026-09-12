@@ -13,7 +13,7 @@ import pytest
 from pydantic import ValidationError
 
 # These imports will FAIL (red phase) until the implementation exists.
-from backend.app.schemas.split_url import (
+from backend.app.schemas.split_url_config import (
     SplitUrlConfig,
     SplitUrlVariant,
 )

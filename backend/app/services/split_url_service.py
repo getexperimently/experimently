@@ -7,7 +7,7 @@ MD5 hashing of the user ID combined with the experiment key.
 
 import hashlib
 
-from backend.app.schemas.split_url import SplitUrlConfig, SplitUrlVariant
+from backend.app.schemas.split_url_config import SplitUrlConfig, SplitUrlVariant
 
 
 def get_cookie_name(experiment_key: str) -> str:

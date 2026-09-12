@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { CustomRole } from '@/types/admin';
-import { AdminService } from '@/services/admin';
+import { RbacService } from '@ee/rbac';
 import { PermissionCheckboxGrid } from './PermissionCheckboxGrid';
 
 interface CreateRoleModalProps {
@@ -51,13 +51,13 @@ export function CreateRoleModal({
 
     try {
       if (isEditMode && role) {
-        await AdminService.updateRole(role.name, {
+        await RbacService.updateRole(role.name, {
           name,
           description,
           permissions,
         });
       } else {
-        await AdminService.createRole({ name, description, permissions });
+        await RbacService.createRole({ name, description, permissions });
       }
       onSuccess();
     } catch (err) {

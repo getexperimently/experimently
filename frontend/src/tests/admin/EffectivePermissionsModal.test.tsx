@@ -1,11 +1,11 @@
 import React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import { EffectivePermissionsModal } from '@/components/admin/users/EffectivePermissionsModal';
-import { AdminService } from '@/services/admin';
+import { RbacService } from '@ee/rbac';
 
-jest.mock('@/services/admin');
+jest.mock('@ee/rbac');
 
-const mockGetUserPermissions = AdminService.getUserPermissions as jest.Mock;
+const mockGetUserPermissions = RbacService.getUserPermissions as jest.Mock;
 
 beforeEach(() => {
   jest.clearAllMocks();

@@ -1,0 +1,112 @@
+name: 🐛 Bug report
+description: Something in Experimently does not behave as documented.
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Not for security issues.** If this bug lets someone read data they
+        should not, bypass authentication or authorisation, forge an audit
+        record, or circumvent a licence check, close this form and follow
+        [SECURITY.md](../blob/main/SECURITY.md) instead. Public issues are the
+        disclosure.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you saw, and what you expected instead.
+      placeholder: |
+        Expected: /api/v1/tracking/assign returns the sticky variant.
+        Actual: it returns control with assigned=false on the second call.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: >-
+        The smallest sequence that shows the problem. A curl command, a failing
+        test, or a seed script beats a description.
+      placeholder: |
+        1. make dev
+        2. curl -X POST localhost:8000/api/v1/auth/login -d '...'
+        3. curl -X POST localhost:8000/api/v1/tracking/assign -H 'X-API-Key: ...' -d '...'
+        4. Repeat step 3 -> different variant
+    validations:
+      required: true
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - Backend API
+        - Background scheduler (rollout / safety / bandit / metrics)
+        - Lambda function
+        - Dashboard
+        - SDK
+        - Docker / docker-compose
+        - Infrastructure (CDK)
+        - Demo application
+        - Documentation
+        - Not sure
+    validations:
+      required: true
+
+  - type: input
+    id: sdk
+    attributes:
+      label: Which SDK, if the component is an SDK
+      placeholder: "sdk/python 1.2.0"
+
+  - type: dropdown
+    id: edition
+    attributes:
+      label: Edition
+      options:
+        - Community (no licence key)
+        - Enterprise (licence key active)
+        - Enterprise (grace or expired)
+        - Not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: >-
+        Version or commit SHA, how you are running it, OS, Python and Node
+        versions, and the value of ENVIRONMENT and AUTH_PROVIDER.
+      placeholder: |
+        Version: v1.0.0 / commit abc1234
+        Running: docker compose up
+        OS: macOS 15.2 (arm64)
+        ENVIRONMENT=development AUTH_PROVIDER=local
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs, stack trace or failing test output
+      description: >-
+        Paste the relevant part, not the whole file. **Redact API keys, licence
+        keys, bearer tokens, connection strings and user identifiers before you
+        paste.**
+      render: shell
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and this is not a duplicate.
+          required: true
+        - label: This is not a security vulnerability (see SECURITY.md).
+          required: true
+        - label: I have redacted every credential, token and identifier from the text above.
+          required: true
