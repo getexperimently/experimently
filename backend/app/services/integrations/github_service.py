@@ -3,6 +3,7 @@ GitHub integration service.
 Creates/updates GitHub issues and adds comments linked to platform experiments.
 All methods swallow exceptions — GitHub failures never disrupt platform.
 """
+
 import hashlib
 import hmac as hmac_lib
 import logging
@@ -185,9 +186,12 @@ class GitHubService:
             return False
         if not signature_header or not signature_header.startswith("sha256="):
             return False
-        expected = "sha256=" + hmac_lib.new(
-            self._webhook_secret.encode(), payload_body, hashlib.sha256
-        ).hexdigest()
+        expected = (
+            "sha256="
+            + hmac_lib.new(
+                self._webhook_secret.encode(), payload_body, hashlib.sha256
+            ).hexdigest()
+        )
         return hmac_lib.compare_digest(expected, signature_header)
 
     def parse_webhook_event(

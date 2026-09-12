@@ -12,13 +12,12 @@ Key methods:
 - Long-running experiment risk detection
 """
 
-import math
 import logging
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple, Any
+import math
+from dataclasses import dataclass
 from enum import Enum
+from typing import Any, Dict, List, Optional
 
-import numpy as np
 from scipy import stats
 
 logger = logging.getLogger(__name__)
@@ -55,6 +54,7 @@ class EvidenceStrength(str, Enum):
 @dataclass
 class MSPRTResult:
     """Result of an mSPRT computation."""
+
     lambda_ratio: float
     always_valid_p_value: float
     can_stop: bool
@@ -65,6 +65,7 @@ class MSPRTResult:
 @dataclass
 class ConfidenceSequence:
     """An always-valid confidence interval."""
+
     lower: float
     upper: float
     width: float
@@ -74,6 +75,7 @@ class ConfidenceSequence:
 @dataclass
 class AlphaSpendingBoundary:
     """A single boundary in an alpha spending schedule."""
+
     look_number: int
     cumulative_alpha: float
     boundary_z: float
@@ -83,6 +85,7 @@ class AlphaSpendingBoundary:
 @dataclass
 class EvidencePoint:
     """A single point along the evidence trajectory."""
+
     sample_size: int
     lambda_ratio: float
     always_valid_p_value: float
@@ -92,6 +95,7 @@ class EvidencePoint:
 @dataclass
 class LongRunningRisk:
     """Risk assessment for a long-running experiment."""
+
     is_at_risk: bool
     expected_duration_days: int
     actual_duration_days: int
@@ -102,6 +106,7 @@ class LongRunningRisk:
 @dataclass
 class SequentialAnalysis:
     """Full sequential analysis result for an experiment."""
+
     method: SequentialTestingMethod
     msprt_result: Optional[MSPRTResult]
     confidence_sequence: Optional[ConfidenceSequence]
@@ -187,7 +192,7 @@ class SequentialTestingService:
         # Lambda_n = sqrt(V_n / (V_n + tau^2)) * exp(tau^2 * Z_n^2 / (2*(V_n + tau^2)))
         ratio = V_n / (V_n + tau_squared)
         lambda_ratio = math.sqrt(ratio) * math.exp(
-            tau_squared * Z_n ** 2 / (2.0 * (V_n + tau_squared))
+            tau_squared * Z_n**2 / (2.0 * (V_n + tau_squared))
         )
 
         can_stop = lambda_ratio >= boundary
@@ -233,7 +238,10 @@ class SequentialTestingService:
 
         if control_total == 0 or treatment_total == 0:
             return ConfidenceSequence(
-                lower=-1.0, upper=1.0, width=2.0, sample_size=sample_size,
+                lower=-1.0,
+                upper=1.0,
+                width=2.0,
+                sample_size=sample_size,
             )
 
         p_c = control_successes / control_total
@@ -254,7 +262,10 @@ class SequentialTestingService:
         width = upper - lower
 
         return ConfidenceSequence(
-            lower=lower, upper=upper, width=width, sample_size=sample_size,
+            lower=lower,
+            upper=upper,
+            width=width,
+            sample_size=sample_size,
         )
 
     def compute_alpha_spending(
@@ -281,7 +292,9 @@ class SequentialTestingService:
         if spending_function == SpendingFunction.POCOCK:
             boundaries = self._pocock_spending(current_look, planned_looks, alpha)
         else:
-            boundaries = self._obrien_fleming_spending(current_look, planned_looks, alpha)
+            boundaries = self._obrien_fleming_spending(
+                current_look, planned_looks, alpha
+            )
 
         return boundaries
 
@@ -368,9 +381,7 @@ class SequentialTestingService:
             if required_sample_size > 0
             else 0.0
         )
-        slow_collection = (
-            fraction_of_duration >= 0.5 and fraction_of_samples < 0.5
-        )
+        slow_collection = fraction_of_duration >= 0.5 and fraction_of_samples < 0.5
 
         is_at_risk = duration_exceeded or slow_collection
 
@@ -503,7 +514,8 @@ class SequentialTestingService:
 
     @staticmethod
     def _classify_evidence(
-        lambda_ratio: float, boundary: float,
+        lambda_ratio: float,
+        boundary: float,
     ) -> EvidenceStrength:
         """
         Classify the strength of evidence from a lambda ratio.
@@ -527,7 +539,9 @@ class SequentialTestingService:
 
     @staticmethod
     def _obrien_fleming_spending(
-        current_look: int, planned_looks: int, alpha: float,
+        current_look: int,
+        planned_looks: int,
+        alpha: float,
     ) -> List[AlphaSpendingBoundary]:
         """
         Compute O'Brien-Fleming alpha spending boundaries.
@@ -544,7 +558,9 @@ class SequentialTestingService:
         for i in range(1, current_look + 1):
             t_i = i / planned_looks
             # Cumulative alpha spent through look i
-            cumulative_alpha = 2.0 * (1.0 - stats.norm.cdf(z_alpha_half / math.sqrt(t_i)))
+            cumulative_alpha = 2.0 * (
+                1.0 - stats.norm.cdf(z_alpha_half / math.sqrt(t_i))
+            )
             # Ensure we don't exceed the total alpha budget
             cumulative_alpha = min(cumulative_alpha, alpha)
 
@@ -567,7 +583,9 @@ class SequentialTestingService:
 
     @staticmethod
     def _pocock_spending(
-        current_look: int, planned_looks: int, alpha: float,
+        current_look: int,
+        planned_looks: int,
+        alpha: float,
     ) -> List[AlphaSpendingBoundary]:
         """
         Compute Pocock alpha spending boundaries.

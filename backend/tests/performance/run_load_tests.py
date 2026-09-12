@@ -30,6 +30,7 @@ Exit codes:
     0 — all SLA targets met
     1 — one or more SLA targets violated, or test infrastructure error
 """
+
 import argparse
 import os
 import subprocess
@@ -43,16 +44,16 @@ _REPO_ROOT = Path(__file__).resolve().parents[4]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from backend.tests.performance.validators import (
-    RequestStats,
-    ValidationResult,
-    parse_locust_csv,
-    generate_report,
-    validate_against_target,
-)
 from backend.tests.performance.specs.performance_targets import (
     PERFORMANCE_TARGETS,
     PerformanceTarget,
+)
+from backend.tests.performance.validators import (
+    RequestStats,
+    ValidationResult,
+    generate_report,
+    parse_locust_csv,
+    validate_against_target,
 )
 
 # Default paths
@@ -198,8 +199,8 @@ def _wait_for_server(host: str, timeout_seconds: int = 30) -> bool:
     Returns:
         True if the server became ready within the timeout; False otherwise.
     """
-    import urllib.request
     import urllib.error
+    import urllib.request
 
     health_url = f"{host}/health"
     deadline = time.monotonic() + timeout_seconds
@@ -249,12 +250,18 @@ def _run_locust(
         "-m",
         "locust",
         "--headless",
-        "--host", host,
-        "--users", str(users),
-        "--spawn-rate", str(spawn_rate),
-        "--run-time", duration,
-        "--locustfile", locustfile,
-        "--csv", csv_prefix,
+        "--host",
+        host,
+        "--users",
+        str(users),
+        "--spawn-rate",
+        str(spawn_rate),
+        "--run-time",
+        duration,
+        "--locustfile",
+        locustfile,
+        "--csv",
+        csv_prefix,
         "--csv-full-history",
         "--only-summary",
     ]

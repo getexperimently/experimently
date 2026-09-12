@@ -17,7 +17,7 @@ The ID is:
 """
 
 import uuid
-from typing import Callable, Awaitable
+from typing import Awaitable, Callable
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
@@ -34,9 +34,7 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
         request: Request,
         call_next: Callable[[Request], Awaitable[Response]],
     ) -> Response:
-        request_id: str = request.headers.get(
-            "X-Request-ID", str(uuid.uuid4())
-        )
+        request_id: str = request.headers.get("X-Request-ID", str(uuid.uuid4()))
 
         # Bind to the current async context so all log lines in this request
         # automatically include request_id, path, and method.

@@ -5,6 +5,7 @@ These are the SLA contracts. Tests validate actual performance meets these targe
 Each PerformanceTarget defines the acceptable latency percentiles and minimum
 throughput for a given endpoint under load.
 """
+
 from dataclasses import dataclass, field
 
 

@@ -17,11 +17,12 @@ import os
 import pytest
 import requests
 
-from backend.tests.realistic.data_generator import make_ab_test_scenario, PlatformSeeder
-
+from backend.tests.realistic.data_generator import PlatformSeeder, make_ab_test_scenario
 
 API_URL = "http://localhost:8000"
-SKIP_REASON = "Realistic scenario tests require a running platform (set RUN_REALISTIC=1)"
+SKIP_REASON = (
+    "Realistic scenario tests require a running platform (set RUN_REALISTIC=1)"
+)
 
 # Applied only to tests that make live HTTP requests to the platform.
 needs_platform = pytest.mark.skipif(
@@ -74,7 +75,9 @@ class TestABTestLifecycle:
                 }
             ],
         }
-        resp = requests.post(f"{API_URL}/api/v1/experiments", json=payload, headers=headers, timeout=15)
+        resp = requests.post(
+            f"{API_URL}/api/v1/experiments", json=payload, headers=headers, timeout=15
+        )
         assert resp.status_code == 201, resp.text
         data = resp.json()
         assert data["status"] == "draft"
@@ -119,7 +122,9 @@ class TestABTestLifecycle:
         scenario = make_ab_test_scenario(seed=42)
         result = scenario.generate()
 
-        expected_events = int(scenario.users * (scenario.control_cvr + scenario.treatment_cvr) / 2)
+        expected_events = int(
+            scenario.users * (scenario.control_cvr + scenario.treatment_cvr) / 2
+        )
         actual_events = len(result.events)
         tolerance = expected_events * 0.20
 
@@ -136,8 +141,9 @@ class TestABTestLifecycle:
         We classify users by their assignment time relative to _start_date and then
         compare the conversion rate of those two cohorts.
         """
-        from backend.tests.realistic.data_generator import make_novelty_scenario
         from datetime import timedelta
+
+        from backend.tests.realistic.data_generator import make_novelty_scenario
 
         scenario = make_novelty_scenario(seed=7)
         result = scenario.generate()

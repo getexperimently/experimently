@@ -9,6 +9,7 @@ context:
 Rows created here (flags + the metric rows an evaluation records) are removed
 again in the fixture teardown.
 """
+
 import json
 from urllib.parse import quote
 
@@ -183,14 +184,14 @@ class TestPostEvaluate:
 class TestUserFlagsWithContext:
     def test_context_query_param(self, admin_client, targeted_flag):
         on = admin_client.get(
-            f"/api/v1/feature-flags/user/dev-12",
+            "/api/v1/feature-flags/user/dev-12",
             params={"context": json.dumps(IPHONE_15)},
         )
         assert on.status_code == 200, on.text
         assert on.json()[targeted_flag.key] is True
 
         off = admin_client.get(
-            f"/api/v1/feature-flags/user/dev-12",
+            "/api/v1/feature-flags/user/dev-12",
             params={"context": json.dumps(PIXEL_7)},
         )
         assert off.status_code == 200, off.text

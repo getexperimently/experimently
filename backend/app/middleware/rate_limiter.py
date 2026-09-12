@@ -8,8 +8,8 @@ response and records Prometheus counters for hits and rejections.
 """
 
 import logging
-import time
 import threading
+import time
 from collections import defaultdict, deque
 from typing import Callable, Dict, Optional, Tuple
 
@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # In-memory fallback limiter
 # ---------------------------------------------------------------------------
+
 
 class SlidingWindowRateLimiter:
     """
@@ -69,6 +70,7 @@ class SlidingWindowRateLimiter:
 # Redis-backed rate limiter
 # ---------------------------------------------------------------------------
 
+
 class RedisRateLimiter:
     """
     Fixed-window rate limiter backed by Redis ``INCR`` + ``EXPIRE``.
@@ -111,9 +113,15 @@ class RedisRateLimiter:
                 # Test connectivity
                 self._redis_client.ping()
                 self._redis_available = True
-                logger.info("Rate limiter connected to Redis at %s:%s", self._redis_host, self._redis_port)
+                logger.info(
+                    "Rate limiter connected to Redis at %s:%s",
+                    self._redis_host,
+                    self._redis_port,
+                )
             except Exception as exc:
-                logger.warning("Rate limiter Redis unavailable, using in-memory fallback: %s", exc)
+                logger.warning(
+                    "Rate limiter Redis unavailable, using in-memory fallback: %s", exc
+                )
                 self._redis_client = None
                 self._redis_available = False
         return self._redis_client
@@ -206,6 +214,7 @@ def resolve_rate_limit(
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _get_client_ip(request: Request) -> str:
     """Extract the real client IP, respecting ``X-Forwarded-For`` if present."""
     forwarded_for = request.headers.get("X-Forwarded-For")
@@ -217,6 +226,7 @@ def _get_client_ip(request: Request) -> str:
 # ---------------------------------------------------------------------------
 # Middleware
 # ---------------------------------------------------------------------------
+
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
     """
@@ -237,7 +247,11 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             from backend.app.core.config import settings
 
             self._sdk_limit = int(
-                getattr(settings, "SDK_RATE_LIMIT_PER_MINUTE", DEFAULT_SDK_RATE_LIMIT_PER_MINUTE)
+                getattr(
+                    settings,
+                    "SDK_RATE_LIMIT_PER_MINUTE",
+                    DEFAULT_SDK_RATE_LIMIT_PER_MINUTE,
+                )
             )
             self._limiter: object = RedisRateLimiter(
                 redis_host=settings.REDIS_HOST,
@@ -263,7 +277,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         # Record Prometheus metrics
         try:
-            from backend.app.core.metrics import record_rate_limit_hit, record_rate_limit_rejection
+            from backend.app.core.metrics import (
+                record_rate_limit_hit,
+                record_rate_limit_rejection,
+            )
 
             record_rate_limit_hit(path)
             if not allowed:

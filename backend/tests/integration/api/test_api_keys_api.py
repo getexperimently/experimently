@@ -16,7 +16,11 @@ from sqlalchemy.orm import sessionmaker
 
 from backend.app.api import deps
 from backend.app.core.config import settings
-from backend.app.core.security import create_local_access_token, get_password_hash, hash_api_key
+from backend.app.core.security import (
+    create_local_access_token,
+    get_password_hash,
+    hash_api_key,
+)
 from backend.app.main import app
 from backend.app.models.api_key import APIKey
 from backend.app.models.assignment import Assignment
@@ -109,7 +113,11 @@ class TestCreate:
 
     def test_create_returns_plaintext_once(self, client, db_session, developer):
         resp = _create(
-            client, developer, name="SDK key", description="ci", scopes=["read", "track"]
+            client,
+            developer,
+            name="SDK key",
+            description="ci",
+            scopes=["read", "track"],
         )
         assert resp.status_code == 201, resp.text
         body = resp.json()
@@ -119,7 +127,9 @@ class TestCreate:
         assert body["prefix"] == body["key"][:9]
         assert body["expires_at"] is None
 
-        row = db_session.query(APIKey).filter(APIKey.id == uuid.UUID(body["id"])).first()
+        row = (
+            db_session.query(APIKey).filter(APIKey.id == uuid.UUID(body["id"])).first()
+        )
         assert row is not None
         assert row.user_id == developer.id
         assert row.key == hash_api_key(body["key"])  # only the hash is stored
@@ -135,7 +145,10 @@ class TestCreate:
 
     def test_validation(self, client, developer):
         assert client.post(URL, json={}, headers=_auth(developer)).status_code == 422
-        assert client.post(URL, json={"name": "   "}, headers=_auth(developer)).status_code == 422
+        assert (
+            client.post(URL, json={"name": "   "}, headers=_auth(developer)).status_code
+            == 422
+        )
         assert (
             client.post(
                 URL, json={"name": "x", "scopes": ["a,b"]}, headers=_auth(developer)
@@ -162,7 +175,9 @@ class TestList:
     def test_requires_auth(self, client):
         assert client.get(URL).status_code == 401
 
-    def test_lists_only_own_keys_without_secret(self, client, developer, other_developer):
+    def test_lists_only_own_keys_without_secret(
+        self, client, developer, other_developer
+    ):
         mine = _create(client, developer, name="mine").json()
         _create(client, other_developer, name="theirs")
 
@@ -189,7 +204,10 @@ class TestList:
     def test_scopes_round_trip_as_list(self, client, developer):
         created = _create(client, developer, scopes=["read", "write"]).json()
         items = client.get(URL, headers=_auth(developer)).json()
-        assert next(i for i in items if i["id"] == created["id"])["scopes"] == ["read", "write"]
+        assert next(i for i in items if i["id"] == created["id"])["scopes"] == [
+            "read",
+            "write",
+        ]
 
     def test_all_requires_admin(self, client, developer):
         resp = client.get(f"{URL}?all=true", headers=_auth(developer))
@@ -211,7 +229,11 @@ class TestList:
 
     def test_inactive_keys_hidden_by_default(self, client, db_session, developer):
         created = _create(client, developer).json()
-        row = db_session.query(APIKey).filter(APIKey.id == uuid.UUID(created["id"])).first()
+        row = (
+            db_session.query(APIKey)
+            .filter(APIKey.id == uuid.UUID(created["id"]))
+            .first()
+        )
         row.is_active = False
         db_session.commit()
 
@@ -219,7 +241,9 @@ class TestList:
         assert created["id"] not in ids
         ids = {
             i["id"]
-            for i in client.get(f"{URL}?include_inactive=true", headers=_auth(developer)).json()
+            for i in client.get(
+                f"{URL}?include_inactive=true", headers=_auth(developer)
+            ).json()
         }
         assert created["id"] in ids
 
@@ -239,15 +263,22 @@ class TestDelete:
         assert resp.status_code == 204
         assert resp.content == b""
         assert (
-            db_session.query(APIKey).filter(APIKey.id == uuid.UUID(created["id"])).first() is None
+            db_session.query(APIKey)
+            .filter(APIKey.id == uuid.UUID(created["id"]))
+            .first()
+            is None
         )
 
-    def test_other_user_cannot_delete(self, client, db_session, developer, other_developer):
+    def test_other_user_cannot_delete(
+        self, client, db_session, developer, other_developer
+    ):
         created = _create(client, developer).json()
         resp = client.delete(f"{URL}/{created['id']}", headers=_auth(other_developer))
         assert resp.status_code == 403
         assert (
-            db_session.query(APIKey).filter(APIKey.id == uuid.UUID(created["id"])).first()
+            db_session.query(APIKey)
+            .filter(APIKey.id == uuid.UUID(created["id"]))
+            .first()
             is not None
         )
 
@@ -257,10 +288,16 @@ class TestDelete:
         assert resp.status_code == 204
 
     def test_unknown_id_404(self, client, developer):
-        assert client.delete(f"{URL}/{uuid.uuid4()}", headers=_auth(developer)).status_code == 404
+        assert (
+            client.delete(f"{URL}/{uuid.uuid4()}", headers=_auth(developer)).status_code
+            == 404
+        )
 
     def test_malformed_id_422(self, client, developer):
-        assert client.delete(f"{URL}/not-a-uuid", headers=_auth(developer)).status_code == 422
+        assert (
+            client.delete(f"{URL}/not-a-uuid", headers=_auth(developer)).status_code
+            == 422
+        )
 
     def test_deleted_key_no_longer_authenticates(self, client, developer):
         created = _create(client, developer).json()
@@ -307,16 +344,23 @@ def active_experiment(db_session, admin):
     db_session.refresh(experiment)
     yield experiment
     db_session.rollback()
-    db_session.query(Assignment).filter(Assignment.experiment_id == experiment.id).delete()
+    db_session.query(Assignment).filter(
+        Assignment.experiment_id == experiment.id
+    ).delete()
     db_session.commit()
 
 
 class TestKeyAuthenticatesSdkTraffic:
-    def test_tracking_assign_with_created_key(self, client, developer, active_experiment):
+    def test_tracking_assign_with_created_key(
+        self, client, developer, active_experiment
+    ):
         key = _create(client, developer, name="sdk").json()["key"]
         resp = client.post(
             "/api/v1/tracking/assign",
-            json={"experiment_key": active_experiment.key, "user_id": f"u-{uuid.uuid4().hex[:6]}"},
+            json={
+                "experiment_key": active_experiment.key,
+                "user_id": f"u-{uuid.uuid4().hex[:6]}",
+            },
             headers={"X-API-Key": key},
         )
         assert resp.status_code == 200, resp.text

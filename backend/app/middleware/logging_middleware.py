@@ -6,15 +6,14 @@ This middleware logs incoming requests and outgoing responses using structured J
 """
 
 import os
-import time
 import uuid
-from typing import Callable, Awaitable, Dict, Any
+from typing import Awaitable, Callable
 
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.types import ASGIApp
 
-from backend.app.core.logging import get_logger, LogContext
+from backend.app.core.logging import LogContext, get_logger
 from backend.app.utils.masking import mask_request_data, mask_sensitive_data
 from backend.app.utils.metrics import MetricsCollector
 
@@ -27,7 +26,9 @@ class LoggingMiddleware(BaseHTTPMiddleware):
     def __init__(self, app: ASGIApp):
         """Initialize the middleware."""
         super().__init__(app)
-        self.collect_request_body = os.getenv("COLLECT_REQUEST_BODY", "true").lower() in ("true", "1", "yes")
+        self.collect_request_body = os.getenv(
+            "COLLECT_REQUEST_BODY", "true"
+        ).lower() in ("true", "1", "yes")
 
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
         """Process the request and log details."""
@@ -93,10 +94,14 @@ class LoggingMiddleware(BaseHTTPMiddleware):
                     "response": masked_response_data,
                     "metrics": {
                         "process_time_ms": performance_metrics.get("duration_ms", 0),
-                        "memory_usage_mb": performance_metrics.get("memory_change_mb", 0),
-                        "total_memory_mb": performance_metrics.get("total_memory_mb", 0),
+                        "memory_usage_mb": performance_metrics.get(
+                            "memory_change_mb", 0
+                        ),
+                        "total_memory_mb": performance_metrics.get(
+                            "total_memory_mb", 0
+                        ),
                         "cpu_percent": performance_metrics.get("cpu_percent", 0),
-                    }
+                    },
                 }
 
                 # Log successful response
@@ -104,7 +109,9 @@ class LoggingMiddleware(BaseHTTPMiddleware):
 
                 # Add custom headers
                 response.headers["X-Request-ID"] = request_id
-                response.headers["X-Process-Time"] = str(performance_metrics.get("duration_ms", 0) / 1000)
+                response.headers["X-Process-Time"] = str(
+                    performance_metrics.get("duration_ms", 0) / 1000
+                )
 
                 return response
 
@@ -118,10 +125,14 @@ class LoggingMiddleware(BaseHTTPMiddleware):
                     "error": str(e),
                     "metrics": {
                         "process_time_ms": performance_metrics.get("duration_ms", 0),
-                        "memory_usage_mb": performance_metrics.get("memory_change_mb", 0),
-                        "total_memory_mb": performance_metrics.get("total_memory_mb", 0),
+                        "memory_usage_mb": performance_metrics.get(
+                            "memory_change_mb", 0
+                        ),
+                        "total_memory_mb": performance_metrics.get(
+                            "total_memory_mb", 0
+                        ),
                         "cpu_percent": performance_metrics.get("cpu_percent", 0),
-                    }
+                    },
                 }
 
                 ctx.error("Request failed", exc_info=True, extra=error_data)
@@ -150,16 +161,11 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         metrics_collector = MetricsCollector()
         metrics_collector.start()
 
-        # Capture start time
-        start_time = time.time()
-
-        # Log incoming request (masked)
+        # Log incoming request (masked). Timing comes from the metrics
+        # collector started above.
         masked_path = request.url.path
-        masked_headers = mask_sensitive_data(dict(request.headers))
 
-        logger.info(
-            f"Request {request_id} started: {request.method} {masked_path}"
-        )
+        logger.info(f"Request {request_id} started: {request.method} {masked_path}")
 
         # Process the request
         try:
@@ -172,13 +178,15 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
             # Log successful response
             logger.info(
                 f"Request {request_id} completed: {response.status_code} "
-                f"({performance_metrics.get('duration_ms', 0)/1000:.3f}s) "
+                f"({performance_metrics.get('duration_ms', 0) / 1000:.3f}s) "
                 f"Memory: {performance_metrics.get('total_memory_mb', 0):.2f}MB "
                 f"CPU: {performance_metrics.get('cpu_percent', 0):.2f}%"
             )
 
             # Add custom headers
-            response.headers["X-Process-Time"] = str(performance_metrics.get("duration_ms", 0) / 1000)
+            response.headers["X-Process-Time"] = str(
+                performance_metrics.get("duration_ms", 0) / 1000
+            )
             response.headers["X-Request-ID"] = request_id
 
             return response
@@ -190,7 +198,7 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
 
             # Log exception
             logger.exception(
-                f"Request {request_id} failed after {performance_metrics.get('duration_ms', 0)/1000:.3f}s: {str(e)} "
+                f"Request {request_id} failed after {performance_metrics.get('duration_ms', 0) / 1000:.3f}s: {e!s} "
                 f"Memory: {performance_metrics.get('total_memory_mb', 0):.2f}MB "
                 f"CPU: {performance_metrics.get('cpu_percent', 0):.2f}%"
             )

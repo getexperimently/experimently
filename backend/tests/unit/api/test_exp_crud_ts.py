@@ -14,8 +14,8 @@ except ImportError as e:
     print(f"Failed to import app: {e}")
     # Try an alternative import path
     try:
-        import sys
         import os
+        import sys
 
         # Add the project root to the path
         project_root = os.path.abspath(

@@ -27,7 +27,6 @@ import boto3
 from botocore.exceptions import ClientError
 
 from backend.app.schemas.realtime_counters import (
-    BulkIncrementRequest,
     BulkIncrementResponse,
     CounterType,
     ExperimentCounters,
@@ -140,9 +139,7 @@ class DynamoDBCounterService:
         sk_prefix = "VARIANT#"
 
         response = self._table.query(
-            KeyConditionExpression=(
-                "pk = :pk AND begins_with(sk, :sk_prefix)"
-            ),
+            KeyConditionExpression=("pk = :pk AND begins_with(sk, :sk_prefix)"),
             ExpressionAttributeValues={
                 ":pk": pk_value,
                 ":sk_prefix": sk_prefix,
@@ -160,22 +157,20 @@ class DynamoDBCounterService:
         for item in items:
             # Extract variant_id from the sort key "VARIANT#{id}"
             sk: str = item.get("sk", "")
-            variant_id = sk[len("VARIANT#"):] if sk.startswith("VARIANT#") else sk
+            variant_id = sk[len("VARIANT#") :] if sk.startswith("VARIANT#") else sk
 
             assignments = int(item.get("assignments", 0))
             events = int(item.get("events", 0))
             conversions = int(item.get("conversions", 0))
             item_ts = item.get("last_updated")
 
-            conversion_rate = (
-                conversions / assignments if assignments > 0 else 0.0
-            )
+            conversion_rate = conversions / assignments if assignments > 0 else 0.0
 
             variant_counters.append(
                 VariantCounters(
                     variant_id=variant_id,
                     variant_name=variant_id,  # name not stored; use id as fallback
-                    is_control=False,         # cannot determine from counter data alone
+                    is_control=False,  # cannot determine from counter data alone
                     assignments=assignments,
                     events=events,
                     conversions=conversions,
@@ -320,12 +315,9 @@ class DynamoDBCounterService:
             set_parts.append("last_updated = :ts")
             update_expr = "SET " + ", ".join(set_parts)
 
-            expr_names = {
-                f"#attr_{i}": attr
-                for i, attr in enumerate(attrs_to_reset)
-            }
+            expr_names = {f"#attr_{i}": attr for i, attr in enumerate(attrs_to_reset)}
             expr_values = {
-                f":zero": Decimal(0),
+                ":zero": Decimal(0),
                 ":ts": now,
             }
 

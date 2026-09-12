@@ -19,6 +19,8 @@ from backend.app.main import app
 from backend.app.models.user import User
 from backend.app.schemas.results import (
     ExperimentResultsResponse,
+)
+from backend.app.schemas.results import (
     SRMResult as SRMSchema,
 )
 from backend.app.services.analysis_service import AnalysisService
@@ -28,7 +30,6 @@ from backend.app.services.srm_service import (
     compute_srm,
     compute_srm_for_experiment,
 )
-
 
 # ---------------------------------------------------------------------------
 # compute_srm — pure function
@@ -238,7 +239,9 @@ class TestComputeSrmForExperiment:
     def test_missing_optimization_type_is_treated_as_fixed(self):
         """Legacy rows with a NULL optimization_type still get the test."""
         a, b = uuid.uuid4(), uuid.uuid4()
-        db = self._db([(a, 50), (b, 50)], [(a, 6000), (b, 4000)], optimization_type=None)
+        db = self._db(
+            [(a, 50), (b, 50)], [(a, 6000), (b, 4000)], optimization_type=None
+        )
 
         result = compute_srm_for_experiment(db, uuid.uuid4())
         assert result is not None and result.warning is True
@@ -340,12 +343,15 @@ class TestResultsEndpointSrm:
             {str(CONTROL_UUID): 6000, str(TREATMENT_UUID): 4000},
             {str(CONTROL_UUID): 50, str(TREATMENT_UUID): 50},
         )
-        with patch.object(
-            AnalysisService, "get_experiment_results", return_value=_results_dict()
-        ), patch(
-            "backend.app.api.v1.endpoints.results.compute_srm_for_experiment",
-            return_value=srm,
-        ) as mock_srm:
+        with (
+            patch.object(
+                AnalysisService, "get_experiment_results", return_value=_results_dict()
+            ),
+            patch(
+                "backend.app.api.v1.endpoints.results.compute_srm_for_experiment",
+                return_value=srm,
+            ) as mock_srm,
+        ):
             response = client.get(
                 f"/api/v1/results/{EXPERIMENT_UUID}", params={"use_cache": "false"}
             )
@@ -364,11 +370,14 @@ class TestResultsEndpointSrm:
 
     @pytest.mark.unit
     def test_srm_null_when_undefined(self, client):
-        with patch.object(
-            AnalysisService, "get_experiment_results", return_value=_results_dict()
-        ), patch(
-            "backend.app.api.v1.endpoints.results.compute_srm_for_experiment",
-            return_value=None,
+        with (
+            patch.object(
+                AnalysisService, "get_experiment_results", return_value=_results_dict()
+            ),
+            patch(
+                "backend.app.api.v1.endpoints.results.compute_srm_for_experiment",
+                return_value=None,
+            ),
         ):
             response = client.get(
                 f"/api/v1/results/{EXPERIMENT_UUID}", params={"use_cache": "false"}
@@ -380,11 +389,14 @@ class TestResultsEndpointSrm:
 
     @pytest.mark.unit
     def test_srm_failure_never_fails_the_response(self, client):
-        with patch.object(
-            AnalysisService, "get_experiment_results", return_value=_results_dict()
-        ), patch(
-            "backend.app.api.v1.endpoints.results.compute_srm_for_experiment",
-            side_effect=RuntimeError("db down"),
+        with (
+            patch.object(
+                AnalysisService, "get_experiment_results", return_value=_results_dict()
+            ),
+            patch(
+                "backend.app.api.v1.endpoints.results.compute_srm_for_experiment",
+                side_effect=RuntimeError("db down"),
+            ),
         ):
             response = client.get(
                 f"/api/v1/results/{EXPERIMENT_UUID}", params={"use_cache": "false"}

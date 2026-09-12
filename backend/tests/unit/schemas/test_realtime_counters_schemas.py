@@ -14,16 +14,15 @@ import pytest
 from pydantic import ValidationError
 
 from backend.app.schemas.realtime_counters import (
-    CounterType,
-    VariantCounters,
-    ExperimentCounters,
-    IncrementRequest,
-    IncrementResponse,
     BulkIncrementRequest,
     BulkIncrementResponse,
     CounterResetRequest,
+    CounterType,
+    ExperimentCounters,
+    IncrementRequest,
+    IncrementResponse,
+    VariantCounters,
 )
-
 
 # ---------------------------------------------------------------------------
 # CounterType enum

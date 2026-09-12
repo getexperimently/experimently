@@ -1,12 +1,13 @@
-from typing import List, Optional
 from datetime import datetime, timedelta
+from typing import List, Optional
+
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
-from pydantic import BaseModel, Field, ConfigDict
 
 from backend.app.api import deps
-from backend.app.models.user import User
 from backend.app.models.api_key import APIKey
+from backend.app.models.user import User
 
 router = APIRouter()
 
@@ -165,4 +166,4 @@ def delete_api_key(
     db.delete(api_key)
     db.commit()
 
-    return None
+    return

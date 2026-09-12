@@ -1,0 +1,85 @@
+name: Regression Guard
+
+# A pull request labelled `bug` has to add or change a test. The label is read
+# from the pull_request event payload (`github.event.pull_request.labels`), and
+# the workflow is re-triggered on `labeled`/`unlabeled` so the check re-runs the
+# moment someone applies or removes the label.
+#
+# The job always runs and always reports: a pull request without the `bug`
+# label passes immediately. That matters because a job skipped by a top-level
+# `if:` reports nothing at all, which leaves a required check pending forever.
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, labeled, unlabeled, ready_for_review]
+
+concurrency:
+  group: regression-guard-${{ github.head_ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  regression-guard:
+    name: regression-guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Require a test with every bug fix
+        env:
+          LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+
+          is_labelled() { printf '%s' "$LABELS" | grep -qiE "\"$1\""; }
+
+          if ! is_labelled bug; then
+            echo "Not labelled \`bug\` — nothing to enforce."
+            exit 0
+          fi
+
+          if is_labelled skip-regression-guard; then
+            echo "Labelled \`skip-regression-guard\` — the author has explained why in the description."
+            exit 0
+          fi
+
+          git fetch --no-tags --depth=1 origin "$BASE_SHA" 2>/dev/null || true
+          # Three dots: compare against the merge base, so a test file that
+          # changed on main after the fork point is not counted as this
+          # pull request's regression test.
+          CHANGED=$(git diff --name-only "$BASE_SHA"..."$HEAD_SHA")
+          echo "Files changed:"; echo "$CHANGED" | awk '{ print "  " $0 }'
+
+          # Anything that is a test: pytest files and directories, Jest/RTL
+          # specs, Playwright specs, and the per-SDK test trees.
+          TESTS=$(printf '%s\n' "$CHANGED" | grep -Ei \
+            -e '(^|/)tests?/' \
+            -e '(^|/)test_[^/]+\.py$' \
+            -e '[^/]+_test\.(py|go|exs|rb)$' \
+            -e '\.(test|spec)\.(t|j)sx?$' \
+            -e '(^|/)__tests__/' \
+            -e '(^|/)src/test/' \
+            -e 'Test[A-Za-z0-9]*\.(java|kt|cs)$' \
+            -e '(^|/)spec/' \
+            || true)
+
+          if [ -z "$TESTS" ]; then
+            echo
+            echo "::error::This pull request is labelled \`bug\` but changes no test file."
+            echo "Add the test that fails on the old code (mark it @pytest.mark.regression"
+            echo "for backend tests), or add the \`skip-regression-guard\` label and say in"
+            echo "the description why the fix cannot be tested."
+            exit 1
+          fi
+
+          echo
+          echo "Regression coverage found in:"
+          printf '%s\n' "$TESTS" | awk '{ print "  " $0 }'

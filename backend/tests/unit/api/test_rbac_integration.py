@@ -4,14 +4,19 @@ Tests for RBAC integration with Cognito groups.
 This module tests how Cognito groups map to application roles and permissions.
 """
 
-import pytest  # noqa: F401
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
-from fastapi import HTTPException  # noqa: F401
+import pytest
+from fastapi import HTTPException
 
 from backend.app.api.deps import get_current_user
+from backend.app.core.permissions import (
+    Action,
+    ResourceType,
+    check_ownership,
+    check_permission,
+)
 from backend.app.models.user import User, UserRole
-from backend.app.core.permissions import ResourceType, Action, check_permission, check_ownership
 
 
 class TestRBACIntegration:
@@ -42,7 +47,7 @@ class TestRBACIntegration:
                 "Admins": "admin",
                 "Developers": "developer",
                 "Analysts": "analyst",
-                "Viewers": "viewer"
+                "Viewers": "viewer",
             }
             mock_settings.COGNITO_ADMIN_GROUPS = ["Admins", "SuperUsers"]
             mock_settings.SYNC_ROLES_ON_LOGIN = True
@@ -55,7 +60,7 @@ class TestRBACIntegration:
             username="admin_user",
             email="admin@example.com",
             role=UserRole.ADMIN,
-            is_superuser=False  # Even without superuser flag, ADMIN role should have all permissions
+            is_superuser=False,  # Even without superuser flag, ADMIN role should have all permissions
         )
 
         # Test all resource types
@@ -72,7 +77,7 @@ class TestRBACIntegration:
             username="developer_user",
             email="developer@example.com",
             role=UserRole.DEVELOPER,
-            is_superuser=False
+            is_superuser=False,
         )
 
         # Experiment permissions - should have all
@@ -103,7 +108,7 @@ class TestRBACIntegration:
             username="analyst_user",
             email="analyst@example.com",
             role=UserRole.ANALYST,
-            is_superuser=False
+            is_superuser=False,
         )
 
         # Experiment permissions - should have READ and LIST only
@@ -134,18 +139,26 @@ class TestRBACIntegration:
             username="viewer_user",
             email="viewer@example.com",
             role=UserRole.VIEWER,
-            is_superuser=False
+            is_superuser=False,
         )
 
         # For most resources, VIEWER should have READ and LIST permissions only
         for resource_type in ResourceType:
             # VIEWERs can READ all resources
-            assert check_permission(user, resource_type, Action.READ) is True, f"VIEWER should have READ permission for {resource_type}"
+            assert check_permission(user, resource_type, Action.READ) is True, (
+                f"VIEWER should have READ permission for {resource_type}"
+            )
 
             # VIEWERs cannot CREATE, UPDATE, or DELETE any resources
-            assert check_permission(user, resource_type, Action.CREATE) is False, f"VIEWER should NOT have CREATE permission for {resource_type}"
-            assert check_permission(user, resource_type, Action.UPDATE) is False, f"VIEWER should NOT have UPDATE permission for {resource_type}"
-            assert check_permission(user, resource_type, Action.DELETE) is False, f"VIEWER should NOT have DELETE permission for {resource_type}"
+            assert check_permission(user, resource_type, Action.CREATE) is False, (
+                f"VIEWER should NOT have CREATE permission for {resource_type}"
+            )
+            assert check_permission(user, resource_type, Action.UPDATE) is False, (
+                f"VIEWER should NOT have UPDATE permission for {resource_type}"
+            )
+            assert check_permission(user, resource_type, Action.DELETE) is False, (
+                f"VIEWER should NOT have DELETE permission for {resource_type}"
+            )
 
             # Special handling for LIST permission based on actual RBAC configuration
             if resource_type in [
@@ -158,10 +171,14 @@ class TestRBACIntegration:
                 ResourceType.API_KEY,
             ]:
                 # According to RBAC configuration, VIEWERs can READ these resources but not LIST them
-                assert check_permission(user, resource_type, Action.LIST) is False, f"VIEWER should NOT have LIST permission for {resource_type}"
+                assert check_permission(user, resource_type, Action.LIST) is False, (
+                    f"VIEWER should NOT have LIST permission for {resource_type}"
+                )
             else:
                 # For other resources (EXPERIMENT, FEATURE_FLAG, REPORT), VIEWERs should have LIST permission
-                assert check_permission(user, resource_type, Action.LIST) is True, f"VIEWER should have LIST permission for {resource_type}"
+                assert check_permission(user, resource_type, Action.LIST) is True, (
+                    f"VIEWER should have LIST permission for {resource_type}"
+                )
 
     def test_superuser_overrides_role_permissions(self, mock_settings):
         """Test that superuser flag overrides role-based permissions."""
@@ -170,13 +187,15 @@ class TestRBACIntegration:
             username="super_viewer",
             email="super_viewer@example.com",
             role=UserRole.VIEWER,  # Lowest privilege role
-            is_superuser=True      # But superuser flag is set
+            is_superuser=True,  # But superuser flag is set
         )
 
         # Should have all permissions regardless of role
         for resource_type in ResourceType:
             for action in Action:
-                assert check_permission(user, resource_type, action) is True, f"Superuser should have {action} permission for {resource_type}"
+                assert check_permission(user, resource_type, action) is True, (
+                    f"Superuser should have {action} permission for {resource_type}"
+                )
 
     def test_ownership_check(self, mock_settings):
         """Test that ownership check works correctly."""
@@ -186,7 +205,7 @@ class TestRBACIntegration:
             username="owner_user",
             email="owner@example.com",
             role=UserRole.VIEWER,  # Limited permissions
-            is_superuser=False
+            is_superuser=False,
         )
 
         # Create a resource the user owns
@@ -201,23 +220,21 @@ class TestRBACIntegration:
         assert check_ownership(user, owned_resource) is True
         assert check_ownership(user, other_resource) is False
 
-    def test_cognito_groups_to_permissions_flow(self, mock_db_session, mock_auth_service, mock_settings):
+    def test_cognito_groups_to_permissions_flow(
+        self, mock_db_session, mock_auth_service, mock_settings
+    ):
         """Test the complete flow from Cognito groups to application permissions."""
         # Mock the Cognito response with developer group
         mock_auth_service.get_user_with_groups.return_value = {
             "username": "dev_user",
-            "attributes": {
-                "email": "dev@example.com"
-            },
-            "groups": ["Developers"]
+            "attributes": {"email": "dev@example.com"},
+            "groups": ["Developers"],
         }
 
         # Also mock the get_user method which is called first
         mock_auth_service.get_user.return_value = {
             "username": "dev_user",
-            "attributes": {
-                "email": "dev@example.com"
-            }
+            "attributes": {"email": "dev@example.com"},
         }
 
         # Create a new user (not in DB)
@@ -237,28 +254,37 @@ class TestRBACIntegration:
                     assert user.role == UserRole.DEVELOPER
 
                     # Verify permissions based on the role
-                    assert check_permission(user, ResourceType.EXPERIMENT, Action.CREATE) is True
-                    assert check_permission(user, ResourceType.FEATURE_FLAG, Action.UPDATE) is True
-                    assert check_permission(user, ResourceType.USER, Action.CREATE) is False
-                    assert check_permission(user, ResourceType.REPORT, Action.READ) is True
+                    assert (
+                        check_permission(user, ResourceType.EXPERIMENT, Action.CREATE)
+                        is True
+                    )
+                    assert (
+                        check_permission(user, ResourceType.FEATURE_FLAG, Action.UPDATE)
+                        is True
+                    )
+                    assert (
+                        check_permission(user, ResourceType.USER, Action.CREATE)
+                        is False
+                    )
+                    assert (
+                        check_permission(user, ResourceType.REPORT, Action.READ) is True
+                    )
 
-    def test_coginto_admin_group_to_superuser(self, mock_db_session, mock_auth_service, mock_settings):
+    def test_coginto_admin_group_to_superuser(
+        self, mock_db_session, mock_auth_service, mock_settings
+    ):
         """Test that users in Cognito admin groups get superuser status."""
         # Mock the Cognito response with admin group
         mock_auth_service.get_user_with_groups.return_value = {
             "username": "admin_user",
-            "attributes": {
-                "email": "admin@example.com"
-            },
-            "groups": ["Admins"]  # In COGNITO_ADMIN_GROUPS
+            "attributes": {"email": "admin@example.com"},
+            "groups": ["Admins"],  # In COGNITO_ADMIN_GROUPS
         }
 
         # Also mock the get_user method which is called first
         mock_auth_service.get_user.return_value = {
             "username": "admin_user",
-            "attributes": {
-                "email": "admin@example.com"
-            }
+            "attributes": {"email": "admin@example.com"},
         }
 
         # Create a new user (not in DB)
@@ -283,32 +309,30 @@ class TestRBACIntegration:
                         for action in Action:
                             assert check_permission(user, resource_type, action) is True
 
-    def test_role_changes_with_cognito_group_changes(self, mock_db_session, mock_auth_service, mock_settings):
+    def test_role_changes_with_cognito_group_changes(
+        self, mock_db_session, mock_auth_service, mock_settings
+    ):
         """Test that user roles update when Cognito groups change."""
         # Create existing user with VIEWER role
         existing_user = User(
             username="changing_user",
             email="changing@example.com",
             role=UserRole.VIEWER,
-            is_superuser=False
+            is_superuser=False,
         )
         mock_db_session.query().filter().first.return_value = existing_user
 
         # Mock the Cognito response with new role (developer)
         mock_auth_service.get_user_with_groups.return_value = {
             "username": "changing_user",
-            "attributes": {
-                "email": "changing@example.com"
-            },
-            "groups": ["Developers"]  # Now in Developers group
+            "attributes": {"email": "changing@example.com"},
+            "groups": ["Developers"],  # Now in Developers group
         }
 
         # Also mock the get_user method which is called first
         mock_auth_service.get_user.return_value = {
             "username": "changing_user",
-            "attributes": {
-                "email": "changing@example.com"
-            }
+            "attributes": {"email": "changing@example.com"},
         }
 
         # Call get_current_user to update the user based on new Cognito groups
@@ -325,5 +349,11 @@ class TestRBACIntegration:
                     assert user.role == UserRole.DEVELOPER
 
                     # Verify permissions reflect the new role
-                    assert check_permission(user, ResourceType.EXPERIMENT, Action.CREATE) is True  # Developer can create
-                    assert check_permission(user, ResourceType.USER, Action.CREATE) is False  # But can't create users
+                    assert (
+                        check_permission(user, ResourceType.EXPERIMENT, Action.CREATE)
+                        is True
+                    )  # Developer can create
+                    assert (
+                        check_permission(user, ResourceType.USER, Action.CREATE)
+                        is False
+                    )  # But can't create users

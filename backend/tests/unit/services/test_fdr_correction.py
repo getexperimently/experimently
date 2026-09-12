@@ -12,11 +12,11 @@ Tests cover:
 """
 
 import pytest
+
 from backend.app.services.fdr_correction_service import (
     BenjaminiHochbergService,
     FDRResult,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -114,7 +114,7 @@ class TestBHProcedureBasic:
         """
         service = _make_service()
         raw_p = [0.001, 0.008, 0.039, 0.041, 0.042, 0.06, 0.074, 0.205, 0.212, 0.391]
-        p_values = {f"metric_{i+1}": p for i, p in enumerate(raw_p)}
+        p_values = {f"metric_{i + 1}": p for i, p in enumerate(raw_p)}
         results = service.correct(p_values, fdr_threshold=0.05)
         n_significant = sum(1 for r in results if r.is_significant)
         assert n_significant == 2, (
@@ -130,7 +130,7 @@ class TestBHProcedureBasic:
         """
         service = _make_service()
         raw_p = [0.001, 0.008, 0.039, 0.041, 0.042, 0.06, 0.074, 0.205, 0.212, 0.391]
-        p_values = {f"metric_{i+1}": p for i, p in enumerate(raw_p)}
+        p_values = {f"metric_{i + 1}": p for i, p in enumerate(raw_p)}
         results = service.correct(p_values, fdr_threshold=0.05)
 
         # Sort by rank
@@ -138,9 +138,7 @@ class TestBHProcedureBasic:
         significant_flags = [r.is_significant for r in results]
 
         # Only ranks 1-2 should be significant
-        assert all(significant_flags[:2]), (
-            "Metrics with rank 1-2 should be significant"
-        )
+        assert all(significant_flags[:2]), "Metrics with rank 1-2 should be significant"
         assert not any(significant_flags[2:]), (
             "Metrics with rank 3-10 should NOT be significant"
         )
@@ -218,20 +216,22 @@ class TestBHMonotonicity:
         results = service.correct(p_values)
         results.sort(key=lambda r: r.rank)
         raw_pvals = [r.raw_p_value for r in results]
-        assert raw_pvals == sorted(raw_pvals), "Raw p-values should be sorted ascending by rank"
+        assert raw_pvals == sorted(raw_pvals), (
+            "Raw p-values should be sorted ascending by rank"
+        )
 
     def test_adjusted_p_values_non_decreasing(self):
         """BH-adjusted p-values are non-decreasing (monotone step-up)."""
         service = _make_service()
         raw_p = [0.001, 0.008, 0.039, 0.041, 0.042, 0.06, 0.074, 0.205, 0.212, 0.391]
-        p_values = {f"m{i+1}": p for i, p in enumerate(raw_p)}
+        p_values = {f"m{i + 1}": p for i, p in enumerate(raw_p)}
         results = service.correct(p_values)
         results.sort(key=lambda r: r.rank)
         adj_pvals = [r.adjusted_p_value for r in results]
         for i in range(len(adj_pvals) - 1):
             assert adj_pvals[i] <= adj_pvals[i + 1], (
-                f"Adjusted p-values not monotone: {adj_pvals[i]} > {adj_pvals[i+1]} "
-                f"at positions {i}, {i+1}"
+                f"Adjusted p-values not monotone: {adj_pvals[i]} > {adj_pvals[i + 1]} "
+                f"at positions {i}, {i + 1}"
             )
 
     def test_adjusted_p_values_bounded_by_1(self):
@@ -252,7 +252,7 @@ class TestBHMonotonicity:
         """Significant metrics all have smaller raw p-values than non-significant ones."""
         service = _make_service()
         raw_p = [0.001, 0.008, 0.039, 0.041, 0.042, 0.06, 0.074, 0.205, 0.212, 0.391]
-        p_values = {f"m{i+1}": p for i, p in enumerate(raw_p)}
+        p_values = {f"m{i + 1}": p for i, p in enumerate(raw_p)}
         results = service.correct(p_values, fdr_threshold=0.05)
 
         significant_p = [r.raw_p_value for r in results if r.is_significant]
@@ -276,7 +276,7 @@ class TestBHThresholdSensitivity:
         """FDR=0.10 yields at least as many discoveries as FDR=0.05."""
         service = _make_service()
         raw_p = [0.001, 0.008, 0.039, 0.041, 0.042, 0.06, 0.074, 0.205, 0.212, 0.391]
-        p_values = {f"m{i+1}": p for i, p in enumerate(raw_p)}
+        p_values = {f"m{i + 1}": p for i, p in enumerate(raw_p)}
 
         results_05 = service.correct(p_values, fdr_threshold=0.05)
         results_10 = service.correct(p_values, fdr_threshold=0.10)
@@ -304,7 +304,7 @@ class TestBHThresholdSensitivity:
         """
         service = _make_service()
         raw_p = [0.001, 0.008, 0.039, 0.041, 0.042, 0.06, 0.074, 0.205, 0.212, 0.391]
-        p_values = {f"m{i+1}": p for i, p in enumerate(raw_p)}
+        p_values = {f"m{i + 1}": p for i, p in enumerate(raw_p)}
         results = service.correct(p_values, fdr_threshold=0.10)
         n_significant = sum(1 for r in results if r.is_significant)
         assert n_significant == 6, (
@@ -370,7 +370,7 @@ class TestBHVsBonferroni:
         """BH finds more discoveries than Bonferroni on the classic 10-p-value example."""
         service = _make_service()
         raw_p = [0.001, 0.008, 0.039, 0.041, 0.042, 0.06, 0.074, 0.205, 0.212, 0.391]
-        p_values = {f"m{i+1}": p for i, p in enumerate(raw_p)}
+        p_values = {f"m{i + 1}": p for i, p in enumerate(raw_p)}
         alpha = 0.05
         m = len(p_values)
 
@@ -390,7 +390,7 @@ class TestBHVsBonferroni:
         """BH detects significance where Bonferroni misses (moderate p-values)."""
         service = _make_service()
         # 20 metrics, first 5 have moderate but real effects
-        p_values = {f"m{i+1}": 0.004 * i for i in range(1, 21)}
+        p_values = {f"m{i + 1}": 0.004 * i for i in range(1, 21)}
         alpha = 0.05
         m = len(p_values)
 
@@ -440,6 +440,7 @@ class TestBHVsBonferroni:
         service = _make_service()
         # Mix of truly significant and null metrics
         import numpy as np
+
         rng = np.random.default_rng(42)
         # 20 small p-values (significant) + 80 large (null)
         small_pvals = rng.uniform(0.001, 0.01, 20)

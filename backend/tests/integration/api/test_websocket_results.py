@@ -10,7 +10,7 @@ Uses starlette.testclient.TestClient's native WebSocket support (synchronous
 context manager). All DB calls are mocked so no live PostgreSQL is required.
 """
 
-from unittest.mock import MagicMock, patch, AsyncMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient

@@ -18,13 +18,11 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from backend.app.api import deps
-from backend.app.core.permissions import Action, ResourceType, check_permission
 from backend.app.models.user import User, UserRole
 from backend.app.schemas.realtime_counters import (
     BulkIncrementRequest,
     BulkIncrementResponse,
     CounterResetRequest,
-    CounterType,
     ExperimentCounters,
     IncrementRequest,
     IncrementResponse,
@@ -182,9 +180,10 @@ def reset_counters(
     - Requires ADMIN role.
     """
     # ADMIN-only: check superuser flag OR explicit ADMIN role
-    is_admin = getattr(current_user, "is_superuser", False) or getattr(
-        current_user, "role", None
-    ) == UserRole.ADMIN
+    is_admin = (
+        getattr(current_user, "is_superuser", False)
+        or getattr(current_user, "role", None) == UserRole.ADMIN
+    )
     if not is_admin:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

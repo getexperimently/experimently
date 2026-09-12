@@ -5,11 +5,11 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Union
 from uuid import UUID
 
-from sqlalchemy import func, desc
+from sqlalchemy import desc, func
 from sqlalchemy.orm import Session
 
-from backend.app.models.event import Event, EventType
 from backend.app.models.assignment import Assignment
+from backend.app.models.event import Event, EventType
 from backend.app.schemas.tracking import EventCreate
 
 logger = logging.getLogger(__name__)
@@ -88,7 +88,9 @@ class EventService:
         if experiment_id is None and feature_flag_id is None:
             raise ValueError("Either experiment_id or feature_flag_id must be provided")
 
-        metadata = next((data[k] for k in _METADATA_KEYS if data.get(k) is not None), None)
+        metadata = next(
+            (data[k] for k in _METADATA_KEYS if data.get(k) is not None), None
+        )
         timestamp = next((data[k] for k in _TIMESTAMP_KEYS if data.get(k)), None)
 
         return Event(
@@ -112,7 +114,9 @@ class EventService:
             "event_type": event.event_type,
             "event_name": event.event_name,
             "experiment_id": str(event.experiment_id) if event.experiment_id else None,
-            "feature_flag_id": str(event.feature_flag_id) if event.feature_flag_id else None,
+            "feature_flag_id": str(event.feature_flag_id)
+            if event.feature_flag_id
+            else None,
             "variant_id": str(event.variant_id) if event.variant_id else None,
             "value": event.value,
             "timestamp": event.created_at,
@@ -132,7 +136,7 @@ class EventService:
             self.db.refresh(event)
             return event
         except Exception as e:
-            logger.error(f"Error tracking event: {str(e)}")
+            logger.error(f"Error tracking event: {e!s}")
             self.db.rollback()
             raise
 
@@ -209,7 +213,7 @@ class EventService:
                 self.db.refresh(event)
             return events
         except Exception as e:
-            logger.error(f"Error tracking events batch: {str(e)}")
+            logger.error(f"Error tracking events batch: {e!s}")
             self.db.rollback()
             raise
 
@@ -228,7 +232,9 @@ class EventService:
         limit: int = 100,
     ) -> List[Dict[str, Any]]:
         """Get events for an experiment, newest first, with optional filters."""
-        query = self.db.query(Event).filter(Event.experiment_id == _to_uuid(experiment_id))
+        query = self.db.query(Event).filter(
+            Event.experiment_id == _to_uuid(experiment_id)
+        )
 
         if event_type:
             query = query.filter(Event.event_type == event_type)
@@ -296,7 +302,9 @@ class EventService:
         """Delete all events associated with an experiment; returns the count."""
         exp_id = _to_uuid(experiment_id)
         count = (
-            self.db.query(func.count(Event.id)).filter(Event.experiment_id == exp_id).scalar()
+            self.db.query(func.count(Event.id))
+            .filter(Event.experiment_id == exp_id)
+            .scalar()
             or 0
         )
 
@@ -310,14 +318,20 @@ class EventService:
 
     def purge_old_events(self, days_to_keep: int = 90) -> int:
         """Delete events older than ``days_to_keep`` days; returns the count."""
-        cutoff = _to_iso_timestamp(datetime.now(timezone.utc) - timedelta(days=days_to_keep))
+        cutoff = _to_iso_timestamp(
+            datetime.now(timezone.utc) - timedelta(days=days_to_keep)
+        )
 
         count = (
-            self.db.query(func.count(Event.id)).filter(Event.created_at < cutoff).scalar()
+            self.db.query(func.count(Event.id))
+            .filter(Event.created_at < cutoff)
+            .scalar()
             or 0
         )
 
-        self.db.query(Event).filter(Event.created_at < cutoff).delete(synchronize_session=False)
+        self.db.query(Event).filter(Event.created_at < cutoff).delete(
+            synchronize_session=False
+        )
         self.db.commit()
 
         logger.info(f"Purged {count} events older than {days_to_keep} days")

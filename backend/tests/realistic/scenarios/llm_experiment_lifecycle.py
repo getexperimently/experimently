@@ -41,8 +41,10 @@ class TestCostEstimation:
 
         # Claude 3.5 Sonnet: $0.003/1K input, $0.015/1K output
         cost = estimate_cost(
-            "anthropic", "claude-3-5-sonnet-20241022",
-            input_tokens=2000, output_tokens=1000,
+            "anthropic",
+            "claude-3-5-sonnet-20241022",
+            input_tokens=2000,
+            output_tokens=1000,
         )
         expected = 0.006 + 0.015
         assert abs(cost - expected) < 1e-6
@@ -51,8 +53,10 @@ class TestCostEstimation:
         from backend.app.services.llm_proxy_service import estimate_cost
 
         cost = estimate_cost(
-            "anthropic", "claude-opus-4-6",
-            input_tokens=1000, output_tokens=1000,
+            "anthropic",
+            "claude-opus-4-6",
+            input_tokens=1000,
+            output_tokens=1000,
         )
         expected = 0.015 + 0.075
         assert abs(cost - expected) < 1e-6
@@ -61,8 +65,10 @@ class TestCostEstimation:
         from backend.app.services.llm_proxy_service import estimate_cost
 
         cost = estimate_cost(
-            "google", "gemini-1.5-pro",
-            input_tokens=4000, output_tokens=2000,
+            "google",
+            "gemini-1.5-pro",
+            input_tokens=4000,
+            output_tokens=2000,
         )
         expected = 4 * 0.00125 + 2 * 0.005
         assert abs(cost - expected) < 1e-6
@@ -88,14 +94,18 @@ class TestCostEstimation:
     def test_cohere_in_cost_table(self):
         from backend.app.services.llm_proxy_service import estimate_cost
 
-        cost = estimate_cost("cohere", "command-r-plus", input_tokens=1000, output_tokens=1000)
+        cost = estimate_cost(
+            "cohere", "command-r-plus", input_tokens=1000, output_tokens=1000
+        )
         expected = 0.003 + 0.015
         assert abs(cost - expected) < 1e-6
 
     def test_mistral_in_cost_table(self):
         from backend.app.services.llm_proxy_service import estimate_cost
 
-        cost = estimate_cost("mistral", "mistral-large-latest", input_tokens=1000, output_tokens=1000)
+        cost = estimate_cost(
+            "mistral", "mistral-large-latest", input_tokens=1000, output_tokens=1000
+        )
         expected = 0.003 + 0.009
         assert abs(cost - expected) < 1e-6
 
@@ -193,7 +203,8 @@ class TestVariantAssignment:
 
         exp_id = str(uuid.uuid4())
         below_half = sum(
-            1 for i in range(10_000)
+            1
+            for i in range(10_000)
             if LLMExperimentService._hash_bucket(exp_id, f"user-{i}") < 0.5
         )
         # Expect ~5000 ± 200 (4-sigma tolerance)
@@ -269,9 +280,10 @@ class TestEvaluationStatistics:
         assert lo <= m <= hi
 
     def test_confidence_interval_width_decreases_with_n(self):
+        import random
+
         from backend.app.services.llm_analytics_service import _confidence_interval_95
 
-        import random
         rng = random.Random(42)
         small = [rng.gauss(10, 2) for _ in range(10)]
         large = [rng.gauss(10, 2) for _ in range(200)]
@@ -314,25 +326,30 @@ class TestLLMDataScenario:
     def _generate_synthetic_evaluations(n_control=50, n_treatment=50, seed=42):
         """Generate synthetic LLM evaluation data for offline testing."""
         import random
+
         rng = random.Random(seed)
 
         control_evals = []
         for i in range(n_control):
-            control_evals.append({
-                "latency_ms": max(100, rng.gauss(800, 200)),
-                "cost_usd": rng.uniform(0.001, 0.01),
-                "auto_eval_score": rng.betavariate(7, 3),  # mean ~0.7
-                "human_rating": rng.uniform(2.5, 4.5),
-            })
+            control_evals.append(
+                {
+                    "latency_ms": max(100, rng.gauss(800, 200)),
+                    "cost_usd": rng.uniform(0.001, 0.01),
+                    "auto_eval_score": rng.betavariate(7, 3),  # mean ~0.7
+                    "human_rating": rng.uniform(2.5, 4.5),
+                }
+            )
 
         treatment_evals = []
         for i in range(n_treatment):
-            treatment_evals.append({
-                "latency_ms": max(100, rng.gauss(600, 150)),  # faster
-                "cost_usd": rng.uniform(0.002, 0.015),  # slightly more expensive
-                "auto_eval_score": rng.betavariate(8, 2),  # mean ~0.8 (better)
-                "human_rating": rng.uniform(3.0, 5.0),  # higher ratings
-            })
+            treatment_evals.append(
+                {
+                    "latency_ms": max(100, rng.gauss(600, 150)),  # faster
+                    "cost_usd": rng.uniform(0.002, 0.015),  # slightly more expensive
+                    "auto_eval_score": rng.betavariate(8, 2),  # mean ~0.8 (better)
+                    "human_rating": rng.uniform(3.0, 5.0),  # higher ratings
+                }
+            )
 
         return control_evals, treatment_evals
 
@@ -353,7 +370,9 @@ class TestLLMDataScenario:
         assert treat_latency < ctrl_latency
 
     def test_evaluation_counts_match_expected(self):
-        control, treatment = self._generate_synthetic_evaluations(n_control=100, n_treatment=100)
+        control, treatment = self._generate_synthetic_evaluations(
+            n_control=100, n_treatment=100
+        )
         assert len(control) == 100
         assert len(treatment) == 100
 

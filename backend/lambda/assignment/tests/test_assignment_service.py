@@ -5,17 +5,16 @@ Tests the core assignment logic including consistent hashing, config validation,
 and variant assignment.
 """
 
-import pytest
 import sys
-from pathlib import Path
 from datetime import datetime
-from unittest.mock import Mock, patch, MagicMock
+from pathlib import Path
+from unittest.mock import Mock, patch
 
 # Add parent directories to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "shared"))
 
-from models import ExperimentConfig, VariantConfig, ExperimentStatus, Assignment
+from models import ExperimentConfig, ExperimentStatus, VariantConfig
 
 
 class TestAssignmentService:
@@ -29,9 +28,9 @@ class TestAssignmentService:
             status=ExperimentStatus.ACTIVE,
             variants=[
                 VariantConfig(key="control", allocation=0.5),
-                VariantConfig(key="treatment", allocation=0.5)
+                VariantConfig(key="treatment", allocation=0.5),
             ],
-            traffic_allocation=1.0
+            traffic_allocation=1.0,
         )
 
     # Day 1, Task 2.1: Tests for consistent hashing integration
@@ -63,9 +62,9 @@ class TestAssignmentService:
             status=ExperimentStatus.ACTIVE,
             variants=[
                 VariantConfig(key="control", allocation=0.5),
-                VariantConfig(key="treatment", allocation=0.5)
+                VariantConfig(key="treatment", allocation=0.5),
             ],
-            traffic_allocation=0.5
+            traffic_allocation=0.5,
         )
 
         service = AssignmentService()
@@ -80,8 +79,9 @@ class TestAssignmentService:
         assignment_rate = len(assigned) / len(results)
 
         # Should be within ±5% of 50%
-        assert 0.45 <= assignment_rate <= 0.55, \
+        assert 0.45 <= assignment_rate <= 0.55, (
             f"Assignment rate: {assignment_rate:.2%} (expected ~50%)"
+        )
 
     def test_assign_variant_distribution_matches_allocation(self):
         """Test that variant distribution matches allocation percentages."""
@@ -94,9 +94,9 @@ class TestAssignmentService:
             status=ExperimentStatus.ACTIVE,
             variants=[
                 VariantConfig(key="control", allocation=0.7),
-                VariantConfig(key="treatment", allocation=0.3)
+                VariantConfig(key="treatment", allocation=0.3),
             ],
-            traffic_allocation=1.0
+            traffic_allocation=1.0,
         )
 
         service = AssignmentService()
@@ -110,10 +110,12 @@ class TestAssignmentService:
         treatment_pct = results.count("treatment") / len(results)
 
         # Should be within ±5% of target allocation
-        assert 0.65 <= control_pct <= 0.75, \
+        assert 0.65 <= control_pct <= 0.75, (
             f"Control: {control_pct:.2%} (expected ~70%)"
-        assert 0.25 <= treatment_pct <= 0.35, \
+        )
+        assert 0.25 <= treatment_pct <= 0.35, (
             f"Treatment: {treatment_pct:.2%} (expected ~30%)"
+        )
 
     def test_assign_variant_with_three_variants(self):
         """Test assignment with three variants."""
@@ -126,9 +128,9 @@ class TestAssignmentService:
             variants=[
                 VariantConfig(key="control", allocation=0.33),
                 VariantConfig(key="variant_a", allocation=0.33),
-                VariantConfig(key="variant_b", allocation=0.34)
+                VariantConfig(key="variant_b", allocation=0.34),
             ],
-            traffic_allocation=1.0
+            traffic_allocation=1.0,
         )
 
         service = AssignmentService()
@@ -166,8 +168,8 @@ class TestAssignmentService:
             status=ExperimentStatus.DRAFT,
             variants=[
                 VariantConfig(key="control", allocation=0.5),
-                VariantConfig(key="treatment", allocation=0.5)
-            ]
+                VariantConfig(key="treatment", allocation=0.5),
+            ],
         )
 
         service = AssignmentService()
@@ -185,8 +187,8 @@ class TestAssignmentService:
             status=ExperimentStatus.PAUSED,
             variants=[
                 VariantConfig(key="control", allocation=0.5),
-                VariantConfig(key="treatment", allocation=0.5)
-            ]
+                VariantConfig(key="treatment", allocation=0.5),
+            ],
         )
 
         service = AssignmentService()
@@ -204,8 +206,8 @@ class TestAssignmentService:
             status=ExperimentStatus.COMPLETED,
             variants=[
                 VariantConfig(key="control", allocation=0.5),
-                VariantConfig(key="treatment", allocation=0.5)
-            ]
+                VariantConfig(key="treatment", allocation=0.5),
+            ],
         )
 
         service = AssignmentService()
@@ -213,7 +215,7 @@ class TestAssignmentService:
 
         assert is_valid is False
 
-    @patch('assignment_service.get_dynamodb_resource')
+    @patch("assignment_service.get_dynamodb_resource")
     def test_get_experiment_config_returns_config(self, mock_get_resource):
         """Test fetching experiment config from DynamoDB."""
         from assignment_service import AssignmentService
@@ -221,15 +223,15 @@ class TestAssignmentService:
         # Mock DynamoDB response
         mock_table = Mock()
         mock_table.get_item.return_value = {
-            'Item': {
-                'experiment_id': 'exp_123',
-                'key': 'checkout_test',
-                'status': 'active',
-                'variants': [
-                    {'key': 'control', 'allocation': 0.5},
-                    {'key': 'treatment', 'allocation': 0.5}
+            "Item": {
+                "experiment_id": "exp_123",
+                "key": "checkout_test",
+                "status": "active",
+                "variants": [
+                    {"key": "control", "allocation": 0.5},
+                    {"key": "treatment", "allocation": 0.5},
                 ],
-                'traffic_allocation': 1.0
+                "traffic_allocation": 1.0,
             }
         }
         mock_resource = Mock()
@@ -244,8 +246,10 @@ class TestAssignmentService:
         assert config.key == "checkout_test"
         assert config.status == ExperimentStatus.ACTIVE
 
-    @patch('assignment_service.get_dynamodb_resource')
-    def test_get_experiment_config_missing_experiment_returns_none(self, mock_get_resource):
+    @patch("assignment_service.get_dynamodb_resource")
+    def test_get_experiment_config_missing_experiment_returns_none(
+        self, mock_get_resource
+    ):
         """Test that missing experiment returns None."""
         from assignment_service import AssignmentService
 
@@ -261,7 +265,7 @@ class TestAssignmentService:
 
         assert config is None
 
-    @patch('assignment_service.get_dynamodb_resource')
+    @patch("assignment_service.get_dynamodb_resource")
     def test_get_experiment_config_handles_dynamodb_errors(self, mock_get_resource):
         """Test that DynamoDB errors are handled gracefully."""
         from assignment_service import AssignmentService
@@ -289,7 +293,7 @@ class TestAssignmentService:
         assignment = service.create_assignment(
             user_id=user_id,
             experiment_config=self.valid_experiment_config,
-            variant=variant
+            variant=variant,
         )
 
         assert assignment.user_id == user_id
@@ -309,7 +313,7 @@ class TestAssignmentService:
             user_id="user_789",
             experiment_config=self.valid_experiment_config,
             variant="control",
-            context=context
+            context=context,
         )
 
         assert assignment.context == context

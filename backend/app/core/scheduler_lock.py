@@ -93,12 +93,20 @@ def _acquire(engine: Engine, name: str) -> Tuple[Optional[Connection], bool]:
     try:
         conn = engine.connect().execution_options(isolation_level="AUTOCOMMIT")
     except Exception as exc:
-        logger.warning("scheduler_lock(%s): could not connect (database unavailable): %s", name, exc)
+        logger.warning(
+            "scheduler_lock(%s): could not connect (database unavailable): %s",
+            name,
+            exc,
+        )
         return None, False
     try:
         acquired = try_acquire(conn, name)
     except Exception as exc:
-        logger.warning("scheduler_lock(%s): could not acquire (database unavailable): %s", name, exc)
+        logger.warning(
+            "scheduler_lock(%s): could not acquire (database unavailable): %s",
+            name,
+            exc,
+        )
         conn.close()
         return None, False
     if acquired:
@@ -144,7 +152,9 @@ def scheduler_lock(name: str, engine: Optional[Engine] = None) -> Iterator[bool]
 
 
 @asynccontextmanager
-async def async_scheduler_lock(name: str, engine: Optional[Engine] = None) -> AsyncIterator[bool]:
+async def async_scheduler_lock(
+    name: str, engine: Optional[Engine] = None
+) -> AsyncIterator[bool]:
     """
     Coroutine-friendly :func:`scheduler_lock`.
 
@@ -161,10 +171,10 @@ async def async_scheduler_lock(name: str, engine: Optional[Engine] = None) -> As
 
 
 __all__ = [
-    "scheduler_lock",
-    "async_scheduler_lock",
-    "try_acquire",
-    "release",
-    "lock_name",
     "LOCK_NAMESPACE",
+    "async_scheduler_lock",
+    "lock_name",
+    "release",
+    "scheduler_lock",
+    "try_acquire",
 ]

@@ -4,6 +4,7 @@ Database query performance analyzer.
 Parses PostgreSQL pg_stat_statements output and identifies slow queries,
 missing indexes, and optimization opportunities.
 """
+
 import csv
 import re
 from dataclasses import dataclass, field
@@ -169,7 +170,9 @@ def generate_query_report(stats: list[QueryStats]) -> str:
     for i, qs in enumerate(stats, 1):
         # Truncate long queries for readability
         query_display = qs.query[:120] + "..." if len(qs.query) > 120 else qs.query
-        lines.append(f"\n#{i}  Mean: {qs.mean_time_ms:.1f}ms  |  Calls: {qs.call_count:,}  |  Total: {qs.total_time_ms:.0f}ms")
+        lines.append(
+            f"\n#{i}  Mean: {qs.mean_time_ms:.1f}ms  |  Calls: {qs.call_count:,}  |  Total: {qs.total_time_ms:.0f}ms"
+        )
         lines.append(f"    Query: {query_display}")
         if qs.rows_returned > 0:
             lines.append(f"    Rows: {qs.rows_returned:,}")

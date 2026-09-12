@@ -9,12 +9,12 @@ import pytest
 from pydantic import ValidationError
 
 from backend.app.schemas.interaction import (
-    RiskLevel,
+    ActiveInteractionScanResponse,
+    InteractionAnalysisResponse,
     InteractionResultSchema,
     NoveltyResultSchema,
+    RiskLevel,
     SUTVAResultSchema,
-    InteractionAnalysisResponse,
-    ActiveInteractionScanResponse,
 )
 
 
@@ -99,14 +99,14 @@ class TestInteractionAnalysisResponse:
     """Tests for InteractionAnalysisResponse."""
 
     def _make_valid(self, **overrides):
-        base = dict(
-            experiment_a_id="exp-a",
-            experiment_b_id="exp-b",
-            overlap_coefficient=0.45,
-            has_significant_overlap=True,
-            overall_risk=RiskLevel.MEDIUM,
-            recommendations=["Check overlap."],
-        )
+        base = {
+            "experiment_a_id": "exp-a",
+            "experiment_b_id": "exp-b",
+            "overlap_coefficient": 0.45,
+            "has_significant_overlap": True,
+            "overall_risk": RiskLevel.MEDIUM,
+            "recommendations": ["Check overlap."],
+        }
         base.update(overrides)
         return InteractionAnalysisResponse(**base)
 

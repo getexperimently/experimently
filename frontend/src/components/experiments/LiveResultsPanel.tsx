@@ -11,7 +11,6 @@ import {
   useExperimentStream,
   ConnectionStatus,
   VariantResult,
-  ExperimentSnapshot,
 } from '@/hooks/useExperimentStream';
 
 // ---------------------------------------------------------------------------
@@ -165,7 +164,7 @@ function VariantsTable({ variants }: { variants: VariantResult[] }) {
 // ---------------------------------------------------------------------------
 
 export function LiveResultsPanel({ experimentId }: LiveResultsPanelProps) {
-  const { snapshot, status, error, refresh, disconnect, connect } =
+  const { snapshot, status, error, refresh, connect } =
     useExperimentStream(experimentId);
 
   const [reconnectCountdown, setReconnectCountdown] = useState<number | null>(null);

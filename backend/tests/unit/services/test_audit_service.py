@@ -10,18 +10,18 @@ This module tests the AuditService functionality including:
 - Error handling
 """
 
-import pytest
 import asyncio
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
+from unittest.mock import AsyncMock, Mock, patch
 from uuid import uuid4
-from unittest.mock import Mock, patch, AsyncMock
 
-from sqlalchemy.orm import Session
+import pytest
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Session
 
-from backend.app.services.audit_service import AuditService
-from backend.app.models.audit_log import AuditLog, ActionType, EntityType
+from backend.app.models.audit_log import ActionType, AuditLog, EntityType
 from backend.app.models.user import User, UserRole
+from backend.app.services.audit_service import AuditService
 
 
 class TestAuditServiceLogging:

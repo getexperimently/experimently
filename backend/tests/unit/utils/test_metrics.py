@@ -4,14 +4,14 @@ Unit tests for the metrics collection utility functions.
 These tests verify that performance metrics collection works correctly.
 """
 
-import time
 import threading
-from unittest.mock import patch, MagicMock, Mock
+import time
+from unittest.mock import MagicMock, Mock, patch
 
-import pytest
 import psutil
+import pytest
 
-from backend.app.utils.metrics import get_memory_usage, get_cpu_usage, MetricsCollector
+from backend.app.utils.metrics import MetricsCollector, get_cpu_usage, get_memory_usage
 
 
 class TestMetrics:
@@ -21,7 +21,7 @@ class TestMetrics:
 
     @pytest.fixture
     def mock_psutil(self):
-        with patch('psutil.Process') as mock:
+        with patch("psutil.Process") as mock:
             yield mock
 
     def test_get_memory_usage_success(self, mock_process):
@@ -73,7 +73,7 @@ class TestMetricsCollector:
         process.cpu_percent.return_value = 25.0
         return process
 
-    @patch('psutil.Process')
+    @patch("psutil.Process")
     def test_start_collection(self, mock_psutil, collector, mock_process):
         # Test starting metrics collection
         mock_psutil.return_value = mock_process
@@ -91,7 +91,7 @@ class TestMetricsCollector:
         assert collector.is_running is False
         assert collector.process is None
 
-    @patch('psutil.Process')
+    @patch("psutil.Process")
     def test_get_metrics(self, mock_psutil, collector, mock_process):
         # Test getting collected metrics
         mock_psutil.return_value = mock_process
@@ -99,10 +99,10 @@ class TestMetricsCollector:
 
         metrics = collector.get_metrics()
 
-        assert 'memory_usage' in metrics
-        assert 'cpu_usage' in metrics
-        assert metrics['memory_usage'] == 50.0
-        assert metrics['cpu_usage'] == 25.0
+        assert "memory_usage" in metrics
+        assert "cpu_usage" in metrics
+        assert metrics["memory_usage"] == 50.0
+        assert metrics["cpu_usage"] == 25.0
 
     def test_get_metrics_not_started(self, collector):
         # Test getting metrics without starting collection
@@ -110,7 +110,7 @@ class TestMetricsCollector:
 
         assert metrics == {}
 
-    @patch('psutil.Process')
+    @patch("psutil.Process")
     def test_collect_metrics_thread(self, mock_psutil, collector, mock_process):
         # Test metrics collection in background thread
         mock_psutil.return_value = mock_process
@@ -120,10 +120,10 @@ class TestMetricsCollector:
         collector.stop()
 
         assert len(collector.metrics_history) > 0
-        assert 'memory_usage' in collector.metrics_history[0]
-        assert 'cpu_usage' in collector.metrics_history[0]
+        assert "memory_usage" in collector.metrics_history[0]
+        assert "cpu_usage" in collector.metrics_history[0]
 
-    @patch('psutil.Process')
+    @patch("psutil.Process")
     def test_metrics_history_limit(self, mock_psutil, collector, mock_process):
         # Test metrics history size limit
         mock_psutil.return_value = mock_process
@@ -138,7 +138,7 @@ class TestMetricsCollector:
 
         assert len(collector.metrics_history) == 5
 
-    @patch('psutil.Process')
+    @patch("psutil.Process")
     def test_metrics_average(self, mock_psutil, collector, mock_process):
         # Test calculating metrics averages
         mock_psutil.return_value = mock_process
@@ -150,12 +150,12 @@ class TestMetricsCollector:
 
         averages = collector.get_average_metrics()
 
-        assert 'memory_usage' in averages
-        assert 'cpu_usage' in averages
-        assert averages['memory_usage'] == 50.0
-        assert averages['cpu_usage'] == 25.0
+        assert "memory_usage" in averages
+        assert "cpu_usage" in averages
+        assert averages["memory_usage"] == 50.0
+        assert averages["cpu_usage"] == 25.0
 
-    @patch('psutil.Process')
+    @patch("psutil.Process")
     def test_metrics_peak(self, mock_psutil, collector, mock_process):
         # Test finding peak metrics
         mock_psutil.return_value = mock_process
@@ -170,5 +170,5 @@ class TestMetricsCollector:
 
         peaks = collector.get_peak_metrics()
 
-        assert peaks['memory_usage'] == 50.0
-        assert peaks['cpu_usage'] == 30.0
+        assert peaks["memory_usage"] == 50.0
+        assert peaks["cpu_usage"] == 30.0

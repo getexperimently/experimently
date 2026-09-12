@@ -7,17 +7,18 @@ GET  /api/v1/export/feature-flags         — Download feature flag data as CSV/
 GET  /api/v1/export/reports/overview      — Platform overview report (JSON)
 GET  /api/v1/export/reports/experiments/{id} — Full single-experiment report (JSON)
 """
+
 from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
-from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
 from backend.app.api import deps
 from backend.app.api.deps import get_db
 from backend.app.models.user import User
-from backend.app.schemas.export import ExportFormat, ExportScope, ExportRequest
+from backend.app.schemas.export import ExportFormat, ExportRequest, ExportScope
 from backend.app.services.export_service import ExportService
 
 router = APIRouter()
@@ -26,6 +27,7 @@ router = APIRouter()
 # ---------------------------------------------------------------------------
 # Export: Experiments
 # ---------------------------------------------------------------------------
+
 
 @router.get(
     "/experiments",
@@ -37,10 +39,16 @@ router = APIRouter()
     tags=["Export"],
 )
 def export_experiments(
-    format: ExportFormat = Query(ExportFormat.CSV, description="Output format: csv or json"),
+    format: ExportFormat = Query(
+        ExportFormat.CSV, description="Output format: csv or json"
+    ),
     scope: ExportScope = Query(ExportScope.SUMMARY, description="Data scope"),
-    start_date: Optional[datetime] = Query(None, description="Filter by created_at >= start_date (inclusive)"),
-    end_date: Optional[datetime] = Query(None, description="Filter by created_at <= end_date (inclusive)"),
+    start_date: Optional[datetime] = Query(
+        None, description="Filter by created_at >= start_date (inclusive)"
+    ),
+    end_date: Optional[datetime] = Query(
+        None, description="Filter by created_at <= end_date (inclusive)"
+    ),
     db: Session = Depends(get_db),
     current_user: User = Depends(deps.get_current_active_user),
 ) -> StreamingResponse:
@@ -73,6 +81,7 @@ def export_experiments(
 # Export: Variants
 # ---------------------------------------------------------------------------
 
+
 @router.get(
     "/variants",
     summary="Export variant results to CSV or JSON",
@@ -83,10 +92,16 @@ def export_experiments(
     tags=["Export"],
 )
 def export_variants(
-    format: ExportFormat = Query(ExportFormat.CSV, description="Output format: csv or json"),
+    format: ExportFormat = Query(
+        ExportFormat.CSV, description="Output format: csv or json"
+    ),
     scope: ExportScope = Query(ExportScope.SUMMARY, description="Data scope"),
-    start_date: Optional[datetime] = Query(None, description="Filter experiments created at or after this date"),
-    end_date: Optional[datetime] = Query(None, description="Filter experiments created at or before this date"),
+    start_date: Optional[datetime] = Query(
+        None, description="Filter experiments created at or after this date"
+    ),
+    end_date: Optional[datetime] = Query(
+        None, description="Filter experiments created at or before this date"
+    ),
     db: Session = Depends(get_db),
     current_user: User = Depends(deps.get_current_active_user),
 ) -> StreamingResponse:
@@ -119,6 +134,7 @@ def export_variants(
 # Export: Feature Flags
 # ---------------------------------------------------------------------------
 
+
 @router.get(
     "/feature-flags",
     summary="Export feature flag data to CSV or JSON",
@@ -129,9 +145,15 @@ def export_variants(
     tags=["Export"],
 )
 def export_feature_flags(
-    format: ExportFormat = Query(ExportFormat.CSV, description="Output format: csv or json"),
-    start_date: Optional[datetime] = Query(None, description="Filter flags created at or after this date"),
-    end_date: Optional[datetime] = Query(None, description="Filter flags created at or before this date"),
+    format: ExportFormat = Query(
+        ExportFormat.CSV, description="Output format: csv or json"
+    ),
+    start_date: Optional[datetime] = Query(
+        None, description="Filter flags created at or after this date"
+    ),
+    end_date: Optional[datetime] = Query(
+        None, description="Filter flags created at or before this date"
+    ),
     db: Session = Depends(get_db),
     current_user: User = Depends(deps.get_current_active_user),
 ) -> StreamingResponse:
@@ -164,6 +186,7 @@ def export_feature_flags(
 # Reports: Platform Overview
 # ---------------------------------------------------------------------------
 
+
 @router.get(
     "/reports/overview",
     summary="Platform overview report",
@@ -174,8 +197,12 @@ def export_feature_flags(
     tags=["Reports"],
 )
 def get_overview_report(
-    start_date: Optional[datetime] = Query(None, description="Report period start (inclusive)"),
-    end_date: Optional[datetime] = Query(None, description="Report period end (inclusive)"),
+    start_date: Optional[datetime] = Query(
+        None, description="Report period start (inclusive)"
+    ),
+    end_date: Optional[datetime] = Query(
+        None, description="Report period end (inclusive)"
+    ),
     db: Session = Depends(get_db),
     current_user: User = Depends(deps.get_current_active_user),
 ) -> JSONResponse:
@@ -197,6 +224,7 @@ def get_overview_report(
 # Reports: Single Experiment
 # ---------------------------------------------------------------------------
 
+
 @router.get(
     "/reports/experiments/{experiment_id}",
     summary="Full experiment report",
@@ -208,7 +236,9 @@ def get_overview_report(
 )
 def get_experiment_report(
     experiment_id: str,
-    format: ExportFormat = Query(ExportFormat.JSON, description="Output format: csv or json"),
+    format: ExportFormat = Query(
+        ExportFormat.JSON, description="Output format: csv or json"
+    ),
     db: Session = Depends(get_db),
     current_user: User = Depends(deps.get_current_active_user),
 ) -> JSONResponse:
@@ -225,13 +255,19 @@ def get_experiment_report(
     import json as _json
 
     # Fetch experiment rows filtered to this specific ID
-    exp_result = service.export_experiments(json_request, experiment_ids=[experiment_id])
-    exp_content: str = exp_result[0] if isinstance(exp_result, tuple) else str(exp_result)
+    exp_result = service.export_experiments(
+        json_request, experiment_ids=[experiment_id]
+    )
+    exp_content: str = (
+        exp_result[0] if isinstance(exp_result, tuple) else str(exp_result)
+    )
     experiments = _json.loads(exp_content) if exp_content else []
 
     # Fetch variant rows for this experiment
     var_result = service.export_variants(json_request, experiment_ids=[experiment_id])
-    var_content: str = var_result[0] if isinstance(var_result, tuple) else str(var_result)
+    var_content: str = (
+        var_result[0] if isinstance(var_result, tuple) else str(var_result)
+    )
     variants = _json.loads(var_content) if var_content else []
 
     report: dict = {

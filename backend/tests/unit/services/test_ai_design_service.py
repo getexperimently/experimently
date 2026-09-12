@@ -11,8 +11,9 @@ Claude API is always mocked — no real API calls are made.
 """
 
 import os
+from unittest.mock import MagicMock, PropertyMock, patch
+
 import pytest
-from unittest.mock import MagicMock, patch, PropertyMock
 
 from backend.app.services.ai_design_service import (
     AIDesignService,
@@ -21,10 +22,10 @@ from backend.app.services.ai_design_service import (
     SampleSizeEstimate,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_mock_anthropic_client(response_text: str = "AI response text"):
     """Return a mock anthropic.Anthropic() client with a preconfigured response."""
@@ -42,6 +43,7 @@ def _make_mock_anthropic_client(response_text: str = "AI response text"):
 # ---------------------------------------------------------------------------
 # TestExperimentDesignAssistant (8 tests)
 # ---------------------------------------------------------------------------
+
 
 class TestExperimentDesignAssistant:
     """Tests for suggest_experiment_design and suggest_metrics_for_experiment."""
@@ -67,9 +69,14 @@ class TestExperimentDesignAssistant:
         assert isinstance(result.variant_descriptions, list)
         assert len(result.variant_descriptions) >= 2
 
-    @patch("backend.app.services.ai_design_service.AIDesignService.is_ai_available", return_value=True)
+    @patch(
+        "backend.app.services.ai_design_service.AIDesignService.is_ai_available",
+        return_value=True,
+    )
     @patch("backend.app.services.ai_design_service.AIDesignService._ai_suggest")
-    def test_ai_suggest_called_when_key_available(self, mock_ai_suggest, mock_available):
+    def test_ai_suggest_called_when_key_available(
+        self, mock_ai_suggest, mock_available
+    ):
         """When ANTHROPIC_API_KEY is set, _ai_suggest is invoked."""
         mock_ai_suggest.return_value = ExperimentDesignSuggestion(
             hypothesis="AI hypothesis",
@@ -86,8 +93,14 @@ class TestExperimentDesignAssistant:
         mock_ai_suggest.assert_called_once()
         assert result.confidence == "ai_generated"
 
-    @patch("backend.app.services.ai_design_service.AIDesignService.is_ai_available", return_value=True)
-    @patch("backend.app.services.ai_design_service.AIDesignService._ai_suggest", side_effect=Exception("API error"))
+    @patch(
+        "backend.app.services.ai_design_service.AIDesignService.is_ai_available",
+        return_value=True,
+    )
+    @patch(
+        "backend.app.services.ai_design_service.AIDesignService._ai_suggest",
+        side_effect=Exception("API error"),
+    )
     def test_graceful_degradation_on_ai_failure(self, mock_ai_suggest, mock_available):
         """When AI call fails, falls back to template-based suggestion without raising."""
         result = AIDesignService.suggest_experiment_design(
@@ -110,12 +123,22 @@ class TestExperimentDesignAssistant:
 
     def test_suggest_metrics_returns_list(self):
         """suggest_metrics_for_experiment always returns a non-empty list."""
-        for exp_type in ["checkout", "onboarding", "pricing", "email", "landing_page", "default"]:
+        for exp_type in [
+            "checkout",
+            "onboarding",
+            "pricing",
+            "email",
+            "landing_page",
+            "default",
+        ]:
             metrics = AIDesignService.suggest_metrics_for_experiment(exp_type)
             assert isinstance(metrics, list)
             assert len(metrics) > 0
 
-    @patch("backend.app.services.ai_design_service.AIDesignService.is_ai_available", return_value=False)
+    @patch(
+        "backend.app.services.ai_design_service.AIDesignService.is_ai_available",
+        return_value=False,
+    )
     def test_template_based_when_anthropic_not_installed(self, mock_available):
         """When anthropic package is unavailable, returns template-based suggestion."""
         result = AIDesignService.suggest_experiment_design(
@@ -128,6 +151,7 @@ class TestExperimentDesignAssistant:
 # ---------------------------------------------------------------------------
 # TestResultsInterpreter (8 tests)
 # ---------------------------------------------------------------------------
+
 
 class TestResultsInterpreter:
     """Tests for interpret_results and generate_plain_english_summary."""
@@ -144,7 +168,11 @@ class TestResultsInterpreter:
 
     def test_interpretation_has_required_fields(self):
         """ResultsInterpretation has summary, recommendation, confidence_statement, key_findings."""
-        results = {"p_value": 0.01, "relative_improvement_pct": 3.0, "variant_name": "B"}
+        results = {
+            "p_value": 0.01,
+            "relative_improvement_pct": 3.0,
+            "variant_name": "B",
+        }
         interp = AIDesignService.interpret_results(results)
         assert interp.summary
         assert interp.recommendation in {"ship", "continue_testing", "stop_futility"}
@@ -152,9 +180,14 @@ class TestResultsInterpreter:
         assert isinstance(interp.key_findings, list)
         assert len(interp.key_findings) > 0
 
-    @patch("backend.app.services.ai_design_service.AIDesignService.is_ai_available", return_value=True)
+    @patch(
+        "backend.app.services.ai_design_service.AIDesignService.is_ai_available",
+        return_value=True,
+    )
     @patch("backend.app.services.ai_design_service.AIDesignService._ai_interpret")
-    def test_ai_interpret_called_when_available(self, mock_ai_interpret, mock_available):
+    def test_ai_interpret_called_when_available(
+        self, mock_ai_interpret, mock_available
+    ):
         """When AI is available, _ai_interpret is invoked."""
         mock_ai_interpret.return_value = ResultsInterpretation(
             summary="AI summary",
@@ -163,41 +196,71 @@ class TestResultsInterpreter:
             key_findings=["Significant improvement"],
             generated_by="ai",
         )
-        results = {"p_value": 0.02, "relative_improvement_pct": 10.0, "variant_name": "A"}
+        results = {
+            "p_value": 0.02,
+            "relative_improvement_pct": 10.0,
+            "variant_name": "A",
+        }
         result = AIDesignService.interpret_results(results)
         mock_ai_interpret.assert_called_once()
         assert result.generated_by == "ai"
 
     def test_ship_recommendation_when_significant_positive(self):
         """p_value < 0.05 and positive effect → recommendation is 'ship'."""
-        results = {"p_value": 0.02, "relative_improvement_pct": 8.0, "variant_name": "Variant B"}
+        results = {
+            "p_value": 0.02,
+            "relative_improvement_pct": 8.0,
+            "variant_name": "Variant B",
+        }
         interp = AIDesignService._template_interpret(results)
         assert interp.recommendation == "ship"
 
     def test_continue_testing_when_not_significant(self):
         """p_value > 0.05 → recommendation includes 'continue_testing'."""
-        results = {"p_value": 0.30, "relative_improvement_pct": 2.0, "variant_name": "Variant C"}
+        results = {
+            "p_value": 0.30,
+            "relative_improvement_pct": 2.0,
+            "variant_name": "Variant C",
+        }
         interp = AIDesignService._template_interpret(results)
         assert interp.recommendation == "continue_testing"
 
     def test_generate_plain_english_summary_returns_string(self):
         """generate_plain_english_summary returns a non-empty string."""
-        results = {"p_value": 0.04, "relative_improvement_pct": 4.5, "variant_name": "Test Variant"}
+        results = {
+            "p_value": 0.04,
+            "relative_improvement_pct": 4.5,
+            "variant_name": "Test Variant",
+        }
         summary = AIDesignService.generate_plain_english_summary(results)
         assert isinstance(summary, str)
         assert len(summary) > 0
 
     def test_summary_mentions_variant_name(self):
         """Plain-English summary mentions the variant name."""
-        results = {"p_value": 0.04, "relative_improvement_pct": 4.5, "variant_name": "MyVariant"}
+        results = {
+            "p_value": 0.04,
+            "relative_improvement_pct": 4.5,
+            "variant_name": "MyVariant",
+        }
         summary = AIDesignService.generate_plain_english_summary(results)
         assert "MyVariant" in summary
 
-    @patch("backend.app.services.ai_design_service.AIDesignService.is_ai_available", return_value=True)
-    @patch("backend.app.services.ai_design_service.AIDesignService._ai_interpret", side_effect=Exception("LLM error"))
+    @patch(
+        "backend.app.services.ai_design_service.AIDesignService.is_ai_available",
+        return_value=True,
+    )
+    @patch(
+        "backend.app.services.ai_design_service.AIDesignService._ai_interpret",
+        side_effect=Exception("LLM error"),
+    )
     def test_fallback_to_template_on_ai_error(self, mock_ai, mock_available):
         """When AI interpret fails, falls back to template-based interpretation."""
-        results = {"p_value": 0.10, "relative_improvement_pct": 1.0, "variant_name": "X"}
+        results = {
+            "p_value": 0.10,
+            "relative_improvement_pct": 1.0,
+            "variant_name": "X",
+        }
         interp = AIDesignService.interpret_results(results)
         assert isinstance(interp, ResultsInterpretation)
         assert interp.generated_by == "template"
@@ -206,6 +269,7 @@ class TestResultsInterpreter:
 # ---------------------------------------------------------------------------
 # TestSampleSizeAdvisor (4 tests)
 # ---------------------------------------------------------------------------
+
 
 class TestSampleSizeAdvisor:
     """Tests for estimate_sample_size."""
@@ -256,6 +320,7 @@ class TestSampleSizeAdvisor:
 # TestGracefulDegradation (5 tests)
 # ---------------------------------------------------------------------------
 
+
 class TestGracefulDegradation:
     """Tests for graceful degradation when ANTHROPIC_API_KEY is absent."""
 
@@ -271,7 +336,10 @@ class TestGracefulDegradation:
         with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "sk-test-key"}):
             assert AIDesignService.is_ai_available() is True
 
-    @patch("backend.app.services.ai_design_service.AIDesignService.is_ai_available", return_value=False)
+    @patch(
+        "backend.app.services.ai_design_service.AIDesignService.is_ai_available",
+        return_value=False,
+    )
     def test_fallback_suggestion_when_key_not_set(self, mock_available):
         """When key not set, suggest_experiment_design uses template fallback."""
         result = AIDesignService.suggest_experiment_design(
@@ -280,8 +348,14 @@ class TestGracefulDegradation:
         assert isinstance(result, ExperimentDesignSuggestion)
         assert result.confidence == "template_based"
 
-    @patch("backend.app.services.ai_design_service.AIDesignService.is_ai_available", return_value=True)
-    @patch("backend.app.services.ai_design_service.AIDesignService._ai_suggest", side_effect=RuntimeError("Unexpected"))
+    @patch(
+        "backend.app.services.ai_design_service.AIDesignService.is_ai_available",
+        return_value=True,
+    )
+    @patch(
+        "backend.app.services.ai_design_service.AIDesignService._ai_suggest",
+        side_effect=RuntimeError("Unexpected"),
+    )
     def test_fallback_has_all_required_fields(self, mock_ai, mock_available):
         """Fallback suggestion still has all required fields (no KeyError)."""
         result = AIDesignService.suggest_experiment_design(
@@ -295,7 +369,10 @@ class TestGracefulDegradation:
         assert result.recommended_duration_days is not None
         assert result.variant_descriptions is not None
 
-    @patch("backend.app.services.ai_design_service.AIDesignService.is_ai_available", return_value=False)
+    @patch(
+        "backend.app.services.ai_design_service.AIDesignService.is_ai_available",
+        return_value=False,
+    )
     def test_no_exception_when_ai_unavailable(self, mock_available):
         """No exception is raised when AI is unavailable — graceful degradation."""
         try:

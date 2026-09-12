@@ -25,12 +25,12 @@ class CasualUserBehavior:
     """Encapsulates the behavioral parameters for a casual user profile."""
 
     sessions_per_week: float = 1.5
-    conversion_rate: float = 0.03          # 3% baseline
+    conversion_rate: float = 0.03  # 3% baseline
     session_duration_minutes: float = 1.8  # average
-    bounce_rate: float = 0.65              # 65% single-page sessions
+    bounce_rate: float = 0.65  # 65% single-page sessions
     max_tolerated_latency_ms: float = 3000
-    feature_discovery_rate: float = 0.10   # rarely finds advanced features
-    return_probability: float = 0.30       # 30% chance of returning after 7 days
+    feature_discovery_rate: float = 0.10  # rarely finds advanced features
+    return_probability: float = 0.30  # 30% chance of returning after 7 days
 
     def simulate_session(self, rng: random.Random | None = None) -> dict[str, Any]:
         """
@@ -50,8 +50,14 @@ class CasualUserBehavior:
 
         # Bounce immediately?
         if r.random() < self.bounce_rate:
-            events.append({"event": "bounce", "value": 1.0, "scroll_depth": r.uniform(0, 20)})
-            return {"events": events, "converted": False, "session_minutes": r.uniform(0.1, 0.5)}
+            events.append(
+                {"event": "bounce", "value": 1.0, "scroll_depth": r.uniform(0, 20)}
+            )
+            return {
+                "events": events,
+                "converted": False,
+                "session_minutes": r.uniform(0.1, 0.5),
+            }
 
         # Engaged session
         scroll = r.uniform(20, 80)
@@ -122,4 +128,6 @@ if __name__ == "__main__":
     population = make_casual_user_population(n=100, seed=42)
     converters = [u for u in population if u["converted"]]
     print(f"Casual user population: {len(population)} users")
-    print(f"Converters: {len(converters)} ({100 * len(converters) / len(population):.1f}%)")
+    print(
+        f"Converters: {len(converters)} ({100 * len(converters) / len(population):.1f}%)"
+    )

@@ -4,23 +4,27 @@ Rules engine for evaluating targeting rules.
 This module provides functions for evaluating targeting rules against user contexts.
 """
 
-import re
-import logging
 import hashlib
+import logging
 import math
-from typing import Dict, Any, List, Optional, Union, Callable
-from datetime import datetime, time as datetime_time
+import re
+from datetime import datetime
+from datetime import time as datetime_time
+from typing import Any, Dict, Optional
+
 import semver
+
 try:
     import pytz
+
     HAS_PYTZ = True
 except ImportError:
     HAS_PYTZ = False
 
 from backend.app.schemas.targeting_rule import (
+    Condition,
     LogicalOperator,
     OperatorType,
-    Condition,
     RuleGroup,
     TargetingRule,
     TargetingRules,
@@ -32,7 +36,9 @@ logger = logging.getLogger(__name__)
 UserContext = Dict[str, Any]
 
 
-def evaluate_targeting_rules(targeting_rules: TargetingRules, user_context: UserContext) -> Optional[TargetingRule]:
+def evaluate_targeting_rules(
+    targeting_rules: TargetingRules, user_context: UserContext
+) -> Optional[TargetingRule]:
     """
     Evaluate a set of targeting rules against a user context.
     Returns the first matching rule, or None if no rules match.
@@ -89,11 +95,16 @@ def evaluate_rule_group(rule_group: RuleGroup, user_context: UserContext) -> boo
     operator = rule_group.operator
 
     # Evaluate conditions
-    condition_results = [evaluate_condition(condition, user_context) for condition in rule_group.conditions]
+    condition_results = [
+        evaluate_condition(condition, user_context)
+        for condition in rule_group.conditions
+    ]
 
     # Evaluate nested groups
     if rule_group.groups:
-        group_results = [evaluate_rule_group(group, user_context) for group in rule_group.groups]
+        group_results = [
+            evaluate_rule_group(group, user_context) for group in rule_group.groups
+        ]
     else:
         group_results = []
 
@@ -150,7 +161,9 @@ def evaluate_condition(condition: Condition, user_context: UserContext) -> bool:
     actual_value = user_context[attribute]
 
     # Apply operator
-    return apply_operator(operator, actual_value, expected_value, condition.additional_value)
+    return apply_operator(
+        operator, actual_value, expected_value, condition.additional_value
+    )
 
 
 def _is_empty_value(value: Any) -> bool:
@@ -203,7 +216,7 @@ def apply_operator(
     operator: OperatorType,
     actual_value: Any,
     expected_value: Any,
-    additional_value: Optional[Any] = None
+    additional_value: Optional[Any] = None,
 ) -> bool:
     """
     Apply an operator to compare actual and expected values.
@@ -246,12 +259,16 @@ def apply_operator(
     elif operator == OperatorType.IN:
         # Check if actual_value is in expected_value (which should be a collection)
         if not isinstance(expected_value, (list, tuple, set)):
-            logger.warning(f"Expected value for IN operator should be a collection, got {type(expected_value)}")
+            logger.warning(
+                f"Expected value for IN operator should be a collection, got {type(expected_value)}"
+            )
             return False
         return any(_values_equal(actual_value, item) for item in expected_value)
     elif operator == OperatorType.NOT_IN:
         if not isinstance(expected_value, (list, tuple, set)):
-            logger.warning(f"Expected value for NOT_IN operator should be a collection, got {type(expected_value)}")
+            logger.warning(
+                f"Expected value for NOT_IN operator should be a collection, got {type(expected_value)}"
+            )
             return False
         return not any(_values_equal(actual_value, item) for item in expected_value)
 
@@ -323,23 +340,31 @@ def apply_operator(
         try:
             # Convert to datetime if not already
             if isinstance(actual_value, str):
-                actual_date = datetime.fromisoformat(actual_value.replace('Z', '+00:00'))
+                actual_date = datetime.fromisoformat(
+                    actual_value.replace("Z", "+00:00")
+                )
             elif isinstance(actual_value, (int, float)):
                 actual_date = datetime.fromtimestamp(actual_value)
             elif isinstance(actual_value, datetime):
                 actual_date = actual_value
             else:
-                logger.warning(f"Unsupported date format for actual value: {actual_value}")
+                logger.warning(
+                    f"Unsupported date format for actual value: {actual_value}"
+                )
                 return False
 
             if isinstance(expected_value, str):
-                expected_date = datetime.fromisoformat(expected_value.replace('Z', '+00:00'))
+                expected_date = datetime.fromisoformat(
+                    expected_value.replace("Z", "+00:00")
+                )
             elif isinstance(expected_value, (int, float)):
                 expected_date = datetime.fromtimestamp(expected_value)
             elif isinstance(expected_value, datetime):
                 expected_date = expected_value
             else:
-                logger.warning(f"Unsupported date format for expected value: {expected_value}")
+                logger.warning(
+                    f"Unsupported date format for expected value: {expected_value}"
+                )
                 return False
 
             if operator == OperatorType.BEFORE:
@@ -348,7 +373,9 @@ def apply_operator(
                 return actual_date > expected_date
 
         except (ValueError, TypeError):
-            logger.warning(f"Failed to compare dates: {actual_value} and {expected_value}")
+            logger.warning(
+                f"Failed to compare dates: {actual_value} and {expected_value}"
+            )
             return False
 
     # Range operators
@@ -360,8 +387,11 @@ def apply_operator(
 
         try:
             # Handle numeric ranges
-            if all(isinstance(v, (int, float)) or (isinstance(v, str) and v.replace('.', '', 1).isdigit())
-                  for v in (actual_value, expected_value, additional_value)):
+            if all(
+                isinstance(v, (int, float))
+                or (isinstance(v, str) and v.replace(".", "", 1).isdigit())
+                for v in (actual_value, expected_value, additional_value)
+            ):
                 actual = float(actual_value)
                 lower = float(expected_value)
                 upper = float(additional_value)
@@ -371,51 +401,69 @@ def apply_operator(
             if isinstance(actual_value, datetime):
                 actual_date = actual_value
             elif isinstance(actual_value, str):
-                actual_date = datetime.fromisoformat(actual_value.replace('Z', '+00:00'))
+                actual_date = datetime.fromisoformat(
+                    actual_value.replace("Z", "+00:00")
+                )
             elif isinstance(actual_value, (int, float)):
                 actual_date = datetime.fromtimestamp(actual_value)
             else:
-                logger.warning(f"Unsupported format for BETWEEN operator: {actual_value}")
+                logger.warning(
+                    f"Unsupported format for BETWEEN operator: {actual_value}"
+                )
                 return False
 
             if isinstance(expected_value, datetime):
                 lower_date = expected_value
             elif isinstance(expected_value, str):
-                lower_date = datetime.fromisoformat(expected_value.replace('Z', '+00:00'))
+                lower_date = datetime.fromisoformat(
+                    expected_value.replace("Z", "+00:00")
+                )
             elif isinstance(expected_value, (int, float)):
                 lower_date = datetime.fromtimestamp(expected_value)
             else:
-                logger.warning(f"Unsupported format for BETWEEN lower bound: {expected_value}")
+                logger.warning(
+                    f"Unsupported format for BETWEEN lower bound: {expected_value}"
+                )
                 return False
 
             if isinstance(additional_value, datetime):
                 upper_date = additional_value
             elif isinstance(additional_value, str):
-                upper_date = datetime.fromisoformat(additional_value.replace('Z', '+00:00'))
+                upper_date = datetime.fromisoformat(
+                    additional_value.replace("Z", "+00:00")
+                )
             elif isinstance(additional_value, (int, float)):
                 upper_date = datetime.fromtimestamp(additional_value)
             else:
-                logger.warning(f"Unsupported format for BETWEEN upper bound: {additional_value}")
+                logger.warning(
+                    f"Unsupported format for BETWEEN upper bound: {additional_value}"
+                )
                 return False
 
             return lower_date <= actual_date <= upper_date
 
         except (ValueError, TypeError):
-            logger.warning(f"Failed to evaluate BETWEEN operator with {actual_value}, {expected_value}, {additional_value}")
+            logger.warning(
+                f"Failed to evaluate BETWEEN operator with {actual_value}, {expected_value}, {additional_value}"
+            )
             return False
 
     # Array operators
     elif operator == OperatorType.CONTAINS_ALL:
         # Check if actual_value contains all elements in expected_value
         if not isinstance(expected_value, (list, tuple, set)):
-            logger.warning(f"Expected value for CONTAINS_ALL should be a collection, got {type(expected_value)}")
+            logger.warning(
+                f"Expected value for CONTAINS_ALL should be a collection, got {type(expected_value)}"
+            )
             return False
 
         if not isinstance(actual_value, (list, tuple, set)):
             if isinstance(actual_value, str):
                 # Handle special case for strings
                 return all(item in actual_value for item in expected_value)
-            logger.warning(f"Actual value for CONTAINS_ALL should be a collection, got {type(actual_value)}")
+            logger.warning(
+                f"Actual value for CONTAINS_ALL should be a collection, got {type(actual_value)}"
+            )
             return False
 
         return all(item in actual_value for item in expected_value)
@@ -423,14 +471,18 @@ def apply_operator(
     elif operator == OperatorType.CONTAINS_ANY:
         # Check if actual_value contains any elements in expected_value
         if not isinstance(expected_value, (list, tuple, set)):
-            logger.warning(f"Expected value for CONTAINS_ANY should be a collection, got {type(expected_value)}")
+            logger.warning(
+                f"Expected value for CONTAINS_ANY should be a collection, got {type(expected_value)}"
+            )
             return False
 
         if not isinstance(actual_value, (list, tuple, set)):
             if isinstance(actual_value, str):
                 # Handle special case for strings
                 return any(item in actual_value for item in expected_value)
-            logger.warning(f"Actual value for CONTAINS_ANY should be a collection, got {type(actual_value)}")
+            logger.warning(
+                f"Actual value for CONTAINS_ANY should be a collection, got {type(actual_value)}"
+            )
             return False
 
         return any(item in actual_value for item in expected_value)
@@ -440,12 +492,14 @@ def apply_operator(
         try:
             # Parse the versions
             if not isinstance(actual_value, str) or not isinstance(expected_value, str):
-                logger.warning(f"Semantic version requires string values, got {type(actual_value)} and {type(expected_value)}")
+                logger.warning(
+                    f"Semantic version requires string values, got {type(actual_value)} and {type(expected_value)}"
+                )
                 return False
 
             # Remove leading 'v' if present (be lenient)
-            actual_clean = actual_value.lstrip('v')
-            expected_clean = expected_value.lstrip('v')
+            actual_clean = actual_value.lstrip("v")
+            expected_clean = expected_value.lstrip("v")
 
             # Validate format
             try:
@@ -462,10 +516,12 @@ def apply_operator(
             # We compare major, minor, patch, and prerelease, but not build
             if comparison_type == "eq":
                 # For equality, we ignore build metadata per SemVer spec
-                return (actual_ver.major == expected_ver.major and
-                        actual_ver.minor == expected_ver.minor and
-                        actual_ver.patch == expected_ver.patch and
-                        actual_ver.prerelease == expected_ver.prerelease)
+                return (
+                    actual_ver.major == expected_ver.major
+                    and actual_ver.minor == expected_ver.minor
+                    and actual_ver.patch == expected_ver.patch
+                    and actual_ver.prerelease == expected_ver.prerelease
+                )
             elif comparison_type == "gt":
                 return actual_ver > expected_ver
             elif comparison_type == "gte":
@@ -475,7 +531,9 @@ def apply_operator(
             elif comparison_type == "lte":
                 return actual_ver <= expected_ver
             else:
-                logger.warning(f"Unknown semantic version comparison type: {comparison_type}")
+                logger.warning(
+                    f"Unknown semantic version comparison type: {comparison_type}"
+                )
                 return False
 
         except Exception as e:
@@ -501,45 +559,59 @@ def apply_operator(
                 try:
                     return actual_length == int(expected_value)
                 except (ValueError, TypeError):
-                    logger.warning(f"Expected value for array length must be numeric, got {expected_value}")
+                    logger.warning(
+                        f"Expected value for array length must be numeric, got {expected_value}"
+                    )
                     return False
 
             elif comparison_type == "gt":
                 try:
                     return actual_length > int(expected_value)
                 except (ValueError, TypeError):
-                    logger.warning(f"Expected value for array length must be numeric, got {expected_value}")
+                    logger.warning(
+                        f"Expected value for array length must be numeric, got {expected_value}"
+                    )
                     return False
 
             elif comparison_type == "lt":
                 try:
                     return actual_length < int(expected_value)
                 except (ValueError, TypeError):
-                    logger.warning(f"Expected value for array length must be numeric, got {expected_value}")
+                    logger.warning(
+                        f"Expected value for array length must be numeric, got {expected_value}"
+                    )
                     return False
 
             elif comparison_type == "gte":
                 try:
                     return actual_length >= int(expected_value)
                 except (ValueError, TypeError):
-                    logger.warning(f"Expected value for array length must be numeric, got {expected_value}")
+                    logger.warning(
+                        f"Expected value for array length must be numeric, got {expected_value}"
+                    )
                     return False
 
             elif comparison_type == "lte":
                 try:
                     return actual_length <= int(expected_value)
                 except (ValueError, TypeError):
-                    logger.warning(f"Expected value for array length must be numeric, got {expected_value}")
+                    logger.warning(
+                        f"Expected value for array length must be numeric, got {expected_value}"
+                    )
                     return False
 
             elif comparison_type == "between":
                 # Expected value should be a dict with min and max
                 if not isinstance(expected_value, dict):
-                    logger.warning(f"BETWEEN operator for array length requires dict with 'min' and 'max', got {type(expected_value)}")
+                    logger.warning(
+                        f"BETWEEN operator for array length requires dict with 'min' and 'max', got {type(expected_value)}"
+                    )
                     return False
 
                 if "min" not in expected_value or "max" not in expected_value:
-                    logger.warning(f"BETWEEN operator for array length requires 'min' and 'max' keys")
+                    logger.warning(
+                        "BETWEEN operator for array length requires 'min' and 'max' keys"
+                    )
                     return False
 
                 try:
@@ -551,7 +623,9 @@ def apply_operator(
                     return False
 
             else:
-                logger.warning(f"Unknown array length comparison type: {comparison_type}")
+                logger.warning(
+                    f"Unknown array length comparison type: {comparison_type}"
+                )
                 return False
 
         except Exception as e:
@@ -577,13 +651,17 @@ def apply_operator(
             # Extract coordinates from actual_value
             actual_coords = _extract_coordinates(actual_value)
             if not actual_coords:
-                logger.debug(f"Failed to extract coordinates from actual value: {actual_value}")
+                logger.debug(
+                    f"Failed to extract coordinates from actual value: {actual_value}"
+                )
                 return False
 
             # Extract coordinates from expected_value
             expected_coords = _extract_coordinates(expected_value)
             if not expected_coords:
-                logger.debug(f"Failed to extract coordinates from expected value: {expected_value}")
+                logger.debug(
+                    f"Failed to extract coordinates from expected value: {expected_value}"
+                )
                 return False
 
             # Validate coordinates
@@ -597,7 +675,9 @@ def apply_operator(
 
             # Extract radius from expected_value
             if not isinstance(expected_value, dict) or "radius" not in expected_value:
-                logger.warning("GEO_DISTANCE operator requires 'radius' in expected_value")
+                logger.warning(
+                    "GEO_DISTANCE operator requires 'radius' in expected_value"
+                )
                 return False
 
             try:
@@ -622,7 +702,7 @@ def apply_operator(
                 actual_coords["lon"],
                 expected_coords["lat"],
                 expected_coords["lon"],
-                unit
+                unit,
             )
 
             if distance is None:
@@ -646,7 +726,9 @@ def apply_operator(
                 epsilon = 0.01  # 10 meters tolerance
                 return abs(distance - radius) < epsilon
             else:
-                logger.warning(f"Unknown comparison type for GEO_DISTANCE: {comparison}")
+                logger.warning(
+                    f"Unknown comparison type for GEO_DISTANCE: {comparison}"
+                )
                 return False
 
         except Exception as e:
@@ -666,7 +748,9 @@ def apply_operator(
 
             # Validate expected_value is a dict
             if not isinstance(expected_value, dict):
-                logger.warning(f"TIME_WINDOW operator requires dict configuration, got {type(expected_value)}")
+                logger.warning(
+                    f"TIME_WINDOW operator requires dict configuration, got {type(expected_value)}"
+                )
                 return False
 
             # Empty config matches everything
@@ -725,8 +809,13 @@ def apply_operator(
 
             # Check time range if specified
             if "start_time" in expected_value or "end_time" in expected_value:
-                if "start_time" not in expected_value or "end_time" not in expected_value:
-                    logger.warning("Both start_time and end_time must be specified together")
+                if (
+                    "start_time" not in expected_value
+                    or "end_time" not in expected_value
+                ):
+                    logger.warning(
+                        "Both start_time and end_time must be specified together"
+                    )
                     return False
 
                 start_time = _parse_time(expected_value["start_time"])
@@ -740,7 +829,9 @@ def apply_operator(
 
                 # Helper function for inclusive time comparison
                 # Treats times within the same minute as equal for end boundary
-                def time_matches_or_before_end(current: datetime_time, end: datetime_time) -> bool:
+                def time_matches_or_before_end(
+                    current: datetime_time, end: datetime_time
+                ) -> bool:
                     # If hours and minutes match, consider it within range regardless of seconds
                     if current.hour == end.hour and current.minute == end.minute:
                         return True
@@ -749,17 +840,28 @@ def apply_operator(
                 # Handle overnight time range (e.g., 22:00 to 02:00)
                 if start_time > end_time:
                     # Overnight: match if time >= start OR time <= end (with minute-level inclusivity)
-                    if not (current_time >= start_time or time_matches_or_before_end(current_time, end_time)):
+                    if not (
+                        current_time >= start_time
+                        or time_matches_or_before_end(current_time, end_time)
+                    ):
                         return False
                 else:
                     # Normal range: match if start <= time <= end (with minute-level inclusivity)
-                    if not (current_time >= start_time and time_matches_or_before_end(current_time, end_time)):
+                    if not (
+                        current_time >= start_time
+                        and time_matches_or_before_end(current_time, end_time)
+                    ):
                         return False
 
             # Check date range if specified
             if "start_date" in expected_value or "end_date" in expected_value:
-                if "start_date" not in expected_value or "end_date" not in expected_value:
-                    logger.warning("Both start_date and end_date must be specified together")
+                if (
+                    "start_date" not in expected_value
+                    or "end_date" not in expected_value
+                ):
+                    logger.warning(
+                        "Both start_date and end_date must be specified together"
+                    )
                     return False
 
                 start_date = _parse_date(expected_value["start_date"])
@@ -771,7 +873,9 @@ def apply_operator(
 
                 # Validate date range (start must be before or equal to end)
                 if start_date > end_date:
-                    logger.warning(f"Invalid date range: start_date {start_date} after end_date {end_date}")
+                    logger.warning(
+                        f"Invalid date range: start_date {start_date} after end_date {end_date}"
+                    )
                     return False
 
                 # Check if current date is in range (date only, ignore time)
@@ -787,7 +891,7 @@ def apply_operator(
             return False
 
     # Enhanced operators - delegate to evaluation service if available
-    elif operator in ['percentage_bucket', 'json_path']:
+    elif operator in ["percentage_bucket", "json_path"]:
         # For backward compatibility, these will be handled by the evaluation service
         # Fall back to False for now if not handled by evaluation service
         logger.warning(f"Enhanced operator {operator} requires RulesEvaluationService")
@@ -827,7 +931,7 @@ def _parse_datetime(value: Any) -> Optional[datetime]:
         if isinstance(value, str):
             try:
                 # Try parsing ISO format
-                return datetime.fromisoformat(value.replace('Z', '+00:00'))
+                return datetime.fromisoformat(value.replace("Z", "+00:00"))
             except ValueError:
                 logger.debug(f"Failed to parse datetime string: {value}")
                 return None
@@ -918,34 +1022,22 @@ def _extract_coordinates(value: Any) -> Optional[Dict[str, float]]:
         if isinstance(value, dict):
             # Try lat/lon keys first
             if "lat" in value and "lon" in value:
-                return {
-                    "lat": float(value["lat"]),
-                    "lon": float(value["lon"])
-                }
+                return {"lat": float(value["lat"]), "lon": float(value["lon"])}
             # Try latitude/longitude keys
             elif "latitude" in value and "longitude" in value:
                 return {
                     "lat": float(value["latitude"]),
-                    "lon": float(value["longitude"])
+                    "lon": float(value["longitude"]),
                 }
             # Try mixed formats
             elif "lat" in value and "longitude" in value:
-                return {
-                    "lat": float(value["lat"]),
-                    "lon": float(value["longitude"])
-                }
+                return {"lat": float(value["lat"]), "lon": float(value["longitude"])}
             elif "latitude" in value and "lon" in value:
-                return {
-                    "lat": float(value["latitude"]),
-                    "lon": float(value["lon"])
-                }
+                return {"lat": float(value["latitude"]), "lon": float(value["lon"])}
 
         # Handle array format [lat, lon]
         elif isinstance(value, (list, tuple)) and len(value) == 2:
-            return {
-                "lat": float(value[0]),
-                "lon": float(value[1])
-            }
+            return {"lat": float(value[0]), "lon": float(value[1])}
 
         return None
 
@@ -982,11 +1074,7 @@ def _validate_coordinates(coords: Dict[str, float]) -> bool:
 
 
 def _haversine_distance(
-    lat1: float,
-    lon1: float,
-    lat2: float,
-    lon2: float,
-    unit: str = "km"
+    lat1: float, lon1: float, lat2: float, lon2: float, unit: str = "km"
 ) -> Optional[float]:
     """
     Calculate the great circle distance between two points on Earth using the Haversine formula.
@@ -1015,7 +1103,10 @@ def _haversine_distance(
         dlat = lat2_rad - lat1_rad
         dlon = lon2_rad - lon1_rad
 
-        a = math.sin(dlat / 2) ** 2 + math.cos(lat1_rad) * math.cos(lat2_rad) * math.sin(dlon / 2) ** 2
+        a = (
+            math.sin(dlat / 2) ** 2
+            + math.cos(lat1_rad) * math.cos(lat2_rad) * math.sin(dlon / 2) ** 2
+        )
         c = 2 * math.asin(math.sqrt(a))
 
         # Distance in kilometers
@@ -1063,7 +1154,9 @@ def should_include_in_rollout(rule: TargetingRule, user_context: UserContext) ->
 
     # Create a hash of the user ID and rule ID for deterministic bucketing
     hash_input = f"{user_id}:{rule.id}"
-    hash_value = int(hashlib.md5(hash_input.encode(), usedforsecurity=False).hexdigest(), 16)
+    hash_value = int(
+        hashlib.md5(hash_input.encode(), usedforsecurity=False).hexdigest(), 16
+    )
 
     # Calculate the bucket (0-99)
     bucket = hash_value % 100
@@ -1083,7 +1176,15 @@ def get_stable_user_id(user_context: UserContext) -> str:
         A string identifier for the user
     """
     # Try common user identifier fields
-    for field in ['user_id', 'id', 'email', 'username', 'device_id', 'client_id', 'session_id']:
+    for field in [
+        "user_id",
+        "id",
+        "email",
+        "username",
+        "device_id",
+        "client_id",
+        "session_id",
+    ]:
         if field in user_context and user_context[field]:
             return str(user_context[field])
 

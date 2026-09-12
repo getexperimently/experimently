@@ -13,7 +13,6 @@ from typing import List, Optional, Tuple
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-
 # ---------------------------------------------------------------------------
 # Enums / literals
 # ---------------------------------------------------------------------------
@@ -24,6 +23,7 @@ VALID_METRIC_TYPES = ("proportion", "mean", "ratio")
 # ---------------------------------------------------------------------------
 # Request schemas
 # ---------------------------------------------------------------------------
+
 
 class SampleSizeRequest(BaseModel):
     """Request body for POST /power/sample-size."""
@@ -104,9 +104,7 @@ class SampleSizeRequest(BaseModel):
     @model_validator(mode="after")
     def validate_mean_requires_std(self) -> "SampleSizeRequest":
         if self.metric_type == "mean" and self.baseline_std is None:
-            raise ValueError(
-                "baseline_std is required when metric_type='mean'"
-            )
+            raise ValueError("baseline_std is required when metric_type='mean'")
         return self
 
     @model_validator(mode="after")
@@ -256,8 +254,10 @@ class PlanRequest(BaseModel):
 # Response schemas
 # ---------------------------------------------------------------------------
 
+
 class SampleSizeResponse(BaseModel):
     """Response for POST /power/sample-size."""
+
     model_config = ConfigDict(from_attributes=True)
 
     per_variant: int = Field(description="Sample size needed per variant.")
@@ -266,8 +266,12 @@ class SampleSizeResponse(BaseModel):
     power: float
     baseline_rate: float
     mde_absolute: float = Field(description="Minimum detectable absolute effect size.")
-    mde_relative: float = Field(description="Minimum detectable relative lift (e.g. 0.10 = 10%).")
-    confidence_level: float = Field(description="Statistical confidence level (1 - alpha).")
+    mde_relative: float = Field(
+        description="Minimum detectable relative lift (e.g. 0.10 = 10%)."
+    )
+    confidence_level: float = Field(
+        description="Statistical confidence level (1 - alpha)."
+    )
     runtime_days: Optional[float] = Field(
         default=None,
         description="Estimated days to reach significance (None if daily_traffic not provided).",
@@ -279,6 +283,7 @@ class SampleSizeResponse(BaseModel):
 
 class MDEResponse(BaseModel):
     """Response for POST /power/mde."""
+
     model_config = ConfigDict(from_attributes=True)
 
     mde_absolute: float = Field(description="Smallest detectable absolute effect.")
@@ -293,6 +298,7 @@ class MDEResponse(BaseModel):
 
 class RuntimeResponse(BaseModel):
     """Response for POST /power/runtime."""
+
     model_config = ConfigDict(from_attributes=True)
 
     days_to_significance: float
@@ -305,9 +311,12 @@ class RuntimeResponse(BaseModel):
 
 class PowerCurvePoint(BaseModel):
     """A single point on the power curve."""
+
     model_config = ConfigDict(from_attributes=True)
 
-    effect_size_relative: float = Field(description="Relative effect size (e.g. 0.05 = 5% lift).")
+    effect_size_relative: float = Field(
+        description="Relative effect size (e.g. 0.05 = 5% lift)."
+    )
     sample_size_per_variant: int
     is_current_target: bool = Field(
         description="True for the point closest to the selected MDE.",
@@ -316,6 +325,7 @@ class PowerCurvePoint(BaseModel):
 
 class PowerCurveResponse(BaseModel):
     """Response for GET /power/curve."""
+
     model_config = ConfigDict(from_attributes=True)
 
     points: List[PowerCurvePoint]
@@ -326,6 +336,7 @@ class PowerCurveResponse(BaseModel):
 
 class PlanResponse(BaseModel):
     """Response for POST /power/plan (AI-enhanced advice)."""
+
     model_config = ConfigDict(from_attributes=True)
 
     advice: str = Field(description="Plain-English planning advice.")

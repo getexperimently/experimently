@@ -1,25 +1,27 @@
-import os
-import json
-import time
 import logging
-import traceback
-from typing import Dict, Any, Callable, Awaitable, Optional
+import os
 from datetime import datetime
+from typing import Awaitable, Callable, Optional
 
 try:
-    import fastapi
     from starlette.middleware.base import BaseHTTPMiddleware
     from starlette.requests import Request
     from starlette.responses import Response
 except ImportError:
     # For linting purposes, define placeholder types if imports fail
     BaseHTTPMiddleware = object
-    class Request: pass
-    class Response: pass
+
+    class Request:
+        pass
+
+    class Response:
+        pass
+
 
 from backend.app.utils.aws_client import AWSClient
 
 logger = logging.getLogger(__name__)
+
 
 class ErrorMiddleware(BaseHTTPMiddleware):
     """
@@ -31,7 +33,7 @@ class ErrorMiddleware(BaseHTTPMiddleware):
         app,
         aws_client: Optional[AWSClient] = None,
         metric_namespace: str = "ExperimentationPlatform",
-        track_errors: bool = True
+        track_errors: bool = True,
     ):
         super().__init__(app)
         self.aws_client = aws_client
@@ -93,14 +95,20 @@ class ErrorMiddleware(BaseHTTPMiddleware):
                 dimensions={
                     "Endpoint": path,
                     "Method": method,
-                    "ErrorType": type(error).__name__
-                }
+                    "ErrorType": type(error).__name__,
+                },
             )
         except Exception as e:
-            logger.error(f"Failed to send error metrics to CloudWatch: {str(e)}")
+            logger.error(f"Failed to send error metrics to CloudWatch: {e!s}")
 
     # Headers that contain sensitive values and must be masked in logs
-    _SENSITIVE_HEADER_PATTERNS = {"authorization", "cookie", "x-api-key", "token", "secret"}
+    _SENSITIVE_HEADER_PATTERNS = {
+        "authorization",
+        "cookie",
+        "x-api-key",
+        "token",
+        "secret",
+    }
 
     def _mask_headers(self, headers: dict) -> dict:
         """Mask sensitive header values for safe logging."""
@@ -120,17 +128,20 @@ class ErrorMiddleware(BaseHTTPMiddleware):
             "method": request.method,
             "error_type": type(error).__name__,
             "error_message": str(error),
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.utcnow().isoformat(),
         }
 
         # Add request context if available, with sensitive headers masked
         try:
-            error_details.update({
-                "client_host": request.client.host,
-                "headers": self._mask_headers(dict(request.headers)),
-                "query_params": dict(request.query_params)
-            })
+            error_details.update(
+                {
+                    "client_host": request.client.host,
+                    "headers": self._mask_headers(dict(request.headers)),
+                    "query_params": dict(request.query_params),
+                }
+            )
         except Exception:
             pass
 
-        logger.error(f"Request error: {error_details}", exc_info=True)
+        # Called from the middleware's `except` block, so sys.exc_info() is set.
+        logger.error(f"Request error: {error_details}", exc_info=True)  # noqa: LOG014

@@ -7,11 +7,11 @@ Provides common functionality for logging, validation, error handling, and AWS s
 import json
 import logging
 import os
-import boto3
-from typing import Dict, Any, Optional, List
 from datetime import datetime, timezone
 from decimal import Decimal
+from typing import Any, Dict, List, Optional
 
+import boto3
 
 # AWS Clients (initialized lazily for better cold start performance)
 _dynamodb = None
@@ -24,23 +24,25 @@ class JsonFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
         """Format log record as JSON."""
         log_data = {
-            'timestamp': datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat(),
-            'level': record.levelname,
-            'message': record.getMessage(),
-            'logger': record.name,
-            'function': record.funcName,
-            'line': record.lineno,
+            "timestamp": datetime.fromtimestamp(
+                record.created, tz=timezone.utc
+            ).isoformat(),
+            "level": record.levelname,
+            "message": record.getMessage(),
+            "logger": record.name,
+            "function": record.funcName,
+            "line": record.lineno,
         }
 
         # Add exception info if present
         if record.exc_info:
-            log_data['exception'] = self.formatException(record.exc_info)
+            log_data["exception"] = self.formatException(record.exc_info)
 
         # Add extra fields
-        if hasattr(record, 'user_id'):
-            log_data['user_id'] = record.user_id
-        if hasattr(record, 'experiment_id'):
-            log_data['experiment_id'] = record.experiment_id
+        if hasattr(record, "user_id"):
+            log_data["user_id"] = record.user_id
+        if hasattr(record, "experiment_id"):
+            log_data["experiment_id"] = record.experiment_id
 
         return json.dumps(log_data)
 
@@ -59,7 +61,7 @@ def get_logger(name: str, level: Optional[str] = None) -> logging.Logger:
     logger = logging.getLogger(name)
 
     # Set level from parameter or environment variable
-    log_level = level or os.environ.get('LOG_LEVEL', 'INFO')
+    log_level = level or os.environ.get("LOG_LEVEL", "INFO")
     logger.setLevel(getattr(logging, log_level.upper()))
 
     # Configure handler if not already configured
@@ -89,9 +91,7 @@ def validate_event(event: Dict[str, Any], required_fields: List[str]) -> None:
 
 
 def format_response(
-    status_code: int,
-    body: Dict[str, Any],
-    headers: Optional[Dict[str, str]] = None
+    status_code: int, body: Dict[str, Any], headers: Optional[Dict[str, str]] = None
 ) -> Dict[str, Any]:
     """
     Format Lambda response in standard format.
@@ -105,25 +105,23 @@ def format_response(
         Formatted response dictionary
     """
     default_headers = {
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*',  # Configure based on environment
-        'Access-Control-Allow-Headers': 'Content-Type,Authorization',
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*",  # Configure based on environment
+        "Access-Control-Allow-Headers": "Content-Type,Authorization",
     }
 
     if headers:
         default_headers.update(headers)
 
     return {
-        'statusCode': status_code,
-        'headers': default_headers,
-        'body': json.dumps(body, cls=DecimalEncoder)
+        "statusCode": status_code,
+        "headers": default_headers,
+        "body": json.dumps(body, cls=DecimalEncoder),
     }
 
 
 def format_error_response(
-    status_code: int,
-    error_message: str,
-    error_type: Optional[str] = None
+    status_code: int, error_message: str, error_type: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Format error response.
@@ -137,10 +135,10 @@ def format_error_response(
         Formatted error response
     """
     body = {
-        'error': {
-            'message': error_message,
-            'type': error_type or 'InternalError',
-            'timestamp': datetime.now(timezone.utc).isoformat()
+        "error": {
+            "message": error_message,
+            "type": error_type or "InternalError",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
     }
     return format_response(status_code, body)
@@ -166,7 +164,7 @@ def get_dynamodb_client():
     """
     global _dynamodb
     if _dynamodb is None:
-        _dynamodb = boto3.client('dynamodb')
+        _dynamodb = boto3.client("dynamodb")
     return _dynamodb
 
 
@@ -179,7 +177,7 @@ def get_dynamodb_resource():
     """
     global _dynamodb
     if _dynamodb is None:
-        _dynamodb = boto3.resource('dynamodb')
+        _dynamodb = boto3.resource("dynamodb")
     return _dynamodb
 
 
@@ -192,14 +190,12 @@ def get_kinesis_client():
     """
     global _kinesis
     if _kinesis is None:
-        _kinesis = boto3.client('kinesis')
+        _kinesis = boto3.client("kinesis")
     return _kinesis
 
 
 def put_dynamodb_item(
-    table_name: str,
-    item: Dict[str, Any],
-    condition_expression: Optional[str] = None
+    table_name: str, item: Dict[str, Any], condition_expression: Optional[str] = None
 ) -> bool:
     """
     Put item into DynamoDB table.
@@ -216,22 +212,21 @@ def put_dynamodb_item(
     table = dynamodb.Table(table_name)
 
     try:
-        kwargs = {'Item': item}
+        kwargs = {"Item": item}
         if condition_expression:
-            kwargs['ConditionExpression'] = condition_expression
+            kwargs["ConditionExpression"] = condition_expression
 
         table.put_item(**kwargs)
         return True
     except Exception as e:
         logger = get_logger(__name__)
-        logger.error(f"Failed to put item in DynamoDB: {str(e)}", extra={'table': table_name})
+        logger.error(
+            f"Failed to put item in DynamoDB: {e!s}", extra={"table": table_name}
+        )
         return False
 
 
-def get_dynamodb_item(
-    table_name: str,
-    key: Dict[str, Any]
-) -> Optional[Dict[str, Any]]:
+def get_dynamodb_item(table_name: str, key: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """
     Get item from DynamoDB table.
 
@@ -247,17 +242,17 @@ def get_dynamodb_item(
 
     try:
         response = table.get_item(Key=key)
-        return response.get('Item')
+        return response.get("Item")
     except Exception as e:
         logger = get_logger(__name__)
-        logger.error(f"Failed to get item from DynamoDB: {str(e)}", extra={'table': table_name})
+        logger.error(
+            f"Failed to get item from DynamoDB: {e!s}", extra={"table": table_name}
+        )
         return None
 
 
 def put_kinesis_record(
-    stream_name: str,
-    data: Dict[str, Any],
-    partition_key: str
+    stream_name: str, data: Dict[str, Any], partition_key: str
 ) -> bool:
     """
     Put record into Kinesis stream.
@@ -276,19 +271,21 @@ def put_kinesis_record(
         kinesis.put_record(
             StreamName=stream_name,
             Data=json.dumps(data, cls=DecimalEncoder),
-            PartitionKey=partition_key
+            PartitionKey=partition_key,
         )
         return True
     except Exception as e:
         logger = get_logger(__name__)
-        logger.error(f"Failed to put record in Kinesis: {str(e)}", extra={'stream': stream_name})
+        logger.error(
+            f"Failed to put record in Kinesis: {e!s}", extra={"stream": stream_name}
+        )
         return False
 
 
 def batch_put_kinesis_records(
     stream_name: str,
     records: List[Dict[str, Any]],
-    partition_key_field: str = 'user_id'
+    partition_key_field: str = "user_id",
 ) -> tuple[int, int]:
     """
     Batch put records into Kinesis stream.
@@ -310,39 +307,43 @@ def batch_put_kinesis_records(
     # Kinesis batch limit is 500 records
     batch_size = 500
     for i in range(0, len(records), batch_size):
-        batch = records[i:i + batch_size]
+        batch = records[i : i + batch_size]
 
         kinesis_records = [
             {
-                'Data': json.dumps(record, cls=DecimalEncoder),
-                'PartitionKey': str(record.get(partition_key_field, 'default'))
+                "Data": json.dumps(record, cls=DecimalEncoder),
+                "PartitionKey": str(record.get(partition_key_field, "default")),
             }
             for record in batch
         ]
 
         try:
             response = kinesis.put_records(
-                StreamName=stream_name,
-                Records=kinesis_records
+                StreamName=stream_name, Records=kinesis_records
             )
 
-            successful += len(batch) - response.get('FailedRecordCount', 0)
-            failed += response.get('FailedRecordCount', 0)
+            successful += len(batch) - response.get("FailedRecordCount", 0)
+            failed += response.get("FailedRecordCount", 0)
 
-            if response.get('FailedRecordCount', 0) > 0:
+            if response.get("FailedRecordCount", 0) > 0:
                 logger.warning(
                     f"Batch put partially failed: {response['FailedRecordCount']} failed",
-                    extra={'stream': stream_name}
+                    extra={"stream": stream_name},
                 )
 
         except Exception as e:
-            logger.error(f"Failed to batch put records in Kinesis: {str(e)}", extra={'stream': stream_name})
+            logger.error(
+                f"Failed to batch put records in Kinesis: {e!s}",
+                extra={"stream": stream_name},
+            )
             failed += len(batch)
 
     return successful, failed
 
 
-def get_env_variable(name: str, default: Optional[str] = None, required: bool = False) -> Optional[str]:
+def get_env_variable(
+    name: str, default: Optional[str] = None, required: bool = False
+) -> Optional[str]:
     """
     Get environment variable with validation.
 

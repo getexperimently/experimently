@@ -30,6 +30,7 @@ from an already-drawn matrix; the public functions draw one when the caller has
 none, so they remain usable standalone, and :meth:`BayesianService.analyze`
 draws once and threads the matrix through.
 """
+
 import logging
 from typing import Dict, List, Optional, Sequence, Tuple
 
@@ -95,10 +96,9 @@ def _draw_posterior_samples(
 ) -> np.ndarray:
     """Draw ``n_samples`` from each Beta posterior; shape ``[n_variants, n_samples]``."""
     rng = make_rng(resolve_seed(seed, n_samples, posteriors))
-    return np.array([
-        rng.beta(float(p["alpha"]), float(p["beta"]), n_samples)
-        for p in posteriors
-    ])
+    return np.array(
+        [rng.beta(float(p["alpha"]), float(p["beta"]), n_samples) for p in posteriors]
+    )
 
 
 def _ptbb_from_samples(samples: np.ndarray) -> List[float]:
@@ -145,17 +145,11 @@ def compute_posterior(
 
     # Validate inputs
     if conversions < 0:
-        raise ValueError(
-            f"conversions must be >= 0, got {conversions}"
-        )
+        raise ValueError(f"conversions must be >= 0, got {conversions}")
     if total < 0:
-        raise ValueError(
-            f"total must be >= 0, got {total}"
-        )
+        raise ValueError(f"total must be >= 0, got {total}")
     if conversions > total:
-        raise ValueError(
-            f"conversions ({conversions}) must be <= total ({total})"
-        )
+        raise ValueError(f"conversions ({conversions}) must be <= total ({total})")
 
     # Handle zero observations: return prior unchanged
     if total == 0:
@@ -194,9 +188,7 @@ def compute_credible_interval(
         ValueError: If level is not in (0, 1).
     """
     if not (0.0 < level < 1.0):
-        raise ValueError(
-            f"level must be in (0, 1), got {level}"
-        )
+        raise ValueError(f"level must be in (0, 1), got {level}")
 
     family = posterior.get("family", "beta")
 
@@ -520,9 +512,7 @@ class BayesianService:
         prior = {"alpha": self.config.alpha, "beta": self.config.beta}
 
         # Update posteriors
-        posteriors = [
-            compute_posterior(prior, obs) for obs in variant_observations
-        ]
+        posteriors = [compute_posterior(prior, obs) for obs in variant_observations]
         if len(posteriors) < 2:
             raise ValueError(
                 f"At least 2 posteriors are required for PtBB, got {len(posteriors)}"

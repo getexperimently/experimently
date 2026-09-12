@@ -4,18 +4,19 @@ Unit tests for Targeting Rules and Caching (Day 3).
 Tests targeting rule evaluation and Lambda warm-start caching.
 """
 
-import pytest
 import sys
-from pathlib import Path
 from datetime import datetime, timezone
-from unittest.mock import Mock, patch, MagicMock
+from pathlib import Path
 from time import sleep
+from unittest.mock import Mock, patch
+
+import pytest
 
 # Add parent directories to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "shared"))
 
-from models import ExperimentConfig, VariantConfig, ExperimentStatus
+from models import ExperimentConfig, ExperimentStatus, VariantConfig
 
 
 class TestTargetingRules:
@@ -29,15 +30,11 @@ class TestTargetingRules:
             status=ExperimentStatus.ACTIVE,
             variants=[
                 VariantConfig(key="control", allocation=0.5),
-                VariantConfig(key="treatment", allocation=0.5)
+                VariantConfig(key="treatment", allocation=0.5),
             ],
             targeting_rules=[
-                {
-                    "attribute": "country",
-                    "operator": "equals",
-                    "value": "US"
-                }
-            ]
+                {"attribute": "country", "operator": "equals", "value": "US"}
+            ],
         )
 
     # Day 3, Task 2.9: Tests for targeting rule evaluation
@@ -49,8 +46,7 @@ class TestTargetingRules:
         context = {"country": "US", "platform": "web"}
 
         matches = service.evaluate_targeting_rules(
-            self.experiment_with_rules.targeting_rules,
-            context
+            self.experiment_with_rules.targeting_rules, context
         )
 
         assert matches is True
@@ -63,8 +59,7 @@ class TestTargetingRules:
         context = {"country": "CA", "platform": "web"}
 
         matches = service.evaluate_targeting_rules(
-            self.experiment_with_rules.targeting_rules,
-            context
+            self.experiment_with_rules.targeting_rules, context
         )
 
         assert matches is False
@@ -75,7 +70,7 @@ class TestTargetingRules:
 
         rules = [
             {"attribute": "country", "operator": "equals", "value": "US"},
-            {"attribute": "platform", "operator": "equals", "value": "web"}
+            {"attribute": "platform", "operator": "equals", "value": "web"},
         ]
 
         service = AssignmentService()
@@ -96,8 +91,7 @@ class TestTargetingRules:
         context = {"platform": "web"}  # Missing 'country'
 
         matches = service.evaluate_targeting_rules(
-            self.experiment_with_rules.targeting_rules,
-            context
+            self.experiment_with_rules.targeting_rules, context
         )
 
         assert matches is False
@@ -135,34 +129,24 @@ class TestTargetingRules:
         service = AssignmentService()
 
         # Should match
-        assert service.evaluate_targeting_rules(
-            rules, {"country": "US"}
-        ) is True
+        assert service.evaluate_targeting_rules(rules, {"country": "US"}) is True
 
         # Should not match
-        assert service.evaluate_targeting_rules(
-            rules, {"country": "FR"}
-        ) is False
+        assert service.evaluate_targeting_rules(rules, {"country": "FR"}) is False
 
     def test_evaluate_targeting_rules_greater_than_operator(self):
         """Test 'greater_than' operator for numeric values."""
         from assignment_service import AssignmentService
 
-        rules = [
-            {"attribute": "age", "operator": "greater_than", "value": 18}
-        ]
+        rules = [{"attribute": "age", "operator": "greater_than", "value": 18}]
 
         service = AssignmentService()
 
         # Should match
-        assert service.evaluate_targeting_rules(
-            rules, {"age": 25}
-        ) is True
+        assert service.evaluate_targeting_rules(rules, {"age": 25}) is True
 
         # Should not match
-        assert service.evaluate_targeting_rules(
-            rules, {"age": 16}
-        ) is False
+        assert service.evaluate_targeting_rules(rules, {"age": 16}) is False
 
     def test_assign_variant_respects_targeting_rules(self):
         """Test that variant assignment respects targeting rules."""
@@ -173,18 +157,14 @@ class TestTargetingRules:
         # User matching targeting rules should get assigned
         context_match = {"country": "US"}
         variant = service.assign_variant(
-            "user_us_123",
-            self.experiment_with_rules,
-            context_match
+            "user_us_123", self.experiment_with_rules, context_match
         )
         assert variant in ["control", "treatment"]
 
         # User not matching targeting rules should not get assigned
         context_no_match = {"country": "CA"}
         variant_excluded = service.assign_variant(
-            "user_ca_456",
-            self.experiment_with_rules,
-            context_no_match
+            "user_ca_456", self.experiment_with_rules, context_no_match
         )
         assert variant_excluded is None
 
@@ -193,7 +173,7 @@ class TestLambdaCaching:
     """Test suite for Lambda Warm-Start Caching."""
 
     # Day 3, Task 2.11: Tests for caching layer
-    @patch('assignment_service.get_dynamodb_resource')
+    @patch("assignment_service.get_dynamodb_resource")
     def test_get_experiment_config_caches_result(self, mock_get_resource):
         """Test that experiment config is cached after first fetch."""
         from assignment_service import AssignmentService
@@ -201,15 +181,15 @@ class TestLambdaCaching:
         # Mock DynamoDB response
         mock_table = Mock()
         mock_table.get_item.return_value = {
-            'Item': {
-                'experiment_id': 'exp_cache_test',
-                'key': 'cache_test',
-                'status': 'active',
-                'variants': [
-                    {'key': 'control', 'allocation': 0.5},
-                    {'key': 'treatment', 'allocation': 0.5}
+            "Item": {
+                "experiment_id": "exp_cache_test",
+                "key": "cache_test",
+                "status": "active",
+                "variants": [
+                    {"key": "control", "allocation": 0.5},
+                    {"key": "treatment", "allocation": 0.5},
                 ],
-                'traffic_allocation': 1.0
+                "traffic_allocation": 1.0,
             }
         }
         mock_resource = Mock()
@@ -229,7 +209,7 @@ class TestLambdaCaching:
         # Both should return same config
         assert config1.experiment_id == config2.experiment_id
 
-    @patch('assignment_service.get_dynamodb_resource')
+    @patch("assignment_service.get_dynamodb_resource")
     def test_cache_miss_fetches_from_dynamodb(self, mock_get_resource):
         """Test that cache miss triggers DynamoDB fetch."""
         from assignment_service import AssignmentService
@@ -237,15 +217,15 @@ class TestLambdaCaching:
         # Mock DynamoDB response
         mock_table = Mock()
         mock_table.get_item.return_value = {
-            'Item': {
-                'experiment_id': 'exp_123',
-                'key': 'test_exp',
-                'status': 'active',
-                'variants': [
-                    {'key': 'control', 'allocation': 0.5},
-                    {'key': 'treatment', 'allocation': 0.5}
+            "Item": {
+                "experiment_id": "exp_123",
+                "key": "test_exp",
+                "status": "active",
+                "variants": [
+                    {"key": "control", "allocation": 0.5},
+                    {"key": "treatment", "allocation": 0.5},
                 ],
-                'traffic_allocation': 1.0
+                "traffic_allocation": 1.0,
             }
         }
         mock_resource = Mock()
@@ -270,7 +250,7 @@ class TestLambdaCaching:
         # Add item to cache
         service._experiment_cache["test_key"] = {
             "config": "test_config",
-            "timestamp": datetime.now(timezone.utc).timestamp()
+            "timestamp": datetime.now(timezone.utc).timestamp(),
         }
 
         # Immediately check - should be valid
@@ -294,8 +274,8 @@ class TestLambdaCaching:
             status=ExperimentStatus.ACTIVE,
             variants=[
                 VariantConfig(key="control", allocation=0.5),
-                VariantConfig(key="treatment", allocation=0.5)
-            ]
+                VariantConfig(key="treatment", allocation=0.5),
+            ],
         )
 
         # Store in cache
@@ -330,24 +310,24 @@ class TestLambdaCaching:
         hit_rate = service.get_cache_hit_rate()
         assert hit_rate == pytest.approx(0.667, 0.01)  # 2/3 ≈ 66.7%
 
-    @patch('assignment_service.get_dynamodb_resource')
+    @patch("assignment_service.get_dynamodb_resource")
     def test_different_experiments_cached_separately(self, mock_get_resource):
         """Test that different experiments are cached with separate keys."""
         from assignment_service import AssignmentService
 
         # Mock DynamoDB to return different experiments
         def get_item_side_effect(**kwargs):
-            key = kwargs['Key']['key']
+            key = kwargs["Key"]["key"]
             return {
-                'Item': {
-                    'experiment_id': f'exp_{key}',
-                    'key': key,
-                    'status': 'active',
-                    'variants': [
-                        {'key': 'control', 'allocation': 0.5},
-                        {'key': 'treatment', 'allocation': 0.5}
+                "Item": {
+                    "experiment_id": f"exp_{key}",
+                    "key": key,
+                    "status": "active",
+                    "variants": [
+                        {"key": "control", "allocation": 0.5},
+                        {"key": "treatment", "allocation": 0.5},
                     ],
-                    'traffic_allocation': 1.0
+                    "traffic_allocation": 1.0,
                 }
             }
 

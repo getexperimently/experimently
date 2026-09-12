@@ -5,14 +5,15 @@ This module defines Pydantic models for audience segmentation data structures
 used in the P3-C: Audience Segmentation API.
 """
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
-from typing import Optional, Any
 from enum import Enum
-from datetime import datetime
+from typing import Optional
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class SegmentStatus(str, Enum):
     """Segment lifecycle status."""
+
     ACTIVE = "active"
     INACTIVE = "inactive"
     ARCHIVED = "archived"
@@ -26,7 +27,7 @@ class SegmentCreate(BaseModel):
     rules: dict = Field(
         ...,
         description="Targeting rules JSON matching rules_engine format. "
-                    "Format: {\"conditions\": [...], \"logical_operator\": \"AND\"|\"OR\"}",
+        'Format: {"conditions": [...], "logical_operator": "AND"|"OR"}',
     )
 
     model_config = ConfigDict(
@@ -85,7 +86,7 @@ class SegmentMembershipRequest(BaseModel):
     user_context: dict = Field(
         ...,
         description="User attributes to evaluate against segment rules. "
-                    "e.g. {\"user_id\": \"123\", \"country\": \"US\", \"plan\": \"pro\", \"age\": 25}",
+        'e.g. {"user_id": "123", "country": "US", "plan": "pro", "age": 25}',
     )
 
     model_config = ConfigDict(
@@ -187,9 +188,7 @@ class SegmentExperimentResponse(BaseModel):
                 "experiments": [
                     {"id": "exp-1", "name": "Homepage Test", "status": "active"}
                 ],
-                "feature_flags": [
-                    {"id": "ff-1", "name": "dark-mode"}
-                ],
+                "feature_flags": [{"id": "ff-1", "name": "dark-mode"}],
             }
         }
     )

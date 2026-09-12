@@ -18,7 +18,6 @@ import pytest
 
 from backend.app.services.cuped_service import CupedEffect, CupedService
 
-
 # ---------------------------------------------------------------------------
 # Simulation helpers
 # ---------------------------------------------------------------------------
@@ -45,10 +44,12 @@ def _simulate_experiment(
 
     # Outcome = rho * X + sqrt(1 - rho^2) * noise + mean + effect
     rho = covariate_correlation
-    sigma_noise = math.sqrt(max(0, 1.0 - rho ** 2)) * noise_sd
+    sigma_noise = math.sqrt(max(0, 1.0 - rho**2)) * noise_sd
 
     Y_c = rho * (X_c - 5.0) + rng.normal(0, sigma_noise, n_control) + 5.0
-    Y_t = rho * (X_t - 5.0) + rng.normal(0, sigma_noise, n_treatment) + 5.0 + true_effect
+    Y_t = (
+        rho * (X_t - 5.0) + rng.normal(0, sigma_noise, n_treatment) + 5.0 + true_effect
+    )
 
     return X_c, Y_c, X_t, Y_t
 
@@ -189,14 +190,20 @@ class TestCupedIntegration:
         X_c, Y_c, X_t, Y_t = _simulate_experiment(n_control=500, n_treatment=500)
         effect = CupedService.compute_cuped_effect(Y_c, X_c, Y_t, X_t)
 
-        assert math.isfinite(effect.adjusted_control_mean), "adjusted_control_mean is not finite"
-        assert math.isfinite(effect.adjusted_treatment_mean), "adjusted_treatment_mean is not finite"
+        assert math.isfinite(effect.adjusted_control_mean), (
+            "adjusted_control_mean is not finite"
+        )
+        assert math.isfinite(effect.adjusted_treatment_mean), (
+            "adjusted_treatment_mean is not finite"
+        )
         assert math.isfinite(effect.adjusted_effect), "adjusted_effect is not finite"
         assert math.isfinite(effect.adjusted_se), "adjusted_se is not finite"
         assert math.isfinite(effect.adjusted_p_value), "adjusted_p_value is not finite"
         assert math.isfinite(effect.adjusted_ci[0]), "adjusted_ci lower is not finite"
         assert math.isfinite(effect.adjusted_ci[1]), "adjusted_ci upper is not finite"
-        assert math.isfinite(effect.variance_reduction_pct), "variance_reduction_pct is not finite"
+        assert math.isfinite(effect.variance_reduction_pct), (
+            "variance_reduction_pct is not finite"
+        )
         assert math.isfinite(effect.theta), "theta is not finite"
 
     def test_pipeline_output_matches_direct_primitives(self):

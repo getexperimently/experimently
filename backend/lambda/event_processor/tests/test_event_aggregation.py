@@ -12,10 +12,7 @@ Test-Driven Development (TDD) - RED phase:
 - Write tests first, implementation follows
 """
 
-import pytest
-from datetime import datetime, timedelta
-from unittest.mock import Mock, patch, MagicMock
-from typing import Dict, Any, List
+from unittest.mock import patch
 
 
 class TestEventAggregation:
@@ -36,21 +33,18 @@ class TestEventAggregation:
             "user_id": "user_456",
             "experiment_id": "exp_789",
             "variant": "treatment",
-            "timestamp": "2024-12-19T10:30:00Z"
+            "timestamp": "2024-12-19T10:30:00Z",
         }
 
         from event_aggregator import aggregate_event
 
         # Mock DynamoDB update_item call
         mock_dynamodb_response = {
-            "Attributes": {
-                "event_count": 1,
-                "unique_users": {"user_456"}
-            }
+            "Attributes": {"event_count": 1, "unique_users": {"user_456"}}
         }
 
         # Act
-        with patch('event_aggregator.dynamodb_table') as mock_table:
+        with patch("event_aggregator.dynamodb_table") as mock_table:
             mock_table.update_item.return_value = mock_dynamodb_response
             result = aggregate_event(enriched_event)
 
@@ -78,7 +72,7 @@ class TestEventAggregation:
                 "user_id": "user_1",
                 "experiment_id": "exp_123",
                 "variant": "control",
-                "timestamp": "2024-12-19T10:30:00Z"
+                "timestamp": "2024-12-19T10:30:00Z",
             },
             {
                 "event_id": "evt_2",
@@ -86,7 +80,7 @@ class TestEventAggregation:
                 "user_id": "user_2",
                 "experiment_id": "exp_123",
                 "variant": "control",
-                "timestamp": "2024-12-19T10:31:00Z"
+                "timestamp": "2024-12-19T10:31:00Z",
             },
             {
                 "event_id": "evt_3",
@@ -94,8 +88,8 @@ class TestEventAggregation:
                 "user_id": "user_1",  # Same user as evt_1
                 "experiment_id": "exp_123",
                 "variant": "control",
-                "timestamp": "2024-12-19T10:32:00Z"
-            }
+                "timestamp": "2024-12-19T10:32:00Z",
+            },
         ]
 
         from event_aggregator import aggregate_events_batch
@@ -104,11 +98,16 @@ class TestEventAggregation:
         mock_responses = [
             {"Attributes": {"event_count": 1, "unique_user_ids": {"user_1"}}},
             {"Attributes": {"event_count": 2, "unique_user_ids": {"user_1", "user_2"}}},
-            {"Attributes": {"event_count": 3, "unique_user_ids": {"user_1", "user_2"}}}  # Same user count
+            {
+                "Attributes": {
+                    "event_count": 3,
+                    "unique_user_ids": {"user_1", "user_2"},
+                }
+            },  # Same user count
         ]
 
         # Act
-        with patch('event_aggregator.dynamodb_table') as mock_table:
+        with patch("event_aggregator.dynamodb_table") as mock_table:
             mock_table.update_item.side_effect = mock_responses
             results = aggregate_events_batch(enriched_events)
 
@@ -135,7 +134,7 @@ class TestEventAggregation:
                 "user_id": "user_1",
                 "experiment_id": "exp_456",
                 "variant": "treatment",
-                "timestamp": "2024-12-19T10:15:00Z"  # 10am hour
+                "timestamp": "2024-12-19T10:15:00Z",  # 10am hour
             },
             {
                 "event_id": "evt_11am",
@@ -143,14 +142,14 @@ class TestEventAggregation:
                 "user_id": "user_2",
                 "experiment_id": "exp_456",
                 "variant": "treatment",
-                "timestamp": "2024-12-19T11:30:00Z"  # 11am hour
-            }
+                "timestamp": "2024-12-19T11:30:00Z",  # 11am hour
+            },
         ]
 
         from event_aggregator import aggregate_events_batch
 
         # Act
-        with patch('event_aggregator.dynamodb_table') as mock_table:
+        with patch("event_aggregator.dynamodb_table") as mock_table:
             mock_table.update_item.return_value = {"Attributes": {"event_count": 1}}
             results = aggregate_events_batch(enriched_events)
 
@@ -179,7 +178,7 @@ class TestEventAggregation:
                 "user_id": "user_1",
                 "experiment_id": "exp_789",
                 "variant": "control",
-                "timestamp": "2024-12-19T10:00:00Z"
+                "timestamp": "2024-12-19T10:00:00Z",
             },
             {
                 "event_id": "evt_day2",
@@ -187,16 +186,16 @@ class TestEventAggregation:
                 "user_id": "user_2",
                 "experiment_id": "exp_789",
                 "variant": "control",
-                "timestamp": "2024-12-20T10:00:00Z"  # Next day
-            }
+                "timestamp": "2024-12-20T10:00:00Z",  # Next day
+            },
         ]
 
         from event_aggregator import aggregate_events_batch
 
         # Act
-        with patch('event_aggregator.dynamodb_table') as mock_table:
+        with patch("event_aggregator.dynamodb_table") as mock_table:
             mock_table.update_item.return_value = {"Attributes": {"event_count": 1}}
-            results = aggregate_events_batch(enriched_events, window='daily')
+            results = aggregate_events_batch(enriched_events, window="daily")
 
         # Assert
         assert mock_table.update_item.call_count == 2
@@ -220,13 +219,13 @@ class TestEventAggregation:
             "user_id": "user_123",
             "experiment_id": "exp_concurrent",
             "variant": "treatment",
-            "timestamp": "2024-12-19T10:30:00Z"
+            "timestamp": "2024-12-19T10:30:00Z",
         }
 
         from event_aggregator import aggregate_event
 
         # Act
-        with patch('event_aggregator.dynamodb_table') as mock_table:
+        with patch("event_aggregator.dynamodb_table") as mock_table:
             mock_table.update_item.return_value = {"Attributes": {"event_count": 1}}
             result = aggregate_event(enriched_event)
 
@@ -250,28 +249,29 @@ class TestEventAggregation:
             "user_id": "user_retry",
             "experiment_id": "exp_retry",
             "variant": "control",
-            "timestamp": "2024-12-19T10:30:00Z"
+            "timestamp": "2024-12-19T10:30:00Z",
         }
 
-        from event_aggregator import aggregate_event
         from botocore.exceptions import ClientError
+        from event_aggregator import aggregate_event
 
         # Mock conditional check failure on first call, success on retry
         mock_error = ClientError(
-            {"Error": {"Code": "ConditionalCheckFailedException"}},
-            "UpdateItem"
+            {"Error": {"Code": "ConditionalCheckFailedException"}}, "UpdateItem"
         )
 
         # Act
-        with patch('event_aggregator.dynamodb_table') as mock_table:
+        with patch("event_aggregator.dynamodb_table") as mock_table:
             mock_table.update_item.side_effect = [
                 mock_error,  # First call fails
-                {"Attributes": {"event_count": 2}}  # Retry succeeds
+                {"Attributes": {"event_count": 2}},  # Retry succeeds
             ]
             result = aggregate_event(enriched_event, max_retries=2)
 
         # Assert
-        assert mock_table.update_item.call_count == 2  # Called twice (1 fail + 1 success)
+        assert (
+            mock_table.update_item.call_count == 2
+        )  # Called twice (1 fail + 1 success)
         assert result["event_count"] == 2
 
     def test_aggregate_creates_partition_key_from_experiment_variant_time(self):
@@ -289,17 +289,17 @@ class TestEventAggregation:
             "user_id": "user_key",
             "experiment_id": "exp_abc123",
             "variant": "treatment",
-            "timestamp": "2024-12-19T10:30:00Z"
+            "timestamp": "2024-12-19T10:30:00Z",
         }
 
-        from event_aggregator import aggregate_event, create_aggregation_key
+        from event_aggregator import create_aggregation_key
 
         # Act
         aggregation_key = create_aggregation_key(
             enriched_event["experiment_id"],
             enriched_event["variant"],
             enriched_event["timestamp"],
-            window="hourly"
+            window="hourly",
         )
 
         # Assert
@@ -324,7 +324,7 @@ class TestEventAggregation:
                 "user_id": "user_both",
                 "experiment_id": "exp_tracking",
                 "variant": "control",
-                "timestamp": "2024-12-19T10:30:00Z"
+                "timestamp": "2024-12-19T10:30:00Z",
             },
             {
                 "event_id": "evt_treatment",
@@ -332,17 +332,17 @@ class TestEventAggregation:
                 "user_id": "user_both",  # Same user, different variant
                 "experiment_id": "exp_tracking",
                 "variant": "treatment",
-                "timestamp": "2024-12-19T10:31:00Z"
-            }
+                "timestamp": "2024-12-19T10:31:00Z",
+            },
         ]
 
         from event_aggregator import aggregate_events_batch
 
         # Act
-        with patch('event_aggregator.dynamodb_table') as mock_table:
+        with patch("event_aggregator.dynamodb_table") as mock_table:
             mock_table.update_item.side_effect = [
                 {"Attributes": {"event_count": 1, "unique_users": 1}},
-                {"Attributes": {"event_count": 1, "unique_users": 1}}
+                {"Attributes": {"event_count": 1, "unique_users": 1}},
             ]
             results = aggregate_events_batch(enriched_events)
 
@@ -368,14 +368,14 @@ class TestEventAggregation:
             "event_id": "evt_no_exp",
             "event_type": "page_view",
             "user_id": "user_456",
-            "timestamp": "2024-12-19T10:30:00Z"
+            "timestamp": "2024-12-19T10:30:00Z",
             # No experiment_id or variant
         }
 
         from event_aggregator import aggregate_event
 
         # Act
-        with patch('event_aggregator.dynamodb_table') as mock_table:
+        with patch("event_aggregator.dynamodb_table") as mock_table:
             result = aggregate_event(enriched_event)
 
         # Assert
@@ -398,7 +398,7 @@ class TestEventAggregation:
                 "user_id": "user_1",
                 "experiment_id": "exp_123",
                 "variant": "control",
-                "timestamp": "2024-12-19T10:30:00Z"
+                "timestamp": "2024-12-19T10:30:00Z",
             },
             {
                 "event_id": "evt_fail",
@@ -406,17 +406,17 @@ class TestEventAggregation:
                 "user_id": "user_2",
                 "experiment_id": "exp_456",
                 "variant": "treatment",
-                "timestamp": "2024-12-19T10:31:00Z"
-            }
+                "timestamp": "2024-12-19T10:31:00Z",
+            },
         ]
 
         from event_aggregator import aggregate_events_batch
 
         # Act - Mock one success, one failure
-        with patch('event_aggregator.dynamodb_table') as mock_table:
+        with patch("event_aggregator.dynamodb_table") as mock_table:
             mock_table.update_item.side_effect = [
                 {"Attributes": {"event_count": 1}},  # Success
-                Exception("DynamoDB error")  # Failure
+                Exception("DynamoDB error"),  # Failure
             ]
             results = aggregate_events_batch(enriched_events, return_summary=True)
 

@@ -1,24 +1,24 @@
 # Feature flag database models
-from sqlalchemy import (
-    Column,
-    String,
-    Boolean,
-    Integer,
-    ForeignKey,
-    Enum,
-    Text,
-    Index,
-    CheckConstraint,
-    DateTime,
-)
-from sqlalchemy.dialects.postgresql import UUID, JSONB
-from sqlalchemy.orm import relationship
-from sqlalchemy.ext.declarative import declared_attr
-
-from .base import Base, BaseModel
-from backend.app.core.database_config import get_schema_name
 import enum
 
+from sqlalchemy import (
+    CheckConstraint,
+    Column,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+)
+from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.ext.declarative import declared_attr
+from sqlalchemy.orm import relationship
+
+from backend.app.core.database_config import get_schema_name
+
+from .base import Base, BaseModel
 
 
 class FeatureFlagStatus(enum.Enum):
@@ -79,25 +79,19 @@ class FeatureFlag(Base, BaseModel):
         cascade="all, delete-orphan",
     )
     raw_metrics = relationship(
-        "RawMetric",
-        back_populates="feature_flag",
-        cascade="all, delete-orphan"
+        "RawMetric", back_populates="feature_flag", cascade="all, delete-orphan"
     )
     aggregated_metrics = relationship(
-        "AggregatedMetric",
-        back_populates="feature_flag",
-        cascade="all, delete-orphan"
+        "AggregatedMetric", back_populates="feature_flag", cascade="all, delete-orphan"
     )
     error_logs = relationship(
-        "ErrorLog",
-        back_populates="feature_flag",
-        cascade="all, delete-orphan"
+        "ErrorLog", back_populates="feature_flag", cascade="all, delete-orphan"
     )
     safety_config = relationship(
         "FeatureFlagSafetyConfig",
         back_populates="feature_flag",
         cascade="all, delete-orphan",
-        uselist=False  # One-to-one relationship
+        uselist=False,  # One-to-one relationship
     )
 
     @declared_attr

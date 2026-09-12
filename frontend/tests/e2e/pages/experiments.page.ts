@@ -44,10 +44,12 @@ export class ExperimentsPage {
   readonly statusBadge: Locator;
   readonly variantsTable: Locator;
   readonly metricsList: Locator;
+  readonly actions: Locator;
   readonly startButton: Locator;
   readonly pauseButton: Locator;
   readonly completeButton: Locator;
   readonly archiveButton: Locator;
+  readonly confirmDialog: Locator;
   readonly confirmButton: Locator;
   readonly confirmCancelButton: Locator;
   readonly actionError: Locator;
@@ -90,10 +92,12 @@ export class ExperimentsPage {
     this.statusBadge = page.getByTestId("experiment-status");
     this.variantsTable = page.getByTestId("variants-table");
     this.metricsList = page.getByTestId("metrics-list");
+    this.actions = page.getByTestId("experiment-actions");
     this.startButton = page.getByTestId("action-start");
     this.pauseButton = page.getByTestId("action-pause");
     this.completeButton = page.getByTestId("action-complete");
     this.archiveButton = page.getByTestId("action-archive");
+    this.confirmDialog = page.getByTestId("confirm-action");
     this.confirmButton = page.getByTestId("confirm-yes");
     this.confirmCancelButton = page.getByTestId("confirm-cancel");
     this.actionError = page.getByTestId("action-error");

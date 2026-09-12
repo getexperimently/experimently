@@ -5,31 +5,29 @@ This module defines the models for storing safety settings, feature flag safety 
 and rollback history for the safety monitoring system.
 """
 
-from uuid import uuid4
-from sqlalchemy import (
-    Column,
-    String,
-    Boolean,
-    Integer,
-    Float,
-    ForeignKey,
-    Text,
-    Index,
-    DateTime,
-    Enum as SQLAEnum,
-    func
-)
-from sqlalchemy.dialects.postgresql import UUID, JSONB
-from sqlalchemy.orm import relationship
-from sqlalchemy.ext.declarative import declared_attr
 from enum import Enum
 
-from .base import Base, BaseModel
+from sqlalchemy import (
+    Boolean,
+    Column,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+)
+from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.ext.declarative import declared_attr
+from sqlalchemy.orm import relationship
+
 from backend.app.core.database_config import get_schema_name
+
+from .base import Base, BaseModel
 
 
 class RollbackTriggerType(str, Enum):
     """Types of rollback triggers."""
+
     ERROR_RATE = "error_rate"
     LATENCY = "latency"
     MANUAL = "manual"
@@ -40,10 +38,13 @@ class RollbackTriggerType(str, Enum):
 
 class SafetySettings(Base, BaseModel):
     """Global safety settings for feature flag rollouts."""
+
     __tablename__ = "safety_settings"
 
     enable_automatic_rollbacks = Column(Boolean, default=False, nullable=False)
-    default_metrics = Column(JSONB, nullable=True)  # Dictionary of metric names to threshold configs
+    default_metrics = Column(
+        JSONB, nullable=True
+    )  # Dictionary of metric names to threshold configs
 
     @declared_attr
     def __table_args__(cls):
@@ -53,6 +54,7 @@ class SafetySettings(Base, BaseModel):
 
 class FeatureFlagSafetyConfig(Base, BaseModel):
     """Safety configuration for specific feature flags."""
+
     __tablename__ = "feature_flag_safety_configs"
 
     feature_flag_id = Column(
@@ -61,7 +63,9 @@ class FeatureFlagSafetyConfig(Base, BaseModel):
         nullable=False,
     )
     enabled = Column(Boolean, default=True, nullable=False)
-    metrics = Column(JSONB, nullable=False, default={})  # Dictionary of metric names to threshold configs
+    metrics = Column(
+        JSONB, nullable=False, default={}
+    )  # Dictionary of metric names to threshold configs
     rollback_percentage = Column(Integer, default=0, nullable=False)
 
     # Relationships
@@ -77,13 +81,18 @@ class FeatureFlagSafetyConfig(Base, BaseModel):
         schema_name = get_schema_name()
         return (
             # Unique constraint on feature flag ID
-            Index(f"{schema_name}_safety_config_feature_flag_id_idx", "feature_flag_id", unique=True),
+            Index(
+                f"{schema_name}_safety_config_feature_flag_id_idx",
+                "feature_flag_id",
+                unique=True,
+            ),
             {"schema": schema_name},
         )
 
 
 class SafetyRollbackRecord(Base, BaseModel):
     """Record of a safety-triggered rollback."""
+
     __tablename__ = "safety_rollback_records"
 
     feature_flag_id = Column(
@@ -93,14 +102,26 @@ class SafetyRollbackRecord(Base, BaseModel):
     )
     safety_config_id = Column(
         UUID(as_uuid=True),
-        ForeignKey(f"{get_schema_name()}.feature_flag_safety_configs.id", ondelete="CASCADE"),
+        ForeignKey(
+            f"{get_schema_name()}.feature_flag_safety_configs.id", ondelete="CASCADE"
+        ),
         nullable=False,
     )
-    trigger_type = Column(String, nullable=False)  # Type of trigger that caused rollback
-    trigger_reason = Column(Text, nullable=False)  # Description of the reason for rollback
-    previous_percentage = Column(Integer, nullable=False)  # Rollout percentage before rollback
-    target_percentage = Column(Integer, nullable=False)  # Target rollout percentage after rollback
-    success = Column(Boolean, default=False, nullable=False)  # Whether the rollback was successful
+    trigger_type = Column(
+        String, nullable=False
+    )  # Type of trigger that caused rollback
+    trigger_reason = Column(
+        Text, nullable=False
+    )  # Description of the reason for rollback
+    previous_percentage = Column(
+        Integer, nullable=False
+    )  # Rollout percentage before rollback
+    target_percentage = Column(
+        Integer, nullable=False
+    )  # Target rollout percentage after rollback
+    success = Column(
+        Boolean, default=False, nullable=False
+    )  # Whether the rollback was successful
     executed_by_user_id = Column(
         UUID(as_uuid=True),
         ForeignKey(f"{get_schema_name()}.users.id", ondelete="SET NULL"),
@@ -109,7 +130,9 @@ class SafetyRollbackRecord(Base, BaseModel):
 
     # Relationships
     feature_flag = relationship("FeatureFlag")
-    safety_config = relationship("FeatureFlagSafetyConfig", back_populates="rollback_records")
+    safety_config = relationship(
+        "FeatureFlagSafetyConfig", back_populates="rollback_records"
+    )
     executed_by = relationship("User")
 
     @declared_attr

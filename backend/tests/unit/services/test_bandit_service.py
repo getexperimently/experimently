@@ -9,25 +9,31 @@ Tests the core multi-armed bandit algorithms:
 Following TDD: tests written first, then implementation.
 """
 
-import pytest
 import math
 from typing import Dict, List
 
+import pytest
+
 from backend.app.services.bandit_service import (
-    BanditService,
-    ThompsonSampling,
     UCB1,
+    BanditService,
     EpsilonGreedy,
+    ThompsonSampling,
     VariantStats,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-def make_stats(variant_id: str, successes: int, failures: int,
-               pulls: int = None, total_reward: float = None) -> VariantStats:
+
+def make_stats(
+    variant_id: str,
+    successes: int,
+    failures: int,
+    pulls: int = None,
+    total_reward: float = None,
+) -> VariantStats:
     """Create a VariantStats instance with sensible defaults."""
     if pulls is None:
         pulls = successes + failures
@@ -45,6 +51,7 @@ def make_stats(variant_id: str, successes: int, failures: int,
 # ===========================================================================
 # TestThompsonSampling
 # ===========================================================================
+
 
 class TestThompsonSampling:
     """Tests for Thompson Sampling algorithm."""
@@ -77,7 +84,7 @@ class TestThompsonSampling:
         result = ThompsonSampling.sample(alpha, beta_vals, n_samples=10000)
         for i, p in enumerate(result):
             assert abs(p - 1 / n) < 0.05, (
-                f"Arm {i} probability {p:.4f} deviates too far from {1/n:.4f}"
+                f"Arm {i} probability {p:.4f} deviates too far from {1 / n:.4f}"
             )
 
     def test_sample_probabilities_sum_to_one(self):
@@ -137,8 +144,10 @@ class TestThompsonSampling:
 
     def test_compute_weights_ten_variants(self):
         """Works correctly with 10 variants; weights still sum to 1."""
-        stats = [make_stats(f"v{i}", successes=i * 5, failures=(10 - i) * 5)
-                 for i in range(10)]
+        stats = [
+            make_stats(f"v{i}", successes=i * 5, failures=(10 - i) * 5)
+            for i in range(10)
+        ]
         weights = ThompsonSampling.compute_weights(stats)
         assert len(weights) == 10
         assert abs(sum(weights.values()) - 1.0) < 1e-9
@@ -147,6 +156,7 @@ class TestThompsonSampling:
 # ===========================================================================
 # TestUCB1
 # ===========================================================================
+
 
 class TestUCB1:
     """Tests for UCB1 (Upper Confidence Bound) algorithm."""
@@ -221,8 +231,8 @@ class TestUCB1:
     def test_total_pulls_equals_sum_of_counts(self):
         """total_pulls used internally equals sum of individual counts."""
         stats = [
-            make_stats("v0", successes=40, failures=60),   # 100 pulls
-            make_stats("v1", successes=60, failures=40),   # 100 pulls
+            make_stats("v0", successes=40, failures=60),  # 100 pulls
+            make_stats("v1", successes=60, failures=40),  # 100 pulls
         ]
         # The implementation should not raise or produce wrong results
         weights = UCB1.compute_weights(stats)
@@ -232,6 +242,7 @@ class TestUCB1:
 # ===========================================================================
 # TestEpsilonGreedy
 # ===========================================================================
+
 
 class TestEpsilonGreedy:
     """Tests for Epsilon-Greedy algorithm."""
@@ -299,7 +310,7 @@ class TestEpsilonGreedy:
         n = 3
         for v_id, w in weights.items():
             assert abs(w - 1 / n) < 1e-9, (
-                f"Variant {v_id}: expected {1/n:.4f}, got {w:.4f}"
+                f"Variant {v_id}: expected {1 / n:.4f}, got {w:.4f}"
             )
 
     def test_tie_broken_by_first_variant(self):
@@ -321,6 +332,7 @@ class TestEpsilonGreedy:
 # TestBanditService
 # ===========================================================================
 
+
 class TestBanditService:
     """Tests for the high-level BanditService dispatcher."""
 
@@ -330,57 +342,71 @@ class TestBanditService:
             spec["id"]: {
                 "successes": spec.get("successes", 0),
                 "failures": spec.get("failures", 0),
-                "pulls": spec.get("pulls", spec.get("successes", 0) + spec.get("failures", 0)),
-                "total_reward": spec.get("total_reward", float(spec.get("successes", 0))),
+                "pulls": spec.get(
+                    "pulls", spec.get("successes", 0) + spec.get("failures", 0)
+                ),
+                "total_reward": spec.get(
+                    "total_reward", float(spec.get("successes", 0))
+                ),
             }
             for spec in specs
         }
 
     def test_compute_weights_dispatches_correctly(self):
         """compute_weights() returns a dict keyed by variant_id."""
-        variant_data = self._make_variant_data([
-            {"id": "v0", "successes": 30, "failures": 70},
-            {"id": "v1", "successes": 70, "failures": 30},
-        ])
+        variant_data = self._make_variant_data(
+            [
+                {"id": "v0", "successes": 30, "failures": 70},
+                {"id": "v1", "successes": 70, "failures": 30},
+            ]
+        )
         weights = BanditService.compute_weights("thompson_sampling", variant_data)
         assert isinstance(weights, dict)
         assert set(weights.keys()) == {"v0", "v1"}
 
     def test_thompson_sampling_dispatch(self):
         """algorithm='thompson_sampling' invokes Thompson Sampling path."""
-        variant_data = self._make_variant_data([
-            {"id": "a", "successes": 10, "failures": 90},
-            {"id": "b", "successes": 90, "failures": 10},
-        ])
+        variant_data = self._make_variant_data(
+            [
+                {"id": "a", "successes": 10, "failures": 90},
+                {"id": "b", "successes": 90, "failures": 10},
+            ]
+        )
         weights = BanditService.compute_weights("thompson_sampling", variant_data)
         # b should dominate substantially
         assert weights["b"] > weights["a"]
 
     def test_ucb1_dispatch(self):
         """algorithm='ucb1' invokes UCB1 path."""
-        variant_data = self._make_variant_data([
-            {"id": "a", "successes": 20, "failures": 80},
-            {"id": "b", "successes": 80, "failures": 20},
-        ])
+        variant_data = self._make_variant_data(
+            [
+                {"id": "a", "successes": 20, "failures": 80},
+                {"id": "b", "successes": 80, "failures": 20},
+            ]
+        )
         weights = BanditService.compute_weights("ucb1", variant_data)
         assert weights["b"] > weights["a"]
 
     def test_epsilon_greedy_dispatch(self):
         """algorithm='epsilon_greedy' invokes EpsilonGreedy path."""
-        variant_data = self._make_variant_data([
-            {"id": "a", "successes": 20, "failures": 80},
-            {"id": "b", "successes": 80, "failures": 20},
-        ])
+        variant_data = self._make_variant_data(
+            [
+                {"id": "a", "successes": 20, "failures": 80},
+                {"id": "b", "successes": 80, "failures": 20},
+            ]
+        )
         weights = BanditService.compute_weights("epsilon_greedy", variant_data)
         assert weights["b"] > weights["a"]
 
     def test_fixed_algorithm_returns_equal_weights(self):
         """algorithm='fixed' returns equal weights for all variants."""
-        variant_data = self._make_variant_data([
-            {"id": "a", "successes": 80, "failures": 20},
-            {"id": "b", "successes": 10, "failures": 90},
-            {"id": "c", "successes": 50, "failures": 50},
-        ])
+        variant_data = self._make_variant_data(
+            [
+                {"id": "a", "successes": 80, "failures": 20},
+                {"id": "b", "successes": 10, "failures": 90},
+                {"id": "c", "successes": 50, "failures": 50},
+            ]
+        )
         weights = BanditService.compute_weights("fixed", variant_data)
         expected = 1 / 3
         for v_id, w in weights.items():
@@ -399,10 +425,12 @@ class TestBanditService:
 
     def test_weights_sum_to_approximately_one(self):
         """All returned weights sum to approximately 1.0."""
-        variant_data = self._make_variant_data([
-            {"id": "x", "successes": 40, "failures": 60},
-            {"id": "y", "successes": 60, "failures": 40},
-        ])
+        variant_data = self._make_variant_data(
+            [
+                {"id": "x", "successes": 40, "failures": 60},
+                {"id": "y", "successes": 60, "failures": 40},
+            ]
+        )
         for algo in ["thompson_sampling", "ucb1", "epsilon_greedy", "fixed"]:
             weights = BanditService.compute_weights(algo, variant_data)
             total = sum(weights.values())
@@ -412,40 +440,48 @@ class TestBanditService:
 
     def test_ucb1_deterministic_for_same_data(self):
         """UCB1 is deterministic: same data always yields same weights."""
-        variant_data = self._make_variant_data([
-            {"id": "v0", "successes": 50, "failures": 50},
-            {"id": "v1", "successes": 70, "failures": 30},
-        ])
+        variant_data = self._make_variant_data(
+            [
+                {"id": "v0", "successes": 50, "failures": 50},
+                {"id": "v1", "successes": 70, "failures": 30},
+            ]
+        )
         w1 = BanditService.compute_weights("ucb1", variant_data)
         w2 = BanditService.compute_weights("ucb1", variant_data)
         assert w1 == w2
 
     def test_epsilon_greedy_deterministic_for_same_data(self):
         """Epsilon-greedy is deterministic: same data yields same weights."""
-        variant_data = self._make_variant_data([
-            {"id": "v0", "successes": 50, "failures": 50},
-            {"id": "v1", "successes": 70, "failures": 30},
-        ])
+        variant_data = self._make_variant_data(
+            [
+                {"id": "v0", "successes": 50, "failures": 50},
+                {"id": "v1", "successes": 70, "failures": 30},
+            ]
+        )
         w1 = BanditService.compute_weights("epsilon_greedy", variant_data)
         w2 = BanditService.compute_weights("epsilon_greedy", variant_data)
         assert w1 == w2
 
     def test_two_variants(self):
         """Works correctly with exactly 2 variants."""
-        variant_data = self._make_variant_data([
-            {"id": "control", "successes": 40, "failures": 60},
-            {"id": "treatment", "successes": 60, "failures": 40},
-        ])
+        variant_data = self._make_variant_data(
+            [
+                {"id": "control", "successes": 40, "failures": 60},
+                {"id": "treatment", "successes": 60, "failures": 40},
+            ]
+        )
         weights = BanditService.compute_weights("ucb1", variant_data)
         assert len(weights) == 2
         assert abs(sum(weights.values()) - 1.0) < 1e-9
 
     def test_five_variants(self):
         """Works correctly with 5 variants."""
-        variant_data = self._make_variant_data([
-            {"id": f"v{i}", "successes": i * 10, "failures": (5 - i) * 10}
-            for i in range(5)
-        ])
+        variant_data = self._make_variant_data(
+            [
+                {"id": f"v{i}", "successes": i * 10, "failures": (5 - i) * 10}
+                for i in range(5)
+            ]
+        )
         for algo in ["thompson_sampling", "ucb1", "epsilon_greedy", "fixed"]:
             weights = BanditService.compute_weights(algo, variant_data)
             assert len(weights) == 5

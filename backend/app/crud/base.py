@@ -10,8 +10,8 @@ from uuid import UUID
 
 from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel
-from sqlalchemy.orm import Session
 from sqlalchemy import func, or_
+from sqlalchemy.orm import Session
 
 from backend.app.models.base import Base
 
@@ -77,7 +77,7 @@ class CRUDBase(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
         skip: int = 0,
         limit: int = 100,
         status: Optional[str] = None,
-        search: Optional[str] = None
+        search: Optional[str] = None,
     ) -> List[ModelType]:
         """
         Get multiple records with optional filtering and pagination.
@@ -160,7 +160,9 @@ class CRUDBase(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
 
         return query.offset(skip).limit(limit).all()
 
-    def count(self, db: Session, status: Optional[str] = None, search: Optional[str] = None) -> int:
+    def count(
+        self, db: Session, status: Optional[str] = None, search: Optional[str] = None
+    ) -> int:
         """
         Count records with optional filtering.
 
@@ -195,7 +197,11 @@ class CRUDBase(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
         return query.scalar() or 0  # Return 0 if None
 
     def count_by_owner(
-        self, db: Session, owner_id: Union[UUID, str], status: Optional[str] = None, search: Optional[str] = None
+        self,
+        db: Session,
+        owner_id: Union[UUID, str],
+        status: Optional[str] = None,
+        search: Optional[str] = None,
     ) -> int:
         """
         Count records owned by a specific user.
@@ -209,7 +215,9 @@ class CRUDBase(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
         Returns:
             Count of records
         """
-        query = db.query(func.count(self.model.id)).filter(self.model.owner_id == owner_id)
+        query = db.query(func.count(self.model.id)).filter(
+            self.model.owner_id == owner_id
+        )
 
         # Add status filter if provided and model has status attribute
         if status and hasattr(self.model, "status"):
@@ -254,7 +262,7 @@ class CRUDBase(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
         db: Session,
         *,
         db_obj: ModelType,
-        obj_in: Union[UpdateSchemaType, Dict[str, Any]]
+        obj_in: Union[UpdateSchemaType, Dict[str, Any]],
     ) -> ModelType:
         """
         Update a record.

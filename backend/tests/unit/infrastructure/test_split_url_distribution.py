@@ -9,13 +9,13 @@ Run with:
     export APP_ENV=test TESTING=true
     python -m pytest backend/tests/unit/infrastructure/test_split_url_distribution.py -v
 """
-import pytest
+
 import aws_cdk as cdk
+import pytest
 from aws_cdk import aws_lambda as lambda_
-from aws_cdk.assertions import Template, Match
+from aws_cdk.assertions import Match, Template
 
 from infrastructure.constructs.split_url_distribution import SplitUrlDistribution
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -68,6 +68,7 @@ def template(stack_and_template):
 # Test 1: Construct can be instantiated
 # ---------------------------------------------------------------------------
 
+
 def test_construct_can_be_instantiated(construct):
     """SplitUrlDistribution construct can be created without errors."""
     assert construct is not None
@@ -76,6 +77,7 @@ def test_construct_can_be_instantiated(construct):
 # ---------------------------------------------------------------------------
 # Test 2: CloudFront distribution resource exists
 # ---------------------------------------------------------------------------
+
 
 def test_cloudfront_distribution_created(template):
     """A CloudFront distribution resource is present in the synthesised template."""
@@ -86,6 +88,7 @@ def test_cloudfront_distribution_created(template):
 # Test 3: Distribution has the correct origin domain
 # ---------------------------------------------------------------------------
 
+
 def test_distribution_has_correct_origin_domain(template):
     """The distribution origin is configured with the supplied origin_domain."""
     template.has_resource_properties(
@@ -93,11 +96,7 @@ def test_distribution_has_correct_origin_domain(template):
         {
             "DistributionConfig": {
                 "Origins": Match.array_with(
-                    [
-                        Match.object_like(
-                            {"DomainName": _ORIGIN_DOMAIN}
-                        )
-                    ]
+                    [Match.object_like({"DomainName": _ORIGIN_DOMAIN})]
                 )
             }
         },
@@ -108,6 +107,7 @@ def test_distribution_has_correct_origin_domain(template):
 # Test 4: Lambda@Edge is attached to viewer-request
 # ---------------------------------------------------------------------------
 
+
 def test_lambda_edge_attached_to_viewer_request(template):
     """Lambda@Edge association uses the VIEWER_REQUEST event type."""
     template.has_resource_properties(
@@ -116,11 +116,7 @@ def test_lambda_edge_attached_to_viewer_request(template):
             "DistributionConfig": {
                 "DefaultCacheBehavior": {
                     "LambdaFunctionAssociations": Match.array_with(
-                        [
-                            Match.object_like(
-                                {"EventType": "viewer-request"}
-                            )
-                        ]
+                        [Match.object_like({"EventType": "viewer-request"})]
                     )
                 }
             }
@@ -132,15 +128,14 @@ def test_lambda_edge_attached_to_viewer_request(template):
 # Test 5: HTTPS-only viewer protocol policy
 # ---------------------------------------------------------------------------
 
+
 def test_distribution_has_https_only_policy(template):
     """Distribution viewer protocol policy redirects HTTP to HTTPS."""
     template.has_resource_properties(
         "AWS::CloudFront::Distribution",
         {
             "DistributionConfig": {
-                "DefaultCacheBehavior": {
-                    "ViewerProtocolPolicy": "redirect-to-https"
-                }
+                "DefaultCacheBehavior": {"ViewerProtocolPolicy": "redirect-to-https"}
             }
         },
     )
@@ -149,6 +144,7 @@ def test_distribution_has_https_only_policy(template):
 # ---------------------------------------------------------------------------
 # Test 6: Cache disabled — default TTL is 0
 # ---------------------------------------------------------------------------
+
 
 def test_distribution_has_no_cache_ttl(template):
     """Cache policy has DefaultTTL=0 to disable caching for A/B routing."""
@@ -166,6 +162,7 @@ def test_distribution_has_no_cache_ttl(template):
 # Test 7: Cache policy has MinTTL = 0
 # ---------------------------------------------------------------------------
 
+
 def test_distribution_has_min_ttl_zero(template):
     """Cache policy MinTTL is 0 (no minimum caching)."""
     template.has_resource_properties(
@@ -181,6 +178,7 @@ def test_distribution_has_min_ttl_zero(template):
 # ---------------------------------------------------------------------------
 # Test 8: Cache policy has MaxTTL = 0
 # ---------------------------------------------------------------------------
+
 
 def test_distribution_has_max_ttl_zero(template):
     """Cache policy MaxTTL is 0."""
@@ -198,6 +196,7 @@ def test_distribution_has_max_ttl_zero(template):
 # Test 9: Distribution outputs domain name via CfnOutput
 # ---------------------------------------------------------------------------
 
+
 def test_distribution_outputs_domain_name(template):
     """A CfnOutput for the CloudFront domain name is present in the template.
 
@@ -208,8 +207,7 @@ def test_distribution_outputs_domain_name(template):
     # Using '*' matches all outputs; then we filter by key prefix.
     all_outputs = template.find_outputs("*", {})
     domain_name_outputs = {
-        k: v for k, v in all_outputs.items()
-        if "DistributionDomainName" in k
+        k: v for k, v in all_outputs.items() if "DistributionDomainName" in k
     }
     assert len(domain_name_outputs) >= 1, (
         f"Expected at least one output containing 'DistributionDomainName'. "
@@ -221,6 +219,7 @@ def test_distribution_outputs_domain_name(template):
 # Test 10: Construct exposes domain_name attribute
 # ---------------------------------------------------------------------------
 
+
 def test_construct_exposes_domain_name_attribute(construct):
     """SplitUrlDistribution exposes the distribution domain name as an attribute."""
     assert construct.domain_name is not None
@@ -231,6 +230,7 @@ def test_construct_exposes_domain_name_attribute(construct):
 # Test 11: Construct exposes distribution attribute
 # ---------------------------------------------------------------------------
 
+
 def test_construct_exposes_distribution_attribute(construct):
     """SplitUrlDistribution exposes the CloudFront Distribution object."""
     assert construct.distribution is not None
@@ -239,6 +239,7 @@ def test_construct_exposes_distribution_attribute(construct):
 # ---------------------------------------------------------------------------
 # Test 12: Lambda function resource exists
 # ---------------------------------------------------------------------------
+
 
 def test_lambda_function_resource_exists(template):
     """At least one Lambda function resource exists (the router function)."""
@@ -253,6 +254,7 @@ def test_lambda_function_resource_exists(template):
 # Test 13: Lambda@Edge function has a versioned ARN reference
 # ---------------------------------------------------------------------------
 
+
 def test_lambda_edge_association_references_function_version(template):
     """LambdaFunctionAssociation references a Lambda version (not just the function)."""
     template.has_resource_properties(
@@ -261,11 +263,7 @@ def test_lambda_edge_association_references_function_version(template):
             "DistributionConfig": {
                 "DefaultCacheBehavior": {
                     "LambdaFunctionAssociations": Match.array_with(
-                        [
-                            Match.object_like(
-                                {"LambdaFunctionARN": Match.any_value()}
-                            )
-                        ]
+                        [Match.object_like({"LambdaFunctionARN": Match.any_value()})]
                     )
                 }
             }
@@ -277,21 +275,19 @@ def test_lambda_edge_association_references_function_version(template):
 # Test 14: Cache policy name contains construct ID
 # ---------------------------------------------------------------------------
 
+
 def test_cache_policy_name_contains_construct_id(template):
     """Cache policy name is namespaced with the construct ID."""
     template.has_resource_properties(
         "AWS::CloudFront::CachePolicy",
-        {
-            "CachePolicyConfig": {
-                "Name": Match.string_like_regexp(_CONSTRUCT_ID)
-            }
-        },
+        {"CachePolicyConfig": {"Name": Match.string_like_regexp(_CONSTRUCT_ID)}},
     )
 
 
 # ---------------------------------------------------------------------------
 # Test 15: Distribution is enabled (not disabled)
 # ---------------------------------------------------------------------------
+
 
 def test_distribution_is_enabled(template):
     """The CloudFront distribution is enabled (Enabled=true)."""

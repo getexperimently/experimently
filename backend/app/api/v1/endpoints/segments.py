@@ -17,7 +17,6 @@ Routes:
 
 import logging
 from typing import List, Optional
-from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
@@ -37,7 +36,10 @@ from backend.app.schemas.segment import (
     SegmentStatus,
     SegmentUpdate,
 )
-from backend.app.services.audience_service import AudienceService, _segment_to_response_dict
+from backend.app.services.audience_service import (
+    AudienceService,
+    _segment_to_response_dict,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +49,7 @@ router = APIRouter()
 # ---------------------------------------------------------------------------
 # Helper
 # ---------------------------------------------------------------------------
+
 
 def _require_permission(user: User, action: Action) -> None:
     """
@@ -66,6 +69,7 @@ def _require_permission(user: User, action: Action) -> None:
 # List segments
 # ---------------------------------------------------------------------------
 
+
 @router.get(
     "",
     response_model=List[SegmentResponse],
@@ -84,13 +88,16 @@ def list_segments(
 ) -> List[SegmentResponse]:
     """List segments with optional status filter."""
     _require_permission(current_user, Action.LIST)
-    segments = AudienceService.list_segments(db, status=segment_status, limit=limit, offset=offset)
+    segments = AudienceService.list_segments(
+        db, status=segment_status, limit=limit, offset=offset
+    )
     return [SegmentResponse(**_segment_to_response_dict(s)) for s in segments]
 
 
 # ---------------------------------------------------------------------------
 # Create segment
 # ---------------------------------------------------------------------------
+
 
 @router.post(
     "",
@@ -114,6 +121,7 @@ def create_segment(
 # ---------------------------------------------------------------------------
 # Bulk evaluate — placed BEFORE /{id} routes to avoid path collision
 # ---------------------------------------------------------------------------
+
 
 @router.post(
     "/bulk-evaluate",
@@ -139,6 +147,7 @@ def bulk_evaluate_segments(
 # Get segment
 # ---------------------------------------------------------------------------
 
+
 @router.get(
     "/{segment_id}",
     response_model=SegmentResponse,
@@ -163,6 +172,7 @@ def get_segment(
 # ---------------------------------------------------------------------------
 # Update segment
 # ---------------------------------------------------------------------------
+
 
 @router.put(
     "/{segment_id}",
@@ -190,6 +200,7 @@ def update_segment(
 # Delete segment (soft delete → ARCHIVED)
 # ---------------------------------------------------------------------------
 
+
 @router.delete(
     "/{segment_id}",
     status_code=status.HTTP_204_NO_CONTENT,
@@ -216,6 +227,7 @@ def delete_segment(
 # ---------------------------------------------------------------------------
 # Evaluate membership
 # ---------------------------------------------------------------------------
+
 
 @router.post(
     "/{segment_id}/evaluate",
@@ -245,6 +257,7 @@ def evaluate_segment_membership(
 # Get linked experiments
 # ---------------------------------------------------------------------------
 
+
 @router.get(
     "/{segment_id}/experiments",
     response_model=SegmentExperimentResponse,
@@ -272,6 +285,7 @@ def get_segment_experiments(
 # Preview audience size
 # ---------------------------------------------------------------------------
 
+
 @router.post(
     "/{segment_id}/preview",
     response_model=AudiencePreviewResponse,
@@ -285,7 +299,9 @@ def get_segment_experiments(
 def preview_audience_size(
     segment_id: str,
     data: SegmentCreate,
-    sample_size: int = Query(1000, ge=10, le=10000, description="Sample size for estimation"),
+    sample_size: int = Query(
+        1000, ge=10, le=10000, description="Sample size for estimation"
+    ),
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_active_user),
 ) -> AudiencePreviewResponse:
@@ -296,4 +312,6 @@ def preview_audience_size(
         AudienceService.get_segment(db, segment_id)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
-    return AudienceService.preview_audience_size(db, data.rules, sample_size=sample_size)
+    return AudienceService.preview_audience_size(
+        db, data.rules, sample_size=sample_size
+    )

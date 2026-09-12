@@ -1,10 +1,12 @@
 """Unit tests for experiment scheduler."""
-import pytest
-from datetime import datetime, timedelta, timezone
-from unittest.mock import patch, MagicMock, AsyncMock, call
 
-from backend.app.models.experiment import Experiment, ExperimentStatus
+from datetime import datetime, timedelta, timezone
+from unittest.mock import AsyncMock, MagicMock, call, patch
+
+import pytest
+
 from backend.app.core.scheduler import ExperimentScheduler
+from backend.app.models.experiment import Experiment, ExperimentStatus
 
 
 @pytest.fixture
@@ -21,9 +23,7 @@ def scheduler():
 
 
 @pytest.mark.asyncio
-async def test_scheduler_activate_experiments(
-    scheduler, mock_db_session
-):
+async def test_scheduler_activate_experiments(scheduler, mock_db_session):
     """Test that scheduler activates experiments when start_date is reached."""
     # Create mock experiments
     mock_experiment = MagicMock(spec=Experiment)
@@ -55,9 +55,7 @@ async def test_scheduler_activate_experiments(
 
 
 @pytest.mark.asyncio
-async def test_scheduler_completes_experiments(
-    scheduler, mock_db_session
-):
+async def test_scheduler_completes_experiments(scheduler, mock_db_session):
     """Test that scheduler completes experiments when end_date is reached."""
     # Create mock experiments
     mock_experiment = MagicMock(spec=Experiment)
@@ -89,9 +87,7 @@ async def test_scheduler_completes_experiments(
 
 
 @pytest.mark.asyncio
-async def test_scheduler_no_eligible_experiments(
-    scheduler, mock_db_session
-):
+async def test_scheduler_no_eligible_experiments(scheduler, mock_db_session):
     """Test scheduler when no experiments need to be updated."""
     # Create separate query mocks for activation and completion
     activate_query = MagicMock()
@@ -113,9 +109,7 @@ async def test_scheduler_no_eligible_experiments(
 
 
 @pytest.mark.asyncio
-async def test_scheduler_exception_handling(
-    scheduler, mock_db_session
-):
+async def test_scheduler_exception_handling(scheduler, mock_db_session):
     """Test that scheduler handles exceptions gracefully."""
     # Setup the mock DB to raise an exception
     mock_db_session.query.side_effect = Exception("Test exception")
@@ -130,9 +124,7 @@ async def test_scheduler_exception_handling(
 
 
 @pytest.mark.asyncio
-async def test_scheduler_activation_with_timezone(
-    scheduler, mock_db_session
-):
+async def test_scheduler_activation_with_timezone(scheduler, mock_db_session):
     """Test that scheduler handles timezone metadata correctly."""
     # Create mock experiment with timezone metadata
     mock_experiment = MagicMock(spec=Experiment)

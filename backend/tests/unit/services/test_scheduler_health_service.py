@@ -14,22 +14,21 @@ Tests cover:
 - get_run_history returns at most `limit` records
 """
 
-import pytest
-from unittest.mock import MagicMock, patch, call
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
+from unittest.mock import MagicMock, call, patch
 from uuid import uuid4
 
+import pytest
 from sqlalchemy.orm import Session
 
-from backend.app.services.scheduler_health_service import SchedulerHealthService
-from backend.app.schemas.scheduler import (
-    SchedulerName,
-    SchedulerRunStatus,
-    SchedulerHealthResponse,
-    SchedulerRunRecord,
-)
 from backend.app.models.scheduler_run import SchedulerRun
-
+from backend.app.schemas.scheduler import (
+    SchedulerHealthResponse,
+    SchedulerName,
+    SchedulerRunRecord,
+    SchedulerRunStatus,
+)
+from backend.app.services.scheduler_health_service import SchedulerHealthService
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -51,7 +50,9 @@ def make_run(
     run.scheduler_name = scheduler_name
     run.status = status
     run.started_at = started_at or datetime(2026, 3, 1, 10, 0, 0, tzinfo=timezone.utc)
-    run.completed_at = completed_at or datetime(2026, 3, 1, 10, 0, 5, tzinfo=timezone.utc)
+    run.completed_at = completed_at or datetime(
+        2026, 3, 1, 10, 0, 5, tzinfo=timezone.utc
+    )
     run.items_processed = items_processed
     run.items_failed = items_failed
     run.error_message = error_message
@@ -329,7 +330,9 @@ class TestGetRunHistory:
 
         self.service.get_run_history(self.db, "experiment")
         # Verify .limit(20) was called
-        self.db.query.return_value.filter.return_value.order_by.return_value.limit.assert_called_with(20)
+        self.db.query.return_value.filter.return_value.order_by.return_value.limit.assert_called_with(
+            20
+        )
 
     def test_custom_limit_respected(self):
         runs = [make_run() for _ in range(5)]
@@ -337,7 +340,9 @@ class TestGetRunHistory:
         query_chain.all.return_value = runs
 
         self.service.get_run_history(self.db, "experiment", limit=5)
-        self.db.query.return_value.filter.return_value.order_by.return_value.limit.assert_called_with(5)
+        self.db.query.return_value.filter.return_value.order_by.return_value.limit.assert_called_with(
+            5
+        )
 
     def test_returns_scheduler_run_records(self):
         runs = [make_run(status="success")]

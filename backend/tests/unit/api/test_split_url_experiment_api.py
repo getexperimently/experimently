@@ -9,25 +9,28 @@ Covers:
 - RBAC: admin/developer can create; analyst cannot
 - Preview endpoint: GET /api/v1/experiments/{id}/split-url/preview?user_id=X
 """
+
 import uuid
-import pytest
 from datetime import datetime
 from typing import Any, Dict, List, Optional
-from unittest.mock import patch, MagicMock, AsyncMock
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 from pydantic import BaseModel, ConfigDict
 
 from backend.app.models.experiment import ExperimentStatus as ModelExperimentStatus
 from backend.app.schemas.experiment import (
     ExperimentCreate,
-    ExperimentUpdate,
     ExperimentResponse,
     ExperimentType,
-    ExperimentStatus as SchemaExperimentStatus,
-    VariantBase,
+    ExperimentUpdate,
     MetricBase,
+    VariantBase,
+)
+from backend.app.schemas.experiment import (
+    ExperimentStatus as SchemaExperimentStatus,
 )
 from backend.app.schemas.split_url import SplitUrlConfig, SplitUrlVariant
-
 
 # ---------------------------------------------------------------------------
 # Shared helpers / mock data
@@ -35,8 +38,16 @@ from backend.app.schemas.split_url import SplitUrlConfig, SplitUrlVariant
 
 VALID_SPLIT_URL_CONFIG = {
     "variants": [
-        {"name": "Control", "url": "https://example.com/control", "traffic_allocation": 50.0},
-        {"name": "Treatment", "url": "https://example.com/treatment", "traffic_allocation": 50.0},
+        {
+            "name": "Control",
+            "url": "https://example.com/control",
+            "traffic_allocation": 50.0,
+        },
+        {
+            "name": "Treatment",
+            "url": "https://example.com/treatment",
+            "traffic_allocation": 50.0,
+        },
     ],
     "cookie_name": "split_url_test",
     "cookie_ttl_days": 30,
@@ -59,7 +70,9 @@ VALID_EXPERIMENT_METRICS = [
 ]
 
 
-def make_experiment_create_payload(experiment_type: str = "split_url", split_url_config: Optional[Dict] = None) -> Dict:
+def make_experiment_create_payload(
+    experiment_type: str = "split_url", split_url_config: Optional[Dict] = None
+) -> Dict:
     """Build a valid experiment creation payload."""
     payload = {
         "name": f"Test Split URL Experiment {uuid.uuid4().hex[:6]}",
@@ -77,6 +90,7 @@ def make_experiment_create_payload(experiment_type: str = "split_url", split_url
 
 class MockVariant(BaseModel):
     """Mock variant for response construction."""
+
     id: uuid.UUID = uuid.uuid4()
     name: str = "Control"
     description: Optional[str] = None
@@ -105,6 +119,7 @@ class MockVariant(BaseModel):
 
 class MockMetric(BaseModel):
     """Mock metric for response construction."""
+
     id: uuid.UUID = uuid.uuid4()
     name: str = "Conversion"
     description: Optional[str] = None
@@ -210,6 +225,7 @@ def make_mock_experiment_dict(
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def mock_db():
     return MagicMock()
@@ -282,12 +298,15 @@ def viewer_user():
 @pytest.fixture
 def mock_cache_control():
     from backend.app.api.deps import CacheControl
+
     return CacheControl(enabled=False, skip=False, redis=None)
 
 
 @pytest.fixture
 def mock_experiment_service():
-    with patch("backend.app.api.v1.endpoints.experiments.ExperimentService") as mock_cls:
+    with patch(
+        "backend.app.api.v1.endpoints.experiments.ExperimentService"
+    ) as mock_cls:
         instance = MagicMock()
         mock_cls.return_value = instance
         yield instance
@@ -297,6 +316,7 @@ def mock_experiment_service():
 # Phase 1-A: SplitUrlConfig schema validation tests (pure unit)
 # ---------------------------------------------------------------------------
 
+
 class TestSplitUrlConfigSchema:
     """Validate the SplitUrlConfig Pydantic schema in isolation."""
 
@@ -304,8 +324,14 @@ class TestSplitUrlConfigSchema:
         """SplitUrlConfig with exactly 2 variants summing to 100 is valid."""
         config = SplitUrlConfig(
             variants=[
-                SplitUrlVariant(name="Control", url="https://example.com/a", traffic_allocation=50.0),
-                SplitUrlVariant(name="Treatment", url="https://example.com/b", traffic_allocation=50.0),
+                SplitUrlVariant(
+                    name="Control", url="https://example.com/a", traffic_allocation=50.0
+                ),
+                SplitUrlVariant(
+                    name="Treatment",
+                    url="https://example.com/b",
+                    traffic_allocation=50.0,
+                ),
             ]
         )
         assert len(config.variants) == 2
@@ -314,9 +340,15 @@ class TestSplitUrlConfigSchema:
         """SplitUrlConfig with 3 variants summing to 100 is valid."""
         config = SplitUrlConfig(
             variants=[
-                SplitUrlVariant(name="A", url="https://example.com/a", traffic_allocation=33.34),
-                SplitUrlVariant(name="B", url="https://example.com/b", traffic_allocation=33.33),
-                SplitUrlVariant(name="C", url="https://example.com/c", traffic_allocation=33.33),
+                SplitUrlVariant(
+                    name="A", url="https://example.com/a", traffic_allocation=33.34
+                ),
+                SplitUrlVariant(
+                    name="B", url="https://example.com/b", traffic_allocation=33.33
+                ),
+                SplitUrlVariant(
+                    name="C", url="https://example.com/c", traffic_allocation=33.33
+                ),
             ]
         )
         assert len(config.variants) == 3
@@ -326,7 +358,11 @@ class TestSplitUrlConfigSchema:
         with pytest.raises(Exception):
             SplitUrlConfig(
                 variants=[
-                    SplitUrlVariant(name="Only", url="https://example.com/only", traffic_allocation=100.0),
+                    SplitUrlVariant(
+                        name="Only",
+                        url="https://example.com/only",
+                        traffic_allocation=100.0,
+                    ),
                 ]
             )
 
@@ -340,8 +376,12 @@ class TestSplitUrlConfigSchema:
         with pytest.raises(Exception):
             SplitUrlConfig(
                 variants=[
-                    SplitUrlVariant(name="A", url="https://a.com", traffic_allocation=40.0),
-                    SplitUrlVariant(name="B", url="https://b.com", traffic_allocation=40.0),
+                    SplitUrlVariant(
+                        name="A", url="https://a.com", traffic_allocation=40.0
+                    ),
+                    SplitUrlVariant(
+                        name="B", url="https://b.com", traffic_allocation=40.0
+                    ),
                 ]
             )
 
@@ -375,6 +415,7 @@ class TestSplitUrlConfigSchema:
 # Phase 1-B: ExperimentCreate schema with split_url_config
 # ---------------------------------------------------------------------------
 
+
 class TestExperimentCreateWithSplitUrlConfig:
     """Test that ExperimentCreate accepts and validates split_url_config."""
 
@@ -398,7 +439,9 @@ class TestExperimentCreateWithSplitUrlConfig:
 
     def test_experiment_create_split_url_config_null_for_ab(self):
         """Explicitly setting split_url_config=None is allowed for A/B experiments."""
-        payload = make_experiment_create_payload(experiment_type="a_b", split_url_config=None)
+        payload = make_experiment_create_payload(
+            experiment_type="a_b", split_url_config=None
+        )
         exp = ExperimentCreate(**payload)
         assert exp.split_url_config is None
 
@@ -428,7 +471,11 @@ class TestExperimentCreateWithSplitUrlConfig:
         """split_url_config with fewer than 2 variants raises validation error."""
         single_variant_config = {
             "variants": [
-                {"name": "Only", "url": "https://only.com", "traffic_allocation": 100.0},
+                {
+                    "name": "Only",
+                    "url": "https://only.com",
+                    "traffic_allocation": 100.0,
+                },
             ]
         }
         payload = make_experiment_create_payload(
@@ -458,12 +505,15 @@ class TestExperimentCreateWithSplitUrlConfig:
 # Phase 1-C: ExperimentUpdate schema with split_url_config
 # ---------------------------------------------------------------------------
 
+
 class TestExperimentUpdateWithSplitUrlConfig:
     """Test that ExperimentUpdate handles split_url_config changes."""
 
     def test_experiment_update_accepts_split_url_config(self):
         """ExperimentUpdate can set split_url_config."""
-        update = ExperimentUpdate(split_url_config=SplitUrlConfig(**VALID_SPLIT_URL_CONFIG))
+        update = ExperimentUpdate(
+            split_url_config=SplitUrlConfig(**VALID_SPLIT_URL_CONFIG)
+        )
         assert update.split_url_config is not None
 
     def test_experiment_update_can_clear_split_url_config(self):
@@ -480,6 +530,7 @@ class TestExperimentUpdateWithSplitUrlConfig:
 # ---------------------------------------------------------------------------
 # Phase 1-D: API endpoint tests (using mocked service + dependency overrides)
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_create_split_url_experiment_via_endpoint(
@@ -522,11 +573,13 @@ async def test_get_split_url_experiment_returns_split_url_config(
     from backend.app.api.v1.endpoints.experiments import get_experiment
 
     experiment_id = uuid.uuid4()
-    mock_experiment_service.get_experiment_by_id.return_value = make_mock_experiment_dict(
-        experiment_id=experiment_id,
-        owner_id=admin_user.id,
-        experiment_type="split_url",
-        split_url_config=VALID_SPLIT_URL_CONFIG,
+    mock_experiment_service.get_experiment_by_id.return_value = (
+        make_mock_experiment_dict(
+            experiment_id=experiment_id,
+            owner_id=admin_user.id,
+            experiment_type="split_url",
+            split_url_config=VALID_SPLIT_URL_CONFIG,
+        )
     )
 
     result = await get_experiment(
@@ -547,11 +600,13 @@ async def test_get_ab_experiment_split_url_config_is_null(
     from backend.app.api.v1.endpoints.experiments import get_experiment
 
     experiment_id = uuid.uuid4()
-    mock_experiment_service.get_experiment_by_id.return_value = make_mock_experiment_dict(
-        experiment_id=experiment_id,
-        owner_id=admin_user.id,
-        experiment_type="a_b",
-        split_url_config=None,
+    mock_experiment_service.get_experiment_by_id.return_value = (
+        make_mock_experiment_dict(
+            experiment_id=experiment_id,
+            owner_id=admin_user.id,
+            experiment_type="a_b",
+            split_url_config=None,
+        )
     )
 
     result = await get_experiment(
@@ -569,8 +624,9 @@ async def test_viewer_user_cannot_create_experiment(
     mock_db, mock_experiment_service, viewer_user, mock_cache_control
 ):
     """Viewer users cannot create split_url experiments — endpoint raises an HTTPException."""
-    from backend.app.api.v1.endpoints.experiments import create_experiment
     from fastapi import HTTPException
+
+    from backend.app.api.v1.endpoints.experiments import create_experiment
 
     payload = make_experiment_create_payload(
         experiment_type="split_url",
@@ -597,6 +653,7 @@ async def test_viewer_user_cannot_create_experiment(
 # Phase 1-E: Preview endpoint tests
 # ---------------------------------------------------------------------------
 
+
 class TestSplitUrlPreviewEndpoint:
     """Tests for GET /api/v1/experiments/{id}/split-url/preview?user_id=X."""
 
@@ -605,14 +662,18 @@ class TestSplitUrlPreviewEndpoint:
         self, mock_db, mock_experiment_service, admin_user, mock_cache_control
     ):
         """Preview endpoint returns the URL variant for a given user_id."""
-        from backend.app.api.v1.endpoints.experiments import preview_split_url_assignment
+        from backend.app.api.v1.endpoints.experiments import (
+            preview_split_url_assignment,
+        )
 
         experiment_id = uuid.uuid4()
-        mock_experiment_service.get_experiment_by_id.return_value = make_mock_experiment_dict(
-            experiment_id=experiment_id,
-            owner_id=admin_user.id,
-            experiment_type="split_url",
-            split_url_config=VALID_SPLIT_URL_CONFIG,
+        mock_experiment_service.get_experiment_by_id.return_value = (
+            make_mock_experiment_dict(
+                experiment_id=experiment_id,
+                owner_id=admin_user.id,
+                experiment_type="split_url",
+                split_url_config=VALID_SPLIT_URL_CONFIG,
+            )
         )
 
         result = await preview_split_url_assignment(
@@ -634,7 +695,9 @@ class TestSplitUrlPreviewEndpoint:
         self, mock_db, mock_experiment_service, admin_user, mock_cache_control
     ):
         """Same user_id always gets the same variant (deterministic hashing)."""
-        from backend.app.api.v1.endpoints.experiments import preview_split_url_assignment
+        from backend.app.api.v1.endpoints.experiments import (
+            preview_split_url_assignment,
+        )
 
         experiment_id = uuid.uuid4()
         exp_dict = make_mock_experiment_dict(
@@ -668,8 +731,11 @@ class TestSplitUrlPreviewEndpoint:
         self, mock_db, mock_experiment_service, admin_user
     ):
         """Preview endpoint returns 404 when the experiment does not exist."""
-        from backend.app.api.v1.endpoints.experiments import preview_split_url_assignment
         from fastapi import HTTPException
+
+        from backend.app.api.v1.endpoints.experiments import (
+            preview_split_url_assignment,
+        )
 
         mock_experiment_service.get_experiment_by_id.return_value = None
 
@@ -688,15 +754,20 @@ class TestSplitUrlPreviewEndpoint:
         self, mock_db, mock_experiment_service, admin_user
     ):
         """Preview endpoint returns 400 when the experiment is not split_url type."""
-        from backend.app.api.v1.endpoints.experiments import preview_split_url_assignment
         from fastapi import HTTPException
 
+        from backend.app.api.v1.endpoints.experiments import (
+            preview_split_url_assignment,
+        )
+
         experiment_id = uuid.uuid4()
-        mock_experiment_service.get_experiment_by_id.return_value = make_mock_experiment_dict(
-            experiment_id=experiment_id,
-            owner_id=admin_user.id,
-            experiment_type="a_b",
-            split_url_config=None,
+        mock_experiment_service.get_experiment_by_id.return_value = (
+            make_mock_experiment_dict(
+                experiment_id=experiment_id,
+                owner_id=admin_user.id,
+                experiment_type="a_b",
+                split_url_config=None,
+            )
         )
 
         with pytest.raises(HTTPException) as exc_info:
@@ -714,15 +785,20 @@ class TestSplitUrlPreviewEndpoint:
         self, mock_db, mock_experiment_service, admin_user
     ):
         """Preview endpoint returns 400 when split_url experiment has no config set."""
-        from backend.app.api.v1.endpoints.experiments import preview_split_url_assignment
         from fastapi import HTTPException
 
+        from backend.app.api.v1.endpoints.experiments import (
+            preview_split_url_assignment,
+        )
+
         experiment_id = uuid.uuid4()
-        mock_experiment_service.get_experiment_by_id.return_value = make_mock_experiment_dict(
-            experiment_id=experiment_id,
-            owner_id=admin_user.id,
-            experiment_type="split_url",
-            split_url_config=None,  # No config
+        mock_experiment_service.get_experiment_by_id.return_value = (
+            make_mock_experiment_dict(
+                experiment_id=experiment_id,
+                owner_id=admin_user.id,
+                experiment_type="split_url",
+                split_url_config=None,  # No config
+            )
         )
 
         with pytest.raises(HTTPException) as exc_info:
@@ -740,15 +816,20 @@ class TestSplitUrlPreviewEndpoint:
         self, mock_db, mock_experiment_service, analyst_user
     ):
         """Analyst users cannot access the preview endpoint — expect 403."""
-        from backend.app.api.v1.endpoints.experiments import preview_split_url_assignment
         from fastapi import HTTPException
 
+        from backend.app.api.v1.endpoints.experiments import (
+            preview_split_url_assignment,
+        )
+
         experiment_id = uuid.uuid4()
-        mock_experiment_service.get_experiment_by_id.return_value = make_mock_experiment_dict(
-            experiment_id=experiment_id,
-            owner_id=uuid.uuid4(),
-            experiment_type="split_url",
-            split_url_config=VALID_SPLIT_URL_CONFIG,
+        mock_experiment_service.get_experiment_by_id.return_value = (
+            make_mock_experiment_dict(
+                experiment_id=experiment_id,
+                owner_id=uuid.uuid4(),
+                experiment_type="split_url",
+                split_url_config=VALID_SPLIT_URL_CONFIG,
+            )
         )
 
         with pytest.raises(HTTPException) as exc_info:
@@ -766,14 +847,18 @@ class TestSplitUrlPreviewEndpoint:
         self, mock_db, mock_experiment_service, developer_user
     ):
         """Developer users can access the preview endpoint."""
-        from backend.app.api.v1.endpoints.experiments import preview_split_url_assignment
+        from backend.app.api.v1.endpoints.experiments import (
+            preview_split_url_assignment,
+        )
 
         experiment_id = uuid.uuid4()
-        mock_experiment_service.get_experiment_by_id.return_value = make_mock_experiment_dict(
-            experiment_id=experiment_id,
-            owner_id=developer_user.id,
-            experiment_type="split_url",
-            split_url_config=VALID_SPLIT_URL_CONFIG,
+        mock_experiment_service.get_experiment_by_id.return_value = (
+            make_mock_experiment_dict(
+                experiment_id=experiment_id,
+                owner_id=developer_user.id,
+                experiment_type="split_url",
+                split_url_config=VALID_SPLIT_URL_CONFIG,
+            )
         )
 
         result = await preview_split_url_assignment(
@@ -791,14 +876,18 @@ class TestSplitUrlPreviewEndpoint:
         self, mock_db, mock_experiment_service, admin_user
     ):
         """Preview response includes experiment_id for traceability."""
-        from backend.app.api.v1.endpoints.experiments import preview_split_url_assignment
+        from backend.app.api.v1.endpoints.experiments import (
+            preview_split_url_assignment,
+        )
 
         experiment_id = uuid.uuid4()
-        mock_experiment_service.get_experiment_by_id.return_value = make_mock_experiment_dict(
-            experiment_id=experiment_id,
-            owner_id=admin_user.id,
-            experiment_type="split_url",
-            split_url_config=VALID_SPLIT_URL_CONFIG,
+        mock_experiment_service.get_experiment_by_id.return_value = (
+            make_mock_experiment_dict(
+                experiment_id=experiment_id,
+                owner_id=admin_user.id,
+                experiment_type="split_url",
+                split_url_config=VALID_SPLIT_URL_CONFIG,
+            )
         )
 
         result = await preview_split_url_assignment(

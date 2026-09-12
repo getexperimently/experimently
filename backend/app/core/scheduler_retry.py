@@ -6,8 +6,8 @@ background scheduler tasks. Failures are logged at WARNING level; final
 exhaustion is logged at ERROR level.
 """
 
-import time
 import logging
+import time
 from functools import wraps
 from typing import Callable
 
@@ -37,6 +37,7 @@ def with_retry(max_retries: int = 3, delay_seconds: int = 60, backoff: float = 2
         Exception: The last exception raised by the wrapped function after all
                    retry attempts have been exhausted.
     """
+
     def decorator(func: Callable):
         @wraps(func)
         def wrapper(*args, **kwargs):
@@ -47,7 +48,7 @@ def with_retry(max_retries: int = 3, delay_seconds: int = 60, backoff: float = 2
                 except Exception as e:
                     last_exception = e
                     if attempt < max_retries:
-                        wait = delay_seconds * (backoff ** attempt)
+                        wait = delay_seconds * (backoff**attempt)
                         logger.warning(
                             "%s failed (attempt %d/%d), retrying in %.0fs: %s",
                             func.__name__,
@@ -67,4 +68,5 @@ def with_retry(max_retries: int = 3, delay_seconds: int = 60, backoff: float = 2
             raise last_exception
 
         return wrapper
+
     return decorator

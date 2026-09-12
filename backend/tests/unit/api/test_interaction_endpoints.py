@@ -9,14 +9,14 @@ Covers:
 - Schema validation
 """
 
-import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
+import pytest
 from fastapi.testclient import TestClient
 
+from backend.app.api.deps import get_current_active_user, get_db
 from backend.app.main import app
-from backend.app.api.deps import get_db, get_current_active_user
 from backend.app.models.user import UserRole
 from backend.app.services.interaction_detection_service import (
     InteractionAnalysis,
@@ -25,10 +25,10 @@ from backend.app.services.interaction_detection_service import (
     SUTVAResult,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_mock_db():
     return MagicMock()
@@ -40,6 +40,7 @@ def _override_get_db(mock_db):
             yield mock_db
         finally:
             pass
+
     return _get_db
 
 
@@ -91,6 +92,7 @@ def _make_analysis(
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def developer_client():
     user = _make_user(role=UserRole.DEVELOPER)
@@ -128,6 +130,7 @@ def admin_client():
 # TestScanEndpoint
 # ---------------------------------------------------------------------------
 
+
 class TestScanEndpoint:
     """Tests for GET /api/v1/interactions/scan."""
 
@@ -141,7 +144,9 @@ class TestScanEndpoint:
             response = client.get("/api/v1/interactions/scan")
         assert response.status_code == 200
 
-    def test_scan_returns_active_interaction_scan_response_shape(self, developer_client):
+    def test_scan_returns_active_interaction_scan_response_shape(
+        self, developer_client
+    ):
         client, _, mock_db = developer_client
         with patch(
             "backend.app.api.v1.endpoints.interactions.InteractionDetectionService"
@@ -176,7 +181,10 @@ class TestScanEndpoint:
             "backend.app.api.v1.endpoints.interactions.InteractionDetectionService"
         ) as MockSvc:
             MockSvc.return_value.scan_active_experiments.return_value = [analysis]
-            MockSvc.return_value._get_active_experiment_ids.return_value = [exp_a, exp_b]
+            MockSvc.return_value._get_active_experiment_ids.return_value = [
+                exp_a,
+                exp_b,
+            ]
             response = client.get("/api/v1/interactions/scan")
         data = response.json()
         assert data["pairs_analyzed"] == len(data["analyses"])
@@ -204,6 +212,7 @@ class TestScanEndpoint:
 # ---------------------------------------------------------------------------
 # TestAnalyzePairEndpoint
 # ---------------------------------------------------------------------------
+
 
 class TestAnalyzePairEndpoint:
     """Tests for GET /api/v1/interactions/{exp_a_id}/{exp_b_id}."""
@@ -305,6 +314,7 @@ class TestAnalyzePairEndpoint:
 # TestNoveltyEndpoint
 # ---------------------------------------------------------------------------
 
+
 class TestNoveltyEndpoint:
     """Tests for GET /api/v1/interactions/{exp_a_id}/{exp_b_id}/novelty."""
 
@@ -335,6 +345,7 @@ class TestNoveltyEndpoint:
 # TestHighRiskPairs
 # ---------------------------------------------------------------------------
 
+
 class TestHighRiskPairs:
     """Tests for correct high_risk_pairs counting in scan response."""
 
@@ -349,8 +360,13 @@ class TestHighRiskPairs:
         with patch(
             "backend.app.api.v1.endpoints.interactions.InteractionDetectionService"
         ) as MockSvc:
-            MockSvc.return_value.scan_active_experiments.return_value = [high_risk_analysis]
-            MockSvc.return_value._get_active_experiment_ids.return_value = [exp_a, exp_b]
+            MockSvc.return_value.scan_active_experiments.return_value = [
+                high_risk_analysis
+            ]
+            MockSvc.return_value._get_active_experiment_ids.return_value = [
+                exp_a,
+                exp_b,
+            ]
             response = client.get("/api/v1/interactions/scan")
         data = response.json()
         assert data["high_risk_pairs"] >= 1

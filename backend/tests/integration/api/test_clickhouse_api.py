@@ -23,18 +23,18 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from backend.app.main import app
 from backend.app.api import deps
+from backend.app.main import app
 from backend.app.models.user import User, UserRole
 from backend.app.services.clickhouse_connector import (
     ClickHouseConnectionError,
     ClickHouseQueryError,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers / Fixtures
 # ---------------------------------------------------------------------------
+
 
 def _make_user(role: UserRole = UserRole.DEVELOPER, is_superuser: bool = False) -> User:
     """Build a minimal User object for mocking auth."""
@@ -98,6 +98,7 @@ def client_as_viewer(viewer_user):
 # POST /test-connection
 # ===========================================================================
 
+
 class TestClickHouseTestConnection:
     """Tests for the POST /clickhouse/test-connection endpoint."""
 
@@ -120,7 +121,9 @@ class TestClickHouseTestConnection:
             response = client_as_developer.post(self.ENDPOINT, json=self.VALID_PAYLOAD)
         assert response.status_code == 200
 
-    def test_test_connection_response_contains_status_connected(self, client_as_developer):
+    def test_test_connection_response_contains_status_connected(
+        self, client_as_developer
+    ):
         """Response body has status='connected' when connection succeeds."""
         with patch(
             "backend.app.api.v1.endpoints.warehouse_clickhouse.ClickHouseConnector"
@@ -144,8 +147,8 @@ class TestClickHouseTestConnection:
         with patch(
             "backend.app.api.v1.endpoints.warehouse_clickhouse.ClickHouseConnector"
         ) as MockConn:
-            MockConn.return_value.test_connection.side_effect = ClickHouseConnectionError(
-                "Host unreachable"
+            MockConn.return_value.test_connection.side_effect = (
+                ClickHouseConnectionError("Host unreachable")
             )
             response = client_as_developer.post(self.ENDPOINT, json=self.VALID_PAYLOAD)
         assert response.status_code == 503
@@ -188,6 +191,7 @@ class TestClickHouseTestConnection:
 # ===========================================================================
 # POST /query
 # ===========================================================================
+
 
 class TestClickHouseQuery:
     """Tests for the POST /clickhouse/query endpoint."""
@@ -308,6 +312,7 @@ class TestClickHouseQuery:
 # GET /metrics/experiments/{experiment_id}
 # ===========================================================================
 
+
 class TestClickHouseExperimentMetrics:
     """Tests for GET /clickhouse/metrics/experiments/{experiment_id}."""
 
@@ -390,9 +395,7 @@ class TestClickHouseExperimentMetrics:
     def test_get_experiment_metrics_requires_developer_role(self, client_as_viewer):
         """VIEWER role gets 403."""
         exp_id = str(uuid.uuid4())
-        response = client_as_viewer.get(
-            self._endpoint(exp_id), params=self.CONN_PARAMS
-        )
+        response = client_as_viewer.get(self._endpoint(exp_id), params=self.CONN_PARAMS)
         assert response.status_code == 403
 
     def test_get_experiment_metrics_returns_empty_for_unknown_id(
@@ -423,6 +426,7 @@ class TestClickHouseExperimentMetrics:
 # ===========================================================================
 # GET /metrics/flags/{flag_id}
 # ===========================================================================
+
 
 class TestClickHouseFeatureFlagMetrics:
     """Tests for GET /clickhouse/metrics/flags/{flag_id}."""
@@ -511,9 +515,7 @@ class TestClickHouseFeatureFlagMetrics:
         )
         assert response.status_code == 403
 
-    def test_get_flag_metrics_returns_empty_for_unknown_flag(
-        self, client_as_developer
-    ):
+    def test_get_flag_metrics_returns_empty_for_unknown_flag(self, client_as_developer):
         """Returns 200 with empty metrics when flag has no data."""
         flag_id = str(uuid.uuid4())
         with patch(

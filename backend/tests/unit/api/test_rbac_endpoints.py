@@ -1,12 +1,14 @@
 """Unit tests for RBAC API endpoints."""
-import pytest
-from unittest.mock import patch, MagicMock
-from uuid import uuid4
+
 from datetime import datetime
+from unittest.mock import MagicMock, patch
+from uuid import uuid4
+
+import pytest
 from fastapi.testclient import TestClient
 
+from backend.app.api.deps import get_current_active_user, get_db
 from backend.app.main import app
-from backend.app.api.deps import get_db, get_current_active_user
 from backend.app.models.user import UserRole
 
 
@@ -21,6 +23,7 @@ def _override_get_db(mock_db):
             yield mock_db
         finally:
             pass
+
     return _get_db
 
 
@@ -113,27 +116,36 @@ class TestCreateRole:
         mock_db.query.return_value.filter.return_value.count.return_value = 0
         with patch("backend.app.api.v1.endpoints.rbac.RBACService") as mock_svc:
             mock_svc.create_custom_role.return_value = mock_role
-            response = client.post("/api/v1/rbac/roles", json={
-                "name": "data-scientist",
-                "permissions": [],
-            })
+            response = client.post(
+                "/api/v1/rbac/roles",
+                json={
+                    "name": "data-scientist",
+                    "permissions": [],
+                },
+            )
         assert response.status_code == 201
 
     def test_viewer_cannot_create_role(self, viewer_client):
         client, _, _ = viewer_client
-        response = client.post("/api/v1/rbac/roles", json={"name": "newrole", "permissions": []})
+        response = client.post(
+            "/api/v1/rbac/roles", json={"name": "newrole", "permissions": []}
+        )
         assert response.status_code == 403
 
     def test_duplicate_role_returns_409(self, admin_client):
         client, _, _ = admin_client
         with patch("backend.app.api.v1.endpoints.rbac.RBACService") as mock_svc:
             mock_svc.create_custom_role.side_effect = ValueError("already exists")
-            response = client.post("/api/v1/rbac/roles", json={"name": "existing", "permissions": []})
+            response = client.post(
+                "/api/v1/rbac/roles", json={"name": "existing", "permissions": []}
+            )
         assert response.status_code == 409
 
     def test_invalid_role_name_returns_422(self, admin_client):
         client, _, _ = admin_client
-        response = client.post("/api/v1/rbac/roles", json={"name": "1Invalid", "permissions": []})
+        response = client.post(
+            "/api/v1/rbac/roles", json={"name": "1Invalid", "permissions": []}
+        )
         assert response.status_code == 422
 
 
@@ -167,7 +179,9 @@ class TestUpdateRole:
         mock_db.query.return_value.filter.return_value.count.return_value = 0
         with patch("backend.app.api.v1.endpoints.rbac.RBACService") as mock_svc:
             mock_svc.update_custom_role.return_value = mock_role
-            response = client.put("/api/v1/rbac/roles/my-role", json={"description": "Updated desc"})
+            response = client.put(
+                "/api/v1/rbac/roles/my-role", json={"description": "Updated desc"}
+            )
         assert response.status_code == 200
 
     def test_viewer_cannot_update(self, viewer_client):
@@ -178,7 +192,9 @@ class TestUpdateRole:
     def test_update_system_role_returns_400(self, admin_client):
         client, _, _ = admin_client
         with patch("backend.app.api.v1.endpoints.rbac.RBACService") as mock_svc:
-            mock_svc.update_custom_role.side_effect = ValueError("Cannot modify system roles")
+            mock_svc.update_custom_role.side_effect = ValueError(
+                "Cannot modify system roles"
+            )
             response = client.put("/api/v1/rbac/roles/admin", json={"description": "x"})
         assert response.status_code == 400
 
@@ -199,7 +215,9 @@ class TestDeleteRole:
     def test_delete_system_role_returns_400(self, admin_client):
         client, _, _ = admin_client
         with patch("backend.app.api.v1.endpoints.rbac.RBACService") as mock_svc:
-            mock_svc.delete_custom_role.side_effect = ValueError("Cannot delete system roles")
+            mock_svc.delete_custom_role.side_effect = ValueError(
+                "Cannot delete system roles"
+            )
             response = client.delete("/api/v1/rbac/roles/admin")
         assert response.status_code == 400
 
@@ -209,10 +227,13 @@ class TestAssignRevoke:
         client, _, _ = admin_client
         with patch("backend.app.api.v1.endpoints.rbac.RBACService") as mock_svc:
             mock_svc.assign_role.return_value = MagicMock()
-            response = client.post("/api/v1/rbac/roles/assign", json={
-                "user_id": str(uuid4()),
-                "role_name": "data-scientist",
-            })
+            response = client.post(
+                "/api/v1/rbac/roles/assign",
+                json={
+                    "user_id": str(uuid4()),
+                    "role_name": "data-scientist",
+                },
+            )
         assert response.status_code == 200
         assert response.json()["status"] == "assigned"
 
@@ -220,27 +241,32 @@ class TestAssignRevoke:
         client, _, _ = admin_client
         with patch("backend.app.api.v1.endpoints.rbac.RBACService") as mock_svc:
             mock_svc.revoke_role.return_value = None
-            response = client.post("/api/v1/rbac/roles/revoke", json={
-                "user_id": str(uuid4()),
-                "role_name": "data-scientist",
-            })
+            response = client.post(
+                "/api/v1/rbac/roles/revoke",
+                json={
+                    "user_id": str(uuid4()),
+                    "role_name": "data-scientist",
+                },
+            )
         assert response.status_code == 200
         assert response.json()["status"] == "revoked"
 
     def test_viewer_cannot_assign(self, viewer_client):
         client, _, _ = viewer_client
-        response = client.post("/api/v1/rbac/roles/assign", json={
-            "user_id": str(uuid4()), "role_name": "any"
-        })
+        response = client.post(
+            "/api/v1/rbac/roles/assign",
+            json={"user_id": str(uuid4()), "role_name": "any"},
+        )
         assert response.status_code == 403
 
     def test_assign_unknown_role_returns_404(self, admin_client):
         client, _, _ = admin_client
         with patch("backend.app.api.v1.endpoints.rbac.RBACService") as mock_svc:
             mock_svc.assign_role.side_effect = ValueError("not found")
-            response = client.post("/api/v1/rbac/roles/assign", json={
-                "user_id": str(uuid4()), "role_name": "ghost"
-            })
+            response = client.post(
+                "/api/v1/rbac/roles/assign",
+                json={"user_id": str(uuid4()), "role_name": "ghost"},
+            )
         assert response.status_code == 404
 
 
@@ -248,13 +274,18 @@ class TestEffectivePermissions:
     def test_get_own_permissions_returns_200(self, admin_client):
         client, user, mock_db = admin_client
         from backend.app.schemas.rbac import EffectivePermissionsResponse
+
         mock_db.query.return_value.filter.return_value.first.return_value = user
         with patch("backend.app.api.v1.endpoints.rbac.RBACService") as mock_svc:
-            mock_svc.get_effective_permissions.return_value = EffectivePermissionsResponse(
-                user_id=str(user.id), username="admin",
-                base_role="admin", custom_roles=[],
-                permissions={"experiment": ["create", "read"]},
-                is_superuser=True,
+            mock_svc.get_effective_permissions.return_value = (
+                EffectivePermissionsResponse(
+                    user_id=str(user.id),
+                    username="admin",
+                    base_role="admin",
+                    custom_roles=[],
+                    permissions={"experiment": ["create", "read"]},
+                    is_superuser=True,
+                )
             )
             response = client.get(f"/api/v1/rbac/users/{user.id}/permissions")
         assert response.status_code == 200
@@ -273,13 +304,18 @@ class TestEffectivePermissions:
     def test_viewer_can_get_own_permissions(self, viewer_client):
         client, user, mock_db = viewer_client
         from backend.app.schemas.rbac import EffectivePermissionsResponse
+
         mock_db.query.return_value.filter.return_value.first.return_value = user
         with patch("backend.app.api.v1.endpoints.rbac.RBACService") as mock_svc:
-            mock_svc.get_effective_permissions.return_value = EffectivePermissionsResponse(
-                user_id=str(user.id), username="viewer",
-                base_role="viewer", custom_roles=[],
-                permissions={"experiment": ["read", "list"]},
-                is_superuser=False,
+            mock_svc.get_effective_permissions.return_value = (
+                EffectivePermissionsResponse(
+                    user_id=str(user.id),
+                    username="viewer",
+                    base_role="viewer",
+                    custom_roles=[],
+                    permissions={"experiment": ["read", "list"]},
+                    is_superuser=False,
+                )
             )
             response = client.get(f"/api/v1/rbac/users/{user.id}/permissions")
         assert response.status_code == 200
@@ -296,7 +332,7 @@ class TestGrantRevokePermission:
                     "user_id": str(uuid4()),
                     "resource": "report",
                     "actions": ["read"],
-                }
+                },
             )
         assert response.status_code == 201
         assert response.json()["status"] == "granted"
@@ -305,7 +341,7 @@ class TestGrantRevokePermission:
         client, _, _ = viewer_client
         response = client.post(
             f"/api/v1/rbac/users/{uuid4()}/grant",
-            json={"user_id": str(uuid4()), "resource": "report", "actions": ["read"]}
+            json={"user_id": str(uuid4()), "resource": "report", "actions": ["read"]},
         )
         assert response.status_code == 403
 

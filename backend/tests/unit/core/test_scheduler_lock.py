@@ -17,6 +17,7 @@ Covered:
 
 from __future__ import annotations
 
+import re
 import uuid
 
 import pytest
@@ -24,7 +25,12 @@ from prometheus_client import REGISTRY
 from sqlalchemy.orm import sessionmaker
 
 from backend.app.core import scheduler_lock as lock_module
-from backend.app.core.scheduler_lock import async_scheduler_lock, release, scheduler_lock, try_acquire
+from backend.app.core.scheduler_lock import (
+    async_scheduler_lock,
+    release,
+    scheduler_lock,
+    try_acquire,
+)
 from backend.app.core.scheduler_tick import (
     STATUS_FAILED,
     STATUS_SKIPPED,
@@ -119,7 +125,9 @@ class TestSchedulerLock:
             bad.dispose()
 
     def test_lock_name_is_namespaced(self):
-        assert lock_module.lock_name("experiment") == "experimently.scheduler.experiment"
+        assert (
+            lock_module.lock_name("experiment") == "experimently.scheduler.experiment"
+        )
 
     def test_lock_connection_is_not_idle_in_transaction(self, test_db):
         """A session-level advisory lock needs no transaction; the holder must stay idle."""
@@ -129,13 +137,17 @@ class TestSchedulerLock:
         with scheduler_lock(name, engine=test_db) as acquired:
             assert acquired is True
             with test_db.connect() as probe:
-                states = probe.execute(
-                    text(
-                        "SELECT state FROM pg_stat_activity "
-                        "WHERE datname = current_database() AND pid <> pg_backend_pid() "
-                        "AND query LIKE '%pg_try_advisory_lock%'"
+                states = (
+                    probe.execute(
+                        text(
+                            "SELECT state FROM pg_stat_activity "
+                            "WHERE datname = current_database() AND pid <> pg_backend_pid() "
+                            "AND query LIKE '%pg_try_advisory_lock%'"
+                        )
                     )
-                ).scalars().all()
+                    .scalars()
+                    .all()
+                )
             assert states, "lock holder session not visible"
             assert all(state == "idle" for state in states), states
 
@@ -221,7 +233,9 @@ def _runs(factory, name):
 
 class TestRunLockedTick:
     @pytest.mark.asyncio
-    async def test_tick_skipped_when_lock_held_elsewhere(self, test_db, record_sessions):
+    async def test_tick_skipped_when_lock_held_elsewhere(
+        self, test_db, record_sessions
+    ):
         name = _name()
         calls = []
 
@@ -254,7 +268,9 @@ class TestRunLockedTick:
 
         assert outcome.acquired is True
         assert outcome.status == STATUS_SUCCESS
-        assert outcome.result == TickResult(items_processed=3, items_failed=0, metadata={"k": "v"})
+        assert outcome.result == TickResult(
+            items_processed=3, items_failed=0, metadata={"k": "v"}
+        )
 
         runs = _runs(record_sessions, name)
         assert len(runs) == 1
@@ -300,7 +316,9 @@ class TestRunLockedTick:
         assert _gauge(name) is None
 
     @pytest.mark.asyncio
-    async def test_failing_tick_is_recorded_and_reraised(self, test_db, record_sessions):
+    async def test_failing_tick_is_recorded_and_reraised(
+        self, test_db, record_sessions
+    ):
         name = _name()
 
         async def tick():
@@ -357,7 +375,8 @@ class TestSchedulerWiring:
 
         module = importlib.import_module(module_name)
         source = inspect.getsource(module)
-        assert "run_locked_tick(SCHEDULER_NAME" in source, module_name
+        # Formatter-insensitive: the call may wrap after the opening paren.
+        assert re.search(r"run_locked_tick\(\s*SCHEDULER_NAME", source), module_name
         assert getattr(module, "SCHEDULER_NAME", None) in {
             "experiment",
             "rollout",

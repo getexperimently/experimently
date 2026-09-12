@@ -4,15 +4,21 @@ Test cases for rule compilation and validation.
 Tests the rule compiler that pre-validates and optimizes targeting rules.
 """
 
-import pytest
 from datetime import datetime
-from backend.app.core.rule_compiler import RuleCompiler, CompiledRule, RuleValidationError
+
+import pytest
+
+from backend.app.core.rule_compiler import (
+    CompiledRule,
+    RuleCompiler,
+    RuleValidationError,
+)
 from backend.app.schemas.targeting_rule import (
-    TargetingRule,
-    RuleGroup,
     Condition,
     LogicalOperator,
-    OperatorType
+    OperatorType,
+    RuleGroup,
+    TargetingRule,
 )
 
 
@@ -24,13 +30,9 @@ class TestRuleCompilation:
         rule_group = RuleGroup(
             operator=LogicalOperator.AND,
             conditions=[
-                Condition(
-                    attribute="country",
-                    operator=OperatorType.EQUALS,
-                    value="US"
-                )
+                Condition(attribute="country", operator=OperatorType.EQUALS, value="US")
             ],
-            groups=[]
+            groups=[],
         )
 
         rule = TargetingRule(
@@ -38,9 +40,8 @@ class TestRuleCompilation:
             name="US Only",
             description="Target US users",
             rule=rule_group,
-            
             priority=1,
-            rollout_percentage=100
+            rollout_percentage=100,
         )
 
         compiler = RuleCompiler()
@@ -57,18 +58,24 @@ class TestRuleCompilation:
         inner_group = RuleGroup(
             operator=LogicalOperator.OR,
             conditions=[
-                Condition(attribute="age", operator=OperatorType.GREATER_THAN, value=18),
-                Condition(attribute="verified", operator=OperatorType.EQUALS, value=True)
+                Condition(
+                    attribute="age", operator=OperatorType.GREATER_THAN, value=18
+                ),
+                Condition(
+                    attribute="verified", operator=OperatorType.EQUALS, value=True
+                ),
             ],
-            groups=[]
+            groups=[],
         )
 
         outer_group = RuleGroup(
             operator=LogicalOperator.AND,
             conditions=[
-                Condition(attribute="country", operator=OperatorType.IN, value=["US", "CA"])
+                Condition(
+                    attribute="country", operator=OperatorType.IN, value=["US", "CA"]
+                )
             ],
-            groups=[inner_group]
+            groups=[inner_group],
         )
 
         rule = TargetingRule(
@@ -76,9 +83,8 @@ class TestRuleCompilation:
             name="Complex Rule",
             description="Nested targeting",
             rule=outer_group,
-            
             priority=1,
-            rollout_percentage=100
+            rollout_percentage=100,
         )
 
         compiler = RuleCompiler()
@@ -95,7 +101,7 @@ class TestRuleCompilation:
             conditions=[
                 Condition(attribute="country", operator=OperatorType.EQUALS, value="US")
             ],
-            groups=[]
+            groups=[],
         )
 
         rule = TargetingRule(
@@ -103,9 +109,8 @@ class TestRuleCompilation:
             name="Cached Rule",
             description="Test caching",
             rule=rule_group,
-            
             priority=1,
-            rollout_percentage=100
+            rollout_percentage=100,
         )
 
         compiler = RuleCompiler()
@@ -134,10 +139,10 @@ class TestRuleValidation:
                 Condition(
                     attribute="country",
                     operator=OperatorType.IN,
-                    value=["US", "CA"]  # Valid
+                    value=["US", "CA"],  # Valid
                 )
             ],
-            groups=[]
+            groups=[],
         )
 
         rule = TargetingRule(
@@ -146,7 +151,7 @@ class TestRuleValidation:
             description="Valid rule",
             rule=rule_group,
             priority=1,
-            rollout_percentage=100
+            rollout_percentage=100,
         )
 
         compiler = RuleCompiler()
@@ -165,10 +170,10 @@ class TestRuleValidation:
                     attribute="age",
                     operator=OperatorType.BETWEEN,
                     value=18,
-                    additional_value=65  # Valid upper bound
+                    additional_value=65,  # Valid upper bound
                 )
             ],
-            groups=[]
+            groups=[],
         )
 
         rule = TargetingRule(
@@ -177,7 +182,7 @@ class TestRuleValidation:
             description="Valid between operator",
             rule=rule_group,
             priority=1,
-            rollout_percentage=100
+            rollout_percentage=100,
         )
 
         compiler = RuleCompiler()
@@ -196,10 +201,10 @@ class TestRuleValidation:
                     attribute="location",
                     operator=OperatorType.GEO_DISTANCE,
                     value=[37.7749, -122.4194],  # Valid [lat, lon]
-                    additional_value=10  # radius in default unit
+                    additional_value=10,  # radius in default unit
                 )
             ],
-            groups=[]
+            groups=[],
         )
 
         rule = TargetingRule(
@@ -208,7 +213,7 @@ class TestRuleValidation:
             description="Valid GEO_DISTANCE",
             rule=rule_group,
             priority=1,
-            rollout_percentage=100
+            rollout_percentage=100,
         )
 
         compiler = RuleCompiler()
@@ -225,16 +230,16 @@ class TestRuleValidation:
         # Create deeply nested rules (depth > reasonable limit)
         current_group = RuleGroup(
             operator=LogicalOperator.AND,
-            conditions=[Condition(attribute="depth", operator=OperatorType.EQUALS, value=10)],
-            groups=[]
+            conditions=[
+                Condition(attribute="depth", operator=OperatorType.EQUALS, value=10)
+            ],
+            groups=[],
         )
 
         # Nest 20 levels deep
         for i in range(20):
             current_group = RuleGroup(
-                operator=LogicalOperator.AND,
-                conditions=[],
-                groups=[current_group]
+                operator=LogicalOperator.AND, conditions=[], groups=[current_group]
             )
 
         rule = TargetingRule(
@@ -242,9 +247,8 @@ class TestRuleValidation:
             name="Very Deep Rule",
             description="Too many levels",
             rule=current_group,
-            
             priority=1,
-            rollout_percentage=100
+            rollout_percentage=100,
         )
 
         compiler = RuleCompiler(max_depth=10)
@@ -263,10 +267,14 @@ class TestRuleOptimization:
         rule_group = RuleGroup(
             operator=LogicalOperator.AND,
             conditions=[
-                Condition(attribute="country", operator=OperatorType.EQUALS, value="US"),
-                Condition(attribute="country", operator=OperatorType.EQUALS, value="US"),  # Duplicate
+                Condition(
+                    attribute="country", operator=OperatorType.EQUALS, value="US"
+                ),
+                Condition(
+                    attribute="country", operator=OperatorType.EQUALS, value="US"
+                ),  # Duplicate
             ],
-            groups=[]
+            groups=[],
         )
 
         rule = TargetingRule(
@@ -274,9 +282,8 @@ class TestRuleOptimization:
             name="Redundant Rule",
             description="Duplicate conditions",
             rule=rule_group,
-            
             priority=1,
-            rollout_percentage=100
+            rollout_percentage=100,
         )
 
         compiler = RuleCompiler()
@@ -291,10 +298,14 @@ class TestRuleOptimization:
         rule_group = RuleGroup(
             operator=LogicalOperator.AND,
             conditions=[
-                Condition(attribute="country", operator=OperatorType.EQUALS, value="US"),
-                Condition(attribute="country", operator=OperatorType.EQUALS, value="CA"),
+                Condition(
+                    attribute="country", operator=OperatorType.EQUALS, value="US"
+                ),
+                Condition(
+                    attribute="country", operator=OperatorType.EQUALS, value="CA"
+                ),
             ],
-            groups=[]
+            groups=[],
         )
 
         rule = TargetingRule(
@@ -302,9 +313,8 @@ class TestRuleOptimization:
             name="Contradictory Rule",
             description="Impossible to satisfy",
             rule=rule_group,
-            
             priority=1,
-            rollout_percentage=100
+            rollout_percentage=100,
         )
 
         compiler = RuleCompiler()
@@ -323,11 +333,17 @@ class TestCompiledRuleMetadata:
         rule_group = RuleGroup(
             operator=LogicalOperator.AND,
             conditions=[
-                Condition(attribute="country", operator=OperatorType.IN, value=["US", "CA"]),
-                Condition(attribute="age", operator=OperatorType.GREATER_THAN, value=18),
-                Condition(attribute="verified", operator=OperatorType.EQUALS, value=True),
+                Condition(
+                    attribute="country", operator=OperatorType.IN, value=["US", "CA"]
+                ),
+                Condition(
+                    attribute="age", operator=OperatorType.GREATER_THAN, value=18
+                ),
+                Condition(
+                    attribute="verified", operator=OperatorType.EQUALS, value=True
+                ),
             ],
-            groups=[]
+            groups=[],
         )
 
         rule = TargetingRule(
@@ -335,9 +351,8 @@ class TestCompiledRuleMetadata:
             name="Metadata Rule",
             description="Test metadata",
             rule=rule_group,
-            
             priority=1,
-            rollout_percentage=100
+            rollout_percentage=100,
         )
 
         compiler = RuleCompiler()
@@ -355,15 +370,19 @@ class TestCompiledRuleMetadata:
             operator=LogicalOperator.AND,
             conditions=[
                 Condition(attribute="country", operator=OperatorType.IN, value=["US"]),
-                Condition(attribute="version", operator=OperatorType.SEMANTIC_VERSION, value="1.0.0"),
+                Condition(
+                    attribute="version",
+                    operator=OperatorType.SEMANTIC_VERSION,
+                    value="1.0.0",
+                ),
                 Condition(
                     attribute="location",
                     operator=OperatorType.GEO_DISTANCE,
                     value=[37.7749, -122.4194],  # Pydantic expects [lat, lon]
-                    additional_value=10  # radius
+                    additional_value=10,  # radius
                 ),
             ],
-            groups=[]
+            groups=[],
         )
 
         rule = TargetingRule(
@@ -372,7 +391,7 @@ class TestCompiledRuleMetadata:
             description="Test operator extraction",
             rule=rule_group,
             priority=1,
-            rollout_percentage=100
+            rollout_percentage=100,
         )
 
         compiler = RuleCompiler()
@@ -394,7 +413,7 @@ class TestCompilerCache:
             conditions=[
                 Condition(attribute="country", operator=OperatorType.EQUALS, value="US")
             ],
-            groups=[]
+            groups=[],
         )
 
         rule = TargetingRule(
@@ -402,9 +421,8 @@ class TestCompilerCache:
             name="Cache Test",
             description="Test cache invalidation",
             rule=rule_group,
-            
             priority=1,
-            rollout_percentage=100
+            rollout_percentage=100,
         )
 
         compiler = RuleCompiler()
@@ -430,9 +448,11 @@ class TestCompilerCache:
             rule_group = RuleGroup(
                 operator=LogicalOperator.AND,
                 conditions=[
-                    Condition(attribute=f"attr_{i}", operator=OperatorType.EQUALS, value=i)
+                    Condition(
+                        attribute=f"attr_{i}", operator=OperatorType.EQUALS, value=i
+                    )
                 ],
-                groups=[]
+                groups=[],
             )
 
             rule = TargetingRule(
@@ -440,9 +460,8 @@ class TestCompilerCache:
                 name=f"Rule {i}",
                 description=f"Rule {i}",
                 rule=rule_group,
-                
                 priority=1,
-                rollout_percentage=100
+                rollout_percentage=100,
             )
 
             compiler.compile(rule)
@@ -457,7 +476,7 @@ class TestCompilerCache:
             conditions=[
                 Condition(attribute="country", operator=OperatorType.EQUALS, value="US")
             ],
-            groups=[]
+            groups=[],
         )
 
         rule = TargetingRule(
@@ -465,9 +484,8 @@ class TestCompilerCache:
             name="Clear Test",
             description="Test cache clearing",
             rule=rule_group,
-            
             priority=1,
-            rollout_percentage=100
+            rollout_percentage=100,
         )
 
         compiler = RuleCompiler()
@@ -495,9 +513,7 @@ class TestCompilerPerformance:
         ]
 
         rule_group = RuleGroup(
-            operator=LogicalOperator.AND,
-            conditions=conditions,
-            groups=[]
+            operator=LogicalOperator.AND, conditions=conditions, groups=[]
         )
 
         rule = TargetingRule(
@@ -505,9 +521,8 @@ class TestCompilerPerformance:
             name="Performance Test",
             description="Test compilation speed",
             rule=rule_group,
-            
             priority=1,
-            rollout_percentage=100
+            rollout_percentage=100,
         )
 
         compiler = RuleCompiler()
@@ -529,7 +544,7 @@ class TestCompilerPerformance:
             conditions=[
                 Condition(attribute="country", operator=OperatorType.EQUALS, value="US")
             ],
-            groups=[]
+            groups=[],
         )
 
         rule = TargetingRule(
@@ -537,9 +552,8 @@ class TestCompilerPerformance:
             name="Cache Performance",
             description="Test cache speed",
             rule=rule_group,
-            
             priority=1,
-            rollout_percentage=100
+            rollout_percentage=100,
         )
 
         compiler = RuleCompiler()

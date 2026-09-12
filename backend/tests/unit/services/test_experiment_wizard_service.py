@@ -6,21 +6,22 @@ No real database required — uses in-memory draft store.
 """
 
 import uuid
+
 import pytest
 
 from backend.app.services.experiment_wizard_service import (
-    ExperimentWizardService,
-    WizardValidationResult,
-    WizardDraft,
     EXPERIMENT_TYPES,
     WIZARD_STEPS,
+    ExperimentWizardService,
+    WizardDraft,
+    WizardValidationResult,
     _drafts,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _clear_drafts():
     """Clear the in-memory draft store between tests."""
@@ -30,6 +31,7 @@ def _clear_drafts():
 # ---------------------------------------------------------------------------
 # TestWizardValidation
 # ---------------------------------------------------------------------------
+
 
 class TestWizardValidation:
     """Tests for ExperimentWizardService.validate_wizard_step."""
@@ -79,9 +81,7 @@ class TestWizardValidation:
 
     def test_choose_type_empty_returns_error(self):
         """Step 'choose_type': missing type returns error."""
-        result = ExperimentWizardService.validate_wizard_step(
-            "choose_type", {}
-        )
+        result = ExperimentWizardService.validate_wizard_step("choose_type", {})
         assert result.is_valid is False
 
     def test_define_hypothesis_requires_hypothesis_min_10_chars(self):
@@ -198,6 +198,7 @@ class TestWizardValidation:
 # ---------------------------------------------------------------------------
 # TestWizardDraftManagement
 # ---------------------------------------------------------------------------
+
 
 class TestWizardDraftManagement:
     """Tests for draft creation, retrieval, updating, listing, and submission."""
@@ -332,6 +333,7 @@ class TestWizardDraftManagement:
 # TestWizardExperimentCreation
 # ---------------------------------------------------------------------------
 
+
 class TestWizardExperimentCreation:
     """Tests for build_experiment_payload."""
 
@@ -343,7 +345,9 @@ class TestWizardExperimentCreation:
         draft = ExperimentWizardService.create_draft(
             user_id="user-1", experiment_type="ab"
         )
-        draft.hypothesis = "We believe increasing button size will raise click-through rates."
+        draft.hypothesis = (
+            "We believe increasing button size will raise click-through rates."
+        )
         draft.primary_metric_id = "metric-001"
         payload = ExperimentWizardService.build_experiment_payload(draft)
         assert isinstance(payload, dict)
@@ -353,7 +357,9 @@ class TestWizardExperimentCreation:
         draft = ExperimentWizardService.create_draft(
             user_id="user-1", experiment_type="ab"
         )
-        draft.hypothesis = "We believe a new headline will improve conversions significantly."
+        draft.hypothesis = (
+            "We believe a new headline will improve conversions significantly."
+        )
         draft.primary_metric_id = "metric-001"
         payload = ExperimentWizardService.build_experiment_payload(draft)
 
@@ -412,7 +418,9 @@ class TestWizardExperimentCreation:
         assert "traffic_percentage" in payload["variants"][0]
 
     @pytest.mark.parametrize("wizard_type", sorted(EXPERIMENT_TYPES))
-    def test_every_wizard_type_builds_a_payload_ExperimentCreate_accepts(self, wizard_type):
+    def test_every_wizard_type_builds_a_payload_ExperimentCreate_accepts(
+        self, wizard_type
+    ):
         """Exactly one control and allocations summing to 100, for every type."""
         from backend.app.schemas.experiment import ExperimentCreate
 
@@ -454,5 +462,10 @@ class TestWizardExperimentCreation:
         }
 
     def test_payload_omits_targeting_rules_when_the_draft_has_none(self):
-        draft = ExperimentWizardService.create_draft(user_id="user-1", experiment_type="ab")
-        assert ExperimentWizardService.build_experiment_payload(draft)["targeting_rules"] is None
+        draft = ExperimentWizardService.create_draft(
+            user_id="user-1", experiment_type="ab"
+        )
+        assert (
+            ExperimentWizardService.build_experiment_payload(draft)["targeting_rules"]
+            is None
+        )

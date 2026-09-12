@@ -6,27 +6,21 @@ in the experimentation platform. It provides a comprehensive audit trail for
 compliance, debugging, and analysis purposes.
 """
 
-from uuid import uuid4
-from sqlalchemy import (
-    Column,
-    String,
-    Text,
-    DateTime,
-    Index,
-    ForeignKey,
-    func
-)
-from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import relationship
-from sqlalchemy.ext.declarative import declared_attr
 from enum import Enum
 
-from .base import Base, BaseModel
+from sqlalchemy import Column, DateTime, ForeignKey, Index, String, Text, func
+from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.ext.declarative import declared_attr
+from sqlalchemy.orm import relationship
+
 from backend.app.core.database_config import get_schema_name
+
+from .base import Base, BaseModel
 
 
 class ActionType(str, Enum):
     """Types of actions that can be audited."""
+
     # Feature Flag Actions
     TOGGLE_ENABLE = "toggle_enable"
     TOGGLE_DISABLE = "toggle_disable"
@@ -64,6 +58,7 @@ class ActionType(str, Enum):
 
 class EntityType(str, Enum):
     """Types of entities that can be audited."""
+
     FEATURE_FLAG = "feature_flag"
     EXPERIMENT = "experiment"
     USER = "user"
@@ -75,6 +70,7 @@ class EntityType(str, Enum):
 
 class AuditLog(Base, BaseModel):
     """Audit log model for tracking all user actions and changes."""
+
     __tablename__ = "audit_logs"
 
     # User information
@@ -97,7 +93,9 @@ class AuditLog(Base, BaseModel):
 
     # Additional context
     reason = Column(Text, nullable=True)
-    timestamp = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    timestamp = Column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
 
     # Relationships
     user = relationship("User", back_populates="audit_logs")
@@ -107,13 +105,24 @@ class AuditLog(Base, BaseModel):
         schema_name = get_schema_name()
         return (
             # Performance indexes
-            Index(f"{schema_name}_audit_logs_timestamp_idx", "timestamp", postgresql_using="btree"),
+            Index(
+                f"{schema_name}_audit_logs_timestamp_idx",
+                "timestamp",
+                postgresql_using="btree",
+            ),
             Index(f"{schema_name}_audit_logs_user_id_idx", "user_id"),
             Index(f"{schema_name}_audit_logs_entity_idx", "entity_type", "entity_id"),
             Index(f"{schema_name}_audit_logs_action_type_idx", "action_type"),
             # Composite index for common queries
-            Index(f"{schema_name}_audit_logs_user_timestamp_idx", "user_id", "timestamp"),
-            Index(f"{schema_name}_audit_logs_entity_timestamp_idx", "entity_type", "entity_id", "timestamp"),
+            Index(
+                f"{schema_name}_audit_logs_user_timestamp_idx", "user_id", "timestamp"
+            ),
+            Index(
+                f"{schema_name}_audit_logs_entity_timestamp_idx",
+                "entity_type",
+                "entity_id",
+                "timestamp",
+            ),
             {"schema": schema_name},
         )
 

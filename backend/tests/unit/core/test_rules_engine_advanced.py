@@ -8,27 +8,28 @@ This module tests the new features including:
 - Integration with assignment service
 """
 
-import pytest
 import json
 from datetime import datetime, timedelta
-from typing import Dict, Any, List, Optional
+from typing import Any, Dict, List, Optional
 from unittest.mock import Mock, patch
 
+import pytest
+
+from backend.app.core.rule_validation import RuleValidator, ValidationSeverity
 from backend.app.schemas.targeting_rule import (
+    AttributeType,
     Condition,
+    LogicalOperator,
+    OperatorType,
     RuleGroup,
     TargetingRule,
     TargetingRules,
-    LogicalOperator,
-    OperatorType,
-    AttributeType,
 )
 from backend.app.services.rules_evaluation_service import (
-    RulesEvaluationService,
-    RuleEvaluationMetrics,
     AttributeValidationResult,
+    RuleEvaluationMetrics,
+    RulesEvaluationService,
 )
-from backend.app.core.rule_validation import RuleValidator, ValidationSeverity
 
 
 class TestAdvancedOperators:
@@ -77,23 +78,26 @@ class TestAdvancedOperators:
         start_time = now - timedelta(hours=1)
         end_time = now + timedelta(hours=1)
 
-        time_window = {
-            'start': start_time.isoformat(),
-            'end': end_time.isoformat()
-        }
+        time_window = {"start": start_time.isoformat(), "end": end_time.isoformat()}
 
         # Test current time within window
         assert self.service._evaluate_time_window(now.isoformat(), time_window) is True
 
         # Test time outside window
         past_time = now - timedelta(hours=2)
-        assert self.service._evaluate_time_window(past_time.isoformat(), time_window) is False
+        assert (
+            self.service._evaluate_time_window(past_time.isoformat(), time_window)
+            is False
+        )
 
         # Test with timestamps
-        assert self.service._evaluate_time_window(now.timestamp(), {
-            'start': start_time.timestamp(),
-            'end': end_time.timestamp()
-        }) is True
+        assert (
+            self.service._evaluate_time_window(
+                now.timestamp(),
+                {"start": start_time.timestamp(), "end": end_time.timestamp()},
+            )
+            is True
+        )
 
     def test_percentage_bucket_operator(self):
         """Test percentage bucket operator."""
@@ -115,21 +119,37 @@ class TestAdvancedOperators:
             "user": {
                 "profile": {
                     "tier": "premium",
-                    "preferences": ["feature_a", "feature_b"]
+                    "preferences": ["feature_a", "feature_b"],
                 }
             }
         }
 
         # Test simple path
-        assert self.service._evaluate_json_path(json_data, "$.user.profile.tier", "premium") is True
-        assert self.service._evaluate_json_path(json_data, "$.user.profile.tier", "basic") is False
+        assert (
+            self.service._evaluate_json_path(
+                json_data, "$.user.profile.tier", "premium"
+            )
+            is True
+        )
+        assert (
+            self.service._evaluate_json_path(json_data, "$.user.profile.tier", "basic")
+            is False
+        )
 
         # Test non-existent path
-        assert self.service._evaluate_json_path(json_data, "$.user.nonexistent", "value") is False
+        assert (
+            self.service._evaluate_json_path(json_data, "$.user.nonexistent", "value")
+            is False
+        )
 
         # Test with JSON string
         json_string = json.dumps(json_data)
-        assert self.service._evaluate_json_path(json_string, "$.user.profile.tier", "premium") is True
+        assert (
+            self.service._evaluate_json_path(
+                json_string, "$.user.profile.tier", "premium"
+            )
+            is True
+        )
 
     def test_array_length_operator(self):
         """Test array length operator."""
@@ -151,11 +171,15 @@ class TestAttributeValidation:
 
     def test_string_attribute_validation(self):
         """Test string attribute validation."""
-        result = self.service._validate_attribute_value("name", "John Doe", AttributeType.STRING)
+        result = self.service._validate_attribute_value(
+            "name", "John Doe", AttributeType.STRING
+        )
         assert result.is_valid is True
 
         # Test non-string value
-        result = self.service._validate_attribute_value("name", 123, AttributeType.STRING)
+        result = self.service._validate_attribute_value(
+            "name", 123, AttributeType.STRING
+        )
         assert result.is_valid is False
         assert "must be a string" in result.error_message
 
@@ -165,90 +189,132 @@ class TestAttributeValidation:
         result = self.service._validate_attribute_value("age", 25, AttributeType.NUMBER)
         assert result.is_valid is True
 
-        result = self.service._validate_attribute_value("score", 98.5, AttributeType.NUMBER)
+        result = self.service._validate_attribute_value(
+            "score", 98.5, AttributeType.NUMBER
+        )
         assert result.is_valid is True
 
         # Test string that can be converted to number
-        result = self.service._validate_attribute_value("count", "42", AttributeType.NUMBER)
+        result = self.service._validate_attribute_value(
+            "count", "42", AttributeType.NUMBER
+        )
         assert result.is_valid is True
 
         # Test invalid number
-        result = self.service._validate_attribute_value("age", "not a number", AttributeType.NUMBER)
+        result = self.service._validate_attribute_value(
+            "age", "not a number", AttributeType.NUMBER
+        )
         assert result.is_valid is False
 
     def test_boolean_attribute_validation(self):
         """Test boolean attribute validation."""
-        result = self.service._validate_attribute_value("active", True, AttributeType.BOOLEAN)
+        result = self.service._validate_attribute_value(
+            "active", True, AttributeType.BOOLEAN
+        )
         assert result.is_valid is True
 
-        result = self.service._validate_attribute_value("active", False, AttributeType.BOOLEAN)
+        result = self.service._validate_attribute_value(
+            "active", False, AttributeType.BOOLEAN
+        )
         assert result.is_valid is True
 
         # Test non-boolean
-        result = self.service._validate_attribute_value("active", "true", AttributeType.BOOLEAN)
+        result = self.service._validate_attribute_value(
+            "active", "true", AttributeType.BOOLEAN
+        )
         assert result.is_valid is False
 
     def test_array_attribute_validation(self):
         """Test array attribute validation."""
-        result = self.service._validate_attribute_value("tags", ["a", "b", "c"], AttributeType.ARRAY)
+        result = self.service._validate_attribute_value(
+            "tags", ["a", "b", "c"], AttributeType.ARRAY
+        )
         assert result.is_valid is True
 
-        result = self.service._validate_attribute_value("empty", [], AttributeType.ARRAY)
+        result = self.service._validate_attribute_value(
+            "empty", [], AttributeType.ARRAY
+        )
         assert result.is_valid is True
 
         # Test non-array
-        result = self.service._validate_attribute_value("tags", "not an array", AttributeType.ARRAY)
+        result = self.service._validate_attribute_value(
+            "tags", "not an array", AttributeType.ARRAY
+        )
         assert result.is_valid is False
 
     def test_date_attribute_validation(self):
         """Test date attribute validation."""
         # Test ISO string
-        result = self.service._validate_attribute_value("created_at", "2023-01-01T00:00:00Z", AttributeType.DATE)
+        result = self.service._validate_attribute_value(
+            "created_at", "2023-01-01T00:00:00Z", AttributeType.DATE
+        )
         assert result.is_valid is True
 
         # Test datetime object
-        result = self.service._validate_attribute_value("updated_at", datetime.now(), AttributeType.DATE)
+        result = self.service._validate_attribute_value(
+            "updated_at", datetime.now(), AttributeType.DATE
+        )
         assert result.is_valid is True
 
         # Test timestamp
-        result = self.service._validate_attribute_value("timestamp", 1672531200, AttributeType.DATE)
+        result = self.service._validate_attribute_value(
+            "timestamp", 1672531200, AttributeType.DATE
+        )
         assert result.is_valid is True
 
         # Test invalid date string
-        result = self.service._validate_attribute_value("invalid_date", "not a date", AttributeType.DATE)
+        result = self.service._validate_attribute_value(
+            "invalid_date", "not a date", AttributeType.DATE
+        )
         assert result.is_valid is False
 
     def test_geo_coordinate_validation(self):
         """Test geographic coordinate validation."""
         # Test valid coordinates
-        result = self.service._validate_attribute_value("location", [40.7128, -74.0060], AttributeType.GEO_COORDINATE)
+        result = self.service._validate_attribute_value(
+            "location", [40.7128, -74.0060], AttributeType.GEO_COORDINATE
+        )
         assert result.is_valid is True
 
         # Test invalid format
-        result = self.service._validate_attribute_value("location", [40.7128], AttributeType.GEO_COORDINATE)
+        result = self.service._validate_attribute_value(
+            "location", [40.7128], AttributeType.GEO_COORDINATE
+        )
         assert result.is_valid is False
 
         # Test out of range coordinates
-        result = self.service._validate_attribute_value("location", [91, -74], AttributeType.GEO_COORDINATE)
+        result = self.service._validate_attribute_value(
+            "location", [91, -74], AttributeType.GEO_COORDINATE
+        )
         assert result.is_valid is False
 
-        result = self.service._validate_attribute_value("location", [40, -181], AttributeType.GEO_COORDINATE)
+        result = self.service._validate_attribute_value(
+            "location", [40, -181], AttributeType.GEO_COORDINATE
+        )
         assert result.is_valid is False
 
     def test_semantic_version_validation(self):
         """Test semantic version validation."""
         # Test valid versions
-        result = self.service._validate_attribute_value("version", "1.2.3", AttributeType.SEMANTIC_VERSION)
+        result = self.service._validate_attribute_value(
+            "version", "1.2.3", AttributeType.SEMANTIC_VERSION
+        )
         assert result.is_valid is True
 
-        result = self.service._validate_attribute_value("version", "1.0.0-beta.1", AttributeType.SEMANTIC_VERSION)
+        result = self.service._validate_attribute_value(
+            "version", "1.0.0-beta.1", AttributeType.SEMANTIC_VERSION
+        )
         assert result.is_valid is True
 
         # Test invalid versions
-        result = self.service._validate_attribute_value("version", "1.2", AttributeType.SEMANTIC_VERSION)
+        result = self.service._validate_attribute_value(
+            "version", "1.2", AttributeType.SEMANTIC_VERSION
+        )
         assert result.is_valid is False
 
-        result = self.service._validate_attribute_value("version", "not a version", AttributeType.SEMANTIC_VERSION)
+        result = self.service._validate_attribute_value(
+            "version", "not a version", AttributeType.SEMANTIC_VERSION
+        )
         assert result.is_valid is False
 
 
@@ -266,7 +332,7 @@ class TestRulesEvaluationService:
             "location": [40.7128, -74.0060],
             "tags": ["beta", "early-adopter"],
             "active": True,
-            "signup_date": "2023-01-01T00:00:00Z"
+            "signup_date": "2023-01-01T00:00:00Z",
         }
 
     def test_enhanced_rule_evaluation(self):
@@ -276,25 +342,16 @@ class TestRulesEvaluationService:
             attribute="app_version",
             operator=OperatorType.SEMANTIC_VERSION,
             value="1.2.0",
-            attribute_type=AttributeType.SEMANTIC_VERSION
+            attribute_type=AttributeType.SEMANTIC_VERSION,
         )
 
-        rule_group = RuleGroup(
-            operator=LogicalOperator.AND,
-            conditions=[condition]
-        )
+        rule_group = RuleGroup(operator=LogicalOperator.AND, conditions=[condition])
 
         targeting_rule = TargetingRule(
-            id="version_test",
-            rule=rule_group,
-            rollout_percentage=100,
-            priority=1
+            id="version_test", rule=rule_group, rollout_percentage=100, priority=1
         )
 
-        targeting_rules = TargetingRules(
-            version="1.0",
-            rules=[targeting_rule]
-        )
+        targeting_rules = TargetingRules(version="1.0", rules=[targeting_rule])
 
         # Test evaluation
         matched_rule, metrics = self.service.evaluate_rules_with_validation(
@@ -318,25 +375,16 @@ class TestRulesEvaluationService:
             attribute="app_version",
             operator=OperatorType.SEMANTIC_VERSION,
             value="1.2.0",
-            attribute_type=AttributeType.SEMANTIC_VERSION
+            attribute_type=AttributeType.SEMANTIC_VERSION,
         )
 
-        rule_group = RuleGroup(
-            operator=LogicalOperator.AND,
-            conditions=[condition]
-        )
+        rule_group = RuleGroup(operator=LogicalOperator.AND, conditions=[condition])
 
         targeting_rule = TargetingRule(
-            id="version_test",
-            rule=rule_group,
-            rollout_percentage=100,
-            priority=1
+            id="version_test", rule=rule_group, rollout_percentage=100, priority=1
         )
 
-        targeting_rules = TargetingRules(
-            version="1.0",
-            rules=[targeting_rule]
-        )
+        targeting_rules = TargetingRules(version="1.0", rules=[targeting_rule])
 
         # Test evaluation should handle validation gracefully
         matched_rule, metrics = self.service.evaluate_rules_with_validation(
@@ -354,27 +402,16 @@ class TestRulesEvaluationService:
         self.service.clear_metrics()
 
         condition = Condition(
-            attribute="country",
-            operator=OperatorType.EQUALS,
-            value="US"
+            attribute="country", operator=OperatorType.EQUALS, value="US"
         )
 
-        rule_group = RuleGroup(
-            operator=LogicalOperator.AND,
-            conditions=[condition]
-        )
+        rule_group = RuleGroup(operator=LogicalOperator.AND, conditions=[condition])
 
         targeting_rule = TargetingRule(
-            id="simple_test",
-            rule=rule_group,
-            rollout_percentage=100,
-            priority=1
+            id="simple_test", rule=rule_group, rollout_percentage=100, priority=1
         )
 
-        targeting_rules = TargetingRules(
-            version="1.0",
-            rules=[targeting_rule]
-        )
+        targeting_rules = TargetingRules(version="1.0", rules=[targeting_rule])
 
         # Evaluate multiple times
         for i in range(5):
@@ -384,9 +421,9 @@ class TestRulesEvaluationService:
 
         # Check performance stats
         stats = self.service.get_performance_stats()
-        assert stats['total_evaluations'] == 5
-        assert stats['avg_evaluation_time_ms'] > 0
-        assert stats['match_rate'] == 1.0  # All should match
+        assert stats["total_evaluations"] == 5
+        assert stats["avg_evaluation_time_ms"] > 0
+        assert stats["match_rate"] == 1.0  # All should match
 
 
 class TestRuleValidator:
@@ -399,33 +436,34 @@ class TestRuleValidator:
     def test_valid_rules_validation(self):
         """Test validation of valid rules."""
         condition = Condition(
-            attribute="country",
-            operator=OperatorType.EQUALS,
-            value="US"
+            attribute="country", operator=OperatorType.EQUALS, value="US"
         )
 
-        rule_group = RuleGroup(
-            operator=LogicalOperator.AND,
-            conditions=[condition]
-        )
+        rule_group = RuleGroup(operator=LogicalOperator.AND, conditions=[condition])
 
         targeting_rule = TargetingRule(
             id="valid_rule",
             name="Valid Rule",
             rule=rule_group,
             rollout_percentage=50,
-            priority=1
+            priority=1,
         )
 
-        targeting_rules = TargetingRules(
-            version="1.0",
-            rules=[targeting_rule]
-        )
+        targeting_rules = TargetingRules(version="1.0", rules=[targeting_rule])
 
         result = self.validator.validate_targeting_rules(targeting_rules)
 
         assert result.is_valid is True
-        assert len([issue for issue in result.issues if issue.severity == ValidationSeverity.ERROR]) == 0
+        assert (
+            len(
+                [
+                    issue
+                    for issue in result.issues
+                    if issue.severity == ValidationSeverity.ERROR
+                ]
+            )
+            == 0
+        )
 
     def test_invalid_rules_validation(self):
         """Test validation of invalid rules."""
@@ -433,31 +471,29 @@ class TestRuleValidator:
         condition = Condition(
             attribute="email",
             operator=OperatorType.MATCH_REGEX,
-            value="[invalid regex"  # Invalid regex
+            value="[invalid regex",  # Invalid regex
         )
 
-        rule_group = RuleGroup(
-            operator=LogicalOperator.AND,
-            conditions=[condition]
-        )
+        rule_group = RuleGroup(operator=LogicalOperator.AND, conditions=[condition])
 
         # Use valid percentage but invalid regex
         targeting_rule = TargetingRule(
             id="invalid_rule",
             rule=rule_group,
             rollout_percentage=50,  # Valid percentage
-            priority=1
+            priority=1,
         )
 
-        targeting_rules = TargetingRules(
-            version="1.0",
-            rules=[targeting_rule]
-        )
+        targeting_rules = TargetingRules(version="1.0", rules=[targeting_rule])
 
         result = self.validator.validate_targeting_rules(targeting_rules)
 
         assert result.is_valid is False
-        errors = [issue for issue in result.issues if issue.severity == ValidationSeverity.ERROR]
+        errors = [
+            issue
+            for issue in result.issues
+            if issue.severity == ValidationSeverity.ERROR
+        ]
         assert len(errors) > 0
 
         # Test that Pydantic validation also works for percentage
@@ -466,48 +502,33 @@ class TestRuleValidator:
                 id="invalid_percentage",
                 rule=rule_group,
                 rollout_percentage=150,  # This should raise Pydantic error
-                priority=1
+                priority=1,
             )
 
     def test_duplicate_rule_ids_validation(self):
         """Test validation catches duplicate rule IDs."""
         condition = Condition(
-            attribute="country",
-            operator=OperatorType.EQUALS,
-            value="US"
+            attribute="country", operator=OperatorType.EQUALS, value="US"
         )
 
-        rule_group = RuleGroup(
-            operator=LogicalOperator.AND,
-            conditions=[condition]
-        )
+        rule_group = RuleGroup(operator=LogicalOperator.AND, conditions=[condition])
 
         # Create two rules with same ID
         rule1 = TargetingRule(
-            id="duplicate_id",
-            rule=rule_group,
-            rollout_percentage=50,
-            priority=1
+            id="duplicate_id", rule=rule_group, rollout_percentage=50, priority=1
         )
 
         rule2 = TargetingRule(
-            id="duplicate_id",
-            rule=rule_group,
-            rollout_percentage=50,
-            priority=2
+            id="duplicate_id", rule=rule_group, rollout_percentage=50, priority=2
         )
 
-        targeting_rules = TargetingRules(
-            version="1.0",
-            rules=[rule1, rule2]
-        )
+        targeting_rules = TargetingRules(version="1.0", rules=[rule1, rule2])
 
         result = self.validator.validate_targeting_rules(targeting_rules)
 
         assert result.is_valid is False
         duplicate_errors = [
-            issue for issue in result.issues
-            if "Duplicate rule IDs" in issue.message
+            issue for issue in result.issues if "Duplicate rule IDs" in issue.message
         ]
         assert len(duplicate_errors) > 0
 
@@ -517,32 +538,22 @@ class TestRuleValidator:
         condition = Condition(
             attribute="description",
             operator=OperatorType.MATCH_REGEX,
-            value=".*complex.*regex.*pattern.*"
+            value=".*complex.*regex.*pattern.*",
         )
 
-        rule_group = RuleGroup(
-            operator=LogicalOperator.AND,
-            conditions=[condition]
-        )
+        rule_group = RuleGroup(operator=LogicalOperator.AND, conditions=[condition])
 
         targeting_rule = TargetingRule(
-            id="expensive_rule",
-            rule=rule_group,
-            rollout_percentage=100,
-            priority=1
+            id="expensive_rule", rule=rule_group, rollout_percentage=100, priority=1
         )
 
-        targeting_rules = TargetingRules(
-            version="1.0",
-            rules=[targeting_rule]
-        )
+        targeting_rules = TargetingRules(version="1.0", rules=[targeting_rule])
 
         result = self.validator.validate_targeting_rules(targeting_rules)
 
         # Should have performance warnings
         performance_warnings = [
-            issue for issue in result.issues
-            if "expensive" in issue.message.lower()
+            issue for issue in result.issues if "expensive" in issue.message.lower()
         ]
         assert len(performance_warnings) > 0
 
@@ -552,26 +563,19 @@ class TestRuleValidator:
         valid_condition = Condition(
             attribute="app_version",
             operator=OperatorType.SEMANTIC_VERSION,
-            value="1.2.3"
+            value="1.2.3",
         )
 
         valid_group = RuleGroup(
-            operator=LogicalOperator.AND,
-            conditions=[valid_condition]
+            operator=LogicalOperator.AND, conditions=[valid_condition]
         )
 
         valid_rule = TargetingRule(
-            id="valid_semver",
-            rule=valid_group,
-            rollout_percentage=100,
-            priority=1
+            id="valid_semver", rule=valid_group, rollout_percentage=100, priority=1
         )
 
         # Test valid case first
-        targeting_rules = TargetingRules(
-            version="1.0",
-            rules=[valid_rule]
-        )
+        targeting_rules = TargetingRules(version="1.0", rules=[valid_rule])
 
         result = self.validator.validate_targeting_rules(targeting_rules)
         assert result.is_valid is True
@@ -581,7 +585,7 @@ class TestRuleValidator:
             invalid_condition = Condition(
                 attribute="app_version",
                 operator=OperatorType.SEMANTIC_VERSION,
-                value="1.2"  # Invalid format - should raise Pydantic error
+                value="1.2",  # Invalid format - should raise Pydantic error
             )
 
     def test_geo_coordinates_validation(self):
@@ -591,26 +595,19 @@ class TestRuleValidator:
             attribute="location",
             operator=OperatorType.GEO_DISTANCE,
             value=[40.7128, -74.0060],
-            additional_value=10  # 10km radius
+            additional_value=10,  # 10km radius
         )
 
         valid_group = RuleGroup(
-            operator=LogicalOperator.AND,
-            conditions=[valid_condition]
+            operator=LogicalOperator.AND, conditions=[valid_condition]
         )
 
         valid_rule = TargetingRule(
-            id="valid_geo",
-            rule=valid_group,
-            rollout_percentage=100,
-            priority=1
+            id="valid_geo", rule=valid_group, rollout_percentage=100, priority=1
         )
 
         # Test valid case first
-        targeting_rules = TargetingRules(
-            version="1.0",
-            rules=[valid_rule]
-        )
+        targeting_rules = TargetingRules(version="1.0", rules=[valid_rule])
 
         result = self.validator.validate_targeting_rules(targeting_rules)
         assert result.is_valid is True
@@ -621,7 +618,7 @@ class TestRuleValidator:
                 attribute="location",
                 operator=OperatorType.GEO_DISTANCE,
                 value=[91, -74],  # Invalid latitude - should raise Pydantic error
-                additional_value=10
+                additional_value=10,
             )
 
 
@@ -638,20 +635,15 @@ class TestIntegrationScenarios:
 
         # First group: country AND tier
         us_condition = Condition(
-            attribute="country",
-            operator=OperatorType.EQUALS,
-            value="US"
+            attribute="country", operator=OperatorType.EQUALS, value="US"
         )
 
         premium_condition = Condition(
-            attribute="subscription_tier",
-            operator=OperatorType.EQUALS,
-            value="premium"
+            attribute="subscription_tier", operator=OperatorType.EQUALS, value="premium"
         )
 
         us_premium_group = RuleGroup(
-            operator=LogicalOperator.AND,
-            conditions=[us_condition, premium_condition]
+            operator=LogicalOperator.AND, conditions=[us_condition, premium_condition]
         )
 
         # Second group: version AND location
@@ -659,38 +651,32 @@ class TestIntegrationScenarios:
             attribute="app_version",
             operator=OperatorType.SEMANTIC_VERSION,
             value="1.2.0",
-            attribute_type=AttributeType.SEMANTIC_VERSION
+            attribute_type=AttributeType.SEMANTIC_VERSION,
         )
 
         location_condition = Condition(
             attribute="location",
             operator=OperatorType.GEO_DISTANCE,
             value=[40.7128, -74.0060],  # NYC coordinates
-            additional_value=50  # 50km radius
+            additional_value=50,  # 50km radius
         )
 
         version_location_group = RuleGroup(
             operator=LogicalOperator.AND,
-            conditions=[version_condition, location_condition]
+            conditions=[version_condition, location_condition],
         )
 
         # Main group: OR of the two groups
         main_group = RuleGroup(
             operator=LogicalOperator.OR,
-            groups=[us_premium_group, version_location_group]
+            groups=[us_premium_group, version_location_group],
         )
 
         targeting_rule = TargetingRule(
-            id="complex_rule",
-            rule=main_group,
-            rollout_percentage=100,
-            priority=1
+            id="complex_rule", rule=main_group, rollout_percentage=100, priority=1
         )
 
-        targeting_rules = TargetingRules(
-            version="1.0",
-            rules=[targeting_rule]
-        )
+        targeting_rules = TargetingRules(version="1.0", rules=[targeting_rule])
 
         # Test user that matches first group
         us_premium_user = {
@@ -698,7 +684,7 @@ class TestIntegrationScenarios:
             "country": "US",
             "subscription_tier": "premium",
             "app_version": "1.0.0",
-            "location": [34.0522, -118.2437]  # LA coordinates
+            "location": [34.0522, -118.2437],  # LA coordinates
         }
 
         matched_rule, metrics = self.service.evaluate_rules_with_validation(
@@ -714,7 +700,7 @@ class TestIntegrationScenarios:
             "country": "CA",
             "subscription_tier": "basic",
             "app_version": "1.3.0",
-            "location": [40.7500, -73.9900]  # Close to NYC
+            "location": [40.7500, -73.9900],  # Close to NYC
         }
 
         matched_rule, metrics = self.service.evaluate_rules_with_validation(
@@ -730,7 +716,7 @@ class TestIntegrationScenarios:
             "country": "CA",
             "subscription_tier": "basic",
             "app_version": "1.0.0",
-            "location": [34.0522, -118.2437]  # LA coordinates
+            "location": [34.0522, -118.2437],  # LA coordinates
         }
 
         matched_rule, metrics = self.service.evaluate_rules_with_validation(
@@ -743,52 +729,46 @@ class TestIntegrationScenarios:
         """Test that rules are evaluated in correct priority order."""
         # Create high priority rule
         high_priority_condition = Condition(
-            attribute="subscription_tier",
-            operator=OperatorType.EQUALS,
-            value="premium"
+            attribute="subscription_tier", operator=OperatorType.EQUALS, value="premium"
         )
 
         high_priority_group = RuleGroup(
-            operator=LogicalOperator.AND,
-            conditions=[high_priority_condition]
+            operator=LogicalOperator.AND, conditions=[high_priority_condition]
         )
 
         high_priority_rule = TargetingRule(
             id="high_priority",
             rule=high_priority_group,
             rollout_percentage=100,
-            priority=1  # Higher priority (lower number)
+            priority=1,  # Higher priority (lower number)
         )
 
         # Create low priority rule that would also match
         low_priority_condition = Condition(
-            attribute="country",
-            operator=OperatorType.EQUALS,
-            value="US"
+            attribute="country", operator=OperatorType.EQUALS, value="US"
         )
 
         low_priority_group = RuleGroup(
-            operator=LogicalOperator.AND,
-            conditions=[low_priority_condition]
+            operator=LogicalOperator.AND, conditions=[low_priority_condition]
         )
 
         low_priority_rule = TargetingRule(
             id="low_priority",
             rule=low_priority_group,
             rollout_percentage=100,
-            priority=10  # Lower priority (higher number)
+            priority=10,  # Lower priority (higher number)
         )
 
         targeting_rules = TargetingRules(
             version="1.0",
-            rules=[low_priority_rule, high_priority_rule]  # Add in reverse order
+            rules=[low_priority_rule, high_priority_rule],  # Add in reverse order
         )
 
         # User that matches both rules
         user_context = {
             "user_id": "test-user",
             "country": "US",
-            "subscription_tier": "premium"
+            "subscription_tier": "premium",
         }
 
         matched_rule, metrics = self.service.evaluate_rules_with_validation(
@@ -802,46 +782,26 @@ class TestIntegrationScenarios:
     def test_rollout_percentage_evaluation(self):
         """Test rollout percentage affects rule matching."""
         condition = Condition(
-            attribute="country",
-            operator=OperatorType.EQUALS,
-            value="US"
+            attribute="country", operator=OperatorType.EQUALS, value="US"
         )
 
-        rule_group = RuleGroup(
-            operator=LogicalOperator.AND,
-            conditions=[condition]
-        )
+        rule_group = RuleGroup(operator=LogicalOperator.AND, conditions=[condition])
 
         # Rule with 0% rollout - should never match
         zero_rollout_rule = TargetingRule(
-            id="zero_rollout",
-            rule=rule_group,
-            rollout_percentage=0,
-            priority=1
+            id="zero_rollout", rule=rule_group, rollout_percentage=0, priority=1
         )
 
         # Rule with 100% rollout - should always match
         full_rollout_rule = TargetingRule(
-            id="full_rollout",
-            rule=rule_group,
-            rollout_percentage=100,
-            priority=2
+            id="full_rollout", rule=rule_group, rollout_percentage=100, priority=2
         )
 
-        zero_rollout_rules = TargetingRules(
-            version="1.0",
-            rules=[zero_rollout_rule]
-        )
+        zero_rollout_rules = TargetingRules(version="1.0", rules=[zero_rollout_rule])
 
-        full_rollout_rules = TargetingRules(
-            version="1.0",
-            rules=[full_rollout_rule]
-        )
+        full_rollout_rules = TargetingRules(version="1.0", rules=[full_rollout_rule])
 
-        user_context = {
-            "user_id": "test-user",
-            "country": "US"
-        }
+        user_context = {"user_id": "test-user", "country": "US"}
 
         # Test 0% rollout
         matched_rule, _ = self.service.evaluate_rules_with_validation(

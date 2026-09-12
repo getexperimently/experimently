@@ -20,11 +20,17 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 from sqlalchemy import text
 
-REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
+REPO_ROOT = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "..", "..", "..")
+)
 
 
 def _run_bootstrap(schema: str) -> subprocess.CompletedProcess:
-    env = {k: v for k, v in os.environ.items() if k not in ("APP_ENV", "TESTING", "ENVIRONMENT")}
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if k not in ("APP_ENV", "TESTING", "ENVIRONMENT")
+    }
     env.update(
         {
             "PYTHONPATH": REPO_ROOT,
@@ -53,13 +59,21 @@ def test_concurrent_bootstraps_on_a_fresh_schema_do_not_race(test_db):
 
         for proc in results:
             assert proc.returncode == 0, proc.stderr[-2000:]
-        outcomes = sorted("created" if "(created)" in p.stdout else "upgraded" for p in results)
+        outcomes = sorted(
+            "created" if "(created)" in p.stdout else "upgraded" for p in results
+        )
         assert outcomes == ["created", "upgraded"], [p.stdout for p in results]
 
         with engine.connect() as conn:
-            users = conn.execute(text(f'SELECT email FROM "{schema}".users')).scalars().all()
+            users = (
+                conn.execute(text(f'SELECT email FROM "{schema}".users'))
+                .scalars()
+                .all()
+            )
             assert users == ["race@example.com"]
-            head = conn.execute(text(f'SELECT count(*) FROM "{schema}".alembic_version')).scalar()
+            head = conn.execute(
+                text(f'SELECT count(*) FROM "{schema}".alembic_version')
+            ).scalar()
             assert head == 1
     finally:
         with engine.begin() as conn:

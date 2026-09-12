@@ -8,56 +8,57 @@ and applying appropriate prefixes and tags.
 from fastapi import APIRouter
 
 from backend.app.api.v1.endpoints import (
-    auth,
-    api_keys,
-    users,
-    experiments,
-    tracking,
-    client_errors,
-    feature_flags,
     admin,
-    assignments,
-    events,
-    results,
-    rollout_schedules,
-    metrics,
-    safety,
-    audit_logs,
-    export,
-    bulk_toggle,
-    rbac,
-    realtime_counters,
-    etl,
-    scheduler_health,
-    segments,
-    mutual_exclusion_groups,
-    global_holdout,
-    bandit,
-    interactions,
     ai_design,
-    mcp,
-    experiment_wizard,
-    warehouse,
-    notifications,
+    api_keys,
+    assignments,
+    audit_logs,
+    auth,
+    bandit,
+    bulk_toggle,
+    client_errors,
     compliance,
+    edge,
+    etl,
+    events,
+    experiment_wizard,
+    experiments,
+    export,
+    feature_flags,
+    global_holdout,
+    hipaa,
     integrations,
-    sso,
-    warehouse_databricks,
-    warehouse_clickhouse,
-    warehouse_mysql,
-    post_stratification,
-    openfeature,
+    interactions,
     llm_experiments,
     llm_proxy,
+    mcp,
+    metrics,
+    mutual_exclusion_groups,
+    notifications,
+    openfeature,
+    post_stratification,
     power_calculator,
-    edge,
-    workspaces,
-    hipaa,
+    rbac,
+    realtime_counters,
+    results,
+    rollout_schedules,
+    safety,
+    scheduler_health,
+    segments,
+    sso,
+    tracking,
+    users,
+    warehouse,
+    warehouse_clickhouse,
+    warehouse_databricks,
+    warehouse_mysql,
     websocket_results,
+    workspaces,
 )
 
 # Import the sample size calculator router
 from backend.app.api.v1.sample_size_calculator import router as sample_size_router
+
 # from backend.app.routers import feature_flag_routes
 
 # Create API router for v1
@@ -89,12 +90,8 @@ api_router_v1.include_router(results.router, prefix="/results", tags=["Results"]
 api_router_v1.include_router(
     rollout_schedules.router, prefix="/rollout-schedules", tags=["Rollout Schedules"]
 )
-api_router_v1.include_router(
-    metrics.router, prefix="/metrics", tags=["Metrics"]
-)
-api_router_v1.include_router(
-    safety.router, prefix="/safety", tags=["Safety"]
-)
+api_router_v1.include_router(metrics.router, prefix="/metrics", tags=["Metrics"])
+api_router_v1.include_router(safety.router, prefix="/safety", tags=["Safety"])
 api_router_v1.include_router(
     audit_logs.router, prefix="/audit-logs", tags=["Audit Logs"]
 )
@@ -125,23 +122,20 @@ api_router_v1.include_router(
 )
 
 # P3-C: Audience Segmentation API
-api_router_v1.include_router(
-    segments.router, prefix="/segments", tags=["Segments"]
-)
+api_router_v1.include_router(segments.router, prefix="/segments", tags=["Segments"])
 
 # EP-022: Mutual Exclusion Groups & Global Holdout
 api_router_v1.include_router(
-    mutual_exclusion_groups.router, prefix="/mutual-exclusion-groups",
-    tags=["Mutual Exclusion Groups"]
+    mutual_exclusion_groups.router,
+    prefix="/mutual-exclusion-groups",
+    tags=["Mutual Exclusion Groups"],
 )
 api_router_v1.include_router(
     global_holdout.router, prefix="/holdout", tags=["Global Holdout"]
 )
 
 # Issue #22: Multi-Armed Bandit (MAB) endpoints
-api_router_v1.include_router(
-    bandit.router, prefix="/bandit", tags=["Bandit"]
-)
+api_router_v1.include_router(bandit.router, prefix="/bandit", tags=["Bandit"])
 
 # Issue #25: Cross-Experiment Interaction Detection & Analysis
 api_router_v1.include_router(
@@ -149,14 +143,10 @@ api_router_v1.include_router(
 )
 
 # Issue #23: AI-Powered Experiment Design & Recommendations
-api_router_v1.include_router(
-    ai_design.router, prefix="/ai", tags=["AI Design"]
-)
+api_router_v1.include_router(ai_design.router, prefix="/ai", tags=["AI Design"])
 
 # Issue #23: MCP (Model Context Protocol) server for AI agent access
-api_router_v1.include_router(
-    mcp.router, prefix="/mcp", tags=["MCP"]
-)
+api_router_v1.include_router(mcp.router, prefix="/mcp", tags=["MCP"])
 
 # Issue #27: guided experiment builder (draft-and-submit API; no dashboard UI)
 api_router_v1.include_router(
@@ -164,9 +154,7 @@ api_router_v1.include_router(
 )
 
 # Issue #26: POST-MVP Warehouse-Native Analytics (Snowflake / BigQuery / Redshift)
-api_router_v1.include_router(
-    warehouse.router, prefix="/warehouse", tags=["Warehouse"]
-)
+api_router_v1.include_router(warehouse.router, prefix="/warehouse", tags=["Warehouse"])
 
 # EP-030: Notification preferences and delivery log
 api_router_v1.include_router(
@@ -184,9 +172,7 @@ api_router_v1.include_router(
 )
 
 # EP-037: SSO/SAML & OIDC Enterprise Authentication
-api_router_v1.include_router(
-    sso.router, prefix="/auth/sso", tags=["SSO"]
-)
+api_router_v1.include_router(sso.router, prefix="/auth/sso", tags=["SSO"])
 
 # EP-041: Databricks Warehouse Connector
 api_router_v1.include_router(
@@ -227,9 +213,7 @@ api_router_v1.include_router(
 )
 
 # EP-047: Edge SDK bootstrap endpoint (Cloudflare Workers / Vercel Edge / Deno Deploy)
-api_router_v1.include_router(
-    edge.router, prefix="/edge", tags=["Edge"]
-)
+api_router_v1.include_router(edge.router, prefix="/edge", tags=["Edge"])
 
 # EP-057: Multi-Tenant Team Workspaces
 api_router_v1.include_router(
@@ -237,9 +221,7 @@ api_router_v1.include_router(
 )
 
 # EP-050: HIPAA Compliance
-api_router_v1.include_router(
-    hipaa.router, prefix="/hipaa", tags=["HIPAA"]
-)
+api_router_v1.include_router(hipaa.router, prefix="/hipaa", tags=["HIPAA"])
 
 # EP-058: Real-time WebSocket Streaming Results
 api_router_v1.include_router(

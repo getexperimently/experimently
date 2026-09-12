@@ -1,7 +1,7 @@
 import React from 'react';
 import { render, screen } from '@testing-library/react';
 import { EarlyStoppingBanner } from '@/components/results/Sequential/EarlyStoppingBanner';
-import { MSPRTResult, RecommendedAction } from '@/types/sequential';
+import { MSPRTResult } from '@/types/sequential';
 
 const mockMSPRT: MSPRTResult = {
   lambda_ratio: 25.42,

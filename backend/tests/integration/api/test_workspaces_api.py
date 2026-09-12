@@ -10,12 +10,12 @@ mocked auth dependencies.
 """
 
 import uuid
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from backend.app.models.user import User, UserRole
-
 
 HASHED_PASSWORD = "$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW"
 
@@ -126,9 +126,7 @@ class TestGetWorkspace:
         resp = admin_client.get(f"/api/v1/workspaces/{uuid.uuid4()}")
         assert resp.status_code in (403, 404), resp.text
 
-    def test_get_workspace_as_non_member_returns_403(
-        self, viewer_client
-    ):
+    def test_get_workspace_as_non_member_returns_403(self, viewer_client):
         """A user that is not a member gets 403 when trying to view a workspace they don't own.
 
         Viewer creates workspace B (so they are OWNER), then tries to access
@@ -150,9 +148,7 @@ class TestUpdateWorkspace:
         assert resp.status_code == 200, resp.text
         assert resp.json()["name"] == "Updated Name"
 
-    def test_update_workspace_as_viewer_returns_403(
-        self, viewer_client, db_session
-    ):
+    def test_update_workspace_as_viewer_returns_403(self, viewer_client, db_session):
         """Viewer (workspace OWNER but trying to update as a non-ADMIN role) cannot
         update — but OWNER can. Instead, test that a non-member cannot update.
         """
@@ -199,16 +195,12 @@ class TestWorkspaceMembers:
         """Admin can add an existing user."""
         ws = _create_workspace(admin_client, "-addmem")
         payload = {"user_id": str(developer_user.id), "role": "DEVELOPER"}
-        resp = admin_client.post(
-            f"/api/v1/workspaces/{ws['id']}/members", json=payload
-        )
+        resp = admin_client.post(f"/api/v1/workspaces/{ws['id']}/members", json=payload)
         assert resp.status_code == 201, resp.text
         data = resp.json()
         assert data["role"] == "DEVELOPER"
 
-    def test_add_member_as_developer_returns_403(
-        self, developer_client, viewer_user
-    ):
+    def test_add_member_as_developer_returns_403(self, developer_client, viewer_user):
         """Non-member developer cannot add members to a workspace they don't belong to."""
         resp = developer_client.post(
             f"/api/v1/workspaces/{uuid.uuid4()}/members",
@@ -220,9 +212,7 @@ class TestWorkspaceMembers:
         ws = _create_workspace(admin_client, "-dupmem")
         payload = {"user_id": str(developer_user.id), "role": "VIEWER"}
         admin_client.post(f"/api/v1/workspaces/{ws['id']}/members", json=payload)
-        resp = admin_client.post(
-            f"/api/v1/workspaces/{ws['id']}/members", json=payload
-        )
+        resp = admin_client.post(f"/api/v1/workspaces/{ws['id']}/members", json=payload)
         assert resp.status_code == 409, resp.text
 
     def test_update_member_role(self, admin_client, developer_user):
@@ -298,9 +288,7 @@ class TestWorkspaceInvites:
     def test_create_invite_as_admin(self, admin_client):
         ws = _create_workspace(admin_client, "-inv")
         payload = {"email": "invitee@example.com", "role": "DEVELOPER"}
-        resp = admin_client.post(
-            f"/api/v1/workspaces/{ws['id']}/invites", json=payload
-        )
+        resp = admin_client.post(f"/api/v1/workspaces/{ws['id']}/invites", json=payload)
         assert resp.status_code == 201, resp.text
         data = resp.json()
         assert data["email"] == "invitee@example.com"
@@ -354,9 +342,12 @@ class TestWorkspaceInvites:
         # Admin is already a member — expect 422 (AlreadyMember → PlanLimitExceeded path)
         assert resp.status_code in (201, 422), resp.text
 
-    def test_accept_expired_invite_returns_400(self, admin_client, developer_client, db_session):
+    def test_accept_expired_invite_returns_400(
+        self, admin_client, developer_client, db_session
+    ):
         """Accepting an expired invite returns 400."""
         from backend.app.models.workspace import WorkspaceInvite
+
         ws = _create_workspace(admin_client, "-expinv")
         payload = {"email": "exp@example.com", "role": "VIEWER"}
         create_resp = admin_client.post(
@@ -366,6 +357,7 @@ class TestWorkspaceInvites:
         token = create_resp.json()["token"]
         # Force expiry in DB
         from datetime import datetime, timedelta
+
         invite = db_session.query(WorkspaceInvite).filter_by(id=inv_id).first()
         if invite:
             invite.expires_at = datetime.utcnow() - timedelta(hours=1)
@@ -401,9 +393,7 @@ class TestWorkspaceAPIKeys:
         """Listing keys does NOT show the plaintext key."""
         ws = _create_workspace(admin_client, "-hidkey")
         payload = {"name": "Hidden Key", "scopes": ["flags:read"]}
-        admin_client.post(
-            f"/api/v1/workspaces/{ws['id']}/api-keys", json=payload
-        )
+        admin_client.post(f"/api/v1/workspaces/{ws['id']}/api-keys", json=payload)
         list_resp = admin_client.get(f"/api/v1/workspaces/{ws['id']}/api-keys")
         assert list_resp.status_code == 200, list_resp.text
         for k in list_resp.json():
@@ -416,9 +406,7 @@ class TestWorkspaceAPIKeys:
             json={"name": "Revoke Me", "scopes": ["flags:read"]},
         )
         key_id = create_resp.json()["id"]
-        resp = admin_client.delete(
-            f"/api/v1/workspaces/{ws['id']}/api-keys/{key_id}"
-        )
+        resp = admin_client.delete(f"/api/v1/workspaces/{ws['id']}/api-keys/{key_id}")
         assert resp.status_code == 204, resp.text
 
     def test_rotate_api_key(self, admin_client):

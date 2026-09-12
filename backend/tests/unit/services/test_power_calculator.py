@@ -12,6 +12,7 @@ No network calls are made — all tests are pure CPU.
 """
 
 import math
+
 import pytest
 
 from backend.app.services.power_calculator_service import (
@@ -25,6 +26,7 @@ from backend.app.services.power_calculator_service import (
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def calc() -> PowerCalculatorService:
@@ -49,17 +51,18 @@ def calc() -> PowerCalculatorService:
 # formula and the tests assert against the actual scipy-derived values.
 
 REF_BASELINE = 0.05
-REF_MDE_REL = 0.10   # 10% relative lift → p2 = 0.055
+REF_MDE_REL = 0.10  # 10% relative lift → p2 = 0.055
 REF_N_PER_VARIANT = 31234  # verified via scipy.stats.norm
 
 HIGHER_BASELINE = 0.10
-HIGHER_MDE_REL = 0.05   # 5% relative lift → p2 = 0.105
+HIGHER_MDE_REL = 0.05  # 5% relative lift → p2 = 0.105
 HIGHER_BASELINE_N = 57763  # verified via scipy.stats.norm (Fleiss formula)
 
 
 # ===========================================================================
 # TestSampleSizeComputation
 # ===========================================================================
+
 
 class TestSampleSizeComputation:
     """Tests for compute_sample_size."""
@@ -251,6 +254,7 @@ class TestSampleSizeComputation:
 # TestSampleSizeValidation  (edge cases / invalid inputs)
 # ===========================================================================
 
+
 class TestSampleSizeValidation:
     """Tests for input validation in compute_sample_size."""
 
@@ -272,7 +276,9 @@ class TestSampleSizeValidation:
 
     def test_mde_negative_raises_value_error(self, calc):
         with pytest.raises(ValueError):
-            calc.compute_sample_size(baseline_rate=0.10, minimum_detectable_effect=-0.05)
+            calc.compute_sample_size(
+                baseline_rate=0.10, minimum_detectable_effect=-0.05
+            )
 
     def test_mde_one_raises_value_error(self, calc):
         with pytest.raises(ValueError):
@@ -330,6 +336,7 @@ class TestSampleSizeValidation:
 # TestMDEComputation
 # ===========================================================================
 
+
 class TestMDEComputation:
     """Tests for compute_mde."""
 
@@ -359,19 +366,17 @@ class TestMDEComputation:
 
     def test_larger_sample_gives_smaller_mde(self, calc):
         """More samples → can detect smaller effects."""
-        mde_small = calc.compute_mde(
-            sample_size_per_variant=1000, baseline_rate=0.10
-        )
-        mde_large = calc.compute_mde(
-            sample_size_per_variant=50000, baseline_rate=0.10
-        )
+        mde_small = calc.compute_mde(sample_size_per_variant=1000, baseline_rate=0.10)
+        mde_large = calc.compute_mde(sample_size_per_variant=50000, baseline_rate=0.10)
         assert mde_large.mde_relative < mde_small.mde_relative
 
     def test_mde_absolute_equals_baseline_times_relative(self, calc):
-        result = calc.compute_mde(
-            sample_size_per_variant=5000, baseline_rate=0.20
+        result = calc.compute_mde(sample_size_per_variant=5000, baseline_rate=0.20)
+        expected_abs = (
+            result.baseline_rate * result.mde_relative
+            if hasattr(result, "baseline_rate")
+            else 0.20 * result.mde_relative
         )
-        expected_abs = result.baseline_rate * result.mde_relative if hasattr(result, 'baseline_rate') else 0.20 * result.mde_relative
         # mde_absolute ≈ 0.20 * mde_relative
         assert abs(result.mde_absolute - 0.20 * result.mde_relative) < 0.001
 
@@ -400,15 +405,11 @@ class TestMDEComputation:
         assert result.power == 0.90
 
     def test_mde_relative_is_positive(self, calc):
-        result = calc.compute_mde(
-            sample_size_per_variant=5000, baseline_rate=0.10
-        )
+        result = calc.compute_mde(sample_size_per_variant=5000, baseline_rate=0.10)
         assert result.mde_relative > 0
 
     def test_mde_absolute_is_positive(self, calc):
-        result = calc.compute_mde(
-            sample_size_per_variant=5000, baseline_rate=0.10
-        )
+        result = calc.compute_mde(sample_size_per_variant=5000, baseline_rate=0.10)
         assert result.mde_absolute > 0
 
     def test_mde_relative_decreases_with_power(self, calc):
@@ -431,6 +432,7 @@ class TestMDEComputation:
 # ===========================================================================
 # TestRuntimeEstimation
 # ===========================================================================
+
 
 class TestRuntimeEstimation:
     """Tests for compute_runtime_estimate."""
@@ -487,7 +489,9 @@ class TestRuntimeEstimation:
         result = calc.compute_runtime_estimate(
             required_sample_size=7000, daily_traffic=1000, traffic_allocation=1.0
         )
-        assert abs(result.weeks_to_significance - result.days_to_significance / 7) < 1e-6
+        assert (
+            abs(result.weeks_to_significance - result.days_to_significance / 7) < 1e-6
+        )
 
     def test_confidence_interval_is_tuple_of_two(self, calc):
         result = calc.compute_runtime_estimate(
@@ -535,6 +539,7 @@ class TestRuntimeEstimation:
 # TestPowerCurve
 # ===========================================================================
 
+
 class TestPowerCurve:
     """Tests for compute_power_curve."""
 
@@ -554,7 +559,7 @@ class TestPowerCurve:
         # Sample size should decrease (or stay the same) as effect size increases
         for i in range(1, len(sizes)):
             assert sizes[i] <= sizes[i - 1], (
-                f"Non-monotonic at index {i}: {sizes[i-1]} → {sizes[i]}"
+                f"Non-monotonic at index {i}: {sizes[i - 1]} → {sizes[i]}"
             )
 
     def test_default_effect_sizes_cover_1_to_50_percent(self, calc):
@@ -569,16 +574,12 @@ class TestPowerCurve:
             assert p.sample_size_per_variant > 0
 
     def test_at_most_one_current_target_marked(self, calc):
-        points = calc.compute_power_curve(
-            baseline_rate=0.10, mde_target=0.10
-        )
+        points = calc.compute_power_curve(baseline_rate=0.10, mde_target=0.10)
         targets = [p for p in points if p.is_current_target]
         assert len(targets) <= 1
 
     def test_current_target_closest_to_mde(self, calc):
-        points = calc.compute_power_curve(
-            baseline_rate=0.10, mde_target=0.10
-        )
+        points = calc.compute_power_curve(baseline_rate=0.10, mde_target=0.10)
         targets = [p for p in points if p.is_current_target]
         if targets:
             target = targets[0]
@@ -588,9 +589,10 @@ class TestPowerCurve:
                     non_targets,
                     key=lambda p: abs(p.effect_size_relative - 0.10),
                 )
-                assert abs(target.effect_size_relative - 0.10) <= abs(
-                    closest_other.effect_size_relative - 0.10
-                ) + 1e-9
+                assert (
+                    abs(target.effect_size_relative - 0.10)
+                    <= abs(closest_other.effect_size_relative - 0.10) + 1e-9
+                )
 
     def test_no_target_marked_when_mde_target_none(self, calc):
         points = calc.compute_power_curve(baseline_rate=0.10, mde_target=None)
@@ -599,9 +601,7 @@ class TestPowerCurve:
 
     def test_custom_effect_sizes_respected(self, calc):
         custom_sizes = [0.05, 0.10, 0.20]
-        points = calc.compute_power_curve(
-            baseline_rate=0.10, effect_sizes=custom_sizes
-        )
+        points = calc.compute_power_curve(baseline_rate=0.10, effect_sizes=custom_sizes)
         returned_sizes = [p.effect_size_relative for p in points]
         for s in custom_sizes:
             assert s in returned_sizes
@@ -623,6 +623,7 @@ class TestPowerCurve:
 # TestRoundTripConsistency
 # ===========================================================================
 
+
 class TestRoundTripConsistency:
     """Round-trip tests between sample size and MDE."""
 
@@ -633,9 +634,7 @@ class TestRoundTripConsistency:
             baseline_rate=0.20, minimum_detectable_effect=target_mde
         ).per_variant
 
-        recovered = calc.compute_mde(
-            sample_size_per_variant=n, baseline_rate=0.20
-        )
+        recovered = calc.compute_mde(sample_size_per_variant=n, baseline_rate=0.20)
         assert abs(recovered.mde_relative - target_mde) < 0.01, (
             f"Round-trip mismatch: expected ~{target_mde}, got {recovered.mde_relative:.4f}"
         )
@@ -646,9 +645,7 @@ class TestRoundTripConsistency:
             baseline_rate=0.30, minimum_detectable_effect=target_mde
         ).per_variant
 
-        recovered = calc.compute_mde(
-            sample_size_per_variant=n, baseline_rate=0.30
-        )
+        recovered = calc.compute_mde(sample_size_per_variant=n, baseline_rate=0.30)
         assert abs(recovered.mde_relative - target_mde) < 0.01, (
             f"Round-trip mismatch: expected ~{target_mde}, got {recovered.mde_relative:.4f}"
         )
@@ -657,6 +654,7 @@ class TestRoundTripConsistency:
 # ===========================================================================
 # TestEdgeCases
 # ===========================================================================
+
 
 class TestEdgeCases:
     """Miscellaneous edge-case tests."""

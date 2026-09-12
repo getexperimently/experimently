@@ -4,22 +4,23 @@ Unit tests for rollout scheduler.
 This is a standalone test file that can run independently without loading the main application.
 """
 
-import sys
 import os
+import sys
+from datetime import datetime, timedelta, timezone
+from unittest.mock import AsyncMock, MagicMock, call, patch
+
 import pytest
 import pytest_asyncio
-from datetime import datetime, timezone, timedelta
-from unittest.mock import AsyncMock, MagicMock, patch, call
 
 # Add the parent directory to the path so we can import the modules we need
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../')))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../")))
 
 # Import the module we're testing and its dependencies
 from backend.app.core.rollout_scheduler import RolloutScheduler
 from backend.app.models.rollout_schedule import (
     RolloutScheduleStatus,
     RolloutStageStatus,
-    TriggerType
+    TriggerType,
 )
 
 
@@ -53,7 +54,11 @@ class MockRolloutStage:
         self.trigger_type = TriggerType.TIME_BASED
         self.start_date = None
         self.target_percentage = 25 * stage_order
-        self.updated_at = datetime.now(timezone.utc) - timedelta(hours=25) if status == RolloutStageStatus.IN_PROGRESS else None
+        self.updated_at = (
+            datetime.now(timezone.utc) - timedelta(hours=25)
+            if status == RolloutStageStatus.IN_PROGRESS
+            else None
+        )
         self.completed_date = None
         self.trigger_configuration = None
 
@@ -67,7 +72,7 @@ class TestRolloutScheduler:
         return RolloutScheduler(interval_minutes=1)
 
     @pytest.mark.asyncio
-    @patch('backend.app.core.rollout_scheduler.SessionLocal')
+    @patch("backend.app.core.rollout_scheduler.SessionLocal")
     async def test_scheduler_initialization(self, mock_session, scheduler):
         """Test scheduler initialization with default parameters."""
         assert scheduler.interval_minutes == 1
@@ -75,7 +80,7 @@ class TestRolloutScheduler:
         assert scheduler.task is None
 
     @pytest.mark.asyncio
-    @patch('backend.app.core.rollout_scheduler.SessionLocal')
+    @patch("backend.app.core.rollout_scheduler.SessionLocal")
     async def test_scheduler_start_stop(self, mock_session, scheduler):
         """Test starting and stopping the scheduler."""
         # Test starting
@@ -144,7 +149,9 @@ class TestRolloutScheduler:
         stage = MagicMock()
         stage.status = RolloutStageStatus.IN_PROGRESS
         stage.trigger_type = TriggerType.TIME_BASED
-        stage.updated_at = current_time - timedelta(hours=25)  # Default duration is 24 hours
+        stage.updated_at = current_time - timedelta(
+            hours=25
+        )  # Default duration is 24 hours
         stage.trigger_configuration = None
         assert scheduler._is_stage_eligible_for_completion(stage, current_time) is True
 
@@ -173,7 +180,7 @@ class TestRolloutScheduler:
         assert scheduler._is_stage_eligible_for_completion(stage, current_time) is False
 
     @pytest.mark.asyncio
-    @patch('backend.app.core.rollout_scheduler.SessionLocal')
+    @patch("backend.app.core.rollout_scheduler.SessionLocal")
     async def test_activate_stage(self, mock_session_class):
         """Test activating a stage and updating feature flag."""
         mock_session = MagicMock()
@@ -201,7 +208,9 @@ class TestRolloutScheduler:
         # Activate the stage
         scheduler = RolloutScheduler(interval_minutes=1)
         current_time = datetime.now(timezone.utc)
-        result = await scheduler._activate_stage(mock_session, mock_schedule, mock_stage, current_time)
+        result = await scheduler._activate_stage(
+            mock_session, mock_schedule, mock_stage, current_time
+        )
 
         # Verify results
         assert result is True
@@ -211,14 +220,11 @@ class TestRolloutScheduler:
         assert mock_feature_flag.updated_at == current_time
 
         # Verify method calls
-        mock_session.add.assert_has_calls([
-            call(mock_stage),
-            call(mock_feature_flag)
-        ])
+        mock_session.add.assert_has_calls([call(mock_stage), call(mock_feature_flag)])
         mock_session.commit.assert_called_once()
 
     @pytest.mark.asyncio
-    @patch('backend.app.core.rollout_scheduler.SessionLocal')
+    @patch("backend.app.core.rollout_scheduler.SessionLocal")
     async def test_activate_stage_feature_flag_not_found(self, mock_session_class):
         """Test activating a stage when feature flag is not found."""
         mock_session = MagicMock()
@@ -243,7 +249,9 @@ class TestRolloutScheduler:
         # Activate the stage
         scheduler = RolloutScheduler(interval_minutes=1)
         current_time = datetime.now(timezone.utc)
-        result = await scheduler._activate_stage(mock_session, mock_schedule, mock_stage, current_time)
+        result = await scheduler._activate_stage(
+            mock_session, mock_schedule, mock_stage, current_time
+        )
 
         # Verify results
         assert result is False
@@ -252,7 +260,7 @@ class TestRolloutScheduler:
         mock_session.commit.assert_not_called()  # Shouldn't commit if flag not found
 
     @pytest.mark.asyncio
-    @patch('backend.app.core.rollout_scheduler.SessionLocal')
+    @patch("backend.app.core.rollout_scheduler.SessionLocal")
     async def test_no_active_schedules(self, mock_session_class):
         """Test scheduler when there are no active schedules."""
         # Setup mock database session
@@ -274,7 +282,7 @@ class TestRolloutScheduler:
         mock_session.close.assert_called_once()
 
     @pytest.mark.asyncio
-    @patch('backend.app.core.rollout_scheduler.SessionLocal')
+    @patch("backend.app.core.rollout_scheduler.SessionLocal")
     async def test_error_handling(self, mock_session_class):
         """Test error handling in the scheduler."""
         # Setup mock database session
@@ -292,8 +300,8 @@ class TestRolloutScheduler:
         mock_session.close.assert_called_once()
 
     @pytest.mark.asyncio
-    @patch('backend.app.core.rollout_scheduler.asyncio.sleep')
-    @patch('backend.app.core.rollout_scheduler.SessionLocal')
+    @patch("backend.app.core.rollout_scheduler.asyncio.sleep")
+    @patch("backend.app.core.rollout_scheduler.SessionLocal")
     async def test_run_scheduler(self, mock_session_class, mock_sleep):
         """Test the scheduler loop runs and stops correctly."""
         # Setup

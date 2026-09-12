@@ -12,11 +12,11 @@ Following TDD (Test-Driven Development) - RED phase: Tests written first.
 All tests should fail until evaluator.py is implemented.
 """
 
-import pytest
 import sys
 from pathlib import Path
-from datetime import datetime, timezone
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
+
+import pytest
 
 # Add parent directories to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -35,7 +35,7 @@ class TestFeatureFlagEvaluator:
             flag_id="flag_123",
             key="new_checkout",
             enabled=True,
-            rollout_percentage=100.0
+            rollout_percentage=100.0,
         )
 
         # Disabled flag
@@ -43,7 +43,7 @@ class TestFeatureFlagEvaluator:
             flag_id="flag_disabled",
             key="disabled_feature",
             enabled=False,
-            rollout_percentage=100.0
+            rollout_percentage=100.0,
         )
 
         # Flag with 50% rollout
@@ -51,7 +51,7 @@ class TestFeatureFlagEvaluator:
             flag_id="flag_partial",
             key="partial_feature",
             enabled=True,
-            rollout_percentage=50.0
+            rollout_percentage=50.0,
         )
 
         # Flag with targeting rules
@@ -62,7 +62,7 @@ class TestFeatureFlagEvaluator:
             rollout_percentage=100.0,
             targeting_rules=[
                 {"attribute": "country", "operator": "equals", "value": "US"}
-            ]
+            ],
         )
 
         # Flag with variants
@@ -74,15 +74,15 @@ class TestFeatureFlagEvaluator:
             default_variant="control",
             variants=[
                 VariantConfig(key="control", allocation=0.5),
-                VariantConfig(key="treatment", allocation=0.5)
-            ]
+                VariantConfig(key="treatment", allocation=0.5),
+            ],
         )
 
     # ====================================================================
     # Task 4.1: Tests for flag config fetching
     # ====================================================================
 
-    @patch('evaluator.get_dynamodb_resource')
+    @patch("evaluator.get_dynamodb_resource")
     def test_get_flag_config_returns_valid_config(self, mock_get_resource):
         """Test that valid flag returns configuration."""
         from evaluator import FeatureFlagEvaluator
@@ -90,11 +90,11 @@ class TestFeatureFlagEvaluator:
         # Mock DynamoDB response
         mock_table = Mock()
         mock_table.get_item.return_value = {
-            'Item': {
-                'flag_id': 'flag_123',
-                'key': 'new_checkout',
-                'enabled': True,
-                'rollout_percentage': 100.0
+            "Item": {
+                "flag_id": "flag_123",
+                "key": "new_checkout",
+                "enabled": True,
+                "rollout_percentage": 100.0,
             }
         }
         mock_resource = Mock()
@@ -109,7 +109,7 @@ class TestFeatureFlagEvaluator:
         assert config.key == "new_checkout"
         assert config.enabled is True
 
-    @patch('evaluator.get_dynamodb_resource')
+    @patch("evaluator.get_dynamodb_resource")
     def test_get_flag_config_missing_flag_returns_none(self, mock_get_resource):
         """Test that invalid flag_key returns None."""
         from evaluator import FeatureFlagEvaluator
@@ -131,15 +131,12 @@ class TestFeatureFlagEvaluator:
         from evaluator import FeatureFlagEvaluator
 
         evaluator = FeatureFlagEvaluator()
-        result = evaluator.evaluate(
-            user_id="user_123",
-            flag_config=self.disabled_flag
-        )
+        result = evaluator.evaluate(user_id="user_123", flag_config=self.disabled_flag)
 
         assert result["enabled"] is False
         assert result["reason"] == "flag_disabled"
 
-    @patch('evaluator.get_dynamodb_resource')
+    @patch("evaluator.get_dynamodb_resource")
     def test_get_flag_config_cached_returns_from_cache(self, mock_get_resource):
         """Test that config is cached after first fetch."""
         from evaluator import FeatureFlagEvaluator
@@ -147,11 +144,11 @@ class TestFeatureFlagEvaluator:
         # Mock DynamoDB response
         mock_table = Mock()
         mock_table.get_item.return_value = {
-            'Item': {
-                'flag_id': 'flag_cached',
-                'key': 'cached_feature',
-                'enabled': True,
-                'rollout_percentage': 100.0
+            "Item": {
+                "flag_id": "flag_cached",
+                "key": "cached_feature",
+                "enabled": True,
+                "rollout_percentage": 100.0,
             }
         }
         mock_resource = Mock()
@@ -183,7 +180,7 @@ class TestFeatureFlagEvaluator:
             flag_id="flag_zero",
             key="zero_rollout",
             enabled=True,
-            rollout_percentage=0.0
+            rollout_percentage=0.0,
         )
 
         evaluator = FeatureFlagEvaluator()
@@ -191,8 +188,7 @@ class TestFeatureFlagEvaluator:
         # Test 100 different users - all should get False
         for i in range(100):
             result = evaluator.evaluate(
-                user_id=f"user_{i}",
-                flag_config=zero_rollout_flag
+                user_id=f"user_{i}", flag_config=zero_rollout_flag
             )
             assert result["enabled"] is False
             assert result["reason"] == "not_in_rollout"
@@ -206,8 +202,7 @@ class TestFeatureFlagEvaluator:
         # Test 100 different users - all should get True
         for i in range(100):
             result = evaluator.evaluate(
-                user_id=f"user_{i}",
-                flag_config=self.enabled_flag
+                user_id=f"user_{i}", flag_config=self.enabled_flag
             )
             assert result["enabled"] is True
             assert result["reason"] == "enabled"
@@ -222,8 +217,7 @@ class TestFeatureFlagEvaluator:
         # Test 1000 users
         for i in range(1000):
             result = evaluator.evaluate(
-                user_id=f"user_{i}",
-                flag_config=self.partial_rollout_flag
+                user_id=f"user_{i}", flag_config=self.partial_rollout_flag
             )
             results.append(result["enabled"])
 
@@ -232,8 +226,9 @@ class TestFeatureFlagEvaluator:
         enabled_rate = enabled_count / len(results)
 
         # Should be within ±5% of 50%
-        assert 0.45 <= enabled_rate <= 0.55, \
+        assert 0.45 <= enabled_rate <= 0.55, (
             f"Enabled rate: {enabled_rate:.2%} (expected ~50%)"
+        )
 
     def test_rollout_same_user_gets_consistent_result(self):
         """Test that same user gets consistent result across multiple calls."""
@@ -244,31 +239,23 @@ class TestFeatureFlagEvaluator:
 
         # Call multiple times
         results = [
-            evaluator.evaluate(user_id, self.partial_rollout_flag)
-            for _ in range(10)
+            evaluator.evaluate(user_id, self.partial_rollout_flag) for _ in range(10)
         ]
 
         # All results should be identical
         enabled_values = [r["enabled"] for r in results]
-        assert len(set(enabled_values)) == 1, \
-            "Same user should get consistent result"
+        assert len(set(enabled_values)) == 1, "Same user should get consistent result"
 
     def test_rollout_with_different_flag_keys_gives_different_distributions(self):
         """Test that different flags give independent distributions."""
         from evaluator import FeatureFlagEvaluator
 
         flag_a = FeatureFlagConfig(
-            flag_id="flag_a",
-            key="feature_a",
-            enabled=True,
-            rollout_percentage=50.0
+            flag_id="flag_a", key="feature_a", enabled=True, rollout_percentage=50.0
         )
 
         flag_b = FeatureFlagConfig(
-            flag_id="flag_b",
-            key="feature_b",
-            enabled=True,
-            rollout_percentage=50.0
+            flag_id="flag_b", key="feature_b", enabled=True, rollout_percentage=50.0
         )
 
         evaluator = FeatureFlagEvaluator()
@@ -286,11 +273,10 @@ class TestFeatureFlagEvaluator:
 
         # Results should not be identical (independent distributions)
         # At least some users should have different results
-        different_results = sum(
-            a != b for a, b in zip(results_a, results_b)
-        )
-        assert different_results > 10, \
+        different_results = sum(a != b for a, b in zip(results_a, results_b))
+        assert different_results > 10, (
             "Different flags should have independent distributions"
+        )
 
     # ====================================================================
     # Task 4.5: Tests for targeting rules
@@ -304,9 +290,7 @@ class TestFeatureFlagEvaluator:
         context = {"country": "US", "platform": "web"}
 
         result = evaluator.evaluate(
-            user_id="user_us",
-            flag_config=self.targeted_flag,
-            context=context
+            user_id="user_us", flag_config=self.targeted_flag, context=context
         )
 
         assert result["enabled"] is True
@@ -320,9 +304,7 @@ class TestFeatureFlagEvaluator:
         context = {"country": "CA", "platform": "web"}
 
         result = evaluator.evaluate(
-            user_id="user_ca",
-            flag_config=self.targeted_flag,
-            context=context
+            user_id="user_ca", flag_config=self.targeted_flag, context=context
         )
 
         assert result["enabled"] is False
@@ -339,8 +321,8 @@ class TestFeatureFlagEvaluator:
             rollout_percentage=100.0,
             targeting_rules=[
                 {"attribute": "country", "operator": "equals", "value": "US"},
-                {"attribute": "platform", "operator": "equals", "value": "web"}
-            ]
+                {"attribute": "platform", "operator": "equals", "value": "web"},
+            ],
         )
 
         evaluator = FeatureFlagEvaluator()
@@ -348,18 +330,14 @@ class TestFeatureFlagEvaluator:
         # Both rules match - should be enabled
         context_match = {"country": "US", "platform": "web"}
         result_match = evaluator.evaluate(
-            user_id="user_match",
-            flag_config=multi_rule_flag,
-            context=context_match
+            user_id="user_match", flag_config=multi_rule_flag, context=context_match
         )
         assert result_match["enabled"] is True
 
         # Only one rule matches - should be disabled
         context_partial = {"country": "US", "platform": "mobile"}
         result_partial = evaluator.evaluate(
-            user_id="user_partial",
-            flag_config=multi_rule_flag,
-            context=context_partial
+            user_id="user_partial", flag_config=multi_rule_flag, context=context_partial
         )
         assert result_partial["enabled"] is False
 
@@ -373,9 +351,7 @@ class TestFeatureFlagEvaluator:
         context = {"platform": "web"}  # Missing 'country'
 
         result = evaluator.evaluate(
-            user_id="user_missing",
-            flag_config=self.targeted_flag,
-            context=context
+            user_id="user_missing", flag_config=self.targeted_flag, context=context
         )
 
         assert result["enabled"] is False
@@ -388,9 +364,7 @@ class TestFeatureFlagEvaluator:
         evaluator = FeatureFlagEvaluator()
 
         result = evaluator.evaluate(
-            user_id="user_no_context",
-            flag_config=self.targeted_flag,
-            context=None
+            user_id="user_no_context", flag_config=self.targeted_flag, context=None
         )
 
         assert result["enabled"] is False
@@ -407,7 +381,7 @@ class TestFeatureFlagEvaluator:
             rollout_percentage=100.0,
             targeting_rules=[
                 {"attribute": "country", "operator": "in", "value": ["US", "CA", "UK"]}
-            ]
+            ],
         )
 
         evaluator = FeatureFlagEvaluator()
@@ -415,18 +389,14 @@ class TestFeatureFlagEvaluator:
         # User in list - should be enabled
         context_in = {"country": "CA"}
         result_in = evaluator.evaluate(
-            user_id="user_in_list",
-            flag_config=in_operator_flag,
-            context=context_in
+            user_id="user_in_list", flag_config=in_operator_flag, context=context_in
         )
         assert result_in["enabled"] is True
 
         # User not in list - should be disabled
         context_out = {"country": "FR"}
         result_out = evaluator.evaluate(
-            user_id="user_out_list",
-            flag_config=in_operator_flag,
-            context=context_out
+            user_id="user_out_list", flag_config=in_operator_flag, context=context_out
         )
         assert result_out["enabled"] is False
 
@@ -441,7 +411,7 @@ class TestFeatureFlagEvaluator:
             rollout_percentage=100.0,
             targeting_rules=[
                 {"attribute": "age", "operator": "greater_than", "value": 18}
-            ]
+            ],
         )
 
         evaluator = FeatureFlagEvaluator()
@@ -449,18 +419,14 @@ class TestFeatureFlagEvaluator:
         # User age > 18 - should be enabled
         context_gt = {"age": 25}
         result_gt = evaluator.evaluate(
-            user_id="user_adult",
-            flag_config=gt_operator_flag,
-            context=context_gt
+            user_id="user_adult", flag_config=gt_operator_flag, context=context_gt
         )
         assert result_gt["enabled"] is True
 
         # User age <= 18 - should be disabled
         context_lte = {"age": 16}
         result_lte = evaluator.evaluate(
-            user_id="user_minor",
-            flag_config=gt_operator_flag,
-            context=context_lte
+            user_id="user_minor", flag_config=gt_operator_flag, context=context_lte
         )
         assert result_lte["enabled"] is False
 
@@ -475,8 +441,7 @@ class TestFeatureFlagEvaluator:
         evaluator = FeatureFlagEvaluator()
 
         result = evaluator.evaluate(
-            user_id="user_variant",
-            flag_config=self.variant_flag
+            user_id="user_variant", flag_config=self.variant_flag
         )
 
         assert result["enabled"] is True
@@ -490,15 +455,11 @@ class TestFeatureFlagEvaluator:
         user_id = "user_consistent"
 
         # Call multiple times
-        results = [
-            evaluator.evaluate(user_id, self.variant_flag)
-            for _ in range(10)
-        ]
+        results = [evaluator.evaluate(user_id, self.variant_flag) for _ in range(10)]
 
         # All variants should be identical
         variants = [r["variant"] for r in results]
-        assert len(set(variants)) == 1, \
-            "Same user should get consistent variant"
+        assert len(set(variants)) == 1, "Same user should get consistent variant"
 
     def test_evaluate_variant_distribution_matches_allocation(self):
         """Test that variant distribution matches allocation percentages."""
@@ -513,8 +474,8 @@ class TestFeatureFlagEvaluator:
             default_variant="control",
             variants=[
                 VariantConfig(key="control", allocation=0.7),
-                VariantConfig(key="treatment", allocation=0.3)
-            ]
+                VariantConfig(key="treatment", allocation=0.3),
+            ],
         )
 
         evaluator = FeatureFlagEvaluator()
@@ -528,10 +489,12 @@ class TestFeatureFlagEvaluator:
         treatment_pct = results.count("treatment") / len(results)
 
         # Should be within ±5% of target allocation
-        assert 0.65 <= control_pct <= 0.75, \
+        assert 0.65 <= control_pct <= 0.75, (
             f"Control: {control_pct:.2%} (expected ~70%)"
-        assert 0.25 <= treatment_pct <= 0.35, \
+        )
+        assert 0.25 <= treatment_pct <= 0.35, (
             f"Treatment: {treatment_pct:.2%} (expected ~30%)"
+        )
 
     def test_evaluate_with_null_user_id_raises_error(self):
         """Test that None user_id raises ValueError."""
@@ -540,10 +503,7 @@ class TestFeatureFlagEvaluator:
         evaluator = FeatureFlagEvaluator()
 
         with pytest.raises(ValueError, match="user_id cannot be None"):
-            evaluator.evaluate(
-                user_id=None,
-                flag_config=self.enabled_flag
-            )
+            evaluator.evaluate(user_id=None, flag_config=self.enabled_flag)
 
     def test_evaluate_with_empty_user_id_raises_error(self):
         """Test that empty user_id raises ValueError."""
@@ -552,10 +512,7 @@ class TestFeatureFlagEvaluator:
         evaluator = FeatureFlagEvaluator()
 
         with pytest.raises(ValueError, match="user_id cannot be empty"):
-            evaluator.evaluate(
-                user_id="",
-                flag_config=self.enabled_flag
-            )
+            evaluator.evaluate(user_id="", flag_config=self.enabled_flag)
 
     def test_cache_hit_rate_tracking(self):
         """Test that cache hit rate is tracked correctly."""
@@ -564,12 +521,12 @@ class TestFeatureFlagEvaluator:
         evaluator = FeatureFlagEvaluator()
 
         # Mock cache behavior
-        with patch.object(evaluator, 'get_flag_config_cached') as mock_cached:
+        with patch.object(evaluator, "get_flag_config_cached") as mock_cached:
             # First call - cache miss
             mock_cached.side_effect = [
                 self.enabled_flag,  # First call - miss
                 self.enabled_flag,  # Second call - hit
-                self.enabled_flag   # Third call - hit
+                self.enabled_flag,  # Third call - hit
             ]
 
             evaluator.get_flag_config_cached("test_flag")
@@ -595,7 +552,7 @@ class TestFeatureFlagEvaluator:
             rollout_percentage=50.0,
             targeting_rules=[
                 {"attribute": "country", "operator": "equals", "value": "US"}
-            ]
+            ],
         )
 
         evaluator = FeatureFlagEvaluator()
@@ -606,9 +563,7 @@ class TestFeatureFlagEvaluator:
         results = []
         for i in range(100):
             result = evaluator.evaluate(
-                user_id=f"user_{i}",
-                flag_config=combined_flag,
-                context=context_match
+                user_id=f"user_{i}", flag_config=combined_flag, context=context_match
             )
             results.append(result["enabled"])
 
@@ -616,8 +571,9 @@ class TestFeatureFlagEvaluator:
         enabled_count = sum(results)
 
         # Should be less than 100% but more than 0%
-        assert 0 < enabled_count < 100, \
+        assert 0 < enabled_count < 100, (
             "Should have partial rollout among targeted users"
+        )
 
         # User NOT matching targeting should always be disabled
         context_no_match = {"country": "CA"}
@@ -625,38 +581,51 @@ class TestFeatureFlagEvaluator:
             result = evaluator.evaluate(
                 user_id=f"user_ca_{i}",
                 flag_config=combined_flag,
-                context=context_no_match
+                context=context_no_match,
             )
-            assert result["enabled"] is False, \
+            assert result["enabled"] is False, (
                 "Users not matching targeting should always be disabled"
+            )
 
     # ====================================================================
     # Batch Evaluation Tests
     # ====================================================================
 
-    @patch('evaluator.get_dynamodb_resource')
+    @patch("evaluator.get_dynamodb_resource")
     def test_batch_evaluate_multiple_flags(self, mock_get_resource):
         """Test batch evaluation of multiple flags."""
         from evaluator import FeatureFlagEvaluator
 
         # Mock DynamoDB to return different flags
         def get_item_side_effect(**kwargs):
-            flag_key = kwargs['Key']['key']
+            flag_key = kwargs["Key"]["key"]
             if flag_key == "flag1":
-                return {'Item': {
-                    'flag_id': 'flag_1', 'key': 'flag1',
-                    'enabled': True, 'rollout_percentage': 100.0
-                }}
+                return {
+                    "Item": {
+                        "flag_id": "flag_1",
+                        "key": "flag1",
+                        "enabled": True,
+                        "rollout_percentage": 100.0,
+                    }
+                }
             elif flag_key == "flag2":
-                return {'Item': {
-                    'flag_id': 'flag_2', 'key': 'flag2',
-                    'enabled': False, 'rollout_percentage': 100.0
-                }}
+                return {
+                    "Item": {
+                        "flag_id": "flag_2",
+                        "key": "flag2",
+                        "enabled": False,
+                        "rollout_percentage": 100.0,
+                    }
+                }
             elif flag_key == "flag3":
-                return {'Item': {
-                    'flag_id': 'flag_3', 'key': 'flag3',
-                    'enabled': True, 'rollout_percentage': 50.0
-                }}
+                return {
+                    "Item": {
+                        "flag_id": "flag_3",
+                        "key": "flag3",
+                        "enabled": True,
+                        "rollout_percentage": 50.0,
+                    }
+                }
             else:
                 return {}  # Flag not found
 
@@ -670,8 +639,7 @@ class TestFeatureFlagEvaluator:
 
         # Batch evaluate multiple flags
         results = evaluator.batch_evaluate(
-            user_id="user_123",
-            flag_keys=["flag1", "flag2", "flag3", "flag4"]
+            user_id="user_123", flag_keys=["flag1", "flag2", "flag3", "flag4"]
         )
 
         # Verify results
@@ -692,16 +660,18 @@ class TestFeatureFlagEvaluator:
         assert results["flag4"]["enabled"] is False
         assert results["flag4"]["reason"] == "flag_not_found"
 
-    @patch('evaluator.get_dynamodb_resource')
+    @patch("evaluator.get_dynamodb_resource")
     def test_batch_evaluate_uses_cache(self, mock_get_resource):
         """Test that batch evaluation benefits from caching."""
         from evaluator import FeatureFlagEvaluator
 
         mock_table = Mock()
         mock_table.get_item.return_value = {
-            'Item': {
-                'flag_id': 'cached_flag', 'key': 'cached',
-                'enabled': True, 'rollout_percentage': 100.0
+            "Item": {
+                "flag_id": "cached_flag",
+                "key": "cached",
+                "enabled": True,
+                "rollout_percentage": 100.0,
             }
         }
         mock_resource = Mock()
@@ -711,17 +681,11 @@ class TestFeatureFlagEvaluator:
         evaluator = FeatureFlagEvaluator()
 
         # First batch - cache miss
-        results1 = evaluator.batch_evaluate(
-            user_id="user_123",
-            flag_keys=["cached"]
-        )
+        results1 = evaluator.batch_evaluate(user_id="user_123", flag_keys=["cached"])
         assert mock_table.get_item.call_count == 1
 
         # Second batch - cache hit
-        results2 = evaluator.batch_evaluate(
-            user_id="user_123",
-            flag_keys=["cached"]
-        )
+        results2 = evaluator.batch_evaluate(user_id="user_123", flag_keys=["cached"])
         assert mock_table.get_item.call_count == 1  # No additional call
 
         # Results should be consistent
@@ -732,10 +696,7 @@ class TestFeatureFlagEvaluator:
         from evaluator import FeatureFlagEvaluator
 
         evaluator = FeatureFlagEvaluator()
-        results = evaluator.batch_evaluate(
-            user_id="user_123",
-            flag_keys=[]
-        )
+        results = evaluator.batch_evaluate(user_id="user_123", flag_keys=[])
 
         assert results == {}
 
@@ -746,7 +707,4 @@ class TestFeatureFlagEvaluator:
         evaluator = FeatureFlagEvaluator()
 
         with pytest.raises(ValueError, match="user_id cannot be None or empty"):
-            evaluator.batch_evaluate(
-                user_id="",
-                flag_keys=["flag1"]
-            )
+            evaluator.batch_evaluate(user_id="", flag_keys=["flag1"])

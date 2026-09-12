@@ -10,19 +10,20 @@ Tests cover:
 - Report generation
 - CSV parsing from Locust output
 """
+
 import os
 import tempfile
+
 import pytest
 
+from backend.tests.performance.specs.performance_targets import PerformanceTarget
 from backend.tests.performance.validators import (
     RequestStats,
     ValidationResult,
-    validate_against_target,
     generate_report,
     parse_locust_csv,
+    validate_against_target,
 )
-from backend.tests.performance.specs.performance_targets import PerformanceTarget
-
 
 # ---------------------------------------------------------------------------
 # RequestStats property tests
@@ -79,6 +80,7 @@ class TestRequestStatsPercentiles:
     def test_p50_less_than_p95_less_than_p99_for_varied_distribution(self):
         """For a varied distribution, p50 <= p95 <= p99 must hold."""
         import random
+
         random.seed(42)
         times = [random.uniform(1, 100) for _ in range(1000)]
         stats = RequestStats("test", "GET", 1000, 0, times)
@@ -315,9 +317,7 @@ class TestGenerateReport:
         """Report should include specific failure messages for failing endpoints."""
         failures = ["p95 exceeded: 450ms > 200ms", "rps below target: 100 < 500"]
         results = [
-            ValidationResult(
-                passed=False, endpoint="/api/assign", failures=failures
-            )
+            ValidationResult(passed=False, endpoint="/api/assign", failures=failures)
         ]
         report = generate_report(results)
         assert "p95 exceeded" in report
@@ -400,9 +400,7 @@ class TestParseLocustCsv:
 
     def test_parse_returns_list_of_request_stats(self):
         """parse_locust_csv should return a list of RequestStats objects."""
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".csv", delete=False
-        ) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
             tmp_path = f.name
 
         try:
@@ -444,9 +442,7 @@ class TestParseLocustCsv:
 
     def test_parse_correctly_extracts_request_count(self):
         """parse_locust_csv should correctly read request counts from CSV."""
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".csv", delete=False
-        ) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
             tmp_path = f.name
 
         try:
@@ -489,9 +485,7 @@ class TestParseLocustCsv:
 
     def test_parse_handles_aggregated_row(self):
         """parse_locust_csv should skip or handle the Locust 'Aggregated' summary row."""
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".csv", delete=False
-        ) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
             tmp_path = f.name
 
         try:
@@ -558,9 +552,7 @@ class TestParseLocustCsv:
 
     def test_parse_empty_csv_returns_empty_list(self):
         """parse_locust_csv should return an empty list for a CSV with only headers."""
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".csv", delete=False
-        ) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
             tmp_path = f.name
 
         try:

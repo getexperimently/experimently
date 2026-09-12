@@ -29,17 +29,17 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from backend.app.services.clickhouse_connector import (
-    ClickHouseConnector,
-    ClickHouseConnectionError,
-    ClickHouseQueryError,
     ClickHouseAuthError,
+    ClickHouseConnectionError,
+    ClickHouseConnector,
+    ClickHouseQueryError,
     ClickHouseTimeoutError,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers / Fixtures
 # ---------------------------------------------------------------------------
+
 
 def _make_connector(**overrides) -> ClickHouseConnector:
     """Build a ClickHouseConnector with sensible defaults."""
@@ -84,6 +84,7 @@ def _make_mock_client(query_result=None):
 # 1. Initialization Tests (7 tests)
 # ===========================================================================
 
+
 class TestClickHouseConnectorInit:
     """Tests for connector initialisation and config storage."""
 
@@ -126,6 +127,7 @@ class TestClickHouseConnectorInit:
     def test_init_uses_settings_defaults(self):
         """Connector falls back to settings when no args supplied."""
         from backend.app.core.config import settings
+
         connector = ClickHouseConnector()
         assert connector.host == settings.CLICKHOUSE_HOST
         assert connector.port == settings.CLICKHOUSE_PORT
@@ -135,6 +137,7 @@ class TestClickHouseConnectorInit:
 # ===========================================================================
 # 2. Connection Establishment Tests (6 tests)
 # ===========================================================================
+
 
 class TestClickHouseConnectorConnect:
     """Tests for connection establishment."""
@@ -178,7 +181,9 @@ class TestClickHouseConnectorConnect:
     @patch("backend.app.services.clickhouse_connector.clickhouse_connect")
     def test_connect_raises_auth_error_on_bad_credentials(self, mock_ch):
         """connect() raises ClickHouseAuthError when credentials are wrong."""
-        mock_ch.get_client.side_effect = Exception("Authentication failed: wrong password")
+        mock_ch.get_client.side_effect = Exception(
+            "Authentication failed: wrong password"
+        )
 
         connector = _make_connector(password="wrong")
         with pytest.raises((ClickHouseConnectionError, ClickHouseAuthError)):
@@ -210,6 +215,7 @@ class TestClickHouseConnectorConnect:
 # 3. Query Execution Tests (8 tests)
 # ===========================================================================
 
+
 class TestClickHouseConnectorExecuteQuery:
     """Tests for execute_query() method."""
 
@@ -225,7 +231,9 @@ class TestClickHouseConnectorExecuteQuery:
 
         connector = _make_connector()
         connector.connect()
-        rows = connector.execute_query("SELECT user_id, event_count FROM events LIMIT 10")
+        rows = connector.execute_query(
+            "SELECT user_id, event_count FROM events LIMIT 10"
+        )
 
         assert isinstance(rows, list)
         assert len(rows) == 2
@@ -324,6 +332,7 @@ class TestClickHouseConnectorExecuteQuery:
 # ===========================================================================
 # 4. Experiment Metrics Tests (6 tests)
 # ===========================================================================
+
 
 class TestClickHouseConnectorExperimentMetrics:
     """Tests for get_experiment_metrics() method."""
@@ -438,6 +447,7 @@ class TestClickHouseConnectorExperimentMetrics:
 # 5. Feature Flag Metrics Tests (5 tests)
 # ===========================================================================
 
+
 class TestClickHouseConnectorFeatureFlagMetrics:
     """Tests for get_feature_flag_metrics() method."""
 
@@ -526,6 +536,7 @@ class TestClickHouseConnectorFeatureFlagMetrics:
 # 6. test_connection() Tests (5 tests)
 # ===========================================================================
 
+
 class TestClickHouseConnectorTestConnection:
     """Tests for the test_connection() method."""
 
@@ -589,6 +600,7 @@ class TestClickHouseConnectorTestConnection:
 # 7. close() Tests (3 tests)
 # ===========================================================================
 
+
 class TestClickHouseConnectorClose:
     """Tests for the close() method."""
 
@@ -626,6 +638,7 @@ class TestClickHouseConnectorClose:
 # ===========================================================================
 # 8. Context Manager Tests (3 tests)
 # ===========================================================================
+
 
 class TestClickHouseConnectorContextManager:
     """Tests for __enter__ / __exit__ context manager protocol."""
@@ -670,6 +683,7 @@ class TestClickHouseConnectorContextManager:
 # ===========================================================================
 # 9. Retry / Resilience Tests (4 tests)
 # ===========================================================================
+
 
 class TestClickHouseConnectorRetry:
     """Tests for retry logic on transient failures."""
@@ -733,6 +747,7 @@ class TestClickHouseConnectorRetry:
 # ===========================================================================
 # 10. SQL Injection Prevention Tests (6 tests)
 # ===========================================================================
+
 
 class TestClickHouseSQLInjectionPrevention:
     """Tests for SQL injection safeguards."""
@@ -798,6 +813,7 @@ class TestClickHouseSQLInjectionPrevention:
 # ===========================================================================
 # 11. Reconnect After Disconnect Tests (2 tests)
 # ===========================================================================
+
 
 class TestClickHouseConnectorReconnect:
     """Tests for reconnection after close()."""

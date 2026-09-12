@@ -6,12 +6,11 @@ performance metrics.
 """
 
 import os
-import time
-import resource
-import platform
 import threading
+import time
+from typing import Any, Dict, Optional
+
 import psutil
-from typing import Dict, Any, Optional
 
 
 def get_memory_usage(process: Optional[psutil.Process] = None) -> float:
@@ -134,14 +133,16 @@ class MetricsCollector:
 
         try:
             metrics = {
-                'timestamp': time.time(),
-                'memory_usage': get_memory_usage(self.process),
-                'cpu_usage': get_cpu_usage(self.process)
+                "timestamp": time.time(),
+                "memory_usage": get_memory_usage(self.process),
+                "cpu_usage": get_cpu_usage(self.process),
             }
             with self._lock:
                 self.metrics_history.append(metrics)
                 if len(self.metrics_history) > self.max_history_size:
-                    self.metrics_history = self.metrics_history[-self.max_history_size:]
+                    self.metrics_history = self.metrics_history[
+                        -self.max_history_size :
+                    ]
         except Exception:
             pass
 
@@ -163,8 +164,8 @@ class MetricsCollector:
         with self._lock:
             if self.metrics_history:
                 latest = self.metrics_history[-1]
-                memory_usage = latest['memory_usage']
-                cpu_usage = latest['cpu_usage']
+                memory_usage = latest["memory_usage"]
+                cpu_usage = latest["cpu_usage"]
             else:
                 memory_usage = self.start_memory or 0.0
                 cpu_usage = self.cpu_usage
@@ -172,39 +173,30 @@ class MetricsCollector:
         return {
             "duration_ms": round(duration_ms, 2),
             "cpu_usage": round(cpu_usage, 2),
-            "memory_usage": round(memory_usage, 2)
+            "memory_usage": round(memory_usage, 2),
         }
 
     def get_average_metrics(self) -> Dict[str, float]:
         """Get average metrics over the collection period."""
         with self._lock:
             if not self.metrics_history:
-                return {
-                    'memory_usage': 0.0,
-                    'cpu_usage': 0.0
-                }
+                return {"memory_usage": 0.0, "cpu_usage": 0.0}
 
-            memory_values = [m['memory_usage'] for m in self.metrics_history]
-            cpu_values = [m['cpu_usage'] for m in self.metrics_history]
+            memory_values = [m["memory_usage"] for m in self.metrics_history]
+            cpu_values = [m["cpu_usage"] for m in self.metrics_history]
 
             return {
-                'memory_usage': sum(memory_values) / len(memory_values),
-                'cpu_usage': sum(cpu_values) / len(cpu_values)
+                "memory_usage": sum(memory_values) / len(memory_values),
+                "cpu_usage": sum(cpu_values) / len(cpu_values),
             }
 
     def get_peak_metrics(self) -> Dict[str, float]:
         """Get peak metrics over the collection period."""
         with self._lock:
             if not self.metrics_history:
-                return {
-                    'memory_usage': 0.0,
-                    'cpu_usage': 0.0
-                }
+                return {"memory_usage": 0.0, "cpu_usage": 0.0}
 
-            memory_values = [m['memory_usage'] for m in self.metrics_history]
-            cpu_values = [m['cpu_usage'] for m in self.metrics_history]
+            memory_values = [m["memory_usage"] for m in self.metrics_history]
+            cpu_values = [m["cpu_usage"] for m in self.metrics_history]
 
-            return {
-                'memory_usage': max(memory_values),
-                'cpu_usage': max(cpu_values)
-            }
+            return {"memory_usage": max(memory_values), "cpu_usage": max(cpu_values)}

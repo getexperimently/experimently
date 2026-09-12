@@ -6,7 +6,7 @@ provide a clean, label-safe API for recording measurements throughout
 the codebase without callers needing to know the underlying metric type.
 """
 
-from prometheus_client import Counter, Histogram, Gauge
+from prometheus_client import Counter, Gauge, Histogram
 
 # ---------------------------------------------------------------------------
 # HTTP metrics

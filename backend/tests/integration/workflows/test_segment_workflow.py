@@ -13,14 +13,16 @@ These tests exercise the complete audience segment lifecycle:
 Segments use the rules_engine format:
   {"operator": "and", "conditions": [{"attribute": ..., "operator": ..., "value": ...}]}
 """
+
 import uuid
+
 import pytest
 from fastapi.testclient import TestClient
-
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _segment_key() -> str:
     """Generate a unique segment name."""
@@ -66,13 +68,16 @@ def _create_segment(
         "rules": rules,
     }
     resp = client.post("/api/v1/segments", json=payload)
-    assert resp.status_code == 201, f"Segment create failed (status={resp.status_code}): {resp.text}"
+    assert resp.status_code == 201, (
+        f"Segment create failed (status={resp.status_code}): {resp.text}"
+    )
     return resp.json()
 
 
 # ---------------------------------------------------------------------------
 # Full lifecycle workflow tests
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.integration
 @pytest.mark.requires_db
@@ -112,9 +117,17 @@ class TestSegmentLifecycleWorkflow:
         # Step 3: Evaluate a matching user (US, premium)
         match_resp = admin_client.post(
             f"/api/v1/segments/{segment_id}/evaluate",
-            json={"user_context": {"country": "US", "plan": "premium", "user_id": "user-001"}},
+            json={
+                "user_context": {
+                    "country": "US",
+                    "plan": "premium",
+                    "user_id": "user-001",
+                }
+            },
         )
-        assert match_resp.status_code == 200, f"Evaluate (match) failed: {match_resp.text}"
+        assert match_resp.status_code == 200, (
+            f"Evaluate (match) failed: {match_resp.text}"
+        )
         match_data = match_resp.json()
         assert match_data["is_member"] is True, (
             f"Expected is_member=True for US+premium user, got: {match_data}"
@@ -124,9 +137,13 @@ class TestSegmentLifecycleWorkflow:
         # Step 4: Evaluate a non-matching user (EU, free)
         no_match_resp = admin_client.post(
             f"/api/v1/segments/{segment_id}/evaluate",
-            json={"user_context": {"country": "DE", "plan": "free", "user_id": "user-002"}},
+            json={
+                "user_context": {"country": "DE", "plan": "free", "user_id": "user-002"}
+            },
         )
-        assert no_match_resp.status_code == 200, f"Evaluate (no match) failed: {no_match_resp.text}"
+        assert no_match_resp.status_code == 200, (
+            f"Evaluate (no match) failed: {no_match_resp.text}"
+        )
         no_match_data = no_match_resp.json()
         assert no_match_data["is_member"] is False, (
             f"Expected is_member=False for DE+free user, got: {no_match_data}"
@@ -429,12 +446,14 @@ class TestSegmentCRUDWorkflow:
         active_ids = [s["id"] for s in active_resp.json()]
 
         assert seg1["id"] in active_ids, "Active seg1 should appear in active list"
-        assert seg2["id"] not in active_ids, "Archived seg2 should not appear in active list"
+        assert seg2["id"] not in active_ids, (
+            "Archived seg2 should not appear in active list"
+        )
 
     def test_viewer_can_list_segments(self, viewer_user, db_session):
         """Viewer role can list segments (read-only access permitted)."""
-        from backend.tests.integration.conftest import make_client_for_user
         from backend.app.main import app
+        from backend.tests.integration.conftest import make_client_for_user
 
         client = make_client_for_user(db_session, viewer_user)
         resp = client.get("/api/v1/segments")
@@ -451,4 +470,6 @@ class TestSegmentCRUDWorkflow:
                 "rules": _premium_us_rules(),
             },
         )
-        assert resp.status_code == 403, f"Expected 403, got {resp.status_code}: {resp.text}"
+        assert resp.status_code == 403, (
+            f"Expected 403, got {resp.status_code}: {resp.text}"
+        )

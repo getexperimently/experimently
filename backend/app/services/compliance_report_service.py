@@ -7,18 +7,21 @@ as well as HMAC integrity verification statistics.
 
 Also supports exporting audit events as JSON or CSV for chain-of-custody.
 """
+
 import csv
 import io
 import json
-from dataclasses import dataclass, field, asdict as dataclasses_asdict
-from datetime import datetime, timezone, timedelta
-from typing import Dict, List, Optional
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
+from typing import Dict, Optional
 
 from sqlalchemy.orm import Session
 
-from backend.app.models.compliance_audit_event import ComplianceAuditEvent, AuditAction, AuditOutcome
-from backend.app.services.audit_signing_service import AuditSigningService
 from backend.app.core.config import settings
+from backend.app.models.compliance_audit_event import (
+    ComplianceAuditEvent,
+)
+from backend.app.services.audit_signing_service import AuditSigningService
 
 # Module-level signer instance (one instance is sufficient — stateless)
 _signer = AuditSigningService()
@@ -212,9 +215,7 @@ class ComplianceReportService:
         """Convert a ComplianceAuditEvent (or mock) to a plain dict."""
         return {
             "id": str(event.id),
-            "timestamp": (
-                event.timestamp.isoformat() if event.timestamp else None
-            ),
+            "timestamp": (event.timestamp.isoformat() if event.timestamp else None),
             "action": (
                 event.action.value
                 if hasattr(event.action, "value")

@@ -17,7 +17,7 @@ Thompson sampling is the only stochastic algorithm.  Its draws come from
 """
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence
 
 import numpy as np
@@ -31,6 +31,7 @@ _FALLBACK_SEED_NAMESPACE = "bandit_service"
 # ---------------------------------------------------------------------------
 # Data classes
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class VariantStats:
@@ -57,6 +58,7 @@ class VariantStats:
 # Thompson Sampling
 # ---------------------------------------------------------------------------
 
+
 class ThompsonSampling:
     """
     Bayesian MAB using Beta distribution posteriors.
@@ -70,9 +72,9 @@ class ThompsonSampling:
     produces the largest draw on each trial.
     """
 
-    PRIOR_ALPHA: float = 1.0   # uninformative prior
+    PRIOR_ALPHA: float = 1.0  # uninformative prior
     PRIOR_BETA: float = 1.0
-    N_SAMPLES: int = 10_000    # samples used to estimate selection probabilities
+    N_SAMPLES: int = 10_000  # samples used to estimate selection probabilities
 
     @staticmethod
     def arm_fingerprint(
@@ -148,9 +150,7 @@ class ThompsonSampling:
             return [1.0]
 
         # Draw n_samples from each Beta posterior: shape (n_samples, n_variants)
-        rng = make_rng(
-            ThompsonSampling.resolve_seed(seed, n_samples, alpha, beta)
-        )
+        rng = make_rng(ThompsonSampling.resolve_seed(seed, n_samples, alpha, beta))
         draws = rng.beta(alpha, beta, size=(n_samples, n_variants))
 
         # For each sample pick the arm with the maximum draw
@@ -202,6 +202,7 @@ class ThompsonSampling:
 # ---------------------------------------------------------------------------
 # UCB1
 # ---------------------------------------------------------------------------
+
 
 class UCB1:
     """
@@ -305,14 +306,14 @@ class UCB1:
             return {vs.variant_id: 1.0 / n for vs in variant_stats}
 
         return {
-            vs.variant_id: scores[i] / total_score
-            for i, vs in enumerate(variant_stats)
+            vs.variant_id: scores[i] / total_score for i, vs in enumerate(variant_stats)
         }
 
 
 # ---------------------------------------------------------------------------
 # Epsilon-Greedy
 # ---------------------------------------------------------------------------
+
 
 class EpsilonGreedy:
     """
@@ -352,9 +353,7 @@ class EpsilonGreedy:
             return {variant_stats[0].variant_id: 1.0}
 
         # Find the best arm by conversion_rate; ties go to the first arm
-        best_idx = max(
-            range(n), key=lambda i: variant_stats[i].conversion_rate
-        )
+        best_idx = max(range(n), key=lambda i: variant_stats[i].conversion_rate)
 
         # Assign weights
         explore_weight = epsilon / n
@@ -370,6 +369,7 @@ class EpsilonGreedy:
 # ---------------------------------------------------------------------------
 # BanditService — high-level dispatcher
 # ---------------------------------------------------------------------------
+
 
 class BanditService:
     """

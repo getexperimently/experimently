@@ -5,27 +5,30 @@ Experiment-related database models for the experimentation platform.
 This module defines models for experiments, variants, and metrics.
 """
 
+import enum
+
 from sqlalchemy import (
-    Column,
-    String,
     Boolean,
-    Integer,
-    ForeignKey,
-    Enum as SQLAEnum,
-    Text,
-    Index,
     CheckConstraint,
+    Column,
     DateTime,
     Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
 )
-from sqlalchemy.dialects.postgresql import UUID, JSONB
-from sqlalchemy.orm import relationship
+from sqlalchemy import (
+    Enum as SQLAEnum,
+)
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.ext.declarative import declared_attr
+from sqlalchemy.orm import relationship
+
+from backend.app.core.database_config import get_schema_name
 
 from .base import Base, BaseModel
-from backend.app.core.database_config import get_schema_name
-import enum
-import uuid
 
 
 class ExperimentStatus(enum.Enum):
@@ -95,7 +98,10 @@ class Experiment(Base, BaseModel):
     # Issue #22: MAB optimization type
     optimization_type = Column(
         SQLAEnum(
-            "fixed", "thompson_sampling", "ucb1", "epsilon_greedy",
+            "fixed",
+            "thompson_sampling",
+            "ucb1",
+            "epsilon_greedy",
             name="optimization_type_enum",
         ),
         nullable=False,
@@ -153,9 +159,7 @@ class Experiment(Base, BaseModel):
     events = relationship(
         "Event", back_populates="experiment", cascade="all, delete-orphan"
     )
-    reports = relationship(
-        "Report", back_populates="experiment", cascade="all, delete"
-    )
+    reports = relationship("Report", back_populates="experiment", cascade="all, delete")
 
     # Add assignments relationship
     assignments = relationship(
@@ -221,10 +225,6 @@ class Variant(Base, BaseModel):
     # Add events relationship
     events = relationship(
         "Event", back_populates="variant", cascade="all, delete-orphan"
-    )
-    # Ensure assignments relationship is properly defined
-    assignments = relationship(
-        "Assignment", back_populates="variant", cascade="all, delete-orphan"
     )
 
     @declared_attr

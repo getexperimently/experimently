@@ -11,9 +11,9 @@ Provides:
 All calculations use scipy.stats for numerical accuracy.
 """
 
-import math
 import logging
-from dataclasses import dataclass, field
+import math
+from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
 from scipy.stats import norm
@@ -25,9 +25,11 @@ logger = logging.getLogger(__name__)
 # Result dataclasses
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class SampleSizeResult:
     """Result of a sample size computation."""
+
     per_variant: int
     total: int
     alpha: float
@@ -45,6 +47,7 @@ class SampleSizeResult:
 @dataclass
 class MDEResult:
     """Result of an MDE computation."""
+
     mde_absolute: float
     mde_relative: float
     per_variant_sample: int
@@ -58,6 +61,7 @@ class MDEResult:
 @dataclass
 class RuntimeEstimate:
     """Estimated runtime to reach significance."""
+
     days_to_significance: float
     weeks_to_significance: float
     daily_traffic_per_variant: int
@@ -67,6 +71,7 @@ class RuntimeEstimate:
 @dataclass
 class PowerCurvePoint:
     """A single point on the sample-size vs. effect-size power curve."""
+
     effect_size_relative: float
     sample_size_per_variant: int
     is_current_target: bool
@@ -77,14 +82,28 @@ class PowerCurvePoint:
 # ---------------------------------------------------------------------------
 
 _DEFAULT_EFFECT_SIZES = [
-    0.01, 0.02, 0.03, 0.05, 0.07, 0.10, 0.12, 0.15,
-    0.20, 0.25, 0.30, 0.35, 0.40, 0.45, 0.50,
+    0.01,
+    0.02,
+    0.03,
+    0.05,
+    0.07,
+    0.10,
+    0.12,
+    0.15,
+    0.20,
+    0.25,
+    0.30,
+    0.35,
+    0.40,
+    0.45,
+    0.50,
 ]
 
 
 # ---------------------------------------------------------------------------
 # PowerCalculatorService
 # ---------------------------------------------------------------------------
+
 
 class PowerCalculatorService:
     """
@@ -370,7 +389,9 @@ class PowerCalculatorService:
         -------
         List[PowerCurvePoint] sorted by effect_size_relative ascending.
         """
-        self._validate_basic(alpha=alpha, power=power_target, baseline_rate=baseline_rate)
+        self._validate_basic(
+            alpha=alpha, power=power_target, baseline_rate=baseline_rate
+        )
 
         sizes = effect_sizes if effect_sizes is not None else _DEFAULT_EFFECT_SIZES
         points: List[PowerCurvePoint] = []
@@ -454,7 +475,7 @@ class PowerCalculatorService:
         n = (
             z_alpha * math.sqrt(2 * pooled * (1 - pooled))
             + z_power * math.sqrt(p1 * (1 - p1) + p2 * (1 - p2))
-        ) ** 2 / delta ** 2
+        ) ** 2 / delta**2
 
         return math.ceil(n)
 
@@ -483,7 +504,7 @@ class PowerCalculatorService:
         if std <= 0:
             raise ValueError("std must be > 0")
 
-        n = 2 * std ** 2 * (z_alpha + z_power) ** 2 / delta ** 2
+        n = 2 * std**2 * (z_alpha + z_power) ** 2 / delta**2
         return math.ceil(n)
 
     @staticmethod
@@ -497,9 +518,7 @@ class PowerCalculatorService:
     ) -> None:
         """Validate all inputs and raise ValueError on invalid values."""
         if not (0 < baseline_rate < 1):
-            raise ValueError(
-                f"baseline_rate must be in (0, 1), got {baseline_rate}"
-            )
+            raise ValueError(f"baseline_rate must be in (0, 1), got {baseline_rate}")
         if mde_relative <= 0:
             raise ValueError(
                 f"minimum_detectable_effect must be > 0, got {mde_relative}"
@@ -517,9 +536,7 @@ class PowerCalculatorService:
                 f"metric_type must be 'proportion', 'mean', or 'ratio', got '{metric_type}'"
             )
         if metric_type == "mean" and baseline_std is None:
-            raise ValueError(
-                "baseline_std is required when metric_type='mean'"
-            )
+            raise ValueError("baseline_std is required when metric_type='mean'")
         # Validate that treatment rate is a valid probability
         mde_abs = baseline_rate * mde_relative
         p2 = baseline_rate + mde_abs
@@ -537,9 +554,7 @@ class PowerCalculatorService:
     ) -> None:
         """Lightweight validation for MDE/curve endpoints."""
         if not (0 < baseline_rate < 1):
-            raise ValueError(
-                f"baseline_rate must be in (0, 1), got {baseline_rate}"
-            )
+            raise ValueError(f"baseline_rate must be in (0, 1), got {baseline_rate}")
         if not (0 < alpha < 0.5):
             raise ValueError(f"alpha must be in (0, 0.5), got {alpha}")
         if not (0 < power < 1):

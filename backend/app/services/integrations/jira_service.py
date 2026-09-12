@@ -3,6 +3,7 @@ Jira integration service.
 Creates/updates Jira issues linked to platform experiments.
 All methods swallow exceptions — Jira failures never disrupt platform.
 """
+
 import logging
 from datetime import datetime
 from typing import Optional
@@ -15,8 +16,9 @@ logger = logging.getLogger(__name__)
 class JiraService:
     """Manages Jira issue lifecycle tied to experiment events."""
 
-    def __init__(self, base_url: str, api_token: str, email: str,
-                 project_key: str = ""):
+    def __init__(
+        self, base_url: str, api_token: str, email: str, project_key: str = ""
+    ):
         self._base_url = base_url.rstrip("/")
         self._api_token = api_token
         self._email = email
@@ -101,8 +103,10 @@ class JiraService:
 
     def transition_issue(self, issue_key: str, transition_id: str) -> None:
         try:
-            self._post(f"/rest/api/3/issue/{issue_key}/transitions",
-                       {"transition": {"id": transition_id}})
+            self._post(
+                f"/rest/api/3/issue/{issue_key}/transitions",
+                {"transition": {"id": transition_id}},
+            )
         except Exception as exc:
             logger.warning("Jira transition_issue failed for %s: %s", issue_key, exc)
 
@@ -121,7 +125,11 @@ class JiraService:
             issue = payload.get("issue", {})
             changelog = payload.get("changelog", {})
             status_change = next(
-                (item for item in changelog.get("items", []) if item.get("field") == "status"),
+                (
+                    item
+                    for item in changelog.get("items", [])
+                    if item.get("field") == "status"
+                ),
                 None,
             )
             if not status_change:

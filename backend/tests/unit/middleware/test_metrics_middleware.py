@@ -9,8 +9,8 @@ Covers:
 
 import pytest
 from fastapi import FastAPI
-from starlette.testclient import TestClient
 from starlette.responses import JSONResponse
+from starlette.testclient import TestClient
 
 # ---------------------------------------------------------------------------
 # normalize_path tests (pure function — no side-effects)
@@ -75,7 +75,9 @@ async def test_metrics_middleware_records_on_success(mocker):
     async def ping():
         return {"pong": True}
 
-    from backend.app.middleware.prometheus_metrics_middleware import PrometheusMetricsMiddleware
+    from backend.app.middleware.prometheus_metrics_middleware import (
+        PrometheusMetricsMiddleware,
+    )
 
     app.add_middleware(PrometheusMetricsMiddleware)
     client = TestClient(app)
@@ -98,7 +100,9 @@ async def test_metrics_middleware_records_404(mocker):
     )
 
     app = FastAPI()
-    from backend.app.middleware.prometheus_metrics_middleware import PrometheusMetricsMiddleware
+    from backend.app.middleware.prometheus_metrics_middleware import (
+        PrometheusMetricsMiddleware,
+    )
 
     app.add_middleware(PrometheusMetricsMiddleware)
     client = TestClient(app)
@@ -124,7 +128,9 @@ async def test_metrics_middleware_normalizes_uuid_path(mocker):
     async def get_experiment(experiment_id: str):
         return {"id": experiment_id}
 
-    from backend.app.middleware.prometheus_metrics_middleware import PrometheusMetricsMiddleware
+    from backend.app.middleware.prometheus_metrics_middleware import (
+        PrometheusMetricsMiddleware,
+    )
 
     app.add_middleware(PrometheusMetricsMiddleware)
     client = TestClient(app)
@@ -149,7 +155,9 @@ async def test_metrics_middleware_records_post(mocker):
     async def create_event():
         return {"created": True}
 
-    from backend.app.middleware.prometheus_metrics_middleware import PrometheusMetricsMiddleware
+    from backend.app.middleware.prometheus_metrics_middleware import (
+        PrometheusMetricsMiddleware,
+    )
 
     app.add_middleware(PrometheusMetricsMiddleware)
     client = TestClient(app)

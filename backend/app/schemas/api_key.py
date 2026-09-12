@@ -36,7 +36,7 @@ class APIKeyCreate(BaseModel):
         if v is None:
             return None
         if isinstance(v, str):
-            v = [part for part in v.split(",")]
+            v = list(v.split(","))
         cleaned = [str(s).strip() for s in v if str(s).strip()]
         for scope in cleaned:
             if "," in scope:

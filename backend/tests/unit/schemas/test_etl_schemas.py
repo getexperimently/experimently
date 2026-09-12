@@ -16,16 +16,15 @@ import pytest
 from pydantic import ValidationError
 
 from backend.app.schemas.etl import (
-    GlueJobStatus,
-    ETLJobType,
-    ETLJobRequest,
-    ETLJobResponse,
     AthenaQueryRequest,
     AthenaQueryResult,
-    PartitionInfo,
+    ETLJobRequest,
+    ETLJobResponse,
+    ETLJobType,
     GlueCrawlerStatus,
+    GlueJobStatus,
+    PartitionInfo,
 )
-
 
 # ---------------------------------------------------------------------------
 # GlueJobStatus enum tests
@@ -106,7 +105,10 @@ class TestETLJobRequest:
         """Dates using slashes (2024/01/15) are rejected."""
         with pytest.raises(ValidationError) as exc_info:
             ETLJobRequest(job_type=ETLJobType.EVENTS_TO_PARQUET, date="2024/01/15")
-        assert "date" in str(exc_info.value).lower() or "pattern" in str(exc_info.value).lower()
+        assert (
+            "date" in str(exc_info.value).lower()
+            or "pattern" in str(exc_info.value).lower()
+        )
 
     def test_invalid_date_partial(self):
         """Partial dates like '2024-01' are rejected."""

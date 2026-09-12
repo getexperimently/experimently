@@ -1,24 +1,32 @@
 """
 RBAC service — custom role management and effective permissions resolution.
 """
-from typing import List, Optional, Dict, Set
+
+from datetime import datetime
+from typing import Dict, List, Optional, Set
 from uuid import UUID
-from datetime import datetime, timezone
+
 from sqlalchemy.orm import Session
 
-from backend.app.models.custom_role import CustomRole, UserCustomRole, DirectPermissionGrant
+from backend.app.core.permissions import ROLE_PERMISSIONS, ResourceType
+from backend.app.models.custom_role import (
+    CustomRole,
+    DirectPermissionGrant,
+    UserCustomRole,
+)
 from backend.app.models.user import User, UserRole
-from backend.app.core.permissions import ROLE_PERMISSIONS, ResourceType, Action
 from backend.app.schemas.rbac import (
-    CustomRoleCreate, CustomRoleUpdate, CustomRoleResponse,
-    EffectivePermissionsResponse, PermissionGrant,
+    CustomRoleCreate,
+    CustomRoleUpdate,
+    EffectivePermissionsResponse,
 )
 
 
 class RBACService:
-
     @staticmethod
-    def create_custom_role(db: Session, data: CustomRoleCreate, created_by_id: UUID) -> CustomRole:
+    def create_custom_role(
+        db: Session, data: CustomRoleCreate, created_by_id: UUID
+    ) -> CustomRole:
         """Create a new custom role. Raises ValueError if name already exists."""
         existing = db.query(CustomRole).filter(CustomRole.name == data.name).first()
         if existing:
@@ -38,7 +46,7 @@ class RBACService:
         """List all custom roles, optionally including system roles."""
         q = db.query(CustomRole)
         if not include_system:
-            q = q.filter(CustomRole.is_system_role == False)  # noqa: E712
+            q = q.filter(CustomRole.is_system_role == False)
         return q.order_by(CustomRole.name).all()
 
     @staticmethod
@@ -46,7 +54,9 @@ class RBACService:
         return db.query(CustomRole).filter(CustomRole.name == role_name).first()
 
     @staticmethod
-    def update_custom_role(db: Session, role_name: str, data: CustomRoleUpdate) -> CustomRole:
+    def update_custom_role(
+        db: Session, role_name: str, data: CustomRoleUpdate
+    ) -> CustomRole:
         role = db.query(CustomRole).filter(CustomRole.name == role_name).first()
         if not role:
             raise ValueError(f"Role '{role_name}' not found")
@@ -81,10 +91,14 @@ class RBACService:
         role = db.query(CustomRole).filter(CustomRole.name == role_name).first()
         if not role:
             raise ValueError(f"Role '{role_name}' not found")
-        existing = db.query(UserCustomRole).filter(
-            UserCustomRole.user_id == user_id,
-            UserCustomRole.role_id == role.id,
-        ).first()
+        existing = (
+            db.query(UserCustomRole)
+            .filter(
+                UserCustomRole.user_id == user_id,
+                UserCustomRole.role_id == role.id,
+            )
+            .first()
+        )
         if existing:
             return existing
         assignment = UserCustomRole(
@@ -136,15 +150,21 @@ class RBACService:
     @staticmethod
     def revoke_direct_permission(db: Session, user_id: UUID, resource: str) -> int:
         """Revoke all direct grants for a user+resource. Returns count deleted."""
-        count = db.query(DirectPermissionGrant).filter(
-            DirectPermissionGrant.user_id == user_id,
-            DirectPermissionGrant.resource == resource,
-        ).delete()
+        count = (
+            db.query(DirectPermissionGrant)
+            .filter(
+                DirectPermissionGrant.user_id == user_id,
+                DirectPermissionGrant.resource == resource,
+            )
+            .delete()
+        )
         db.flush()
         return count
 
     @staticmethod
-    def get_effective_permissions(db: Session, user: User) -> EffectivePermissionsResponse:
+    def get_effective_permissions(
+        db: Session, user: User
+    ) -> EffectivePermissionsResponse:
         """
         Resolve a user's full permission set:
         1. Start with base role permissions (ROLE_PERMISSIONS)
@@ -161,7 +181,7 @@ class RBACService:
         else:
             # 1. Base role — safely handle mock objects or missing roles
             try:
-                base_role = getattr(user, 'role', UserRole.VIEWER)
+                base_role = getattr(user, "role", UserRole.VIEWER)
                 base_role_perms = ROLE_PERMISSIONS.get(base_role, {})
             except Exception:
                 base_role_perms = {}
@@ -170,35 +190,41 @@ class RBACService:
                 perms.setdefault(resource.value, set()).update(a.value for a in actions)
 
             # 2. Custom roles
-            custom_assignments = db.query(UserCustomRole).filter(
-                UserCustomRole.user_id == user.id
-            ).all()
+            custom_assignments = (
+                db.query(UserCustomRole).filter(UserCustomRole.user_id == user.id).all()
+            )
             for assignment in custom_assignments:
                 role = assignment.role
-                for perm in (role.permissions or []):
+                for perm in role.permissions or []:
                     resource_key = perm.get("resource", "")
                     actions_list = perm.get("actions", [])
                     perms.setdefault(resource_key, set()).update(actions_list)
 
             # 3. Direct grants (valid only)
-            direct_grants = db.query(DirectPermissionGrant).filter(
-                DirectPermissionGrant.user_id == user.id,
-                DirectPermissionGrant.is_active == True,  # noqa: E712
-            ).all()
+            direct_grants = (
+                db.query(DirectPermissionGrant)
+                .filter(
+                    DirectPermissionGrant.user_id == user.id,
+                    DirectPermissionGrant.is_active == True,
+                )
+                .all()
+            )
             for grant in direct_grants:
                 if grant.is_valid:
                     perms.setdefault(grant.resource, set()).update(grant.actions or [])
 
         # Get custom role names
         custom_role_names = []
-        assignments = db.query(UserCustomRole).filter(UserCustomRole.user_id == user.id).all()
+        assignments = (
+            db.query(UserCustomRole).filter(UserCustomRole.user_id == user.id).all()
+        )
         for a in assignments:
             if a.role:
                 custom_role_names.append(a.role.name)
 
         # Build base_role string safely
-        user_role = getattr(user, 'role', UserRole.VIEWER)
-        if hasattr(user_role, 'value'):
+        user_role = getattr(user, "role", UserRole.VIEWER)
+        if hasattr(user_role, "value"):
             base_role_str = user_role.value
         else:
             base_role_str = str(user_role)

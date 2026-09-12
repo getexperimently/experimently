@@ -6,19 +6,17 @@ They define the expected behavior of compute_segment_breakdown,
 detect_hte, and get_adjusted_alpha.
 """
 
-import pytest
 from typing import Any, Dict, List
 
+import pytest
 
 # ---------------------------------------------------------------------------
 # Import the service under test (will fail until implementation is created)
 # ---------------------------------------------------------------------------
-
 from backend.app.services.dimensional_analysis_service import (
     DimensionalAnalysisService,
     SegmentResult,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers / fixtures
@@ -50,9 +48,9 @@ def service() -> DimensionalAnalysisService:
 def platform_segments() -> Dict[str, Dict[str, Dict[str, Any]]]:
     """Segment breakdown for 'platform' dimension: ios, android, web."""
     return {
-        "ios": _make_segment_data(500, 60, 500, 80),   # strong lift
+        "ios": _make_segment_data(500, 60, 500, 80),  # strong lift
         "android": _make_segment_data(400, 40, 400, 42),  # tiny lift
-        "web": _make_segment_data(300, 30, 300, 28),   # negative lift
+        "web": _make_segment_data(300, 30, 300, 28),  # negative lift
     }
 
 
@@ -123,7 +121,9 @@ class TestComputeSegmentResults:
             base_alpha=0.05,
         )
         for r in results:
-            assert r.sample_size > 0, f"segment {r.segment_value!r} has zero sample_size"
+            assert r.sample_size > 0, (
+                f"segment {r.segment_value!r} has zero sample_size"
+            )
 
     def test_each_segment_has_variant_results(self, service, platform_segments):
         """Each SegmentResult must contain variant-level sub-results."""
@@ -189,7 +189,9 @@ class TestComputeSegmentResults:
                         f"Segment {seg.segment_value!r} treatment variant missing p_value"
                     )
 
-    def test_per_segment_confidence_intervals_computed(self, service, platform_segments):
+    def test_per_segment_confidence_intervals_computed(
+        self, service, platform_segments
+    ):
         """Every variant must have a confidence_interval tuple."""
         results = service.compute_segment_results(
             segments=platform_segments,
@@ -220,7 +222,9 @@ class TestComputeSegmentResults:
         segment_values = {r.segment_value for r in results}
         assert "unknown" in segment_values
 
-    def test_segment_sample_size_is_sum_of_variant_sizes(self, service, platform_segments):
+    def test_segment_sample_size_is_sum_of_variant_sizes(
+        self, service, platform_segments
+    ):
         """Segment-level sample_size must equal the sum of all variants' sample_sizes."""
         results = service.compute_segment_results(
             segments=platform_segments,
@@ -260,7 +264,7 @@ class TestDetectHTE:
         One segment has a big positive effect; another has a negative effect.
         """
         divergent_segments = {
-            "ios": _make_segment_data(5000, 100, 5000, 500),   # huge positive lift
+            "ios": _make_segment_data(5000, 100, 5000, 500),  # huge positive lift
             "android": _make_segment_data(5000, 500, 5000, 100),  # negative lift
         }
         segment_results = service.compute_segment_results(

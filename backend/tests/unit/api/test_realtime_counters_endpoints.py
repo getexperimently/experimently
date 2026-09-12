@@ -11,23 +11,23 @@ Coverage:
 - POST /api/v1/counters/{experiment_id}/reset     — ADMIN-only, 403 for others
 """
 
-import pytest
 from unittest.mock import MagicMock, patch
-from fastapi.testclient import TestClient
 from uuid import uuid4
 
-from backend.app.main import app
+import pytest
+from fastapi.testclient import TestClient
+
 from backend.app.api import deps
+from backend.app.main import app
 from backend.app.models.user import User, UserRole
 from backend.app.schemas.realtime_counters import (
+    BulkIncrementResponse,
     CounterType,
     ExperimentCounters,
     IncrementResponse,
-    BulkIncrementResponse,
     VariantCounters,
 )
 from backend.app.services.dynamodb_counter_service import DynamoDBCounterService
-
 
 # ---------------------------------------------------------------------------
 # Factories
@@ -128,6 +128,7 @@ def admin_client(mock_counter_service):
 
     # Override the counter service dependency
     from backend.app.api.v1.endpoints.realtime_counters import get_counter_service
+
     app.dependency_overrides[get_counter_service] = lambda: mock_counter_service
 
     return TestClient(app, raise_server_exceptions=False), mock_counter_service
@@ -140,6 +141,7 @@ def analyst_client(mock_counter_service):
     app.dependency_overrides[deps.get_current_active_user] = lambda: analyst
 
     from backend.app.api.v1.endpoints.realtime_counters import get_counter_service
+
     app.dependency_overrides[get_counter_service] = lambda: mock_counter_service
 
     return TestClient(app, raise_server_exceptions=False), mock_counter_service

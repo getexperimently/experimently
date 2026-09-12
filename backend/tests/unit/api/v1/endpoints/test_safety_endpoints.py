@@ -7,7 +7,7 @@ and rollback functionality for feature flags.
 
 import json
 from datetime import datetime
-from typing import Dict, Any
+from typing import Any, Dict
 from unittest.mock import MagicMock, patch
 from uuid import UUID, uuid4
 
@@ -18,23 +18,23 @@ from sqlalchemy.orm import Session
 
 from backend.app.api.deps import get_current_active_user, get_current_superuser
 from backend.app.main import app
-from backend.app.models.user import User
 from backend.app.models.safety import (
-    SafetySettings,
     FeatureFlagSafetyConfig,
-    RollbackTriggerType
+    RollbackTriggerType,
+    SafetySettings,
+)
+from backend.app.models.user import User
+from backend.app.schemas.safety import (
+    FeatureFlagSafetyConfigResponse,
+    HealthStatus,
+    MetricStatus,
+    MetricThreshold,
+    MetricValue,
+    RollbackResponse,
+    SafetyCheckResponse,
+    SafetySettingsResponse,
 )
 from backend.app.services.safety_service import SafetyService
-from backend.app.schemas.safety import (
-    SafetySettingsResponse,
-    FeatureFlagSafetyConfigResponse,
-    SafetyCheckResponse,
-    RollbackResponse,
-    HealthStatus,
-    MetricValue,
-    MetricThreshold,
-    MetricStatus
-)
 
 
 class TestSafetyEndpoints:
@@ -54,7 +54,7 @@ class TestSafetyEndpoints:
             full_name="Test User",
             is_active=True,
             is_superuser=False,
-            hashed_password="hashed_password"
+            hashed_password="hashed_password",
         )
 
     @pytest.fixture
@@ -65,7 +65,7 @@ class TestSafetyEndpoints:
             username="superuser",
             email="super@example.com",
             is_superuser=True,
-            hashed_password="somepassword"
+            hashed_password="somepassword",
         )
 
     @pytest.fixture
@@ -85,7 +85,7 @@ class TestSafetyEndpoints:
             "default_latency_threshold": 1.5,
             "notification_emails": ["alerts@example.com"],
             "created_at": datetime.utcnow().isoformat(),
-            "updated_at": datetime.utcnow().isoformat()
+            "updated_at": datetime.utcnow().isoformat(),
         }
 
     @pytest.fixture
@@ -99,29 +99,29 @@ class TestSafetyEndpoints:
                 "error_count": 10,
                 "total_evaluations": 2000,
                 "avg_latency": 150,
-                "p95_latency": 200
+                "p95_latency": 200,
             },
             "thresholds": {
                 "error_threshold": 2.0,
                 "error_threshold_value": 0.6,
                 "latency_threshold": 1.5,
-                "latency_threshold_value": 180
+                "latency_threshold_value": 180,
             },
             "details": {
                 "error_rate": {
                     "status": "safe",
                     "current": 0.5,
                     "baseline": 0.3,
-                    "threshold": 0.6
+                    "threshold": 0.6,
                 },
                 "latency": {
                     "status": "safe",
                     "current": 150,
                     "baseline": 120,
-                    "threshold": 180
-                }
+                    "threshold": 180,
+                },
             },
-            "checked_at": datetime.utcnow().isoformat()
+            "checked_at": datetime.utcnow().isoformat(),
         }
 
     @pytest.fixture
@@ -134,7 +134,7 @@ class TestSafetyEndpoints:
             "previous_percentage": 50,
             "current_percentage": 0,
             "message": "Feature flag rolled back due to manual request",
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.utcnow().isoformat(),
         }
 
     def test_get_safety_settings(self, client: TestClient, mock_superuser: User):
@@ -147,14 +147,18 @@ class TestSafetyEndpoints:
             id=uuid4(),
             enable_automatic_rollbacks=False,
             default_metrics={
-                "error_rate": MetricThreshold(warning_threshold=0.1, critical_threshold=0.2)
+                "error_rate": MetricThreshold(
+                    warning_threshold=0.1, critical_threshold=0.2
+                )
             },
             created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow()
+            updated_at=datetime.utcnow(),
         )
 
-        with patch("backend.app.services.safety_service.SafetyService.async_get_safety_settings",
-                   return_value=mock_settings):
+        with patch(
+            "backend.app.services.safety_service.SafetyService.async_get_safety_settings",
+            return_value=mock_settings,
+        ):
             response = client.get("/api/v1/safety/settings")
 
         # Reset override
@@ -163,7 +167,10 @@ class TestSafetyEndpoints:
         # Check response
         assert response.status_code == status.HTTP_200_OK
         data = response.json()
-        assert data["enable_automatic_rollbacks"] == mock_settings.enable_automatic_rollbacks
+        assert (
+            data["enable_automatic_rollbacks"]
+            == mock_settings.enable_automatic_rollbacks
+        )
         assert "default_metrics" in data
 
     def test_update_safety_settings(self, client: TestClient, mock_superuser: User):
@@ -178,9 +185,9 @@ class TestSafetyEndpoints:
                 "error_rate": {
                     "warning_threshold": 0.05,
                     "critical_threshold": 0.1,
-                    "comparison_type": "greater_than"
+                    "comparison_type": "greater_than",
                 }
-            }
+            },
         }
 
         # Mock the response
@@ -189,11 +196,13 @@ class TestSafetyEndpoints:
             enable_automatic_rollbacks=True,
             default_metrics=update_data["default_metrics"],
             created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow()
+            updated_at=datetime.utcnow(),
         )
 
-        with patch("backend.app.services.safety_service.SafetyService.create_or_update_safety_settings",
-                   return_value=mock_settings):
+        with patch(
+            "backend.app.services.safety_service.SafetyService.create_or_update_safety_settings",
+            return_value=mock_settings,
+        ):
             response = client.post("/api/v1/safety/settings", json=update_data)
 
         # Reset override
@@ -202,10 +211,18 @@ class TestSafetyEndpoints:
         # Check response
         assert response.status_code == status.HTTP_200_OK
         data = response.json()
-        assert data["enable_automatic_rollbacks"] == update_data["enable_automatic_rollbacks"]
-        assert data["default_metrics"]["error_rate"]["warning_threshold"] == update_data["default_metrics"]["error_rate"]["warning_threshold"]
+        assert (
+            data["enable_automatic_rollbacks"]
+            == update_data["enable_automatic_rollbacks"]
+        )
+        assert (
+            data["default_metrics"]["error_rate"]["warning_threshold"]
+            == update_data["default_metrics"]["error_rate"]["warning_threshold"]
+        )
 
-    def test_get_feature_flag_safety_config(self, client: TestClient, mock_user: User, feature_flag_id: UUID):
+    def test_get_feature_flag_safety_config(
+        self, client: TestClient, mock_user: User, feature_flag_id: UUID
+    ):
         """Test getting feature flag safety config."""
         # Mock the deps
         app.dependency_overrides[get_current_active_user] = lambda: mock_user
@@ -216,16 +233,22 @@ class TestSafetyEndpoints:
             feature_flag_id=feature_flag_id,
             enabled=True,
             metrics={
-                "error_rate": MetricThreshold(warning_threshold=0.1, critical_threshold=0.2)
+                "error_rate": MetricThreshold(
+                    warning_threshold=0.1, critical_threshold=0.2
+                )
             },
             rollback_percentage=0,
             created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow()
+            updated_at=datetime.utcnow(),
         )
 
-        with patch("backend.app.services.safety_service.SafetyService.async_get_feature_flag_safety_config",
-                   return_value=mock_config):
-            response = client.get(f"/api/v1/safety/feature-flags/{feature_flag_id}/config")
+        with patch(
+            "backend.app.services.safety_service.SafetyService.async_get_feature_flag_safety_config",
+            return_value=mock_config,
+        ):
+            response = client.get(
+                f"/api/v1/safety/feature-flags/{feature_flag_id}/config"
+            )
 
         # Reset override
         app.dependency_overrides = {}
@@ -237,7 +260,9 @@ class TestSafetyEndpoints:
         assert data["enabled"] == mock_config.enabled
         assert "metrics" in data
 
-    def test_check_feature_flag_safety(self, client: TestClient, mock_user: User, mock_safety_check: Dict[str, Any]):
+    def test_check_feature_flag_safety(
+        self, client: TestClient, mock_user: User, mock_safety_check: Dict[str, Any]
+    ):
         """Test checking feature flag safety."""
         feature_flag_id = UUID(mock_safety_check["feature_flag_id"])
 
@@ -256,15 +281,19 @@ class TestSafetyEndpoints:
                     threshold=0.1,
                     unit="%",
                     is_healthy=True,
-                    details={"comparison_type": "greater_than"}
+                    details={"comparison_type": "greater_than"},
                 )
             ],
-            last_checked=datetime.utcnow()
+            last_checked=datetime.utcnow(),
         )
 
-        with patch("backend.app.services.safety_service.SafetyService.check_feature_flag_safety",
-                   return_value=mock_check):
-            response = client.get(f"/api/v1/safety/feature-flags/{feature_flag_id}/check")
+        with patch(
+            "backend.app.services.safety_service.SafetyService.check_feature_flag_safety",
+            return_value=mock_check,
+        ):
+            response = client.get(
+                f"/api/v1/safety/feature-flags/{feature_flag_id}/check"
+            )
 
         # Reset override
         app.dependency_overrides = {}
@@ -276,7 +305,9 @@ class TestSafetyEndpoints:
         assert data["is_healthy"] == mock_check.is_healthy
         assert "metrics" in data
 
-    def test_rollback_feature_flag(self, client: TestClient, mock_superuser: User, feature_flag_id: UUID):
+    def test_rollback_feature_flag(
+        self, client: TestClient, mock_superuser: User, feature_flag_id: UUID
+    ):
         """Test rolling back a feature flag."""
         # Mock the deps
         app.dependency_overrides[get_current_active_user] = lambda: mock_superuser
@@ -291,14 +322,16 @@ class TestSafetyEndpoints:
             trigger_type="manual",
             rollback_record_id=uuid4(),
             timestamp=datetime.utcnow(),
-            details={"reason": "Test rollback"}
+            details={"reason": "Test rollback"},
         )
 
-        with patch("backend.app.services.safety_service.SafetyService.async_rollback_feature_flag",
-                   return_value=mock_rollback):
+        with patch(
+            "backend.app.services.safety_service.SafetyService.async_rollback_feature_flag",
+            return_value=mock_rollback,
+        ):
             response = client.post(
                 f"/api/v1/safety/feature-flags/{feature_flag_id}/rollback",
-                params={"reason": "Test rollback", "percentage": 0}
+                params={"reason": "Test rollback", "percentage": 0},
             )
 
         # Reset override
@@ -318,14 +351,14 @@ class TestSafetyEndpoints:
         # Mock the deps - this will fail for regular users
         def mock_superuser_dependency():
             from fastapi import HTTPException
+
             raise HTTPException(status_code=403, detail="Not a superuser")
 
         app.dependency_overrides[get_current_superuser] = mock_superuser_dependency
 
         # Try to update settings (superuser only)
         response = client.post(
-            "/api/v1/safety/settings",
-            json={"enable_automatic_rollbacks": True}
+            "/api/v1/safety/settings", json={"enable_automatic_rollbacks": True}
         )
 
         # Reset override

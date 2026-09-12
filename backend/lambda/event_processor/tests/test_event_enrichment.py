@@ -11,10 +11,7 @@ Test-Driven Development (TDD) - RED phase:
 - Write tests first, implementation follows
 """
 
-import pytest
-from datetime import datetime
-from unittest.mock import Mock, patch, AsyncMock
-from typing import Dict, Any
+from unittest.mock import patch
 
 
 class TestEventEnrichment:
@@ -36,7 +33,7 @@ class TestEventEnrichment:
             "event_type": "page_view",
             "user_id": "user_456",
             "experiment_id": "exp_789",
-            "timestamp": "2024-12-19T10:30:00Z"
+            "timestamp": "2024-12-19T10:30:00Z",
         }
 
         validated_event = validate_event(event_dict)
@@ -47,13 +44,16 @@ class TestEventEnrichment:
             "user_id": "user_456",
             "experiment_id": "exp_789",
             "variant": "treatment",
-            "timestamp": "2024-12-19T09:00:00Z"
+            "timestamp": "2024-12-19T09:00:00Z",
         }
 
         from event_enricher import enrich_event
 
         # Act
-        with patch('event_enricher.fetch_assignment_from_dynamodb', return_value=mock_assignment):
+        with patch(
+            "event_enricher.fetch_assignment_from_dynamodb",
+            return_value=mock_assignment,
+        ):
             enriched_event = enrich_event(validated_event)
 
         # Assert
@@ -78,7 +78,7 @@ class TestEventEnrichment:
             "event_type": "conversion",
             "user_id": "user_789",
             "experiment_id": "exp_123",
-            "timestamp": "2024-12-19T10:30:00Z"
+            "timestamp": "2024-12-19T10:30:00Z",
         }
 
         validated_event = validate_event(event_dict)
@@ -89,7 +89,7 @@ class TestEventEnrichment:
             "user_id": "user_789",
             "experiment_id": "exp_123",
             "variant": "control",
-            "timestamp": "2024-12-19T09:00:00Z"
+            "timestamp": "2024-12-19T09:00:00Z",
         }
 
         # Mock experiment metadata
@@ -97,14 +97,19 @@ class TestEventEnrichment:
             "experiment_id": "exp_123",
             "key": "checkout_redesign",
             "name": "Checkout Redesign Test",
-            "status": "active"
+            "status": "active",
         }
 
         from event_enricher import enrich_event
 
         # Act
-        with patch('event_enricher.fetch_assignment_from_dynamodb', return_value=mock_assignment):
-            with patch('event_enricher.fetch_experiment_metadata', return_value=mock_experiment):
+        with patch(
+            "event_enricher.fetch_assignment_from_dynamodb",
+            return_value=mock_assignment,
+        ):
+            with patch(
+                "event_enricher.fetch_experiment_metadata", return_value=mock_experiment
+            ):
                 enriched_event = enrich_event(validated_event)
 
         # Assert
@@ -127,7 +132,7 @@ class TestEventEnrichment:
             "event_id": "evt_789",
             "event_type": "page_view",
             "user_id": "user_111",
-            "timestamp": "2024-12-19T10:30:00Z"
+            "timestamp": "2024-12-19T10:30:00Z",
             # No experiment_id
         }
 
@@ -160,7 +165,7 @@ class TestEventEnrichment:
             "event_type": "page_view",
             "user_id": "user_new",
             "experiment_id": "exp_123",
-            "timestamp": "2024-12-19T10:30:00Z"
+            "timestamp": "2024-12-19T10:30:00Z",
         }
 
         validated_event = validate_event(event_dict)
@@ -170,14 +175,16 @@ class TestEventEnrichment:
             "experiment_id": "exp_123",
             "key": "checkout_redesign",
             "name": "Checkout Redesign Test",
-            "status": "active"
+            "status": "active",
         }
 
         from event_enricher import enrich_event
 
         # Act
-        with patch('event_enricher.fetch_assignment_from_dynamodb', return_value=None):
-            with patch('event_enricher.fetch_experiment_metadata', return_value=mock_experiment):
+        with patch("event_enricher.fetch_assignment_from_dynamodb", return_value=None):
+            with patch(
+                "event_enricher.fetch_experiment_metadata", return_value=mock_experiment
+            ):
                 enriched_event = enrich_event(validated_event)
 
         # Assert
@@ -207,13 +214,9 @@ class TestEventEnrichment:
             "properties": {
                 "revenue": 99.99,
                 "item_count": 3,
-                "payment_method": "credit_card"
+                "payment_method": "credit_card",
             },
-            "metadata": {
-                "source": "mobile_app",
-                "version": "2.1.0",
-                "platform": "ios"
-            }
+            "metadata": {"source": "mobile_app", "version": "2.1.0", "platform": "ios"},
         }
 
         validated_event = validate_event(event_dict)
@@ -224,13 +227,16 @@ class TestEventEnrichment:
             "user_id": "user_customer",
             "experiment_id": "exp_pricing",
             "variant": "discount_20",
-            "timestamp": "2024-12-19T09:00:00Z"
+            "timestamp": "2024-12-19T09:00:00Z",
         }
 
         from event_enricher import enrich_event
 
         # Act
-        with patch('event_enricher.fetch_assignment_from_dynamodb', return_value=mock_assignment):
+        with patch(
+            "event_enricher.fetch_assignment_from_dynamodb",
+            return_value=mock_assignment,
+        ):
             enriched_event = enrich_event(validated_event)
 
         # Assert - Original data preserved
@@ -258,7 +264,7 @@ class TestEventEnrichment:
             "event_type": "conversion",
             "user_id": "user_123",
             "experiment_id": "exp_456",
-            "timestamp": "2024-12-19T10:30:00Z"
+            "timestamp": "2024-12-19T10:30:00Z",
         }
 
         validated_event = validate_event(event_dict)
@@ -269,13 +275,16 @@ class TestEventEnrichment:
             "user_id": "user_123",
             "experiment_id": "exp_456",
             "variant": "treatment",
-            "timestamp": "2024-12-19T09:00:00Z"  # 1.5 hours before event
+            "timestamp": "2024-12-19T09:00:00Z",  # 1.5 hours before event
         }
 
         from event_enricher import enrich_event
 
         # Act
-        with patch('event_enricher.fetch_assignment_from_dynamodb', return_value=mock_assignment):
+        with patch(
+            "event_enricher.fetch_assignment_from_dynamodb",
+            return_value=mock_assignment,
+        ):
             enriched_event = enrich_event(validated_event)
 
         # Assert
@@ -301,22 +310,22 @@ class TestEventEnrichment:
                 "event_type": "page_view",
                 "user_id": "user_1",
                 "experiment_id": "exp_a",
-                "timestamp": "2024-12-19T10:00:00Z"
+                "timestamp": "2024-12-19T10:00:00Z",
             },
             {
                 "event_id": "evt_2",
                 "event_type": "conversion",
                 "user_id": "user_2",
                 "experiment_id": "exp_b",
-                "timestamp": "2024-12-19T10:01:00Z"
+                "timestamp": "2024-12-19T10:01:00Z",
             },
             {
                 "event_id": "evt_3",
                 "event_type": "page_view",
                 "user_id": "user_3",
-                "timestamp": "2024-12-19T10:02:00Z"
+                "timestamp": "2024-12-19T10:02:00Z",
                 # No experiment_id
-            }
+            },
         ]
 
         validated_events = [validate_event(e) for e in events]
@@ -325,14 +334,17 @@ class TestEventEnrichment:
         def mock_fetch_assignment(user_id, experiment_id):
             assignments = {
                 ("user_1", "exp_a"): {"assignment_id": "a1", "variant": "control"},
-                ("user_2", "exp_b"): {"assignment_id": "a2", "variant": "treatment"}
+                ("user_2", "exp_b"): {"assignment_id": "a2", "variant": "treatment"},
             }
             return assignments.get((user_id, experiment_id))
 
         from event_enricher import enrich_events_batch
 
         # Act
-        with patch('event_enricher.fetch_assignment_from_dynamodb', side_effect=mock_fetch_assignment):
+        with patch(
+            "event_enricher.fetch_assignment_from_dynamodb",
+            side_effect=mock_fetch_assignment,
+        ):
             enriched_events = enrich_events_batch(validated_events)
 
         # Assert
@@ -357,7 +369,7 @@ class TestEventEnrichment:
             "event_type": "page_view",
             "user_id": "user_error",
             "experiment_id": "exp_error",
-            "timestamp": "2024-12-19T10:30:00Z"
+            "timestamp": "2024-12-19T10:30:00Z",
         }
 
         validated_event = validate_event(event_dict)
@@ -365,7 +377,10 @@ class TestEventEnrichment:
         from event_enricher import enrich_event
 
         # Act - Mock DynamoDB error
-        with patch('event_enricher.fetch_assignment_from_dynamodb', side_effect=Exception("DynamoDB error")):
+        with patch(
+            "event_enricher.fetch_assignment_from_dynamodb",
+            side_effect=Exception("DynamoDB error"),
+        ):
             enriched_event = enrich_event(validated_event)
 
         # Assert

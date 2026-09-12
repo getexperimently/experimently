@@ -13,15 +13,15 @@ Tests cover the Horvitz-Thompson post-stratification estimator:
 """
 
 import math
-import pytest
+
 import numpy as np
 import pandas as pd
+import pytest
 
 from backend.app.services.post_stratification_service import (
     PostStratificationService,
     PostStratResult,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -104,7 +104,9 @@ def _make_imbalanced_data(
         treatment_rows.append(
             pd.DataFrame(
                 {
-                    "metric_value": rng.normal(stratum_mean + 1.0, 1.0, treatment_sizes[i]),
+                    "metric_value": rng.normal(
+                        stratum_mean + 1.0, 1.0, treatment_sizes[i]
+                    ),
                     "stratum": label,
                 }
             )
@@ -267,7 +269,10 @@ class TestPostStratificationServiceBasic:
             treatment_data=treatment_df,
             stratum_cols=["stratum"],
         )
-        assert abs(result.effect_size - (result.treatment_mean - result.control_mean)) < 1e-10
+        assert (
+            abs(result.effect_size - (result.treatment_mean - result.control_mean))
+            < 1e-10
+        )
 
     def test_compute_effect_size_relative_is_ratio(self):
         """effect_size_relative = effect_size / abs(control_mean)."""
@@ -344,10 +349,14 @@ class TestPostStratificationVarianceReduction:
             mean = float(i) * 10.0
             n = 200
             control_rows.append(
-                pd.DataFrame({"metric_value": rng.normal(mean, 1.0, n), "stratum": label})
+                pd.DataFrame(
+                    {"metric_value": rng.normal(mean, 1.0, n), "stratum": label}
+                )
             )
             treatment_rows.append(
-                pd.DataFrame({"metric_value": rng.normal(mean + 0.5, 1.0, n), "stratum": label})
+                pd.DataFrame(
+                    {"metric_value": rng.normal(mean + 0.5, 1.0, n), "stratum": label}
+                )
             )
         control_df = pd.concat(control_rows, ignore_index=True)
         treatment_df = pd.concat(treatment_rows, ignore_index=True)
@@ -369,10 +378,16 @@ class TestPostStratificationVarianceReduction:
         # Strata with identical means — strata are uninformative
         n = 300
         control_df = pd.DataFrame(
-            {"metric_value": rng.normal(5.0, 1.0, n), "stratum": np.tile(["A", "B"], n // 2)}
+            {
+                "metric_value": rng.normal(5.0, 1.0, n),
+                "stratum": np.tile(["A", "B"], n // 2),
+            }
         )
         treatment_df = pd.DataFrame(
-            {"metric_value": rng.normal(5.5, 1.0, n), "stratum": np.tile(["A", "B"], n // 2)}
+            {
+                "metric_value": rng.normal(5.5, 1.0, n),
+                "stratum": np.tile(["A", "B"], n // 2),
+            }
         )
 
         service = _make_service()
@@ -397,10 +412,14 @@ class TestPostStratificationVarianceReduction:
             mean = float(i) * 8.0
             n = 250
             control_rows.append(
-                pd.DataFrame({"metric_value": rng.normal(mean, 1.0, n), "stratum": label})
+                pd.DataFrame(
+                    {"metric_value": rng.normal(mean, 1.0, n), "stratum": label}
+                )
             )
             treatment_rows.append(
-                pd.DataFrame({"metric_value": rng.normal(mean + 1.0, 1.0, n), "stratum": label})
+                pd.DataFrame(
+                    {"metric_value": rng.normal(mean + 1.0, 1.0, n), "stratum": label}
+                )
             )
         control_df = pd.concat(control_rows, ignore_index=True)
         treatment_df = pd.concat(treatment_rows, ignore_index=True)
@@ -636,8 +655,12 @@ class TestPostStratificationEdgeCases:
     def test_raises_on_missing_stratum_column(self):
         """ValueError raised when stratum_col not in DataFrame."""
         service = _make_service()
-        control_df = pd.DataFrame({"metric_value": [1.0, 2.0, 3.0], "other_col": ["A", "A", "B"]})
-        treatment_df = pd.DataFrame({"metric_value": [2.0, 3.0, 4.0], "other_col": ["A", "B", "B"]})
+        control_df = pd.DataFrame(
+            {"metric_value": [1.0, 2.0, 3.0], "other_col": ["A", "A", "B"]}
+        )
+        treatment_df = pd.DataFrame(
+            {"metric_value": [2.0, 3.0, 4.0], "other_col": ["A", "B", "B"]}
+        )
         with pytest.raises((ValueError, KeyError)):
             service.compute(
                 control_data=control_df,
@@ -678,7 +701,9 @@ class TestPostStratificationEdgeCases:
     def test_custom_alpha_narrows_confidence_interval(self):
         """Narrower CI for alpha=0.10 than alpha=0.01."""
         service = _make_service()
-        control_df, treatment_df = _make_balanced_data(n_per_group=500, n_strata=2, seed=42)
+        control_df, treatment_df = _make_balanced_data(
+            n_per_group=500, n_strata=2, seed=42
+        )
 
         result_90 = service.compute(
             control_data=control_df,
@@ -703,10 +728,16 @@ class TestPostStratificationEdgeCases:
         rng = np.random.default_rng(700)
         n = 200
         control_df = pd.DataFrame(
-            {"revenue": rng.normal(100.0, 10.0, n), "stratum": np.tile(["A", "B"], n // 2)}
+            {
+                "revenue": rng.normal(100.0, 10.0, n),
+                "stratum": np.tile(["A", "B"], n // 2),
+            }
         )
         treatment_df = pd.DataFrame(
-            {"revenue": rng.normal(105.0, 10.0, n), "stratum": np.tile(["A", "B"], n // 2)}
+            {
+                "revenue": rng.normal(105.0, 10.0, n),
+                "stratum": np.tile(["A", "B"], n // 2),
+            }
         )
         result = service.compute(
             control_data=control_df,
@@ -723,27 +754,41 @@ class TestPostStratificationEdgeCases:
         rng = np.random.default_rng(800)
         n = 1000
         control_df = pd.DataFrame(
-            {"metric_value": rng.normal(0.0, 1.0, n), "stratum": np.tile(["A", "B"], n // 2)}
+            {
+                "metric_value": rng.normal(0.0, 1.0, n),
+                "stratum": np.tile(["A", "B"], n // 2),
+            }
         )
         treatment_df = pd.DataFrame(
-            {"metric_value": rng.normal(5.0, 1.0, n), "stratum": np.tile(["A", "B"], n // 2)}
+            {
+                "metric_value": rng.normal(5.0, 1.0, n),
+                "stratum": np.tile(["A", "B"], n // 2),
+            }
         )
         result = service.compute(
             control_data=control_df,
             treatment_data=treatment_df,
             stratum_cols=["stratum"],
         )
-        assert result.p_value < 0.001, f"Expected p < 0.001 for large effect, got {result.p_value}"
+        assert result.p_value < 0.001, (
+            f"Expected p < 0.001 for large effect, got {result.p_value}"
+        )
 
     def test_non_significant_result_when_no_effect(self):
         """p_value is likely large (>0.10) when there is truly no treatment effect."""
         rng = np.random.default_rng(900)
         n = 500
         control_df = pd.DataFrame(
-            {"metric_value": rng.normal(5.0, 1.0, n), "stratum": np.tile(["A", "B"], n // 2)}
+            {
+                "metric_value": rng.normal(5.0, 1.0, n),
+                "stratum": np.tile(["A", "B"], n // 2),
+            }
         )
         treatment_df = pd.DataFrame(
-            {"metric_value": rng.normal(5.0, 1.0, n), "stratum": np.tile(["A", "B"], n // 2)}
+            {
+                "metric_value": rng.normal(5.0, 1.0, n),
+                "stratum": np.tile(["A", "B"], n // 2),
+            }
         )
         service = _make_service()
         result = service.compute(
@@ -779,6 +824,10 @@ class TestPostStratificationEdgeCases:
             stratum_cols=["stratum"],
         )
 
-        width_small = result_small.confidence_interval[1] - result_small.confidence_interval[0]
-        width_large = result_large.confidence_interval[1] - result_large.confidence_interval[0]
+        width_small = (
+            result_small.confidence_interval[1] - result_small.confidence_interval[0]
+        )
+        width_large = (
+            result_large.confidence_interval[1] - result_large.confidence_interval[0]
+        )
         assert width_small > width_large, "Small sample should have wider CI"

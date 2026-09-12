@@ -19,7 +19,6 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from backend.app.api import deps
-from backend.app.core.permissions import Action, ResourceType, check_permission
 from backend.app.models.user import User, UserRole
 from backend.app.schemas.etl import (
     AthenaQueryRequest,
@@ -58,6 +57,7 @@ def get_etl_service() -> ETLService:
 # ---------------------------------------------------------------------------
 # Permission helpers
 # ---------------------------------------------------------------------------
+
 
 def _require_admin_or_developer(current_user: User) -> None:
     """Raise 403 if the user is not ADMIN or DEVELOPER."""
@@ -183,7 +183,9 @@ def run_athena_query(
     """Execute an Athena SQL query and return results."""
     _require_analyst_or_above(current_user)
 
-    logger.info(f"User {current_user.username} running Athena query on db={request.database}")
+    logger.info(
+        f"User {current_user.username} running Athena query on db={request.database}"
+    )
     return svc.run_athena_query(request)
 
 

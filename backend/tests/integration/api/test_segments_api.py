@@ -21,16 +21,17 @@ Endpoint coverage:
 """
 
 import uuid
+
 import pytest
 from fastapi.testclient import TestClient
 
 from backend.app.main import app
 from backend.tests.integration.conftest import make_client_for_user
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _valid_segment_payload(name: str = None) -> dict:
     """Return a minimal valid SegmentCreate payload."""
@@ -39,9 +40,7 @@ def _valid_segment_payload(name: str = None) -> dict:
         "description": "Integration test segment",
         "rules": {
             "operator": "AND",
-            "conditions": [
-                {"attribute": "country", "operator": "eq", "value": "US"}
-            ],
+            "conditions": [{"attribute": "country", "operator": "eq", "value": "US"}],
         },
     }
 
@@ -56,6 +55,7 @@ def _create_segment(client: TestClient, name: str = None) -> dict:
 # ---------------------------------------------------------------------------
 # Create segment
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.integration
 @pytest.mark.requires_db
@@ -135,9 +135,7 @@ class TestCreateSegment:
         """Created segment response contains the provided rules."""
         rules = {
             "operator": "AND",
-            "conditions": [
-                {"attribute": "plan", "operator": "eq", "value": "premium"}
-            ],
+            "conditions": [{"attribute": "plan", "operator": "eq", "value": "premium"}],
         }
         payload = {"name": "Premium Segment", "rules": rules}
         response = admin_client.post("/api/v1/segments/", json=payload)
@@ -151,6 +149,7 @@ class TestCreateSegment:
 # ---------------------------------------------------------------------------
 # List segments
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.integration
 @pytest.mark.requires_db
@@ -244,6 +243,7 @@ class TestListSegments:
 # Get single segment
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.integration
 @pytest.mark.requires_db
 class TestGetSegment:
@@ -301,6 +301,7 @@ class TestGetSegment:
 # ---------------------------------------------------------------------------
 # Update segment
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.integration
 @pytest.mark.requires_db
@@ -378,13 +379,16 @@ class TestUpdateSegment:
     def test_update_nonexistent_segment_returns_404(self, admin_client):
         """PUT on a non-existent UUID returns 404."""
         fake_id = "00000000-0000-0000-0000-000000000001"
-        response = admin_client.put(f"/api/v1/segments/{fake_id}", json={"name": "Ghost"})
+        response = admin_client.put(
+            f"/api/v1/segments/{fake_id}", json={"name": "Ghost"}
+        )
         assert response.status_code == 404, response.text
 
 
 # ---------------------------------------------------------------------------
 # Archive segment (soft delete)
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.integration
 @pytest.mark.requires_db
@@ -451,6 +455,7 @@ class TestArchiveSegment:
 # Evaluate membership
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.integration
 @pytest.mark.requires_db
 class TestEvaluateMembership:
@@ -474,7 +479,9 @@ class TestEvaluateMembership:
 
         # Evaluate a US user
         eval_payload = {"user_context": {"country": "US", "user_id": "user-123"}}
-        response = admin_client.post(f"/api/v1/segments/{seg_id}/evaluate", json=eval_payload)
+        response = admin_client.post(
+            f"/api/v1/segments/{seg_id}/evaluate", json=eval_payload
+        )
         assert response.status_code == 200, response.text
 
         data = response.json()
@@ -498,7 +505,9 @@ class TestEvaluateMembership:
 
         # Evaluate a non-US user
         eval_payload = {"user_context": {"country": "CA", "user_id": "user-456"}}
-        response = admin_client.post(f"/api/v1/segments/{seg_id}/evaluate", json=eval_payload)
+        response = admin_client.post(
+            f"/api/v1/segments/{seg_id}/evaluate", json=eval_payload
+        )
         assert response.status_code == 200, response.text
         assert response.json()["is_member"] is False
 
@@ -522,7 +531,9 @@ class TestEvaluateMembership:
         """Evaluating a non-existent segment returns 404."""
         fake_id = "00000000-0000-0000-0000-000000000003"
         eval_payload = {"user_context": {"country": "US"}}
-        response = admin_client.post(f"/api/v1/segments/{fake_id}/evaluate", json=eval_payload)
+        response = admin_client.post(
+            f"/api/v1/segments/{fake_id}/evaluate", json=eval_payload
+        )
         assert response.status_code == 404, response.text
 
     def test_evaluate_with_empty_context_returns_200(self, admin_client):
@@ -548,6 +559,7 @@ class TestEvaluateMembership:
 # ---------------------------------------------------------------------------
 # Bulk evaluate
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.integration
 @pytest.mark.requires_db
@@ -603,7 +615,9 @@ class TestBulkEvaluate:
         assert "user_context" in data
         assert data["user_context"]["country"] == "US"
 
-    def test_bulk_evaluate_nonexistent_segment_treated_as_non_member(self, admin_client):
+    def test_bulk_evaluate_nonexistent_segment_treated_as_non_member(
+        self, admin_client
+    ):
         """Non-existent segment IDs in bulk evaluate are treated as non-member (False)."""
         fake_id = "00000000-0000-0000-0000-ffffffffffff"
         payload = {
@@ -649,6 +663,7 @@ class TestBulkEvaluate:
 # Get linked experiments
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.integration
 @pytest.mark.requires_db
 class TestGetSegmentExperiments:
@@ -690,6 +705,7 @@ class TestGetSegmentExperiments:
 # ---------------------------------------------------------------------------
 # Preview audience size
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.integration
 @pytest.mark.requires_db

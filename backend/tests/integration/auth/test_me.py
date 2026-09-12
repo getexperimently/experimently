@@ -16,9 +16,14 @@ fake token, Cognito raises an error → ValueError → HTTP 401.
 
 UserInfoResponse schema: {"username": str, "attributes": dict}
 """
+
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
-from backend.tests.integration.auth.spec_cognito_integration import COGNITO_ENDPOINT_SPECS
+
+from backend.tests.integration.auth.spec_cognito_integration import (
+    COGNITO_ENDPOINT_SPECS,
+)
 
 SPEC = COGNITO_ENDPOINT_SPECS["me"]
 
@@ -86,7 +91,9 @@ class TestMeEndpoint:
         assert "attributes" in data
         assert isinstance(data["attributes"], dict)
 
-    def test_me_response_attributes_contain_email(self, auth_client, auth_tokens, registered_user):
+    def test_me_response_attributes_contain_email(
+        self, auth_client, auth_tokens, registered_user
+    ):
         """User attributes from moto include the email set during signup"""
         response = auth_client.get(
             SPEC.path,
@@ -101,7 +108,9 @@ class TestMeEndpoint:
 
     def test_me_with_mocked_service_returns_200(self, auth_client):
         """With CognitoAuthService mocked, any token returns 200 with user info"""
-        with patch("backend.app.api.v1.endpoints.auth.CognitoAuthService") as MockService:
+        with patch(
+            "backend.app.api.v1.endpoints.auth.CognitoAuthService"
+        ) as MockService:
             mock_instance = MagicMock()
             mock_instance.get_user.return_value = {
                 "username": "mock_user",
@@ -124,7 +133,9 @@ class TestMeEndpoint:
 
     def test_me_service_error_returns_401(self, auth_client):
         """CognitoAuthService.get_user raising ValueError returns 401"""
-        with patch("backend.app.api.v1.endpoints.auth.CognitoAuthService") as MockService:
+        with patch(
+            "backend.app.api.v1.endpoints.auth.CognitoAuthService"
+        ) as MockService:
             mock_instance = MagicMock()
             mock_instance.get_user.side_effect = ValueError(
                 "An error occurred (NotAuthorizedException): Invalid Access Token"

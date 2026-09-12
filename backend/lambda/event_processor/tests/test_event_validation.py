@@ -11,8 +11,9 @@ Test-Driven Development (TDD) - RED phase:
 - Write tests first, implementation follows
 """
 
-import pytest
 from datetime import datetime
+
+import pytest
 from pydantic import ValidationError
 
 
@@ -32,7 +33,7 @@ class TestEventSchemaValidation:
             "event_id": "evt_12345",
             "event_type": "page_view",
             "user_id": "user_67890",
-            "timestamp": "2024-12-19T10:30:00Z"
+            "timestamp": "2024-12-19T10:30:00Z",
         }
 
         from event_validator import validate_event
@@ -62,7 +63,7 @@ class TestEventSchemaValidation:
             "timestamp": "2024-12-19T10:30:00Z",
             "experiment_id": "exp_789",
             "properties": {"revenue": 99.99, "item_count": 3},
-            "metadata": {"source": "mobile_app", "version": "1.2.3"}
+            "metadata": {"source": "mobile_app", "version": "1.2.3"},
         }
 
         from event_validator import validate_event
@@ -88,7 +89,7 @@ class TestEventSchemaValidation:
             "event_id": "evt_123",
             "event_type": "page_view",
             # Missing user_id
-            "timestamp": "2024-12-19T10:30:00Z"
+            "timestamp": "2024-12-19T10:30:00Z",
         }
 
         from event_validator import validate_event
@@ -114,7 +115,7 @@ class TestEventSchemaValidation:
             "event_id": "evt_123",
             "event_type": {"invalid": "type"},  # Invalid: should be string
             "user_id": "user_456",
-            "timestamp": "2024-12-19T10:30:00Z"
+            "timestamp": "2024-12-19T10:30:00Z",
         }
 
         from event_validator import validate_event
@@ -164,21 +165,21 @@ class TestEventSchemaValidation:
                 "event_id": "evt_1",
                 "event_type": "page_view",
                 "user_id": "user_1",
-                "timestamp": "2024-12-19T10:00:00Z"
+                "timestamp": "2024-12-19T10:00:00Z",
             },
             {
                 "event_id": "evt_2",
                 "event_type": "button_click",
                 "user_id": "user_2",
-                "timestamp": "2024-12-19T10:01:00Z"
+                "timestamp": "2024-12-19T10:01:00Z",
             },
             {
                 "event_id": "evt_3",
                 "event_type": "conversion",
                 "user_id": "user_3",
                 "timestamp": "2024-12-19T10:02:00Z",
-                "properties": {"value": 50.00}
-            }
+                "properties": {"value": 50.00},
+            },
         ]
 
         from event_validator import validate_events_batch
@@ -207,28 +208,27 @@ class TestEventSchemaValidation:
                 "event_id": "evt_1",
                 "event_type": "page_view",
                 "user_id": "user_1",
-                "timestamp": "2024-12-19T10:00:00Z"
+                "timestamp": "2024-12-19T10:00:00Z",
             },
             {
                 # Invalid: missing user_id
                 "event_id": "evt_2",
                 "event_type": "button_click",
-                "timestamp": "2024-12-19T10:01:00Z"
+                "timestamp": "2024-12-19T10:01:00Z",
             },
             {
                 "event_id": "evt_3",
                 "event_type": "conversion",
                 "user_id": "user_3",
-                "timestamp": "2024-12-19T10:02:00Z"
-            }
+                "timestamp": "2024-12-19T10:02:00Z",
+            },
         ]
 
         from event_validator import validate_events_batch
 
         # Act
         validated_events, validation_errors = validate_events_batch(
-            events_batch,
-            skip_invalid=True
+            events_batch, skip_invalid=True
         )
 
         # Assert
@@ -253,14 +253,14 @@ class TestEventSchemaValidation:
                 "event_id": "evt_1",
                 "event_type": "page_view",
                 "user_id": "user_1",
-                "timestamp": "2024-12-19T10:00:00Z"
+                "timestamp": "2024-12-19T10:00:00Z",
             },
             {
                 # Invalid: missing user_id
                 "event_id": "evt_2",
                 "event_type": "button_click",
-                "timestamp": "2024-12-19T10:01:00Z"
-            }
+                "timestamp": "2024-12-19T10:01:00Z",
+            },
         ]
 
         from event_validator import validate_events_batch
@@ -284,7 +284,7 @@ class TestEventSchemaValidation:
             "user_id": "user_456",
             "timestamp": "2024-12-19T10:30:00Z",
             "unknown_field": "should_be_ignored",
-            "another_extra": 12345
+            "another_extra": 12345,
         }
 
         from event_validator import validate_event
@@ -310,29 +310,29 @@ class TestEventSchemaValidation:
                 "event_id": "evt_123",  # Duplicate
                 "event_type": "page_view",
                 "user_id": "user_1",
-                "timestamp": "2024-12-19T10:00:00Z"
+                "timestamp": "2024-12-19T10:00:00Z",
             },
             {
                 "event_id": "evt_123",  # Duplicate
                 "event_type": "button_click",
                 "user_id": "user_2",
-                "timestamp": "2024-12-19T10:01:00Z"
-            }
+                "timestamp": "2024-12-19T10:01:00Z",
+            },
         ]
 
         from event_validator import validate_events_batch
 
         # Act
         validated_events, validation_errors = validate_events_batch(
-            events_batch,
-            skip_invalid=True,
-            check_duplicates=True
+            events_batch, skip_invalid=True, check_duplicates=True
         )
 
         # Assert
         # Should flag the duplicate
         assert len(validation_errors) >= 1
-        assert any("duplicate" in err.get("error", "").lower() for err in validation_errors)
+        assert any(
+            "duplicate" in err.get("error", "").lower() for err in validation_errors
+        )
 
     def test_validate_preserves_datetime_formats(self):
         """
@@ -344,9 +344,9 @@ class TestEventSchemaValidation:
         """
         # Arrange
         timestamp_formats = [
-            "2024-12-19T10:30:00Z",           # ISO with Z
-            "2024-12-19T10:30:00+00:00",      # ISO with timezone
-            "2024-12-19T10:30:00.123456Z",    # ISO with microseconds
+            "2024-12-19T10:30:00Z",  # ISO with Z
+            "2024-12-19T10:30:00+00:00",  # ISO with timezone
+            "2024-12-19T10:30:00.123456Z",  # ISO with microseconds
         ]
 
         from event_validator import validate_event
@@ -356,7 +356,7 @@ class TestEventSchemaValidation:
                 "event_id": f"evt_{ts_format}",
                 "event_type": "page_view",
                 "user_id": "user_123",
-                "timestamp": ts_format
+                "timestamp": ts_format,
             }
 
             # Act
@@ -383,15 +383,12 @@ class TestEventSchemaValidation:
                 "cart": {
                     "items": [
                         {"id": "item1", "price": 10.00},
-                        {"id": "item2", "price": 20.00}
+                        {"id": "item2", "price": 20.00},
                     ],
-                    "total": 30.00
+                    "total": 30.00,
                 },
-                "payment": {
-                    "method": "credit_card",
-                    "last_four": "1234"
-                }
-            }
+                "payment": {"method": "credit_card", "last_four": "1234"},
+            },
         }
 
         from event_validator import validate_event

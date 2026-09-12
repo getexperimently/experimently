@@ -5,6 +5,7 @@ Tests the service layer across all three integrations — Jira, Salesforce, GitH
 covering the factory pattern, experiment lifecycle events, webhook processing, and
 resilience/error handling. No real HTTP calls are made; all network I/O is mocked.
 """
+
 import hashlib
 import hmac as hmac_lib
 from datetime import datetime
@@ -12,15 +13,15 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from backend.app.models.integration_config import IntegrationConfig, IntegrationType
+from backend.app.services.integrations.github_service import GitHubService
 from backend.app.services.integrations.jira_service import JiraService
 from backend.app.services.integrations.salesforce_service import SalesforceService
-from backend.app.services.integrations.github_service import GitHubService
-from backend.app.models.integration_config import IntegrationConfig, IntegrationType
-
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_jira_config(is_active: bool = True, extra: dict = None):
     config = MagicMock(spec=IntegrationConfig)
@@ -116,6 +117,7 @@ def _mock_httpx_get(return_json: dict, status_code: int = 200):
 # 1. IntegrationConfig Factory Pattern
 # ===========================================================================
 
+
 class TestIntegrationConfigFactory:
     """JiraService.from_config, SalesforceService.from_config, GitHubService.from_config."""
 
@@ -207,7 +209,10 @@ class TestIntegrationConfigFactory:
     def test_github_service_from_config_missing_token_returns_none(self):
         """GitHubService.from_config() returns None when token is missing."""
         config = MagicMock(spec=IntegrationConfig)
-        config.encrypted_config = {"repo_owner": "myorg", "repo_name": "experimentation"}
+        config.encrypted_config = {
+            "repo_owner": "myorg",
+            "repo_name": "experimentation",
+        }
         service = GitHubService.from_config(config)
         assert service is None
 
@@ -239,6 +244,7 @@ class TestIntegrationConfigFactory:
 # 2. Experiment Lifecycle Integration
 # ===========================================================================
 
+
 class TestExperimentLifecycleIntegration:
     """Full workflow: experiment starts → third-party action → experiment completes → follow-up."""
 
@@ -261,7 +267,9 @@ class TestExperimentLifecycleIntegration:
     def test_jira_issue_summary_contains_experiment_name(self):
         """Issue summary contains the experiment name prefixed with [Experiment]."""
         service = _make_jira_service()
-        with patch.object(service, "_post", return_value={"id": "10001", "key": "EXP-1"}) as mock_post:
+        with patch.object(
+            service, "_post", return_value={"id": "10001", "key": "EXP-1"}
+        ) as mock_post:
             service.create_experiment_issue(
                 project_key="EXP",
                 experiment_name="My AB Test",
@@ -275,7 +283,9 @@ class TestExperimentLifecycleIntegration:
     def test_jira_results_comment_added_on_completion(self):
         """add_results_comment() posts a structured results comment to an existing issue."""
         service = _make_jira_service()
-        with patch.object(service, "_post", return_value={"id": "comment-99"}) as mock_post:
+        with patch.object(
+            service, "_post", return_value={"id": "comment-99"}
+        ) as mock_post:
             service.add_results_comment(
                 issue_key="EXP-123",
                 experiment_name="Checkout A/B Test",
@@ -306,7 +316,9 @@ class TestExperimentLifecycleIntegration:
         """sync_experiment() creates a Salesforce Opportunity when no opportunity_id given."""
         service = _make_salesforce_service()
         with patch("httpx.post") as mock_post:
-            mock_post.return_value = _mock_httpx_post({"id": "006NEWID", "success": True})
+            mock_post.return_value = _mock_httpx_post(
+                {"id": "006NEWID", "success": True}
+            )
             result = service.sync_experiment(
                 experiment_id="exp-001",
                 name="Checkout A/B Test",
@@ -389,6 +401,7 @@ class TestExperimentLifecycleIntegration:
 # 3. Webhook Processing Workflow
 # ===========================================================================
 
+
 class TestWebhookProcessingWorkflow:
     """Webhooks from each service are parsed into normalized events."""
 
@@ -399,7 +412,9 @@ class TestWebhookProcessingWorkflow:
             "webhookEvent": "jira:issue_updated",
             "issue": {"key": "EXP-123", "fields": {"status": {"name": "In Progress"}}},
             "changelog": {
-                "items": [{"field": "status", "fromString": "Open", "toString": "In Progress"}]
+                "items": [
+                    {"field": "status", "fromString": "Open", "toString": "In Progress"}
+                ]
             },
         }
         result = service.parse_webhook_event(payload)
@@ -469,9 +484,9 @@ class TestWebhookProcessingWorkflow:
         secret = "webhook_secret_abc"
         service = _make_github_service(webhook_secret=secret)
         body = b'{"action": "opened", "issue": {"number": 1}}'
-        signature = "sha256=" + hmac_lib.new(
-            secret.encode(), body, hashlib.sha256
-        ).hexdigest()
+        signature = (
+            "sha256=" + hmac_lib.new(secret.encode(), body, hashlib.sha256).hexdigest()
+        )
         assert service.verify_webhook_signature(body, signature) is True
 
     def test_github_webhook_with_invalid_signature(self):
@@ -532,6 +547,7 @@ class TestWebhookProcessingWorkflow:
 # ===========================================================================
 # 4. Error Handling + Resilience
 # ===========================================================================
+
 
 class TestIntegrationResilience:
     """Services swallow errors and return None — they never disrupt the platform."""

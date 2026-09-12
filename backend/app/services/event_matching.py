@@ -26,8 +26,7 @@ EXPOSURE_EVENT_TYPES = (EventType.EXPOSURE.value, "experiment_exposure")
 
 #: SQL fragment for raw ``text()`` queries; binds ``:event_name``.
 CONVERSION_SQL_PREDICATE = (
-    "event_name = :event_name "
-    "AND event_type NOT IN ('exposure', 'experiment_exposure')"
+    "event_name = :event_name AND event_type NOT IN ('exposure', 'experiment_exposure')"
 )
 
 

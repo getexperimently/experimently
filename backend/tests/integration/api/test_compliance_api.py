@@ -16,8 +16,9 @@ For the report and export endpoints we patch the service layer to avoid
 the heavy compliance-report computation path when we only need to verify
 the HTTP routing and RBAC logic.
 """
+
 import uuid
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict
 from unittest.mock import MagicMock, patch
 
@@ -32,10 +33,10 @@ from backend.app.models.compliance_audit_event import (
 )
 from backend.app.services.audit_log_service import AuditLogService
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _seed_audit_event(
     db_session: Session,
@@ -81,6 +82,7 @@ def _make_fake_report(standard: str = "soc2") -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 # GET /api/v1/compliance/audit-events
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.integration
 @pytest.mark.requires_db
@@ -248,6 +250,7 @@ class TestListAuditEvents:
 # GET /api/v1/compliance/reports/{standard}
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.integration
 @pytest.mark.requires_db
 class TestComplianceReports:
@@ -258,7 +261,9 @@ class TestComplianceReports:
         fake_report = _make_fake_report("soc2")
         with patch(
             "backend.app.services.compliance_report_service.ComplianceReportService.generate_report",
-            return_value=MagicMock(**fake_report, **{"__iter__": lambda self: iter(fake_report.items())}),
+            return_value=MagicMock(
+                **fake_report, __iter__=lambda self: iter(fake_report.items())
+            ),
         ):
             # Use dataclasses_asdict fallback — patch the dataclass conversion
             from dataclasses import dataclass
@@ -283,7 +288,9 @@ class TestComplianceReports:
                     if self.events_by_outcome is None:
                         self.events_by_outcome = fake_report["events_by_outcome"]
                     if self.events_by_resource_type is None:
-                        self.events_by_resource_type = fake_report["events_by_resource_type"]
+                        self.events_by_resource_type = fake_report[
+                            "events_by_resource_type"
+                        ]
 
             with patch(
                 "backend.app.services.compliance_report_service.ComplianceReportService.generate_report",
@@ -301,7 +308,9 @@ class TestComplianceReports:
         class FakeIsoReport:
             standard: str = "iso27001"
             generated_at: str = datetime.now(timezone.utc).isoformat()
-            period_start: str = (datetime.now(timezone.utc) - timedelta(days=730)).isoformat()
+            period_start: str = (
+                datetime.now(timezone.utc) - timedelta(days=730)
+            ).isoformat()
             period_end: str = datetime.now(timezone.utc).isoformat()
             total_events: int = 0
             events_by_action: dict = None
@@ -381,6 +390,7 @@ class TestComplianceReports:
 # GET /api/v1/compliance/export
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.integration
 @pytest.mark.requires_db
 class TestAuditExport:
@@ -414,7 +424,7 @@ class TestAuditExport:
         """Export response includes Content-Disposition attachment header."""
         with patch(
             "backend.app.services.compliance_report_service.ComplianceReportService.export_events",
-            return_value=b'[]',
+            return_value=b"[]",
         ):
             response = admin_client.get(
                 "/api/v1/compliance/export", params={"format": "json"}
@@ -451,7 +461,7 @@ class TestAuditExport:
         """Default format is json when not specified."""
         with patch(
             "backend.app.services.compliance_report_service.ComplianceReportService.export_events",
-            return_value=b'[]',
+            return_value=b"[]",
         ):
             response = admin_client.get("/api/v1/compliance/export")
         assert response.status_code == 200, response.text

@@ -11,6 +11,26 @@ import { ExperimentsService } from '@/services/experiments';
 import { useApi } from '@/hooks/useApi';
 import { PageTitle } from '@/components/PageTitle';
 import { FirstRunChecklist } from '@/components/experiments/FirstRunChecklist';
+import { useOptionalAuth } from '@/contexts/AuthContext';
+
+/**
+ * Whether the API would accept a create from this user.
+ *
+ * Mirrors `check_permission(user, EXPERIMENT, CREATE)`: a superuser bypasses
+ * the role table, otherwise ADMIN and DEVELOPER hold CREATE. A user with a
+ * custom role or a direct grant (`GET /api/v1/rbac/users/{id}/permissions`)
+ * is not covered here — they are offered the button only if their built-in
+ * role allows it, so the UI is never more permissive than the API.
+ */
+const ROLES_THAT_CAN_CREATE = ['ADMIN', 'DEVELOPER'] as const;
+
+function canCreateExperiment(user: { role?: string; is_superuser?: boolean } | null | undefined) {
+  // No session yet (the page renders before the context resolves): show the
+  // button rather than flickering it in.
+  if (!user) return true;
+  if (user.is_superuser) return true;
+  return ROLES_THAT_CAN_CREATE.includes(user.role as 'ADMIN' | 'DEVELOPER');
+}
 
 const STATUS_FILTERS: Array<{ label: string; value: ExperimentStatus | 'all' }> = [
   { label: 'All', value: 'all' },
@@ -22,6 +42,10 @@ const STATUS_FILTERS: Array<{ label: string; value: ExperimentStatus | 'all' }> 
 
 export default function ExperimentsPage() {
   const [statusFilter, setStatusFilter] = useState<ExperimentStatus | 'all'>('all');
+  // Analysts and viewers are refused by the API, so they are not offered the
+  // button; the page is otherwise identical for every role.
+  const auth = useOptionalAuth();
+  const canCreate = canCreateExperiment(auth?.user);
 
   const { data, loading: isLoading, error } = useApi<ExperimentListResponse>(
     () => ExperimentsService.list(statusFilter !== 'all' ? { status: statusFilter } : undefined),
@@ -46,13 +70,15 @@ export default function ExperimentsPage() {
               Manage and monitor your A/B tests and feature experiments
             </p>
           </div>
-          <Link
-            href="/experiments/new"
-            className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors"
-            data-testid="new-experiment-btn"
-          >
-            + New Experiment
-          </Link>
+          {canCreate && (
+            <Link
+              href="/experiments/new"
+              className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors"
+              data-testid="new-experiment-btn"
+            >
+              + New Experiment
+            </Link>
+          )}
         </div>
 
         {/* Status filter buttons */}

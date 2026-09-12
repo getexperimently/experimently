@@ -192,8 +192,12 @@ def deactivate_baa(
     summary="List PHI audit log entries",
 )
 def list_audit_logs(
-    start_date: Optional[datetime] = Query(None, description="Filter from this datetime (UTC)"),
-    end_date: Optional[datetime] = Query(None, description="Filter up to this datetime (UTC)"),
+    start_date: Optional[datetime] = Query(
+        None, description="Filter from this datetime (UTC)"
+    ),
+    end_date: Optional[datetime] = Query(
+        None, description="Filter up to this datetime (UTC)"
+    ),
     resource_type: Optional[str] = Query(
         None, description="Filter by resource type: experiment, feature_flag, user_data"
     ),
@@ -271,7 +275,9 @@ def create_audit_log(
     summary="Generate HIPAA compliance report",
 )
 def get_hipaa_report(
-    start_date: Optional[datetime] = Query(None, description="Report period start (UTC)"),
+    start_date: Optional[datetime] = Query(
+        None, description="Report period start (UTC)"
+    ),
     end_date: Optional[datetime] = Query(None, description="Report period end (UTC)"),
     current_user: User = Depends(deps.get_current_active_user),
     db: Session = Depends(get_db),

@@ -11,6 +11,7 @@ without requiring a live PostgreSQL server.
 
 Pattern adapted from test_feature_flags.py and test_split_url_api.py.
 """
+
 from __future__ import annotations
 
 import uuid
@@ -21,10 +22,10 @@ from uuid import UUID
 import pytest
 from fastapi.testclient import TestClient
 
-from backend.app.main import app
 from backend.app.api import deps
-from backend.app.models.user import User, UserRole
+from backend.app.main import app
 from backend.app.models.feature_flag import FeatureFlag, FeatureFlagStatus
+from backend.app.models.user import User, UserRole
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -32,7 +33,7 @@ from backend.app.models.feature_flag import FeatureFlag, FeatureFlagStatus
 
 HASHED_PASSWORD = "$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW"
 ADMIN_USER_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
-DEV_USER_ID   = uuid.UUID("00000000-0000-0000-0000-000000000002")
+DEV_USER_ID = uuid.UUID("00000000-0000-0000-0000-000000000002")
 
 # ---------------------------------------------------------------------------
 # Factories
@@ -117,7 +118,9 @@ def _setup_overrides(
     query_mock = MagicMock()
     query_mock.all.return_value = flags
     query_mock.filter.return_value = query_mock
-    query_mock.first.return_value = first_flag if first_flag is not None else (flags[0] if flags else None)
+    query_mock.first.return_value = (
+        first_flag if first_flag is not None else (flags[0] if flags else None)
+    )
     db.query.return_value = query_mock
 
     app.dependency_overrides[deps.get_db] = lambda: db
@@ -207,12 +210,15 @@ class TestGetOpenFeatureFlags:
     def test_missing_api_key_returns_401(self, client):
         """Requests without X-API-Key header should return 401."""
         # Override get_api_key to simulate the key being missing.
-        from fastapi import HTTPException, status as http_status
+        from fastapi import HTTPException
+        from fastapi import status as http_status
+
         def raise_401():
             raise HTTPException(
                 status_code=http_status.HTTP_401_UNAUTHORIZED,
                 detail="API key missing",
             )
+
         app.dependency_overrides[deps.get_api_key] = raise_401
         app.dependency_overrides[deps.get_db] = lambda: MagicMock()
 
@@ -221,12 +227,15 @@ class TestGetOpenFeatureFlags:
 
     def test_invalid_api_key_returns_401(self, client):
         """An invalid API key returns 401."""
-        from fastapi import HTTPException, status as http_status
+        from fastapi import HTTPException
+        from fastapi import status as http_status
+
         def raise_401():
             raise HTTPException(
                 status_code=http_status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid API Key",
             )
+
         app.dependency_overrides[deps.get_api_key] = raise_401
         app.dependency_overrides[deps.get_db] = lambda: MagicMock()
 
@@ -319,7 +328,7 @@ class TestPostOpenFeatureEvaluate:
     def test_evaluate_variant_flag_returns_variant_value(self, client):
         """A flag with variants returns the assigned variant's value."""
         variants = [
-            {"key": "control", "weight": 0.0},   # 0% so this is never picked
+            {"key": "control", "weight": 0.0},  # 0% so this is never picked
             {"key": "treatment", "weight": 1.0, "value": "new-checkout"},
         ]
         flag = _make_feature_flag(
@@ -355,9 +364,12 @@ class TestPostOpenFeatureEvaluate:
 
     def test_evaluate_missing_api_key_returns_401(self, client):
         """POST /evaluate without an API key returns 401."""
-        from fastapi import HTTPException, status as http_status
+        from fastapi import HTTPException
+        from fastapi import status as http_status
+
         def raise_401():
             raise HTTPException(status_code=http_status.HTTP_401_UNAUTHORIZED)
+
         app.dependency_overrides[deps.get_api_key] = raise_401
         app.dependency_overrides[deps.get_db] = lambda: MagicMock()
 
@@ -455,12 +467,14 @@ class TestBulkEvaluate:
 
         def make_query(model_class):
             q = MagicMock()
+
             def filter_fn(*args, **kwargs):
                 fq = MagicMock()
                 # We need to inspect the filter argument to return the right flag.
                 # For simplicity, alternate between the two flags.
                 fq.first.side_effect = [flag_a, flag_b]
                 return fq
+
             q.filter.side_effect = filter_fn
             q.all.return_value = [flag_a, flag_b]
             return q
@@ -505,9 +519,12 @@ class TestBulkEvaluate:
 
     def test_bulk_evaluate_missing_api_key_returns_401(self, client):
         """Bulk evaluate without an API key returns 401."""
-        from fastapi import HTTPException, status as http_status
+        from fastapi import HTTPException
+        from fastapi import status as http_status
+
         def raise_401():
             raise HTTPException(status_code=http_status.HTTP_401_UNAUTHORIZED)
+
         app.dependency_overrides[deps.get_api_key] = raise_401
         app.dependency_overrides[deps.get_db] = lambda: MagicMock()
 
@@ -541,11 +558,13 @@ class TestHashFunction:
 
     def test_hash_in_unit_interval(self):
         from backend.app.api.v1.endpoints.openfeature import _hash_user
+
         h = _hash_user("user-123", "my-flag")
         assert 0.0 <= h < 1.0
 
     def test_hash_is_deterministic(self):
         from backend.app.api.v1.endpoints.openfeature import _hash_user
+
         h1 = _hash_user("alice", "dark-mode")
         h2 = _hash_user("alice", "dark-mode")
         assert h1 == h2
@@ -558,13 +577,16 @@ class TestHashFunction:
           2975317059 / 4294967296 ≈ 0.69274...
         """
         from backend.app.api.v1.endpoints.openfeature import _hash_user
+
         h = _hash_user("user-123", "my-flag")
         assert abs(h - 0.69274) < 0.0001, f"Expected ~0.69274, got {h}"
 
     def test_hash_differs_for_different_users(self):
         from backend.app.api.v1.endpoints.openfeature import _hash_user
+
         assert _hash_user("alice", "flag") != _hash_user("bob", "flag")
 
     def test_hash_differs_for_different_flags(self):
         from backend.app.api.v1.endpoints.openfeature import _hash_user
+
         assert _hash_user("alice", "flag-a") != _hash_user("alice", "flag-b")

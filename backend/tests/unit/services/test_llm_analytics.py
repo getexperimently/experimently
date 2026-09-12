@@ -30,13 +30,12 @@ from backend.app.services.llm_analytics_service import (
     _welch_t_test,
 )
 
-
 # ---------------------------------------------------------------------------
 # Statistical helper tests
 # ---------------------------------------------------------------------------
 
-class TestStatisticalHelpers:
 
+class TestStatisticalHelpers:
     def test_mean_empty(self):
         assert _mean([]) is None
 
@@ -102,6 +101,7 @@ class TestStatisticalHelpers:
     def test_cohens_d_large_effect(self):
         # Add slight variance so pooled std > 0
         import random
+
         rng = random.Random(42)
         a = [1.0 + rng.gauss(0, 0.1) for _ in range(50)]
         b = [3.0 + rng.gauss(0, 0.1) for _ in range(50)]
@@ -122,6 +122,7 @@ class TestStatisticalHelpers:
 # ---------------------------------------------------------------------------
 # Helpers for building mock DB / experiments
 # ---------------------------------------------------------------------------
+
 
 def _make_eval(
     exp_id: uuid.UUID,
@@ -214,8 +215,8 @@ def _make_experiment_with_data(
 # Analytics service tests
 # ---------------------------------------------------------------------------
 
-class TestGetExperimentResults:
 
+class TestGetExperimentResults:
     def _make_db(self, experiment=None, evals=None):
         db = MagicMock()
         db.query.return_value.filter.return_value.first.return_value = experiment
@@ -276,6 +277,7 @@ class TestGetExperimentResults:
     def test_p_value_significant_difference(self):
         svc = LLMEvaluationAnalyticsService()
         import random
+
         rng = random.Random(99)
         # Use values with variance so Welch t-test fires properly
         ctrl_bm = [0.1 + rng.gauss(0, 0.02) for _ in range(20)]
@@ -344,6 +346,7 @@ class TestGetExperimentResults:
     def test_effect_size_calculated(self):
         svc = LLMEvaluationAnalyticsService()
         import random
+
         rng = random.Random(7)
         # Use values with small variance so Cohen's d is large
         ctrl_bm = [0.1 + rng.gauss(0, 0.05) for _ in range(30)]
@@ -369,8 +372,8 @@ class TestGetExperimentResults:
 # Human rating submission
 # ---------------------------------------------------------------------------
 
-class TestSubmitHumanRating:
 
+class TestSubmitHumanRating:
     def test_valid_rating_stored(self):
         svc = LLMEvaluationAnalyticsService()
         ev = _make_eval(uuid.uuid4(), uuid.uuid4())
@@ -403,8 +406,8 @@ class TestSubmitHumanRating:
 # LLM-as-judge
 # ---------------------------------------------------------------------------
 
-class TestRunLLMAsJudge:
 
+class TestRunLLMAsJudge:
     @pytest.mark.asyncio
     async def test_judge_scores_evaluations(self):
         svc = LLMEvaluationAnalyticsService()
@@ -414,12 +417,16 @@ class TestRunLLMAsJudge:
 
         db = MagicMock()
         db.query.return_value.filter.return_value.all.return_value = [ev]
-        db.query.return_value.filter.return_value.filter.return_value.all.return_value = [ev]
+        db.query.return_value.filter.return_value.filter.return_value.all.return_value = [
+            ev
+        ]
         db.commit.return_value = None
         db.add.return_value = None
 
         # Mock the anthropic call inside _judge_response
-        with patch.object(svc, "_judge_response", new=AsyncMock(return_value=(0.85, "Good response"))):
+        with patch.object(
+            svc, "_judge_response", new=AsyncMock(return_value=(0.85, "Good response"))
+        ):
             results = await svc.run_llm_as_judge(db, exp_id, "helpfulness")
 
         assert len(results) == 1
@@ -438,7 +445,9 @@ class TestRunLLMAsJudge:
         db.commit.return_value = None
         db.add.return_value = None
 
-        with patch.object(svc, "_judge_response", new=AsyncMock(return_value=(0.7, "OK"))):
+        with patch.object(
+            svc, "_judge_response", new=AsyncMock(return_value=(0.7, "OK"))
+        ):
             await svc.run_llm_as_judge(db, exp_id, "accuracy")
 
         assert ev.auto_eval_score == 0.7
@@ -460,20 +469,30 @@ class TestRunLLMAsJudge:
 
         # Patch at the service level to always fail, then verify the outer
         # run_llm_as_judge handles it gracefully via the inner try/except
-        with patch.object(svc, "_judge_response", new=AsyncMock(return_value=(0.5, "Judge unavailable — fallback score assigned"))):
+        with patch.object(
+            svc,
+            "_judge_response",
+            new=AsyncMock(
+                return_value=(0.5, "Judge unavailable — fallback score assigned")
+            ),
+        ):
             results = await svc.run_llm_as_judge(db, exp_id, "safety")
 
         assert results[0].score == pytest.approx(0.5, abs=0.1)
 
     def test_parse_judge_response_valid_json(self):
         svc = LLMEvaluationAnalyticsService()
-        score, reasoning = svc._parse_judge_response('{"score": 0.75, "reasoning": "Good answer"}')
+        score, reasoning = svc._parse_judge_response(
+            '{"score": 0.75, "reasoning": "Good answer"}'
+        )
         assert score == pytest.approx(0.75)
         assert reasoning == "Good answer"
 
     def test_parse_judge_response_invalid_json_extracts_float(self):
         svc = LLMEvaluationAnalyticsService()
-        score, reasoning = svc._parse_judge_response("The score is 0.8 because it was helpful.")
+        score, reasoning = svc._parse_judge_response(
+            "The score is 0.8 because it was helpful."
+        )
         assert score == pytest.approx(0.8)
 
     def test_parse_judge_response_no_score_returns_half(self):

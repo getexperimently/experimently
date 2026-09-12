@@ -7,6 +7,7 @@ unavailable and asserts the persisted BanditState reflects the seeded
 conversions.  Every row created here is deleted again in fixture teardown
 because the shared test database is not truncated between tests.
 """
+
 import uuid
 from datetime import datetime, timezone
 from unittest.mock import patch

@@ -11,6 +11,7 @@ No real database or warehouse connection required — uses MagicMock throughout.
 
 import uuid
 from unittest.mock import MagicMock, patch
+
 import pytest
 
 from backend.app.services.warehouse_service import (
@@ -20,7 +21,6 @@ from backend.app.services.warehouse_service import (
     WarehouseQueryGenerator,
     WarehouseSyncResult,
 )
-
 
 # ---------------------------------------------------------------------------
 # TestWarehouseQueryGenerator (15 tests)
@@ -166,12 +166,15 @@ class TestWarehouseQueryGenerator:
     # ------------------------------------------------------------------ #
     # 12. validate_sql returns False for SQL containing dangerous keywords
     # ------------------------------------------------------------------ #
-    @pytest.mark.parametrize("dangerous_sql", [
-        "DROP TABLE assignments",
-        "DELETE FROM assignments",
-        "INSERT INTO assignments VALUES (1)",
-        "UPDATE assignments SET x=1",
-    ])
+    @pytest.mark.parametrize(
+        "dangerous_sql",
+        [
+            "DROP TABLE assignments",
+            "DELETE FROM assignments",
+            "INSERT INTO assignments VALUES (1)",
+            "UPDATE assignments SET x=1",
+        ],
+    )
     def test_validate_sql_rejects_dangerous_statements(self, dangerous_sql):
         assert WarehouseQueryGenerator.validate_sql(dangerous_sql) is False
 
@@ -240,7 +243,10 @@ class TestWarehouseConnectionManager:
     # ------------------------------------------------------------------ #
     def test_test_connection_returns_connection_test_result(self):
         manager = self._make_manager()
-        config = {"warehouse_type": "snowflake", "host": "account.snowflakecomputing.com"}
+        config = {
+            "warehouse_type": "snowflake",
+            "host": "account.snowflakecomputing.com",
+        }
         result = manager.test_connection(config)
         assert isinstance(result, ConnectionTestResult)
         assert hasattr(result, "success")
@@ -282,7 +288,9 @@ class TestWarehouseConnectionManager:
         manager = WarehouseConnectionManager(db)
 
         # Patch at the model module level where the class is defined
-        with patch("backend.app.models.warehouse_connection.WarehouseConnection") as MockConn:
+        with patch(
+            "backend.app.models.warehouse_connection.WarehouseConnection"
+        ) as MockConn:
             fake_conn = MagicMock()
             fake_conn.id = uuid.uuid4()
             fake_conn.name = "My Snowflake"
@@ -357,6 +365,7 @@ class TestWarehouseConnectionManager:
         """The WarehouseConnection model must NOT have a 'password' or
         'private_key' column — credentials are stored encrypted."""
         from backend.app.models.warehouse_connection import WarehouseConnection
+
         columns = [c.key for c in WarehouseConnection.__table__.columns]
         assert "password" not in columns
         assert "private_key" not in columns

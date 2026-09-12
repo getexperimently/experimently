@@ -16,15 +16,17 @@ of statistical significance.
 
 import os
 import uuid
+from datetime import datetime, timedelta, timezone
+
 import pytest
 import requests
-from datetime import datetime, timedelta, timezone
 
 from backend.tests.realistic.data_generator import make_rollout_scenario
 
-
 API_URL = os.environ.get("REALISTIC_API_URL", "http://localhost:8000")
-SKIP_REASON = "Realistic scenario tests require a running platform (set RUN_REALISTIC=1)"
+SKIP_REASON = (
+    "Realistic scenario tests require a running platform (set RUN_REALISTIC=1)"
+)
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("RUN_REALISTIC") != "1",
@@ -73,7 +75,11 @@ class TestFeatureFlagRollout:
         flag_key = f"rollout-sched-{uuid.uuid4().hex[:8]}"
         flag_resp = requests.post(
             f"{API_URL}/api/v1/feature-flags",
-            json={"key": flag_key, "name": f"[Realistic] {flag_key}", "rollout_percentage": 0},
+            json={
+                "key": flag_key,
+                "name": f"[Realistic] {flag_key}",
+                "rollout_percentage": 0,
+            },
             headers=auth_headers,
             timeout=15,
         )
@@ -148,7 +154,7 @@ class TestFeatureFlagRollout:
         stages = [10, 50, 100]
         for i in range(1, len(stages)):
             assert stages[i] >= stages[i - 1], (
-                f"Stage {i} percentage {stages[i]} is less than stage {i-1} percentage {stages[i-1]}"
+                f"Stage {i} percentage {stages[i]} is less than stage {i - 1} percentage {stages[i - 1]}"
             )
 
     def test_session_decay_reduces_late_engagement(self):
@@ -162,7 +168,9 @@ class TestFeatureFlagRollout:
         week3_end = start + timedelta(days=21)
 
         week1_users = [u for u in result.users if u.assigned_at < week1_end]
-        week3_users = [u for u in result.users if week1_end <= u.assigned_at < week3_end]
+        week3_users = [
+            u for u in result.users if week1_end <= u.assigned_at < week3_end
+        ]
         week1_ids = {u.user_id for u in week1_users}
         week3_ids = {u.user_id for u in week3_users}
 

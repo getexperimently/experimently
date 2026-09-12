@@ -49,24 +49,18 @@ sys.path.insert(0, str(PROJECT_ROOT))
 # Importing seed_demo_data applies the shared environment defaults (APP_ENV,
 # POSTGRES_*) *before* any backend.app module reads settings, and gives us
 # the helpers we reuse.  The module only runs its seeder under __main__.
-from backend.scripts.seed_demo_data import (  # noqa: E402
-    _bulk_insert,
-    days_ago,
-    ensure_schema,
-    ensure_tables,
-    now_utc,
-    seed_users,
-)
+from sqlalchemy import func
 
-from sqlalchemy import func  # noqa: E402
-
-from backend.app.core.security import hash_api_key  # noqa: E402
-from backend.app.db.session import SessionLocal  # noqa: E402
-from backend.app.models.api_key import APIKey, generate_api_key  # noqa: E402
-from backend.app.models.assignment import Assignment  # noqa: E402
-from backend.app.models.audit_log import ActionType, AuditLog, EntityType  # noqa: E402
-from backend.app.models.event import Event  # noqa: E402
-from backend.app.models.experiment import (  # noqa: E402
+# Registers the "Report" class referenced by name in User/Experiment/FeatureFlag
+# relationships; without it the first ORM query fails to configure mappers.
+import backend.app.models.report  # noqa: F401
+from backend.app.core.security import hash_api_key
+from backend.app.db.session import SessionLocal
+from backend.app.models.api_key import APIKey, generate_api_key
+from backend.app.models.assignment import Assignment
+from backend.app.models.audit_log import ActionType, AuditLog, EntityType
+from backend.app.models.event import Event
+from backend.app.models.experiment import (
     Experiment,
     ExperimentStatus,
     ExperimentType,
@@ -74,35 +68,39 @@ from backend.app.models.experiment import (  # noqa: E402
     MetricType,
     Variant,
 )
-from backend.app.models.feature_flag import FeatureFlag, FeatureFlagStatus  # noqa: E402
-from backend.app.models.global_holdout import GlobalHoldout  # noqa: E402
-from backend.app.models.metrics.metric import (  # noqa: E402
+from backend.app.models.feature_flag import FeatureFlag, FeatureFlagStatus
+from backend.app.models.global_holdout import GlobalHoldout
+from backend.app.models.metrics.metric import (
     AggregatedMetric,
     ErrorLog,
     RawMetric,
 )
-from backend.app.models.mutual_exclusion_group import (  # noqa: E402
+from backend.app.models.mutual_exclusion_group import (
     MutualExclusionGroup,
     MutualExclusionGroupStatus,
 )
-from backend.app.models.rollout_schedule import (  # noqa: E402
+from backend.app.models.rollout_schedule import (
     RolloutSchedule,
     RolloutScheduleStatus,
     RolloutStage,
     RolloutStageStatus,
     TriggerType,
 )
-from backend.app.models.safety import (  # noqa: E402
+from backend.app.models.safety import (
     FeatureFlagSafetyConfig,
     SafetyRollbackRecord,
     SafetySettings,
 )
-
-# Registers the "Report" class referenced by name in User/Experiment/FeatureFlag
-# relationships; without it the first ORM query fails to configure mappers.
-import backend.app.models.report  # noqa: E402,F401
-from backend.app.schemas.bayesian import BayesianConfig  # noqa: E402
-from backend.app.schemas.experiment import SequentialTestingConfigInput  # noqa: E402
+from backend.app.schemas.bayesian import BayesianConfig
+from backend.app.schemas.experiment import SequentialTestingConfigInput
+from backend.scripts.seed_demo_data import (
+    _bulk_insert,
+    days_ago,
+    ensure_schema,
+    ensure_tables,
+    now_utc,
+    seed_users,
+)
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -423,15 +421,30 @@ AI_SEARCH_RULES: Dict[str, Any] = {
             "id": "grp-ios17-us-premium",
             "logical_operator": "AND",
             "conditions": [
-                {"id": "cond-os", "attribute": "os", "operator": "equals", "value": "iOS"},
+                {
+                    "id": "cond-os",
+                    "attribute": "os",
+                    "operator": "equals",
+                    "value": "iOS",
+                },
                 {
                     "id": "cond-os-version",
                     "attribute": "os_version",
                     "operator": "semver_gte",
                     "value": "17.0.0",
                 },
-                {"id": "cond-region", "attribute": "region", "operator": "equals", "value": "US"},
-                {"id": "cond-tier", "attribute": "tier", "operator": "equals", "value": "premium"},
+                {
+                    "id": "cond-region",
+                    "attribute": "region",
+                    "operator": "equals",
+                    "value": "US",
+                },
+                {
+                    "id": "cond-tier",
+                    "attribute": "tier",
+                    "operator": "equals",
+                    "value": "premium",
+                },
             ],
         }
     ],
@@ -587,7 +600,9 @@ def seed_global_holdout(db, admin_user) -> GlobalHoldout:
     active = db.query(GlobalHoldout).filter(GlobalHoldout.is_active.is_(True)).first()
     if active is not None:
         if active.name == HOLDOUT_NAME:
-            print(f"    '{HOLDOUT_NAME}' already active at {active.holdout_percentage}%, skipping.")
+            print(
+                f"    '{HOLDOUT_NAME}' already active at {active.holdout_percentage}%, skipping."
+            )
         else:
             print(
                 f"    REUSING the existing active holdout '{active.name}' "
@@ -623,7 +638,9 @@ def seed_global_holdout(db, admin_user) -> GlobalHoldout:
 # ---------------------------------------------------------------------------
 
 
-def seed_experiments(db, admin_user, group: MutualExclusionGroup) -> Dict[str, Experiment]:
+def seed_experiments(
+    db, admin_user, group: MutualExclusionGroup
+) -> Dict[str, Experiment]:
     """Create the five StreamPulse experiments (idempotent by ``key``)."""
     print("  Seeding StreamPulse experiments...")
     experiments: Dict[str, Experiment] = {}
@@ -634,9 +651,13 @@ def seed_experiments(db, admin_user, group: MutualExclusionGroup) -> Dict[str, E
             if spec["meg"] and existing.mutual_exclusion_group_id != group.id:
                 existing.mutual_exclusion_group_id = group.id
                 db.commit()
-                print(f"    '{spec['key']}' already exists; attached it to '{MEG_NAME}'.")
+                print(
+                    f"    '{spec['key']}' already exists; attached it to '{MEG_NAME}'."
+                )
             else:
-                print(f"    '{spec['key']}' already exists (id={existing.id}), skipping.")
+                print(
+                    f"    '{spec['key']}' already exists (id={existing.id}), skipping."
+                )
             experiments[spec["key"]] = existing
             continue
 
@@ -662,7 +683,9 @@ def seed_experiments(db, admin_user, group: MutualExclusionGroup) -> Dict[str, E
             exp.sequential_testing_config = SequentialTestingConfigInput().model_dump()
         if spec["bayesian"]:
             exp.bayesian_enabled = True
-            exp.bayesian_config = BayesianConfig(rope=[-0.01, 0.01]).model_dump(mode="json")
+            exp.bayesian_config = BayesianConfig(rope=[-0.01, 0.01]).model_dump(
+                mode="json"
+            )
         db.add(exp)
         db.flush()
 
@@ -721,8 +744,22 @@ def _seed_player_schedule(db, flag: FeatureFlag, admin_user) -> None:
     db.flush()
 
     stage_specs = [
-        ("Internal + 5%", "Employees via targeting rule plus 5% of everyone", 1, 5, days_ago(2), RolloutStageStatus.IN_PROGRESS),
-        ("25%", "A quarter of all devices", 2, 25, days_ago(-1), RolloutStageStatus.PENDING),
+        (
+            "Internal + 5%",
+            "Employees via targeting rule plus 5% of everyone",
+            1,
+            5,
+            days_ago(2),
+            RolloutStageStatus.IN_PROGRESS,
+        ),
+        (
+            "25%",
+            "A quarter of all devices",
+            2,
+            25,
+            days_ago(-1),
+            RolloutStageStatus.PENDING,
+        ),
         ("50%", "Half of all devices", 3, 50, days_ago(-3), RolloutStageStatus.PENDING),
         ("100%", "Everyone", 4, 100, days_ago(-7), RolloutStageStatus.PENDING),
     ]
@@ -755,7 +792,9 @@ def seed_feature_flags(db, admin_user) -> Dict[str, FeatureFlag]:
         key = spec["key"]
         existing = db.query(FeatureFlag).filter(FeatureFlag.key == key).first()
         if existing:
-            print(f"    '{key}' already exists (rollout {existing.rollout_percentage}%), skipping.")
+            print(
+                f"    '{key}' already exists (rollout {existing.rollout_percentage}%), skipping."
+            )
             flags[key] = existing
             continue
 
@@ -837,7 +876,9 @@ def seed_audit_logs(db, admin_user, experiment: Experiment) -> int:
         or 0
     )
     if existing:
-        print(f"    {existing} audit rows already exist for '{experiment.key}', skipping.")
+        print(
+            f"    {existing} audit rows already exist for '{experiment.key}', skipping."
+        )
         return 0
 
     created_at = days_ago(HISTORY_DAYS + 1)
@@ -867,8 +908,12 @@ def seed_audit_logs(db, admin_user, experiment: Experiment) -> int:
             entity_type=EntityType.EXPERIMENT.value,
             entity_id=experiment.id,
             entity_name=experiment.name,
-            old_value=json.dumps({"traffic_allocation": {"control": 90, "value_modal": 10}}),
-            new_value=json.dumps({"traffic_allocation": {"control": 50, "value_modal": 50}}),
+            old_value=json.dumps(
+                {"traffic_allocation": {"control": 90, "value_modal": 10}}
+            ),
+            new_value=json.dumps(
+                {"traffic_allocation": {"control": 50, "value_modal": 50}}
+            ),
             reason="Legal review complete (PII-adjacent screen); moving to a 50/50 split",
             timestamp=created_at + timedelta(hours=6),
         ),
@@ -980,7 +1025,9 @@ def _funnel_events(
         clock["t"] = clock["t"] + timedelta(seconds=rng.randint(lo, hi))
         return clock["t"].isoformat()
 
-    def event(event_type: str, created_at: str, value: float = 1.0, metadata=None) -> Event:
+    def event(
+        event_type: str, created_at: str, value: float = 1.0, metadata=None
+    ) -> Event:
         return Event(
             event_type=event_type,
             event_name=event_type,
@@ -997,7 +1044,11 @@ def _funnel_events(
         frequency = variant_config.get("frequency", "daily")
         if rng.random() < rates["notification_open"][variant_name]:
             events.append(
-                event("notification_open", later(600, 86400), metadata={"frequency": frequency})
+                event(
+                    "notification_open",
+                    later(600, 86400),
+                    metadata={"frequency": frequency},
+                )
             )
         if rng.random() < rates["app_uninstall"][variant_name]:
             events.append(event("app_uninstall", later(3600, 172800)))
@@ -1005,7 +1056,9 @@ def _funnel_events(
         if rng.random() < rates["wrapped_view"][variant_name]:
             events.append(event("wrapped_view", later(5, 120)))
             if rng.random() < rates["share"][variant_name]:
-                events.append(event("share", later(5, 60), metadata={"surface": "wrapped"}))
+                events.append(
+                    event("share", later(5, 60), metadata={"surface": "wrapped"})
+                )
     elif key == BADGES_KEY:
         if rng.random() < rates["badge_tap"][variant_name]:
             events.append(event("badge_tap", later(5, 120)))
@@ -1177,10 +1230,16 @@ def reset_streampulse(db) -> Dict[str, int]:
         counts["feature_flags"] += 1
         print(f"    Deleted feature flag '{flag.key}'.")
 
-    group = db.query(MutualExclusionGroup).filter(MutualExclusionGroup.name == MEG_NAME).first()
+    group = (
+        db.query(MutualExclusionGroup)
+        .filter(MutualExclusionGroup.name == MEG_NAME)
+        .first()
+    )
     if group is not None:
         # Any experiment still pointing at the group (not ours) is detached first.
-        db.query(Experiment).filter(Experiment.mutual_exclusion_group_id == group.id).update(
+        db.query(Experiment).filter(
+            Experiment.mutual_exclusion_group_id == group.id
+        ).update(
             {Experiment.mutual_exclusion_group_id: None}, synchronize_session=False
         )
         db.delete(group)

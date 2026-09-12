@@ -13,7 +13,6 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, EmailStr, field_validator
 
-
 # ---------------------------------------------------------------------------
 # PHI Audit Log Schemas
 # ---------------------------------------------------------------------------

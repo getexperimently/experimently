@@ -6,10 +6,10 @@ in the experimentation platform.
 """
 
 import logging
-from typing import List, Optional
+from typing import List
 
-from backend.app.models.user import UserRole
 from backend.app.core.config import settings
+from backend.app.models.user import UserRole
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -27,7 +27,12 @@ def map_cognito_groups_to_role(groups: List[str]) -> UserRole:
         UserRole: The highest privilege role from the user's groups
     """
     # Define role hierarchy (highest privilege first)
-    role_hierarchy = [UserRole.ADMIN, UserRole.DEVELOPER, UserRole.ANALYST, UserRole.VIEWER]
+    role_hierarchy = [
+        UserRole.ADMIN,
+        UserRole.DEVELOPER,
+        UserRole.ANALYST,
+        UserRole.VIEWER,
+    ]
 
     # Get group-to-role mapping from settings
     group_role_mapping = {
@@ -36,7 +41,9 @@ def map_cognito_groups_to_role(groups: List[str]) -> UserRole:
     }
 
     # Log all mapped groups for debugging
-    logger.debug(f"Mapping Cognito groups {groups} to roles using mapping: {group_role_mapping}")
+    logger.debug(
+        f"Mapping Cognito groups {groups} to roles using mapping: {group_role_mapping}"
+    )
 
     # Find all matching roles based on groups
     matching_roles = []
@@ -47,7 +54,9 @@ def map_cognito_groups_to_role(groups: List[str]) -> UserRole:
 
     # If user is in admin groups, automatically assign ADMIN role
     if should_be_superuser(groups):
-        logger.debug(f"User is in admin groups {settings.COGNITO_ADMIN_GROUPS}, assigning ADMIN role")
+        logger.debug(
+            f"User is in admin groups {settings.COGNITO_ADMIN_GROUPS}, assigning ADMIN role"
+        )
         return UserRole.ADMIN
 
     # Return highest privilege role if any matches found
@@ -74,7 +83,9 @@ def should_be_superuser(groups: List[str]) -> bool:
     is_superuser = any(group in settings.COGNITO_ADMIN_GROUPS for group in groups)
 
     if is_superuser:
-        admin_groups = [group for group in groups if group in settings.COGNITO_ADMIN_GROUPS]
+        admin_groups = [
+            group for group in groups if group in settings.COGNITO_ADMIN_GROUPS
+        ]
         logger.debug(f"User is in admin groups: {admin_groups}")
 
     return is_superuser

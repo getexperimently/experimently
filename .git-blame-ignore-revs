@@ -1,0 +1,21 @@
+# Revisions git blame should skip.
+#
+# Only whole-tree, no-behaviour-change reformattings belong here: a commit in
+# this list is invisible to `git blame`, so anything that changed behaviour
+# would hide a real author. One SHA per line, full 40 characters, with a
+# comment saying what it was.
+#
+# Enable it locally (once per clone):
+#     git config blame.ignoreRevsFile .git-blame-ignore-revs
+# GitHub picks this file up automatically.
+
+# TODO: add the SHA of the format-once commit — the one that ran
+# `ruff format backend/` over 499 files and ruff's safe fixes across the
+# backend, when ruff replaced black + isort + flake8 (P1 lint gate).
+# After committing it: `git log -1 --format=%H` and paste the bare
+# 40-character SHA below this line (an invalid SHA makes git blame warn, so
+# the file stays comment-only until then).
+
+# ruff format + ruff check --fix across backend/ (499 files reformatted,
+# 1,300 lint findings auto-fixed). No behaviour change.
+b83985042cc9739d180ac0cef2d1bd8f9db34634

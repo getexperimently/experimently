@@ -7,25 +7,27 @@ No real database required.
 
 import uuid
 from datetime import datetime
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, call, patch
+
 import pytest
 
+from backend.app.models.segment import Segment
+from backend.app.models.segment import SegmentStatus as ModelSegmentStatus
 from backend.app.schemas.segment import (
-    SegmentCreate,
-    SegmentUpdate,
-    SegmentStatus,
-    SegmentMembershipResponse,
+    AudiencePreviewResponse,
     BulkSegmentMembershipRequest,
     BulkSegmentMembershipResponse,
-    AudiencePreviewResponse,
+    SegmentCreate,
+    SegmentMembershipResponse,
+    SegmentStatus,
+    SegmentUpdate,
 )
-from backend.app.models.segment import Segment, SegmentStatus as ModelSegmentStatus
 from backend.app.services.audience_service import AudienceService
-
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_mock_segment(
     segment_id=None,
@@ -64,6 +66,7 @@ def _make_mock_db(segment=None):
 # ---------------------------------------------------------------------------
 # create_segment
 # ---------------------------------------------------------------------------
+
 
 class TestCreateSegment:
     def test_create_segment_persists_with_correct_fields(self):
@@ -130,6 +133,7 @@ class TestCreateSegment:
 # list_segments
 # ---------------------------------------------------------------------------
 
+
 class TestListSegments:
     def test_list_segments_returns_all_when_no_status_filter(self):
         """list_segments without status filter queries all segments."""
@@ -155,6 +159,7 @@ class TestListSegments:
 # get_segment
 # ---------------------------------------------------------------------------
 
+
 class TestGetSegment:
     def test_get_segment_returns_segment_when_found(self):
         """get_segment returns the segment when it exists."""
@@ -175,6 +180,7 @@ class TestGetSegment:
 # ---------------------------------------------------------------------------
 # update_segment
 # ---------------------------------------------------------------------------
+
 
 class TestUpdateSegment:
     def test_update_segment_updates_name(self):
@@ -214,6 +220,7 @@ class TestUpdateSegment:
 # delete_segment (soft delete)
 # ---------------------------------------------------------------------------
 
+
 class TestDeleteSegment:
     def test_delete_segment_sets_status_to_archived(self):
         """delete_segment performs soft delete by setting status=ARCHIVED."""
@@ -245,6 +252,7 @@ class TestDeleteSegment:
 # ---------------------------------------------------------------------------
 # evaluate_membership
 # ---------------------------------------------------------------------------
+
 
 class TestEvaluateMembership:
     def test_evaluate_membership_returns_true_when_rules_match(self):
@@ -328,9 +336,7 @@ class TestEvaluateMembership:
             "backend.app.services.audience_service.evaluate_rule_group",
             return_value=False,
         ):
-            result = AudienceService.evaluate_membership(
-                db, str(mock_seg.id), {}
-            )
+            result = AudienceService.evaluate_membership(db, str(mock_seg.id), {})
 
         assert isinstance(result, SegmentMembershipResponse)
 
@@ -338,6 +344,7 @@ class TestEvaluateMembership:
 # ---------------------------------------------------------------------------
 # bulk_evaluate_membership
 # ---------------------------------------------------------------------------
+
 
 class TestBulkEvaluateMembership:
     def test_bulk_evaluate_returns_correct_memberships_dict(self):
@@ -436,6 +443,7 @@ class TestBulkEvaluateMembership:
 # get_segment_experiments
 # ---------------------------------------------------------------------------
 
+
 class TestGetSegmentExperiments:
     def test_get_segment_experiments_raises_when_segment_not_found(self):
         """get_segment_experiments raises ValueError for non-existent segment."""
@@ -463,6 +471,7 @@ class TestGetSegmentExperiments:
 # ---------------------------------------------------------------------------
 # preview_audience_size
 # ---------------------------------------------------------------------------
+
 
 class TestPreviewAudienceSize:
     def test_preview_returns_dict_with_required_keys(self):

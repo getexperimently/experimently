@@ -11,6 +11,7 @@ Tests cover:
 - Malformed config header handling
 - Insufficient variants (< 2) → pass-through
 """
+
 import json
 import sys
 from pathlib import Path
@@ -26,12 +27,12 @@ _lambda_dir = Path(__file__).resolve().parents[3] / "lambda"
 sys.path.insert(0, str(_lambda_dir / "split_url_router"))
 
 # These imports will FAIL (red phase) until the implementation exists.
-from handler import handler, _parse_cookies, _hash_user, _pick_variant  # noqa: E402
-
+from handler import _hash_user, _parse_cookies, _pick_variant, handler
 
 # ──────────────────────────────────────────────────────────────────────────
 # Helpers
 # ──────────────────────────────────────────────────────────────────────────
+
 
 def _make_event(
     config: Optional[dict],
@@ -80,6 +81,7 @@ _TWO_VARIANT_CONFIG = {
 # _parse_cookies
 # ──────────────────────────────────────────────────────────────────────────
 
+
 class TestParseCookies:
     def test_empty_string(self):
         assert _parse_cookies("") == {}
@@ -113,6 +115,7 @@ class TestParseCookies:
 # _hash_user
 # ──────────────────────────────────────────────────────────────────────────
 
+
 class TestHashUserLambda:
     def test_returns_float_in_range(self):
         h = _hash_user("1.2.3.4", "Mozilla/5.0", "exp_key")
@@ -138,6 +141,7 @@ class TestHashUserLambda:
 # ──────────────────────────────────────────────────────────────────────────
 # _pick_variant
 # ──────────────────────────────────────────────────────────────────────────
+
 
 class TestPickVariant:
     _VARIANTS = [
@@ -178,6 +182,7 @@ class TestPickVariant:
 # handler — pass-through cases
 # ──────────────────────────────────────────────────────────────────────────
 
+
 class TestHandlerPassThrough:
     def test_no_config_header_passes_through(self):
         event = _make_event(config=None)
@@ -205,7 +210,11 @@ class TestHandlerPassThrough:
         config = {
             "experiment_key": "single",
             "variants": [
-                {"name": "only", "url": "https://example.com", "traffic_allocation": 100}
+                {
+                    "name": "only",
+                    "url": "https://example.com",
+                    "traffic_allocation": 100,
+                }
             ],
         }
         event = _make_event(config=config)
@@ -216,6 +225,7 @@ class TestHandlerPassThrough:
 # ──────────────────────────────────────────────────────────────────────────
 # handler — new assignment (no cookie)
 # ──────────────────────────────────────────────────────────────────────────
+
 
 class TestHandlerNewAssignment:
     def test_returns_302_redirect(self):
@@ -262,7 +272,10 @@ class TestHandlerNewAssignment:
         )
         r1 = handler(event, None)
         r2 = handler(event, None)
-        assert r1["headers"]["location"][0]["value"] == r2["headers"]["location"][0]["value"]
+        assert (
+            r1["headers"]["location"][0]["value"]
+            == r2["headers"]["location"][0]["value"]
+        )
 
     def test_cookie_ttl_from_config(self):
         config = dict(_TWO_VARIANT_CONFIG)
@@ -285,6 +298,7 @@ class TestHandlerNewAssignment:
 # ──────────────────────────────────────────────────────────────────────────
 # handler — existing cookie (already assigned)
 # ──────────────────────────────────────────────────────────────────────────
+
 
 class TestHandlerExistingCookie:
     def test_existing_valid_cookie_passes_through(self):
@@ -326,6 +340,7 @@ class TestHandlerExistingCookie:
 # ──────────────────────────────────────────────────────────────────────────
 # handler — holdout check
 # ──────────────────────────────────────────────────────────────────────────
+
 
 class TestHandlerHoldout:
     def test_holdout_users_see_control_url(self):

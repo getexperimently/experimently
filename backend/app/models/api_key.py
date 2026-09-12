@@ -1,21 +1,22 @@
-import uuid
 import secrets
 from datetime import datetime
+
 from sqlalchemy import (
-    Column,
-    String,
     Boolean,
-    ForeignKey,
+    Column,
     DateTime,
+    ForeignKey,
+    String,
     Text,
 )
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import relationship
 from sqlalchemy.ext.declarative import declared_attr
+from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
-from .base import Base, BaseModel
 from backend.app.core.database_config import get_schema_name
+
+from .base import Base, BaseModel
 
 
 def generate_api_key() -> str:

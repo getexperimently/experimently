@@ -10,19 +10,18 @@ This module tests the audit log API endpoints including:
 - Error handling
 """
 
-import pytest
-from datetime import datetime, timezone, timedelta
-from uuid import uuid4
-from unittest.mock import patch, Mock, MagicMock
-
 from contextlib import contextmanager
+from datetime import datetime, timedelta, timezone
+from unittest.mock import MagicMock, Mock, patch
+from uuid import uuid4
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from backend.app.main import app
 from backend.app.api import deps
-from backend.app.models.audit_log import AuditLog, ActionType, EntityType
+from backend.app.main import app
+from backend.app.models.audit_log import ActionType, AuditLog, EntityType
 from backend.app.models.user import User, UserRole
 from backend.app.services.audit_service import AuditService
 
@@ -41,10 +40,10 @@ class TestAuditLogsAPI:
             is_superuser=(role == UserRole.ADMIN),
         )
 
-
     @contextmanager
     def override_deps(self, mock_user: User, mock_db: Session):
         """Context manager to override FastAPI dependencies."""
+
         def get_mock_user():
             return mock_user
 
@@ -73,7 +72,9 @@ class TestAuditLogsAPI:
             audit_log = AuditLog(
                 user_id=user.id,
                 user_email=user.email,
-                action_type=ActionType.TOGGLE_ENABLE.value if i % 2 == 0 else ActionType.TOGGLE_DISABLE.value,
+                action_type=ActionType.TOGGLE_ENABLE.value
+                if i % 2 == 0
+                else ActionType.TOGGLE_DISABLE.value,
                 entity_type=EntityType.FEATURE_FLAG.value,
                 entity_id=uuid4(),
                 entity_name=f"test_feature_{i}",
@@ -116,12 +117,17 @@ class TestAuditLogsAPI:
         ]
 
         with self.override_deps(mock_user, mock_db):
-            with patch.object(AuditService, 'get_audit_logs', return_value=(mock_audit_logs, 1)):
-                with patch("backend.app.api.v1.endpoints.audit_logs.check_permission", return_value=True):
+            with patch.object(
+                AuditService, "get_audit_logs", return_value=(mock_audit_logs, 1)
+            ):
+                with patch(
+                    "backend.app.api.v1.endpoints.audit_logs.check_permission",
+                    return_value=True,
+                ):
                     client = TestClient(app)
                     response = client.get(
                         "/api/v1/audit-logs/",
-                        headers={"Authorization": "Bearer test-token"}
+                        headers={"Authorization": "Bearer test-token"},
                     )
 
         assert response.status_code == 200
@@ -141,8 +147,13 @@ class TestAuditLogsAPI:
         mock_user = self.setup_test_user(UserRole.ADMIN)
 
         with self.override_deps(mock_user, mock_db):
-            with patch.object(AuditService, 'get_audit_logs', return_value=([], 0)) as mock_get_logs:
-                with patch("backend.app.api.v1.endpoints.audit_logs.check_permission", return_value=True):
+            with patch.object(
+                AuditService, "get_audit_logs", return_value=([], 0)
+            ) as mock_get_logs:
+                with patch(
+                    "backend.app.api.v1.endpoints.audit_logs.check_permission",
+                    return_value=True,
+                ):
                     client = TestClient(app)
                     response = client.get(
                         "/api/v1/audit-logs/",
@@ -153,17 +164,17 @@ class TestAuditLogsAPI:
                             "page": 2,
                             "limit": 25,
                         },
-                        headers={"Authorization": "Bearer test-token"}
+                        headers={"Authorization": "Bearer test-token"},
                     )
 
         assert response.status_code == 200
         # Verify the service was called with correct parameters
         mock_get_logs.assert_called_once()
         call_args = mock_get_logs.call_args
-        assert call_args.kwargs['page'] == 2
-        assert call_args.kwargs['limit'] == 25
-        assert call_args.kwargs['entity_type'] == EntityType.FEATURE_FLAG
-        assert call_args.kwargs['action_type'] == ActionType.TOGGLE_ENABLE
+        assert call_args.kwargs["page"] == 2
+        assert call_args.kwargs["limit"] == 25
+        assert call_args.kwargs["entity_type"] == EntityType.FEATURE_FLAG
+        assert call_args.kwargs["action_type"] == ActionType.TOGGLE_ENABLE
 
     def test_list_audit_logs_permission_restricted(self):
         """Test that regular users can only see their own logs."""
@@ -172,18 +183,23 @@ class TestAuditLogsAPI:
         mock_user = self.setup_test_user(UserRole.VIEWER)
 
         with self.override_deps(mock_user, mock_db):
-            with patch.object(AuditService, 'get_audit_logs', return_value=([], 0)) as mock_get_logs:
-                with patch("backend.app.api.v1.endpoints.audit_logs.check_permission", return_value=False):
+            with patch.object(
+                AuditService, "get_audit_logs", return_value=([], 0)
+            ) as mock_get_logs:
+                with patch(
+                    "backend.app.api.v1.endpoints.audit_logs.check_permission",
+                    return_value=False,
+                ):
                     client = TestClient(app)
                     response = client.get(
                         "/api/v1/audit-logs/",
-                        headers={"Authorization": "Bearer test-token"}
+                        headers={"Authorization": "Bearer test-token"},
                     )
 
         assert response.status_code == 200
         # Verify the service was called with user's ID restriction
         call_args = mock_get_logs.call_args
-        assert call_args.kwargs['user_id'] == mock_user.id
+        assert call_args.kwargs["user_id"] == mock_user.id
 
     def test_list_audit_logs_invalid_entity_type(self):
         """Test error handling for invalid entity type."""
@@ -192,12 +208,15 @@ class TestAuditLogsAPI:
         mock_user = self.setup_test_user(UserRole.ADMIN)
 
         with self.override_deps(mock_user, mock_db):
-            with patch("backend.app.api.v1.endpoints.audit_logs.check_permission", return_value=True):
+            with patch(
+                "backend.app.api.v1.endpoints.audit_logs.check_permission",
+                return_value=True,
+            ):
                 client = TestClient(app)
                 response = client.get(
                     "/api/v1/audit-logs/",
                     params={"entity_type": "invalid_entity_type"},
-                    headers={"Authorization": "Bearer test-token"}
+                    headers={"Authorization": "Bearer test-token"},
                 )
 
         assert response.status_code == 400
@@ -213,7 +232,10 @@ class TestAuditLogsAPI:
         to_date = from_date - timedelta(days=1)  # Invalid: to_date before from_date
 
         with self.override_deps(mock_user, mock_db):
-            with patch("backend.app.api.v1.endpoints.audit_logs.check_permission", return_value=True):
+            with patch(
+                "backend.app.api.v1.endpoints.audit_logs.check_permission",
+                return_value=True,
+            ):
                 client = TestClient(app)
                 response = client.get(
                     "/api/v1/audit-logs/",
@@ -221,7 +243,7 @@ class TestAuditLogsAPI:
                         "from_date": from_date.isoformat(),
                         "to_date": to_date.isoformat(),
                     },
-                    headers={"Authorization": "Bearer test-token"}
+                    headers={"Authorization": "Bearer test-token"},
                 )
 
         assert response.status_code == 400
@@ -254,12 +276,17 @@ class TestAuditLogsAPI:
         ]
 
         with self.override_deps(mock_user, mock_db):
-            with patch.object(AuditService, 'get_entity_audit_history', return_value=mock_audit_logs):
-                with patch("backend.app.api.v1.endpoints.audit_logs.check_permission", return_value=True):
+            with patch.object(
+                AuditService, "get_entity_audit_history", return_value=mock_audit_logs
+            ):
+                with patch(
+                    "backend.app.api.v1.endpoints.audit_logs.check_permission",
+                    return_value=True,
+                ):
                     client = TestClient(app)
                     response = client.get(
                         f"/api/v1/audit-logs/entity/feature_flag/{entity_id}",
-                        headers={"Authorization": "Bearer test-token"}
+                        headers={"Authorization": "Bearer test-token"},
                     )
 
         assert response.status_code == 200
@@ -276,11 +303,14 @@ class TestAuditLogsAPI:
         entity_id = uuid4()
 
         with self.override_deps(mock_user, mock_db):
-            with patch("backend.app.api.v1.endpoints.audit_logs.check_permission", return_value=False):
+            with patch(
+                "backend.app.api.v1.endpoints.audit_logs.check_permission",
+                return_value=False,
+            ):
                 client = TestClient(app)
                 response = client.get(
                     f"/api/v1/audit-logs/entity/feature_flag/{entity_id}",
-                    headers={"Authorization": "Bearer test-token"}
+                    headers={"Authorization": "Bearer test-token"},
                 )
 
         assert response.status_code == 403
@@ -313,12 +343,17 @@ class TestAuditLogsAPI:
         ]
 
         with self.override_deps(mock_user, mock_db):
-            with patch.object(AuditService, 'get_user_activity', return_value=mock_audit_logs):
-                with patch("backend.app.api.v1.endpoints.audit_logs.check_permission", return_value=True):
+            with patch.object(
+                AuditService, "get_user_activity", return_value=mock_audit_logs
+            ):
+                with patch(
+                    "backend.app.api.v1.endpoints.audit_logs.check_permission",
+                    return_value=True,
+                ):
                     client = TestClient(app)
                     response = client.get(
                         f"/api/v1/audit-logs/user/{target_user_id}",
-                        headers={"Authorization": "Bearer test-token"}
+                        headers={"Authorization": "Bearer test-token"},
                     )
 
         assert response.status_code == 200
@@ -335,12 +370,17 @@ class TestAuditLogsAPI:
         mock_audit_logs = []
 
         with self.override_deps(mock_user, mock_db):
-            with patch.object(AuditService, 'get_user_activity', return_value=mock_audit_logs):
-                with patch("backend.app.api.v1.endpoints.audit_logs.check_permission", return_value=False):
+            with patch.object(
+                AuditService, "get_user_activity", return_value=mock_audit_logs
+            ):
+                with patch(
+                    "backend.app.api.v1.endpoints.audit_logs.check_permission",
+                    return_value=False,
+                ):
                     client = TestClient(app)
                     response = client.get(
                         f"/api/v1/audit-logs/user/{mock_user.id}",
-                        headers={"Authorization": "Bearer test-token"}
+                        headers={"Authorization": "Bearer test-token"},
                     )
 
         assert response.status_code == 200
@@ -354,11 +394,14 @@ class TestAuditLogsAPI:
         other_user_id = uuid4()
 
         with self.override_deps(mock_user, mock_db):
-            with patch("backend.app.api.v1.endpoints.audit_logs.check_permission", return_value=False):
+            with patch(
+                "backend.app.api.v1.endpoints.audit_logs.check_permission",
+                return_value=False,
+            ):
                 client = TestClient(app)
                 response = client.get(
                     f"/api/v1/audit-logs/user/{other_user_id}",
-                    headers={"Authorization": "Bearer test-token"}
+                    headers={"Authorization": "Bearer test-token"},
                 )
 
         assert response.status_code == 403
@@ -392,12 +435,15 @@ class TestAuditLogsAPI:
         }
 
         with self.override_deps(mock_user, mock_db):
-            with patch.object(AuditService, 'get_audit_stats', return_value=mock_stats):
-                with patch("backend.app.api.v1.endpoints.audit_logs.check_permission", return_value=True):
+            with patch.object(AuditService, "get_audit_stats", return_value=mock_stats):
+                with patch(
+                    "backend.app.api.v1.endpoints.audit_logs.check_permission",
+                    return_value=True,
+                ):
                     client = TestClient(app)
                     response = client.get(
                         "/api/v1/audit-logs/stats",
-                        headers={"Authorization": "Bearer test-token"}
+                        headers={"Authorization": "Bearer test-token"},
                     )
 
         assert response.status_code == 200
@@ -414,11 +460,14 @@ class TestAuditLogsAPI:
         mock_user = self.setup_test_user(UserRole.VIEWER)
 
         with self.override_deps(mock_user, mock_db):
-            with patch("backend.app.api.v1.endpoints.audit_logs.check_permission", return_value=False):
+            with patch(
+                "backend.app.api.v1.endpoints.audit_logs.check_permission",
+                return_value=False,
+            ):
                 client = TestClient(app)
                 response = client.get(
                     "/api/v1/audit-logs/stats",
-                    headers={"Authorization": "Bearer test-token"}
+                    headers={"Authorization": "Bearer test-token"},
                 )
 
         assert response.status_code == 403
@@ -431,12 +480,17 @@ class TestAuditLogsAPI:
         mock_user = self.setup_test_user(UserRole.ADMIN)
 
         with self.override_deps(mock_user, mock_db):
-            with patch.object(AuditService, 'get_audit_logs', side_effect=Exception("Service error")):
-                with patch("backend.app.api.v1.endpoints.audit_logs.check_permission", return_value=True):
+            with patch.object(
+                AuditService, "get_audit_logs", side_effect=Exception("Service error")
+            ):
+                with patch(
+                    "backend.app.api.v1.endpoints.audit_logs.check_permission",
+                    return_value=True,
+                ):
                     client = TestClient(app)
                     response = client.get(
                         "/api/v1/audit-logs/",
-                        headers={"Authorization": "Bearer test-token"}
+                        headers={"Authorization": "Bearer test-token"},
                     )
 
         assert response.status_code == 500
@@ -449,12 +503,19 @@ class TestAuditLogsAPI:
         mock_user = self.setup_test_user(UserRole.ADMIN)
 
         with self.override_deps(mock_user, mock_db):
-            with patch.object(AuditService, 'get_audit_logs', side_effect=ValueError("Invalid parameter")):
-                with patch("backend.app.api.v1.endpoints.audit_logs.check_permission", return_value=True):
+            with patch.object(
+                AuditService,
+                "get_audit_logs",
+                side_effect=ValueError("Invalid parameter"),
+            ):
+                with patch(
+                    "backend.app.api.v1.endpoints.audit_logs.check_permission",
+                    return_value=True,
+                ):
                     client = TestClient(app)
                     response = client.get(
                         "/api/v1/audit-logs/",
-                        headers={"Authorization": "Bearer test-token"}
+                        headers={"Authorization": "Bearer test-token"},
                     )
 
         assert response.status_code == 400
@@ -470,8 +531,7 @@ class TestAuditLogsAPI:
 
         # Test with invalid token
         response = client.get(
-            "/api/v1/audit-logs/",
-            headers={"Authorization": "Bearer invalid-token"}
+            "/api/v1/audit-logs/", headers={"Authorization": "Bearer invalid-token"}
         )
         # This would depend on your authentication implementation
         # but should result in 401 or 403

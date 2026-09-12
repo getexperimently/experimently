@@ -12,26 +12,36 @@ GET    /api/v1/rbac/users/{user_id}/permissions — get effective permissions
 POST   /api/v1/rbac/users/{user_id}/grant    — grant direct permission (ADMIN only)
 DELETE /api/v1/rbac/users/{user_id}/grant/{resource} — revoke direct permission
 """
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+
+from typing import TYPE_CHECKING
 from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
 
 from backend.app.api import deps
 from backend.app.api.deps import get_db
 from backend.app.models.user import User, UserRole
-from backend.app.services.rbac_service import RBACService
 from backend.app.schemas.rbac import (
-    CustomRoleCreate, CustomRoleUpdate, CustomRoleResponse,
-    AssignRoleRequest, RevokeRoleRequest,
-    EffectivePermissionsResponse, DelegatePermissionRequest,
+    AssignRoleRequest,
+    CustomRoleCreate,
+    CustomRoleResponse,
+    CustomRoleUpdate,
+    DelegatePermissionRequest,
+    EffectivePermissionsResponse,
+    RevokeRoleRequest,
 )
+from backend.app.services.rbac_service import RBACService
+
+if TYPE_CHECKING:
+    from backend.app.models.custom_role import CustomRole
 
 router = APIRouter()
 
 
 def _require_admin(current_user: User) -> None:
     """Raise 403 if user is not ADMIN or superuser."""
-    role = getattr(current_user, 'role', None)
+    role = getattr(current_user, "role", None)
     if not current_user.is_superuser and role != UserRole.ADMIN:
         raise HTTPException(status_code=403, detail="Admin role required")
 
@@ -160,6 +170,7 @@ def get_effective_permissions(
     if str(user_id) != str(current_user.id):
         _require_admin(current_user)
     from backend.app.models.user import User as UserModel
+
     target_user = db.query(UserModel).filter(UserModel.id == user_id).first()
     if not target_user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -210,7 +221,10 @@ def revoke_permission(
 def _role_to_response(role: "CustomRole", db: Session) -> CustomRoleResponse:
     """Convert a CustomRole model instance to a CustomRoleResponse schema."""
     from backend.app.models.custom_role import UserCustomRole
-    user_count = db.query(UserCustomRole).filter(UserCustomRole.role_id == role.id).count()
+
+    user_count = (
+        db.query(UserCustomRole).filter(UserCustomRole.role_id == role.id).count()
+    )
     return CustomRoleResponse(
         id=str(role.id),
         name=role.name,

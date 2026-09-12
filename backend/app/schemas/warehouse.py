@@ -7,14 +7,14 @@ are stored encrypted and must never be returned in API responses.
 """
 
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field
-
 
 # ---------------------------------------------------------------------------
 # Enums
 # ---------------------------------------------------------------------------
+
 
 class WarehouseType(str, Enum):
     """Supported customer data warehouse platforms."""
@@ -28,6 +28,7 @@ class WarehouseType(str, Enum):
 # Request schemas
 # ---------------------------------------------------------------------------
 
+
 class WarehouseConnectionCreate(BaseModel):
     """
     Payload for creating a new warehouse connection.
@@ -36,19 +37,30 @@ class WarehouseConnectionCreate(BaseModel):
     returned in any response — they are stored encrypted server-side.
     """
 
-    name: str = Field(..., min_length=1, max_length=200, description="Human-readable connection name")
+    name: str = Field(
+        ..., min_length=1, max_length=200, description="Human-readable connection name"
+    )
     warehouse_type: WarehouseType = Field(..., description="Target warehouse platform")
-    host: Optional[str] = Field(None, description="Warehouse hostname (Snowflake / Redshift)")
+    host: Optional[str] = Field(
+        None, description="Warehouse hostname (Snowflake / Redshift)"
+    )
     database: Optional[str] = Field(None, description="Default database / catalog name")
-    schema_name: Optional[str] = Field(None, description="Default schema inside the database")
+    schema_name: Optional[str] = Field(
+        None, description="Default schema inside the database"
+    )
     username: Optional[str] = Field(None, description="Service-account or IAM username")
-    password: Optional[str] = Field(None, description="Password (write-only; never returned)")
-    project_id: Optional[str] = Field(None, description="GCP project ID (BigQuery only)")
+    password: Optional[str] = Field(
+        None, description="Password (write-only; never returned)"
+    )
+    project_id: Optional[str] = Field(
+        None, description="GCP project ID (BigQuery only)"
+    )
 
 
 # ---------------------------------------------------------------------------
 # Response schemas
 # ---------------------------------------------------------------------------
+
 
 class WarehouseConnectionResponse(BaseModel):
     """

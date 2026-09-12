@@ -10,11 +10,12 @@ This module validates parsed events using Pydantic models from shared module:
 Follows TDD (Test-Driven Development) - GREEN phase implementation.
 """
 
+import logging
 import sys
 from pathlib import Path
-from typing import List, Dict, Any, Tuple
+from typing import Any, Dict, List, Tuple
+
 from pydantic import ValidationError
-import logging
 
 # Add shared module to path
 shared_path = Path(__file__).parent.parent / "shared"
@@ -42,14 +43,16 @@ def validate_event(event_dict: Dict[str, Any]) -> EventData:
         validated_event = EventData(**event_dict)
         return validated_event
     except ValidationError as e:
-        logger.error(f"Event validation failed for event_id={event_dict.get('event_id', 'unknown')}: {e}")
+        logger.error(
+            f"Event validation failed for event_id={event_dict.get('event_id', 'unknown')}: {e}"
+        )
         raise
 
 
 def validate_events_batch(
     events_batch: List[Dict[str, Any]],
     skip_invalid: bool = False,
-    check_duplicates: bool = False
+    check_duplicates: bool = False,
 ) -> Tuple[List[EventData], List[Dict[str, Any]]]:
     """
     Validate a batch of events.
@@ -82,7 +85,7 @@ def validate_events_batch(
                     error_dict = {
                         "event_id": event_id,
                         "error": f"Duplicate event_id: {event_id}",
-                        "event_data": event_dict
+                        "event_data": event_dict,
                     }
                     logger.warning(f"Duplicate event_id detected: {event_id}")
 
@@ -90,7 +93,9 @@ def validate_events_batch(
                         validation_errors.append(error_dict)
                         continue
                     else:
-                        raise ValidationError(f"Duplicate event_id: {event_id}", model=EventData)
+                        raise ValidationError(
+                            f"Duplicate event_id: {event_id}", model=EventData
+                        )
 
                 seen_event_ids.add(event_id)
 
@@ -101,7 +106,7 @@ def validate_events_batch(
             error_dict = {
                 "event_id": event_id,
                 "error": str(e),
-                "event_data": event_dict
+                "event_data": event_dict,
             }
 
             logger.error(f"Validation failed for event {event_id}: {e}")
@@ -116,8 +121,8 @@ def validate_events_batch(
             event_id = event_dict.get("event_id", "unknown")
             error_dict = {
                 "event_id": event_id,
-                "error": f"Unexpected error: {str(e)}",
-                "event_data": event_dict
+                "error": f"Unexpected error: {e!s}",
+                "event_data": event_dict,
             }
 
             logger.error(f"Unexpected error validating event {event_id}: {e}")

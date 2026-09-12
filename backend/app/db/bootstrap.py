@@ -54,7 +54,11 @@ def database_url() -> str:
     """Build a SQLAlchemy URL from the POSTGRES_* environment variables."""
     user = os.environ.get("POSTGRES_USER", "postgres")
     password = os.environ.get("POSTGRES_PASSWORD", "postgres")
-    host = os.environ.get("POSTGRES_SERVER") or os.environ.get("POSTGRES_HOST") or "localhost"
+    host = (
+        os.environ.get("POSTGRES_SERVER")
+        or os.environ.get("POSTGRES_HOST")
+        or "localhost"
+    )
     port = os.environ.get("POSTGRES_PORT", "5432")
     db = os.environ.get("POSTGRES_DB", "experimentation")
     return f"postgresql://{user}:{password}@{host}:{port}/{db}"
@@ -133,9 +137,12 @@ def ensure_first_superuser(engine: Engine, schema: str) -> bool:
         # request, and an identifier cannot be a bind parameter; quote it
         # through the dialect so an odd schema name still cannot break out.
         quoted = engine.dialect.identifier_preparer.quote_schema(schema)
-        session.execute(
-            text(f"SET search_path TO {quoted}, public")  # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text
-        )
+        search_path_sql = f"SET search_path TO {quoted}, public"
+        # The suppression has to sit on the `text(...)` call, which is the node
+        # semgrep reports; `fmt: skip` keeps the formatter from wrapping the
+        # line and carrying the comment away from it.
+        search_path = text(search_path_sql)  # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text  # fmt: skip
+        session.execute(search_path)
         if session.query(User.id).first() is not None:
             return False
 
@@ -172,11 +179,15 @@ def _bootstrap_locked(engine: Engine, schema: str) -> str:
     ensure_schema(engine, schema)
 
     if has_alembic_version(engine, schema):
-        logger.info("alembic_version present in schema %s: running upgrade head", schema)
+        logger.info(
+            "alembic_version present in schema %s: running upgrade head", schema
+        )
         command.upgrade(cfg, "head")
         result = "upgraded"
     else:
-        logger.info("Fresh database: creating schema %s from models and stamping head", schema)
+        logger.info(
+            "Fresh database: creating schema %s from models and stamping head", schema
+        )
         create_from_models(engine, schema)
         # env.py reads POSTGRES_SCHEMA for the alembic_version location.
         os.environ["POSTGRES_SCHEMA"] = schema
@@ -202,15 +213,21 @@ def bootstrap(engine: Engine | None = None, schema: str | None = None) -> str:
     # by this session until pg_advisory_unlock (or disconnect), independently
     # of the transactions alembic and create_all open on other connections.
     with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as lock_conn:
-        lock_conn.execute(text("SELECT pg_advisory_lock(hashtext(:key))"), {"key": lock_key})
+        lock_conn.execute(
+            text("SELECT pg_advisory_lock(hashtext(:key))"), {"key": lock_key}
+        )
         logger.info("bootstrap: holding advisory lock %s", lock_key)
         try:
             return _bootstrap_locked(engine, schema)
         finally:
-            lock_conn.execute(text("SELECT pg_advisory_unlock(hashtext(:key))"), {"key": lock_key})
+            lock_conn.execute(
+                text("SELECT pg_advisory_unlock(hashtext(:key))"), {"key": lock_key}
+            )
 
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     result = bootstrap()
-    print(f"Database bootstrap complete ({result}) — schema '{schema_name()}' at {database_url().split('@')[-1]}")
+    print(
+        f"Database bootstrap complete ({result}) — schema '{schema_name()}' at {database_url().split('@')[-1]}"
+    )

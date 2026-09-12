@@ -10,20 +10,20 @@ This module tests the new toggle endpoints including:
 - Error handling
 """
 
-import pytest
-from datetime import datetime, timezone
-from uuid import uuid4
-from unittest.mock import Mock, AsyncMock, MagicMock, patch
 import json
+from datetime import datetime, timezone
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from uuid import uuid4
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
+from backend.app.api import deps
 from backend.app.main import app
+from backend.app.models.audit_log import ActionType, EntityType
 from backend.app.models.feature_flag import FeatureFlag, FeatureFlagStatus
 from backend.app.models.user import User, UserRole
-from backend.app.models.audit_log import ActionType, EntityType
-from backend.app.api import deps
 
 
 class TestFeatureFlagToggleEndpoints:
@@ -39,7 +39,9 @@ class TestFeatureFlagToggleEndpoints:
         # Clear dependency overrides
         app.dependency_overrides.clear()
 
-    def setup_test_user(self, role: UserRole = UserRole.DEVELOPER, is_superuser: bool = False):
+    def setup_test_user(
+        self, role: UserRole = UserRole.DEVELOPER, is_superuser: bool = False
+    ):
         """Setup a test user with specified role."""
         return User(
             id=uuid4(),
@@ -50,7 +52,9 @@ class TestFeatureFlagToggleEndpoints:
             is_superuser=is_superuser,
         )
 
-    def setup_test_feature_flag(self, owner_id: uuid4, status: FeatureFlagStatus = FeatureFlagStatus.INACTIVE):
+    def setup_test_feature_flag(
+        self, owner_id: uuid4, status: FeatureFlagStatus = FeatureFlagStatus.INACTIVE
+    ):
         """Setup a test feature flag."""
         return FeatureFlag(
             id=uuid4(),
@@ -71,8 +75,7 @@ class TestFeatureFlagToggleEndpoints:
 
         # Setup feature flag
         feature_flag = self.setup_test_feature_flag(
-            owner_id=mock_user.id,
-            status=FeatureFlagStatus.INACTIVE
+            owner_id=mock_user.id, status=FeatureFlagStatus.INACTIVE
         )
 
         # Mock database query
@@ -87,14 +90,20 @@ class TestFeatureFlagToggleEndpoints:
         # Override dependencies
         app.dependency_overrides[deps.get_current_active_user] = lambda: mock_user
         app.dependency_overrides[deps.get_db] = lambda: mock_db
-        app.dependency_overrides[deps.get_cache_control] = lambda: {"enabled": False, "redis": None}
+        app.dependency_overrides[deps.get_cache_control] = lambda: {
+            "enabled": False,
+            "redis": None,
+        }
 
         # Mock audit service
-        with patch("backend.app.services.audit_service.AuditService.log_action", side_effect=mock_log_action):
+        with patch(
+            "backend.app.services.audit_service.AuditService.log_action",
+            side_effect=mock_log_action,
+        ):
             client = TestClient(app)
             response = client.post(
                 f"/api/v1/feature-flags/{feature_flag.id}/toggle",
-                json={"reason": "Testing toggle functionality"}
+                json={"reason": "Testing toggle functionality"},
             )
 
         assert response.status_code == 200
@@ -123,8 +132,7 @@ class TestFeatureFlagToggleEndpoints:
 
         # Setup feature flag
         feature_flag = self.setup_test_feature_flag(
-            owner_id=mock_user.id,
-            status=FeatureFlagStatus.ACTIVE
+            owner_id=mock_user.id, status=FeatureFlagStatus.ACTIVE
         )
 
         # Mock database query
@@ -139,14 +147,20 @@ class TestFeatureFlagToggleEndpoints:
         # Override dependencies
         app.dependency_overrides[deps.get_current_active_user] = lambda: mock_user
         app.dependency_overrides[deps.get_db] = lambda: mock_db
-        app.dependency_overrides[deps.get_cache_control] = lambda: {"enabled": False, "redis": None}
+        app.dependency_overrides[deps.get_cache_control] = lambda: {
+            "enabled": False,
+            "redis": None,
+        }
 
         # Mock audit service
-        with patch("backend.app.services.audit_service.AuditService.log_action", side_effect=mock_log_action):
+        with patch(
+            "backend.app.services.audit_service.AuditService.log_action",
+            side_effect=mock_log_action,
+        ):
             client = TestClient(app)
             response = client.post(
                 f"/api/v1/feature-flags/{feature_flag.id}/toggle",
-                json={"reason": "Testing toggle off"}
+                json={"reason": "Testing toggle off"},
             )
 
         assert response.status_code == 200
@@ -166,8 +180,7 @@ class TestFeatureFlagToggleEndpoints:
 
         # Setup inactive feature flag
         feature_flag = self.setup_test_feature_flag(
-            owner_id=mock_user.id,
-            status=FeatureFlagStatus.INACTIVE
+            owner_id=mock_user.id, status=FeatureFlagStatus.INACTIVE
         )
 
         # Mock database query
@@ -182,14 +195,20 @@ class TestFeatureFlagToggleEndpoints:
         # Override dependencies
         app.dependency_overrides[deps.get_current_active_user] = lambda: mock_user
         app.dependency_overrides[deps.get_db] = lambda: mock_db
-        app.dependency_overrides[deps.get_cache_control] = lambda: {"enabled": False, "redis": None}
+        app.dependency_overrides[deps.get_cache_control] = lambda: {
+            "enabled": False,
+            "redis": None,
+        }
 
         # Mock audit service
-        with patch("backend.app.services.audit_service.AuditService.log_action", side_effect=mock_log_action):
+        with patch(
+            "backend.app.services.audit_service.AuditService.log_action",
+            side_effect=mock_log_action,
+        ):
             client = TestClient(app)
             response = client.post(
                 f"/api/v1/feature-flags/{feature_flag.id}/enable",
-                json={"reason": "Enabling for testing"}
+                json={"reason": "Enabling for testing"},
             )
 
         assert response.status_code == 200
@@ -207,8 +226,7 @@ class TestFeatureFlagToggleEndpoints:
 
         # Setup active feature flag
         feature_flag = self.setup_test_feature_flag(
-            owner_id=mock_user.id,
-            status=FeatureFlagStatus.ACTIVE
+            owner_id=mock_user.id, status=FeatureFlagStatus.ACTIVE
         )
 
         # Mock database query
@@ -223,14 +241,20 @@ class TestFeatureFlagToggleEndpoints:
         # Override dependencies
         app.dependency_overrides[deps.get_current_active_user] = lambda: mock_user
         app.dependency_overrides[deps.get_db] = lambda: mock_db
-        app.dependency_overrides[deps.get_cache_control] = lambda: {"enabled": False, "redis": None}
+        app.dependency_overrides[deps.get_cache_control] = lambda: {
+            "enabled": False,
+            "redis": None,
+        }
 
         # Mock audit service
-        with patch("backend.app.services.audit_service.AuditService.log_action", side_effect=mock_log_action):
+        with patch(
+            "backend.app.services.audit_service.AuditService.log_action",
+            side_effect=mock_log_action,
+        ):
             client = TestClient(app)
             response = client.post(
                 f"/api/v1/feature-flags/{feature_flag.id}/disable",
-                json={"reason": "Disabling for testing"}
+                json={"reason": "Disabling for testing"},
             )
 
         assert response.status_code == 200
@@ -252,13 +276,15 @@ class TestFeatureFlagToggleEndpoints:
         # Override dependencies
         app.dependency_overrides[deps.get_current_active_user] = lambda: mock_user
         app.dependency_overrides[deps.get_db] = lambda: mock_db
-        app.dependency_overrides[deps.get_cache_control] = lambda: {"enabled": False, "redis": None}
+        app.dependency_overrides[deps.get_cache_control] = lambda: {
+            "enabled": False,
+            "redis": None,
+        }
 
         client = TestClient(app)
         non_existent_id = uuid4()
         response = client.post(
-            f"/api/v1/feature-flags/{non_existent_id}/toggle",
-            json={"reason": "Test"}
+            f"/api/v1/feature-flags/{non_existent_id}/toggle", json={"reason": "Test"}
         )
 
         assert response.status_code == 404
@@ -274,7 +300,7 @@ class TestFeatureFlagToggleEndpoints:
         different_user_id = uuid4()
         feature_flag = self.setup_test_feature_flag(
             owner_id=different_user_id,  # Different owner
-            status=FeatureFlagStatus.INACTIVE
+            status=FeatureFlagStatus.INACTIVE,
         )
 
         # Mock database query
@@ -283,12 +309,14 @@ class TestFeatureFlagToggleEndpoints:
         # Override dependencies
         app.dependency_overrides[deps.get_current_active_user] = lambda: mock_user
         app.dependency_overrides[deps.get_db] = lambda: mock_db
-        app.dependency_overrides[deps.get_cache_control] = lambda: {"enabled": False, "redis": None}
+        app.dependency_overrides[deps.get_cache_control] = lambda: {
+            "enabled": False,
+            "redis": None,
+        }
 
         client = TestClient(app)
         response = client.post(
-            f"/api/v1/feature-flags/{feature_flag.id}/toggle",
-            json={"reason": "Test"}
+            f"/api/v1/feature-flags/{feature_flag.id}/toggle", json={"reason": "Test"}
         )
 
         assert response.status_code == 403
@@ -303,8 +331,7 @@ class TestFeatureFlagToggleEndpoints:
         # Setup feature flag owned by different user
         different_user_id = uuid4()
         feature_flag = self.setup_test_feature_flag(
-            owner_id=different_user_id,
-            status=FeatureFlagStatus.INACTIVE
+            owner_id=different_user_id, status=FeatureFlagStatus.INACTIVE
         )
 
         # Mock database query
@@ -319,14 +346,20 @@ class TestFeatureFlagToggleEndpoints:
         # Override dependencies
         app.dependency_overrides[deps.get_current_active_user] = lambda: mock_superuser
         app.dependency_overrides[deps.get_db] = lambda: mock_db
-        app.dependency_overrides[deps.get_cache_control] = lambda: {"enabled": False, "redis": None}
+        app.dependency_overrides[deps.get_cache_control] = lambda: {
+            "enabled": False,
+            "redis": None,
+        }
 
         # Mock audit service
-        with patch("backend.app.services.audit_service.AuditService.log_action", side_effect=mock_log_action):
+        with patch(
+            "backend.app.services.audit_service.AuditService.log_action",
+            side_effect=mock_log_action,
+        ):
             client = TestClient(app)
             response = client.post(
                 f"/api/v1/feature-flags/{feature_flag.id}/toggle",
-                json={"reason": "Superuser toggle"}
+                json={"reason": "Superuser toggle"},
             )
 
         assert response.status_code == 200
@@ -342,8 +375,7 @@ class TestFeatureFlagToggleEndpoints:
 
         # Setup feature flag
         feature_flag = self.setup_test_feature_flag(
-            owner_id=mock_user.id,
-            status=FeatureFlagStatus.INACTIVE
+            owner_id=mock_user.id, status=FeatureFlagStatus.INACTIVE
         )
 
         # Mock database query
@@ -358,17 +390,21 @@ class TestFeatureFlagToggleEndpoints:
         # Override dependencies with cache enabled
         # Use SimpleNamespace so attribute access (cache_control.enabled) works
         import types
+
         mock_cache = types.SimpleNamespace(enabled=True, redis=mock_redis)
         app.dependency_overrides[deps.get_current_active_user] = lambda: mock_user
         app.dependency_overrides[deps.get_db] = lambda: mock_db
         app.dependency_overrides[deps.get_cache_control] = lambda: mock_cache
 
         # Mock audit service
-        with patch("backend.app.services.audit_service.AuditService.log_action", side_effect=mock_log_action):
+        with patch(
+            "backend.app.services.audit_service.AuditService.log_action",
+            side_effect=mock_log_action,
+        ):
             client = TestClient(app)
             response = client.post(
                 f"/api/v1/feature-flags/{feature_flag.id}/toggle",
-                json={"reason": "Test cache invalidation"}
+                json={"reason": "Test cache invalidation"},
             )
 
         assert response.status_code == 200
@@ -385,8 +421,7 @@ class TestFeatureFlagToggleEndpoints:
 
         # Setup feature flag
         feature_flag = self.setup_test_feature_flag(
-            owner_id=mock_user.id,
-            status=FeatureFlagStatus.INACTIVE
+            owner_id=mock_user.id, status=FeatureFlagStatus.INACTIVE
         )
 
         # Mock database query
@@ -403,14 +438,20 @@ class TestFeatureFlagToggleEndpoints:
         # Override dependencies
         app.dependency_overrides[deps.get_current_active_user] = lambda: mock_user
         app.dependency_overrides[deps.get_db] = lambda: mock_db
-        app.dependency_overrides[deps.get_cache_control] = lambda: {"enabled": False, "redis": None}
+        app.dependency_overrides[deps.get_cache_control] = lambda: {
+            "enabled": False,
+            "redis": None,
+        }
 
         # Mock audit service
-        with patch("backend.app.services.audit_service.AuditService.log_action", side_effect=mock_log_action):
+        with patch(
+            "backend.app.services.audit_service.AuditService.log_action",
+            side_effect=mock_log_action,
+        ):
             client = TestClient(app)
             response = client.post(
                 f"/api/v1/feature-flags/{feature_flag.id}/toggle",
-                json={}  # No reason provided
+                json={},  # No reason provided
             )
 
         assert response.status_code == 200
@@ -423,8 +464,7 @@ class TestFeatureFlagToggleEndpoints:
 
         # Setup feature flag
         feature_flag = self.setup_test_feature_flag(
-            owner_id=mock_user.id,
-            status=FeatureFlagStatus.INACTIVE
+            owner_id=mock_user.id, status=FeatureFlagStatus.INACTIVE
         )
 
         # Mock database query
@@ -434,12 +474,15 @@ class TestFeatureFlagToggleEndpoints:
         # Override dependencies
         app.dependency_overrides[deps.get_current_active_user] = lambda: mock_user
         app.dependency_overrides[deps.get_db] = lambda: mock_db
-        app.dependency_overrides[deps.get_cache_control] = lambda: {"enabled": False, "redis": None}
+        app.dependency_overrides[deps.get_cache_control] = lambda: {
+            "enabled": False,
+            "redis": None,
+        }
 
         client = TestClient(app)
         response = client.post(
             f"/api/v1/feature-flags/{feature_flag.id}/toggle",
-            json={"reason": "Test error handling"}
+            json={"reason": "Test error handling"},
         )
 
         assert response.status_code == 500
@@ -452,8 +495,7 @@ class TestFeatureFlagToggleEndpoints:
 
         # Setup feature flag
         feature_flag = self.setup_test_feature_flag(
-            owner_id=mock_user.id,
-            status=FeatureFlagStatus.INACTIVE
+            owner_id=mock_user.id, status=FeatureFlagStatus.INACTIVE
         )
 
         # Mock database query
@@ -468,14 +510,20 @@ class TestFeatureFlagToggleEndpoints:
         # Override dependencies
         app.dependency_overrides[deps.get_current_active_user] = lambda: mock_user
         app.dependency_overrides[deps.get_db] = lambda: mock_db
-        app.dependency_overrides[deps.get_cache_control] = lambda: {"enabled": False, "redis": None}
+        app.dependency_overrides[deps.get_cache_control] = lambda: {
+            "enabled": False,
+            "redis": None,
+        }
 
         # Mock audit service to raise exception
-        with patch("backend.app.services.audit_service.AuditService.log_action", side_effect=mock_log_action_error):
+        with patch(
+            "backend.app.services.audit_service.AuditService.log_action",
+            side_effect=mock_log_action_error,
+        ):
             client = TestClient(app)
             response = client.post(
                 f"/api/v1/feature-flags/{feature_flag.id}/toggle",
-                json={"reason": "Test audit error handling"}
+                json={"reason": "Test audit error handling"},
             )
 
         # Should still succeed (audit logging is non-blocking)
@@ -493,7 +541,10 @@ class TestFeatureFlagToggleEndpoints:
         # Override dependencies
         app.dependency_overrides[deps.get_current_active_user] = lambda: mock_user
         app.dependency_overrides[deps.get_db] = lambda: mock_db
-        app.dependency_overrides[deps.get_cache_control] = lambda: {"enabled": False, "redis": None}
+        app.dependency_overrides[deps.get_cache_control] = lambda: {
+            "enabled": False,
+            "redis": None,
+        }
 
         client = TestClient(app)
         feature_flag_id = uuid4()
@@ -502,7 +553,7 @@ class TestFeatureFlagToggleEndpoints:
         response = client.post(
             f"/api/v1/feature-flags/{feature_flag_id}/toggle",
             content="invalid json",
-            headers={"Content-Type": "application/json"}
+            headers={"Content-Type": "application/json"},
         )
 
         assert response.status_code == 422  # Unprocessable Entity

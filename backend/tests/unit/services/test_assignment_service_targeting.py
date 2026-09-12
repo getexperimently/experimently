@@ -5,24 +5,25 @@ This module tests the integration between the assignment service and the enhance
 rules engine for targeted experiment assignments.
 """
 
-import pytest
 import json
 from datetime import datetime
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import MagicMock, Mock, patch
 from uuid import UUID, uuid4
 
-from backend.app.services.assignment_service import AssignmentService
-from backend.app.models.experiment import Experiment, Variant, ExperimentStatus
+import pytest
+
 from backend.app.models.assignment import Assignment
+from backend.app.models.experiment import Experiment, ExperimentStatus, Variant
 from backend.app.schemas.targeting_rule import (
+    AttributeType,
     Condition,
+    LogicalOperator,
+    OperatorType,
     RuleGroup,
     TargetingRule,
     TargetingRules,
-    LogicalOperator,
-    OperatorType,
-    AttributeType,
 )
+from backend.app.services.assignment_service import AssignmentService
 
 
 class TestAssignmentServiceTargeting:
@@ -45,7 +46,7 @@ class TestAssignmentServiceTargeting:
         self.experiment.status = ExperimentStatus.ACTIVE
         self.experiment.variants = [
             Mock(id=self.variant_a_id, traffic_allocation=50),
-            Mock(id=self.variant_b_id, traffic_allocation=50)
+            Mock(id=self.variant_b_id, traffic_allocation=50),
         ]
 
         # Create targeting rules
@@ -61,14 +62,14 @@ class TestAssignmentServiceTargeting:
                             {
                                 "attribute": "subscription_tier",
                                 "operator": "eq",
-                                "value": "premium"
+                                "value": "premium",
                             }
-                        ]
+                        ],
                     },
                     "rollout_percentage": 100,
-                    "priority": 1
+                    "priority": 1,
                 }
-            ]
+            ],
         }
 
     def test_assign_user_with_targeting_success(self):
@@ -103,19 +104,21 @@ class TestAssignmentServiceTargeting:
             "updated_at": datetime.now().isoformat(),
         }
 
-        with patch.object(self.service, 'get_assignment', return_value=assignment_dict):
-            with patch.object(self.service, '_hash_user_to_variant', return_value=self.variant_a_id):
+        with patch.object(self.service, "get_assignment", return_value=assignment_dict):
+            with patch.object(
+                self.service, "_hash_user_to_variant", return_value=self.variant_a_id
+            ):
                 # User context that matches targeting rules
                 user_context = {
                     "user_id": "test-user",
                     "subscription_tier": "premium",
-                    "country": "US"
+                    "country": "US",
                 }
 
                 result = self.service.assign_user_with_targeting(
                     user_id="test-user",
                     experiment_id=self.experiment_id,
-                    user_context=user_context
+                    user_context=user_context,
                 )
 
                 # Verify assignment was created
@@ -143,13 +146,13 @@ class TestAssignmentServiceTargeting:
         user_context = {
             "user_id": "test-user",
             "subscription_tier": "basic",  # Doesn't match premium requirement
-            "country": "US"
+            "country": "US",
         }
 
         result = self.service.assign_user_with_targeting(
             user_id="test-user",
             experiment_id=self.experiment_id,
-            user_context=user_context
+            user_context=user_context,
         )
 
         # Verify no assignment was created
@@ -190,17 +193,16 @@ class TestAssignmentServiceTargeting:
             "variant_id": str(self.variant_a_id),
         }
 
-        with patch.object(self.service, 'get_assignment', return_value=assignment_dict):
-            with patch.object(self.service, '_hash_user_to_variant', return_value=self.variant_a_id):
-                user_context = {
-                    "user_id": "test-user",
-                    "country": "US"
-                }
+        with patch.object(self.service, "get_assignment", return_value=assignment_dict):
+            with patch.object(
+                self.service, "_hash_user_to_variant", return_value=self.variant_a_id
+            ):
+                user_context = {"user_id": "test-user", "country": "US"}
 
                 result = self.service.assign_user_with_targeting(
                     user_id="test-user",
                     experiment_id=self.experiment_id,
-                    user_context=user_context
+                    user_context=user_context,
                 )
 
                 # Should assign user since no targeting rules means all users are eligible
@@ -229,16 +231,13 @@ class TestAssignmentServiceTargeting:
             "variant_id": str(self.variant_b_id),
         }
 
-        with patch.object(self.service, 'get_assignment', return_value=assignment_dict):
-            user_context = {
-                "user_id": "test-user",
-                "subscription_tier": "premium"
-            }
+        with patch.object(self.service, "get_assignment", return_value=assignment_dict):
+            user_context = {"user_id": "test-user", "subscription_tier": "premium"}
 
             result = self.service.assign_user_with_targeting(
                 user_id="test-user",
                 experiment_id=self.experiment_id,
-                user_context=user_context
+                user_context=user_context,
             )
 
             # Should return existing assignment
@@ -265,7 +264,7 @@ class TestAssignmentServiceTargeting:
             self.service.assign_user_with_targeting(
                 user_id="test-user",
                 experiment_id=self.experiment_id,
-                user_context=user_context
+                user_context=user_context,
             )
 
         assert "Cannot assign users to experiment with status" in str(exc_info.value)
@@ -280,7 +279,7 @@ class TestAssignmentServiceTargeting:
             self.service.assign_user_with_targeting(
                 user_id="test-user",
                 experiment_id=self.experiment_id,
-                user_context=user_context
+                user_context=user_context,
             )
 
         assert "not found" in str(exc_info.value)
@@ -303,14 +302,14 @@ class TestAssignmentServiceTargeting:
                                     {
                                         "attribute": "country",
                                         "operator": "eq",
-                                        "value": "US"
+                                        "value": "US",
                                     },
                                     {
                                         "attribute": "subscription_tier",
                                         "operator": "eq",
-                                        "value": "premium"
-                                    }
-                                ]
+                                        "value": "premium",
+                                    },
+                                ],
                             },
                             {
                                 "operator": "and",
@@ -318,16 +317,16 @@ class TestAssignmentServiceTargeting:
                                     {
                                         "attribute": "app_version",
                                         "operator": "semantic_version",
-                                        "value": "1.2.0"
+                                        "value": "1.2.0",
                                     }
-                                ]
-                            }
-                        ]
+                                ],
+                            },
+                        ],
                     },
                     "rollout_percentage": 100,
-                    "priority": 1
+                    "priority": 1,
                 }
-            ]
+            ],
         }
 
         self.experiment.targeting_rules = json.dumps(complex_rules)
@@ -337,7 +336,7 @@ class TestAssignmentServiceTargeting:
             "user_id": "user1",
             "country": "US",
             "subscription_tier": "premium",
-            "app_version": "1.0.0"
+            "app_version": "1.0.0",
         }
 
         result = self.service._evaluate_experiment_targeting(
@@ -352,7 +351,7 @@ class TestAssignmentServiceTargeting:
             "user_id": "user2",
             "country": "CA",
             "subscription_tier": "basic",
-            "app_version": "1.3.0"
+            "app_version": "1.3.0",
         }
 
         result = self.service._evaluate_experiment_targeting(
@@ -367,7 +366,7 @@ class TestAssignmentServiceTargeting:
             "user_id": "user3",
             "country": "CA",
             "subscription_tier": "basic",
-            "app_version": "1.0.0"
+            "app_version": "1.0.0",
         }
 
         result = self.service._evaluate_experiment_targeting(
@@ -389,8 +388,10 @@ class TestAssignmentServiceTargeting:
         self.experiment.targeting_rules = json.dumps(self.targeting_rules)
 
         # Mock assignment creation and get_assignment
-        with patch.object(self.service, 'get_assignment') as mock_get_assignment:
-            with patch.object(self.service, '_hash_user_to_variant', return_value=self.variant_a_id):
+        with patch.object(self.service, "get_assignment") as mock_get_assignment:
+            with patch.object(
+                self.service, "_hash_user_to_variant", return_value=self.variant_a_id
+            ):
                 mock_get_assignment.return_value = {
                     "id": str(uuid4()),
                     "user_id": "test-user",
@@ -402,13 +403,13 @@ class TestAssignmentServiceTargeting:
                 for i in range(5):
                     user_context = {
                         "user_id": f"user-{i}",
-                        "subscription_tier": "premium"
+                        "subscription_tier": "premium",
                     }
 
                     self.service.assign_user_with_targeting(
                         user_id=f"user-{i}",
                         experiment_id=self.experiment_id,
-                        user_context=user_context
+                        user_context=user_context,
                     )
 
                 # Get performance stats
@@ -433,14 +434,14 @@ class TestAssignmentServiceTargeting:
                                 "attribute": "app_version",
                                 "operator": "semantic_version",
                                 "value": "1.2.0",
-                                "attribute_type": "semantic_version"
+                                "attribute_type": "semantic_version",
                             }
-                        ]
+                        ],
                     },
                     "rollout_percentage": 100,
-                    "priority": 1
+                    "priority": 1,
                 }
-            ]
+            ],
         }
 
         self.experiment.targeting_rules = json.dumps(rules_with_validation)
@@ -452,14 +453,14 @@ class TestAssignmentServiceTargeting:
         # User context with invalid semantic version
         user_context = {
             "user_id": "test-user",
-            "app_version": "invalid-version"  # Invalid semantic version format
+            "app_version": "invalid-version",  # Invalid semantic version format
         }
 
         result = self.service.assign_user_with_targeting(
             user_id="test-user",
             experiment_id=self.experiment_id,
             user_context=user_context,
-            validate_attributes=True
+            validate_attributes=True,
         )
 
         # Should not assign due to validation error
@@ -483,27 +484,29 @@ class TestAssignmentServiceTargeting:
             "variant_id": str(self.variant_a_id),
         }
 
-        with patch.object(self.service, 'get_assignment', return_value=assignment_dict):
-            with patch.object(self.service, '_hash_user_to_variant', return_value=self.variant_a_id):
+        with patch.object(self.service, "get_assignment", return_value=assignment_dict):
+            with patch.object(
+                self.service, "_hash_user_to_variant", return_value=self.variant_a_id
+            ):
                 user_context = {
                     "user_id": "test-user",
                     "subscription_tier": "premium",
-                    "country": "US"
+                    "country": "US",
                 }
 
                 self.service.assign_user_with_targeting(
                     user_id="test-user",
                     experiment_id=self.experiment_id,
                     user_context=user_context,
-                    track_exposure=True
+                    track_exposure=True,
                 )
 
                 # Verify exposure event was tracked with targeting info
                 self.mock_event_service.track_exposure.assert_called_once()
 
                 call_args = self.mock_event_service.track_exposure.call_args
-                exposure_properties = call_args[1]['properties']
+                exposure_properties = call_args[1]["properties"]
 
-                assert exposure_properties['targeting_rule_id'] == 'premium_users'
-                assert exposure_properties['targeting_matched'] is True
-                assert exposure_properties['subscription_tier'] == 'premium'
+                assert exposure_properties["targeting_rule_id"] == "premium_users"
+                assert exposure_properties["targeting_matched"] is True
+                assert exposure_properties["subscription_tier"] == "premium"

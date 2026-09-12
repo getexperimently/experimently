@@ -5,32 +5,35 @@ This module defines models for managing gradual rollout schedules for feature fl
 including staged percentage increases, time-based triggers, and progression criteria.
 """
 
-from datetime import datetime
+import uuid
 from enum import Enum
+
 from sqlalchemy import (
-    Column,
-    String,
-    Boolean,
-    Integer,
-    ForeignKey,
-    Enum as SQLAEnum,
-    Text,
-    Index,
     CheckConstraint,
+    Column,
     DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
     func,
 )
-from sqlalchemy.dialects.postgresql import UUID, JSONB
-from sqlalchemy.orm import relationship
+from sqlalchemy import (
+    Enum as SQLAEnum,
+)
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.ext.declarative import declared_attr
-import uuid
+from sqlalchemy.orm import relationship
+
+from backend.app.core.database_config import get_schema_name
 
 from .base import Base, BaseModel
-from backend.app.core.database_config import get_schema_name
 
 
 class TriggerType(Enum):
     """Types of triggers for rollout schedule stages."""
+
     TIME_BASED = "time_based"  # Trigger based on a specific date/time
     METRIC_BASED = "metric_based"  # Trigger based on a specific metric threshold
     MANUAL = "manual"  # Manually triggered by a user
@@ -38,6 +41,7 @@ class TriggerType(Enum):
 
 class RolloutStageStatus(Enum):
     """Status of a rollout schedule stage."""
+
     PENDING = "pending"  # Stage is waiting to be processed
     IN_PROGRESS = "in_progress"  # Stage is currently being applied
     COMPLETED = "completed"  # Stage has been completed
@@ -46,6 +50,7 @@ class RolloutStageStatus(Enum):
 
 class RolloutScheduleStatus(Enum):
     """Status of a rollout schedule."""
+
     DRAFT = "draft"  # Schedule is being drafted, not yet active
     ACTIVE = "active"  # Schedule is active and being processed
     PAUSED = "paused"  # Schedule is temporarily paused
@@ -60,6 +65,7 @@ class RolloutSchedule(Base, BaseModel):
     A rollout schedule contains multiple stages that define how a feature flag
     should be gradually rolled out to users over time.
     """
+
     __tablename__ = "rollout_schedules"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -97,7 +103,7 @@ class RolloutSchedule(Base, BaseModel):
         "RolloutStage",
         back_populates="rollout_schedule",
         cascade="all, delete-orphan",
-        order_by="RolloutStage.stage_order"
+        order_by="RolloutStage.stage_order",
     )
 
     @declared_attr
@@ -134,6 +140,7 @@ class RolloutStage(Base, BaseModel):
     Each stage represents a target percentage and the criteria for
     transitioning to this stage.
     """
+
     __tablename__ = "rollout_stages"
 
     rollout_schedule_id = Column(

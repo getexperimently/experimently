@@ -24,8 +24,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from backend.app.api import deps
 from backend.app.models.user import User, UserRole
 from backend.app.services.clickhouse_connector import (
-    ClickHouseConnector,
     ClickHouseConnectionError,
+    ClickHouseConnector,
     ClickHouseQueryError,
 )
 
@@ -59,7 +59,9 @@ class ClickHouseConnectionParams(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     host: str = Field(..., description="ClickHouse server hostname")
-    port: int = Field(8123, description="ClickHouse HTTP port (8123 for HTTP, 8443 for HTTPS)")
+    port: int = Field(
+        8123, description="ClickHouse HTTP port (8123 for HTTP, 8443 for HTTPS)"
+    )
     database: str = Field("default", description="ClickHouse database name")
     user: str = Field("default", description="ClickHouse username")
     password: str = Field("", description="ClickHouse password")

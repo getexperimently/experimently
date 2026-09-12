@@ -1,18 +1,19 @@
 # backend/tests/unit/api/test_users.py
-import pytest
 import uuid
-from unittest.mock import MagicMock, patch
-from fastapi import status, HTTPException
-from fastapi.testclient import TestClient
-from sqlalchemy.orm import Session
-from pydantic import SecretStr
 from datetime import datetime, timezone
+from unittest.mock import MagicMock, patch
 
+import pytest
+from fastapi import HTTPException, status
+from fastapi.testclient import TestClient
+from pydantic import SecretStr
+from sqlalchemy.orm import Session
+
+from backend.app.api.deps import get_current_active_user, get_current_superuser, get_db
+from backend.app.core.security import get_password_hash
+from backend.app.main import app
 from backend.app.models.user import User, UserRole
 from backend.app.schemas.user import UserCreate, UserUpdate
-from backend.app.api.deps import get_current_active_user, get_current_superuser, get_db
-from backend.app.main import app
-from backend.app.core.security import get_password_hash
 
 
 @pytest.fixture
@@ -79,8 +80,10 @@ def client():
 
 def test_list_users_superuser(client, mock_db, mock_db_query, superuser):
     """Test that superusers can list all users."""
-    # Setup mocks
+    # Setup mocks. The endpoint orders before paginating, so `order_by` has to
+    # return the chain too.
     mock_db_query.filter.return_value = mock_db_query
+    mock_db_query.order_by.return_value = mock_db_query
     mock_db_query.offset.return_value = mock_db_query
     # Important: Return a list directly, not something with .all() method
     mock_db_query.limit.return_value = [superuser]
@@ -224,7 +227,7 @@ def test_create_user(mock_hash, client, mock_db, mock_db_query, superuser):
         for key, value in user.__dict__.items():
             if key != "_sa_instance_state" and hasattr(created_user, key):
                 setattr(created_user, key, value)
-        return None
+        return
 
     mock_db.add.side_effect = side_effect_add
 
@@ -475,6 +478,7 @@ def test_update_user_self(client, mock_db, mock_db_query, normal_user):
     # Reset overrides
     app.dependency_overrides = {}
 
+
 def test_delete_user_superuser(client, mock_db, mock_db_query, superuser, normal_user):
     """Test that superusers can delete other users."""
     # Setup mocks
@@ -495,6 +499,7 @@ def test_delete_user_superuser(client, mock_db, mock_db_query, superuser, normal
     mock_db.delete.assert_called_once_with(normal_user)
     mock_db.commit.assert_called_once()
 
+
 def test_create_user_existing_username(client, mock_db):
     response = client.post(
         "/api/v1/users/",
@@ -506,6 +511,7 @@ def test_create_user_existing_username(client, mock_db):
         },
     )
     assert response.status_code == 409, response.text
+
 
 def test_create_user_existing_email(client, mock_db):
     response = client.post(
@@ -519,6 +525,7 @@ def test_create_user_existing_email(client, mock_db):
     )
     assert response.status_code == 409, response.text
 
+
 def test_weak_password(client, mock_db):
     response = client.post(
         "/api/v1/users/",
@@ -530,6 +537,7 @@ def test_weak_password(client, mock_db):
         },
     )
     assert response.status_code == 422, response.text
+
 
 def test_create_user_invalid_data(client, mock_db):
     response = client.post(

@@ -20,15 +20,15 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from backend.app.api.deps import get_db, get_current_user
+from backend.app.api.deps import get_current_user, get_db
 from backend.app.main import app
 from backend.app.models.user import User
 from backend.app.schemas.bayesian import (
     BayesianConfig,
     BayesianDecision,
+    BayesianPosteriorResult,
     BayesianResultsResponse,
     BayesianVariantResult,
-    BayesianPosteriorResult,
 )
 from backend.app.services.analysis_service import AnalysisService
 
@@ -46,6 +46,7 @@ USER_UUID = uuid.UUID("12345678-1234-5678-1234-567812345678")
 # ---------------------------------------------------------------------------
 # Helpers: build minimal mock results dicts
 # ---------------------------------------------------------------------------
+
 
 def _make_base_results(
     bayesian_enabled: bool = False,
@@ -271,9 +272,7 @@ class TestBayesianResultsField:
     """
 
     @pytest.mark.unit
-    def test_bayesian_results_is_null_when_bayesian_disabled(
-        self, client: TestClient
-    ):
+    def test_bayesian_results_is_null_when_bayesian_disabled(self, client: TestClient):
         """
         When bayesian_enabled=False the response must include
         bayesian_results=null (not omitted, just null).
@@ -298,15 +297,15 @@ class TestBayesianResultsField:
         assert data["bayesian_results"] is None
 
     @pytest.mark.unit
-    def test_bayesian_results_present_when_bayesian_enabled(
-        self, client: TestClient
-    ):
+    def test_bayesian_results_present_when_bayesian_enabled(self, client: TestClient):
         """
         When bayesian_enabled=True the response must contain a non-null
         bayesian_results object with decision and variant_results.
         """
         bayesian_data = _make_bayesian_results(decision="CONTINUE")
-        results = _make_base_results(bayesian_enabled=True, bayesian_results=bayesian_data)
+        results = _make_base_results(
+            bayesian_enabled=True, bayesian_results=bayesian_data
+        )
 
         with patch.object(
             AnalysisService,
@@ -326,9 +325,7 @@ class TestBayesianResultsField:
         assert "variant_results" in br
 
     @pytest.mark.unit
-    def test_bayesian_results_contains_decision_field(
-        self, client: TestClient
-    ):
+    def test_bayesian_results_contains_decision_field(self, client: TestClient):
         """bayesian_results.decision must be present and a valid BayesianDecision string."""
         bayesian_data = _make_bayesian_results(decision="CONTINUE")
         results = _make_base_results(bayesian_results=bayesian_data)
@@ -348,9 +345,7 @@ class TestBayesianResultsField:
         assert br["decision"] in {d.value for d in BayesianDecision}
 
     @pytest.mark.unit
-    def test_bayesian_results_contains_variant_results(
-        self, client: TestClient
-    ):
+    def test_bayesian_results_contains_variant_results(self, client: TestClient):
         """
         bayesian_results.variant_results must be a list with one entry per variant,
         each containing probability_to_be_best, expected_loss, and posterior.
@@ -380,9 +375,7 @@ class TestBayesianResultsField:
             assert "variant_key" in vr
 
     @pytest.mark.unit
-    def test_bayesian_results_posterior_has_credible_interval(
-        self, client: TestClient
-    ):
+    def test_bayesian_results_posterior_has_credible_interval(self, client: TestClient):
         """
         Each variant's posterior must include credible_interval_lower and
         credible_interval_upper fields.
@@ -406,7 +399,10 @@ class TestBayesianResultsField:
             posterior = vr["posterior"]
             assert "credible_interval_lower" in posterior
             assert "credible_interval_upper" in posterior
-            assert posterior["credible_interval_lower"] < posterior["credible_interval_upper"]
+            assert (
+                posterior["credible_interval_lower"]
+                < posterior["credible_interval_upper"]
+            )
 
     @pytest.mark.unit
     def test_bayesian_decision_continue(self, client: TestClient):
@@ -568,9 +564,7 @@ class TestBayesianResultsAccessControl:
         assert response.json()["bayesian_results"] is not None
 
     @pytest.mark.unit
-    def test_analyst_can_access_bayesian_results(
-        self, client_analyst: TestClient
-    ):
+    def test_analyst_can_access_bayesian_results(self, client_analyst: TestClient):
         """ANALYST users (read-only) must be able to retrieve bayesian_results."""
         bayesian_data = _make_bayesian_results()
         results = _make_base_results(bayesian_results=bayesian_data)
@@ -589,9 +583,7 @@ class TestBayesianResultsAccessControl:
         assert response.json()["bayesian_results"] is not None
 
     @pytest.mark.unit
-    def test_developer_can_access_bayesian_results(
-        self, client_developer: TestClient
-    ):
+    def test_developer_can_access_bayesian_results(self, client_developer: TestClient):
         """DEVELOPER users must be able to read bayesian_results."""
         bayesian_data = _make_bayesian_results()
         results = _make_base_results(bayesian_results=bayesian_data)
@@ -632,9 +624,7 @@ class TestBayesianResultsResponseSchema:
     """Ensure the full response schema is correct when Bayesian is enabled."""
 
     @pytest.mark.unit
-    def test_top_level_response_includes_bayesian_results_key(
-        self, client: TestClient
-    ):
+    def test_top_level_response_includes_bayesian_results_key(self, client: TestClient):
         """
         The top-level ExperimentResultsResponse must always include a
         bayesian_results key (null or populated).
@@ -655,9 +645,7 @@ class TestBayesianResultsResponseSchema:
         assert "bayesian_results" in response.json()
 
     @pytest.mark.unit
-    def test_bayesian_variant_result_has_all_required_fields(
-        self, client: TestClient
-    ):
+    def test_bayesian_variant_result_has_all_required_fields(self, client: TestClient):
         """Each BayesianVariantResult must have variant_key, posterior,
         probability_to_be_best, and expected_loss."""
         bayesian_data = _make_bayesian_results()
@@ -675,7 +663,12 @@ class TestBayesianResultsResponseSchema:
 
         assert response.status_code == 200
         br = response.json()["bayesian_results"]
-        required_keys = {"variant_key", "posterior", "probability_to_be_best", "expected_loss"}
+        required_keys = {
+            "variant_key",
+            "posterior",
+            "probability_to_be_best",
+            "expected_loss",
+        }
         for vr in br["variant_results"]:
             for key in required_keys:
                 assert key in vr, f"Missing key '{key}' in BayesianVariantResult"
@@ -699,8 +692,11 @@ class TestBayesianResultsResponseSchema:
         assert response.status_code == 200
         br = response.json()["bayesian_results"]
         posterior_required = {
-            "alpha", "beta", "mean",
-            "credible_interval_lower", "credible_interval_upper"
+            "alpha",
+            "beta",
+            "mean",
+            "credible_interval_lower",
+            "credible_interval_upper",
         }
         for vr in br["variant_results"]:
             for key in posterior_required:
@@ -709,9 +705,7 @@ class TestBayesianResultsResponseSchema:
                 )
 
     @pytest.mark.unit
-    def test_response_is_200_even_when_bayesian_is_none(
-        self, client: TestClient
-    ):
+    def test_response_is_200_even_when_bayesian_is_none(self, client: TestClient):
         """
         The endpoint must return 200 even when bayesian_results is null
         (backwards-compatible for experiments that predate EP-035).

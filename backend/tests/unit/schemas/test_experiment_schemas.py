@@ -4,18 +4,19 @@ Test Experiment Schemas.
 This module contains tests for the Pydantic v2 experiment schema validation.
 """
 
-import pytest
-from datetime import datetime
 import uuid
+from datetime import datetime
+
+import pytest
 
 from backend.app.schemas.experiment_schemas import (
     ExperimentBase,
     ExperimentCreate,
-    ExperimentUpdate,
     ExperimentInDB,
+    ExperimentListResponse,
     ExperimentResponse,
     ExperimentSimple,
-    ExperimentListResponse
+    ExperimentUpdate,
 )
 
 
@@ -28,7 +29,7 @@ class TestExperimentSchemasValidation:
             "key": "test-experiment",
             "name": "Test Experiment",
             "description": "This is a test experiment",
-            "is_active": True
+            "is_active": True,
         }
         experiment = ExperimentBase(**data)
 
@@ -43,7 +44,7 @@ class TestExperimentSchemasValidation:
             "key": "test-experiment",
             "name": "Test Experiment",
             "description": "This is a test experiment",
-            "is_active": True
+            "is_active": True,
         }
         experiment = ExperimentCreate(**data)
 
@@ -54,11 +55,7 @@ class TestExperimentSchemasValidation:
 
     def test_experiment_update(self):
         """Test ExperimentUpdate schema."""
-        data = {
-            "key": "updated-key",
-            "name": "Updated Name",
-            "is_active": False
-        }
+        data = {"key": "updated-key", "name": "Updated Name", "is_active": False}
         experiment = ExperimentUpdate(**data)
 
         assert experiment.key == "updated-key"
@@ -80,7 +77,7 @@ class TestExperimentSchemasValidation:
             "description": "This is a test experiment",
             "is_active": True,
             "created_at": current_time,
-            "updated_at": current_time
+            "updated_at": current_time,
         }
 
         experiment = ExperimentInDB(**data)
@@ -104,7 +101,7 @@ class TestExperimentSchemasValidation:
             "id": experiment_id,
             "key": "test-experiment",
             "name": "Test Experiment",
-            "is_active": True
+            "is_active": True,
         }
 
         experiment = ExperimentSimple(**data)
@@ -128,10 +125,10 @@ class TestExperimentSchemasValidation:
                     "id": experiment_id,
                     "key": "test-experiment",
                     "name": "Test Experiment",
-                    "is_active": True
+                    "is_active": True,
                 }
             ],
-            "total": 1
+            "total": 1,
         }
 
         response = ExperimentListResponse(**data)

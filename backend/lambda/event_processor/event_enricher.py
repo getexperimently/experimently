@@ -10,11 +10,11 @@ This module enriches validated events with:
 Follows TDD (Test-Driven Development) - GREEN phase implementation.
 """
 
-import sys
-from pathlib import Path
-from typing import Dict, Any, List, Optional
-from datetime import datetime
 import logging
+import sys
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 # Add shared module to path
 shared_path = Path(__file__).parent.parent / "shared"
@@ -25,7 +25,9 @@ from models import EventData
 logger = logging.getLogger(__name__)
 
 
-def fetch_assignment_from_dynamodb(user_id: str, experiment_id: str) -> Optional[Dict[str, Any]]:
+def fetch_assignment_from_dynamodb(
+    user_id: str, experiment_id: str
+) -> Optional[Dict[str, Any]]:
     """
     Fetch user assignment from DynamoDB.
 
@@ -40,7 +42,9 @@ def fetch_assignment_from_dynamodb(user_id: str, experiment_id: str) -> Optional
     """
     # Placeholder - will be implemented when DynamoDB integration is added
     # In real implementation, this would query DynamoDB assignments table
-    logger.debug(f"Fetching assignment for user_id={user_id}, experiment_id={experiment_id}")
+    logger.debug(
+        f"Fetching assignment for user_id={user_id}, experiment_id={experiment_id}"
+    )
     return None
 
 
@@ -62,8 +66,7 @@ def fetch_experiment_metadata(experiment_id: str) -> Optional[Dict[str, Any]]:
 
 
 def calculate_time_since_assignment(
-    event_timestamp: datetime,
-    assignment_timestamp: str
+    event_timestamp: datetime, assignment_timestamp: str
 ) -> int:
     """
     Calculate time elapsed since assignment in seconds.
@@ -77,7 +80,9 @@ def calculate_time_since_assignment(
     """
     # Parse assignment timestamp
     if isinstance(assignment_timestamp, str):
-        assignment_dt = datetime.fromisoformat(assignment_timestamp.replace('Z', '+00:00'))
+        assignment_dt = datetime.fromisoformat(
+            assignment_timestamp.replace("Z", "+00:00")
+        )
     else:
         assignment_dt = assignment_timestamp
 
@@ -107,10 +112,10 @@ def enrich_event(validated_event: EventData) -> Dict[str, Any]:
     enriched = validated_event.model_dump()
 
     # Convert datetime to ISO string for JSON serialization
-    if isinstance(enriched.get('timestamp'), datetime):
-        enriched['timestamp'] = enriched['timestamp'].isoformat()
+    if isinstance(enriched.get("timestamp"), datetime):
+        enriched["timestamp"] = enriched["timestamp"].isoformat()
 
-    experiment_id = enriched.get('experiment_id')
+    experiment_id = enriched.get("experiment_id")
 
     # If no experiment_id, return as-is
     if not experiment_id:
@@ -118,24 +123,20 @@ def enrich_event(validated_event: EventData) -> Dict[str, Any]:
 
     try:
         # Fetch assignment data
-        assignment = fetch_assignment_from_dynamodb(
-            enriched['user_id'],
-            experiment_id
-        )
+        assignment = fetch_assignment_from_dynamodb(enriched["user_id"], experiment_id)
 
         if assignment:
             # Add assignment fields
-            enriched['assignment_id'] = assignment.get('assignment_id')
-            enriched['variant'] = assignment.get('variant')
+            enriched["assignment_id"] = assignment.get("assignment_id")
+            enriched["variant"] = assignment.get("variant")
 
             # Calculate derived fields
-            if 'timestamp' in assignment:
+            if "timestamp" in assignment:
                 try:
                     time_since = calculate_time_since_assignment(
-                        validated_event.timestamp,
-                        assignment['timestamp']
+                        validated_event.timestamp, assignment["timestamp"]
                     )
-                    enriched['time_since_assignment_seconds'] = time_since
+                    enriched["time_since_assignment_seconds"] = time_since
                 except Exception as e:
                     logger.warning(f"Failed to calculate time_since_assignment: {e}")
 
@@ -143,14 +144,16 @@ def enrich_event(validated_event: EventData) -> Dict[str, Any]:
         experiment_metadata = fetch_experiment_metadata(experiment_id)
 
         if experiment_metadata:
-            enriched['experiment_key'] = experiment_metadata.get('key')
-            enriched['experiment_name'] = experiment_metadata.get('name')
-            enriched['experiment_status'] = experiment_metadata.get('status')
+            enriched["experiment_key"] = experiment_metadata.get("key")
+            enriched["experiment_name"] = experiment_metadata.get("name")
+            enriched["experiment_status"] = experiment_metadata.get("status")
 
     except Exception as e:
         # Log error but don't fail - preserve original event data
-        logger.error(f"Error enriching event {enriched.get('event_id', 'unknown')}: {e}")
-        enriched['enrichment_error'] = True
+        logger.error(
+            f"Error enriching event {enriched.get('event_id', 'unknown')}: {e}"
+        )
+        enriched["enrichment_error"] = True
 
     return enriched
 
@@ -178,9 +181,9 @@ def enrich_events_batch(validated_events: List[EventData]) -> List[Dict[str, Any
             # Even if enrichment fails completely, preserve the original event
             logger.error(f"Failed to enrich event {event.event_id}: {e}")
             event_dict = event.model_dump()
-            if isinstance(event_dict.get('timestamp'), datetime):
-                event_dict['timestamp'] = event_dict['timestamp'].isoformat()
-            event_dict['enrichment_error'] = True
+            if isinstance(event_dict.get("timestamp"), datetime):
+                event_dict["timestamp"] = event_dict["timestamp"].isoformat()
+            event_dict["enrichment_error"] = True
             enriched_events.append(event_dict)
 
     return enriched_events

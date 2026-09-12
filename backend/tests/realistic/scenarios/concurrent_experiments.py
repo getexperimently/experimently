@@ -16,14 +16,19 @@ with realistic overlap patterns.
 
 import os
 import uuid
+
 import pytest
 import requests
 
-from backend.tests.realistic.data_generator import make_concurrent_scenario, DataScenario
-
+from backend.tests.realistic.data_generator import (
+    DataScenario,
+    make_concurrent_scenario,
+)
 
 API_URL = os.environ.get("REALISTIC_API_URL", "http://localhost:8000")
-SKIP_REASON = "Realistic scenario tests require a running platform (set RUN_REALISTIC=1)"
+SKIP_REASON = (
+    "Realistic scenario tests require a running platform (set RUN_REALISTIC=1)"
+)
 
 requires_platform = pytest.mark.skipif(
     os.environ.get("RUN_REALISTIC") != "1",
@@ -60,10 +65,16 @@ class TestConcurrentDataGeneration:
         )
         result = scenario.generate()
         control_ids = [u.user_id for u in result.users if u.variant_name == "control"]
-        treatment_ids = [u.user_id for u in result.users if u.variant_name == "treatment"]
+        treatment_ids = [
+            u.user_id for u in result.users if u.variant_name == "treatment"
+        ]
 
-        assert len(control_ids) == len(set(control_ids)), "Duplicate user IDs in control"
-        assert len(treatment_ids) == len(set(treatment_ids)), "Duplicate user IDs in treatment"
+        assert len(control_ids) == len(set(control_ids)), (
+            "Duplicate user IDs in control"
+        )
+        assert len(treatment_ids) == len(set(treatment_ids)), (
+            "Duplicate user IDs in treatment"
+        )
 
     def test_population_overlap_is_zero_by_default(self):
         """Without multi_assignment injection, no user appears in both variants."""
@@ -76,7 +87,9 @@ class TestConcurrentDataGeneration:
         )
         result = scenario.generate()
         control_ids = {u.user_id for u in result.users if u.variant_name == "control"}
-        treatment_ids = {u.user_id for u in result.users if u.variant_name == "treatment"}
+        treatment_ids = {
+            u.user_id for u in result.users if u.variant_name == "treatment"
+        }
         overlap = control_ids & treatment_ids
         assert len(overlap) == 0, f"Unexpected overlap: {overlap}"
 

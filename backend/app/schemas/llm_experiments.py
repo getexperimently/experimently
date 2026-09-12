@@ -4,10 +4,8 @@ Pydantic v2 schemas for LLM Experiment API endpoints (EP-046).
 
 from datetime import datetime
 from typing import Any, Dict, List, Optional
-from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
-
 
 # ---------------------------------------------------------------------------
 # Variant schemas
@@ -138,7 +136,9 @@ class CreateLLMExperimentRequest(BaseModel):
             "business_metric",
         }
         if v not in valid:
-            raise ValueError(f"evaluation_metric must be one of: {', '.join(sorted(valid))}")
+            raise ValueError(
+                f"evaluation_metric must be one of: {', '.join(sorted(valid))}"
+            )
         return v
 
     @model_validator(mode="after")
@@ -256,7 +256,7 @@ class SubmitEvaluationRequest(BaseModel):
     """Request to submit evaluation scores for a prior completion."""
 
     evaluation_id: str
-    human_rating: Optional[float] = None     # 1–5
+    human_rating: Optional[float] = None  # 1–5
     business_metric_value: Optional[float] = None
 
     @field_validator("human_rating")
@@ -319,8 +319,8 @@ class VariantStats(BaseModel):
     mean_business_metric: Optional[float]
     business_metric_ci_lower: Optional[float]
     business_metric_ci_upper: Optional[float]
-    p_value: Optional[float]       # vs control
-    effect_size: Optional[float]   # Cohen's d vs control
+    p_value: Optional[float]  # vs control
+    effect_size: Optional[float]  # Cohen's d vs control
 
 
 class LLMExperimentResults(BaseModel):
@@ -348,6 +348,6 @@ class LLMJudgeResult(BaseModel):
     """Result from LLM-as-judge scoring for a single evaluation."""
 
     evaluation_id: str
-    score: float        # 0–1
+    score: float  # 0–1
     reasoning: str
     judge_model: str

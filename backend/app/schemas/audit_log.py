@@ -6,11 +6,10 @@ providing validation and serialization for audit trail operations.
 """
 
 from datetime import datetime
-from typing import Optional, List, Dict, Any
+from typing import Dict, List, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, field_validator, model_validator, ConfigDict
-from enum import Enum
+from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 from backend.app.models.audit_log import ActionType, EntityType
 
@@ -35,7 +34,7 @@ class AuditLogCreate(AuditLogBase):
 
     user_id: Optional[UUID] = None
 
-    @field_validator('action_type')
+    @field_validator("action_type")
     @classmethod
     def validate_action_type(cls, v):
         """Validate action type is a valid ActionType enum value."""
@@ -45,7 +44,7 @@ class AuditLogCreate(AuditLogBase):
         except ValueError:
             raise ValueError(f"Invalid action type: {v}")
 
-    @field_validator('entity_type')
+    @field_validator("entity_type")
     @classmethod
     def validate_entity_type(cls, v):
         """Validate entity type is a valid EntityType enum value."""
@@ -82,13 +81,13 @@ class AuditLogListResponse(BaseModel):
 
     def __init__(self, **data):
         """Initialize and calculate total_pages if not provided."""
-        if 'total_pages' not in data:
-            total = data.get('total', 0)
-            limit = data.get('limit', 50)
+        if "total_pages" not in data:
+            total = data.get("total", 0)
+            limit = data.get("limit", 50)
             if limit <= 0:
-                data['total_pages'] = 0
+                data["total_pages"] = 0
             else:
-                data['total_pages'] = (total + limit - 1) // limit
+                data["total_pages"] = (total + limit - 1) // limit
         super().__init__(**data)
 
 
@@ -99,7 +98,7 @@ class ToggleRequest(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-    @field_validator('reason')
+    @field_validator("reason")
     @classmethod
     def validate_reason(cls, v):
         """Validate reason length if provided."""
@@ -137,7 +136,7 @@ class AuditLogFilterParams(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-    @field_validator('page')
+    @field_validator("page")
     @classmethod
     def validate_page(cls, v):
         """Validate page number is positive."""
@@ -145,7 +144,7 @@ class AuditLogFilterParams(BaseModel):
             raise ValueError("Page number must be 1 or greater")
         return v
 
-    @field_validator('limit')
+    @field_validator("limit")
     @classmethod
     def validate_limit(cls, v):
         """Validate limit is within acceptable range."""
@@ -153,7 +152,7 @@ class AuditLogFilterParams(BaseModel):
             raise ValueError("Limit must be between 1 and 1000")
         return v
 
-    @field_validator('entity_type')
+    @field_validator("entity_type")
     @classmethod
     def validate_entity_type(cls, v):
         """Validate entity type if provided."""
@@ -165,7 +164,7 @@ class AuditLogFilterParams(BaseModel):
                 raise ValueError(f"Invalid entity type: {v}")
         return v
 
-    @field_validator('action_type')
+    @field_validator("action_type")
     @classmethod
     def validate_action_type(cls, v):
         """Validate action type if provided."""
@@ -177,10 +176,14 @@ class AuditLogFilterParams(BaseModel):
                 raise ValueError(f"Invalid action type: {v}")
         return v
 
-    @model_validator(mode='after')
+    @model_validator(mode="after")
     def validate_date_range(self):
         """Validate that to_date is after from_date if both are provided."""
-        if self.to_date is not None and self.from_date is not None and self.to_date <= self.from_date:
+        if (
+            self.to_date is not None
+            and self.from_date is not None
+            and self.to_date <= self.from_date
+        ):
             raise ValueError("to_date must be after from_date")
         return self
 

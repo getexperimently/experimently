@@ -14,13 +14,14 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
-
 # ---------------------------------------------------------------------------
 # Request schemas
 # ---------------------------------------------------------------------------
 
+
 class DesignRequest(BaseModel):
     """Request body for POST /ai/design."""
+
     description: str = Field(
         ...,
         min_length=10,
@@ -35,6 +36,7 @@ class DesignRequest(BaseModel):
 
 class InterpretRequest(BaseModel):
     """Request body for POST /ai/interpret/{experiment_id}."""
+
     experiment_id: str = Field(..., description="Experiment identifier.")
     variant_name: str = Field(..., description="Name of the variant being interpreted.")
     p_value: float = Field(..., description="Statistical p-value from the experiment.")
@@ -47,8 +49,10 @@ class InterpretRequest(BaseModel):
 # Response schemas
 # ---------------------------------------------------------------------------
 
+
 class ExperimentDesignSuggestionResponse(BaseModel):
     """Response for POST /ai/design."""
+
     model_config = ConfigDict(from_attributes=True)
 
     hypothesis: str
@@ -63,6 +67,7 @@ class ExperimentDesignSuggestionResponse(BaseModel):
 
 class ResultsInterpretationResponse(BaseModel):
     """Response for POST /ai/interpret/{experiment_id}."""
+
     model_config = ConfigDict(from_attributes=True)
 
     summary: str
@@ -74,6 +79,7 @@ class ResultsInterpretationResponse(BaseModel):
 
 class SampleSizeEstimateResponse(BaseModel):
     """Response for GET /ai/sample-size."""
+
     model_config = ConfigDict(from_attributes=True)
 
     required_per_variant: int
@@ -84,6 +90,7 @@ class SampleSizeEstimateResponse(BaseModel):
 
 class ExperimentTemplateResponse(BaseModel):
     """Response for GET /ai/templates and GET /ai/templates/{id}."""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: str
@@ -103,8 +110,10 @@ class ExperimentTemplateResponse(BaseModel):
 # MCP schemas
 # ---------------------------------------------------------------------------
 
+
 class MCPToolSchema(BaseModel):
     """Definition of a single MCP tool exposed to AI agents."""
+
     name: str
     description: str
     parameters: Dict[str, Any]
@@ -112,6 +121,7 @@ class MCPToolSchema(BaseModel):
 
 class MCPManifestResponse(BaseModel):
     """MCP server manifest listing all available tools."""
+
     name: str
     version: str
     tools: List[MCPToolSchema]

@@ -31,12 +31,12 @@ Statistical ground-truth values used in this file were independently computed wi
 """
 
 import math
-import pytest
 from typing import List
 from unittest.mock import MagicMock
 
-from backend.app.services.analysis_service import AnalysisService
+import pytest
 
+from backend.app.services.analysis_service import AnalysisService
 
 # ---------------------------------------------------------------------------
 # Helpers / shared data
@@ -86,7 +86,7 @@ class TestSelectStatisticalTest:
         # TODO: implement select_statistical_test on AnalysisService
         result = service.select_statistical_test(
             metric_type="conversion",
-            control_size=20,    # below threshold of 30
+            control_size=20,  # below threshold of 30
             treatment_size=25,
         )
         assert result == "fisher_exact", (
@@ -258,8 +258,8 @@ class TestWelchTTest:
 
     # Each sub-list is repeated 200 times for a total of n=1000 per group.
     # group1 mean = 4.0, group2 mean = 5.0  → clear 1-unit difference.
-    _GROUP1: List[float] = [2, 3, 4, 5, 6] * 200    # mean=4, var=2
-    _GROUP2: List[float] = [3, 4, 5, 6, 7] * 200    # mean=5, var=2
+    _GROUP1: List[float] = [2, 3, 4, 5, 6] * 200  # mean=4, var=2
+    _GROUP2: List[float] = [3, 4, 5, 6, 7] * 200  # mean=5, var=2
 
     @pytest.mark.unit
     def test_welch_t_test_known_case(self):
@@ -367,9 +367,7 @@ class TestCohensH:
         service = _make_service()
         # Pre-computed: h ≈ 0.30 for p1=0.10, p2=0.178
         _h, label = service.cohens_h(p1=0.10, p2=0.178)
-        assert label == "small", (
-            f"Expected label='small' for |h|≈0.3, got '{label}'"
-        )
+        assert label == "small", f"Expected label='small' for |h|≈0.3, got '{label}'"
 
     @pytest.mark.unit
     def test_cohens_h_label_large_for_h_0_9(self):
@@ -381,9 +379,7 @@ class TestCohensH:
         service = _make_service()
         # Pre-computed: h ≈ 0.927 for p1=0.10, p2=0.50
         _h, label = service.cohens_h(p1=0.10, p2=0.50)
-        assert label == "large", (
-            f"Expected label='large' for |h|≈0.927, got '{label}'"
-        )
+        assert label == "large", f"Expected label='large' for |h|≈0.927, got '{label}'"
 
 
 # ---------------------------------------------------------------------------
@@ -462,9 +458,7 @@ class TestCohensD:
             control_values=control,
             treatment_values=treatment,
         )
-        assert label == "medium", (
-            f"Expected label='medium' for d≈0.6, got '{label}'"
-        )
+        assert label == "medium", f"Expected label='medium' for d≈0.6, got '{label}'"
 
 
 # ---------------------------------------------------------------------------
@@ -685,7 +679,7 @@ class TestSampleSizeCalculator:
         # TODO: implement calculate_required_sample_size on AnalysisService
         n = service.calculate_required_sample_size(
             baseline_rate=0.5,
-            minimum_detectable_effect=0.05,   # absolute: 50% → 55%
+            minimum_detectable_effect=0.05,  # absolute: 50% → 55%
             alpha=0.05,
             power=0.80,
         )
@@ -707,13 +701,13 @@ class TestSampleSizeCalculator:
         service = _make_service()
         n_small_mde = service.calculate_required_sample_size(
             baseline_rate=0.1,
-            minimum_detectable_effect=0.01,   # small effect: 10% → 11%
+            minimum_detectable_effect=0.01,  # small effect: 10% → 11%
             alpha=0.05,
             power=0.80,
         )
         n_large_mde = service.calculate_required_sample_size(
             baseline_rate=0.1,
-            minimum_detectable_effect=0.02,   # larger effect: 10% → 12%
+            minimum_detectable_effect=0.02,  # larger effect: 10% → 12%
             alpha=0.05,
             power=0.80,
         )
@@ -736,13 +730,13 @@ class TestSampleSizeCalculator:
             baseline_rate=0.1,
             minimum_detectable_effect=0.02,
             alpha=0.05,
-            power=0.80,   # 80% power
+            power=0.80,  # 80% power
         )
         n_high_power = service.calculate_required_sample_size(
             baseline_rate=0.1,
             minimum_detectable_effect=0.02,
             alpha=0.05,
-            power=0.90,   # 90% power
+            power=0.90,  # 90% power
         )
         assert n_high_power > n_low_power, (
             f"90% power ({n_high_power}) should require more samples than 80% power ({n_low_power})"
