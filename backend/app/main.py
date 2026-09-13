@@ -23,9 +23,9 @@ from backend.app.core.metrics_scheduler import metrics_scheduler
 from backend.app.core.rollout_scheduler import rollout_scheduler
 from backend.app.core.safety_scheduler import safety_scheduler
 from backend.app.core.scheduler import experiment_scheduler
-from backend.app.ee_loader import load_enterprise
 from backend.app.middleware.rate_limiter import RateLimitMiddleware
 from backend.app.middleware.security_middleware import SecurityHeadersMiddleware
+from backend.app.modules_loader import abort_if_modules_broken, load_modules
 
 # --- EP-013 additions ---
 try:
@@ -65,13 +65,22 @@ if _monitoring_imports_ok:
 # Standard-library logger (used by the existing schedulers etc.)
 logger = logging.getLogger(__name__)
 
-# Open-core seam: install the Enterprise hooks (routers, models, tags, audit
-# signer).  Importing backend.app.api.api above already triggered this while
-# it built the v1 router; the call is repeated here (it is idempotent) so that
-# main.py — the process entry point — names the seam explicitly.  A Community
-# build has no `ee` package: nothing loads and every hook keeps its default.
-if load_enterprise():
-    logger.info("Enterprise edition hooks installed")
+# The seam: install the modules' hooks (routers, models, tags, audit signer).
+# Importing backend.app.api.api above already triggered this while it built
+# the v1 router; the call is repeated here (it is idempotent) so that main.py
+# — the process entry point — names the seam explicitly.  A core build has no
+# `modules` package: nothing loads and every hook keeps its default.
+if load_modules():
+    logger.info("Modules hooks installed")
+# Nothing to load is the core profile and starts cleanly.  A package that *was*
+# found and did not install -- the registration raised, or its routers would
+# not mount -- is a full-profile deployment that would serve less than it was
+# deployed as (module routes 404, and on a failed registration compliance
+# events unsigned), so outside development/test this raises and the process
+# never starts.  Unconditional, because a routers-only failure leaves
+# `load_modules()` True: it is `modules_failure()` that decides, not the
+# return value.
+abort_if_modules_broken()
 
 if settings.dev_auth_bypass_active:
     logger.warning(
@@ -140,7 +149,7 @@ app = FastAPI(
     docs_url=None,
     redoc_url=None,
     openapi_url=f"{settings.API_V1_STR}/openapi.json",
-    # Community tag descriptions plus whatever the Enterprise registration
+    # Core tag descriptions plus whatever the modules' registration
     # contributed through hooks.register_tags(); computed at router build, so
     # it is read here after `api_router` has been imported above.
     openapi_tags=tags_metadata,

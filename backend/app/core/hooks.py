@@ -1,16 +1,17 @@
-"""The open-core seam: extension points Community code calls, Enterprise fills.
+"""The seam between the core and the optional modules.
 
-Community Edition (CE) code never imports Enterprise Edition (EE) code.  Where
-CE needs behaviour that only EE provides, it calls through a hook defined here.
-Every hook ships a Community default that is a no-op or a null implementation,
-so a build with no ``ee`` package behaves exactly as the open-source product is
-meant to; :mod:`backend.app.ee_loader` installs the EE implementations at
-start-up when the ``ee`` package is importable.
+Core code (``backend/``) never imports the ``modules`` package.  Where the core
+needs behaviour that only a module provides, it calls through a hook defined
+here.  Every hook ships a core default that is a no-op or a null
+implementation, so a build with no ``modules`` package -- the core profile --
+behaves exactly as the open-source product is meant to;
+:mod:`backend.app.modules_loader` installs the module implementations at
+start-up when the ``modules`` package is importable (the full profile).
 
 Hooks
 -----
 ``audit_signer``
-    Signs :class:`ComplianceAuditEvent` rows.  CE default writes no signature.
+    Signs :class:`ComplianceAuditEvent` rows.  Core default writes no signature.
 ``register_router`` / ``apply_routers``
     Extra API routers to mount on the v1 router.
 ``register_model_module`` / ``import_registered_models``
@@ -19,16 +20,20 @@ Hooks
 ``register_tags`` / ``extra_tags_metadata``
     Extra OpenAPI tag metadata.
 ``register_capability`` / ``get_capability``
-    Named implementations a Community call site asks for by key -- the body
-    of a route whose URL exists in every edition, or a service class a
-    scheduler prefers when it is installed.  ``get_capability`` returns
-    ``None`` for anything nobody registered, and the caller answers that with
-    an explicit refusal (HTTP 501) or a fallback, never with silence.  The
-    keys are the contract; ``core/enterprise_features.py`` names them.
+    Named implementations a core call site asks for by key -- the body of a
+    route whose URL exists in every profile, or a service class a scheduler
+    prefers when it is installed.  ``get_capability`` returns ``None`` for
+    anything nobody registered, and the caller answers that with an explicit
+    refusal (HTTP 501) or a fallback, never with silence.  The keys are the
+    contract; ``core/optional_modules.py`` names them.
+``register_modules`` / ``installed_modules``
+    The names of the modules the registration provides, validated against
+    :data:`KNOWN_MODULES`.  ``GET /api/v1/modules`` reports them and the
+    dashboard decides what to render from the same list.
 
 There is deliberately no ``register_scheduler``: all five schedulers started in
-``main.py``'s lifespan are Community, and no Enterprise module needs one today
-(``docs/planning/ee-coupling-report.md`` §5).  Add it when P5's PHI purge job
+``main.py``'s lifespan are core, and no module needs one today
+(the coupling report under ``docs/planning/``, §5).  Add it when P5's PHI purge job
 actually needs it, not before.
 """
 
@@ -42,6 +47,7 @@ from typing import Any, Callable, Dict, List, Optional, Protocol, Sequence, Tupl
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "KNOWN_MODULES",
     "AuditSigner",
     "NullAuditSigner",
     "apply_routers",
@@ -50,14 +56,43 @@ __all__ = [
     "extra_tags_metadata",
     "get_capability",
     "import_registered_models",
+    "installed_modules",
     "register_capability",
     "register_model_module",
+    "register_modules",
     "register_router",
     "register_tags",
     "reset",
     "reset_audit_signer",
     "set_audit_signer",
 ]
+
+#: The module names a registration may claim -- one per group in
+#: ``modules-manifest.txt``, in the same order.  This tuple is the contract
+#: between three places that have no other way to agree:
+#:
+#: * ``modules.register(hooks)``, which passes the names it provides to
+#:   :func:`register_modules`,
+#: * ``GET /api/v1/modules``, which reports :func:`installed_modules`,
+#: * ``frontend/src/services/modules.ts``'s ``MODULES``, which the dashboard
+#:   passes to ``useModule()`` to decide what chrome to render.
+#:
+#: A typo in any of them is silent -- the dashboard simply hides a tab the
+#: deployment has.  :func:`register_modules` rejects an unknown name, and
+#: ``backend/tests/unit/core/test_module_names.py`` pins the dashboard's copy
+#: against this one.
+KNOWN_MODULES: Tuple[str, ...] = (
+    "workspaces",
+    "hipaa",
+    "compliance",
+    "sso",
+    "rbac",
+    "warehouse",
+    "integrations",
+    "counters",
+    "etl",
+    "split_url",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -78,17 +113,17 @@ class AuditSigner(Protocol):
 
 
 class NullAuditSigner:
-    """Community default: audit events are recorded, but not signed.
+    """Core default: audit events are recorded, but not signed.
 
-    Tamper-evidence (HMAC-SHA256, EP-033) is an Enterprise feature.  Writing
-    ``None`` is safe on the hot path because
+    Tamper-evidence (HMAC-SHA256, EP-033) is the ``compliance`` module's.
+    Writing ``None`` is safe on the hot path because
     ``compliance_audit_events.hmac_signature`` is nullable in both the model
     (``models/compliance_audit_event.py:90``) and the migration that created it
-    (``ep033_add_compliance_audit_events.py:97``) — the six CE call sites that
+    (``ep033_add_compliance_audit_events.py:97``) — the six core call sites that
     log on every experiment and feature-flag mutation keep working unchanged.
 
     ``verify`` reports True for an unsigned row: absence of a signature is the
-    documented CE state, not evidence of tampering.  A row that *does* carry a
+    documented core state, not evidence of tampering.  A row that *does* carry a
     signature cannot be checked without the key, so it is reported as unverified.
     """
 
@@ -103,7 +138,7 @@ class NullAuditSigner:
 
 #: The active signer.  Look this up through the module (``hooks.audit_signer``)
 #: rather than importing the name, so that :func:`set_audit_signer` is visible
-#: to callers that were imported before the Enterprise loader ran.
+#: to callers that were imported before the modules loader ran.
 audit_signer: AuditSigner = NullAuditSigner()
 
 _DEFAULT_AUDIT_SIGNER: AuditSigner = audit_signer
@@ -119,7 +154,7 @@ def set_audit_signer(signer: AuditSigner) -> AuditSigner:
 
 
 def reset_audit_signer() -> None:
-    """Restore the Community default (used by tests)."""
+    """Restore the core default (used by tests)."""
     set_audit_signer(_DEFAULT_AUDIT_SIGNER)
 
 
@@ -132,6 +167,7 @@ _router_registrars: List[Callable[[Any], None]] = []
 _model_modules: List[str] = []
 _tags_metadata: List[Dict[str, Any]] = []
 _capabilities: Dict[str, Any] = {}
+_installed_modules: List[str] = []
 
 
 def register_router(registrar: Callable[[Any], None]) -> None:
@@ -151,6 +187,14 @@ def apply_routers(router: Any) -> int:
     """Run every registered router registrar against *router*.
 
     Returns the number of registrars applied.
+
+    A registrar is module code and may raise.  This function does not catch
+    that -- the seam is a registry, and what a failure *means* belongs to the
+    loader -- so the API build calls it through
+    ``modules_loader.mount_module_routers``, which runs it against a staging
+    router inside the loader's guard.  Calling it directly from a router build
+    is what once turned a missing ``public_router`` into an AttributeError out
+    of ``import backend.app.api.api`` and a process that never bound a port.
     """
     with _lock:
         registrars = list(_router_registrars)
@@ -220,11 +264,39 @@ def capability_names() -> Tuple[str, ...]:
         return tuple(sorted(_capabilities))
 
 
+def register_modules(names: Sequence[str]) -> None:
+    """Record the modules the registration provides.
+
+    Every name must be one of :data:`KNOWN_MODULES`; an unknown one is a
+    ``ValueError`` raised while the registration runs, so a typo is a
+    start-up failure the loader reports rather than a module the dashboard
+    never shows.  Registering a name twice is a no-op.
+    """
+    unknown = [name for name in names if name not in KNOWN_MODULES]
+    if unknown:
+        raise ValueError(
+            f"unknown module name(s) {unknown!r}; add them to KNOWN_MODULES (and "
+            f"to frontend/src/services/modules.ts) first. Known: "
+            f"{', '.join(KNOWN_MODULES)}"
+        )
+    with _lock:
+        for name in names:
+            if name not in _installed_modules:
+                _installed_modules.append(name)
+
+
+def installed_modules() -> Tuple[str, ...]:
+    """The module names registered so far, in :data:`KNOWN_MODULES` order."""
+    with _lock:
+        return tuple(name for name in KNOWN_MODULES if name in _installed_modules)
+
+
 def reset() -> None:
-    """Clear every registry and restore the Community signer (tests only)."""
+    """Clear every registry and restore the core signer (tests only)."""
     with _lock:
         _router_registrars.clear()
         _model_modules.clear()
         _tags_metadata.clear()
         _capabilities.clear()
+        _installed_modules.clear()
     reset_audit_signer()

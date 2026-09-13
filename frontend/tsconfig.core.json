@@ -1,0 +1,49 @@
+{
+  // Core-profile type-check.
+  //
+  //   npx tsc --noEmit -p tsconfig.core.json
+  //
+  // Same compiler options as `tsconfig.json`, but `@modules/*` resolves to the
+  // stub tree ALONE and the modules tree (`../modules/frontend/src`) is
+  // excluded from the program — so this is what the dashboard compiles to
+  // once `scripts/core_build.sh` has deleted `modules/`, proven without
+  // deleting anything.
+  //
+  // `next.config.js` points Next at this file for a core build, so webpack's
+  // tsconfig-paths resolution agrees with the explicit `@modules` alias
+  // instead of quietly resolving back to the real module.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    // `paths` is replaced wholesale by `extends`, not merged, so every entry
+    // of tsconfig.json is repeated here; only `@modules/*` differs.
+    "paths": {
+      "@/*": [
+        "./src/*"
+      ],
+      "@modules/*": [
+        "./src/modules-stub/*"
+      ],
+      "react": [
+        "./node_modules/react",
+        "./node_modules/@types/react"
+      ],
+      "react/*": [
+        "./node_modules/react/*",
+        "./node_modules/@types/react/*"
+      ],
+      "next": [
+        "./node_modules/next"
+      ],
+      "next/*": [
+        "./node_modules/next/*"
+      ],
+      "@testing-library/*": [
+        "./node_modules/@testing-library/*"
+      ]
+    }
+  },
+  "exclude": [
+    "node_modules",
+    "../modules"
+  ]
+}

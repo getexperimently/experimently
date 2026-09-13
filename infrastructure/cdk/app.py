@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 
+import importlib.util
 import os
+from pathlib import Path
+
 from aws_cdk import App, Environment
 
 from stacks.vpc_stack import VpcStack
 from stacks.compute_stack import ComputeStack
 from stacks.api_stack import ApiStack
-from stacks.analytics_stack import AnalyticsStack
 from stacks.monitoring_stack import MonitoringStack
 from stacks.enhanced_database_stack import EnhancedDatabaseStack
 from stacks.dynamodb_tables_stack import DynamoDBTablesStack
@@ -16,8 +18,73 @@ from stacks.elasticache_redis_stack import (
 from stacks.authentication_stack import AuthenticationStack
 from stacks.fargate_service_stack import FargateServiceStack
 from stacks.migration_task_stack import MigrationTaskStack
-from stacks.dynamodb_counters_stack import DynamoDBCountersStack
-from stacks.glue_etl_stack import GlueETLStack
+
+# ---------------------------------------------------------------------------
+# The modules' stacks (modules/infrastructure/cdk/stacks, issue #89)
+# ---------------------------------------------------------------------------
+# The real-time counters table (P2-B), the analytics data lake (Kinesis +
+# Firehose + OpenSearch) and the Glue ETL jobs (P3-A) belong to the counters
+# and etl modules: their stacks live under modules/, which a core checkout
+# does not have.
+#
+# Which profile this checkout deploys is decided the same way the application
+# decides it (backend/app/modules_loader.py): by whether the modules are
+# THERE.  A full checkout has modules/infrastructure/cdk/stacks and gets the
+# three stacks; a core checkout has no modules/ and gets neither the stacks
+# nor the API routes that would need them.  It was an environment variable
+# (ENABLE_MODULE_STACKS) that nothing in the repository ever set, so
+# `cdk deploy --all` on a full checkout silently produced no counters table
+# and no Kinesis/OpenSearch/Glue while the API went on reporting `counters`
+# and `etl` installed and the bandit scheduler retried DynamoDB every tick.
+#
+# EXPERIMENTLY_PROFILE -- the same variable the images and the API use --
+# overrides the default in either direction: `core` deploys the core set from
+# a full checkout, `full` insists on the module stacks and fails if they are
+# absent rather than quietly dropping them.
+#
+# The stacks are loaded by file path so that `cdk synth` never imports the
+# `modules` package (whose __init__ pulls in the backend application and its
+# dependencies).
+_MODULES_STACKS_DIR = Path(__file__).resolve().parents[2] / "modules" / "infrastructure" / "cdk" / "stacks"
+
+_PROFILE = os.environ.get("EXPERIMENTLY_PROFILE", "").strip().lower()
+if _PROFILE not in ("", "core", "full"):
+    raise SystemExit(
+        f"EXPERIMENTLY_PROFILE must be 'core' or 'full', not {_PROFILE!r}"
+    )
+_MODULES_PRESENT = _MODULES_STACKS_DIR.is_dir()
+if _PROFILE == "full" and not _MODULES_PRESENT:
+    raise SystemExit(
+        f"EXPERIMENTLY_PROFILE=full but {_MODULES_STACKS_DIR} does not exist: "
+        "this is a core checkout (modules/ is absent)."
+    )
+ENABLE_MODULE_STACKS = _MODULES_PRESENT and _PROFILE != "core"
+
+
+def _load_modules_stack(module_name: str, class_name: str):
+    """Import ``<class_name>`` from ``modules/infrastructure/cdk/stacks/<module_name>.py``."""
+    path = _MODULES_STACKS_DIR / f"{module_name}.py"
+    if not path.exists():
+        raise SystemExit(
+            f"{path} does not exist, but {_MODULES_STACKS_DIR} does: the "
+            "modules' CDK stacks are incomplete."
+        )
+    spec = importlib.util.spec_from_file_location(f"modules_stacks.{module_name}", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return getattr(module, class_name)
+
+
+print(
+    f"[cdk] profile: {'full' if ENABLE_MODULE_STACKS else 'core'} "
+    f"(modules/infrastructure/cdk/stacks {'present' if _MODULES_PRESENT else 'absent'}"
+    f"{', EXPERIMENTLY_PROFILE=' + _PROFILE if _PROFILE else ''})"
+)
+
+if ENABLE_MODULE_STACKS:
+    AnalyticsStack = _load_modules_stack("analytics_stack", "AnalyticsStack")
+    DynamoDBCountersStack = _load_modules_stack("dynamodb_counters_stack", "DynamoDBCountersStack")
+    GlueETLStack = _load_modules_stack("glue_etl_stack", "GlueETLStack")
 
 # Environment determination
 VALID_ENVIRONMENTS = ["dev", "staging", "prod", "demo"]
@@ -61,13 +128,14 @@ dynamodb_stack = DynamoDBTablesStack(
     app, f"experimentation-dynamodb-{env_name}", environment=env_name, env=env
 )
 
-# P2-B: Real-time counters DynamoDB table
-dynamodb_counters_stack = DynamoDBCountersStack(
-    app,
-    f"experimentation-dynamodb-counters-{env_name}",
-    environment=env_name,
-    env=env,
-)
+# P2-B: Real-time counters DynamoDB table (counters module)
+if ENABLE_MODULE_STACKS:
+    dynamodb_counters_stack = DynamoDBCountersStack(
+        app,
+        f"experimentation-dynamodb-counters-{env_name}",
+        environment=env_name,
+        env=env,
+    )
 
 # Create the enhanced database stack (with improved Aurora PostgreSQL)
 database_stack = EnhancedDatabaseStack(
@@ -108,18 +176,36 @@ api_stack = ApiStack(
 )
 api_stack.add_dependency(compute_stack)
 
-# Create the analytics stack (Kinesis, OpenSearch)
-analytics_stack = AnalyticsStack(
-    app, f"experimentation-analytics-{env_name}", vpc=vpc_stack.vpc, env=env
-)
-analytics_stack.add_dependency(vpc_stack)
-analytics_stack.add_dependency(dynamodb_stack)
+# Create the analytics stack (Kinesis, OpenSearch) -- etl module
+analytics_stack = None
+if ENABLE_MODULE_STACKS:
+    analytics_stack = AnalyticsStack(
+        app, f"experimentation-analytics-{env_name}", vpc=vpc_stack.vpc, env=env
+    )
+    analytics_stack.add_dependency(vpc_stack)
+    analytics_stack.add_dependency(dynamodb_stack)
 
 # Create the monitoring stack (CloudWatch, Alarms)
+#
+# The Kinesis widget and the iterator-age alarm describe the analytics stack's
+# event stream, so they are only created when that stack is. In a core
+# deployment there is no stream: the alarm would sit in INSUFFICIENT_DATA for
+# ever and the dashboard would show an empty graph. The stream NAME comes from
+# the analytics stack rather than being spelled out again here -- it names
+# itself `exp-events-<id>`, never the `experimentation-events` this stack used
+# to watch.
 monitoring_stack = MonitoringStack(
-    app, f"experimentation-monitoring-{env_name}", vpc=vpc_stack.vpc, env=env
+    app,
+    f"experimentation-monitoring-{env_name}",
+    vpc=vpc_stack.vpc,
+    events_stream_name=(
+        analytics_stack.events_stream.stream_name if analytics_stack else None
+    ),
+    env=env,
 )
 monitoring_stack.add_dependency(vpc_stack)
+if analytics_stack is not None:
+    monitoring_stack.add_dependency(analytics_stack)
 
 # ---------------------------------------------------------------------------
 # EP-019: Production Deployment — ECS Fargate + ALB + Blue/Green + Migrations
@@ -141,6 +227,10 @@ fargate_stack = FargateServiceStack(
     ecs_security_group=compute_stack.ecs_security_group,
     env_name=env_name,
     certificate_arn=certificate_arn,
+    # The profile decides which secrets the task definition has to inject:
+    # AUDIT_HMAC_KEY is read only by the modules, and naming a secret that was
+    # never created stops ECS from starting the task at all.
+    include_modules=ENABLE_MODULE_STACKS,
     env=env,
 )
 fargate_stack.add_dependency(compute_stack)
@@ -153,21 +243,27 @@ migration_stack = MigrationTaskStack(
     f"experimentation-migrations-{env_name}",
     ecs_cluster=compute_stack.ecs_cluster,
     env_name=env_name,
+    # The migration container connects to the same Aurora cluster the service
+    # does; it was given no host at all and so tried localhost.
+    db_host=database_stack.aurora_cluster.cluster_endpoint.hostname,
+    include_modules=ENABLE_MODULE_STACKS,
     env=env,
 )
 migration_stack.add_dependency(fargate_stack)
 migration_stack.add_dependency(database_stack)
 
 
-# P3-A: ETL & Glue Jobs for S3 Data Lake
-glue_etl_stack = GlueETLStack(
-    app,
-    f"experimentation-glue-etl-{env_name}",
-    data_lake_bucket=analytics_stack.data_lake_bucket,
-    env_name=env_name,
-    env=env,
-)
-glue_etl_stack.add_dependency(analytics_stack)
+# P3-A: ETL & Glue Jobs for S3 Data Lake -- etl module (needs the analytics
+# stack's data lake bucket, so the two are enabled together)
+if ENABLE_MODULE_STACKS:
+    glue_etl_stack = GlueETLStack(
+        app,
+        f"experimentation-glue-etl-{env_name}",
+        data_lake_bucket=analytics_stack.data_lake_bucket,
+        env_name=env_name,
+        env=env,
+    )
+    glue_etl_stack.add_dependency(analytics_stack)
 
 
 app.synth()

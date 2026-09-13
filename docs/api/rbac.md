@@ -510,10 +510,10 @@ curl -H "Authorization: Bearer $ADMIN_TOKEN" \
 
 ## Service API (Internal)
 
-The `RBACService` in `backend/app/services/rbac_service.py` can be used directly in other services:
+The `RBACService` in `modules/backend/app/services/rbac_service.py` can be used directly in other services:
 
 ```python
-from backend.app.services.rbac_service import RBACService
+from modules.backend.app.services.rbac_service import RBACService
 
 # Check if user can perform an action (merges all layers)
 can_do_it = RBACService.check_effective_permission(

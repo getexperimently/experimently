@@ -5,9 +5,8 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Wordmark } from '@/components/Wordmark';
 import { LOGIN_PATH, Role, UserMe, safeNextPath } from '@/services/api';
 import { ROLE_COLORS, USER_ROLE_LABELS } from '@/types/admin';
-import { EditionBanner } from '@/components/EditionBanner';
-import { useEdition } from '@/contexts/EditionContext';
-import { EDITIONS_DOC_PATH, EditionInfo, FEATURES, featureEnabled } from '@/services/edition';
+import { useModules } from '@/contexts/ModulesContext';
+import { MODULES, MODULES_DOC_PATH, ModulesInfo, moduleInstalled } from '@/services/modules';
 
 export interface NavItem {
   label: string;
@@ -29,37 +28,40 @@ export function isNavActive(pathname: string, href: string): boolean {
 }
 
 /**
- * Routes that only exist under an Enterprise licence. They are kept out of
- * `NAV_ITEMS` — the primary nav is Community chrome and must not hard-link
- * Enterprise routes (`docs/planning/ee-coupling-report.md` §6) — and surface
- * instead inside the collapsed "Enterprise" group below.
+ * Routes that belong to a module. They are kept out of `NAV_ITEMS` — the
+ * primary nav is core chrome and must not hard-link a route the core profile
+ * does not serve — and surface instead inside the collapsed "More" group
+ * below, once the module is installed.
  */
-export const ENTERPRISE_NAV_ITEMS: (NavItem & { feature: string })[] = [
+export const MODULE_NAV_ITEMS: (NavItem & { module: string })[] = [
   {
     label: 'Workspaces',
     href: '/workspaces',
     testId: 'nav-workspaces',
-    feature: FEATURES.WORKSPACES,
+    module: MODULES.WORKSPACES,
   },
 ];
 
-/** The Enterprise routes this licence actually allows. */
-export function licensedEnterpriseNav(edition: EditionInfo): NavItem[] {
-  return ENTERPRISE_NAV_ITEMS.filter((item) => featureEnabled(edition, item.feature));
+/** The module routes this instance actually serves. */
+export function installedModuleNav(info: ModulesInfo): NavItem[] {
+  return MODULE_NAV_ITEMS.filter((item) => moduleInstalled(info, item.module));
 }
 
 /**
- * Collapsed "Enterprise" disclosure. Closed by default and never opened for
- * the viewer: it is a place to find out what the tier is, not a prompt. In a
- * licensed instance it also carries the Enterprise routes, which otherwise
- * have no navigation at all.
+ * Collapsed "More" disclosure. Closed by default and never opened for the
+ * viewer. It carries the installed modules' routes, which otherwise have no
+ * navigation at all, and in the core profile a "Modules" link to the guide
+ * that says what the modules are and how to run the full profile.
  */
-function EnterpriseNavGroup({
+function MoreNavGroup({
   items,
+  showModulesGuide,
   id,
   onNavigate,
 }: {
   items: NavItem[];
+  /** Add the "Modules" documentation link (the core profile). */
+  showModulesGuide: boolean;
   id: string;
   /** Called when a link inside the group is followed (closes the mobile menu). */
   onNavigate?: () => void;
@@ -111,13 +113,13 @@ function EnterpriseNavGroup({
   return (
     <details
       ref={details}
-      data-testid="enterprise-nav-group"
+      data-testid="more-nav-group"
       className="relative"
       open={open}
       onToggle={(event) => setOpen((event.currentTarget as HTMLDetailsElement).open)}
     >
       <summary className="cursor-pointer list-none px-3 py-1.5 rounded-md text-sm font-medium text-slate-500 hover:text-slate-900 hover:bg-slate-50">
-        Enterprise
+        More
       </summary>
       <div
         id={id}
@@ -134,14 +136,16 @@ function EnterpriseNavGroup({
             {item.label}
           </Link>
         ))}
-        <Link
-          href={EDITIONS_DOC_PATH}
-          data-testid="nav-editions-docs"
-          onClick={follow}
-          className="block px-3 py-2 rounded-md text-sm text-slate-600 hover:bg-slate-50"
-        >
-          Editions &amp; licensing
-        </Link>
+        {showModulesGuide && (
+          <Link
+            href={MODULES_DOC_PATH}
+            data-testid="nav-modules-docs"
+            onClick={follow}
+            className="block px-3 py-2 rounded-md text-sm text-slate-600 hover:bg-slate-50"
+          >
+            Modules
+          </Link>
+        )}
       </div>
     </details>
   );
@@ -164,13 +168,13 @@ interface AppShellProps {
 
 /**
  * Application chrome: top navigation (Experiments · Feature Flags · Admin ·
- * Docs), the edition pill and the user area with a visible "Log out" button.
- * Mounted by `_app.tsx` for every route except `/login`.
+ * Docs · More) and the user area with a visible "Log out" button. Mounted by
+ * `_app.tsx` for every route except `/login`.
  */
 export function AppShell({ children }: AppShellProps) {
   const router = useRouter();
   const { user, status, logout } = useAuth();
-  const { info: edition } = useEdition();
+  const { profile, modules, version, isLoading: modulesLoading, error: modulesError } = useModules();
   const [menuOpen, setMenuOpen] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
 
@@ -178,7 +182,15 @@ export function AppShell({ children }: AppShellProps) {
   const visibleNav = NAV_ITEMS.filter(
     (item) => !item.roles || (user !== null && item.roles.includes(user.role)),
   );
-  const enterpriseNav = licensedEnterpriseNav(edition);
+  const moduleNav = installedModuleNav({ profile, modules, version });
+  // Not while the probe is outstanding: the provider's initial state is core,
+  // so a full-profile instance would paint the "Modules" guide link on every
+  // full page load and swap it for the routes when /api/v1/modules resolved.
+  // Not on a *failed* probe either: that also resolves to core, and the link
+  // says "this instance runs the core profile" -- a claim the dashboard has no
+  // grounds for when all it knows is that the API did not answer.
+  const showModulesGuide = !modulesLoading && modulesError === null && profile === 'core';
+  const showMore = !modulesLoading && (moduleNav.length > 0 || showModulesGuide);
 
   const handleLogout = async () => {
     if (loggingOut) return;
@@ -233,7 +245,13 @@ export function AppShell({ children }: AppShellProps) {
                   </Link>
                 );
               })}
-              <EnterpriseNavGroup items={enterpriseNav} id="enterprise-nav-desktop" />
+              {showMore && (
+                <MoreNavGroup
+                  items={moduleNav}
+                  showModulesGuide={showModulesGuide}
+                  id="more-nav-desktop"
+                />
+              )}
             </nav>
           </div>
 
@@ -328,16 +346,17 @@ export function AppShell({ children }: AppShellProps) {
                 {item.label}
               </Link>
             ))}
-            <EnterpriseNavGroup
-              items={enterpriseNav}
-              id="enterprise-nav-mobile"
-              onNavigate={() => setMenuOpen(false)}
-            />
+            {showMore && (
+              <MoreNavGroup
+                items={moduleNav}
+                showModulesGuide={showModulesGuide}
+                id="more-nav-mobile"
+                onNavigate={() => setMenuOpen(false)}
+              />
+            )}
           </nav>
         )}
       </header>
-
-      <EditionBanner />
 
       <main id="main-content" className="flex-1 flex flex-col">
         {children}

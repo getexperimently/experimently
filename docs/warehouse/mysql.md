@@ -185,7 +185,7 @@ For AWS RDS, use `pool_recycle=1800` (30 minutes) to stay inside RDS idle-connec
 Always use `%s` placeholders. Never concatenate user input into SQL strings.
 
 ```python
-from backend.app.services.mysql_connector import MySQLConnector
+from modules.backend.app.services.mysql_connector import MySQLConnector
 
 with MySQLConnector(host="db.example.com", database="analytics",
                    user="analyst", password="secret") as conn:

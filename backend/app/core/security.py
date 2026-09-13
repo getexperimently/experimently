@@ -10,7 +10,7 @@ Security notes:
   practice). The previous passlib wrapper was abandoned upstream and
   incompatible with bcrypt >= 4.1.
 - Two token formats exist:
-    * ``AUTH_PROVIDER=local`` (Community Edition default): HS256 JWTs signed
+    * ``AUTH_PROVIDER=local`` (the default): HS256 JWTs signed
       with ``settings.SECRET_KEY`` and issued by ``create_local_access_token``.
       They are validated by ``decode_local_token`` on every request.
     * ``AUTH_PROVIDER=cognito``: opaque AWS Cognito access tokens validated

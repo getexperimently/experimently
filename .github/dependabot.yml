@@ -1,55 +1,212 @@
 version: 2
 
+# One entry per package manifest Dependabot can read. Every entry groups
+# patch and minor bumps into a single weekly pull request so the queue stays
+# reviewable; majors arrive on their own. The `lint` job's lock check
+# (scripts/check_requirements_lock.py) turns red on a pip bump in either
+# profile until `make lock` regenerates the matching lock
+# (backend/requirements/runtime.lock, modules/requirements.lock), so a Python
+# bump is merged together with its lock.
+
 updates:
-  # Track GitHub Actions used in workflows. Dependabot opens PRs that pin
-  # actions to commit SHAs and bump them on a schedule, satisfying the
-  # "pin and periodically update GitHub Action versions" requirement of
-  # Phase 3 hardening (#40).
+  # ---------------------------------------------------------------------------
+  # Repository tooling
+  # ---------------------------------------------------------------------------
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
-    labels:
-      - "dependencies"
-      - "github-actions"
+    labels: ["dependencies", "github-actions"]
 
-  # Backend Python dependencies.
+  # The four images built from this repository (the API image installs the
+  # lock, so a base-image bump and a Python bump are separate pull requests).
+  - package-ecosystem: "docker"
+    directories: ["/backend", "/frontend", "/demo/shoplab", "/demo/streampulse"]
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 4
+    labels: ["dependencies", "docker"]
+
+  # ---------------------------------------------------------------------------
+  # Backend, dashboard, infrastructure
+  # ---------------------------------------------------------------------------
+  # Two directories, not one. `/backend` is backend/requirements.txt, the
+  # superset every CI job and every developer venv installs.
+  # `/backend/requirements` is runtime.txt (what the shipped image actually
+  # installs, via runtime.lock) and dev.txt -- neither is at the root of
+  # `/backend`, and neither is pulled in by a `-r` from requirements.txt, so
+  # Dependabot never saw them: a security bump landed in requirements.txt,
+  # went green, and shipped an image still running the old version.
+  # scripts/check_requirements_lock.py now fails the lint job when the two
+  # disagree, so the pair is merged together.
   - package-ecosystem: "pip"
-    directory: "/backend"
+    directories: ["/backend", "/backend/requirements"]
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
-    labels:
-      - "dependencies"
-      - "python"
+    labels: ["dependencies", "python"]
     groups:
       patch-and-minor:
-        update-types:
-          - "patch"
-          - "minor"
+        update-types: ["patch", "minor"]
 
-  # Frontend Node dependencies.
+  # The modules' own runtime dependencies (modules/requirements.txt): the SAML
+  # signature stack (python3-saml, which pulls xmlsec/lxml), authlib, and the
+  # Databricks / ClickHouse / MySQL warehouse drivers. They left
+  # backend/requirements.txt when the modules moved under modules/ and were
+  # then updated by nothing -- python3-saml/xmlsec verify SAML signatures, so
+  # that gap was the one that mattered most. Dependabot edits
+  # modules/requirements.txt; the lock check stays red until
+  # `make lock-modules` regenerates modules/requirements.lock.
+  - package-ecosystem: "pip"
+    directory: "/modules"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 3
+    labels: ["dependencies", "python", "modules"]
+    groups:
+      patch-and-minor:
+        update-types: ["patch", "minor"]
+
+  # Lambda functions: each has its own requirements.txt (backend/lambda/<fn>).
+  - package-ecosystem: "pip"
+    directories:
+      - "/backend/lambda/assignment"
+      - "/backend/lambda/event_processor"
+      - "/backend/lambda/feature_flag_evaluation"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 3
+    labels: ["dependencies", "python", "lambda"]
+    groups:
+      patch-and-minor:
+        update-types: ["patch", "minor"]
+
+  # AWS CDK app (Python), infrastructure/cdk/requirements.txt.
+  - package-ecosystem: "pip"
+    directory: "/infrastructure/cdk"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 3
+    labels: ["dependencies", "python", "infrastructure"]
+    groups:
+      patch-and-minor:
+        update-types: ["patch", "minor"]
+
   - package-ecosystem: "npm"
     directory: "/frontend"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
-    labels:
-      - "dependencies"
-      - "javascript"
+    labels: ["dependencies", "javascript"]
     groups:
       patch-and-minor:
-        update-types:
-          - "patch"
-          - "minor"
+        update-types: ["patch", "minor"]
 
-  # Infrastructure (CDK) dependencies.
+  # Demo applications (ShopLab, StreamPulse): Next.js apps consuming the React
+  # SDK from source.
   - package-ecosystem: "npm"
-    directory: "/infrastructure"
+    directories: ["/demo/shoplab", "/demo/streampulse"]
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 2
+    labels: ["dependencies", "javascript", "demo"]
+    groups:
+      patch-and-minor:
+        update-types: ["patch", "minor"]
+
+  # ---------------------------------------------------------------------------
+  # Client SDKs (sdk/<lang>, MIT) — one entry per ecosystem
+  # ---------------------------------------------------------------------------
+  - package-ecosystem: "npm"
+    directories: ["/sdk/js", "/sdk/react", "/sdk/react-native", "/sdk/openfeature", "/sdk/edge"]
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels: ["dependencies", "sdk"]
+    groups:
+      patch-and-minor:
+        update-types: ["patch", "minor"]
+
+  - package-ecosystem: "pip"
+    directories: ["/sdk/python", "/sdk/openfeature-python"]
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 2
+    labels: ["dependencies", "sdk"]
+    groups:
+      patch-and-minor:
+        update-types: ["patch", "minor"]
+
+  - package-ecosystem: "gomod"
+    directory: "/sdk/go"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 2
+    labels: ["dependencies", "sdk"]
+
+  # Maven: the parent pom and the two modules (core, spring-boot-starter).
+  - package-ecosystem: "maven"
+    directories: ["/sdk/java", "/sdk/java/core", "/sdk/java/spring-boot-starter"]
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 3
-    labels:
-      - "dependencies"
-      - "infrastructure"
+    labels: ["dependencies", "sdk"]
+    groups:
+      patch-and-minor:
+        update-types: ["patch", "minor"]
+
+  - package-ecosystem: "gradle"
+    directory: "/sdk/android"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 2
+    labels: ["dependencies", "sdk"]
+    groups:
+      patch-and-minor:
+        update-types: ["patch", "minor"]
+
+  - package-ecosystem: "bundler"
+    directory: "/sdk/ruby"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 2
+    labels: ["dependencies", "sdk"]
+
+  - package-ecosystem: "composer"
+    directory: "/sdk/php"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 2
+    labels: ["dependencies", "sdk"]
+
+  - package-ecosystem: "nuget"
+    directory: "/sdk/dotnet"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 2
+    labels: ["dependencies", "sdk"]
+    groups:
+      patch-and-minor:
+        update-types: ["patch", "minor"]
+
+  - package-ecosystem: "mix"
+    directory: "/sdk/elixir"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 2
+    labels: ["dependencies", "sdk"]
+
+  - package-ecosystem: "pub"
+    directory: "/sdk/flutter"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 2
+    labels: ["dependencies", "sdk"]
+
+  - package-ecosystem: "swift"
+    directory: "/sdk/ios"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 2
+    labels: ["dependencies", "sdk"]

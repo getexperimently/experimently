@@ -13,7 +13,9 @@ Routes (all unauthenticated, none in the OpenAPI schema):
     reported but only fails readiness when ``REDIS_REQUIRED=true`` (the
     application degrades gracefully without Redis: rate limiting falls back to
     memory, caching is skipped). Disk space below 1 GB is reported as ``low``.
-    Returns 200 when ready, 503 otherwise.
+    The profile the process runs (``core`` or ``full``) is reported as
+    ``profile`` and in ``checks.modules``, and never gates readiness. Returns
+    200 when ready, 503 otherwise.
 
 ``GET /health``
     Alias of ``/health/ready`` kept for the existing ALB/ECS/CDK wiring.
@@ -33,6 +35,7 @@ from __future__ import annotations
 
 import hmac
 import logging
+import re
 import shutil
 import time
 from datetime import datetime, timezone
@@ -53,12 +56,75 @@ router = APIRouter()
 # ---------------------------------------------------------------------------
 
 
+#: ``scheme://user:secret@host`` -- a DSN or a broker URL in an exception
+#: message.  The userinfo is the credential; the rest is the diagnosis.
+_URL_CREDENTIALS = re.compile(r"(?P<scheme>[A-Za-z][\w+.-]*://)[^\s/@]*:[^\s/@]*@")
+#: The account id in an ARN -- botocore puts the whole ARN in its messages.
+#: The service and the resource are the diagnosis; the account is not.
+_ARN_ACCOUNT = re.compile(r"(arn:[a-z0-9-]*:[a-z0-9-]*:[a-z0-9-]*:)\d{6,}")
+#: ``client_secret=abc`` / ``"api-key": "abc"`` -- a named credential with its
+#: value attached.  The *name* is worth keeping, the value never is.
+#: A ``name = value`` / ``"name": "value"`` pair whose *name* looks secret.
+#
+# Deliberately dull. An earlier version allowed the name to be surrounded by
+# `[\w.\[\]-]*` on both sides and the value to be `'...'|"..."|\S+`, which
+# (a) missed the JSON and quoted forms this docstring gives as its own
+# examples, because the closing quote sits between the name and the colon, and
+# (b) backtracked quadratically: 12.9 s on a 5.5 kB line, minutes on a longer
+# one, in a synchronous call inside an async handler on a one-worker
+# container -- an unauthenticated readiness probe could hold the event loop.
+# The name is a single bounded run, the value is "the rest of the token", and
+# nothing nests.
+_SECRET_ASSIGNMENT = re.compile(
+    r"""(?ix)
+    (["']?)                                  # optional opening quote
+    ([\w.\[\]-]{0,40}?
+       (?:secret|token|api[-_]?key|credential|passwd|pwd|authorization)
+     [\w.\[\]-]{0,40}?)
+    \1                                       # its closing quote, if any
+    \s*[=:]\s*
+    (["']?)[^\s,;}\]]{0,200}\3              # the value, quoted or bare
+    """
+)
+
+
+def _scrub(text: str) -> str:
+    """One line of *text*, at most 200 characters, carrying no credential.
+
+    Every string a check puts in a response body goes through this: the
+    readiness probe is unauthenticated, and outside production it reports the
+    checks' own error text.  Exceptions from this layer are rich in
+    credentials -- psycopg2 quotes the whole DSN, botocore the ARN, authlib
+    the client secret it was given -- and none of that is diagnosis.
+
+    Truncation alone is not redaction (the credential is usually in the first
+    eighty characters), so the two shapes a secret arrives in are removed
+    first, and a message that still mentions a password is dropped whole: the
+    common one, ``password authentication failed for user "x"``, says what an
+    operator needs without the first line at all.
+    """
+    first = text.splitlines()[0] if text else ""
+    if "password" in first.lower():
+        return "redacted: the message carried a credential"
+    # Truncate BEFORE substituting, not after. The patterns run in time
+    # proportional to what they are given, and this string comes from an
+    # arbitrary exception; the cap is the only bound there is. A credential
+    # lives in the first characters of these messages anyway -- psycopg2 opens
+    # with the DSN, authlib with the parameter it was handed -- so nothing
+    # diagnostic is lost, and 200 characters is what the caller gets regardless.
+    first = first[:200]
+    first = _URL_CREDENTIALS.sub(r"\g<scheme>***:***@", first)
+    first = _ARN_ACCOUNT.sub(r"\1***", first)
+    first = _SECRET_ASSIGNMENT.sub(r"\1\2\1=***", first)
+    return first
+
+
 def _safe_error(exc: BaseException) -> str:
     """First line of the error without credentials (never echo a password)."""
     text = str(exc).splitlines()[0] if str(exc) else exc.__class__.__name__
     if "password" in text.lower():
         return f"{exc.__class__.__name__}: authentication failed"
-    return text[:200]
+    return _scrub(text)
 
 
 # Environment and feature switches come from ``settings`` only: pydantic-
@@ -147,6 +213,44 @@ def check_redis() -> Dict[str, Any]:
         return {"status": "unhealthy", "error": _safe_error(exc)}
 
 
+def check_modules() -> Dict[str, Any]:
+    """Which profile the process runs, and whether anyone chose it.
+
+    ``healthy`` covers the two intended states: a core build with no
+    ``modules`` package (``profile: "core"``) and a full-profile deployment
+    whose registration succeeded (``profile: "full"``).  ``unhealthy`` is the
+    third state the loader distinguishes -- the package was found and did not
+    install -- in which the process serves less than it was deployed as
+    without anyone having asked for it.  ``profile`` still says how far it
+    got: ``core`` when the registration itself failed (module routes 404 and
+    compliance audit events are written unsigned), ``full`` when the
+    registration stands and only its routers are missing.
+
+    Reported, not gated: readiness answers "may this instance take traffic",
+    and a degraded profile still serves every core route.  Outside development
+    and test the state cannot reach a probe at all, because ``main.py`` refuses
+    to start on it (``modules_loader.abort_if_modules_broken``); reporting it
+    is for the developer running a half-finished module, who would otherwise
+    have to infer it from a 404.
+
+    The profile is read, never loaded: ``modules_active()`` answers from the
+    loader's cache, where ``load_modules()`` could re-run a whole registration
+    (~3.5 s of endpoint imports, on the event loop, under the loader's lock)
+    from inside an unauthenticated probe.
+    """
+    from backend.app.modules_loader import modules_active, modules_failure
+
+    profile = "full" if modules_active() else "core"
+    failure = modules_failure()
+    if failure is None:
+        return {"status": "healthy", "profile": profile}
+    # Scrubbed like every other check's error: the loader builds this string
+    # out of an arbitrary exception from module code (a psycopg2 DSN, a
+    # botocore ARN, an authlib client secret) and this response is
+    # unauthenticated.
+    return {"status": "unhealthy", "profile": profile, "error": _scrub(failure)}
+
+
 def check_disk(path: str = "/") -> Dict[str, Any]:
     """Free space on *path*; ``low`` below 1 GB."""
     try:
@@ -180,8 +284,11 @@ def readiness_payload() -> tuple[Dict[str, Any], int]:
         "database": check_database(),
         "redis": check_redis(),
         "disk": check_disk(),
+        "modules": check_modules(),
     }
 
+    # The modules check is deliberately not part of ``ready``: see
+    # :func:`check_modules`.
     ready = checks["database"]["status"] == "healthy"
     if checks["redis"]["status"] != "healthy" and redis_required():
         ready = False
@@ -191,6 +298,9 @@ def readiness_payload() -> tuple[Dict[str, Any], int]:
     body: Dict[str, Any] = {
         "status": "healthy" if ready else "unhealthy",
         "timestamp": _timestamp(),
+        # Which profile is serving, in every environment: an operator reading
+        # a production probe should not have to call a route to find out.
+        "profile": checks["modules"]["profile"],
     }
 
     if not is_production():
@@ -227,7 +337,14 @@ def metrics_access(request: Request) -> Optional[JSONResponse]:
     expected = metrics_token()
     if expected:
         presented = _presented_token(request)
-        if not presented or not hmac.compare_digest(presented, expected):
+        # Compared as bytes: Starlette decodes headers as latin-1, so a scrape
+        # with a non-ASCII byte in its Authorization header hands us a `str`
+        # that `hmac.compare_digest` refuses (TypeError -> 500 from an
+        # unauthenticated endpoint).  Encoding both sides keeps the comparison
+        # constant-time and makes a bad token a 401, which is what it is.
+        if not presented or not hmac.compare_digest(
+            presented.encode("utf-8"), expected.encode("utf-8")
+        ):
             return JSONResponse(
                 {"detail": "Invalid or missing metrics token"},
                 status_code=401,
@@ -289,6 +406,7 @@ async def prometheus_metrics(request: Request) -> Response:
 __all__ = [
     "check_database",
     "check_disk",
+    "check_modules",
     "check_redis",
     "environment_name",
     "is_development_or_test",

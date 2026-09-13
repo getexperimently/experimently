@@ -4,11 +4,59 @@ Bring a PostgreSQL database up to the current schema.
 Two situations are handled:
 
 * **Existing database** (has an ``alembic_version`` table): run
-  ``alembic upgrade head`` so pending incremental migrations are applied.
+  ``alembic upgrade heads`` so pending incremental migrations are applied.
 
 * **Fresh database** (no ``alembic_version`` table): create the schema from
   the SQLAlchemy models with ``Base.metadata.create_all`` and then
-  ``alembic stamp head``.
+  ``alembic stamp heads``.
+
+``heads``, plural: a full checkout has two -- the core chain and the
+``modules`` branch under ``modules/backend/app/db/migrations`` (issue #89) --
+and alembic refuses the singular ``head`` when more than one exists.  A core
+checkout has one head and ``heads`` names it just the same.  Both are recorded,
+because the two branches fork at a real branch point (core ``a7b8c9d0e1f2``,
+whose children are the core marker ``b8c9d0e1f2a3`` and ``modules_0001_rbac``)
+rather than being joined by a ``depends_on``, which would collapse them into
+one row.  See ``modules_0001_rbac``'s docstring for why the ordering edge has
+to exist at all.
+
+One row can still be redundant: an ``alembic_version`` left by an older build
+may hold a revision that is an *ancestor* of another recorded revision, and
+alembic then refuses every command with "Requested revision ... overlaps with
+other requested revisions ...".  :func:`prune_redundant_revisions` deletes
+exactly those rows before the upgrade, which is what alembic itself would
+consider the branch heads.
+
+Switching profiles is part of the contract, and both directions are handled
+here:
+
+* **core database, full build** -- the schema is at the core head and the
+  module tables are missing (the core chain marks the revisions that used to
+  create them as applied).  After ``upgrade heads`` the models are reconciled
+  with the database: every *module* table they declare and it lacks is created,
+  and the ``use_alter`` foreign keys ``create_all`` skips on an existing table
+  are added.  The result is the schema a fresh full-profile bootstrap builds.
+  A missing *core* table is left missing on purpose -- see
+  :func:`reconcile_with_models`.
+* **full database, core build** -- ``alembic_version`` holds a revision no core
+  tree has a file for, and every alembic command against it fails outright with
+  "Can't locate revision identified by ...".  When the core chain is already at
+  its head there is nothing to apply, so the rows are left exactly as they are
+  and the upgrade is skipped with a warning; when it is not, the bootstrap
+  refuses with a message naming the revisions and what to do about them, rather
+  than letting an alembic traceback stop the container.
+
+Neither behaviour may be *this module's*, because this module is not the only
+documented way to migrate: ``docs/self-hosting/migrations.md``,
+``deploy-prod.yml`` and the CDK migration task all run ``alembic upgrade
+heads`` directly, and that path used to half-finish the first switch (nine
+module tables missing, both revisions stamped, nothing left to retry) and die
+on the second, and could not read a database recorded at both the branch point
+and the branch at all.  So :func:`prune_redundant_revisions`,
+:func:`may_run_alembic` and :func:`reconcile_with_models` are called from
+``migrations/env.py`` as well -- the one file every alembic command runs
+through, whoever launched it -- and this module keeps calling them for the
+fresh-database branch, which never reaches alembic at all.
 
 In both cases, when the ``users`` table is empty afterwards, the first
 administrator is created from ``FIRST_SUPERUSER`` / ``FIRST_SUPERUSER_PASSWORD``
@@ -35,19 +83,36 @@ from __future__ import annotations
 
 import logging
 import os
+from contextlib import contextmanager
 from pathlib import Path
+from typing import Iterator
 
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import create_engine, inspect, text
+from alembic.runtime.migration import MigrationContext
+from alembic.script import ScriptDirectory
+from sqlalchemy import ForeignKeyConstraint, create_engine, inspect, text
 from sqlalchemy.engine import Engine
-from sqlalchemy.schema import CreateSchema
+from sqlalchemy.schema import AddConstraint, CreateSchema
+
+from backend.app.db.autogenerate_filters import MODULE_TABLES
+from backend.app.db.schema import (
+    metadata_for_schema,
+    point_metadata_at,
+    resolve_schema_name,
+)
 
 logger = logging.getLogger(__name__)
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _ALEMBIC_INI = _REPO_ROOT / "backend" / "app" / "db" / "alembic.ini"
 _MIGRATIONS_DIR = _REPO_ROOT / "backend" / "app" / "db" / "migrations"
+#: The two version locations alembic.ini names, made absolute: the core
+#: chain and the modules branch (which alembic skips when `modules/` is absent).
+_VERSION_LOCATIONS = (
+    _MIGRATIONS_DIR / "versions",
+    _REPO_ROOT / "modules" / "backend" / "app" / "db" / "migrations" / "versions",
+)
 
 
 def database_url() -> str:
@@ -67,22 +132,23 @@ def database_url() -> str:
 def schema_name() -> str:
     """Schema the application tables live in.
 
-    ``POSTGRES_SCHEMA`` wins when set (this is what alembic's env.py uses);
-    otherwise fall back to the application's own environment-derived choice
-    so the bootstrap and the running app agree.
+    One line, because the precedence is shared: ``backend/app/db/schema.py``
+    is what alembic's ``env.py`` resolves with too, so the bootstrap and
+    alembic cannot pick different schemas (they did -- see that module).
     """
-    explicit = os.environ.get("POSTGRES_SCHEMA")
-    if explicit:
-        return explicit
-    from backend.app.core.database_config import get_schema_name
-
-    return get_schema_name()
+    return resolve_schema_name()
 
 
 def alembic_config() -> Config:
     """Alembic config that works regardless of the current working directory."""
     cfg = Config(str(_ALEMBIC_INI))
     cfg.set_main_option("script_location", str(_MIGRATIONS_DIR))
+    # alembic.ini spells the modules' location relative to the repository
+    # root (see the comment there); a bootstrap may run from anywhere.
+    cfg.set_main_option("path_separator", "newline")
+    cfg.set_main_option(
+        "version_locations", "\n".join(str(p) for p in _VERSION_LOCATIONS)
+    )
     return cfg
 
 
@@ -95,31 +161,60 @@ def has_alembic_version(engine: Engine, schema: str) -> bool:
     return inspect(engine).has_table("alembic_version", schema=schema)
 
 
-def _point_models_at_schema(schema: str):
-    """Import every model and point all tables at *schema*; return ``Base``."""
-    # Open-core seam: register the Community models explicitly, then let the
-    # Enterprise package add its own through hooks.register_model_module().
-    # A Community build has no `ee` package and creates the 37 CE tables only.
-    from backend.app.ee_loader import require_enterprise_or_absent
+def _register_models():
+    """Import every model module; return ``Base``."""
+    # The seam: register the core models explicitly, then let the modules
+    # package add its own through hooks.register_model_module().  A core
+    # build has no `modules` package and creates the 37 core tables only.
     from backend.app.models import register_core_models
+    from backend.app.modules_loader import require_modules_or_absent
 
     Base = register_core_models()
-    # Strict: a fresh database built while the Enterprise registration is
-    # broken would be missing the tables the Enterprise routers need.
-    require_enterprise_or_absent()
+    # Strict: a fresh database built while the modules' registration is
+    # broken would be missing the tables the module routers need.
+    require_modules_or_absent()
+    return Base
 
-    # (models.base.set_schema does the same, but derives the name from APP_ENV
-    # rather than POSTGRES_SCHEMA.)
-    Base.metadata.schema = schema
-    for table in Base.metadata.tables.values():
-        table.schema = schema
+
+def schema_metadata(schema: str):
+    """The models' metadata as it reads on *schema*, for DDL.
+
+    ``metadata_for_schema`` hands back ``Base.metadata`` itself when the models
+    already declare *schema* (the usual case) and a properly translated copy
+    otherwise -- one where each table's key, each auto-generated index name and
+    each string ``ForeignKey`` colspec names *schema* rather than the schema
+    the models were imported under.
+
+    The in-place repoint this used to do left those three behind, so a
+    bootstrap with ``POSTGRES_SCHEMA=experimentation APP_ENV=test`` built
+    schema ``experimentation`` full of indexes called
+    ``ix_test_experimentation_*`` -- and the next ``alembic revision
+    --autogenerate`` proposed dropping and re-creating all 67 of them.
+    """
+    return metadata_for_schema(_register_models(), schema)
+
+
+def _point_models_at_schema(schema: str):
+    """Point the **mapped classes** at *schema*, in place; return ``Base``.
+
+    For the ORM path only (:func:`ensure_first_superuser`): a mapper is bound
+    to the ``Table`` object the model declared, so a translated copy is
+    invisible to ``session.query(User)`` and the query would name the schema
+    the models were imported under whatever ``search_path`` says.  DDL goes
+    through :func:`schema_metadata` instead -- see ``backend/app/db/schema.py``
+    for why the two are different operations.
+    """
+    Base = _register_models()
+    # (``models.base.set_schema()`` does the same for the schema
+    # ``get_schema_name()`` resolves; this one takes the schema as an argument,
+    # for a caller that names a scratch schema the environment does not.)
+    point_metadata_at(Base, schema)
     return Base
 
 
 def create_from_models(engine: Engine, schema: str) -> None:
     """Create every table defined by the SQLAlchemy models inside *schema*."""
-    Base = _point_models_at_schema(schema)
-    Base.metadata.create_all(bind=engine)
+    schema_metadata(schema).create_all(bind=engine)
 
 
 def ensure_first_superuser(engine: Engine, schema: str) -> bool:
@@ -172,6 +267,250 @@ def ensure_first_superuser(engine: Engine, schema: str) -> bool:
         session.close()
 
 
+# ---------------------------------------------------------------------------
+# Reconciling an existing database with the models (profile switch)
+# ---------------------------------------------------------------------------
+def missing_model_tables(engine: Engine, schema: str, metadata) -> list[str]:
+    """Tables the models declare that *schema* does not have."""
+    existing = set(inspect(engine).get_table_names(schema=schema))
+    return sorted({t.name for t in metadata.tables.values()} - existing)
+
+
+def _add_missing_alter_constraints(engine: Engine, schema: str, metadata) -> list[str]:
+    """Add the models' ``use_alter`` foreign keys that the database lacks.
+
+    ``create_all`` emits a ``use_alter`` constraint only when it creates one of
+    the two tables the constraint joins, so a database whose ``experiments``
+    table already existed when ``workspaces`` was created keeps the column
+    without the constraint.  The two cross-boundary keys
+    (``modules/backend/app/models/workspace.py``) are exactly that case on a
+    core database opened by a full build.
+    """
+    inspector = inspect(engine)
+    existing = set(inspector.get_table_names(schema=schema))
+    added: list[str] = []
+    for table in metadata.tables.values():
+        if table.name not in existing:
+            continue
+        wanted = [
+            constraint
+            for constraint in table.constraints
+            if isinstance(constraint, ForeignKeyConstraint)
+            and constraint.use_alter
+            and constraint.name
+            and constraint.referred_table.name in existing
+        ]
+        # Reflect only the tables that could be missing one: every start-up
+        # runs this, and all but two of the fifty have nothing to check.
+        if not wanted:
+            continue
+        present = {
+            fk["name"] for fk in inspector.get_foreign_keys(table.name, schema=schema)
+        }
+        for constraint in wanted:
+            if str(constraint.name) in present:
+                continue
+            with engine.begin() as conn:
+                conn.execute(AddConstraint(constraint))
+            added.append(str(constraint.name))
+    return added
+
+
+def reconcile_with_models(engine: Engine, schema: str) -> tuple[list[str], list[str]]:
+    """Create the **module** tables the loaded models declare and *schema* lacks.
+
+    Returns ``(tables created, foreign keys added)``; both empty is the normal
+    case and costs one reflection pass.
+
+    This is what makes a **profile switch** land on the same schema a fresh
+    bootstrap of that profile builds.  A database the core profile created has
+    the core chain stamped, which marks the revisions that once created
+    ``workspaces``, ``sso_configs``, ``phi_audit_logs`` and the rest as applied;
+    the modules' branch does not re-create them (it owns the three RBAC tables
+    only), so without this the full build would answer ``profile: full`` while
+    those routes failed on missing relations.
+
+    The models create the tables rather than the modules' branch because the
+    models are already the source of truth for a schema built from zero (see
+    this module's docstring): hand-writing nine more ``create_table`` calls into
+    a migration would duplicate them and drift from them.  It runs *after*
+    ``alembic upgrade heads`` so that a pending migration always gets first
+    refusal on the DDL it owns.
+
+    Only the module tables (:data:`autogenerate_filters.MODULE_TABLES`), and
+    that limit is the point.  This runs on every ``alembic upgrade heads`` that
+    reaches head and on every start-up, so an unfiltered ``create_all`` would
+    also create a **core** table whose migration somebody forgot to write --
+    outside the migration transaction, with no revision and no downgrade, and
+    the next ``--autogenerate`` would then report no diff because the table
+    exists everywhere.  A core table missing from a migrated database is a bug
+    to report, not one to paper over; the module tables are the case with no
+    migration to fall back on.
+    """
+    metadata = schema_metadata(schema)
+    created = [
+        name
+        for name in missing_model_tables(engine, schema, metadata)
+        if name in MODULE_TABLES
+    ]
+    if created:
+        logger.warning(
+            "schema %s is missing %d module table(s) the models declare (%s); "
+            "creating them from the models",
+            schema,
+            len(created),
+            ", ".join(created),
+        )
+        metadata.create_all(
+            bind=engine,
+            tables=[t for t in metadata.tables.values() if t.name in set(created)],
+        )
+    added = _add_missing_alter_constraints(engine, schema, metadata)
+    if added:
+        logger.warning("Added missing foreign key(s): %s", ", ".join(added))
+    return created, added
+
+
+# ---------------------------------------------------------------------------
+# Revisions this build has no file for (a core build on a full database)
+# ---------------------------------------------------------------------------
+def recorded_revisions(engine: Engine, schema: str) -> set[str]:
+    """The revision ids in ``<schema>.alembic_version``."""
+    with engine.connect() as conn:
+        context = MigrationContext.configure(
+            conn, opts={"version_table_schema": schema}
+        )
+        return set(context.get_current_heads())
+
+
+def prune_redundant_revisions(engine: Engine, schema: str, cfg: Config) -> list[str]:
+    """Delete ``alembic_version`` rows that are ancestors of another row.
+
+    ``alembic_version`` is meant to hold branch *heads*: revisions none of
+    which is an ancestor of another.  A row that is an ancestor of another row
+    makes alembic refuse **every** command -- "Requested revision X overlaps
+    with other requested revisions Y" -- so the database cannot even be read,
+    let alone upgraded, and the only documented way out is editing the table by
+    hand.
+
+    A release that turns a former alembic base into a descendant of an existing
+    revision creates exactly that state on any database built by the previous
+    build: ``modules_0001_rbac`` was an independent base and is now a child of
+    ``a7b8c9d0e1f2``, so a database recorded at both is stuck.  Dropping the
+    ancestor row is not a judgement call -- it is what alembic's own
+    ``_filter_into_branch_heads`` does when it reduces a revision set to its
+    heads, and the ancestor is applied either way.
+
+    Rows this build cannot resolve are left alone: their ancestry is unknown
+    here (that is a database from the other profile, which ``_unresolvable``
+    handles).  Returns the revisions removed.
+    """
+    recorded = recorded_revisions(engine, schema)
+    if len(recorded) < 2:
+        return []
+    script = ScriptDirectory.from_config(cfg)
+    known = {rev.revision for rev in script.walk_revisions()}
+    resolvable = recorded & known
+    if len(resolvable) < 2:
+        return []
+
+    redundant: set[str] = set()
+    for revision in resolvable:
+        ancestors = {
+            rev.revision
+            for rev in script.iterate_revisions(revision, "base")
+            if rev.revision != revision
+        }
+        redundant |= ancestors & resolvable
+    if not redundant:
+        return []
+
+    logger.warning(
+        "Schema %s records revision(s) that another recorded revision already "
+        "descends from (%s); removing the redundant row(s) so alembic can run",
+        schema,
+        ", ".join(sorted(redundant)),
+    )
+    # `schema` comes from POSTGRES_SCHEMA / the environment, never from a
+    # request, and a schema name cannot be a bind parameter; quote it through
+    # the dialect as ensure_first_superuser() does.  The revision ids *are*
+    # bound.
+    quoted = engine.dialect.identifier_preparer.quote_schema(schema)
+    delete_sql = f"DELETE FROM {quoted}.alembic_version WHERE version_num = :rev"  # nosec B608 - schema quoted through the dialect above, revision bound below
+    with engine.begin() as conn:
+        statement = text(delete_sql)  # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text  # fmt: skip
+        for revision in sorted(redundant):
+            conn.execute(statement, {"rev": revision})
+    return sorted(redundant)
+
+
+def _unresolvable(cfg: Config, recorded: set[str]) -> tuple[set[str], bool]:
+    """``(recorded revisions this build cannot resolve, local heads all applied)``.
+
+    alembic reads *every* row of ``alembic_version`` before it does anything, so
+    one row from a profile this build does not have makes every command fail --
+    there is no "ignore what you do not know" in alembic.  The second value says
+    whether there is anything to apply anyway.
+    """
+    script = ScriptDirectory.from_config(cfg)
+    known = {rev.revision for rev in script.walk_revisions()}
+    heads = set(script.revision_map.heads)
+    return recorded - known, heads <= recorded
+
+
+def may_run_alembic(cfg: Config, recorded: set[str], schema: str) -> bool:
+    """Whether alembic may be run against a schema recorded at *recorded*.
+
+    The guard for a **full database opened by a core build** -- the reverse
+    profile switch.  ``alembic_version`` then holds ``modules_0001_rbac``,
+    which a core tree has no file for, and raw alembic answers *every* command
+    with ``CommandError: Can't locate revision identified by
+    'modules_0001_rbac'`` before applying anything.  ``deploy-prod.yml`` builds
+    ``--target core`` and tags it ``:latest``, and ``migration_task_stack.py``
+    pulls ``latest``, so that is the ECS migration task's failure mode and it
+    fails the deploy job.
+
+    This function is what makes every documented path answer the same way, so
+    it is called from ``db/bootstrap.py`` *and* from ``migrations/env.py``, for
+    an ``upgrade`` however it was launched.  Not for ``downgrade`` or ``stamp``:
+    returning False means "succeed having done nothing", which is honest only
+    where there is nothing left to do, and those two would then exit 0 with the
+    schema and the version table untouched (``env.py``'s
+    ``_SKIPPABLE_COMMANDS``).  The three answers:
+
+    * nothing foreign recorded -> ``True``, run normally;
+    * foreign rows but this build's own heads are all applied -> log a WARNING,
+      return ``False``, leave the rows alone.  There is nothing to do, and the
+      rows belong to the other profile, so "succeed having done nothing" is the
+      honest answer -- not a traceback that stops a container;
+    * foreign rows *and* this build has migrations of its own to apply ->
+      ``RuntimeError`` naming the revisions and the two ways out.  Refusing is
+      the only safe answer: alembic cannot plan a path from a revision it
+      cannot resolve.
+    """
+    foreign, nothing_pending = _unresolvable(cfg, recorded)
+    if not foreign:
+        return True
+    if not nothing_pending:
+        raise RuntimeError(
+            f"Schema {schema} records migration(s) this build has no file "
+            f"for ({', '.join(sorted(foreign))}) and this build's own "
+            "migrations are not all applied, so alembic cannot run at all. "
+            "This is a database built by the full profile being opened by a "
+            "core build. Run the full image against it, or -- with a backup "
+            "taken -- delete those rows from "
+            f'"{schema}".alembic_version.'
+        )
+    logger.warning(
+        "Schema %s records migration(s) from another profile (%s); this "
+        "build has nothing to apply, so alembic is skipped and the rows "
+        "are left untouched",
+        schema,
+        ", ".join(sorted(foreign)),
+    )
+    return False
+
+
 # Every API replica runs the bootstrap on start-up (docker-entrypoint.sh).
 # A blocking, session-level advisory lock serialises them: the first replica
 # creates or upgrades the schema and the first administrator, the others wait
@@ -180,25 +519,76 @@ def ensure_first_superuser(engine: Engine, schema: str) -> bool:
 BOOTSTRAP_LOCK_NAMESPACE = "experimently.bootstrap."
 
 
+@contextmanager
+def alembic_sees_schema(schema: str) -> Iterator[None]:
+    """Make ``POSTGRES_SCHEMA`` name *schema* for the duration of the block.
+
+    ``POSTGRES_SCHEMA`` is how every part of alembic learns which schema it is
+    working on, and they each read the process environment independently:
+    ``migrations/env.py`` for ``version_table_schema`` and the reflection
+    filter, and revision modules such as ``a7b8c9d0e1f2`` and
+    ``modules_0001_rbac`` at *import* time, for the names they build.
+    :func:`schema_name`, on the other hand, falls back to
+    ``core.database_config.get_schema_name()`` (derived from ``APP_ENV``) when
+    the variable is not set -- so with ``APP_ENV=test`` and no
+    ``POSTGRES_SCHEMA`` the bootstrap worked on ``test_experimentation`` while
+    alembic worked on ``experimentation``.
+
+    Only the fresh-database branch used to export it, just before
+    ``command.stamp``.  On an existing database ``command.upgrade`` then ran
+    against the *other* schema: alembic found no ``alembic_version`` there,
+    created the schema, and began replaying the historical chain from its base
+    -- which this module's docstring explains cannot be replayed -- leaving a
+    stray half-built schema behind.
+
+    Restored on the way out so an in-process caller (a test that bootstraps a
+    scratch schema) does not change what the rest of the process resolves.
+    """
+    previous = os.environ.get("POSTGRES_SCHEMA")
+    os.environ["POSTGRES_SCHEMA"] = schema
+    try:
+        yield
+    finally:
+        if previous is None:
+            os.environ.pop("POSTGRES_SCHEMA", None)
+        else:
+            os.environ["POSTGRES_SCHEMA"] = previous
+
+
 def _bootstrap_locked(engine: Engine, schema: str) -> str:
+    # Before the config is built: building it reads the revision files, and a
+    # revision module binds POSTGRES_SCHEMA when it is imported.
+    with alembic_sees_schema(schema):
+        return _bootstrap_schema(engine, schema)
+
+
+def _bootstrap_schema(engine: Engine, schema: str) -> str:
     cfg = alembic_config()
 
     ensure_schema(engine, schema)
 
     if has_alembic_version(engine, schema):
-        logger.info(
-            "alembic_version present in schema %s: running upgrade head", schema
-        )
-        command.upgrade(cfg, "head")
+        # Before anything reads the revision set: a row that another recorded
+        # row descends from makes every alembic command fail outright.
+        prune_redundant_revisions(engine, schema, cfg)
+        # The same guard migrations/env.py applies, so that `alembic upgrade
+        # heads` and this bootstrap behave identically on a database from the
+        # other profile.
+        if may_run_alembic(cfg, recorded_revisions(engine, schema), schema):
+            logger.info(
+                "alembic_version present in schema %s: running upgrade heads", schema
+            )
+            command.upgrade(cfg, "heads")
         result = "upgraded"
+        reconcile_with_models(engine, schema)
     else:
         logger.info(
-            "Fresh database: creating schema %s from models and stamping head", schema
+            "Fresh database: creating schema %s from models and stamping heads",
+            schema,
         )
         create_from_models(engine, schema)
-        # env.py reads POSTGRES_SCHEMA for the alembic_version location.
-        os.environ["POSTGRES_SCHEMA"] = schema
-        command.stamp(cfg, "head")
+        # POSTGRES_SCHEMA already names `schema` -- alembic_sees_schema().
+        command.stamp(cfg, "heads")
         result = "created"
 
     ensure_first_superuser(engine, schema)

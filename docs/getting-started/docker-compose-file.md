@@ -9,8 +9,8 @@ header comment is the reference for every variable and profile; this page summar
 |---------|-------|-----------|---------|-------|
 | `postgres` | `postgres:16-alpine` | 5432 | default | data in the `postgres_data` volume |
 | `redis` | `redis:7-alpine` | 6379 | default | caching and rate-limit counters |
-| `api` | `experimently-api:ce` (built from `backend/Dockerfile`) | 8000 | default | runs bootstrap and seeds on first start, then uvicorn |
-| `frontend` | `experimently-web:ce` (built from `frontend/Dockerfile`) | 3000 | default | nginx serving the static dashboard and proxying `/api` to `api` |
+| `api` | `experimently-api:core` (built from `backend/Dockerfile`; `EXPERIMENTLY_PROFILE=full` builds the `full` target with the modules) | 8000 | default | runs bootstrap and seeds on first start, then uvicorn |
+| `frontend` | `experimently-web:core` (built from `frontend/Dockerfile`; `full` likewise) | 3000 | default | nginx serving the static dashboard and proxying `/api` to `api` |
 | `shoplab`, `shoplab-simulator` | built from `demo/shoplab` | 3200 | `demo` | sample e-commerce app and its traffic generator |
 | `streampulse`, `streampulse-simulator` | built from `demo/streampulse` | 3300 | `demo` | sample streaming app and its device simulator |
 | `pgadmin` | `dpage/pgadmin4` | 5050 | `tools` | database browser |

@@ -1,18 +1,31 @@
-const { enterpriseTreeAvailable } = require('./ee-alias');
+const path = require('path');
+const { MODULES_DIR, MODULES_STUB_DIR, modulesTreeAvailable } = require('./modules-alias');
 
-// Open-core seam: `./ee-alias.js` owns the rule, this file applies it to jest.
-// The mapper value is an array — jest tries each entry and uses the first that
-// resolves — so an Enterprise tree gets `src/ee/x` and falls back to the stub
-// for anything it does not carry, while a Community run (`src/ee` deleted, or
-// EXPERIMENTLY_EDITION=ce) can only ever reach the stub.
-const enterprise = enterpriseTreeAvailable();
-const eeTargets = enterprise
-  ? ['<rootDir>/src/ee/$1', '<rootDir>/src/ee-stub/$1']
-  : ['<rootDir>/src/ee-stub/$1'];
+// The modules seam: `./modules-alias.js` owns the rule, this file applies it
+// to jest. The mapper value is an array — jest tries each entry and uses the
+// first that resolves — so a full-profile tree gets `modules/frontend/src/x`
+// and falls back to the stub for anything it does not carry, while a core run
+// (`modules/` deleted, or EXPERIMENTLY_PROFILE=core) can only ever reach the
+// stub.
+//
+// The module tests live beside the modules, outside this package, so `roots`
+// gains that directory only when the profile uses it: a full run collects
+// `modules/frontend/src/**/*.test.ts(x)`, a core run never looks there (and
+// jest would refuse a root that does not exist, which is exactly the case in
+// a built core tree).
+const full = modulesTreeAvailable();
+const moduleTargets = full
+  ? [path.join(MODULES_DIR, '$1'), path.join(MODULES_STUB_DIR, '$1')]
+  : [path.join(MODULES_STUB_DIR, '$1')];
 
 module.exports = {
   testEnvironment: 'jsdom',
   setupFilesAfterEnv: ['<rootDir>/jest.setup.ts'],
+  roots: full ? ['<rootDir>', MODULES_DIR] : ['<rootDir>'],
+  // Searched after the normal node_modules walk-up (like NODE_PATH), so the
+  // modules tree — outside this package — finds `react` here and core files
+  // resolve exactly as before.
+  modulePaths: ['<rootDir>/node_modules'],
   transform: {
     '^.+\\.(ts|tsx)$': ['ts-jest', {
       tsconfig: {
@@ -22,8 +35,8 @@ module.exports = {
     }],
   },
   moduleNameMapper: {
-    // `@ee/…` first: it is the more specific pattern of the two.
-    '^@ee/(.*)$': eeTargets,
+    // `@modules/…` first: it is the more specific pattern of the two.
+    '^@modules/(.*)$': moduleTargets,
     '^@/(.*)$': '<rootDir>/src/$1',
     '\\.(css|less|scss|png|jpg|jpeg|gif|svg)$': 'identity-obj-proxy',
     '^recharts$': '<rootDir>/src/__mocks__/recharts.tsx',
@@ -33,10 +46,17 @@ module.exports = {
     '/node_modules/',
     '/.next/',
     '/out/',
-    // Enterprise tests live beside the Enterprise modules; a Community run has
-    // neither. (In a real Community build the directory is gone anyway.)
-    ...(enterprise ? [] : ['<rootDir>/src/ee/']),
+    // Belt and braces for a core run on an undeleted tree: the modules root
+    // is not listed above, and its tests are ignored even if something else
+    // reaches them.
+    ...(full ? [] : [`^${MODULES_DIR.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/`]),
   ],
+  // Known limit: the modules tree is not in the coverage report. Its tests
+  // run, but babel-plugin-istanbul (test-exclude) refuses to instrument any
+  // file outside jest's rootDir, and `../modules/...` globs here cannot
+  // change that. Reporting it needs a second jest project rooted at
+  // MODULES_DIR with its own ts-jest tsconfig; not worth it while coverage is
+  // informational.
   collectCoverageFrom: [
     'src/components/**/*.{ts,tsx}',
     'src/services/**/*.{ts,tsx}',

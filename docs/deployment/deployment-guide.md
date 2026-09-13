@@ -244,7 +244,7 @@ export POSTGRES_DB=experimentation
 export POSTGRES_SCHEMA=experimentation
 export DATABASE_URL="postgresql://appuser:PASSWORD@experimentation-prod.cluster-XXXXX.us-west-2.rds.amazonaws.com:5432/experimentation"
 
-python -m alembic -c backend/app/db/alembic.ini upgrade head
+python -m alembic -c backend/app/db/alembic.ini upgrade heads
 python -m alembic -c backend/app/db/alembic.ini current
 ```
 
@@ -300,7 +300,7 @@ The deployment then proceeds through these automated stages:
 | Build Docker image | Build and tag the backend image | ~5 min |
 | Security scan | ECR image scan for CVEs | ~2 min |
 | Push to ECR | Push to `experimentation-backend:v1.2.3` | ~1 min |
-| Database migration | Run `alembic upgrade head` via ECS task | ~2 min |
+| Database migration | Run `alembic upgrade heads` via ECS task | ~2 min |
 | Deploy to ECS | Register new task definition, update service | ~3 min |
 | Wait for stabilization | ECS replaces tasks (rolling or blue/green) | ~3 min |
 | Smoke tests | Hit health, experiments list, tracking endpoints | ~1 min |

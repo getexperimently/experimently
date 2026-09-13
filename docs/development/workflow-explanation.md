@@ -6,23 +6,44 @@ protection on `main`; a pull request cannot be merged while any of them is red.
 
 ## Required checks on every pull request
 
+The status name is what branch protection matches on — the job's `name:`, not its
+id — so renaming a job silently drops its gate. Read the live list with:
+
+```bash
+gh api repos/<owner>/<repo>/branches/main/protection --jq '.required_status_checks.contexts'
+```
+
 | Check (status name) | Workflow | What it runs |
 |---------------------|----------|--------------|
 | Unit Tests | `pr-qa-gate.yml` | `backend/tests/unit` (+ Lambda tests) against a Postgres service |
+| Module Tests † | `pr-qa-gate.yml` | `modules/backend/tests` with both requirement sets installed |
 | Smoke Tests | `pr-qa-gate.yml` | `backend/tests/smoke`: app import, route wiring, auth wiring |
+| Base Requirements Only † | `pr-qa-gate.yml` | the modules must register on `backend/requirements.txt` alone (`scripts/check_modules_register.py`), then the smoke suite |
 | Frontend Tests | `pr-qa-gate.yml` | `npm test`, `tsc --noEmit`, `next build` |
 | SDK Contract Tests | `pr-qa-gate.yml` | cross-SDK golden vectors (`tests/sdk-contract`) |
-| SDK Live Contract | `pr-qa-gate.yml` | boots the API with `seed_sdk_contract`, drives every SDK through assign / evaluate / track |
+| SDK Live Contract / sdk-live-contract (core) | `pr-qa-gate.yml` | boots the API with `seed_sdk_contract`, drives every SDK through assign / evaluate / track |
+| SDK Unit Tests | `sdk-unit-tests.yml` | aggregate of the per-SDK legs (each leg runs only when its SDK changed) |
+| core-build | `pr-qa-gate.yml` | `scripts/core_build.sh`: copy the tree, delete `modules/`, rebuild and run the suites |
+| full-build | `pr-qa-gate.yml` | the same sequence on the full tree |
+| Browser E2E | `pr-qa-gate.yml` | Playwright specs against a booted stack |
+| Docker Smoke | `pr-qa-gate.yml` | builds `experimently-api:core` and `experimently-web:core`, starts `docker-compose.yml`, checks `/health/ready`, that `/api/v1/experiments` is a 401 without credentials, logs in as the seeded admin, mints an API key, assigns a user to `sdk_contract_ab` and verifies nginx routing for a dynamic dashboard route |
 | integration-tests | `integration-tests.yml` | `backend/tests/integration` with Postgres and Redis services |
+| lint | `lint.yml` | ruff, import-linter, REUSE, lock check, eslint, tsc, hadolint, actionlint |
+| regression-guard | `regression-guard.yml` | a pull request labelled `bug` must change a test file |
 | Security Scan Summary | `security-scan.yml` | Bandit, npm audit, Semgrep (`p/python`, `p/security-audit`, `p/secrets`, `p/owasp-top-ten`), Gitleaks, Trivy on the built image |
 | Release Gate Summary | `release-gate.yml` | backend gate (unit + smoke), frontend gate (test + build), security gate (Bandit + Gitleaks) |
 
-`Docker Smoke` (`pr-qa-gate.yml`) also runs on every pull request: it builds
-`experimently-api:ce` and `experimently-web:ce`, starts `docker-compose.yml`, checks
-`/health/ready`, that `/api/v1/experiments` is a 401 without credentials, logs in as the
-seeded admin, mints an API key, assigns a user to `sdk_contract_ab` and verifies nginx
-routing for a dynamic dashboard route. It becomes a required check in phase P1 of the
-launch plan.
+† Runs on every pull request but is **not yet** in branch protection — add the
+status name above verbatim. Both are unconditional (no `if:`, no path filter),
+so requiring them cannot leave a pull request pending.
+
+Deliberately **not** required, because they are path-filtered and a required check
+that never reports leaves a pull request permanently pending:
+`CDK Stack Tests (Python)` (`infrastructure-tests.yml`) and `cognito-integration`
+(`cognito-integration-tests.yml`). The per-job checks behind an aggregate
+(`Backend Gate`, `Frontend Gate`, `Security Gate`; `Python Security Scan`,
+`Semgrep SAST`, …; `Select SDKs` and the per-SDK legs) are not listed either —
+their summary job is.
 
 ## Other pull-request and push workflows
 
@@ -44,7 +65,7 @@ launch plan.
 
 `deploy-dev.yml`, `deploy-prod.yml`, `db-migrate.yml` and `rollback.yml` deploy the CDK
 stacks to AWS. They run only when the repository variable `AWS_ACCOUNT_ID` is set on the
-upstream repository, so forks and the Community Edition never attempt a deploy. See
+upstream repository, so forks and self-hosted checkouts never attempt a deploy. See
 [docs/deployment](../deployment/README.md).
 
 ## Running the same checks locally

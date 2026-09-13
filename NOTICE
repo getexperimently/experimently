@@ -1,26 +1,24 @@
 Experimently
 Copyright (c) 2024-2026 Experimently
 
-This product includes software developed by Experimently and by third parties.
+This product includes software developed by Experimently
+(https://github.com/amarkanday/experimentation-platform) and by third parties.
 
 --------------------------------------------------------------------------------
 Licensing of this repository
 --------------------------------------------------------------------------------
 
-  Community Edition (everything except `ee/` and `sdk/`)
-      GNU Affero General Public License v3.0 only (AGPL-3.0-only)
-      See `LICENSE`.
-
-  Enterprise Edition (`ee/`)
-      Experimently Enterprise Licence 1.0 — proprietary, source-available.
-      See `ee/LICENSE`. Not open source. Requires a valid licence key.
+  Everything except `sdk/` — the backend, the optional modules under
+  `modules/`, the dashboard, the Lambda functions, the infrastructure
+  definitions, the demo applications, the scripts and the documentation
+      Apache License 2.0 (Apache-2.0). See `LICENSE`.
 
   Client SDKs and OpenFeature providers (`sdk/`)
       MIT Licence. See `sdk/LICENSE` and the `LICENSE` file in each SDK
       directory.
 
-  Documentation (`docs/`)
-      AGPL-3.0-only, as part of the Community Edition.
+`REUSE.toml` records the same split in machine-readable form; the licence texts
+are in `LICENSES/`.
 
 If you redistribute this software, in source or binary form, you must keep this
 NOTICE file and the `LICENSE` files intact.
@@ -54,7 +52,8 @@ of them, and each remains under its own licence:
   orjson                               MPL-2.0 AND (Apache-2.0 OR MIT)
 
   If you modify any of these libraries, the obligation to publish those
-  modifications is yours under their licences, not under the AGPL-3.0.
+  modifications is yours under their licences; nothing in the Apache-2.0
+  licence of this product changes that.
 
 `caniuse-lite`, pulled in transitively by the dashboard build toolchain, carries
 a CC-BY-4.0 licence over its browser-support database. It is a build-time
@@ -64,7 +63,7 @@ dependency only and its data is not redistributed by Experimently.
 Trademarks
 --------------------------------------------------------------------------------
 
-"Experimently" and the Experimently logo are trademarks of Experimently. The
-AGPL-3.0 and the MIT Licence grant no trademark rights. You may state that your
-product is built on Experimently; you may not name a fork or a hosted service
-"Experimently" without written permission.
+"Experimently" and the Experimently logo are trademarks of Experimently. Section
+6 of the Apache License 2.0 and the MIT Licence grant no trademark rights. You
+may state that your product is built on Experimently; you may not name a fork
+or a hosted service "Experimently" without written permission.

@@ -26,6 +26,12 @@ This directory contains the API documentation for the Experimentation Platform.
    - Testing requirements
    - Documentation standards
 
+4. [API stability and the OpenAPI snapshots](stability.md)
+   - `openapi-v1.stable.json` (core profile) and `openapi-v1.full.json` (full profile),
+     the checked-in contract the smoke suite compares against
+   - Marking a route `x-stability: beta`
+   - What to do when a stable route has to change
+
 ## Quick Start
 
 1. Get your API key from the platform's Settings page

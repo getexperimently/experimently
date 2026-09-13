@@ -31,6 +31,13 @@ class FargateServiceStack(Stack):
       CERTIFICATE_ARN environment variable or pass certificate_arn to the
       constructor. Without a valid ACM certificate the HTTPS listener cannot
       be created and the stack will fail during deployment.
+    - The Secrets Manager secrets listed in docs/deployment/README.md must
+      exist. ECS cannot start a task whose task definition names a secret that
+      is not there, and the application cannot start without their values.
+
+    ``include_modules`` is the deployment's profile (``app.py`` passes
+    ``ENABLE_MODULE_STACKS``). ``True`` adds the full profile's own secret,
+    ``AUDIT_HMAC_KEY``; see the comment beside it.
     """
 
     def __init__(
@@ -42,11 +49,13 @@ class FargateServiceStack(Stack):
         ecs_security_group,
         env_name: str = "prod",
         certificate_arn: str = None,
+        include_modules: bool = False,
         **kwargs,
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
         self.env_name = env_name
+        self.include_modules = include_modules
 
         # --- ECR Repository ---
         self.ecr_repo = ecr.Repository.from_repository_name(
@@ -68,6 +77,39 @@ class FargateServiceStack(Stack):
         redis_secret = secretsmanager.Secret.from_secret_name_v2(
             self, "RedisSecret", f"/{env_name}/experimentation/redis-url"
         )
+        # Every secret below is one the container REFUSES TO START without in a
+        # hardened environment, and the task definition is the only thing that
+        # can supply it: the image ships no .env file (.dockerignore keeps
+        # .env.* out of the build context).
+        #
+        # FIRST_SUPERUSER_PASSWORD defaults to "admin", which
+        # `Settings.validate_superuser_password` rejects in staging/production
+        # -- so `import backend.app.core.config` raised ValidationError and
+        # uvicorn never bound, on BOTH profiles.
+        superuser_secret = secretsmanager.Secret.from_secret_name_v2(
+            self,
+            "SuperuserPasswordSecret",
+            f"/{env_name}/experimentation/first-superuser-password",
+        )
+        required_secrets = [db_secret, jwt_secret, redis_secret, superuser_secret]
+
+        # AUDIT_HMAC_KEY is the full profile's: `modules.register(hooks)` builds
+        # ModulesSettings as its first step and its validator rejects the dev
+        # default in staging/production, so a full image without this secret
+        # fails the registration -- which `abort_if_modules_broken()` turns into
+        # a refusal to start, and which kills every alembic command too
+        # (migrations/env.py calls require_modules_or_absent()).
+        #
+        # Only for the full profile: a core image never reads it, and naming a
+        # secret that does not exist stops ECS from starting the task at all.
+        audit_secret = None
+        if include_modules:
+            audit_secret = secretsmanager.Secret.from_secret_name_v2(
+                self,
+                "AuditHmacSecret",
+                f"/{env_name}/experimentation/audit-hmac-key",
+            )
+            required_secrets.append(audit_secret)
 
         # --- IAM Task Role ---
         # The task role is assumed by the application code running inside the
@@ -83,15 +125,11 @@ class FargateServiceStack(Stack):
                 "CloudWatchLogsFullAccess"
             )
         )
-        # Least-privilege Secrets Manager access — only the three required secrets
+        # Least-privilege Secrets Manager access — only the required secrets
         task_role.add_to_policy(
             iam.PolicyStatement(
                 actions=["secretsmanager:GetSecretValue"],
-                resources=[
-                    db_secret.secret_arn,
-                    jwt_secret.secret_arn,
-                    redis_secret.secret_arn,
-                ],
+                resources=[secret.secret_arn for secret in required_secrets],
             )
         )
 
@@ -113,11 +151,7 @@ class FargateServiceStack(Stack):
         execution_role.add_to_policy(
             iam.PolicyStatement(
                 actions=["secretsmanager:GetSecretValue"],
-                resources=[
-                    db_secret.secret_arn,
-                    jwt_secret.secret_arn,
-                    redis_secret.secret_arn,
-                ],
+                resources=[secret.secret_arn for secret in required_secrets],
             )
         )
 
@@ -160,6 +194,18 @@ class FargateServiceStack(Stack):
                 "POSTGRES_PASSWORD": ecs.Secret.from_secrets_manager(db_secret),
                 "SECRET_KEY": ecs.Secret.from_secrets_manager(jwt_secret),
                 "REDIS_URL": ecs.Secret.from_secrets_manager(redis_secret),
+                "FIRST_SUPERUSER_PASSWORD": ecs.Secret.from_secrets_manager(
+                    superuser_secret
+                ),
+                **(
+                    {
+                        "AUDIT_HMAC_KEY": ecs.Secret.from_secrets_manager(
+                            audit_secret
+                        )
+                    }
+                    if audit_secret is not None
+                    else {}
+                ),
             },
             health_check=ecs.HealthCheck(
                 command=["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"],
@@ -352,10 +398,14 @@ class FargateServiceStack(Stack):
                 deployment_approval_wait_time=Duration.minutes(30),
                 # Keep the blue (old) task set alive for 1 hour after a
                 # successful deployment so that a quick rollback is possible
-                # without a full re-deployment.
-                terminate_blue_instances_on_deployment_success=codedeploy.InstanceTerminationWaitTime.after(
-                    Duration.hours(1)
-                ),
+                # without a full re-deployment.  The property is
+                # `termination_wait_time` (a Duration): the name this used --
+                # `terminate_blue_instances_on_deployment_success=
+                # codedeploy.InstanceTerminationWaitTime.after(...)` -- is from
+                # the EC2/on-premises deployment group and does not exist in
+                # aws_cdk.aws_codedeploy at all, so `cdk synth` raised
+                # AttributeError before it produced a single template.
+                termination_wait_time=Duration.hours(1),
             ),
             deployment_config=codedeploy.EcsDeploymentConfig.CANARY_10_PERCENT_5_MINUTES,
             role=codedeploy_role,

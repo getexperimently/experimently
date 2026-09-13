@@ -12,7 +12,7 @@ name: Platform
 #     live-contract:
 #       uses: ./.github/workflows/_platform.yml
 #       with:
-#         edition: ce
+#         profile: core
 #         seed: sdk-contract
 #         suite: sdk-live-contract
 #         sdks: python js go java
@@ -29,10 +29,10 @@ name: Platform
 on:
   workflow_call:
     inputs:
-      edition:
-        description: 'ce | ee — which edition to boot (ee additionally installs ee/requirements.txt when present).'
+      profile:
+        description: 'core | full — which profile to boot. core removes modules/ from the checkout; full installs modules/requirements.txt on top of the backend pins.'
         type: string
-        default: ce
+        default: core
       seed:
         description: 'Comma list of seeds to apply: demo, shoplab, streampulse, sdk-contract. Empty for none.'
         type: string
@@ -52,7 +52,7 @@ on:
 
 jobs:
   platform:
-    name: ${{ inputs.suite }} (${{ inputs.edition }})
+    name: ${{ inputs.suite }} (${{ inputs.profile }})
     runs-on: ubuntu-latest
     timeout-minutes: ${{ inputs.timeout-minutes }}
 
@@ -84,7 +84,7 @@ jobs:
       # Identical to what the sdk-live-contract job in pr-qa-gate.yml set inline.
       APP_ENV: development
       ENVIRONMENT: development
-      EXPERIMENTLY_EDITION: ${{ inputs.edition }}
+      EXPERIMENTLY_PROFILE: ${{ inputs.profile }}
       # The app reads POSTGRES_SERVER for the host; POSTGRES_HOST is what the
       # seed scripts and tests read. Both are set, as before.
       POSTGRES_SERVER: localhost
@@ -103,6 +103,17 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      # `profile: core` has to mean a core API, not just an environment
+      # variable. Nothing under backend/ reads EXPERIMENTLY_PROFILE:
+      # backend/app/modules_loader.py decides on whether `import modules`
+      # succeeds, so a checkout with modules/ present boots the full profile
+      # whatever the input said. Removing the directory is exactly how
+      # scripts/core_build.sh proves the core profile, and the assertion after
+      # the boot below checks the API agrees.
+      - name: Make the core profile real
+        if: inputs.profile == 'core'
+        run: rm -rf modules
 
       # ── toolchains ──────────────────────────────────────────────────────────
       - name: Set up Python
@@ -160,15 +171,14 @@ jobs:
       - name: Install backend dependencies
         run: pip install -r backend/requirements.txt
 
-      - name: Install enterprise dependencies
-        if: inputs.edition == 'ee'
-        run: |
-          if [ -f ee/requirements.txt ]; then
-            pip install -r ee/requirements.txt
-          else
-            echo "::error::edition=ee requested but ee/requirements.txt does not exist yet (P2)"
-            exit 1
-          fi
+      # The modules import packages backend/requirements.txt deliberately does
+      # not carry (python3-saml, PyMySQL, the warehouse drivers). Every one of
+      # those imports is guarded, so without this install the module code loads
+      # and then refuses at the first call -- which is exactly the failure this
+      # file must not hide.
+      - name: Install module dependencies
+        if: inputs.profile == 'full'
+        run: pip install -r modules/requirements.txt
 
       - name: Install SDK dependencies
         if: inputs.suite == 'sdk-live-contract'
@@ -225,6 +235,51 @@ jobs:
             sleep 1
           done
           echo "backend did not become healthy"; tail -n 100 backend.log; exit 1
+
+      # The profile the caller asked for is the profile that is running. A core
+      # job that quietly booted the full API would test the wrong thing and
+      # still be green -- which is what `sdk-live-contract (core)`, a required
+      # check, was doing.
+      #
+      # `.profile` alone does not answer that question. Registering the module
+      # routers and mounting them are two steps, and the second can fail on its
+      # own: the process then keeps serving the core API while every module
+      # route 404s. So the module list and one real module route are checked
+      # too -- /api/v1/workspaces/ is mounted by the registration and exists in
+      # no core build, so it is 404 there and an authentication refusal here.
+      - name: Assert the running profile
+        run: |
+          set -euo pipefail
+          curl -sf http://127.0.0.1:8000/api/v1/modules -o modules.json
+          cat modules.json
+          running=$(jq -er .profile modules.json)
+          if [ "$running" != "${{ inputs.profile }}" ]; then
+            echo "::error::asked for the ${{ inputs.profile }} profile, the API is running $running"
+            exit 1
+          fi
+          count=$(jq -er '.modules | length' modules.json)
+          code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8000/api/v1/workspaces/)
+          if [ "${{ inputs.profile }}" = 'full' ]; then
+            if [ "$count" -eq 0 ]; then
+              echo "::error::the full profile reports no installed modules"
+              exit 1
+            fi
+            if [ "$code" = '404' ]; then
+              echo "::error::/api/v1/workspaces/ answers 404: the module routers registered but never mounted"
+              tail -n 100 backend.log
+              exit 1
+            fi
+          else
+            if [ "$count" -ne 0 ]; then
+              echo "::error::the core profile reports $count installed modules"
+              exit 1
+            fi
+            if [ "$code" != '404' ]; then
+              echo "::error::/api/v1/workspaces/ answers $code on the core profile: a module route is mounted"
+              exit 1
+            fi
+          fi
+          echo "the API is running the $running profile ($count modules, /api/v1/workspaces/ -> $code)"
 
       # ── suite ───────────────────────────────────────────────────────────────
       - name: Run suite

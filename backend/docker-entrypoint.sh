@@ -4,7 +4,7 @@
 #
 #   1. Wait for PostgreSQL (POSTGRES_SERVER/POSTGRES_PORT) to accept connections.
 #   2. RUN_MIGRATIONS=true (default)  ->  python -m backend.app.db.bootstrap
-#      (creates the schema on a fresh database, `alembic upgrade head` otherwise).
+#      (creates the schema on a fresh database, `alembic upgrade heads` otherwise).
 #   3. SEED=<comma list of demo,shoplab,streampulse,sdk-contract>  ->  run the
 #      matching backend/scripts/seed_*.py once. Completed seeds are recorded in
 #      the `seed_markers` table (backend/scripts/seed_markers.py) so a restart

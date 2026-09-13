@@ -51,7 +51,7 @@ export DATABRICKS_SCHEMA="experiments"
 ### Basic connection and query
 
 ```python
-from backend.app.services.databricks_connector import DatabricksConnector
+from modules.backend.app.services.databricks_connector import DatabricksConnector
 
 with DatabricksConnector(
     host="myworkspace.azuredatabricks.net",
@@ -71,7 +71,7 @@ with DatabricksConnector(
 ### Test connection
 
 ```python
-from backend.app.services.databricks_connector import DatabricksConnector
+from modules.backend.app.services.databricks_connector import DatabricksConnector
 
 connector = DatabricksConnector(
     host="myworkspace.azuredatabricks.net",
@@ -88,7 +88,7 @@ else:
 ### Fetch experiment metrics
 
 ```python
-from backend.app.services.databricks_connector import DatabricksConnector
+from modules.backend.app.services.databricks_connector import DatabricksConnector
 
 with DatabricksConnector(
     host="myworkspace.azuredatabricks.net",
@@ -114,7 +114,7 @@ with DatabricksConnector(
 ### Fetch feature flag metrics
 
 ```python
-from backend.app.services.databricks_connector import DatabricksConnector
+from modules.backend.app.services.databricks_connector import DatabricksConnector
 
 with DatabricksConnector(
     host="myworkspace.azuredatabricks.net",

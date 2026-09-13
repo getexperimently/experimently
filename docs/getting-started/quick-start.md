@@ -24,7 +24,7 @@ cd experimentation-platform
 docker compose up -d --wait
 ```
 
-The first start builds two images (`experimently-api:ce`, `experimently-web:ce`), starts
+The first start builds two images (`experimently-api:core`, `experimently-web:core`), starts
 Postgres 16 and Redis 7, creates the database schema, creates the first administrator and
 applies the `demo` seed (three experiments, two flags). Seeds run once per database.
 

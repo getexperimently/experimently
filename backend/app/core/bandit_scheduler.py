@@ -8,7 +8,7 @@ fresh weights.
 Stats sources, in order of preference
 -------------------------------------
 1. DynamoDB real-time counters (``DynamoDBCounterService.get_experiment_counters``),
-   an optional module reached through ``core.enterprise_features``; a build
+   an optional module reached through ``core.optional_modules``; a build
    without it simply starts at source 2.
 2. PostgreSQL: ``count(Assignment)`` per variant for pulls and the number of
    distinct converting users (events whose ``event_type`` equals the
@@ -40,7 +40,7 @@ from sqlalchemy import and_, func
 from sqlalchemy.orm import Session
 
 from backend.app.core.config import settings
-from backend.app.core.enterprise_features import realtime_counter_service
+from backend.app.core.optional_modules import realtime_counter_service
 from backend.app.core.scheduler_tick import run_locked_tick
 from backend.app.core.stats_engine import ENGINE_VERSION, as_of_bucket, derive_seed
 from backend.app.models.analysis_snapshot import AnalysisKind
@@ -421,9 +421,9 @@ class BanditScheduler:
         """
         Return the DynamoDB counter service class, or ``None`` when absent.
 
-        Real-time DynamoDB counters are an optional (Enterprise) module, so
-        Community never imports it directly — it asks the
-        ``core.enterprise_features`` seam.  A build that does not ship the
+        Real-time DynamoDB counters are the optional ``counters`` module, so
+        the core never imports it directly — it asks the
+        ``core.optional_modules`` seam.  A build that does not ship the
         service is a supported configuration, not an error: the caller simply
         falls through to the next stats source (PostgreSQL).
         """

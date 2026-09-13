@@ -119,10 +119,10 @@ export const AdminService = {
     });
   },
 
-  // Roles, permission grants and effective permissions (`/api/v1/rbac/*`) are
-  // Enterprise: see `src/ee/rbac.ts`, reached through the `@ee/rbac` alias.
-  // They used to live here, which shipped Community builds with calls to
-  // routes their backend does not serve (`ee-coupling-report.md` §6).
+  // Roles, permission grants and effective permissions (`/api/v1/rbac/*`)
+  // belong to the rbac module: see `modules/frontend/src/rbac.ts`, reached
+  // through the `@modules/rbac` alias. They used to live here, which shipped
+  // core builds with calls to routes their backend does not serve.
 
   // Safety (`backend/app/api/v1/endpoints/safety.py`)
   async getSafetySettings(): Promise<SafetySettings> {

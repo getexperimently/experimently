@@ -3,7 +3,7 @@ Authentication endpoints for the API.
 
 Two providers share this router (selected by ``settings.AUTH_PROVIDER``):
 
-* ``local`` (Community Edition default) — e-mail + password against the
+* ``local`` (the default) — e-mail + password against the
   ``users`` table, HS256 JWTs issued by ``core.security``.  Endpoints:
   ``POST /login``, ``GET /me``, ``POST /logout`` and the OAuth2 form
   ``POST /token`` (``username`` = e-mail) so Swagger's *Authorize* works.

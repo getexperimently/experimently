@@ -79,6 +79,43 @@ CDK will display a diff of all resources to be created and prompt for confirmati
 
 The first full deployment takes approximately 20–40 minutes (Aurora and OpenSearch provisioning are the slowest steps).
 
+### Which stacks you get: core or full
+
+The CDK app deploys the stacks your checkout has, the same way the API loads
+the modules it finds. A **core** checkout has no `modules/` directory and gets
+the core stacks below. A **full** checkout also has
+`modules/infrastructure/cdk/stacks`, and `cdk deploy --all` then adds three
+more:
+
+| Stack | Module | What it is |
+|-------|--------|------------|
+| `experimentation-dynamodb-counters-<env>` | `counters` | The real-time counter table the bandit scheduler reads |
+| `experimentation-analytics-<env>` | `etl` | Kinesis stream, Firehose delivery, OpenSearch domain, data-lake bucket |
+| `experimentation-glue-etl-<env>` | `etl` | Glue crawler and ETL jobs over the data-lake bucket |
+
+The first line the app prints says which profile it picked:
+
+```
+[cdk] profile: full (modules/infrastructure/cdk/stacks present)
+```
+
+`EXPERIMENTLY_PROFILE` — the same variable the container images and the API
+use — overrides the choice:
+
+```bash
+EXPERIMENTLY_PROFILE=core cdk deploy --all   # core stacks only, from a full checkout
+EXPERIMENTLY_PROFILE=full cdk deploy --all   # fail if the module stacks are absent
+```
+
+Two things follow from the profile, so a core deployment is consistent rather
+than half-configured:
+
+- The monitoring stack's Kinesis widget and its iterator-age alarm are created
+  only alongside the analytics stack, and they watch the stream that stack
+  actually creates. A core deployment has neither.
+- Without the `counters` stack there is no counter table: the bandit scheduler
+  falls back to PostgreSQL for its statistics, which is the core behaviour.
+
 ---
 
 ## Individual Stack Deployment
@@ -131,12 +168,14 @@ cdk deploy MonitoringStack
 
 ### DynamoStack
 
-- **ExperimentCounters** DynamoDB table with on-demand billing
-- Global secondary indexes for querying by experiment and metric
+- Core: the assignment, event and flag-evaluation tables
+- Full profile only (the `counters` module): the **experiment-counters**
+  DynamoDB table with on-demand billing and a GSI for querying by experiment
 
-### StreamingStack
+### StreamingStack (full profile only — the `etl` module)
 
-- **Kinesis Data Stream** (`ExperimentEvents`, 2 shards by default)
+- **Kinesis Data Stream** (`exp-events-<id>`)
+- **Firehose delivery stream** into the data-lake bucket
 - **OpenSearch Service** domain (single-node `t3.medium.search` for development; multi-node for production)
 
 ### MonitoringStack
@@ -145,6 +184,9 @@ cdk deploy MonitoringStack
 - CloudWatch dashboards: API latency, error rates, Lambda invocations, DynamoDB throughput
 - CloudWatch alarms: p99 latency, error rate, dead letter queue depth
 - SNS topic for alarm notifications
+- With the `etl` module: a Kinesis widget and an iterator-age alarm on that
+  module's event stream. A core deployment gets neither, rather than an alarm
+  on a stream that does not exist.
 
 ### SplitUrlStack
 

@@ -2,15 +2,15 @@ import React from 'react';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import {
   AppShell,
-  ENTERPRISE_NAV_ITEMS,
+  MODULE_NAV_ITEMS,
   NAV_ITEMS,
   displayName,
   isNavActive,
-  licensedEnterpriseNav,
+  installedModuleNav,
 } from '@/components/AppShell';
 import { AuthProvider } from '@/contexts/AuthContext';
-import { EditionProvider } from '@/contexts/EditionContext';
-import { COMMUNITY_EDITION, EditionInfo, FEATURES } from '@/services/edition';
+import { ModulesProvider, __resetModulesCache } from '@/contexts/ModulesContext';
+import { CORE_PROFILE, MODULES, ModulesInfo } from '@/services/modules';
 import { TOKEN_STORAGE_KEY, UserMe } from '@/services/api';
 
 const mockReplace = jest.fn().mockResolvedValue(true);
@@ -86,30 +86,31 @@ function signInAs(user: UserMe) {
   mockFetch.mockResolvedValueOnce(jsonResponse(200, user));
 }
 
-function enterprise(overrides: Partial<EditionInfo> = {}): EditionInfo {
+function full(overrides: Partial<ModulesInfo> = {}): ModulesInfo {
   return {
-    edition: 'enterprise',
-    features: [FEATURES.WORKSPACES],
-    status: 'active',
-    expires_at: '2026-09-12T00:00:00Z',
+    profile: 'full',
+    modules: [MODULES.WORKSPACES],
     version: '1.0.0',
     ...overrides,
   };
 }
 
-function renderShell(edition: EditionInfo = COMMUNITY_EDITION) {
+function renderShell(info: ModulesInfo = CORE_PROFILE) {
   return render(
-    <EditionProvider initial={edition}>
+    <ModulesProvider initial={info}>
       <AuthProvider>
         <AppShell>
           <div data-testid="page-content">page</div>
         </AppShell>
       </AuthProvider>
-    </EditionProvider>,
+    </ModulesProvider>,
   );
 }
 
 beforeEach(() => {
+  // The modules cache lives at module scope and outlives a test; an unseeded
+  // provider in one test would otherwise reuse the previous test's answer.
+  __resetModulesCache();
   mockFetch.mockReset();
   mockReplace.mockClear();
   localStorage.clear();
@@ -118,12 +119,13 @@ beforeEach(() => {
 });
 
 describe('AppShell', () => {
-  it('renders children, the wordmark and the edition pill', async () => {
+  it('renders children and the wordmark, with no status pill on it', async () => {
     signInAs(makeUser());
     renderShell();
     expect(screen.getByTestId('page-content')).toBeInTheDocument();
     expect(screen.getByText('Experimently')).toBeInTheDocument();
-    expect(screen.getByTestId('edition-pill')).toHaveTextContent('CE');
+    // The wordmark is the badge letter and the name, nothing appended.
+    expect(screen.getByLabelText('Experimently home')).toHaveTextContent(/^EExperimently$/);
     await waitFor(() => expect(screen.getByTestId('user-menu')).toBeInTheDocument());
   });
 
@@ -215,37 +217,8 @@ describe('AppShell', () => {
     expect(screen.queryByTestId('mobile-nav')).not.toBeInTheDocument();
   });
 
-  describe('edition chrome', () => {
-    it('reflects the real edition in the pill', async () => {
-      signInAs(makeUser());
-      renderShell(enterprise());
-      await waitFor(() => expect(screen.getByTestId('user-menu')).toBeInTheDocument());
-      expect(screen.getByTestId('edition-pill')).toHaveTextContent('EE');
-    });
-
-    it('shows the grace banner inside the shell', async () => {
-      signInAs(makeUser());
-      renderShell(enterprise({ status: 'grace' }));
-      await waitFor(() => expect(screen.getByTestId('user-menu')).toBeInTheDocument());
-      expect(screen.getByTestId('edition-banner')).toHaveAttribute('data-status', 'grace');
-    });
-
-    it('shows no banner on an active licence or in Community', async () => {
-      signInAs(makeUser());
-      const view = renderShell(enterprise());
-      await waitFor(() => expect(screen.getByTestId('user-menu')).toBeInTheDocument());
-      expect(screen.queryByTestId('edition-banner')).not.toBeInTheDocument();
-      view.unmount();
-
-      localStorage.clear();
-      mockFetch.mockReset();
-      signInAs(makeUser());
-      renderShell();
-      await waitFor(() => expect(screen.getByTestId('user-menu')).toBeInTheDocument());
-      expect(screen.queryByTestId('edition-banner')).not.toBeInTheDocument();
-    });
-
-    it('keeps the primary nav free of Enterprise routes', () => {
+  describe('module chrome', () => {
+    it('keeps the primary nav free of module routes', () => {
       expect(NAV_ITEMS.map((i) => i.href)).toEqual([
         '/experiments',
         '/feature-flags',
@@ -254,27 +227,40 @@ describe('AppShell', () => {
       ]);
     });
 
-    it('offers a collapsed Enterprise group that is closed by default', async () => {
+    it('offers a collapsed More group that is closed by default', async () => {
       signInAs(makeUser());
       renderShell();
       await waitFor(() => expect(screen.getByTestId('user-menu')).toBeInTheDocument());
-      const group = screen.getAllByTestId('enterprise-nav-group')[0];
+      const group = screen.getAllByTestId('more-nav-group')[0];
       expect(group).toBeInTheDocument();
       expect(group).not.toHaveAttribute('open');
-      expect(screen.getAllByTestId('nav-editions-docs')[0]).toHaveAttribute(
-        'href',
-        '/docs/editions',
-      );
+      expect(group.querySelector('summary')).toHaveTextContent('More');
     });
 
-    it('closes the Enterprise group when a link in it is followed, and on navigation', async () => {
+    it('links to the modules guide in the core profile, and not in the full one', async () => {
+      signInAs(makeUser());
+      const view = renderShell();
+      await waitFor(() => expect(screen.getByTestId('user-menu')).toBeInTheDocument());
+      expect(screen.getAllByTestId('nav-modules-docs')[0]).toHaveAttribute('href', '/docs/modules');
+      expect(screen.getAllByTestId('nav-modules-docs')[0]).toHaveTextContent('Modules');
+      view.unmount();
+
+      localStorage.clear();
+      mockFetch.mockReset();
+      signInAs(makeUser());
+      renderShell(full());
+      await waitFor(() => expect(screen.getByTestId('user-menu')).toBeInTheDocument());
+      expect(screen.queryByTestId('nav-modules-docs')).not.toBeInTheDocument();
+    });
+
+    it('closes the More group when a link in it is followed, and on navigation', async () => {
       // _app.tsx keeps one AppShell across client-side navigations, so an
       // uncontrolled <details> stayed open -- a panel over the next page --
       // after any link inside it was clicked.
       signInAs(makeUser());
-      renderShell(enterprise());
+      renderShell(full());
       await waitFor(() => expect(screen.getByTestId('user-menu')).toBeInTheDocument());
-      const group = screen.getAllByTestId('enterprise-nav-group')[0] as HTMLDetailsElement;
+      const group = screen.getAllByTestId('more-nav-group')[0] as HTMLDetailsElement;
 
       fireEvent.click(group.querySelector('summary')!);
       await waitFor(() => expect(group).toHaveAttribute('open'));
@@ -289,11 +275,11 @@ describe('AppShell', () => {
       await waitFor(() => expect(group).not.toHaveAttribute('open'));
     });
 
-    it('closes the Enterprise group on an outside click and on Escape', async () => {
+    it('closes the More group on an outside click and on Escape', async () => {
       signInAs(makeUser());
-      renderShell(enterprise());
+      renderShell(full());
       await waitFor(() => expect(screen.getByTestId('user-menu')).toBeInTheDocument());
-      const group = screen.getAllByTestId('enterprise-nav-group')[0] as HTMLDetailsElement;
+      const group = screen.getAllByTestId('more-nav-group')[0] as HTMLDetailsElement;
 
       fireEvent.click(group.querySelector('summary')!);
       await act(async () => {
@@ -312,27 +298,89 @@ describe('AppShell', () => {
       await waitFor(() => expect(group).not.toHaveAttribute('open'));
     });
 
-    it('carries no Workspaces link in Community', async () => {
+    it('carries no Workspaces link in the core profile', async () => {
       signInAs(makeUser());
       renderShell();
       await waitFor(() => expect(screen.getByTestId('user-menu')).toBeInTheDocument());
       expect(screen.queryByTestId('nav-workspaces')).not.toBeInTheDocument();
     });
 
-    it('adds the Workspaces link once the licence allows it', async () => {
+    it('adds the Workspaces link once the workspaces module is installed', async () => {
       signInAs(makeUser());
-      renderShell(enterprise());
+      renderShell(full());
       await waitFor(() => expect(screen.getByTestId('user-menu')).toBeInTheDocument());
       expect(screen.getAllByTestId('nav-workspaces')[0]).toHaveAttribute('href', '/workspaces');
     });
 
-    it('licensedEnterpriseNav gates on the licence state, not just the edition', () => {
-      expect(licensedEnterpriseNav(COMMUNITY_EDITION)).toEqual([]);
-      expect(licensedEnterpriseNav(enterprise())).toHaveLength(ENTERPRISE_NAV_ITEMS.length);
-      expect(licensedEnterpriseNav(enterprise({ status: 'grace' }))).toHaveLength(1);
-      expect(licensedEnterpriseNav(enterprise({ status: 'expired' }))).toEqual([]);
-      expect(licensedEnterpriseNav(enterprise({ status: 'invalid' }))).toEqual([]);
-      expect(licensedEnterpriseNav(enterprise({ features: ['hipaa'] }))).toEqual([]);
+    it('shows no More group at all in a full profile with no routed module installed', async () => {
+      // A full instance whose installed modules carry no dashboard route has
+      // nothing to put in the group, and an empty disclosure is noise.
+      signInAs(makeUser());
+      renderShell(full({ modules: [MODULES.HIPAA] }));
+      await waitFor(() => expect(screen.getByTestId('user-menu')).toBeInTheDocument());
+      expect(screen.queryByTestId('more-nav-group')).not.toBeInTheDocument();
+    });
+
+    it('hides the More group while the modules are still being probed', async () => {
+      // The provider's initial state is core, so an unseeded shell would
+      // otherwise paint the "Modules" guide link on a full instance and swap
+      // it for the routes when the probe resolved.
+      mockFetch.mockImplementation((url: string) =>
+        url.endsWith('/api/v1/modules')
+          ? new Promise(() => {})
+          : Promise.resolve(jsonResponse(200, makeUser())),
+      );
+      localStorage.setItem(TOKEN_STORAGE_KEY, 'tok');
+      render(
+        <ModulesProvider>
+          <AuthProvider>
+            <AppShell>
+              <div data-testid="page-content">page</div>
+            </AppShell>
+          </AuthProvider>
+        </ModulesProvider>,
+      );
+      await waitFor(() => expect(screen.getByTestId('user-menu')).toBeInTheDocument());
+      expect(screen.queryByTestId('more-nav-group')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('nav-modules-docs')).not.toBeInTheDocument();
+    });
+
+    it('shows no Modules guide link when the probe failed', async () => {
+      // A failed probe also resolves to core, and the guide link says "this
+      // instance runs the core profile" -- which the dashboard cannot know
+      // when all that happened is that /api/v1/modules did not answer.
+      mockFetch.mockImplementation((url: string) =>
+        url.endsWith('/api/v1/modules')
+          ? Promise.reject(new TypeError('Failed to fetch'))
+          : Promise.resolve(jsonResponse(200, makeUser())),
+      );
+      localStorage.setItem(TOKEN_STORAGE_KEY, 'tok');
+      render(
+        <ModulesProvider>
+          <AuthProvider>
+            <AppShell>
+              <div data-testid="page-content">page</div>
+            </AppShell>
+          </AuthProvider>
+        </ModulesProvider>,
+      );
+      await waitFor(() => expect(screen.getByTestId('user-menu')).toBeInTheDocument());
+      await waitFor(() =>
+        expect(mockFetch).toHaveBeenCalledWith(
+          expect.stringContaining('/api/v1/modules'),
+          expect.anything(),
+        ),
+      );
+      expect(screen.queryByTestId('nav-modules-docs')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('more-nav-group')).not.toBeInTheDocument();
+    });
+
+    it('installedModuleNav lists exactly the routes whose module is installed', () => {
+      expect(installedModuleNav(CORE_PROFILE)).toEqual([]);
+      expect(installedModuleNav(full())).toHaveLength(MODULE_NAV_ITEMS.length);
+      expect(installedModuleNav(full({ modules: ['hipaa'] }))).toEqual([]);
+      expect(installedModuleNav(full({ profile: 'core' }))).toHaveLength(1);
+      expect(MODULE_NAV_ITEMS.map((i) => i.href)).toEqual(['/workspaces']);
     });
   });
 

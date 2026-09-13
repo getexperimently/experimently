@@ -11,6 +11,53 @@ from aws_cdk import (
 )
 from constructs import Construct
 
+# --- The command the task runs -------------------------------------------
+# backend/Dockerfile sets WORKDIR /app and copies the repository layout under
+# it (`COPY backend/ /app/backend/`, and `modules/ /app/modules/` for the full
+# profile), so a path that works from a checkout works here unchanged.  The
+# config used to be named "app/db/alembic.ini", which resolves to
+# /app/app/db/alembic.ini and does not exist.
+IMAGE_WORKDIR = "/app"
+ALEMBIC_CONFIG = "backend/app/db/alembic.ini"
+
+#: `heads`, plural.  A full-profile image has two -- the core chain and the
+#: `modules` branch -- and alembic refuses the singular `head` when more than
+#: one exists ("Multiple head revisions are present"), so `upgrade head` fails
+#: outright.  A core image has one head and `heads` names it just the same.
+#: backend/tests/unit/infrastructure/test_migration_task_command.py checks that
+#: this command, the db-migrate workflow and deploy-prod all still agree with
+#: the image layout.
+MIGRATION_COMMAND = [
+    "python",
+    "-m",
+    "alembic",
+    "-c",
+    ALEMBIC_CONFIG,
+    "upgrade",
+    "heads",
+]
+
+# --- The image this task must run ----------------------------------------
+# The migration task and the API service have to be the same **profile**, and
+# `IMAGE_TAG` is how that is arranged: `.github/workflows/deploy-prod.yml`
+# builds `--target "$PROFILE"` and pushes that image to `:latest` as well as to
+# the version tags, so whichever profile was deployed is what this task pulls.
+# Changing this tag without changing what the deploy workflow pushes to it
+# breaks that, and the two profiles do not read the same `alembic_version`: a
+# core image cannot resolve the `modules_0001_rbac` row a full bootstrap
+# records, and alembic reads every row before it does anything.
+#
+# When the pair *is* mismatched, `backend/app/db/migrations/env.py` answers the
+# way `db/bootstrap.py` always did rather than with a traceback: when there is
+# nothing for this build to apply it logs a WARNING naming the foreign
+# revisions, leaves the rows alone and exits 0; when this build's own
+# migrations are *not* all applied it refuses with a message telling the
+# operator to run the full image against the database, or -- with a backup
+# taken -- to delete those rows from `<schema>.alembic_version`. Either way the
+# task never half-applies a chain it cannot plan, and the deploy job fails with
+# a sentence instead of "Can't locate revision identified by ...".
+IMAGE_TAG = "latest"
+
 
 class MigrationTaskStack(Stack):
     """
@@ -18,9 +65,10 @@ class MigrationTaskStack(Stack):
 
     This stack does NOT create a long-running ECS service. Instead it
     registers a Fargate task definition that can be invoked on-demand
-    (e.g. from a CI/CD pipeline or a CodePipeline action) to run:
+    (e.g. from a CI/CD pipeline or a CodePipeline action) to run
+    :data:`MIGRATION_COMMAND`:
 
-        python -m alembic -c app/db/alembic.ini upgrade head
+        python -m alembic -c backend/app/db/alembic.ini upgrade heads
 
     Usage in a deployment pipeline:
         aws ecs run-task \\
@@ -31,6 +79,18 @@ class MigrationTaskStack(Stack):
 
     The task exits (succeeds or fails) after the migration completes, making
     it easy to detect failures and gate subsequent deployment steps.
+
+    ``db_host`` is the Aurora writer endpoint (``app.py`` passes the database
+    stack's ``cluster_endpoint.hostname``); without it the container talks to
+    ``localhost``. ``include_modules`` is the deployment's profile and decides
+    whether the full profile's ``AUDIT_HMAC_KEY`` is injected.
+
+    :data:`MIGRATION_COMMAND` is the container's **CMD**, and the image's
+    ENTRYPOINT runs before it; ``RUN_MIGRATIONS=false`` in the environment is
+    what stops that entry point from bootstrapping the schema on its way past.
+    Callers that override the command (``.github/workflows/db-migrate.yml``,
+    ``deploy-prod.yml``) inherit that environment, which is why a *downgrade*
+    override is now only a downgrade.
     """
 
     def __init__(
@@ -39,12 +99,15 @@ class MigrationTaskStack(Stack):
         construct_id: str,
         ecs_cluster,
         env_name: str = "prod",
+        db_host: str = None,
+        include_modules: bool = False,
         **kwargs,
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
         self.env_name = env_name
         self.ecs_cluster = ecs_cluster
+        self.include_modules = include_modules
 
         # --- ECR Repository ---
         # Reuses the same backend image as the main Fargate service.
@@ -56,13 +119,41 @@ class MigrationTaskStack(Stack):
         )
 
         # --- Secrets from Secrets Manager ---
-        # Only the DB password is required; the migration task does not need
-        # the JWT secret or Redis URL.
+        # Not "only the DB password": `python -m alembic -c
+        # backend/app/db/alembic.ini ...` imports `backend.app.core.config`
+        # (and, on the full profile, `modules.register(hooks)`) before it plans
+        # a single revision, and those settings classes VALIDATE every hardened
+        # field in staging/production whether or not this task reads it. A
+        # missing SECRET_KEY or FIRST_SUPERUSER_PASSWORD is a ValidationError at
+        # import, which is every alembic command failing -- see the comments in
+        # stacks/fargate_service_stack.py, which names the same secrets.
+        #
+        # REDIS_URL is genuinely not needed: it has no such validator.
         db_secret = secretsmanager.Secret.from_secret_name_v2(
             self,
             "DbSecret",
             f"/{env_name}/experimentation/db-password",
         )
+        jwt_secret = secretsmanager.Secret.from_secret_name_v2(
+            self,
+            "JwtSecret",
+            f"/{env_name}/experimentation/jwt-secret",
+        )
+        superuser_secret = secretsmanager.Secret.from_secret_name_v2(
+            self,
+            "SuperuserPasswordSecret",
+            f"/{env_name}/experimentation/first-superuser-password",
+        )
+        required_secrets = [db_secret, jwt_secret, superuser_secret]
+
+        audit_secret = None
+        if include_modules:
+            audit_secret = secretsmanager.Secret.from_secret_name_v2(
+                self,
+                "AuditHmacSecret",
+                f"/{env_name}/experimentation/audit-hmac-key",
+            )
+            required_secrets.append(audit_secret)
 
         # --- IAM Task Execution Role ---
         # The execution role is used by the ECS agent to pull the image and
@@ -78,11 +169,11 @@ class MigrationTaskStack(Stack):
                 )
             ],
         )
-        # Allow the execution role to retrieve only the DB secret
+        # Allow the execution role to retrieve only the secrets it injects
         execution_role.add_to_policy(
             iam.PolicyStatement(
                 actions=["secretsmanager:GetSecretValue"],
-                resources=[db_secret.secret_arn],
+                resources=[secret.secret_arn for secret in required_secrets],
             )
         )
 
@@ -118,26 +209,37 @@ class MigrationTaskStack(Stack):
 
         self.task_definition.add_container(
             "backend",
-            image=ecs.ContainerImage.from_ecr_repository(ecr_repo, tag="latest"),
-            # Override the default image entrypoint to run Alembic migrations
-            command=[
-                "python",
-                "-m",
-                "alembic",
-                "-c",
-                "app/db/alembic.ini",
-                "upgrade",
-                "head",
-            ],
+            image=ecs.ContainerImage.from_ecr_repository(ecr_repo, tag=IMAGE_TAG),
+            # `command` is the container's CMD, NOT its entry point: the image's
+            # ENTRYPOINT (backend/docker-entrypoint.sh) still runs first and
+            # only `exec "$@"`s this at the end. RUN_MIGRATIONS=false below is
+            # what keeps that from being a bug -- see the environment.
+            command=list(MIGRATION_COMMAND),
             logging=ecs.LogDrivers.aws_logs(
                 stream_prefix="migrate",
                 log_group=log_group,
             ),
             environment={
                 "APP_ENV": env_name,
+                # Where the database IS. Without it every setting that names a
+                # host falls back to `localhost`: the entry point's `pg_isready`
+                # loop spent DB_WAIT_TIMEOUT=120s against the container itself
+                # and exited 1, and had it got past that, alembic would have
+                # "migrated" a database that is not there.
+                **({"POSTGRES_SERVER": db_host} if db_host else {}),
                 "POSTGRES_DB": "experimentation",
                 "POSTGRES_SCHEMA": "experimentation",
                 "POSTGRES_PORT": "5432",
+                # The entry point's own bootstrap (prune + `upgrade heads` +
+                # reconcile + ensure_first_superuser) must NOT run here: it
+                # would apply a migration before this task's command is
+                # reached, which for `db-migrate.yml`'s downgrade override
+                # means upgrading to heads and then undoing exactly that. The
+                # task runs one alembic command -- the one in `command` -- and
+                # nothing else. The entry point still waits for the database
+                # and still execs the command.
+                "RUN_MIGRATIONS": "false",
+                "SEED": "",
                 # Ensure Python output is flushed immediately so that
                 # CloudWatch Logs captures the full migration output even if
                 # the task exits quickly.
@@ -145,6 +247,19 @@ class MigrationTaskStack(Stack):
             },
             secrets={
                 "POSTGRES_PASSWORD": ecs.Secret.from_secrets_manager(db_secret),
+                "SECRET_KEY": ecs.Secret.from_secrets_manager(jwt_secret),
+                "FIRST_SUPERUSER_PASSWORD": ecs.Secret.from_secrets_manager(
+                    superuser_secret
+                ),
+                **(
+                    {
+                        "AUDIT_HMAC_KEY": ecs.Secret.from_secrets_manager(
+                            audit_secret
+                        )
+                    }
+                    if audit_secret is not None
+                    else {}
+                ),
             },
             essential=True,
         )

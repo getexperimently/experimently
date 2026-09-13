@@ -24,10 +24,19 @@ jobs:
         run: |
           pip install bandit pip-audit
 
+      # Both trees: the modules (SAML parsing, PHI encryption, the SQL-building
+      # warehouse connectors, the inbound webhooks) moved to modules/backend/app
+      # and `-r backend/app` no longer reaches them. modules/ is absent in a
+      # core checkout, so it is passed only when it is there.
       - name: Run Bandit
         run: |
-          bandit -r backend/app -f json -o bandit-report.json || true
-          bandit -r backend/app -ll  # Only show medium+ severity, fail on high
+          targets=backend/app
+          if [ -d modules/backend/app ]; then targets="$targets modules/backend/app"; fi
+          echo "bandit -r $targets"
+          # shellcheck disable=SC2086
+          bandit -r $targets -f json -o bandit-report.json || true
+          # shellcheck disable=SC2086
+          bandit -r $targets -ll  # Only show medium+ severity, fail on high
         continue-on-error: false
 
       # Informational: lists every advisory for the pinned versions regardless
@@ -37,6 +46,11 @@ jobs:
       - name: Run pip-audit (dependency advisories, informational)
         run: |
           pip-audit -r backend/requirements.txt --no-deps --desc=off
+          # The module-only pins (python3-saml, the warehouse drivers) live in
+          # their own file and would otherwise be audited nowhere.
+          if [ -f modules/requirements.txt ]; then
+            pip-audit -r modules/requirements.txt --no-deps --desc=off
+          fi
         continue-on-error: true
 
       - name: Upload Bandit report
@@ -76,8 +90,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Both trees, for the reason Bandit takes both: the SAML XML parser, the
+      # PHI encryption, the SQL-string-building warehouse connectors and the
+      # platform's only anonymous write path all live under modules/backend/app
+      # now, and `backend/app/` reaches none of them. modules/ is absent in a
+      # core checkout, so it is passed only when it is there.
       - name: Run Semgrep
         run: |
+          targets=backend/app/
+          if [ -d modules/backend/app ]; then targets="$targets modules/backend/app/"; fi
+          echo "semgrep scan ... $targets"
+          # shellcheck disable=SC2086
           semgrep scan \
             --config "p/python" \
             --config "p/security-audit" \
@@ -86,7 +109,7 @@ jobs:
             --error \
             --json \
             --output semgrep-report.json \
-            backend/app/
+            $targets
 
       - name: Upload Semgrep results
         uses: actions/upload-artifact@v7
@@ -127,21 +150,38 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y trivy
 
+      # `backend/` covers the core image's pins; the full image adds
+      # modules/requirements.txt on top, and that file was in no gate and in
+      # no SBOM. trivy takes one path per invocation, so the modules get their
+      # own scan and their own SBOM. Absent in a core checkout.
+      # (trivy's pip analyser reads files named requirements.txt only, so
+      # neither tree's .lock is scanned here -- pip-audit above covers those.)
       - name: Scan filesystem for vulnerabilities
         run: |
           trivy fs --severity HIGH,CRITICAL --exit-code 1 --format table backend/
+          if [ -d modules ]; then
+            trivy fs --severity HIGH,CRITICAL --exit-code 1 --format table modules/
+          fi
         continue-on-error: false
 
       - name: Generate SBOM
         run: |
           trivy fs --format cyclonedx --output sbom.json backend/
+          if [ -d modules ]; then
+            trivy fs --format cyclonedx --output sbom-modules.json modules/
+          fi
 
       - name: Upload SBOM
         uses: actions/upload-artifact@v7
         if: always()
         with:
           name: sbom-report
-          path: sbom.json
+          path: |
+            sbom.json
+            sbom-modules.json
+          # `modules/` is absent in a core checkout, so one of the two may not
+          # exist; the SBOM upload must not fail the scan over that.
+          if-no-files-found: warn
           retention-days: 90
 
   security-summary:
