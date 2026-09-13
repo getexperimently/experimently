@@ -9,19 +9,18 @@ Endpoints:
   GET /reports/{standard} — On-demand compliance report (ADMIN/ANALYST)
   GET /export             — Full audit export as JSON or CSV (ADMIN only)
 
-EDITION SPLIT
--------------
-``/audit-events`` is Community: it reads ``audit_events_v2`` through the
-Community ``AuditLogService`` and must keep answering in every build
+CORE / MODULE SPLIT
+-------------------
+``/audit-events`` is core: it reads ``audit_events_v2`` through the core
+``AuditLogService`` and must keep answering in every build
 (``backend/tests/smoke/test_wiring.py`` asserts it, and the SOC 2
 documentation points at it).
 
-``/reports/{standard}`` and ``/export`` are Enterprise: their bodies live in
-``compliance_reports.py`` and are reached through the
-``core/enterprise_features`` seam. The routes stay declared here so the URLs
-and their OpenAPI entries exist in every edition; a build without the
-Enterprise module answers HTTP 501 rather than 404, so the refusal is
-explicit.
+``/reports/{standard}`` and ``/export`` are the compliance module's: their
+bodies live in ``compliance_reports.py`` and are reached through the
+``core/optional_modules`` seam. The routes stay declared here so the URLs
+and their OpenAPI entries exist in every profile; a build without the module
+answers HTTP 501 rather than 404, so the refusal is explicit.
 """
 
 import logging
@@ -34,7 +33,7 @@ from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from backend.app.api import deps
-from backend.app.core.enterprise_features import (
+from backend.app.core.optional_modules import (
     COMPLIANCE_REPORTING_UNAVAILABLE_DETAIL,
     compliance_export_handler,
     compliance_report_handler,
@@ -51,14 +50,14 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# Roles that may read the Community compliance audit event listing
+# Roles that may read the core compliance audit event listing
 _ALLOWED_ROLES = (UserRole.ADMIN, UserRole.ANALYST)
 
 
 def _require_role(current_user: User, allowed: tuple, detail: str) -> None:
     """The route's own access policy, checked before the seam is consulted.
 
-    Who may call a route is a property of the route, not of the edition: a
+    Who may call a route is a property of the route, not of the profile: a
     VIEWER asking for the SOC 2 report is refused with the same 403 in every
     build, rather than learning from a 501 which bodies this build lacks.
     """
@@ -141,7 +140,7 @@ def list_audit_events(
 
 
 # ---------------------------------------------------------------------------
-# Report generation — Enterprise body (compliance_reports.py)
+# Report generation — compliance module body (compliance_reports.py)
 # ---------------------------------------------------------------------------
 
 
@@ -157,7 +156,7 @@ def list_audit_events(
             "description": "Caller does not have ADMIN or ANALYST role",
         },
         status.HTTP_501_NOT_IMPLEMENTED: {
-            "description": "Compliance reporting is not available in this edition",
+            "description": "The compliance module is not installed in this deployment",
         },
     },
 )
@@ -182,7 +181,7 @@ def generate_compliance_report(
 
     **Access control**: Requires ADMIN or ANALYST role.
 
-    **Edition**: Enterprise. Builds without compliance reporting answer 501.
+    **Module**: compliance. Builds without it answer 501.
     """
     _require_role(
         current_user, _ALLOWED_ROLES, "Compliance reports require ADMIN or ANALYST role"
@@ -203,7 +202,7 @@ def generate_compliance_report(
 
 
 # ---------------------------------------------------------------------------
-# Audit export — Enterprise body (compliance_reports.py)
+# Audit export — compliance module body (compliance_reports.py)
 # ---------------------------------------------------------------------------
 
 
@@ -216,7 +215,7 @@ def generate_compliance_report(
             "description": "Caller does not have ADMIN role",
         },
         status.HTTP_501_NOT_IMPLEMENTED: {
-            "description": "Audit export is not available in this edition",
+            "description": "The compliance module is not installed in this deployment",
         },
     },
 )
@@ -242,7 +241,7 @@ def export_audit_events(
     **Access control**: Requires ADMIN role only (stricter than report
     generation — this is a full data dump).
 
-    **Edition**: Enterprise. Builds without audit export answer 501.
+    **Module**: compliance. Builds without it answer 501.
     """
     _require_role(current_user, (UserRole.ADMIN,), "Audit export requires ADMIN role")
     handler = compliance_export_handler()

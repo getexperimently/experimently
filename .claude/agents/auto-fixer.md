@@ -130,9 +130,10 @@ export APP_ENV=test TESTING=true
 python -m pytest backend/tests/ -v --tb=short
 python -m pytest backend/tests/unit/ -p no:cov -q
 
-# Database migrations (if needed)
+# Database migrations (if needed). `heads`, plural: a full checkout has two --
+# the core chain and the `modules` branch -- and `upgrade head` fails on it.
 export POSTGRES_DB=experimentation POSTGRES_SCHEMA=experimentation
-python -m alembic -c backend/app/db/alembic.ini upgrade head
+python -m alembic -c backend/app/db/alembic.ini upgrade heads
 
 # Code formatting (run after any Python edit)
 black backend/app/<changed_file>.py

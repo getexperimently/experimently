@@ -6,8 +6,8 @@ body:
     attributes:
       value: |
         **Not for security issues.** If this bug lets someone read data they
-        should not, bypass authentication or authorisation, forge an audit
-        record, or circumvent a licence check, close this form and follow
+        should not, bypass authentication or authorisation, or forge an
+        audit record, close this form and follow
         [SECURITY.md](../blob/main/SECURITY.md) instead. Public issues are the
         disclosure.
 
@@ -62,13 +62,15 @@ body:
       placeholder: "sdk/python 1.2.0"
 
   - type: dropdown
-    id: edition
+    id: profile
     attributes:
-      label: Edition
+      label: Profile
+      description: >-
+        `GET /api/v1/modules` reports it: `core` (the modules directory is not
+        installed) or `full` (it is), plus the installed module names.
       options:
-        - Community (no licence key)
-        - Enterprise (licence key active)
-        - Enterprise (grace or expired)
+        - core
+        - full
         - Not sure
     validations:
       required: true
@@ -94,9 +96,8 @@ body:
     attributes:
       label: Logs, stack trace or failing test output
       description: >-
-        Paste the relevant part, not the whole file. **Redact API keys, licence
-        keys, bearer tokens, connection strings and user identifiers before you
-        paste.**
+        Paste the relevant part, not the whole file. **Redact API keys, bearer
+        tokens, connection strings and user identifiers before you paste.**
       render: shell
 
   - type: checkboxes

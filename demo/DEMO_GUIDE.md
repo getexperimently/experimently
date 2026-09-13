@@ -185,7 +185,7 @@ See `demo/streampulse/README.md`.
 
 ---
 
-### Scene 5 — Enterprise / Admin (5 min)
+### Scene 5 — Modules / Admin (5 min)
 
 **What to show:**
 
@@ -224,7 +224,7 @@ See `demo/streampulse/README.md`.
 > Yes. Snowflake, BigQuery, and Redshift are all supported via the warehouse-native analytics feature. You can query your existing event data without moving it.
 
 **"Is it SOC 2 compliant?"**
-> The platform is not certified and we do not claim it. What it gives you are controls that support your own program: an append-only audit log of every change in the community edition, and in the enterprise edition HMAC-SHA256 signed audit events with exportable report packs. Your auditor decides what they satisfy.
+> The platform is not certified and we do not claim it. What it gives you are controls that support your own program: an append-only audit log of every change in the core profile, and with the `compliance` module HMAC-SHA256 signed audit events with exportable report packs. Your auditor decides what they satisfy.
 
 **"What about our tech stack?"**
 > We have SDKs for Python, JavaScript/TypeScript, Java (Spring Boot auto-configuration), and React (with hooks and SSR support). The REST API means you can integrate from anything.

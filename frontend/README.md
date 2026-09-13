@@ -67,9 +67,13 @@ navigation the current role cannot use.
 ## Container image
 
 ```bash
-docker build -t experimently-web:ce frontend/
+# From the repository root (the build context): the core profile by default,
+# `--build-arg EXPERIMENTLY_PROFILE=full` for the full profile.
+docker build -f frontend/Dockerfile -t experimently-web:core .
+docker build -f frontend/Dockerfile -t experimently-web:full --build-arg EXPERIMENTLY_PROFILE=full .
 ```
 
 `frontend/Dockerfile` runs `npm ci`, `npm run build`, generates the nginx route map, and
 serves `out/` with `nginxinc/nginx-unprivileged` on port 8080. `docker-compose.yml` at the
-repository root wires it to the API.
+repository root wires it to the API. See `docs/getting-started/modules.md` for what the two
+profiles are.

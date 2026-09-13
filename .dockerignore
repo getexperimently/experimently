@@ -33,6 +33,14 @@ infrastructure/
 backend/tests/
 backend/lambda/
 tests/
+# The same three rules for the modules tree: the API image copies modules/ for
+# the full profile, and none of these belong in it. modules/frontend/ is NOT
+# here -- frontend/Dockerfile copies it into the dashboard image for the full
+# profile, so it has to stay in the context; backend/Dockerfile leaves it out
+# by copying modules/backend/ rather than modules/ whole.
+modules/infrastructure/
+modules/backend/tests/
+modules/lambda/
 sdk/*/node_modules/
 sdk/*/dist/
 sdk/android/

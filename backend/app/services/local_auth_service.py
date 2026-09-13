@@ -1,5 +1,5 @@
 """
-Local (email + password) authentication for the Community Edition.
+Local (email + password) authentication -- the default provider.
 
 ``AUTH_PROVIDER=local`` authenticates against ``users.email`` /
 ``users.hashed_password`` (bcrypt, see ``core.security``) and issues HS256
@@ -13,7 +13,7 @@ Failed logins are counted per e-mail address.  After
 that window and ``/auth/login`` answers ``423 Locked``.  A successful login
 clears the counter.
 
-The counter is an **in-process** dictionary.  That is deliberate for CE: it
+The counter is an **in-process** dictionary.  That is deliberate: it
 needs no extra infrastructure and is correct for the default single-worker
 container (``WEB_CONCURRENCY=1``).  Deployments running several uvicorn
 workers or replicas get an independent counter per worker, so the effective

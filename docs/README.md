@@ -88,7 +88,7 @@
 - [Auth Environment Variables](auth/auth-environment-variables.md) — Cognito configuration
 - [Auth User Guide](auth/auth-user-guide.md) — registration, login, password policies
 - [Cognito Testing](auth/cognito-auth-testing.md) — testing auth locally
-- [Enterprise SSO](auth/sso.md) — SAML 2.0 and OIDC setup for Okta, Azure AD, Google, GitHub
+- [SSO](auth/sso.md) — SAML 2.0 and OIDC setup for Okta, Azure AD, Google, GitHub (the `sso` module)
 
 ---
 
@@ -150,12 +150,9 @@
 
 ---
 
-## Go-to-Market
+## Planning records
 
-- [GTM Strategy](go-to-market/GTM_STRATEGY.md)
-- [Demo Application Strategy](go-to-market/demo-application-strategy.md) — ShopLab (built), StreamPulse and LaunchPad (planned); see the [Demo Guide](../demo/DEMO_GUIDE.md)
-- [Open-Source Strategy](go-to-market/open-source-strategy.md)
-- [Design Partner Playbook](go-to-market/design-partner-playbook.md)
-- [Messaging Framework](go-to-market/messaging-framework.md)
-- [GTM Metrics Dashboard](go-to-market/metrics-dashboard.md)
-- [Zero-Budget Tactics](go-to-market/zero-budget-tactics.md)
+- [Modules](getting-started/modules.md) — the core and full profiles, and what each module adds
+- `planning/go-to-market/` — the earlier commercial strategy (design partners, paid tiers), superseded on
+  2026-09-12 by the decision to be fully open source under Apache-2.0; kept as a record, see
+  [planning/open-core-launch-plan-2026-09.md](planning/open-core-launch-plan-2026-09.md)

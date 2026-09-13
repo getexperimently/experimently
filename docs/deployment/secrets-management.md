@@ -99,6 +99,44 @@ aws secretsmanager create-secret \
   --tags '[{"Key":"Environment","Value":"production"},{"Key":"Service","Value":"experimentation-platform"}]'
 ```
 
+### First Superuser Password
+
+The bootstrap creates the first administrator with this password. It has no
+usable default: `FIRST_SUPERUSER_PASSWORD` falls back to `admin`, which the
+production settings reject outright — without this secret the container exits
+before uvicorn binds, on **either** profile.
+
+```bash
+SUPERUSER_PASSWORD=$(python3 -c "import secrets; print(secrets.token_urlsafe(24))")
+
+aws secretsmanager create-secret \
+  --name /prod/experimentation/first-superuser-password \
+  --description "Password for the first administrator account (FIRST_SUPERUSER_PASSWORD)" \
+  --secret-string "$SUPERUSER_PASSWORD" \
+  --tags '[{"Key":"Environment","Value":"production"},{"Key":"Service","Value":"experimentation-platform"}]'
+```
+
+### Compliance Audit HMAC Key (`profile: full` only)
+
+Signs the SOC 2 / ISO 27001 compliance audit log (HMAC-SHA256). Only module
+code reads it, and `modules.register(hooks)` builds those settings as its first
+step: a **full** deployment without this secret fails the registration, so the
+API refuses to start and every `alembic` command fails with it. A `core`
+deployment never reads it and does not need the secret at all.
+
+```bash
+AUDIT_HMAC_KEY=$(python3 -c "import secrets; print(secrets.token_hex(32))")
+
+aws secretsmanager create-secret \
+  --name /prod/experimentation/audit-hmac-key \
+  --description "HMAC-SHA256 key signing the compliance audit log (AUDIT_HMAC_KEY)" \
+  --secret-string "$AUDIT_HMAC_KEY" \
+  --tags '[{"Key":"Environment","Value":"production"},{"Key":"Service","Value":"experimentation-platform"}]'
+```
+
+Rotating it does not invalidate old rows, but signatures made with the previous
+key no longer verify — re-verify or re-sign before rotating.
+
 ### Verify All Secrets Exist
 
 ```bash
@@ -108,7 +146,10 @@ aws secretsmanager list-secrets \
   --output table
 ```
 
-Expected output: 4 secrets — `db-password`, `jwt-secret`, `redis-url`, `cognito-config`.
+Expected output: 5 secrets — `db-password`, `jwt-secret`, `redis-url`,
+`cognito-config`, `first-superuser-password` — plus `audit-hmac-key` for the
+`full` profile. `Deploy to Production` checks for exactly this set before it
+builds anything ("Required secrets exist for this profile").
 
 ---
 

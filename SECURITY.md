@@ -1,9 +1,9 @@
 # Security policy
 
-Experimently handles experiment assignments, feature-flag evaluations and, in
-the Enterprise Edition, audit and PHI data. We take vulnerability reports
-seriously and we would rather hear about a problem from you than from an
-incident.
+Experimently handles experiment assignments, feature-flag evaluations, audit
+records and, with the `hipaa` module installed, PHI. We take vulnerability
+reports seriously and we would rather hear about a problem from you than from
+an incident.
 
 ## Reporting a vulnerability
 
@@ -19,12 +19,12 @@ Report privately, by either route:
 
 Please include, as far as you have it:
 
-- the affected component (backend API, dashboard, a specific SDK, `ee/`, the
-  CDK stacks) and the version, tag or commit SHA;
+- the affected component (backend API, dashboard, a specific SDK, a module
+  under `modules/`, the CDK stacks) and the version, tag or commit SHA;
 - a description of the issue and what an attacker can achieve with it;
 - reproduction steps, a proof of concept, or a minimal request/response pair;
-- any configuration required to reproduce (auth provider, edition, licence
-  state);
+- any configuration required to reproduce (auth provider, profile, installed
+  modules);
 - whether you have disclosed it anywhere else, and any deadline you are working
   to.
 
@@ -65,12 +65,10 @@ released versions at launch; until then only the tip of `main` is supported.
 
 Once `1.0.0` ships, the policy is: the current minor release and the one before
 it receive security fixes, for at least 6 months after the newer minor is
-released. Enterprise Edition customers with a current licence key receive
-backported fixes according to their agreement.
+released.
 
-The Community Edition (AGPL-3.0) and the SDKs (MIT) are covered by this policy.
-The Enterprise Edition in `ee/` is covered by this policy and, additionally, by
-the terms of your Enterprise licence.
+The whole repository is covered by this policy: the core, the optional modules
+under `modules/` (both Apache-2.0) and the SDKs (MIT).
 
 ## Scope
 
@@ -79,7 +77,9 @@ In scope:
 - the backend API, background schedulers and Lambda functions;
 - the dashboard;
 - the client SDKs in `sdk/`;
-- the Enterprise Edition in `ee/`, including the licence-key mechanism;
+- the optional modules in `modules/` (workspaces, custom roles, SSO, HIPAA,
+  compliance reporting, warehouse analytics, integrations, counters, ETL,
+  split URL testing);
 - the shipped container images, `docker-compose.yml` and the CDK stacks;
 - authentication, authorisation, tenancy and audit-trail integrity.
 

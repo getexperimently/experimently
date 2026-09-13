@@ -71,10 +71,25 @@ def test_concurrent_bootstraps_on_a_fresh_schema_do_not_race(test_db):
                 .all()
             )
             assert users == ["race@example.com"]
-            head = conn.execute(
-                text(f'SELECT count(*) FROM "{schema}".alembic_version')
-            ).scalar()
-            assert head == 1
+            # Exactly one row per head, and the second replica must not have
+            # added a duplicate: two rows in a full checkout (the core chain
+            # and the `modules` branch), one in a core checkout.  The count
+            # used to be hard-coded to 1, which was the bug in finding 1 --
+            # `stamp heads` recorded only the modules head -- written down as
+            # an assertion.
+            from alembic.script import ScriptDirectory
+
+            from backend.app.db.bootstrap import alembic_config
+
+            heads = set(
+                ScriptDirectory.from_config(alembic_config()).revision_map.heads
+            )
+            recorded = list(
+                conn.execute(
+                    text(f'SELECT version_num FROM "{schema}".alembic_version')
+                ).scalars()
+            )
+            assert sorted(recorded) == sorted(heads)
     finally:
         with engine.begin() as conn:
             conn.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))

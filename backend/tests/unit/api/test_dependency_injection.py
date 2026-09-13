@@ -14,7 +14,7 @@ def _cognito_provider(monkeypatch):
     """
     ``deps.get_current_user`` is exercised here through its Cognito branch
     (``auth_service.get_user_with_groups`` is patched).  The suite default is
-    the Community Edition local provider (P0 open-core), so select Cognito for
+    the core profile's local provider (P0), so select Cognito for
     this module; the local branch is covered by tests/unit/api/test_local_auth.py.
     """
     monkeypatch.setattr(settings, "AUTH_PROVIDER", "cognito")

@@ -1,8 +1,8 @@
 """`scripts/generate_third_party_licenses.py` — the dependency licence report.
 
 The report is what a reader checks before trusting that nothing in the tree is
-incompatible with distributing an AGPL-3.0 work, so a wrong flag is worse than
-no flag.
+incompatible with distributing an Apache-2.0 work, so a wrong flag is worse
+than no flag.
 """
 
 from __future__ import annotations
@@ -36,9 +36,8 @@ class TestFlagsFor:
     def test_lgpl_is_weak_copyleft_not_strong(self, script, lic):
         """`"GPL" in lic.lower()` is true of every LGPL string.
 
-        psycopg2 is LGPL; reporting it as strong copyleft with "check
-        compatibility direction" sends the reader after a problem that
-        does not exist.
+        psycopg2 is LGPL; reporting it as strong copyleft that "must not
+        ship" sends the reader after a problem that does not exist.
         """
         flag = script.flags_for(lic)
         assert flag is not None
@@ -53,7 +52,9 @@ class TestFlagsFor:
     def test_gpl_still_gets_the_gpl_note(self, script, lic):
         flag = script.flags_for(lic)
         assert flag is not None
-        assert "check compatibility direction" in flag
+        assert "strong copyleft" in flag
+        assert "must not ship" in flag
+        assert "network-use" not in flag  # that is the AGPL note
 
     @pytest.mark.parametrize(
         "lic", ["MIT", "Apache-2.0", "BSD-3-Clause", "ISC", "MPL-2.0", "PSF-2.0"]
@@ -70,8 +71,8 @@ class TestFlagsFor:
         [
             ("SSPL-1.0", "NOT an open-source licence"),
             ("BUSL-1.1", "source-available"),
-            ("CDDL-1.0", "GPL-incompatible"),
-            ("MS-PL", "GPL-incompatible"),
+            ("CDDL-1.0", "weak copyleft"),
+            ("MS-PL", "separate artefact"),
             ("UNKNOWN", "resolved by hand"),
             ("UNLICENSED", "no licence declared"),
         ],

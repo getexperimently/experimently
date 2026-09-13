@@ -72,7 +72,7 @@ is required before the platform can serve data-subject requests without database
 - Local JWTs expire after `LOCAL_AUTH_TOKEN_TTL_MINUTES` (default 12 hours); accounts lock
   for `LOCAL_AUTH_LOCKOUT_MINUTES` after `LOCAL_AUTH_MAX_FAILED_ATTEMPTS` failures.
 - `DEV_AUTH_BYPASS` cannot be enabled in staging or production; settings validation refuses to boot.
-- The HIPAA module encrypts designated PHI fields with Fernet (`backend/app/core/phi_encryption.py`).
+- The HIPAA module encrypts designated PHI fields with Fernet (`modules/backend/app/core/phi_encryption.py`).
 - Audit events in `audit_events_v2` are HMAC-SHA256 signed so tampering is detectable.
 - TLS, disk encryption, backups and log retention are properties of your deployment,
   not of the software. **You must** configure them.

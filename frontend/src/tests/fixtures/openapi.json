@@ -287,12 +287,6 @@
         "summary": "Edge SDK bootstrap \u2014 all flags and experiments in one call"
       }
     },
-    "/api/v1/edition": {
-      "get": {
-        "operationId": "get_edition_api_v1_edition_get",
-        "summary": "Edition and licence status"
-      }
-    },
     "/api/v1/etl/crawler/run": {
       "post": {
         "operationId": "run_crawler_api_v1_etl_crawler_run_post",
@@ -793,6 +787,12 @@
       "get": {
         "operationId": "get_metrics_summary_api_v1_metrics_summary_get",
         "summary": "Get metrics summary"
+      }
+    },
+    "/api/v1/modules": {
+      "get": {
+        "operationId": "get_modules_api_v1_modules_get",
+        "summary": "Profile and installed modules"
       }
     },
     "/api/v1/mutual-exclusion-groups": {

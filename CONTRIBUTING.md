@@ -1,8 +1,7 @@
 # Contributing to Experimently
 
 Thanks for wanting to help. This document is the short version of everything you
-need: how to sign your work, how to run the stack, where code lives, and which
-part of the tree does not take outside contributions.
+need: how to sign your work, how to run the stack, and where code lives.
 
 ## Before you start
 
@@ -20,6 +19,7 @@ part of the tree does not take outside contributions.
 Experimently uses the [Developer Certificate of Origin](https://developercertificate.org/),
 not a CLA. You keep the copyright in your contribution; you certify that you
 have the right to submit it under the licence of the file you are changing.
+There is no paperwork and no copyright assignment, anywhere in the tree.
 
 Sign off every commit:
 
@@ -49,10 +49,12 @@ git rebase --signoff main
 A pull request with unsigned commits will be blocked by the DCO check until every
 commit carries a sign-off.
 
-**Licence of your contribution.** A contribution to the Community Edition is
-made under [AGPL-3.0-only](LICENSE); a contribution to `sdk/` is made under
-[MIT](sdk/LICENSE). The `LICENSE` file covering the directory you touch is the
-licence you are contributing under — there is no separate copyright assignment.
+**Licence of your contribution.** Everything except `sdk/` — the backend, the
+optional modules under `modules/`, the dashboard, the docs — is
+[Apache-2.0](LICENSE), and a contribution to any of it is made under Apache-2.0
+(section 5 of the licence says exactly that). A contribution to `sdk/` is made
+under [MIT](sdk/LICENSE). The `LICENSE` file covering the directory you touch is
+the licence you are contributing under.
 
 ## Running the stack
 
@@ -69,9 +71,14 @@ make web              # in a second shell: the dashboard on :3100
 `make dev` runs `AUTH_PROVIDER=local uvicorn backend.app.main:app` after
 `docker compose up -d --wait postgres redis` and
 `python -m backend.app.db.bootstrap`. Bootstrap is idempotent: it creates the
-schema from the models and stamps the alembic head on a fresh database, and runs
-`alembic upgrade head` on an existing one. Do not run `alembic upgrade head` on
+schema from the models and stamps the alembic heads on a fresh database, and runs
+`alembic upgrade heads` on an existing one. Do not run `alembic upgrade heads` on
 an empty database — the historical migration chain cannot replay from nothing.
+
+`heads` is plural throughout: a full checkout has two — the core chain and the
+`modules` branch, kept separate so that deleting `modules/` leaves a consistent
+core chain. Do not merge them; a new revision names the head it extends
+(`alembic revision --autogenerate --head modules@head -m "..."`).
 
 Other useful targets — `make help` lists them all:
 
@@ -81,7 +88,10 @@ Other useful targets — `make help` lists them all:
 | `make demo` | The whole stack including the ShopLab and StreamPulse demo apps |
 | `make down` | Stop everything and drop the volumes |
 | `make bootstrap` | Create the schema and the first administrator |
-| `make openapi` | Regenerate the OpenAPI fixture the frontend URL guard checks |
+| `make openapi` | Regenerate the OpenAPI fixtures: the frontend URL guard's and the two stable snapshots |
+| `make core-build` | Prove the core profile stands alone (copy, delete `modules/`, rebuild, test) |
+| `make full-build` | The same sequence on the full tree, `modules/` included |
+| `make lock` | Regenerate both requirements locks (what the two API images install) |
 
 ### Tests
 
@@ -89,6 +99,7 @@ Other useful targets — `make help` lists them all:
 make test             # what a pull request must pass: backend + frontend
 make test-unit        # backend unit tests (most need Postgres too)
 make test-integration # backend integration tests (needs Postgres on localhost:5432)
+make test-modules     # the modules' own suite (needs modules/requirements.txt installed)
 make test-frontend    # dashboard jest tests, tsc --noEmit, production build
 make test-sdk         # cross-SDK golden-vector contract tests
 ```
@@ -99,7 +110,9 @@ suite is not database-free despite the name: 26 of its files take the
 `localhost:5432` regardless of `POSTGRES_PORT`. The split is by what the test
 exercises, not by whether it touches a database.
 Run backend tests from the repository root; `pyproject.toml` is the single pytest
-configuration and `testpaths` is `backend/tests`.
+configuration and `testpaths` covers `backend/tests` and `modules/backend/tests`.
+Tests that need a module installed are marked `@pytest.mark.modules` and are
+skipped in a core build.
 
 Every bug fix needs a regression test. The `regression-guard` CI job fails a pull
 request labelled `bug` that adds no test.
@@ -111,11 +124,15 @@ make lint             # exactly what the `lint` CI job runs
 make format           # ruff format + ruff check --fix, in place
 ```
 
-`make lint` runs `ruff check backend/`, `ruff format --check backend/`,
-`npm run lint` and `npx tsc --noEmit` in `frontend/`, plus `hadolint` on the
-Dockerfiles and `actionlint` on the workflows when those two are installed
-(`brew install hadolint actionlint`). `ruff` replaces black, isort and flake8 —
-do not add those back.
+`make lint` runs `ruff check backend/ modules/ scripts/`, `ruff format --check`,
+`lint-imports` (the core/modules import contracts), `reuse lint` (every file
+carries a licence: `REUSE.toml` covers the tree by directory, the texts live in
+`LICENSES/`), the requirements-lock check, `npm run lint` and `npx tsc --noEmit`
+in `frontend/`, plus `hadolint` on the Dockerfiles and `actionlint` on the
+workflows when those two are installed (`brew install hadolint actionlint`).
+`ruff` replaces black, isort and flake8 — do not add those back. A change to a
+pin in `backend/requirements/runtime.txt` needs `make lock` afterwards: the API
+image installs the hashed lock, not the loose pins.
 
 ## Layer map
 
@@ -126,10 +143,12 @@ backend/scripts/    One-off and seed scripts
 backend/tests/      unit/ integration/ smoke/ e2e/ contract/ performance/ realistic/
 frontend/           Next.js dashboard (TypeScript)
 sdk/<lang>/         16 client SDKs — independent packages, MIT licensed
-ee/                 Enterprise Edition — proprietary, no outside contributions
+modules/            The optional modules (workspaces, rbac, sso, hipaa, compliance,
+                    warehouse, integrations, counters, etl, split_url) — Apache-2.0,
+                    contributions welcome like anywhere else
 infrastructure/     AWS CDK stacks
 demo/               ShopLab and StreamPulse demo applications
-docs/               All documentation, including Enterprise topics
+docs/               All documentation, including the modules
 tests/sdk-contract/ Cross-SDK golden-vector tests
 ```
 
@@ -147,14 +166,30 @@ Rules that are easy to get wrong:
   in `backend/tests/smoke/`. Markers exist (`unit`, `integration`, `api`,
   `regression`) but the directory is what CI selects on, and a module-level
   import cannot be skipped by a marker.
-- **Nothing in `backend/` may import `ee`.** The Community Edition must build,
-  boot and pass its tests with `ee/` deleted. `backend/tests/smoke/test_ce_boundary.py`
-  enforces the import direction today, reading the module list in
-  `ee-manifest.txt`; the `community-build` CI job that actually deletes those
-  paths and rebuilds lands with the physical move (issue #89).
-  Enterprise code plugs into the Community Edition through the registration
-  hooks and loader under `backend/app/core/`, never the other way round: the
-  dependency arrow points from `ee/` into `backend/`, never back.
+- **Nothing in `backend/` may import `modules`.** The core profile must build,
+  boot and pass its tests with `modules/` deleted, and three things enforce
+  it: `lint-imports` (contracts in `pyproject.toml` `[tool.importlinter]` and
+  `backend/lambda/.importlinter`: `backend.app` and the Lambda functions never
+  import `modules`; `backend.app` never imports `backend.tests`, `sdk`, `demo`
+  or `infrastructure`), `backend/tests/smoke/test_core_boundary.py` (an AST
+  scan against the module list in `modules-manifest.txt`, including string
+  literals such as `patch()` targets), and `make core-build`
+  (`scripts/core_build.sh`), which copies the checkout, deletes `modules/` and
+  every manifest path, and then imports, bootstraps, tests, builds and scans
+  what is left — the `core-build` CI job runs the same script on every pull
+  request, and `full-build` runs the same sequence on the full tree.
+  The modules plug into the core through the registration hooks and the
+  loader under `backend/app/core/` and `backend/app/modules_loader.py`, never
+  the other way round: the dependency arrow points from `modules/` into
+  `backend/`, never back. A module that is not installed answers 501 on its
+  routes; there is no other gate.
+- **The public API has a stable snapshot.** `docs/api/openapi-v1.stable.json`
+  (the core profile) and `docs/api/openapi-v1.full.json` (the full profile)
+  are compared by `backend/tests/smoke/test_openapi_snapshot.py`: changing the
+  shape of a stable route fails the smoke suite. A new or still-changing route
+  is marked `openapi_extra={"x-stability": "beta"}` on its decorator, which
+  turns the failure into a warning; `make openapi` regenerates the snapshots
+  when a change is intended. See `docs/api/stability.md`.
 - **SDKs are independent packages.** `sdk/js`, `sdk/python`, `sdk/go` and the
   thirteen others have their own manifests, their own tests and their own
   release pipelines, and they do not import from `backend/`. They share only the
@@ -178,52 +213,3 @@ Rules that are easy to get wrong:
 
 Keep pull requests focused. A refactor and a bug fix in one branch takes three
 times as long to review, and a reverted refactor takes the fix with it.
-
-## `ee/` takes no outside contributions
-
-`ee/` is the Enterprise Edition. It is proprietary and source-available under
-[`ee/LICENSE`](ee/LICENSE), not open source, and `.github/CODEOWNERS` assigns it
-to the repository owner.
-
-**We will close, without review, any pull request that modifies a file under
-`ee/`.** This is not a judgement about the contribution. The reason is licensing:
-Experimently sells the Enterprise Edition, and selling code we do not wholly own
-requires either a copyright assignment or a contributor licence agreement from
-every contributor. We chose the DCO precisely so that contributing to the open
-core stays frictionless — no paperwork, no assignment, you keep your copyright.
-The price of that choice is that the proprietary directory has to stay
-single-author.
-
-What you can do instead:
-
-- **File an issue** about an Enterprise feature. Bug reports, design feedback and
-  reproduction cases for `ee/` are welcome and acted on.
-- **Contribute to the seam.** The hooks, the registries, the edition endpoint,
-  the licence verifier and the Enterprise loader all live in `backend/app/`
-  under AGPL-3.0 and are open to contributions. Most of what people want to
-  change about Enterprise behaviour is actually in the seam.
-
-  To exercise the Enterprise path locally, mint yourself a development licence
-  and put it where the runner you use will read it:
-
-  ```bash
-  python scripts/make_dev_license.py --features '*' --env-file .env.dev   # make dev
-  python scripts/make_dev_license.py --features '*' --env-file .env       # docker compose
-  ```
-
-  `make dev` runs uvicorn with `DevSettings`, which reads `.env.dev`;
-  `docker compose` reads `.env` and passes the two variables to the api
-  service. `GET /api/v1/edition` tells you which one took: `"edition":
-  "enterprise"` with `"status": "active"`.
-
-  It signs with `kid="dev"`, which the verifier honours only when the process
-  environment explicitly says `ENVIRONMENT=development` or `ENVIRONMENT=test` —
-  so it unlocks your checkout and nothing else. The private key is written to
-  `~/.experimently/`, mode 0600, and the script refuses to put one anywhere
-  inside the repository.
-- **Contribute to the docs.** Enterprise documentation lives in `docs/` under
-  AGPL-3.0, not in `ee/`. Documentation is marketing; only the code is
-  proprietary.
-
-If you are unsure which side of the line a change falls on, open an issue and
-ask before you write it.

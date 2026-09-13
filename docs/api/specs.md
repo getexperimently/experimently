@@ -1079,8 +1079,14 @@ Revokes an API key.
 
 The API enforces the following rate limits:
 
--   Standard tier: 10 requests per second, 10,000 requests per day
--   Enterprise tier: 100 requests per second, 1,000,000 requests per day
+-   SDK paths (`/api/v1/tracking/*`, `/api/v1/feature-flags/evaluate/*`,
+    `/api/v1/feature-flags/user/*`): `SDK_RATE_LIMIT_PER_MINUTE` per client IP (default 6000/min)
+-   Authentication endpoints (`/api/v1/auth/login`, `/token`: 10/min; `/signup`,
+    `/forgot-password`, `/reset-password`: 5/min)
+-   Everything else: 300 requests per minute per client IP
+
+The limits are the same in every profile; they are configuration, not a plan
+(`backend/app/middleware/rate_limiter.py`).
 
 When a rate limit is exceeded, the API will respond with a 429 status code and the following headers:
 

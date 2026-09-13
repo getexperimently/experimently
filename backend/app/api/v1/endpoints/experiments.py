@@ -26,14 +26,12 @@ from sqlalchemy.orm import Session
 
 from backend.app.api import deps
 from backend.app.api.v1.endpoints import results as results_endpoints
-from backend.app.core.enterprise_features import (
+from backend.app.core.logging import logger
+from backend.app.core.optional_modules import (
     SPLIT_URL_UNAVAILABLE_DETAIL,
     split_url_preview_handler,
     split_url_routing_available,
-    split_url_routing_installed,
 )
-from backend.app.core.license import check_feature
-from backend.app.core.logging import logger
 from backend.app.core.permissions import (
     Action,
     ResourceType,
@@ -117,9 +115,9 @@ def _reject_unroutable_split_url(experiment_type: Any) -> None:
     Refuse ``experiment_type=split_url`` when nothing can route it.
 
     ``ExperimentType.SPLIT_URL`` is a live database enum value and cannot be
-    withdrawn cheaply, so a build without the Enterprise split-URL router would
-    otherwise happily store a split-URL experiment that never serves a single
-    user. Fail loudly at the write instead.
+    withdrawn cheaply, so a build without the split_url module would otherwise
+    happily store a split-URL experiment that never serves a single user. Fail
+    loudly at the write instead: 501 says this deployment does not have it.
     """
     if experiment_type is None:
         return
@@ -128,11 +126,6 @@ def _reject_unroutable_split_url(experiment_type: Any) -> None:
         return
     if split_url_routing_available():
         return
-    # Installed but unlicensed is a different answer from not installed:
-    # 403 `feature_not_licensed` names the feature and the licence state,
-    # 501 says this build simply does not have it.
-    if split_url_routing_installed():
-        check_feature("split_url", write=True)
     raise HTTPException(
         status_code=status.HTTP_501_NOT_IMPLEMENTED,
         detail=SPLIT_URL_UNAVAILABLE_DETAIL,
@@ -501,10 +494,10 @@ async def update_experiment(
         # Check access permission
         experiment = deps.get_experiment_access(experiment, current_user)
 
-        # Only now: the edition check comes *after* existence and authorisation,
+        # Only now: the module check comes *after* existence and authorisation,
         # so an unauthorised caller (or a request for a missing experiment)
         # gets the 403/404 it always got, not a 501 that reveals which
-        # features this build lacks before it has checked who is asking.
+        # modules this build lacks before it has checked who is asking.
         # And only for a *change* to split_url: a full-object PUT that
         # restates the stored type of a legacy split-URL row is renaming or
         # re-describing it, not storing a new experiment nothing routes.
@@ -1889,7 +1882,7 @@ async def trigger_schedule_processing(
     response_description="Returns the predicted URL variant for the given user",
     responses={
         status.HTTP_501_NOT_IMPLEMENTED: {
-            "description": "Split URL routing is not available in this edition",
+            "description": "The split_url module is not installed in this deployment",
         },
     },
 )
@@ -1902,15 +1895,14 @@ async def preview_split_url_assignment(
     """
     Preview the split URL variant assignment for a given user.
 
-    The route is declared here so the URL exists in every edition; the body
-    lives in the Enterprise ``experiments_split_url`` module and is reached
-    through the ``core.enterprise_features`` seam. Builds without split-URL
+    The route is declared here so the URL exists in every profile; the body
+    lives in the split_url module (``experiments_split_url``) and is reached
+    through the ``core.optional_modules`` seam. Builds without split-URL
     routing answer HTTP 501 rather than a meaningless assignment.
     """
     # The route's own access policy comes before the seam is consulted, so a
-    # VIEWER is told no in every edition rather than learning from a 501 or a
-    # licence 403 which bodies this build has (the same order the compliance
-    # routes use).
+    # VIEWER is told no in every profile rather than learning from a 501
+    # which bodies this build has (the same order the compliance routes use).
     if not (
         getattr(current_user, "is_superuser", False)
         or getattr(current_user, "role", None) in (UserRole.ADMIN, UserRole.DEVELOPER)

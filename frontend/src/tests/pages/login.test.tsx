@@ -89,7 +89,7 @@ describe('LoginPage', () => {
     const submit = screen.getByRole('button', { name: 'Sign in' });
     expect(submit).toHaveAttribute('type', 'submit');
 
-    // No public sign-up in CE.
+    // No public sign-up.
     expect(screen.queryByText(/sign up/i)).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: /create account/i })).not.toBeInTheDocument();
     await waitFor(() => expect(mockReplace).not.toHaveBeenCalled());
@@ -114,7 +114,7 @@ describe('LoginPage', () => {
     expect(password).toHaveAttribute('type', 'password');
   });
 
-  it('shows the CE "forgot password" copy without a reset link', () => {
+  it('shows the "forgot password" copy without a reset link', () => {
     renderLogin();
     expect(screen.getByText('Forgot password?')).toBeInTheDocument();
     expect(screen.getByTestId('forgot-password-help')).toHaveTextContent(

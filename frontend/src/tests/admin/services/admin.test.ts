@@ -123,7 +123,7 @@ describe('AdminService', () => {
     });
   });
 
-  // `/api/v1/rbac/*` moved to the Enterprise tree; covered by src/ee/rbac.test.ts.
+  // `/api/v1/rbac/*` moved to the rbac module; covered by modules/frontend/src/rbac.test.ts.
 
   describe('safety', () => {
     const settings: SafetySettings = {

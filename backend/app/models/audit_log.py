@@ -55,14 +55,6 @@ class ActionType(str, Enum):
     SAFETY_ROLLBACK = "safety_rollback"
     SAFETY_CONFIG_UPDATE = "safety_config_update"
 
-    # Licence / edition transitions (backend/app/core/license.py).  Dotted
-    # names on purpose: the open-core plan specifies ``license.*`` events.
-    LICENSE_NONE = "license.none"
-    LICENSE_ACTIVE = "license.active"
-    LICENSE_GRACE = "license.grace"
-    LICENSE_EXPIRED = "license.expired"
-    LICENSE_INVALID = "license.invalid"
-
 
 class EntityType(str, Enum):
     """Types of entities that can be audited."""
@@ -74,7 +66,6 @@ class EntityType(str, Enum):
     PERMISSION = "permission"
     SAFETY_CONFIG = "safety_config"
     ROLLOUT_SCHEDULE = "rollout_schedule"
-    LICENSE = "license"
 
 
 class AuditLog(Base, BaseModel):

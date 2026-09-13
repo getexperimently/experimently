@@ -120,7 +120,7 @@ export interface ApiErrorInit {
 /**
  * Error thrown for every failed request. `detail` is the parsed `{"detail": …}`
  * body from FastAPI (string, object or validation list). When the backend
- * returns a typed error such as `{"detail": {"code": "feature_not_licensed"}}`
+ * returns a typed error such as `{"detail": {"code": "workspace_role_required"}}`
  * the code is exposed as `code`. `status === 0` means the API was unreachable.
  */
 export class ApiError extends Error {

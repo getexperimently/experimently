@@ -11,7 +11,7 @@ const sections = [
       { label: 'Core Concepts', href: '/docs/concepts', desc: 'Feature flags, experiments, variants, and metrics' },
       { label: 'Architecture Overview', href: '/docs/architecture', desc: 'How Experimently works under the hood' },
       { label: 'FAQ', href: '/docs/faq', desc: 'Common questions answered' },
-      { label: 'Editions & Licensing', href: '/docs/editions', desc: 'What is in Community, what is in Enterprise, and how licences behave' },
+      { label: 'Modules & Profiles', href: '/docs/modules', desc: 'What the core profile includes, what each module adds, and how to run the full profile' },
     ],
   },
   {
@@ -103,14 +103,14 @@ const sections = [
   {
     category: 'Security & Compliance',
     icon: '🔒',
-    description: 'Enterprise-grade security, audit logging, and compliance reports.',
+    description: 'Security, audit logging, and compliance reports.',
     links: [
       { label: 'Compliance audit logging', href: '/docs/api/compliance', desc: 'Signed audit events and report export' },
       { label: 'ISO 27001', href: '/docs/security/iso27001', desc: 'ISO 27001 compliance report export' },
       { label: 'Audit Logging', href: '/docs/security/audit-logging', desc: 'HMAC-SHA256 tamper-proof audit trail' },
       { label: 'RBAC', href: '/docs/security/rbac', desc: 'Role-based access control: Admin, Developer, Analyst, Viewer' },
       { label: 'API Key Management', href: '/docs/security/api-keys', desc: 'Scoped keys, rotation, revocation' },
-      { label: 'Enterprise SSO', href: '/docs/auth/sso', desc: 'SAML 2.0, OIDC/OAuth2 for Okta, Azure AD, Google Workspace, GitHub, and OneLogin.' },
+      { label: 'SSO / SAML / OIDC', href: '/docs/auth/sso', desc: 'SAML 2.0, OIDC/OAuth2 for Okta, Azure AD, Google Workspace, GitHub, and OneLogin.' },
       { label: 'HIPAA Compliance', href: '/docs/hipaa/overview', desc: 'PHI encryption (Fernet AES-128-CBC), 6-year audit retention, BAA management, data residency.' },
     ],
   },

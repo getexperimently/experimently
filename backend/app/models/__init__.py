@@ -1,19 +1,19 @@
-"""Community Edition model registry.
+"""Core model registry.
 
-Importing this package registers **only** the Community models on
-``Base.metadata``.  Enterprise models (workspaces, custom roles, SSO configs,
-BAA configs, PHI audit logs, warehouse connections, integration configs) are
-not imported here; they join the metadata through the open-core seam, by
-calling ``backend.app.core.hooks.register_model_module()`` from the Enterprise
-package's ``register()`` entry point (see ``backend/app/ee_loader.py``).
+Importing this package registers **only** the core models on
+``Base.metadata``.  The modules' models (workspaces, custom roles, SSO
+configs, BAA configs, PHI audit logs, warehouse connections, integration
+configs) are not imported here; they join the metadata through the seam, by
+calling ``backend.app.core.hooks.register_model_module()`` from the modules
+package's ``register()`` entry point (see ``backend/app/modules_loader.py``).
 
 Package semantics make this file the single choke point for the schema:
 importing *any* submodule runs this ``__init__`` first, so
 ``import backend.app.models.experiment`` alone is enough to give a caller the
-complete Community metadata.  That is also why the boundary is easy to lose
-invisibly — one Community module importing an Enterprise model would put its
-table back on ``Base.metadata`` and ``create_all`` would silently keep
-producing Enterprise tables.  ``backend/tests/smoke/test_core_model_registry.py``
+complete core metadata.  That is also why the boundary is easy to lose
+invisibly — one core module importing a module's model would put its table
+back on ``Base.metadata`` and ``create_all`` would silently keep producing
+module tables.  ``backend/tests/smoke/test_core_model_registry.py``
 asserts, in a fresh interpreter, that it does not.
 """
 
@@ -88,7 +88,7 @@ from .user import (
     user_role_association,
 )
 
-#: Every Community model module, relative to this package.  The ``from .x
+#: Every core model module, relative to this package.  The ``from .x
 #: import y`` statements above already import all of them; this tuple names
 #: them so :func:`register_core_models` can state the requirement instead of
 #: relying on that side effect, and so the boundary is one list to audit.
@@ -121,16 +121,16 @@ CORE_MODEL_MODULES = (
 # `Any`, not `DeclarativeMeta`: `declarative_base()` is the legacy API and its
 # stubs return Any, so a narrower annotation only produces a no-any-return.
 def register_core_models() -> Any:
-    """Register every Community model on ``Base.metadata``; returns ``Base``.
+    """Register every core model on ``Base.metadata``; returns ``Base``.
 
     Idempotent, and safe to call before or after anything else has imported a
     model module.  Callers that build a schema — ``db/bootstrap.py``, alembic's
     ``env.py``, ``backend/tests/conftest.py`` — call this rather than importing
     the package for its side effect, so that what they depend on is explicit.
 
-    This registers Community models *only*.  Enterprise models arrive through
-    ``backend.app.ee_loader.load_enterprise()``, which imports whatever the
-    Enterprise package registered with ``hooks.register_model_module()``.
+    This registers core models *only*.  The modules' models arrive through
+    ``backend.app.modules_loader.load_modules()``, which imports whatever the
+    modules package registered with ``hooks.register_model_module()``.
     """
     for module_name in CORE_MODEL_MODULES:
         importlib.import_module(f"{__name__}.{module_name}")

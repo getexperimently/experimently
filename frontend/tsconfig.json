@@ -22,9 +22,33 @@
       "@/*": [
         "./src/*"
       ],
-      "@ee/*": [
-        "./src/ee/*",
-        "./src/ee-stub/*"
+      "@modules/*": [
+        "../modules/frontend/src/*",
+        "./src/modules-stub/*"
+      ],
+      // The modules tree sits outside this package, so the node_modules
+      // walk-up from its files finds nothing: these route the packages it
+      // imports to the one node_modules, in the order the walk-up would use.
+      // Deliberately not a `*` catch-all — that rewires nested-version
+      // resolution inside node_modules (measured: @types/jest's pretty-format).
+      // Add a key when the modules tree imports a new package; tsc says
+      // which. src/tests/modules-alias.test.ts checks the list is complete.
+      "react": [
+        "./node_modules/react",
+        "./node_modules/@types/react"
+      ],
+      "react/*": [
+        "./node_modules/react/*",
+        "./node_modules/@types/react/*"
+      ],
+      "next": [
+        "./node_modules/next"
+      ],
+      "next/*": [
+        "./node_modules/next/*"
+      ],
+      "@testing-library/*": [
+        "./node_modules/@testing-library/*"
       ]
     },
     "incremental": true
@@ -32,7 +56,9 @@
   "include": [
     "next-env.d.ts",
     "**/*.ts",
-    "**/*.tsx"
+    "**/*.tsx",
+    "../modules/frontend/src/**/*.ts",
+    "../modules/frontend/src/**/*.tsx"
   ],
   "exclude": [
     "node_modules"

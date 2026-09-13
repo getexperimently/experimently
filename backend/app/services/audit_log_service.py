@@ -4,8 +4,8 @@ AuditLogService: writes ComplianceAuditEvents to the database.
 Used by API endpoints to log create/update/delete operations.
 Events carry configurable retention expiry dates for SOC 2 Type 2 and
 ISO 27001 compliance, and are signed through ``hooks.audit_signer``.
-The Community default writes no signature (the column is nullable);
-the Enterprise edition installs the HMAC-SHA256 signer.
+The core default writes no signature (the column is nullable); the
+compliance module installs the HMAC-SHA256 signer.
 """
 
 import logging
@@ -151,9 +151,9 @@ class AuditLogService:
             retention_expires_at=_get_retention_expiry(retention_standard),
         )
 
-        # Sign the event for tamper detection. Signing is an Enterprise
-        # feature installed through the open-core seam; the Community
-        # default returns None, which the nullable hmac_signature column
+        # Sign the event for tamper detection. Signing is the compliance
+        # module's, installed through the seam; the core default returns
+        # None, which the nullable hmac_signature column
         # accepts. Looked up on the module, not bound at import time, so a
         # signer installed after this module loaded is still used.
         event.hmac_signature = hooks.audit_signer.sign(event)

@@ -1,6 +1,6 @@
-# Enterprise SSO Guide
+# SSO Guide
 
-The Experimentation Platform supports Enterprise Single Sign-On (SSO) via SAML 2.0 and OpenID Connect (OIDC). SSO allows your organization to authenticate users through an existing Identity Provider (IdP) instead of platform-managed passwords.
+The `sso` module adds Single Sign-On (SSO) via SAML 2.0 and OpenID Connect (OIDC); it is part of the full profile and, like every module, Apache-2.0. SSO allows your organization to authenticate users through an existing Identity Provider (IdP) instead of platform-managed passwords.
 
 ---
 
@@ -312,7 +312,6 @@ Configure the following in your deployment environment before enabling SSO:
 
 ```bash
 # Feature flag
-SSO_ENABLED=true
 
 # SAML Service Provider settings
 SAML_SP_ENTITY_ID=https://your-platform.com
@@ -337,7 +336,6 @@ OIDC_AUTH0_DOMAIN=your-tenant.auth0.com
 
 # State token security
 # Generate with: openssl rand -hex 32
-SSO_STATE_SECRET=<random-256-bit-hex-secret>
 
 # JIT provisioning default role when no group mapping matches
 SSO_DEFAULT_ROLE=VIEWER
