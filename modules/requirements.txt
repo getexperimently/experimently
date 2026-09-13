@@ -1,0 +1,35 @@
+# Runtime dependencies the modules add on top of backend/requirements.txt.
+#
+# Only the full profile installs these: backend/Dockerfile's `full` stage
+# (from modules/requirements.lock, hashed), the `full-build` and
+# `modules-tests` CI jobs, and _platform.yml with `profile: full`. A core
+# checkout has no modules/ directory and therefore none of these packages.
+#
+# Nothing under backend/ imports any of them; every module that does guards
+# the import (`try: import pymysql / except ImportError: pymysql = None`), so
+# a full checkout still imports cleanly without them — it just cannot connect.
+#
+# Keep this list to what the modules import at RUNTIME. Test-only and
+# infrastructure tooling (pytest, moto, aws-cdk-lib, pyspark for the Glue
+# jobs) stays in backend/requirements.txt, which CI installs alongside.
+#
+# After editing, regenerate the lock: `make lock` (or `make lock-modules`),
+# then commit modules/requirements.lock. `make lock-check` /
+# scripts/check_requirements_lock.py fail when the two drift.
+
+# EP-037: SSO/SAML & OIDC authentication (modules/backend/app/services/sso_service.py)
+python3-saml==1.16.0   # the `onelogin.saml2` package: SAML 2.0 request/response handling
+authlib==1.8.0         # AsyncOAuth2Client for the OIDC authorization-code flow
+defusedxml==0.7.1      # sso_service.py:32, SAML metadata parsing without the
+                       # entity-expansion / external-entity holes in stdlib ElementTree
+requests==2.34.2       # sso_service.py:600,662 -- the OIDC token/userinfo fallback
+                       # when authlib is not importable.  A transitive dependency of
+                       # databricks-sql-connector as well, pinned here because a module
+                       # imports it directly.
+
+# EP-041: Databricks warehouse connector (modules/backend/app/services/databricks_connector.py)
+databricks-sql-connector==3.7.5   # 3.3 pinned pandas<2.2
+
+# EP-048: ClickHouse and MySQL warehouse connectors
+clickhouse-connect==0.7.0   # modules/backend/app/services/clickhouse_connector.py
+PyMySQL==1.2.0              # modules/backend/app/services/mysql_connector.py

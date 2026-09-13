@@ -10,7 +10,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 # ---------------------------------------------------------------------------
-# Local provider (Community Edition) — /auth/login, /auth/me, /auth/logout
+# Local provider (the default) — /auth/login, /auth/me, /auth/logout
 # ---------------------------------------------------------------------------
 
 

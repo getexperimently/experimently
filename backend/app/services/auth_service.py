@@ -37,7 +37,7 @@ class CognitoAuthService:
         import, and ``boto3.client`` validates the region then -- with
         ``AWS_REGION=''`` it raises "Invalid endpoint" -- which made importing
         ``backend.app.api.deps`` (and everything that imports the API, the
-        Enterprise registration included) fail on a configuration detail
+        modules' registration included) fail on a configuration detail
         that only matters once Cognito is actually called.
         """
         if self._client is None:

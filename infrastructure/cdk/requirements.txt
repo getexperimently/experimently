@@ -1,3 +1,12 @@
-aws-cdk-lib==2.94.0
+# The CDK app's own pins.
+#
+# aws-cdk-lib and constructs are ALSO pinned in backend/requirements.txt, which
+# is what CI and the venv install -- this file is what a standalone
+# `pip install -r infrastructure/cdk/requirements.txt` gets. The two must agree
+# or `cdk synth` behaves differently in the two environments: this file sat at
+# 2.94.0 while everything that actually ran used 2.268.0, and API differences
+# between them are exactly how a stack that never synthesises goes unnoticed.
+# Dependabot updates both (see .github/dependabot.yml).
+aws-cdk-lib==2.268.0
 constructs>=10.0.0,<11.0.0
 pytest==7.4.2

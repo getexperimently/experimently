@@ -247,12 +247,12 @@ To apply migrations to your database:
 
 1. **Initialize the database schema** (first time only):
    ```bash
-   python -m alembic -c backend/app/db/alembic.ini upgrade head
+   python -m alembic -c backend/app/db/alembic.ini upgrade heads
    ```
 
 2. **Update an existing database**:
    ```bash
-   python -m alembic -c backend/app/db/alembic.ini upgrade head
+   python -m alembic -c backend/app/db/alembic.ini upgrade heads
    ```
 
 3. **Downgrade to a previous version**:
@@ -275,21 +275,29 @@ To apply migrations to your database:
 
 When you make changes to the models, you need to create a new migration:
 
+A full checkout has two alembic heads — the core chain and the `modules`
+branch — so every `revision` names the head it extends. `alembic heads` prints
+both; alembic puts the new file beside the head it is given, so `modules@head`
+lands in `modules/backend/app/db/migrations/versions/`.
+
 1. **Auto-generate a migration script**:
    ```bash
-   alembic revision --autogenerate -m "Description of changes"
+   alembic revision --autogenerate --head <core head id> -m "Description of changes"
+   alembic revision --autogenerate --head modules@head -m "Description of changes"
    ```
 
 2. **Create an empty migration script**:
    ```bash
-   alembic revision -m "Description of changes"
+   alembic revision --head <core head id> -m "Description of changes"
    ```
+   (`env.py` does not run for a bare `revision`, so pass `--version-path` too, or
+   use `--autogenerate`.)
 
 3. **Review and modify** the generated migration script in `backend/migrations/versions/`
 
 4. **Apply the new migration**:
    ```bash
-   python -m alembic -c backend/app/db/alembic.ini upgrade head
+   python -m alembic -c backend/app/db/alembic.ini upgrade heads
    ```
 
 ### Migration Best Practices
@@ -345,7 +353,7 @@ For development environments:
 
 3. Apply migrations:
    ```bash
-   python -m alembic -c backend/app/db/alembic.ini upgrade head
+   python -m alembic -c backend/app/db/alembic.ini upgrade heads
    ```
 
 4. Verify setup:

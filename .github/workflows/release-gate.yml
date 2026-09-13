@@ -82,8 +82,18 @@ jobs:
       - name: Install Bandit
         run: pip install bandit
 
+      # Both trees: 58 files moved under modules/backend/app in the physical
+      # move (SAML parsing, PHI encryption, the SQL-building warehouse
+      # connectors, the inbound webhooks) and `-r backend/app` scanned none of
+      # them. modules/ is absent in a core checkout, so it is passed only when
+      # it is there.
       - name: Run Bandit high severity checks
-        run: bandit -r backend/app -ll
+        run: |
+          targets=backend/app
+          if [ -d modules/backend/app ]; then targets="$targets modules/backend/app"; fi
+          echo "bandit -r $targets -ll"
+          # shellcheck disable=SC2086
+          bandit -r $targets -ll
 
       - name: Run gitleaks secret scan
         uses: gitleaks/gitleaks-action@v2

@@ -134,7 +134,7 @@ export POSTGRES_SERVER=localhost
 export POSTGRES_USER=postgres
 export POSTGRES_PASSWORD=postgres
 
-python -m alembic -c backend/app/db/alembic.ini upgrade head
+python -m alembic -c backend/app/db/alembic.ini upgrade heads
 ok "Migrations complete."
 
 # ---------------------------------------------------------------------------

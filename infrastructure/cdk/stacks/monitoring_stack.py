@@ -13,7 +13,26 @@ from constructs import Construct
 
 
 class MonitoringStack(Stack):
-    def __init__(self, scope: Construct, construct_id: str, vpc, **kwargs) -> None:
+    """Dashboard, alarms and SNS topic for the platform.
+
+    ``events_stream_name`` is the Kinesis stream the analytics stack creates
+    (``modules/infrastructure/cdk/stacks/analytics_stack.py``, the ``etl``
+    module).  It is ``None`` in a core deployment, where there is no such
+    stream: the Kinesis widget and the iterator-age alarm are then not created
+    at all, rather than graphing nothing and holding an alarm in
+    INSUFFICIENT_DATA for ever.  The name is passed in rather than written out
+    here because the stream names itself ``exp-events-<id>``, not the
+    ``experimentation-events`` this stack used to watch.
+    """
+
+    def __init__(
+        self,
+        scope: Construct,
+        construct_id: str,
+        vpc,
+        events_stream_name: str | None = None,
+        **kwargs,
+    ) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
         # Create an SNS topic for alerts
@@ -141,35 +160,38 @@ class MonitoringStack(Stack):
             ],
         )
 
-        # Add Kinesis metrics
-        kinesis_widget = cloudwatch.GraphWidget(
-            title="Kinesis",
-            left=[
-                cloudwatch.Metric(
-                    namespace="AWS/Kinesis",
-                    metric_name="IncomingRecords",
-                    dimensions_map={"StreamName": "experimentation-events"},
-                    statistic="Sum",
-                    period=Duration.minutes(1),
-                ),
-                cloudwatch.Metric(
-                    namespace="AWS/Kinesis",
-                    metric_name="IncomingBytes",
-                    dimensions_map={"StreamName": "experimentation-events"},
-                    statistic="Sum",
-                    period=Duration.minutes(1),
-                ),
-            ],
-            right=[
-                cloudwatch.Metric(
-                    namespace="AWS/Kinesis",
-                    metric_name="GetRecords.IteratorAgeMilliseconds",
-                    dimensions_map={"StreamName": "experimentation-events"},
-                    statistic="Maximum",
-                    period=Duration.minutes(1),
-                )
-            ],
-        )
+        # Add Kinesis metrics -- only when this deployment has a stream.
+        kinesis_widget = None
+        if events_stream_name is not None:
+            stream_dimensions = {"StreamName": events_stream_name}
+            kinesis_widget = cloudwatch.GraphWidget(
+                title="Kinesis",
+                left=[
+                    cloudwatch.Metric(
+                        namespace="AWS/Kinesis",
+                        metric_name="IncomingRecords",
+                        dimensions_map=stream_dimensions,
+                        statistic="Sum",
+                        period=Duration.minutes(1),
+                    ),
+                    cloudwatch.Metric(
+                        namespace="AWS/Kinesis",
+                        metric_name="IncomingBytes",
+                        dimensions_map=stream_dimensions,
+                        statistic="Sum",
+                        period=Duration.minutes(1),
+                    ),
+                ],
+                right=[
+                    cloudwatch.Metric(
+                        namespace="AWS/Kinesis",
+                        metric_name="GetRecords.IteratorAgeMilliseconds",
+                        dimensions_map=stream_dimensions,
+                        statistic="Maximum",
+                        period=Duration.minutes(1),
+                    )
+                ],
+            )
 
         # Add RDS metrics
         rds_widget = cloudwatch.GraphWidget(
@@ -254,12 +276,18 @@ class MonitoringStack(Stack):
 
         # Add all widgets to the dashboard
         dashboard.add_widgets(
-            api_widget,
-            lambda_widget,
-            dynamodb_widget,
-            kinesis_widget,
-            rds_widget,
-            redis_widget,
+            *[
+                widget
+                for widget in (
+                    api_widget,
+                    lambda_widget,
+                    dynamodb_widget,
+                    kinesis_widget,
+                    rds_widget,
+                    redis_widget,
+                )
+                if widget is not None
+            ]
         )
 
         # Create CloudWatch Alarms
@@ -350,27 +378,29 @@ class MonitoringStack(Stack):
             cloudwatch_actions.SnsAction(self.alerts_topic)
         )
 
-        # Kinesis iterator age alarm (potential processing backlog)
-        iterator_age_alarm = cloudwatch.Alarm(
-            self,
-            "KinesisIteratorAgeAlarm",
-            metric=cloudwatch.Metric(
-                namespace="AWS/Kinesis",
-                metric_name="GetRecords.IteratorAgeMilliseconds",
-                dimensions_map={"StreamName": "experimentation-events"},
-                statistic="Maximum",
-                period=Duration.minutes(5),
-            ),
-            evaluation_periods=3,
-            threshold=300000,  # 5 minutes
-            comparison_operator=cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
-            alarm_description="Kinesis stream processing is falling behind",
-            alarm_name="KinesisProcessingDelay",
-        )
+        # Kinesis iterator age alarm (potential processing backlog) -- only
+        # when the analytics stack created the stream it watches.
+        if events_stream_name is not None:
+            iterator_age_alarm = cloudwatch.Alarm(
+                self,
+                "KinesisIteratorAgeAlarm",
+                metric=cloudwatch.Metric(
+                    namespace="AWS/Kinesis",
+                    metric_name="GetRecords.IteratorAgeMilliseconds",
+                    dimensions_map={"StreamName": events_stream_name},
+                    statistic="Maximum",
+                    period=Duration.minutes(5),
+                ),
+                evaluation_periods=3,
+                threshold=300000,  # 5 minutes
+                comparison_operator=cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+                alarm_description="Kinesis stream processing is falling behind",
+                alarm_name="KinesisProcessingDelay",
+            )
 
-        iterator_age_alarm.add_alarm_action(
-            cloudwatch_actions.SnsAction(self.alerts_topic)
-        )
+            iterator_age_alarm.add_alarm_action(
+                cloudwatch_actions.SnsAction(self.alerts_topic)
+            )
 
         # Lambda duration alarm
         lambda_duration_alarm = cloudwatch.Alarm(

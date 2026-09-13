@@ -6,13 +6,13 @@ EP-050 adds HIPAA (Health Insurance Portability and Accountability Act) complian
 
 ## Components
 
-### 1. PHI Encryption (`backend/app/core/phi_encryption.py`)
+### 1. PHI Encryption (`modules/backend/app/core/phi_encryption.py`)
 
 Symmetric encryption for Protected Health Information (PHI) using Fernet (AES-128-CBC + HMAC-SHA256).
 
 **Key generation:**
 ```python
-from backend.app.core.phi_encryption import PHIEncryption
+from modules.backend.app.core.phi_encryption import PHIEncryption
 key = PHIEncryption.generate_key()  # Store this in AWS Secrets Manager
 ```
 
@@ -28,7 +28,7 @@ plaintext  = enc.decrypt(ciphertext)
 - HMAC authentication prevents tampered ciphertext from decrypting
 - `decrypt()` raises `ValueError` on any integrity failure
 
-### 2. PHI Audit Log (`backend/app/models/phi_audit_log.py`)
+### 2. PHI Audit Log (`modules/backend/app/models/phi_audit_log.py`)
 
 Every PHI access is recorded in `experimentation.phi_audit_logs` with:
 - Who accessed (user_id FK to users)
@@ -39,7 +39,7 @@ Every PHI access is recorded in `experimentation.phi_audit_logs` with:
 - Network context (ip_address, user_agent)
 - Retention marker (retention_years = 6, per HIPAA §164.530(j))
 
-### 3. BAA Configuration (`backend/app/models/baa_config.py`)
+### 3. BAA Configuration (`modules/backend/app/models/baa_config.py`)
 
 Business Associate Agreements are tracked in `experimentation.baa_configs`. Each record stores:
 - Covered entity contact (organization_name, signatory_name, signatory_email)
@@ -48,7 +48,7 @@ Business Associate Agreements are tracked in `experimentation.baa_configs`. Each
 - PHI categories covered (demographics, diagnosis, treatment, billing)
 - Document integrity hash (SHA-256 of signed BAA document)
 
-### 4. HIPAA Service (`backend/app/services/hipaa_service.py`)
+### 4. HIPAA Service (`modules/backend/app/services/hipaa_service.py`)
 
 Central business logic layer:
 
@@ -65,7 +65,7 @@ Central business logic layer:
 | `check_data_residency(...)` | Validate AWS region |
 | `get_hipaa_status(...)` | Readiness checklist |
 
-### 5. API Endpoints (`backend/app/api/v1/endpoints/hipaa.py`)
+### 5. API Endpoints (`modules/backend/app/api/v1/endpoints/hipaa.py`)
 
 All endpoints at `/api/v1/hipaa` require ADMIN role (except `/encrypt` which also allows DEVELOPER).
 

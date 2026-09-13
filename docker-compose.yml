@@ -23,8 +23,11 @@
 #   postgres  localhost:5432          redis localhost:6379
 # =============================================================================
 
-x-api-image: &api-image experimently-api:${EXPERIMENTLY_IMAGE_TAG:-ce}
-x-web-image: &web-image experimently-web:${EXPERIMENTLY_IMAGE_TAG:-ce}
+# Image tags follow the profile: `core` (the default, backend/ only) or `full`
+# (the optional modules included). EXPERIMENTLY_PROFILE=full builds the full
+# images; EXPERIMENTLY_IMAGE_TAG defaults to the same word.
+x-api-image: &api-image experimently-api:${EXPERIMENTLY_IMAGE_TAG:-${EXPERIMENTLY_PROFILE:-core}}
+x-web-image: &web-image experimently-web:${EXPERIMENTLY_IMAGE_TAG:-${EXPERIMENTLY_PROFILE:-core}}
 
 services:
   # ---------------------------------------------------------------------------
@@ -65,16 +68,13 @@ services:
     build:
       context: .
       dockerfile: backend/Dockerfile
-      target: ${EXPERIMENTLY_EDITION:-ce}
+      # core | full — see backend/Dockerfile. `full` copies modules/ into the
+      # image; `core` never reads it.
+      target: ${EXPERIMENTLY_PROFILE:-core}
     image: *api-image
     environment:
-      # --- edition / environment ---
+      # --- environment ---
       ENVIRONMENT: ${ENVIRONMENT:-development}
-      # Enterprise licence (optional). Mint a development one with
-      # `python scripts/make_dev_license.py --env-file .env`; compose reads
-      # `.env` next to this file. Without a key the stack is Community.
-      EXPERIMENTLY_LICENSE_KEY: ${EXPERIMENTLY_LICENSE_KEY:-}
-      EXPERIMENTLY_DEV_LICENSE_PUBLIC_KEY: ${EXPERIMENTLY_DEV_LICENSE_PUBLIC_KEY:-}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       LOG_FORMAT: ${LOG_FORMAT:-console}          # json | console
       WEB_CONCURRENCY: ${WEB_CONCURRENCY:-1}       # 1 worker per container; scale containers instead
@@ -142,6 +142,7 @@ services:
       context: .
       dockerfile: frontend/Dockerfile
       args:
+        EXPERIMENTLY_PROFILE: ${EXPERIMENTLY_PROFILE:-core}
         # Relative: the dashboard calls /api/... on its own origin and nginx
         # proxies to the api container.
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-}
@@ -177,7 +178,7 @@ services:
         NEXT_PUBLIC_EXPERIMENTLY_API_URL: ${SHOPLAB_API_URL:-http://localhost:${API_HOST_PORT:-8000}}
         NEXT_PUBLIC_EXPERIMENTLY_API_KEY: ${SHOPLAB_API_KEY:-eptk_demo_shoplab_0123456789abcdef0123456789abcdef}
         NEXT_PUBLIC_EXPERIMENTLY_DASHBOARD_URL: ${DASHBOARD_URL:-http://localhost:${FRONTEND_HOST_PORT:-3000}}
-    image: experimently-shoplab:${EXPERIMENTLY_IMAGE_TAG:-ce}
+    image: experimently-shoplab:${EXPERIMENTLY_IMAGE_TAG:-${EXPERIMENTLY_PROFILE:-core}}
     ports:
       - "${SHOPLAB_HOST_PORT:-3200}:3200"
     depends_on:
@@ -221,7 +222,7 @@ services:
         NEXT_PUBLIC_EXPERIMENTLY_API_URL: ${STREAMPULSE_API_URL:-http://localhost:${API_HOST_PORT:-8000}}
         NEXT_PUBLIC_EXPERIMENTLY_API_KEY: ${STREAMPULSE_API_KEY:-eptk_demo_streampulse_0123456789abcdef0123456789ab}
         NEXT_PUBLIC_EXPERIMENTLY_DASHBOARD_URL: ${DASHBOARD_URL:-http://localhost:${FRONTEND_HOST_PORT:-3000}}
-    image: experimently-streampulse:${EXPERIMENTLY_IMAGE_TAG:-ce}
+    image: experimently-streampulse:${EXPERIMENTLY_IMAGE_TAG:-${EXPERIMENTLY_PROFILE:-core}}
     ports:
       - "${STREAMPULSE_HOST_PORT:-3300}:3300"
     depends_on:

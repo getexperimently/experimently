@@ -5,10 +5,15 @@ repos:
       - id: check-yaml
       - id: check-json
         # tsconfig files are JSONC: TypeScript reads `//` comments in them, and
-        # tsconfig.ce.json documents why the Community type-check exists at all.
+        # tsconfig.core.json documents why the core type-check exists at all.
         # The hook is a strict JSON parser, so it is wrong about these two.
         exclude: '(^|/)tsconfig[^/]*\.json$'
       - id: check-added-large-files
+        # The two OpenAPI snapshots under docs/api/ (the core one 711 KB, the
+        # full one 925 KB) are generated text that the snapshot test diffs
+        # operation by operation; they are the only files over the default
+        # 500 KB and they are supposed to be large.
+        args: ['--maxkb=1024']
       - id: check-merge-conflict
       - id: debug-statements
         exclude: ^(.*\.venv\/.*|.*venv\/.*)$
@@ -18,13 +23,15 @@ repos:
 
   # Frontend checks
 
-  # Backend lint + format. Same ruff version and the same [tool.ruff] config as
-  # `make lint` and the `lint` CI job, so a clean commit is a green job.
+  # Python lint + format. Same ruff version, the same [tool.ruff] config and the
+  # same three trees as `make lint` and the `lint` CI job (backend/, modules/,
+  # scripts/), so a clean commit is a green job. Scoped to ^backend/ the hook
+  # let a modules/ or scripts/ change through and the gate then failed on it.
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.16.7
     hooks:
       - id: ruff
         args: [--fix]
-        files: ^backend/
+        files: ^(backend|modules|scripts)/
       - id: ruff-format
-        files: ^backend/
+        files: ^(backend|modules|scripts)/

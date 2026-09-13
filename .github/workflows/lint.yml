@@ -1,7 +1,11 @@
 name: Lint
 
 # One fast job: everything that reads the tree without running it.
-#   ruff check / ruff format --check   backend/ scripts/  (replaces black + isort + flake8)
+#   ruff check / ruff format --check   backend/ modules/ scripts/  (replaces black + isort + flake8)
+#   lint-imports                       the core/modules import boundary ([tool.importlinter]
+#                                      in pyproject.toml, backend/lambda/.importlinter)
+#   reuse lint                         every file carries a licence (REUSE.toml, LICENSES/)
+#   check_requirements_lock.py         backend/requirements/runtime.lock matches runtime.txt
 #   eslint + tsc                       frontend/
 #   hadolint                           the four Dockerfiles
 #   actionlint                         .github/workflows
@@ -23,6 +27,8 @@ permissions:
 
 env:
   RUFF_VERSION: '0.16.7'
+  IMPORT_LINTER_VERSION: '2.15'
+  REUSE_VERSION: '6.2.0'
   HADOLINT_VERSION: '2.15.1'
   ACTIONLINT_VERSION: '1.7.12'
 
@@ -39,15 +45,39 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install ruff
-        run: pip install "ruff==${RUFF_VERSION}"
+      - name: Install ruff, import-linter, reuse
+        run: pip install "ruff==${RUFF_VERSION}" "import-linter==${IMPORT_LINTER_VERSION}" "reuse==${REUSE_VERSION}"
 
       # Configuration lives in [tool.ruff] in pyproject.toml.
       - name: ruff check
-        run: ruff check backend/ scripts/ --output-format=github
+        run: ruff check backend/ modules/ scripts/ --output-format=github
 
       - name: ruff format --check
-        run: ruff format --check backend/ scripts/
+        run: ruff format --check backend/ modules/ scripts/
+
+      # The core/modules boundary, statically: backend.app / backend.lambda
+      # never import modules; backend.app never imports backend.tests, sdk,
+      # demo or infrastructure. Contracts in pyproject.toml ([tool.importlinter])
+      # and backend/lambda/.importlinter (the Lambda functions are their own
+      # roots).
+      - name: lint-imports
+        run: |
+          lint-imports
+          cd backend/lambda && lint-imports
+
+      # REUSE 3.3: every file is covered by REUSE.toml (Apache-2.0 everywhere,
+      # sdk/ MIT) and the licence texts in LICENSES/ match. The root LICENSE is
+      # canonical; its copy under LICENSES/ must be byte-identical.
+      - name: reuse lint
+        run: |
+          reuse lint
+          cmp LICENSE LICENSES/Apache-2.0.txt \
+            || { echo "::error::LICENSES/Apache-2.0.txt has drifted from LICENSE"; exit 1; }
+
+      # backend/Dockerfile installs the hashed lock; a pin bumped in runtime.txt
+      # without `make lock` would otherwise ship the old version.
+      - name: requirements lock is current
+        run: python scripts/check_requirements_lock.py
 
       - name: Set up Node.js
         uses: actions/setup-node@v7
@@ -59,7 +89,9 @@ jobs:
       - name: Install frontend dependencies
         run: cd frontend && npm ci
 
-      # `npm run lint` is `eslint src`; flat config in frontend/eslint.config.mjs.
+      # `npm run lint` runs eslint over frontend/src and modules/frontend/src
+      # (the modules' dashboard code, resolved through the `@modules/*`
+      # alias); flat config in frontend/eslint.config.mjs.
       - name: eslint
         run: cd frontend && npm run lint
 

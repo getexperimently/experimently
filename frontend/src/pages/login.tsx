@@ -188,7 +188,7 @@ export default function LoginPage() {
           </div>
 
           <p className="mt-6 text-center text-xs text-slate-400">
-            Community Edition · no public sign-up. Accounts are created by an administrator.
+            No public sign-up. Accounts are created by an administrator.
           </p>
         </div>
       </main>

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { RbacService } from '@ee/rbac';
+import { RbacService } from '@modules/rbac';
 
 interface EffectivePermissionsModalProps {
   isOpen: boolean;

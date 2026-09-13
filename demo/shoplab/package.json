@@ -1,6 +1,7 @@
 {
   "name": "shoplab-demo",
   "version": "0.1.0",
+  "license": "Apache-2.0",
   "private": true,
   "description": "ShopLab — a demo storefront running live experiments on the Experimently platform",
   "scripts": {

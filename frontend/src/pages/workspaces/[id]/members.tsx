@@ -1,8 +1,9 @@
 /**
- * Enterprise route — workspace members (EP-057).
+ * Module route — workspace members (EP-057).
  *
- * Thin re-export so this file compiles in both editions: `@ee/*` resolves to
- * `src/ee/` when the Enterprise tree is present and to `src/ee-stub/`
- * (an "Enterprise feature" notice) when it is not. See `next.config.js`.
+ * Thin re-export so this file compiles in both profiles: `@modules/*` resolves
+ * to `modules/frontend/src/` when the modules tree is present and to
+ * `src/modules-stub/` (a "module not installed" notice) when it is not. See
+ * `next.config.js`.
  */
-export { default } from '@ee/pages/workspaces/[id]/members';
+export { default } from '@modules/pages/workspaces/[id]/members';

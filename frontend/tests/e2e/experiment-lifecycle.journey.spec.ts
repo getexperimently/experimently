@@ -4,7 +4,7 @@ import { ExperimentsPage } from "./pages/experiments.page";
 /**
  * Journey 2 — experiment lifecycle.
  *
- * The CE click-path an evaluator walks in their first ten minutes:
+ * The core click-path an evaluator walks in their first ten minutes:
  * list → `/experiments/new` → detail → start → pause → resume → complete →
  * results → archive. It runs against a real backend with the demo admin, and
  * every step asserts on `data-testid`s rendered by `src/pages/experiments/`

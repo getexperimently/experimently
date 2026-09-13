@@ -23,10 +23,40 @@ This directory contains all operational documentation for deploying and operatin
 1. Create and push a git tag: `git tag v1.2.3 && git push origin v1.2.3`
 2. Ensure **Release Gate** succeeded for the target commit/tag.
 3. Go to **GitHub Actions** → **"Deploy to Production"** → **Run workflow** → enter the tag
+   and pick the **profile** (see below)
 4. Approve the deployment in the GitHub environment gate
 5. Monitor progress in Slack `#deployments`
 
 Full procedure: [deployment-guide.md](deployment-guide.md)
+
+#### Which profile?
+
+`Deploy to Production` asks for a `profile`, and the answer is a decision about
+what production *is*, not a build detail:
+
+| profile | image | compliance audit log |
+|---------|-------|----------------------|
+| `full` (default) | `backend/Dockerfile --target full`: `backend/` plus `modules/backend/` and the module-only dependencies | HMAC-SHA256 signed by the compliance module (`AuditSigningService`) |
+| `core` | `--target core`: `backend/` only, no `modules/` directory at all | **unsigned** — `hooks.audit_signer` stays `NullAuditSigner`, every event is written with `hmac_signature = NULL`, and `verify()` reports those rows as intact |
+
+Nothing at runtime flags the difference: `/health/ready` answers 200 either way
+(it reports `profile`, it does not judge it) and `abort_if_modules_broken()`
+only fires for a *broken* modules package, never for an absent one. So `core`
+also requires ticking **`accept_unsigned_audit_log`**; the workflow refuses the
+run otherwise, before it assumes the production AWS role. The dashboard image
+is built with the same profile — a core API behind a dashboard that renders
+module chrome is a broken UI.
+
+`full` needs one secret `core` does not: **`/prod/experimentation/audit-hmac-key`**
+(→ `AUDIT_HMAC_KEY`). `modules.register(hooks)` builds the modules' settings as
+its very first step and their validator rejects the shipped dev default in
+staging and production, so a full image without it never registers the modules
+— `abort_if_modules_broken()` refuses to start the API and
+`require_modules_or_absent()` fails every `alembic` command, including the
+migration task. The workflow's **"Required secrets exist for this profile"**
+step checks for it (and for the four every profile needs) before it builds
+anything, so a missing secret is a red job, not a crash loop. Create it with
+[secrets-management.md](secrets-management.md).
 
 ---
 
@@ -115,12 +145,20 @@ These secrets must be set in the GitHub repository under **Settings → Secrets 
 
 These secrets must be populated before the first deployment. See [secrets-management.md](secrets-management.md) for creation commands.
 
-| Secret Path | Description |
-|-------------|-------------|
-| `/prod/experimentation/db-password` | Aurora PostgreSQL application user password |
-| `/prod/experimentation/jwt-secret` | JWT signing secret (minimum 32 characters) |
-| `/prod/experimentation/redis-url` | Redis connection URL with auth token |
-| `/prod/experimentation/cognito-config` | Cognito user pool ID and client ID (JSON) |
+| Secret Path | Injected as | Description |
+|-------------|-------------|-------------|
+| `/prod/experimentation/db-password` | `POSTGRES_PASSWORD` | Aurora PostgreSQL application user password |
+| `/prod/experimentation/jwt-secret` | `SECRET_KEY` | JWT signing secret (minimum 32 characters) |
+| `/prod/experimentation/redis-url` | `REDIS_URL` | Redis connection URL with auth token |
+| `/prod/experimentation/first-superuser-password` | `FIRST_SUPERUSER_PASSWORD` | Password for the first administrator; the default `admin` is refused in production |
+| `/prod/experimentation/audit-hmac-key` | `AUDIT_HMAC_KEY` | **`profile: full` only** — signs the compliance audit log; the modules refuse to register without it |
+| `/prod/experimentation/cognito-config` | — | Cognito user pool ID and client ID (JSON) |
+
+Every row except `cognito-config` is injected by the ECS task definitions
+(`infrastructure/cdk/stacks/fargate_service_stack.py` and
+`migration_task_stack.py`) and is one the application refuses to start without:
+the image ships no `.env` file, so the task definition is the only source.
+`Deploy to Production` fails in **Pre-deployment Checks** if one is missing.
 
 ---
 

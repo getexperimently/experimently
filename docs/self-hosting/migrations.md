@@ -8,6 +8,15 @@ The platform uses **Alembic** for PostgreSQL schema management. All schema chang
 
 Migration files live in `backend/app/db/migrations/versions/`. Each file represents one atomic schema change, identified by a unique revision ID. Alembic tracks which migrations have been applied in the `alembic_version` table in your database.
 
+**Two branches, two heads.** A full-profile checkout also has
+`modules/backend/app/db/migrations/versions/`, a separate branch labelled
+`modules` for the schema the optional modules own. A core checkout has no
+`modules/` directory and therefore one head; a full checkout has two, and
+`alembic_version` holds one row per head. That is why every command below says
+`heads` (plural) and never `head`: alembic refuses the singular when more than
+one head exists. Run every command from the repository root, or with an
+absolute `-c` path — the config resolves both branches from any directory.
+
 ---
 
 ## Running All Migrations
@@ -26,10 +35,23 @@ export POSTGRES_USER=postgres
 export POSTGRES_PASSWORD=your-password
 
 # Run migrations
-python -m alembic -c backend/app/db/alembic.ini upgrade head
+python -m alembic -c backend/app/db/alembic.ini upgrade heads
 ```
 
-`head` refers to the latest migration. This command applies all unapplied migrations in order.
+`heads` refers to the latest migration of every branch. This command applies all
+unapplied migrations in order.
+
+On a database with no tables at all, run the bootstrap instead — the historical
+migration chain cannot be replayed from zero, so a fresh schema is created from
+the models and stamped:
+
+```bash
+python -m backend.app.db.bootstrap
+```
+
+The bootstrap is also what the API container runs on start-up
+(`RUN_MIGRATIONS=true`, the default), and it is what makes a **profile switch**
+work; see "Switching profile" below.
 
 ---
 
@@ -77,10 +99,15 @@ This is the revision ID of the last migration that was applied to the database.
 When you add or modify SQLAlchemy models, generate a migration script:
 
 ```bash
-python -m alembic -c backend/app/db/alembic.ini revision --autogenerate -m "add email_verified column to users"
+# Which head does this revision extend?  (A core checkout has only one and can
+# leave --head out entirely.)
+python -m alembic -c backend/app/db/alembic.ini heads
+
+python -m alembic -c backend/app/db/alembic.ini revision --autogenerate \
+    --head <core head id> -m "add email_verified column to users"
 ```
 
-Alembic inspects the difference between the current models and the database schema, then generates a migration file in `backend/app/db/migrations/versions/`.
+Alembic inspects the difference between the current models and the database schema, then generates a migration file next to the head it extends: `backend/app/db/migrations/versions/` for a core revision, `modules/backend/app/db/migrations/versions/` for `--head modules@head`. Without `--head` it refuses with "Multiple heads are present" rather than guessing — do **not** answer that with `alembic merge`: the merge file lands in the core chain with the module head in its `down_revision`, and a core checkout then cannot load the migration directory at all.
 
 ### Always Review the Generated File
 
@@ -129,11 +156,28 @@ python -m alembic -c backend/app/db/alembic.ini upgrade +3
 
 ## Rolling Back
 
-Roll back the most recent migration:
+Roll back the most recent migration **of one branch**. With two heads a bare
+`-1` is ambiguous — alembic warns and picks one, which may not be the branch you
+meant — so name the branch:
 
 ```bash
-python -m alembic -c backend/app/db/alembic.ini downgrade -1
+# the modules branch, one revision back (its only one today: modules_0001_rbac)
+python -m alembic -c backend/app/db/alembic.ini downgrade modules@-1
+
+# one step back on the core chain
+python -m alembic -c backend/app/db/alembic.ini downgrade <core revision id>
 ```
+
+**Not `modules@base`.** `modules_0001_rbac` is a child of the core revision
+`a7b8c9d0e1f2`, not an alembic base, and with a single tree root alembic cannot
+filter a downgrade by branch label: `downgrade modules@base` resolves to **26
+revisions** — the whole core chain to base — and drops every table in the
+schema.
+
+`modules_0001_rbac` downgrades only the objects its own `upgrade()` created (it
+marks them with a PostgreSQL COMMENT as it goes). On a database whose tables
+came from the bootstrap rather than from that migration, its downgrade is a
+no-op — it will not drop populated tables it never made.
 
 Roll back to a specific revision:
 
@@ -161,7 +205,7 @@ The `stamp` command marks a migration as applied without actually running its SQ
 
 ```bash
 # Mark current database state as "head"
-python -m alembic -c backend/app/db/alembic.ini stamp head
+python -m alembic -c backend/app/db/alembic.ini stamp heads
 
 # Mark as a specific revision
 python -m alembic -c backend/app/db/alembic.ini stamp ab1234567890
@@ -192,7 +236,9 @@ cd1234567890 (head)
 
 ### Resolution
 
-Create a merge migration that unifies the two heads:
+The `modules` branch is *not* one of these: it is two heads on purpose, and
+`alembic heads` labels it. Never merge it. For two core revisions cut from the
+same parent, create a merge migration that unifies them:
 
 ```bash
 python -m alembic -c backend/app/db/alembic.ini merge -m "merge heads" ab1234567890 cd1234567890
@@ -201,7 +247,7 @@ python -m alembic -c backend/app/db/alembic.ini merge -m "merge heads" ab1234567
 This creates a new migration file with both revisions as its `down_revision`. The merge migration itself has no SQL operations — it exists only to reunify the graph. Apply it normally:
 
 ```bash
-python -m alembic -c backend/app/db/alembic.ini upgrade head
+python -m alembic -c backend/app/db/alembic.ini upgrade heads
 ```
 
 ---
@@ -250,10 +296,44 @@ In production (ECS Fargate), migrations are run as a one-off ECS task before the
 # Run as a one-off ECS task
 aws ecs run-task \
   --cluster experimentation-cluster \
-  --task-definition experimentation-migrations \
-  --overrides '{"containerOverrides":[{"name":"api","command":["python","-m","alembic","-c","app/db/alembic.ini","upgrade","head"]}]}' \
+  --task-definition experimentation-migrate \
+  --overrides '{"containerOverrides":[{"name":"backend","command":["python","-m","alembic","-c","backend/app/db/alembic.ini","upgrade","heads"]}]}' \
   --launch-type FARGATE \
   --network-configuration "awsvpcConfiguration={subnets=[subnet-xxxx],securityGroups=[sg-xxxx]}"
 ```
 
-The CDK deployment pipeline runs this task automatically before routing traffic to the new deployment.
+The CDK deployment pipeline runs this task automatically before routing traffic to the new deployment. The exact command is
+`MIGRATION_COMMAND` in `infrastructure/cdk/stacks/migration_task_stack.py`; the
+path is relative to the image's `WORKDIR /app`, under which `backend/Dockerfile`
+copies the repository layout unchanged.
+
+---
+
+## Switching Profile
+
+The same database can be built by one profile and opened by the other. Let the
+bootstrap do it — `python -m backend.app.db.bootstrap`, which is what the API
+container runs on start-up — rather than `alembic upgrade heads` on its own.
+
+**Core database, full image.** The core chain marks the revisions that once
+created `workspaces`, `sso_configs`, `phi_audit_logs` and the rest as applied
+without creating them, and the `modules` branch does not re-create them (it owns
+the three RBAC tables only). The bootstrap therefore reconciles the schema with
+the models after upgrading: it creates every table the models declare and the
+database lacks, adds the two `workspace_id` foreign keys, and says so at
+WARNING. Without that step the API answers `profile: full` on
+`GET /api/v1/modules` while `/workspaces` and `/hipaa/*` fail on missing
+relations.
+
+**Full database, core image.** `alembic_version` holds a revision a core build
+has no file for, and *every* alembic command against it fails with "Can't locate
+revision identified by 'modules_0001_rbac'" — alembic reads the whole table
+before it does anything. The bootstrap handles it: when the core chain is
+already at its head there is nothing to apply, so it skips alembic, leaves the
+rows untouched and logs a WARNING naming the revisions. When the core chain is
+*behind* (a newer core image against a full database) it refuses with a message
+naming them; run the full image against that database, or — with a backup taken
+— delete those rows from `alembic_version` first.
+
+The module tables themselves are never dropped by switching down to core. They
+stay, unused, until the database goes back to the full profile.

@@ -1,0 +1,34 @@
+# REUSE.toml — machine-readable licensing for the whole repository
+# (REUSE Specification 3.3, https://reuse.software/spec-3.3/).
+#
+# Two rules, by directory, matching the root LICENSE and NOTICE:
+#
+#   sdk/**  MIT          (sdk/LICENSE — the client SDKs and OpenFeature providers)
+#   **      Apache-2.0   (everything else: backend/, modules/, frontend/, docs/, ...)
+#
+# `reuse lint` (in `make lint` and the `lint` CI job) checks that every file is
+# covered and that the licence texts in LICENSES/ match the identifiers used.
+# No file carries a per-file SPDX header today; if one is added (say, to a file
+# meant to be copied out of the tree) it takes precedence over these tables
+# ("closest" precedence).
+#
+# The licence texts REUSE requires live in LICENSES/<id>.txt. Apache-2.0.txt is
+# byte-identical to the root LICENSE (`make lint` fails when they drift); MIT.txt
+# is the SPDX text for the identifier sdk/LICENSE uses.
+
+version = 1
+SPDX-PackageName = "Experimently"
+SPDX-PackageSupplier = "Experimently <hello@getexperimently.com>"
+SPDX-PackageDownloadLocation = "https://github.com/amarkanday/experimentation-platform"
+
+[[annotations]]
+path = ["**"]
+precedence = "closest"
+SPDX-FileCopyrightText = "2024-2026 Experimently"
+SPDX-License-Identifier = "Apache-2.0"
+
+[[annotations]]
+path = ["sdk/**"]
+precedence = "closest"
+SPDX-FileCopyrightText = "2024-2026 Experimently"
+SPDX-License-Identifier = "MIT"

@@ -16,7 +16,6 @@ psycopg2-binary==2.9.12
 asyncpg==0.31.0
 aioredis==2.0.1
 redis==8.1.0
-PyMySQL==1.2.0
 boto3==1.43.89
 boto3-stubs==1.43.89
 mypy-boto3-dynamodb==1.43.64
@@ -69,9 +68,22 @@ orjson==3.12.0
 ujson==5.13.0
 semver==3.0.4          # core/rules_engine.py semantic-version operators
 loguru==0.7.3          # api/deps.py
-requests==2.34.2       # integrations, warehouse connectors, SDK contract tests
+requests==2.34.2       # tests only: tests/smoke/test_production.py and
+                       # tests/realistic/*.  Deliberately NOT in
+                       # requirements/runtime.txt -- no backend/app, backend/lambda
+                       # or backend/scripts module imports it; the one runtime
+                       # importer is a module service, so the full image gets it
+                       # from modules/requirements.txt.
+defusedxml==0.7.1      # a modules runtime pin (modules/requirements.txt), kept
+                       # here too because this file is what every test job and
+                       # every developer venv installs, and the modules tree
+                       # imports it UNGUARDED (sso_service.py, deliberately: the
+                       # XXE-safe parser has no safe fallback).  Without it,
+                       # modules.register(hooks) raises on a full checkout and
+                       # conftest exits 3 with zero tests collected.
+                       # Deliberately NOT in requirements/runtime.txt -- nothing
+                       # under backend/ imports it.
 cryptography==50.0.1   # core/phi_encryption.py (Fernet)
-defusedxml==0.7.1      # services/sso_service.py SAML metadata parsing
 mock==5.2.0            # tests/unit/middleware/test_error_middleware.py
 
 # Monitoring & Tracing
@@ -98,12 +110,7 @@ python-json-logger==2.0.7
 # Add psutil for system metrics collection
 psutil==5.9.8
 
-# EP-037: SSO/SAML & OIDC Enterprise Authentication
-python3-saml==1.16.0
-authlib==1.8.0
-
-# EP-041: Databricks Warehouse Connector
-databricks-sql-connector==3.7.5   # 3.3 pinned pandas<2.2
-
-# EP-048: ClickHouse and MySQL Warehouse Connectors
-clickhouse-connect==0.7.0
+# The modules' own runtime dependencies (SAML/OIDC, the warehouse connectors)
+# are NOT here: they live in modules/requirements.txt, locked in
+# modules/requirements.lock, and are installed only by the full profile.
+# Nothing under backend/ imports them.

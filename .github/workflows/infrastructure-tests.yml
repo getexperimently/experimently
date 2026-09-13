@@ -5,11 +5,16 @@ on:
     branches: [main]
     paths:
       - 'infrastructure/**'
+      - 'modules/infrastructure/**'
       - '.github/workflows/infrastructure-tests.yml'
   pull_request:
     branches: [main]
     paths:
       - 'infrastructure/**'
+      # The modules' stacks are built by infrastructure/cdk/app.py in the full
+      # profile, and test_app_profiles.py asserts they are; a change to one of
+      # them has to run these tests.
+      - 'modules/infrastructure/**'
       - '.github/workflows/infrastructure-tests.yml'
   workflow_dispatch:
 

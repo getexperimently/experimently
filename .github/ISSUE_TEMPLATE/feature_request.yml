@@ -52,7 +52,7 @@ body:
         - SDKs
         - Self-hosting, Docker, infrastructure
         - Auth, roles and audit
-        - Enterprise feature
+        - A module (workspaces, rbac, sso, hipaa, compliance, warehouse, integrations, counters, etl, split_url)
         - Other
     validations:
       required: true
@@ -64,5 +64,4 @@ body:
       options:
         - label: >-
             I would be willing to open a pull request for this. (Read
-            CONTRIBUTING.md first — commits need `git commit -s`, and `ee/`
-            takes no outside contributions.)
+            CONTRIBUTING.md first — commits need `git commit -s`.)

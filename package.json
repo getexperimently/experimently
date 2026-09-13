@@ -10,7 +10,7 @@
     "type": "git",
     "url": "git+https://github.com/amarkanday/experimentation-platform.git"
   },
-  "license": "AGPL-3.0-only",
+  "license": "Apache-2.0",
   "author": "",
   "type": "commonjs",
   "main": "index.js",

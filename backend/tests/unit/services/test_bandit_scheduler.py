@@ -290,70 +290,9 @@ class TestBanditScheduler:
         db.commit.assert_called_once()
 
     # -----------------------------------------------------------------------
-    # 9. get_variant_stats_from_counters — mocked DynamoDB fetch
+    # 9. get_variant_stats_from_counters against the real DynamoDB provider:
+    #    modules/backend/tests/unit/services/test_bandit_scheduler_counters.py
     # -----------------------------------------------------------------------
-    @pytest.mark.enterprise
-    def test_get_variant_stats_from_counters_uses_dynamodb(self):
-        """get_variant_stats_from_counters reads DynamoDB via get_experiment_counters."""
-        from backend.app.schemas.realtime_counters import (
-            ExperimentCounters,
-            VariantCounters,
-        )
-
-        db = MagicMock()
-        scheduler = BanditScheduler(db=db)
-
-        exp_id = uuid.uuid4()
-        vid1, vid2 = str(uuid.uuid4()), str(uuid.uuid4())
-
-        counters = ExperimentCounters(
-            experiment_id=str(exp_id),
-            total_assignments=200,
-            total_events=0,
-            total_conversions=60,
-            variants=[
-                VariantCounters(
-                    variant_id=vid1,
-                    variant_name=vid1,
-                    is_control=True,
-                    assignments=100,
-                    conversions=40,
-                    conversion_rate=0.4,
-                ),
-                VariantCounters(
-                    variant_id=vid2,
-                    variant_name=vid2,
-                    is_control=False,
-                    assignments=100,
-                    conversions=20,
-                    conversion_rate=0.2,
-                ),
-            ],
-        )
-
-        mock_counter_service = MagicMock()
-        mock_counter_service.get_experiment_counters.return_value = counters
-
-        # DynamoDBCounterService is imported inside the function body, so we
-        # patch the class at its definition site (the service module).
-        with patch(
-            "backend.app.services.dynamodb_counter_service.DynamoDBCounterService",
-            return_value=mock_counter_service,
-        ):
-            stats = scheduler.get_variant_stats_from_counters(exp_id, [vid1, vid2])
-
-        mock_counter_service.get_experiment_counters.assert_called_once_with(
-            str(exp_id)
-        )
-        assert set(stats) == {vid1, vid2}
-        # assignments → pulls, conversions → successes, failures = pulls - successes
-        assert stats[vid1].pulls == 100
-        assert stats[vid1].successes == 40
-        assert stats[vid1].failures == 60
-        assert stats[vid2].successes == 20
-        assert stats[vid2].failures == 80
-        # DynamoDB had data, so PostgreSQL was never consulted
-        db.query.assert_not_called()
 
     # -----------------------------------------------------------------------
     # 10. estimate_regret_reduction > 0 when best variant dominates
@@ -553,8 +492,8 @@ def _counter_capability(provider):
     """Register *provider* under ``counters.service`` for the duration.
 
     ``None`` unregisters it -- a build that does not ship the service; a
-    provider answering ``None`` is one that ships it but is not licensed for
-    it.  Both must fall through to PostgreSQL.
+    provider answering ``None`` is one whose service could not be resolved.
+    Both must fall through to PostgreSQL.
     """
     from backend.app.core import hooks
 
@@ -639,9 +578,9 @@ class TestBanditSchedulerStatsFallback:
         here: ``backend/tests/unit/conftest.py`` replaces ``logging.getLogger``
         for every unit test.)
         """
-        from backend.app.core import enterprise_features
+        from backend.app.core import optional_modules
 
-        assert not hasattr(enterprise_features, "logger")
+        assert not hasattr(optional_modules, "logger")
 
         db, scheduler, _ = self._scheduler_with_experiment()
         with (
@@ -654,9 +593,9 @@ class TestBanditSchedulerStatsFallback:
         assert mock_logger.warning.call_count == 0
         assert mock_logger.error.call_count == 0
 
-    def test_falls_back_to_postgres_when_the_licence_lapsed(self):
-        """The service is installed but the provider answers None: the
-        licence no longer covers real-time counters. PostgreSQL it is."""
+    def test_falls_back_to_postgres_when_the_provider_answers_none(self):
+        """The service is installed but the provider answers None (the class
+        could not be resolved). PostgreSQL it is."""
         db, scheduler, exp = self._scheduler_with_experiment(
             metrics=[_mock_metric("purchase", True)]
         )
@@ -716,47 +655,9 @@ class TestBanditSchedulerStatsFallback:
         assert stats[vid2].successes == 5
         assert stats[vid2].failures == 95
 
-    @pytest.mark.enterprise
-    def test_falls_back_to_postgres_when_dynamodb_has_no_pulls(self):
-        """DynamoDB reachable but empty for this experiment → PostgreSQL."""
-        from backend.app.schemas.realtime_counters import ExperimentCounters
-
-        db, scheduler, exp = self._scheduler_with_experiment(
-            metrics=[_mock_metric("purchase", True)]
-        )
-        vid1, vid2 = (str(v.id) for v in exp.variants)
-
-        empty = ExperimentCounters(
-            experiment_id=str(exp.id),
-            total_assignments=0,
-            total_events=0,
-            total_conversions=0,
-            variants=[],
-        )
-        mock_counter_service = MagicMock()
-        mock_counter_service.get_experiment_counters.return_value = empty
-
-        with (
-            patch(
-                "backend.app.services.dynamodb_counter_service.DynamoDBCounterService",
-                return_value=mock_counter_service,
-            ),
-            patch.object(
-                scheduler,
-                "_count_assignments_by_variant",
-                return_value={vid1: 10, vid2: 10},
-            ),
-            patch.object(
-                scheduler, "_count_conversions_by_variant", return_value={vid1: 3}
-            ),
-        ):
-            stats = scheduler.get_variant_stats_from_counters(
-                exp.id, [vid1, vid2], experiment=exp
-            )
-
-        assert stats[vid1].pulls == 10
-        assert stats[vid1].successes == 3
-        assert stats[vid2].successes == 0
+    # "DynamoDB reachable but empty -> PostgreSQL" drives the real counters
+    # module provider and lives in modules/backend/tests/unit/services/
+    # test_bandit_scheduler_counters.py.
 
     def test_successes_are_capped_at_pulls(self):
         """A variant can never convert more users than it was assigned."""

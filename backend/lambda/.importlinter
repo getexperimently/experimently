@@ -1,0 +1,32 @@
+# import-linter contracts for the Lambda functions.  Run from this directory:
+#
+#     cd backend/lambda && lint-imports
+#
+# (`make lint` and the `lint` CI job do.)  The functions are separate
+# deployables with no shared parent package -- `backend/lambda` has no
+# __init__.py and `lambda` is a Python keyword -- so each one is its own root
+# here, resolved from the current directory.  modules/lambda/ (glue,
+# split_url_router) belongs to the modules and is not a root: the point of the
+# contract is that nothing that ships in the core image reaches it.
+[importlinter]
+root_packages =
+    assignment
+    event_processor
+    feature_flag_evaluation
+    shared
+include_external_packages = True
+
+[importlinter:contract:lambda-does-not-import-modules]
+name = Lambda functions never import the modules package
+type = forbidden
+source_modules =
+    assignment
+    event_processor
+    feature_flag_evaluation
+    shared
+forbidden_modules =
+    modules
+    backend
+    sdk
+    demo
+    infrastructure

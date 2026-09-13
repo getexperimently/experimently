@@ -34,6 +34,29 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+def _best_duration(run, repeats: int = 5) -> float:
+    """The fastest of *repeats* runs of *run*, in seconds.
+
+    A single wall-clock timing measures the code plus whatever else the
+    machine was doing. These benchmarks timed one run and asserted a fixed
+    ceiling, so a scheduler preemption or a garbage-collection pause failed
+    them (the 10 ms equality benchmark came back at 17.5 ms while three test
+    suites shared the machine). Taking the minimum is what `timeit` does: the
+    best run is the one least polluted by other work, and genuinely slower
+    code is slower in every run, so a real regression still fails.
+
+    Only the single-measurement benchmarks use this. The ones that compare two
+    timings against each other (cached vs uncached) are left alone: the ratio
+    is already robust to a slow machine, because both halves slow down.
+    """
+    best = float("inf")
+    for _ in range(repeats):
+        start = time.perf_counter()
+        run()
+        best = min(best, time.perf_counter() - start)
+    return best
+
+
 class TestOperatorPerformance:
     """Benchmark individual operator performance."""
 
@@ -41,10 +64,11 @@ class TestOperatorPerformance:
         """Benchmark simple equality operator."""
         iterations = 10000
 
-        start = time.time()
-        for _ in range(iterations):
-            apply_operator(OperatorType.EQUALS, "US", "US")
-        duration = time.time() - start
+        def _run():
+            for _ in range(iterations):
+                apply_operator(OperatorType.EQUALS, "US", "US")
+
+        duration = _best_duration(_run)
 
         # Should be very fast (< 10ms for 10k operations)
         assert duration < 0.01
@@ -55,10 +79,11 @@ class TestOperatorPerformance:
         """Benchmark string contains operator."""
         iterations = 10000
 
-        start = time.time()
-        for _ in range(iterations):
-            apply_operator(OperatorType.CONTAINS, "hello world", "world")
-        duration = time.time() - start
+        def _run():
+            for _ in range(iterations):
+                apply_operator(OperatorType.CONTAINS, "hello world", "world")
+
+        duration = _best_duration(_run)
 
         # Should be fast
         assert duration < 0.05
@@ -69,12 +94,16 @@ class TestOperatorPerformance:
         """Benchmark semantic version comparison."""
         iterations = 1000  # Fewer iterations for complex operation
 
-        start = time.time()
-        for _ in range(iterations):
-            apply_operator(
-                OperatorType.SEMANTIC_VERSION, "1.2.3", "1.0.0", additional_value="gt"
-            )
-        duration = time.time() - start
+        def _run():
+            for _ in range(iterations):
+                apply_operator(
+                    OperatorType.SEMANTIC_VERSION,
+                    "1.2.3",
+                    "1.0.0",
+                    additional_value="gt",
+                )
+
+        duration = _best_duration(_run)
 
         # Should be reasonably fast
         assert duration < 0.1  # < 100ms for 1k operations
@@ -85,14 +114,15 @@ class TestOperatorPerformance:
         """Benchmark geographic distance calculation."""
         iterations = 1000
 
-        start = time.time()
-        for _ in range(iterations):
-            apply_operator(
-                OperatorType.GEO_DISTANCE,
-                {"lat": 37.7749, "lon": -122.4194},
-                {"lat": 37.8044, "lon": -122.2712, "radius": 15, "unit": "miles"},
-            )
-        duration = time.time() - start
+        def _run():
+            for _ in range(iterations):
+                apply_operator(
+                    OperatorType.GEO_DISTANCE,
+                    {"lat": 37.7749, "lon": -122.4194},
+                    {"lat": 37.8044, "lon": -122.2712, "radius": 15, "unit": "miles"},
+                )
+
+        duration = _best_duration(_run)
 
         # Should be reasonably fast despite math operations
         assert duration < 0.2  # < 200ms for 1k operations
@@ -105,18 +135,19 @@ class TestOperatorPerformance:
 
         dt = datetime(2024, 1, 2, 10, 0, 0)
 
-        start = time.time()
-        for _ in range(iterations):
-            apply_operator(
-                OperatorType.TIME_WINDOW,
-                dt,
-                {
-                    "days": [0, 1, 2, 3, 4],  # Weekdays
-                    "start_time": "09:00",
-                    "end_time": "17:00",
-                },
-            )
-        duration = time.time() - start
+        def _run():
+            for _ in range(iterations):
+                apply_operator(
+                    OperatorType.TIME_WINDOW,
+                    dt,
+                    {
+                        "days": [0, 1, 2, 3, 4],  # Weekdays
+                        "start_time": "09:00",
+                        "end_time": "17:00",
+                    },
+                )
+
+        duration = _best_duration(_run)
 
         # Should be fast
         assert duration < 0.1
@@ -147,12 +178,13 @@ class TestRuleCompilationPerformance:
             rollout_percentage=100,
         )
 
-        start = time.time()
-        for i in range(iterations):
-            # Modify rule slightly to avoid cache
-            rule.rollout_percentage = 50 + (i % 51)
-            compiler.compile(rule, force_recompile=True)
-        duration = time.time() - start
+        def _run():
+            for i in range(iterations):
+                # Modify rule slightly to avoid cache
+                rule.rollout_percentage = 50 + (i % 51)
+                compiler.compile(rule, force_recompile=True)
+
+        duration = _best_duration(_run)
 
         # Should be very fast
         assert duration < 1.0  # < 1s for 1k compilations
@@ -198,10 +230,11 @@ class TestRuleCompilationPerformance:
             id="complex_rule", rule=outer_group, priority=1, rollout_percentage=100
         )
 
-        start = time.time()
-        for _ in range(iterations):
-            compiler.compile(rule, force_recompile=True)
-        duration = time.time() - start
+        def _run():
+            for _ in range(iterations):
+                compiler.compile(rule, force_recompile=True)
+
+        duration = _best_duration(_run)
 
         # Should still be reasonably fast
         assert duration < 1.0  # < 1s for 100 complex compilations
@@ -246,25 +279,31 @@ class TestRuleCompilationPerformance:
             id="cache_test", rule=outer_group, priority=1, rollout_percentage=100
         )
 
-        # Time uncached compilation
-        start = time.time()
-        for _ in range(1000):
-            compiler.compile(rule, force_recompile=True)
-        uncached_duration = time.time() - start
+        # Both halves as the best of several runs. A ratio of two single
+        # timings is not robust to a busy machine the way a ratio usually is:
+        # the halves are measured minutes apart in wall-clock terms, so load
+        # arriving between them lands on one side only. This assertion failed
+        # two core-profile rehearsals at 1.20 against a 1.3 floor while other
+        # suites shared the machine, and passed in isolation every time.
+        uncached_duration = cached_duration = float("inf")
+        for _ in range(5):
+            start = time.perf_counter()
+            for _ in range(1000):
+                compiler.compile(rule, force_recompile=True)
+            uncached_duration = min(uncached_duration, time.perf_counter() - start)
 
-        # Clear cache and compile once
-        compiler.clear_cache()
-        compiler.compile(rule)
-
-        # Time cached compilation
-        start = time.time()
-        for _ in range(1000):
+            # Warm the cache, then time the hits.
+            compiler.clear_cache()
             compiler.compile(rule)
-        cached_duration = time.time() - start
 
-        # Cached should be faster (at least 1.3x)
-        # Note: Speedup is modest because compilation is already very fast,
-        # and cache lookup has its own overhead (hashing, dict access)
+            start = time.perf_counter()
+            for _ in range(1000):
+                compiler.compile(rule)
+            cached_duration = min(cached_duration, time.perf_counter() - start)
+
+        # Cached should be faster (at least 1.3x). The speedup is modest
+        # because compilation is already very fast and a cache lookup has its
+        # own overhead (hashing, dict access).
         speedup = uncached_duration / cached_duration
         assert speedup > 1.3
         assert compiler.cache_hits >= 1000
@@ -286,10 +325,11 @@ class TestEvaluationCachePerformance:
             cache.set(f"rule_{i}", {"user_id": f"user_{i}"}, True)
 
         # Benchmark lookups
-        start = time.time()
-        for i in range(iterations):
-            cache.get(f"rule_{i % 100}", {"user_id": f"user_{i % 100}"})
-        duration = time.time() - start
+        def _run():
+            for i in range(iterations):
+                cache.get(f"rule_{i % 100}", {"user_id": f"user_{i % 100}"})
+
+        duration = _best_duration(_run)
 
         # Should be very fast
         assert duration < 0.1  # < 100ms for 10k lookups
@@ -301,10 +341,11 @@ class TestEvaluationCachePerformance:
         cache = EvaluationCache()
         iterations = 10000
 
-        start = time.time()
-        for i in range(iterations):
-            cache.set(f"rule_{i % 100}", {"user_id": f"user_{i}"}, True)
-        duration = time.time() - start
+        def _run():
+            for i in range(iterations):
+                cache.set(f"rule_{i % 100}", {"user_id": f"user_{i}"}, True)
+
+        duration = _best_duration(_run)
 
         # Should be fast
         assert duration < 0.5  # < 500ms for 10k writes
@@ -348,10 +389,11 @@ class TestEndToEndPerformance:
 
         iterations = 1000
 
-        start = time.time()
-        for _ in range(iterations):
-            evaluate_targeting_rules(rules, user_context)
-        duration = time.time() - start
+        def _run():
+            for _ in range(iterations):
+                evaluate_targeting_rules(rules, user_context)
+
+        duration = _best_duration(_run)
 
         # Should be fast
         assert duration < 1.0  # < 1s for 1k evaluations
@@ -403,10 +445,11 @@ class TestEndToEndPerformance:
 
         iterations = 100
 
-        start = time.time()
-        for _ in range(iterations):
-            evaluate_targeting_rules(rules, user_context)
-        duration = time.time() - start
+        def _run():
+            for _ in range(iterations):
+                evaluate_targeting_rules(rules, user_context)
+
+        duration = _best_duration(_run)
 
         # Should still be reasonably fast
         assert duration < 1.0  # < 1s for 100 complex evaluations
@@ -484,9 +527,10 @@ class TestPerformanceComparison:
 
         # This benchmark verifies that compilation is fast enough
         # to be useful (< 1ms per rule)
-        start = time.time()
-        for _ in range(1000):
-            compiler.compile(rule)  # Uses cache
-        duration = time.time() - start
+        def _run():
+            for _ in range(1000):
+                compiler.compile(rule)  # Uses cache
+
+        duration = _best_duration(_run)
 
         assert duration < 0.1  # Cached compilation is very fast

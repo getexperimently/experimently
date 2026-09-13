@@ -6,6 +6,11 @@ because authentication is mocked at the dependency level in unit/integration tes
 They use FastAPI's TestClient with NO mocks — only the real app startup, real
 middleware, and real SQLAlchemy models.
 
+The checks that import a module's model or service live in
+modules/backend/tests/smoke/test_modules_wiring.py; the OpenAPI checks below
+that look for module routes import nothing from the modules package and are
+skipped in a core build (``@pytest.mark.modules``).
+
 Run these after any:
   - New migration / model change
   - Dependency (deps.py) change
@@ -132,18 +137,6 @@ class TestDatabaseColumns:
                 )
         except ImportError:
             pytest.skip("LLMExperiment model not present (EP-046 not deployed)")
-
-    @pytest.mark.enterprise
-    def test_sso_config_model_has_required_columns(self):
-        """EP-037 SSO config model wiring check."""
-        try:
-            from backend.app.models.sso_config import SSOConfig
-
-            col_names = {c.key for c in SSOConfig.__table__.columns}
-            for required in ("provider_type", "entity_id", "sso_url"):
-                assert required in col_names, f"sso_configs.{required} column missing"
-        except ImportError:
-            pytest.skip("SSOConfig model not present (EP-037 not deployed)")
 
 
 # ===========================================================================
@@ -510,7 +503,7 @@ class TestAppStartup:
             "No /llm-experiments/* paths in OpenAPI schema — EP-046 router not registered"
         )
 
-    @pytest.mark.enterprise
+    @pytest.mark.modules
     def test_openapi_schema_includes_warehouse_connectors(self, client):
         """Verify warehouse routers (Databricks, ClickHouse, MySQL) are wired."""
         from backend.app.core.config import settings
@@ -535,7 +528,7 @@ class TestAppStartup:
             "No /power/* paths in OpenAPI schema — power calculator router not registered"
         )
 
-    @pytest.mark.enterprise
+    @pytest.mark.modules
     def test_openapi_schema_includes_workspaces(self, client):
         """Verify EP-057 workspace endpoints are wired into the schema."""
         from backend.app.core.config import settings
@@ -643,12 +636,6 @@ class TestServiceImports:
 
         assert LLMProxyService is not None
 
-    @pytest.mark.enterprise
-    def test_workspace_service_imports(self):
-        from backend.app.services.workspace_service import WorkspaceService
-
-        assert WorkspaceService is not None
-
 
 # ===========================================================================
 # 7. Model imports — critical models import and have expected structure
@@ -676,18 +663,6 @@ class TestModelImports:
 
         assert LLMEvaluation.__tablename__ == "llm_evaluations"
 
-    @pytest.mark.enterprise
-    def test_workspace_model_table_name(self):
-        from backend.app.models.workspace import Workspace
-
-        assert Workspace.__tablename__ == "workspaces"
-
-    @pytest.mark.enterprise
-    def test_workspace_member_model_table_name(self):
-        from backend.app.models.workspace import WorkspaceMember
-
-        assert WorkspaceMember.__tablename__ == "workspace_members"
-
     def test_llm_experiment_enums_exist(self):
         from backend.app.models.llm_experiment import (
             LLMEvaluationMetric,
@@ -699,13 +674,6 @@ class TestModelImports:
         assert len(LLMExperimentStatus) >= 4
         assert len(LLMTaskType) >= 4
         assert len(LLMProvider) >= 4
-
-    @pytest.mark.enterprise
-    def test_workspace_enums_exist(self):
-        from backend.app.models.workspace import WorkspaceMemberRole, WorkspacePlan
-
-        assert len(WorkspacePlan) >= 3
-        assert len(WorkspaceMemberRole) >= 5
 
 
 # ===========================================================================
@@ -766,7 +734,7 @@ class TestNewFeatureEndpoints:
             "No compliance/audit paths in OpenAPI schema — EP-033 router not registered"
         )
 
-    @pytest.mark.enterprise
+    @pytest.mark.modules
     def test_openapi_schema_includes_integrations(self, client):
         """Verify EP-034 third-party integration endpoints are wired."""
         from backend.app.core.config import settings

@@ -35,7 +35,7 @@ export interface AttributeSuggestion {
 
 export const COMMON_ATTRIBUTES: AttributeSuggestion[] = [
   { value: 'user.country', label: 'User Country', type: 'string', examples: ['US', 'UK', 'DE'] },
-  { value: 'user.plan', label: 'User Plan', type: 'string', examples: ['free', 'pro', 'enterprise'] },
+  { value: 'user.plan', label: 'User Plan', type: 'string', examples: ['free', 'pro', 'business'] },
   { value: 'user.age', label: 'User Age', type: 'number' },
   { value: 'user.email', label: 'User Email', type: 'string' },
   { value: 'device.type', label: 'Device Type', type: 'string', examples: ['mobile', 'desktop', 'tablet'] },

@@ -1,14 +1,14 @@
-# Experimentation Platform
+# Experimently
 
-> **Enterprise-grade experimentation platform for A/B testing and feature flags**
+> **Open-source experimentation platform for A/B testing and feature flags — Apache-2.0, all of it**
 
-A production-ready, scalable platform for A/B testing and feature management with real-time evaluation, automated safety monitoring, and comprehensive analytics.
+A production-ready, scalable platform for A/B testing and feature management with real-time evaluation, automated safety monitoring, and comprehensive analytics. Every line in this repository is open source: the core, the optional modules and the SDKs.
 
 ---
 
 ## 🎯 Overview
 
-An enterprise experimentation platform that enables teams to make data-driven decisions through robust A/B testing and feature flag management. Built on AWS with enterprise-grade reliability and performance.
+An experimentation platform that enables teams to make data-driven decisions through robust A/B testing and feature flag management. Built on AWS, self-hosted in your own account.
 
 ### Key Capabilities
 
@@ -16,7 +16,7 @@ An enterprise experimentation platform that enables teams to make data-driven de
 - **Advanced Feature Flags**: Targeting, gradual rollouts, and automated safety monitoring
 - **Enhanced Rules Engine**: 20+ operators including semantic versioning, geo-distance, time windows
 - **Real-time Analytics**: High-throughput event collection and comprehensive metrics
-- **Enterprise RBAC**: Role-based access control with AWS Cognito integration
+- **RBAC**: Role-based access control with local or AWS Cognito authentication; custom roles with the `rbac` module
 - **Complete Audit Trail**: append-only audit log of every change, exportable for your compliance program
 - **Automated Safety**: Real-time monitoring with automatic rollback capabilities
 
@@ -86,7 +86,7 @@ Built using modern, scalable architecture leveraging AWS services:
 - **Sample Size Calculations**: Automatic power analysis
 
 ### Security controls
-- **Audit trail**: append-only log of every change (the enterprise edition adds HMAC signing and
+- **Audit trail**: append-only log of every change (the `compliance` module adds HMAC signing and
   report packs to support a SOC 2 or ISO 27001 program)
 - **Data controls**: retention settings and export endpoints (right-to-erasure tooling is on the roadmap)
 - **Complete Audit Logs**: record of all actions
@@ -153,9 +153,9 @@ Refer to the documentation for:
 ## 🛡️ Security
 
 - **Controls that support your compliance program**: append-only audit log, role-based access,
-  per-flag safety monitoring with automatic rollback; the enterprise edition adds tamper-evident
-  audit signing, compliance report packs and PHI encryption. We do not hold SOC 2, ISO 27001 or
-  HIPAA attestations and do not claim them.
+  per-flag safety monitoring with automatic rollback; the `compliance` and `hipaa` modules add
+  tamper-evident audit signing, compliance report packs and PHI encryption. We do not hold SOC 2,
+  ISO 27001 or HIPAA attestations and do not claim them.
 - **Encryption**: AES-256 at rest (KMS) and TLS 1.2+ in transit when deployed with the provided CDK
 - **Network Security**: VPC isolation, Security Groups, WAF, DDoS protection (CDK deployment)
 
@@ -194,18 +194,48 @@ For questions and issues:
 
 ---
 
+## 🧩 Profiles and modules
+
+One codebase, two profiles. The **core profile** is `backend/` and `frontend/`: experiments and
+feature flags end to end, targeting with 20+ operators, gradual rollouts, safety monitoring with
+automatic rollback, scheduling, the full statistics (frequentist and Bayesian, sequential testing,
+CUPED, multi-armed bandits, mutual exclusion groups and global holdouts, dimensional breakdowns,
+interaction detection, live results), the four built-in roles, audit logging, API keys, alerting
+and every SDK. The **full profile** adds the optional modules under `modules/`, which plug into
+the core through the registration hooks in `backend/app/core/`:
+
+| Module | What it adds |
+|---|---|
+| `workspaces` | Multiple tenants on one instance: members, invites and workspace-scoped API keys |
+| `rbac` | Roles beyond the built-in four, and permissions granted directly to a user |
+| `sso` | SAML 2.0 and OIDC identity providers with just-in-time provisioning and role mapping |
+| `hipaa` | PHI encryption, six-year PHI audit retention, BAA records |
+| `compliance` | SOC 2 / ISO 27001 reports, signed audit exports |
+| `warehouse` | Query Snowflake, BigQuery, Redshift, Databricks, ClickHouse or MySQL in place |
+| `integrations` | Jira, Salesforce and GitHub |
+| `counters` | DynamoDB-backed live assignment and conversion counters |
+| `etl` | Glue crawlers, Athena partitions and scheduled jobs |
+| `split_url` | Server-side URL splitting at the edge |
+
+`GET /api/v1/modules` reports the running profile and the installed modules — ask it first, rather
+than inferring the profile from a status code. A core deployment is the repository with `modules/`
+deleted (`make core-build` proves it builds, boots and passes its tests that way), so a module's
+routes are not mounted and its URLs **404** like any other unknown path. Three URLs are declared by
+a core router but implemented by a module — `/api/v1/compliance/reports/{standard}`,
+`/api/v1/compliance/export` and `/api/v1/experiments/{id}/split-url/preview` — and those answer
+**501**, as does creating an experiment with `experiment_type=split_url`: the route exists in both
+profiles, so it says "not installed" rather than leaving you to wonder about a typo. Both profiles
+are the same licence and the same price: none. Details in
+[docs/getting-started/modules.md](docs/getting-started/modules.md).
+
+---
+
 ## 📄 License
 
 | Part of the repository | Licence |
 |---|---|
-| Everything except `ee/` and `sdk/` (Community Edition) | [AGPL-3.0-only](LICENSE) |
-| `ee/` (Enterprise Edition) | [Experimently Enterprise Licence](ee/LICENSE) — proprietary, source-available, requires a licence key |
+| Everything except `sdk/` — the core, the modules, the dashboard, the docs | [Apache-2.0](LICENSE) |
 | `sdk/` (all client SDKs and OpenFeature providers) | [MIT](sdk/LICENSE) |
-
-The SDKs are MIT precisely so that embedding one in your application does not pull the
-AGPL-3.0 network-use obligation into your codebase. Running an unmodified Community Edition
-creates no source-disclosure obligation either; AGPL-3.0 §13 only applies if you modify it and
-let others interact with the modified version over a network.
 
 Third-party dependency licences are listed in [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md);
 attribution is in [NOTICE](NOTICE). Security reports go to [SECURITY.md](SECURITY.md), not to
@@ -220,7 +250,7 @@ public issues. Contributions are accepted under the DCO — see [CONTRIBUTING.md
 | **Advanced Targeting** | 20+ operators (semver, geo, time, JSON path) | Basic operators only |
 | **Safety Monitoring** | Automated rollback with configurable thresholds | Manual monitoring |
 | **Statistical Methods** | Bayesian + Frequentist analysis | Single method |
-| **Audit Logging** | Append-only trail; tamper-evident signing in the enterprise edition | Limited or none |
+| **Audit Logging** | Append-only trail; tamper-evident signing with the `compliance` module | Limited or none |
 | **Performance** | 125k ops/sec, sub-10ms latency | Varies widely |
 | **RBAC** | 4 roles; local auth or AWS Cognito | Basic or none |
 | **Deployment** | Self-hosted on your AWS account | SaaS only |
