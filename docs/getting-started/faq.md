@@ -16,7 +16,7 @@ The platform includes a REST API backend (FastAPI), a React management dashboard
 
 Yes. The platform is designed to be deployed in your own AWS account using the provided CDK infrastructure definitions. You own your data and control your deployment. There is no vendor lock-in and no data leaves your infrastructure.
 
-Running `cdk deploy --all` from the `infrastructure/` directory provisions the complete AWS environment, including the ECS Fargate API service, Aurora PostgreSQL database, Redis cache, DynamoDB counters, Kinesis stream, Lambda functions, and CloudFront distribution.
+Running `cdk deploy --all` from the `infrastructure/` directory provisions the complete AWS environment, including the ECS Fargate API service, Aurora PostgreSQL database, Redis cache, Lambda functions, and CloudFront distribution. A checkout that also has `modules/` gets the real-time DynamoDB counters table and the Kinesis/OpenSearch/Glue data lake alongside them — see [AWS CDK Deployment](../self-hosting/cdk.md) for which stacks each profile deploys.
 
 ---
 
@@ -163,7 +163,7 @@ See [Split URL Testing API](../api/split-url.md) for setup and the CDK construct
 
 ### What compliance certifications are supported?
 
-The platform holds no certifications. It provides audit-trail controls that customers use as evidence in their own **SOC 2** or **ISO/IEC 27001** programs; the enterprise edition adds tamper-evident signing and report packs.
+The platform holds no certifications. It provides audit-trail controls that customers use as evidence in their own **SOC 2** or **ISO/IEC 27001** programs; the `compliance` module adds tamper-evident signing and report packs.
 
 Every create, update, delete, login, permission change, and data export action is recorded as a tamper-evident audit event signed with HMAC-SHA256. The signing secret is stored in AWS Secrets Manager and rotated quarterly.
 

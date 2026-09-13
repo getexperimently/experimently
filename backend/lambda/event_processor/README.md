@@ -196,7 +196,7 @@ All processing stages log to CloudWatch with structured logging:
 
 ## License
 
-Proprietary - Part of Experimently platform
+Apache-2.0 — see the repository `LICENSE`.
 
 ## Authors
 

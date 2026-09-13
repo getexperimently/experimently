@@ -739,7 +739,7 @@ class TestCognitoClientIsLazy:
         """A module-level CognitoAuthService is built at import, and
         boto3.client validated the region then: with AWS_REGION='' it raised
         "Invalid endpoint", which made importing the API -- and everything
-        that imports the API, the Enterprise registration included -- fail
+        that imports the API, the modules' registration included -- fail
         on a detail that only matters once Cognito is actually called."""
         from backend.app.services import auth_service as module
 

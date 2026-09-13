@@ -1,0 +1,404 @@
+# modules-manifest.txt — the optional modules' file list.
+#
+# FORMAT
+#   One repository-relative path per line, as the file sits in the tree: the
+#   modules live under `modules/` (issue #89), mirrored from where they were
+#   written -- `backend/app/x` is `modules/backend/app/x`, `backend/tests/x` is
+#   `modules/backend/tests/x`, `backend/lambda/x` is `modules/lambda/x`,
+#   `infrastructure/x` is `modules/infrastructure/x`. A path may be a file or a
+#   directory; a directory entry covers everything under it. Blank lines and
+#   lines starting with "#" are ignored.
+#   The boundary test derives both spellings of every module name from these
+#   paths -- `modules.backend.app.x` and the pre-move `backend.app.x` -- so a
+#   core file that reaches for either is a crossing.
+#
+# WHO READS IT
+#   backend/tests/smoke/test_core_boundary.py (P1) AST-walks
+#   backend/{app,scripts,lambda,tests} and fails on:
+#     * any import of a module named here,
+#     * any string literal naming one (patch() targets, monkeypatch.setattr,
+#       dotted-path settings) — NOTE: resolve module-level string constants,
+#       not just literal call arguments. backend/tests/integration/api/
+#       test_hipaa_api.py makes 38 patch() calls through class constants
+#       (_SVC_CREATE etc.); only 13 are literal arguments.
+#     * Base.metadata.tables intersecting MODULE_TABLES (listed at the bottom).
+#   scripts/core_build.sh deletes `modules/` whole and must still get a green
+#     `import backend.app.main`, a core-only bootstrap and green pytest. "Green
+#     pytest" means: every test that survives the deletion passes, with the
+#     tests marked `@pytest.mark.modules` skipped — those live in files that
+#     are otherwise core but exercise a module's behaviour (a module route
+#     answering, the signer signing, the wiring of module routers).
+#     backend/tests/conftest.py skips the marker when the modules did not load.
+#
+# HOW ENTRIES WERE DECIDED
+#   Two tests, both answered from the code, not from the plan's table:
+#     (1) does the core still work with the module deleted?
+#     (2) does anything that stays in the core import it?
+#   Where (2) is non-zero the entry carries the crossing that must be cut
+#   first. Full evidence: the coupling report under docs/planning/.
+#
+# The group numbers 1..10 are the ten module names (`hooks.KNOWN_MODULES`,
+# in this order: workspaces, hipaa, compliance, sso, rbac, warehouse,
+# integrations, counters, etl, split_url); 11 is the dashboard's
+# implementation directory and 12 the registration.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 1. Workspaces / multi-tenancy  (EP-057)
+# Core without it: yes. Nothing in backend/app reads Experiment.workspace_id
+# or FeatureFlag.workspace_id except workspace_service.get_workspace_stats
+# (workspace_service.py:642-659). deps.get_api_key never consults
+# WorkspaceAPIKey. useWorkspace() has 0 consumers.
+# Crossing to cut: the two FK constraints (experiment.py:144-150,
+# feature_flag.py:56-62) → bare indexed UUID.
+# ─────────────────────────────────────────────────────────────────────────────
+modules/backend/app/api/v1/endpoints/workspaces.py
+modules/backend/app/services/workspace_service.py
+modules/backend/app/models/workspace.py
+modules/backend/app/schemas/workspaces.py
+modules/frontend/src/contexts/WorkspaceContext.tsx
+modules/frontend/src/services/workspaces.ts
+modules/frontend/src/tests/contexts/WorkspaceContext.test.tsx
+modules/frontend/src/tests/services/workspaces.test.ts
+modules/backend/tests/integration/api/test_workspaces_api.py
+modules/backend/tests/unit/services/test_workspace_service.py
+modules/backend/tests/realistic/scenarios/multi_tenant_isolation.py
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 2. HIPAA / PHI / BAA  (EP-050)
+# Core without it: yes. Zero importers outside the HIPAA cluster.
+# ─────────────────────────────────────────────────────────────────────────────
+modules/backend/app/api/v1/endpoints/hipaa.py
+modules/backend/app/services/hipaa_service.py
+modules/backend/app/core/phi_encryption.py
+modules/backend/app/models/baa_config.py
+modules/backend/app/models/phi_audit_log.py
+modules/backend/app/schemas/hipaa.py
+modules/backend/tests/integration/api/test_hipaa_api.py
+modules/backend/tests/unit/services/test_hipaa_service.py
+modules/backend/tests/unit/core/test_phi_encryption.py
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 3. Signed audit + compliance reporting  (EP-033) — SPLIT, not a whole move
+# CORE KEEPS: models/compliance_audit_event.py, services/audit_log_service.py
+# (.log/.get_events), services/audit_service.py + audit_logs table (zero
+# module deps), and GET /api/v1/compliance/audit-events. The core calls
+# AuditLogService at experiments.py:257,513,715 and feature_flags.py:285,
+# 483,605 — it cannot move.
+# THE MODULE TAKES: the HMAC signer and the report/export routes. The
+# crossing is audit_log_service.py:22 + :37 (module-level
+# `AuditSigningService()`), cut by hooks.audit_signer with a NullSigner
+# default.
+# compliance.py is split: the /audit-events route stays core; the bodies of
+# /reports/{standard} and /export now live in
+# api/v1/endpoints/compliance_reports.py. The two routes stay declared in
+# compliance.py and reach the module's bodies through core/optional_modules,
+# answering HTTP 501 when this file is absent.
+# schemas/compliance_audit.py splits the same way.
+# ─────────────────────────────────────────────────────────────────────────────
+modules/backend/app/services/audit_signing_service.py
+modules/backend/app/services/compliance_report_service.py
+modules/backend/app/api/v1/endpoints/compliance_reports.py
+modules/backend/tests/unit/services/test_audit_signing_service.py
+modules/backend/tests/unit/services/test_compliance_report_service.py
+modules/backend/tests/unit/api/test_compliance_reports_api.py
+modules/backend/tests/unit/api/test_compliance_signing.py
+modules/backend/tests/integration/api/test_compliance_reports_api.py
+# NOT listed: backend/tests/unit/api/test_compliance_api.py and
+# backend/tests/integration/api/test_compliance_api.py. They test the core
+# half -- GET /compliance/audit-events, its role checks and pagination, and
+# audit generation on flag/experiment changes -- and were once listed here
+# whole, which would have left the core build with no test that a VIEWER is
+# refused the audit log. The module's halves (report, export, signing) are
+# the two files above.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 4. SSO / SAML / OIDC  (EP-037)
+# Core without it: yes — the token is accepted nowhere; `users.sso_provider`
+# is added by ep037 and never read or written by any code.
+# defusedxml exists only for modules/backend/app/services/sso_service.py, and
+# is pinned in modules/requirements.txt, not backend/requirements/runtime.txt.
+# ─────────────────────────────────────────────────────────────────────────────
+modules/backend/app/api/v1/endpoints/sso.py
+modules/backend/app/services/sso_service.py
+modules/backend/app/models/sso_config.py
+modules/backend/tests/integration/api/test_sso_api.py
+modules/backend/tests/unit/services/test_sso_service.py
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 5. Advanced RBAC — custom roles and direct grants  (P2-A)
+# Core without it: yes, and provably unused: core/permissions.py and
+# api/deps.py contain 0 references to CustomRole / DirectPermissionGrant.
+# The 4 fixed roles (ADMIN/DEVELOPER/ANALYST/VIEWER) stay core.
+# Also: custom_roles, user_custom_roles and direct_permission_grants had
+# NO alembic migration at all — an upgraded database has never had them
+# (the modules' alembic branch, group 12, creates them).
+# Crossing to cut: AdminSidebar.tsx:14 links /admin/roles; services/admin.ts
+# lines 125-145 hold 5 /api/v1/rbac/* calls inside a core service module.
+# ─────────────────────────────────────────────────────────────────────────────
+modules/backend/app/api/v1/endpoints/rbac.py
+modules/backend/app/services/rbac_service.py
+modules/backend/app/models/custom_role.py
+modules/backend/app/schemas/rbac.py
+modules/frontend/src/components/admin/roles
+modules/frontend/src/tests/admin/RoleTable.test.tsx
+modules/frontend/src/tests/admin/CreateRoleModal.test.tsx
+modules/frontend/src/tests/admin/PermissionCheckboxGrid.test.tsx
+modules/backend/tests/unit/api/test_rbac_endpoints.py
+modules/backend/tests/unit/api/test_rbac_integration.py
+modules/backend/tests/unit/services/test_rbac_service.py
+modules/backend/tests/unit/schemas/test_rbac_schemas.py
+modules/backend/tests/integration/api/test_rbac_api.py
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 6. Warehouse-native analytics  (Issue #26, EP-041, EP-048)
+# Core without it: yes. All four connector modules guard their driver import
+# in try/except, and none of databricks-sql-connector / clickhouse-connect /
+# PyMySQL is in requirements/runtime.txt — the core image already ships
+# without them.
+# ─────────────────────────────────────────────────────────────────────────────
+modules/backend/app/api/v1/endpoints/warehouse.py
+modules/backend/app/api/v1/endpoints/warehouse_clickhouse.py
+modules/backend/app/api/v1/endpoints/warehouse_databricks.py
+modules/backend/app/api/v1/endpoints/warehouse_mysql.py
+modules/backend/app/services/warehouse_service.py
+modules/backend/app/services/clickhouse_connector.py
+modules/backend/app/services/databricks_connector.py
+modules/backend/app/services/mysql_connector.py
+modules/backend/app/models/warehouse_connection.py
+modules/backend/app/schemas/warehouse.py
+modules/backend/tests/unit/api/test_warehouse_endpoints.py
+modules/backend/tests/unit/schemas/test_warehouse_schemas.py
+modules/backend/tests/unit/services/test_warehouse_service.py
+modules/backend/tests/unit/services/test_clickhouse_connector.py
+modules/backend/tests/unit/services/test_databricks_connector.py
+modules/backend/tests/unit/services/test_mysql_connector.py
+modules/backend/tests/integration/api/test_clickhouse_api.py
+modules/backend/tests/integration/api/test_databricks_api.py
+modules/backend/tests/integration/api/test_mysql_api.py
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 7. Third-party integrations — Jira / Salesforce / GitHub  (EP-034)
+# Core without it: yes. Only crossing is seed_demo_data.py:57,132.
+# ─────────────────────────────────────────────────────────────────────────────
+modules/backend/app/api/v1/endpoints/integrations.py
+modules/backend/app/services/integrations
+modules/backend/app/models/integration_config.py
+modules/backend/app/schemas/integration.py
+modules/backend/tests/unit/api/test_integrations_api.py
+modules/backend/tests/unit/models/test_integration_config_model.py
+modules/backend/tests/unit/schemas/test_integration_schemas.py
+modules/backend/tests/unit/services/test_github_service.py
+modules/backend/tests/unit/services/test_jira_service.py
+modules/backend/tests/unit/services/test_salesforce_service.py
+modules/backend/tests/unit/services/test_integration_workflow.py
+modules/backend/tests/integration/api/test_integrations_api.py
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 8. Real-time DynamoDB counters  (P2-B)
+# Core without it: yes — bandit_scheduler.py asks the `counters.service`
+# capability inside a function and already falls back to PostgreSQL when it
+# is unavailable.
+# counter_integration.py had no importer in the event_processor Lambda
+# package; moved whole to backend/app/services/dynamodb_counter_integration.py
+# so backend/lambda carries no core -> module import.
+# ─────────────────────────────────────────────────────────────────────────────
+modules/backend/app/api/v1/endpoints/realtime_counters.py
+modules/backend/app/services/dynamodb_counter_service.py
+modules/backend/app/schemas/realtime_counters.py
+modules/backend/app/services/dynamodb_counter_integration.py
+modules/infrastructure/cdk/stacks/dynamodb_counters_stack.py
+modules/backend/tests/unit/api/test_realtime_counters_endpoints.py
+modules/backend/tests/unit/schemas/test_realtime_counters_schemas.py
+modules/backend/tests/unit/services/test_dynamodb_counter_service.py
+modules/backend/tests/integration/api/test_realtime_counters_api.py
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 9. ETL / Glue / Athena / Kinesis-OpenSearch  (P3-A)
+# Core without it: yes, zero importers. analytics_stack.py (Kinesis + Firehose
+# + OpenSearch) is grouped here per the plan's "Kinesis/OpenSearch/Glue/ETL
+# stacks" row. infrastructure/cdk/app.py loads it, and the two stacks beside
+# it, by file path when modules/infrastructure/cdk/stacks exists -- so a core
+# checkout synthesises none of the three and the monitoring stack drops its
+# Kinesis widget and alarm with them.
+# ─────────────────────────────────────────────────────────────────────────────
+modules/backend/app/api/v1/endpoints/etl.py
+modules/backend/app/services/etl_service.py
+modules/backend/app/schemas/etl.py
+modules/lambda/glue
+modules/infrastructure/cdk/stacks/glue_etl_stack.py
+modules/infrastructure/cdk/stacks/analytics_stack.py
+modules/backend/tests/unit/api/test_etl_endpoints.py
+modules/backend/tests/unit/schemas/test_etl_schemas.py
+modules/backend/tests/unit/services/test_etl_service.py
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 10. Split-URL testing  (EP-036)
+# Core without it: yes. All three crossings are cut:
+#   schemas/experiment.py:22 now imports schemas/split_url_config.py, which is
+#     CORE — it is pure declarative validation (>=2 variants, allocations
+#     summing to 100) with no routing behaviour, so split_url_config keeps its
+#     Pydantic validation in every profile instead of degrading to bare JSON.
+#   endpoints/experiments.py no longer imports the schema or the service.
+#   The preview route body moved to endpoints/experiments_split_url.py; the
+#     route stays declared in experiments.py and reaches it through
+#     core/optional_modules, answering 501 when this file is absent.
+# ExperimentType.SPLIT_URL stays in the core enum (a DB enum value cannot be
+# withdrawn cheaply), but create/update refuse experiment_type=split_url with
+# HTTP 501 when split-URL routing is not installed, so a core-profile user
+# cannot store an experiment nothing routes. frontend/src/types/experiments.ts
+# keeps the enum label.
+# infrastructure/constructs/split_url_distribution.py has no referrer in
+# infrastructure/cdk/app.py today.
+# ─────────────────────────────────────────────────────────────────────────────
+modules/backend/app/services/split_url_service.py
+modules/backend/app/api/v1/endpoints/experiments_split_url.py
+modules/lambda/split_url_router
+modules/infrastructure/constructs/split_url_distribution.py
+modules/backend/tests/unit/api/test_split_url_experiment_api.py
+modules/backend/tests/integration/api/test_split_url_api.py
+modules/backend/tests/unit/lambda/test_split_url_handler.py
+modules/backend/tests/unit/services/test_split_url_service.py
+modules/backend/tests/unit/infrastructure/test_split_url_distribution.py
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 11. Dashboard implementations of the modules (cross-group)
+#
+# One directory entry, because the dashboard's module code is one tree rather
+# than one per module: `modules/frontend/src/**` mirrors `frontend/src/**`
+# (pages/, components/, services/, contexts/, tests/) and holds the seven
+# module page implementations, the roles components, the workspace service
+# and context, their tests, and `rbac.ts` (the five /api/v1/rbac/* calls,
+# cut out of services/admin.ts). The group 1 and 5 frontend entries above are
+# inside this directory; they stay listed so each module's files are named
+# where the module is. It lives under `modules/` and not under `frontend/`
+# because the core build is defined by directory: `modules/` is what
+# scripts/core_build.sh deletes, whatever the file's language.
+#
+# The files at frontend/src/pages/admin/roles.tsx and
+# frontend/src/pages/workspaces/** are one-line
+# `export { default } from '@modules/pages/…'` re-exports and are
+# deliberately NOT listed — they are core. With `modules/frontend/` deleted
+# the `@modules/*` alias resolves them to `frontend/src/modules-stub/` (also
+# not listed, and never to be listed; `core-fallback-probe.ts` inside it is
+# how a test tells which tree answered), whose pages render the ModuleNotice
+# ("this module is not installed in this deployment", via modulePageStub /
+# withModule) with a link to /docs/modules (docs/getting-started/modules.md).
+# That is the designed core experience for those URLs: a page that says what
+# the module is and how to install it, not a 404. (Listing the thin pages
+# would make every stub page unreachable dead code.)
+#
+# frontend/modules-alias.js is the one rule (it exports MODULES_DIR,
+# MODULES_STUB_DIR, modulesTreeAvailable and modulesAliasTargets):
+# next.config.js (webpack alias + experimental.externalDir), jest.config.js
+# (moduleNameMapper + roots) and tsconfig.json (paths + include) all map
+# `@modules/*` to modules/frontend/src first and frontend/src/modules-stub
+# second; tsconfig.core.json maps the stub only and excludes ../modules.
+# frontend/Dockerfile copies modules/frontend/ into the image in its
+# `modules-tree-full` stage and not in `modules-tree-core`, selected by
+# EXPERIMENTLY_PROFILE=core|full (default full). The module-only API paths
+# the dashboard's URL guard accepts are listed in
+# frontend/src/tests/fixtures/openapi.module-paths.json, which
+# backend/tests/smoke/test_openapi_snapshot.py pins to the two OpenAPI
+# snapshots.
+# ─────────────────────────────────────────────────────────────────────────────
+modules/frontend
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 12. The registration entry point and settings
+#
+# modules/backend/app/register.py is `modules.register(hooks)` (re-exported by
+# modules/__init__.py): it validates the modules' settings, registers the
+# seven model modules, installs the audit signer, mounts the eleven routers
+# behind authentication, registers the five capabilities and passes the ten
+# module names to hooks.register_modules(). modules/backend/app/settings.py
+# holds `ModulesSettings` -- the audit signing key, HIPAA, SSO, warehouse,
+# ETL and counter settings that left the core `Settings` in issue #91 -- and
+# modules/backend/app/db/ the modules' alembic branch (label `modules`, first
+# revision modules_0001_rbac, which branches off the core revision
+# a7b8c9d0e1f2 and must run after it) that env.py includes when `modules` is
+# importable.
+# ─────────────────────────────────────────────────────────────────────────────
+modules/backend/app/register.py
+modules/backend/app/settings.py
+modules/backend/app/db
+modules/backend/tests/conftest.py
+modules/backend/tests/unit/conftest.py
+modules/backend/tests/integration/conftest.py
+modules/backend/tests/smoke/conftest.py
+modules/backend/tests/smoke/test_modules_wiring.py
+modules/backend/tests/unit/services/test_bandit_scheduler_counters.py
+modules/backend/tests/unit/db/test_autogenerate_filters_names.py
+modules/backend/tests/unit/test_modules_settings.py
+
+# (Every entry in this file must exist -- test_every_manifest_path_exists
+# checks. There is no gate between the profiles: an installed module is
+# available to every authenticated user its routes admit, and the only
+# refusal a core build gives is HTTP 501, "not installed".)
+
+
+# =============================================================================
+# MODULE TABLES — the boundary test asserts Base.metadata.tables ∩ MODULE_TABLES == ∅
+# after models/__init__.py stops importing the modules' models. 12 tables:
+# =============================================================================
+#   workspaces
+#   workspace_members
+#   workspace_invites
+#   workspace_api_keys
+#   sso_configs
+#   custom_roles
+#   user_custom_roles
+#   direct_permission_grants
+#   baa_configs
+#   phi_audit_logs
+#   warehouse_connections
+#   integration_configs
+#
+# NOT module tables, despite the name: audit_logs and audit_events_v2 are core
+# (unsigned on the core profile; hooks.audit_signer fills in the signature
+# when the compliance module is installed).
+
+
+# =============================================================================
+# DELIBERATELY NOT IN THIS MANIFEST — recommendations, with reasons
+# =============================================================================
+#
+# MUTUAL EXCLUSION GROUPS + GLOBAL HOLDOUT → keep core (recommendation).
+#   The plan's own §3 table already says core and §2 says "MEG/bandit stay
+#   core"; only the task brief lists them as a module. Keep them core.
+#   Evidence beyond the commercial "table stakes" argument: they are on the
+#   assignment hot path — assignment_service.py:21-22 imports both services
+#   at module level and assign_user calls them for every new user. Moving
+#   them turns the single most-exercised core code path into a brokered call
+#   with two fallbacks, and models/experiment.py:170 keeps a
+#   relationship("MutualExclusionGroup") that would then need the same FK
+#   surgery as workspace_id. Cost: high. Benefit: none now that every module
+#   is free.
+#
+# BAYESIAN + CUPED → keep core (recommendation).
+#   Plan §3 says core; the task brief says module. Keep core. They are not
+#   bolt-ons: schemas/results.py:17 types the main results response with
+#   BayesianResultsResponse, analysis_service.py:19,26 computes it inside the
+#   standard results path, results.py:438 returns it on GET /results/{id},
+#   and results.py:46 imports CupedService. Making them a module means the
+#   core results response changes shape by profile — the OpenAPI stable
+#   snapshot (P2) then cannot be one document. The statistics are also the
+#   product's credibility argument at launch; they are the wrong thing to
+#   make optional.
+#
+# BANDITS → keep core. main.py:18 starts bandit_scheduler_runner in the
+#   lifespan, tracking.py:20 reads BanditState on every /tracking/assign,
+#   analysis_snapshot_service.py:283 writes BanditStateHistory. Three hot-path
+#   crossings for a feature the plan already calls core.
+#
+# INTERACTIONS, WEBSOCKET LIVE RESULTS, AI DESIGN + MCP, EDGE BOOTSTRAP →
+#   keep core, as the plan's §3 table says. Each is self-contained (no core
+#   importer outside models/__init__.py and api.py), so they could move
+#   cheaply — but nothing is gained: none is a thing a buyer asks for, and
+#   the edge bootstrap is part of the MIT SDK story.
+#
+# LLM / AI MODEL EVALUATION (EP-046) → undecided; the plan's profile table
+#   omits it entirely. It is self-contained (3 tables, one crossing at
+#   models/__init__.py:32) and, like warehouse and integrations, has never
+#   been run against a live provider. Recommendation: a module, same
+#   "roadmap, not marketed" bucket as warehouse — but decide explicitly
+#   rather than letting it default to core by omission.

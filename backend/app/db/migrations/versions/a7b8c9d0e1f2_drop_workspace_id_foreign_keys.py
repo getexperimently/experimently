@@ -1,18 +1,24 @@
 """Drop the workspace_id foreign keys on experiments and feature_flags
 
-Open-core seam (P2).  ``workspaces`` is an Enterprise table; ``experiments``
-and ``feature_flags`` are Community tables.  The two ``workspace_id``
-``ForeignKey`` constraints were the *entire* ORM coupling between the two
-editions — with them in place, importing the Community models without the
-Enterprise ones raises ``NoReferencedTableError`` for exactly these two
-columns (docs/planning/ee-coupling-report.md §2).
+The seam (P2).  ``workspaces`` is the workspaces module's table;
+``experiments`` and ``feature_flags`` are core tables.  The two
+``workspace_id`` ``ForeignKey`` constraints were the *entire* ORM coupling
+between the core and the module — with them in place, importing the core
+models without the module's raises ``NoReferencedTableError`` for exactly
+these two columns (the coupling report under docs/planning, §2).
 
-The **columns stay**.  Only the constraints go: a Community database keeps
+The **columns stay**.  Only the constraints go: a core database keeps
 ``workspace_id`` as a nullable, indexed UUID that nothing reads or writes, so
-an existing row's value survives.  No migration re-adds the constraint: the
-``ON DELETE SET NULL`` it carried is now done explicitly by
-``WorkspaceService.delete_workspace``, and an Enterprise ``alembic`` branch
-(issue #89) may reinstate it later if a database-level guarantee is wanted.  The index is untouched — ``ep057`` created
+an existing row's value survives.  No migration *in the core chain* re-adds
+the constraint, which is the only guarantee this file can make: it cannot see
+the ``modules`` branch, and a core checkout does not have it.  On a core
+database that is the end of the story — the ``ON DELETE SET NULL`` it carried
+is done explicitly by ``WorkspaceService.delete_workspace``.  On a full one the
+modules branch's first revision (``modules_0001_rbac``, issue #89) does
+reinstate it, and it is ordered after this revision on purpose: it chains from
+here, and ``b8c9d0e1f2a3`` is the core chain's own child of this same
+revision.  ``backend/tests/unit/db/test_alembic_branch_order.py`` walks both
+version directories and pins both halves of that.  The index is untouched — ``ep057`` created
 it separately (``{schema}_exp_workspace`` / ``{schema}_ff_workspace``) and the
 model still declares ``index=True``.
 
@@ -75,7 +81,7 @@ def upgrade() -> None:
 def downgrade() -> None:
     """Re-add the constraints, if this database has a ``workspaces`` table.
 
-    A Community database has none, so there is nothing to point at and the
+    A core database has none, so there is nothing to point at and the
     downgrade is a no-op — which is the correct end state for that database.
     """
     inspector = sa.inspect(op.get_bind())

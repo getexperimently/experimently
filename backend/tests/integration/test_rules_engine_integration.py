@@ -690,27 +690,36 @@ class TestPerformanceIntegration:
 
         user = {"user_id": "user_123", "country": "US", "age": 25, "verified": True}
 
-        # First 100 evaluations (building cache)
-        start1 = time.time()
-        for _ in range(100):
-            service.evaluate(rules, user)
-        duration1 = time.time() - start1
+        # Both halves are timed as the best of several runs, each with its own
+        # service so the cold half is genuinely cold.  A single pair of
+        # wall-clock timings compares the machine, not the code: under load the
+        # warm half can come out slower than the cold one by noise alone, which
+        # failed this test in a core-profile rehearsal while three suites shared
+        # the machine.  The minimum is the run least polluted by other work, and
+        # caching that stopped working would be slower in every run.
+        cold = warm = float("inf")
+        for _ in range(5):
+            service = RulesEvaluationService()
 
-        # Clear metrics but keep cache
-        service.reset_metrics()
+            start = time.perf_counter()
+            for _ in range(100):
+                service.evaluate(rules, user)
+            cold = min(cold, time.perf_counter() - start)
 
-        # Next 100 evaluations (all cache hits)
-        start2 = time.time()
-        for _ in range(100):
-            service.evaluate(rules, user)
-        duration2 = time.time() - start2
+            # Keep the cache, drop the counters: the next 100 are all hits.
+            service.reset_metrics()
 
-        # Cached evaluations should be faster
-        assert duration2 < duration1
+            start = time.perf_counter()
+            for _ in range(100):
+                service.evaluate(rules, user)
+            warm = min(warm, time.perf_counter() - start)
 
-        # Check cache hit rate
+        assert warm < cold
+
+        # The deterministic half of the claim, and the one that would catch
+        # caching actually breaking: every evaluation after the first is a hit.
         metrics = service.get_metrics()
-        assert metrics.cache_hits > 90  # Most should be cache hits
+        assert metrics.cache_hits > 90
 
     def test_multiple_rules_evaluated_efficiently(self):
         """Test evaluation with multiple competing rules is efficient."""

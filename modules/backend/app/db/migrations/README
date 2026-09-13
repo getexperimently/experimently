@@ -1,0 +1,38 @@
+The modules' alembic branch (label `modules`), issue #89.
+
+There is no env.py here: backend/app/db/alembic.ini lists this directory's
+`versions/` as a second version location, and the core env.py runs the
+migrations of both chains.  alembic skips the entry when `modules/` is absent,
+so a core checkout sees one head and a full checkout two -- name them
+plurally (`alembic upgrade heads`, `alembic stamp heads`).  The entry is
+anchored at the .ini file's own directory, so every command works from any
+working directory; it used to be relative to the working directory, and from
+`backend/` alembic silently skipped this branch entirely.
+
+The first revision, modules_0001_rbac, is a child of the core revision
+a7b8c9d0e1f2 -- `down_revision`, not `depends_on`.  It used to be an
+independent alembic base, and alembic was then free to schedule it before the
+core revision whose work it undoes; `depends_on` is not the repair either,
+because it removes the depended-on revision from `heads` and a core image then
+cannot resolve the single row a full bootstrap wrote.  So the core chain grew a
+second child of the same revision (b8c9d0e1f2a3) and the ordering comes from
+ancestry.  The revision's own docstring has the whole argument.  Later module
+revisions chain from it.  Generate one from anywhere with
+
+    alembic -c backend/app/db/alembic.ini revision --autogenerate --head modules@head -m "..."
+
+which lands the file here.  A core revision names the core head instead
+(`--head <id from alembic heads>`) and lands in
+backend/app/db/migrations/versions.
+
+Rolling back: `alembic downgrade modules@-1`, because a bare `-1` is ambiguous
+with two heads.  NOT `modules@base` -- this is not an alembic base any more,
+and with a single tree root alembic cannot filter a downgrade by branch label,
+so `modules@base` resolves to 26 revisions: the whole core chain to base, every
+table dropped.  modules_0001_rbac's downgrade drops only the objects its own
+upgrade() created -- it marks each one with a PostgreSQL COMMENT -- so it never
+drops the tables a fresh full-profile bootstrap built from the models.
+
+Moving to the core profile: nothing to do.  `db/bootstrap.py` leaves the rows
+of this branch alone and skips alembic when the core chain is already at its
+head; see the "Switching Profile" section of docs/self-hosting/migrations.md.

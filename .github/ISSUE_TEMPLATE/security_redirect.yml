@@ -38,9 +38,8 @@ body:
           or tenant;
         - bypassing authentication, the role checks, or an API-key scope;
         - forging, suppressing or tampering with an audit or PHI access record;
-        - circumventing, forging or extending an Enterprise licence key;
-        - leaking a secret, token, licence key or PHI into a log, a response, a
-          URL or a built artefact;
+        - leaking a secret, token or PHI into a log, a response, a URL or a
+          built artefact;
         - remote code execution, SQL or template injection, SSRF, or
           deserialisation of untrusted input;
         - a supply-chain problem in a shipped image or published package.

@@ -1,5 +1,5 @@
 """
-User-owned API keys (Community Edition) — ``/api/v1/api-keys``.
+User-owned API keys (core) — ``/api/v1/api-keys``.
 
 Keys authenticate SDK traffic (``X-API-Key`` header on ``/tracking/*``,
 flag evaluation, OpenFeature, edge bootstrap ...) as the owning user via
@@ -10,7 +10,8 @@ create endpoint; only its SHA-256 hash is persisted (``APIKey.key``).
 * ``POST /``           — create; 201 with the plaintext ``key``.
 * ``DELETE /{key_id}`` — owner or ADMIN; 204.
 
-Workspace-scoped keys (EE) live under ``/workspaces/{id}/api-keys``.
+Workspace-scoped keys (the workspaces module) live under
+``/workspaces/{id}/api-keys``.
 """
 
 from typing import Any, List, Optional

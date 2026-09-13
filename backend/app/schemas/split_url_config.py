@@ -4,13 +4,12 @@ Pydantic schemas for Split URL experiment *configuration* — EP-036 Batch 1.
 Defines the data structures for split URL experiment configuration,
 including URL variants, traffic allocation, and cookie settings.
 
-EDITION: Community. This module is pure declarative validation (at least two
-variants, allocations summing to 100) with no routing behaviour, and it types
+CORE. This module is pure declarative validation (at least two variants,
+allocations summing to 100) with no routing behaviour, and it types
 ``ExperimentCreate.split_url_config`` / ``ExperimentUpdate.split_url_config``.
-Keeping it in Community is what stops that field degrading to unvalidated
-JSON when the Enterprise split-URL router is not installed. The routing
-itself — ``services/split_url_service`` and the preview endpoint — is
-Enterprise.
+Keeping it in the core is what stops that field degrading to unvalidated
+JSON when the split_url module is not installed. The routing itself —
+``services/split_url_service`` and the preview endpoint — is the module's.
 """
 
 from typing import List, Optional

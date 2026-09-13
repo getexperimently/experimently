@@ -132,10 +132,17 @@ Then initialize the database with Alembic:
 
 ```bash
 # Generate the initial migration
-alembic revision --autogenerate -m "Initial migration"
+alembic -c backend/app/db/alembic.ini revision --autogenerate -m "Initial migration"
 
 # Apply the migration
-python -m alembic -c backend/app/db/alembic.ini upgrade head
+python -m alembic -c backend/app/db/alembic.ini upgrade heads
+```
+
+On a database with no tables at all, use the bootstrap instead: the historical
+migration chain cannot be replayed from zero.
+
+```bash
+python -m backend.app.db.bootstrap
 ```
 
 ### Creating New Migrations
@@ -143,30 +150,43 @@ python -m alembic -c backend/app/db/alembic.ini upgrade head
 Whenever you make changes to the models:
 
 ```bash
-# Generate a new migration script
-alembic revision --autogenerate -m "Description of changes"
+# Generate a new migration script.  A full checkout has two heads -- the core
+# chain and the `modules` branch -- so name the one the revision extends; the
+# file lands next to that head.
+alembic -c backend/app/db/alembic.ini heads         # both, with the `modules` label
+alembic -c backend/app/db/alembic.ini revision --autogenerate \
+        --head <core head id> -m "Description of changes"
 
 # Apply the migration
-python -m alembic -c backend/app/db/alembic.ini upgrade head
+python -m alembic -c backend/app/db/alembic.ini upgrade heads
 ```
+
+`alembic revision` runs `migrations/env.py` here (`revision_environment = true`
+in `alembic.ini`), so it needs the same database connection `--autogenerate`
+does. A core checkout has one head and needs no `--head`.
 
 ### Migration Commands Reference
 
 ```bash
 # Upgrade to the latest version
-python -m alembic -c backend/app/db/alembic.ini upgrade head
+python -m alembic -c backend/app/db/alembic.ini upgrade heads
 
-# Downgrade to the previous version
-alembic downgrade -1
+# Downgrade the previous revision of one branch.  With two heads a bare
+# `downgrade -1` is ambiguous -- alembic warns and picks one -- so name the
+# branch: `modules@-1` for a module's, the revision id for a core one.
+# NOT `modules@base`: modules_0001_rbac is a child of core a7b8c9d0e1f2, not
+# an alembic base, and `modules@base` resolves to the whole core chain -- 26
+# revisions, every table dropped.
+alembic -c backend/app/db/alembic.ini downgrade modules@-1
 
 # Downgrade to a specific version
-alembic downgrade <revision>
+alembic -c backend/app/db/alembic.ini downgrade <revision>
 
-# Show current version
-alembic current
+# Show current version (one row per head)
+alembic -c backend/app/db/alembic.ini current
 
 # Show migration history
-alembic history
+alembic -c backend/app/db/alembic.ini history
 ```
 
 ## Working with Experiments

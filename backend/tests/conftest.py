@@ -18,7 +18,7 @@ import pytest
 #   NOT exported: tests that construct ProdSettings()/DevSettings() directly
 #   must keep their class default, and the settings singleton already resolves
 #   APP_ENV=test to the canonical "test".
-# * Auth runs exactly as the Community Edition ships: AUTH_PROVIDER=local and
+# * Auth runs exactly as the core profile ships: AUTH_PROVIDER=local and
 #   the dev-admin bypass OFF (fail-closed).  That is also what the existing
 #   suite was written against (the old root conftest forced the Cognito env so
 #   unauthenticated requests got 401): tests either override
@@ -32,6 +32,15 @@ os.environ.setdefault("TESTING", "true")
 # A developer shell may export ENVIRONMENT=development (see .env.example);
 # ENVIRONMENT wins over APP_ENV, so drop it for the test process.
 os.environ.pop("ENVIRONMENT", None)
+# POSTGRES_SCHEMA likewise wins over APP_ENV in
+# core.database_config.get_schema_name(), and the shell CLAUDE.md documents --
+# and scripts/run-backend-tests.sh -- exports POSTGRES_SCHEMA=experimentation.
+# Set (not `setdefault`) and set HERE, before the first `backend.app` import
+# below: the models bind their schema, their string ForeignKey colspecs and
+# their index names when they are imported, so a session fixture is far too
+# late. Without this a test run would build its tables in the *application*
+# schema. The fixture below sets the same value for the record.
+os.environ["POSTGRES_SCHEMA"] = "test_experimentation"
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -46,63 +55,50 @@ from backend.app.api.deps import CacheControl
 from backend.app.core.config import TestSettings, settings
 from backend.app.core.database_config import get_schema_name
 from backend.app.db.session import Base, get_db, init_db
-from backend.app.ee_loader import require_enterprise_or_absent
 from backend.app.main import app
 from backend.app.models import register_core_models
 from backend.app.models.base import set_schema
 from backend.app.models.experiment import Experiment, ExperimentStatus
 from backend.app.models.user import User, UserRole
+from backend.app.modules_loader import require_modules_or_absent
 
 logger = logging.getLogger(__name__)
 
-# Open-core seam.  This tree is still the Enterprise build: `load_enterprise()`
-# (run by `backend.app.main` on import, above) registers the Enterprise routers,
-# model modules, audit signer and capabilities through
-# `backend/app/ee_transitional.py` -- the same entry point a real `ee` package
-# will provide after issue #89.  Nothing Enterprise is installed by hand here.
-#
-# The Enterprise routers are behind `require_feature`, so the suite runs under
-# a development licence that grants every feature: an Ed25519 key pair made
-# for this process, a wildcard licence signed with it, and `kid="dev"` -- which
-# the verifier honours because ENVIRONMENT/APP_ENV say `test`.  Tests that
-# need a *particular* licence state use the `licensed` fixture below, and the
-# licence unit tests replace the key through monkeypatch.
-from backend.tests.licence_fixtures import (  # `licensed` is a fixture re-export
-    install_session_license,
-    licensed,
-)
-
-install_session_license()
+# The seam.  With `modules/` present this is the full profile: `load_modules()`
+# (run by `backend.app.main` on import, above) registers the modules' routers,
+# model modules, audit signer, capabilities and names through
+# `modules.register(hooks)` (`modules/backend/app/register.py`).  Nothing from
+# the modules is installed by hand here, and a core checkout (no `modules/`)
+# runs the same file with every hook at its default;
+# `pytest_collection_modifyitems` below then skips the `modules`-marked tests.
 
 
 def pytest_collection_modifyitems(config, items):
-    """Skip `enterprise`-marked tests when the Enterprise edition did not load.
+    """Skip `modules`-marked tests when the modules did not load.
 
-    The Community build deletes the manifest paths and runs the suite that is
-    left; a test outside the manifest that exercises Enterprise behaviour
-    (the gate refusing an Enterprise route, the signer, split-URL routing)
-    says so with the marker instead of failing there.
+    The core build deletes the manifest paths and runs the suite that is
+    left; a test outside the manifest that exercises a module's behaviour
+    (a module route answering, the signer, split-URL routing) says so with
+    the marker instead of failing there.
     """
-    from backend.app.ee_loader import enterprise_failure, load_enterprise
+    from backend.app.modules_loader import load_modules, modules_failure
 
-    if load_enterprise():
+    if load_modules():
         return
-    # Absent is a Community build; *broken* is a bug, and skipping the tests
-    # that would have caught it (with exit code 0) is the one thing this hook
-    # must not do.
-    failure = enterprise_failure()
+    # Absent is a core build; *broken* is a bug, and skipping the tests that
+    # would have caught it (with exit code 0) is the one thing this hook must
+    # not do.
+    failure = modules_failure()
     if failure is not None:
         pytest.exit(
-            "The Enterprise registration is present but failed to load; refusing "
-            "to skip the enterprise-marked tests as if this were a Community "
-            f"build. Cause: {failure}",
+            "The modules package is present but failed to load; refusing to "
+            "skip the modules-marked tests as if this were a core build. "
+            f"Cause: {failure}",
             returncode=3,
         )
-    skip = pytest.mark.skip(
-        reason="needs the Enterprise registration (Community build)"
-    )
+    skip = pytest.mark.skip(reason="needs the modules package (core build)")
     for item in items:
-        if "enterprise" in item.keywords:
+        if "modules" in item.keywords:
             item.add_marker(skip)
 
 
@@ -172,12 +168,32 @@ def setup_test_environment():
     os.environ.pop("DATABASE_URI", None)
 
 
+#: The engine this process built, and how many times it built one.  Session
+#: scope is per *FixtureDef*, and pytest builds one FixtureDef per conftest
+#: that defines (or re-exports) the fixture: `modules/backend/tests/conftest.py`
+#: re-exports this function, so a session that spans both trees -- a bare
+#: `pytest` with `testpaths = ["backend/tests", "modules/backend/tests"]`, an
+#: IDE run, `pytest -k` across both -- entered this body a second time and
+#: pg_terminate_backend()'d every connection, DROPped the database and rebuilt
+#: ~50 tables under the half that was already running.  The module global is
+#: shared (there is one function object, whatever pytest wraps it in), so the
+#: second entry hands back the first engine and the database is built once per
+#: process however many FixtureDefs point here.
+_SESSION_ENGINE = None
+_SESSION_DB_BUILDS = 0
+
+
 @pytest.fixture(scope="session")
 def test_db():
     """Create a per-process test database and schema.
 
     Using a PID-unique database name (experimentation_test_<pid>) means
     concurrent pytest processes never share or drop each other's database.
+
+    Built once per process (see `_SESSION_ENGINE`): a second entry -- the
+    modules' conftest re-exports this fixture, which gives it its own
+    FixtureDef and therefore its own session cache -- yields the engine the
+    first one built and tears nothing down.
 
     The production engine (session.py) uses a QueuePool(pool_size=20) that
     is created at module-import time.  We dispose it here so that its idle
@@ -187,6 +203,14 @@ def test_db():
     return, generating 'server closed the connection unexpectedly' tracebacks
     that cascade through subsequent NullPool checkouts.
     """
+    global _SESSION_ENGINE, _SESSION_DB_BUILDS
+    if _SESSION_ENGINE is not None:
+        # Already built by another FixtureDef in this session.  Yield it and
+        # drop nothing: the FixtureDef that built it owns the teardown, and
+        # it finalises last (pytest finalises in reverse order of setup).
+        yield _SESSION_ENGINE
+        return
+
     # Dispose the production engine pool to prevent interference.
     try:
         from backend.app.db.session import engine as _prod_engine
@@ -279,12 +303,12 @@ def test_db():
                 # Missing models cause create_all to fail, which triggers the
                 # retry loop.
                 register_core_models()
-                # The Enterprise model modules arrive through the seam -- the
+                # The modules' model modules arrive through the seam -- the
                 # same seven `hooks.register_model_module()` calls bootstrap
                 # and alembic see -- so the test schema and a real one agree.
                 # Strict, like them: a broken registration must fail the
                 # session, not quietly build a 37-table schema.
-                require_enterprise_or_absent()
+                require_modules_or_absent()
 
                 # Set schema for all tables
                 Base.metadata.schema = schema_name
@@ -310,7 +334,12 @@ def test_db():
 
             time.sleep(2)  # Wait before retrying
 
+    _SESSION_ENGINE = engine
+    _SESSION_DB_BUILDS += 1
+
     yield engine
+
+    _SESSION_ENGINE = None
 
     # Teardown: drop the per-process test database.
     try:
@@ -383,19 +412,9 @@ def db_session(test_db):
     # search_path on every new NullPool connection checkout automatically.
     session.execute(text("SET search_path TO test_experimentation"))
 
-    # The licence gate audits on a session of its own (never the request's).
-    # Point it at this database: the application engine targets one the suite
-    # never creates, so without this every gated request logged a failed
-    # INSERT and the audit path was never exercised against a real table.
-    from backend.app.core import license as _license
-
-    previous_factory = _license.audit_session_factory
-    _license.audit_session_factory = Session
-
     try:
         yield session
     finally:
-        _license.audit_session_factory = previous_factory
         # Rollback any uncommitted work left by the test.
         try:
             session.rollback()

@@ -194,13 +194,13 @@ describe('apiFetch — errors', () => {
 
   it('exposes a typed detail.code', async () => {
     mockFetch.mockResolvedValueOnce(
-      jsonResponse(403, { detail: { code: 'feature_not_licensed', message: 'Workspaces need EE' } }),
+      jsonResponse(403, { detail: { code: 'workspace_role_required', message: 'Owner role required' } }),
     );
     const err = await rejection(apiFetch('/api/v1/workspaces/'));
     expect(err.status).toBe(403);
-    expect(err.code).toBe('feature_not_licensed');
+    expect(err.code).toBe('workspace_role_required');
     expect(err.isForbidden).toBe(true);
-    expect(err.message).toBe('Workspaces need EE');
+    expect(err.message).toBe('Owner role required');
     expect(assignSpy).not.toHaveBeenCalled();
   });
 

@@ -1,13 +1,13 @@
 {
   "name": "experimently-frontend",
   "version": "0.1.0",
-  "license": "AGPL-3.0-only",
+  "license": "Apache-2.0",
   "private": true,
   "scripts": {
     "dev": "next dev -p 3100",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint src --max-warnings 0",
+    "lint": "cd .. && eslint --config frontend/eslint.config.mjs --no-error-on-unmatched-pattern --max-warnings 0 frontend/src modules/frontend/src",
     "test": "jest --watchAll=false",
     "test:coverage": "jest --watchAll=false --coverage",
     "test:e2e": "playwright test",
@@ -16,7 +16,7 @@
     "test:visual": "playwright test visual-regression",
     "test:visual:update": "playwright test visual-regression --update-snapshots",
     "test:a11y": "playwright test accessibility",
-    "openapi:dump": "cd .. && python -m backend.scripts.dump_openapi frontend/src/tests/fixtures/openapi.json"
+    "openapi:dump": "cd .. && python -m backend.scripts.dump_openapi --profile full frontend/src/tests/fixtures/openapi.json"
   },
   "dependencies": {
     "@playwright/test": "^1.63.0",

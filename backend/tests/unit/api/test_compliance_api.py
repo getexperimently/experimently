@@ -340,10 +340,10 @@ class TestFeatureFlagAuditGeneration:
 
 
 class TestAuditEventRetention:
-    """AuditLogService.log() stamps retention_expires_at in every edition.
+    """AuditLogService.log() stamps retention_expires_at in every profile.
 
-    The HMAC signature tests that used to live here are Enterprise
-    (``test_compliance_signing.py``): the Community signer writes none.
+    The HMAC signature tests that used to live here are the compliance
+    module's (``test_compliance_signing.py``): the core signer writes none.
     """
 
     def test_audit_event_has_retention_expiry(self):

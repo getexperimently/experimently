@@ -25,6 +25,13 @@ def client():
     return TestClient(app, raise_server_exceptions=False)
 
 
+def resp_text(body) -> str:
+    """The whole payload as one string, for "this must not appear" checks."""
+    import json
+
+    return json.dumps(body)
+
+
 class _SettingsProxy:
     """Assignments go to the real ``settings`` object through monkeypatch (restored on teardown)."""
 
@@ -178,6 +185,50 @@ class TestReadiness:
         assert "version" not in body
         assert body["checks"]["database"] == {"status": "unhealthy"}  # no error text
 
+    def test_ready_reports_the_profile(self, client, healthy_deps):
+        """`profile` is `full` here: the test tree has `modules/`."""
+        body = client.get("/health/ready").json()
+        assert body["profile"] in ("core", "full")
+        assert body["checks"]["modules"]["status"] == "healthy"
+        assert body["checks"]["modules"]["profile"] == body["profile"]
+
+    def test_a_broken_registration_is_reported_but_does_not_fail_readiness(
+        self, client, healthy_deps, monkeypatch
+    ):
+        """A failed modules registration leaves the process on the core
+        profile.  Outside development/test `main.py` refuses to start on it,
+        so a probe never sees it there; where a probe does see it, it is
+        reported and not gated -- every core route still serves, and failing
+        readiness would only turn a visible degradation into a crash loop."""
+        from backend.app import modules_loader
+
+        monkeypatch.setattr(
+            modules_loader, "_failure", "modules.register(hooks) raised boom"
+        )
+        resp = client.get("/health/ready")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["status"] == "healthy"
+        assert body["checks"]["modules"]["status"] == "unhealthy"
+        assert body["checks"]["modules"]["error"] == (
+            "modules.register(hooks) raised boom"
+        )
+
+    def test_production_reports_the_profile_but_not_the_cause(
+        self, client, healthy_deps, fake_settings, monkeypatch
+    ):
+        """The profile is operational information an operator needs from the
+        probe; the failure string stays behind the same production redaction
+        as every other check detail."""
+        from backend.app import modules_loader
+
+        monkeypatch.setattr(modules_loader, "_failure", "boom in modules")
+        fake_settings.ENVIRONMENT = "production"
+        body = client.get("/health/ready").json()
+        assert body["profile"] in ("core", "full")
+        assert body["checks"]["modules"] == {"status": "unhealthy"}
+        assert "boom in modules" not in resp_text(body)
+
     def test_error_text_never_contains_password(self):
         err = health._safe_error(
             RuntimeError('FATAL: password authentication failed for user "x"')
@@ -242,3 +293,178 @@ class TestMetricsEndpoint:
         resp = client.get("/metrics")
         assert resp.status_code == 200
         assert resp.headers["content-type"].startswith("text/plain")
+
+
+# ---------------------------------------------------------------------------
+# What an unauthenticated probe is allowed to publish
+# ---------------------------------------------------------------------------
+
+
+class TestTheProbePublishesNoCredential:
+    """`/health/ready` is unauthenticated and, outside production, reports each
+    check's own error text.
+
+    The modules check used to return `modules_failure()` verbatim, bypassing
+    the sanitiser every other check uses: the loader builds that string out of
+    whatever module code raised, and a psycopg2 failure there put a DSN --
+    host, user, password -- into the body of a public endpoint. Production
+    reduces the body to statuses, so the exposure was development *and*
+    staging.
+    """
+
+    @pytest.mark.regression
+    def test_a_modules_failure_carrying_a_dsn_is_not_published(
+        self, client, healthy_deps, monkeypatch
+    ):
+        from backend.app import modules_loader
+
+        monkeypatch.setattr(
+            modules_loader,
+            "_failure",
+            "modules.register(hooks) raised OperationalError: connection to "
+            'server failed: FATAL:  password authentication failed for user "exp"',
+        )
+        body = client.get("/health/ready").json()
+
+        assert body["checks"]["modules"]["status"] == "unhealthy"
+        assert "password" not in resp_text(body).lower()
+        assert "exp" not in body["checks"]["modules"]["error"]
+
+    @pytest.mark.regression
+    def test_a_modules_failure_carrying_a_url_credential_is_not_published(
+        self, client, healthy_deps, monkeypatch
+    ):
+        from backend.app import modules_loader
+
+        monkeypatch.setattr(
+            modules_loader,
+            "_failure",
+            "modules.register(hooks) raised OperationalError: could not "
+            "connect: postgresql://exp:hunter2@db.internal:5432/experimentation",
+        )
+        error = client.get("/health/ready").json()["checks"]["modules"]["error"]
+
+        assert "hunter2" not in error
+        # Still a diagnosis: the host and the failure are what an operator needs.
+        assert "db.internal" in error
+        assert "OperationalError" in error
+
+    @pytest.mark.regression
+    def test_the_failure_is_one_line_and_bounded(
+        self, client, healthy_deps, monkeypatch
+    ):
+        from backend.app import modules_loader
+
+        monkeypatch.setattr(
+            modules_loader,
+            "_failure",
+            "modules.register(hooks) raised RuntimeError: first line\n"
+            + "second line\n" * 50,
+        )
+        error = client.get("/health/ready").json()["checks"]["modules"]["error"]
+
+        assert error == "modules.register(hooks) raised RuntimeError: first line"
+
+    def test_a_failure_with_nothing_to_hide_is_reported_in_full(
+        self, client, healthy_deps, monkeypatch
+    ):
+        """Redaction that ate the diagnosis would be its own bug: the common
+        failure is a rejected setting, and its field name is the whole point."""
+        from backend.app import modules_loader
+
+        monkeypatch.setattr(
+            modules_loader,
+            "_failure",
+            "modules.register(hooks) raised ValidationError: AUDIT_HMAC_KEY: "
+            "must be at least 32 characters",
+        )
+        error = client.get("/health/ready").json()["checks"]["modules"]["error"]
+
+        assert "AUDIT_HMAC_KEY" in error
+        assert "at least 32 characters" in error
+
+
+class TestScrub:
+    """`_scrub` is what stands between an exception from any check and an
+    unauthenticated response body."""
+
+    def test_url_userinfo_goes(self):
+        assert health._scrub("could not connect: amqp://guest:s3cret@broker:5672/") == (
+            "could not connect: amqp://***:***@broker:5672/"
+        )
+
+    def test_a_named_secret_keeps_its_name_and_loses_its_value(self):
+        assert health._scrub('OAuthError: client_secret="abc123" was rejected') == (
+            "OAuthError: client_secret=*** was rejected"
+        )
+        assert health._scrub("redis error: token: abc123") == "redis error: token=***"
+
+    def test_an_arn_keeps_its_resource_and_loses_the_account(self):
+        scrubbed = health._scrub(
+            "ClientError: User arn:aws:iam::123456789012:user/etl is not authorized"
+        )
+        assert "123456789012" not in scrubbed
+        assert "arn:aws:iam::***:user/etl" in scrubbed
+
+    def test_a_password_message_is_dropped_whole(self):
+        assert "password" not in health._scrub(
+            'FATAL: password authentication failed for user "exp"'
+        )
+
+    def test_it_is_one_line_and_at_most_200_characters(self):
+        assert health._scrub("first\nsecond") == "first"
+        assert len(health._scrub("x" * 500)) == 200
+        assert health._scrub("") == ""
+
+    def test_an_ordinary_message_is_untouched(self):
+        message = "OperationalError: could not translate host name 'db' to address"
+        assert health._scrub(message) == message
+
+
+class TestTheProbeNeverRegisters:
+    """`check_modules` called `load_modules()`, so an unauthenticated probe
+    could make a process that had registered for a *schema* re-run the whole
+    registration -- eleven endpoint modules, ~3.5 s, on the event loop, under
+    the loader's lock -- once per process."""
+
+    @pytest.mark.regression
+    def test_a_probe_runs_no_registration(self, client, healthy_deps, monkeypatch):
+        from unittest.mock import patch
+
+        from backend.app import modules_loader
+
+        monkeypatch.setattr(modules_loader, "_state", True)
+        monkeypatch.setattr(modules_loader, "_routers", False)
+        with patch.object(modules_loader, "_find_register") as find:
+            body = client.get("/health/ready").json()
+
+        assert find.call_count == 0
+        assert body["profile"] == "full"
+
+
+class TestMetricsTokenComparison:
+    """A wrong token is a 401, whatever bytes it is made of.
+
+    Starlette decodes headers as latin-1, so `Authorization: Bearer caf\xe9`
+    arrives as a `str` with a non-ASCII code point and `hmac.compare_digest`
+    raises TypeError on it -- a 500 from an unauthenticated endpoint, and an
+    exception traceback in the logs for every scrape that gets it wrong.
+    """
+
+    @pytest.mark.regression
+    def test_a_non_ascii_bearer_header_is_a_401(self, client, fake_settings):
+        fake_settings.METRICS_TOKEN = "s3cret"
+        # Raw bytes: httpx will not encode a non-ASCII str header.
+        resp = client.get("/metrics", headers={b"Authorization": b"Bearer caf\xe9"})
+        assert resp.status_code == 401
+
+    @pytest.mark.regression
+    def test_a_non_ascii_query_token_is_a_401(self, client, fake_settings):
+        fake_settings.METRICS_TOKEN = "s3cret"
+        assert client.get("/metrics?token=caf%E9").status_code == 401
+
+    def test_the_right_token_still_passes(self, client, fake_settings):
+        fake_settings.METRICS_TOKEN = "s3cret"
+        assert (
+            client.get("/metrics", headers={"Authorization": "Bearer s3cret"})
+        ).status_code == 200

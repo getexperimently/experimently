@@ -62,6 +62,21 @@ BYPASS_ALLOWED_ENVIRONMENTS: tuple = ("development", "test")
 # Environments that must not run with placeholder secrets or demo passwords.
 HARDENED_ENVIRONMENTS: tuple = ("staging", "production")
 
+# The dotenv file each environment's settings class reads.  One table: the
+# three ``model_config`` blocks below and ``env_file_for_environment()`` (which
+# the modules' settings call, so that a setting that moved off the core class
+# is still read from the same file) all take their answer from here.
+ENV_FILES: Dict[str, str] = {
+    "development": ".env.dev",
+    "test": ".env.test",
+    "staging": ".env.prod",
+    "production": ".env.prod",
+}
+
+#: The file an unrecognised environment name falls back to.  Never a hardened
+#: environment's file: an unknown name must not pick up production secrets.
+DEFAULT_ENV_FILE: str = ENV_FILES["development"]
+
 # Placeholder secrets that ship in the repository (class defaults,
 # docker-compose.yml, .env.example) or are otherwise well known.  Any secret
 # equal to one of these, or starting with one of the prefixes, is refused in
@@ -77,7 +92,6 @@ _PLACEHOLDER_SECRETS: frozenset = frozenset(
         "default-secret-key-for-testing",
         "development_secret_key_change_in_production",
         "dev-audit-key-change-in-production",
-        "sso-state-secret-change-in-prod",
     }
 )
 _PLACEHOLDER_SECRET_PREFIXES: tuple = (
@@ -87,7 +101,6 @@ _PLACEHOLDER_SECRET_PREFIXES: tuple = (
     "default-secret",
     "ci-only-",
     "test-",
-    "sso-state-secret-change",
 )
 
 
@@ -131,6 +144,22 @@ def canonical_environment_quiet(value: str) -> str:
     """Like :func:`canonical_environment` but never warns (for comparisons)."""
     normalised = value.strip().lower()
     return _LEGACY_ENVIRONMENT_ALIASES.get(normalised, normalised)
+
+
+def env_file_for_environment(environment: Any) -> str:
+    """The dotenv file the settings class for *environment* reads.
+
+    ``ModulesSettings`` (``modules/backend/app/settings.py``) asks for this so
+    that every setting which moved off the core ``Settings`` class is still
+    read from the same ``.env.dev`` / ``.env.test`` / ``.env.prod`` the core
+    class reads -- the mechanism ``docs/getting-started/environment-setup.md``
+    documents.  Legacy ``dev``/``prod`` spellings are accepted (quietly: the
+    caller has already had its deprecation warning), and an unrecognised name
+    falls back to the development file rather than a hardened one.
+    """
+    if not isinstance(environment, str):
+        return DEFAULT_ENV_FILE
+    return ENV_FILES.get(canonical_environment_quiet(environment), DEFAULT_ENV_FILE)
 
 
 def resolve_environment_from_process_env() -> str:
@@ -181,8 +210,8 @@ class Settings(BaseSettings):
     # Authentication provider (P0 open-core)
     # ------------------------------------------------------------------
     # ``local``  - email/password against ``users.hashed_password`` (bcrypt)
-    #              issuing HS256 JWTs signed with SECRET_KEY.  Community
-    #              Edition default; no AWS required.
+    #              issuing HS256 JWTs signed with SECRET_KEY.  The default;
+    #              no AWS required.
     # ``cognito`` - AWS Cognito user pool (needs COGNITO_USER_POOL_ID and
     #              COGNITO_CLIENT_ID in the process environment).
     AUTH_PROVIDER: Literal["local", "cognito"] = "local"
@@ -199,19 +228,6 @@ class Settings(BaseSettings):
     LOCAL_AUTH_MAX_FAILED_ATTEMPTS: int = 10
     LOCAL_AUTH_LOCKOUT_MINUTES: int = 15
 
-    # ------------------------------------------------------------------
-    # Enterprise licence (open-core seam; see backend/app/core/license.py)
-    # ------------------------------------------------------------------
-    # Offline-verified Ed25519 licence key, ``base64url(claims).base64url(sig)``.
-    # Empty (the default) means Community Edition: /api/v1/edition reports
-    # ``{"edition": "ce", "status": "none"}`` and every ``require_feature``
-    # dependency refuses.  Never phoned home, never logged.
-    EXPERIMENTLY_LICENSE_KEY: str = ""
-    # PEM public key for developer licences minted by
-    # ``scripts/make_dev_license.py`` (kid ``dev``).  Honoured only when
-    # ENVIRONMENT is development or test, so a leaked dev key cannot unlock a
-    # production deployment.
-    EXPERIMENTLY_DEV_LICENSE_PUBLIC_KEY: str = ""
     BACKEND_CORS_ORIGINS: List[AnyHttpUrl] = []
     # CORS_ORIGINS is a plain-string list version of BACKEND_CORS_ORIGINS that
     # can also be set via env var as a comma-separated string. NoDecode stops
@@ -250,9 +266,6 @@ class Settings(BaseSettings):
     SLACK_BOT_TOKEN: str = ""
     SLACK_DEFAULT_CHANNEL: str = "#platform-alerts"
     SLACK_ENABLED: bool = False
-
-    # DynamoDB settings
-    DYNAMODB_COUNTERS_TABLE: str = "experiment-counters"
 
     # Multi-armed bandit weight refresh cadence (Issue #22). The in-app
     # BanditSchedulerRunner recomputes BanditState weights this often.
@@ -293,24 +306,12 @@ class Settings(BaseSettings):
     # AWS region
     AWS_REGION: str = "us-east-1"
 
-    # Compliance audit settings (EP-033)
-    AUDIT_HMAC_KEY: str = "dev-audit-key-change-in-production"
+    # Compliance audit retention (EP-033).  Read by the core AuditLogService
+    # when it stamps an event's retention date; the HMAC signing key that
+    # makes the events tamper-evident is the compliance module's and lives in
+    # modules/backend/app/settings.py (issue #91).
     AUDIT_RETENTION_DAYS_SOC2: int = 365  # 12 months
     AUDIT_RETENTION_DAYS_ISO27001: int = 730  # 24 months
-
-    # EP-050: HIPAA Compliance settings
-    PHI_ENCRYPTION_KEY: Optional[str] = None
-    HIPAA_ENABLED: bool = False
-    HIPAA_ALLOWED_REGIONS: List[str] = ["us-east-1", "us-west-2"]
-    HIPAA_AUDIT_LOG_RETENTION_YEARS: int = 6
-
-    # Glue / ETL settings (P3-A)
-    GLUE_ETL_JOB_NAME: str = "experimentation-events-etl"
-    GLUE_METRICS_JOB_NAME: str = "experimentation-metrics-etl"
-    GLUE_DATABASE: str = "experimentation"
-    GLUE_EVENTS_TABLE: str = "raw_events"
-    ATHENA_OUTPUT_BUCKET: str = "s3://experimentation-athena-results/"
-    GLUE_CRAWLER_NAME: str = "experimentation-crawler"
 
     # Email / notification settings (EP-030)
     EMAIL_ENABLED: bool = False
@@ -331,44 +332,11 @@ class Settings(BaseSettings):
     LLM_MAX_TOKENS_DEFAULT: int = 1000
     LLM_TEMPERATURE_DEFAULT: float = 0.7
 
-    # EP-041: Databricks warehouse connector
-    DATABRICKS_HOST: str = ""
-    DATABRICKS_HTTP_PATH: str = ""
-    DATABRICKS_TOKEN: str = ""
-    DATABRICKS_CATALOG: str = "main"
-    DATABRICKS_SCHEMA: str = "default"
-    DATABRICKS_TIMEOUT_SECONDS: int = 30
-
-    # EP-048: ClickHouse warehouse connector
-    CLICKHOUSE_HOST: str = "localhost"
-    CLICKHOUSE_PORT: int = 8123  # HTTP port (9000 for native)
-    CLICKHOUSE_DATABASE: str = "default"
-    CLICKHOUSE_USER: str = "default"
-    CLICKHOUSE_PASSWORD: str = ""
-    CLICKHOUSE_SECURE: bool = False
-    CLICKHOUSE_TIMEOUT_SECONDS: int = 30
-
-    # EP-048: MySQL warehouse connector
-    MYSQL_HOST: str = "localhost"
-    MYSQL_PORT: int = 3306
-    MYSQL_DATABASE: str = ""
-    MYSQL_USER: str = ""
-    MYSQL_PASSWORD: str = ""
-    MYSQL_TIMEOUT_SECONDS: int = 30
-
-    # SSO / SAML / OIDC settings (EP-037)
-    SSO_ENABLED: bool = True
-    SAML_SP_ENTITY_ID: str = "https://experimentation-platform.example.com"
-    SAML_SP_ACS_URL: str = (
-        "https://experimentation-platform.example.com/auth/sso/saml/acs"
-    )
-    OIDC_GOOGLE_CLIENT_ID: str = ""
-    OIDC_GOOGLE_CLIENT_SECRET: str = ""
-    OIDC_GITHUB_CLIENT_ID: str = ""
-    OIDC_GITHUB_CLIENT_SECRET: str = ""
-    OIDC_MICROSOFT_CLIENT_ID: str = ""
-    OIDC_MICROSOFT_CLIENT_SECRET: str = ""
-    SSO_STATE_SECRET: str = "sso-state-secret-change-in-prod"
+    # The modules' settings (the audit signing key, HIPAA, SSO, the warehouse
+    # connectors, ETL, real-time counters) are NOT here: they live on
+    # ``ModulesSettings`` in modules/backend/app/settings.py and are validated
+    # by the modules' registration, so a core deployment never has to supply
+    # a module's secret to start (issue #91).
 
     # Cognito settings
     COGNITO_GROUP_ROLE_MAPPING: Dict[str, str] = {
@@ -411,6 +379,29 @@ class Settings(BaseSettings):
             self.DEV_AUTH_BYPASS is True
             and self.ENVIRONMENT in BYPASS_ALLOWED_ENVIRONMENTS
         )
+
+    @property
+    def dev_fallbacks_allowed(self) -> bool:
+        """True where a degraded development-only fallback may run at all.
+
+        The companion of :attr:`dev_auth_bypass_active` for the fallbacks that
+        have no switch to enable -- code that stands in for something a real
+        deployment must have:
+
+        * the SAML stub parser that accepts an assertion without checking its
+          signature when ``python3-saml`` is not installed
+          (``modules/backend/app/services/sso_service.py``);
+        * continuing on the core profile after the modules package was found
+          but failed to register (``backend/app/modules_loader.py``).
+
+        Both are conveniences for a developer and security failures anywhere
+        else, so they share the dev-admin bypass's allow-list: they run in
+        ``development`` and ``test`` and nowhere else.  Call sites ask this
+        rather than comparing ``ENVIRONMENT`` themselves, so that staging is
+        hardened with production and an unrecognised environment name fails
+        closed instead of matching no ``== "production"`` test.
+        """
+        return self.ENVIRONMENT in BYPASS_ALLOWED_ENVIRONMENTS
 
     @field_validator("ENVIRONMENT", mode="before")
     @classmethod
@@ -500,43 +491,6 @@ class Settings(BaseSettings):
                 )
         return v
 
-    @field_validator("AUDIT_HMAC_KEY")
-    @classmethod
-    def validate_audit_hmac_key(cls, v: str, info: ValidationInfo) -> str:
-        """
-        Reject the dev default AUDIT_HMAC_KEY in production.
-
-        This key signs SOC 2 / ISO 27001 compliance audit log integrity proofs
-        (HMAC-SHA256). Shipping the default in prod makes all audit signatures
-        forgeable and breaks compliance attestations.
-        """
-        if _hardening_required(info):
-            if _secret_is_placeholder(v) or len(v) < _MIN_SECRET_KEY_LENGTH:
-                raise ValueError(
-                    f"AUDIT_HMAC_KEY must be at least {_MIN_SECRET_KEY_LENGTH} characters "
-                    "and must not be the dev default in staging/production. "
-                    'Generate one with: python -c "import secrets; print(secrets.token_hex(32))"'
-                )
-        return v
-
-    @field_validator("SSO_STATE_SECRET")
-    @classmethod
-    def validate_sso_state_secret(cls, v: str, info: ValidationInfo) -> str:
-        """
-        Reject the dev default SSO_STATE_SECRET in production.
-
-        This secret protects the SAML/OIDC state parameter against CSRF.
-        A predictable value lets an attacker forge SSO state tokens.
-        """
-        if _hardening_required(info):
-            if _secret_is_placeholder(v) or len(v) < _MIN_SECRET_KEY_LENGTH:
-                raise ValueError(
-                    f"SSO_STATE_SECRET must be at least {_MIN_SECRET_KEY_LENGTH} characters "
-                    "and must not be the dev default in staging/production. "
-                    'Generate one with: python -c "import secrets; print(secrets.token_hex(32))"'
-                )
-        return v
-
     @field_validator("DATABASE_URI", mode="before")
     @classmethod
     def assemble_database_connection(
@@ -617,7 +571,7 @@ class DevSettings(Settings):
     POSTGRES_DB: str = "experimentation"
 
     model_config = SettingsConfigDict(
-        env_file=".env.dev", case_sensitive=True, extra="ignore"
+        env_file=ENV_FILES["development"], case_sensitive=True, extra="ignore"
     )
 
 
@@ -644,7 +598,7 @@ class TestSettings(Settings):
     CACHE_CONTROL: Dict[str, Any] = {"enabled": False, "redis": None, "ttl": 3600}
 
     model_config = SettingsConfigDict(
-        env_file=".env.test", case_sensitive=True, extra="ignore"
+        env_file=ENV_FILES["test"], case_sensitive=True, extra="ignore"
     )
 
 
@@ -658,7 +612,7 @@ class ProdSettings(Settings):
     CACHE_CONTROL: Dict[str, Any] = {"enabled": True, "redis": None, "ttl": 3600}
 
     model_config = SettingsConfigDict(
-        env_file=".env.prod", case_sensitive=True, extra="ignore"
+        env_file=ENV_FILES["production"], case_sensitive=True, extra="ignore"
     )
 
     def get_db_url(self) -> str:
@@ -691,16 +645,6 @@ class ProdSettings(Settings):
 # ``ENVIRONMENT`` (canonical) wins; legacy ``APP_ENV`` is honoured with a
 # deprecation warning.  The resolved value is passed explicitly so the chosen
 # class always reports the canonical name (``APP_ENV=prod`` -> ``production``).
-#: Whether the deployment named its environment at all.  Captured *before*
-#: the legacy ``APP_ENV`` mirror below, which would otherwise make an
-#: undeclared process indistinguishable from a declared development one to
-#: anything that reads ``os.environ`` afterwards -- and the licence verifier
-#: has to treat "nothing declared" as production (``core/license.py``).
-ENVIRONMENT_DECLARED: bool = bool(
-    (os.environ.get("ENVIRONMENT") or "").strip()
-    or (os.environ.get("APP_ENV") or "").strip()
-)
-
 _resolved_environment = resolve_environment_from_process_env()
 
 # Mirror the legacy spelling back into APP_ENV for modules that still read it
@@ -720,12 +664,15 @@ else:
 __all__ = [
     "BYPASS_ALLOWED_ENVIRONMENTS",
     "CANONICAL_ENVIRONMENTS",
+    "DEFAULT_ENV_FILE",
+    "ENV_FILES",
     "DevSettings",
     "EnvironmentName",
     "ProdSettings",
     "Settings",
     "TestSettings",
     "canonical_environment",
+    "env_file_for_environment",
     "resolve_environment_from_process_env",
     "settings",
 ]

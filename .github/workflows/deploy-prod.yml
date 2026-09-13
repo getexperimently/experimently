@@ -7,6 +7,29 @@ on:
         description: 'Git tag or commit SHA to deploy (e.g. v1.2.3)'
         required: true
         type: string
+      profile:
+        # The profile a deployment gets is a decision, not a default. The image
+        # used to be built `--target core` with nothing saying so, which on this
+        # layout means an image with no modules/ directory at all: the modules'
+        # registration never runs, `hooks.audit_signer` stays `NullAuditSigner`,
+        # and every SOC 2 / ISO 27001 compliance audit event is written with
+        # hmac_signature = NULL -- which `NullAuditSigner.verify()` then reports
+        # as intact. Nothing else signals it (`/health/ready` is a cheerful 200
+        # with `profile: core`), so the choice is made here, in the open.
+        description: 'Image profile to build and deploy (full = modules included, signed compliance audit log)'
+        required: true
+        type: choice
+        default: full
+        options: [full, core]
+      accept_unsigned_audit_log:
+        # Required for `core` and only for `core`; see the guard in
+        # pre-deployment-checks. A tick-box is the cheapest way to make
+        # "unsigned" impossible to reach by accident while keeping it reachable
+        # on purpose (a core-licensed deployment that never wanted the modules).
+        description: 'core only: I accept an UNSIGNED compliance audit log (no HMAC, verify() reports unsigned rows as intact)'
+        required: false
+        type: boolean
+        default: false
       skip_smoke_tests:
         description: 'Skip smoke tests (emergency deploys only)'
         required: false
@@ -32,6 +55,35 @@ jobs:
       contents: read
       checks: read
     steps:
+      # Before anything else, and before any AWS credential is issued: the
+      # profile decides whether this deployment signs its compliance audit log.
+      - name: Confirm the deployment profile
+        env:
+          PROFILE: ${{ inputs.profile }}
+          ACCEPTED: ${{ inputs.accept_unsigned_audit_log }}
+        run: |
+          set -euo pipefail
+          echo "Requested profile: ${PROFILE}"
+          UNSIGNED="profile=core builds an image with no modules/, so the compliance module never registers: every SOC 2 / ISO 27001 audit event is written with hmac_signature = NULL and NullAuditSigner.verify() reports those rows as intact."
+          if [ "${PROFILE}" = "core" ] && [ "${ACCEPTED}" != "true" ]; then
+            echo "::error::${UNSIGNED} Re-run with accept_unsigned_audit_log=true if that is what you want, or deploy profile=full."
+            exit 1
+          fi
+          {
+            echo "### Deployment profile: \`${PROFILE}\`"
+            echo ""
+            if [ "${PROFILE}" = "core" ]; then
+              echo ":warning: ${UNSIGNED}"
+              echo ""
+              echo "Acknowledged by @${GITHUB_ACTOR}."
+            else
+              echo "Modules included; compliance audit events are HMAC-signed."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "${PROFILE}" = "core" ]; then
+            echo "::warning::${UNSIGNED} Acknowledged by ${GITHUB_ACTOR}."
+          fi
+
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.version }}
@@ -62,6 +114,7 @@ jobs:
           slack-message: |
             :rocket: *Production deployment starting*
             Version: `${{ inputs.version }}`
+            Profile: `${{ inputs.profile }}`${{ inputs.profile == 'core' && ' :warning: unsigned compliance audit log' || '' }}
             Triggered by: ${{ github.actor }}
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
@@ -78,6 +131,38 @@ jobs:
         with:
           role-to-assume: ${{ secrets.PROD_AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
+
+      # The task definitions inject these (infrastructure/cdk/stacks/
+      # fargate_service_stack.py, migration_task_stack.py), and the image ships
+      # no .env file: they are the only way the container gets a real value for
+      # a setting whose default the production settings classes REFUSE. A
+      # missing one is not a degraded deployment, it is a container that exits
+      # before uvicorn binds -- discovered twenty minutes later as a CodeDeploy
+      # timeout. One describe-secret each turns that into a name.
+      - name: Required secrets exist for this profile
+        env:
+          PROFILE: ${{ inputs.profile }}
+        run: |
+          set -euo pipefail
+          required=(db-password jwt-secret redis-url first-superuser-password)
+          if [ "${PROFILE}" = "full" ]; then
+            # Only the modules read it, and modules.register(hooks) builds
+            # their settings first: without it the registration fails, the API
+            # refuses to start (abort_if_modules_broken) and every alembic
+            # command fails with it (require_modules_or_absent).
+            required+=(audit-hmac-key)
+          fi
+          missing=()
+          for name in "${required[@]}"; do
+            aws secretsmanager describe-secret \
+              --secret-id "/prod/experimentation/${name}" >/dev/null 2>&1 \
+              || missing+=("/prod/experimentation/${name}")
+          done
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "::error::profile=${PROFILE} needs these AWS Secrets Manager secrets and they do not exist: ${missing[*]}. Create them first: docs/deployment/secrets-management.md."
+            exit 1
+          fi
+          echo "profile=${PROFILE}: all ${#required[@]} required secrets exist"
 
       - name: Verify backup exists
         run: |
@@ -181,17 +266,33 @@ jobs:
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: ${{ inputs.version }}
+          PROFILE: ${{ inputs.profile }}
         run: |
+          set -euo pipefail
           # Build context is the repository root (the code imports backend.app.*).
+          # --target is the requested profile, never a hard-coded default: see
+          # the `profile` input and the guard in pre-deployment-checks.
           docker build \
             --build-arg BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ') \
             --build-arg GIT_COMMIT=${{ github.sha }} \
-            --target ce \
+            --target "$PROFILE" \
             -t $ECR_REGISTRY/$ECR_BACKEND_REPO:$IMAGE_TAG \
+            -t $ECR_REGISTRY/$ECR_BACKEND_REPO:$IMAGE_TAG-$PROFILE \
             -t $ECR_REGISTRY/$ECR_BACKEND_REPO:latest \
             -f backend/Dockerfile \
             .
+          # The image labels itself (backend/Dockerfile's `core` and `full`
+          # stages each set io.experimently.profile). Fail here rather than
+          # discover in production that the tag and the contents disagree.
+          BUILT=$(docker inspect --format '{{index .Config.Labels "io.experimently.profile"}}' \
+            "$ECR_REGISTRY/$ECR_BACKEND_REPO:$IMAGE_TAG")
+          if [ "$BUILT" != "$PROFILE" ]; then
+            echo "::error::requested profile '$PROFILE' but the image is labelled '$BUILT'"
+            exit 1
+          fi
+          echo "Backend image profile: $BUILT"
           docker push $ECR_REGISTRY/$ECR_BACKEND_REPO:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_BACKEND_REPO:$IMAGE_TAG-$PROFILE
           docker push $ECR_REGISTRY/$ECR_BACKEND_REPO:latest
           echo "image=$ECR_REGISTRY/$ECR_BACKEND_REPO:$IMAGE_TAG" >> $GITHUB_OUTPUT
 
@@ -200,16 +301,24 @@ jobs:
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: ${{ inputs.version }}
+          PROFILE: ${{ inputs.profile }}
         run: |
+          set -euo pipefail
           # NEXT_PUBLIC_API_URL stays empty when the dashboard's nginx proxies
           # /api to the API (same origin); set PROD_API_URL only for a split origin.
+          # Build context is the repository root, like the API image: the
+          # Dockerfile copies docs/ (in-app documentation) and, for the full
+          # profile, modules/frontend/ from beside frontend/. The dashboard
+          # follows the API image's profile -- a core API serving no module
+          # routes behind a dashboard that renders module chrome is a broken UI.
           docker build \
             --build-arg NEXT_PUBLIC_API_URL=${{ secrets.PROD_API_URL }} \
             --build-arg GIT_COMMIT=${{ github.sha }} \
+            --build-arg EXPERIMENTLY_PROFILE="$PROFILE" \
             -t $ECR_REGISTRY/$ECR_FRONTEND_REPO:$IMAGE_TAG \
             -t $ECR_REGISTRY/$ECR_FRONTEND_REPO:latest \
             -f frontend/Dockerfile \
-            frontend/
+            .
           docker push $ECR_REGISTRY/$ECR_FRONTEND_REPO:$IMAGE_TAG
           docker push $ECR_REGISTRY/$ECR_FRONTEND_REPO:latest
           echo "image=$ECR_REGISTRY/$ECR_FRONTEND_REPO:$IMAGE_TAG" >> $GITHUB_OUTPUT
@@ -251,7 +360,7 @@ jobs:
             --task-definition experimentation-migrate \
             --launch-type FARGATE \
             --network-configuration "awsvpcConfiguration={subnets=[${{ secrets.PROD_PRIVATE_SUBNET_IDS }}],securityGroups=[${{ secrets.PROD_ECS_SG_ID }}],assignPublicIp=DISABLED}" \
-            --overrides '{"containerOverrides":[{"name":"backend","command":["python","-m","alembic","-c","app/db/alembic.ini","upgrade","head"]}]}' \
+            --overrides '{"containerOverrides":[{"name":"backend","command":["python","-m","alembic","-c","backend/app/db/alembic.ini","upgrade","heads"]}]}' \
             --query 'tasks[0].taskArn' \
             --output text)
 

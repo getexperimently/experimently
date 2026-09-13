@@ -16,7 +16,7 @@ on:
       target:
         description: 'Target revision (head, base, -1, or specific revision ID)'
         required: false
-        default: 'head'
+        default: 'heads'
 
 env:
   AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
@@ -63,7 +63,7 @@ jobs:
             --task-definition experimentation-migrate \
             --launch-type FARGATE \
             --network-configuration "awsvpcConfiguration={subnets=[${{ secrets.PRIVATE_SUBNET_IDS }}],securityGroups=[${{ secrets.ECS_SG_ID }}],assignPublicIp=DISABLED}" \
-            --overrides '{"containerOverrides":[{"name":"backend","command":["python","-m","alembic","-c","app/db/alembic.ini","current"]}]}'
+            --overrides '{"containerOverrides":[{"name":"backend","command":["python","-m","alembic","-c","backend/app/db/alembic.ini","current"]}]}'
 
       - name: Run migration
         run: |
@@ -72,7 +72,7 @@ jobs:
             --task-definition experimentation-migrate \
             --launch-type FARGATE \
             --network-configuration "awsvpcConfiguration={subnets=[${{ secrets.PRIVATE_SUBNET_IDS }}],securityGroups=[${{ secrets.ECS_SG_ID }}],assignPublicIp=DISABLED}" \
-            --overrides "{\"containerOverrides\":[{\"name\":\"backend\",\"command\":[\"python\",\"-m\",\"alembic\",\"-c\",\"app/db/alembic.ini\",\"${{ inputs.direction }}\",\"${{ inputs.target }}\"]}]}" \
+            --overrides "{\"containerOverrides\":[{\"name\":\"backend\",\"command\":[\"python\",\"-m\",\"alembic\",\"-c\",\"backend/app/db/alembic.ini\",\"${{ inputs.direction }}\",\"${{ inputs.target }}\"]}]}" \
             --query 'tasks[0].taskArn' --output text)
 
           echo "Migration task ARN: $TASK_ARN"

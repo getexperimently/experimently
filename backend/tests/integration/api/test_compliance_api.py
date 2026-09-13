@@ -1,12 +1,12 @@
 """
-Integration tests for the Community half of the Compliance Audit API (EP-033).
+Integration tests for the core half of the Compliance Audit API (EP-033).
 
   GET /api/v1/compliance/audit-events — listing, filtering, pagination and
-  the ADMIN/ANALYST role check, in every edition.
+  the ADMIN/ANALYST role check, in every profile.
 
-The report and export routes keep their URLs in every edition but delegate
-their bodies through the seam; their tests are Enterprise and live in
-``test_compliance_reports_api.py``.
+The report and export routes keep their URLs in every profile but delegate
+their bodies through the seam; their tests are the compliance module's and
+live in ``test_compliance_reports_api.py``.
 
 All tests use the conftest.py fixtures (admin_client, analyst_client,
 developer_client, viewer_client) which wire up dependency overrides so no

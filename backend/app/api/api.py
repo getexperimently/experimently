@@ -19,7 +19,6 @@ from backend.app.api.v1.endpoints import (
     client_errors,
     compliance,
     edge,
-    edition,
     events,
     experiment_wizard,
     experiments,
@@ -31,6 +30,7 @@ from backend.app.api.v1.endpoints import (
     llm_proxy,
     mcp,
     metrics,
+    modules,
     mutual_exclusion_groups,
     notifications,
     openfeature,
@@ -49,25 +49,25 @@ from backend.app.api.v1.endpoints import (
 # Import the sample size calculator router
 from backend.app.api.v1.sample_size_calculator import router as sample_size_router
 from backend.app.core import hooks
-from backend.app.ee_loader import load_enterprise
+from backend.app.modules_loader import load_modules, mount_module_routers
 
 # from backend.app.routers import feature_flag_routes
 
 
 def register_core_routers(router: APIRouter) -> APIRouter:
-    """Mount every Community endpoint router on *router*; returns it.
+    """Mount every core endpoint router on *router*; returns it.
 
-    The Community half of the open-core seam for the API surface: a Community
-    build calls only this, and whatever the Enterprise package registered
-    through ``hooks.register_router()`` is mounted afterwards by
+    The core half of the seam for the API surface: a core build calls only
+    this, and whatever the modules package registered through
+    ``hooks.register_router()`` is mounted afterwards by
     :func:`build_v1_router`.
     """
     router.include_router(auth.router, prefix="/auth", tags=["Authentication"])
     # P0 (open-core): user-owned API keys for SDK authentication
     router.include_router(api_keys.router, prefix="/api-keys", tags=["API Keys"])
     router.include_router(users.router, prefix="/users", tags=["Users"])
-    # Open-core seam: unauthenticated edition/licence probe for the dashboard chrome.
-    router.include_router(edition.router, tags=["Edition"])
+    # Unauthenticated profile/modules probe for the dashboard chrome.
+    router.include_router(modules.router, tags=["Modules"])
     router.include_router(
         experiments.router, prefix="/experiments", tags=["Experiments"]
     )
@@ -163,17 +163,23 @@ def register_core_routers(router: APIRouter) -> APIRouter:
 
 
 def build_v1_router() -> APIRouter:
-    """Build the v1 router: Community routers, then anything the seam added.
+    """Build the v1 router: core routers, then anything the seam added.
 
-    Enterprise routers arrive only through ``hooks.apply_routers`` -- from
-    ``ee.register(hooks)``, or from the transitional in-tree module while the
-    Enterprise code has not moved yet (see ``ee_loader``).  Nothing in this
-    module names an Enterprise endpoint.
+    Module routers arrive only through the seam -- from ``modules.register
+    (hooks)`` (see ``modules_loader``).  Nothing in this module names a module
+    endpoint.
+
+    Mounting goes through ``modules_loader.mount_module_routers`` rather than
+    ``hooks.apply_routers`` directly, so that module code raising while it
+    mounts is the loader's failure -- logged, recorded, refused at start-up
+    outside development -- and not an exception out of ``import
+    backend.app.api.api``, which used to take the whole API down after the
+    load had already reported success.
     """
-    load_enterprise()
+    load_modules()
     router = APIRouter()
     register_core_routers(router)
-    hooks.apply_routers(router)
+    mount_module_routers(router)
     return router
 
 
@@ -186,7 +192,7 @@ api_router.include_router(api_router_v1)
 
 # Documentation configuration
 #
-# CORE_TAGS_METADATA describes the Community API surface. Enterprise tags
+# CORE_TAGS_METADATA describes the core API surface. The modules' tags
 # arrive through hooks.register_tags(); `tags_metadata` below is the union
 # and is what an OpenAPI document should be built from.
 CORE_TAGS_METADATA = [
@@ -306,15 +312,15 @@ CORE_TAGS_METADATA = [
         "description": (
             "Compliance audit trail: append-only events for every experiment and "
             "feature-flag change, readable by ADMIN and ANALYST. HMAC signing, "
-            "SOC 2 / ISO 27001 reports and the audit export are Enterprise features "
-            "on the same routes."
+            "SOC 2 / ISO 27001 reports and the audit export are the compliance "
+            "module's, on the same routes."
         ),
     },
 ]
 
 
 def build_tags_metadata() -> list:
-    """Community tag metadata plus whatever the seam contributed."""
+    """Core tag metadata plus whatever the seam contributed."""
     return CORE_TAGS_METADATA + hooks.extra_tags_metadata()
 
 

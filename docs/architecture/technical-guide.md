@@ -477,7 +477,7 @@ python -m alembic -c backend/app/db/alembic.ini revision --autogenerate -m "add 
 # Verify: down_revision, column types, schema prefix
 
 # 4. Apply
-python -m alembic -c backend/app/db/alembic.ini upgrade head
+python -m alembic -c backend/app/db/alembic.ini upgrade heads
 
 # 5. Verify
 python -m alembic -c backend/app/db/alembic.ini current

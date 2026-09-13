@@ -12,7 +12,7 @@ picked up at module load time.
 
 This package is the only place in the test suite that runs the Cognito
 provider: the Cognito env vars used to live in the root conftest, but the
-Community Edition default is ``AUTH_PROVIDER=local`` (with the dev-admin
+default is ``AUTH_PROVIDER=local`` (with the dev-admin
 bypass enabled for the rest of the suite), so everything Cognito-specific is
 scoped here.  ``_cognito_provider`` below flips the settings singleton to the
 Cognito provider with the bypass off for every test in this directory.

@@ -4,7 +4,8 @@
 Sources
 -------
 Python   `pip-licenses` against the active virtualenv, which is installed from
-         `backend/requirements.txt`.
+         `backend/requirements.txt` plus `modules/requirements.txt` (the
+         module-only pins the full profile adds).
 Node     `npx license-checker-rseidelsohn --production` in each package that has
          a `package-lock.json` (the dashboard and the five JavaScript SDKs).
 Other    Declared direct dependencies read out of the per-SDK manifests
@@ -101,31 +102,56 @@ MANIFEST_DEPS: dict[str, list[tuple[str, str, str]]] = {
     ],
 }
 
-# Licences that are incompatible with distributing an AGPL-3.0 work, or that
-# need a human decision before the repository goes public.
+# Licences that need a human decision before they ship in an Apache-2.0 work.
+#
+# This project is Apache-2.0, a permissive licence: a dependency is a problem
+# when its own terms would reach the combined work.  Strong copyleft (GPL,
+# AGPL) does exactly that -- a GPL library in the runtime closure would bind
+# the distribution to the GPL, and the AGPL adds the network-use clause on
+# top -- so those two are the ones to keep out.  Weak copyleft (LGPL, MPL,
+# EPL, CDDL) only reaches the library itself: linking an unmodified copy is
+# fine, modifications to the library must be published under its licence.
+# psycopg2-binary (LGPL) is the standing example and is deliberately allowed.
 #
 # Matched as whole licence identifiers, not substrings.  A plain
-# `"GPL" in lic.lower()` reports LGPL and AGPL as strong copyleft: the LGPL
-# is weak copyleft (linking is fine, which is why psycopg2 is not a problem),
-# and AGPL is this project's own licence, so both were flagged with the wrong
-# note and with a "check compatibility direction" that has no answer.  The
-# lookbehind keeps `GPL` from matching inside `LGPL`/`AGPL`, and the list is
-# ordered most specific first so the right note wins.
+# `"GPL" in lic.lower()` reports LGPL and AGPL as plain GPL and gives them the
+# wrong note; the lookbehind keeps `GPL` from matching inside `LGPL`/`AGPL`,
+# and the list is ordered most specific first so the right note wins.
 COPYLEFT_FLAGS: list[tuple[str, str]] = [
-    (r"(?<![A-Z])AGPL", "strong copyleft — the same licence as this project's core"),
+    (
+        r"(?<![A-Z])AGPL",
+        "strong copyleft with a network-use clause — binds the combined work; "
+        "must not ship in the runtime closure of an Apache-2.0 product",
+    ),
     (
         r"(?<![A-Z])LGPL",
-        "weak copyleft — linking is fine; modifications to the library are not",
+        "weak copyleft — linking an unmodified copy is fine; modifications "
+        "to the library must be published under the LGPL",
     ),
-    (r"(?<![A-Z])GPL", "strong copyleft — check compatibility direction"),
-    ("SSPL", "NOT an open-source licence, incompatible with AGPL-3.0 distribution"),
-    ("BUSL", "source-available, not open source"),
-    ("Elastic", "source-available, not open source"),
-    ("CC-BY-SA", "share-alike, incompatible with AGPL-3.0 for code"),
+    (
+        r"(?<![A-Z])GPL",
+        "strong copyleft — binds the combined work; must not ship in the "
+        "runtime closure of an Apache-2.0 product",
+    ),
+    ("SSPL", "NOT an open-source licence; must not ship"),
+    ("BUSL", "source-available, not open source; must not ship"),
+    ("Elastic", "source-available, not open source; must not ship"),
+    ("CC-BY-SA", "share-alike — unusable for code; data only, and it stays CC-BY-SA"),
     ("CC-BY-NC", "non-commercial, unusable"),
-    ("CDDL", "file-level copyleft, GPL-incompatible"),
-    ("EPL-1.0", "GPL-incompatible as published; fine as a separate test-only artefact"),
-    ("MS-PL", "GPL-incompatible"),
+    (
+        "CDDL",
+        "file-level weak copyleft — combining is fine; modified files stay CDDL",
+    ),
+    (
+        "EPL-1.0",
+        "module-level weak copyleft — fine as a separate artefact; "
+        "modifications to it stay EPL",
+    ),
+    (
+        "MS-PL",
+        "permissive but source redistributions of the library must stay MS-PL; "
+        "keep it a separate artefact",
+    ),
     ("UNKNOWN", "licence could not be determined — must be resolved by hand"),
     ("UNLICENSED", "no licence declared"),
 ]
@@ -141,7 +167,14 @@ def run(cmd: list[str], cwd: Path | None = None) -> str:
     ).stdout
 
 
-REQUIREMENTS = ROOT / "backend" / "requirements.txt"
+#: Every pinned dependency of the product. The module-only pins live in their
+#: own file -- only the full profile installs them -- and they are as much a
+#: redistributed dependency as the rest, so both files are read. The second is
+#: absent in a core checkout.
+REQUIREMENTS = [
+    ROOT / "backend" / "requirements.txt",
+    ROOT / "modules" / "requirements.txt",
+]
 
 
 def _canonical(name: str) -> str:
@@ -149,7 +182,7 @@ def _canonical(name: str) -> str:
 
 
 def declared_python_dependencies() -> set[str]:
-    """The transitive closure of the pins in backend/requirements.txt.
+    """The transitive closure of the pins in the requirements files.
 
     Whatever else happens to be installed in the virtualenv the generator
     runs in -- a formatter that was replaced, a tool tried once -- is not a
@@ -163,14 +196,17 @@ def declared_python_dependencies() -> set[str]:
     from packaging.requirements import Requirement
 
     roots: list[Requirement] = []
-    for line in REQUIREMENTS.read_text(encoding="utf-8").splitlines():
-        line = line.split("#", 1)[0].strip()
-        if not line or line.startswith(("-", "git+")):
+    for path in REQUIREMENTS:
+        if not path.exists():
             continue
-        try:
-            roots.append(Requirement(line))
-        except Exception:
-            continue
+        for line in path.read_text(encoding="utf-8").splitlines():
+            line = line.split("#", 1)[0].strip()
+            if not line or line.startswith(("-", "git+")):
+                continue
+            try:
+                roots.append(Requirement(line))
+            except Exception:
+                continue
 
     closure: set[str] = set()
     pending = list(roots)
@@ -211,7 +247,16 @@ def python_rows() -> list[tuple[str, str, str]]:
 
 def node_rows(pkg_dir: str) -> list[tuple[str, str, str]]:
     out = run(
-        ["npx", "--yes", "license-checker-rseidelsohn", "--production", "--json"],
+        [
+            "npx",
+            "--yes",
+            "license-checker-rseidelsohn",
+            "--production",
+            "--json",
+            # The scanned package itself is `private: true`, which the checker
+            # reports as UNLICENSED; it is not a third party.
+            "--excludePrivatePackages",
+        ],
         cwd=ROOT / pkg_dir,
     )
     data = json.loads(out)
@@ -286,22 +331,26 @@ def main() -> int:
 Generated by `scripts/generate_third_party_licenses.py` on {date.today().isoformat()}.
 Do not edit by hand; re-run the script after a dependency change.
 
-Experimently's own licensing is in `LICENSE` (AGPL-3.0-only core), `ee/LICENSE`
-(proprietary Enterprise Edition) and `sdk/LICENSE` (MIT SDKs). This file covers
-only third-party software.
+Experimently's own licensing is in `LICENSE` (Apache-2.0, the whole repository
+including the optional modules) and `sdk/LICENSE` (MIT, the client SDKs). This
+file covers only third-party software: what the product depends on, and under
+which licence each dependency is redistributed.
 
 Sections are grouped by licence, most common first. A ⚠️ marks a licence that
-needs a human decision before redistribution.
+needs a human decision before redistribution — for an Apache-2.0 product that
+is strong copyleft (GPL, AGPL), which must not ship in the runtime closure,
+and weak copyleft (LGPL, MPL, EPL, CDDL), which is fine to link unmodified.
 """
     )
 
     parts.append("## Python — backend, Lambda functions, infrastructure\n")
     parts.append(
         "The transitive closure of the pins in `backend/requirements.txt` "
-        "(runtime, test and CDK pins together), with versions and licences "
-        "read from the installed distributions by `pip-licenses`. Packages "
-        "that happen to be installed but are not reachable from a pin are "
-        "not dependencies and are not listed.\n"
+        "(runtime, test and CDK pins together) and `modules/requirements.txt` "
+        "(the module-only pins the full profile installs), with versions and "
+        "licences read from the installed distributions by `pip-licenses`. "
+        "Packages that happen to be installed but are not reachable from a pin "
+        "are not dependencies and are not listed.\n"
     )
     parts.append(grouped_table(python_rows()))
 

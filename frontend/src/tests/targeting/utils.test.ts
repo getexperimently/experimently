@@ -198,7 +198,7 @@ describe('rulesToJson', () => {
           id: 'g1',
           logical_operator: 'AND',
           conditions: [
-            { id: 'c1', attribute: 'user.plan', operator: 'in', value: 'pro,enterprise' },
+            { id: 'c1', attribute: 'user.plan', operator: 'in', value: 'pro,business' },
           ],
         },
       ],
@@ -210,7 +210,7 @@ describe('rulesToJson', () => {
     const conditions = groups[0].conditions as unknown as Array<Record<string, unknown>>;
     expect(conditions[0].attribute).toBe('user.plan');
     expect(conditions[0].operator).toBe('in');
-    expect(conditions[0].value).toBe('pro,enterprise');
+    expect(conditions[0].value).toBe('pro,business');
   });
 });
 

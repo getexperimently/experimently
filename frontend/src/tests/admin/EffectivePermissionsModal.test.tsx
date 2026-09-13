@@ -1,9 +1,9 @@
 import React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import { EffectivePermissionsModal } from '@/components/admin/users/EffectivePermissionsModal';
-import { RbacService } from '@ee/rbac';
+import { RbacService } from '@modules/rbac';
 
-jest.mock('@ee/rbac');
+jest.mock('@modules/rbac');
 
 const mockGetUserPermissions = RbacService.getUserPermissions as jest.Mock;
 

@@ -4,12 +4,15 @@
 #
 # Build context is the REPOSITORY ROOT (the code imports `backend.app.*`):
 #
-#   docker build -f backend/Dockerfile -t experimently-api:ce .
-#   docker build -f backend/Dockerfile --target ee -t experimently-api:ee .
+#   docker build -f backend/Dockerfile -t experimently-api:core .
+#   docker build -f backend/Dockerfile --target full -t experimently-api:full .
 #
 # Targets:
-#   ce  (default) community edition — backend/ only
-#   ee  enterprise edition — additionally copies ee/ when the directory exists
+#   core  (default) the core profile — backend/ only
+#   full  the full profile — backend/ plus modules/ and the module-only
+#         dependencies (modules/requirements.lock). Needs a full checkout: on
+#         a core one, which has no modules/ directory, it produces an image
+#         with an empty /app/modules that refuses to start outside development.
 #
 # Runtime contract:
 #   ENTRYPOINT backend/docker-entrypoint.sh  (waits for Postgres, bootstraps the
@@ -40,29 +43,40 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-COPY backend/requirements/runtime.txt /tmp/runtime.txt
-RUN pip install --upgrade pip && pip install -r /tmp/runtime.txt
+# The lock is the fully resolved, hashed closure of runtime.txt (`make lock`,
+# uv pip compile --universal --generate-hashes). Installing it with
+# --require-hashes makes the image reproducible and refuses any artefact that
+# does not match a recorded hash; `make lock-check` / the lint job fail when
+# runtime.txt is bumped without regenerating it.
+COPY backend/requirements/runtime.lock /tmp/runtime.lock
+RUN pip install --upgrade pip && pip install --require-hashes -r /tmp/runtime.lock
 
 # -------------------------------------------------------------------------
-# Stage 2: runtime — the minimal application image both editions share
+# Stage 2: runtime — everything the two profiles share EXCEPT the venv.
+#
+# The venv is copied in by the profile stages below, not here: the full profile
+# needs a bigger one, and a `COPY --from` on top of an inherited /opt/venv
+# would leave both copies in the image.
 # -------------------------------------------------------------------------
 FROM python:${PYTHON_VERSION}-slim AS runtime
 
 ARG BUILD_DATE
 ARG GIT_COMMIT
-ARG EDITION=ce
 
 LABEL org.opencontainers.image.title="Experimently API" \
       org.opencontainers.image.description="FastAPI backend for the Experimently experimentation platform" \
+      org.opencontainers.image.licenses="Apache-2.0" \
       org.opencontainers.image.created="${BUILD_DATE}" \
-      org.opencontainers.image.revision="${GIT_COMMIT}" \
-      io.experimently.edition="${EDITION}"
+      org.opencontainers.image.revision="${GIT_COMMIT}"
 
+# The profile is NOT a build argument: it is the target you build. `core` and
+# `full` below each set EXPERIMENTLY_PROFILE and the profile label for
+# themselves, and this stage is never a build target of its own. It carried an
+# `ARG PROFILE=core` that nothing ever passed and both children overrode.
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONPATH=/app \
     PATH="/opt/venv/bin:$PATH" \
-    EXPERIMENTLY_EDITION=${EDITION} \
     WEB_CONCURRENCY=1 \
     PORT=8000
 
@@ -77,8 +91,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && useradd --uid 1001 --gid appgroup --shell /bin/bash --create-home appuser
 
 WORKDIR /app
-
-COPY --from=builder /opt/venv /opt/venv
 
 # Application code. The layout under /app mirrors the repository so that
 # `backend.app.main:app`, `python -m backend.app.db.bootstrap` and the seed
@@ -99,32 +111,92 @@ ENTRYPOINT ["/app/backend/docker-entrypoint.sh"]
 CMD ["uvicorn", "backend.app.main:app", "--host", "0.0.0.0", "--port", "8000"]
 
 # -------------------------------------------------------------------------
-# Stage 3: ee — runtime plus the enterprise package (`--target ee`).
+# Stage 3a: modules-src — the modules/ tree, or an empty stand-in for it.
 #
-# `ee/` does not exist in the community checkout. `COPY ee* /app/ee/` uses a
-# glob so the build does not fail when the directory is absent (a glob that
-# matches nothing is tolerated by COPY, an explicit path is not); the
-# `ee/requirements.txt` install is likewise guarded.
+# Every reference to modules/ in this file goes through this one stage, because
+# a COPY that names modules/ by an explicit path cannot be built from a *core*
+# checkout, which has no modules/ at all. BuildKit builds only the stages the
+# requested --target needs, so it never looks; a classic builder
+# (DOCKER_BUILDKIT=0, Compose v1, Kaniko, older buildah) has no such notion and
+# runs every stage in file order, and `core` is the LAST stage here — so a
+# plain `docker build -f backend/Dockerfile .` on a core checkout reaches these
+# module stages and dies in them with "COPY failed: file not found in build
+# context: modules/requirements.lock".
+#
+# A glob alone does not fix it either: both builders reject a pattern that
+# matches nothing with "COPY failed: no source files were specified". So each
+# glob is paired with runtime.lock, which is always in the context, and the
+# companion is deleted again below. What is left is the same layout either way
+# — /modules/__init__.py, /modules/requirements.lock (empty when the context
+# had none) and /modules/backend/ — which the two stages below then take by
+# explicit path.
+#
+# `modules*/...` and not the bare `modules*`: the latter also matches the
+# repository's modules-manifest.txt.
+#
+# A `--target full` build from a core checkout is therefore no longer refused
+# at build time; it produces an image whose /app/modules is empty, and
+# `abort_if_modules_broken()` refuses to start it outside development.
 # -------------------------------------------------------------------------
-FROM runtime AS ee
+FROM python:${PYTHON_VERSION}-slim AS modules-src
 
-ARG EDITION=ee
-ENV EXPERIMENTLY_EDITION=ee
-LABEL io.experimently.edition="ee"
+COPY backend/requirements/runtime.lock modules*/__init__.py modules*/requirements.lock /modules/
+COPY backend/requirements/runtime.lock modules*/backend /modules/backend/
+RUN rm -f /modules/runtime.lock /modules/backend/runtime.lock \
+    && touch /modules/__init__.py /modules/requirements.lock
 
-USER root
-COPY --chown=appuser:appgroup ee* /app/ee/
-RUN if [ -f /app/ee/requirements.txt ]; then \
-        pip install --no-cache-dir -r /app/ee/requirements.txt; \
-    else \
-        echo "ee/ not present in build context; image is functionally CE"; \
+# -------------------------------------------------------------------------
+# Stage 3b: builder-full — the builder venv plus the module-only dependencies.
+#
+# The modules import packages the core profile never does (python3-saml/xmlsec,
+# authlib, PyMySQL, clickhouse-connect, databricks-sql-connector and their
+# closure). Every one of those imports is guarded in the module that needs it,
+# so a `full` image without them still boots and serves every route — and then
+# refuses the SAML flow and blocks on warehouse retries. They must be in the
+# image, and only in the `full` one.
+#
+# modules/requirements.lock is the hashed closure of modules/requirements.txt
+# (`make lock`), resolved under backend/requirements.txt as a constraint so the
+# two locks never disagree about a shared package; `make lock-check` and the
+# lint job fail when they drift. Installed here rather than in the
+# `full` stage below because this stage has the toolchain the sdist-only pins
+# need (thrift 0.20.0 publishes no wheel at all), and because the install then
+# caches independently of the module sources.
+# -------------------------------------------------------------------------
+FROM builder AS builder-full
+
+COPY --from=modules-src /modules/requirements.lock /tmp/modules.lock
+# Empty means a core checkout (see modules-src); there is nothing to add.
+RUN if [ -s /tmp/modules.lock ]; then \
+        pip install --require-hashes -r /tmp/modules.lock; \
     fi
-USER appuser
 
 # -------------------------------------------------------------------------
-# Stage 4: ce — the community image. Last stage = default target, so a plain
-# `docker build -f backend/Dockerfile .` produces CE.
+# Stage 3c: full — runtime plus the modules package (`--target full`).
 # -------------------------------------------------------------------------
-FROM runtime AS ce
-ENV EXPERIMENTLY_EDITION=ce
-LABEL io.experimently.edition="ce"
+FROM runtime AS full
+
+ENV EXPERIMENTLY_PROFILE=full
+LABEL io.experimently.profile="full"
+
+# The core closure *plus* the module dependencies.
+COPY --from=builder-full /opt/venv /opt/venv
+
+# modules/backend, not modules/ whole: modules/frontend is the dashboard's
+# module code, which frontend/Dockerfile needs in the build context and this
+# image has no use for. modules/backend/tests, modules/infrastructure and
+# modules/lambda are kept out of the context by .dockerignore, exactly as their
+# backend/ counterparts are.
+COPY --from=modules-src --chown=appuser:appgroup /modules/__init__.py /app/modules/
+COPY --from=modules-src --chown=appuser:appgroup /modules/backend /app/modules/backend/
+
+# -------------------------------------------------------------------------
+# Stage 4: core — the core image, with the core closure only: none of
+# modules/requirements.lock and no modules/ directory. Last stage = default
+# target, so a plain `docker build -f backend/Dockerfile .` builds this one.
+# -------------------------------------------------------------------------
+FROM runtime AS core
+ENV EXPERIMENTLY_PROFILE=core
+LABEL io.experimently.profile="core"
+
+COPY --from=builder /opt/venv /opt/venv

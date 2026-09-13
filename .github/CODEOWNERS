@@ -2,7 +2,7 @@
 #
 # Every entry here requires a review from the listed owner before a pull request
 # that touches those paths can merge. Order matters: the LAST matching pattern
-# wins, so the two licence-critical directories are listed last.
+# wins, so the SDK directory is listed last.
 #
 # Replace @amarkanday with the org team handle when the repository moves to its
 # public org (see the naming decision in the launch plan).
@@ -19,11 +19,6 @@
 /CONTRIBUTING.md            @amarkanday
 /.github/CODEOWNERS         @amarkanday
 /.github/workflows/         @amarkanday
-
-# Enterprise Edition: proprietary, source-available, no outside contributions.
-# Pull requests from outside contributors that touch this path are closed
-# without review. See CONTRIBUTING.md.
-/ee/                        @amarkanday
 
 # Client SDKs: MIT licensed and bound by the cross-SDK hashing contract.
 # A change here can fork assignment behaviour across sixteen packages.

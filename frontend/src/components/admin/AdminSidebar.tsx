@@ -1,7 +1,7 @@
 import React from 'react';
 import Link from 'next/link';
-import { useEdition } from '@/contexts/EditionContext';
-import { EDITIONS_DOC_PATH, EditionInfo, FEATURES, featureEnabled } from '@/services/edition';
+import { useModules } from '@/contexts/ModulesContext';
+import { MODULES, MODULES_DOC_PATH, ModulesInfo, moduleInstalled } from '@/services/modules';
 
 interface NavItem {
   label: string;
@@ -9,11 +9,12 @@ interface NavItem {
   testId: string;
   icon: string;
   /**
-   * Licence feature this item needs. Items without one are Community and
-   * always render. This is the seam the coupling report calls out: `/admin/roles`
-   * was hard-linked from Community chrome (`ee-coupling-report.md` §6).
+   * Module this item needs. Items without one are core and always render.
+   * `/admin/roles` belongs to the `rbac` module, so it is listed only when
+   * that module is installed: core chrome must not hard-link a route the core
+   * profile does not serve.
    */
-  feature?: string;
+  module?: string;
 }
 
 export const NAV_ITEMS: NavItem[] = [
@@ -24,7 +25,7 @@ export const NAV_ITEMS: NavItem[] = [
     href: '/admin/roles',
     testId: 'nav-item-roles',
     icon: '🔑',
-    feature: FEATURES.RBAC,
+    module: MODULES.RBAC,
   },
   { label: 'Audit Log', href: '/admin/audit', testId: 'nav-item-audit', icon: '📋' },
   { label: 'Safety', href: '/admin/safety', testId: 'nav-item-safety', icon: '🛡️' },
@@ -33,9 +34,9 @@ export const NAV_ITEMS: NavItem[] = [
   { label: 'Notifications', href: '/admin/notifications', testId: 'nav-item-notifications', icon: '🔔' },
 ];
 
-/** Community items, plus any Enterprise item the licence currently allows. */
-export function visibleNavItems(edition: EditionInfo, items: NavItem[] = NAV_ITEMS): NavItem[] {
-  return items.filter((item) => !item.feature || featureEnabled(edition, item.feature));
+/** Core items, plus any module item whose module is installed. */
+export function visibleNavItems(info: ModulesInfo, items: NavItem[] = NAV_ITEMS): NavItem[] {
+  return items.filter((item) => !item.module || moduleInstalled(info, item.module));
 }
 
 interface AdminSidebarProps {
@@ -43,11 +44,16 @@ interface AdminSidebarProps {
 }
 
 export function AdminSidebar({ currentPath }: AdminSidebarProps) {
-  const { info, isLoading } = useEdition();
-  const items = visibleNavItems(info);
-  // Not while the probe is outstanding: the note would say an admin page is
-  // Enterprise-only on a licensed instance, then vanish when the answer came.
-  const hiddenEnterprise = isLoading ? 0 : NAV_ITEMS.length - items.length;
+  const { profile, modules, version, isLoading, error } = useModules();
+  const items = visibleNavItems({ profile, modules, version });
+  // Neither while the probe is outstanding -- the note would say an admin page
+  // is missing on a full-profile instance and then vanish when the answer came
+  // -- nor when the probe *failed*: a failed probe resolves to the core
+  // profile, so the count would be right for a reason that is wrong, and the
+  // note would tell an operator their instance has no `rbac` module when all
+  // that happened was a 502. The separate note below says that instead.
+  const probeFailed = !isLoading && error !== null;
+  const hiddenModulePages = isLoading || probeFailed ? 0 : NAV_ITEMS.length - items.length;
 
   return (
     <aside
@@ -80,14 +86,21 @@ export function AdminSidebar({ currentPath }: AdminSidebarProps) {
           })}
         </nav>
 
-        {hiddenEnterprise > 0 && (
-          <p data-testid="admin-sidebar-enterprise-note" className="mt-6 text-xs text-slate-400">
-            {hiddenEnterprise === 1 ? 'One admin page is' : `${hiddenEnterprise} admin pages are`}{' '}
-            part of{' '}
-            <Link href={EDITIONS_DOC_PATH} className="underline hover:text-slate-600">
-              Enterprise
+        {hiddenModulePages > 0 && (
+          <p data-testid="admin-sidebar-modules-note" className="mt-6 text-xs text-slate-400">
+            {hiddenModulePages === 1
+              ? 'One admin page belongs to a module that is not installed.'
+              : `${hiddenModulePages} admin pages belong to modules that are not installed.`}{' '}
+            <Link href={MODULES_DOC_PATH} className="underline hover:text-slate-600">
+              Modules
             </Link>
-            .
+          </p>
+        )}
+
+        {probeFailed && (
+          <p data-testid="admin-sidebar-modules-error" className="mt-6 text-xs text-slate-400">
+            The dashboard could not reach the API to check which modules are installed, so any
+            module pages are hidden for now.
           </p>
         )}
       </div>

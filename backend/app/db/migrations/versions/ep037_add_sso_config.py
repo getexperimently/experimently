@@ -1,4 +1,4 @@
-"""EP-037: Add SSO/SAML & OIDC enterprise authentication tables
+"""EP-037: Add SSO/SAML & OIDC authentication tables
 
 Revision ID: ep037_sso_config
 Revises: ep036_split_url

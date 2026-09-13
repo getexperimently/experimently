@@ -59,6 +59,131 @@ jobs:
             python -m pytest "$d" -p no:cov -q --tb=short || exit 1
           done
 
+  # The modules carry 1,629 tests of their own. Until now the only thing that
+  # ran them was `full-build`, a 60-minute job: a broken module test was an
+  # hour of waiting away. This is the same shape as unit-tests, so it fails in
+  # minutes.
+  module-tests:
+    name: Module Tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_DB: experimentation
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: |
+            backend/requirements.txt
+            modules/requirements.txt
+
+      # Both sets: the modules import the backend, and modules/requirements.txt
+      # carries what only they import (python3-saml, PyMySQL, the warehouse
+      # drivers). Without the second install the connector tests would pass
+      # against a None module and prove nothing.
+      - name: Install dependencies
+        run: |
+          pip install -r backend/requirements.txt
+          pip install -r modules/requirements.txt
+
+      - name: Run module tests
+        env:
+          APP_ENV: test
+          TESTING: 'true'
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: 5432
+          POSTGRES_DB: experimentation
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        run: python -m pytest modules/backend/tests -p no:cov -q --tb=short
+
+  base-requirements-only:
+    # The environment nobody was testing: a FULL checkout whose interpreter has
+    # ONLY backend/requirements.txt in it -- no modules/requirements.txt, no
+    # extras. Every other Python job either installs both sets (module-tests)
+    # or does not care whether the modules registered.
+    #
+    # The modules import a few packages unguarded (defusedxml in sso_service,
+    # deliberately: an XXE-safe parser has no safe fallback), so moving one of
+    # those out of backend/requirements.txt breaks the registration for every
+    # job that installs that file alone. When that happened the symptom was
+    # unreadable -- conftest's require_modules_or_absent() raised during
+    # collection and pytest exited 3 having collected zero tests -- and no
+    # developer could reproduce it, because their venv has every package.
+    #
+    # ~90 seconds: one pip install, one import, the smoke suite.
+    name: Base Requirements Only
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_DB: experimentation
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      # EXACTLY this file. Adding anything here -- including
+      # modules/requirements.txt -- defeats the whole job.
+      - name: Install backend/requirements.txt and nothing else
+        run: pip install -r backend/requirements.txt
+
+      - name: The modules must register on this environment
+        env:
+          APP_ENV: test
+          TESTING: 'true'
+          # The import itself opens no connection, but the settings are read
+          # while it happens; give them the service's values rather than
+          # whatever the defaults are.
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: 5432
+          POSTGRES_DB: experimentation
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        run: python scripts/check_modules_register.py
+
+      - name: Run the smoke suite
+        env:
+          APP_ENV: test
+          TESTING: 'true'
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: 5432
+          POSTGRES_DB: experimentation
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        run: python -m pytest backend/tests/smoke -p no:cov -q --tb=short
+
   smoke-tests:
     name: Smoke Tests
     runs-on: ubuntu-latest
@@ -122,27 +247,34 @@ jobs:
       - name: Build
         run: cd frontend && npm run build
 
-      # The Community seam, exercised the way a Community build resolves it:
-      # `@ee/*` to the stub tree only. Without these three steps a stub-shape
-      # drift -- an `@ee/x` import with no stub, a method added to src/ee/rbac.ts
-      # and used from a Community page -- ships through a green CI, because
-      # every other step resolves `@ee/*` to the real tree first.
-      - name: tsc against the Community tsconfig
-        run: cd frontend && npx tsc --noEmit -p tsconfig.ce.json
+      # The core seam, exercised the way a core build resolves it:
+      # `@modules/*` to the stub tree only. Without these three steps a
+      # stub-shape drift -- an `@modules/x` import with no stub, a method added
+      # to modules/frontend/src/rbac.ts and used from a core page -- ships
+      # through a green CI, because every other step resolves `@modules/*` to
+      # the real tree (modules/frontend/src) first. scripts/core_build.sh
+      # repeats the build step on a tree with modules/ actually deleted (the
+      # core-build job).
+      - name: tsc against the core tsconfig
+        run: cd frontend && npx tsc --noEmit -p tsconfig.core.json
 
-      - name: Jest as Community
-        run: cd frontend && EXPERIMENTLY_EDITION=ce npx jest --passWithNoTests --watchAll=false
+      - name: Jest as the core profile
+        run: cd frontend && EXPERIMENTLY_PROFILE=core npx jest --passWithNoTests --watchAll=false
 
-      - name: Community build carries no Enterprise route
+      - name: Core build carries no module route
         run: |
           cd frontend
           rm -rf .next out
-          EXPERIMENTLY_EDITION=ce npm run build
+          EXPERIMENTLY_PROFILE=core npm run build
           if grep -rlE '/api/v1/workspaces|/api/v1/rbac/|/api/v1/hipaa' out/_next/static; then
-            echo "::error::Community bundle references Enterprise routes"; exit 1
+            echo "::error::core bundle references module routes"; exit 1
           fi
-          if [ -z "$(find out/_next/static/chunks/pages -maxdepth 1 -name 'workspaces*' -print -quit)" ]; then
-            echo "::error::Community bundle has no workspaces stub page"; exit 1
+          # `-type f -name 'workspaces-*.js'`: the chunks directory also holds a
+          # `workspaces/` DIRECTORY for the nested routes, and the old
+          # `-name 'workspaces*' -print -quit` stopped at it -- so the check
+          # passed even with the stub index page gone.
+          if [ -z "$(find out/_next/static/chunks/pages -maxdepth 1 -type f -name 'workspaces-*.js' -print -quit)" ]; then
+            echo "::error::core bundle has no workspaces stub page (chunks/pages/workspaces-<hash>.js)"; exit 1
           fi
 
   sdk-contracts:
@@ -171,6 +303,110 @@ jobs:
       - name: Run JS contracts
         run: node tests/sdk-contract/test_js_sdk.js
 
+  # Each profile must stand on its own. scripts/core_build.sh copies the
+  # checkout and runs one sequence over the copy; `--profile core` deletes
+  # modules/ and every path modules-manifest.txt still lists outside it (a
+  # boundary regression fails there), `--profile full` deletes nothing.
+  #
+  # Both profiles run: REUSE licensing and gitleaks over the tree that profile
+  # would ship, `import backend.app.main` in the right profile, bootstrap on
+  # Postgres 16 into a scratch schema (exactly that profile's tables), the
+  # dashboard build with the module-route grep, and the shipped-licence
+  # allow-list over that profile's dependency closure.
+  #
+  # The pytest sessions are core-only, and deliberately: `--profile full`
+  # leaves the tree exactly as the checkout is, so its unit / integration /
+  # smoke / module / Lambda / golden-vector sessions would re-run, in a
+  # 60-minute job, what unit-tests, integration-tests.yml, smoke-tests,
+  # module-tests and sdk-contracts already ran on that same tree in minutes.
+  # `--profile core` runs them because there they run against a DIFFERENT
+  # tree -- one with modules/ deleted -- which nothing else exercises.
+  #
+  # The same sequence as `make core-build` / `make full-build`; the step that
+  # failed is named in the last line of the log.
+  profile-build:
+    # The check name stays `core-build` / `full-build`: an explicit `name:`
+    # replaces the default `profile-build (core)` spelling, so the required
+    # status checks keep working.
+    name: ${{ matrix.profile }}-build
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - profile: core
+            steps: ''
+          - profile: full
+            steps: '--steps copy,strip,reuse,secrets,import,bootstrap,frontend,licences'
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: experimentation
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      APP_ENV: test
+      TESTING: 'true'
+      POSTGRES_SERVER: localhost
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: '5432'
+      POSTGRES_DB: experimentation
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      GITLEAKS_VERSION: '8.30.1'
+      # Repository tooling, same versions as the Makefile; installed here
+      # rather than pinned in backend/requirements.txt, which is the product's
+      # dependency list and feeds THIRD_PARTY_LICENSES.md.
+      REUSE_VERSION: '6.2.0'
+      PIP_LICENSES_VERSION: '5.5.5'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install backend dependencies
+        run: pip install -r backend/requirements.txt "reuse==${REUSE_VERSION}" "pip-licenses==${PIP_LICENSES_VERSION}"
+
+      # The modules import packages backend/requirements.txt deliberately does
+      # not carry (python3-saml, PyMySQL, the warehouse drivers, and the
+      # defusedxml/requests the SSO service needs); every one of those imports
+      # is guarded, so without this the licence step would report them as
+      # "pinned but not installed here".
+      - name: Install module dependencies
+        if: matrix.profile == 'full'
+        run: pip install -r modules/requirements.txt
+
+      - name: Install gitleaks
+        run: |
+          curl -fsSL -o /tmp/gitleaks.tar.gz \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          tar -xzf /tmp/gitleaks.tar.gz -C /usr/local/bin gitleaks
+          gitleaks version
+
+      - name: ${{ matrix.profile }} build
+        run: scripts/core_build.sh --profile ${{ matrix.profile }} ${{ matrix.steps }}
+
   # Live SDK contract: every SDK's contract_smoke against a real backend.
   # Proves the SDKs call endpoints the backend actually serves (the golden-vector
   # job above only covers hashing). Toolchains not available on ubuntu-latest
@@ -181,7 +417,7 @@ jobs:
     name: SDK Live Contract
     uses: ./.github/workflows/_platform.yml
     with:
-      edition: ce
+      profile: core
       seed: sdk-contract
       suite: sdk-live-contract
       sdks: >-
@@ -355,19 +591,141 @@ jobs:
         with:
           context: .
           file: backend/Dockerfile
-          target: ce
+          target: core
           load: true
-          tags: experimently-api:ce
+          tags: experimently-api:core
           cache-from: type=gha,scope=api
           cache-to: type=gha,scope=api,mode=max
+
+      # The full image is what a self-hoster who runs the modules gets, and no
+      # job built it: a module-only dependency missing from the image surfaced
+      # as a refused SAML login or a warehouse query blocking on retries in
+      # production, never as a red build. It is built in this job rather than
+      # its own because the `builder` and `runtime` stages are already in this
+      # job's layer cache from the core build above, so the extra work is one
+      # pip install of the module closure -- a couple of minutes inside the
+      # existing 25-minute budget, against ~8 for a cold job of its own.
+      - name: Build API image (full profile)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: backend/Dockerfile
+          target: full
+          load: true
+          tags: experimently-api:full
+          cache-from: |
+            type=gha,scope=api
+            type=gha,scope=api-full
+          cache-to: type=gha,scope=api-full,mode=max
+
+      # The deny-list is DERIVED, not typed: every distribution
+      # modules/requirements.lock pins that backend/requirements/runtime.lock
+      # does not. Those two locks are what the two stages install, so their
+      # difference is exactly "what full adds". The six hand-written names
+      # this replaced had already gone stale -- `requests` and `defusedxml`
+      # were in the core image with no core importer, and neither was on the
+      # list -- and a derived list also covers the closure (lxml, xmlsec,
+      # pyarrow, thrift, oauthlib, ...) that nobody would have typed out.
+      # Distribution names, checked against importlib.metadata: no guessing
+      # which import name `python3-saml` answers to.
+      - name: Module dependencies are in the full image and only there
+        run: |
+          set -euo pipefail
+          MODULE_ONLY="$(python3 scripts/module_only_packages.py --oneline)"
+          echo "module-only distributions: $MODULE_ONLY"
+          docker run --rm -e MODULE_ONLY="$MODULE_ONLY" --entrypoint python experimently-api:full -c '
+          import importlib.util, os, re
+          from importlib import metadata
+          wanted = set(os.environ["MODULE_ONLY"].split())
+          installed = {re.sub(r"[-_.]+", "-", d.metadata["Name"]).lower()
+                       for d in metadata.distributions() if d.metadata["Name"]}
+          missing = sorted(wanted - installed)
+          assert not missing, "full image is missing module dependencies: %s" % missing
+          assert os.environ["EXPERIMENTLY_PROFILE"] == "full", os.environ["EXPERIMENTLY_PROFILE"]
+          # find_spec, not import: this asserts the package the loader looks for
+          # is in the image, without running the registration chain, which needs
+          # settings this container has not been given.
+          assert importlib.util.find_spec("modules") is not None, "no modules package in the full image"
+          print("full image: all %d module dependencies and modules/ present" % len(wanted))
+          '
+          # The core image must carry none of them, or 'core' means nothing.
+          docker run --rm -e MODULE_ONLY="$MODULE_ONLY" --entrypoint python experimently-api:core -c '
+          import importlib.util, os, re
+          from importlib import metadata
+          wanted = set(os.environ["MODULE_ONLY"].split())
+          installed = {re.sub(r"[-_.]+", "-", d.metadata["Name"]).lower()
+                       for d in metadata.distributions() if d.metadata["Name"]}
+          leaked = sorted(wanted & installed)
+          assert not leaked, "core image ships module-only packages: %s" % leaked
+          assert importlib.util.find_spec("modules") is None, "core image ships a modules package"
+          assert os.environ["EXPERIMENTLY_PROFILE"] == "core", os.environ["EXPERIMENTLY_PROFILE"]
+          print("core image: none of the %d module dependencies, no modules/" % len(wanted))
+          '
+          # No test tree, no CDK app, no dashboard code: .dockerignore keeps the
+          # first two out of the build context and the Dockerfile copies
+          # modules/backend rather than modules/ whole.
+          docker run --rm --entrypoint sh experimently-api:full -c '
+          for unwanted in backend/tests infrastructure frontend lambda; do
+            if [ -d "/app/modules/$unwanted" ]; then
+              echo "the image ships modules/$unwanted"
+              exit 1
+            fi
+          done
+          echo "full image: no tests, no CDK, no dashboard code"
+          '
+
+      # Every job here runs ENVIRONMENT=development, where the hardening
+      # validators are all off -- so nothing ever ran this image the way a
+      # deployment does. `modules.register(hooks)` builds the modules' settings
+      # as its first step, and their AUDIT_HMAC_KEY validator rejects the
+      # shipped dev default in staging/production: with the secret missing the
+      # registration fails, main.py's abort_if_modules_broken() refuses to
+      # start, and migrations/env.py fails every alembic command with it. The
+      # variables below are the ones a production task definition injects
+      # (infrastructure/cdk/stacks/fargate_service_stack.py).
+      - name: Full image boots with production settings
+        run: |
+          set -euo pipefail
+          KEY=$(python3 -c 'import secrets; print(secrets.token_hex(32))')
+          prod=(
+            -e ENVIRONMENT=production
+            -e SECRET_KEY="$KEY"
+            -e FIRST_SUPERUSER_PASSWORD="$KEY"
+            -e POSTGRES_PASSWORD=ci-only-not-a-real-password
+            -e REDIS_URL=redis://localhost:6379/0
+          )
+          # Importing main.py runs the registration and the abort check; it
+          # opens no connection, so no database or Redis is needed here.
+          docker run --rm "${prod[@]}" -e AUDIT_HMAC_KEY="$KEY" \
+            --entrypoint python experimently-api:full -c '
+          import backend.app.main  # noqa: F401 -- the import IS the test
+          from backend.app.core import hooks
+          from backend.app.modules_loader import modules_failure
+          assert modules_failure() is None, modules_failure()
+          signer = type(hooks.audit_signer).__name__
+          assert signer != "NullAuditSigner", "full image writes UNSIGNED audit events"
+          print("full image in production: modules registered, audit signer is", signer)
+          '
+          # ...and without that one secret it must refuse, naming it, rather
+          # than serve a core profile behind a full label.
+          if docker run --rm "${prod[@]}" --entrypoint python \
+               experimently-api:full -c 'import backend.app.main' 2>refused.log; then
+            echo "::error::the full image started with no AUDIT_HMAC_KEY"
+            exit 1
+          fi
+          grep -q AUDIT_HMAC_KEY refused.log
+          echo "full image with no AUDIT_HMAC_KEY: refused, and the message names it"
+          rm -f refused.log
 
       - name: Build dashboard image
         uses: docker/build-push-action@v6
         with:
           context: .
           file: frontend/Dockerfile
+          build-args: |
+            EXPERIMENTLY_PROFILE=core
           load: true
-          tags: experimently-web:ce
+          tags: experimently-web:core
           cache-from: type=gha,scope=web
           cache-to: type=gha,scope=web,mode=max
 

@@ -120,13 +120,13 @@ def backfill_experiment_keys(db) -> int:
 
 
 def ensure_tables():
-    """Create every table of the running edition if it does not exist yet.
+    """Create every table of the running profile if it does not exist yet.
 
-    The same registration bootstrap uses -- the Community models, then
-    whatever the Enterprise registration adds -- so a database seeded by hand
-    (the "pieces by hand" path in CLAUDE.md) has the tables the Enterprise
-    routers need.  Importing a handful of model modules and calling
-    ``create_all``, as this once did, built the 37 Community tables and left
+    The same registration bootstrap uses -- the core models, then whatever
+    the modules' registration adds -- so a database seeded by hand (the
+    "pieces by hand" path in CLAUDE.md) has the tables the module routers
+    need.  Importing a handful of model modules and calling ``create_all``,
+    as this once did, built the 37 core tables and left
     ``GET /api/v1/workspaces`` to fail on a missing relation.
     """
     from backend.app.db.bootstrap import create_from_models
