@@ -1,0 +1,54 @@
+# Paths removed from EVERY commit when this repository is exported for
+# publication (scripts/publish/export.sh, `git filter-repo --invert-paths
+# --paths-from-file`). One entry per line: a plain path matches that file or
+# everything under that directory; `glob:` entries use shell wildcards.
+#
+# Everything here is internal-only. The optional modules (`modules/`) are NOT
+# here: they are published under Apache-2.0 like the rest of the tree.
+#
+# Test for this file: export.sh's sweep lists every path that ever existed in
+# the exported history and fails if any entry below still matches one.
+
+# Agent instructions with local absolute paths, and the internal working notes
+# that lived beside them. `.claude/agents/` and `.claude/commands/` stay: they
+# are the QA agents and the developer commands the docs describe.
+CLAUDE.md
+backend/CLAUDE.md
+frontend/CLAUDE.md
+.claude/settings.json
+.claude/settings.local.json
+.claude/scratchpads
+.claude/EP010_QUICK_START.md
+.claude/EP010_PHASE4_EXECUTION_PLAN.md
+.claude/PHASE_4_PLAN.md
+.claude/QUICKSTART_PHASE4.md
+.claude/PHASE4_VALIDATION.md
+.claude/README_PHASE4.md
+.cursor
+
+# Internal planning: the launch plan, the nine specialist reviews, the
+# superseded go-to-market strategy, the coupling report, the testing audit.
+# Also the one place the pre-reframe vocabulary may still appear.
+docs/planning
+project
+wip
+
+# An internal audit report, the developer-bypass instructions, and the
+# fabricated "production" metrics of the public-preview mock-ups.
+docs/security/security-audit-report.md
+docs/LOCAL_DEVELOPMENT_AUTH.md
+test_dev_auth.sh
+public-preview
+# An interview-prep document that was committed to the repository root once.
+API_Architecture_PM_Interview_Guide.md
+
+# --- local files: below this line, entries are files a developer creates or
+# generates locally and were committed by mistake. They are removed from the
+# history like everything else, but the dangling-reference sweep does not treat
+# a mention of them as a dead link (the docs legitimately say "create .env.dev").
+.env.dev
+glob:backend/.env.*
+backend/.venv
+LICENSE.txt
+glob:*coverage.xml
+glob:*.log

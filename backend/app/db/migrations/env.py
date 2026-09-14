@@ -42,7 +42,7 @@ require_modules_or_absent()
 # metadata as it reads on the schema resolved above, so that the metadata
 # autogenerate compares and the schema it reflects are the same string by
 # construction.  Without this, `APP_ENV=test TESTING=true` with POSTGRES_SCHEMA
-# left unset — the export sequence CLAUDE.md documents — produced a revision
+# left unset — the export sequence CONTRIBUTING.md documents — produced a revision
 # that creates all ~50 tables in test_experimentation and drops all ~50 from
 # experimentation: users, experiments, feature_flags, everything.
 # Base.metadata itself is returned unchanged when the two already agree.
@@ -216,7 +216,7 @@ _STATE_CHANGING_COMMANDS = frozenset({"upgrade", "downgrade", "stamp"})
 #: has nothing left to do once this build's own heads are all recorded: that is
 #: what :func:`may_run_alembic` tests.  A skipped ``downgrade`` exits 0 with the
 #: schema unchanged, and a skipped ``stamp`` is worse still -- ``stamp --purge
-#: heads`` is the escape hatch `CLAUDE.md` and the guard's own message point at,
+#: heads`` is the escape hatch the migration guide and the guard's own message point at,
 #: and the guard used to close it.  Both now get alembic's own answer, which
 #: names the revision it cannot resolve (review round 4, finding 3).
 _SKIPPABLE_COMMANDS = frozenset({"upgrade"})

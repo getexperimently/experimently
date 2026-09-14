@@ -5,7 +5,7 @@ Run pytest tests for the backend with all necessary environment configuration.
 Arguments: $ARGUMENTS (optional - specific test path or pytest flags)
 
 Steps to execute:
-1. Activate the virtual environment at /Users/ashishmarkanday/github/experimentation-platform/venv
+1. Activate the virtual environment (`source venv/bin/activate` from the repository root)
 2. Set required environment variables: APP_ENV=test and TESTING=true
 3. Run pytest with the provided arguments, or all backend tests if no args provided
 4. Use verbose output (-v) and short traceback (--tb=short) for clear results

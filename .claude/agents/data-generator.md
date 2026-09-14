@@ -25,15 +25,15 @@ Available scenarios:
 ## Dry Run (data generation only, no API call)
 
 ```bash
-source /Users/ashishmarkanday/github/experimentation-platform/venv/bin/activate
-cd /Users/ashishmarkanday/github/experimentation-platform
+source venv/bin/activate
+cd "$(git rev-parse --show-toplevel)"
 python backend/tests/realistic/data_generator.py --scenario <name> --dry-run
 ```
 
 ## Seed into Running Platform
 
 ```bash
-source /Users/ashishmarkanday/github/experimentation-platform/venv/bin/activate
+source venv/bin/activate
 python backend/tests/realistic/data_generator.py \
   --scenario <name> \
   --api-url http://localhost:8000 \

@@ -311,29 +311,40 @@ copies the repository layout unchanged.
 
 ## Switching Profile
 
-The same database can be built by one profile and opened by the other. Let the
-bootstrap do it — `python -m backend.app.db.bootstrap`, which is what the API
-container runs on start-up — rather than `alembic upgrade heads` on its own.
+The same database can be built by one profile and opened by the other. Both
+documented paths handle it the same way: `python -m backend.app.db.bootstrap`
+(what the API container runs on start-up) and `alembic upgrade heads` (what the
+migration task runs) share the repairs below, because `migrations/env.py` calls
+them after a command-line upgrade.
 
 **Core database, full image.** The core chain marks the revisions that once
 created `workspaces`, `sso_configs`, `phi_audit_logs` and the rest as applied
 without creating them, and the `modules` branch does not re-create them (it owns
-the three RBAC tables only). The bootstrap therefore reconciles the schema with
-the models after upgrading: it creates every table the models declare and the
-database lacks, adds the two `workspace_id` foreign keys, and says so at
-WARNING. Without that step the API answers `profile: full` on
-`GET /api/v1/modules` while `/workspaces` and `/hipaa/*` fail on missing
-relations.
+the three RBAC tables only). So after the upgrade reaches this build's heads,
+the module tables the models declare and the database lacks are created from
+the models, the two `workspace_id` foreign keys are added, and a WARNING says
+so. Only module tables are ever created this way — an unmigrated *core* model is
+not, so a missing core migration still shows up as a missing table rather than
+being papered over. `alembic upgrade heads --sql` (offline mode) has no
+reconcile step: the SQL it emits for a profile switch is incomplete.
 
 **Full database, core image.** `alembic_version` holds a revision a core build
-has no file for, and *every* alembic command against it fails with "Can't locate
-revision identified by 'modules_0001_rbac'" — alembic reads the whole table
-before it does anything. The bootstrap handles it: when the core chain is
-already at its head there is nothing to apply, so it skips alembic, leaves the
-rows untouched and logs a WARNING naming the revisions. When the core chain is
-*behind* (a newer core image against a full database) it refuses with a message
-naming them; run the full image against that database, or — with a backup taken
-— delete those rows from `alembic_version` first.
+has no file for. `alembic upgrade heads` answers in one of two ways: when the
+core chain is already at its head there is nothing to apply, so it skips alembic,
+leaves the rows untouched and logs a WARNING naming the foreign revisions (exit
+0); when the core chain is *behind* — a newer core image against a database the
+full image built — it refuses with a message naming them. `downgrade` and
+`stamp` do not skip: they fail with alembic's own "Can't locate revision
+identified by 'modules_0001_rbac'", and the schema is untouched.
 
-The module tables themselves are never dropped by switching down to core. They
-stay, unused, until the database goes back to the full profile.
+The escape hatch, when you really do want the core image to own that database:
+take a backup, then from the core image
+
+```bash
+python -m alembic -c backend/app/db/alembic.ini stamp --purge heads
+```
+
+`--purge` replaces the whole version table with this build's own heads, so the
+modules row goes and the core row stays. The module tables themselves are never
+dropped by switching down to core. They stay, unused, until the database goes
+back to the full profile.

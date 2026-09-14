@@ -124,7 +124,7 @@ def ensure_tables():
 
     The same registration bootstrap uses -- the core models, then whatever
     the modules' registration adds -- so a database seeded by hand (the
-    "pieces by hand" path in CLAUDE.md) has the tables the module routers
+    by-hand demo setup in demo/DEMO_GUIDE.md) has the tables the module routers
     need.  Importing a handful of model modules and calling ``create_all``,
     as this once did, built the 37 core tables and left
     ``GET /api/v1/workspaces`` to fail on a missing relation.
