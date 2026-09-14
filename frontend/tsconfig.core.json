@@ -24,12 +24,12 @@
         "./src/modules-stub/*"
       ],
       "react": [
-        "./node_modules/react",
-        "./node_modules/@types/react"
+        "./node_modules/@types/react",
+        "./node_modules/react"
       ],
       "react/*": [
-        "./node_modules/react/*",
-        "./node_modules/@types/react/*"
+        "./node_modules/@types/react/*",
+        "./node_modules/react/*"
       ],
       "next": [
         "./node_modules/next"
