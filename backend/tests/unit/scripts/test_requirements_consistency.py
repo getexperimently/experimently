@@ -94,15 +94,20 @@ class TestDependabotCoverage:
         return directories
 
     @pytest.mark.regression
-    def test_the_files_the_image_installs_are_watched(self):
-        """`/backend` does not cover `backend/requirements/runtime.txt`:
-        Dependabot's pip fetcher reads the `.txt`/`.in` files at the named
-        directory's root plus whatever a `-r` pulls in, and nothing pulls in
-        runtime.txt."""
+    def test_the_backend_is_watched_once(self):
+        """`/backend` covers backend/requirements.txt AND the pin files under
+        backend/requirements/: Dependabot's pip fetcher reads a `requirements/`
+        subdirectory of the named directory (PR #119, "in /backend", bumped
+        pandas in both files). A second entry for `/backend/requirements`
+        re-reads the parent's file and opens a duplicate of every pull request
+        (#120/#123, #121/#124) -- it must not come back."""
         directories = self._pip_directories()
-        assert "/backend/requirements" in directories, (
-            "nothing watches backend/requirements/runtime.txt, the only pin "
-            f"file the shipped image installs; pip entries: {sorted(directories)}"
+        assert "/backend" in directories, (
+            f"nothing watches backend/requirements.txt; pip entries: {sorted(directories)}"
+        )
+        assert "/backend/requirements" not in directories, (
+            "`/backend/requirements` duplicates the `/backend` entry: Dependabot "
+            "reads the requirements/ subdirectory from `/backend` already"
         )
 
     def test_every_pinned_requirements_file_in_the_tree_is_covered(self):
@@ -128,6 +133,11 @@ class TestDependabotCoverage:
             if not checker.read_pins(path):
                 continue  # a pointer file, nothing of its own to bump
             watched = "/" + "/".join(parts[:-1]) if len(parts) > 1 else "/"
-            if watched not in directories:
+            # A pin file inside a `requirements/` subdirectory is read by the
+            # entry for its parent (see test_the_backend_is_watched_once).
+            candidates = {watched}
+            if len(parts) > 2 and parts[-2] == "requirements":
+                candidates.add("/" + "/".join(parts[:-2]))
+            if not candidates & directories:
                 uncovered.append(str(relative))
         assert not uncovered, f"no Dependabot pip entry covers: {uncovered}"
