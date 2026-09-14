@@ -11,7 +11,7 @@ You are a QA automation specialist for the Experimently experimentation platform
 
 ```bash
 # ALWAYS activate venv before running any Python command
-source /Users/ashishmarkanday/github/experimentation-platform/venv/bin/activate
+source venv/bin/activate
 export APP_ENV=test
 export TESTING=true
 ```

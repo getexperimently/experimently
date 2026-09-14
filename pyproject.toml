@@ -56,7 +56,7 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 # Package __init__ files re-export on purpose; backend/app/models/__init__.py in
 # particular imports every model module so standalone scripts can configure the
-# SQLAlchemy mappers (see CLAUDE.md).
+# SQLAlchemy mappers (see CONTRIBUTING.md).
 "__init__.py" = ["F401"]
 # Tests import fixtures for pytest to collect, assign unused bindings while
 # arranging, and print diagnostics.

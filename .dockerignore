@@ -28,7 +28,6 @@ venv/
 **/*.log
 **/.DS_Store
 # docs/ is copied into the dashboard image (in-app documentation pages).
-public-preview/
 infrastructure/
 backend/tests/
 backend/lambda/

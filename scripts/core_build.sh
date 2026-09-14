@@ -187,7 +187,7 @@ if [ -z "${VIRTUAL_ENV:-}" ] && [ -f "$REPO_ROOT/venv/bin/activate" ]; then
 fi
 PYTHON="${PYTHON:-python}"
 
-# Same process environment every backend test job uses (CLAUDE.md "Always").
+# Same process environment every backend test job uses (CONTRIBUTING.md, "Tests").
 export APP_ENV=test
 export TESTING=true
 export EXPERIMENTLY_PROFILE="$PROFILE"

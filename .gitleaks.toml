@@ -1,12 +1,35 @@
-title = "Experimentation Platform Gitleaks Config"
+title = "Experimently gitleaks config"
+
+# A config that defines no rules and does not extend the defaults scans with
+# NO RULES -- which is what this file did from the day it was added (EP-018)
+# until 2026-09-13. Every CI run, every core_build.sh secrets step and every
+# local scan that loaded it found nothing because it could not find anything.
+# Tamper-test any change here: plant a fake AWS key in a scratch commit and
+# make sure the scan reports it.
+[extend]
+useDefault = true
 
 [allowlist]
-  description = "Allowlist"
-  regexes = [
-    '''HASHED_PASSWORD = "\$2b\$12\$.*"''',  # bcrypt hashes in test files are OK
-    '''mock.*token''',                         # mock tokens in tests
-  ]
-  paths = [
-    '''backend/tests/''',
-    '''frontend/src/tests/''',
-  ]
+description = "test fixtures and reviewed placeholder values"
+paths = [
+  'backend/tests/',
+  'modules/backend/tests/',
+  'frontend/src/tests/',
+  'modules/frontend/src/tests/',
+  'sdk/[^/]+/tests?/',
+  'demo/[^/]+/src/__tests__/',
+]
+# Every value here is a visibly fake placeholder the default rules match in
+# this tree or its history. scripts/publish/gitleaks-export.toml carries the
+# same list with NO path allowlist; it is the one the publication sweep uses.
+stopwords = [
+  "your_access_token", "your_api_key", "your-api-key", "YOUR_API_KEY",
+  "your_admin_token", "your-api-key-here", "expired_token",
+  "sk-live-xxxx", "sk-prod-abc123", "sk-live-abc123", "sk_live_123abc",
+  "ep_live_a1b2c3", "1234567890ABCDEF",
+  "StrongPass123", "Str0ng-Passw0rd", "abcdef1234567890", "owner-flag-001",
+  "dev-token-admin", "Ed25519PrivateKey",
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9", "eyJjdHkiOiJKV1Q", "eyJraWQiOiJ",
+  "eyJ0eXAiOiJKV1Q", "eyJhbGciOiJSUzI1NiIs",
+  "num_buckets", "FLAG_KEYS", "default_variant",
+]

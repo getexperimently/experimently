@@ -33,7 +33,7 @@ Hooks
 
 There is deliberately no ``register_scheduler``: all five schedulers started in
 ``main.py``'s lifespan are core, and no module needs one today
-(the coupling report under ``docs/planning/``, §5).  Add it when P5's PHI purge job
+(established when the boundary was mapped before the move).  Add it when P5's PHI purge job
 actually needs it, not before.
 """
 

@@ -64,7 +64,7 @@ amplify configure
 ### Step 2: Initialize Amplify in Your Project
 
 ```bash
-cd /Users/ashishmarkanday/github/experimentation-platform/frontend
+cd frontend
 amplify init
 ```
 

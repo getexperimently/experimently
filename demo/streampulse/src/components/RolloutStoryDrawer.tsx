@@ -14,7 +14,7 @@ export interface StoryStep {
   lookAt: string;
 }
 
-/** The 7-step narrative from docs/planning/go-to-market/demo-application-strategy.md, as seeded and scripted. */
+/** The 7-step narrative for the StreamPulse rollout story as seeded and scripted. */
 export const STORY_STEPS: StoryStep[] = [
   {
     title: 'We are launching a redesigned player',

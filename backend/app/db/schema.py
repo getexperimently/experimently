@@ -13,7 +13,7 @@ module there were two, and they disagreed:
 
 They agree in production (``POSTGRES_SCHEMA=experimentation``, ``APP_ENV=prod``)
 and in the test suite (``conftest.py`` sets both), and they disagreed in exactly
-the shell ``CLAUDE.md`` documents for running anything by hand::
+the shell ``CONTRIBUTING.md`` documents for running anything by hand::
 
     export APP_ENV=test TESTING=true      # POSTGRES_SCHEMA left unset
 

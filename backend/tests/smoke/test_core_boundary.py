@@ -13,8 +13,8 @@ failing on three kinds of crossing:
    arguments: ``backend/tests/integration/api/test_hipaa_api.py`` makes 38
    ``patch()`` calls of which only 13 pass a literal — the rest go through
    class-level constants (``self._SVC_CREATE``), and a test that looked only at
-   call arguments would pass that file while it is still fully coupled (the
-   coupling report under ``docs/planning/``, §7).  Module- and class-level
+   call arguments would pass that file while it is still fully coupled (as the
+   pre-move coupling analysis found).  Module- and class-level
    ``NAME = "..."`` assignments are additionally resolved so that the *report*
    names the ``patch()`` call site, not only the constant;
 3. **schema** — ``Base.metadata.tables`` intersecting the manifest's module
