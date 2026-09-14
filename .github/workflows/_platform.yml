@@ -163,7 +163,7 @@ jobs:
 
       - name: Set up .NET
         if: contains(inputs.sdks, 'dotnet')
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '6.0.x'
 
