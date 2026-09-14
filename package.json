@@ -1,14 +1,14 @@
 {
-  "name": "experimentation-platform",
+  "name": "experimently",
   "version": "1.0.0",
   "description": "A scalable, AWS-based platform for A/B testing and feature flags with real-time evaluation capabilities.",
-  "homepage": "https://github.com/amarkanday/experimentation-platform#readme",
+  "homepage": "https://github.com/getexperimently/experimently#readme",
   "bugs": {
-    "url": "https://github.com/amarkanday/experimentation-platform/issues"
+    "url": "https://github.com/getexperimently/experimently/issues"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/amarkanday/experimentation-platform.git"
+    "url": "git+https://github.com/getexperimently/experimently.git"
   },
   "license": "Apache-2.0",
   "author": "",

@@ -1,6 +1,6 @@
 # API Endpoints Documentation
 
-This document provides detailed information about all available API endpoints in the Experimentation Platform.
+This document provides detailed information about all available API endpoints in Experimently.
 
 ## Authentication and Authorization
 
@@ -768,12 +768,12 @@ curl -X GET "http://localhost:8000/api/v1/experiments/" \
 
 #### Installation
 ```bash
-pip install experimentation-platform-sdk
+pip install experimently
 ```
 
 #### Basic Usage
 ```python
-from experimentation_platform import ExperimentationClient
+from experimentation import ExperimentationClient
 
 # Initialize client
 client = ExperimentationClient(
@@ -814,12 +814,12 @@ assignments = client.get_user_assignments(
 
 #### Installation
 ```bash
-npm install experimentation-platform-sdk
+npm install @getexperimently/js-sdk
 ```
 
 #### Basic Usage
 ```javascript
-import { ExperimentationClient } from 'experimentation-platform-sdk';
+import { ExperimentationClient } from '@getexperimently/js-sdk';
 
 // Initialize client
 const client = new ExperimentationClient({
@@ -937,7 +937,7 @@ await client.trackEvents([
 ```typescript
 // hooks/useExperimentation.ts
 import { useState, useEffect } from 'react';
-import { ExperimentationClient } from 'experimentation-platform-sdk';
+import { ExperimentationClient } from '@getexperimently/js-sdk';
 
 const client = new ExperimentationClient({
   apiKey: process.env.REACT_APP_API_KEY,
@@ -1001,7 +1001,7 @@ function MyComponent({ userId }: { userId: string }) {
 ```typescript
 // contexts/ExperimentationContext.tsx
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { ExperimentationClient } from 'experimentation-platform-sdk';
+import { ExperimentationClient } from '@getexperimently/js-sdk';
 
 interface ExperimentationContextType {
   flags: Record<string, boolean>;
@@ -1085,7 +1085,7 @@ function App() {
 #### 1. Express.js Middleware
 ```typescript
 // middleware/experimentation.ts
-import { ExperimentationClient } from 'experimentation-platform-sdk';
+import { ExperimentationClient } from '@getexperimently/js-sdk';
 
 const client = new ExperimentationClient({
   apiKey: process.env.API_KEY,
@@ -1177,7 +1177,7 @@ export class ExperimentationModule {}
 
 // experimentation.service.ts
 import { Injectable } from '@nestjs/common';
-import { ExperimentationClient } from 'experimentation-platform-sdk';
+import { ExperimentationClient } from '@getexperimently/js-sdk';
 
 @Injectable()
 export class ExperimentationService {
@@ -1246,7 +1246,7 @@ export class ExperimentationController {
 ```typescript
 // pages/api/experimentation/flags.ts
 import { NextApiRequest, NextApiResponse } from 'next';
-import { ExperimentationClient } from 'experimentation-platform-sdk';
+import { ExperimentationClient } from '@getexperimently/js-sdk';
 
 const client = new ExperimentationClient({
   apiKey: process.env.API_KEY,

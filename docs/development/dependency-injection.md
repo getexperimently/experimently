@@ -1,4 +1,4 @@
-# Dependency Injection Implementation for Experimentation Platform
+# Dependency Injection Implementation for Experimently
 
 ## Overview
 

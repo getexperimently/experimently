@@ -1,6 +1,6 @@
 # Testing Guide
 
-Comprehensive guide for writing and running tests in the Experimentation Platform.
+Comprehensive guide for writing and running tests in Experimently.
 
 ## Overview
 

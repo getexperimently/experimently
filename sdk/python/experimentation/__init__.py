@@ -1,4 +1,4 @@
-"""Experimentation Platform Python SDK.
+"""Experimently Python SDK.
 
 Usage::
 

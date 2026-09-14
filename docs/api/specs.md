@@ -1,12 +1,12 @@
-# Experimentation Platform API Specification
+# Experimently API Specification
 
-This document outlines the API endpoints for the Experimentation Platform, providing a reference for developers integrating with the system.
+This document outlines the API endpoints for Experimently, providing a reference for developers integrating with the system.
 
 ## Base URL
 
 ```
-Production: https://api.experimentation-platform.example.com
-Development: https://dev-api.experimentation-platform.example.com
+Production: https://api.experimently.example.com
+Development: https://dev-api.experimently.example.com
 ```
 
 ## Authentication
@@ -1102,10 +1102,10 @@ The API uses a versioned URL path (e.g., `/api/v1/`) to ensure backward compatib
 
 The API is accessible through our client SDKs:
 
--   [JavaScript SDK](https://github.com/your-org/experimentation-js-sdk)
--   [Python SDK](https://github.com/your-org/experimentation-python-sdk)
--   [Ruby SDK](https://github.com/your-org/experimentation-ruby-sdk)
--   [Java SDK](https://github.com/your-org/experimentation-java-sdk)
+-   [JavaScript SDK](https://github.com/getexperimently/experimently/tree/main/sdk/js)
+-   [Python SDK](https://github.com/getexperimently/experimently/tree/main/sdk/python)
+-   [Ruby SDK](https://github.com/getexperimently/experimently/tree/main/sdk/ruby)
+-   [Java SDK](https://github.com/getexperimently/experimently/tree/main/sdk/java)
 
 ## Webhook Notifications
 

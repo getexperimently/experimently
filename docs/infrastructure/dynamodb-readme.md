@@ -1,4 +1,4 @@
-# DynamoDB Tables Configuration for Experimentation Platform
+# DynamoDB Tables Configuration for Experimently
 
 This document explains the DynamoDB table designs used in the experimentation platform and how to work with them effectively.
 

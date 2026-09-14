@@ -1,6 +1,6 @@
-# experimentation-openfeature (Python)
+# experimently-openfeature (Python)
 
-[OpenFeature](https://openfeature.dev) provider for the Experimentation Platform. Flags are
+[OpenFeature](https://openfeature.dev) provider for Experimently. Flags are
 evaluated **by the server** through the [`experimentation`](../python) Python SDK
 (`GET /api/v1/feature-flags/evaluate/{flag_key}?user_id=<targeting_key>`) and cached per
 user + flag; nothing is bucketed locally.
@@ -8,12 +8,12 @@ user + flag; nothing is bucketed locally.
 ## Install
 
 ```bash
-pip install openfeature-sdk experimentation-sdk experimentation-openfeature   # once published
+pip install openfeature-sdk experimently experimently-openfeature            # once published
 pip install -e sdk/python -e sdk/openfeature-python                          # from this repository
 ```
 
 Requires Python 3.9+ and `openfeature-sdk >= 0.9.0` (the version that added the tracking API).
-The only other dependency is [`experimentation-sdk`](../python), which itself has none.
+The only other dependency is [`experimently`](../python), which itself has none.
 
 ## Quick start
 

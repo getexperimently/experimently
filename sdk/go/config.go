@@ -4,7 +4,7 @@ import "time"
 
 // SdkConfig holds all configuration for the SDK client.
 type SdkConfig struct {
-	// BaseURL is the origin of the Experimentation Platform API, e.g.
+	// BaseURL is the origin of the Experimently API, e.g.
 	// "https://api.example.com". The SDK appends "/api/v1/...".
 	BaseURL string
 	// APIKey is sent as the X-API-Key header on every request.
@@ -30,7 +30,7 @@ func defaultConfig() *SdkConfig {
 	}
 }
 
-// WithBaseURL sets the origin of the Experimentation Platform API.
+// WithBaseURL sets the origin of the Experimently API.
 func WithBaseURL(url string) Option {
 	return func(c *SdkConfig) {
 		c.BaseURL = url

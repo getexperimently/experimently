@@ -1,4 +1,4 @@
-# Secrets Management — Experimentation Platform
+# Secrets Management — Experimently
 
 **Version:** 1.0
 **Date:** March 2026
@@ -34,7 +34,7 @@ aws secretsmanager create-secret \
   --name /prod/experimentation/db-password \
   --description "Aurora PostgreSQL password for the experimentation application user" \
   --secret-string "$DB_PASSWORD" \
-  --tags '[{"Key":"Environment","Value":"production"},{"Key":"Service","Value":"experimentation-platform"}]'
+  --tags '[{"Key":"Environment","Value":"production"},{"Key":"Service","Value":"experimently"}]'
 
 # Verify it was created
 aws secretsmanager describe-secret --secret-id /prod/experimentation/db-password \
@@ -59,7 +59,7 @@ aws secretsmanager create-secret \
   --name /prod/experimentation/jwt-secret \
   --description "JWT token signing secret for the experimentation platform API" \
   --secret-string "$JWT_SECRET" \
-  --tags '[{"Key":"Environment","Value":"production"},{"Key":"Service","Value":"experimentation-platform"}]'
+  --tags '[{"Key":"Environment","Value":"production"},{"Key":"Service","Value":"experimently"}]'
 ```
 
 ### Redis Connection URL
@@ -80,7 +80,7 @@ aws secretsmanager create-secret \
   --name /prod/experimentation/redis-url \
   --description "Redis connection URL for ElastiCache (includes auth token)" \
   --secret-string "redis://:${REDIS_TOKEN}@experimentation-redis-prod.XXXXX.cache.amazonaws.com:6379/0" \
-  --tags '[{"Key":"Environment","Value":"production"},{"Key":"Service","Value":"experimentation-platform"}]'
+  --tags '[{"Key":"Environment","Value":"production"},{"Key":"Service","Value":"experimently"}]'
 ```
 
 ### Cognito Configuration
@@ -96,7 +96,7 @@ aws secretsmanager create-secret \
     "client_id": "XXXXXXXXXXXXXXXXXXXXXXXXXX",
     "region": "us-west-2"
   }' \
-  --tags '[{"Key":"Environment","Value":"production"},{"Key":"Service","Value":"experimentation-platform"}]'
+  --tags '[{"Key":"Environment","Value":"production"},{"Key":"Service","Value":"experimently"}]'
 ```
 
 ### First Superuser Password
@@ -113,7 +113,7 @@ aws secretsmanager create-secret \
   --name /prod/experimentation/first-superuser-password \
   --description "Password for the first administrator account (FIRST_SUPERUSER_PASSWORD)" \
   --secret-string "$SUPERUSER_PASSWORD" \
-  --tags '[{"Key":"Environment","Value":"production"},{"Key":"Service","Value":"experimentation-platform"}]'
+  --tags '[{"Key":"Environment","Value":"production"},{"Key":"Service","Value":"experimently"}]'
 ```
 
 ### Compliance Audit HMAC Key (`profile: full` only)
@@ -131,7 +131,7 @@ aws secretsmanager create-secret \
   --name /prod/experimentation/audit-hmac-key \
   --description "HMAC-SHA256 key signing the compliance audit log (AUDIT_HMAC_KEY)" \
   --secret-string "$AUDIT_HMAC_KEY" \
-  --tags '[{"Key":"Environment","Value":"production"},{"Key":"Service","Value":"experimentation-platform"}]'
+  --tags '[{"Key":"Environment","Value":"production"},{"Key":"Service","Value":"experimently"}]'
 ```
 
 Rotating it does not invalidate old rows, but signatures made with the previous

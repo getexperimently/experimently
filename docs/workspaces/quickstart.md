@@ -138,7 +138,7 @@ await client.track('purchase', { userId: 'user-123', value: 49.99 });
 ### Python SDK
 
 ```python
-from experimentation_sdk import ExperimentationClient
+from experimentation import ExperimentationClient
 
 client = ExperimentationClient(
     api_key="ep_live_a1b2c3d4e5f6...",

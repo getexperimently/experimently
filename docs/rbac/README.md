@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Experimentation Platform implements a robust Role-Based Access Control (RBAC) system to manage permissions across different resources. This document explains the permission architecture and how to use it in the application.
+Experimently implements a robust Role-Based Access Control (RBAC) system to manage permissions across different resources. This document explains the permission architecture and how to use it in the application.
 
 ## User Roles
 

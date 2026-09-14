@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace ExperimentationPlatform;
+namespace Experimently;
 
 /**
  * Result of a server-side feature flag evaluation

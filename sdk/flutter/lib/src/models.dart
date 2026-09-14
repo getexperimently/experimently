@@ -1,12 +1,12 @@
-/// Core data models for the Experimentation Platform Flutter SDK.
-library experimentation_sdk_models;
+/// Core data models for the Experimently Flutter SDK.
+library experimently_models;
 
 /// Configuration for the [ExperimentationClient].
 class SdkConfig {
   /// API key sent as `X-API-Key` on every request.
   final String apiKey;
 
-  /// Origin of the Experimentation Platform API, e.g. `https://api.example.com`.
+  /// Origin of the Experimently API, e.g. `https://api.example.com`.
   /// The SDK appends `/api/v1/...` itself.
   final String baseUrl;
 

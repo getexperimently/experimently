@@ -1,6 +1,6 @@
 # Edge SDK
 
-`@experimentation-platform/edge-sdk` (v0.2) runs in Cloudflare Workers, Vercel Edge Functions, Deno
+`@getexperimently/edge-sdk` (v0.2) runs in Cloudflare Workers, Vercel Edge Functions, Deno
 Deploy, Node >= 18 and any WinterCG-compatible runtime. It has zero runtime dependencies and uses no
 Node.js built-ins — only Web-standard `fetch`, `AbortController` and `Headers`.
 
@@ -16,7 +16,7 @@ Source: `sdk/edge`. Verified against a live backend: **yes (2026-09-11)** via th
 ## Installation
 
 ```bash
-npm install @experimentation-platform/edge-sdk
+npm install @getexperimently/edge-sdk
 ```
 
 Entry points: the package root (`EdgeExperimentationClient`), `/cloudflare`, `/vercel` and `/deno`.
@@ -27,7 +27,7 @@ The build (`npm run build`) emits ESM to `dist/` with type declarations.
 ## Quick start
 
 ```typescript
-import { EdgeExperimentationClient } from '@experimentation-platform/edge-sdk';
+import { EdgeExperimentationClient } from '@getexperimently/edge-sdk';
 
 const client = new EdgeExperimentationClient({
   apiKey: env.EP_API_KEY,
@@ -73,7 +73,7 @@ the request handler), then use the sync accessors freely.
 ## Cloudflare Workers
 
 ```typescript
-import { withExperimentation } from '@experimentation-platform/edge-sdk/cloudflare';
+import { withExperimentation } from '@getexperimently/edge-sdk/cloudflare';
 
 export default withExperimentation(
   async (request, env, ctx) => {
@@ -125,7 +125,7 @@ export default withExperimentation(handler, {
 
 ```typescript
 // middleware.ts
-import { createEdgeMiddleware } from '@experimentation-platform/edge-sdk/vercel';
+import { createEdgeMiddleware } from '@getexperimently/edge-sdk/vercel';
 
 export const middleware = createEdgeMiddleware({
   apiKey: process.env.EP_API_KEY!,
@@ -150,7 +150,7 @@ The middleware:
 ## Deno Deploy
 
 ```typescript
-import { createDenoHandler } from 'npm:@experimentation-platform/edge-sdk/deno';
+import { createDenoHandler } from 'npm:@getexperimently/edge-sdk/deno';
 
 export default createDenoHandler(
   async (req, client) => {
@@ -210,7 +210,7 @@ Every request carries `X-API-Key`, `Content-Type: application/json` and `Accept:
 ```typescript
 interface EdgeSdkConfig {
   apiKey: string;        // Required. Sent as X-API-Key.
-  baseUrl?: string;      // Backend origin. Defaults to https://api.experimentationplatform.io.
+  baseUrl?: string;      // Backend origin. Defaults to https://api.getexperimently.com.
   cacheTtlMs?: number;   // Per user + key cache TTL (default: 60_000 ms).
   timeout?: number;      // Per-request timeout (default: 500 ms).
   store?: EdgeStore;     // Optional shared KV store ({ get(key), put(key, value, ttlMs) }).

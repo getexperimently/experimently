@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace ExperimentationPlatform;
+namespace Experimently;
 
 /**
  * Result of a sticky experiment assignment (POST /api/v1/tracking/assign).

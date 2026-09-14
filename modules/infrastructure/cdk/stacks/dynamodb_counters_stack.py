@@ -137,7 +137,7 @@ class DynamoDBCountersStack(Stack):
         # ----------------------------------------------------------------
         # Tags
         # ----------------------------------------------------------------
-        Tags.of(self.counters_table).add("Service", "experimentation-platform")
+        Tags.of(self.counters_table).add("Service", "experimently")
         Tags.of(self.counters_table).add("Component", "realtime-counters")
         Tags.of(self.counters_table).add("Environment", environment)
 

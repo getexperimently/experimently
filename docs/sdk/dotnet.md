@@ -1,6 +1,6 @@
 # .NET SDK
 
-`ExperimentationPlatform.SDK` (v0.2) provides feature flag evaluation, experiment assignment and
+`Experimently.SDK` (v0.2) provides feature flag evaluation, experiment assignment and
 event tracking for .NET applications. It targets `netstandard2.1` and `net6.0`, uses
 `System.Text.Json` and `HttpClient`, and has no other dependencies.
 
@@ -22,13 +22,13 @@ Source: `sdk/dotnet`.
 ## Installation
 
 ```bash
-dotnet add package ExperimentationPlatform.SDK
+dotnet add package Experimently.SDK
 ```
 
 Or reference the project directly from a checkout:
 
 ```xml
-<ProjectReference Include="../../sdk/dotnet/src/ExperimentationPlatform/ExperimentationPlatform.csproj" />
+<ProjectReference Include="../../sdk/dotnet/src/Experimently/Experimently.csproj" />
 ```
 
 ---
@@ -36,7 +36,7 @@ Or reference the project directly from a checkout:
 ## Quick Start
 
 ```csharp
-using ExperimentationPlatform;
+using Experimently;
 
 var config = new SdkConfig(
     baseUrl: Environment.GetEnvironmentVariable("EXPERIMENTLY_API_URL") ?? "http://localhost:8000",
@@ -235,10 +235,10 @@ low-level `ExperimentationHttpClient` throws:
 
 | Exception | Extends | When |
 |-----------|---------|------|
-| `ExperimentationPlatform.Exceptions.ExperimentationException` | `Exception` | Base class |
-| `ExperimentationPlatform.Exceptions.NetworkException` | `ExperimentationException` | `HttpRequestException`, timeouts (`TaskCanceledException`) |
-| `ExperimentationPlatform.Exceptions.ApiException` (`StatusCode`, `ResponseBody`) | `ExperimentationException` | Other 4xx/5xx (404 not ACTIVE, 422 validation, 429 rate limited) or an undecodable body |
-| `ExperimentationPlatform.Exceptions.AuthException` | `ExperimentationException` | HTTP 401 — invalid API key |
+| `Experimently.Exceptions.ExperimentationException` | `Exception` | Base class |
+| `Experimently.Exceptions.NetworkException` | `ExperimentationException` | `HttpRequestException`, timeouts (`TaskCanceledException`) |
+| `Experimently.Exceptions.ApiException` (`StatusCode`, `ResponseBody`) | `ExperimentationException` | Other 4xx/5xx (404 not ACTIVE, 422 validation, 429 rate limited) or an undecodable body |
+| `Experimently.Exceptions.AuthException` | `ExperimentationException` | HTTP 401 — invalid API key |
 
 ---
 
@@ -306,7 +306,7 @@ public class CheckoutController : ControllerBase
 ## Testing your own code
 
 Inject an `HttpClient` built on a fake `HttpMessageHandler` — the SDK's own tests do exactly
-this (`sdk/dotnet/tests/ExperimentationPlatform.Tests/ExperimentationClientTests.cs`):
+this (`sdk/dotnet/tests/Experimently.Tests/ExperimentationClientTests.cs`):
 
 ```csharp
 sealed class CannedHandler : HttpMessageHandler

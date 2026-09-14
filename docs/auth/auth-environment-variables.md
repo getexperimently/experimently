@@ -1,6 +1,6 @@
 # Authentication Environment Variables
 
-This document provides detailed information about the environment variables required for the AWS Cognito authentication implementation in the Experimentation Platform.
+This document provides detailed information about the environment variables required for the AWS Cognito authentication implementation in Experimently.
 
 ## Required Cognito Environment Variables
 

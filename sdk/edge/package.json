@@ -1,5 +1,5 @@
 {
-  "name": "@experimentation-platform/edge-sdk",
+  "name": "@getexperimently/edge-sdk",
   "version": "0.2.0",
   "description": "Edge-compatible SDK for Cloudflare Workers, Vercel Edge Functions, and Deno Deploy (server-decided flags and assignments, zero runtime dependencies)",
   "main": "dist/index.js",

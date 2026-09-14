@@ -39,7 +39,7 @@ class MonitoringStack(Stack):
         self.alerts_topic = sns.Topic(
             self,
             "AlertsTopic",
-            display_name="Experimentation Platform Alerts",
+            display_name="Experimently Alerts",
             topic_name="experimentation-alerts",
         )
 

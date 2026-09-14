@@ -1,5 +1,5 @@
 /// In-memory cache of server results keyed by user + key, with TTL.
-library experimentation_sdk_cache;
+library experimently_cache;
 
 /// A single entry in the cache.
 class _CacheEntry<T> {

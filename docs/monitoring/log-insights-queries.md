@@ -1,6 +1,6 @@
 # CloudWatch Logs Insights Queries
 
-This document provides a collection of useful CloudWatch Logs Insights queries for analyzing logs from the Experimentation Platform.
+This document provides a collection of useful CloudWatch Logs Insights queries for analyzing logs from Experimently.
 
 ## Overview
 

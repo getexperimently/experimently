@@ -1,4 +1,4 @@
-# Experimentation Platform Wireframes
+# Experimently Wireframes
 
 ## Main Dashboard
 

@@ -83,7 +83,7 @@ class TestConstruction:
         assert request.headers["X-API-Key"] == API_KEY
         assert request.headers["Content-Type"] == "application/json"
         assert request.headers["Accept"] == "application/json"
-        assert request.headers["User-Agent"].startswith("experimentation-sdk-python/")
+        assert request.headers["User-Agent"].startswith("experimently-python/")
         assert request.timeout == 1.5
 
 

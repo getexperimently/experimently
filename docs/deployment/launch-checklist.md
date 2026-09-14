@@ -1,4 +1,4 @@
-# Production Launch Checklist — Experimentation Platform
+# Production Launch Checklist — Experimently
 
 **Version:** 1.0
 **Date:** March 2026
@@ -198,7 +198,7 @@ This checklist must be completed and signed off before any traffic is sent to th
 - [ ] Legal review of Terms of Service complete and ToS published
 - [ ] Customer support team trained on escalation procedures for platform issues
 - [ ] Data Processing Agreement (DPA) in place with all third-party processors (AWS, any analytics vendors)
-- [ ] GDPR Article 30 Record of Processing Activities updated to include the Experimentation Platform
+- [ ] GDPR Article 30 Record of Processing Activities updated to include Experimently
 
 ---
 

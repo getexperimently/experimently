@@ -1,4 +1,4 @@
-defmodule ExperimentationPlatform.MixProject do
+defmodule Experimently.MixProject do
   use Mix.Project
 
   # test/support holds helpers the test files share; compiled for :test only.
@@ -7,18 +7,18 @@ defmodule ExperimentationPlatform.MixProject do
 
   def project do
     [
-      app: :experimentation_platform,
+      app: :experimently,
       version: "0.1.0",
       elixir: "~> 1.14",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       deps: deps(),
-      description: "Elixir SDK for the Experimentation Platform — A/B testing and feature flags",
+      description: "Elixir SDK for Experimently — A/B testing and feature flags",
       package: package(),
-      name: "ExperimentationPlatform",
-      source_url: "https://github.com/your-org/experimentation-platform",
+      name: "Experimently",
+      source_url: "https://github.com/getexperimently/experimently",
       docs: [
-        main: "ExperimentationPlatform",
+        main: "Experimently",
         extras: ["README.md"]
       ]
     ]
@@ -40,7 +40,7 @@ defmodule ExperimentationPlatform.MixProject do
   defp package do
     [
       licenses: ["MIT"],
-      links: %{"GitHub" => "https://github.com/your-org/experimentation-platform"}
+      links: %{"GitHub" => "https://github.com/getexperimently/experimently"}
     ]
   end
 end

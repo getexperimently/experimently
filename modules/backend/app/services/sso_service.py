@@ -288,12 +288,12 @@ def generate_saml_metadata(config: SSOConfig) -> str:
     """
     _require_saml_support()
     sp_entity_id = getattr(
-        settings, "SAML_SP_ENTITY_ID", "https://experimentation-platform.example.com"
+        settings, "SAML_SP_ENTITY_ID", "https://experimently.example.com"
     )
     sp_acs_url = getattr(
         settings,
         "SAML_SP_ACS_URL",
-        f"https://experimentation-platform.example.com/api/v1/auth/sso/saml/{config.id}/acs",
+        f"https://experimently.example.com/api/v1/auth/sso/saml/{config.id}/acs",
     )
 
     if _SAML_AVAILABLE and OneLogin_Saml2_Settings is not None:
@@ -385,12 +385,12 @@ def _parse_saml_response_with_library(
 ) -> Dict[str, Any]:
     """Parse SAML response using the python3-saml library."""
     sp_entity_id = getattr(
-        settings, "SAML_SP_ENTITY_ID", "https://experimentation-platform.example.com"
+        settings, "SAML_SP_ENTITY_ID", "https://experimently.example.com"
     )
     sp_acs_url = getattr(
         settings,
         "SAML_SP_ACS_URL",
-        f"https://experimentation-platform.example.com/api/v1/auth/sso/saml/{config.id}/acs",
+        f"https://experimently.example.com/api/v1/auth/sso/saml/{config.id}/acs",
     )
 
     saml_settings_dict: Dict[str, Any] = {

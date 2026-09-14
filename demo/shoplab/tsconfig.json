@@ -16,7 +16,7 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"],
-      "@experimentation-platform/react-sdk": ["../../sdk/react/src/index.ts"]
+      "@getexperimently/react-sdk": ["../../sdk/react/src/index.ts"]
     },
     "incremental": true
   },

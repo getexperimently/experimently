@@ -1,6 +1,6 @@
 # Authentication Documentation
 
-This directory contains documentation related to authentication and authorization in the Experimentation Platform.
+This directory contains documentation related to authentication and authorization in Experimently.
 
 ## Files
 

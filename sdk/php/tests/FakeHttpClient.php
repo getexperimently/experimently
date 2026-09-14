@@ -2,11 +2,11 @@
 
 declare(strict_types=1);
 
-namespace ExperimentationPlatform\Tests;
+namespace Experimently\Tests;
 
-use ExperimentationPlatform\Errors\ApiException;
-use ExperimentationPlatform\HttpClient;
-use ExperimentationPlatform\SdkConfig;
+use Experimently\Errors\ApiException;
+use Experimently\HttpClient;
+use Experimently\SdkConfig;
 
 /**
  * Fake HttpClient that records every request and serves canned responses.

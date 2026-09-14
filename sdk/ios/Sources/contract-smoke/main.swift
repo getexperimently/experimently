@@ -12,7 +12,7 @@
 // exits 1. Only the SDK's public API is used.
 
 import Foundation
-import ExperimentationSDK
+import Experimently
 
 func fail(_ message: String) -> Never {
     FileHandle.standardError.write(("ios contract smoke: " + message + "\n").data(using: .utf8)!)

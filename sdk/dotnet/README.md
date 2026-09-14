@@ -1,6 +1,6 @@
-# Experimentation Platform — .NET/C# SDK
+# Experimently — .NET/C# SDK
 
-Official .NET SDK for the Experimentation Platform: feature flag evaluation, experiment
+Official .NET SDK for Experimently: feature flag evaluation, experiment
 assignment and analytics event tracking.
 
 Flag evaluation and experiment assignment are decided **by the server**: every call goes to the
@@ -8,7 +8,7 @@ public API with your `X-API-Key`, the server buckets the user (sticky per user +
 the SDK caches the answer per user + key. Nothing is bucketed locally.
 
 **Target frameworks**: `netstandard2.1` / `net6.0`
-**NuGet package**: `ExperimentationPlatform.SDK`
+**NuGet package**: `Experimently.SDK`
 **Version**: 0.2.0
 **Dependencies**: none beyond `System.Text.Json` (framework-provided on `net6.0`; NuGet on `netstandard2.1`)
 
@@ -17,10 +17,10 @@ the SDK caches the answer per user + key. Nothing is bucketed locally.
 ## Installation
 
 ```bash
-dotnet add package ExperimentationPlatform.SDK
+dotnet add package Experimently.SDK
 ```
 
-Or from source: add a `<ProjectReference>` to `sdk/dotnet/src/ExperimentationPlatform/ExperimentationPlatform.csproj`
+Or from source: add a `<ProjectReference>` to `sdk/dotnet/src/Experimently/Experimently.csproj`
 (this is what `examples/` and `tests/` do).
 
 ---
@@ -28,7 +28,7 @@ Or from source: add a `<ProjectReference>` to `sdk/dotnet/src/ExperimentationPla
 ## Quick Start
 
 ```csharp
-using ExperimentationPlatform;
+using Experimently;
 
 var config = new SdkConfig(
     Environment.GetEnvironmentVariable("EXPERIMENTLY_API_URL") ?? "http://localhost:8000",
@@ -208,8 +208,8 @@ All HTTP is faked with an `HttpMessageHandler` injected through `HttpClient`; no
 
 ```
 sdk/dotnet/
-  ExperimentationPlatform.sln
-  src/ExperimentationPlatform/            # SDK source (netstandard2.1 + net6.0)
+  Experimently.sln
+  src/Experimently/            # SDK source (netstandard2.1 + net6.0)
     SdkConfig.cs
     ExperimentationClient.cs              # public API (evaluate / assign / track / batch / cache helpers)
     ExperimentationHttpClient.cs          # X-API-Key, JSON, error mapping
@@ -218,7 +218,7 @@ sdk/dotnet/
     IsExternalInit.cs                     # `init` accessor polyfill for netstandard2.1
     Models/                               # FlagEvaluationResult, Assignment, TrackEvent
     Exceptions/                           # ExperimentationException, NetworkException, ApiException, AuthException
-  tests/ExperimentationPlatform.Tests/    # xUnit (net6.0), fake HttpMessageHandler
+  tests/Experimently.Tests/    # xUnit (net6.0), fake HttpMessageHandler
   examples/BasicUsage/                    # Walk-through app
   examples/ContractSmoke/                 # Contract smoke (see above)
   verify_hash.py                          # Cross-SDK hash parity script

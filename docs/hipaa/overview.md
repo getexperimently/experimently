@@ -2,7 +2,7 @@
 
 ## Summary
 
-EP-050 adds HIPAA (Health Insurance Portability and Accountability Act) compliance controls to the Experimentation Platform. The implementation covers the four primary HIPAA technical safeguard requirements: access controls, audit controls, integrity, and transmission security.
+EP-050 adds HIPAA (Health Insurance Portability and Accountability Act) compliance controls to Experimently. The implementation covers the four primary HIPAA technical safeguard requirements: access controls, audit controls, integrity, and transmission security.
 
 ## Components
 

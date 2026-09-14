@@ -19,7 +19,7 @@ jobs:
   rollback:
     name: Rollback Production Deployment
     runs-on: ubuntu-latest
-    if: github.repository == 'amarkanday/experimentation-platform' && vars.AWS_ACCOUNT_ID != ''
+    if: (github.repository == 'amarkanday/experimentation-platform' || github.repository == 'getexperimently/experimently') && vars.AWS_ACCOUNT_ID != ''
     environment: production
     permissions:
       id-token: write

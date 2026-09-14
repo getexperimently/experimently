@@ -1,4 +1,4 @@
-# Experimentation Platform Infrastructure
+# Experimently Infrastructure
 
 This directory contains AWS CDK code for deploying the experimentation platform infrastructure.
 

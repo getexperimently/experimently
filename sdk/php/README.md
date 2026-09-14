@@ -16,7 +16,7 @@ locally.
 ## Installation
 
 ```bash
-composer require experimently/experimentation-platform-sdk
+composer require experimently/sdk
 ```
 
 Without composer, `require` the files under `src/` directly (see `examples/contract_smoke.php`).
@@ -24,8 +24,8 @@ Without composer, `require` the files under `src/` directly (see `examples/contr
 ## Quick Start
 
 ```php
-use ExperimentationPlatform\ExperimentationClient;
-use ExperimentationPlatform\SdkConfig;
+use Experimently\ExperimentationClient;
+use Experimently\SdkConfig;
 
 $client = new ExperimentationClient(new SdkConfig(
     baseUrl: getenv('EXPERIMENTLY_API_URL') ?: 'http://localhost:8000',  // origin only

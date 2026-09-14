@@ -1,6 +1,6 @@
 # CloudWatch Dashboard Reference
 
-This document provides a detailed reference for the CloudWatch dashboards used in the Experimentation Platform monitoring system.
+This document provides a detailed reference for the CloudWatch dashboards used in the Experimently monitoring system.
 
 ## System Health Dashboard
 

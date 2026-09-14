@@ -1,7 +1,7 @@
 # JavaScript SDK
 
-`@experimentation-platform/js-sdk` (v1.0) is the JavaScript/TypeScript client for the
-Experimentation Platform public API: experiment assignment, feature flag evaluation and event
+`@getexperimently/js-sdk` (v1.0) is the JavaScript/TypeScript client for the
+Experimently public API: experiment assignment, feature flag evaluation and event
 tracking for Node >= 18 and browsers. Zero runtime dependencies — it uses the global `fetch`.
 
 Flag evaluation and experiment assignment are decided **by the server**: every call goes to the
@@ -19,7 +19,7 @@ Verified against a live backend: **yes (2026-09-11)** via the contract smoke bel
 ## Installation
 
 ```bash
-npm install @experimentation-platform/js-sdk
+npm install @getexperimently/js-sdk
 # or, from this repository:
 npm install ./sdk/js
 ```
@@ -31,7 +31,7 @@ CommonJS build (`dist/index.js`) with type declarations; `import`/`require` both
 ## Quick start
 
 ```typescript
-import { ExperimentationClient } from '@experimentation-platform/js-sdk';
+import { ExperimentationClient } from '@getexperimently/js-sdk';
 
 const client = new ExperimentationClient({
   apiUrl: 'http://localhost:8000',   // origin only; the SDK appends /api/v1/...
@@ -172,7 +172,7 @@ Conversions are matched to metrics by **event name**.
 | `INVALID_RESPONSE` | 2xx but the body is not what the SDK expects (or `userId` missing) | HTTP status or `undefined` |
 
 ```typescript
-import { ExperimentationClient, ExperimentationError } from '@experimentation-platform/js-sdk';
+import { ExperimentationClient, ExperimentationError } from '@getexperimently/js-sdk';
 
 try {
   const a = await client.getAssignment('checkout_flow', user);
@@ -210,7 +210,7 @@ rate limited (`Retry-After` header, retried once).
 import type {
   ClientConfig, UserContext, Assignment, FlagEvaluation,
   TrackOptions, TrackEvent, BatchResult, AssignmentRecord,
-} from '@experimentation-platform/js-sdk';
+} from '@getexperimently/js-sdk';
 
 interface Assignment {
   experimentKey: string;

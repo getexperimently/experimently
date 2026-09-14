@@ -1,6 +1,6 @@
 # PHP SDK
 
-`experimently/experimentation-platform-sdk` (v0.1) provides feature flag evaluation, experiment
+`experimently/sdk` (v0.1) provides feature flag evaluation, experiment
 assignment and event tracking for PHP 8.1+ applications. It depends only on `ext-curl` and
 `ext-json`.
 
@@ -23,7 +23,7 @@ Source: `sdk/php`.
 ## Installation
 
 ```bash
-composer require experimently/experimentation-platform-sdk
+composer require experimently/sdk
 ```
 
 Without composer, `require` the files under `sdk/php/src/` directly (`examples/contract_smoke.php`
@@ -36,8 +36,8 @@ shows the order).
 ```php
 <?php
 
-use ExperimentationPlatform\ExperimentationClient;
-use ExperimentationPlatform\SdkConfig;
+use Experimently\ExperimentationClient;
+use Experimently\SdkConfig;
 
 $client = new ExperimentationClient(new SdkConfig(
     baseUrl: getenv('EXPERIMENTLY_API_URL') ?: 'http://localhost:8000',
@@ -225,10 +225,10 @@ The public methods never throw on network or HTTP errors. Only `HttpClient` thro
 
 | Exception | Extends | When |
 |-----------|---------|------|
-| `ExperimentationPlatform\Errors\ExperimentationException` | `\RuntimeException` | Base class |
-| `ExperimentationPlatform\Errors\NetworkException` | `ExperimentationException` | cURL transport errors, timeouts |
-| `ExperimentationPlatform\Errors\ApiException` (`getStatusCode()`) | `ExperimentationException` | Other 4xx/5xx (404 not ACTIVE, 422 validation, 429 rate limited) |
-| `ExperimentationPlatform\Errors\AuthException` | `ApiException` | HTTP 401 — invalid API key |
+| `Experimently\Errors\ExperimentationException` | `\RuntimeException` | Base class |
+| `Experimently\Errors\NetworkException` | `ExperimentationException` | cURL transport errors, timeouts |
+| `Experimently\Errors\ApiException` (`getStatusCode()`) | `ExperimentationException` | Other 4xx/5xx (404 not ACTIVE, 422 validation, 429 rate limited) |
+| `Experimently\Errors\AuthException` | `ApiException` | HTTP 401 — invalid API key |
 
 ---
 
@@ -251,8 +251,8 @@ to decide a variant.
 
 ```php
 // app/Providers/ExperimentlyServiceProvider.php
-use ExperimentationPlatform\ExperimentationClient;
-use ExperimentationPlatform\SdkConfig;
+use Experimently\ExperimentationClient;
+use Experimently\SdkConfig;
 
 public function register(): void
 {

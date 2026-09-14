@@ -207,7 +207,7 @@ class GlueETLStack(Stack):
             timeout=60,  # minutes
             max_retries=1,
             description="Transforms raw JSON events from S3 into Parquet format",
-            tags={"Environment": env_name, "Project": "experimentation-platform"},
+            tags={"Environment": env_name, "Project": "experimently"},
         )
         self.events_etl_job.node.add_dependency(glue_database)
 
@@ -245,7 +245,7 @@ class GlueETLStack(Stack):
             timeout=60,
             max_retries=1,
             description="Aggregates experiment metrics from Parquet event files",
-            tags={"Environment": env_name, "Project": "experimentation-platform"},
+            tags={"Environment": env_name, "Project": "experimently"},
         )
         self.metrics_etl_job.node.add_dependency(glue_database)
 
@@ -270,7 +270,7 @@ class GlueETLStack(Stack):
                 delete_behavior="LOG",
             ),
             description="Crawls raw S3 events to update the Glue catalog",
-            tags={"Environment": env_name, "Project": "experimentation-platform"},
+            tags={"Environment": env_name, "Project": "experimently"},
         )
         self.glue_crawler.node.add_dependency(glue_database)
 

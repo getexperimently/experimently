@@ -1,7 +1,7 @@
 # Python SDK
 
-`experimentation-sdk` (v1.0.0) is a synchronous, dependency-free Python client for the
-Experimentation Platform public API: experiment assignment, feature-flag evaluation and event
+`experimently` (v1.0.0) is a synchronous, dependency-free Python client for the
+Experimently public API: experiment assignment, feature-flag evaluation and event
 tracking. Requires Python 3.9+; HTTP goes through the standard library (`urllib`).
 
 Flag evaluation and experiment assignment are decided **by the server**: every call goes to the
@@ -16,7 +16,7 @@ client (see [openfeature.md](openfeature.md)).
 ## Installation
 
 ```bash
-pip install experimentation-sdk        # once published
+pip install experimently        # once published
 pip install -e sdk/python              # from this repository
 ```
 

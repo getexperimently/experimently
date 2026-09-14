@@ -1,4 +1,4 @@
-# @experimentation-platform/edge-sdk
+# @getexperimently/edge-sdk
 
 Edge-compatible SDK for Cloudflare Workers, Vercel Edge Functions, Deno Deploy, Node >= 18 and any
 WinterCG runtime. Zero runtime dependencies, no Node.js built-ins.
@@ -11,7 +11,7 @@ Full documentation: [`docs/sdk/edge.md`](../../docs/sdk/edge.md).
 ## Quick start
 
 ```ts
-import { EdgeExperimentationClient } from '@experimentation-platform/edge-sdk';
+import { EdgeExperimentationClient } from '@getexperimently/edge-sdk';
 
 const client = new EdgeExperimentationClient({ apiKey: env.EP_API_KEY, baseUrl: 'http://localhost:8000' });
 
@@ -21,7 +21,7 @@ await client.track('purchase', userId, { sku: 'A1' }, { value: 49.99, experiment
 await client.track('page_view', userId); // no key → fans out to every cached assignment + flag
 ```
 
-Adapters: `@experimentation-platform/edge-sdk/cloudflare` (`withExperimentation`, KV store),
+Adapters: `@getexperimently/edge-sdk/cloudflare` (`withExperimentation`, KV store),
 `/vercel` (`createEdgeMiddleware`), `/deno` (`createDenoHandler`, Deno KV store).
 
 ## Backend endpoints used

@@ -115,7 +115,7 @@ export function disabledEvaluation(
 }
 
 /**
- * Browser client for the Experimentation Platform public API.
+ * Browser client for the Experimently public API.
  *
  * - Flag evaluation and experiment assignment are decided by the server; no
  *   local bucketing happens here.

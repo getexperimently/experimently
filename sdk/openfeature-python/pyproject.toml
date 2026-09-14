@@ -3,9 +3,9 @@ requires = ["setuptools>=65", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "experimentation-openfeature"
+name = "experimently-openfeature"
 version = "1.0.0"
-description = "OpenFeature provider for the Experimentation Platform (server-side flag evaluation)"
+description = "OpenFeature provider for Experimently (server-side flag evaluation)"
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.9"
@@ -13,7 +13,7 @@ keywords = ["openfeature", "feature-flags", "experimentation", "a/b-testing"]
 dependencies = [
     # 0.9.0 introduced the tracking API (AbstractProvider.track / TrackingEventDetails).
     "openfeature-sdk>=0.9.0",
-    "experimentation-sdk>=1.0.0",
+    "experimently>=1.0.0",
 ]
 
 [project.optional-dependencies]

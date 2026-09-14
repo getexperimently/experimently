@@ -5,18 +5,18 @@
     <modelVersion>4.0.0</modelVersion>
 
     <parent>
-        <groupId>com.experimentationplatform</groupId>
-        <artifactId>experimentation-java-sdk-parent</artifactId>
+        <groupId>com.getexperimently</groupId>
+        <artifactId>experimently-sdk-parent</artifactId>
         <version>1.0.0</version>
         <relativePath>../pom.xml</relativePath>
     </parent>
 
-    <artifactId>experimentation-spring-boot-starter</artifactId>
+    <artifactId>experimently-spring-boot-starter</artifactId>
     <packaging>jar</packaging>
 
-    <name>Experimentation Platform Spring Boot Starter</name>
+    <name>Experimently Spring Boot Starter</name>
     <description>
-        Spring Boot auto-configuration starter for the Experimentation Platform Java SDK.
+        Spring Boot auto-configuration starter for the Experimently Java SDK.
         Provides zero-configuration integration via spring.factories / AutoConfiguration.imports.
     </description>
 
@@ -39,8 +39,8 @@
     <dependencies>
         <!-- Core SDK — the artifact produced by the sibling module -->
         <dependency>
-            <groupId>com.experimentationplatform</groupId>
-            <artifactId>experimentation-java-sdk</artifactId>
+            <groupId>com.getexperimently</groupId>
+            <artifactId>experimently-sdk</artifactId>
             <version>${project.version}</version>
         </dependency>
 

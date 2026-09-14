@@ -1,6 +1,6 @@
 # React Native SDK
 
-`@experimentation-platform/react-native-sdk` (v0.1) provides feature flag evaluation, A/B experiment
+`@getexperimently/react-native-sdk` (v0.1) provides feature flag evaluation, A/B experiment
 assignment and event tracking for React Native apps: a context provider, three hooks and a plain
 client, with an in-memory cache and an AsyncStorage-backed offline fallback.
 
@@ -18,9 +18,9 @@ mocked `fetch`; there is no contract smoke for React Native.
 ## Installation
 
 ```bash
-npm install @experimentation-platform/react-native-sdk @react-native-async-storage/async-storage md5
+npm install @getexperimently/react-native-sdk @react-native-async-storage/async-storage md5
 # or
-yarn add @experimentation-platform/react-native-sdk @react-native-async-storage/async-storage md5
+yarn add @getexperimently/react-native-sdk @react-native-async-storage/async-storage md5
 ```
 
 - **iOS**: `cd ios && pod install` (required by `@react-native-async-storage/async-storage`).
@@ -39,7 +39,7 @@ import {
   useFlag,
   useExperiment,
   useExperimentationClient,
-} from '@experimentation-platform/react-native-sdk';
+} from '@getexperimently/react-native-sdk';
 
 // Create the client once, at app start-up.
 const client = new ExperimentationClient({
@@ -150,7 +150,7 @@ Escape hatch to the underlying client, e.g. for imperative tracking or `client.c
 ## Direct Client API
 
 ```typescript
-import { ExperimentationClient } from '@experimentation-platform/react-native-sdk';
+import { ExperimentationClient } from '@getexperimently/react-native-sdk';
 
 const client = new ExperimentationClient({ apiKey: 'YOUR_API_KEY', baseUrl: 'https://api.getexperimently.com' });
 
@@ -254,7 +254,7 @@ MD5("{userId}:{flagKey}") → first 4 bytes as little-endian uint32 → ÷ 2^32 
 ```
 
 ```typescript
-import { hashUser } from '@experimentation-platform/react-native-sdk';
+import { hashUser } from '@getexperimently/react-native-sdk';
 hashUser('user-123', 'my-flag'); // ≈ 0.6927449859
 ```
 
@@ -270,7 +270,7 @@ your own `__mocks__`):
 ```json
 {
   "moduleNameMapper": {
-    "@react-native-async-storage/async-storage": "<rootDir>/node_modules/@experimentation-platform/react-native-sdk/__mocks__/@react-native-async-storage/async-storage"
+    "@react-native-async-storage/async-storage": "<rootDir>/node_modules/@getexperimently/react-native-sdk/__mocks__/@react-native-async-storage/async-storage"
   }
 }
 ```
@@ -280,7 +280,7 @@ your own `__mocks__`):
 Stub the methods with the real return shapes:
 
 ```typescript
-import type { ExperimentationClient } from '@experimentation-platform/react-native-sdk';
+import type { ExperimentationClient } from '@getexperimently/react-native-sdk';
 
 const mockClient = {
   evaluateFlag: jest.fn().mockResolvedValue({ key: 'my-flag', enabled: true, config: null }),
@@ -296,7 +296,7 @@ const mockClient = {
 
 ```tsx
 import { render, waitFor } from '@testing-library/react-native';
-import { ExperimentationProvider, useFlag } from '@experimentation-platform/react-native-sdk';
+import { ExperimentationProvider, useFlag } from '@getexperimently/react-native-sdk';
 
 function Probe() {
   const { enabled, loading } = useFlag('my-flag');
