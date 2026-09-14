@@ -33,15 +33,18 @@ updates:
   # ---------------------------------------------------------------------------
   # Two directories, not one. `/backend` is backend/requirements.txt, the
   # superset every CI job and every developer venv installs.
-  # `/backend/requirements` is runtime.txt (what the shipped image actually
-  # installs, via runtime.lock) and dev.txt -- neither is at the root of
-  # `/backend`, and neither is pulled in by a `-r` from requirements.txt, so
-  # Dependabot never saw them: a security bump landed in requirements.txt,
-  # went green, and shipped an image still running the old version.
-  # scripts/check_requirements_lock.py now fails the lint job when the two
-  # disagree, so the pair is merged together.
+  # One entry, `/backend`, covers backend/requirements.txt AND the pin files
+  # under backend/requirements/ (runtime.txt, dev.txt): Dependabot's pip
+  # fetcher reads a `requirements/` subdirectory of the named directory --
+  # PR #119 ("in /backend") bumped pandas in both files at once. A second
+  # entry for `/backend/requirements` was added on the belief that nothing
+  # watched runtime.txt; in fact it re-read the parent's requirements.txt and
+  # opened a duplicate of every pull request (#120/#123, #121/#124).
+  # scripts/check_requirements_lock.py fails the lint job when runtime.txt
+  # and requirements.txt disagree, so a bump that reaches only one of them
+  # cannot merge.
   - package-ecosystem: "pip"
-    directories: ["/backend", "/backend/requirements"]
+    directory: "/backend"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
