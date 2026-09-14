@@ -278,7 +278,14 @@ describe('caching', () => {
 
   it('under StrictMode the retry chain is owned by one effect invocation', async () => {
     // StrictMode mounts, cleans up and mounts again. The first invocation's
-    // `.then` must not schedule a timer that no live cleanup owns.
+    // `.then` must not schedule a retry that no live cleanup owns, or the
+    // provider goes on probing after it is gone.
+    //
+    // This used to count outstanding fake timers, which no longer measures
+    // that: React 19 holds one of its own (rendering `<span />` alone leaves
+    // `jest.getTimerCount()` at 1, and it survives unmount), so the count was
+    // 2 with exactly one retry scheduled. The probes themselves are what the
+    // count was standing in for, so they are what is asserted.
     jest.useFakeTimers();
     try {
       mockGet.mockRejectedValue(new TypeError('Failed to fetch'));
@@ -293,15 +300,27 @@ describe('caching', () => {
         await Promise.resolve();
         await Promise.resolve();
       });
-      expect(jest.getTimerCount()).toBe(1);
-      unmount();
-      expect(jest.getTimerCount()).toBe(0);
-      const calls = mockGet.mock.calls.length;
+      // Both invocations share the one in-flight probe.
+      expect(mockGet).toHaveBeenCalledTimes(1);
+
+      // The chain is live: the retry fires while the provider is mounted.
+      // Without this the assertion after unmount would also pass if no retry
+      // had ever been scheduled.
       await act(async () => {
         jest.advanceTimersByTime(MODULES_ERROR_RETRY_MAX_MS);
         await Promise.resolve();
       });
-      // Nothing fires after unmount.
+      expect(mockGet).toHaveBeenCalledTimes(2);
+
+      // ...and unmount ends it: a chain left behind by the first effect
+      // invocation would keep probing here, because only the live
+      // invocation's cleanup runs.
+      unmount();
+      const calls = mockGet.mock.calls.length;
+      await act(async () => {
+        jest.advanceTimersByTime(10 * MODULES_ERROR_RETRY_MAX_MS);
+        await Promise.resolve();
+      });
       expect(mockGet.mock.calls.length).toBe(calls);
     } finally {
       jest.useRealTimers();

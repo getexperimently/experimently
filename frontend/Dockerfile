@@ -113,13 +113,18 @@ RUN npm run build \
     && ! grep -rl "Documentation coming soon" out/docs >/dev/null \
     # The bundle must match the profile: a core image carries no chunk that
     # names a module route, a full image carries them.
-    # `-type f -name 'workspaces-*.js'`: the chunks directory also holds a
-    # `workspaces/` directory for the nested routes, and a bare `workspaces*`
-    # with `-print -quit` stopped at it -- so the stub page could vanish and
-    # this assertion would still pass.
+    # The positive half matters as much as the negative one -- without it the
+    # grep also passes when the page vanished entirely. It is a string, not a
+    # chunk filename: Turbopack (the default bundler from Next 16) emits flat
+    # content-hashed chunks with no `chunks/pages/` directory, so the old
+    # `find out/_next/static/chunks/pages -name 'workspaces-*.js'` matched
+    # nothing in either profile. `Separate teams into workspaces` is the stub
+    # page's own description (frontend/src/modules-stub/pages/workspaces/index.tsx);
+    # the real module's page says "Isolated project namespaces" instead, so the
+    # string is in the core bundle and in no full one.
     && if [ "$EXPERIMENTLY_PROFILE" = "core" ]; then \
          ! grep -rlE '/api/v1/workspaces|/api/v1/rbac/' out/_next/static >/dev/null \
-         && test -n "$(find out/_next/static/chunks/pages -maxdepth 1 -type f -name 'workspaces-*.js' -print -quit)"; \
+         && grep -rl 'Separate teams into workspaces' out/_next/static >/dev/null; \
        else \
          test -d /app/modules/frontend/src \
          && grep -rlE '/api/v1/rbac/' out/_next/static >/dev/null; \

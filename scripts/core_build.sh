@@ -672,14 +672,17 @@ step_frontend() {
             printf '%s\n' "$leaked" | sed 's/^/    /' >&2
             die "the core bundle references module routes (files above)"
         fi
-        # `-type f -name 'workspaces-*.js'`, not `-name 'workspaces*'`: the
-        # chunks directory also holds a `workspaces/` DIRECTORY for the nested
-        # routes (workspaces/[id], workspaces/new, workspaces/invites), and
-        # `find ... -print -quit` stopped at it -- so the check passed even
-        # with the stub index page gone, which is the one regression it
-        # exists for. The page's chunk is `workspaces-<hash>.js`.
-        if [ -z "$(find "$static/chunks/pages" -maxdepth 1 -type f -name 'workspaces-*.js' -print -quit)" ]; then
-            die "the core bundle has no workspaces stub page (out/_next/static/chunks/pages/workspaces-<hash>.js)"
+        # The other half of the check: without it the grep above also passes
+        # when the stub index page vanished entirely, which is the one
+        # regression it exists for. It greps for the stub page's own
+        # description rather than a chunk filename -- Turbopack, the default
+        # bundler from Next 16, emits flat content-hashed chunks with no
+        # `chunks/pages/` directory, so the old
+        # `find "$static/chunks/pages" -name 'workspaces-*.js'` matched
+        # nothing in either profile. The real module's page says "Isolated
+        # project namespaces" instead, so the string is in no full bundle.
+        if ! grep -rl 'Separate teams into workspaces' "$static" >/dev/null; then
+            die "the core bundle has no workspaces stub page (its description is in no chunk)"
         fi
         log "core bundle: no module route, workspaces stub present"
     else

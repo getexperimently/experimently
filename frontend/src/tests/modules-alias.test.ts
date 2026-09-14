@@ -19,10 +19,13 @@
  * at the bottom of this file shows is complete: every `@modules/*` module a
  * core source imports has a stub.
  *
- * webpack cannot be resolved in-process (Next bundles its own copy), so it is
- * covered by the config assertions here plus a real
- * `EXPERIMENTLY_PROFILE=core npx next build`, which renders the stub pages
- * into `out/` — see the seam notes in `next.config.js`.
+ * Next's two bundlers cannot be resolved in-process (Next bundles its own
+ * copies of Turbopack and webpack), so they are covered by the config
+ * assertions here plus a real `EXPERIMENTLY_PROFILE=core npx next build`,
+ * which renders the stub pages into `out/` — see the seam notes in
+ * `next.config.js`. From Next 16 that build uses Turbopack, so the Turbopack
+ * spelling of the alias is the one the shipped bundle depends on; the webpack
+ * one still serves `next build --webpack`.
  */
 import fs from 'fs';
 import path from 'path';
@@ -85,7 +88,7 @@ function moduleImports(root: string): string[] {
 
 const modulesTree = modulesAlias.modulesTreeAvailable();
 
-describe('the @modules/* alias — one rule, three toolchains', () => {
+describe('the @modules/* alias — one rule, every toolchain', () => {
   describe('the rule itself (modules-alias.js)', () => {
     it('points at modules/frontend/src beside the package, never inside it', () => {
       expect(modulesAlias.MODULES_DIR).toBe(MODULES_DIR);
@@ -94,6 +97,21 @@ describe('the @modules/* alias — one rule, three toolchains', () => {
       // The old location, `frontend/src/modules`, must stay gone: the alias
       // is the only way in.
       expect(fs.existsSync(path.join(FRONTEND_ROOT, 'src', 'modules'))).toBe(false);
+    });
+
+    it('leaves the repository root declaring no module "type"', () => {
+      // `<repo>/package.json` is the nearest package.json above
+      // modules/frontend/src, and Turbopack reads the module format from it:
+      // an explicit `"type": "commonjs"` there failed every file in the
+      // modules tree with "Specified module format (CommonJs) is not matching
+      // the module format of the source code (EcmaScript Modules)" — a full
+      // `next build` that could not compile a single module. Absent, Node's
+      // default is commonjs anyway, which is what the one root-level script
+      // (tests/sdk-contract/test_js_sdk.js) needs.
+      const rootPackage = JSON.parse(
+        fs.readFileSync(path.join(REPO_ROOT, 'package.json'), 'utf8'),
+      );
+      expect(rootPackage.type).toBeUndefined();
     });
 
     it('is full when modules/frontend/src exists and EXPERIMENTLY_PROFILE is not "core"', () => {
@@ -118,6 +136,44 @@ describe('the @modules/* alias — one rule, three toolchains', () => {
       expect(modulesAlias.modulesAliasTargets({})).toEqual(
         fs.existsSync(MODULES_DIR) ? [MODULES_DIR, MODULES_STUB_DIR] : [MODULES_STUB_DIR],
       );
+    });
+
+    it('spells the same directories, in order, for Turbopack', () => {
+      // One rule, two bundlers: whatever webpack is pointed at, Turbopack is
+      // pointed at, same order. Resolved back to absolute paths so the two
+      // spellings are compared as directories, not as strings.
+      for (const env of [{}, { EXPERIMENTLY_PROFILE: 'core' }]) {
+        const targets = modulesAlias.modulesAliasTargets(env);
+        const turbo = modulesAlias.modulesAliasTurbopack(env);
+        expect(Object.keys(turbo)).toEqual(['@modules/*']);
+        expect(
+          turbo['@modules/*'].map((request: string) =>
+            path.resolve(FRONTEND_ROOT, request.replace(/\/\*$/, '')),
+          ),
+        ).toEqual(targets);
+      }
+    });
+
+    it('gives Turbopack relative requests, never absolute paths', () => {
+      // Turbopack treats an alias target as a module *request*: an absolute
+      // one is read as server-relative and re-rooted at the Next project
+      // directory ("aliased to server relative '/Users/…' inside of
+      // [project]/frontend"), and every `@modules/*` import then fails with
+      // Module not found. Relative requests, and a trailing `/*` so the
+      // captured tail is substituted, are what actually resolves.
+      for (const env of [{}, { EXPERIMENTLY_PROFILE: 'core' }]) {
+        for (const request of modulesAlias.modulesAliasTurbopack(env)['@modules/*']) {
+          expect(request.startsWith('/')).toBe(false);
+          expect(request).toMatch(/^\.{1,2}\//);
+          expect(request.endsWith('/*')).toBe(true);
+        }
+      }
+    });
+
+    it('is core for Turbopack too whenever EXPERIMENTLY_PROFILE=core', () => {
+      expect(modulesAlias.modulesAliasTurbopack({ EXPERIMENTLY_PROFILE: 'core' })).toEqual({
+        '@modules/*': ['./src/modules-stub/*'],
+      });
     });
   });
 
@@ -250,8 +306,35 @@ describe('the @modules/* alias — one rule, three toolchains', () => {
     });
   });
 
-  describe('next/webpack', () => {
+  describe('next (turbopack + webpack)', () => {
     const nextConfig = require(path.join(FRONTEND_ROOT, 'next.config.js'));
+
+    it('hands Turbopack the alias from modules-alias.js, unchanged', () => {
+      // Turbopack is what `next build` uses from Next 16, so this is the
+      // spelling the shipped bundle depends on.
+      expect(nextConfig.turbopack.resolveAlias).toEqual(modulesAlias.modulesAliasTurbopack());
+    });
+
+    it('gives Turbopack a root the modules tree is inside', () => {
+      // Turbopack resolves nothing above its root, and the modules tree is a
+      // sibling of this package; without this, `../modules/frontend/src/*` is
+      // outside the project and every module import fails. It also stops
+      // Turbopack inferring a root from the nearest lockfile it can find.
+      expect(nextConfig.turbopack.root).toBe(REPO_ROOT);
+      expect(path.relative(nextConfig.turbopack.root, MODULES_DIR).startsWith('..')).toBe(false);
+    });
+
+    it('points both bundlers at the same directories', () => {
+      // The failure this guards is one bundler drifting from the other: a
+      // core Turbopack build that still reaches the real module would ship it
+      // with nothing failing, because the webpack assertions below would
+      // still pass.
+      const out: any = nextConfig.webpack({ resolve: {} });
+      const viaTurbopack = nextConfig.turbopack.resolveAlias['@modules/*'].map((request: string) =>
+        path.resolve(FRONTEND_ROOT, request.replace(/\/\*$/, '')),
+      );
+      expect(viaTurbopack).toEqual(out.resolve.alias['@modules']);
+    });
 
     it('sets resolve.alias["@modules"] to the same ordered directories', () => {
       const config: any = { resolve: { alias: { '@': path.join(FRONTEND_ROOT, 'src') } } };
@@ -454,8 +537,33 @@ describe('the dashboard image', () => {
     expect(text).toMatch(/if \[ "\$EXPERIMENTLY_PROFILE" = "core" \]; then/);
     // core: no module route in the bundle, and the stub page is there instead.
     expect(text).toMatch(/! grep -rlE '\/api\/v1\/workspaces\|\/api\/v1\/rbac\/' out\/_next\/static/);
+    expect(text).toMatch(/&& grep -rl 'Separate teams into workspaces' out\/_next\/static/);
     // full: the modules tree was really copied, and its code really shipped.
     expect(text).toMatch(/test -d \/app\/modules\/frontend\/src/);
     expect(text).toMatch(/&& grep -rlE '\/api\/v1\/rbac\/' out\/_next\/static/);
+  });
+
+  it('greps for a string only the core bundle can contain', () => {
+    // The positive half of the core assertion is a string, not a chunk
+    // filename: Turbopack emits flat content-hashed chunks with no
+    // `chunks/pages/` directory, so the `find ... -name 'workspaces-*.js'`
+    // this replaced matched nothing in either profile from Next 16 on. It is
+    // only a gate while the stub page says it and the real page does not.
+    const stub = path.join(MODULES_STUB_DIR, 'pages', 'workspaces', 'index.tsx');
+    expect(fs.readFileSync(stub, 'utf8')).toContain('Separate teams into workspaces');
+    if (fs.existsSync(MODULES_DIR)) {
+      const real = path.join(MODULES_DIR, 'pages', 'workspaces', 'index.tsx');
+      expect(fs.readFileSync(real, 'utf8')).not.toContain('Separate teams into workspaces');
+    }
+    // Every consumer of the gate greps for the same string.
+    for (const file of [
+      DASHBOARD_DOCKERFILE,
+      path.join(REPO_ROOT, 'scripts', 'core_build.sh'),
+      path.join(REPO_ROOT, '.github', 'workflows', 'pr-qa-gate.yml'),
+    ]) {
+      expect(fs.readFileSync(file, 'utf8')).toContain(
+        "grep -rl 'Separate teams into workspaces'",
+      );
+    }
   });
 });
