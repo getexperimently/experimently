@@ -1,0 +1,150 @@
+# MkDocs Material configuration for the public documentation site.
+#
+# The nav below was generated ONCE (P3.4, #136) from the in-app docs hub --
+# the sections and labels of frontend/src/pages/docs/index.tsx and the slug
+# map that page used to render markdown inside the dashboard -- and is
+# hand-maintained from here. One entry per page: where the hub listed one
+# file under several labels, the first label won. Pages not listed are still
+# built and searchable, reachable by URL.
+#
+# `strict: true` fails the build on any broken link or anchor, in CI on every
+# pull request (.github/workflows/docs.yml). Fix the link; do not relax it.
+site_name: Experimently
+site_description: 'Open-source experimentation platform: A/B testing, feature flags, sequential and Bayesian
+  statistics, fifteen SDKs.'
+site_url: https://getexperimently.github.io/experimently/
+repo_url: https://github.com/getexperimently/experimently
+repo_name: getexperimently/experimently
+edit_uri: edit/main/docs/
+copyright: Copyright &copy; 2024-2026 Experimently. Apache-2.0.
+docs_dir: docs
+site_dir: site
+exclude_docs: 'planning/
+
+  '
+strict: true
+theme:
+  name: material
+  features:
+  - navigation.tabs
+  - navigation.sections
+  - navigation.top
+  - navigation.footer
+  - search.suggest
+  - search.highlight
+  - content.code.copy
+  - content.action.edit
+  - toc.follow
+  palette:
+  - media: '(prefers-color-scheme: light)'
+    scheme: default
+    primary: indigo
+    accent: indigo
+    toggle:
+      icon: material/brightness-7
+      name: Switch to dark mode
+  - media: '(prefers-color-scheme: dark)'
+    scheme: slate
+    primary: indigo
+    accent: indigo
+    toggle:
+      icon: material/brightness-4
+      name: Switch to light mode
+markdown_extensions:
+- admonition
+- attr_list
+- md_in_html
+- tables
+- toc
+- pymdownx.details: null
+- pymdownx.superfences: null
+- pymdownx.tabbed:
+    alternate_style: true
+- pymdownx.highlight:
+    anchor_linenums: true
+- pymdownx.inlinehilite: null
+- pymdownx.snippets:
+    base_path:
+    - docs
+    check_paths: true
+plugins:
+- search
+nav:
+- Home: README.md
+- Getting Started:
+  - Quick Start: getting-started/quick-start.md
+  - Core Concepts: getting-started/concepts.md
+  - Architecture Overview: getting-started/architecture.md
+  - FAQ: getting-started/faq.md
+  - Modules & Profiles: getting-started/modules.md
+- Feature Flags:
+  - Creating Feature Flags: feature-flags/create.md
+  - Targeting & Rules: Enhanced_Rules_Engine_Reference.md
+  - Gradual Rollouts: feature-flags/rollouts.md
+  - Safety Monitoring: feature-flags/safety.md
+- A/B Testing & Experiments:
+  - Running Experiments: guides/user-guide.md
+  - Statistical Methods: api/sequential-testing.md
+  - CUPED Variance Reduction: api/cuped.md
+  - Multi-Armed Bandits: api/multi-armed-bandit.md
+  - Split URL Testing: api/split-url.md
+  - Mutual Exclusion Groups: api/mutual-exclusion-groups.md
+  - Live Results Streaming: websocket-streaming.md
+- LLM / AI Model Evaluation:
+  - Overview: llm-evaluation/overview.md
+  - Quick Start: llm-evaluation/quickstart.md
+- SDKs:
+  - JavaScript SDK: sdk/javascript.md
+  - Python SDK: sdk/python.md
+  - Java SDK: sdk/java.md
+  - React SDK: sdk/react.md
+  - Go SDK: sdk/go.md
+  - iOS Swift SDK: sdk/ios.md
+  - Android Kotlin SDK: sdk/android.md
+  - Flutter SDK: sdk/flutter.md
+  - React Native SDK: sdk/react-native.md
+  - MCP Server: mcp-server.md
+  - OpenFeature Provider: sdk/openfeature.md
+  - Edge SDK: sdk/edge.md
+  - Ruby SDK: sdk/ruby.md
+  - PHP SDK: sdk/php.md
+  - .NET SDK: sdk/dotnet.md
+  - Elixir SDK: sdk/elixir.md
+  - SDK contract & status: sdk-guide.md
+- API Reference:
+  - Authentication: api/auth.md
+  - Experiments: api/endpoints.md
+  - Compliance & Audit: api/compliance.md
+  - Integrations: api/integrations.md
+- Integrations:
+  - AWS: integrations/aws.md
+  - Data Warehouses: api/warehouse-analytics.md
+  - Databricks: warehouse/databricks.md
+  - ClickHouse: warehouse/clickhouse.md
+  - MySQL: warehouse/mysql.md
+  - Salesforce: integrations/salesforce.md
+  - GitHub: integrations/github.md
+  - Slack & Email: api/alerting.md
+- Security & Compliance:
+  - Audit Logging: api/audit-logging.md
+  - RBAC: api/rbac.md
+  - API Key Management: security/api-keys.md
+  - SSO / SAML / OIDC: auth/sso.md
+  - HIPAA Compliance: hipaa/overview.md
+- Self-Hosting:
+  - AWS CDK Deployment: self-hosting/cdk.md
+  - Docker Compose: getting-started/docker-guide.md
+  - Environment Variables: getting-started/environment-setup.md
+  - Database Migrations: self-hosting/migrations.md
+  - Monitoring: self-hosting/monitoring.md
+- Guides & Tutorials:
+  - Bayesian Experimentation: api/bayesian.md
+  - Guided Experiment Builder: guides/experiment-wizard.md
+  - Interaction Detection: api/interaction-detection.md
+- Statistics Reference:
+  - Power Analysis & Sample Size: statistics/power-analysis.md
+  - Post-Stratification: statistics/post-stratification.md
+  - FDR Correction: statistics/fdr-correction.md
+- Team Workspaces:
+  - Workspace Overview: workspaces/overview.md
+  - Quickstart: workspaces/quickstart.md

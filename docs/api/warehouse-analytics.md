@@ -1,5 +1,8 @@
 # Warehouse-Native Analytics
 
+!!! info "Part of the `warehouse` module"
+    Warehouse-native analytics is one of the optional modules -- present in the **full profile**, absent from the core one. A core deployment does not serve these routes. See [Modules and profiles](../getting-started/modules.md) for what each profile includes and how to run the full one.
+
 Warehouse-native analytics lets you run experiment analysis directly against your existing data warehouse (Snowflake, BigQuery, or Redshift) instead of relying solely on events tracked through the platform's ingestion pipeline. This is useful when your source-of-truth metrics already live in the warehouse, or when you need to analyze large datasets that are impractical to re-ingest.
 
 ---

@@ -195,6 +195,5 @@ You should see both dashboards in the output:
 
 ## Next Steps
 
-- [Set up CloudWatch Alarms](../alerts/cloudwatch-alarms.md) for proactive monitoring
+- [Set up CloudWatch Alarms](../infrastructure/cloudwatch-setup.md) for proactive monitoring
 - Configure [Log Insights queries](log-insights-queries.md) for analysis
-- Integrate with [AWS X-Ray](../tracing/xray-integration.md) for distributed tracing

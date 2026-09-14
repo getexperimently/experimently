@@ -1,5 +1,8 @@
 # MySQL / MariaDB Warehouse Connector
 
+!!! info "Part of the `warehouse` module"
+    Warehouse-native analytics is one of the optional modules -- present in the **full profile**, absent from the core one. A core deployment does not serve these routes. See [Modules and profiles](../getting-started/modules.md) for what each profile includes and how to run the full one.
+
 ## Overview
 
 The MySQL connector lets you run read-only analytics queries and fetch experiment metrics directly from a MySQL or MariaDB database. It uses `PyMySQL` (pure Python, no native client libraries required) and enforces `DictCursor` so every row is returned as a Python `dict`.

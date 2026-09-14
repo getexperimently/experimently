@@ -137,14 +137,16 @@ function MoreNavGroup({
           </Link>
         ))}
         {showModulesGuide && (
-          <Link
+          <a
             href={MODULES_DOC_PATH}
+            target="_blank"
+            rel="noreferrer"
             data-testid="nav-modules-docs"
             onClick={follow}
             className="block px-3 py-2 rounded-md text-sm text-slate-600 hover:bg-slate-50"
           >
             Modules
-          </Link>
+          </a>
         )}
       </div>
     </details>
