@@ -1,13 +1,20 @@
 /** @type {import('next').NextConfig} */
 const path = require('path');
-const { modulesAliasTargets, modulesTreeAvailable } = require('./modules-alias');
+const {
+  REPO_ROOT,
+  modulesAliasTargets,
+  modulesAliasTurbopack,
+  modulesTreeAvailable,
+} = require('./modules-alias');
 
-// The modules seam. `./modules-alias.js` owns the rule; this file applies it
-// to webpack. Next also derives aliases from `tsconfig.json`'s `paths` via its
-// own resolve plugin — if that kept mapping `@modules/*` at
-// `../modules/frontend/src/*` it would quietly win back the real module in a
-// core build, the exact silent failure to avoid — so a core build is also
-// pointed at `tsconfig.core.json`, whose `paths` list the stub tree alone.
+// The modules seam. `./modules-alias.js` owns the rule; this file applies it to
+// both bundlers — Turbopack, which `next build` uses by default from Next 16,
+// and webpack, which `next build --webpack` still uses. Next also derives
+// aliases from `tsconfig.json`'s `paths` via its own resolve plugin — if that
+// kept mapping `@modules/*` at `../modules/frontend/src/*` it would quietly win
+// back the real module in a core build, the exact silent failure to avoid — so
+// a core build is also pointed at `tsconfig.core.json`, whose `paths` list the
+// stub tree alone.
 const full = modulesTreeAvailable();
 
 module.exports = {
@@ -23,9 +30,21 @@ module.exports = {
     // The modules tree is `../modules/frontend/src`, outside this package.
     // Without this, Next's SWC loader only compiles sources inside the project
     // directory and a `@modules/*` import of a real module fails with "Module
-    // parse failed: Unexpected token".
+    // parse failed: Unexpected token". (webpack only; Turbopack uses
+    // `turbopack.root` below for the same purpose.)
     externalDir: true,
   },
+  turbopack: {
+    // Turbopack resolves nothing above its root, and the modules tree is a
+    // sibling of this package. Pinning the root to the repository also stops
+    // Turbopack inferring one from the nearest lockfile it can find — on a
+    // developer machine that was $HOME, which it then warned about and
+    // ignored.
+    root: REPO_ROOT,
+    resolveAlias: modulesAliasTurbopack(),
+  },
+  // `next build --webpack`. Kept in step with the Turbopack alias above by
+  // src/tests/modules-alias.test.ts, which asserts both spell the same rule.
   webpack: (config) => {
     config.resolve = config.resolve || {};
     config.resolve.alias = {

@@ -15,15 +15,30 @@
  * tree, which is how it is tested.
  *
  * Consumers:
- *   next.config.js      → webpack `resolve.alias` (+ `typescript.tsconfigPath`,
- *                         `experimental.externalDir` so webpack will compile
- *                         sources outside the project root)
+ *   next.config.js      → Turbopack `turbopack.resolveAlias` (the default
+ *                         bundler from Next 16) AND webpack `resolve.alias`
+ *                         (`next build --webpack`), plus
+ *                         `typescript.tsconfigPath`, `turbopack.root` and
+ *                         `experimental.externalDir` so either bundler will
+ *                         compile sources outside the project root
  *   jest.config.js      → `moduleNameMapper` + `roots` (module tests live
  *                         beside the modules)
  *   tsconfig.json       → `paths` (real first, stub as fallback) + `include`
  *   tsconfig.core.json  → `paths` (stub only) — what a core `tsc` uses
  *   Dockerfile          → `COPY modules/frontend/ /app/modules/frontend/` for
  *                         the full image; the core image never copies it
+ *
+ * One constraint the seam puts on the repository root: `<repo>/package.json`
+ * must not declare `"type"`. It is the nearest package.json above
+ * `modules/frontend/src`, and Turbopack reads the module format from it — an
+ * explicit `"type": "commonjs"` there failed every file in the modules tree
+ * with "Specified module format (CommonJs) is not matching the module format
+ * of the source code (EcmaScript Modules)". Absent, the field defaults to
+ * commonjs for Node exactly as before (the one root-level script,
+ * tests/sdk-contract/test_js_sdk.js, is `require`-based), and Turbopack stops
+ * treating the declaration as an instruction. The dashboard image never hit
+ * this because it copies `frontend/` and `modules/frontend/` into `/app` with
+ * no package.json between them. src/tests/modules-alias.test.ts pins it.
  */
 const fs = require('fs');
 const path = require('path');
@@ -44,10 +59,39 @@ function modulesAliasTargets(env = process.env) {
   return modulesTreeAvailable(env) ? [MODULES_DIR, MODULES_STUB_DIR] : [MODULES_STUB_DIR];
 }
 
+/**
+ * The same rule spelled for Turbopack's `resolveAlias` — the bundler
+ * `next build` uses by default from Next 16.
+ *
+ * Two differences from webpack's `resolve.alias`, both found by building:
+ *
+ *   1. webpack does prefix matching, so `'@modules': [dirs]` already covers
+ *      `@modules/anything`. Turbopack matches the key whole unless it carries
+ *      a `*`, and substitutes the captured tail into the `*` on the value
+ *      side — so the key is `@modules/*` and every target ends in `/*`.
+ *   2. A target is a module *request*, not a filesystem path: an absolute one
+ *      is read as server-relative and re-rooted at the Next project directory
+ *      ("aliased to server relative '/Users/…' inside of [project]/frontend",
+ *      then Module not found). So the targets are `./`- and `../`-relative to
+ *      this directory, which is that project directory.
+ *
+ * Same directories, same order as every other toolchain: the first that
+ * contains the module wins, which is what makes a full tree fall back to the
+ * stub for a module it does not carry.
+ */
+function modulesAliasTurbopack(env = process.env) {
+  const request = (dir) => {
+    const rel = path.relative(__dirname, dir).split(path.sep).join('/');
+    return `${rel.startsWith('.') ? rel : `./${rel}`}/*`;
+  };
+  return { '@modules/*': modulesAliasTargets(env).map(request) };
+}
+
 module.exports = {
   REPO_ROOT,
   MODULES_DIR,
   MODULES_STUB_DIR,
   modulesTreeAvailable,
   modulesAliasTargets,
+  modulesAliasTurbopack,
 };

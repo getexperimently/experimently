@@ -13,10 +13,14 @@
     "noEmit": true,
     "esModuleInterop": true,
     "module": "esnext",
-    "moduleResolution": "node",
+    // `bundler` and `react-jsx` are not a preference: Next 16 rewrites this
+    // file on every build until both are set ("The following mandatory changes
+    // were made to your tsconfig.json"). They are written here so the file on
+    // disk is the file Next wants and nothing mutates the checkout mid-build.
+    "moduleResolution": "bundler",
     "resolveJsonModule": true,
     "isolatedModules": true,
-    "jsx": "preserve",
+    "jsx": "react-jsx",
     "baseUrl": ".",
     "paths": {
       "@/*": [
@@ -33,13 +37,20 @@
       // resolution inside node_modules (measured: @types/jest's pretty-format).
       // Add a key when the modules tree imports a new package; tsc says
       // which. src/tests/modules-alias.test.ts checks the list is complete.
+      // Types first, implementation second. Under `moduleResolution: node` the
+      // order did not matter — `./node_modules/react` has no `index.d.ts`, so
+      // tsc fell through to the `@types` entry. Under `bundler` tsc honours
+      // react's `exports` map, resolves `./index.js`, stops there and reports
+      // TS7016 "implicitly has an 'any' type" for every React import in the
+      // program (422 errors on the first Next 16 build). tsc is `noEmit` here,
+      // so the declaration file is the right answer for both trees.
       "react": [
-        "./node_modules/react",
-        "./node_modules/@types/react"
+        "./node_modules/@types/react",
+        "./node_modules/react"
       ],
       "react/*": [
-        "./node_modules/react/*",
-        "./node_modules/@types/react/*"
+        "./node_modules/@types/react/*",
+        "./node_modules/react/*"
       ],
       "next": [
         "./node_modules/next"
