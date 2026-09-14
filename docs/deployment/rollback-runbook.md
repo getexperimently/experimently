@@ -1,4 +1,4 @@
-# Rollback Runbook — Experimentation Platform
+# Rollback Runbook — Experimently
 
 **Version:** 1.0
 **Date:** March 2026

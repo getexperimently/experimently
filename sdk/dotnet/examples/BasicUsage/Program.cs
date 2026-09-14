@@ -1,4 +1,4 @@
-// BasicUsage — demonstrates the ExperimentationPlatform .NET SDK
+// BasicUsage — demonstrates the Experimently .NET SDK
 //
 // To run:
 //   cd sdk/dotnet/examples/BasicUsage
@@ -6,8 +6,8 @@
 //
 // Flags and experiments are decided by the server; the SDK caches the answers per user + key.
 
-using ExperimentationPlatform;
-using ExperimentationPlatform.Models;
+using Experimently;
+using Experimently.Models;
 
 // -----------------------------------------------------------------
 // 1. Configure the SDK

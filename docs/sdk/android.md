@@ -1,6 +1,6 @@
 # Android Kotlin SDK
 
-The Android SDK (`com.experimentationplatform.android`) provides feature flag evaluation,
+The Android SDK (`com.getexperimently.android`) provides feature flag evaluation,
 experiment assignment and event tracking for Android applications. It is built on Kotlin
 Coroutines and OkHttp, persists the last successful results to `SharedPreferences` for offline
 fallback, and its unit tests run on the plain JVM with OkHttp's `MockWebServer`.
@@ -33,7 +33,7 @@ The module is not published to Maven yet; consume it from source.
 ```kotlin
 // settings.gradle.kts
 include(":sdk")
-project(":sdk").projectDir = file("../experimentation-platform/sdk/android/sdk")
+project(":sdk").projectDir = file("../experimently/sdk/android/sdk")
 
 // build.gradle.kts (app module)
 dependencies {
@@ -46,10 +46,10 @@ dependencies {
 ## Quick Start
 
 ```kotlin
-import com.experimentationplatform.android.ExperimentationClient
-import com.experimentationplatform.android.SdkConfig
-import com.experimentationplatform.android.TrackEvent
-import com.experimentationplatform.android.User
+import com.getexperimently.android.ExperimentationClient
+import com.getexperimently.android.SdkConfig
+import com.getexperimently.android.TrackEvent
+import com.getexperimently.android.User
 
 val client = ExperimentationClient(
     SdkConfig(

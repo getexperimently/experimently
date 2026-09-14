@@ -1,5 +1,5 @@
-name: experimentation_sdk_example
-description: Example Flutter app demonstrating the Experimentation Platform SDK.
+name: experimently_example
+description: Example Flutter app demonstrating the Experimently SDK.
 version: 1.0.0
 
 environment:
@@ -9,7 +9,7 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  experimentation_sdk:
+  experimently:
     path: ../
 
 dev_dependencies:

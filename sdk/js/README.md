@@ -1,6 +1,6 @@
-# @experimentation-platform/js-sdk
+# @getexperimently/js-sdk
 
-JavaScript/TypeScript client for the Experimentation Platform public API. Node >= 18 and browsers,
+JavaScript/TypeScript client for the Experimently public API. Node >= 18 and browsers,
 zero runtime dependencies (global `fetch`), CommonJS build with type declarations.
 
 Flag evaluation and experiment assignment are **decided by the server**; results are cached per
@@ -11,7 +11,7 @@ Full documentation: [`docs/sdk/javascript.md`](../../docs/sdk/javascript.md).
 ## Quick start
 
 ```ts
-import { ExperimentationClient } from '@experimentation-platform/js-sdk';
+import { ExperimentationClient } from '@getexperimently/js-sdk';
 
 const client = new ExperimentationClient({ apiUrl: 'http://localhost:8000', apiKey: 'eptk_...' });
 const user = { userId: 'user-123', attributes: { plan: 'pro' } };

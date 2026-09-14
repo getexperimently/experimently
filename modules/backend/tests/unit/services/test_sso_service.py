@@ -384,7 +384,7 @@ class TestGenerateSAMLMetadata:
         assert (
             "SPSSODescriptor" in xml
             or "AssertionConsumerService" in xml
-            or "experimentation-platform" in xml
+            or "experimently" in xml
         )
 
     def test_xml_parseable(self):
@@ -399,7 +399,7 @@ class TestGenerateSAMLMetadata:
         cfg = _make_saml_config()
         with patch.object(sso_service, "_SAML_AVAILABLE", False):
             xml = generate_saml_metadata(cfg)
-        assert "experimentation-platform" in xml
+        assert "experimently" in xml
 
     def test_contains_acs_binding(self):
         cfg = _make_saml_config()

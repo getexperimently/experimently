@@ -11,7 +11,7 @@
  *
  * Usage (middleware.ts):
  * ```ts
- * import { createEdgeMiddleware } from '@experimentation-platform/edge-sdk/vercel';
+ * import { createEdgeMiddleware } from '@getexperimently/edge-sdk/vercel';
  *
  * export const middleware = createEdgeMiddleware({
  *   apiKey: process.env.EP_API_KEY!,

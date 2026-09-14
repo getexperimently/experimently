@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace ExperimentationPlatform\Errors;
+namespace Experimently\Errors;
 
 /**
  * Thrown when a network-level error occurs (cURL failure, timeout, etc.).

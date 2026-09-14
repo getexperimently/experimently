@@ -1,4 +1,4 @@
-# Monitoring Guide — Experimentation Platform (EP-013)
+# Monitoring Guide — Experimently (EP-013)
 
 This guide covers all monitoring components introduced by EP-013:
 Prometheus metrics, structured logging, request tracing, CloudWatch

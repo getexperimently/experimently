@@ -1,4 +1,4 @@
-# Experimentation Platform Documentation
+# Experimently Documentation
 
 ## Start Here
 

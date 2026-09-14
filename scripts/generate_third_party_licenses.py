@@ -83,7 +83,7 @@ MANIFEST_DEPS: dict[str, list[tuple[str, str, str]]] = {
         ("php (ext-json, ext-curl)", ">=8.1", "PHP-3.01 / runtime, not bundled"),
         ("phpunit/phpunit (dev)", "^10.0", "BSD-3-Clause"),
     ],
-    "Ruby SDK (`sdk/ruby/experimentation_platform.gemspec`)": [
+    "Ruby SDK (`sdk/ruby/experimently.gemspec`)": [
         ("(standard library only)", "—", "Ruby / BSD-2-Clause"),
     ],
     "Elixir SDK (`sdk/elixir/mix.exs`)": [
@@ -97,7 +97,7 @@ MANIFEST_DEPS: dict[str, list[tuple[str, str, str]]] = {
         ("coverlet.collector (test)", "6.0.0", "MIT"),
     ],
     "Python SDKs (`sdk/python`, `sdk/openfeature-python`)": [
-        ("(experimentation-sdk: standard library only)", "—", "—"),
+        ("(experimently: standard library only)", "—", "—"),
         ("openfeature-sdk", ">=0.9.0", "Apache-2.0"),
     ],
 }

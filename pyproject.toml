@@ -236,7 +236,7 @@ requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "experimentation-platform"
+name = "experimently"
 version = "0.1.0"
 description = "Experimently — experimentation platform for A/B testing and feature flags"
 requires-python = ">=3.11"

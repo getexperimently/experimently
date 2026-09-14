@@ -1,4 +1,4 @@
-# Threat Model — Experimentation Platform
+# Threat Model — Experimently
 
 **Version:** 1.0
 **Date:** March 2026
@@ -9,7 +9,7 @@
 
 ## 1. System Overview
 
-The Experimentation Platform is an AWS-hosted A/B testing and feature flag management service. It enables product teams to run controlled experiments, gradually roll out features, and evaluate results through a statistical engine.
+Experimently is an AWS-hosted A/B testing and feature flag management service. It enables product teams to run controlled experiments, gradually roll out features, and evaluate results through a statistical engine.
 
 ### Primary Assets
 

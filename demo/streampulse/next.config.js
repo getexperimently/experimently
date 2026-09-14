@@ -14,7 +14,7 @@ module.exports = {
   webpack: (config) => {
     config.resolve.alias = {
       ...config.resolve.alias,
-      '@experimentation-platform/react-sdk': SDK_ENTRY,
+      '@getexperimently/react-sdk': SDK_ENTRY,
       // Force a single React copy. Without this, the SDK source could resolve
       // sdk/react/node_modules/react and hooks would throw "Invalid hook call".
       react: path.resolve(__dirname, 'node_modules/react'),

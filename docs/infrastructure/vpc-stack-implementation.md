@@ -1,6 +1,6 @@
 # VPC Implementation with Public and Private Subnets
 
-This document provides the implementation of a VPC with public, private, and isolated subnets for the Experimentation Platform using AWS CDK.
+This document provides the implementation of a VPC with public, private, and isolated subnets for Experimently using AWS CDK.
 
 ## VPC Stack Implementation
 

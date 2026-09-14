@@ -5,17 +5,17 @@
     <modelVersion>4.0.0</modelVersion>
 
     <parent>
-        <groupId>com.experimentationplatform</groupId>
-        <artifactId>experimentation-java-sdk-parent</artifactId>
+        <groupId>com.getexperimently</groupId>
+        <artifactId>experimently-sdk-parent</artifactId>
         <version>1.0.0</version>
         <relativePath>../pom.xml</relativePath>
     </parent>
 
-    <artifactId>experimentation-java-sdk</artifactId>
+    <artifactId>experimently-sdk</artifactId>
     <packaging>jar</packaging>
 
-    <name>Experimentation Platform Java SDK — Core</name>
-    <description>Core Java/JVM client SDK for the Experimentation Platform</description>
+    <name>Experimently Java SDK — Core</name>
+    <description>Core Java/JVM client SDK for Experimently</description>
 
     <dependencies>
         <!-- HTTP Client -->

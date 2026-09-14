@@ -1,4 +1,4 @@
-# Experimentation Platform Java SDK
+# Experimently Java SDK
 
 Java 11+ client for the Experimently A/B testing and feature flag platform (OkHttp + Jackson),
 plus a Spring Boot 3 auto-configuration starter. Thread-safe; one client per application.
@@ -7,35 +7,35 @@ Flag evaluation and experiment assignment are decided **by the server**: every c
 public API with your `X-API-Key`, the server buckets the user (sticky per user + experiment), and
 the SDK caches the answer per user + key for a TTL. Nothing is bucketed locally.
 
-Modules: `core/` (`experimentation-java-sdk`) and `spring-boot-starter/`
-(`experimentation-spring-boot-starter`). Full reference: [`docs/sdk/java.md`](../../docs/sdk/java.md).
+Modules: `core/` (`experimently-sdk`) and `spring-boot-starter/`
+(`experimently-spring-boot-starter`). Full reference: [`docs/sdk/java.md`](../../docs/sdk/java.md).
 
 ## Installation
 
 ```xml
 <dependency>
-    <groupId>com.experimentationplatform</groupId>
-    <artifactId>experimentation-java-sdk</artifactId>          <!-- core client -->
+    <groupId>com.getexperimently</groupId>
+    <artifactId>experimently-sdk</artifactId>          <!-- core client -->
     <version>1.0.0</version>
 </dependency>
 <!-- or, for Spring Boot: -->
 <dependency>
-    <groupId>com.experimentationplatform</groupId>
-    <artifactId>experimentation-spring-boot-starter</artifactId> <!-- pulls in the core -->
+    <groupId>com.getexperimently</groupId>
+    <artifactId>experimently-spring-boot-starter</artifactId> <!-- pulls in the core -->
     <version>1.0.0</version>
 </dependency>
 ```
 
-Gradle: `implementation 'com.experimentationplatform:experimentation-java-sdk:1.0.0'`.
+Gradle: `implementation 'com.getexperimently:experimently-sdk:1.0.0'`.
 Inside this monorepo: `cd sdk/java && mvn install`.
 
 ## Quick Start (core client)
 
 ```java
-import com.experimentationplatform.sdk.ExperimentationClient;
-import com.experimentationplatform.sdk.config.SdkConfig;
-import com.experimentationplatform.sdk.exception.ExperimentationException;
-import com.experimentationplatform.sdk.model.*;
+import com.getexperimently.sdk.ExperimentationClient;
+import com.getexperimently.sdk.config.SdkConfig;
+import com.getexperimently.sdk.exception.ExperimentationException;
+import com.getexperimently.sdk.model.*;
 
 SdkConfig config = SdkConfig.builder(System.getenv("EXPERIMENTLY_API_KEY"), "http://localhost:8000").build();
 
@@ -101,7 +101,7 @@ bean suppresses the auto-configured one.
 | Builder method | Starter property (`experimentation.*`) | Default | Description |
 |---|---|---|---|
 | *(constructor)* `apiKey` | `api-key` | — (required) | Sent as `X-API-Key`; the starter is inactive without it |
-| *(constructor)* `baseUrl` | `base-url` | starter: `https://api.experimentation-platform.example.com` | Backend origin; the SDK appends `/api/v1/...`; trailing `/` stripped |
+| *(constructor)* `baseUrl` | `base-url` | starter: `https://api.experimently.example.com` | Backend origin; the SDK appends `/api/v1/...`; trailing `/` stripped |
 | `timeoutMs(int)` | `timeout-ms` | `5000` | OkHttp connect/read/write timeout |
 | `cacheTtlMs(long)` | `cache-ttl-seconds` | `300000` ms / `300` s | Lifetime of a cached evaluation/assignment |
 | `cacheSize(int)` | `cache-size` | `1000` | Max entries per cache (flags and assignments each), LRU |
@@ -172,7 +172,7 @@ bash sdk/java/examples/contract_smoke.sh
 
 The script runs `./mvnw -q -B -pl core -am package -DskipTests` when `core/target` is stale (Maven output
 goes to stderr) and then `java -cp "core/target/classes:core/target/lib/*"
-com.experimentationplatform.sdk.examples.ContractSmoke`; `FORCE_BUILD=1` forces a rebuild. Env:
+com.getexperimently.sdk.examples.ContractSmoke`; `FORCE_BUILD=1` forces a rebuild. Env:
 `EXPERIMENTLY_API_URL` (default `http://localhost:8000`), `EXPERIMENTLY_API_KEY` (required),
 `CONTRACT_EXPERIMENT_KEY` (default `sdk_contract_ab`), `CONTRACT_FLAG_KEY` (default
 `sdk_contract_flag`), `CONTRACT_USER_ID` (default random `smoke-<uuid>`). Repo-wide runner:

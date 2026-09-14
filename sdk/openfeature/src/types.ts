@@ -1,12 +1,12 @@
 /**
- * Types for the Experimentation Platform OpenFeature Provider.
+ * Types for the Experimently OpenFeature Provider.
  *
- * The provider delegates every network call to `@experimentation-platform/js-sdk`;
+ * The provider delegates every network call to `@getexperimently/js-sdk`;
  * the flag shape it works with is that SDK's `FlagEvaluation`
  * (`{key, enabled, config}` from `GET /api/v1/feature-flags/evaluate/{key}?user_id=…`).
  */
 
-import type { ExperimentationClient } from '@experimentation-platform/js-sdk';
+import type { ExperimentationClient } from '@getexperimently/js-sdk';
 
 export interface ExperimentationProviderOptions {
   /** API key used in the X-API-Key header. */

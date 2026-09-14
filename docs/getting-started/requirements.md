@@ -1,4 +1,4 @@
-# Requirements for Experimentation Platform
+# Requirements for Experimently
 
 This document outlines the core requirements for an experimentation platform, incorporating both real-time testing capabilities and feature flag functionality.
 

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Script to deploy CloudWatch dashboards for Experimentation Platform
+# Script to deploy CloudWatch dashboards for Experimently
 
 # Exit on error
 set -e

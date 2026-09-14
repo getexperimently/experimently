@@ -1,12 +1,12 @@
 # User Guide
 
-Guide for product managers, experimenters, and analysts using the Experimentation Platform.
+Guide for product managers, experimenters, and analysts using Experimently.
 
 ---
 
 ## Introduction
 
-The Experimentation Platform enables you to:
+Experimently enables you to:
 - **A/B test** product changes with statistical rigor
 - **Feature flag** new functionality for controlled rollouts
 - **Analyze results** with real-time statistical significance reporting
@@ -438,5 +438,5 @@ If high-risk pairs are found, add the experiments to a [Mutual Exclusion Group](
 - **API Documentation**: http://localhost:8000/docs
 - **Technical Guide**: See [Technical Guide](../architecture/technical-guide.md) for implementation details
 - **Testing Guide**: See [Testing Guide](../development/testing-guide.md) for test workflows
-- **Issues**: https://github.com/amarkanday/experimentation-platform/issues
-- **Slack**: #experimentation-platform channel
+- **Issues**: https://github.com/getexperimently/experimently/issues
+- **Slack**: #experimently channel

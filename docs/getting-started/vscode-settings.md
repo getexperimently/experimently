@@ -1,4 +1,4 @@
-# VSCode Configuration for Experimentation Platform
+# VSCode Configuration for Experimently
 
 This document provides the recommended VSCode settings for the experimentation platform project. These settings ensure a consistent development experience for all team members and enforce the project's coding standards automatically.
 

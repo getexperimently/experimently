@@ -1,4 +1,4 @@
-# Experimentation Platform Android SDK
+# Experimently Android SDK
 
 Kotlin client for the Experimently A/B testing and feature flag platform. Coroutine-based,
 OkHttp under the hood, `SharedPreferences`-backed offline fallback, `minSdk 21`.
@@ -19,7 +19,7 @@ Full reference: [`docs/sdk/android.md`](../../docs/sdk/android.md).
 ```kotlin
 // settings.gradle.kts
 include(":sdk")
-project(":sdk").projectDir = file("../experimentation-platform/sdk/android/sdk")
+project(":sdk").projectDir = file("../experimently/sdk/android/sdk")
 
 // build.gradle.kts (app module)
 dependencies {
@@ -28,15 +28,15 @@ dependencies {
 ```
 
 Requires Kotlin 1.9, coroutines 1.7 and OkHttp 4.12 (declared by the module). Package:
-`com.experimentationplatform.android`.
+`com.getexperimently.android`.
 
 ## Quick Start
 
 ```kotlin
-import com.experimentationplatform.android.ExperimentationClient
-import com.experimentationplatform.android.SdkConfig
-import com.experimentationplatform.android.TrackEvent
-import com.experimentationplatform.android.User
+import com.getexperimently.android.ExperimentationClient
+import com.getexperimently.android.SdkConfig
+import com.getexperimently.android.TrackEvent
+import com.getexperimently.android.User
 
 val client = ExperimentationClient(
     SdkConfig(
@@ -150,7 +150,7 @@ bash sdk/android/examples/contract_smoke.sh
 # {"sdk":"android","assign":{"variant_name":"treatment","is_control":false,"sticky":true},"flag":{"enabled":true},"track":{"ok":true},"fanout":{"ok":true}}
 ```
 
-Runs `com.experimentationplatform.android.examples.ContractSmoke` from the JVM build above
+Runs `com.getexperimently.android.examples.ContractSmoke` from the JVM build above
 (`./mvnw -q package -DskipTests` when `jvm/target` is stale, Maven output to stderr; `FORCE_BUILD=1`
 forces a rebuild). Env: `EXPERIMENTLY_API_URL` (default `http://localhost:8000`),
 `EXPERIMENTLY_API_KEY` (required), `CONTRACT_EXPERIMENT_KEY` (default `sdk_contract_ab`),

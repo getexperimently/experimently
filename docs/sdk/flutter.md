@@ -1,8 +1,8 @@
 # Flutter SDK
 
-`experimentation_sdk` (v0.2) provides feature flag evaluation, A/B experiment assignment and
+`experimently` (v0.2) provides feature flag evaluation, A/B experiment assignment and
 event tracking for Flutter applications on iOS, Android, Web, macOS, Windows and Linux. A
-Flutter-free entry point (`experimentation_sdk_core.dart`) exposes the same client to plain Dart
+Flutter-free entry point (`experimently_core.dart`) exposes the same client to plain Dart
 programs.
 
 Flag evaluation and experiment assignment are decided **by the server**: every call goes to the
@@ -26,10 +26,10 @@ Source: `sdk/flutter`.
 dependencies:
   flutter:
     sdk: flutter
-  experimentation_sdk:
+  experimently:
     git:
-      url: https://github.com/experimentation-platform/sdk
-      path: flutter
+      url: https://github.com/getexperimently/experimently
+      path: sdk/flutter
 ```
 
 ```bash
@@ -40,15 +40,15 @@ Two library entry points are available:
 
 | Import | Use from | Adds |
 |--------|----------|------|
-| `package:experimentation_sdk/experimentation_sdk.dart` | Flutter apps | everything below plus `SharedPreferencesOfflineStore` |
-| `package:experimentation_sdk/experimentation_sdk_core.dart` | plain Dart (servers, CLIs, the contract smoke) | the client, models, cache, HTTP client, `InMemoryOfflineStore`, `hashUser` — no `package:flutter` code |
+| `package:experimently/experimently.dart` | Flutter apps | everything below plus `SharedPreferencesOfflineStore` |
+| `package:experimently/experimently_core.dart` | plain Dart (servers, CLIs, the contract smoke) | the client, models, cache, HTTP client, `InMemoryOfflineStore`, `hashUser` — no `package:flutter` code |
 
 ---
 
 ## Quick Start
 
 ```dart
-import 'package:experimentation_sdk/experimentation_sdk.dart';
+import 'package:experimently/experimently.dart';
 
 final client = ExperimentationClient(
   config: const SdkConfig(
@@ -283,7 +283,7 @@ throws:
 the golden-vector tests in `tests/sdk-contract/`:
 
 ```dart
-import 'package:experimentation_sdk/experimentation_sdk.dart';
+import 'package:experimently/experimently.dart';
 
 hashUser('user-123', 'my-flag');   // 0.6927449859213084
 ```
@@ -339,7 +339,7 @@ Inject a `package:http` `MockClient` (no code generation needed); the SDK's own 
 ```dart
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
-import 'package:experimentation_sdk/experimentation_sdk_core.dart';
+import 'package:experimently/experimently_core.dart';
 
 final apiHttp = ApiHttpClient(
   apiKey: 'test',
@@ -373,7 +373,7 @@ The live runner (`tests/sdk-contract/live/run_live_contract.py`) invokes exactly
 `cd sdk/flutter && dart run example/contract_smoke.dart`. Env: `EXPERIMENTLY_API_URL` (default
 `http://localhost:8000`), `EXPERIMENTLY_API_KEY` (required), `CONTRACT_EXPERIMENT_KEY` (default
 `sdk_contract_ab`), `CONTRACT_FLAG_KEY` (default `sdk_contract_flag`), `CONTRACT_USER_ID` (default
-random `smoke-<uuid>`). The smoke imports only `experimentation_sdk_core.dart`, so no
+random `smoke-<uuid>`). The smoke imports only `experimently_core.dart`, so no
 `package:flutter` code is loaded — but the package depends on the `flutter` SDK, so dependency
 resolution needs Flutter's bundled `dart` (run `flutter pub get` first so `dart run` prints
 nothing but the JSON line).

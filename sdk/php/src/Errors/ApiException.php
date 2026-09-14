@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace ExperimentationPlatform\Errors;
+namespace Experimently\Errors;
 
 /**
  * Thrown when the API returns a 4xx or 5xx HTTP status code.

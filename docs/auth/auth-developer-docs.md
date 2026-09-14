@@ -1,6 +1,6 @@
 # Authentication Developer Documentation
 
-This document provides technical documentation for developers integrating with and extending the AWS Cognito authentication system in the Experimentation Platform.
+This document provides technical documentation for developers integrating with and extending the AWS Cognito authentication system in Experimently.
 
 ## Architecture Overview
 
@@ -86,11 +86,11 @@ const userPoolClient = new cognito.UserPoolClient(this, "ExperimentationClient",
     ],
     callbackUrls: [
       'http://localhost:3000/callback',
-      'https://app.experimentation-platform.example.com/callback',
+      'https://app.experimently.example.com/callback',
     ],
     logoutUrls: [
       'http://localhost:3000/',
-      'https://app.experimentation-platform.example.com/',
+      'https://app.experimently.example.com/',
     ],
   },
   preventUserExistenceErrors: true,

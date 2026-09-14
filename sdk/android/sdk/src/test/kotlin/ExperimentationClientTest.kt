@@ -1,4 +1,4 @@
-import com.experimentationplatform.android.*
+import com.getexperimently.android.*
 import kotlinx.coroutines.async
 import kotlinx.coroutines.test.runTest
 import okhttp3.mockwebserver.Dispatcher
@@ -11,7 +11,7 @@ import org.junit.jupiter.api.Assertions.*
 import java.util.concurrent.TimeUnit
 
 /**
- * Test suite for the Experimentation Platform Android SDK against OkHttp's MockWebServer.
+ * Test suite for the Experimently Android SDK against OkHttp's MockWebServer.
  *
  * Tests cover:
  * - SdkConfig defaults and custom values

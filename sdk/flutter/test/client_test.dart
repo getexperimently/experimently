@@ -12,7 +12,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
-import 'package:experimentation_sdk/experimentation_sdk_core.dart';
+import 'package:experimently/experimently_core.dart';
 
 // ---------------------------------------------------------------------------
 // Helpers

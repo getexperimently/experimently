@@ -1,6 +1,6 @@
 # Authentication Flow Diagrams
 
-This document contains the flow diagrams for the Cognito authentication system implemented in the Experimentation Platform.
+This document contains the flow diagrams for the Cognito authentication system implemented in Experimently.
 
 ## 1. Registration and Confirmation Flow
 

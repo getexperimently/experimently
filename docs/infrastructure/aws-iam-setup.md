@@ -1,4 +1,4 @@
-# AWS IAM User Setup for Experimentation Platform
+# AWS IAM User Setup for Experimently
 
 This guide outlines the process for creating an AWS IAM user with the appropriate permissions needed to build and deploy the experimentation platform infrastructure.
 
@@ -79,7 +79,7 @@ Create a custom policy with more precise permissions:
 ### Step 3: Add Tags
 
 Add organizational tags:
-- Key: `Project`, Value: `ExperimentationPlatform`
+- Key: `Project`, Value: `Experimently`
 - Key: `Role`, Value: `Developer`
 - Key: `ManagedBy`, Value: `IAC`
 

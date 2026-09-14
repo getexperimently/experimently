@@ -1,6 +1,6 @@
 # Elixir SDK
 
-`experimentation_platform` (v0.1) provides feature flag evaluation, experiment assignment and
+`experimently` (v0.1) provides feature flag evaluation, experiment assignment and
 event tracking for Elixir and Phoenix applications. It is built on OTP primitives — a `GenServer`
 client with a private ETS-backed cache — and uses Erlang's built-in `:httpc` for HTTP, so the only
 runtime dependency is `Jason`.
@@ -27,7 +27,7 @@ Add to your `mix.exs` dependencies and run `mix deps.get`:
 ```elixir
 defp deps do
   [
-    {:experimentation_platform, "~> 0.1.0"}
+    {:experimently, "~> 0.1.0"}
   ]
 end
 ```
@@ -38,19 +38,19 @@ end
 
 ```elixir
 {:ok, client} =
-  ExperimentationPlatform.start(
+  Experimently.start(
     base_url: System.get_env("EXPERIMENTLY_API_URL", "http://localhost:8000"),
     api_key: System.fetch_env!("EXPERIMENTLY_API_KEY")
   )
 
-if ExperimentationPlatform.feature_enabled?(client, "new-checkout", "user-123") do
+if Experimently.feature_enabled?(client, "new-checkout", "user-123") do
   render_new_checkout()
 end
 
-{:ok, %ExperimentationPlatform.Assignment{variant_name: variant, configuration: config}} =
-  ExperimentationPlatform.get_assignment(client, "checkout-cta-copy", "user-123", %{plan: "pro"})
+{:ok, %Experimently.Assignment{variant_name: variant, configuration: config}} =
+  Experimently.get_assignment(client, "checkout-cta-copy", "user-123", %{plan: "pro"})
 
-ExperimentationPlatform.track(client, "purchase", "user-123", %{sku: "pro-plan"},
+Experimently.track(client, "purchase", "user-123", %{sku: "pro-plan"},
   experiment_key: "checkout-cta-copy", value: 99.99)
 ```
 
@@ -58,12 +58,12 @@ ExperimentationPlatform.track(client, "purchase", "user-123", %{sku: "pro-plan"}
 
 ## Configuration
 
-`ExperimentationPlatform.start/1` (or `ExperimentationPlatform.Client.start_link/1`) accepts a
-keyword list, a map or an `%ExperimentationPlatform.Config{}`:
+`Experimently.start/1` (or `Experimently.Client.start_link/1`) accepts a
+keyword list, a map or an `%Experimently.Config{}`:
 
 ```elixir
 {:ok, client} =
-  ExperimentationPlatform.start(
+  Experimently.start(
     base_url: "http://localhost:8000",  # Required — origin only; the SDK appends /api/v1/...
     api_key: "your-api-key",            # Required — sent as X-API-Key
     cache_ttl: 300,                     # Seconds a successful result is reused (default 300)
@@ -80,7 +80,7 @@ keyword list, a map or an `%ExperimentationPlatform.Config{}`:
 | `:cache_ttl` | `integer` | `300` | How long a successful evaluation/assignment is reused (seconds) |
 | `:timeout` | `integer` | `10_000` | `:httpc` connect and request timeout (milliseconds) |
 | `:max_cache_size` | `integer` | `1_000` | Maximum cache entries |
-| `:http_client` | `module` | `ExperimentationPlatform.HttpClient` | `HttpBehaviour` implementation (for testing) |
+| `:http_client` | `module` | `Experimently.HttpClient` | `HttpBehaviour` implementation (for testing) |
 | `:name` | `atom` | — | Register the client process under a name |
 
 `Config.new/1` raises `ArgumentError` for a missing `:base_url` or `:api_key`.
@@ -90,7 +90,7 @@ keyword list, a map or an `%ExperimentationPlatform.Config{}`:
 ```elixir
 # lib/my_app/application.ex
 children = [
-  {ExperimentationPlatform.Client,
+  {Experimently.Client,
    base_url: System.fetch_env!("EXPERIMENTLY_API_URL"),
    api_key: System.fetch_env!("EXPERIMENTLY_API_KEY"),
    name: MyApp.Experiments}
@@ -110,7 +110,7 @@ different restart strategy. Its cache is process-owned, so a restart starts with
 ### `evaluate_flag(client, flag_key, user_id, opts \\ [])`
 
 Calls `GET /api/v1/feature-flags/evaluate/{flag_key}?user_id=…` and returns
-`{:ok, %ExperimentationPlatform.FlagEvaluation{}}`:
+`{:ok, %Experimently.FlagEvaluation{}}`:
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -119,8 +119,8 @@ Calls `GET /api/v1/feature-flags/evaluate/{flag_key}?user_id=…` and returns
 | `config` | `term() \| nil` | The flag's `config` payload as returned by the server |
 
 ```elixir
-case ExperimentationPlatform.evaluate_flag(client, "dark-mode", "user-456") do
-  {:ok, %ExperimentationPlatform.FlagEvaluation{enabled: true, config: config}} -> render_dark(config)
+case Experimently.evaluate_flag(client, "dark-mode", "user-456") do
+  {:ok, %Experimently.FlagEvaluation{enabled: true, config: config}} -> render_dark(config)
   {:ok, _disabled} -> render_light()
   {:error, _reason} -> render_light()
 end
@@ -145,7 +145,7 @@ failure.
 
 Calls `POST /api/v1/tracking/assign` with `{experiment_key, user_id, context: attributes}`. The
 server buckets the user, keeps the assignment sticky and records the exposure. Returns
-`{:ok, %ExperimentationPlatform.Assignment{}}`:
+`{:ok, %Experimently.Assignment{}}`:
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -156,9 +156,9 @@ server buckets the user, keeps the assignment sticky and records the exposure. R
 | `configuration` | `map() \| nil` | The variant's `configuration` JSON from the experiment definition |
 
 ```elixir
-case ExperimentationPlatform.get_assignment(client, "checkout-cta-copy", "user-123", %{plan: "pro", country: "US"}) do
-  {:ok, %ExperimentationPlatform.Assignment{variant_name: "treatment-a"}} -> render_short_cta()
-  {:ok, %ExperimentationPlatform.Assignment{variant_name: "treatment-b"}} -> render_urgency_cta()
+case Experimently.get_assignment(client, "checkout-cta-copy", "user-123", %{plan: "pro", country: "US"}) do
+  {:ok, %Experimently.Assignment{variant_name: "treatment-a"}} -> render_short_cta()
+  {:ok, %Experimently.Assignment{variant_name: "treatment-b"}} -> render_urgency_cta()
   _control_or_error -> render_original_cta()
 end
 ```
@@ -180,10 +180,10 @@ returns `:ok` and never raises; failures are logged as warnings. `stop/1` waits 
 for in-flight requests.
 
 ```elixir
-ExperimentationPlatform.track(client, "purchase", "user-123", %{sku: "pro-plan"},
+Experimently.track(client, "purchase", "user-123", %{sku: "pro-plan"},
   experiment_key: "checkout-cta-copy", value: 99.99)
-ExperimentationPlatform.track(client, "search", "user-123", %{q: "shoes"}, feature_flag_key: "new-search")
-ExperimentationPlatform.track(client, "page_view", "user-123", %{page: "/products"})   # no key: fanned out
+Experimently.track(client, "search", "user-123", %{q: "shoes"}, feature_flag_key: "new-search")
+Experimently.track(client, "page_view", "user-123", %{page: "/products"})   # no key: fanned out
 ```
 
 | Option | Type | Description |
@@ -212,19 +212,19 @@ the key explicitly when tracking from a different node or a worker that never as
 ### `track_batch(client, events)`
 
 Synchronous. Sends up to 100 events per `POST /api/v1/tracking/batch` (longer lists are chunked)
-and returns `{:ok, %ExperimentationPlatform.BatchResult{success_count, failure_count, errors}}` or
+and returns `{:ok, %Experimently.BatchResult{success_count, failure_count, errors}}` or
 `{:error, reason}` when a request fails. Each event is a map (atom or string keys) with
 `event_name`, `user_id` and at least one of `experiment_key` / `feature_flag_key`; optional
 `properties` (sent as `metadata`), `value`, `event_type`, `timestamp`.
 
 ```elixir
 {:ok, result} =
-  ExperimentationPlatform.track_batch(client, [
+  Experimently.track_batch(client, [
     %{event_name: "purchase", user_id: "user-123", experiment_key: "checkout-cta-copy", value: 99.99},
     %{event_name: "search", user_id: "user-123", feature_flag_key: "new-search"}
   ])
 
-ExperimentationPlatform.BatchResult.ok?(result)   # true when failure_count == 0
+Experimently.BatchResult.ok?(result)   # true when failure_count == 0
 result.errors                                      # nil, or a list of error maps
 ```
 
@@ -275,20 +275,20 @@ The public functions never raise on network or HTTP errors; they return tagged t
 | `{:network_error, reason}` | `:httpc` connection failures and timeouts (`:econnrefused`, `:timeout`, …) |
 | `{:malformed_response, body}` | 2xx body without the expected fields (assignment without `variant_name`) |
 
-`ExperimentationPlatform.Config.new/1` raises `ArgumentError` for a missing `:base_url`/`:api_key`.
-The exception structs in `ExperimentationPlatform.{Error, AuthError, ApiError, NetworkError, ConfigError}`
+`Experimently.Config.new/1` raises `ArgumentError` for a missing `:base_url`/`:api_key`.
+The exception structs in `Experimently.{Error, AuthError, ApiError, NetworkError, ConfigError}`
 are available for callers who prefer to raise.
 
 ---
 
 ## Consistent Hash Utility
 
-`ExperimentationPlatform.Evaluator.hash_user/2` implements the cross-SDK formula —
+`Experimently.Evaluator.hash_user/2` implements the cross-SDK formula —
 `MD5("{user_id}:{flag_key}")`, first 4 bytes as little-endian uint32, divided by 2^32 — and is
 pinned by the golden-vector tests in `tests/sdk-contract/`:
 
 ```elixir
-ExperimentationPlatform.Evaluator.hash_user("user-123", "my-flag")   # 0.6927449859213084
+Experimently.Evaluator.hash_user("user-123", "my-flag")   # 0.6927449859213084
 ```
 
 It is exported as a utility only. Since assignment moved to the server, nothing in the SDK uses it
@@ -302,7 +302,7 @@ to decide a variant.
 defmodule MyAppWeb.CheckoutController do
   use MyAppWeb, :controller
 
-  alias ExperimentationPlatform, as: Experiments
+  alias Experimently, as: Experiments
 
   def show(conn, _params) do
     user_id = get_session(conn, :user_id) || "anonymous"
@@ -311,7 +311,7 @@ defmodule MyAppWeb.CheckoutController do
 
     cta_variant =
       case Experiments.get_assignment(MyApp.Experiments, "checkout-cta-copy", user_id, %{plan: "pro"}) do
-        {:ok, %ExperimentationPlatform.Assignment{variant_name: variant}} -> variant
+        {:ok, %Experimently.Assignment{variant_name: variant}} -> variant
         {:error, _} -> "control"
       end
 
@@ -327,11 +327,11 @@ end
 ## Testing your own code
 
 Inject a mock HTTP module through the `:http_client` option (the SDK's own tests use this
-pattern — see `sdk/elixir/test/experimentation_platform/client_test.exs`):
+pattern — see `sdk/elixir/test/experimently/client_test.exs`):
 
 ```elixir
 defmodule MyApp.MockHttp do
-  @behaviour ExperimentationPlatform.HttpBehaviour
+  @behaviour Experimently.HttpBehaviour
 
   @impl true
   def get(_config, "/api/v1/feature-flags/evaluate/new-checkout?user_id=" <> _user_id) do
@@ -348,9 +348,9 @@ defmodule MyApp.MockHttp do
 end
 
 {:ok, client} =
-  ExperimentationPlatform.start(base_url: "http://localhost", api_key: "test", http_client: MyApp.MockHttp)
+  Experimently.start(base_url: "http://localhost", api_key: "test", http_client: MyApp.MockHttp)
 
-assert ExperimentationPlatform.feature_enabled?(client, "new-checkout", "user-1")
+assert Experimently.feature_enabled?(client, "new-checkout", "user-1")
 ```
 
 ---

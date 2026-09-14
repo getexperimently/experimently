@@ -77,7 +77,5 @@ class NotificationDeliveryLogListResponse(BaseModel):
 
 class TestNotificationRequest(BaseModel):
     channel: NotificationChannel = NotificationChannel.SLACK
-    message: str = Field(
-        "Test notification from Experimentation Platform", max_length=500
-    )
+    message: str = Field("Test notification from Experimently", max_length=500)
     recipient: Optional[str] = None

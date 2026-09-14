@@ -1,6 +1,6 @@
-# experimentation-sdk (Python)
+# experimently (Python)
 
-Synchronous, dependency-free Python client for the Experimentation Platform public API.
+Synchronous, dependency-free Python client for the Experimently public API.
 Experiment assignment and feature-flag evaluation are decided **by the server** (sticky per
 user + experiment); the SDK caches the answers per user + key and never buckets locally.
 
@@ -10,7 +10,7 @@ else to install.
 ## Install
 
 ```bash
-pip install experimentation-sdk          # once published
+pip install experimently                 # once published
 pip install -e sdk/python                # from this repository
 ```
 

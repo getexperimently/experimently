@@ -1,5 +1,5 @@
 """
-experimentation-openfeature: OpenFeature provider for the Experimentation Platform.
+experimently-openfeature: OpenFeature provider for Experimently.
 
 Flags are evaluated by the server through the ``experimentation`` SDK
 (``GET /api/v1/feature-flags/evaluate/{flag_key}?user_id=<targeting_key>``).

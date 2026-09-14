@@ -3,9 +3,9 @@ requires = ["setuptools>=65", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "experimentation-sdk"
+name = "experimently"
 version = "1.0.0"
-description = "Python client for the Experimentation Platform public API (experiments, feature flags, event tracking)"
+description = "Python client for the Experimently public API (experiments, feature flags, event tracking)"
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.9"

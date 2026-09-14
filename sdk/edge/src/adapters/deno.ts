@@ -14,7 +14,7 @@
  *
  * Usage:
  * ```ts
- * import { createDenoHandler } from '@experimentation-platform/edge-sdk/deno';
+ * import { createDenoHandler } from '@getexperimently/edge-sdk/deno';
  *
  * export default createDenoHandler(
  *   async (req, client) => {

@@ -1,5 +1,5 @@
 /**
- * @experimentation-platform/edge-sdk
+ * @getexperimently/edge-sdk
  *
  * Edge-compatible SDK for Cloudflare Workers, Vercel Edge Functions,
  * Deno Deploy, and any WinterCG-compatible JavaScript runtime.
@@ -16,7 +16,7 @@
  *
  * Quick start:
  * ```ts
- * import { EdgeExperimentationClient } from '@experimentation-platform/edge-sdk';
+ * import { EdgeExperimentationClient } from '@getexperimently/edge-sdk';
  *
  * const client = new EdgeExperimentationClient({ apiKey: 'your-api-key', baseUrl: 'https://api.example.com' });
  *

@@ -10,16 +10,16 @@ vendor's SDK**.
 This means you can:
 - Switch feature flag providers without changing a line of application code.
 - Use the same `client.getBooleanValue("my-flag", false)` call whether you are using
-  LaunchDarkly, Split, Flagsmith, or this Experimentation Platform.
+  LaunchDarkly, Split, Flagsmith, or this Experimently.
 - Add OpenFeature hooks (logging, metrics, tracing) once and have them apply to all providers.
 
 ---
 
 ## TypeScript / Node.js Provider
 
-`@experimentation-platform/openfeature-provider` (v0.2, source `sdk/openfeature`) implements the
+`@getexperimently/openfeature-provider` (v0.2, source `sdk/openfeature`) implements the
 `@openfeature/server-sdk` `Provider` interface by delegating every evaluation to the
-[JavaScript SDK](javascript.md) (`@experimentation-platform/js-sdk`), which calls
+[JavaScript SDK](javascript.md) (`@getexperimently/js-sdk`), which calls
 `GET /api/v1/feature-flags/evaluate/{flag_key}?user_id=<targetingKey>` and caches the answer per
 user + flag. Flags are decided **by the server**; nothing is bucketed locally and no flag
 definitions are downloaded. Requires Node >= 18 and `@openfeature/server-sdk >= 1.7`.
@@ -30,7 +30,7 @@ Verified against a live backend: **yes (2026-09-11)** — via
 ### Installation
 
 ```bash
-npm install @openfeature/server-sdk @experimentation-platform/js-sdk @experimentation-platform/openfeature-provider
+npm install @openfeature/server-sdk @getexperimently/js-sdk @getexperimently/openfeature-provider
 # from this repository:
 npm install ./sdk/js ./sdk/openfeature
 ```
@@ -39,7 +39,7 @@ npm install ./sdk/js ./sdk/openfeature
 
 ```typescript
 import { OpenFeature } from '@openfeature/server-sdk';
-import { ExperimentationProvider } from '@experimentation-platform/openfeature-provider';
+import { ExperimentationProvider } from '@getexperimently/openfeature-provider';
 
 // 1. Register the provider (once, at app start-up).
 const provider = new ExperimentationProvider({
@@ -116,7 +116,7 @@ new ExperimentationProvider({
 
 | Member | Signature | Description |
 |---|---|---|
-| `metadata` | `{ name: 'experimentation-platform-provider' }` | OpenFeature provider metadata |
+| `metadata` | `{ name: 'experimently-provider' }` | OpenFeature provider metadata |
 | `client` | `ExperimentationClient` | The underlying JS SDK client (`getAssignment`, `getVariant`, `track`, `trackBatch`, `getAssignments`, …) |
 | `initialize` | `(context?) => Promise<void>` | No-op: nothing is pre-fetched, flags are evaluated per user on demand |
 | `onClose` | `() => Promise<void>` | Clears the evaluation cache |
@@ -163,7 +163,7 @@ npm run build     # tsc → dist/
 
 ## Python Provider
 
-`experimentation-openfeature` (v1.0.0, source `sdk/openfeature-python`) delegates every
+`experimently-openfeature` (v1.0.0, source `sdk/openfeature-python`) delegates every
 evaluation to the [`experimentation` Python SDK](python.md), which calls
 `GET /api/v1/feature-flags/evaluate/{flag_key}?user_id=<targeting_key>` and caches the answer per
 user + flag. Flags are decided **by the server**; nothing is bucketed locally and no flag
@@ -172,7 +172,7 @@ definitions are downloaded. Requires Python 3.9+ and `openfeature-sdk >= 0.9.0`.
 ### Installation
 
 ```bash
-pip install openfeature-sdk experimentation-sdk experimentation-openfeature   # once published
+pip install openfeature-sdk experimently experimently-openfeature   # once published
 pip install -e sdk/python -e sdk/openfeature-python                          # from this repository
 ```
 
@@ -358,10 +358,10 @@ await client.waitForInitialization();
 const value = await client.variation('my-flag', user, false);
 ```
 
-**After (OpenFeature + Experimentation Platform provider):**
+**After (OpenFeature + Experimently provider):**
 ```typescript
 import { OpenFeature } from '@openfeature/server-sdk';
-import { ExperimentationProvider } from '@experimentation-platform/openfeature-provider';
+import { ExperimentationProvider } from '@getexperimently/openfeature-provider';
 await OpenFeature.setProviderAndWait(new ExperimentationProvider({ apiKey: 'api-key' }));
 const client = OpenFeature.getClient();
 const value = await client.getBooleanValue('my-flag', false, { targetingKey: userId });

@@ -1,6 +1,6 @@
 # Python Virtual Environment Setup Guide
 
-This guide outlines how to set up and configure a Python virtual environment for the Experimentation Platform project.
+This guide outlines how to set up and configure a Python virtual environment for the Experimently project.
 
 ## Directory Structure
 
@@ -117,7 +117,7 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-echo -e "${YELLOW}Setting up Python virtual environment for Experimentation Platform...${NC}"
+echo -e "${YELLOW}Setting up Python virtual environment for Experimently...${NC}"
 
 # Check if Python 3.11+ is installed
 python_version=$(python3 --version 2>&1 | awk '{print $2}')
@@ -172,7 +172,7 @@ echo -e "${YELLOW}To activate the virtual environment, run:${NC} source venv/bin
 
 ```batch
 @echo off
-echo Setting up Python virtual environment for Experimentation Platform...
+echo Setting up Python virtual environment for Experimently...
 
 REM Check if Python 3.11+ is installed
 for /f "tokens=2" %%I in ('python --version 2^>^&1') do set python_version=%%I
@@ -253,7 +253,7 @@ For pyenv users, create a `.python-version` file:
 from setuptools import find_packages, setup
 
 setup(
-    name="experimentation-platform",
+    name="experimently",
     version="0.1.0",
     packages=find_packages(),
     include_package_data=True,
