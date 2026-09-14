@@ -10,7 +10,7 @@ pointed at the wrong thing, and the second kind is destructive:
   reflect the application schema, which ``env.py`` named from
   ``POSTGRES_SCHEMA`` (default ``"experimentation"``) while ``target_metadata``
   named it from ``APP_ENV`` (``test_experimentation`` under the export sequence
-  ``CLAUDE.md`` documents).  The generated revision created all ~50 tables in
+  ``CONTRIBUTING.md`` documents).  The generated revision created all ~50 tables in
   one schema and ran ``op.drop_table`` on all ~50 in the other -- ``users``,
   ``experiments``, ``feature_flags``, everything.
 * *review round 3, finding 2.*  Nothing filtered the twelve module tables, nine
@@ -161,7 +161,7 @@ def test_the_test_environment_does_not_redirect_the_comparison(
     ``POSTGRES_SCHEMA`` names the schema; ``APP_ENV``/``TESTING`` named the one
     the models declared.  With the two disagreeing -- ``export APP_ENV=test
     TESTING=true`` in a shell pointed at a real database, which is the first
-    thing ``CLAUDE.md`` tells a developer to type -- autogenerate compared a
+    thing ``CONTRIBUTING.md`` tells a developer to type -- autogenerate compared a
     metadata describing one schema against a reflection of the other and
     proposed creating every table in one and dropping every table from the
     other.

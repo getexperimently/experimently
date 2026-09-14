@@ -68,7 +68,7 @@ Guidelines:
 
 ```bash
 # Activate venv
-source /Users/ashishmarkanday/github/experimentation-platform/venv/bin/activate
+source venv/bin/activate
 export APP_ENV=test TESTING=true
 
 # Run just the failing test first
@@ -123,7 +123,7 @@ Action needed: <what the human should decide>
 
 ```bash
 # Virtual environment
-source /Users/ashishmarkanday/github/experimentation-platform/venv/bin/activate
+source venv/bin/activate
 
 # Test commands
 export APP_ENV=test TESTING=true

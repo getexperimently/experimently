@@ -107,7 +107,7 @@ Interested in using this platform for your organization?
    (http://localhost:3200) — a small e-commerce site running five live experiments through the React SDK,
    with a traffic simulator keeping the dashboards moving. Walkthrough: [demo/DEMO_GUIDE.md](demo/DEMO_GUIDE.md)
 3. **Review the Documentation**: Check the [docs](docs/) directory for comprehensive guides
-4. **Run Locally**: Follow the setup instructions in CLAUDE.md for local development
+4. **Run Locally**: Follow the setup instructions in CONTRIBUTING.md for local development
 
 ### For Deployment
 
@@ -123,8 +123,7 @@ Refer to the documentation for:
 
 - **[Architecture Overview](docs/architecture/overview.md)**: System design
 - **[Targeting rules](docs/feature-flags/create.md)**: operators, attribute aliases, examples
-- **[Testing audit](docs/testing/testing-audit-2026-09.md)**: what is tested, what gates, what is missing
-- **[Development Guide](CLAUDE.md)**: Complete development guidelines and best practices
+- **[Contributing](CONTRIBUTING.md)**: development setup, the test suites, the core/modules boundary
 
 ---
 
@@ -189,7 +188,7 @@ Refer to the documentation for:
 
 For questions and issues:
 - Check the [documentation](docs/) directory
-- Review [CLAUDE.md](CLAUDE.md) for development guidelines
+- Review [CONTRIBUTING.md](CONTRIBUTING.md) for development guidelines
 - Run the demos (`./demo/setup-local.sh`)
 
 ---

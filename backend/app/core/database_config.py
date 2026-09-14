@@ -13,7 +13,7 @@ It used to be one of two, and they disagreed.  ``POSTGRES_SCHEMA`` was read
 directly by ``migrations/env.py`` and by five revision modules, each with its
 own ``"experimentation"`` default, while this function looked only at
 ``APP_ENV``/``TESTING``.  They agree in production and in the test suite and
-part company in exactly the shell ``CLAUDE.md`` documents for running anything
+part company in exactly the shell ``CONTRIBUTING.md`` documents for running anything
 by hand (``export APP_ENV=test TESTING=true``, ``POSTGRES_SCHEMA`` unset):
 ``alembic revision --autogenerate`` then compared a metadata describing one
 schema against a reflection of the other and produced a revision that created

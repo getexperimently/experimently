@@ -10,7 +10,7 @@ Review round 3, finding 1.  There used to be two:
   they build, each with its own copy of the literal default.
 
 With ``export APP_ENV=test TESTING=true`` and ``POSTGRES_SCHEMA`` unset -- the
-first thing ``CLAUDE.md`` tells a developer to type -- the first said
+first thing ``CONTRIBUTING.md`` tells a developer to type -- the first said
 ``test_experimentation`` and the second said ``experimentation``.  ``alembic
 revision --autogenerate`` compared a metadata describing one against a
 reflection of the other and wrote ``op.create_table`` for all ~50 tables plus

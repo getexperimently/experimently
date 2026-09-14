@@ -33,7 +33,7 @@ os.environ.setdefault("TESTING", "true")
 # ENVIRONMENT wins over APP_ENV, so drop it for the test process.
 os.environ.pop("ENVIRONMENT", None)
 # POSTGRES_SCHEMA likewise wins over APP_ENV in
-# core.database_config.get_schema_name(), and the shell CLAUDE.md documents --
+# core.database_config.get_schema_name(), and the shell CONTRIBUTING.md documents --
 # and scripts/run-backend-tests.sh -- exports POSTGRES_SCHEMA=experimentation.
 # Set (not `setdefault`) and set HERE, before the first `backend.app` import
 # below: the models bind their schema, their string ForeignKey colspecs and

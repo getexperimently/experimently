@@ -395,7 +395,7 @@ def test_a_core_build_does_not_pretend_to_downgrade_or_stamp(
     build's heads are all recorded, so there is nothing to apply"). A core image
     pointed at a full database therefore exited 0 from ``alembic downgrade -1``
     with the schema unchanged, and from ``alembic stamp heads`` -- the escape
-    hatch the guard's own message and ``CLAUDE.md`` point at -- with the version
+    hatch the guard's own message and ``CONTRIBUTING.md`` point at -- with the version
     table unchanged.  They get alembic's own answer now, which names the
     revision it cannot resolve (review round 4, finding 3).
     """

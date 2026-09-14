@@ -111,6 +111,30 @@ suite is not database-free despite the name: 26 of its files take the
 exercises, not by whether it touches a database.
 Run backend tests from the repository root; `pyproject.toml` is the single pytest
 configuration and `testpaths` covers `backend/tests` and `modules/backend/tests`.
+
+The test shell, if you run pytest by hand rather than through `make`:
+
+```bash
+source venv/bin/activate
+export APP_ENV=test TESTING=true POSTGRES_SCHEMA=test_experimentation
+python -m pytest backend/tests/unit -p no:cov -q
+```
+
+`POSTGRES_SCHEMA` matters more than it looks: the models bake the schema name
+into index names and foreign-key targets at import time, and alembic reflects
+whatever `POSTGRES_SCHEMA` names. The two must agree or `alembic revision
+--autogenerate` compares one schema's models against another schema's tables
+and proposes creating -- or dropping -- everything. The same export sequence
+applies when generating a migration:
+
+```bash
+export APP_ENV=test TESTING=true POSTGRES_SCHEMA=test_experimentation
+python -m alembic -c backend/app/db/alembic.ini revision --autogenerate --head <core head id> -m "..."
+```
+
+`backend/tests/integration/database/test_autogenerate_is_empty.py` is the
+standing check that a freshly bootstrapped database produces an empty
+migration; if you touch anything about schemas or reflection, run it.
 Tests that need a module installed are marked `@pytest.mark.modules` and are
 skipped in a core build.
 

@@ -63,7 +63,7 @@ backend/tests/performance/
 
 ```bash
 # Activate the virtual environment
-source /Users/ashishmarkanday/github/experimentation-platform/venv/bin/activate
+source venv/bin/activate
 
 # Ensure dependencies are installed (includes locust==2.17.0)
 pip install -r backend/requirements.txt
@@ -76,7 +76,7 @@ uvicorn backend.app.main:app --reload --host 0.0.0.0 --port 8000
 ### Option A: Locust Web UI (interactive)
 
 ```bash
-cd /Users/ashishmarkanday/github/experimentation-platform
+cd "$(git rev-parse --show-toplevel)"
 
 # Baseline test
 locust -f backend/tests/performance/locustfiles/api_load_test.py \
@@ -97,7 +97,7 @@ and spawn rate, and click **Start swarming**.
 ### Option B: Headless mode (no browser)
 
 ```bash
-cd /Users/ashishmarkanday/github/experimentation-platform
+cd "$(git rev-parse --show-toplevel)"
 
 # Baseline — 50 users, 60 seconds
 locust -f backend/tests/performance/locustfiles/api_load_test.py \
@@ -117,7 +117,7 @@ locust -f backend/tests/performance/locustfiles/api_load_test.py \
 ### Option C: CI runner (validates SLAs automatically)
 
 ```bash
-cd /Users/ashishmarkanday/github/experimentation-platform
+cd "$(git rev-parse --show-toplevel)"
 source venv/bin/activate
 
 python backend/tests/performance/run_load_tests.py \

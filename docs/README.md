@@ -96,7 +96,6 @@
 
 - [Guidelines](development/guidelines.md) — coding standards, git workflow, TDD
 - [Testing Guide](development/testing-guide.md) — unit, integration, E2E, contract tests
-- [Testing Audit (Sep 2026)](testing/testing-audit-2026-09.md) — inventory of every test layer, CI gate map, gaps by category, prioritised recommendations
 - [Dependency Injection](development/dependency-injection.md) — FastAPI deps.py patterns
 - [Workflow Explanation](development/workflow-explanation.md) — GitHub Actions CI
 - [Database Migrations](development/database/migrations.md) — Alembic workflow
@@ -119,7 +118,6 @@
 ## Security
 
 - [Security Architecture](security-architecture.md) — system security design
-- [Security Audit Report](security/security-audit-report.md) — EP-018 audit findings
 - [Threat Model](security/threat-model.md) — threat scenarios and countermeasures
 - [Security Policies](security/security-policies.md) — access control, data protection
 - [Hardening Changes](security/hardening-changes.md) — WAF, headers, rate limiting
