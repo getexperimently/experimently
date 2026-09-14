@@ -8,7 +8,6 @@ This directory contains the security compliance documentation for the Experiment
 | [Incident Response Plan](incident-response-plan.md) | How to respond to security incidents |
 | [GDPR Compliance Checklist](gdpr-compliance-checklist.md) | GDPR requirements and status |
 | [Security Policies](security-policies.md) | Access control and data policies |
-| [Security Audit Report](security-audit-report.md) | Findings from initial security audit |
 | [Hardening Changes](hardening-changes.md) | Security controls implemented |
 
 ## Quick Reference

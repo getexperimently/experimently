@@ -33,7 +33,7 @@ The platform uses a multi-layer testing strategy:
 
 ```bash
 # 1. Activate virtualenv (ALWAYS do this first)
-source /Users/ashishmarkanday/github/experimentation-platform/venv/bin/activate
+source venv/bin/activate
 
 # 2. Start PostgreSQL
 docker ps | grep postgres

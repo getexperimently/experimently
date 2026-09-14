@@ -4,7 +4,7 @@
 models join ``Base.metadata`` through ``hooks.register_model_module()`` (see
 ``backend/app/modules_loader.py``).
 
-This is the gate the coupling report (``docs/planning/``, §9) asks for on day
+This is the gate the pre-move coupling analysis asked for on day
 one, because the failure mode is invisible: if any core module imports a
 module's model — directly, or by importing a service that does — package
 semantics put the module tables straight back on ``Base.metadata`` and

@@ -7,7 +7,7 @@ Arguments: $ARGUMENTS (optional - "docker" to use Docker, otherwise local)
 Steps to execute:
 
 For local development (default):
-1. Activate virtual environment at /Users/ashishmarkanday/github/experimentation-platform/venv
+1. Activate the virtual environment (`source venv/bin/activate` from the repository root)
 2. Set environment to development: export APP_ENV=dev
 3. Ensure PostgreSQL is running (check with: docker ps | grep postgres)
 4. Start uvicorn server: cd backend && uvicorn app.main:app --reload --host 0.0.0.0 --port 8000

@@ -5,7 +5,7 @@ The seam (P2).  ``workspaces`` is the workspaces module's table;
 ``workspace_id`` ``ForeignKey`` constraints were the *entire* ORM coupling
 between the core and the module — with them in place, importing the core
 models without the module's raises ``NoReferencedTableError`` for exactly
-these two columns (the coupling report under docs/planning, §2).
+these two columns (established by the pre-move coupling analysis).
 
 The **columns stay**.  Only the constraints go: a core database keeps
 ``workspace_id`` as a nullable, indexed UUID that nothing reads or writes, so

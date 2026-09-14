@@ -35,7 +35,7 @@
 #     (1) does the core still work with the module deleted?
 #     (2) does anything that stays in the core import it?
 #   Where (2) is non-zero the entry carries the crossing that must be cut
-#   first. Full evidence: the coupling report under docs/planning/.
+#   first, as the pre-move coupling analysis established.
 #
 # The group numbers 1..10 are the ten module names (`hooks.KNOWN_MODULES`,
 # in this order: workspaces, hipaa, compliance, sso, rbac, warehouse,
