@@ -1,5 +1,5 @@
 """
-Public types for the Experimentation Platform OpenFeature Provider.
+Public types for the Experimently OpenFeature Provider.
 """
 
 from __future__ import annotations

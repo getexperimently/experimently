@@ -1,8 +1,8 @@
 # Experimently Flutter / Dart SDK
 
-`experimentation_sdk` (v0.2) provides feature flag evaluation, A/B experiment assignment and event
+`experimently` (v0.2) provides feature flag evaluation, A/B experiment assignment and event
 tracking for Flutter applications (iOS, Android, Web, macOS, Windows, Linux) and, through the
-Flutter-free `experimentation_sdk_core.dart` entry point, for plain Dart programs.
+Flutter-free `experimently_core.dart` entry point, for plain Dart programs.
 
 Flag evaluation and experiment assignment are decided **by the server**: every call goes to the
 public API with your `X-API-Key`, the server buckets the user (sticky per user + experiment), and
@@ -20,9 +20,9 @@ the SDK caches the answer per user + key. Nothing is bucketed on the device.
 
 ```yaml
 dependencies:
-  experimentation_sdk:
+  experimently:
     git:
-      url: https://github.com/experimentation-platform/sdk
+      url: https://github.com/getexperimently/experimently
       path: flutter
 ```
 
@@ -33,7 +33,7 @@ flutter pub get
 ## Quick Start
 
 ```dart
-import 'package:experimentation_sdk/experimentation_sdk.dart';
+import 'package:experimently/experimently.dart';
 
 final client = ExperimentationClient(
   config: const SdkConfig(
@@ -138,7 +138,7 @@ EXPERIMENTLY_API_KEY=<key> dart run example/contract_smoke.dart
 Env: `EXPERIMENTLY_API_URL` (default `http://localhost:8000`), `EXPERIMENTLY_API_KEY` (required),
 `CONTRACT_EXPERIMENT_KEY` (default `sdk_contract_ab`), `CONTRACT_FLAG_KEY` (default
 `sdk_contract_flag`), `CONTRACT_USER_ID` (default random `smoke-<uuid>`). The smoke imports only
-`experimentation_sdk_core.dart` (no `package:flutter` code is loaded), but dependency resolution
+`experimently_core.dart` (no `package:flutter` code is loaded), but dependency resolution
 still needs the Flutter SDK because the package depends on `flutter`/`shared_preferences`, so use
 Flutter's bundled `dart` and run `flutter pub get` first.
 

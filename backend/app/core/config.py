@@ -196,7 +196,7 @@ def resolve_environment_from_process_env() -> str:
 class Settings(BaseSettings):
     """Base settings class."""
 
-    PROJECT_NAME: str = "Experimentation Platform"
+    PROJECT_NAME: str = "Experimently"
     VERSION: str = "1.0.0"
     API_V1_STR: str = "/api/v1"
     # Canonical environment name. Legacy ``dev``/``prod`` spellings and the
@@ -321,7 +321,7 @@ class Settings(BaseSettings):
     SMTP_USERNAME: str = ""
     SMTP_PASSWORD: str = ""
     EMAIL_FROM_ADDRESS: str = "platform@example.com"
-    EMAIL_FROM_NAME: str = "Experimentation Platform"
+    EMAIL_FROM_NAME: str = "Experimently"
     NOTIFICATION_ADMIN_EMAILS: List[str] = []
 
     # EP-046: LLM/AI Model Evaluation
@@ -563,7 +563,7 @@ class DevSettings(Settings):
     ]
     CACHE_ENABLED: bool = False
     CACHE_CONTROL: Dict[str, Any] = {"enabled": False, "redis": None, "ttl": 3600}
-    PROJECT_NAME: str = "Experimentation Platform (Development)"
+    PROJECT_NAME: str = "Experimently (Development)"
     PROJECT_DESCRIPTION: str = "A platform for managing experiments and feature flags (Development Environment)"
     POSTGRES_SERVER: str = "localhost"
     POSTGRES_USER: str = "postgres"
@@ -584,7 +584,7 @@ class TestSettings(Settings):
     LOG_LEVEL: str = (
         "INFO"  # set LOG_LEVEL=DEBUG explicitly; DEBUG makes every library chatty
     )
-    PROJECT_NAME: str = "Experimentation Platform"
+    PROJECT_NAME: str = "Experimently"
     PROJECT_DESCRIPTION: str = (
         "API for managing experiments and feature flags in test environment"
     )
@@ -606,7 +606,7 @@ class ProdSettings(Settings):
     """Production/staging environment settings."""
 
     ENVIRONMENT: EnvironmentName = "production"
-    PROJECT_NAME: str = "Experimentation Platform"
+    PROJECT_NAME: str = "Experimently"
     PROJECT_DESCRIPTION: str = "A platform for managing experiments and feature flags"
     CACHE_ENABLED: bool = True
     CACHE_CONTROL: Dict[str, Any] = {"enabled": True, "redis": None, "ttl": 3600}

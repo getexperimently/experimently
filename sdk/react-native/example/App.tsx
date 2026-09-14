@@ -1,5 +1,5 @@
 /**
- * Example React Native app demonstrating the Experimentation Platform SDK.
+ * Example React Native app demonstrating the Experimently SDK.
  *
  * Shows:
  *  - Provider setup
@@ -24,7 +24,7 @@ import {
   useFlag,
   useExperiment,
   useExperimentationClient,
-} from '@experimentation-platform/react-native-sdk';
+} from '@getexperimently/react-native-sdk';
 
 // ---------------------------------------------------------------------------
 // SDK client setup — do this once at app startup.

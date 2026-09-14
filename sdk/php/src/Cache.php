@@ -2,10 +2,10 @@
 
 declare(strict_types=1);
 
-namespace ExperimentationPlatform;
+namespace Experimently;
 
 /**
- * In-memory TTL cache for the Experimentation Platform PHP SDK.
+ * In-memory TTL cache for the Experimently PHP SDK.
  *
  * PHP is single-threaded within a request, so no mutex/locking is needed.
  * When the cache reaches maxCacheSize the oldest entry (by insertion order) is evicted.

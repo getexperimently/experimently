@@ -1,6 +1,6 @@
 # API Documentation
 
-This directory contains the API documentation for the Experimentation Platform.
+This directory contains the API documentation for Experimently.
 
 ## Files
 
@@ -37,7 +37,7 @@ This directory contains the API documentation for the Experimentation Platform.
 1. Get your API key from the platform's Settings page
 2. Use the key in your requests:
    ```bash
-   curl -H "Authorization: Bearer YOUR_API_KEY" https://api.experimentation-platform.example.com/v1/experiments
+   curl -H "Authorization: Bearer YOUR_API_KEY" https://api.experimently.example.com/v1/experiments
    ```
 3. Check the [API Reference](endpoints.md) for detailed usage examples
 4. Refer to the [API Specification](specs.md) for complete endpoint documentation

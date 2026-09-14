@@ -1,4 +1,4 @@
-# Deployment Guide — Experimentation Platform
+# Deployment Guide — Experimently
 
 **Version:** 1.0
 **Date:** March 2026

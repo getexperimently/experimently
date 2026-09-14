@@ -2,15 +2,15 @@
 import PackageDescription
 
 let package = Package(
-    name: "ExperimentationSDK",
+    name: "Experimently",
     platforms: [
         .iOS(.v14),
         .macOS(.v11)
     ],
     products: [
         .library(
-            name: "ExperimentationSDK",
-            targets: ["ExperimentationSDK"]
+            name: "Experimently",
+            targets: ["Experimently"]
         ),
         // Contract smoke against a live backend: `swift run contract-smoke`.
         .executable(
@@ -20,19 +20,19 @@ let package = Package(
     ],
     targets: [
         .target(
-            name: "ExperimentationSDK",
+            name: "Experimently",
             dependencies: [],
-            path: "Sources/ExperimentationSDK"
+            path: "Sources/Experimently"
         ),
         .executableTarget(
             name: "contract-smoke",
-            dependencies: ["ExperimentationSDK"],
+            dependencies: ["Experimently"],
             path: "Sources/contract-smoke"
         ),
         .testTarget(
-            name: "ExperimentationSDKTests",
-            dependencies: ["ExperimentationSDK"],
-            path: "Tests/ExperimentationSDKTests"
+            name: "ExperimentlyTests",
+            dependencies: ["Experimently"],
+            path: "Tests/ExperimentlyTests"
         )
     ]
 )

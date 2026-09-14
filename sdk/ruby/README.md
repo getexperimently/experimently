@@ -1,4 +1,4 @@
-# ExperimentationPlatform Ruby SDK
+# Experimently Ruby SDK
 
 Native Ruby client for the Experimently A/B testing and feature flag platform. Stdlib only
 (`Net::HTTP`, `JSON`, `Digest`, `Mutex`), thread-safe, no runtime gem dependencies.
@@ -12,7 +12,7 @@ Full reference: [`docs/sdk/ruby.md`](../../docs/sdk/ruby.md).
 ## Installation
 
 ```ruby
-gem "experimentation_platform", "~> 0.1"
+gem "experimently", "~> 0.1"
 ```
 
 The gemspec requires **Ruby >= 2.6.0** (`required_ruby_version`); the specs in this repo were run
@@ -21,9 +21,9 @@ on Ruby 2.6.10. Inside the monorepo, no install is needed: `ruby -Isdk/ruby/lib 
 ## Quick Start
 
 ```ruby
-require 'experimentation_platform'
+require 'experimently'
 
-client = ExperimentationPlatform::Client.new(
+client = Experimently::Client.new(
   base_url: ENV.fetch("EXPERIMENTLY_API_URL", "http://localhost:8000"),  # origin only
   api_key:  ENV.fetch("EXPERIMENTLY_API_KEY")                             # sent as X-API-Key
 )
@@ -52,7 +52,7 @@ client.track("page_view", "user-123", properties: { page: "/" })
 
 ## Configuration
 
-`Client.new(**options)` or `Client.new(ExperimentationPlatform::SdkConfig.new(**options))`.
+`Client.new(**options)` or `Client.new(Experimently::SdkConfig.new(**options))`.
 
 | Option | Type | Default | Description |
 |---|---|---|---|
@@ -75,7 +75,7 @@ Missing `base_url`/`api_key` raise `ArgumentError` from `Client.new`.
 | `track_batch(events)` | `BatchResult` (`success_count`, `failure_count`, `errors`, `ok?`) | failures counted; never raises |
 | `assignments(user_id)` / `evaluated_flags(user_id)` | `Array<Assignment>` / `Array<String>` | cached, unexpired entries only |
 | `clear_cache` / `close` | `nil` | drop every cached entry (`close` for shutdown hooks) |
-| `ExperimentationPlatform::FeatureFlagEvaluator.hash_user(user_id, key)` | `Float` in `[0, 1)` | pure (parity utility) |
+| `Experimently::FeatureFlagEvaluator.hash_user(user_id, key)` | `Float` in `[0, 1)` | pure (parity utility) |
 
 `attributes` on `get_assignment` are sent as the assignment `context` (targeting rules); on
 `evaluate_flag` they are accepted for symmetry only — the evaluate endpoint takes just `user_id`.
@@ -92,7 +92,7 @@ and at least one of `experiment_key`/`feature_flag_key` (the server rejects key-
   (rate limited), 5xx: `evaluate_flag` returns a **disabled** evaluation, `get_assignment` returns
   **`nil`**, `track` returns **`false`**, `track_batch` counts the chunk as failed. Each logs one
   line via `Kernel#warn`. There is no stale fallback beyond the TTL.
-- Only the low-level `ExperimentationPlatform::HttpClient` raises: `AuthenticationError` (401,
+- Only the low-level `Experimently::HttpClient` raises: `AuthenticationError` (401,
   `< APIError`), `APIError` (`#status_code`; other 4xx/5xx), `NetworkError`.
 - One `Client` may be shared between threads: the cache is `Mutex`-protected and each request
   opens its own `Net::HTTP` connection.

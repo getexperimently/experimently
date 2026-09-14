@@ -49,7 +49,7 @@ jobs:
   pre-deployment-checks:
     name: Pre-deployment Checks
     runs-on: ubuntu-latest
-    if: github.repository == 'amarkanday/experimentation-platform' && vars.AWS_ACCOUNT_ID != ''
+    if: (github.repository == 'amarkanday/experimentation-platform' || github.repository == 'getexperimently/experimently') && vars.AWS_ACCOUNT_ID != ''
     permissions:
       id-token: write
       contents: read
@@ -184,7 +184,7 @@ jobs:
   run-tests:
     name: Run Test Suite
     runs-on: ubuntu-latest
-    if: github.repository == 'amarkanday/experimentation-platform' && vars.AWS_ACCOUNT_ID != ''
+    if: (github.repository == 'amarkanday/experimentation-platform' || github.repository == 'getexperimently/experimently') && vars.AWS_ACCOUNT_ID != ''
     needs: pre-deployment-checks
     services:
       postgres:
@@ -238,7 +238,7 @@ jobs:
   build-and-push:
     name: Build & Push Docker Images
     runs-on: ubuntu-latest
-    if: github.repository == 'amarkanday/experimentation-platform' && vars.AWS_ACCOUNT_ID != ''
+    if: (github.repository == 'amarkanday/experimentation-platform' || github.repository == 'getexperimently/experimently') && vars.AWS_ACCOUNT_ID != ''
     needs: run-tests
     permissions:
       id-token: write
@@ -326,7 +326,7 @@ jobs:
   run-migrations:
     name: Run Database Migrations
     runs-on: ubuntu-latest
-    if: github.repository == 'amarkanday/experimentation-platform' && vars.AWS_ACCOUNT_ID != ''
+    if: (github.repository == 'amarkanday/experimentation-platform' || github.repository == 'getexperimently/experimently') && vars.AWS_ACCOUNT_ID != ''
     needs: build-and-push
     environment: production
     permissions:
@@ -386,7 +386,7 @@ jobs:
   deploy:
     name: Deploy to Production (Blue/Green)
     runs-on: ubuntu-latest
-    if: github.repository == 'amarkanday/experimentation-platform' && vars.AWS_ACCOUNT_ID != ''
+    if: (github.repository == 'amarkanday/experimentation-platform' || github.repository == 'getexperimently/experimently') && vars.AWS_ACCOUNT_ID != ''
     needs: [build-and-push, run-migrations]
     environment: production
     permissions:
@@ -463,7 +463,7 @@ jobs:
     name: Post-deployment Smoke Tests
     runs-on: ubuntu-latest
     needs: deploy
-    if: github.repository == 'amarkanday/experimentation-platform' && vars.AWS_ACCOUNT_ID != '' && (!inputs.skip_smoke_tests)
+    if: (github.repository == 'amarkanday/experimentation-platform' || github.repository == 'getexperimently/experimently') && vars.AWS_ACCOUNT_ID != '' && (!inputs.skip_smoke_tests)
     steps:
       - uses: actions/checkout@v4
         with:
@@ -489,7 +489,7 @@ jobs:
     name: Post-deployment Verification
     runs-on: ubuntu-latest
     needs: [deploy, smoke-tests]
-    if: github.repository == 'amarkanday/experimentation-platform' && vars.AWS_ACCOUNT_ID != '' && (always())
+    if: (github.repository == 'amarkanday/experimentation-platform' || github.repository == 'getexperimently/experimently') && vars.AWS_ACCOUNT_ID != '' && (always())
     permissions:
       id-token: write
       contents: read

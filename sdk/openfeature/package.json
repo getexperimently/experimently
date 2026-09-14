@@ -1,7 +1,7 @@
 {
-  "name": "@experimentation-platform/openfeature-provider",
+  "name": "@getexperimently/openfeature-provider",
   "version": "0.2.0",
-  "description": "OpenFeature provider for the Experimentation Platform (delegates to @experimentation-platform/js-sdk)",
+  "description": "OpenFeature provider for Experimently (delegates to @getexperimently/js-sdk)",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "files": [
@@ -27,7 +27,7 @@
   ],
   "license": "MIT",
   "dependencies": {
-    "@experimentation-platform/js-sdk": "file:../js",
+    "@getexperimently/js-sdk": "file:../js",
     "@openfeature/server-sdk": "^1.7.0"
   },
   "devDependencies": {

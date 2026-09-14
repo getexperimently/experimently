@@ -2,7 +2,7 @@ import '@/styles/globals.css';
 import React, { useEffect, useMemo, useState } from 'react';
 import Head from 'next/head';
 import type { AppProps } from 'next/app';
-import { ExperimentationProvider } from '@experimentation-platform/react-sdk';
+import { ExperimentationProvider } from '@getexperimently/react-sdk';
 import Layout from '@/components/Layout';
 import ExperimentlyPanel from '@/components/ExperimentlyPanel';
 import { EventLogProvider } from '@/lib/eventLog';

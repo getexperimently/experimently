@@ -1,6 +1,6 @@
 # Getting Started Guide
 
-This directory contains documentation to help you get started with the Experimentation Platform.
+This directory contains documentation to help you get started with Experimently.
 
 ## Files
 

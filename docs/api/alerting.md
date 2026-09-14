@@ -46,7 +46,7 @@ SLACK_DEFAULT_CHANNEL=#platform-alerts
 EMAIL_ENABLED=true
 SENDGRID_API_KEY=SG.your-api-key
 EMAIL_FROM_ADDRESS=platform@yourcompany.com
-EMAIL_FROM_NAME=Experimentation Platform
+EMAIL_FROM_NAME=Experimently
 NOTIFICATION_ADMIN_EMAILS=eng-team@yourcompany.com,oncall@yourcompany.com
 ```
 

@@ -6,7 +6,7 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-echo -e "${YELLOW}Setting up Python virtual environment for Experimentation Platform...${NC}"
+echo -e "${YELLOW}Setting up Python virtual environment for Experimently...${NC}"
 
 # Check if Python 3.9+ is installed
 python_version=$(python3 --version 2>&1 | awk '{print $2}')

@@ -143,7 +143,7 @@ class DynamoDBTablesStack(Stack):
             self._configure_auto_scaling(table, min_capacity=5, max_capacity=500)
 
         # Add tags
-        Tags.of(table).add("Service", "experimentation-platform")
+        Tags.of(table).add("Service", "experimently")
         Tags.of(table).add("Environment", environment)
 
         return table
@@ -219,7 +219,7 @@ class DynamoDBTablesStack(Stack):
             self._configure_auto_scaling(table, min_capacity=10, max_capacity=1000)
 
         # Add tags
-        Tags.of(table).add("Service", "experimentation-platform")
+        Tags.of(table).add("Service", "experimently")
         Tags.of(table).add("Environment", environment)
 
         return table
@@ -288,7 +288,7 @@ class DynamoDBTablesStack(Stack):
             self._configure_auto_scaling(table, min_capacity=5, max_capacity=100)
 
         # Add tags
-        Tags.of(table).add("Service", "experimentation-platform")
+        Tags.of(table).add("Service", "experimently")
         Tags.of(table).add("Environment", environment)
 
         return table
@@ -343,7 +343,7 @@ class DynamoDBTablesStack(Stack):
             self._configure_auto_scaling(table, min_capacity=5, max_capacity=100)
 
         # Add tags
-        Tags.of(table).add("Service", "experimentation-platform")
+        Tags.of(table).add("Service", "experimently")
         Tags.of(table).add("Environment", environment)
 
         return table
@@ -412,7 +412,7 @@ class DynamoDBTablesStack(Stack):
             self._configure_auto_scaling(table, min_capacity=5, max_capacity=100)
 
         # Add tags
-        Tags.of(table).add("Service", "experimentation-platform")
+        Tags.of(table).add("Service", "experimently")
         Tags.of(table).add("Environment", environment)
 
         return table

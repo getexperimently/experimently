@@ -1,12 +1,12 @@
 /**
- * @experimentation-platform/js-sdk
+ * @getexperimently/js-sdk
  *
- * JavaScript/TypeScript client for the Experimentation Platform public API.
+ * JavaScript/TypeScript client for the Experimently public API.
  * Works in Node >= 18 and browsers; zero runtime dependencies (uses global `fetch`).
  *
  * @example
  * ```ts
- * import { ExperimentationClient } from '@experimentation-platform/js-sdk';
+ * import { ExperimentationClient } from '@getexperimently/js-sdk';
  *
  * const client = new ExperimentationClient({ apiUrl: 'http://localhost:8000', apiKey: '...' });
  * const variant = await client.getVariant('checkout_flow', { userId: 'user-123' });

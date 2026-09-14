@@ -1,7 +1,7 @@
 {
-  "name": "@experimentation-platform/js-sdk",
+  "name": "@getexperimently/js-sdk",
   "version": "1.0.0",
-  "description": "JavaScript/TypeScript SDK for the Experimentation Platform public API (Node >= 18 and browsers, zero runtime dependencies)",
+  "description": "JavaScript/TypeScript SDK for the Experimently public API (Node >= 18 and browsers, zero runtime dependencies)",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "files": [

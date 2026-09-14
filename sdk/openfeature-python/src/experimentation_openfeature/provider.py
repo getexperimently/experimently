@@ -1,5 +1,5 @@
 """
-ExperimentationProvider — OpenFeature provider for the Experimentation Platform.
+ExperimentationProvider — OpenFeature provider for Experimently.
 
 Every flag is evaluated **by the server**: the provider delegates to the
 ``experimentation`` Python SDK, which calls
@@ -45,7 +45,7 @@ from experimentation.transport import Transport
 
 logger = logging.getLogger(__name__)
 
-PROVIDER_NAME = "experimentation-platform-provider"
+PROVIDER_NAME = "experimently-provider"
 
 # (value, found) — ``found`` is False when the config carries nothing usable.
 _Picker = Callable[[FlagEvaluation], Tuple[Any, bool]]
@@ -120,7 +120,7 @@ def _targeting_key(evaluation_context: Optional[EvaluationContext]) -> Optional[
 
 class ExperimentationProvider(AbstractProvider):
     """
-    OpenFeature provider backed by the Experimentation Platform public API.
+    OpenFeature provider backed by the Experimently public API.
 
     Example::
 

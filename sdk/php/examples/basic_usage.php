@@ -21,9 +21,9 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../vendor/autoload.php';
 
-use ExperimentationPlatform\ExperimentationClient;
-use ExperimentationPlatform\FeatureFlagEvaluator;
-use ExperimentationPlatform\SdkConfig;
+use Experimently\ExperimentationClient;
+use Experimently\FeatureFlagEvaluator;
+use Experimently\SdkConfig;
 
 // ---------------------------------------------------------------------------
 // 1. Configure and create the client

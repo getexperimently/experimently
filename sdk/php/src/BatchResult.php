@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace ExperimentationPlatform;
+namespace Experimently;
 
 /**
  * Aggregated result of ExperimentationClient::trackBatch() (POST /api/v1/tracking/batch).

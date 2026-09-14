@@ -1,4 +1,4 @@
-# Experimentation Platform API Documentation Guide
+# Experimently API Documentation Guide
 
 This guide explains how to access and use the API documentation for the experimentation platform.
 

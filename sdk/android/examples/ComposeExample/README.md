@@ -1,6 +1,6 @@
 # Compose Example
 
-This example demonstrates using the Experimentation Platform Android SDK with Jetpack Compose.
+This example demonstrates using the Experimently Android SDK with Jetpack Compose.
 
 ## Setup
 
@@ -13,7 +13,7 @@ implementation(project(":sdk"))
 Or, when published to Maven:
 
 ```kotlin
-implementation("com.experimentationplatform:android-sdk:1.0.0")
+implementation("com.getexperimently:experimently-android:1.0.0")
 ```
 
 ## Usage

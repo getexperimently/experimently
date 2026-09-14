@@ -2,7 +2,7 @@
 
 ## What Are Workspaces?
 
-Workspaces are the top-level isolation boundary in the Experimentation Platform.
+Workspaces are the top-level isolation boundary in Experimently.
 Each workspace has its own independent namespace for experiments, feature flags,
 members, and API keys, making it safe for multiple teams to use the same platform
 instance without interfering with each other.

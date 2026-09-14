@@ -13,8 +13,8 @@
 // messages before the program starts; the live runner reads the last stdout line.)
 
 using System.Text.Json;
-using ExperimentationPlatform;
-using ExperimentationPlatform.Models;
+using Experimently;
+using Experimently.Models;
 
 try
 {

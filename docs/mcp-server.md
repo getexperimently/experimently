@@ -32,7 +32,7 @@ curl http://localhost:8000/api/v1/mcp/manifest
 
 ```json
 {
-  "name": "experimentation-platform",
+  "name": "experimently",
   "version": "1.0.0",
   "tools": [
     {
@@ -163,7 +163,7 @@ Add the MCP server to your `~/.claude/settings.json`:
 ```json
 {
   "mcpServers": {
-    "experimentation-platform": {
+    "experimently": {
       "url": "http://localhost:8000/api/v1/mcp/manifest"
     }
   }

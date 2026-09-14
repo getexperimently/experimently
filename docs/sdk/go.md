@@ -1,6 +1,6 @@
 # Go SDK
 
-`github.com/amarkanday/experimentation-platform/sdk/go` (package `experimentation`) provides
+`github.com/getexperimently/experimently/sdk/go` (package `experimentation`) provides
 feature flag evaluation, experiment assignment and event tracking for Go services. Standard
 library only, goroutine-safe, context-aware.
 
@@ -15,11 +15,11 @@ Source: `sdk/go`. Requires Go 1.21+.
 ## Installation
 
 ```bash
-go get github.com/amarkanday/experimentation-platform/sdk/go
+go get github.com/getexperimently/experimently/sdk/go
 ```
 
 ```go
-import exp "github.com/amarkanday/experimentation-platform/sdk/go"
+import exp "github.com/getexperimently/experimently/sdk/go"
 ```
 
 ---

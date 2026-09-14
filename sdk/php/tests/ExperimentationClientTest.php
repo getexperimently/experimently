@@ -2,16 +2,16 @@
 
 declare(strict_types=1);
 
-namespace ExperimentationPlatform\Tests;
+namespace Experimently\Tests;
 
-use ExperimentationPlatform\Assignment;
-use ExperimentationPlatform\BatchResult;
-use ExperimentationPlatform\Errors\ApiException;
-use ExperimentationPlatform\Errors\AuthException;
-use ExperimentationPlatform\Errors\NetworkException;
-use ExperimentationPlatform\ExperimentationClient;
-use ExperimentationPlatform\FlagEvaluation;
-use ExperimentationPlatform\SdkConfig;
+use Experimently\Assignment;
+use Experimently\BatchResult;
+use Experimently\Errors\ApiException;
+use Experimently\Errors\AuthException;
+use Experimently\Errors\NetworkException;
+use Experimently\ExperimentationClient;
+use Experimently\FlagEvaluation;
+use Experimently\SdkConfig;
 use PHPUnit\Framework\TestCase;
 
 /**

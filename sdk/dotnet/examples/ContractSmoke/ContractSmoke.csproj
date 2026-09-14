@@ -10,6 +10,6 @@
     <IsPackable>false</IsPackable>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="../../src/ExperimentationPlatform/ExperimentationPlatform.csproj" />
+    <ProjectReference Include="../../src/Experimently/Experimently.csproj" />
   </ItemGroup>
 </Project>

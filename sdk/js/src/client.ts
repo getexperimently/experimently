@@ -60,7 +60,7 @@ function toIso(timestamp: Date | string): string {
 }
 
 /**
- * Client for the Experimentation Platform public API.
+ * Client for the Experimently public API.
  *
  * - Flag evaluation and experiment assignment are decided by the server; no
  *   local bucketing happens here. `consistentHash` is exported as a utility only.

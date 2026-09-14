@@ -1,4 +1,4 @@
-"""Synchronous client for the Experimentation Platform public API.
+"""Synchronous client for the Experimently public API.
 
 * Dependency-free: HTTP goes through :mod:`urllib` from the standard library
   (or any injected :class:`~experimentation.transport.Transport`).
@@ -39,7 +39,7 @@ MAX_RETRY_AFTER_SECONDS = 5.0
 #: Wait used when a 429 carries no (parseable) ``Retry-After`` header.
 DEFAULT_RETRY_AFTER_SECONDS = 1.0
 
-_USER_AGENT = f"experimentation-sdk-python/{__version__}"
+_USER_AGENT = f"experimently-python/{__version__}"
 
 
 def _iso_timestamp(value: Union[datetime, str, None]) -> Optional[str]:

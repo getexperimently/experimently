@@ -1,12 +1,13 @@
 {
-  "name": "@experimentation-platform/react-native-sdk",
+  "name": "@getexperimently/react-native-sdk",
   "version": "0.1.0",
-  "description": "React Native SDK for the Experimentation Platform — server-decided feature flags and A/B assignments, event tracking, in-memory cache and AsyncStorage offline fallback.",
+  "description": "React Native SDK for Experimently — server-decided feature flags and A/B assignments, event tracking, in-memory cache and AsyncStorage offline fallback.",
   "main": "src/index.ts",
   "types": "src/index.ts",
   "repository": {
     "type": "git",
-    "url": "https://github.com/experimentation-platform/sdk"
+    "url": "https://github.com/getexperimently/experimently.git",
+    "directory": "sdk/react-native"
   },
   "keywords": [
     "experimentation",

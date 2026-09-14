@@ -194,7 +194,7 @@ class EnhancedDatabaseStack(Stack):
         # Add tags to the database cluster for easier identification and management
         Tags.of(self.aurora_cluster).add("Name", f"{construct_id}-aurora-cluster")
         Tags.of(self.aurora_cluster).add("Environment", environment)
-        Tags.of(self.aurora_cluster).add("Service", "experimentation-platform")
+        Tags.of(self.aurora_cluster).add("Service", "experimently")
 
         # 7. STORE CONNECTION INFORMATION IN SSM FOR EASY ACCESS
         ssm.StringParameter(

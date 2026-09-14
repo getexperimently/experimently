@@ -1,5 +1,5 @@
 """
-Experimentation Platform package initialization.
+Experimently package initialization.
 
 This module initializes the experimentation platform package
 and imports core components for easy access.

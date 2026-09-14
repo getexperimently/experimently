@@ -1,10 +1,10 @@
-# Experimentation Platform Models and Migrations
+# Experimently Models and Migrations
 
-This document describes the data models used in the Experimentation Platform and provides instructions for managing database migrations.
+This document describes the data models used in Experimently and provides instructions for managing database migrations.
 
 ## Data Models
 
-The Experimentation Platform uses SQLAlchemy ORM models organized in a structured, modular architecture.
+Experimently uses SQLAlchemy ORM models organized in a structured, modular architecture.
 
 ### Base Models
 
@@ -225,7 +225,7 @@ Assignment.variant = relationship("Variant", back_populates="assignments")
 
 ## Database Migration Management
 
-The Experimentation Platform uses Alembic for managing database migrations.
+Experimently uses Alembic for managing database migrations.
 
 ### Migration Structure
 

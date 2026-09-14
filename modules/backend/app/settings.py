@@ -106,10 +106,8 @@ class ModulesSettings(BaseSettings):
     MYSQL_TIMEOUT_SECONDS: int = 30
 
     # SSO / SAML / OIDC settings (EP-037)
-    SAML_SP_ENTITY_ID: str = "https://experimentation-platform.example.com"
-    SAML_SP_ACS_URL: str = (
-        "https://experimentation-platform.example.com/auth/sso/saml/acs"
-    )
+    SAML_SP_ENTITY_ID: str = "https://experimently.example.com"
+    SAML_SP_ACS_URL: str = "https://experimently.example.com/auth/sso/saml/acs"
     OIDC_GOOGLE_CLIENT_ID: str = ""
     OIDC_GOOGLE_CLIENT_SECRET: str = ""
     OIDC_GITHUB_CLIENT_ID: str = ""
