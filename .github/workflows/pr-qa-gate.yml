@@ -590,7 +590,7 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Build API image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: backend/Dockerfile
@@ -609,7 +609,7 @@ jobs:
       # pip install of the module closure -- a couple of minutes inside the
       # existing 25-minute budget, against ~8 for a cold job of its own.
       - name: Build API image (full profile)
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: backend/Dockerfile
@@ -721,7 +721,7 @@ jobs:
           rm -f refused.log
 
       - name: Build dashboard image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: frontend/Dockerfile
