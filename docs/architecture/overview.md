@@ -1,4 +1,4 @@
-# High-Level Architecture Design for Experimentation Platform on AWS
+# High-Level Architecture Design for Experimently on AWS
 
 Based on the detailed requirements for an experimentation platform with A/B testing and feature flag capabilities, this document outlines a comprehensive architecture leveraging AWS services to build a robust, scalable solution.
 

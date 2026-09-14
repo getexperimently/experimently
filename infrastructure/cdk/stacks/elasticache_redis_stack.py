@@ -96,7 +96,7 @@ class ElastiCacheRedisStack(Stack):
         # Add tags
         Tags.of(self.redis_cluster).add("Name", f"{construct_id}-redis")
         Tags.of(self.redis_cluster).add("Environment", environment)
-        Tags.of(self.redis_cluster).add("Service", "experimentation-platform")
+        Tags.of(self.redis_cluster).add("Service", "experimently")
 
         # 5. STORE CONNECTION INFORMATION IN SSM
         ssm.StringParameter(

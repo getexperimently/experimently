@@ -1,4 +1,4 @@
-defmodule ExperimentationPlatform.TestSupport.ProcessHelpers do
+defmodule Experimently.TestSupport.ProcessHelpers do
   @moduledoc """
   Teardown helpers for processes linked to a test process.
 

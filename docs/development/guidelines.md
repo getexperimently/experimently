@@ -1,6 +1,6 @@
-# Experimentation Platform Development Guidelines
+# Experimently Development Guidelines
 
-This document outlines the development standards, workflows, and best practices for the Experimentation Platform project. All team members should follow these guidelines to ensure code quality, maintainability, and consistency.
+This document outlines the development standards, workflows, and best practices for the Experimently project. All team members should follow these guidelines to ensure code quality, maintainability, and consistency.
 
 ## Table of Contents
 
@@ -29,8 +29,8 @@ This document outlines the development standards, workflows, and best practices 
 1. Clone the repository:
 
     ```bash
-    git clone https://github.com/your-org/experimentation-platform.git
-    cd experimentation-platform
+    git clone https://github.com/getexperimently/experimently.git
+    cd experimently
     ```
 
 2. Set up the backend:

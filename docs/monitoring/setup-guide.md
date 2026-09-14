@@ -1,6 +1,6 @@
 # Monitoring System Setup Guide
 
-This guide provides detailed instructions for setting up the monitoring and error tracking system for the Experimentation Platform.
+This guide provides detailed instructions for setting up the monitoring and error tracking system for Experimently.
 
 ## Prerequisites
 

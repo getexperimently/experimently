@@ -2,15 +2,15 @@
 
 declare(strict_types=1);
 
-namespace ExperimentationPlatform;
+namespace Experimently;
 
-use ExperimentationPlatform\Errors\ApiException;
-use ExperimentationPlatform\Errors\AuthException;
-use ExperimentationPlatform\Errors\ExperimentationException;
-use ExperimentationPlatform\Errors\NetworkException;
+use Experimently\Errors\ApiException;
+use Experimently\Errors\AuthException;
+use Experimently\Errors\ExperimentationException;
+use Experimently\Errors\NetworkException;
 
 /**
- * Thin cURL wrapper for communicating with the Experimentation Platform API.
+ * Thin cURL wrapper for communicating with the Experimently API.
  *
  * Every request carries the configured API key in the X-API-Key header plus
  * Content-Type/Accept: application/json. No external dependencies — uses only

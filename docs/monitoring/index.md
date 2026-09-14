@@ -1,6 +1,6 @@
 # Monitoring and Error Tracking Documentation
 
-Welcome to the Experimentation Platform's Monitoring and Error Tracking documentation. This section provides comprehensive information about our AWS CloudWatch-based monitoring system.
+Welcome to Experimently's Monitoring and Error Tracking documentation. This section provides comprehensive information about our AWS CloudWatch-based monitoring system.
 
 ## Table of Contents
 

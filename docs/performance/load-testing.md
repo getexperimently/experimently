@@ -1,4 +1,4 @@
-# Load Testing — Experimentation Platform
+# Load Testing — Experimently
 
 ## Overview
 

@@ -1,6 +1,6 @@
 # Environment Configuration Setup Guide
 
-This guide explains how to set up the environment configuration for the Experimentation Platform.
+This guide explains how to set up the environment configuration for Experimently.
 
 ## Overview
 
@@ -47,7 +47,7 @@ REDIS_DB=0
 
 #### Application Settings
 ```
-PROJECT_NAME="Experimentation Platform"
+PROJECT_NAME="Experimently"
 ENVIRONMENT=development  # or testing, production
 DEBUG=true              # set to false in production
 LOG_LEVEL=DEBUG         # INFO, WARNING, ERROR in production

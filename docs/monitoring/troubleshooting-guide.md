@@ -1,6 +1,6 @@
 # Monitoring System Troubleshooting Guide
 
-This guide provides solutions to common issues with the Experimentation Platform's monitoring and error tracking system.
+This guide provides solutions to common issues with Experimently's monitoring and error tracking system.
 
 ## Common Issues
 

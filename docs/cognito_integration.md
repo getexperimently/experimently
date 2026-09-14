@@ -1,6 +1,6 @@
 # AWS Cognito Integration
 
-This document explains how the Experimentation Platform integrates with AWS Cognito for authentication and role-based access control.
+This document explains how Experimently integrates with AWS Cognito for authentication and role-based access control.
 
 ## Overview
 

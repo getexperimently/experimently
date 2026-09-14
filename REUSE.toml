@@ -19,7 +19,7 @@
 version = 1
 SPDX-PackageName = "Experimently"
 SPDX-PackageSupplier = "Experimently <hello@getexperimently.com>"
-SPDX-PackageDownloadLocation = "https://github.com/amarkanday/experimentation-platform"
+SPDX-PackageDownloadLocation = "https://github.com/getexperimently/experimently"
 
 [[annotations]]
 path = ["**"]

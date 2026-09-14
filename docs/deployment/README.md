@@ -1,6 +1,6 @@
 # Deployment Documentation
 
-This directory contains all operational documentation for deploying and operating the Experimentation Platform in production.
+This directory contains all operational documentation for deploying and operating Experimently in production.
 
 ---
 

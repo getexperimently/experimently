@@ -1,6 +1,6 @@
 # Technical Guide
 
-Detailed implementation reference for the Experimentation Platform. Covers architecture, data models, key subsystems, and real-world use cases.
+Detailed implementation reference for Experimently. Covers architecture, data models, key subsystems, and real-world use cases.
 
 ---
 

@@ -1,22 +1,22 @@
-# @experimentation-platform/react-sdk
+# @getexperimently/react-sdk
 
-React hooks and clients for the Experimentation Platform public API. Feature flags and
+React hooks and clients for the Experimently public API. Feature flags and
 experiment assignments are decided **by the server** (sticky per user); the SDK caches the
 answers per user + key and never buckets locally.
 
 ## Install
 
 ```bash
-npm install @experimentation-platform/react-sdk   # peer deps: react >=17, react-dom >=17
+npm install @getexperimently/react-sdk   # peer deps: react >=17, react-dom >=17
 ```
 
-Consuming from source (as the ShopLab demo does): alias `@experimentation-platform/react-sdk`
+Consuming from source (as the ShopLab demo does): alias `@getexperimently/react-sdk`
 to `sdk/react/src` in your bundler and tsconfig.
 
 ## Provider setup
 
 ```tsx
-import { ExperimentationProvider } from '@experimentation-platform/react-sdk';
+import { ExperimentationProvider } from '@getexperimently/react-sdk';
 
 <ExperimentationProvider
   config={{ apiKey: process.env.NEXT_PUBLIC_EXPERIMENTLY_API_KEY!, baseUrl: 'http://localhost:8000' }}
@@ -114,7 +114,7 @@ HOC that injects `flagEvaluation: FeatureFlagEvaluation` into `Component`.
 `ServerClient` (Node/SSR) — same requests, `(key, user)` argument order, **never throws**:
 
 ```ts
-import { ServerClient } from '@experimentation-platform/react-sdk/ssr';
+import { ServerClient } from '@getexperimently/react-sdk/ssr';
 
 export async function getServerSideProps({ req }) {
   const client = new ServerClient({ apiKey: process.env.EXPERIMENTLY_API_KEY!, baseUrl: process.env.EXPERIMENTLY_API_URL! });

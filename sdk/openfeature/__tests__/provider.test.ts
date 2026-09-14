@@ -1,7 +1,7 @@
 /**
  * Tests for ExperimentationProvider (OpenFeature TypeScript provider).
  *
- * The provider delegates to @experimentation-platform/js-sdk; `fetch` is injected
+ * The provider delegates to @getexperimently/js-sdk; `fetch` is injected
  * so no network calls are made. Coverage:
  *   - construction / metadata / baseUrl handling / reusing a JS SDK client
  *   - request shape: GET /api/v1/feature-flags/evaluate/{key}?user_id=…, headers, no attributes
@@ -17,8 +17,8 @@
 import { ExperimentationProvider } from '../src/ExperimentationProvider';
 import type { ExperimentationProviderOptions } from '../src/types';
 import { ErrorCode, StandardResolutionReasons } from '@openfeature/server-sdk';
-import { ExperimentationClient } from '@experimentation-platform/js-sdk';
-import type { FlagEvaluateResponse } from '@experimentation-platform/js-sdk';
+import { ExperimentationClient } from '@getexperimently/js-sdk';
+import type { FlagEvaluateResponse } from '@getexperimently/js-sdk';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -91,7 +91,7 @@ describe('ExperimentationProvider — construction', () => {
 
   test('provider metadata name is unchanged', () => {
     const provider = makeProvider(flagFetch({ enabled: true }));
-    expect(provider.metadata.name).toBe('experimentation-platform-provider');
+    expect(provider.metadata.name).toBe('experimently-provider');
   });
 
   test('hooks are undefined by default', () => {

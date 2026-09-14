@@ -21,7 +21,7 @@
  *
  * [vars]
  * EP_API_KEY = "your-api-key"
- * EP_BASE_URL = "https://api.your-experimentation-platform.com"
+ * EP_BASE_URL = "https://api.your-platform.com"
  * ```
  */
 

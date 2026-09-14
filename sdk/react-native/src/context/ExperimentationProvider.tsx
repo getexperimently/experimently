@@ -3,7 +3,7 @@
  *
  * @example
  * ```tsx
- * import { ExperimentationProvider, ExperimentationClient } from '@experimentation-platform/react-native-sdk';
+ * import { ExperimentationProvider, ExperimentationClient } from '@getexperimently/react-native-sdk';
  *
  * const client = new ExperimentationClient({
  *   apiKey: 'YOUR_API_KEY',

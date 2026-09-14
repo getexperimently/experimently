@@ -1,4 +1,4 @@
-"""Middleware package for the Experimentation Platform."""
+"""Middleware package for Experimently."""
 
 from backend.app.middleware.rate_limiter import RateLimitMiddleware
 from backend.app.middleware.security_middleware import SecurityHeadersMiddleware

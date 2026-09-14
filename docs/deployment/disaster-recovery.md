@@ -1,4 +1,4 @@
-# Disaster Recovery Plan — Experimentation Platform
+# Disaster Recovery Plan — Experimently
 
 **Version:** 1.0
 **Date:** March 2026

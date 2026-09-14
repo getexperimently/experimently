@@ -19,5 +19,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "ExperimentationSDK"
+rootProject.name = "experimently-android"
 include(":sdk")

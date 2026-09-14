@@ -1,14 +1,14 @@
 {
-    "name": "experimently/experimentation-platform-sdk",
+    "name": "experimently/sdk",
     "description": "PHP SDK for Experimently A/B testing and feature flag platform",
     "type": "library",
     "license": "MIT",
     "keywords": ["a/b testing", "feature flags", "experimentation", "sdk"],
-    "homepage": "https://github.com/experimently/experimentation-platform",
+    "homepage": "https://github.com/getexperimently/experimently",
     "authors": [
         {
             "name": "Experimently",
-            "email": "sdk@experimently.io"
+            "email": "hello@getexperimently.com"
         }
     ],
     "require": {
@@ -21,12 +21,12 @@
     },
     "autoload": {
         "psr-4": {
-            "ExperimentationPlatform\\": "src/"
+            "Experimently\\": "src/"
         }
     },
     "autoload-dev": {
         "psr-4": {
-            "ExperimentationPlatform\\Tests\\": "tests/"
+            "Experimently\\Tests\\": "tests/"
         }
     },
     "config": {

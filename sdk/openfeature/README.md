@@ -1,8 +1,8 @@
-# @experimentation-platform/openfeature-provider
+# @getexperimently/openfeature-provider
 
-[OpenFeature](https://openfeature.dev) provider for the Experimentation Platform
+[OpenFeature](https://openfeature.dev) provider for Experimently
 (`@openfeature/server-sdk`, Node >= 18). Every evaluation is delegated to
-[`@experimentation-platform/js-sdk`](../js/README.md) and **decided by the server**; successful
+[`@getexperimently/js-sdk`](../js/README.md) and **decided by the server**; successful
 answers are cached per user + flag. Nothing is bucketed locally and no flag definitions are downloaded.
 
 Full documentation: [`docs/sdk/openfeature.md`](../../docs/sdk/openfeature.md).
@@ -11,7 +11,7 @@ Full documentation: [`docs/sdk/openfeature.md`](../../docs/sdk/openfeature.md).
 
 ```ts
 import { OpenFeature } from '@openfeature/server-sdk';
-import { ExperimentationProvider } from '@experimentation-platform/openfeature-provider';
+import { ExperimentationProvider } from '@getexperimently/openfeature-provider';
 
 const provider = new ExperimentationProvider({ apiKey: 'eptk_...', baseUrl: 'http://localhost:8000' });
 await OpenFeature.setProviderAndWait(provider);

@@ -1,5 +1,5 @@
 import SwiftUI
-import ExperimentationSDK
+import Experimently
 
 // MARK: - App Entry Point
 

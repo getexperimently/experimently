@@ -3,7 +3,7 @@
 
 ## Overview
 
-This guide will help you set up and manage your local development environment using Docker Compose, tailored specifically for the Experimentation Platform. The setup includes a PostgreSQL database, Redis caching, LocalStack for AWS service emulation, and optional tools such as PGAdmin for database management.
+This guide will help you set up and manage your local development environment using Docker Compose, tailored specifically for Experimently. The setup includes a PostgreSQL database, Redis caching, LocalStack for AWS service emulation, and optional tools such as PGAdmin for database management.
 
 ## Prerequisites
 

@@ -1,6 +1,6 @@
 # Security Documentation
 
-This directory contains the security compliance documentation for the Experimentation Platform.
+This directory contains the security compliance documentation for Experimently.
 
 | Document | Description |
 |----------|-------------|

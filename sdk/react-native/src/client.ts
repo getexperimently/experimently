@@ -1,5 +1,5 @@
 /**
- * React Native Experimentation Platform client.
+ * React Native Experimently client.
  *
  * Flag evaluation and experiment assignment are decided **by the server**
  * (`GET /api/v1/feature-flags/evaluate/{key}?user_id=…`,

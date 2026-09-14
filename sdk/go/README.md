@@ -1,4 +1,4 @@
-# Experimentation Platform Go SDK
+# Experimently Go SDK
 
 Go client for the Experimently A/B testing and feature flag platform. Zero dependencies outside
 the standard library, safe for concurrent use.
@@ -12,11 +12,11 @@ Full reference: [`docs/sdk/go.md`](../../docs/sdk/go.md).
 ## Installation
 
 ```bash
-go get github.com/amarkanday/experimentation-platform/sdk/go   # Go 1.21+
+go get github.com/getexperimently/experimently/sdk/go   # Go 1.21+
 ```
 
 ```go
-import exp "github.com/amarkanday/experimentation-platform/sdk/go"
+import exp "github.com/getexperimently/experimently/sdk/go"
 ```
 
 ## Quick Start

@@ -1,4 +1,4 @@
-# Security Policies — Experimentation Platform
+# Security Policies — Experimently
 
 **Version:** 1.0
 **Date:** March 2026

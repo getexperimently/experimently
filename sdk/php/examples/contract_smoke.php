@@ -22,8 +22,8 @@ declare(strict_types=1);
  * exit 1. Nothing else is ever written to stdout (PHP notices go to stderr).
  */
 
-use ExperimentationPlatform\ExperimentationClient;
-use ExperimentationPlatform\SdkConfig;
+use Experimently\ExperimentationClient;
+use Experimently\SdkConfig;
 
 // Keep stdout clean: any PHP warning/notice/deprecation goes to stderr.
 error_reporting(E_ALL);

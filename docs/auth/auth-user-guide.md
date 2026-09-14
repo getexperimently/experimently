@@ -1,12 +1,12 @@
 # Authentication User Guide
 
-This guide explains how to use the authentication features of the Experimentation Platform, including registration, login, password management, and security best practices.
+This guide explains how to use the authentication features of Experimently, including registration, login, password management, and security best practices.
 
 ## Account Registration
 
 ### Registration Requirements
 
-To create an account on the Experimentation Platform, you will need to provide:
+To create an account on Experimently, you will need to provide:
 
 - **Username**: 3-20 characters, alphanumeric with underscores and hyphens only
 - **Email**: A valid email address you can access for verification
@@ -102,7 +102,7 @@ When making API requests, include the access token in the Authorization header:
 ```javascript
 // Example of an authenticated API request using fetch
 async function fetchExperiments() {
-  const response = await fetch('https://api.experimentation-platform.com/api/v1/experiments', {
+  const response = await fetch('https://api.experimently.example.com/api/v1/experiments', {
     method: 'GET',
     headers: {
       'Authorization': `Bearer ${localStorage.getItem('accessToken')}`,
@@ -123,7 +123,7 @@ If your access token expires, use the refresh token to get a new one:
 async function refreshTokens() {
   const refreshToken = localStorage.getItem('refreshToken');
   
-  const response = await fetch('https://api.experimentation-platform.com/api/v1/auth/refresh', {
+  const response = await fetch('https://api.experimently.example.com/api/v1/auth/refresh', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json'
@@ -208,7 +208,7 @@ To keep your account secure:
 
 If you notice suspicious activity on your account:
 1. Change your password immediately
-2. Contact support at support@experimentation-platform.com
+2. Contact support at support@getexperimently.com
 3. Check your account activity log for unauthorized actions
 4. Review connected devices in account settings
 

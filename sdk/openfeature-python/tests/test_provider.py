@@ -71,7 +71,7 @@ class TestConstruction:
 
     def test_metadata_name(self):
         provider, _ = make_provider()
-        assert provider.get_metadata().name == PROVIDER_NAME == "experimentation-platform-provider"
+        assert provider.get_metadata().name == PROVIDER_NAME == "experimently-provider"
 
     def test_get_provider_hooks_returns_empty_list(self):
         provider, _ = make_provider()

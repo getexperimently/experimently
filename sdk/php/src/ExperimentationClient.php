@@ -2,12 +2,12 @@
 
 declare(strict_types=1);
 
-namespace ExperimentationPlatform;
+namespace Experimently;
 
-use ExperimentationPlatform\Errors\ExperimentationException;
+use Experimently\Errors\ExperimentationException;
 
 /**
- * Main entry-point for the Experimentation Platform PHP SDK.
+ * Main entry-point for the Experimently PHP SDK.
  *
  * Flag evaluation and experiment assignment are decided by the server; the SDK
  * never buckets users locally. Successful results are cached per user + key for

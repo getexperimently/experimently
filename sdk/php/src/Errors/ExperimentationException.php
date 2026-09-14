@@ -2,10 +2,10 @@
 
 declare(strict_types=1);
 
-namespace ExperimentationPlatform\Errors;
+namespace Experimently\Errors;
 
 /**
- * Base exception for all Experimentation Platform SDK errors.
+ * Base exception for all Experimently SDK errors.
  */
 class ExperimentationException extends \RuntimeException
 {

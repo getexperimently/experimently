@@ -12035,7 +12035,7 @@
             "default": "slack"
           },
           "message": {
-            "default": "Test notification from Experimentation Platform",
+            "default": "Test notification from Experimently",
             "maxLength": 500,
             "title": "Message",
             "type": "string"
@@ -15091,7 +15091,7 @@
   },
   "info": {
     "description": "API for managing experiments and feature flags in test environment",
-    "title": "Experimentation Platform",
+    "title": "Experimently",
     "version": "1.0.0"
   },
   "openapi": "3.1.0",

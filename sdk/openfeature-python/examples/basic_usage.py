@@ -1,5 +1,5 @@
 """
-Basic usage example: Experimentation Platform OpenFeature Python Provider.
+Basic usage example: Experimently OpenFeature Python Provider.
 
 Run from the repository root with the virtual environment activated:
     source venv/bin/activate

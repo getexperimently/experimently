@@ -18,7 +18,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
-import 'package:experimentation_sdk/experimentation_sdk_core.dart';
+import 'package:experimently/experimently_core.dart';
 
 String _env(String name, String defaultValue) {
   final value = Platform.environment[name];

@@ -47,7 +47,7 @@ class ApiStack(Stack):
         self.api = apigateway.RestApi(
             self,
             "ExperimentationApi",
-            rest_api_name="Experimentation Platform API",
+            rest_api_name="Experimently API",
             description="API for the experimentation platform",
         )
 

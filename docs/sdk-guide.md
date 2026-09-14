@@ -68,13 +68,13 @@ toolchain before relying on them.
 
 ## Python SDK
 
-`sdk/python` — package `experimentation-sdk`, stdlib only (no runtime dependencies), Python ≥ 3.9,
+`sdk/python` — package `experimently`, stdlib only (no runtime dependencies), Python ≥ 3.9,
 synchronous. Full reference: [Python SDK](sdk/python.md).
 
 ### Installation
 
 ```bash
-pip install experimentation-sdk
+pip install experimently
 # or from source:
 pip install -e ./sdk/python
 ```
@@ -156,14 +156,14 @@ Smoke against a live backend: `python sdk/python/examples/contract_smoke.py`.
 
 ## JavaScript / TypeScript SDK
 
-`sdk/js` — package `@experimentation-platform/js-sdk`, zero runtime dependencies, uses the global
+`sdk/js` — package `@getexperimently/js-sdk`, zero runtime dependencies, uses the global
 `fetch` (Node ≥ 18 and browsers), CommonJS build with type declarations. Full reference:
 [JavaScript SDK](sdk/javascript.md). For React apps use the [React SDK](sdk/react.md) instead.
 
 ### Installation
 
 ```bash
-npm install @experimentation-platform/js-sdk
+npm install @getexperimently/js-sdk
 # or from source:
 npm install ./sdk/js
 ```
@@ -171,7 +171,7 @@ npm install ./sdk/js
 ### Quick Start
 
 ```typescript
-import { ExperimentationClient } from '@experimentation-platform/js-sdk';
+import { ExperimentationClient } from '@getexperimently/js-sdk';
 
 const client = new ExperimentationClient({
   apiUrl: 'http://localhost:8000',   // origin only; the SDK appends /api/v1/...
@@ -243,7 +243,7 @@ import {
   useExperiment,
   useFeatureFlag,
   useTrackEvent,
-} from '@experimentation-platform/react-sdk';
+} from '@getexperimently/react-sdk';
 
 function App() {
   return (
@@ -296,19 +296,19 @@ const client = new ExperimentationClient({
 
 ```xml
 <dependency>
-  <groupId>com.experimentationplatform</groupId>
-  <artifactId>experimentation-java-sdk</artifactId>
+  <groupId>com.getexperimently</groupId>
+  <artifactId>experimently-sdk</artifactId>
   <version>1.0.0</version>
 </dependency>
-<!-- Spring Boot: use experimentation-spring-boot-starter instead -->
+<!-- Spring Boot: use experimently-spring-boot-starter instead -->
 ```
 
 ### Quick Start
 
 ```java
-import com.experimentationplatform.sdk.ExperimentationClient;
-import com.experimentationplatform.sdk.config.SdkConfig;
-import com.experimentationplatform.sdk.model.*;
+import com.getexperimently.sdk.ExperimentationClient;
+import com.getexperimently.sdk.config.SdkConfig;
+import com.getexperimently.sdk.model.*;
 
 SdkConfig config = SdkConfig.builder("eptk_...", "http://localhost:8000")  // apiKey, baseUrl (origin only)
     .timeoutMs(5000)
@@ -390,7 +390,7 @@ Highlights:
   `GET /api/v1/feature-flags/evaluate/{key}?user_id=`; `useVariant` and `useMultipleFlags` build on it.
 - `useTrackEvent()` → `track(eventName, properties?, { experimentKey?, featureFlagKey?, value? })`; without a
   key the event fans out to every experiment the user is assigned to.
-- `ServerClient` (from `@experimentation-platform/react-sdk/ssr`) offers the same calls for Node/SSR and never throws.
+- `ServerClient` (from `@getexperimently/react-sdk/ssr`) offers the same calls for Node/SSR and never throws.
 
 ## API Key Authentication
 

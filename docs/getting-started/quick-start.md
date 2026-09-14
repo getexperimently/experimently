@@ -19,8 +19,8 @@ Only needed if you want to run the backend or dashboard outside Docker: Python 3
 ## Step 1: Start the stack
 
 ```bash
-git clone https://github.com/amarkanday/experimentation-platform.git
-cd experimentation-platform
+git clone https://github.com/getexperimently/experimently.git
+cd experimently
 docker compose up -d --wait
 ```
 

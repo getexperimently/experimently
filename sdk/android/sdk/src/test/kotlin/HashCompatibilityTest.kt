@@ -1,5 +1,5 @@
-import com.experimentationplatform.android.ConsistentHash
-import com.experimentationplatform.android.FeatureFlagEvaluator
+import com.getexperimently.android.ConsistentHash
+import com.getexperimently.android.FeatureFlagEvaluator
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
 

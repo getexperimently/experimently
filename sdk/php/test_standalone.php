@@ -32,16 +32,16 @@ foreach (
     require_once __DIR__ . '/' . $file;
 }
 
-use ExperimentationPlatform\Assignment;
-use ExperimentationPlatform\BatchResult;
-use ExperimentationPlatform\Cache;
-use ExperimentationPlatform\Errors\ApiException;
-use ExperimentationPlatform\Errors\NetworkException;
-use ExperimentationPlatform\ExperimentationClient;
-use ExperimentationPlatform\FeatureFlagEvaluator;
-use ExperimentationPlatform\FlagEvaluation;
-use ExperimentationPlatform\SdkConfig;
-use ExperimentationPlatform\Tests\FakeHttpClient;
+use Experimently\Assignment;
+use Experimently\BatchResult;
+use Experimently\Cache;
+use Experimently\Errors\ApiException;
+use Experimently\Errors\NetworkException;
+use Experimently\ExperimentationClient;
+use Experimently\FeatureFlagEvaluator;
+use Experimently\FlagEvaluation;
+use Experimently\SdkConfig;
+use Experimently\Tests\FakeHttpClient;
 
 $failures = [];
 $passed   = 0;

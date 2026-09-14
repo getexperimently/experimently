@@ -1,6 +1,6 @@
 # Architecture Documentation
 
-This directory contains documentation about the system architecture and design of the Experimentation Platform.
+This directory contains documentation about the system architecture and design of Experimently.
 
 ## Files
 

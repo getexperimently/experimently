@@ -1,12 +1,12 @@
 /// Main ExperimentationClient for the Flutter SDK.
-library experimentation_sdk_client;
+library experimently_client;
 
 import 'cache.dart';
 import 'http_client.dart';
 import 'models.dart';
 import 'offline_store.dart';
 
-/// Flutter/Dart client for the Experimentation Platform.
+/// Flutter/Dart client for Experimently.
 ///
 /// ## How it works
 /// - **The server decides.** [evaluateFlag] calls

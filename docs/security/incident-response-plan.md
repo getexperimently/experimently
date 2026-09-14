@@ -1,4 +1,4 @@
-# Incident Response Plan — Experimentation Platform
+# Incident Response Plan — Experimently
 
 **Version:** 1.0
 **Date:** March 2026
@@ -340,12 +340,12 @@ cc: @security-team @[engineering-lead] @[ic]
 ### 6.2 Customer Notification Email (P0/P1 involving customer data)
 
 ```
-Subject: Important Security Notice — Experimentation Platform
+Subject: Important Security Notice — Experimently
 
 Dear [Customer Name],
 
 We are writing to notify you of a security incident that may have affected
-your data on the Experimentation Platform.
+your data on Experimently.
 
 What happened:
 [Clear, non-technical description of the incident, what data was involved,
@@ -372,7 +372,7 @@ please contact security@yourcompany.com.
 
 [Name]
 [Title]
-Experimentation Platform Security Team
+Experimently Security Team
 ```
 
 ### 6.3 Regulatory / GDPR Notification (within 72 hours of identifying P0 breach involving PII)

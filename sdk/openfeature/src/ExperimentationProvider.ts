@@ -1,8 +1,8 @@
 /**
- * OpenFeature Provider for the Experimentation Platform.
+ * OpenFeature Provider for Experimently.
  *
  * Implements the @openfeature/server-sdk `Provider` interface on top of
- * `@experimentation-platform/js-sdk`. Every evaluation is decided by the
+ * `@getexperimently/js-sdk`. Every evaluation is decided by the
  * server (`GET /api/v1/feature-flags/evaluate/{flag_key}?user_id=…`); the
  * JS SDK caches successful answers per user + flag for `cacheTtlMs` and never
  * caches failures.
@@ -27,7 +27,7 @@ import {
   ExperimentationClient,
   consistentHash,
   type FlagEvaluation,
-} from '@experimentation-platform/js-sdk';
+} from '@getexperimently/js-sdk';
 import {
   ErrorCode,
   StandardResolutionReasons,
@@ -60,7 +60,7 @@ function configField(config: unknown, field: string): unknown {
 
 export class ExperimentationProvider implements Provider {
   readonly metadata: ProviderMetadata = {
-    name: 'experimentation-platform-provider',
+    name: 'experimently-provider',
   };
 
   hooks?: Hook[];

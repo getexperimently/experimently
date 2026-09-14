@@ -1,8 +1,8 @@
 # Java SDK
 
-`com.experimentationplatform:experimentation-java-sdk` (v1.0.0) is a Java 11+ client for feature
+`com.getexperimently:experimently-sdk` (v1.0.0) is a Java 11+ client for feature
 flags, experiment assignment and event tracking, built on OkHttp 4 and Jackson.
-`experimentation-spring-boot-starter` adds Spring Boot auto-configuration (Spring Boot 3.1,
+`experimently-spring-boot-starter` adds Spring Boot auto-configuration (Spring Boot 3.1,
 which needs Java 17+ at runtime).
 
 Flag evaluation and experiment assignment are decided **by the server**: every call goes to the
@@ -18,20 +18,20 @@ Source: `sdk/java` (`core/`, `spring-boot-starter/`).
 ```xml
 <!-- core client -->
 <dependency>
-    <groupId>com.experimentationplatform</groupId>
-    <artifactId>experimentation-java-sdk</artifactId>
+    <groupId>com.getexperimently</groupId>
+    <artifactId>experimently-sdk</artifactId>
     <version>1.0.0</version>
 </dependency>
 
 <!-- Spring Boot: the starter depends on the core, so add only this -->
 <dependency>
-    <groupId>com.experimentationplatform</groupId>
-    <artifactId>experimentation-spring-boot-starter</artifactId>
+    <groupId>com.getexperimently</groupId>
+    <artifactId>experimently-spring-boot-starter</artifactId>
     <version>1.0.0</version>
 </dependency>
 ```
 
-Gradle: `implementation 'com.experimentationplatform:experimentation-java-sdk:1.0.0'` (or the
+Gradle: `implementation 'com.getexperimently:experimently-sdk:1.0.0'` (or the
 starter). From this monorepo, `cd sdk/java && mvn install` publishes both to `~/.m2`.
 
 ---
@@ -39,13 +39,13 @@ starter). From this monorepo, `cd sdk/java && mvn install` publishes both to `~/
 ## Quick Start
 
 ```java
-import com.experimentationplatform.sdk.ExperimentationClient;
-import com.experimentationplatform.sdk.config.SdkConfig;
-import com.experimentationplatform.sdk.exception.ExperimentationException;
-import com.experimentationplatform.sdk.model.ExperimentAssignment;
-import com.experimentationplatform.sdk.model.FlagEvaluation;
-import com.experimentationplatform.sdk.model.TrackEvent;
-import com.experimentationplatform.sdk.model.User;
+import com.getexperimently.sdk.ExperimentationClient;
+import com.getexperimently.sdk.config.SdkConfig;
+import com.getexperimently.sdk.exception.ExperimentationException;
+import com.getexperimently.sdk.model.ExperimentAssignment;
+import com.getexperimently.sdk.model.FlagEvaluation;
+import com.getexperimently.sdk.model.TrackEvent;
+import com.getexperimently.sdk.model.User;
 
 SdkConfig config = SdkConfig.builder(System.getenv("EXPERIMENTLY_API_KEY"), "http://localhost:8000")
         .timeoutMs(3000)
@@ -178,7 +178,7 @@ experimentation:
 | Property | Type | Default | Maps to |
 |---|---|---|---|
 | `experimentation.api-key` | `String` | — (required) | `SdkConfig.apiKey` |
-| `experimentation.base-url` | `String` | `https://api.experimentation-platform.example.com` | `SdkConfig.baseUrl` — set it to your backend origin |
+| `experimentation.base-url` | `String` | `https://api.experimently.example.com` | `SdkConfig.baseUrl` — set it to your backend origin |
 | `experimentation.timeout-ms` | `int` | `5000` | `timeoutMs` |
 | `experimentation.cache-ttl-seconds` | `int` | `300` | `cacheTtlMs` (× 1000) |
 | `experimentation.cache-size` | `int` | `1000` | `cacheSize` |
@@ -231,7 +231,7 @@ bash sdk/java/examples/contract_smoke.sh
 
 The script builds when needed (`mvn -q -pl core -am package -DskipTests`, Maven output on stderr;
 `FORCE_BUILD=1` forces it) and runs
-`java -cp "core/target/classes:core/target/lib/*" com.experimentationplatform.sdk.examples.ContractSmoke`.
+`java -cp "core/target/classes:core/target/lib/*" com.getexperimently.sdk.examples.ContractSmoke`.
 Env: `EXPERIMENTLY_API_URL` (default `http://localhost:8000`), `EXPERIMENTLY_API_KEY` (required),
 `CONTRACT_EXPERIMENT_KEY` (default `sdk_contract_ab`), `CONTRACT_FLAG_KEY` (default
 `sdk_contract_flag`), `CONTRACT_USER_ID` (default random `smoke-<uuid>`). The smoke assigns on one

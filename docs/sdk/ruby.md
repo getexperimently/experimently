@@ -1,6 +1,6 @@
 # Ruby SDK
 
-`experimentation_platform` (v0.1.0) provides feature flag evaluation, experiment assignment and
+`experimently` (v0.1.0) provides feature flag evaluation, experiment assignment and
 event tracking for Ruby applications. It has zero runtime gem dependencies (`Net::HTTP`, `JSON`,
 `Digest`, `Mutex` from the standard library) and is safe to share between threads.
 
@@ -16,7 +16,7 @@ Source: `sdk/ruby`.
 
 ```ruby
 # Gemfile
-gem 'experimentation_platform', '~> 0.1'
+gem 'experimently', '~> 0.1'
 ```
 
 The gemspec declares `required_ruby_version = ">= 2.6.0"`; the spec suite in this repository was
@@ -27,9 +27,9 @@ run on Ruby 2.6.10. Inside the monorepo, run scripts with `ruby -Isdk/ruby/lib .
 ## Quick Start
 
 ```ruby
-require 'experimentation_platform'
+require 'experimently'
 
-client = ExperimentationPlatform::Client.new(
+client = Experimently::Client.new(
   base_url: ENV.fetch('EXPERIMENTLY_API_URL', 'http://localhost:8000'),  # origin only
   api_key:  ENV.fetch('EXPERIMENTLY_API_KEY')                             # sent as X-API-Key
 )
@@ -54,14 +54,14 @@ client.track('page_view', 'user-123', properties: { page: '/products' })
 ## Configuration
 
 ```ruby
-client = ExperimentationPlatform::Client.new(
+client = Experimently::Client.new(
   base_url:       'http://localhost:8000',
   api_key:        'your-api-key',
   cache_ttl:      300,
   timeout:        10,
   max_cache_size: 1000
 )
-# or: Client.new(ExperimentationPlatform::SdkConfig.new(base_url: ..., api_key: ...))
+# or: Client.new(Experimently::SdkConfig.new(base_url: ..., api_key: ...))
 ```
 
 | Option | Type | Default | Description |
@@ -123,14 +123,14 @@ result.ok?   # => true when failure_count == 0
 - Network error / timeout, `401` (bad key), `404` (flag/experiment unknown or not ACTIVE), `422`,
   `429` (rate limited), `5xx`: `evaluate_flag` returns a disabled evaluation, `get_assignment`
   returns `nil`, `track` returns `false`, `track_batch` counts the chunk as failed. Each failure
-  is logged once with `Kernel#warn` (`[ExperimentationPlatform] ... error: ...`).
-- Only `ExperimentationPlatform::HttpClient` raises:
+  is logged once with `Kernel#warn` (`[Experimently] ... error: ...`).
+- Only `Experimently::HttpClient` raises:
 
 | Error | Extends | When |
 |---|---|---|
-| `ExperimentationPlatform::AuthenticationError` | `APIError` | HTTP 401 — invalid API key |
-| `ExperimentationPlatform::APIError` (`#status_code`) | `Error` | Other 4xx/5xx (404 not ACTIVE, 422 validation, 429 rate limited) |
-| `ExperimentationPlatform::NetworkError` | `Error` | Timeout, DNS failure, connection refused |
+| `Experimently::AuthenticationError` | `APIError` | HTTP 401 — invalid API key |
+| `Experimently::APIError` (`#status_code`) | `Error` | Other 4xx/5xx (404 not ACTIVE, 422 validation, 429 rate limited) |
+| `Experimently::NetworkError` | `Error` | Timeout, DNS failure, connection refused |
 
 - Thread safety: a single client can be shared across threads. The cache `Mutex` is held only for
   a cache read/write — never during the HTTP request — and every request opens its own
@@ -156,7 +156,7 @@ Conversions are matched to metrics by **event name**: a metric on `purchase` cou
 
 ```ruby
 # config/initializers/experimently.rb
-EXPERIMENTLY = ExperimentationPlatform::Client.new(
+EXPERIMENTLY = Experimently::Client.new(
   base_url: ENV.fetch('EXPERIMENTLY_API_URL'), api_key: ENV.fetch('EXPERIMENTLY_API_KEY'), cache_ttl: 60
 )
 at_exit { EXPERIMENTLY.close }
@@ -189,7 +189,7 @@ In your own specs stub HTTP with WebMock (as `sdk/ruby/spec` does) or double the
 
 ## Consistent hash (compatibility utility)
 
-`ExperimentationPlatform::FeatureFlagEvaluator.hash_user(user_id, key)` = `MD5("{user_id}:{key}")`,
+`Experimently::FeatureFlagEvaluator.hash_user(user_id, key)` = `MD5("{user_id}:{key}")`,
 first 4 bytes as little-endian uint32, divided by 2^32 (`0.6927449859213084` for `'user-123'`,
 `'my-flag'`). It is kept only so the golden vectors in `tests/sdk-contract/` stay identical across
 SDKs. **Nothing in the SDK calls it to pick a variant** — the server decides.

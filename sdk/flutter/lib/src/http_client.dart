@@ -1,5 +1,5 @@
 /// Lightweight HTTP client wrapper around the `http` package.
-library experimentation_sdk_http_client;
+library experimently_http_client;
 
 import 'dart:convert';
 import 'package:http/http.dart' as http;

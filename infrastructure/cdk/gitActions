@@ -13,7 +13,10 @@ cat > github-actions-trust-policy.json << 'EOF'
           "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
         },
         "StringLike": {
-          "token.actions.githubusercontent.com:sub": "repo:amarkanday/experimentation-platform:*"
+          "token.actions.githubusercontent.com:sub": [
+            "repo:amarkanday/experimentation-platform:*",
+            "repo:getexperimently/experimently:*"
+          ]
         }
       }
     }

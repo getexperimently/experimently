@@ -1,4 +1,4 @@
-# Experimentation Platform Models Overview
+# Experimently Models Overview
 
 This document provides a comprehensive overview of the data models used in the experimentation platform. It explains the purpose of each model, its relationships, and key fields.
 

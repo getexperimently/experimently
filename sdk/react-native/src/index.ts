@@ -1,7 +1,7 @@
 /**
- * @experimentation-platform/react-native-sdk
+ * @getexperimently/react-native-sdk
  *
- * React Native SDK for the Experimentation Platform. Flag evaluation and
+ * React Native SDK for Experimently. Flag evaluation and
  * experiment assignment are decided by the server; results are cached in
  * memory and (optionally) persisted to AsyncStorage as an offline fallback.
  *

@@ -1,6 +1,6 @@
 # iOS Swift SDK
 
-`ExperimentationSDK` is a Swift Package (iOS 14+, macOS 11+, Swift 5.5+) providing feature flag
+`Experimently` is a Swift Package (iOS 14+, macOS 11+, Swift 5.5+) providing feature flag
 evaluation, experiment assignment and event tracking with `async`/`await`. It depends only on
 Foundation (URLSession, NSCache, UserDefaults) and CommonCrypto.
 
@@ -19,21 +19,21 @@ The manifest lives in `sdk/ios`, so add the SDK as a local package:
 ```swift
 // Package.swift
 dependencies: [
-    .package(name: "ExperimentationSDK", path: "../experimentation-platform/sdk/ios")
+    .package(name: "Experimently", path: "../experimently/sdk/ios")
 ],
 targets: [
-    .target(name: "MyApp", dependencies: [.product(name: "ExperimentationSDK", package: "ExperimentationSDK")])
+    .target(name: "MyApp", dependencies: [.product(name: "Experimently", package: "Experimently")])
 ]
 ```
 
-Xcode: File → Add Package Dependencies… → Add Local… → `sdk/ios` → product `ExperimentationSDK`.
+Xcode: File → Add Package Dependencies… → Add Local… → `sdk/ios` → product `Experimently`.
 
 ---
 
 ## Quick Start
 
 ```swift
-import ExperimentationSDK
+import Experimently
 
 let client = ExperimentationClient(config: SdkConfig(
     baseURL: "http://localhost:8000",             // origin only; the SDK appends /api/v1/...

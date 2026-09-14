@@ -1,6 +1,6 @@
 # React SDK
 
-`@experimentation-platform/react-sdk` (v1.1) provides a context provider, hooks, a higher-order
+`@getexperimently/react-sdk` (v1.1) provides a context provider, hooks, a higher-order
 component and an SSR client for using experiments and feature flags from React and Next.js.
 
 Flag evaluation and experiment assignment are decided **by the server**: every call goes to the
@@ -15,11 +15,11 @@ Source: `sdk/react`. A complete working integration is the ShopLab demo storefro
 ## Installation
 
 ```bash
-npm install @experimentation-platform/react-sdk   # peer deps: react >= 17, react-dom >= 17
+npm install @getexperimently/react-sdk   # peer deps: react >= 17, react-dom >= 17
 ```
 
 To consume the SDK from source inside this monorepo (what `demo/shoplab` does), alias
-`@experimentation-platform/react-sdk` to `sdk/react/src` in `tsconfig.json` `paths` and in
+`@getexperimently/react-sdk` to `sdk/react/src` in `tsconfig.json` `paths` and in
 your bundler, and alias `react`/`react-dom` to your app's copies to avoid a duplicate React.
 
 ---
@@ -27,7 +27,7 @@ your bundler, and alias `react`/`react-dom` to your app's copies to avoid a dupl
 ## Provider Setup
 
 ```tsx
-import { ExperimentationProvider } from '@experimentation-platform/react-sdk';
+import { ExperimentationProvider } from '@getexperimently/react-sdk';
 
 function App() {
   return (
@@ -85,7 +85,7 @@ Evaluates one flag for the current user via
 (`context` is `user.attributes`, omitted when empty).
 
 ```tsx
-import { useFeatureFlag } from '@experimentation-platform/react-sdk';
+import { useFeatureFlag } from '@getexperimently/react-sdk';
 
 function SearchPage() {
   const { isEnabled, variant, config, loading, error } = useFeatureFlag('new_search');
@@ -123,7 +123,7 @@ Assigns the current user via `POST /api/v1/tracking/assign` (sticky on the serve
 variant plus its configuration.
 
 ```tsx
-import { useExperiment } from '@experimentation-platform/react-sdk';
+import { useExperiment } from '@getexperimently/react-sdk';
 
 function HeroBanner() {
   const { variantKey, configuration, isControl, loading } = useExperiment('hero_banner');
@@ -179,7 +179,7 @@ to build a debug overlay). `useExperimentationContext` is an alias.
 Injects `flagEvaluation: FeatureFlagEvaluation` for one flag into a component.
 
 ```tsx
-import { withExperimentation, type FeatureFlagEvaluation } from '@experimentation-platform/react-sdk';
+import { withExperimentation, type FeatureFlagEvaluation } from '@getexperimently/react-sdk';
 
 interface Props { flagEvaluation: FeatureFlagEvaluation | null; title: string }
 
@@ -200,7 +200,7 @@ disabled evaluation or the control defaults with `error` set.
 
 ```tsx
 // pages/checkout.tsx
-import { ServerClient } from '@experimentation-platform/react-sdk/ssr';
+import { ServerClient } from '@getexperimently/react-sdk/ssr';
 import type { GetServerSideProps } from 'next';
 
 export const getServerSideProps: GetServerSideProps = async ({ req }) => {
@@ -257,7 +257,7 @@ import type {
   FeatureFlagEvaluation,
   ExperimentAssignment,
   TrackEventOptions,
-} from '@experimentation-platform/react-sdk';
+} from '@getexperimently/react-sdk';
 
 interface FeatureFlagEvaluation {
   flagKey: string;
