@@ -1,5 +1,8 @@
 # EP-050: HIPAA Compliance Overview
 
+!!! info "Part of the `hipaa` module"
+    HIPAA is one of the optional modules -- present in the **full profile**, absent from the core one. A core deployment does not serve these routes. See [Modules and profiles](../getting-started/modules.md) for what each profile includes and how to run the full one.
+
 ## Summary
 
 EP-050 adds HIPAA (Health Insurance Portability and Accountability Act) compliance controls to Experimently. The implementation covers the four primary HIPAA technical safeguard requirements: access controls, audit controls, integrity, and transmission security.

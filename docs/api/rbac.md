@@ -1,5 +1,8 @@
 # RBAC API Reference
 
+!!! info "Part of the `rbac` module"
+    Custom roles is one of the optional modules -- present in the **full profile**, absent from the core one. A core deployment does not serve these routes. See [Modules and profiles](../getting-started/modules.md) for what each profile includes and how to run the full one.
+
 ## Overview
 
 The RBAC (Role-Based Access Control) system in the experimentation platform combines three layers to determine what a user can do:

@@ -1,5 +1,4 @@
 import React, { useCallback, useState } from 'react';
-import Link from 'next/link';
 import { PageTitle } from '@/components/PageTitle';
 import { useModules } from '@/contexts/ModulesContext';
 import { MODULES_DOC_PATH } from '@/services/modules';
@@ -35,9 +34,9 @@ export function ModuleNotice({ title, module, description }: ModuleNoticeProps) 
         <p className="mt-4 text-sm text-slate-500">
           The <strong>{title}</strong> module is not installed in this deployment. Modules are part
           of the full profile; see the{' '}
-          <Link href={MODULES_DOC_PATH} className="font-medium text-blue-700 underline">
+          <a href={MODULES_DOC_PATH} target="_blank" rel="noreferrer" className="font-medium text-blue-700 underline">
             modules guide
-          </Link>
+          </a>
           .
         </p>
       </div>

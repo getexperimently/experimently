@@ -1,5 +1,8 @@
 # Salesforce Integration
 
+!!! info "Part of the `integrations` module"
+    Third-party integrations is one of the optional modules -- present in the **full profile**, absent from the core one. A core deployment does not serve these routes. See [Modules and profiles](../getting-started/modules.md) for what each profile includes and how to run the full one.
+
 The Salesforce integration enables the platform to synchronize experiment status and results with your Salesforce CRM. Experiment lifecycle events can update Salesforce Campaign objects, and Salesforce outbound messages can trigger actions in the platform.
 
 ---

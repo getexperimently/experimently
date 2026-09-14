@@ -1,5 +1,8 @@
 # Databricks Warehouse Connector (EP-041)
 
+!!! info "Part of the `warehouse` module"
+    Warehouse-native analytics is one of the optional modules -- present in the **full profile**, absent from the core one. A core deployment does not serve these routes. See [Modules and profiles](../getting-started/modules.md) for what each profile includes and how to run the full one.
+
 Connect the experimentation platform directly to your Databricks SQL warehouse
 to query experiment assignments, conversion events, and feature flag metrics
 without any ETL pipelines.

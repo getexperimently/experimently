@@ -3,6 +3,7 @@ import { render, screen } from '@testing-library/react';
 import { AdminSidebar, NAV_ITEMS, visibleNavItems } from '@/components/admin/AdminSidebar';
 import { ModulesProvider, __resetModulesCache } from '@/contexts/ModulesContext';
 import { CORE_PROFILE, MODULES, ModulesInfo, ModulesService } from '@/services/modules';
+import { MODULES_DOC_PATH } from '@/services/modules';
 
 // Only `ModulesService.get` is replaced; MODULES, CORE_PROFILE and the rest
 // stay real. The seeded providers below never call it.
@@ -116,7 +117,7 @@ describe('AdminSidebar', () => {
       renderSidebar();
       const note = screen.getByTestId('admin-sidebar-modules-note');
       expect(note).toHaveTextContent('One admin page belongs to a module that is not installed.');
-      expect(screen.getByRole('link', { name: 'Modules' })).toHaveAttribute('href', '/docs/modules');
+      expect(screen.getByRole('link', { name: 'Modules' })).toHaveAttribute('href', MODULES_DOC_PATH);
     });
 
     it('is absent once every module page is installed', () => {

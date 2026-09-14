@@ -181,7 +181,7 @@ Run these from the repository root; the backend is imported as `backend.app.*`.
 
 `docker compose --profile demo up -d` adds ShopLab (http://localhost:3200) and StreamPulse
 (http://localhost:3300), two sample products wired to the platform through the public
-SDK path, each with a traffic simulator. See [demo/DEMO_GUIDE.md](../../demo/DEMO_GUIDE.md).
+SDK path, each with a traffic simulator. See [demo/DEMO_GUIDE.md](https://github.com/getexperimently/experimently/blob/main/demo/DEMO_GUIDE.md).
 
 ---
 

@@ -4,7 +4,7 @@ This directory contains documentation related to authentication and authorizatio
 
 ## Files
 
-1. [Environment Setup](environment.md)
+1. [Environment Setup](auth-environment-variables.md)
    - Environment variables configuration
    - AWS Cognito setup
    - Local development settings
@@ -17,7 +17,7 @@ This directory contains documentation related to authentication and authorizatio
    - Password reset process
    - Flow diagrams
 
-3. [User Guide](user-guide.md)
+3. [User Guide](auth-user-guide.md)
    - User registration
    - Account management
    - Password policies
@@ -49,19 +49,19 @@ This directory contains documentation related to authentication and authorizatio
 ## Common Tasks
 
 1. **User Management**
-   - [Creating Users](user-guide.md#creating-users)
-   - [Managing Roles](user-guide.md#role-management)
-   - [Password Reset](user-guide.md#password-reset)
+   - [Creating Users](auth-user-guide.md)
+   - [Managing Roles](auth-user-guide.md)
+   - [Password Reset](auth-user-guide.md#password-reset-process)
 
 2. **Development**
-   - [Local Setup](environment.md#local-development)
+   - [Local Setup](auth-environment-variables.md)
    - [Testing](cognito-auth-testing.md#running-tests)
    - [Integration](auth-developer-docs.md#integration)
 
 3. **Security**
    - [Best Practices](auth-developer-docs.md#security)
    - [Token Management](flow.md#token-management)
-   - [MFA Setup](user-guide.md#mfa-setup)
+   - [MFA Setup](auth-user-guide.md)
 
 4. **SSO (the `sso` module)**
    - [Okta SAML Setup](sso.md#okta-saml-20)
@@ -74,6 +74,6 @@ This directory contains documentation related to authentication and authorizatio
 ## Need Help?
 
 - Review the [Developer Guide](auth-developer-docs.md) for implementation details
-- Check the [User Guide](user-guide.md) for user management
+- Check the [User Guide](auth-user-guide.md) for user management
 - See the [Flow Documentation](flow.md) for process understanding
 - Contact the security team for additional assistance

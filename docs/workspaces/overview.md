@@ -1,5 +1,8 @@
 # Multi-Tenant Team Workspaces — Overview
 
+!!! info "Part of the `workspaces` module"
+    Team workspaces is one of the optional modules -- present in the **full profile**, absent from the core one. A core deployment does not serve these routes. See [Modules and profiles](../getting-started/modules.md) for what each profile includes and how to run the full one.
+
 ## What Are Workspaces?
 
 Workspaces are the top-level isolation boundary in Experimently.

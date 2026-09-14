@@ -768,12 +768,13 @@ jobs:
           # (SIGPIPE) once grep stops reading, which `pipefail` turns into a
           # step failure for any page larger than the pipe buffer.
           curl -s localhost:3000/results/abc -o results.html
-          curl -s localhost:3000/docs/quick-start -o quick-start.html
+          curl -s localhost:3000/docs -o docs.html
           # dynamic route: the results page html, not the login page / 404
           grep -q '"page":"/results/\[id\]"' results.html
-          # in-app docs were rendered from docs/*.md at build time
-          grep -q '<h1>Quick Start' quick-start.html
-          ! grep -q 'Documentation coming soon' quick-start.html
+          # /docs is a hub of links into the documentation site (P3.4): the
+          # page is served, and its links leave the dashboard's origin.
+          grep -q 'Experimently Documentation' docs.html
+          grep -qE 'href="https?://[^"]+/getting-started/quick-start/"' docs.html
           # /api and /health are proxied to the api container
           curl -sf localhost:3000/health/ready >/dev/null
           test "$(curl -sL -o /dev/null -w '%{http_code}' localhost:3000/api/v1/experiments/)" = "401"

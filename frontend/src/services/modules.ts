@@ -10,11 +10,12 @@
  * wiring and `useModule` hook live in `@/contexts/ModulesContext`.
  */
 import { apiFetch } from '@/services/api';
+import { docsUrl } from '@/services/docs';
 
 export const MODULES_PATH = '/api/v1/modules';
 
-/** Where the modules guide lives (`docs/getting-started/modules.md`). */
-export const MODULES_DOC_PATH = '/docs/modules';
+/** Where the modules guide lives: `docs/getting-started/modules.md`, on the documentation site. */
+export const MODULES_DOC_PATH = docsUrl('getting-started/modules');
 
 /**
  * `core` is the product without the optional modules; `full` is the product

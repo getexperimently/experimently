@@ -1,5 +1,8 @@
 # GitHub Integration
 
+!!! info "Part of the `integrations` module"
+    Third-party integrations is one of the optional modules -- present in the **full profile**, absent from the core one. A core deployment does not serve these routes. See [Modules and profiles](../getting-started/modules.md) for what each profile includes and how to run the full one.
+
 The GitHub integration connects the platform to your GitHub repositories. You can receive push and pull request events to link code changes to experiments, and create GitHub issues directly from the platform.
 
 ---

@@ -4,7 +4,7 @@ Welcome to Experimently's Monitoring and Error Tracking documentation. This sect
 
 ## Table of Contents
 
-1. [Monitoring Overview](monitoring-overview.md)
+1. [Monitoring Guide](monitoring-guide.md)
    - Architectural overview
    - Core components
    - Data flow
@@ -88,7 +88,7 @@ See the [Setup Guide](setup-guide.md) for detailed instructions.
 └─────────────────┘    └─────────────────┘    └─────────────────┘
 ```
 
-For more details, see the [Monitoring Overview](monitoring-overview.md).
+For more details, see the [Monitoring Guide](monitoring-guide.md).
 
 ## Contributing to the Monitoring System
 
@@ -104,4 +104,3 @@ If you want to improve our monitoring system:
 
 - [AWS CloudWatch Documentation](https://docs.aws.amazon.com/cloudwatch/)
 - [FastAPI Middleware Documentation](https://fastapi.tiangolo.com/advanced/middleware/)
-- [Infrastructure Monitoring Best Practices](../infrastructure/monitoring-best-practices.md)
