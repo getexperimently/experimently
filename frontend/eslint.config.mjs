@@ -13,12 +13,14 @@
 // from there. `modules/frontend/src` is absent from a core tree;
 // `--no-error-on-unmatched-pattern` lets the same script pass there.
 //
-// `next lint` is deliberately not used: it is a thin eslintrc wrapper that Next
-// 14 cannot drive with a flat config, and it is removed in Next 16. The Next
-// rules themselves are kept by loading @next/eslint-plugin-next directly.
+// `next lint` is not used, and could not be: it was a thin eslintrc wrapper
+// that Next 14 could not drive with a flat config, and Next 16 removed it
+// outright. The Next rules themselves are kept by loading
+// @next/eslint-plugin-next directly, which is why the Next 16 upgrade needed
+// nothing here.
 //
 // ESLint stays on 9.x because eslint-plugin-react 7.x declares `eslint ^9.7` as
-// its peer; the Next 16 / React 19 migration (P2) bumps the whole set together.
+// its peer. ESLint 10 is its own decision, separate from the framework.
 
 import path from "node:path";
 import { fileURLToPath } from "node:url";

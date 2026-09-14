@@ -25,9 +25,15 @@ describe('ResultsIndexPage (/results)', () => {
   });
 
   it('renders a fallback link and the page title while redirecting', () => {
+    // React 19 hoists <title> into document.head wherever it is rendered, so
+    // the mocked passthrough Head above no longer leaves it in the container
+    // for `screen` to find — `document.title` is where it lands, and saying so
+    // is the stronger assertion anyway. Cleared first so a title left by the
+    // test above cannot pass this one.
+    document.title = '';
     render(<ResultsIndexPage />);
     expect(screen.getByTestId('results-redirect')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /experiments/i })).toHaveAttribute('href', '/experiments');
-    expect(screen.getByText(formatPageTitle('Results'))).toBeInTheDocument();
+    expect(document.title).toBe(formatPageTitle('Results'));
   });
 });
