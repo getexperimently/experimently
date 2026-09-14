@@ -349,7 +349,7 @@ jobs:
       - name: Unit tests (JVM variant)
         run: cd sdk/android/jvm && ./mvnw -B clean test
 
-      - uses: android-actions/setup-android@v3
+      - uses: android-actions/setup-android@v4
 
       - uses: gradle/actions/setup-gradle@v4
         with:
