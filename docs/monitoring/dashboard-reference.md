@@ -6,7 +6,6 @@ This document provides a detailed reference for the CloudWatch dashboards used i
 
 The System Health Dashboard (`ExperimentationPlatform-SystemHealth`) provides a high-level view of system health and error rates.
 
-![System Health Dashboard](../images/system-health-dashboard.png)
 
 ### Widgets
 
@@ -71,7 +70,6 @@ The dashboard is defined in `infrastructure/cloudwatch/system-health-dashboard.j
 
 The API Performance Dashboard (`ExperimentationPlatform-APIPerformance`) focuses on API performance metrics and latency.
 
-![API Performance Dashboard](../images/api-performance-dashboard.png)
 
 ### Widgets
 

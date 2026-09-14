@@ -202,3 +202,4 @@ frontend/playwright-report/
 # ignore file, so a fresh clone never commits one.
 **/.claude/settings.local.json
 backend/.venv/
+site/

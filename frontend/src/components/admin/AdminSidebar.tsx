@@ -91,9 +91,9 @@ export function AdminSidebar({ currentPath }: AdminSidebarProps) {
             {hiddenModulePages === 1
               ? 'One admin page belongs to a module that is not installed.'
               : `${hiddenModulePages} admin pages belong to modules that are not installed.`}{' '}
-            <Link href={MODULES_DOC_PATH} className="underline hover:text-slate-600">
+            <a href={MODULES_DOC_PATH} target="_blank" rel="noreferrer" className="underline hover:text-slate-600">
               Modules
-            </Link>
+            </a>
           </p>
         )}
 

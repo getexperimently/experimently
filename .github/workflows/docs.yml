@@ -1,0 +1,63 @@
+# The documentation site (MkDocs Material, mkdocs.yml).
+#
+# Two jobs. `build` runs on every pull request and push to main that touches the
+# docs or the site configuration, with `strict: true` (in mkdocs.yml): a broken
+# link or anchor fails the gate. `deploy` publishes the built site to GitHub
+# Pages on a release tag, and only from the public repository -- Pages for a
+# private repository needs a paid plan, and the monorepo is private until the
+# cut.
+name: Docs
+
+on:
+  pull_request:
+    paths: ['docs/**', 'mkdocs.yml', '.github/workflows/docs.yml']
+  push:
+    branches: [main]
+    paths: ['docs/**', 'mkdocs.yml', '.github/workflows/docs.yml']
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: docs build (strict)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      # Only the site toolchain, pinned to the same versions the venv carries
+      # (backend/requirements.txt), not the whole backend closure.
+      - name: Install MkDocs
+        run: |
+          python -m pip install --quiet \
+            "$(grep -E '^mkdocs==' backend/requirements.txt)" \
+            "$(grep -E '^mkdocs-material==' backend/requirements.txt)" \
+            "$(grep -E '^mkdocs-material-extensions==' backend/requirements.txt)"
+      - name: Build (strict)
+        run: mkdocs build
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: site
+
+  deploy:
+    name: deploy to GitHub Pages
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v') && github.repository == 'getexperimently/experimently'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

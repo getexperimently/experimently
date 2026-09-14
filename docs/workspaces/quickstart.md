@@ -1,5 +1,8 @@
 # Multi-Tenant Team Workspaces — Quickstart
 
+!!! info "Part of the `workspaces` module"
+    Team workspaces is one of the optional modules -- present in the **full profile**, absent from the core one. A core deployment does not serve these routes. See [Modules and profiles](../getting-started/modules.md) for what each profile includes and how to run the full one.
+
 This guide shows you how to create a workspace, invite your team, generate a
 scoped API key, and start using the workspace-scoped API in the SDK.
 

@@ -1,5 +1,8 @@
 # ClickHouse Warehouse Connector
 
+!!! info "Part of the `warehouse` module"
+    Warehouse-native analytics is one of the optional modules -- present in the **full profile**, absent from the core one. A core deployment does not serve these routes. See [Modules and profiles](../getting-started/modules.md) for what each profile includes and how to run the full one.
+
 ## Why ClickHouse
 
 ClickHouse is an open-source columnar database management system designed for online analytical processing (OLAP). It excels at experiment analytics workloads because:

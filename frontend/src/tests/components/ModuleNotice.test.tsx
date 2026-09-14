@@ -9,6 +9,7 @@ import {
 } from '@/components/ModuleNotice';
 import { ModulesProvider, __resetModulesCache } from '@/contexts/ModulesContext';
 import { CORE_PROFILE, MODULES, ModulesInfo, ModulesService } from '@/services/modules';
+import { MODULES_DOC_PATH } from '@/services/modules';
 
 // Only `ModulesService.get` is replaced; MODULES, CORE_PROFILE and the rest
 // stay real. The seeded providers below never call it.
@@ -62,7 +63,7 @@ describe('ModuleNotice', () => {
     );
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Workspaces');
     expect(screen.getByText('Separate teams into workspaces.')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'modules guide' })).toHaveAttribute('href', '/docs/modules');
+    expect(screen.getByRole('link', { name: 'modules guide' })).toHaveAttribute('href', MODULES_DOC_PATH);
   });
 
   it('is a statement of fact, not a sales page', () => {

@@ -12,6 +12,7 @@ import { AuthProvider } from '@/contexts/AuthContext';
 import { ModulesProvider, __resetModulesCache } from '@/contexts/ModulesContext';
 import { CORE_PROFILE, MODULES, ModulesInfo } from '@/services/modules';
 import { TOKEN_STORAGE_KEY, UserMe } from '@/services/api';
+import { MODULES_DOC_PATH } from '@/services/modules';
 
 const mockReplace = jest.fn().mockResolvedValue(true);
 let mockPathname = '/experiments';
@@ -241,7 +242,7 @@ describe('AppShell', () => {
       signInAs(makeUser());
       const view = renderShell();
       await waitFor(() => expect(screen.getByTestId('user-menu')).toBeInTheDocument());
-      expect(screen.getAllByTestId('nav-modules-docs')[0]).toHaveAttribute('href', '/docs/modules');
+      expect(screen.getAllByTestId('nav-modules-docs')[0]).toHaveAttribute('href', MODULES_DOC_PATH);
       expect(screen.getAllByTestId('nav-modules-docs')[0]).toHaveTextContent('Modules');
       view.unmount();
 

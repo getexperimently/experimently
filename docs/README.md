@@ -8,7 +8,7 @@
 | [User Guide](guides/user-guide.md) | Product / Analysts | Designing, running, and interpreting experiments |
 | [Technical Guide](architecture/technical-guide.md) | Engineers | Architecture, data models, implementation details |
 | [SDK Guide](sdk-guide.md) | Engineers | Endpoint contract for SDKs and per-SDK status |
-| [ShopLab Demo](../demo/shoplab/README.md) | Everyone | A storefront running five live experiments through the React SDK (`./demo/setup-local.sh`) |
+| [ShopLab Demo](https://github.com/getexperimently/experimently/blob/main/demo/shoplab/README.md) | Everyone | A storefront running five live experiments through the React SDK (`./demo/setup-local.sh`) |
 | [Testing Guide](development/testing-guide.md) | Engineers | Writing and running tests |
 
 ---

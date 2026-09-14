@@ -19,17 +19,17 @@ This directory contains documentation about the system architecture and design o
    - Business logic
 
 3. **Infrastructure**
-   - [AWS Resources](infrastructure/aws-resources.md)
+   - [AWS Resources](../infrastructure/aws-iam-setup.md)
      - Cloud services
      - Resource configurations
      - Security groups
      - IAM roles
-   - [Networking](infrastructure/networking.md)
+   - [Networking](../infrastructure/network-security-readme.md)
      - VPC setup
      - Subnet configuration
      - Load balancing
      - DNS management
-   - [Deployment](infrastructure/deployment.md)
+   - [Deployment](../deployment/README.md)
      - CI/CD pipeline
      - Environment management
      - Monitoring setup
@@ -78,9 +78,9 @@ This directory contains documentation about the system architecture and design o
    - [Data Validation](models.md#validation)
 
 3. **Infrastructure**
-   - [Resource Management](infrastructure/aws-resources.md#management)
-   - [Network Configuration](infrastructure/networking.md#config)
-   - [Deployment Process](infrastructure/deployment.md#process)
+   - [Resource Management](../infrastructure/aws-iam-setup.md)
+   - [Network Configuration](../infrastructure/network-security-readme.md#network-acl-configuration)
+   - [Deployment Process](../deployment/README.md)
 
 ## Best Practices
 
