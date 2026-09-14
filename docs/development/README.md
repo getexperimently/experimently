@@ -37,7 +37,6 @@ This directory contains development guidelines, best practices, and technical do
    - Deployment process
    - Release management
 
-5. [Development Plan](development-plan.md)
    - Project roadmap
    - Sprint planning
    - Feature prioritization

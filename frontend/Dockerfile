@@ -7,9 +7,9 @@
 #       --build-arg EXPERIMENTLY_PROFILE=full .
 #
 # The build context is the REPOSITORY ROOT (like backend/Dockerfile): the
-# in-app documentation pages (/docs/*) are rendered at build time from the
-# markdown under docs/, which lives next to frontend/, not inside it, and the
-# modules' dashboard code lives in modules/frontend/, also next to frontend/.
+# modules' dashboard code lives in modules/frontend/, next to frontend/, not
+# inside it. (The documentation is no longer rendered in-app -- the dashboard
+# links to the MkDocs site, so docs/ is not copied.)
 #
 # EXPERIMENTLY_PROFILE selects what goes in:
 #   core (default)  never reads modules/frontend/ — a core checkout, which has
@@ -96,21 +96,19 @@ RUN npm ci --no-audit --no-fund
 COPY frontend/ ./
 # modules-alias.js looks for ../modules/frontend/src relative to the frontend dir.
 COPY --from=modules-tree /modules/frontend/ /app/modules/frontend/
-# src/pages/docs/[...slug].tsx reads ../docs relative to the frontend dir.
-COPY docs/ /app/docs/
-
 # Relative API base by default: nginx proxies /api/ to the backend. Pass an
 # absolute URL only when the dashboard is served from a different origin.
 ARG NEXT_PUBLIC_API_URL=""
 ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+# The documentation site the dashboard links to (frontend/src/services/docs.ts).
+# Empty means the published site; set it for a deployment that hosts its own.
+ARG NEXT_PUBLIC_DOCS_URL=""
+ENV NEXT_PUBLIC_DOCS_URL=${NEXT_PUBLIC_DOCS_URL}
 
 RUN npm run build \
     && test -f .next/routes-manifest.json \
     && node scripts/nginx-routes.mjs --out /app/nginx/routes.conf \
     && test -d out \
-    # The docs pages must have found the markdown; a placeholder means the
-    # docs/ copy above is missing.
-    && ! grep -rl "Documentation coming soon" out/docs >/dev/null \
     # The bundle must match the profile: a core image carries no chunk that
     # names a module route, a full image carries them.
     # The positive half matters as much as the negative one -- without it the

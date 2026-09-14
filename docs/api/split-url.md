@@ -1,5 +1,8 @@
 # Server-Side Split URL Testing API
 
+!!! info "Part of the `split_url` module"
+    Split URL testing is one of the optional modules -- present in the **full profile**, absent from the core one. A core deployment does not serve these routes. See [Modules and profiles](../getting-started/modules.md) for what each profile includes and how to run the full one.
+
 This document describes the server-side split URL testing feature. Split URL experiments redirect different user segments to distinct URLs (e.g., `/checkout-v1` vs `/checkout-v2`) using Lambda@Edge at the CloudFront layer, providing zero-latency variant delivery and persistent cookie-based assignment.
 
 ---

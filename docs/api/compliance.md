@@ -1,5 +1,8 @@
 # Compliance Audit Logging API
 
+!!! info "Part of the `compliance` module"
+    Compliance reporting is one of the optional modules -- present in the **full profile**, absent from the core one. A core deployment does not serve these routes. See [Modules and profiles](../getting-started/modules.md) for what each profile includes and how to run the full one.
+
 This document describes the compliance audit logging endpoints. The system provides audit trails with HMAC-SHA256 tamper-evident signing for platform events, as evidence for a customer's SOC 2 or ISO 27001 program (the platform itself holds no certification).
 
 ---

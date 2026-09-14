@@ -38,7 +38,7 @@ flags when no key is given. The MD5 consistent hash remains exported by each SDK
 
 "Verified live" means the SDK's `contract_smoke` entry point passed
 `tests/sdk-contract/live/run_live_contract.py` against a running backend (see
-[tests/sdk-contract/README.md](../tests/sdk-contract/README.md)); the `SDK Live Contract` CI job repeats
+[tests/sdk-contract/README.md](https://github.com/getexperimently/experimently/blob/main/tests/sdk-contract/README.md)); the `SDK Live Contract` CI job repeats
 this on every pull request for the SDKs whose toolchain is available on Linux.
 
 | SDK | Location | Unit tests | Verified live | Docs |

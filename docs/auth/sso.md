@@ -1,5 +1,8 @@
 # SSO Guide
 
+!!! info "Part of the `sso` module"
+    SSO / SAML / OIDC is one of the optional modules -- present in the **full profile**, absent from the core one. A core deployment does not serve these routes. See [Modules and profiles](../getting-started/modules.md) for what each profile includes and how to run the full one.
+
 The `sso` module adds Single Sign-On (SSO) via SAML 2.0 and OpenID Connect (OIDC); it is part of the full profile and, like every module, Apache-2.0. SSO allows your organization to authenticate users through an existing Identity Provider (IdP) instead of platform-managed passwords.
 
 ---
