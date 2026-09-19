@@ -1,0 +1,605 @@
+# A tag becomes signed, multi-architecture images and a GitHub release with an
+# SBOM. Nothing here is run by hand.
+#
+# Entered three ways:
+#   * `workflow_call` from release-please.yml -- the normal path (a tag that
+#     action pushes with GITHUB_TOKEN cannot start a workflow on its own);
+#   * a hand-pushed `v*` tag -- the rehearsal path, e.g. `v0.1.0-rc.1`;
+#   * `workflow_dispatch` on a tag ref, to re-run a release whose publish step
+#     failed after the tag already existed.
+#
+# What it produces, for VERSION=X.Y.Z:
+#   ghcr.io/<owner>/<repo>:core-X.Y.Z   linux/amd64, linux/arm64
+#   ghcr.io/<owner>/<repo>:full-X.Y.Z   linux/amd64, linux/arm64
+#   ghcr.io/<owner>/<repo>-web:core-X.Y.Z   linux/amd64
+#   ghcr.io/<owner>/<repo>-web:full-X.Y.Z   linux/amd64
+# plus the floating `:core` / `:full` tags, which move only for a final
+# release -- a pre-release must never become what `docker pull ...:core` gets.
+#
+# The dashboard images are amd64 only, deliberately: their payload is a static
+# Next.js export, which is architecture-independent, but the Dockerfile builds
+# it inside the image, so an arm64 variant means running `next build` under
+# QEMU for no difference in the bytes served. Tracked as a follow-up rather
+# than pretended away; `docker pull` on arm64 runs the amd64 image under
+# emulation (nginx serving static files -- the cost is negligible) and anyone
+# who minds builds locally, which is what docker-compose.yml does anyway.
+#
+# The image name comes from `github.repository`, so the private repository
+# rehearses to ghcr.io/amarkanday/experimentation-platform and the public one
+# publishes to ghcr.io/getexperimently/experimently with no edit at the cut.
+name: Release
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: 'The tag to release, e.g. v1.2.3.'
+        type: string
+        required: true
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'The tag to release, e.g. v1.2.3. Must already exist.'
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  # Per tag: two runs pushing the same image tags would race to the same digest.
+  group: release-${{ inputs.tag || github.ref }}
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Nothing is built until the tag and the tree agree. `--expect` compares the
+  # tag against VERSION, the release-please manifest, the version the build
+  # backend resolves and settings.VERSION; a tag on the wrong commit, or a
+  # VERSION that release-please did not bump, stops here rather than becoming
+  # images that claim a version they are not.
+  # ---------------------------------------------------------------------------
+  verify:
+    name: tag matches the tree
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+      tag: ${{ steps.resolve.outputs.tag }}
+      prerelease: ${{ steps.resolve.outputs.prerelease }}
+      image: ${{ steps.resolve.outputs.image }}
+      web_image: ${{ steps.resolve.outputs.web_image }}
+    steps:
+      - name: Resolve the tag
+        id: resolve
+        env:
+          # `github.ref_name` on a tag push; the explicit input otherwise.
+          INPUT_TAG: ${{ inputs.tag }}
+          REF_NAME: ${{ github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          tag="${INPUT_TAG:-}"
+          if [ -z "$tag" ]; then
+            if [ "$REF_TYPE" != "tag" ]; then
+              echo "::error::no tag input and the ref ($REF_NAME) is not a tag"
+              exit 1
+            fi
+            tag="$REF_NAME"
+          fi
+          version="${tag#v}"
+          # A hyphen is SemVer's pre-release marker and the only thing that
+          # distinguishes v1.2.3-rc.1 from v1.2.3. The floating :core / :full
+          # tags and the GitHub release's "latest" flag both hang off this.
+          case "$version" in
+            *-*) prerelease=true ;;
+            *)   prerelease=false ;;
+          esac
+          # GHCR rejects an upper-case path; github.repository preserves the
+          # case the owner typed.
+          image="${REGISTRY}/$(echo "$REPOSITORY" | tr '[:upper:]' '[:lower:]')"
+          {
+            echo "tag=$tag"
+            echo "version=$version"
+            echo "prerelease=$prerelease"
+            echo "image=$image"
+            echo "web_image=${image}-web"
+          } >> "$GITHUB_OUTPUT"
+          echo "releasing $tag (version $version, prerelease=$prerelease) as $image"
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.resolve.outputs.tag }}
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+
+      # runtime.txt, not requirements.txt: the checker imports
+      # backend.app.core.config (for settings.VERSION) and calls the build
+      # backend (for the distribution metadata), and the runtime closure is
+      # both smaller -- no pytest, moto, locust or their transitive weight on
+      # the critical path of every tag -- and the *right* one, since it is what
+      # the image installs. Verifying settings.VERSION under the test closure
+      # would have proved something about an environment no release ever runs.
+      - name: Install the runtime dependencies
+        run: |
+          python -m pip install --upgrade pip
+          # setuptools explicitly: it is a *build* dependency
+          # (pyproject's [build-system]) and not a runtime one, so a venv on
+          # 3.12+ does not have it and the metadata check dies with
+          # "No module named setuptools". Measured by installing runtime.txt
+          # alone into a clean venv and watching the check fail.
+          # setuptools explicitly, at pyproject's own floor: it is a *build*
+          # dependency ([build-system] requires = ["setuptools>=77"]), not a
+          # runtime one, so runtime.txt does not carry it -- and the version a
+          # venv happens to bundle can be years old. Measured: with the 65.5.0
+          # that python3.11 -m venv ships, the metadata check dies on
+          # `project.license` (PEP 639 needs 77+), which reads as a broken
+          # pyproject rather than an old tool.
+          pip install "setuptools>=77" -r backend/requirements/runtime.txt
+
+      - name: Version sources agree with the tag
+        run: python scripts/check_version_sources.py --expect "${{ steps.resolve.outputs.version }}"
+
+  # ---------------------------------------------------------------------------
+  # The API images: both profiles, both architectures, signed, with an SBOM.
+  # ---------------------------------------------------------------------------
+  api-images:
+    name: API image (${{ matrix.profile }})
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: write
+      id-token: write   # cosign keyless signing (Fulcio/Rekor)
+    # No job outputs: a matrix job's outputs are last-writer-wins across the
+    # matrix, so a `digest` here would silently mean "whichever profile
+    # finished last". The SBOMs travel to `publish` as artifacts instead, which
+    # is per-profile by construction.
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [core, full]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.verify.outputs.tag }}
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Image tags
+        id: tags
+        env:
+          IMAGE: ${{ needs.verify.outputs.image }}
+          PROFILE: ${{ matrix.profile }}
+          VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          set -euo pipefail
+          # ONLY the versioned tag here. The floating `:core` / `:full` tags are
+          # moved by the `floating-tags` job, after every image has been built,
+          # signed and attested -- see the note on that job.
+          tags="${IMAGE}:${PROFILE}-${VERSION}"
+          echo "tags=$tags" >> "$GITHUB_OUTPUT"
+          # org.opencontainers.image.created must be the build time; the
+          # repository's updated_at, which is what is easily to hand in an
+          # expression, is neither this build nor this tag.
+          echo "build_date=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_OUTPUT"
+          echo "$tags"
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: backend/Dockerfile
+          target: ${{ matrix.profile }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          build-args: |
+            VERSION=${{ needs.verify.outputs.version }}
+            BUILD_DATE=${{ steps.tags.outputs.build_date }}
+            GIT_COMMIT=${{ github.sha }}
+          provenance: mode=max
+          cache-from: type=gha,scope=release-api-${{ matrix.profile }}
+          cache-to: type=gha,scope=release-api-${{ matrix.profile }},mode=max
+
+      # The label is metadata anyone can read off the published image, and it
+      # is the only place the version appears outside the tag. Assert it rather
+      # than trust the build-arg plumbing: a renamed ARG would silently leave
+      # every released image labelled 0.0.0+unknown.
+      - name: Image carries the version it claims
+        env:
+          IMAGE: ${{ needs.verify.outputs.image }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          VERSION: ${{ needs.verify.outputs.version }}
+          PROFILE: ${{ matrix.profile }}
+        run: |
+          set -euo pipefail
+          docker buildx imagetools inspect "${IMAGE}@${DIGEST}" \
+            --format '{{ json .Image }}' > image.json
+          python3 scripts/check_image_labels.py \
+            --file image.json --version "$VERSION" --profile "$PROFILE"
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      # Keyless: the signature is bound to this workflow's OIDC identity
+      # (repository + ref + workflow path) and recorded in Rekor. No private
+      # key exists to leak or rotate. Verify with:
+      #   cosign verify ghcr.io/<owner>/<repo>:core-X.Y.Z \
+      #     --certificate-identity-regexp '^https://github.com/<owner>/<repo>/' \
+      #     --certificate-oidc-issuer https://token.actions.githubusercontent.com
+      - name: Sign the image
+        env:
+          IMAGE: ${{ needs.verify.outputs.image }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: cosign sign --yes "${IMAGE}@${DIGEST}"
+
+      # NOTE, and it is stated in the release notes and the docs rather than
+      # glossed: syft is handed the multi-architecture index with no platform,
+      # so it resolves the runner's -- amd64 -- and one SBOM is attested
+      # against the whole index. An arm64 user's `cosign verify-attestation`
+      # therefore *succeeds* while listing amd64 packages. The two variants
+      # come from one Dockerfile and one hashed lock, so the contents are the
+      # same set of Python distributions, but the OS package layer is not
+      # identical and this should be per-platform. Tracked as a follow-up
+      # rather than claimed to be solved.
+      - name: Generate the SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ needs.verify.outputs.image }}@${{ steps.build.outputs.digest }}
+          format: spdx-json
+          output-file: ${{ github.workspace }}/sbom-api-${{ matrix.profile }}.spdx.json
+          # The action uploads an artifact of its own by default, which would
+          # be the same bytes under a second name; `publish` collects the one
+          # below instead, so there is one artifact per image and its name is
+          # predictable.
+          upload-artifact: false
+
+      # Attached to the image as a Sigstore attestation, so `cosign verify-attestation`
+      # answers "what is in this digest" without the GitHub release.
+      - name: Attest the SBOM
+        env:
+          IMAGE: ${{ needs.verify.outputs.image }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          PROFILE: ${{ matrix.profile }}
+        run: |
+          cosign attest --yes --type spdxjson \
+            --predicate "sbom-api-${PROFILE}.spdx.json" \
+            "${IMAGE}@${DIGEST}"
+
+      - name: Upload the SBOM for the release
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-api-${{ matrix.profile }}
+          path: sbom-api-${{ matrix.profile }}.spdx.json
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  # The dashboard images. amd64 only -- see the header.
+  # ---------------------------------------------------------------------------
+  web-images:
+    name: dashboard image (${{ matrix.profile }})
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [core, full]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.verify.outputs.tag }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Image tags
+        id: tags
+        env:
+          IMAGE: ${{ needs.verify.outputs.web_image }}
+          PROFILE: ${{ matrix.profile }}
+          VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          set -euo pipefail
+          # ONLY the versioned tag here. The floating `:core` / `:full` tags are
+          # moved by the `floating-tags` job, after every image has been built,
+          # signed and attested -- see the note on that job.
+          tags="${IMAGE}:${PROFILE}-${VERSION}"
+          echo "tags=$tags" >> "$GITHUB_OUTPUT"
+          echo "build_date=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_OUTPUT"
+          echo "$tags"
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: frontend/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          build-args: |
+            EXPERIMENTLY_PROFILE=${{ matrix.profile }}
+            VERSION=${{ needs.verify.outputs.version }}
+            BUILD_DATE=${{ steps.tags.outputs.build_date }}
+            GIT_COMMIT=${{ github.sha }}
+          provenance: mode=max
+          cache-from: type=gha,scope=release-web-${{ matrix.profile }}
+          cache-to: type=gha,scope=release-web-${{ matrix.profile }},mode=max
+
+      # The same assertion the API images get: a renamed ARG would otherwise
+      # leave every released dashboard image labelled 0.0.0+unknown, and
+      # nothing else in the pipeline looks.
+      - name: Image carries the version it claims
+        env:
+          IMAGE: ${{ needs.verify.outputs.web_image }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          VERSION: ${{ needs.verify.outputs.version }}
+          PROFILE: ${{ matrix.profile }}
+        run: |
+          set -euo pipefail
+          docker buildx imagetools inspect "${IMAGE}@${DIGEST}" \
+            --format '{{ json .Image }}' > image.json
+          python3 scripts/check_image_labels.py \
+            --file image.json --version "$VERSION" --profile "$PROFILE"
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign the image
+        env:
+          IMAGE: ${{ needs.verify.outputs.web_image }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: cosign sign --yes "${IMAGE}@${DIGEST}"
+
+      - name: Generate the SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ needs.verify.outputs.web_image }}@${{ steps.build.outputs.digest }}
+          format: spdx-json
+          output-file: ${{ github.workspace }}/sbom-web-${{ matrix.profile }}.spdx.json
+          # The action uploads an artifact of its own by default, which would
+          # be the same bytes under a second name; `publish` collects the one
+          # below instead, so there is one artifact per image and its name is
+          # predictable.
+          upload-artifact: false
+
+      - name: Attest the SBOM
+        env:
+          IMAGE: ${{ needs.verify.outputs.web_image }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          PROFILE: ${{ matrix.profile }}
+        run: |
+          cosign attest --yes --type spdxjson \
+            --predicate "sbom-web-${PROFILE}.spdx.json" \
+            "${IMAGE}@${DIGEST}"
+
+      - name: Upload the SBOM for the release
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-web-${{ matrix.profile }}
+          path: sbom-web-${{ matrix.profile }}.spdx.json
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  # Move the floating `:core` / `:full` tags -- last, and all four together.
+  #
+  # These were pushed inside each matrix leg, which is wrong in a way that only
+  # shows up on a bad day: `fail-fast: false` means the `core` leg completes and
+  # moves `ghcr.io/...:core` while the `full` leg fails in cosign, leaving
+  # `docker pull ...:core` on the new version and `...:full` on the old one,
+  # with no GitHub release and no SBOMs to explain it. docker-compose.yml
+  # resolves exactly those tags, so two self-hosters on the same compose file
+  # would be running different versions, and nothing rolls a tag back.
+  #
+  # `imagetools create` re-points a tag at an existing digest; nothing is
+  # rebuilt, so the floating tag and the versioned tag are the same bytes by
+  # construction rather than by a second build that could differ.
+  #
+  # It runs last of all, after `publish`, because moving a floating tag is the
+  # one irreversible half of a release: there is no rollback, and a release
+  # that failed to produce its GitHub release and SBOMs should not have moved
+  # what `docker pull ...:core` returns. `publish` does NOT depend on this job
+  # in turn -- a skipped job skips its dependents, and this one is skipped for
+  # every pre-release, which would have silently suppressed the release notes
+  # and SBOM upload for exactly the rc runs the launch plan rehearses with.
+  #
+  # A pre-release never moves them: `docker pull ...:core` must not hand anyone
+  # an rc.
+  # ---------------------------------------------------------------------------
+  floating-tags:
+    name: move :core and :full
+    needs: [verify, api-images, web-images, publish]
+    if: needs.verify.outputs.prerelease == 'false'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Point :core and :full at this release
+        env:
+          IMAGE: ${{ needs.verify.outputs.image }}
+          WEB_IMAGE: ${{ needs.verify.outputs.web_image }}
+          VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          set -euo pipefail
+          for repo in "$IMAGE" "$WEB_IMAGE"; do
+            for profile in core full; do
+              echo "==> ${repo}:${profile} -> ${repo}:${profile}-${VERSION}"
+              docker buildx imagetools create \
+                --tag "${repo}:${profile}" \
+                "${repo}:${profile}-${VERSION}"
+            done
+          done
+
+      - name: The floating tags resolve to this release
+        env:
+          IMAGE: ${{ needs.verify.outputs.image }}
+          WEB_IMAGE: ${{ needs.verify.outputs.web_image }}
+          VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          set -euo pipefail
+          digest_of() {
+            docker buildx imagetools inspect "$1" --format '{{ json .Manifest }}' \
+              | python3 -c 'import json,sys; print(json.load(sys.stdin)["digest"])'
+          }
+          failed=0
+          for repo in "$IMAGE" "$WEB_IMAGE"; do
+            for profile in core full; do
+              floating="$(digest_of "${repo}:${profile}")"
+              pinned="$(digest_of "${repo}:${profile}-${VERSION}")"
+              if [ "$floating" != "$pinned" ]; then
+                echo "::error::${repo}:${profile} is $floating, expected $pinned"
+                failed=1
+              else
+                echo "${repo}:${profile} = $floating"
+              fi
+            done
+          done
+          exit "$failed"
+
+  # ---------------------------------------------------------------------------
+  # The GitHub release: the four SBOMs, and the pull/verify commands that go
+  # with this exact tag.
+  # ---------------------------------------------------------------------------
+  publish:
+    name: GitHub release
+    needs: [verify, api-images, web-images]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: sbom-*
+          path: sboms
+          merge-multiple: true
+
+      - name: List what will be attached
+        run: ls -l sboms
+
+      - name: Release notes
+        env:
+          IMAGE: ${{ needs.verify.outputs.image }}
+          WEB_IMAGE: ${{ needs.verify.outputs.web_image }}
+          VERSION: ${{ needs.verify.outputs.version }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          cat > notes.md <<EOF
+          ## Images
+
+          \`\`\`
+          docker pull ${IMAGE}:core-${VERSION}      # API, core profile
+          docker pull ${IMAGE}:full-${VERSION}      # API, full profile
+          docker pull ${WEB_IMAGE}:core-${VERSION}  # dashboard, core profile
+          docker pull ${WEB_IMAGE}:full-${VERSION}  # dashboard, full profile
+          \`\`\`
+
+          API images are \`linux/amd64\` and \`linux/arm64\`; dashboard images are
+          \`linux/amd64\` (their payload is a static export, identical either way).
+
+          ## Verifying
+
+          Every image is signed with cosign keyless and carries an SPDX SBOM
+          attestation:
+
+          \`\`\`
+          cosign verify ${IMAGE}:core-${VERSION} \\
+            --certificate-identity-regexp '^https://github.com/${REPOSITORY}/' \\
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com
+
+          cosign verify-attestation --type spdxjson ${IMAGE}:core-${VERSION} \\
+            --certificate-identity-regexp '^https://github.com/${REPOSITORY}/' \\
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com
+          \`\`\`
+
+          The same SBOMs are attached below. Note that the API images' SBOM is
+          generated for \`linux/amd64\`: it is attested against the whole
+          multi-architecture index, so verification of the \`arm64\` variant
+          succeeds against the \`amd64\` package list. The two are built from
+          one Dockerfile and one hashed dependency lock, so the Python
+          distributions are identical; the base OS package layer is not
+          separately described.
+          EOF
+          cat notes.md
+
+      # release-please has already created the release for a normal release;
+      # `gh release edit`/`upload` on an existing one and `create` otherwise.
+      - name: Attach the SBOMs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.verify.outputs.tag }}
+          PRERELEASE: ${{ needs.verify.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release view "$TAG" --json body --jq .body > existing.md
+            # Re-running this workflow on an existing tag is the documented way
+            # to recover a release whose publish step failed, so appending
+            # unconditionally would add a second and third copy of the same
+            # section each time. The marker is what makes the append idempotent:
+            # everything from it onwards is this job's output and is replaced,
+            # everything before it is release-please's changelog and is kept.
+            python3 - <<'PY'
+          import pathlib
+
+          MARKER = "<!-- experimently:release-artifacts -->"
+          existing = pathlib.Path("existing.md").read_text(encoding="utf-8")
+          generated = pathlib.Path("notes.md").read_text(encoding="utf-8")
+          kept = existing.split(MARKER)[0].rstrip()
+          pathlib.Path("combined.md").write_text(
+              f"{kept}\n\n{MARKER}\n{generated}", encoding="utf-8"
+          )
+          PY
+            echo "release $TAG exists; replacing the image section and re-uploading the SBOMs"
+            gh release edit "$TAG" --notes-file combined.md
+          else
+            echo "creating release $TAG"
+            { echo "<!-- experimently:release-artifacts -->"; cat notes.md; } > created.md
+            flags=(--title "$TAG" --notes-file created.md)
+            if [ "$PRERELEASE" = "true" ]; then flags+=(--prerelease); fi
+            gh release create "$TAG" "${flags[@]}"
+          fi
+          gh release upload "$TAG" sboms/* --clobber

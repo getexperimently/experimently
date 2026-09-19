@@ -1,0 +1,288 @@
+# One SDK, one tag, one publish.
+#
+# SDKs version independently of the platform -- a fix to the JavaScript client
+# should not force a release of the API images -- so each has its own tag:
+#
+#   sdk/js/v1.2.3        @getexperimently/js-sdk 1.2.3 -> npm
+#   sdk/python/v1.2.3    experimently 1.2.3            -> PyPI
+#   sdk/go/v1.2.3        github.com/getexperimently/experimently/sdk/go
+#
+# That shape is Go's requirement (a module in a subdirectory is released by a
+# `<subdir>/vX.Y.Z` tag), reused for every SDK so there is one convention.
+#
+# Publishing is by trusted publishing -- OIDC, no long-lived token in any
+# secret. Both registries must be told, once, to trust this repository and this
+# workflow file:
+#
+#   PyPI  Manage project -> Publishing -> Add a GitHub publisher:
+#         owner + repository + workflow `sdk-release.yml` + environment `sdk-release`
+#   npm   Package settings -> Trusted publisher -> GitHub Actions, same three
+#
+# Until that is done a publish step fails with an authentication error, which
+# is the correct behaviour: nothing is published by a fallback nobody audited.
+# The founder owns this (tracked in P3.8, issue #140).
+#
+# `environment: sdk-release` is also where a human approval belongs. NOTE, as
+# intent rather than a working gate: an environment with no protection rule is
+# created on first use and approves nothing. The required-reviewer rule is
+# repository configuration, not something this file can assert, so it is on the
+# P3.8 checklist beside the registry configuration above.
+name: SDK Release
+
+on:
+  push:
+    tags: ['sdk/*/v*']
+  workflow_dispatch:
+    inputs:
+      sdk:
+        description: 'SDK directory name under sdk/, e.g. js or openfeature-python.'
+        type: string
+        required: true
+      version:
+        description: 'Version to publish. Must equal the manifest version on this ref.'
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sdk-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Work out which SDK is being released, and refuse anything the plumbing
+  # cannot actually publish -- including an SDK that has no registry account
+  # yet, which would otherwise build, test, publish nothing and go green.
+  # ---------------------------------------------------------------------------
+  resolve:
+    name: resolve the tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      sdk: ${{ steps.parse.outputs.sdk }}
+      version: ${{ steps.parse.outputs.version }}
+      ecosystem: ${{ steps.parse.outputs.ecosystem }}
+      name: ${{ steps.parse.outputs.name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+
+      - name: Parse and check
+        id: parse
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          INPUT_SDK: ${{ inputs.sdk }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if [ -n "$INPUT_SDK" ]; then
+            sdk="$INPUT_SDK"
+            version="${INPUT_VERSION#v}"
+          else
+            if [ "$REF_TYPE" != "tag" ]; then
+              echo "::error::not a tag ref: $REF_NAME"
+              exit 1
+            fi
+            # sdk/<name>/v<version> -- the name may contain a hyphen
+            # (openfeature-python, react-native) but never a slash.
+            case "$REF_NAME" in
+              sdk/*/v*) ;;
+              *) echo "::error::$REF_NAME is not sdk/<name>/v<version>"; exit 1 ;;
+            esac
+            sdk="${REF_NAME#sdk/}"
+            sdk="${sdk%%/*}"
+            version="${REF_NAME##*/v}"
+          fi
+
+          # Refuses an unknown name, an SDK with no publishing identity, and a
+          # version that does not match the manifest this ref carries.
+          python scripts/check_sdk_version.py "$sdk" --expect "$version"
+          ecosystem="$(python scripts/check_sdk_version.py "$sdk" --print-ecosystem)"
+          # The registry name, from the manifest. It is not derivable from the
+          # directory: sdk/openfeature is @getexperimently/openfeature-provider
+          # while sdk/js is @getexperimently/js-sdk.
+          name=""
+          if [ "$ecosystem" = "pypi" ] || [ "$ecosystem" = "npm" ]; then
+            name="$(python scripts/check_sdk_version.py "$sdk" --print-name)"
+          fi
+
+          {
+            echo "sdk=$sdk"
+            echo "version=$version"
+            echo "ecosystem=$ecosystem"
+            echo "name=$name"
+          } >> "$GITHUB_OUTPUT"
+          echo "releasing sdk/$sdk $version via $ecosystem"
+
+  # ---------------------------------------------------------------------------
+  # PyPI: sdk/python, sdk/openfeature-python
+  # ---------------------------------------------------------------------------
+  pypi:
+    name: publish to PyPI
+    needs: resolve
+    if: needs.resolve.outputs.ecosystem == 'pypi'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment:
+      name: sdk-release
+      url: https://pypi.org/project/${{ needs.resolve.outputs.name }}
+    permissions:
+      contents: read
+      id-token: write   # trusted publishing
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+
+      - name: Install build tooling
+        run: python -m pip install --upgrade pip build twine
+
+      - name: Run the SDK's tests
+        working-directory: sdk/${{ needs.resolve.outputs.sdk }}
+        run: |
+          python -m pip install -e '.[dev]'
+          python -m pytest -q
+
+      - name: Build
+        working-directory: sdk/${{ needs.resolve.outputs.sdk }}
+        run: python -m build
+
+      # `twine check` catches a README that PyPI will reject *before* the
+      # upload, which is the difference between a failed job and a version
+      # number burned on a half-published project.
+      - name: Check the distributions
+        working-directory: sdk/${{ needs.resolve.outputs.sdk }}
+        run: twine check dist/*
+
+      - name: Built version matches the tag
+        working-directory: sdk/${{ needs.resolve.outputs.sdk }}
+        env:
+          VERSION: ${{ needs.resolve.outputs.version }}
+        run: |
+          set -euo pipefail
+          # PyPI normalises: the file name carries the PEP 440 spelling, so
+          # compare on the parsed version rather than the string.
+          python - <<'PY'
+          import os, pathlib, sys
+          from packaging.utils import parse_wheel_filename
+          from packaging.version import Version
+
+          expected = Version(os.environ["VERSION"])
+          wheels = sorted(pathlib.Path("dist").glob("*.whl"))
+          if not wheels:
+              sys.exit("no wheel was built")
+          for wheel in wheels:
+              _, built, _, _ = parse_wheel_filename(wheel.name)
+              if built != expected:
+                  sys.exit(f"{wheel.name} is version {built}, expected {expected}")
+          print(f"{len(wheels)} wheel(s) at {expected}")
+          PY
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: sdk/${{ needs.resolve.outputs.sdk }}/dist
+
+  # ---------------------------------------------------------------------------
+  # npm: sdk/js, sdk/edge, sdk/openfeature, sdk/react, sdk/react-native
+  # ---------------------------------------------------------------------------
+  npm:
+    name: publish to npm
+    needs: resolve
+    if: needs.resolve.outputs.ecosystem == 'npm'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment:
+      name: sdk-release
+      url: https://www.npmjs.com/package/${{ needs.resolve.outputs.name }}
+    permissions:
+      contents: read
+      id-token: write   # trusted publishing + provenance
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          registry-url: https://registry.npmjs.org
+
+      # Trusted publishing and `npm publish --provenance` both need a recent
+      # npm; the one bundled with Node 22 is older than the OIDC support.
+      - name: Install a current npm
+        run: npm install --global npm@latest
+
+      - name: Install, test and build
+        working-directory: sdk/${{ needs.resolve.outputs.sdk }}
+        run: |
+          set -euo pipefail
+          npm ci
+          npm test --if-present
+          npm run build --if-present
+
+      # What `npm publish` would actually upload. A package whose `files` list
+      # is missing ships its sources and tests, or -- worse -- ships no `dist`
+      # at all and installs as an empty module; both have happened to other
+      # people's SDKs and neither fails a test.
+      - name: Show the package contents
+        working-directory: sdk/${{ needs.resolve.outputs.sdk }}
+        run: npm pack --dry-run
+
+      - name: Publish
+        working-directory: sdk/${{ needs.resolve.outputs.sdk }}
+        run: npm publish --provenance --access public
+
+  # ---------------------------------------------------------------------------
+  # Go: nothing to upload. `go get` resolves the tag from the repository, so
+  # the tag *is* the release -- but the module has to actually build at it, and
+  # a tag on a commit where it does not is a broken release nobody can yank.
+  # ---------------------------------------------------------------------------
+  go:
+    name: verify the Go module
+    needs: resolve
+    if: needs.resolve.outputs.ecosystem == 'tag-only'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache-dependency-path: sdk/go/go.sum
+
+      - name: Build and test
+        working-directory: sdk/go
+        run: |
+          go build ./...
+          go test -race ./...
+
+      # The invariant is that go.mod's path ends in the subdirectory the tag
+      # names -- `sdk/go/vX.Y.Z` publishes the module at `sdk/go` -- because
+      # that is what the go tool resolves. It is NOT that the path contains
+      # `github.repository`: go.mod already declares the post-cut home
+      # (getexperimently/experimently), deliberately and permanently, while
+      # this workflow still runs on the pre-cut repository. Comparing against
+      # `github.repository` made every `sdk/go/v*` tag fail here -- a gate
+      # that can only ever reject, which is no better than one that can only
+      # ever pass.
+      - name: Module path matches the tag's subdirectory
+        working-directory: sdk/go
+        run: |
+          set -euo pipefail
+          declared="$(go list -m)"
+          case "$declared" in
+            */sdk/go) ;;
+            *)
+              echo "::error::go.mod declares $declared, which does not end in /sdk/go;"
+              echo "::error::an sdk/go/vX.Y.Z tag publishes the module in sdk/go and nothing else"
+              exit 1
+              ;;
+          esac
+          echo "module path $declared"

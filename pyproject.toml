@@ -236,8 +236,20 @@ requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "experimently"
-version = "0.1.0"
+# NOT `experimently`: that name belongs to the Python SDK
+# (`sdk/python/pyproject.toml`), which the launch publishes to PyPI. Both
+# tables carried it until P3.5, so `pip install -e . && pip install -e
+# sdk/python` in one environment produced two distributions with one name --
+# the second silently replacing the first's metadata -- and
+# `importlib.metadata.version("experimently")` could not say which tree it was
+# answering for. The platform is the bigger thing but the smaller audience:
+# the SDK is what people install.
+name = "experimently-platform"
+# From the repository-root VERSION file, which release-please maintains: one
+# source for the API's `settings.VERSION`, the image labels and this wheel.
+# `version` is absent on purpose -- a literal here would be a second source,
+# and PEP 621 forbids declaring both.
+dynamic = ["version"]
 description = "Experimently — experimentation platform for A/B testing and feature flags"
 requires-python = ">=3.11"
 # Everything in the distribution is Apache-2.0: the core under backend/ and the
@@ -246,6 +258,16 @@ requires-python = ">=3.11"
 # own package with its own release pipeline.
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
+
+[tool.setuptools.dynamic]
+# setuptools reads the file, stripped -- the same bytes
+# backend/app/core/version.py reads at runtime and the release workflow passes
+# to the image label, so a wheel cannot disagree with the server it came from.
+# A build that cannot find the file does not fail: it warns and emits version
+# 0.0.0. That silent path is what scripts/check_version_sources.py catches, and
+# naming the file here is also what makes setuptools ship it in the sdist (see
+# MANIFEST.in, which says the same thing explicitly).
+version = { file = "VERSION" }
 
 [tool.setuptools]
 # Setuptools turns this on by default for a pyproject-configured project, and
