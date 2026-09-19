@@ -13,6 +13,7 @@ from typing import Annotated, Any, Dict, List, Literal, Optional, Union
 from pydantic import (
     AnyHttpUrl,
     EmailStr,
+    Field,
     PostgresDsn,
     RedisDsn,
     ValidationInfo,
@@ -20,6 +21,8 @@ from pydantic import (
     model_validator,
 )
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+
+from backend.app.core.version import get_version
 
 logger = logging.getLogger(__name__)
 
@@ -197,7 +200,23 @@ class Settings(BaseSettings):
     """Base settings class."""
 
     PROJECT_NAME: str = "Experimently"
-    VERSION: str = "1.0.0"
+    # Resolved from the repository-root ``VERSION`` file, which release-please
+    # maintains and pyproject.toml and the image labels read too; see
+    # backend/app/core/version.py.
+    #
+    # The alias is the point.  As a plain field this read the bare ``VERSION``
+    # environment variable -- about the most generic name there is, exported by
+    # build scripts, base images and CI steps everywhere, including six steps
+    # of this repository's own release workflow.  Anything that set it silently
+    # changed what ``/health``, ``GET /api/v1/modules`` and the OpenAPI
+    # ``info.version`` reported, and would have turned
+    # ``scripts/check_version_sources.py`` from a gate into a tautology: the
+    # release workflow would have been comparing the tag against itself.
+    # ``EXPERIMENTLY_VERSION`` is still there for a deployment that genuinely
+    # wants to report something else, but now it has to mean it.
+    VERSION: str = Field(
+        default_factory=get_version, validation_alias="EXPERIMENTLY_VERSION"
+    )
     API_V1_STR: str = "/api/v1"
     # Canonical environment name. Legacy ``dev``/``prod`` spellings and the
     # legacy ``APP_ENV`` variable are accepted (see module docstring above).

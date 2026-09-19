@@ -62,12 +62,21 @@ FROM python:${PYTHON_VERSION}-slim AS runtime
 
 ARG BUILD_DATE
 ARG GIT_COMMIT
+# The release tag, without its leading "v". Passed by .github/workflows/
+# release.yml, which has already run scripts/check_version_sources.py --expect
+# against the tag, so the label and the /app/VERSION copied in below cannot
+# disagree. A plain `docker build` that passes nothing labels the image
+# "0.0.0+unknown" -- an unreleasable version by construction (the same string
+# backend/app/core/version.py falls back to), rather than a stale number that
+# reads like a release.
+ARG VERSION=0.0.0+unknown
 
 LABEL org.opencontainers.image.title="Experimently API" \
       org.opencontainers.image.description="FastAPI backend for the Experimently experimentation platform" \
       org.opencontainers.image.licenses="Apache-2.0" \
       org.opencontainers.image.created="${BUILD_DATE}" \
-      org.opencontainers.image.revision="${GIT_COMMIT}"
+      org.opencontainers.image.revision="${GIT_COMMIT}" \
+      org.opencontainers.image.version="${VERSION}"
 
 # The profile is NOT a build argument: it is the target you build. `core` and
 # `full` below each set EXPERIMENTLY_PROFILE and the profile label for
@@ -96,6 +105,13 @@ WORKDIR /app
 # `backend.app.main:app`, `python -m backend.app.db.bootstrap` and the seed
 # scripts resolve exactly as they do from a checkout.
 COPY --chown=appuser:appgroup backend/ /app/backend/
+# The version the running API reports. backend/app/core/version.py walks three
+# directories up from itself, which is /app here exactly as it is the
+# repository root in a checkout -- so the image and a developer's tree resolve
+# the version by the same path, with no image-only branch to get wrong. It is
+# the file, not the ARG above, because the label is metadata an operator reads
+# and this is what /health and /api/v1/modules answer.
+COPY --chown=appuser:appgroup VERSION /app/VERSION
 RUN chmod +x /app/backend/docker-entrypoint.sh \
     && mkdir -p /data/demo \
     && chown -R appuser:appgroup /data

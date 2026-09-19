@@ -1,0 +1,63 @@
+# Conventional commits on main -> a release pull request -> a `vX.Y.Z` tag.
+#
+# release-please keeps a standing pull request that accumulates every
+# conventional commit since the last release: merging it writes CHANGELOG.md,
+# bumps VERSION (release-please-config.json points the `simple` strategy at
+# that file rather than its default version.txt), updates
+# .release-please-manifest.json, tags the merge commit and opens a GitHub
+# release.
+#
+# It then CALLS release.yml rather than letting the tag trigger it. That is not
+# a stylistic choice: a tag pushed with the default GITHUB_TOKEN does not start
+# another workflow -- GitHub suppresses it to stop workflows triggering
+# themselves -- so release.yml's own `push: tags` trigger never fires for a
+# release-please tag. A release that quietly produced no images would look
+# exactly like a successful one. The alternative is a personal access token
+# held as a secret, which is a credential to rotate and an audit trail to
+# explain; a direct call needs neither.
+#
+# The `push: tags` trigger on release.yml is still the path for a hand-pushed
+# rehearsal tag (`git tag v0.1.0-rc.1 && git push --tags`), which a human's
+# credentials do start.
+name: Release Please
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-please
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    name: release pull request / tag
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write        # create the tag, the release and the release branch
+      pull-requests: write   # open and update the release pull request
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: release
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  release:
+    name: build and publish the release
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    uses: ./.github/workflows/release.yml
+    with:
+      tag: ${{ needs.release-please.outputs.tag_name }}
+    permissions:
+      contents: write   # attach the SBOMs to the release
+      packages: write   # push to GHCR
+      id-token: write   # cosign keyless signing
