@@ -1,0 +1,13 @@
+# `version = {file = "VERSION"}` in pyproject.toml reads this file at build
+# time, and the sdist has to carry it or a rebuild from the sdist produces
+# version 0.0.0 -- setuptools warns about the missing file and does not fail.
+#
+# Measured, not assumed: setuptools 84 puts the file in the sdist by itself,
+# because pyproject names it as a dynamic-version source. Neither deleting
+# this line nor writing `exclude VERSION` here takes it back out. So the line
+# is explicit intent rather than the mechanism -- it says the file is part of
+# the distribution regardless of what a future setuptools decides to infer.
+# The invariant itself is pinned by
+# backend/tests/smoke/test_version_sources.py::test_the_sdist_carries_the_version_file,
+# which is what would notice if that behaviour ever changed.
+include VERSION

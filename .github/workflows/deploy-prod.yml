@@ -272,9 +272,17 @@ jobs:
           # Build context is the repository root (the code imports backend.app.*).
           # --target is the requested profile, never a hard-coded default: see
           # the `profile` input and the guard in pre-deployment-checks.
+          # VERSION is what the image labels itself with
+          # (org.opencontainers.image.version) and what
+          # docs/self-hosting/releases.md tells an operator to read off a
+          # running container. Without it the Dockerfile's placeholder default
+          # applies and every production image says 0.0.0+unknown while
+          # /health reports the real number from /app/VERSION -- the two
+          # version surfaces disagreeing on the only images that matter.
           docker build \
             --build-arg BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ') \
             --build-arg GIT_COMMIT=${{ github.sha }} \
+            --build-arg VERSION="${IMAGE_TAG#v}" \
             --target "$PROFILE" \
             -t $ECR_REGISTRY/$ECR_BACKEND_REPO:$IMAGE_TAG \
             -t $ECR_REGISTRY/$ECR_BACKEND_REPO:$IMAGE_TAG-$PROFILE \
@@ -314,6 +322,7 @@ jobs:
           docker build \
             --build-arg NEXT_PUBLIC_API_URL=${{ secrets.PROD_API_URL }} \
             --build-arg GIT_COMMIT=${{ github.sha }} \
+            --build-arg VERSION="${IMAGE_TAG#v}" \
             --build-arg EXPERIMENTLY_PROFILE="$PROFILE" \
             -t $ECR_REGISTRY/$ECR_FRONTEND_REPO:$IMAGE_TAG \
             -t $ECR_REGISTRY/$ECR_FRONTEND_REPO:latest \
