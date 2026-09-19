@@ -136,11 +136,17 @@ FROM nginxinc/nginx-unprivileged:1.27-alpine AS runtime
 ARG BUILD_DATE
 ARG GIT_COMMIT
 ARG EXPERIMENTLY_PROFILE
+# The release tag without its leading "v"; see the same ARG in
+# backend/Dockerfile. The default is the unreleasable placeholder, so an image
+# built by hand never claims a version it does not have.
+ARG VERSION=0.0.0+unknown
 LABEL org.opencontainers.image.title="Experimently Dashboard" \
       org.opencontainers.image.description="Static Next.js dashboard served by nginx, proxying /api to the Experimently API" \
+      org.opencontainers.image.licenses="Apache-2.0" \
       org.opencontainers.image.created="${BUILD_DATE}" \
       org.opencontainers.image.revision="${GIT_COMMIT}" \
-      com.experimently.profile="${EXPERIMENTLY_PROFILE}"
+      org.opencontainers.image.version="${VERSION}" \
+      io.experimently.profile="${EXPERIMENTLY_PROFILE}"
 
 ENV API_UPSTREAM=http://api:8000
 

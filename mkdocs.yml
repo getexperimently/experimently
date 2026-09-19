@@ -136,6 +136,7 @@ nav:
   - Docker Compose: getting-started/docker-guide.md
   - Environment Variables: getting-started/environment-setup.md
   - Database Migrations: self-hosting/migrations.md
+  - Releases & Image Verification: self-hosting/releases.md
   - Monitoring: self-hosting/monitoring.md
 - Guides & Tutorials:
   - Bayesian Experimentation: api/bayesian.md
