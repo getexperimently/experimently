@@ -8,6 +8,9 @@ Gracefully degrades to template-based advice when the API is unavailable.
 import logging
 import os
 
+from backend.app.core.anthropic_compat import first_text
+from backend.app.core.config import settings
+
 logger = logging.getLogger(__name__)
 
 
@@ -124,11 +127,12 @@ class AIExperimentPlannerService:
         # because anthropic's sync client is fine in FastAPI endpoints).
         client = anthropic.Anthropic()
         message = client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=800,
+            model=settings.ANTHROPIC_MODEL,
+            # Raised from 800: adaptive thinking draws on the same budget.
+            max_tokens=4096,
             messages=[{"role": "user", "content": prompt}],
         )
-        advice = message.content[0].text
+        advice = first_text(message)
         return {"advice": advice, "generated_by": "ai"}
 
     # ------------------------------------------------------------------

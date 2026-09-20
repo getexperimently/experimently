@@ -5,7 +5,9 @@ Pydantic v2 schemas for LLM Experiment API endpoints (EP-046).
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, ConfigDict, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from backend.app.core.config import settings
 
 # ---------------------------------------------------------------------------
 # Variant schemas
@@ -340,7 +342,10 @@ class LLMJudgeRequest(BaseModel):
     """Request to run LLM-as-judge scoring."""
 
     criteria: str = "helpfulness"
-    judge_model: str = "claude-3-5-sonnet-20241022"
+    judge_model: str = Field(
+        default_factory=lambda: settings.LLM_DEFAULT_JUDGE_MODEL,
+        description="Model used to score responses; defaults to LLM_DEFAULT_JUDGE_MODEL.",
+    )
     evaluation_ids: Optional[List[str]] = None  # None = score all
 
 
