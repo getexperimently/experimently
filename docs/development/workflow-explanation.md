@@ -32,15 +32,17 @@ gh api repos/<owner>/<repo>/branches/main/protection --jq '.required_status_chec
 | regression-guard | `regression-guard.yml` | a pull request labelled `bug` must change a test file |
 | Security Scan Summary | `security-scan.yml` | Bandit, npm audit, Semgrep (`p/python`, `p/security-audit`, `p/secrets`, `p/owasp-top-ten`), Gitleaks, Trivy on the built image |
 | Release Gate Summary | `release-gate.yml` | backend gate (unit + smoke), frontend gate (test + build), security gate (Bandit + Gitleaks) |
+| CDK Stack Tests (Python) † | `infrastructure-tests.yml` | `infrastructure/tests`, including a real `cdk synth` of both profiles (`TestTheAppActuallySynthesises`) |
 
 † Runs on every pull request but is **not yet** in branch protection — add the
 status name above verbatim. Both are unconditional (no `if:`, no path filter),
 so requiring them cannot leave a pull request pending.
 
-Deliberately **not** required, because they are path-filtered and a required check
-that never reports leaves a pull request permanently pending:
-`CDK Stack Tests (Python)` (`infrastructure-tests.yml`) and `cognito-integration`
-(`cognito-integration-tests.yml`). The per-job checks behind an aggregate
+Deliberately **not** required, because it is path-filtered and a required check
+that never reports leaves a pull request permanently pending: `cognito-integration`
+(`cognito-integration-tests.yml`). `CDK Stack Tests (Python)` used to be in this
+list for the same reason; its path filter was removed when it grew a real
+`cdk synth` (see below), so it can now be required. The per-job checks behind an aggregate
 (`Backend Gate`, `Frontend Gate`, `Security Gate`; `Python Security Scan`,
 `Semgrep SAST`, …; `Select SDKs` and the per-SDK legs) are not listed either —
 their summary job is.
@@ -50,7 +52,6 @@ their summary job is.
 | Workflow | Trigger | Purpose |
 |----------|---------|---------|
 | `cognito-integration-tests.yml` | changes under `backend/app/**` or `backend/tests/integration/auth/**` | `backend/tests/integration/auth` with moto's Cognito mock; no database, so DB-backed auth tests live in `backend/tests/integration/api` instead |
-| `infrastructure-tests.yml` | changes under `infrastructure/` | CDK stack unit tests |
 | `security-scan.yml` | push, pull request, weekly | as above |
 
 ## Scheduled workflows
