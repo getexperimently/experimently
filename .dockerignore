@@ -31,6 +31,11 @@ venv/
 infrastructure/
 backend/tests/
 backend/lambda/
+# Internal-only, and on scripts/publish/exclude-paths.txt for the public cut --
+# so it must not travel in a published image either. Found by listing /app in a
+# built image while removing the requirements files.
+**/CLAUDE.md
+**/Dockerfile
 tests/
 # The same three rules for the modules tree: the API image copies modules/ for
 # the full profile, and none of these belong in it. modules/frontend/ is NOT
