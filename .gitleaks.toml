@@ -4,8 +4,16 @@ title = "Experimently gitleaks config"
 # NO RULES -- which is what this file did from the day it was added (EP-018)
 # until 2026-09-13. Every CI run, every core_build.sh secrets step and every
 # local scan that loaded it found nothing because it could not find anything.
-# Tamper-test any change here: plant a fake AWS key in a scratch commit and
-# make sure the scan reports it.
+# Tamper-test any change here: plant an AWS key in a scratch commit and make
+# sure the scan reports it -- but NOT the documentation one. `gitleaks` 8.30
+# does not flag `AKIAIOSFODNN7EXAMPLE` /
+# `wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY`, because the default rules
+# allowlist AWS's own published examples. Probing with those and seeing "no
+# leaks found" reads exactly like the rule-less config this file was written to
+# fix. Use a random `AKIA` + 16 chars instead; verified 2026-09-19 that such a
+# key is reported in `backend/app/`, is allowlisted under `backend/tests/`, and
+# is NOT reported once `useDefault` is false -- which is what proves the
+# `[extend]` block below is doing the work.
 [extend]
 useDefault = true
 

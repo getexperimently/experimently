@@ -1,0 +1,34 @@
+# Advisories accepted in the DEVELOPMENT closure, with reasons.
+#
+# There is no such list for the shipped closure. `backend/requirements/runtime.lock`
+# and `modules/requirements.lock` are what the images install, and
+# scripts/audit_dependencies.py fails on any advisory there, full stop -- an
+# exception would be a decision to ship a known vulnerability, which is not a
+# decision a config file should be able to express.
+#
+# This file covers `backend/requirements.txt`, the closure every test job and
+# developer venv installs. Entries here are for packages that do NOT reach an
+# image. That is not taken on trust: the script refuses an entry whose package
+# appears in a shipped closure, and refuses a stale entry whose advisory no
+# longer fires -- so an exception cannot quietly outlive its reason.
+#
+# Adding one is a review decision. Say why, and set `review_by`.
+
+[[ignore]]
+id = "PYSEC-2026-1845"
+package = "pytest"
+reason = """
+Test runner. Fixed in 9.0.3; this tree pins 7.4.2 and the jump is two major
+versions across ~3,500 tests, which is its own change with its own review, not
+a security patch to slip into a CI gate. pytest is not in runtime.txt or
+either lock, so nothing it affects is deployed or distributed.
+"""
+review_by = "2026-12-31"
+
+# PYSEC-2026-1325 (ecdsa) was listed here and has been removed. It never
+# belonged: it reached the audit only because the first version of
+# scripts/audit_dependencies.py passed --no-deps without --disable-pip, so
+# pip-audit resolved 179 packages for a file with 75 pins and reported
+# transitives the file does not pin. With resolution actually disabled the
+# advisory does not fire, and the script's own stale-exception check is what
+# caught the leftover.
