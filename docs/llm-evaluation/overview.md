@@ -25,7 +25,7 @@ The platform handles all of this automatically: it tracks latency, estimates cos
 
 | Provider | Models | Notes |
 |----------|--------|-------|
-| **Anthropic** | claude-3-5-sonnet-20241022, claude-3-haiku-20240307, claude-opus-4-6 | Recommended judge model |
+| **Anthropic** | claude-opus-5, claude-sonnet-5, claude-haiku-4-5, claude-fable-5-1, and the 4.5/4.6 and Claude 3 generations | Recommended judge model. The priced set is `COST_PER_1K_TOKENS` in `backend/app/core/llm_pricing.py`; a model missing from it records $0.00 and logs a warning. |
 | **OpenAI** | gpt-4o, gpt-4o-mini, gpt-3.5-turbo | Cost-efficient options available |
 | **Google** | gemini-1.5-pro, gemini-1.5-flash | Flash: lowest cost per token |
 | **Cohere** | command-r-plus, command-r | Enterprise RAG use cases |
@@ -83,7 +83,7 @@ The hash key is `"{experiment_id}:{user_id}"`, mapped to a bucket in [0, 1) and 
 
 ## LLM-as-Judge Scoring
 
-The platform supports automated quality evaluation using a judge LLM (default: claude-3-5-sonnet-20241022). The judge is prompted:
+The platform supports automated quality evaluation using a judge LLM. The default is `settings.LLM_DEFAULT_JUDGE_MODEL` (`claude-sonnet-5`), overridable per request and by the `LLM_DEFAULT_JUDGE_MODEL` environment variable. The judge is prompted:
 
 ```
 Rate the following AI response on '{criteria}' using a score from 0 (terrible)
@@ -104,10 +104,17 @@ Judge scores are stored as `auto_eval_score` on each evaluation record and inclu
 The platform automatically estimates the cost of each LLM call using a built-in cost table:
 
 ```
-claude-3-5-sonnet-20241022: $0.003/1k input + $0.015/1k output
-gpt-4o:                     $0.0025/1k input + $0.010/1k output
-gemini-1.5-flash:           $0.000075/1k input + $0.0003/1k output
+claude-opus-5:   $0.005/1k input + $0.025/1k output
+claude-sonnet-5: $0.002/1k input + $0.010/1k output
+claude-haiku-4-5:$0.001/1k input + $0.005/1k output
+gpt-4o:          $0.0025/1k input + $0.010/1k output
+gemini-1.5-flash:$0.000075/1k input + $0.0003/1k output
 ```
+
+These are Anthropic first-party list prices; a deployment routing Claude
+through Amazon Bedrock or Vertex AI pays that partner's rates, which this table
+does not model. The non-Anthropic figures above have not been re-checked
+against their providers' current pricing.
 
 Cost data is visible per-variant in the results dashboard, enabling cost/quality trade-off analysis.
 

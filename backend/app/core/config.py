@@ -218,6 +218,16 @@ class Settings(BaseSettings):
         default_factory=get_version, validation_alias="EXPERIMENTLY_VERSION"
     )
     API_V1_STR: str = "/api/v1"
+
+    # The Claude model the platform's own features call (AI experiment design,
+    # the planner). Not the models a *user* selects for an LLM experiment --
+    # those come from the experiment record and go through llm_proxy_service.
+    #
+    # A setting rather than a literal because the three call sites that used to
+    # hard-code `claude-sonnet-4-6` were still on it a generation later, with
+    # no way for an operator to move them without editing code. Sonnet 5 is
+    # both newer and cheaper than 4.6 ($2/$10 per MTok against $3/$15).
+    ANTHROPIC_MODEL: str = "claude-sonnet-5"
     # Canonical environment name. Legacy ``dev``/``prod`` spellings and the
     # legacy ``APP_ENV`` variable are accepted (see module docstring above).
     ENVIRONMENT: EnvironmentName = "development"
@@ -347,7 +357,11 @@ class Settings(BaseSettings):
     LLM_OPENAI_API_KEY: str = ""
     LLM_ANTHROPIC_API_KEY: str = ""
     LLM_GOOGLE_API_KEY: str = ""
-    LLM_DEFAULT_JUDGE_MODEL: str = "claude-3-5-sonnet-20241022"
+    # The LLM-as-judge default. Was `claude-3-5-sonnet-20241022` -- a 2024
+    # snapshot -- here and, separately, in the schema and the service, so the
+    # three agreed with each other while all three aged. Sonnet 5 is current
+    # and cheaper ($2/$10 per MTok); the other two now read this.
+    LLM_DEFAULT_JUDGE_MODEL: str = "claude-sonnet-5"
     LLM_MAX_TOKENS_DEFAULT: int = 1000
     LLM_TEMPERATURE_DEFAULT: float = 0.7
 

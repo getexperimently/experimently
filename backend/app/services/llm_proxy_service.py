@@ -13,57 +13,15 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
+from backend.app.core.anthropic_compat import drop_unsupported_sampling, first_text
+
+# Re-exported: callers and tests import these from here, and the prices
+# live in their own module so the model-literal gate can exempt exactly it.
+from backend.app.core.llm_pricing import estimate_cost
 from backend.app.models.llm_experiment import LLMEvaluation, LLMVariant
 from backend.app.services.llm_experiment_service import LLMExperimentService
 
 logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Cost table
-# ---------------------------------------------------------------------------
-
-COST_PER_1K_TOKENS: Dict[str, Dict[str, Dict[str, float]]] = {
-    "openai": {
-        "gpt-4o": {"input": 0.0025, "output": 0.010},
-        "gpt-4o-mini": {"input": 0.00015, "output": 0.0006},
-        "gpt-3.5-turbo": {"input": 0.0005, "output": 0.0015},
-    },
-    "anthropic": {
-        "claude-3-5-sonnet-20241022": {"input": 0.003, "output": 0.015},
-        "claude-3-haiku-20240307": {"input": 0.00025, "output": 0.00125},
-        "claude-opus-4-6": {"input": 0.015, "output": 0.075},
-    },
-    "google": {
-        "gemini-1.5-pro": {"input": 0.00125, "output": 0.005},
-        "gemini-1.5-flash": {"input": 0.000075, "output": 0.0003},
-    },
-    "cohere": {
-        "command-r-plus": {"input": 0.003, "output": 0.015},
-        "command-r": {"input": 0.00035, "output": 0.00105},
-    },
-    "mistral": {
-        "mistral-large-latest": {"input": 0.003, "output": 0.009},
-        "mistral-small-latest": {"input": 0.0002, "output": 0.0006},
-    },
-}
-
-
-def estimate_cost(
-    provider: str, model_name: str, input_tokens: int, output_tokens: int
-) -> float:
-    """
-    Estimate the cost of an LLM call in USD.
-
-    Falls back to 0.0 when provider/model is not found in the cost table.
-    """
-    provider_costs = COST_PER_1K_TOKENS.get(provider, {})
-    model_costs = provider_costs.get(model_name, {})
-    if not model_costs:
-        return 0.0
-    input_cost = (input_tokens / 1000.0) * model_costs.get("input", 0.0)
-    output_cost = (output_tokens / 1000.0) * model_costs.get("output", 0.0)
-    return round(input_cost + output_cost, 8)
 
 
 # ---------------------------------------------------------------------------
@@ -122,15 +80,28 @@ class AnthropicProvider(BaseProvider):
                     system = msg.get("content", "")
                 else:
                     conversation.append(msg)
+            # temperature/top_p/top_k are REMOVED on Sonnet 5, Opus 5, Opus
+            # 4.8/4.7 and the Fable family -- sending one returns a 400, so an
+            # unconditional `temperature=` made this provider fail outright for
+            # every current Claude model a user might pick.
+            #
+            # Filtered on the MERGED set: `kwargs` is the variant's free-form
+            # `additional_params`, so `{"top_p": 0.9}` reached the API without
+            # going near the named `temperature` argument that an earlier,
+            # narrower check was watching.
+            request = drop_unsupported_sampling(
+                model, {"temperature": temperature, **kwargs}
+            )
             response = await client.messages.create(
                 model=model,
                 max_tokens=max_tokens,
                 system=system or anthropic.NOT_GIVEN,
                 messages=conversation,
-                temperature=temperature,
-                **kwargs,
+                **request,
             )
-            text = response.content[0].text if response.content else ""
+            # Not content[0]: with thinking on, the first block is a thinking
+            # block and .text raises.
+            text = first_text(response)
             input_tok = response.usage.input_tokens if response.usage else 0
             output_tok = response.usage.output_tokens if response.usage else 0
             return ProviderResponse(
