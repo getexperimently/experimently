@@ -39,19 +39,18 @@ jobs:
           bandit -r $targets -ll  # Only show medium+ severity, fail on high
         continue-on-error: false
 
-      # Informational: lists every advisory for the pinned versions regardless
-      # of severity. The blocking dependency gate is the Trivy HIGH/CRITICAL
-      # scan in container-security; lower-severity items are picked up by the
-      # weekly Dependabot pip group.
-      - name: Run pip-audit (dependency advisories, informational)
-        run: |
-          pip-audit -r backend/requirements.txt --no-deps --desc=off
-          # The module-only pins (python3-saml, the warehouse drivers) live in
-          # their own file and would otherwise be audited nowhere.
-          if [ -f modules/requirements.txt ]; then
-            pip-audit -r modules/requirements.txt --no-deps --desc=off
-          fi
-        continue-on-error: true
+      # Blocking, in two tiers. What the images install
+      # (backend/requirements/runtime.lock, modules/requirements.lock) may
+      # carry no advisory at all; the development closure
+      # (backend/requirements.txt) may carry one only with an entry in
+      # security/dependency-audit.toml giving a reason and a review date -- and
+      # the script refuses an entry whose package turns out to ship, or one
+      # that no longer matches any advisory.
+      #
+      # This was `pip-audit ... ; continue-on-error: true`, which is the same
+      # as not running it.
+      - name: Audit the dependency closures
+        run: python scripts/audit_dependencies.py
 
       - name: Upload Bandit report
         uses: actions/upload-artifact@v7
@@ -76,11 +75,46 @@ jobs:
       - name: Install dependencies
         run: cd frontend && npm ci
 
-      - name: Run npm audit
+      # Every closure the licence gate covers, because it now refuses a
+      # directory with no node_modules rather than reporting the root package
+      # alone and passing. The first version of the widened gate ran against
+      # five uninstalled SDKs and checked nothing in CI.
+      - name: Install the published SDK closures
         run: |
-          cd frontend
-          npm audit --audit-level=high
-        continue-on-error: true
+          set -euo pipefail
+          for dir in sdk/js sdk/react sdk/react-native sdk/openfeature sdk/edge; do
+            echo "::group::npm ci $dir"
+            (cd "$dir" && npm ci)
+            echo "::endgroup::"
+          done
+
+      # Blocking. The dashboard image serves this closure's build output, so a
+      # HIGH advisory here ships. It was `continue-on-error: true`, and the
+      # job's result was not even read by security-summary -- neutered twice.
+      #
+      # The demo apps and sdk/react-native are deliberately NOT audited here:
+      # they carry advisories that need semver-major bumps (issue #168), and
+      # gating them today would mean turning continue-on-error back on, which
+      # is what this change exists to remove.
+      - name: Run npm audit
+        # --omit=dev, to match the sentence above it. Without it this audits
+        # the whole lockfile, so a HIGH advisory in jest, eslint or ts-jest --
+        # none of which reach the image -- would block every merge. That is
+        # precisely the pressure that puts `continue-on-error: true` back, and
+        # a blocking gate whose scope is wider than its justification does not
+        # survive contact with a busy week.
+        run: cd frontend && npm audit --omit=dev --audit-level=high
+
+      # Node had no licence gate at all: license-checker was used only to
+      # generate THIRD_PARTY_LICENSES.md, so a dependency arriving under GPL or
+      # SSPL would have been reported and merged. The Python equivalent is
+      # scripts/core_build.sh's `licences` step.
+      # No argument: the script defaults to every closure that is published or
+      # shipped -- the dashboard and the five npm SDKs. Passing `frontend`
+      # alone, which is what this did, left the packages that are actually
+      # redistributed to users ungated.
+      - name: Check production licences
+        run: python3 scripts/check_node_licences.py
 
   semgrep:
     name: Semgrep SAST
@@ -164,6 +198,71 @@ jobs:
           fi
         continue-on-error: false
 
+      # The filesystem scan above reads requirements files; this reads what is
+      # actually installed in the image -- the Debian base, the resolved Python
+      # closure, both profiles. They are different questions, and only this one
+      # is about the artefact that ships.
+      #
+      # --ignore-unfixed is the policy, not a loophole: the core image carries
+      # 55 HIGH/CRITICAL Debian CVEs with no upstream patch (measured), and a
+      # gate that can only be satisfied by a fix that does not exist is a gate
+      # that gets disabled. Everything with a fix available fails the build. As
+      # of this change both profiles report zero, after backend/Dockerfile
+      # stopped shipping pip/setuptools/wheel -- which accounted for every one
+      # of the six fixable findings.
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # build-push-action with the SAME gha cache scopes pr-qa-gate.yml's
+      # docker-smoke uses (`api`, `api-full`), and `load: true` so the image
+      # lands in the local daemon for trivy. The first version ran a bare
+      # `docker build` with no cache at all, which rebuilt both closures cold
+      # on every pull request -- two `pip install --require-hashes` runs, about
+      # the "~8 minutes for a cold job" pr-qa-gate's own comment cites, on a PR
+      # path budgeted at ~13 minutes. It also set up buildx and then did not
+      # use it.
+      - name: Build the API image (core)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: backend/Dockerfile
+          target: core
+          load: true
+          tags: experimently-api:scan-core
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,scope=api,mode=max
+
+      - name: Build the API image (full)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: backend/Dockerfile
+          target: full
+          load: true
+          tags: experimently-api:scan-full
+          # BOTH scopes, as pr-qa-gate.yml does: `builder` and `runtime` are
+          # already cached under `api` from the core build above, and with only
+          # `api-full` a cold or evicted scope re-runs apt and the whole hashed
+          # `pip install` from scratch -- the ~8-minute cold build this step
+          # exists to avoid. The comment above said it used the same scopes as
+          # docker-smoke; it did not.
+          cache-from: |
+            type=gha,scope=api-full
+            type=gha,scope=api
+          cache-to: type=gha,scope=api-full,mode=max
+
+      - name: Scan the built images
+        run: |
+          set -euo pipefail
+          failed=0
+          for target in core full; do
+            echo "::group::trivy image ($target)"
+            trivy image --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 \
+              --format table "experimently-api:scan-$target" || failed=1
+            echo "::endgroup::"
+          done
+          exit "$failed"
+
       - name: Generate SBOM
         run: |
           trivy fs --format cyclonedx --output sbom.json backend/
@@ -184,18 +283,80 @@ jobs:
           if-no-files-found: warn
           retention-days: 90
 
+  # A pull request that ADDS a vulnerable or badly-licensed dependency is
+  # rejected on the diff, before it is merged and becomes everyone's problem.
+  # PR-only by definition -- it compares the base and head closures.
+  #
+  # PUBLIC REPOSITORY ONLY, and not by choice: `dependency-review-action`
+  # answers "Dependency review is not supported on this repository. Please
+  # ensure that Dependency graph is enabled along with GitHub Advanced
+  # Security" and exits 1 on a private repository -- GHAS is a paid add-on
+  # there, and the API the action calls simply is not served. Verified on this
+  # repository, which is why this guard exists rather than a
+  # `continue-on-error` (the thing this whole change removes).
+  #
+  # The condition is the repository name, matching docs.yml's Pages deploy,
+  # so the check turns itself on at the cut with no edit. Until then the job
+  # is skipped, and P3.8 (#140) carries "dependency-review is now live --
+  # add it to branch protection" on its checklist.
+  dependency-review:
+    name: Dependency Review
+    if: github.event_name == 'pull_request' && github.repository == 'getexperimently/experimently'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write   # post the summary comment
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: high
+          # The same families scripts/core_build.sh and
+          # scripts/check_node_licences.py refuse, spelled the way this action
+          # wants them. LGPL is absent from the deny list on purpose: weak
+          # copyleft, linked and not modified, which is why psycopg2-binary and
+          # sharp-libvips are allowed by the other two gates.
+          deny-licenses: GPL-2.0, GPL-3.0, AGPL-3.0, SSPL-1.0
+          comment-summary-in-pr: on-failure
+
   security-summary:
     name: Security Scan Summary
     runs-on: ubuntu-latest
+    # dependency-review is deliberately NOT here. It only runs on pull requests
+    # (it compares two closures), so on a push it is skipped -- and a skipped
+    # job skips its dependents, or, with `if: always()` as below, arrives as
+    # the result `skipped`, which this summary now treats as a failure. It
+    # stands on its own as a check instead. Adding it to branch protection is
+    # a repository setting, noted in the pull request rather than assumed.
     needs: [python-security, frontend-security, semgrep, secret-detection, container-security]
     if: always()
     steps:
       - name: Check security scan results
+        env:
+          # One entry per job in `needs` above, produced by the expression
+          # rather than typed: `toJSON(needs)` is the whole object, so a job
+          # added to `needs` appears here without anyone remembering to add it.
+          RESULTS: ${{ toJSON(needs) }}
         run: |
-          if [ "${{ needs.python-security.result }}" == "failure" ] || \
-             [ "${{ needs.semgrep.result }}" == "failure" ] || \
-             [ "${{ needs.secret-detection.result }}" == "failure" ] || \
-             [ "${{ needs.container-security.result }}" == "failure" ]; then
+          # Every job in `needs`, read from the object rather than from a
+          # hand-typed list. `frontend-security` was missing from that list, so
+          # its result was ignored entirely -- even before its one real step
+          # also carried continue-on-error. A list of names beside a `needs:`
+          # that grows is exactly the defect class this repository keeps
+          # finding, so there is no list: `toJSON(needs)` is
+          # {"job": {"result": ..., "outputs": ...}} and every key is checked.
+          set -euo pipefail
+          echo "$RESULTS" | jq -r 'to_entries[] | "\(.key)=\(.value.result)"' > results.txt
+          test -s results.txt || { echo "::error::needs produced no results"; exit 1; }
+          failed=0
+          while IFS='=' read -r job result; do
+            echo "  $job: $result"
+            case "$result" in
+              success) ;;
+              *) echo "::error::$job: $result"; failed=1 ;;
+            esac
+          done < results.txt
+          if [ "$failed" -ne 0 ]; then
             echo "::error::One or more security scans failed"
             exit 1
           fi

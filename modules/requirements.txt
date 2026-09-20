@@ -28,7 +28,24 @@ requests==2.34.2       # sso_service.py:600,662 -- the OIDC token/userinfo fallb
                        # imports it directly.
 
 # EP-041: Databricks warehouse connector (modules/backend/app/services/databricks_connector.py)
-databricks-sql-connector==3.7.5   # 3.3 pinned pandas<2.2
+databricks-sql-connector[pyarrow]==4.5.0  # >=4.5 is what moves thrift to 0.24.0, which
+                                  # is the fix for PYSEC-2026-3925/3926/3927
+                                  # (issue #97): 3.7.5 pins thrift<0.21 and no
+                                  # 3.x release accepts a patched one, so the
+                                  # advisories could only be cleared by this
+                                  # major. 3.3 had pinned pandas<2.2; 4.5 does
+                                  # not constrain pandas at all.
+                                  #
+                                  # The [pyarrow] extra is NOT optional for us,
+                                  # despite being optional upstream: 3.7.5
+                                  # required pyarrow outright, 4.x made it an
+                                  # extra, and a bare `==4.5.0` therefore drops
+                                  # Arrow/CloudFetch -- the path the driver uses
+                                  # to return large result sets -- from the full
+                                  # image. A security bump must not quietly
+                                  # change what the connector can do, and every
+                                  # test of it patches `databricks_sql`, so
+                                  # nothing would have noticed.
 
 # EP-048: ClickHouse and MySQL warehouse connectors
 clickhouse-connect==0.7.0   # modules/backend/app/services/clickhouse_connector.py

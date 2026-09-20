@@ -1,0 +1,93 @@
+# CodeQL, nightly.
+#
+# Nightly and not on pull requests, deliberately: a CodeQL run over this tree
+# takes many minutes per language, and the pull-request gate is budgeted at
+# ~13 minutes (the P1 plan). Semgrep is what runs on every PR
+# (security-scan.yml) -- fast, rule-based, and tuned to the paths that matter.
+# CodeQL is the deeper dataflow pass, and a finding that only it can see is one
+# that can wait until the next morning.
+#
+# 04:00 UTC: after nightly-qa (02:00) and sdk-unit-tests (03:00), so a red
+# CodeQL run is not competing with them for runners and its notification
+# arrives on its own.
+#
+# Results land in the repository's code-scanning alerts, which need GitHub
+# Advanced Security -- free on a public repository, a paid add-on on a private
+# one. So the analysis runs everywhere and only the SARIF upload is
+# conditional (see `upload:` on the analyze step): on this repository the
+# queries execute and a broken pack or build failure still fails the job,
+# while nothing is uploaded. It starts reporting alerts at the cut with no
+# edit here.
+#
+# This paragraph previously said the upload was attempted and its failure
+# surfaced. That was true of the first version and stopped being true when the
+# upload became conditional -- stated here as what the file does now.
+name: CodeQL
+
+on:
+  schedule:
+    - cron: '0 4 * * *'
+  workflow_dispatch:
+  # On demand for a change to this file itself -- otherwise a broken config
+  # would only be discovered by a nightly run nobody is watching.
+  pull_request:
+    paths: ['.github/workflows/codeql.yml']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        # `python` covers backend/, modules/ and backend/lambda;
+        # `javascript-typescript` covers frontend/, modules/frontend/ and the
+        # TypeScript SDKs. The compiled SDKs (Java, Kotlin, Swift, C#, Go) are
+        # not here: each needs its own toolchain and build, which is a
+        # different job shape, and they are separately covered by their own
+        # ecosystems' tooling. Adding one is adding a build, not a matrix entry.
+        language: [python, javascript-typescript]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          # security-extended adds the lower-precision security queries on top
+          # of the default set. This runs nightly, so the extra minutes and the
+          # extra noise are affordable in a way they would not be on a PR.
+          queries: security-extended
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+
+      # `upload` is conditional for the same reason dependency-review is
+      # guarded: uploading to code scanning needs GitHub Advanced Security,
+      # which a private repository does not have, and an unconditional upload
+      # would make this nightly red every single night -- training everyone to
+      # ignore a security job, which is worse than not having one. (#143 is
+      # what a permanently-red nightly looks like.)
+      #
+      # The analysis itself still runs on the private repository, so a broken
+      # query pack or a build failure is caught here and now; only the results
+      # upload waits for the cut. The condition is the repository name,
+      # matching docs.yml's Pages deploy, so it turns itself on with no edit.
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: /language:${{ matrix.language }}
+          upload: ${{ github.repository == 'getexperimently/experimently' && 'always' || 'never' }}

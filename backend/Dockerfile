@@ -97,7 +97,29 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         curl \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 1001 appgroup \
-    && useradd --uid 1001 --gid appgroup --shell /bin/bash --create-home appuser
+    && useradd --uid 1001 --gid appgroup --shell /bin/bash --create-home appuser \
+    && rm -rf /usr/local/lib/python*/site-packages/setuptools \
+              /usr/local/lib/python*/site-packages/setuptools-* \
+              /usr/local/lib/python*/site-packages/pkg_resources \
+              /usr/local/lib/python*/site-packages/wheel \
+              /usr/local/lib/python*/site-packages/wheel-* \
+              /usr/local/lib/python*/site-packages/pip \
+              /usr/local/lib/python*/site-packages/pip-* \
+              /usr/local/bin/pip /usr/local/bin/pip3 /usr/local/bin/pip3.* \
+              /usr/local/bin/wheel
+
+# The base image's own packaging tools, removed just above, and the venv's,
+# removed in the two profile stages below. Neither is used at runtime: PATH
+# puts /opt/venv first, the entrypoint runs uvicorn and alembic, and nothing
+# under backend/app or modules/backend/app imports pip, setuptools or
+# pkg_resources. They are, however, most of what a vulnerability scanner finds
+# in this image -- setuptools and its vendored jaraco.context/wheel, and pip's
+# vendored msgpack. Measured on the core image: 6 HIGH/CRITICAL findings with a
+# fix available before, 0 after. (The other 55 are unfixed Debian CVEs in the
+# python:3.11-slim base, which is why the scan runs --ignore-unfixed.)
+#
+# A runtime image that cannot install packages is also the point: `pip install`
+# inside a running container is not a supported operation here.
 
 WORKDIR /app
 
@@ -112,7 +134,23 @@ COPY --chown=appuser:appgroup backend/ /app/backend/
 # the file, not the ARG above, because the label is metadata an operator reads
 # and this is what /health and /api/v1/modules answer.
 COPY --chown=appuser:appgroup VERSION /app/VERSION
-RUN chmod +x /app/backend/docker-entrypoint.sh \
+# The requirements files have no runtime use -- they were inputs to the builder
+# stage, which took them from the build context, not from here. Leaving them in
+# the image is not merely untidy: trivy's pip analyser reads any file named
+# requirements.txt, image scans included, so `/app/backend/requirements.txt`
+# made the *development* closure (pytest, moto, locust, aws-cdk-lib) part of
+# what the image gate audits. That gate cannot express the exceptions
+# security/dependency-audit.toml accepts, so the two would have contradicted
+# each other about the same pin the moment one of those advisories gained a
+# fix. .dockerignore cannot exclude them -- the builder needs
+# backend/requirements/runtime.lock from the same context -- so they go here.
+#
+# A pattern, not three named paths: the first attempt removed requirements.txt
+# and requirements/ and left requirements-monitoring.txt sitting there -- which
+# is exactly the kind of file trivy reads. A named list misses the one nobody
+# remembered; the assertion below is what makes that loud either way.
+RUN find /app/backend -maxdepth 2 -name 'requirements*' -exec rm -rf {} + \
+    && chmod +x /app/backend/docker-entrypoint.sh \
     && mkdir -p /data/demo \
     && chown -R appuser:appgroup /data
 
@@ -197,6 +235,48 @@ LABEL io.experimently.profile="full"
 
 # The core closure *plus* the module dependencies.
 COPY --from=builder-full /opt/venv /opt/venv
+# See the note in the runtime stage. Done here and not in `builder`, which
+# `builder-full` extends and which therefore still needs pip. USER root for the
+# duration: the runtime stage has already dropped to appuser, and rm on a
+# root-owned tree fails -- loudly, which is how this was caught, but a silent
+# `|| true` would have left the toolchain in place and the scan gate red with
+# no explanation.
+USER root
+RUN rm -rf /opt/venv/lib/python*/site-packages/pip \
+           /opt/venv/lib/python*/site-packages/pip-* \
+           /opt/venv/lib/python*/site-packages/setuptools \
+           /opt/venv/lib/python*/site-packages/setuptools-* \
+           /opt/venv/lib/python*/site-packages/pkg_resources \
+           /opt/venv/lib/python*/site-packages/wheel \
+           /opt/venv/lib/python*/site-packages/wheel-* \
+           /opt/venv/bin/pip /opt/venv/bin/pip3 /opt/venv/bin/pip3.* \
+           /opt/venv/lib/python*/site-packages/_distutils_hack \
+           /opt/venv/lib/python*/site-packages/distutils-precedence.pth \
+           /usr/local/lib/python*/site-packages/_distutils_hack \
+           /usr/local/lib/python*/site-packages/distutils-precedence.pth
+# ...and then prove it. `rm -rf` on a path that does not exist exits 0, so
+# every line above fails OPEN: a base-image layout change, or a
+# PYTHON_VERSION the paths no longer match, would leave the toolchain in place
+# and nothing would say so. The only other thing that would notice is the
+# trivy gate, and only while a *fixable* advisory happens to exist in one of
+# those packages -- the moment there is none, a green scan would mean nothing.
+#
+# `find` rather than `python -c "import pip"`: import failure is also what a
+# broken install looks like, and this must distinguish "absent" from "broken".
+RUN set -eu; \
+    for name in pip setuptools wheel pkg_resources _distutils_hack; do \
+        found="$(find /opt/venv /usr/local/lib -maxdepth 4 -name "$name" -print -quit 2>/dev/null || true)"; \
+        if [ -n "$found" ]; then \
+            echo "the packaging toolchain survived removal: $found" >&2; \
+            exit 1; \
+        fi; \
+    done; \
+    if command -v pip >/dev/null 2>&1; then \
+        echo "pip is still on PATH: $(command -v pip)" >&2; \
+        exit 1; \
+    fi; \
+    echo "packaging toolchain removed from the venv and the base image"
+USER appuser
 
 # modules/backend, not modules/ whole: modules/frontend is the dashboard's
 # module code, which frontend/Dockerfile needs in the build context and this
@@ -205,6 +285,20 @@ COPY --from=builder-full /opt/venv /opt/venv
 # backend/ counterparts are.
 COPY --from=modules-src --chown=appuser:appgroup /modules/__init__.py /app/modules/
 COPY --from=modules-src --chown=appuser:appgroup /modules/backend /app/modules/backend/
+
+# What must not be in a published image, asserted at the END of the profile
+# stage -- after `full` has copied modules/, which the earlier placement in the
+# `runtime` stage ran before. Covers the .dockerignore exclusions too: an
+# exclusion nothing checks fails open the next time that file is reordered.
+RUN set -eu; \
+    for pattern in 'requirements*' 'CLAUDE.md' 'Dockerfile' '*.pyc'; do \
+        found="$(find /app -name "$pattern" -print -quit 2>/dev/null || true)"; \
+        if [ -n "$found" ]; then \
+            echo "the image ships $found, which it must not" >&2; \
+            exit 1; \
+        fi; \
+    done; \
+    echo "no requirements files, internal docs or build files in the image"
 
 # -------------------------------------------------------------------------
 # Stage 4: core — the core image, with the core closure only: none of
@@ -216,3 +310,59 @@ ENV EXPERIMENTLY_PROFILE=core
 LABEL io.experimently.profile="core"
 
 COPY --from=builder /opt/venv /opt/venv
+# See the note in the runtime stage. Done here and not in `builder`, which
+# `builder-full` extends and which therefore still needs pip. USER root for the
+# duration: the runtime stage has already dropped to appuser, and rm on a
+# root-owned tree fails -- loudly, which is how this was caught, but a silent
+# `|| true` would have left the toolchain in place and the scan gate red with
+# no explanation.
+USER root
+RUN rm -rf /opt/venv/lib/python*/site-packages/pip \
+           /opt/venv/lib/python*/site-packages/pip-* \
+           /opt/venv/lib/python*/site-packages/setuptools \
+           /opt/venv/lib/python*/site-packages/setuptools-* \
+           /opt/venv/lib/python*/site-packages/pkg_resources \
+           /opt/venv/lib/python*/site-packages/wheel \
+           /opt/venv/lib/python*/site-packages/wheel-* \
+           /opt/venv/bin/pip /opt/venv/bin/pip3 /opt/venv/bin/pip3.* \
+           /opt/venv/lib/python*/site-packages/_distutils_hack \
+           /opt/venv/lib/python*/site-packages/distutils-precedence.pth \
+           /usr/local/lib/python*/site-packages/_distutils_hack \
+           /usr/local/lib/python*/site-packages/distutils-precedence.pth
+# ...and then prove it. `rm -rf` on a path that does not exist exits 0, so
+# every line above fails OPEN: a base-image layout change, or a
+# PYTHON_VERSION the paths no longer match, would leave the toolchain in place
+# and nothing would say so. The only other thing that would notice is the
+# trivy gate, and only while a *fixable* advisory happens to exist in one of
+# those packages -- the moment there is none, a green scan would mean nothing.
+#
+# `find` rather than `python -c "import pip"`: import failure is also what a
+# broken install looks like, and this must distinguish "absent" from "broken".
+RUN set -eu; \
+    for name in pip setuptools wheel pkg_resources _distutils_hack; do \
+        found="$(find /opt/venv /usr/local/lib -maxdepth 4 -name "$name" -print -quit 2>/dev/null || true)"; \
+        if [ -n "$found" ]; then \
+            echo "the packaging toolchain survived removal: $found" >&2; \
+            exit 1; \
+        fi; \
+    done; \
+    if command -v pip >/dev/null 2>&1; then \
+        echo "pip is still on PATH: $(command -v pip)" >&2; \
+        exit 1; \
+    fi; \
+    echo "packaging toolchain removed from the venv and the base image"
+USER appuser
+
+# What must not be in a published image, asserted at the END of the profile
+# stage -- after `full` has copied modules/, which the earlier placement in the
+# `runtime` stage ran before. Covers the .dockerignore exclusions too: an
+# exclusion nothing checks fails open the next time that file is reordered.
+RUN set -eu; \
+    for pattern in 'requirements*' 'CLAUDE.md' 'Dockerfile' '*.pyc'; do \
+        found="$(find /app -name "$pattern" -print -quit 2>/dev/null || true)"; \
+        if [ -n "$found" ]; then \
+            echo "the image ships $found, which it must not" >&2; \
+            exit 1; \
+        fi; \
+    done; \
+    echo "no requirements files, internal docs or build files in the image"
