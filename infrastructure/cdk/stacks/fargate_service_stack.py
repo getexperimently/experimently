@@ -29,8 +29,10 @@ class FargateServiceStack(Stack):
     Prerequisites:
     - An ACM certificate must exist for the HTTPS listener. Set the
       CERTIFICATE_ARN environment variable or pass certificate_arn to the
-      constructor. Without a valid ACM certificate the HTTPS listener cannot
-      be created and the stack will fail during deployment.
+      constructor. Without it this stack refuses to build -- at ``cdk synth``,
+      not at deploy, which is what this note used to say: both listeners are
+      HTTPS and CDK validates that at the end of synthesis. A synth-only check
+      may pass any well-formed ARN; nothing resolves it until a deployment.
     - The Secrets Manager secrets listed in docs/deployment/README.md must
       exist. ECS cannot start a task whose task definition names a secret that
       is not there, and the application cannot start without their values.
@@ -121,9 +123,7 @@ class FargateServiceStack(Stack):
             description="IAM role for ECS Fargate tasks",
         )
         task_role.add_managed_policy(
-            iam.ManagedPolicy.from_aws_managed_policy_name(
-                "CloudWatchLogsFullAccess"
-            )
+            iam.ManagedPolicy.from_aws_managed_policy_name("CloudWatchLogsFullAccess")
         )
         # Least-privilege Secrets Manager access — only the required secrets
         task_role.add_to_policy(
@@ -169,7 +169,7 @@ class FargateServiceStack(Stack):
             self,
             "BackendTaskDef",
             family=f"experimentation-backend-{env_name}",
-            cpu=1024,           # 1 vCPU
+            cpu=1024,  # 1 vCPU
             memory_limit_mib=2048,  # 2 GB
             task_role=task_role,
             execution_role=execution_role,
@@ -198,11 +198,7 @@ class FargateServiceStack(Stack):
                     superuser_secret
                 ),
                 **(
-                    {
-                        "AUDIT_HMAC_KEY": ecs.Secret.from_secrets_manager(
-                            audit_secret
-                        )
-                    }
+                    {"AUDIT_HMAC_KEY": ecs.Secret.from_secrets_manager(audit_secret)}
                     if audit_secret is not None
                     else {}
                 ),
@@ -280,15 +276,37 @@ class FargateServiceStack(Stack):
         )
 
         # --- HTTPS Production Listener (port 443) ---
-        # IMPORTANT: An ACM certificate ARN is required for the HTTPS listener.
-        # In production, provision a certificate via AWS Certificate Manager
-        # (either via the console or a separate CDK stack) and pass its ARN as
-        # the `certificate_arn` constructor parameter or the CERTIFICATE_ARN
-        # environment variable. Without a certificate this listener cannot be
-        # created and the stack deploy will fail.
+        # An ACM certificate ARN is required. Provision one via AWS Certificate
+        # Manager and pass it as the `certificate_arn` constructor parameter or
+        # the CERTIFICATE_ARN environment variable; the format is
+        # `arn:aws:acm:<region>:<account>:certificate/<uuid>`.
         #
-        # Example certificate ARN format:
-        #   arn:aws:acm:<region>:<account>:certificate/<uuid>
+        # Required at SYNTH, not at deploy -- which is what the note here used
+        # to say. Both listeners below are HTTPS, and CDK validates at the end
+        # of synthesis that an HTTPS listener has a certificate:
+        #
+        #   ValidationFailedWithErrors: [.../HttpsListener] HTTPS Listener
+        #   needs at least one certificate (call addCertificates)
+        #
+        # So `cdk synth` fails without one, and the guard below says that in
+        # those words rather than leaving the reader to map CDK's message back
+        # to a missing environment variable. A synth-only check (CI) can pass
+        # any well-formed ARN: nothing resolves it until deploy.
+        #
+        # Deliberately NOT falling back to an HTTP listener when the ARN is
+        # absent. That would make `cdk synth` succeed and hand anyone who
+        # forgot the variable a load balancer that terminates in plaintext --
+        # trading a loud failure for a quiet downgrade, on the public edge of
+        # the platform.
+        if not certificate_arn:
+            raise ValueError(
+                "FargateServiceStack requires an ACM certificate: set the "
+                "CERTIFICATE_ARN environment variable (or pass certificate_arn) "
+                "to an arn:aws:acm:<region>:<account>:certificate/<uuid>. Both "
+                "the production and the CodeDeploy test listener are HTTPS, and "
+                "cdk synth fails validation without one."
+            )
+
         https_listener_kwargs = dict(
             port=443,
             protocol=elbv2.ApplicationProtocol.HTTPS,
@@ -339,7 +357,29 @@ class FargateServiceStack(Stack):
             desired_count=3,
             min_healthy_percent=100,
             max_healthy_percent=200,
-            security_groups=[ecs_security_group],
+            # Imported immutably, and this is the whole fix for the dependency
+            # cycle. Passing the ComputeStack's SecurityGroup *object* here
+            # made `attach_to_application_target_group` below reach back into
+            # it: CDK's ApplicationListener.registerConnectable calls
+            # `connections.allowFrom(loadBalancer, ...)`, and
+            # `determineRuleScope` puts BOTH halves of the rule pair under the
+            # initiating security group -- the ECS one, in the compute stack --
+            # each referencing the ALB's security group, which lives here. That
+            # is compute -> fargate, against the fargate -> compute dependency
+            # app.py already declares, and `cdk synth` has refused to complete
+            # since EP-019 first added this stack.
+            #
+            # `mutable=False` makes CDK decline to write rules onto the
+            # imported group; the rule it would have written is created
+            # explicitly below, in this stack, where it belongs.
+            security_groups=[
+                ec2.SecurityGroup.from_security_group_id(
+                    self,
+                    "ImportedEcsSecurityGroup",
+                    ecs_security_group.security_group_id,
+                    mutable=False,
+                )
+            ],
             vpc_subnets=ec2.SubnetSelection(
                 subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS
             ),
@@ -354,8 +394,27 @@ class FargateServiceStack(Stack):
 
         # Attach the service to the blue target group. CodeDeploy will manage
         # shifting traffic between blue and green during deployments.
-        self.fargate_service.attach_to_application_target_group(
-            self.blue_target_group
+        self.fargate_service.attach_to_application_target_group(self.blue_target_group)
+
+        # The ingress CDK would have added implicitly, written explicitly and on
+        # this side of the stack boundary. With the security group imported
+        # `mutable=False` above, CDK silently declines to create this rule --
+        # no warning, no annotation -- and the service would still be reachable
+        # only because `compute_stack.py` opens 0.0.0.0/0 on 8000. That is a
+        # rule nobody should rely on, and tightening it later would take the
+        # load balancer down with it. So the real rule is stated here: this ALB,
+        # to the task port, and nothing else.
+        ec2.CfnSecurityGroupIngress(
+            self,
+            "AlbToTasksIngress",
+            group_id=ecs_security_group.security_group_id,
+            ip_protocol="tcp",
+            from_port=8000,
+            to_port=8000,
+            source_security_group_id=self.alb.connections.security_groups[
+                0
+            ].security_group_id,
+            description="Load balancer to target",
         )
 
         # --- CodeDeploy IAM Role ---
