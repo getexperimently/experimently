@@ -12,12 +12,16 @@ same rule ``backend/app/modules_loader.py`` applies to the application — with
 ``EXPERIMENTLY_PROFILE`` as the explicit override.
 
 ``app.py`` is run the way ``cdk synth`` runs it, with ``App.synth`` stubbed out
-so the assertions are about which stacks the app *contains*.  (The app-wide
-``app.synth()`` currently raises ``DependencyCycle`` between
-``experimentation-compute-dev`` and ``experimentation-fargate-dev`` — the ALB
-in the Fargate stack adds a rule to the ECS security group in the compute
-stack, which already depends on it.  That is a pre-existing defect in the
-core stacks, untouched here and not what these tests are about.)
+so the assertions below are about which stacks the app *contains*.
+
+That stub is also why a two-year-old defect shipped.  ``app.synth()`` raised
+``DependencyCycle`` between ``experimentation-compute-dev`` and
+``experimentation-fargate-dev`` from the day EP-019 added the Fargate stack,
+and every test here passed throughout, because none of them ever called it: a
+dependency cycle is an app-level, synth-time failure, invisible to
+``Template.from_stack`` on one stack at a time.  ``TestTheAppActuallySynthesises``
+at the bottom of this file is the test that would have caught it, and is the
+regression test for the fix.
 """
 
 from __future__ import annotations
@@ -52,11 +56,21 @@ CORE_STACKS = {
 def _app_environment(cdk_dir: Path, **overrides: str):
     saved_env = dict(os.environ)
     saved_path = list(sys.path)
-    saved_modules = {k: v for k, v in sys.modules.items() if k.split(".")[0] == "stacks"}
+    saved_modules = {
+        k: v for k, v in sys.modules.items() if k.split(".")[0] == "stacks"
+    }
     os.environ.update(
         CDK_DEFAULT_ACCOUNT="123456789012",
         CDK_DEFAULT_REGION="us-west-2",
         ENVIRONMENT="dev",
+        # Required at synth, not at deploy: both ALB listeners are HTTPS and
+        # CDK validates that at the end of synthesis, so FargateServiceStack
+        # refuses to build without one. Never resolved -- no AWS call is made
+        # for an ACM ARN until a real deployment.
+        CERTIFICATE_ARN=(
+            "arn:aws:acm:us-west-2:123456789012:certificate/"
+            "00000000-0000-0000-0000-000000000000"
+        ),
     )
     os.environ.pop("EXPERIMENTLY_PROFILE", None)
     os.environ.update(overrides)
@@ -200,3 +214,119 @@ class TestMonitoringFollowsTheProfile:
             {"Name": "StreamName", "Value": "exp-events-abcd1234"}
         ]
         assert "experimentation-events" not in str(template)
+
+
+class TestTheAppActuallySynthesises:
+    """A real ``app.synth()``, which nothing in this repository did before.
+
+    Everything else in this file stubs ``App.synth`` so it can assert on the
+    app's *contents*.  That is a different question from "does this app
+    synthesise", and the difference is not academic: cross-stack references,
+    the stack dependency graph, export generation and the CDK validation
+    plugins all run only inside ``synth()``.  ``cdk synth`` -- and therefore
+    ``cdk deploy`` -- was impossible for either profile from 2026-03-01 until
+    this test was written, and CI was green the whole time.
+    """
+
+    @pytest.mark.parametrize("profile", ["core", "full"])
+    def test_synth_completes(self, profile: str, core_cdk_dir: Path):
+        """`app.synth()` succeeds and yields a template for every stack.
+
+        Asserted on the returned ``CloudAssembly``, not on files: the jsii Node
+        process fixes its working directory and environment when it starts, so
+        by the time this test runs neither ``CDK_OUTDIR`` nor an ``os.chdir``
+        can move where a synth writes. The assembly object has everything worth
+        checking and no such constraint.
+
+        The dummy account, region and certificate come from
+        ``_app_environment``. Nothing here calls ``from_lookup``, so no
+        credentials and no context lookups are needed; the certificate is
+        required at *synth* because both ALB listeners are HTTPS, and an ACM
+        ARN is never resolved until a deployment.
+        """
+        cdk_dir = core_cdk_dir if profile == "core" else CDK_DIR
+
+        with _app_environment(cdk_dir):
+            # No `App.synth` stub -- calling it for real is the entire point.
+            namespace = runpy.run_path(str(cdk_dir / "app.py"), run_name="__main__")
+
+        assembly = namespace["app"].synth()
+        produced = {stack.stack_name for stack in assembly.stacks}
+        assert produced, f"{profile}: synth produced no stacks"
+
+        # The stack set is pinned, not counted: a stack silently dropping out
+        # of a deploy is the defect the ENABLE_MODULE_STACKS gate produced
+        # before this file existed.
+        expected = CORE_STACKS | {
+            "experimentation-auth-dev",
+            "experimentation-api-dev",
+            "experimentation-compute-dev",
+            "experimentation-redis-dev",
+            "experimentation-dynamodb-dev",
+            "experimentation-migrations-dev",
+        }
+        assert expected <= produced, f"{profile}: missing {sorted(expected - produced)}"
+
+        if profile == "full":
+            assert MODULE_STACKS <= produced, (
+                f"full: missing module stacks {sorted(MODULE_STACKS - produced)}"
+            )
+        else:
+            assert not (MODULE_STACKS & produced), (
+                f"core: module stacks leaked in {sorted(MODULE_STACKS & produced)}"
+            )
+
+        # Every stack carries a real template -- synth having "succeeded" with
+        # an empty one would mean nothing.
+        for stack in assembly.stacks:
+            assert stack.template.get("Resources"), (
+                f"{profile}: {stack.stack_name} synthesised no resources"
+            )
+
+    @pytest.mark.regression
+    def test_the_load_balancer_can_still_reach_the_tasks(self):
+        """The ALB -> task ingress survives, and is written by the fargate stack.
+
+        This is the half of the cycle fix that fails *silently*.  Importing the
+        compute stack's security group with ``mutable=False`` is what breaks the
+        cycle, and it also makes CDK decline -- with no warning and no
+        annotation -- to write the rule that
+        ``attach_to_application_target_group`` would otherwise have added.  The
+        explicit ``CfnSecurityGroupIngress`` in ``fargate_service_stack.py``
+        puts it back.
+
+        Delete that construct and everything still synthesises, every other
+        test here still passes, and the service still answers -- because
+        ``compute_stack.py`` opens 0.0.0.0/0 on 8000 (see #175's neighbourhood).
+        The day that rule is tightened, the load balancer goes dark.  So the
+        rule is asserted here rather than left to be inferred from a green
+        synth.
+        """
+        with _app_environment(CDK_DIR):
+            namespace = runpy.run_path(str(CDK_DIR / "app.py"), run_name="__main__")
+        assembly = namespace["app"].synth()
+
+        fargate = next(
+            s for s in assembly.stacks if s.stack_name == "experimentation-fargate-dev"
+        )
+        ingress = [
+            props
+            for res in fargate.template["Resources"].values()
+            if res["Type"] == "AWS::EC2::SecurityGroupIngress"
+            for props in [res.get("Properties", {})]
+            if props.get("FromPort") == 8000 and props.get("ToPort") == 8000
+        ]
+        assert len(ingress) == 1, (
+            "expected exactly one ALB->task ingress rule on port 8000 in "
+            f"experimentation-fargate-dev, found {len(ingress)}"
+        )
+
+        rule = ingress[0]
+        assert rule.get("IpProtocol") == "tcp", rule
+        # Sourced from a security group, never a CIDR: a rule that widened to
+        # 0.0.0.0/0 here would pass a "the rule exists" check and be wrong.
+        assert "SourceSecurityGroupId" in rule, rule
+        assert "CidrIp" not in rule, rule
+        # And it targets the compute stack's group, which is why the rule has
+        # to be written from this side at all.
+        assert "GroupId" in rule, rule

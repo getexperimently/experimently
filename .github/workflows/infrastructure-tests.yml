@@ -7,15 +7,19 @@ on:
       - 'infrastructure/**'
       - 'modules/infrastructure/**'
       - '.github/workflows/infrastructure-tests.yml'
+  # NO path filter on pull_request, deliberately. These tests now include a
+  # real `cdk synth` for both profiles, and the defect that motivated it --
+  # a stack dependency cycle that made `cdk synth` and `cdk deploy` impossible
+  # for six months -- was introduced by a change under infrastructure/ but
+  # could equally have come from modules/, a requirements bump, or a Python
+  # version change. A path-filtered job also cannot be a required check: it
+  # never reports on the pull requests it skips, so the branch protection
+  # entry would sit pending for ever.
+  #
+  # The cost is ~2 minutes, nearly all of it `pip install`, against a gate
+  # that would have caught a six-month outage of the entire deploy path.
   pull_request:
     branches: [main]
-    paths:
-      - 'infrastructure/**'
-      # The modules' stacks are built by infrastructure/cdk/app.py in the full
-      # profile, and test_app_profiles.py asserts they are; a change to one of
-      # them has to run these tests.
-      - 'modules/infrastructure/**'
-      - '.github/workflows/infrastructure-tests.yml'
   workflow_dispatch:
 
 jobs:
