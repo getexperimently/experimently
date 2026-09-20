@@ -14,6 +14,9 @@ import os
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
+from backend.app.core.anthropic_compat import first_text
+from backend.app.core.config import settings
+
 logger = logging.getLogger(__name__)
 
 
@@ -243,11 +246,12 @@ class AIDesignService:
             f"Be concise and specific."
         )
         message = client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=1024,
+            model=settings.ANTHROPIC_MODEL,
+            # Raised from 1024: adaptive thinking draws on the same budget.
+            max_tokens=4096,
             messages=[{"role": "user", "content": prompt}],
         )
-        response_text = message.content[0].text
+        response_text = first_text(message)
         return cls._parse_ai_response(response_text, experiment_type)
 
     @classmethod
@@ -267,11 +271,12 @@ class AIDesignService:
             f"3) Key findings"
         )
         message = client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=512,
+            model=settings.ANTHROPIC_MODEL,
+            # Raised from 512: adaptive thinking draws on the same budget.
+            max_tokens=4096,
             messages=[{"role": "user", "content": prompt}],
         )
-        text = message.content[0].text
+        text = first_text(message)
 
         # Determine recommendation from response text
         rec = "continue_testing"
