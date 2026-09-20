@@ -5846,7 +5846,7 @@
             "title": "Evaluation Ids"
           },
           "judge_model": {
-            "default": "claude-3-5-sonnet-20241022",
+            "description": "Model used to score responses; defaults to LLM_DEFAULT_JUDGE_MODEL.",
             "title": "Judge Model",
             "type": "string"
           }

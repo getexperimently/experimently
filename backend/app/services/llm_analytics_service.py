@@ -18,6 +18,8 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
+from backend.app.core.anthropic_compat import first_text
+from backend.app.core.config import settings
 from backend.app.models.llm_experiment import (
     LLMEvaluation,
     LLMExperiment,
@@ -361,11 +363,16 @@ class LLMEvaluationAnalyticsService:
         db: Session,
         experiment_id: UUID,
         judge_criteria: str = "helpfulness",
-        judge_model: str = "claude-3-5-sonnet-20241022",
+        judge_model: Optional[str] = None,
         evaluation_ids: Optional[List[UUID]] = None,
     ) -> List[LLMJudgeResult]:
         """
         Use an LLM as a judge to score model responses.
+
+        ``judge_model`` defaults to ``settings.LLM_DEFAULT_JUDGE_MODEL`` rather
+        than a literal: this signature carried its own copy of a 2024 model id,
+        which meant the configured default was ignored by anyone calling it
+        positionally.
 
         Calls the judge model with a structured prompt asking it to rate each
         response on the given criteria (0–1).  Stores the auto_eval_score on
@@ -379,6 +386,8 @@ class LLMEvaluationAnalyticsService:
         if evaluation_ids:
             query = query.filter(LLMEvaluation.id.in_(evaluation_ids))
         evaluations = query.all()
+
+        judge_model = judge_model or settings.LLM_DEFAULT_JUDGE_MODEL
 
         results: List[LLMJudgeResult] = []
         for ev in evaluations:
@@ -431,10 +440,15 @@ class LLMEvaluationAnalyticsService:
             client = anthropic.AsyncAnthropic()
             msg = await client.messages.create(
                 model=judge_model,
-                max_tokens=200,
+                # 200 was sized for the answer alone. With adaptive thinking
+                # on -- which `judge_model` may well select, since it is
+                # whatever the user configured -- the budget can be spent
+                # before the verdict starts, and every evaluation then scored
+                # exactly 0.5 and fed the t-tests as if a judge had produced it.
+                max_tokens=4096,
                 messages=[{"role": "user", "content": judge_prompt}],
             )
-            raw = msg.content[0].text if msg.content else ""
+            raw = first_text(msg)
             return self._parse_judge_response(raw)
         except Exception as exc:
             logger.warning(f"LLM-as-judge call failed: {exc}, using fallback score")
