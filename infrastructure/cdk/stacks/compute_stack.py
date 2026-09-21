@@ -33,10 +33,21 @@ class ComputeStack(Stack):
             allow_all_outbound=True,
         )
 
-        # Allow inbound traffic on port 8000 (FastAPI)
-        self.ecs_security_group.add_ingress_rule(
-            ec2.Peer.any_ipv4(), ec2.Port.tcp(8000), "Allow inbound HTTP traffic"
-        )
+        # No ingress rule here on purpose. This used to be
+        # `ec2.Peer.any_ipv4()` on 8000 -- anything routable inside the VPC
+        # could reach the task port directly, bypassing the load balancer.
+        #
+        # It could not safely be removed before #174, because it was the only
+        # reason the ALB could reach the tasks at all: passing this group's
+        # object to the Fargate service made CDK write the real rule into the
+        # *compute* stack, which is what created the dependency cycle, and the
+        # fix imports the group `mutable=False` so CDK writes nothing here.
+        # `fargate_service_stack.py` now states that rule explicitly -- this
+        # ALB's security group, port 8000, nothing else -- and
+        # `test_the_load_balancer_can_still_reach_the_tasks` pins it.
+        #
+        # So the blanket rule has no job left. Removing it means the tasks are
+        # reachable from the load balancer and from nothing else.
 
         # Create database access Lambda role with additional permissions
         db_lambda_role = iam.Role(

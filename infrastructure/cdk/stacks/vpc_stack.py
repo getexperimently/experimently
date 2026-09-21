@@ -94,14 +94,34 @@ class VpcStack(Stack):
             allow_all_outbound=True,
         )
 
-        # Allow SSH access to bastion from specific IP ranges (replace with your corporate IP)
-        self.bastion_security_group.add_ingress_rule(
-            peer=ec2.Peer.ipv4(
-                "0.0.0.0/0"
-            ),  # IMPORTANT: Replace with your specific IP range in production!
-            connection=ec2.Port.tcp(22),
-            description="Allow SSH from specified IP ranges",
-        )
+        # SSH reaches the bastion only from a CIDR the deployer names, and
+        # there is no default.
+        #
+        # This used to be `ec2.Peer.ipv4("0.0.0.0/0")` with a comment saying
+        # "IMPORTANT: Replace with your specific IP range in production!" -- a
+        # comment as the entire control. Nothing failed, warned or required a
+        # choice, so a plain `cdk deploy` opened 22 to the internet, on a group
+        # the Aurora cluster trusts (`enhanced_database_stack.py`) and that is
+        # advertised for exactly that purpose in SSM and a CfnOutput. `cdk
+        # synth` flagged it on every run (CloudFormation-Validate W2508) and
+        # the warning was scrolled past.
+        #
+        # Absent context, no rule is created at all. The group still exists for
+        # the database grant below, with nothing able to reach it -- which is
+        # the safe default, and a bastion nobody has configured is one nobody
+        # can use. Opt in with:
+        #
+        #     cdk deploy -c bastion_ssh_cidr=203.0.113.4/32
+        #
+        # Session Manager and no port 22 at all would be better still; that is
+        # a larger change than closing this hole.
+        bastion_ssh_cidr = self.node.try_get_context("bastion_ssh_cidr")
+        if bastion_ssh_cidr:
+            self.bastion_security_group.add_ingress_rule(
+                peer=ec2.Peer.ipv4(bastion_ssh_cidr),
+                connection=ec2.Port.tcp(22),
+                description=f"SSH from {bastion_ssh_cidr}",
+            )
 
         # Allow bastion to access application and database tiers
         self.app_security_group.add_ingress_rule(
