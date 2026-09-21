@@ -20,6 +20,8 @@ Architecture note on transaction isolation:
 All previously documented application bugs in this file have been fixed.
 """
 
+import uuid
+
 import pytest
 
 from backend.app.models.feature_flag import FeatureFlag, FeatureFlagStatus
@@ -111,10 +113,46 @@ class TestFeatureFlagsPermissions:
         assert response.status_code in (403, 401), response.text
 
     def test_analyst_can_list_flags(self, analyst_client):
-        """Analysts have LIST permission; endpoint returns 200 with their own flags."""
+        """Analysts have LIST permission; the endpoint returns 200."""
         response = analyst_client.get("/api/v1/feature-flags/")
         assert response.status_code == 200, response.text
         assert isinstance(response.json()["items"], list)
+
+    @pytest.mark.regression
+    def test_an_analyst_sees_a_flag_they_do_not_own(
+        self, db_session, admin_user, analyst_client
+    ):
+        """#83, the feature-flag half.
+
+        This endpoint had its own access model, different again from the
+        experiments one: superuser -> all; the UPDATE permission (ADMIN,
+        DEVELOPER) -> all; otherwise own rows only. Its comment read
+        "Analyst/Viewer can only see their own", which inverts the role the
+        docs describe -- ANALYST exists to view all data without modifying it,
+        so it was the one role guaranteed to be wrong.
+
+        Inserted directly rather than created through the API: `admin_client`
+        and `analyst_client` override the same authentication dependency, so
+        requesting both in one test authenticates every call as whichever
+        resolved last.
+        """
+        flag = FeatureFlag(
+            key=f"not-the-analysts-{uuid.uuid4().hex[:8]}",
+            name="Owned by somebody else entirely",
+            description="An analyst should still see this",
+            status=FeatureFlagStatus.INACTIVE,
+            owner_id=admin_user.id,
+            rollout_percentage=0,
+        )
+        db_session.add(flag)
+        db_session.commit()
+        db_session.refresh(flag)
+
+        response = analyst_client.get("/api/v1/feature-flags/", params={"limit": 500})
+
+        assert response.status_code == 200, response.text
+        keys = {item["key"] for item in response.json()["items"]}
+        assert flag.key in keys, "an analyst must see the platform, not an empty page"
 
 
 @pytest.mark.integration

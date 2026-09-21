@@ -195,33 +195,32 @@ async def list_experiments(
         # Create experiment service
         experiment_service = ExperimentService(db)
 
-        # Query experiments based on user permissions
-        if current_user.is_superuser:
-            experiments = experiment_service.get_experiments(
-                skip=skip,
-                limit=limit,
-                status=status_filter,
-                search=search,
-                sort_by=sort_by,
-                sort_order=sort_order,
-            )
-            total = experiment_service.count_experiments(
-                status=status_filter, search=search
-            )
-        else:
-            # Filter by owner for regular users
-            experiments = experiment_service.get_experiments_by_owner(
-                owner_id=current_user.id,
-                skip=skip,
-                limit=limit,
-                status=status_filter,
-                search=search,
-                sort_by=sort_by,
-                sort_order=sort_order,
-            )
-            total = experiment_service.count_experiments_by_owner(
-                owner_id=current_user.id, status=status_filter, search=search
-            )
+        # Everyone the LIST check above admitted sees the whole platform.
+        #
+        # This used to branch on `is_superuser`: a superuser saw everything,
+        # everyone else only rows they owned. That is a second access model
+        # sitting on top of the role table, and it contradicts it -- all four
+        # roles carry Action.LIST on experiments, and ANALYST exists precisely
+        # to "view all data but not create or modify" (CLAUDE.md). An analyst
+        # saw an empty platform (#83).
+        #
+        # A deployment is single tenant (founder, 2026-09-21), so "all
+        # experiments" is the whole of what this installation holds. Tenant
+        # isolation is the workspaces module's job: `Experiment.workspace_id`
+        # is a bare indexed UUID that core never filters on, and if scoping is
+        # ever wanted here it belongs there, keyed on membership, not on who
+        # happens to have created a row.
+        experiments = experiment_service.get_experiments(
+            skip=skip,
+            limit=limit,
+            status=status_filter,
+            search=search,
+            sort_by=sort_by,
+            sort_order=sort_order,
+        )
+        total = experiment_service.count_experiments(
+            status=status_filter, search=search
+        )
 
         # Create response
         return ExperimentListResponse(

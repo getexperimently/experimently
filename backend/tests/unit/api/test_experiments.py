@@ -282,13 +282,17 @@ async def test_list_experiments(
         ),
     ]
 
-    # Configure the mock service with dictionaries
-    mock_experiment_service.get_experiments_by_owner.return_value = [
+    # Configure the mock service with dictionaries.
+    #
+    # The platform-wide methods, not the `_by_owner` pair: the list endpoint
+    # returns everything to anyone the LIST permission admits (#83). It used to
+    # scope to rows the caller owned unless they were a superuser, which meant
+    # an ANALYST -- the role whose whole purpose is viewing all data -- saw an
+    # empty platform.
+    mock_experiment_service.get_experiments.return_value = [
         exp.model_dump() for exp in mock_experiments
     ]
-    mock_experiment_service.count_experiments_by_owner.return_value = len(
-        mock_experiments
-    )
+    mock_experiment_service.count_experiments.return_value = len(mock_experiments)
 
     # NOTE: do not patch ExperimentListResponse.__new__/__init__ here.  Once
     # __new__ has been set and deleted on a class, CPython leaves the class
@@ -305,7 +309,10 @@ async def test_list_experiments(
     )
 
     # Verify service was called correctly
-    mock_experiment_service.get_experiments_by_owner.assert_called_once()
+    mock_experiment_service.get_experiments.assert_called_once()
+    # And that the owner-scoped path is not reached at all. Asserting the
+    # positive alone would still pass if both were called.
+    mock_experiment_service.get_experiments_by_owner.assert_not_called()
 
     # Verify response
     assert isinstance(response, ExperimentListResponse)
