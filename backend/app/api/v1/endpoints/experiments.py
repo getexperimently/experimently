@@ -175,6 +175,22 @@ async def list_experiments(
     Returns:
         ExperimentListResponse: Paginated list of experiments with total count
     """
+    # Every other verb in this file checks its permission -- CREATE at :253,
+    # READ at :375, DELETE at :732, UPDATE at :1012 -- and the equivalent
+    # feature-flag endpoint checks LIST at feature_flags.py:123. This one
+    # checked nothing: `get_current_active_user` establishes that the caller is
+    # authenticated and not disabled, and that was the whole gate.
+    #
+    # It went unnoticed because the ownership filter below was doing the access
+    # control by accident: a caller with no business listing experiments still
+    # only saw their own. That makes the omission invisible until someone
+    # widens the scoping -- which is exactly what #83 asks for.
+    if not check_permission(current_user, ResourceType.EXPERIMENT, Action.LIST):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to list experiments",
+        )
+
     try:
         # Create experiment service
         experiment_service = ExperimentService(db)

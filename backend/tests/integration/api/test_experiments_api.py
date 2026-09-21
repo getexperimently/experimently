@@ -557,3 +557,65 @@ class TestExperimentAuthorization:
         # Not found (404), permission denied (403), or missing query param (422)
         assert response.status_code in (403, 404, 422), response.text
         assert response.status_code != 204
+
+
+@pytest.mark.regression
+class TestListExperimentsChecksItsPermission:
+    """`GET /experiments/` enforced nothing but "is this user active".
+
+    Every other verb in `endpoints/experiments.py` checks its permission --
+    CREATE, READ, DELETE, UPDATE -- and the equivalent feature-flag endpoint
+    checks ``Action.LIST`` at feature_flags.py:123. This one did not.
+
+    **No live hole today**, and the test below is written to say so honestly:
+    `User.role` defaults to `UserRole.VIEWER`, and all four roles carry
+    `Action.LIST` on experiments, so there is no account that reaches this
+    endpoint and should be refused. The gap is that nothing *would* refuse one
+    -- it becomes real the moment a role is added, LIST is removed from one, or
+    the ownership filter is widened, which is what #83 asks for. The filter was
+    doing the access control by accident.
+    """
+
+    def test_every_role_that_may_list_still_can(
+        self, admin_client, developer_client, analyst_client, viewer_client
+    ):
+        """The check must not lock out anyone the role table admits.
+
+        Asserted across all four together because a permission check that
+        quietly excludes one role is the failure mode worth catching.
+        """
+        for name, client in (
+            ("admin", admin_client),
+            ("developer", developer_client),
+            ("analyst", analyst_client),
+            ("viewer", viewer_client),
+        ):
+            response = client.get("/api/v1/experiments/")
+            assert response.status_code == 200, f"{name}: {response.text}"
+
+    def test_the_check_is_load_bearing(self, admin_client, monkeypatch):
+        """A refusal from `check_permission` must actually refuse.
+
+        This is the regression, and it is written this way because no *account*
+        can currently fail the check -- so asserting on a user would assert
+        nothing. Denying the permission itself is what distinguishes the fixed
+        code from the old: before, the endpoint never consulted
+        `check_permission` for LIST at all, so this denial changed nothing and
+        the call returned 200.
+        """
+        import backend.app.api.v1.endpoints.experiments as endpoint
+        from backend.app.core.permissions import Action, ResourceType
+
+        real = endpoint.check_permission
+
+        def deny_only_list(user, resource, action, *args, **kwargs):
+            if resource is ResourceType.EXPERIMENT and action is Action.LIST:
+                return False
+            return real(user, resource, action, *args, **kwargs)
+
+        monkeypatch.setattr(endpoint, "check_permission", deny_only_list)
+
+        response = admin_client.get("/api/v1/experiments/")
+
+        assert response.status_code == 403, response.text
+        assert "not authorized" in response.json()["detail"].lower()
