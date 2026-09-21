@@ -619,3 +619,88 @@ class TestListExperimentsChecksItsPermission:
 
         assert response.status_code == 403, response.text
         assert "not authorized" in response.json()["detail"].lower()
+
+
+@pytest.mark.regression
+class TestEveryRoleSeesThePlatform:
+    """#83: the list was scoped to rows you own unless you were a superuser.
+
+    So an ANALYST -- the role that exists to "view all data but not create or
+    modify" -- saw an empty platform. Three different access models were in
+    play: `is_superuser` here, `is_superuser` **or** the UPDATE permission in
+    `feature_flags.py` (whose comment said "Analyst/Viewer can only see their
+    own", inverting the documented role), and the role table itself, which
+    grants `Action.LIST` to all four and is what the docs describe.
+
+    The role table wins. A deployment is single tenant (founder, 2026-09-21);
+    tenant isolation is the workspaces module's job, keyed on membership, not
+    on who happens to have created a row.
+
+    The experiment is inserted directly rather than created through the API,
+    because `admin_client` and `analyst_client` both override the same
+    authentication dependency -- requesting two in one test silently
+    authenticates every call as whichever was resolved last.
+    """
+
+    @staticmethod
+    def _insert_owned_by(db_session: Session, owner_id, name: str):
+        from backend.app.models.experiment import Experiment, ExperimentStatus
+
+        experiment = Experiment(
+            name=name,
+            description="Owned by somebody else entirely",
+            hypothesis="An analyst should still see this",
+            status=ExperimentStatus.DRAFT,
+            owner_id=owner_id,
+        )
+        db_session.add(experiment)
+        db_session.commit()
+        db_session.refresh(experiment)
+        return experiment
+
+    def test_an_analyst_sees_an_experiment_they_do_not_own(
+        self, db_session: Session, admin_user, analyst_client
+    ):
+        """The reported bug, as an assertion. This list used to come back empty."""
+        experiment = self._insert_owned_by(
+            db_session, admin_user.id, f"Not the analyst's {uuid.uuid4().hex[:8]}"
+        )
+
+        response = analyst_client.get("/api/v1/experiments/", params={"limit": 500})
+
+        assert response.status_code == 200, response.text
+        ids = {item["id"] for item in response.json()["items"]}
+        assert str(experiment.id) in ids, (
+            "an analyst must see the platform, not an empty page"
+        )
+
+    def test_a_viewer_sees_it_too(self, db_session: Session, admin_user, viewer_client):
+        """VIEWER carries LIST as well, so the same holds."""
+        experiment = self._insert_owned_by(
+            db_session, admin_user.id, f"Not the viewer's {uuid.uuid4().hex[:8]}"
+        )
+
+        response = viewer_client.get("/api/v1/experiments/", params={"limit": 500})
+
+        assert response.status_code == 200, response.text
+        assert str(experiment.id) in {i["id"] for i in response.json()["items"]}
+
+    def test_the_total_widens_with_the_list(
+        self, db_session: Session, admin_user, analyst_client
+    ):
+        """`total` drives pagination, so it has to widen too.
+
+        A list that widened while `total` stayed owner-scoped would page
+        wrongly -- the subtler half of the same bug, and the one a
+        smoke-test-by-eye would miss.
+        """
+        self._insert_owned_by(
+            db_session, admin_user.id, f"Total check {uuid.uuid4().hex[:8]}"
+        )
+
+        response = analyst_client.get("/api/v1/experiments/", params={"limit": 1})
+
+        assert response.status_code == 200, response.text
+        assert response.json()["total"] >= 1, (
+            "total is owner-scoped while the items are not"
+        )
