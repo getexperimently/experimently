@@ -1,13 +1,22 @@
-"""The production migration path must name a file that exists in the image.
+"""The production migration path, which no deploy has ever exercised.
 
 ``MigrationTaskStack`` bakes the command the one-off ECS migration task runs,
-and two workflows override it with the same command by hand.  All three used to
-say ``-c app/db/alembic.ini``, which resolves to ``/app/app/db/alembic.ini``
-(``backend/Dockerfile`` sets ``WORKDIR /app`` and copies the repository layout
-under it) and does not exist -- and the stack also said the singular ``upgrade
-head``, which alembic refuses outright on a full-profile image because the
-``modules`` branch gives it two heads.  Nothing executed any of it before a
-deploy, so the whole production migration path was dead.
+and ``deploy-prod.yml`` overrides it with the same command by hand.  Three
+separate things have been wrong with it, each fatal on its own:
+
+1. ``-c app/db/alembic.ini``, which resolves to ``/app/app/db/alembic.ini``
+   (``backend/Dockerfile`` sets ``WORKDIR /app`` and copies the repository
+   layout under it) and does not exist.
+2. The singular ``upgrade head``, which alembic refuses on a full-profile
+   image because the ``modules`` branch gives it two heads.
+3. Raw ``alembic upgrade heads`` at all.  The historical chain cannot be
+   replayed from an empty database -- rehearsed in the built image against a
+   real PostgreSQL, it gets two revisions in and dies with
+   ``DuplicateTable: relation "permissions" already exists``.  ``deploy``
+   needs ``run-migrations``, so this task runs before anything that would have
+   created the schema, and the first production deploy meets exactly that.
+
+Nothing executed any of it before a deploy, so the whole path was dead.
 
 The command is only half of it: ``command=`` on ``add_container`` sets the
 container's **CMD**, and the image's ``ENTRYPOINT`` still runs first.  That
@@ -37,10 +46,11 @@ STACK = REPO_ROOT / "infrastructure" / "cdk" / "stacks" / "migration_task_stack.
 CDK_APP = REPO_ROOT / "infrastructure" / "cdk" / "app.py"
 ENTRYPOINT = REPO_ROOT / "backend" / "docker-entrypoint.sh"
 DOCKERFILE = REPO_ROOT / "backend" / "Dockerfile"
-WORKFLOWS = (
-    REPO_ROOT / ".github" / "workflows" / "db-migrate.yml",
-    REPO_ROOT / ".github" / "workflows" / "deploy-prod.yml",
-)
+#: The two workflows that run a migration, and they do NOT run the same thing:
+#: deploy-prod is the automatic path and must bootstrap, db-migrate is the
+#: manual targeted path and must stay on raw alembic. A test each, below.
+DEPLOY_PROD = REPO_ROOT / ".github" / "workflows" / "deploy-prod.yml"
+DB_MIGRATE = REPO_ROOT / ".github" / "workflows" / "db-migrate.yml"
 
 #: A distribution that ships neither the CDK stacks nor the workflows has
 #: nothing here to check; one that ships them must keep them in agreement.
@@ -162,38 +172,73 @@ def test_migration_command_config_exists_in_the_image_layout():
 
 @pytest.mark.unit
 @pytest.mark.regression
-def test_migration_command_is_the_plural_heads():
-    constants = _stack_constants()
-    command = list(constants["MIGRATION_COMMAND"])
+def test_the_migration_task_bootstraps_rather_than_replaying_the_chain():
+    """Raw `alembic upgrade heads` cannot build a database from nothing.
 
-    assert command == [
-        "python",
-        "-m",
-        "alembic",
-        "-c",
-        constants["ALEMBIC_CONFIG"],
-        "upgrade",
-        "heads",
-    ]
-    # `upgrade head` fails on a full-profile image: two heads are present.
-    assert command[-1] != "head"
+    Rehearsed in the built full image against a real PostgreSQL: two revisions
+    in, it dies with `psycopg2.errors.DuplicateTable: relation "permissions"
+    already exists`, because the historical chain is not replayable from empty
+    (which is why `db/bootstrap.py` exists at all).
+
+    `deploy-prod.yml`'s `deploy` job needs `run-migrations`, so this task runs
+    *before* anything that would have created the schema -- and the first
+    production deployment therefore meets an empty database. Bootstrap handles
+    both states: schema from the models plus stamped heads when empty,
+    `alembic upgrade heads` when not.
+    """
+    command = list(_stack_constants()["MIGRATION_COMMAND"])
+
+    assert command == ["python", "-m", "backend.app.db.bootstrap"], command
+    # The specific regression: the task must not run alembic directly.
+    assert "alembic" not in command, command
 
 
 @pytest.mark.unit
 @pytest.mark.regression
-@pytest.mark.parametrize("workflow", WORKFLOWS, ids=lambda p: p.name)
-def test_workflow_overrides_match_the_task_definition(workflow: Path):
+def test_deploy_prod_bootstraps_too():
+    """The automatic path agrees end to end.
+
+    The override exists rather than inheriting the task definition's command
+    because nothing in `deploy-prod.yml` runs `cdk deploy`, so the registered
+    `experimentation-migrate` definition can be older than this repository. It
+    therefore has to be kept in step by hand, which is what this checks.
+    """
+    workflow = DEPLOY_PROD
+    if not workflow.parent.is_dir():
+        pytest.skip("this tree ships no GitHub workflows")
+    command = list(_stack_constants()["MIGRATION_COMMAND"])
+
+    assert json.dumps(command, separators=(",", ":")) in workflow.read_text(), (
+        "deploy-prod.yml's containerOverrides must run MIGRATION_COMMAND, "
+        f"which is {command}"
+    )
+    assert not _workflow_alembic_commands(workflow), (
+        "deploy-prod.yml still runs alembic directly; the historical chain "
+        "cannot be replayed from the empty database a first deploy meets"
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.regression
+def test_db_migrate_keeps_raw_alembic_and_names_the_right_config():
+    """`db-migrate.yml` is the *manual* path and deliberately stays on alembic.
+
+    `current`, and `upgrade`/`downgrade <target>`, are targeted operations on a
+    database that already exists; bootstrap cannot express a target. What it
+    must not do is drift on the config path or ask for the singular `head`.
+    """
+    workflow = DB_MIGRATE
     if not workflow.parent.is_dir():
         pytest.skip("this tree ships no GitHub workflows")
     config = _stack_constants()["ALEMBIC_CONFIG"]
     commands = _workflow_alembic_commands(workflow)
-    assert commands, f"no alembic command found in {workflow.name}"
+    assert commands, "db-migrate.yml runs no alembic command"
 
     for command in commands:
         assert "-c" in command, command
         assert command[command.index("-c") + 1] == config, command
         assert "head" not in command, (
-            f"{workflow.name} passes the singular 'head'; a full-profile image "
+            "db-migrate.yml passes the singular 'head'; a full-profile image "
             "has two heads and alembic refuses it"
         )
 
