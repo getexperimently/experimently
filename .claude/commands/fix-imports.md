@@ -1,31 +1,40 @@
-Standardize and verify metrics model imports across the codebase.
+Verify that model imports are rooted at `backend.app`, never at `app`.
 
-Check and fix inconsistent import paths for metrics models to prevent SQLAlchemy mapping errors.
-
-Arguments: $ARGUMENTS (optional - "check" to only verify, "fix" to apply fixes)
+Arguments: $ARGUMENTS (optional — "fix" to apply corrections, otherwise check only)
 
 Background:
-Inconsistent import paths (e.g., `from app.models.metrics...` vs `from backend.app.models.metrics...`) cause Python to treat classes as distinct, resulting in:
-- Memory duplication
-- SQLAlchemy "Class is not mapped" errors
-- Type checking failures
-- Unexpected runtime behavior
+An import rooted at `app` rather than `backend.app` resolves to a *different
+module object* for the same file, so Python builds two classes from one
+`class RawMetric`. SQLAlchemy then maps one and not the other:
+
+- "Class is not mapped" at runtime
+- two copies of every model in memory
+- type checks that pass on one and fail on the other
+
+`from .base import Base` inside `backend/app/models/` is **not** this defect and
+must not be "fixed": a relative import there resolves to
+`backend.app.models.base`, the same module object as the fully-qualified path.
+The hazard is only the wrong *root package*.
 
 Steps to execute:
-1. If $ARGUMENTS is "check" or empty: Run verification only
-   - Execute: python standardize_metrics_imports.py --check
-   - Report any inconsistencies found
-   - Show files that need fixes
 
-2. If $ARGUMENTS is "fix": Apply corrections
-   - Execute: python standardize_metrics_imports.py
-   - Review changes made
-   - Run verification tests: python -m pytest backend/tests/unit/metrics/test_metrics_imports.py -v
+1. Check. There is no script for this — it is one grep, and a hit is the defect:
 
-3. Summarize results:
-   - Number of files checked
-   - Number of imports standardized
-   - Verification test status
+   ```bash
+   grep -rnE '^\s*(from|import) app\.' backend/ modules/ --include='*.py'
+   ```
+
+   No output means the convention holds, which is the state of `main` today.
+
+2. If $ARGUMENTS is "fix", rewrite each hit's root package from `app.` to
+   `backend.app.`, then re-run step 1 and confirm it prints nothing.
+
+3. Confirm nothing else broke:
+
+   ```bash
+   make lint          # includes lint-imports, the core/modules boundary
+   source venv/bin/activate && python -m pytest backend/tests/smoke -q
+   ```
 
 Standard import pattern (always use):
 ```python
@@ -33,10 +42,9 @@ from backend.app.models.metrics.metric import RawMetric, MetricType
 ```
 
 Never use:
-- Relative imports: `from app.models.metrics...`
-- Re-exports from __init__.py files
+- A `app.`-rooted import: `from app.models.metrics.metric import RawMetric`
+- Re-exports from `__init__.py` files
 
 Example usage:
-- /fix-imports → check for issues
-- /fix-imports check → same as above
-- /fix-imports fix → apply fixes and verify
+- /fix-imports → check
+- /fix-imports fix → rewrite the offenders, then re-check

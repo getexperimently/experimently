@@ -59,11 +59,10 @@ Standardize and verify metrics model imports.
 ```
 
 **What it does:**
-- Runs standardize_metrics_imports.py script
-- Identifies inconsistent import paths
-- Optionally applies fixes
-- Runs verification tests
-- Reports standardization results
+- Greps for imports rooted at `app.` instead of `backend.app.` — the root
+  package is the whole defect; a relative `from .base import Base` is fine
+- Optionally rewrites the offenders
+- Re-checks, then runs `make lint` and the smoke suite
 
 **Why this matters:**
 Prevents SQLAlchemy "Class is not mapped" errors caused by inconsistent import paths.
