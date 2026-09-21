@@ -8,6 +8,12 @@ export interface RequireAuthProps {
   children: ReactNode;
   /** When set, the user must hold one of these roles. */
   roles?: Role[];
+  /**
+   * When true, the user must be a superuser -- the same flag the admin API
+   * enforces. `role` and `is_superuser` are independent columns, so a role
+   * check cannot stand in for it (#84).
+   */
+  superuser?: boolean;
   /** Where the "Go back" link on the 403 view points. Default `/experiments`. */
   fallbackPath?: string;
   /** Custom element rendered while the session is being resolved. */
@@ -21,7 +27,7 @@ export interface RequireAuthProps {
  * - `anonymous`  → `router.replace('/login?next=<current path>')`
  * - wrong role   → inline 403 view (`data-testid="require-auth-forbidden"`)
  */
-export function RequireAuth({ children, roles, fallbackPath = '/experiments', loading }: RequireAuthProps) {
+export function RequireAuth({ children, roles, superuser, fallbackPath = '/experiments', loading }: RequireAuthProps) {
   const { status, user } = useAuth();
   const router = useRouter();
 
@@ -59,23 +65,33 @@ export function RequireAuth({ children, roles, fallbackPath = '/experiments', lo
     );
   }
 
+  // One 403 view, two gates. `requirement` is the only difference, so the
+  // page says which condition the account failed rather than a generic refusal.
+  const forbidden = (requirement: string) => (
+    <div
+      data-testid="require-auth-forbidden"
+      className="flex flex-col items-center justify-center min-h-[40vh] gap-4 px-4 text-center"
+    >
+      <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">403</p>
+      <p className="text-slate-700 text-lg">You do not have permission to access this page.</p>
+      <p className="text-sm text-slate-500">
+        Signed in as <span className="font-medium">{user.email}</span> ({user.role}). This page
+        requires {requirement}.
+      </p>
+      <Link href={fallbackPath} className="text-blue-600 hover:underline" aria-label="Go to Home">
+        Go to Home
+      </Link>
+    </div>
+  );
+
+  // Superuser first: it is what the admin API actually enforces, so failing it
+  // is the more specific answer when a page asks for both.
+  if (superuser && user.is_superuser !== true) {
+    return forbidden('a superuser account');
+  }
+
   if (roles && roles.length > 0 && !roles.includes(user.role)) {
-    return (
-      <div
-        data-testid="require-auth-forbidden"
-        className="flex flex-col items-center justify-center min-h-[40vh] gap-4 px-4 text-center"
-      >
-        <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">403</p>
-        <p className="text-slate-700 text-lg">You do not have permission to access this page.</p>
-        <p className="text-sm text-slate-500">
-          Signed in as <span className="font-medium">{user.email}</span> ({user.role}). This page
-          requires {roles.join(' or ')}.
-        </p>
-        <Link href={fallbackPath} className="text-blue-600 hover:underline" aria-label="Go to Home">
-          Go to Home
-        </Link>
-      </div>
-    );
+    return forbidden(roles.join(' or '));
   }
 
   return <>{children}</>;
