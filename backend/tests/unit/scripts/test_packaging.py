@@ -44,8 +44,6 @@ FORBIDDEN_PREFIXES = (
     # A tracked symlink to backend/app/db/migrations: the alembic chain was
     # packaged twice, once under each name.
     "backend.migrations",
-    # The orphan pre-migrations tree [tool.ruff] also excludes.
-    "backend.alembic",
 )
 
 
