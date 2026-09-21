@@ -14,12 +14,23 @@ export interface NavItem {
   testId: string;
   /** When set, the item is only shown to users holding one of these roles. */
   roles?: Role[];
+  /**
+   * When true, the item is shown only to superusers -- the same flag the
+   * admin API enforces (`deps.get_current_superuser` on all six endpoints).
+   *
+   * Gating on a role instead was #84: the item was shown to ADMIN and
+   * DEVELOPER, the page guard admitted both, and then every request under
+   * /api/v1/admin returned 403. `role` and `is_superuser` are independent
+   * columns -- `PUT /admin/users/{id}` sets either without the other -- so
+   * a role check could not have matched the API even restricted to ADMIN.
+   */
+  superuser?: boolean;
 }
 
 export const NAV_ITEMS: NavItem[] = [
   { label: 'Experiments', href: '/experiments', testId: 'nav-experiments' },
   { label: 'Feature Flags', href: '/feature-flags', testId: 'nav-feature-flags' },
-  { label: 'Admin', href: '/admin', testId: 'nav-admin', roles: ['ADMIN', 'DEVELOPER'] },
+  { label: 'Admin', href: '/admin', testId: 'nav-admin', superuser: true },
   { label: 'Docs', href: '/docs', testId: 'nav-docs' },
 ];
 
@@ -181,9 +192,11 @@ export function AppShell({ children }: AppShellProps) {
   const [loggingOut, setLoggingOut] = useState(false);
 
   const pathname = router.pathname;
-  const visibleNav = NAV_ITEMS.filter(
-    (item) => !item.roles || (user !== null && item.roles.includes(user.role)),
-  );
+  const visibleNav = NAV_ITEMS.filter((item) => {
+    if (item.superuser) return user !== null && user.is_superuser === true;
+    if (item.roles) return user !== null && item.roles.includes(user.role);
+    return true;
+  });
   const moduleNav = installedModuleNav({ profile, modules, version });
   // Not while the probe is outstanding: the provider's initial state is core,
   // so a full-profile instance would paint the "Modules" guide link on every
