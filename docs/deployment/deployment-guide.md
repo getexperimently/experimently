@@ -151,26 +151,40 @@ Order matters — each stack depends on outputs from the previous one.
 ```bash
 cd infrastructure/cdk
 
-# 1. VPC and networking
-cdk deploy ExperimentationVpcStack --require-approval never
+# These are stack IDS, which is what `cdk deploy` takes; `cdk list` prints
+# them for your environment. Substitute your own for `prod`.
 
-# 2. Aurora PostgreSQL database
-cdk deploy ExperimentationDatabaseStack --require-approval never
+# 1. Cognito user pool (independent of everything else)
+cdk deploy experimentation-auth-prod --require-approval never
 
-# 3. ElastiCache Redis
-cdk deploy ExperimentationRedisStack --require-approval never
+# 2. VPC and networking
+cdk deploy experimentation-vpc-prod --require-approval never
 
-# 4. ECS cluster, task roles, security groups
-cdk deploy ExperimentationComputeStack --require-approval never
+# 3. DynamoDB tables
+cdk deploy experimentation-dynamodb-prod --require-approval never
 
-# 5. ECS Fargate service and ALB
-cdk deploy ExperimentationFargateServiceStack --require-approval never
+# 4. Aurora PostgreSQL database
+cdk deploy experimentation-database-prod --require-approval never
 
-# 6. ECS migration task definition
-cdk deploy ExperimentationMigrationTaskStack --require-approval never
+# 5. ElastiCache Redis
+cdk deploy experimentation-redis-prod --require-approval never
+
+# 6. ECS cluster, task security group, database-access Lambda
+cdk deploy experimentation-compute-prod --require-approval never
 
 # 7. CloudWatch dashboards, alarms, log groups
-cdk deploy ExperimentationMonitoringStack --require-approval never
+cdk deploy experimentation-monitoring-prod --require-approval never
+
+# 8. ECS Fargate service, ALB and CodeDeploy blue/green
+cdk deploy experimentation-fargate-prod --require-approval never
+
+# 9. ECS migration task definition  (NOTE: migrations, plural)
+cdk deploy experimentation-migrations-prod --require-approval never
+
+# Full profile only -- these exist when modules/ is present:
+#   experimentation-dynamodb-counters-prod
+#   experimentation-analytics-prod
+#   experimentation-glue-etl-prod
 
 # Or deploy all at once (respects dependency order)
 cdk deploy --all --require-approval never

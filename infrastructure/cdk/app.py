@@ -8,7 +8,6 @@ from aws_cdk import App, Environment
 
 from stacks.vpc_stack import VpcStack
 from stacks.compute_stack import ComputeStack
-from stacks.api_stack import ApiStack
 from stacks.monitoring_stack import MonitoringStack
 from stacks.enhanced_database_stack import EnhancedDatabaseStack
 from stacks.dynamodb_tables_stack import DynamoDBTablesStack
@@ -165,16 +164,6 @@ compute_stack.add_dependency(vpc_stack)
 compute_stack.add_dependency(database_stack)
 compute_stack.add_dependency(dynamodb_stack)
 compute_stack.add_dependency(redis_stack)  # Add dependency on Redis stack
-
-# Create the API Gateway stack
-api_stack = ApiStack(
-    app,
-    f"experimentation-api-{env_name}",
-    vpc=vpc_stack.vpc,
-    compute=compute_stack,
-    env=env,
-)
-api_stack.add_dependency(compute_stack)
 
 # Create the analytics stack (Kinesis, OpenSearch) -- etl module
 analytics_stack = None

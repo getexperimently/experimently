@@ -265,7 +265,7 @@ The `MonitoringStack` CDK construct
    `infrastructure/cdk/stacks/monitoring_stack.py` following the pattern
    of the existing EP-013 alarms at the bottom of `__init__`.
 
-3. Run `cdk diff` and `cdk deploy ExperimentationMonitoringStack` to apply.
+3. Run `cdk diff` and `cdk deploy experimentation-monitoring-<env>` to apply.
 
 ### SNS topic
 
