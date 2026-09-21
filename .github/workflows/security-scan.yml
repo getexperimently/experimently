@@ -92,10 +92,18 @@ jobs:
       # HIGH advisory here ships. It was `continue-on-error: true`, and the
       # job's result was not even read by security-summary -- neutered twice.
       #
-      # The demo apps and sdk/react-native are deliberately NOT audited here:
-      # they carry advisories that need semver-major bumps (issue #168), and
-      # gating them today would mean turning continue-on-error back on, which
-      # is what this change exists to remove.
+      # The demo apps ARE audited now. They were excluded because they carried
+      # a critical Next advisory needing a semver-major bump (#168), and gating
+      # them then would have meant turning continue-on-error back on -- the
+      # thing that change existed to remove. #168 is fixed, both are on Next
+      # 16 / React 19 and audit clean, so the exclusion has no reason left and
+      # this is what stops them drifting back. The launch plan puts them on a
+      # public VM, so they are internet-facing.
+      #
+      # sdk/react-native is still NOT audited: its 12 high advisories are all
+      # reachable only through react-native 0.73 itself, which is a
+      # devDependency and a peerDependency -- consumers bring their own. That
+      # is react-native 0.73 -> 0.87, its own change.
       - name: Run npm audit
         # --omit=dev, to match the sentence above it. Without it this audits
         # the whole lockfile, so a HIGH advisory in jest, eslint or ts-jest --
@@ -103,7 +111,13 @@ jobs:
         # precisely the pressure that puts `continue-on-error: true` back, and
         # a blocking gate whose scope is wider than its justification does not
         # survive contact with a busy week.
-        run: cd frontend && npm audit --omit=dev --audit-level=high
+        run: |
+          set -euo pipefail
+          for dir in frontend demo/shoplab demo/streampulse; do
+            echo "::group::npm audit $dir"
+            (cd "$dir" && npm audit --omit=dev --audit-level=high)
+            echo "::endgroup::"
+          done
 
       # Node had no licence gate at all: license-checker was used only to
       # generate THIRD_PARTY_LICENSES.md, so a dependency arriving under GPL or
