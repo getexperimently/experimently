@@ -47,14 +47,25 @@ For version `X.Y.Z`, in the repository's GitHub Container Registry namespace:
 
 | Image | Platforms |
 |---|---|
-| `…/experimently:core-X.Y.Z` | `linux/amd64`, `linux/arm64` |
-| `…/experimently:full-X.Y.Z` | `linux/amd64`, `linux/arm64` |
+| `…/experimently:core-X.Y.Z` | `linux/amd64` |
+| `…/experimently:full-X.Y.Z` | `linux/amd64` |
 | `…/experimently-web:core-X.Y.Z` | `linux/amd64` |
 | `…/experimently-web:full-X.Y.Z` | `linux/amd64` |
 
 A final release also moves `:core` and `:full` to point at it.
 
-The dashboard images are `amd64` only on purpose: their payload is a static
+**Every image is `amd64` only, and an `arm64` host runs them under emulation.**
+
+The API images used to publish an `arm64` variant. It did not work: in it,
+`import cryptography.hazmat.backends.openssl` exits 132 — SIGILL, no traceback,
+no message — so every module that imports `backend.app.core.security`, which is
+the whole API, was unimportable. An `arm64` host pulling `:core` therefore got
+an image that died at import with nothing to explain why. Not publishing it is
+better: Docker then falls back to the `amd64` image under emulation, which
+runs. Tracked as #181; if `arm64` is wanted later it needs that fixed first and
+an `arm64` leg in CI so it cannot regress silently.
+
+The dashboard images are `amd64` only for a different and happier reason: their payload is a static
 Next.js export, which is byte-identical on every architecture, but the
 Dockerfile builds it inside the image — an `arm64` variant would mean running
 `next build` under emulation for no difference in what nginx serves. On an
