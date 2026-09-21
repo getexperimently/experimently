@@ -26,11 +26,11 @@ APScheduler==3.11.3
 pytz==2023.3
 
 # AWS
-aws-cdk-lib==2.268.0
-aws-cdk.asset-awscli-v1==2.2.292   # pinned by aws-cdk-lib 2.268.0
+aws-cdk-lib==2.269.0
+aws-cdk.asset-awscli-v1==2.2.292   # pinned exactly by aws-cdk-lib 2.269.0
 aws-cdk.asset-kubectl-v20==2.1.4
 aws-cdk.asset-node-proxy-agent-v6==2.1.2
-aws-cdk.cloud-assembly-schema==54.23.0   # aws-cdk-lib 2.268.0 needs >=54.11,<55
+aws-cdk.cloud-assembly-schema==54.23.0   # aws-cdk-lib 2.269.0 needs >=54.11,<55
 aws-lambda-powertools==2.24.0
 aws-xray-sdk==2.15.0
 watchtower==3.4.0  # CloudWatch logging
