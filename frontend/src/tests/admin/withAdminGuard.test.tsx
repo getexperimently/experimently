@@ -1,6 +1,6 @@
 import React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
-import { withAdminGuard, rolesAtLeast, ADMIN_AREA_ROLES } from '@/components/admin/withAdminGuard';
+import { withAdminGuard, rolesAtLeast } from '@/components/admin/withAdminGuard';
 import { AuthProvider } from '@/contexts/AuthContext';
 import { TOKEN_STORAGE_KEY, UserMe } from '@/services/api';
 import { UserRole } from '@/types/admin';
@@ -83,12 +83,22 @@ describe('withAdminGuard', () => {
     await waitFor(() => expect(screen.getByTestId('protected-content')).toBeInTheDocument());
   });
 
-  it('admits DEVELOPER by default (matches the Admin nav item)', async () => {
-    signInAs('DEVELOPER');
-    const GuardedComponent = withAdminGuard(TestComponent);
-    renderGuarded(GuardedComponent);
-    await waitFor(() => expect(screen.getByTestId('protected-content')).toBeInTheDocument());
-    expect(ADMIN_AREA_ROLES).toEqual(['ADMIN', 'DEVELOPER']);
+  it('refuses a non-superuser by default, whatever their role', async () => {
+    // #84: this admitted ADMIN and DEVELOPER by role, while every endpoint
+    // under /api/v1/admin requires `deps.get_current_superuser`. The DEVELOPER
+    // here is the reported case; `user()` gives is_superuser only to ADMIN.
+    for (const role of ['DEVELOPER', 'ANALYST', 'VIEWER'] as const) {
+      localStorage.clear();
+      mockFetch.mockReset();
+      signInAs(role);
+      const GuardedComponent = withAdminGuard(TestComponent);
+      const view = renderGuarded(GuardedComponent);
+      await waitFor(() =>
+        expect(screen.getByTestId('require-auth-forbidden')).toBeInTheDocument(),
+      );
+      expect(screen.queryByTestId('protected-content')).not.toBeInTheDocument();
+      view.unmount();
+    }
   });
 
   it('redirects to /login when there is no session', async () => {
@@ -124,8 +134,14 @@ describe('withAdminGuard', () => {
   });
 
   it('works with DEVELOPER role when requiredRole is DEVELOPER', async () => {
+    // `superuser: false` because this exercises the ROLE path. With the
+    // default on, a non-superuser DEVELOPER is refused before the role is
+    // consulted, which is the point of #84.
     signInAs('DEVELOPER');
-    const GuardedComponent = withAdminGuard(TestComponent, { requiredRole: 'DEVELOPER' });
+    const GuardedComponent = withAdminGuard(TestComponent, {
+      requiredRole: 'DEVELOPER',
+      superuser: false,
+    });
     renderGuarded(GuardedComponent);
     await waitFor(() => expect(screen.getByTestId('protected-content')).toBeInTheDocument());
   });
@@ -141,7 +157,10 @@ describe('withAdminGuard', () => {
 
   it('explicit roles list takes precedence', async () => {
     signInAs('ANALYST');
-    const GuardedComponent = withAdminGuard(TestComponent, { roles: ['ANALYST'] });
+    const GuardedComponent = withAdminGuard(TestComponent, {
+      roles: ['ANALYST'],
+      superuser: false,
+    });
     renderGuarded(GuardedComponent);
     await waitFor(() => expect(screen.getByTestId('protected-content')).toBeInTheDocument());
   });

@@ -143,16 +143,29 @@ describe('AppShell', () => {
     expect(screen.getByTestId('nav-experiments')).toHaveAttribute('aria-current', 'page');
   });
 
-  it('shows Admin for a DEVELOPER but hides it for ANALYST and VIEWER', async () => {
-    signInAs(makeUser({ role: 'DEVELOPER' }));
-    const { unmount } = renderShell();
-    await waitFor(() => expect(screen.getByTestId('nav-admin')).toBeInTheDocument());
-    unmount();
-
-    for (const role of ['ANALYST', 'VIEWER'] as const) {
+  it('shows Admin to a superuser whatever their role', async () => {
+    // The admin API is uniformly `deps.get_current_superuser`, so that flag --
+    // not the role -- is what the nav has to match (#84).
+    for (const role of ['ADMIN', 'DEVELOPER', 'ANALYST', 'VIEWER'] as const) {
       localStorage.clear();
       mockFetch.mockReset();
-      signInAs(makeUser({ role }));
+      signInAs(makeUser({ role, is_superuser: true }));
+      const view = renderShell();
+      await waitFor(() => expect(screen.getByTestId('nav-admin')).toBeInTheDocument());
+      view.unmount();
+    }
+  });
+
+  it('hides Admin from a non-superuser, including one whose role is ADMIN', async () => {
+    // The ADMIN case is the one a role check could never have got right:
+    // `role` and `is_superuser` are independent columns and
+    // `PUT /admin/users/{id}` sets either without the other, so an
+    // ADMIN-without-superuser is reachable. Before this, they saw the item,
+    // the page guard admitted them, and every admin request returned 403.
+    for (const role of ['ADMIN', 'DEVELOPER', 'ANALYST', 'VIEWER'] as const) {
+      localStorage.clear();
+      mockFetch.mockReset();
+      signInAs(makeUser({ role, is_superuser: false }));
       const view = renderShell();
       await waitFor(() => expect(screen.getByTestId('user-menu')).toBeInTheDocument());
       expect(screen.queryByTestId('nav-admin')).not.toBeInTheDocument();
