@@ -16,9 +16,9 @@ gh api repos/<owner>/<repo>/branches/main/protection --jq '.required_status_chec
 | Check (status name) | Workflow | What it runs |
 |---------------------|----------|--------------|
 | Unit Tests | `pr-qa-gate.yml` | `backend/tests/unit` (+ Lambda tests) against a Postgres service |
-| Module Tests † | `pr-qa-gate.yml` | `modules/backend/tests` with both requirement sets installed |
+| Module Tests | `pr-qa-gate.yml` | `modules/backend/tests` with both requirement sets installed |
 | Smoke Tests | `pr-qa-gate.yml` | `backend/tests/smoke`: app import, route wiring, auth wiring |
-| Base Requirements Only † | `pr-qa-gate.yml` | the modules must register on `backend/requirements.txt` alone (`scripts/check_modules_register.py`), then the smoke suite |
+| Base Requirements Only | `pr-qa-gate.yml` | the modules must register on `backend/requirements.txt` alone (`scripts/check_modules_register.py`), then the smoke suite |
 | Frontend Tests | `pr-qa-gate.yml` | `npm test`, `tsc --noEmit`, `next build` |
 | SDK Contract Tests | `pr-qa-gate.yml` | cross-SDK golden vectors (`tests/sdk-contract`) |
 | SDK Live Contract / sdk-live-contract (core) | `pr-qa-gate.yml` | boots the API with `seed_sdk_contract`, drives every SDK through assign / evaluate / track |
@@ -32,11 +32,7 @@ gh api repos/<owner>/<repo>/branches/main/protection --jq '.required_status_chec
 | regression-guard | `regression-guard.yml` | a pull request labelled `bug` must change a test file |
 | Security Scan Summary | `security-scan.yml` | Bandit, npm audit, Semgrep (`p/python`, `p/security-audit`, `p/secrets`, `p/owasp-top-ten`), Gitleaks, Trivy on the built image |
 | Release Gate Summary | `release-gate.yml` | backend gate (unit + smoke), frontend gate (test + build), security gate (Bandit + Gitleaks) |
-| CDK Stack Tests (Python) † | `infrastructure-tests.yml` | `infrastructure/tests`, including a real `cdk synth` of both profiles (`TestTheAppActuallySynthesises`) |
-
-† Runs on every pull request but is **not yet** in branch protection — add the
-status name above verbatim. Both are unconditional (no `if:`, no path filter),
-so requiring them cannot leave a pull request pending.
+| CDK Stack Tests (Python) | `infrastructure-tests.yml` | `infrastructure/tests`, including a real `cdk synth` of both profiles (`TestTheAppActuallySynthesises`) |
 
 Deliberately **not** required, because it is path-filtered and a required check
 that never reports leaves a pull request permanently pending: `cognito-integration`
