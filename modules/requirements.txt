@@ -48,5 +48,5 @@ databricks-sql-connector[pyarrow]==4.5.0  # >=4.5 is what moves thrift to 0.24.0
                                   # nothing would have noticed.
 
 # EP-048: ClickHouse and MySQL warehouse connectors
-clickhouse-connect==0.7.0   # modules/backend/app/services/clickhouse_connector.py
+clickhouse-connect==1.8.0   # modules/backend/app/services/clickhouse_connector.py
 PyMySQL==1.2.0              # modules/backend/app/services/mysql_connector.py
