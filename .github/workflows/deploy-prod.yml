@@ -363,13 +363,21 @@ jobs:
 
       - name: Run migrations via ECS task
         run: |
-          # Run migration as a one-off ECS task
+          # Run migration as a one-off ECS task.
+          #
+          # The command override is `backend.app.db.bootstrap`, not raw
+          # `alembic upgrade heads`: the historical chain cannot be replayed
+          # from an empty database, and this job runs BEFORE `deploy`, so on a
+          # first deployment nothing has created the schema yet. It stays an
+          # override rather than inheriting the task definition's command
+          # because nothing in this workflow runs `cdk deploy`, so the
+          # registered definition can be older than this repository.
           TASK_ARN=$(aws ecs run-task \
             --cluster $ECS_CLUSTER \
             --task-definition experimentation-migrate \
             --launch-type FARGATE \
             --network-configuration "awsvpcConfiguration={subnets=[${{ secrets.PROD_PRIVATE_SUBNET_IDS }}],securityGroups=[${{ secrets.PROD_ECS_SG_ID }}],assignPublicIp=DISABLED}" \
-            --overrides '{"containerOverrides":[{"name":"backend","command":["python","-m","alembic","-c","backend/app/db/alembic.ini","upgrade","heads"]}]}' \
+            --overrides '{"containerOverrides":[{"name":"backend","command":["python","-m","backend.app.db.bootstrap"]}]}' \
             --query 'tasks[0].taskArn' \
             --output text)
 
