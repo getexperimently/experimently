@@ -14,6 +14,8 @@ updates:
   # ---------------------------------------------------------------------------
   - package-ecosystem: "github-actions"
     directory: "/"
+    commit-message:
+      prefix: "ci(deps)"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
@@ -23,6 +25,8 @@ updates:
   # lock, so a base-image bump and a Python bump are separate pull requests).
   - package-ecosystem: "docker"
     directories: ["/backend", "/frontend", "/demo/shoplab", "/demo/streampulse"]
+    commit-message:
+      prefix: "chore(deps)"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 4
@@ -45,6 +49,8 @@ updates:
   # cannot merge.
   - package-ecosystem: "pip"
     directory: "/backend"
+    commit-message:
+      prefix: "chore(deps)"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
@@ -63,6 +69,8 @@ updates:
   # `make lock-modules` regenerates modules/requirements.lock.
   - package-ecosystem: "pip"
     directory: "/modules"
+    commit-message:
+      prefix: "chore(deps)"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 3
@@ -77,6 +85,8 @@ updates:
       - "/backend/lambda/assignment"
       - "/backend/lambda/event_processor"
       - "/backend/lambda/feature_flag_evaluation"
+    commit-message:
+      prefix: "chore(deps)"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 3
@@ -88,6 +98,8 @@ updates:
   # AWS CDK app (Python), infrastructure/cdk/requirements.txt.
   - package-ecosystem: "pip"
     directory: "/infrastructure/cdk"
+    commit-message:
+      prefix: "chore(deps)"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 3
@@ -98,6 +110,8 @@ updates:
 
   - package-ecosystem: "npm"
     directory: "/frontend"
+    commit-message:
+      prefix: "chore(deps)"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
@@ -110,6 +124,8 @@ updates:
   # SDK from source.
   - package-ecosystem: "npm"
     directories: ["/demo/shoplab", "/demo/streampulse"]
+    commit-message:
+      prefix: "chore(deps)"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 2
@@ -123,6 +139,8 @@ updates:
   # ---------------------------------------------------------------------------
   - package-ecosystem: "npm"
     directories: ["/sdk/js", "/sdk/react", "/sdk/react-native", "/sdk/openfeature", "/sdk/edge"]
+    commit-message:
+      prefix: "chore(deps)"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
@@ -133,6 +151,8 @@ updates:
 
   - package-ecosystem: "pip"
     directories: ["/sdk/python", "/sdk/openfeature-python"]
+    commit-message:
+      prefix: "chore(deps)"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 2
@@ -143,6 +163,8 @@ updates:
 
   - package-ecosystem: "gomod"
     directory: "/sdk/go"
+    commit-message:
+      prefix: "chore(deps)"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 2
@@ -151,6 +173,8 @@ updates:
   # Maven: the parent pom and the two modules (core, spring-boot-starter).
   - package-ecosystem: "maven"
     directories: ["/sdk/java", "/sdk/java/core", "/sdk/java/spring-boot-starter"]
+    commit-message:
+      prefix: "chore(deps)"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 3
@@ -161,6 +185,8 @@ updates:
 
   - package-ecosystem: "gradle"
     directory: "/sdk/android"
+    commit-message:
+      prefix: "chore(deps)"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 2
@@ -171,6 +197,8 @@ updates:
 
   - package-ecosystem: "bundler"
     directory: "/sdk/ruby"
+    commit-message:
+      prefix: "chore(deps)"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 2
@@ -178,6 +206,8 @@ updates:
 
   - package-ecosystem: "composer"
     directory: "/sdk/php"
+    commit-message:
+      prefix: "chore(deps)"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 2
@@ -185,6 +215,8 @@ updates:
 
   - package-ecosystem: "nuget"
     directory: "/sdk/dotnet"
+    commit-message:
+      prefix: "chore(deps)"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 2
@@ -195,6 +227,8 @@ updates:
 
   - package-ecosystem: "mix"
     directory: "/sdk/elixir"
+    commit-message:
+      prefix: "chore(deps)"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 2
@@ -202,6 +236,8 @@ updates:
 
   - package-ecosystem: "pub"
     directory: "/sdk/flutter"
+    commit-message:
+      prefix: "chore(deps)"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 2
@@ -209,6 +245,8 @@ updates:
 
   - package-ecosystem: "swift"
     directory: "/sdk/ios"
+    commit-message:
+      prefix: "chore(deps)"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 2
