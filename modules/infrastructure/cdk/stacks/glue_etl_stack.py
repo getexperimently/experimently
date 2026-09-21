@@ -50,8 +50,6 @@ class GlueETLStack(Stack):
     METRICS_JOB_NAME = "experimentation-metrics-etl"
     GLUE_DATABASE_NAME = "experimentation"
     CRAWLER_NAME = "experimentation-crawler"
-    GLUE_SCRIPT_BUCKET_PREFIX = "glue-scripts"
-    ATHENA_RESULTS_BUCKET_PREFIX = "experimentation-athena-results"
 
     def __init__(
         self,
@@ -72,7 +70,11 @@ class GlueETLStack(Stack):
         self.athena_results_bucket = s3.Bucket(
             self,
             "AthenaResultsBucket",
-            bucket_name=f"{self.ATHENA_RESULTS_BUCKET_PREFIX}-{self.region}",
+            # No bucket_name: S3 is a GLOBAL namespace, so
+            # `experimentation-athena-results-us-west-2` is claimed by whoever
+            # deploys this repository first and every later adopter gets
+            # BucketAlreadyExists mid-deploy (#176). Nothing refers to either
+            # bucket by name -- both are passed around as constructs.
             removal_policy=RemovalPolicy.RETAIN,
             lifecycle_rules=[
                 s3.LifecycleRule(
@@ -89,7 +91,8 @@ class GlueETLStack(Stack):
         glue_scripts_bucket = s3.Bucket(
             self,
             "GlueScriptsBucket",
-            bucket_name=f"{self.GLUE_SCRIPT_BUCKET_PREFIX}-{env_name}-{self.region}",
+            # Unnamed, for the reason above. `glue-scripts-dev-us-west-2`
+            # is generic enough to be taken by someone unrelated already.
             removal_policy=RemovalPolicy.RETAIN,
         )
 
