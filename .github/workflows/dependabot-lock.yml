@@ -72,7 +72,14 @@ jobs:
           python -m pip install --quiet "uv==$UV_VERSION"
           uv --version
 
-      # Keep the trusted copies out of reach of the branch checkout below.
+      # Keep a copy of the default branch's checker out of reach of the branch
+      # checkout below. It is copied BACK OVER scripts/ after each checkout
+      # rather than run from /tmp: the script resolves the repository root as
+      # `Path(__file__).resolve().parents[1]`, so running it from /tmp makes it
+      # look for /tmp/backend/requirements/... and report every file missing.
+      # Overwriting the branch's copy gets both properties at once -- trusted
+      # code, and a root that resolves -- and it is restored before anything is
+      # committed.
       - name: Stash the default branch's checker
         run: |
           set -euo pipefail
@@ -107,75 +114,124 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          set -euo pipefail
+          set -uo pipefail
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          : > /tmp/pushed.txt
+          : > /tmp/skipped.txt
+          : > /tmp/failed.txt
 
           while read -r PR; do
             [ -z "$PR" ] && continue
             echo "::group::PR #$PR"
 
-            # The author guard is repeated per PR: `--jq` above filters the
-            # listing, but an explicitly dispatched number has not been checked.
-            AUTHOR=$(gh pr view "$PR" --json author --jq '.author.login')
-            if [ "$AUTHOR" != "app/dependabot" ]; then
-              echo "::warning::#$PR is authored by $AUTHOR, not Dependabot -- skipping"
-              echo "::endgroup::"; continue
-            fi
+            # One subshell per pull request, so a branch that cannot be
+            # processed does not abort the whole run. The first version exited
+            # on the first failure and never reached the other three pull
+            # requests. Exit codes: 0 pushed, 3 nothing to do, anything else a
+            # real failure.
+            (
+              set -euo pipefail
 
-            gh pr checkout "$PR" --force
+              # Repeated per pull request: the listing filter does not see a
+              # number passed to workflow_dispatch.
+              AUTHOR=$(gh pr view "$PR" --json author --jq '.author.login')
+              if [ "$AUTHOR" != "app/dependabot" ]; then
+                echo "::warning::#$PR is authored by $AUTHOR, not Dependabot"
+                exit 3
+              fi
 
-            # uv invoked from HERE, never `make lock`: the Makefile on this
-            # branch is pull-request content. These flags must match the
-            # `lock-runtime` / `lock-modules` targets on the default branch.
-            uv pip compile backend/requirements/runtime.txt \
-              --universal --generate-hashes --python-version 3.11 \
-              --custom-compile-command "make lock" \
-              -o backend/requirements/runtime.lock
-            if [ -f modules/requirements.txt ]; then
-              uv pip compile modules/requirements.txt \
+              gh pr checkout "$PR" --force
+
+              # A branch older than the file it is meant to update cannot be
+              # processed -- backend/requirements/runtime.txt did not always
+              # exist, and some of these pull requests predate it.
+              if [ ! -f backend/requirements/runtime.txt ]; then
+                echo "#$PR: branch has no backend/requirements/runtime.txt; it predates the file. Comment @dependabot rebase on it."
+                exit 3
+              fi
+
+              # uv invoked from HERE, never `make lock`: the Makefile on this
+              # branch is pull-request content. These flags must match the
+              # `lock-runtime` / `lock-modules` targets on the default branch.
+              uv pip compile backend/requirements/runtime.txt \
                 --universal --generate-hashes --python-version 3.11 \
-                --constraint backend/requirements.txt \
                 --custom-compile-command "make lock" \
-                -o modules/requirements.lock
-            fi
+                -o backend/requirements/runtime.lock
+              if [ -f modules/requirements.txt ]; then
+                uv pip compile modules/requirements.txt \
+                  --universal --generate-hashes --python-version 3.11 \
+                  --constraint backend/requirements.txt \
+                  --custom-compile-command "make lock" \
+                  -o modules/requirements.lock
+              fi
 
-            CHANGED=$(git diff --name-only)
-            if [ -z "$CHANGED" ]; then
-              echo "#$PR: locks already current, nothing to push"
-              echo "::endgroup::"; continue
-            fi
+              CHANGED=$(git diff --name-only)
+              if [ -z "$CHANGED" ]; then
+                echo "#$PR: locks already current, nothing to push"
+                exit 3
+              fi
 
-            # A regeneration that touched anything but a lock file means one of
-            # the commands above did something unintended. Stop rather than
-            # push it.
-            UNEXPECTED=$(echo "$CHANGED" | grep -vE '^(backend/requirements/runtime\.lock|modules/requirements\.lock)$' || true)
-            if [ -n "$UNEXPECTED" ]; then
-              echo "::error::#$PR: regeneration touched unexpected files:"
-              echo "$UNEXPECTED"
-              git checkout -- .
-              echo "::endgroup::"; exit 1
-            fi
+              # A regeneration that touched anything but a lock file means one
+              # of the commands above did something unintended.
+              UNEXPECTED=$(echo "$CHANGED" | grep -vE '^(backend/requirements/runtime\.lock|modules/requirements\.lock)$' || true)
+              if [ -n "$UNEXPECTED" ]; then
+                echo "::error::#$PR: regeneration touched unexpected files:"
+                echo "$UNEXPECTED"
+                git checkout -- .
+                exit 1
+              fi
 
-            # The default branch's checker, against this branch's files.
-            python /tmp/trusted/check_requirements_lock.py
+              # The default branch's checker, run from inside the tree so its
+              # `Path(__file__).resolve().parents[1]` root resolves to the
+              # repository. Running it from /tmp made it look for
+              # /tmp/backend/requirements/... and report every file missing.
+              # Restored before anything is staged.
+              cp /tmp/trusted/check_requirements_lock.py scripts/check_requirements_lock.py
+              python scripts/check_requirements_lock.py
+              git checkout -- scripts/check_requirements_lock.py
 
-            git add backend/requirements/runtime.lock
-            [ -f modules/requirements.lock ] && git add modules/requirements.lock || true
-            git commit \
-              -m "chore(deps): regenerate the requirements locks" \
-              -m "Dependabot updates requirements.txt and runtime.txt but cannot regenerate runtime.lock, which is 'uv pip compile --generate-hashes' output, so the lock check fails lint and Unit Tests until this runs. See #185."
-            git push
-            echo "#$PR: locks regenerated and pushed"
+              git add backend/requirements/runtime.lock
+              if [ -f modules/requirements.lock ]; then
+                git add modules/requirements.lock
+              fi
+              git commit \
+                -m "chore(deps): regenerate the requirements locks" \
+                -m "Dependabot updates requirements.txt and runtime.txt but cannot regenerate runtime.lock, which is 'uv pip compile --generate-hashes' output, so the lock check fails lint and Unit Tests until this runs. See #185."
+              git push
 
-            {
-              echo "Regenerated \`backend/requirements/runtime.lock\` (and \`modules/requirements.lock\` where present) to match this bump -- \`uv pip compile --generate-hashes\` output, which Dependabot cannot produce itself. Without it \`check_requirements_lock.py\` fails the \`lint\` job and \`test_requirements_consistency.py\` fails \`Unit Tests\`. See #185."
-              echo
-              echo "Dependabot stops rebasing a pull request once someone else pushes to its branch. If this one falls behind \`main\`, comment \`@dependabot rebase\`; the lock is regenerated again on the next run of this workflow."
-            } > /tmp/comment.md
-            gh pr comment "$PR" --body-file /tmp/comment.md
+              {
+                echo "Regenerated \`backend/requirements/runtime.lock\` (and \`modules/requirements.lock\` where present) to match this bump -- \`uv pip compile --generate-hashes\` output, which Dependabot cannot produce itself. Without it \`check_requirements_lock.py\` fails the \`lint\` job and \`test_requirements_consistency.py\` fails \`Unit Tests\`. See #185."
+                echo
+                echo "Dependabot stops rebasing a pull request once someone else pushes to its branch. If this one falls behind \`main\`, comment \`@dependabot rebase\`; the lock is regenerated again on the next run of this workflow."
+              } > /tmp/comment.md
+              gh pr comment "$PR" --body-file /tmp/comment.md
+            )
+            RC=$?
+
+            case "$RC" in
+              0) echo "$PR" >> /tmp/pushed.txt;  echo "#$PR: regenerated and pushed" ;;
+              3) echo "$PR" >> /tmp/skipped.txt; echo "#$PR: skipped" ;;
+              *) echo "$PR" >> /tmp/failed.txt;  echo "::error::#$PR: failed (exit $RC)" ;;
+            esac
             echo "::endgroup::"
           done < /tmp/prs.txt
+
+          {
+            echo "### Dependabot lock refresh"
+            echo
+            echo "| outcome | pull requests |"
+            echo "|---|---|"
+            echo "| pushed  | $(tr '\n' ' ' < /tmp/pushed.txt) |"
+            echo "| skipped | $(tr '\n' ' ' < /tmp/skipped.txt) |"
+            echo "| failed  | $(tr '\n' ' ' < /tmp/failed.txt) |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ -s /tmp/failed.txt ]; then
+            echo "::error::failed on: $(tr '\n' ' ' < /tmp/failed.txt)"
+            exit 1
+          fi
 
       - name: Nothing to do
         if: steps.find.outputs.count == '0'
