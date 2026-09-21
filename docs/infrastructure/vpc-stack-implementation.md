@@ -192,6 +192,26 @@ These endpoints allow services within the VPC to access AWS services without goi
 - **SSM Parameters**: VPC and subnet IDs are stored in SSM Parameter Store for easy reference
 - **CloudFormation Outputs**: Exported for cross-stack references
 
+## SSH to the bastion is opt-in
+
+The VPC creates a bastion security group — the Aurora cluster grants it access,
+and its id is published to SSM at `/experimentation/vpc/bastion-sg-id` — but it
+has **no ingress rule unless you ask for one**:
+
+```bash
+cdk deploy -c bastion_ssh_cidr=203.0.113.4/32
+```
+
+Without that context there is no way in, which is deliberate. The rule used to
+be `0.0.0.0/0` on port 22 with a code comment asking the reader to change it;
+nothing failed or warned, so a plain `cdk deploy` opened SSH to the internet on
+a group the database trusts. A bastion nobody has configured should be a
+bastion nobody can reach.
+
+Give it the narrowest CIDR that works — a single address (`/32`) if you have a
+static one. AWS Systems Manager Session Manager, which needs no inbound rule at
+all, is the better answer where it is an option.
+
 ## Deployment Considerations
 
 - For development environments, this configuration uses 2 AZs and 1 NAT Gateway to optimize costs
