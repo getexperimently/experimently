@@ -7,6 +7,6 @@
 # 2.94.0 while everything that actually ran used 2.268.0, and API differences
 # between them are exactly how a stack that never synthesises goes unnoticed.
 # Dependabot updates both (see .github/dependabot.yml).
-aws-cdk-lib==2.268.0
-constructs>=10.0.0,<11.0.0
+aws-cdk-lib==2.269.0
+constructs>=10.5.0,<11.0.0   # the floor aws-cdk-lib 2.269.0 declares
 pytest==7.4.2
