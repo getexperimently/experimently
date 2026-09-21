@@ -846,9 +846,9 @@ python-http-client==3.3.7 \
     --hash=sha256:ad371d2bbedc6ea15c26179c6222a78bc9308d272435ddf1d5c84f068f249a36 \
     --hash=sha256:bf841ee45262747e00dec7ee9971dfb8c7d83083f5713596488d67739170cea0
     # via sendgrid
-python-json-logger==2.0.7 \
-    --hash=sha256:23e7ec02d34237c5aa1e29a070193a4ea87583bb4e7f8fd06d3de8264c4b2e1c \
-    --hash=sha256:f380b826a991ebbe3de4d897aeec42760035ac760345e57b812938dc8b35e2bd
+python-json-logger==4.2.0 \
+    --hash=sha256:158a52126fcd6869e09574d2b66272666f3dc8f468c62637ef9a1fa883719cb9 \
+    --hash=sha256:e371ebe22ec01e289850102091a2b1f6fc9e655c7f1f5f29073936756c290afa
     # via -r backend/requirements/runtime.txt
 python-multipart==0.0.32 \
     --hash=sha256:be54b7f3fa167bb83e4fcd936b887b708f4e57fe75911c02aebf53efaf8d938e \
