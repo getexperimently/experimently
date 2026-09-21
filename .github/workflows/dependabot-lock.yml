@@ -1,0 +1,182 @@
+name: Dependabot lock refresh
+
+# Dependabot can update `backend/requirements.txt` and
+# `backend/requirements/runtime.txt`, but it cannot regenerate
+# `backend/requirements/runtime.lock` -- that file is `uv pip compile
+# --generate-hashes` output. So every bump of any package in runtime.txt
+# arrives red and stays red: `scripts/check_requirements_lock.py` fails the
+# `lint` job, and `test_requirements_consistency.py` fails `Unit Tests` for the
+# same reason. See #185.
+#
+# This regenerates the lock on those branches and pushes the result.
+#
+# WHY NOT `pull_request`: a workflow triggered by Dependabot gets a READ-ONLY
+# GITHUB_TOKEN, so it could not push. `pull_request_target` would get a write
+# token, but it is the classic privilege-escalation shape -- a write token plus
+# a checkout of branch content. Triggering on schedule/dispatch instead means
+# the token is an ordinary write token and the workflow definition always comes
+# from the default branch, which is easier to reason about.
+#
+# WHAT IT WILL NOT DO: run anything from the pull request's branch. `make lock`
+# would execute the branch's Makefile, so the uv invocations below are spelled
+# out here instead and must be kept in step with the `lock-runtime` and
+# `lock-modules` targets. The uv version is READ from the Makefile rather than
+# copied, because a second copy of a pinned version is the drift this
+# repository keeps being bitten by.
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: 'A single PR number. Leave empty to do every eligible open Dependabot PR.'
+        required: false
+        type: string
+  schedule:
+    # A few hours after Dependabot's own windows, so it has opened its PRs.
+    - cron: '0 9 * * 1-5'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: dependabot-lock-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    name: Regenerate the locks on Dependabot branches
+    runs-on: ubuntu-latest
+    if: github.repository == 'amarkanday/experimentation-platform' || github.repository == 'getexperimently/experimently'
+    steps:
+      - name: Check out the default branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+
+      # Read, not duplicated: the Makefile is the single source of the pin.
+      - name: Install uv at the version the Makefile pins
+        run: |
+          set -euo pipefail
+          UV_VERSION=$(sed -n 's/^UV_VERSION := //p' Makefile | head -1)
+          if [ -z "$UV_VERSION" ]; then
+            echo "::error::could not read UV_VERSION from the Makefile"
+            exit 1
+          fi
+          echo "uv version from Makefile: $UV_VERSION"
+          python -m pip install --quiet "uv==$UV_VERSION"
+          uv --version
+
+      # Keep the trusted copies out of reach of the branch checkout below.
+      - name: Stash the default branch's checker
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/trusted
+          cp scripts/check_requirements_lock.py /tmp/trusted/
+
+      - name: Find the pull requests that need it
+        id: find
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SINGLE: ${{ inputs.pr }}
+        run: |
+          set -euo pipefail
+          if [ -n "$SINGLE" ]; then
+            echo "$SINGLE" > /tmp/prs.txt
+          else
+            # Open, authored by Dependabot, touching a file a lock is built from.
+            gh pr list --state open --limit 100 \
+              --json number,author,files \
+              --jq '.[]
+                    | select(.author.login == "app/dependabot")
+                    | select(any(.files[].path;
+                        . == "backend/requirements/runtime.txt"
+                        or . == "modules/requirements.txt"))
+                    | .number' > /tmp/prs.txt
+          fi
+          echo "candidates: $(tr '\n' ' ' < /tmp/prs.txt)"
+          echo "count=$(wc -l < /tmp/prs.txt | tr -d ' ')" >> "$GITHUB_OUTPUT"
+
+      - name: Regenerate and push
+        if: steps.find.outputs.count != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          while read -r PR; do
+            [ -z "$PR" ] && continue
+            echo "::group::PR #$PR"
+
+            # The author guard is repeated per PR: `--jq` above filters the
+            # listing, but an explicitly dispatched number has not been checked.
+            AUTHOR=$(gh pr view "$PR" --json author --jq '.author.login')
+            if [ "$AUTHOR" != "app/dependabot" ]; then
+              echo "::warning::#$PR is authored by $AUTHOR, not Dependabot -- skipping"
+              echo "::endgroup::"; continue
+            fi
+
+            gh pr checkout "$PR" --force
+
+            # uv invoked from HERE, never `make lock`: the Makefile on this
+            # branch is pull-request content. These flags must match the
+            # `lock-runtime` / `lock-modules` targets on the default branch.
+            uv pip compile backend/requirements/runtime.txt \
+              --universal --generate-hashes --python-version 3.11 \
+              --custom-compile-command "make lock" \
+              -o backend/requirements/runtime.lock
+            if [ -f modules/requirements.txt ]; then
+              uv pip compile modules/requirements.txt \
+                --universal --generate-hashes --python-version 3.11 \
+                --constraint backend/requirements.txt \
+                --custom-compile-command "make lock" \
+                -o modules/requirements.lock
+            fi
+
+            CHANGED=$(git diff --name-only)
+            if [ -z "$CHANGED" ]; then
+              echo "#$PR: locks already current, nothing to push"
+              echo "::endgroup::"; continue
+            fi
+
+            # A regeneration that touched anything but a lock file means one of
+            # the commands above did something unintended. Stop rather than
+            # push it.
+            UNEXPECTED=$(echo "$CHANGED" | grep -vE '^(backend/requirements/runtime\.lock|modules/requirements\.lock)$' || true)
+            if [ -n "$UNEXPECTED" ]; then
+              echo "::error::#$PR: regeneration touched unexpected files:"
+              echo "$UNEXPECTED"
+              git checkout -- .
+              echo "::endgroup::"; exit 1
+            fi
+
+            # The default branch's checker, against this branch's files.
+            python /tmp/trusted/check_requirements_lock.py
+
+            git add backend/requirements/runtime.lock
+            [ -f modules/requirements.lock ] && git add modules/requirements.lock || true
+            git commit \
+              -m "chore(deps): regenerate the requirements locks" \
+              -m "Dependabot updates requirements.txt and runtime.txt but cannot regenerate runtime.lock, which is 'uv pip compile --generate-hashes' output, so the lock check fails lint and Unit Tests until this runs. See #185."
+            git push
+            echo "#$PR: locks regenerated and pushed"
+
+            {
+              echo "Regenerated \`backend/requirements/runtime.lock\` (and \`modules/requirements.lock\` where present) to match this bump -- \`uv pip compile --generate-hashes\` output, which Dependabot cannot produce itself. Without it \`check_requirements_lock.py\` fails the \`lint\` job and \`test_requirements_consistency.py\` fails \`Unit Tests\`. See #185."
+              echo
+              echo "Dependabot stops rebasing a pull request once someone else pushes to its branch. If this one falls behind \`main\`, comment \`@dependabot rebase\`; the lock is regenerated again on the next run of this workflow."
+            } > /tmp/comment.md
+            gh pr comment "$PR" --body-file /tmp/comment.md
+            echo "::endgroup::"
+          done < /tmp/prs.txt
+
+      - name: Nothing to do
+        if: steps.find.outputs.count == '0'
+        run: echo "No open Dependabot pull request touches a file a lock is built from."
