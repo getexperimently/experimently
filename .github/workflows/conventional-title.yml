@@ -1,0 +1,81 @@
+name: Conventional Title
+
+# The pull request TITLE is the release note.
+#
+# `main` is squash-merged, and GitHub defaults the squash subject to the pull
+# request title. release-please reads those subjects off `main` to build the
+# changelog and choose the version bump -- so a title that is not a
+# conventional commit is invisible to it. Silently: the release is still cut,
+# the work simply does not appear in it and does not move the version.
+#
+# That is exactly what happened to P3.5 (#165, and #167). Its merge subject was
+# prose, release-please could not parse it, and the release pull request it
+# then opened (#166) contained three historical `docs:` commits and nothing
+# from the change that had just landed. Its log shows it skipping 81 such
+# commits with `Error: unexpected token ' ' at 1:7`.
+#
+# No third-party action: this is a regex over one string, and `regression-guard`
+# is the precedent for a homegrown check.
+
+on:
+  pull_request:
+    branches: [main]
+    # `edited` matters -- it is how a corrected title re-runs the check.
+    types: [opened, edited, synchronize, reopened, ready_for_review]
+
+concurrency:
+  group: conventional-title-${{ github.head_ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  conventional-title:
+    name: conventional-title
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: The title must be a conventional commit
+        env:
+          # Through the environment, never interpolated into the script: a
+          # title is attacker-controlled text and `${{ }}` inside `run:` is a
+          # shell injection.
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          set -euo pipefail
+
+          # The types release-please is configured to understand
+          # (release-please-config.json `changelog-sections`), plus `revert`
+          # and `style`, which it accepts and ignores. Keep this list and that
+          # file in step.
+          TYPES='feat|fix|perf|deps|docs|build|ci|refactor|test|chore|revert|style'
+
+          # type(optional scope)optional !: space, then something.
+          PATTERN="^(${TYPES})(\([a-z0-9][a-z0-9._/-]*\))?!?: .+"
+
+          printf 'title: %s\n\n' "$TITLE"
+
+          if printf '%s' "$TITLE" | grep -qE "$PATTERN"; then
+            echo "OK -- release-please will read this."
+            exit 0
+          fi
+
+          cat <<EOF
+          ::error::The pull request title is not a conventional commit, so
+          release-please cannot read it and this change will be missing from
+          the changelog and will not move the version.
+
+          Expected:   <type>(<optional scope>): <description>
+          Types:      ${TYPES}
+
+          Examples:
+            fix: break the CDK dependency cycle
+            feat(sdk): add a Ruby client
+            chore(deps): bump aws-cdk-lib to 2.269.0
+
+          Edit the title -- this check re-runs on edit. The title is what
+          GitHub uses as the squash-merge subject, which is what
+          release-please parses.
+          EOF
+          exit 1
