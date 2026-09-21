@@ -30,9 +30,16 @@ gh api repos/<owner>/<repo>/branches/main/protection --jq '.required_status_chec
 | integration-tests | `integration-tests.yml` | `backend/tests/integration` with Postgres and Redis services |
 | lint | `lint.yml` | ruff, import-linter, REUSE, lock check, eslint, tsc, hadolint, actionlint |
 | regression-guard | `regression-guard.yml` | a pull request labelled `bug` must change a test file |
+| conventional-title † | `conventional-title.yml` | the pull request title must be a conventional commit, because it becomes the squash subject release-please parses (#167) |
 | Security Scan Summary | `security-scan.yml` | Bandit, npm audit, Semgrep (`p/python`, `p/security-audit`, `p/secrets`, `p/owasp-top-ten`), Gitleaks, Trivy on the built image |
 | Release Gate Summary | `release-gate.yml` | backend gate (unit + smoke), frontend gate (test + build), security gate (Bandit + Gitleaks) |
 | CDK Stack Tests (Python) | `infrastructure-tests.yml` | `infrastructure/tests`, including a real `cdk synth` of both profiles (`TestTheAppActuallySynthesises`) |
+
+† `conventional-title` runs on every pull request but is **not yet** in branch
+protection. Requiring it today would block all 35 open Dependabot pull
+requests, whose titles predate the `commit-message.prefix` added to
+`.github/dependabot.yml` — that only affects pull requests Dependabot opens
+from now on. Add it once that backlog is cleared.
 
 Deliberately **not** required, because it is path-filtered and a required check
 that never reports leaves a pull request permanently pending: `cognito-integration`
