@@ -9,8 +9,8 @@
 #     failed after the tag already existed.
 #
 # What it produces, for VERSION=X.Y.Z:
-#   ghcr.io/<owner>/<repo>:core-X.Y.Z   linux/amd64, linux/arm64
-#   ghcr.io/<owner>/<repo>:full-X.Y.Z   linux/amd64, linux/arm64
+#   ghcr.io/<owner>/<repo>:core-X.Y.Z   linux/amd64  (see #181)
+#   ghcr.io/<owner>/<repo>:full-X.Y.Z   linux/amd64  (see #181)
 #   ghcr.io/<owner>/<repo>-web:core-X.Y.Z   linux/amd64
 #   ghcr.io/<owner>/<repo>-web:full-X.Y.Z   linux/amd64
 # plus the floating `:core` / `:full` tags, which move only for a final
@@ -209,7 +209,15 @@ jobs:
           context: .
           file: backend/Dockerfile
           target: ${{ matrix.profile }}
-          platforms: linux/amd64,linux/arm64
+          # amd64 only, like the dashboard images below. The arm64 variant
+          # was published and could not run: `import
+          # cryptography.hazmat.backends.openssl` exits 132 (SIGILL, no
+          # traceback) in it, so every module importing
+          # backend.app.core.security -- the whole API -- was unimportable.
+          # See #181. Publishing it meant an arm64 host pulling `:core` got an
+          # image that dies at import with nothing to explain why; without it,
+          # Docker falls back to amd64 under emulation, which works.
+          platforms: linux/amd64
           push: true
           tags: ${{ steps.tags.outputs.tags }}
           build-args: |

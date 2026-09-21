@@ -44,7 +44,7 @@ To quickly set up the monitoring system, follow these steps:
 
 1. Install required dependencies:
    ```bash
-   pip install -r backend/requirements-monitoring.txt
+   pip install -r backend/requirements.txt
    ```
 
 2. Create CloudWatch log groups:
