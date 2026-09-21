@@ -234,22 +234,37 @@ jobs:
               {
                 echo "Regenerated \`backend/requirements/runtime.lock\` (and \`modules/requirements.lock\` where present) to match this bump -- \`uv pip compile --generate-hashes\` output, which Dependabot cannot produce itself. Without it \`check_requirements_lock.py\` fails the \`lint\` job and \`test_requirements_consistency.py\` fails \`Unit Tests\`. See #185."
                 echo
-                echo "Dependabot stops rebasing a pull request once someone else pushes to its branch. If this one falls behind \`main\`, comment \`@dependabot rebase\`; the lock is regenerated again on the next run of this workflow."
+                echo "One consequence, measured rather than assumed: Dependabot stops managing a branch once someone else pushes to it, and \`@dependabot rebase\` is then ignored -- tried on #99 and #108, neither rebased. So if this pull request falls behind \`main\`, the way back is to close it and let Dependabot open a fresh one, which it will do with the same bump."
               } > /tmp/comment.md
               gh pr comment "$PR" --body-file /tmp/comment.md
 
-              # Approve the runs the push just created. They are queued a
-              # moment after the push, so give them time to appear; approving
-              # nothing is not an error, it means none needed it.
+              # Approve the runs the push just created.
+              #
+              # POLL, do not sleep once. The first version slept 15 seconds and
+              # reported "approved 0" every time -- measured on #99, the push
+              # landed at 05:03:02 and the runs appeared at 05:04, about a
+              # minute later. So it always looked past them, and the pull
+              # request sat with no checks at all until they were approved by
+              # hand. Approving nothing after the full window is not an error:
+              # some pushes trigger no runs needing approval.
+              #
+              # Kept polling across the whole window rather than stopping at
+              # the first batch, because the runs do not all appear at once.
+              # That costs about 2.5 minutes per pull request, deliberately:
+              # this job runs once on a weekday morning, and the alternative --
+              # exiting early and leaving half the runs queued -- is the bug
+              # being fixed.
               BRANCH=$(git rev-parse --abbrev-ref HEAD)
-              sleep 15
               APPROVED=0
-              for ID in $(gh run list --branch "$BRANCH" --limit 40 \
-                            --json databaseId,conclusion \
-                            --jq '.[] | select(.conclusion == "action_required") | .databaseId'); do
-                if gh api -X POST "repos/${GITHUB_REPOSITORY}/actions/runs/$ID/approve" >/dev/null 2>&1; then
-                  APPROVED=$((APPROVED + 1))
-                fi
+              for _ in $(seq 1 15); do
+                sleep 10
+                for ID in $(gh run list --branch "$BRANCH" --limit 40 \
+                              --json databaseId,conclusion \
+                              --jq '.[] | select(.conclusion == "action_required") | .databaseId'); do
+                  if gh api -X POST "repos/${GITHUB_REPOSITORY}/actions/runs/$ID/approve" >/dev/null 2>&1; then
+                    APPROVED=$((APPROVED + 1))
+                  fi
+                done
               done
               echo "#$PR: approved $APPROVED queued workflow run(s)"
             ) || RC=$?
