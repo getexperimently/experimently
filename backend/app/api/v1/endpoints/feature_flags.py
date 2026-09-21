@@ -144,34 +144,22 @@ async def list_feature_flags(
             )
         record_cache_miss("feature_flag_list")
 
-    # Get feature flags based on user role and permissions
-    if current_user.is_superuser:
-        feature_flags_data = crud_feature_flag.get_multi(
-            db, skip=skip, limit=limit, status=status, search=search
-        )
-        total = crud_feature_flag.count(db, status=status, search=search)
-    else:
-        # Check if user has permission to view all feature flags
-        # Admin/Developer roles can see all flags, Analyst/Viewer can only see their own
-        if check_permission(current_user, ResourceType.FEATURE_FLAG, Action.UPDATE):
-            # User has broader permissions (e.g., ADMIN, DEVELOPER)
-            feature_flags_data = crud_feature_flag.get_multi(
-                db, skip=skip, limit=limit, status=status, search=search
-            )
-            total = crud_feature_flag.count(db, status=status, search=search)
-        else:
-            # User can only see their own feature flags (e.g., ANALYST, VIEWER with limited permissions)
-            feature_flags_data = crud_feature_flag.get_multi_by_owner(
-                db=db,
-                owner_id=current_user.id,
-                skip=skip,
-                limit=limit,
-                status=status,
-                search=search,
-            )
-            total = crud_feature_flag.count_by_owner(
-                db=db, owner_id=current_user.id, status=status, search=search
-            )
+    # Everyone the LIST check above admitted sees the whole platform.
+    #
+    # This had a third access model again, different from both the role table
+    # and the experiments endpoint: superuser -> all; UPDATE permission
+    # (ADMIN, DEVELOPER) -> all; otherwise own rows only. Its comment read
+    # "Analyst/Viewer can only see their own", which inverts the role the docs
+    # describe -- ANALYST exists to "view all data but not create or modify"
+    # (CLAUDE.md), so it was the one role guaranteed to be wrong.
+    #
+    # All four roles carry Action.LIST on feature flags, a deployment is single
+    # tenant (founder, 2026-09-21), and tenant isolation belongs to the
+    # workspaces module rather than to row ownership. See #83.
+    feature_flags_data = crud_feature_flag.get_multi(
+        db, skip=skip, limit=limit, status=status, search=search
+    )
+    total = crud_feature_flag.count(db, status=status, search=search)
 
     # Create response with pagination
     response = FeatureFlagListResponse(
