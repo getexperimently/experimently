@@ -23,7 +23,7 @@ mypy-boto3-ssm==1.43.53
 
 # Scheduling & Background Tasks
 APScheduler==3.11.3
-pytz==2023.3
+pytz==2026.3.post1
 
 # AWS
 aws-cdk-lib==2.269.0
