@@ -254,27 +254,27 @@ class TestTheAppActuallySynthesises:
         produced = {stack.stack_name for stack in assembly.stacks}
         assert produced, f"{profile}: synth produced no stacks"
 
-        # The stack set is pinned, not counted: a stack silently dropping out
-        # of a deploy is the defect the ENABLE_MODULE_STACKS gate produced
-        # before this file existed.
+        # The stack set is pinned EXACTLY, in both directions. It used to be
+        # `expected <= produced`, which catches a stack going missing -- the
+        # defect the ENABLE_MODULE_STACKS gate produced -- but says nothing
+        # about a stack that should not be there. An app that quietly grows a
+        # deploy target is the same class of problem: `experimentation-api-dev`
+        # built an API Gateway, a second Cognito user pool and three
+        # placeholder Lambdas for months, referenced by nothing (#178).
         expected = CORE_STACKS | {
             "experimentation-auth-dev",
-            "experimentation-api-dev",
             "experimentation-compute-dev",
             "experimentation-redis-dev",
             "experimentation-dynamodb-dev",
             "experimentation-migrations-dev",
         }
-        assert expected <= produced, f"{profile}: missing {sorted(expected - produced)}"
-
         if profile == "full":
-            assert MODULE_STACKS <= produced, (
-                f"full: missing module stacks {sorted(MODULE_STACKS - produced)}"
-            )
-        else:
-            assert not (MODULE_STACKS & produced), (
-                f"core: module stacks leaked in {sorted(MODULE_STACKS & produced)}"
-            )
+            expected |= MODULE_STACKS
+
+        assert produced == expected, (
+            f"{profile}: missing {sorted(expected - produced)}, "
+            f"unexpected {sorted(produced - expected)}"
+        )
 
         # Every stack carries a real template -- synth having "succeeded" with
         # an empty one would mean nothing.

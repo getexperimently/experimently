@@ -31,7 +31,7 @@ docker build -t your-account.dkr.ecr.region.amazonaws.com/experimentation-api:la
 docker push your-account.dkr.ecr.region.amazonaws.com/experimentation-api:latest
 
 # Deploy via CDK (re-deploys the ECS service with the new image)
-cd infrastructure && cdk deploy ApiStack
+cd infrastructure && cdk deploy experimentation-fargate-prod
 ```
 
 ### Environment Variables
@@ -238,22 +238,30 @@ cdk bootstrap aws://YOUR_ACCOUNT_ID/YOUR_REGION
 # Deploy all stacks
 cdk deploy --all
 
-# Deploy a specific stack
-cdk deploy ApiStack
+# Deploy a specific stack (a stack id from `cdk list`)
+cdk deploy experimentation-fargate-prod
 ```
 
 ### Stacks Deployed
 
-| Stack | Resources |
-|-------|-----------|
-| `NetworkStack` | VPC, subnets, NAT gateways, security groups |
-| `DatabaseStack` | Aurora cluster, ElastiCache cluster, subnet groups |
-| `ApiStack` | ECS cluster, Fargate service, ALB, IAM roles |
-| `LambdaStack` | Assignment, EventProcessor, FeatureFlagEvaluation Lambda functions |
-| `DynamoStack` | DynamoDB table for counters |
-| `StreamingStack` | Kinesis stream, OpenSearch domain |
-| `MonitoringStack` | CloudWatch dashboards, alarms, log groups |
-| `SplitUrlStack` | CloudFront distribution, Lambda@Edge |
+| Stack (`<env>` is `dev`, `staging` or `prod`) | Contents |
+|---|---|
+| `experimentation-vpc-<env>` | VPC, public/private/isolated subnets, NAT, route tables, network ACLs, gateway endpoints, security groups |
+| `experimentation-auth-<env>` | Cognito user pool, app client and groups |
+| `experimentation-database-<env>` | Aurora PostgreSQL cluster, parameter group, KMS key, security group |
+| `experimentation-redis-<env>` | ElastiCache Redis replication group, subnet group, security group |
+| `experimentation-dynamodb-<env>` | Five DynamoDB tables (assignments, events, experiments, feature flags, overrides) |
+| `experimentation-compute-<env>` | ECS cluster, task security group, the database-access Lambda |
+| `experimentation-fargate-<env>` | ALB, HTTPS + test listeners, blue/green target groups, Fargate service, CodeDeploy application and deployment group, auto-scaling |
+| `experimentation-migrations-<env>` | One-off ECS task definition that runs the alembic upgrade |
+| `experimentation-monitoring-<env>` | CloudWatch dashboards, alarms, log groups, metric filters, SNS topic |
+| `experimentation-dynamodb-counters-<env>` | **Full profile only** — the real-time experiment-counters table |
+| `experimentation-analytics-<env>` | **Full profile only** — Kinesis stream, Firehose, S3 data lake, OpenSearch domain, consumer Lambda |
+| `experimentation-glue-etl-<env>` | **Full profile only** — Glue database and crawler, two ETL jobs, Athena results bucket, daily trigger |
+
+A core deployment builds the first nine; a full one builds all twelve. The
+names are the stack **ids** `cdk deploy` takes, not class names -- run
+`cdk list` to see them for your environment.
 
 ---
 
