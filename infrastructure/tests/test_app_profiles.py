@@ -330,3 +330,65 @@ class TestTheAppActuallySynthesises:
         # And it targets the compute stack's group, which is why the rule has
         # to be written from this side at all.
         assert "GroupId" in rule, rule
+
+    @pytest.mark.regression
+    def test_two_synths_of_the_same_source_agree(self):
+        """Synthesising twice produces byte-identical templates.
+
+        ``analytics_stack.py`` built every physical name it had from
+        ``random.choices(...)`` evaluated at synth time, so this assertion
+        failed on six resources: the Kinesis stream, the S3 data lake, the
+        Firehose delivery stream, the OpenSearch domain, and a Glue database and
+        crawler that duplicated ``glue_etl_stack.py``'s pair.
+
+        What that cost is not the template churn but what CloudFormation does
+        with it: changing a physical name is a **replacement**, so every
+        ``cdk deploy`` -- including a deploy of no change at all -- tore down the
+        data lake and built a new one, and ``RemovalPolicy.RETAIN`` on the bucket
+        meant the old one was kept rather than deleted, with nothing pointing at
+        it. ``exp-data-hdv7dl4h-us-west-2`` in this account is one of those.
+
+        The full profile is the one asserted because the affected stacks are all
+        module stacks; the core profile has no analytics at all. Compared as
+        parsed JSON, not as text, so key order cannot make this flap.
+        """
+        templates = []
+        for _ in range(2):
+            with _app_environment(CDK_DIR):
+                namespace = runpy.run_path(str(CDK_DIR / "app.py"), run_name="__main__")
+            assembly = namespace["app"].synth()
+            templates.append({s.stack_name: s.template for s in assembly.stacks})
+
+        first, second = templates
+        assert first.keys() == second.keys(), "the two synths built different stacks"
+
+        differing = sorted(name for name in first if first[name] != second[name])
+        assert not differing, (
+            "these stacks are not deterministic across synths, so every "
+            f"`cdk deploy` replaces resources in them: {differing}"
+        )
+
+    def test_the_glue_catalog_is_defined_once(self):
+        """One Glue database and one crawler across the whole app, not two.
+
+        ``analytics_stack`` and ``glue_etl_stack`` each created a database and a
+        crawler, both crawling ``s3://<the same data lake>/raw/events/`` on a
+        schedule -- the analytics one hourly. Only ``glue_etl_stack``'s pair is
+        referenced, by its two ETL jobs through ``GLUE_DATABASE_NAME``, so the
+        other maintained a catalog nothing queried and billed per DPU-hour to
+        do it.
+        """
+        with _app_environment(CDK_DIR):
+            namespace = runpy.run_path(str(CDK_DIR / "app.py"), run_name="__main__")
+        assembly = namespace["app"].synth()
+
+        found = {"AWS::Glue::Database": [], "AWS::Glue::Crawler": []}
+        for stack in assembly.stacks:
+            for logical_id, resource in stack.template.get("Resources", {}).items():
+                if resource["Type"] in found:
+                    found[resource["Type"]].append(f"{stack.stack_name}/{logical_id}")
+
+        for resource_type, instances in found.items():
+            assert len(instances) == 1, (
+                f"expected exactly one {resource_type} in the app, found {instances}"
+            )

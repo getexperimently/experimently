@@ -10,37 +10,66 @@ from aws_cdk import (
     aws_kinesisfirehose as firehose,
     aws_opensearchservice as opensearch,
     aws_lambda_event_sources as lambda_event_sources,
-    aws_glue as glue,
 )
 from constructs import Construct
-import random
-import string
 
 
 class AnalyticsStack(Stack):
+    """Kinesis -> Firehose -> S3 data lake, with OpenSearch and a Lambda consumer.
+
+    **No resource here carries an explicit physical name**, and that is the
+    point.  Until now every one of them was built from
+    ``random.choices(...)`` evaluated *at synth time*:
+
+        random_id = "".join(random.choices(ascii_lowercase + digits, k=8))
+        stream_name       = f"exp-events-{random_id}"
+        bucket_name       = f"exp-data-{random_id}-{region}"
+        delivery_stream   = f"exp-delivery-{random_id}"
+        domain_name       = f"exp-{random_id[:8]}"
+
+    So two synths of the same source produced two different templates, and
+    ``cdk deploy`` replaced the Kinesis stream, the S3 bucket, the Firehose
+    delivery stream and the OpenSearch domain **every single time** -- with
+    ``cdk diff`` showing a full replacement of the data lake on a no-op deploy.
+    The bucket is ``RemovalPolicy.RETAIN``, so each of those replacements left
+    the previous one behind, full of events nothing could find.
+
+    That is not hypothetical.  ``exp-data-hdv7dl4h-us-west-2`` is sitting in
+    this account today, created 2025-03-22, orphaned by exactly this, from the
+    one and only deploy this repository has ever had.  It is empty, so the
+    damage this time was nil.
+
+    Omitting the name entirely is better than deriving a deterministic one:
+    CloudFormation generates a physical name from the stack name and the
+    logical id, which is stable across synths, unique per account, and does not
+    have to be hand-checked against each service's length and character rules
+    (OpenSearch domains are 3-28 lowercase characters; S3 buckets are globally
+    unique -- see #176).  Everything downstream already refers to these by
+    object -- ``.stream_arn``, ``.bucket_name``, ``.domain_endpoint`` -- so
+    nothing needed to change to follow them.
+    """
+
     def __init__(self, scope: Construct, construct_id: str, vpc, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
-        # Generate random ID for resource names
-        random_id = "".join(random.choices(string.ascii_lowercase + string.digits, k=8))
         env_name = self.node.try_get_context("env") or "dev"
 
-        # Create a Kinesis Data Stream with randomized name
-        stream_name = f"exp-events-{random_id}"
+        # No explicit physical names anywhere in this stack -- see the class
+        # docstring. CloudFormation derives one from the stack name and the
+        # logical id, which is stable across synths and unique per account.
         self.events_stream = kinesis.Stream(
             self,
             "EventsStream",
-            stream_name=stream_name,
             shard_count=1,  # Increase for production
             retention_period=Duration.hours(24),
         )
 
-        # Create an S3 bucket with randomized name
-        bucket_name = f"exp-data-{random_id}-{self.region}"
+        # RETAIN plus a name that changed every synth is what orphaned
+        # `exp-data-hdv7dl4h-us-west-2` in this account: the replacement was
+        # created and the old bucket kept, with nothing pointing at it.
         self.data_lake_bucket = s3.Bucket(
             self,
             "DataLakeBucket",
-            bucket_name=bucket_name,
             removal_policy=RemovalPolicy.RETAIN,
             versioned=True,
         )
@@ -98,14 +127,9 @@ class AnalyticsStack(Stack):
             )
         )
 
-        # Create a unique delivery stream name
-        delivery_stream_name = f"exp-delivery-{random_id}"
-
-        # Create the delivery stream
         delivery_stream = firehose.CfnDeliveryStream(
             self,
             "EventsDeliveryStream",
-            delivery_stream_name=delivery_stream_name,
             delivery_stream_type="KinesisStreamAsSource",
             kinesis_stream_source_configuration=firehose.CfnDeliveryStream.KinesisStreamSourceConfigurationProperty(
                 kinesis_stream_arn=self.events_stream.stream_arn,
@@ -124,14 +148,10 @@ class AnalyticsStack(Stack):
         )
         delivery_stream.node.add_dependency(self.events_stream)
 
-        # Create a domain name with randomized suffix (ensuring it's under 28 chars)
-        domain_name = f"exp-{random_id[:8]}"
-
         # Create an OpenSearch domain for analytics (with simplified configuration)
         opensearch_domain = opensearch.Domain(
             self,
             "ExperimentationDomain",
-            domain_name=domain_name,
             version=opensearch.EngineVersion.OPENSEARCH_1_3,
             capacity=opensearch.CapacityConfig(
                 data_nodes=1, data_node_instance_type="t3.small.search"
@@ -205,55 +225,4 @@ class AnalyticsStack(Stack):
                 batch_size=100,
                 max_batching_window=Duration.seconds(10),
             )
-        )
-
-        # Create a Glue Database with randomized name
-        db_name = f"exp_{random_id[:8]}_db"
-
-        # Create a Glue Database and Crawler for analyzing data in S3
-        glue_role = iam.Role(
-            self,
-            "GlueRole",
-            assumed_by=iam.ServicePrincipal("glue.amazonaws.com"),
-            managed_policies=[
-                iam.ManagedPolicy.from_aws_managed_policy_name(
-                    "service-role/AWSGlueServiceRole"
-                )
-            ],
-        )
-
-        self.data_lake_bucket.grant_read(glue_role)
-
-        # Create a Glue Database
-        glue_database = glue.CfnDatabase(
-            self,
-            "ExperimentationDatabase",
-            catalog_id=self.account,
-            database_input=glue.CfnDatabase.DatabaseInputProperty(
-                name=db_name, description="Database for experimentation platform data"
-            ),
-        )
-
-        # Create a Glue Crawler with randomized name
-        crawler_name = f"exp-crawler-{random_id[:8]}"
-
-        glue_crawler = glue.CfnCrawler(
-            self,
-            "EventsCrawler",
-            name=crawler_name,
-            role=glue_role.role_arn,
-            database_name=db_name,
-            schedule=glue.CfnCrawler.ScheduleProperty(
-                schedule_expression="cron(0 * * * ? *)"  # Run hourly
-            ),
-            targets=glue.CfnCrawler.TargetsProperty(
-                s3_targets=[
-                    glue.CfnCrawler.S3TargetProperty(
-                        path=f"s3://{self.data_lake_bucket.bucket_name}/raw/events/"
-                    )
-                ]
-            ),
-            schema_change_policy=glue.CfnCrawler.SchemaChangePolicyProperty(
-                update_behavior="UPDATE_IN_DATABASE", delete_behavior="LOG"
-            ),
         )
