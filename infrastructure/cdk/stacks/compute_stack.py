@@ -20,8 +20,32 @@ class ComputeStack(Stack):
         env_name = self.node.try_get_context("env") or "dev"
 
         # Create an ECS cluster for the backend services
+        # Named, because two workflows address it by name and nothing made
+        # them agree. `deploy-prod.yml` sets `ECS_CLUSTER: experimentation-prod`
+        # and `rollback.yml` passes `--cluster experimentation-prod` three
+        # times; with no `cluster_name` CloudFormation generated
+        # `experimentation-compute-prod-ECSCluster<hash>-<random>`, so every
+        # `aws ecs` call in both would have failed with
+        # ClusterNotFoundException -- the rollback path included, which is the
+        # one that matters at 3am (#80).
+        #
+        # Everything else those workflows name already matched: the service and
+        # task-definition family (`experimentation-backend-<env>`), the
+        # migration family (`experimentation-migrate`), the CodeDeploy
+        # application (`experimentation-platform`) and deployment group
+        # (`experimentation-<env>`). This was the only one left implicit.
+        #
+        # Free to set now: nothing has ever been deployed from this repository
+        # (verified -- no experimentation-* stacks in us-west-2 or us-east-1,
+        # including deleted), so there is no cluster to replace. After a
+        # deployment this becomes a replacement, which is why it is worth
+        # fixing before the first one rather than after.
         self.ecs_cluster = ecs.Cluster(
-            self, "ECSCluster", vpc=vpc, container_insights=True
+            self,
+            "ECSCluster",
+            vpc=vpc,
+            cluster_name=f"experimentation-{env_name}",
+            container_insights=True,
         )
 
         # Create a security group for the ECS tasks

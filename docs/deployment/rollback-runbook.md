@@ -80,7 +80,7 @@ aws ecs list-task-definitions \
 # Option B: Check what ECS is currently running, then subtract 1 from the revision
 aws ecs describe-services \
   --cluster experimentation-prod \
-  --services experimentation-api-prod \
+  --services experimentation-backend-prod \
   --query 'services[0].taskDefinition' \
   --output text
 # Returns: arn:...:task-definition/experimentation-backend-prod:44
@@ -89,7 +89,7 @@ aws ecs describe-services \
 # Option C: Review service events to identify what was running before this deployment
 aws ecs describe-services \
   --cluster experimentation-prod \
-  --services experimentation-api-prod \
+  --services experimentation-backend-prod \
   --query 'services[0].events[:5]'
 ```
 
@@ -116,7 +116,7 @@ Watch the GitHub Actions run. Simultaneously run:
 # Watch ECS task replacement in real time (refreshes every 5 seconds)
 watch -n 5 'aws ecs describe-services \
   --cluster experimentation-prod \
-  --services experimentation-api-prod \
+  --services experimentation-backend-prod \
   --query "services[0].{Running:runningCount,Desired:desiredCount,TaskDef:taskDefinition}"'
 ```
 
@@ -136,7 +136,7 @@ PREV_TASK_DEF="arn:aws:ecs:us-west-2:ACCOUNT_ID:task-definition/experimentation-
 # (subtracts 1 from the current revision number)
 CURRENT=$(aws ecs describe-services \
   --cluster experimentation-prod \
-  --services experimentation-api-prod \
+  --services experimentation-backend-prod \
   --query 'services[0].taskDefinition' \
   --output text)
 echo "Current task def: $CURRENT"
@@ -145,14 +145,14 @@ echo "Current task def: $CURRENT"
 # Step 3: Update the ECS service to use the previous task definition
 aws ecs update-service \
   --cluster experimentation-prod \
-  --service experimentation-api-prod \
+  --service experimentation-backend-prod \
   --task-definition $PREV_TASK_DEF \
   --force-new-deployment
 
 # Step 4: Wait for the service to stabilize (blocks until complete or times out in ~10 min)
 aws ecs wait services-stable \
   --cluster experimentation-prod \
-  --services experimentation-api-prod
+  --services experimentation-backend-prod
 
 echo "Rollback complete. Running verification..."
 
@@ -178,8 +178,8 @@ CodeDeploy is configured to automatically roll back when a deployment fails its 
 ```bash
 # Step 1: Get the active deployment ID
 aws deploy list-deployments \
-  --application-name experimentation-backend-prod \
-  --deployment-group-name experimentation-backend-prod-dg \
+  --application-name experimentation-platform \
+  --deployment-group-name experimentation-prod \
   --include-only-statuses InProgress \
   --query 'deployments[0]' \
   --output text
@@ -262,7 +262,7 @@ aws rds restore-db-cluster-to-point-in-time \
 # and force ECS to restart with the new endpoint
 aws ecs update-service \
   --cluster experimentation-prod \
-  --service experimentation-api-prod \
+  --service experimentation-backend-prod \
   --force-new-deployment
 ```
 
@@ -287,7 +287,7 @@ Complete every item before closing the incident. Do not declare the incident res
 curl -sf https://api.experimentation.example.com/health | python3 -m json.tool
 aws ecs describe-services \
   --cluster experimentation-prod \
-  --services experimentation-api-prod \
+  --services experimentation-backend-prod \
   --query 'services[0].{Running:runningCount,Desired:desiredCount,Status:status}'
 ```
 
