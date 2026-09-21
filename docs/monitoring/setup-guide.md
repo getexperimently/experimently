@@ -15,7 +15,7 @@ This guide provides detailed instructions for setting up the monitoring and erro
 Add the monitoring dependencies to your environment:
 
 ```bash
-pip install -r backend/requirements-monitoring.txt
+pip install -r backend/requirements.txt
 ```
 
 The key dependencies include:
