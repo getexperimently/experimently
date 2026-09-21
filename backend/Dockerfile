@@ -146,9 +146,11 @@ COPY --chown=appuser:appgroup VERSION /app/VERSION
 # backend/requirements/runtime.lock from the same context -- so they go here.
 #
 # A pattern, not three named paths: the first attempt removed requirements.txt
-# and requirements/ and left requirements-monitoring.txt sitting there -- which
-# is exactly the kind of file trivy reads. A named list misses the one nobody
-# remembered; the assertion below is what makes that loud either way.
+# and requirements/ and left backend/requirements-monitoring.txt sitting there
+# -- exactly the kind of file trivy reads. That file has since been deleted
+# (#188), which is the point: a named list misses whatever nobody remembered,
+# and would now name something gone. The assertion below is what makes either
+# case loud.
 RUN find /app/backend -maxdepth 2 -name 'requirements*' -exec rm -rf {} + \
     && chmod +x /app/backend/docker-entrypoint.sh \
     && mkdir -p /data/demo \
