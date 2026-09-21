@@ -20,21 +20,39 @@ from constructs import Construct
 IMAGE_WORKDIR = "/app"
 ALEMBIC_CONFIG = "backend/app/db/alembic.ini"
 
-#: `heads`, plural.  A full-profile image has two -- the core chain and the
-#: `modules` branch -- and alembic refuses the singular `head` when more than
-#: one exists ("Multiple head revisions are present"), so `upgrade head` fails
-#: outright.  A core image has one head and `heads` names it just the same.
+#: **Not** raw ``alembic upgrade heads``.  The historical migration chain
+#: cannot be replayed from an empty database -- rehearsed in the built full
+#: image against a real PostgreSQL, ``alembic -c backend/app/db/alembic.ini
+#: upgrade heads`` gets two revisions in and dies:
+#:
+#:     INFO  [alembic.runtime.migration] Running upgrade  -> 84a772608a6e
+#:     INFO  [alembic.runtime.migration] Running upgrade 84a772608a6e -> ba93ceb4d658
+#:     psycopg2.errors.DuplicateTable: relation "permissions" already exists
+#:
+#: `deploy-prod.yml` runs this task *before* the service (`deploy` needs
+#: `run-migrations`), so nothing has created the schema yet and the FIRST
+#: production deploy meets exactly that empty database.  No deployment has ever
+#: been made from this repository, so that is the next one.
+#:
+#: ``bootstrap`` is what `backend/docker-entrypoint.sh` already runs, and it
+#: handles both states: schema from the models plus stamped heads on a fresh
+#: database, `alembic upgrade heads` on an existing one.  Verified in the full
+#: image against a fresh database -- 50 tables, and both heads
+#: (`b8c9d0e1f2a3` and `modules_0001_rbac`) recorded in `alembic_version`.
+#: It needs FIRST_SUPERUSER_PASSWORD, which `secrets=` below already supplies.
+#:
+#: ``db-migrate.yml`` deliberately keeps raw alembic: `current`, and
+#: `upgrade`/`downgrade <target>`, are targeted operations on a database that
+#: already exists, and bootstrap cannot express a target.  ALEMBIC_CONFIG above
+#: is still what that workflow passes to `-c`.
+#:
 #: backend/tests/unit/infrastructure/test_migration_task_command.py checks that
 #: this command, the db-migrate workflow and deploy-prod all still agree with
 #: the image layout.
 MIGRATION_COMMAND = [
     "python",
     "-m",
-    "alembic",
-    "-c",
-    ALEMBIC_CONFIG,
-    "upgrade",
-    "heads",
+    "backend.app.db.bootstrap",
 ]
 
 # --- The image this task must run ----------------------------------------
@@ -68,7 +86,7 @@ class MigrationTaskStack(Stack):
     (e.g. from a CI/CD pipeline or a CodePipeline action) to run
     :data:`MIGRATION_COMMAND`:
 
-        python -m alembic -c backend/app/db/alembic.ini upgrade heads
+        python -m backend.app.db.bootstrap
 
     Usage in a deployment pipeline:
         aws ecs run-task \\
