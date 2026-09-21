@@ -166,13 +166,21 @@ the image ships no `.env` file, so the task definition is the only source.
 
 CDK stacks must be deployed in this order. Each stack depends on outputs from the previous.
 
-1. `ExperimentationVpcStack` — VPC, subnets, NAT gateways
-2. `ExperimentationDatabaseStack` — Aurora PostgreSQL cluster
-3. `ExperimentationRedisStack` — ElastiCache Redis replication group
-4. `ExperimentationComputeStack` — ECS cluster, Lambda functions, IAM roles
-5. `ExperimentationFargateServiceStack` — ECS Fargate service and Application Load Balancer
-6. `ExperimentationMigrationTaskStack` — ECS task definition for Alembic migrations
-7. `ExperimentationMonitoringStack` — CloudWatch dashboards, alarms, log groups
+These are stack **ids** — what `cdk deploy` takes, and what `cdk list` prints.
+`<env>` is `dev`, `staging` or `prod`.
+
+1. `experimentation-auth-<env>` — Cognito user pool, client and groups
+2. `experimentation-vpc-<env>` — VPC, subnets, NAT gateways
+3. `experimentation-dynamodb-<env>` — the five DynamoDB tables
+4. `experimentation-database-<env>` — Aurora PostgreSQL cluster
+5. `experimentation-redis-<env>` — ElastiCache Redis replication group
+6. `experimentation-compute-<env>` — ECS cluster, task security group, database-access Lambda
+7. `experimentation-monitoring-<env>` — CloudWatch dashboards, alarms, log groups
+8. `experimentation-fargate-<env>` — Fargate service, ALB, CodeDeploy blue/green
+9. `experimentation-migrations-<env>` — ECS task definition for Alembic (plural)
+
+With `modules/` present, three more: `experimentation-dynamodb-counters-<env>`,
+`experimentation-analytics-<env>` and `experimentation-glue-etl-<env>`.
 
 Deploy all at once (CDK handles ordering):
 ```bash
