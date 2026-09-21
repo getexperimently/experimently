@@ -57,6 +57,7 @@ their summary job is.
 | `nightly-qa.yml` | nightly | unit, integration, smoke, SDK contract, frontend and accessibility suites in one run |
 | `performance-tests.yml` | weekly and on demand | Locust load test against a freshly started API; SLA thresholds in `backend/tests/performance` |
 | `security-scan.yml` | weekly | full scan including the container image |
+| `dependabot-lock.yml` | weekdays 09:00 UTC, and on demand | regenerates `runtime.lock` / `modules.lock` on Dependabot branches and pushes the result. Dependabot updates `runtime.txt` but cannot produce `uv pip compile --generate-hashes` output, so without this every runtime-dependency bump fails `lint` and `Unit Tests` (#185) |
 
 ## AWS deployment workflows
 
