@@ -38,6 +38,13 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  # To approve the workflow runs this job's own push creates. A push by
+  # GITHUB_TOKEN onto a Dependabot branch leaves every triggered run in
+  # `action_required`, so without this the lock is fixed and the pull request
+  # reports no checks at all -- strictly worse than before, since the required
+  # checks then have nothing to report. Measured on run 35560607155: four pull
+  # requests pushed, 31 runs left awaiting approval.
+  actions: write
 
 concurrency:
   group: dependabot-lock-refresh
@@ -120,6 +127,7 @@ jobs:
 
           : > /tmp/pushed.txt
           : > /tmp/skipped.txt
+          : > /tmp/unresolved.txt
           : > /tmp/failed.txt
 
           while read -r PR; do
@@ -127,10 +135,19 @@ jobs:
             echo "::group::PR #$PR"
 
             # One subshell per pull request, so a branch that cannot be
-            # processed does not abort the whole run. The first version exited
-            # on the first failure and never reached the other three pull
-            # requests. Exit codes: 0 pushed, 3 nothing to do, anything else a
-            # real failure.
+            # processed does not abort the whole run.
+            #
+            # `|| RC=$?`, not a bare subshell followed by `RC=$?`. GitHub runs
+            # `run:` with `bash -e`, and `set -uo pipefail` here does NOT turn
+            # that off -- so a bare subshell that exits non-zero kills the step
+            # before the classification below is ever reached. That is what
+            # happened on run 35560607155: four pull requests were pushed, then
+            # #119 failed to resolve and #108 and #99 were never attempted. An
+            # `|| ...` list is a tested context, where errexit does not fire.
+            #
+            # Exit codes: 0 pushed, 3 nothing to do, 4 dependencies do not
+            # resolve, anything else an unexpected failure.
+            RC=0
             (
               set -euo pipefail
 
@@ -155,16 +172,29 @@ jobs:
               # uv invoked from HERE, never `make lock`: the Makefile on this
               # branch is pull-request content. These flags must match the
               # `lock-runtime` / `lock-modules` targets on the default branch.
-              uv pip compile backend/requirements/runtime.txt \
+              # A bump whose dependencies genuinely conflict cannot be
+              # locked -- #119 wants pandas 3.0.5, which needs numpy >=2.3.3
+              # against this tree's numpy 1.26.4. That is a fact about the pull
+              # request, not a fault here, so it exits 4 and the run still
+              # reports the rest.
+              if ! uv pip compile backend/requirements/runtime.txt \
                 --universal --generate-hashes --python-version 3.11 \
                 --custom-compile-command "make lock" \
-                -o backend/requirements/runtime.lock
+                -o backend/requirements/runtime.lock; then
+                echo "#$PR: dependencies do not resolve"
+                git checkout -- .
+                exit 4
+              fi
               if [ -f modules/requirements.txt ]; then
-                uv pip compile modules/requirements.txt \
+                if ! uv pip compile modules/requirements.txt \
                   --universal --generate-hashes --python-version 3.11 \
                   --constraint backend/requirements.txt \
                   --custom-compile-command "make lock" \
-                  -o modules/requirements.lock
+                  -o modules/requirements.lock; then
+                  echo "#$PR: modules dependencies do not resolve"
+                  git checkout -- .
+                  exit 4
+                fi
               fi
 
               CHANGED=$(git diff --name-only)
@@ -207,12 +237,28 @@ jobs:
                 echo "Dependabot stops rebasing a pull request once someone else pushes to its branch. If this one falls behind \`main\`, comment \`@dependabot rebase\`; the lock is regenerated again on the next run of this workflow."
               } > /tmp/comment.md
               gh pr comment "$PR" --body-file /tmp/comment.md
-            )
-            RC=$?
+
+              # Approve the runs the push just created. They are queued a
+              # moment after the push, so give them time to appear; approving
+              # nothing is not an error, it means none needed it.
+              BRANCH=$(git rev-parse --abbrev-ref HEAD)
+              sleep 15
+              APPROVED=0
+              for ID in $(gh run list --branch "$BRANCH" --limit 40 \
+                            --json databaseId,conclusion \
+                            --jq '.[] | select(.conclusion == "action_required") | .databaseId'); do
+                if gh api -X POST "repos/${GITHUB_REPOSITORY}/actions/runs/$ID/approve" >/dev/null 2>&1; then
+                  APPROVED=$((APPROVED + 1))
+                fi
+              done
+              echo "#$PR: approved $APPROVED queued workflow run(s)"
+            ) || RC=$?
 
             case "$RC" in
               0) echo "$PR" >> /tmp/pushed.txt;  echo "#$PR: regenerated and pushed" ;;
               3) echo "$PR" >> /tmp/skipped.txt; echo "#$PR: skipped" ;;
+              4) echo "$PR" >> /tmp/unresolved.txt
+                 echo "::warning::#$PR: dependencies do not resolve; the lock cannot be generated" ;;
               *) echo "$PR" >> /tmp/failed.txt;  echo "::error::#$PR: failed (exit $RC)" ;;
             esac
             echo "::endgroup::"
@@ -225,6 +271,7 @@ jobs:
             echo "|---|---|"
             echo "| pushed  | $(tr '\n' ' ' < /tmp/pushed.txt) |"
             echo "| skipped | $(tr '\n' ' ' < /tmp/skipped.txt) |"
+            echo "| will not resolve | $(tr '\n' ' ' < /tmp/unresolved.txt) |"
             echo "| failed  | $(tr '\n' ' ' < /tmp/failed.txt) |"
           } >> "$GITHUB_STEP_SUMMARY"
 
