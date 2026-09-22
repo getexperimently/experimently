@@ -292,8 +292,15 @@ COPY --from=modules-src --chown=appuser:appgroup /modules/backend /app/modules/b
 # stage -- after `full` has copied modules/, which the earlier placement in the
 # `runtime` stage ran before. Covers the .dockerignore exclusions too: an
 # exclusion nothing checks fails open the next time that file is reordered.
+#
+# The agent instruction files are matched by a glob rather than by name.
+# There are several of them -- the repository root, backend/, and whatever a
+# developer keeps locally -- so naming one asserted about one. A literal name
+# would also be a reference to a path `scripts/publish/export.sh` strips from
+# the public history, which would leave this line asserting, in the published
+# tree, about a file that cannot exist.
 RUN set -eu; \
-    for pattern in 'requirements*' 'CLAUDE.md' 'Dockerfile' '*.pyc'; do \
+    for pattern in 'requirements*' 'CLAUDE*' 'Dockerfile' '*.pyc'; do \
         found="$(find /app -name "$pattern" -print -quit 2>/dev/null || true)"; \
         if [ -n "$found" ]; then \
             echo "the image ships $found, which it must not" >&2; \
@@ -359,8 +366,15 @@ USER appuser
 # stage -- after `full` has copied modules/, which the earlier placement in the
 # `runtime` stage ran before. Covers the .dockerignore exclusions too: an
 # exclusion nothing checks fails open the next time that file is reordered.
+#
+# The agent instruction files are matched by a glob rather than by name.
+# There are several of them -- the repository root, backend/, and whatever a
+# developer keeps locally -- so naming one asserted about one. A literal name
+# would also be a reference to a path `scripts/publish/export.sh` strips from
+# the public history, which would leave this line asserting, in the published
+# tree, about a file that cannot exist.
 RUN set -eu; \
-    for pattern in 'requirements*' 'CLAUDE.md' 'Dockerfile' '*.pyc'; do \
+    for pattern in 'requirements*' 'CLAUDE*' 'Dockerfile' '*.pyc'; do \
         found="$(find /app -name "$pattern" -print -quit 2>/dev/null || true)"; \
         if [ -n "$found" ]; then \
             echo "the image ships $found, which it must not" >&2; \
