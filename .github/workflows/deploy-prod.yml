@@ -87,7 +87,7 @@ jobs:
             echo "::warning::${UNSIGNED} Acknowledged by ${GITHUB_ACTOR}."
           fi
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.version }}
 
@@ -206,7 +206,7 @@ jobs:
         image: redis:7
         ports: ["6379:6379"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.version }}
 
@@ -249,7 +249,7 @@ jobs:
     outputs:
       backend-image: ${{ steps.build-backend.outputs.image }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.version }}
 
@@ -335,7 +335,7 @@ jobs:
       id-token: write
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.version }}
 
@@ -403,7 +403,7 @@ jobs:
       id-token: write
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.version }}
 
@@ -502,7 +502,7 @@ jobs:
     needs: deploy
     if: (github.repository == 'amarkanday/experimentation-platform' || github.repository == 'getexperimently/experimently') && vars.AWS_ACCOUNT_ID != '' && (!inputs.skip_smoke_tests)
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.version }}
 
