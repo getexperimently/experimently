@@ -53,12 +53,33 @@ BOUNDARY 2: AWS Edge — Partially Trusted
 
 BOUNDARY 3: Application Layer — Trusted with Auth
   [FastAPI on ECS Fargate]
-    Middleware stack:
-      SecurityHeadersMiddleware → HSTS, CSP, X-Frame-Options
-      CORSMiddleware            → Origin allowlist from settings.BACKEND_CORS_ORIGINS
-      RequestLoggingMiddleware  → structured JSON logs to CloudWatch
-      MetricsMiddleware         → latency and throughput instrumentation
-      ErrorMiddleware           → sanitized error responses (no stack traces)
+    Middleware stack, outermost first — the order is what decides which
+    layers see a response that an inner one short-circuits, so it is stated
+    as an order and pinned by backend/tests/unit/middleware/:
+      CORSMiddleware            → Origin allowlist from settings.BACKEND_CORS_ORIGINS.
+                                  Outermost, so a 429 the rate limiter returns
+                                  without calling through still carries the
+                                  CORS headers a browser needs before it will
+                                  let the page read the status (#85)
+      RequestIDMiddleware       → X-Request-ID, bound into the log context
+      PrometheusMetricsMiddleware → latency and throughput instrumentation
+      SecurityHeadersMiddleware → HSTS, CSP, X-Frame-Options. Outside the rate
+                                  limiter for the same reason CORS is outside
+                                  everything
+      RateLimitMiddleware       → per-IP, per-path; CORS preflights exempt
+      RelativeSlashRedirectMiddleware
+                                → a redirect whose authority is the one the
+                                  request arrived on is rewritten to a path,
+                                  so the trailing-slash redirect cannot send a
+                                  browser cross-origin (dropping
+                                  Authorization) or downgrade it to http
+                                  (sending the bearer token in cleartext).
+                                  Every other Location is untouched (#86)
+
+    NOT trusted, and not yet addressed: the `Host` header itself. Nothing
+    validates it — there is no TrustedHostMiddleware — and
+    modules/.../sso.py builds the OIDC redirect_uri from request.base_url.
+    Tracked as #220.
 
     API routes: /api/v1/experiments, /api/v1/feature-flags,
                 /api/v1/tracking/*, /api/v1/results/*, /api/v1/safety/*
