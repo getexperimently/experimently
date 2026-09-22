@@ -115,24 +115,43 @@ aws ecs describe-services \
 4. Click **Run workflow**
 
 The workflow will:
-- Update the ECS service to the specified task definition
-- Wait for the service to stabilize (blocks up to 10 minutes)
-- Run smoke tests against `/health`, `/api/v1/experiments`, and `/api/v1/tracking/assign`
-- Notify `#deployments` Slack channel with rollback status and reason
+- Check the target revision is ACTIVE, in the right family, has a container
+  named `backend`, and is not a CloudFormation-registered `:bootstrap` revision
+- Stop any CodeDeploy deployment still in flight (during an incident the bad
+  deploy usually is, and CodeDeploy refuses a second one)
+- Create a **CodeDeploy** deployment naming that revision, all-at-once rather
+  than the canary the forward path uses
+- **Approve the traffic shift** (`aws deploy continue-deployment`) — without
+  this the deployment parks for 30 minutes and is then stopped, which
+  auto-rollback turns back into the revision you were rolling away from
+- Wait until the target revision is the **PRIMARY task set** and every desired
+  task is running
+- Notify `#deployments` with the result, success or failure
+
+It does **not** run smoke tests; `/health` is Step 5 below, by hand.
 
 ### Step 3: Monitor Progress
 
 Watch the GitHub Actions run. Simultaneously run:
 
 ```bash
-# Watch ECS task replacement in real time (refreshes every 5 seconds)
+# Watch the PRIMARY task set, which is what actually moves.
+#
+# NOT `services[0].taskDefinition`: on a CODE_DEPLOY service that field is set
+# by CreateService and changed only by UpdateService -- the call ECS refuses
+# here -- so it names the revision CloudFormation created and never changes.
+# Watching it during a rollback shows nothing happening and reads as a failure.
 watch -n 5 'aws ecs describe-services \
   --cluster experimentation-prod \
   --services experimentation-backend-prod \
-  --query "services[0].{Running:runningCount,Desired:desiredCount,TaskDef:taskDefinition}"'
+  --query "services[0].{Running:runningCount,Desired:desiredCount,Serving:taskSets[?status==\`PRIMARY\`].taskDefinition|[0]}"'
 ```
 
-Running task count should remain at 3 or above throughout. Tasks are replaced one at a time in a rolling update.
+Running task count should remain at 3 or above throughout. This is a
+**blue/green** deployment, not a rolling update: a second (green) task set is
+provisioned alongside the current one and traffic moves to it in one shift, so
+`Serving` changes from the old revision to the new one at once rather than
+tasks being replaced one at a time.
 
 ---
 
@@ -159,25 +178,73 @@ echo "Running task def: $CURRENT"
 # image tag; pick the target with Method 1 Step 1's listing, which prints the
 # image beside each revision.
 
-# Step 3: Update the ECS service to use the previous task definition
+# Step 3: Deploy the previous task definition through CodeDeploy.
 #
-# KNOWN BROKEN (#208): this service has a CodeDeploy deployment controller,
-# and ECS rejects a task-definition change through UpdateService on such a
-# service -- "Unable to update task definition on services with a CODE_DEPLOY
-# deployment controller". Until #208 replaces this with an
-# `aws deploy create-deployment` naming $PREV_TASK_DEF, use Method 1, or
-# `aws deploy stop-deployment --auto-rollback-enabled` while a deployment is
-# still in flight (Method 3 below).
-aws ecs update-service \
-  --cluster experimentation-prod \
-  --service experimentation-backend-prod \
-  --task-definition $PREV_TASK_DEF \
-  --force-new-deployment
+# NOT `aws ecs update-service --task-definition`. This service has a
+# CodeDeploy deployment controller, and ECS refuses a task-definition change
+# through UpdateService on one: "Unable to update task definition on services
+# with a CODE_DEPLOY deployment controller". Going back is the same call as
+# going forward, with an older revision.
+APPSPEC=$(jq -cn --arg td "$PREV_TASK_DEF" '{
+  version: 1,
+  Resources: [{ TargetService: {
+    Type: "AWS::ECS::Service",
+    Properties: {
+      TaskDefinition: $td,
+      LoadBalancerInfo: { ContainerName: "backend", ContainerPort: 8000 }
+    }
+  }}]
+}')
 
-# Step 4: Wait for the service to stabilize (blocks until complete or times out in ~10 min)
-aws ecs wait services-stable \
-  --cluster experimentation-prod \
-  --services experimentation-backend-prod
+# --deployment-config-name: all-at-once, NOT the deployment group's
+# CANARY_10_PERCENT_5_MINUTES. The canary is right going forward, on a revision
+# nobody has run. Rolling back, the target was serving production minutes ago
+# and the revision being replaced is the one hurting users -- a canary would
+# leave 90% of traffic on it for another five minutes.
+DEPLOYMENT_ID=$(aws deploy create-deployment \
+  --application-name experimentation-platform \
+  --deployment-group-name experimentation-prod \
+  --deployment-config-name CodeDeployDefault.ECSAllAtOnce \
+  --description "manual rollback" \
+  --revision "$(jq -cn --arg c "$APPSPEC" '{revisionType:"AppSpecContent",appSpecContent:{content:$c}}')" \
+  --query deploymentId --output text)
+echo "deployment: $DEPLOYMENT_ID"
+
+# Step 3b: APPROVE THE TRAFFIC SHIFT. Do not skip this.
+#
+# The deployment group sets deployment_approval_wait_time = 30 minutes. When
+# the green task set is provisioned CodeDeploy goes to status `Ready` and
+# WAITS. If ContinueDeployment is not called it stops the deployment, and the
+# group's auto_rollback(stopped_deployment=True) then puts back the revision
+# you are rolling away from. A rollback that is never approved is a rollback
+# that silently undoes itself half an hour later.
+while [ "$(aws deploy get-deployment --deployment-id "$DEPLOYMENT_ID" \
+             --query deploymentInfo.status --output text)" != "Ready" ]; do
+  sleep 5
+done
+aws deploy continue-deployment --deployment-id "$DEPLOYMENT_ID" \
+  --deployment-wait-type READY_WAIT
+
+# Step 4: Wait for the ROLLBACK, not for the service.
+#
+# `aws ecs wait services-stable` returns almost immediately here: during a
+# blue/green deployment the old task set is serving the whole time, so the
+# service is stable and the waiter says nothing about whether the rollback
+# took. Watch the PRIMARY task set instead: that is what moves, and it tells
+# you traffic has shifted without waiting for CodeDeploy to terminate the old
+# task set (the group keeps it for an hour).
+until [ "$(aws ecs describe-services --cluster experimentation-prod \
+             --services experimentation-backend-prod \
+             --query "services[0].taskSets[?status=='PRIMARY'].taskDefinition" \
+             --output text)" = "$PREV_TASK_DEF" ]; do
+  sleep 5
+done
+
+# (the old, misleading form -- every line commented, because this block is
+#  meant to be pasted and two bare flag lines would run as a command)
+# aws ecs wait services-stable \
+#   --cluster experimentation-prod \
+#   --services experimentation-backend-prod
 
 echo "Rollback complete. Running verification..."
 
@@ -283,12 +350,59 @@ aws rds restore-db-cluster-to-point-in-time \
   --db-subnet-group-name experimentation-prod-subnet-group \
   --vpc-security-group-ids <aurora-sg-id>
 
-# After restore completes, update the application DB connection string in Secrets Manager
-# and force ECS to restart with the new endpoint
-aws ecs update-service \
+# ---------------------------------------------------------------------------
+# STOP. A restore to a NEW cluster cannot be picked up by a redeploy today.
+#
+# The backend task definition injects no database host. `fargate_service_stack.py`
+# passes POSTGRES_DB / POSTGRES_SCHEMA / POSTGRES_PORT as environment and
+# POSTGRES_PASSWORD / SECRET_KEY / REDIS_URL / FIRST_SUPERUSER_PASSWORD as
+# secrets -- no POSTGRES_SERVER and no connection URL. (`grep -rn POSTGRES_SERVER
+# infrastructure/` hits only migration_task_stack.py; the application defaults
+# it to `localhost`.) So there is no "connection string in Secrets Manager" to
+# update, and a new deployment would bring the tasks back pointing at whatever
+# they pointed at before -- while this runbook reported success.
+#
+# Until the task definition takes the host from a secret, restoring to
+# `experimentation-prod-restored` means one of:
+#
+#   - restore IN PLACE instead, so the endpoint the tasks already resolve does
+#     not change; or
+#   - repoint the DNS name the tasks use at the restored cluster; or
+#   - `cdk deploy` the Fargate stack against the restored cluster, which
+#     rewrites the task definition.
+#
+# Decide which BEFORE an incident. Tracked as a gap in the deploy path.
+# ---------------------------------------------------------------------------
+#
+# The restart below is correct for this controller and is what you run once the
+# tasks would come back pointing at the right database. Through CodeDeploy,
+# naming the revision already serving: `aws ecs update-service
+# --force-new-deployment` is the usual way to restart a service and is not
+# documented either way for a CODE_DEPLOY-controlled service, which this one
+# is. Rather than find out during a restore, use the call that is correct for
+# this controller regardless.
+CURRENT=$(aws ecs describe-services \
   --cluster experimentation-prod \
-  --service experimentation-backend-prod \
-  --force-new-deployment
+  --services experimentation-backend-prod \
+  --query "services[0].taskSets[?status=='PRIMARY'].taskDefinition" \
+  --output text)
+
+APPSPEC=$(jq -cn --arg td "$CURRENT" '{
+  version: 1,
+  Resources: [{ TargetService: {
+    Type: "AWS::ECS::Service",
+    Properties: {
+      TaskDefinition: $td,
+      LoadBalancerInfo: { ContainerName: "backend", ContainerPort: 8000 }
+    }
+  }}]
+}')
+
+aws deploy create-deployment \
+  --application-name experimentation-platform \
+  --deployment-group-name experimentation-prod \
+  --description "restart after PITR restore" \
+  --revision "$(jq -cn --arg c "$APPSPEC" '{revisionType:"AppSpecContent",appSpecContent:{content:$c}}')"
 ```
 
 **RTO for snapshot restore: ~30 minutes. RPO: 5 minutes (PITR window).**
