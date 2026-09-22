@@ -1562,9 +1562,20 @@ POST /api/v1/etl/jobs/{run_id}/cancel — Cancel running job (ADMIN)
 ```
 GET  /api/v1/counters/{experiment_id}              — Get experiment counters
 POST /api/v1/counters/{experiment_id}/increment    — Increment counter
-POST /api/v1/counters/{experiment_id}/bulk         — Bulk counter update
-DELETE /api/v1/counters/{experiment_id}            — Reset counters (ADMIN)
+POST /api/v1/counters/{experiment_id}/reset        — Reset counters (ADMIN)
+POST /api/v1/counters/bulk                         — Bulk counter update
 ```
+
+Reset is `POST .../reset`, not `DELETE` — this page said `DELETE` for a route
+that has never existed.
+
+On the two routes that take `{experiment_id}`, the path is what is written:
+the body's `experiment_id` must equal it, and a request where they disagree is
+answered **400** rather than written somewhere else (#95).
+
+`bulk` takes no `{experiment_id}` **by design**: each of its up-to-100
+increments names its own experiment, so one call may span several and there is
+no single experiment for the URL to name.
 
 ---
 

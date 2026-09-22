@@ -17924,6 +17924,53 @@
         ]
       }
     },
+    "/api/v1/counters/bulk": {
+      "post": {
+        "description": "Increment multiple counters in a single API call.\n\nAccepts up to 100 increment requests, each naming its own experiment.\nPartial failures are collected and reported in the response \u2014 the\noperation does not abort on first error.\nRequires ``experiment: update`` (ADMIN or DEVELOPER).\n\n**This route has no ``{experiment_id}``**, and used to. Fixing the single\nwrite routes to honour their path (#95) put this one in an impossible\nposition: ``BulkIncrementRequest.increments`` is a list whose every entry\ncarries its own ``experiment_id``, precisely so a collector can flush one\nbuffer spanning several experiments. Requiring them all to equal a path\nsegment would make that required field single-valued and turn a\n100-increment flush into a 400, while the promise two lines up \u2014\n\"does not abort on first error\" \u2014 became false.\n\nA batch has no one experiment to name, so it no longer claims to. The\nper-entry ``experiment_id`` is the only thing that decides where each\nincrement lands, and nothing in the URL can now disagree with it.",
+        "operationId": "bulk_increment_api_v1_counters_bulk_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BulkIncrementRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BulkIncrementResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Bulk-increment multiple counters",
+        "tags": [
+          "Real-time Counters"
+        ]
+      }
+    },
     "/api/v1/counters/{experiment_id}": {
       "get": {
         "description": "Return real-time counters for all variants of the given experiment.\n\nReturns HTTP 404 when the experiment has no counter data (i.e. no\nassignments, events, or conversions have been recorded yet).",
@@ -17975,64 +18022,6 @@
         ]
       }
     },
-    "/api/v1/counters/{experiment_id}/bulk": {
-      "post": {
-        "description": "Increment multiple counters in a single API call.\n\nAccepts up to 100 increment requests.  Partial failures are collected\nand reported in the response \u2014 the operation does not abort on first error.\nRequires ``experiment: update`` (ADMIN or DEVELOPER).",
-        "operationId": "bulk_increment_api_v1_counters__experiment_id__bulk_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "experiment_id",
-            "required": true,
-            "schema": {
-              "title": "Experiment Id",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/BulkIncrementRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BulkIncrementResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "OAuth2PasswordBearer": []
-          }
-        ],
-        "summary": "Bulk-increment multiple counters",
-        "tags": [
-          "Real-time Counters"
-        ]
-      }
-    },
     "/api/v1/counters/{experiment_id}/increment": {
       "post": {
         "description": "Atomically increment a counter (assignment, event, or conversion) for a\nspecific experiment variant.\n\nUses DynamoDB's ADD update expression \u2014 safe under concurrent writes.\nRequires ``experiment: update`` (ADMIN or DEVELOPER).",
@@ -18068,6 +18057,9 @@
               }
             },
             "description": "Successful Response"
+          },
+          "400": {
+            "description": "`experiment_id` in the body names a different experiment than the one in the path."
           },
           "422": {
             "content": {
@@ -18128,6 +18120,9 @@
               }
             },
             "description": "Successful Response"
+          },
+          "400": {
+            "description": "`experiment_id` in the body names a different experiment than the one in the path."
           },
           "422": {
             "content": {

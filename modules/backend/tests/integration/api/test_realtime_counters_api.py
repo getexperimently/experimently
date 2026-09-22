@@ -8,7 +8,7 @@ so no live DynamoDB connection is required.
 Endpoint coverage:
   GET  /api/v1/counters/{experiment_id}          get counters
   POST /api/v1/counters/{experiment_id}/increment increment (1-1000)
-  POST /api/v1/counters/{experiment_id}/bulk      bulk increment (max 100)
+  POST /api/v1/counters/bulk      bulk increment (max 100)
   POST /api/v1/counters/{experiment_id}/reset     reset (ADMIN only)
 """
 
@@ -453,13 +453,13 @@ class TestIncrementCounter:
 
 
 # ---------------------------------------------------------------------------
-# POST /api/v1/counters/{experiment_id}/bulk
+# POST /api/v1/counters/bulk
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.integration
 class TestBulkIncrement:
-    """POST /api/v1/counters/{experiment_id}/bulk"""
+    """POST /api/v1/counters/bulk"""
 
     def test_bulk_increment_returns_200(self, admin_client, counter_mock):
         """Valid bulk increment request returns 200."""
@@ -479,9 +479,7 @@ class TestBulkIncrement:
                 },
             ]
         }
-        response = admin_client.post(
-            f"/api/v1/counters/{_TEST_EXP_ID}/bulk", json=payload
-        )
+        response = admin_client.post("/api/v1/counters/bulk", json=payload)
         assert response.status_code == 200, response.text
 
     def test_bulk_increment_returns_processed_and_failed_counts(
@@ -498,9 +496,7 @@ class TestBulkIncrement:
                 }
             ]
         }
-        response = admin_client.post(
-            f"/api/v1/counters/{_TEST_EXP_ID}/bulk", json=payload
-        )
+        response = admin_client.post("/api/v1/counters/bulk", json=payload)
         assert response.status_code == 200, response.text
         data = response.json()
         assert "processed" in data
@@ -531,9 +527,7 @@ class TestBulkIncrement:
                 },
             ]
         }
-        response = admin_client.post(
-            f"/api/v1/counters/{_TEST_EXP_ID}/bulk", json=payload
-        )
+        response = admin_client.post("/api/v1/counters/bulk", json=payload)
         assert response.status_code == 200, response.text
 
     def test_bulk_increment_too_many_items_returns_422(
@@ -550,24 +544,20 @@ class TestBulkIncrement:
             for i in range(101)  # 101 items — exceeds max_length=100
         ]
         payload = {"increments": increments}
-        response = admin_client.post(
-            f"/api/v1/counters/{_TEST_EXP_ID}/bulk", json=payload
-        )
+        response = admin_client.post("/api/v1/counters/bulk", json=payload)
         assert response.status_code == 422, response.text
 
     def test_bulk_increment_empty_list_returns_422(self, admin_client, counter_mock):
         """Empty increments list fails validation (min_length=1) — returns 422."""
         payload = {"increments": []}
-        response = admin_client.post(
-            f"/api/v1/counters/{_TEST_EXP_ID}/bulk", json=payload
-        )
+        response = admin_client.post("/api/v1/counters/bulk", json=payload)
         assert response.status_code == 422, response.text
 
     def test_bulk_increment_missing_increments_field_returns_422(
         self, admin_client, counter_mock
     ):
         """Missing increments field returns 422."""
-        response = admin_client.post(f"/api/v1/counters/{_TEST_EXP_ID}/bulk", json={})
+        response = admin_client.post("/api/v1/counters/bulk", json={})
         assert response.status_code == 422, response.text
 
     def test_bulk_service_called_with_increment_list(self, admin_client, counter_mock):
@@ -582,7 +572,7 @@ class TestBulkIncrement:
                 }
             ]
         }
-        admin_client.post(f"/api/v1/counters/{_TEST_EXP_ID}/bulk", json=payload)
+        admin_client.post("/api/v1/counters/bulk", json=payload)
         assert counter_mock.bulk_increment.called
 
     def test_developer_can_bulk_increment(self, developer_client, counter_mock):
@@ -597,9 +587,7 @@ class TestBulkIncrement:
                 }
             ]
         }
-        response = developer_client.post(
-            f"/api/v1/counters/{_TEST_EXP_ID}/bulk", json=payload
-        )
+        response = developer_client.post("/api/v1/counters/bulk", json=payload)
         assert response.status_code == 200, response.text
 
     @pytest.mark.regression
@@ -619,9 +607,7 @@ class TestBulkIncrement:
                 }
             ]
         }
-        response = analyst_client.post(
-            f"/api/v1/counters/{_TEST_EXP_ID}/bulk", json=payload
-        )
+        response = analyst_client.post("/api/v1/counters/bulk", json=payload)
         assert response.status_code == 403, response.text
         assert not counter_mock.bulk_increment.called
 
@@ -638,9 +624,7 @@ class TestBulkIncrement:
                 }
             ]
         }
-        response = viewer_client.post(
-            f"/api/v1/counters/{_TEST_EXP_ID}/bulk", json=payload
-        )
+        response = viewer_client.post("/api/v1/counters/bulk", json=payload)
         assert response.status_code == 403, response.text
         assert not counter_mock.bulk_increment.called
 
