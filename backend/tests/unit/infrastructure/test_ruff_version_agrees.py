@@ -1,9 +1,9 @@
 """One ruff version, declared in three places, with nothing to keep them equal.
 
-CLAUDE.md states the invariant plainly -- "one tool, one config block
-(``[tool.ruff]`` in ``pyproject.toml``), the same version in CI, pre-commit and
-the venv" -- and ``.pre-commit-config.yaml`` repeats it in its own comment:
-"Same ruff version ... so a clean commit is a green job".  Nothing asserted it.
+The invariant is one tool, one config block (``[tool.ruff]`` in
+``pyproject.toml``), and the same version in CI, pre-commit and the venv.
+``.pre-commit-config.yaml`` states it in its own comment -- "Same ruff version
+... so a clean commit is a green job" -- and nothing asserted it.
 
 A dependency batch then bumped ``backend/requirements.txt`` to 0.16.8 and left
 ``lint.yml`` and ``.pre-commit-config.yaml`` on 0.16.7.  The drift is silent in
@@ -85,7 +85,7 @@ def test_the_pre_commit_hook_runs_the_ruff_the_venv_installs() -> None:
 
 
 def test_all_three_declaration_sites_name_one_version() -> None:
-    """The invariant as CLAUDE.md states it, in one assertion."""
+    """The whole invariant in one assertion, naming every site that disagrees."""
     declared = {
         "backend/requirements.txt": _requirements_pin(),
         ".github/workflows/lint.yml": _workflow_version(),

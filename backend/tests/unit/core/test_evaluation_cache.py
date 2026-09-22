@@ -441,10 +441,11 @@ class TestCachePerformance:
         wall-clock reading compared against an absolute number. It measured the
         runner, not the cache: it passes in 2.6 ms on a laptop and failed a
         pull request at 285 ms on a contended GitHub runner, a 100x difference
-        with no code change behind it. CLAUDE.md names this exact shape:
-        "Never assert a single wall-clock timing ... take the best of several
-        runs (what `timeit` does), or assert on the deterministic thing the
-        timing was standing in for."
+        with no code change behind it. This repository has a standing rule
+        against exactly this shape, written after three separate flaky gates
+        came from it: never assert a single wall-clock timing -- take the best
+        of several runs (what `timeit` does), or assert on the deterministic
+        thing the timing was standing in for.
 
         The deterministic thing here is the complexity. Both measurements run
         in the same process, so a slow runner slows both equally and cancels
@@ -466,10 +467,10 @@ class TestCachePerformance:
         """The property the speedup was standing in for, asserted directly.
 
         The previous version slept 1 ms ten times, timed that against ten cache
-        hits, and asserted `cached < uncached / 5` -- the other shape CLAUDE.md
-        warns about, and one whose "speedup" was really a measurement of
-        `time.sleep`. What makes a cache fast is that it does not run the
-        expensive thing again, and that is a count, not a duration.
+        hits, and asserted `cached < uncached / 5` -- the other banned shape,
+        `duration2 < duration1`, and one whose "speedup" was really a
+        measurement of `time.sleep`. What makes a cache fast is that it does
+        not run the expensive thing again, and that is a count, not a duration.
         """
         cache = EvaluationCache()
         user_context = {"user_id": "user_123", "country": "US", "age": 25}
