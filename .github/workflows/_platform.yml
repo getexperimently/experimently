@@ -102,7 +102,7 @@ jobs:
       EXPERIMENTLY_API_URL: http://127.0.0.1:8000
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # `profile: core` has to mean a core API, not just an environment
       # variable. Nothing under backend/ reads EXPERIMENTLY_PROFILE:

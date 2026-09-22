@@ -13,7 +13,7 @@ jobs:
     name: Python Security Scan
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Python
         uses: actions/setup-python@v7
@@ -63,7 +63,7 @@ jobs:
     name: Frontend Security Scan
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Node.js
         uses: actions/setup-node@v7
@@ -136,7 +136,7 @@ jobs:
     container:
       image: semgrep/semgrep
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Both trees, for the reason Bandit takes both: the SAML XML parser, the
       # PHI encryption, the SQL-string-building warehouse connectors and the
@@ -175,7 +175,7 @@ jobs:
       contents: read
       pull-requests: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0  # Full history for git-secrets
 
@@ -188,7 +188,7 @@ jobs:
     name: Container Security Scan
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Trivy
         run: |
@@ -355,7 +355,7 @@ jobs:
       contents: read
       pull-requests: write   # post the summary comment
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/dependency-review-action@v4
         with:
           fail-on-severity: high

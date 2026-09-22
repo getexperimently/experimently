@@ -113,7 +113,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           echo "releasing $tag (version $version, prerelease=$prerelease) as $image"
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ steps.resolve.outputs.tag }}
 
@@ -169,7 +169,7 @@ jobs:
       matrix:
         profile: [core, full]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.verify.outputs.tag }}
 
@@ -317,7 +317,7 @@ jobs:
       matrix:
         profile: [core, full]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.verify.outputs.tag }}
 
