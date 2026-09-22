@@ -45,7 +45,7 @@ jobs:
       # dependency. license-checker is pinned in scripts/check_node_licences.py.
       PIP_LICENSES_VERSION: '5.5.5'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-python@v7
         with:
