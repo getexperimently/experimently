@@ -1,0 +1,87 @@
+# Every commit in a pull request carries a Developer Certificate of Origin
+# sign-off. CONTRIBUTING.md has promised this since it was written -- "A pull
+# request with unsigned commits will be blocked by the DCO check until every
+# commit carries a sign-off" -- while no such check existed anywhere in the
+# repository and no app was installed.
+#
+# A workflow rather than the DCO GitHub App, for three reasons that are
+# specific to this project:
+#
+#   * installing an app is a founder-only action in the GitHub UI, and the
+#     public cut (#140) is already bottlenecked on founder-owned steps;
+#   * this repository requires every gate to be tamper-testable, and a
+#     third-party app cannot be. The logic lives in scripts/check_dco.py with
+#     twelve tests in backend/tests/unit/infrastructure/test_dco_check.py;
+#   * it is cheap: GitHub bills a one-minute minimum per job, so this costs
+#     that minimum rather than "a few seconds" as an earlier version of this
+#     comment claimed. The script imports only the standard library, so there
+#     is no toolchain to install and no dependency to resolve.
+#
+# The app remains the better choice if we later want its remediation-commit
+# flow, where a maintainer signs off on a contributor's behalf with their
+# recorded consent. Nothing here forecloses that.
+name: DCO
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# Keyed on github.ref (refs/pull/<n>/merge, unique) rather than
+# github.head_ref (a bare branch name two forks can share).
+concurrency:
+  group: dco-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  dco:
+    name: DCO
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The check walks a commit range, so both ends and the history
+          # between them have to be present. A shallow clone has none of it,
+          # and the script exits 2 rather than pretending the range was empty.
+          #
+          # `fetch-depth: 0` fetches everything, which is more than is needed
+          # but is the only spelling that is correct for every pull request:
+          # a depth guessed from the commit count is wrong the moment someone
+          # opens a long branch, and the failure mode is a green check over a
+          # range git could not walk.
+          fetch-depth: 0
+
+      # No `setup-python`: `scripts/check_dco.py` imports argparse, re,
+      # subprocess, sys, dataclasses and typing -- all standard library -- and
+      # `ubuntu-latest` already ships a Python 3 that runs it. Installing a
+      # toolchain to run a stdlib script is most of this job's wall-clock time.
+      - name: Check every commit is signed off
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+
+          # The merge base with the base branch AS IT IS NOW, not with
+          # `pull_request.base.sha`.
+          #
+          # `base.sha` is the tip of main when the event fired and does not
+          # move as main advances, so `base.sha..head` picks up main's own
+          # commits the moment a contributor merges main into their branch --
+          # commits they did not author and cannot sign, with `--no-merges`
+          # stripping the merge that would have explained where they came from.
+          #
+          # Taking the merge base with `base.sha` does NOT fix that, which is
+          # worth writing down because it is the obvious-looking fix: `base.sha`
+          # is an ancestor of head, so `merge-base(base.sha, head)` is just
+          # `base.sha` again. Measured in a scratch repository -- with main
+          # advanced to an unsigned D and D merged into the branch, the range
+          # from `merge-base(base.sha, head)` still reported D as unsigned,
+          # while the range from `merge-base(origin/<base branch>, head)`
+          # correctly reported only the contributor's own commit.
+          git fetch --quiet origin "$BASE_REF"
+          BASE="$(git merge-base FETCH_HEAD "$HEAD_SHA")"
+          echo "checking $BASE..$HEAD_SHA (merge base with origin/$BASE_REF)"
+          python3 scripts/check_dco.py "$BASE" "$HEAD_SHA"

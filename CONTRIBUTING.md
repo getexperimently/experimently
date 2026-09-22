@@ -46,8 +46,17 @@ To sign off a branch you already wrote:
 git rebase --signoff main
 ```
 
-A pull request with unsigned commits will be blocked by the DCO check until every
-commit carries a sign-off.
+A pull request with unsigned commits fails the **DCO** check
+(`.github/workflows/dco.yml`), which reports on every pull request. It becomes
+a *blocking* check once it is added to branch protection's required list — see
+the launch checklist, item 10. Until then it is red and advisory, and this
+sentence says so rather than promising enforcement that is not switched on yet.
+
+A sign-off matching the commit's **author or its committer** is accepted, which
+is what the DCO GitHub App does too — so `git rebase --signoff` works even on a
+commit you did not author. Commits from Dependabot and github-actions are
+exempt: a bot cannot certify the origin of anything, and the human who merges
+the pull request is the one taking responsibility.
 
 **Licence of your contribution.** Everything except `sdk/` — the backend, the
 optional modules under `modules/`, the dashboard, the docs — is
