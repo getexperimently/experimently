@@ -266,6 +266,27 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         if not self._enabled:
             return await call_next(request)
 
+        # A CORS preflight is a protocol handshake, not an attempt at the
+        # thing it precedes: it carries no credentials and no body, and the
+        # browser sends one before every cross-origin POST. Counting it spent
+        # half of `/api/v1/auth/login`'s ten-per-minute budget on requests the
+        # user never made -- ten preflights alone were enough to 429 the first
+        # real login attempt (#85). CORS is registered outermost in `main.py`,
+        # so in the deployed app a preflight is answered before it reaches
+        # here; this keeps the limiter correct on its own, for a preflight
+        # CORS declines to answer and for any other mounting.
+        #
+        # `Access-Control-Request-Method`, not the method alone. Starlette's
+        # CORSMiddleware only intercepts an OPTIONS that carries BOTH an
+        # `Origin` and that header; a bare `OPTIONS /api/v1/auth/login` passes
+        # straight through it to the router. Skipping on the method alone
+        # therefore made every such request unlimited and unrecorded -- an
+        # exemption a client asks for simply by choosing a verb.
+        if request.method == "OPTIONS" and "access-control-request-method" in (
+            request.headers
+        ):
+            return await call_next(request)
+
         path = request.url.path
         client_ip = _get_client_ip(request)
 
