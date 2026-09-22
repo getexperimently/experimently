@@ -61,6 +61,15 @@ def _node_packages() -> tuple[str, ...]:
 
 NODE_PACKAGES = _node_packages()
 
+#: Pinned, because an unpinned resolver is the drift this repository keeps
+#: paying for. `npx --yes license-checker-rseidelsohn` resolves the latest
+#: release on every run, so a change to how it spells a licence, or to what it
+#: includes, rewrites rows in a legal document and turns a green gate red on a
+#: pull request that changed no dependency. `pip-licenses` is pinned twice
+#: already (`Makefile:PIP_LICENSES_VERSION`, `pr-qa-gate.yml`); this was the
+#: one resolver still floating.
+LICENSE_CHECKER = "license-checker-rseidelsohn@5.0.1"
+
 #: Exact SPDX identifiers (and the spellings license-checker actually emits)
 #: that an Apache-2.0 distribution can carry.
 #:
@@ -137,7 +146,7 @@ def licences_of(directory: Path) -> dict[str, str]:
         [
             "npx",
             "--yes",
-            "license-checker-rseidelsohn",
+            LICENSE_CHECKER,
             "--production",
             "--json",
             "--excludePrivatePackages",

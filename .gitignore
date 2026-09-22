@@ -203,3 +203,6 @@ frontend/playwright-report/
 **/.claude/settings.local.json
 backend/.venv/
 site/
+
+# The licence gate writes this beside the real document when it fails.
+THIRD_PARTY_LICENSES.generated.md
