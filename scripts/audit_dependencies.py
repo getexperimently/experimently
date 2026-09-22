@@ -285,6 +285,32 @@ def load_ignores() -> list[dict]:
                 "say why it is still acceptable."
             )
         entry["review_by"] = review_by
+
+    # A repeated (id, package) pair is an authoring mistake, and it used to
+    # vanish: entries were keyed by id alone, so a second one replaced the
+    # first. That became load-bearing when acceptance started matching on the
+    # id AND the package -- two legitimate entries for one advisory attributed
+    # to two packages (the same CVE against a package and its fork, or a
+    # rename) collapsed, and the survivor's sibling was then reported both as
+    # a package mismatch and as unlisted, with a message accusing the author
+    # of writing the wrong name.
+    seen: dict[tuple[str, str], dict] = {}
+    for entry in entries:
+        key = (entry["id"], canonical(entry["package"]))
+        if key in seen:
+            first = seen[key]["package"]
+            spellings = (
+                f"{first!r}"
+                if first == entry["package"]
+                else f"{first!r} and {entry['package']!r}, which normalise to "
+                f"{canonical(entry['package'])!r}"
+            )
+            raise SystemExit(
+                f"{IGNORE_FILE.name}: {entry['id']} is listed twice for "
+                f"{spellings}. Two entries for one advisory and one package "
+                "cannot both be the reason; merge them."
+            )
+        seen[key] = entry
     return entries
 
 
@@ -319,57 +345,79 @@ def main() -> int:
 
     failures: list[str] = []
 
+    # The shipped tier is self-contained. The development tier is not: its
+    # stale-exception check needs the shipped advisories (an exception whose
+    # advisory fires only there is not dead), and its ship check needs the
+    # shipped package names. So `--tier development` runs the shipped audit
+    # too, deliberately -- that is a dependency, not the tier leak this
+    # script was fixing. `--tier shipped` runs nothing of the development
+    # tier, which is the direction that was leaking.
     print("shipped closures (no exceptions possible):")
     shipped, shipped_scanned = audit(SHIPPED_FILES)
-    shipped_packages = set()
-    if shipped_scanned:
-        for relative in shipped_scanned:
-            for line in (ROOT / relative).read_text(encoding="utf-8").splitlines():
-                match = _PIN.match(line.split("#", 1)[0].strip())
-                if match:
-                    shipped_packages.add(canonical(match.group(1)))
+
     if args.tier in ("shipped", "both") and shipped:
         failures.append(
             "advisories in a SHIPPED closure -- these reach the images:\n"
             + "\n".join(f"    {a}" for a in shipped)
         )
 
-    ignores = load_ignores()
-    by_id = {entry["id"]: entry for entry in ignores}
-
-    print("development closure:")
-    development, _ = audit(DEVELOPMENT_FILES)
-
+    ignores: list[dict] = []
+    development: list[Advisory] = []
     if args.tier in ("development", "both"):
-        # Matched on the advisory id AND the package pip-audit attributed it
-        # to -- not on the id alone with a human-typed package beside it. A
-        # `package = "pytest"` written against an advisory that actually fires
-        # on `cryptography` used to silence the real one while the ship check
-        # below compared the wrong name.
-        def accepted(advisory: Advisory) -> bool:
-            entry = by_id.get(advisory.id)
-            return (
-                entry is not None
-                and entry["package"].lower() == advisory.package.lower()
-            )
+        ignores = load_ignores()
+        # (id, package) is what acceptance matches on, so it is what every
+        # check below keys on. A set, not a second dict: `load_ignores`
+        # already built this index to detect duplicates, and two derivations
+        # of "what a key is" would let acceptance and duplicate-detection
+        # drift apart.
+        accepted_keys = {(e["id"], canonical(e["package"])) for e in ignores}
 
-        # Computed from the two package names directly, NOT as `not accepted(a)`:
-        # deriving it from the same predicate meant neutering that predicate
-        # disabled this check too, so the test for it passed against a broken
-        # gate. (Caught by tamper-testing the test.)
-        mismatched = [
-            f"{a}: accepted as package {by_id[a.id]['package']!r}, but pip-audit "
-            f"attributes it to {a.package!r}"
-            for a in development
-            if a.id in by_id and by_id[a.id]["package"].lower() != a.package.lower()
-        ]
+        # Read only here: the ship check is the only consumer, and computing
+        # it under `--tier shipped` was work for a branch that never runs.
+        shipped_packages = set()
+        for relative in shipped_scanned:
+            for line in (ROOT / relative).read_text(encoding="utf-8").splitlines():
+                match = _PIN.match(line.split("#", 1)[0].strip())
+                if match:
+                    shipped_packages.add(canonical(match.group(1)))
+
+        print("development closure:")
+        development, _ = audit(DEVELOPMENT_FILES)
+
+        # Computed from `ignores` directly, NOT from `accepted_keys` and NOT
+        # as `not accepted(a)`: deriving it from the same lookup acceptance
+        # uses means neutering that lookup disables this check too, so the
+        # test for it passes against a broken gate. (Caught once by
+        # tamper-testing the test; nearly reintroduced while rekeying.)
+        mismatched = []
+        mismatched_ids = set()
+        for advisory in development:
+            listed = [e["package"] for e in ignores if e["id"] == advisory.id]
+            if not listed:
+                continue
+            if canonical(advisory.package) in {canonical(name) for name in listed}:
+                continue
+            mismatched_ids.add(advisory.id)
+            mismatched.append(
+                f"{advisory}: accepted for package(s) {sorted(listed)!r}, but "
+                f"pip-audit attributes it to {advisory.package!r}"
+            )
         if mismatched:
             failures.append(
                 "exception(s) whose package does not match the advisory:\n"
                 + "\n".join(f"    {m}" for m in mismatched)
             )
 
-        unlisted = [a for a in development if not accepted(a)]
+        # Excluding the mismatched ones. They were reported above with the
+        # remedy that applies -- fix the package name -- and reporting them
+        # again here told the author to "add an entry", which they already
+        # had.
+        unlisted = [
+            a
+            for a in development
+            if (a.id, canonical(a.package)) not in accepted_keys
+            and a.id not in mismatched_ids
+        ]
         if unlisted:
             failures.append(
                 "advisories in the development closure with no accepted exception:\n"
@@ -378,8 +426,18 @@ def main() -> int:
                 "with a reason and a review date."
             )
 
-        live_ids = {a.id for a in development} | {a.id for a in shipped}
-        stale = [entry for entry in ignores if entry["id"] not in live_ids]
+        # Keyed on (id, package), like acceptance. Keyed on the id alone, a
+        # dead entry survived for ever as soon as any sibling entry with the
+        # same id was live -- which only became reachable when this file
+        # started allowing several entries per id.
+        live = {(a.id, canonical(a.package)) for a in development} | {
+            (a.id, canonical(a.package)) for a in shipped
+        }
+        stale = [
+            entry
+            for entry in ignores
+            if (entry["id"], canonical(entry["package"])) not in live
+        ]
         if stale:
             failures.append(
                 "exceptions that no longer match any advisory (remove them):\n"
@@ -407,10 +465,26 @@ def main() -> int:
             print(f"error: {failure}", file=sys.stderr)
         return 1
 
-    accepted = ", ".join(sorted(by_id)) or "none"
-    print(
-        f"\nno unaccepted advisories. Accepted in the development closure: {accepted}"
-    )
+    # Each tier reports only what it actually judged. "no unaccepted
+    # advisories" after a run that found some in a closure it was not asked
+    # about reads as a clean result, and a shipped run saying "accepted: none"
+    # reads as "there are none" for a file it never opened.
+    if args.tier == "shipped":
+        print("\nno advisories in the shipped closures.")
+    else:
+        accepted_ids = ", ".join(sorted({e["id"] for e in ignores})) or "none"
+        if args.tier == "development":
+            print(
+                "\nno unaccepted advisories in the development closure "
+                f"(accepted: {accepted_ids}). The shipped closures were "
+                "audited to resolve those exceptions and NOT judged; run "
+                "--tier both or --tier shipped for a verdict on them."
+            )
+        else:
+            print(
+                "\nno unaccepted advisories. Accepted in the development "
+                f"closure: {accepted_ids}"
+            )
     return 0
 
 
