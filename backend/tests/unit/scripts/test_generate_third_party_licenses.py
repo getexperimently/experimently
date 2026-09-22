@@ -113,3 +113,199 @@ class TestDeclaredDependencies:
     def test_canonical_names(self, script):
         assert script._canonical("Typing_Extensions") == "typing-extensions"
         assert script._canonical("ruamel.yaml") == "ruamel-yaml"
+
+
+# ---------------------------------------------------------------------------
+# The gate itself (#170, #215 review)
+#
+# About 400 lines of guard, lock parsing and --check shipped with no test at
+# all; the pull request offered its own first CI run as the tamper, which
+# exercises staleness and nothing else. These cover the parts that decide
+# whether a wrong document can be written or a right one reported stale.
+# ---------------------------------------------------------------------------
+
+
+class TestTheLockParser:
+    """`_lock_pins` reads `uv pip compile --universal --generate-hashes`."""
+
+    def test_it_reads_a_hashed_pin(self, script, tmp_path):
+        lock = tmp_path / "x.lock"
+        lock.write_text(
+            "# a comment\n"
+            "alembic==1.19.2 \\\n"
+            "    --hash=sha256:aaa \\\n"
+            "    --hash=sha256:bbb\n"
+            "    # via -r backend/requirements/runtime.txt\n",
+            encoding="utf-8",
+        )
+        assert script._lock_pins(lock) == {"alembic": "1.19.2"}
+
+    def test_a_marker_that_does_not_hold_is_not_a_dependency(self, script, tmp_path):
+        """A `--universal` lock resolves for every platform at once.
+
+        Treating every pin as required reported the Windows-only ones as
+        missing and refused to generate -- correctly, given what the guard had
+        been told.
+        """
+        lock = tmp_path / "x.lock"
+        lock.write_text(
+            "colorama==0.4.6 ; sys_platform == 'win32' \\\n"
+            "    --hash=sha256:aaa\n"
+            "requests==2.32.3 \\\n"
+            "    --hash=sha256:bbb\n",
+            encoding="utf-8",
+        )
+        pins = script._lock_pins(lock)
+        assert "requests" in pins
+        assert "colorama" not in pins, (
+            "a marker that does not hold is a dependency of a platform this "
+            "image is not, and must not be required"
+        )
+
+    def test_a_marker_that_does_hold_is_required(self, script, tmp_path):
+        lock = tmp_path / "x.lock"
+        lock.write_text(
+            'anyio==4.15.1 ; os_name == "posix" or os_name == "nt" \\\n'
+            "    --hash=sha256:aaa\n",
+            encoding="utf-8",
+        )
+        assert script._lock_pins(lock) == {"anyio": "4.15.1"}
+
+    @pytest.mark.regression
+    def test_an_unreadable_marker_refuses_instead_of_skipping(self, script, tmp_path):
+        lock = tmp_path / "x.lock"
+        lock.write_text("foo==1.0 ; not_a_marker ~~ 3 \\\n", encoding="utf-8")
+        with pytest.raises(SystemExit) as exc:
+            script._lock_pins(lock)
+        assert "marker" in str(exc.value)
+
+    @pytest.mark.regression
+    def test_an_unparseable_line_refuses_instead_of_skipping(self, script, tmp_path):
+        """Silently skipping is what made the Python section empty once.
+
+        The floor in `environment_problems` is 40 against 83 real pins, so a
+        format change that broke the regex for half the closure would still
+        have passed it.
+        """
+        lock = tmp_path / "x.lock"
+        lock.write_text("foo @ https://example.invalid/foo.whl\n", encoding="utf-8")
+        with pytest.raises(SystemExit) as exc:
+            script._lock_pins(lock)
+        assert "cannot parse" in str(exc.value)
+
+
+class TestTheEnvironmentGuard:
+    @pytest.mark.regression
+    def test_a_foreign_architecture_is_refused(self, script, monkeypatch):
+        """Linux alone was checked, and sharp ships a binary per ARCH too.
+
+        The LGPL-3.0-or-later rows in the dashboard section are
+        `@img/sharp-libvips-linux-x64` and its musl sibling; on Linux/arm64
+        the arm64 binaries would silently take their place.
+        """
+        monkeypatch.setattr(script.platform, "system", lambda: "Linux")
+        monkeypatch.setattr(script.platform, "machine", lambda: "aarch64")
+        problems = script.environment_problems()
+        assert any("aarch64" in p for p in problems), problems
+
+    def test_the_shipping_platform_is_accepted(self, script, monkeypatch):
+        monkeypatch.setattr(script.platform, "system", lambda: "Linux")
+        monkeypatch.setattr(script.platform, "machine", lambda: "x86_64")
+        problems = script.environment_problems()
+        assert not any("distribution runs on" in p for p in problems), problems
+
+    @pytest.mark.regression
+    def test_too_few_pins_is_reported_as_a_parsing_failure(self, script, monkeypatch):
+        monkeypatch.setattr(script, "_declared_pins", lambda: {"one": "1.0"})
+        problems = script.environment_problems(allow_foreign_platform=True)
+        assert any("parsing failure" in p for p in problems), problems
+
+
+class TestTheDebugFlagCannotWriteTheDocument:
+    """It said so in three places and was true in none of them."""
+
+    @pytest.mark.regression
+    def test_allow_foreign_platform_refuses_to_write(self, script, monkeypatch, capsys):
+        monkeypatch.setattr(script, "environment_problems", lambda *a, **k: [])
+        wrote: list[str] = []
+        monkeypatch.setattr(
+            script, "render", lambda: (_ for _ in ()).throw(AssertionError("rendered"))
+        )
+
+        code = script.main(["--allow-foreign-platform"])
+
+        assert code == 2, "it must refuse before rendering, let alone writing"
+        assert "will not write" in capsys.readouterr().err
+        assert not wrote
+
+    def test_without_the_flag_a_clean_environment_writes(
+        self, script, monkeypatch, tmp_path
+    ):
+        """The counter-example, so the refusal above cannot pass for free."""
+        monkeypatch.setattr(script, "environment_problems", lambda *a, **k: [])
+        monkeypatch.setattr(script, "render", lambda: "# generated\n")
+        out = tmp_path / "OUT.md"
+        monkeypatch.setattr(script, "OUT", out)
+        monkeypatch.setattr(script, "ROOT", tmp_path)
+
+        assert script.main([]) == 0
+        assert out.read_text(encoding="utf-8") == "# generated\n"
+
+
+class TestCheckMode:
+    def test_only_the_generated_on_date_is_normalised(self, script):
+        line = "Generated by `scripts/generate_third_party_licenses.py` on %s.\n"
+        same = script._comparable(line % "2026-09-13" + "| `x` | 1.0 |")
+        later = script._comparable(line % "2026-09-21" + "| `x` | 1.0 |")
+        changed = script._comparable(line % "2026-09-21" + "| `x` | 2.0 |")
+        assert same == later, "a regeneration on another day is not a diff"
+        assert same != changed, "a version change must still be a diff"
+
+    @pytest.mark.regression
+    def test_check_reports_a_stale_document(self, script, monkeypatch, tmp_path):
+        monkeypatch.setattr(script, "environment_problems", lambda *a, **k: [])
+        monkeypatch.setattr(script, "render", lambda: "| `x` | 2.0 |\n")
+        out = tmp_path / "OUT.md"
+        out.write_text("| `x` | 1.0 |\n", encoding="utf-8")
+        monkeypatch.setattr(script, "OUT", out)
+        monkeypatch.setattr(script, "ROOT", tmp_path)
+
+        assert script.main(["--check"]) == 1
+        assert out.read_text(encoding="utf-8") == "| `x` | 1.0 |\n", (
+            "--check must not write"
+        )
+
+    def test_check_passes_on_a_current_document(self, script, monkeypatch, tmp_path):
+        monkeypatch.setattr(script, "environment_problems", lambda *a, **k: [])
+        monkeypatch.setattr(script, "render", lambda: "| `x` | 1.0 |\n")
+        out = tmp_path / "OUT.md"
+        out.write_text("| `x` | 1.0 |\n", encoding="utf-8")
+        monkeypatch.setattr(script, "OUT", out)
+        monkeypatch.setattr(script, "ROOT", tmp_path)
+
+        assert script.main(["--check"]) == 0
+
+
+class TestFirstPartyPackagesAreNotThirdParties:
+    @pytest.mark.regression
+    def test_every_published_package_name_is_excluded(self, script):
+        own = script._own_package_names()
+        assert "@getexperimently/js-sdk" in own, sorted(own)
+        assert len(own) >= 5, (
+            f"only {len(own)} first-party names found; the document listed "
+            "five of its own SDKs as third-party software before this"
+        )
+
+    def test_the_node_package_list_is_derived_from_the_tree(self, script):
+        """Hand-typed, it went stale silently; the sibling gate derives it."""
+        import importlib.util
+
+        sibling = _SCRIPT.parent / "check_node_licences.py"
+        spec = importlib.util.spec_from_file_location("check_node_licences", sibling)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        assert [d for d, _ in script.NODE_PACKAGES] == list(module.NODE_PACKAGES), (
+            "the two gates must cover the same packages, or one of them is "
+            "silently not covering a published SDK"
+        )
