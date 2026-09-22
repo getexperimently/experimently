@@ -2,9 +2,9 @@
 
 ``scripts/audit_dependencies.py`` and ``scripts/check_node_licences.py`` are
 blocking CI steps: one decides whether a dependency advisory stops a merge, the
-other whether a licence does. CLAUDE.md is explicit that "when you add or
-change a gate, break the thing it guards and watch it fail", and that a
-rehearsal repeated by hand belongs in CI. These are those rehearsals.
+other whether a licence does. The rule this file exists for: when you add or
+change a gate, break the thing it guards and watch it fail -- and a rehearsal
+repeated by hand belongs in CI. These are those rehearsals.
 
 Neither test runs ``pip-audit`` or ``license-checker``: both are slow and need
 the network, and neither is the thing under test. The *decision logic* is --
@@ -31,8 +31,8 @@ ROOT = Path(__file__).resolve().parents[4]
 # `regression` as well as `unit`: every case here encodes a specific defect this
 # change fixed -- id-only exception matching, an unparsed review_by, a discarded
 # exit status, list-valued and object-valued `licenses`, a frontend-only licence
-# scope, a gate that passed on an uninstalled tree -- and CLAUDE.md requires a
-# bug fix to carry a test that `pytest -m regression` selects.
+# scope, a gate that passed on an uninstalled tree -- and a bug fix has to
+# carry a test that `pytest -m regression` selects.
 pytestmark = [pytest.mark.unit, pytest.mark.regression]
 
 

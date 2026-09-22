@@ -201,7 +201,7 @@ async def list_experiments(
         # everyone else only rows they owned. That is a second access model
         # sitting on top of the role table, and it contradicts it -- all four
         # roles carry Action.LIST on experiments, and ANALYST exists precisely
-        # to "view all data but not create or modify" (CLAUDE.md). An analyst
+        # to "view all data but not create or modify". An analyst
         # saw an empty platform (#83).
         #
         # A deployment is single tenant (founder, 2026-09-21), so "all
