@@ -164,6 +164,71 @@ class FargateServiceStack(Stack):
             removal_policy=RemovalPolicy.RETAIN,
         )
 
+        # --- The image this task definition carries ---------------------------
+        # The pipeline owns what actually runs.
+        # `.github/workflows/deploy-prod.yml` reads the task definition the
+        # service is *currently running*, rewrites the backend container's
+        # image to the one it just built, registers that as a new revision and
+        # hands it to CodeDeploy. CloudFormation never gets to choose: ECS
+        # refuses a task-definition change on a service with a CODE_DEPLOY
+        # controller outright -- "Unable to update task definition on services
+        # with a CODE_DEPLOY deployment controller".
+        #
+        # So the tag below is a *bootstrap* image: the one thing that has to
+        # exist before an environment can be stood up at all, because
+        # CloudFormation cannot create an ECS service without a task
+        # definition, and a task definition cannot name no image.
+        #
+        # It is deliberately not `latest`, and the reason is narrower than it
+        # first looks -- this comment was rewritten after reading the ECS API
+        # model rather than reasoning from the template.
+        #
+        # What is NOT true: that a `cdk deploy` can roll the running service
+        # back. ECS refuses a task-definition change through `UpdateService`
+        # on a CODE_DEPLOY service, and CodeDeploy deployments name a revision
+        # ARN outright, so nothing here decides what serves traffic.
+        #
+        # What IS true: this revision is the one `Service.taskDefinition`
+        # keeps pointing at forever. That field is "specified when the service
+        # is created with CreateService, and it can be modified with
+        # UpdateService" -- and UpdateService is the call just ruled out -- so
+        # for the life of the service it names the revision CloudFormation
+        # created, not the one serving traffic (that is
+        # `taskSets[?status=='PRIMARY'].taskDefinition`). Anything that reads
+        # the service to find "the current task definition" therefore lands
+        # here.
+        #
+        # `:latest` made that a live image: the deploy workflow moves the tag
+        # on every build, including builds that failed verification or were
+        # rolled back, so the revision everyone mistakes for current pointed
+        # at an arbitrary later build. A tag the pipeline never writes cannot
+        # drift, so the mistake becomes visible instead of plausible.
+        #
+        # `-c backend_image_tag=<tag>` overrides it, for pinning a `cdk deploy`
+        # on a running environment to the image already in service.
+        #
+        # migration_task_stack.py keeps `latest` deliberately, for the opposite
+        # reason: the deploy workflow pushes `:latest` and runs that task
+        # within the same job, so there it means "the image being deployed".
+        image_tag = self.node.try_get_context("backend_image_tag")
+        if image_tag is None:
+            image_tag = "bootstrap"
+        if not isinstance(image_tag, str) or not image_tag.strip():
+            # `-c backend_image_tag=` supplies "", and cdk.json can supply a
+            # number. Both used to fall through an `or` to "bootstrap", so an
+            # operator who thought they had pinned production got the drifted
+            # revision they were trying to avoid, silently.
+            raise ValueError(
+                "backend_image_tag context must be a non-empty string; got "
+                f"{image_tag!r}"
+            )
+        if image_tag == "latest":
+            raise ValueError(
+                "backend_image_tag must not be `latest`: the deploy workflow "
+                "moves that tag on every build, which is #82"
+            )
+        self.backend_image_tag = image_tag
+
         # --- ECS Task Definition ---
         self.task_definition = ecs.FargateTaskDefinition(
             self,
@@ -177,7 +242,9 @@ class FargateServiceStack(Stack):
 
         self.container = self.task_definition.add_container(
             "backend",
-            image=ecs.ContainerImage.from_ecr_repository(self.ecr_repo, tag="latest"),
+            image=ecs.ContainerImage.from_ecr_repository(
+                self.ecr_repo, tag=self.backend_image_tag
+            ),
             logging=ecs.LogDrivers.aws_logs(
                 stream_prefix="backend",
                 log_group=log_group,
