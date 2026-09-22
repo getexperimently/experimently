@@ -42,6 +42,11 @@ env:
   ECR_BACKEND_REPO: experimentation-platform/backend
   ECS_CLUSTER: experimentation-prod
   ECS_BACKEND_SERVICE: experimentation-backend-prod
+  # The task-definition FAMILY. It happens to spell the same as the
+  # service today (both come from `experimentation-backend-{env}` in
+  # fargate_service_stack.py) and they are different things -- #141
+  # renames the deployed identifiers and could move one without the other.
+  ECS_BACKEND_TASK_FAMILY: experimentation-backend-prod
 
 jobs:
   pre-deployment-checks:
@@ -410,19 +415,46 @@ jobs:
 
       - name: Update ECS task definition with new image
         id: task-def
+        env:
+          # Never interpolate into the script body: `inputs.version` reaches
+          # this string, and it is operator-supplied. A tag containing a quote
+          # would close the Python literal below and run inside the job that
+          # holds the production AWS role.
+          BACKEND_IMAGE: ${{ needs.build-and-push.outputs.backend-image }}
         run: |
-          # Get current task definition
+          set -euo pipefail
+
+          # The FAMILY, deliberately, which resolves to its latest ACTIVE
+          # revision. Two producers register into this family and the split is
+          # the point of #82:
+          #
+          #   CloudFormation owns the shape  -- env, secrets, cpu/memory,
+          #                                     roles, log configuration
+          #   this workflow owns the image   -- and nothing else
+          #
+          # So the newest revision is the right base whoever wrote it: if
+          # `cdk deploy` wrote it, this run picks up the new configuration and
+          # corrects only the image; if the last run of this workflow wrote
+          # it, the configuration is already CloudFormation's from the deploy
+          # before. Basing on the *service* instead would freeze both --
+          # `Service.taskDefinition` is "specified when the service is created
+          # with CreateService, and it can be modified with UpdateService",
+          # and UpdateService is exactly the call ECS refuses on a CODE_DEPLOY
+          # service, so that field never moves off the revision
+          # CloudFormation created. The revision actually serving traffic is
+          # `taskSets[?status=='PRIMARY'].taskDefinition`; it is not used here
+          # because it would discard every CloudFormation change.
           TASK_DEF=$(aws ecs describe-task-definition \
-            --task-definition experimentation-backend-prod \
+            --task-definition "$ECS_BACKEND_TASK_FAMILY" \
             --query taskDefinition)
 
           # Update image in task definition
           NEW_TASK_DEF=$(echo $TASK_DEF | python3 -c "
-          import json, sys
+          import json, os, sys
           td = json.load(sys.stdin)
           for c in td['containerDefinitions']:
               if c['name'] == 'backend':
-                  c['image'] = '${{ needs.build-and-push.outputs.backend-image }}'
+                  c['image'] = os.environ['BACKEND_IMAGE']
           # Remove fields that can't be re-registered
           for key in ['taskDefinitionArn','revision','status','requiresAttributes',
                       'compatibilities','registeredAt','registeredBy']:
