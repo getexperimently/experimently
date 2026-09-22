@@ -17,6 +17,13 @@
 # every unrelated PR.
 name: Third-party licences
 
+# Supersede an in-flight run of the same pull request. Keyed on `github.ref`
+# (`refs/pull/<n>/merge` for a pull request) rather than `github.head_ref`, so
+# two forks pushing a branch of the same name do not cancel each other.
+concurrency:
+  group: third-party-licences-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 on:
   pull_request:
     paths:

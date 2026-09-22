@@ -28,7 +28,7 @@ repos:
   # scripts/), so a clean commit is a green job. Scoped to ^backend/ the hook
   # let a modules/ or scripts/ change through and the gate then failed on it.
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.16.7
+    rev: v0.16.8
     hooks:
       - id: ruff
         args: [--fix]

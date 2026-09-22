@@ -5,6 +5,7 @@ Tests the caching layer for rule evaluation results.
 """
 
 import time
+import timeit
 
 import pytest
 
@@ -411,49 +412,81 @@ class TestCacheWarming:
 class TestCachePerformance:
     """Test cache performance characteristics."""
 
-    def test_cache_lookup_is_fast(self):
-        """Test that cache lookups are very fast."""
-        cache = EvaluationCache()
+    @staticmethod
+    def _time_lookups(entries: int, lookups: int = 1000) -> float:
+        """Best of five runs of *lookups* gets against a cache holding *entries*.
 
-        # Pre-populate cache
-        for i in range(1000):
+        Best-of-N rather than a single run: one stalled moment on a shared
+        runner is enough to make a single `time.time()` delta meaningless, and
+        `timeit` takes the minimum for exactly this reason.
+        """
+        cache = EvaluationCache(max_size=max(entries, lookups) * 2)
+        for i in range(entries):
             cache.set(f"rule_{i}", {"user_id": f"user_{i}"}, True)
+        keys = [
+            (f"rule_{i % entries}", {"user_id": f"user_{i % entries}"})
+            for i in range(lookups)
+        ]
 
-        # Time cache lookup
-        start = time.time()
-        for i in range(1000):
-            cache.get(f"rule_{i}", {"user_id": f"user_{i}"})
-        duration = time.time() - start
+        def run() -> None:
+            for rule_id, context in keys:
+                cache.get(rule_id, context)
 
-        # Should be very fast (< 50ms for 1000 lookups)
-        assert duration < 0.05
+        return min(timeit.repeat(run, repeat=5, number=1))
 
-    def test_cache_provides_speedup(self):
-        """Test that cache provides significant speedup."""
-        # This test would compare evaluation with and without cache
-        # For now, just verify cache is faster than re-evaluation
+    def test_cache_lookup_does_not_slow_down_as_the_cache_grows(self):
+        """A lookup is a hash lookup: its cost must not grow with cache size.
 
+        This used to be `assert duration < 0.05` for 1000 lookups -- a single
+        wall-clock reading compared against an absolute number. It measured the
+        runner, not the cache: it passes in 2.6 ms on a laptop and failed a
+        pull request at 285 ms on a contended GitHub runner, a 100x difference
+        with no code change behind it. CLAUDE.md names this exact shape:
+        "Never assert a single wall-clock timing ... take the best of several
+        runs (what `timeit` does), or assert on the deterministic thing the
+        timing was standing in for."
+
+        The deterministic thing here is the complexity. Both measurements run
+        in the same process, so a slow runner slows both equally and cancels
+        out of the ratio. Measured: 1.00x for 100x the entries. A linear scan
+        would be ~100x, so the bound below has two orders of magnitude of
+        headroom and still fails a real regression.
+        """
+        small = self._time_lookups(entries=100)
+        large = self._time_lookups(entries=10_000)
+
+        assert large < small * 10, (
+            f"1000 lookups took {small * 1000:.2f} ms against 100 entries and "
+            f"{large * 1000:.2f} ms against 10,000 ({large / small:.1f}x). A "
+            "hash lookup should not care how full the cache is; this looks "
+            "like the lookup became a scan."
+        )
+
+    def test_a_cache_hit_does_not_re_evaluate(self):
+        """The property the speedup was standing in for, asserted directly.
+
+        The previous version slept 1 ms ten times, timed that against ten cache
+        hits, and asserted `cached < uncached / 5` -- the other shape CLAUDE.md
+        warns about, and one whose "speedup" was really a measurement of
+        `time.sleep`. What makes a cache fast is that it does not run the
+        expensive thing again, and that is a count, not a duration.
+        """
         cache = EvaluationCache()
         user_context = {"user_id": "user_123", "country": "US", "age": 25}
+        calls = 0
 
-        # Simulate expensive evaluation (in real code, this would be actual rule evaluation)
-        def expensive_evaluation():
-            time.sleep(0.001)  # 1ms simulated evaluation
+        def expensive_evaluation() -> bool:
+            nonlocal calls
+            calls += 1
             return True
 
-        # Without cache
-        start = time.time()
-        for _ in range(10):
-            expensive_evaluation()
-        uncached_duration = time.time() - start
-
-        # With cache
         cache.set("rule_1", user_context, expensive_evaluation())
+        assert calls == 1
 
-        start = time.time()
         for _ in range(10):
-            cache.get("rule_1", user_context)
-        cached_duration = time.time() - start
+            assert cache.get("rule_1", user_context) is True
 
-        # Cached should be significantly faster
-        assert cached_duration < uncached_duration / 5  # At least 5x faster
+        assert calls == 1, (
+            f"the expensive evaluation ran {calls} times for one set and ten "
+            "gets; a cache hit must not re-evaluate"
+        )

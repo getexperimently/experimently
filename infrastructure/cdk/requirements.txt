@@ -7,6 +7,13 @@
 # 2.94.0 while everything that actually ran used 2.268.0, and API differences
 # between them are exactly how a stack that never synthesises goes unnoticed.
 # Dependabot updates both (see .github/dependabot.yml).
-aws-cdk-lib==2.269.0
-constructs>=10.5.0,<11.0.0   # the floor aws-cdk-lib 2.269.0 declares
+#
+# Both are `==` on purpose. test_requirement_pins_agree.py can only compare
+# exact pins, so a RANGE here is invisible to it: `constructs>=10.8.1,<11.0.0`
+# sat in this file while backend/requirements.txt pinned no constructs at all
+# and let pip resolve it transitively -- the venv landed on 10.5.1, below this
+# file's own floor, and the gate said nothing. That is the drift this file
+# exists to prevent, reappearing in the one package the gate could not see.
+aws-cdk-lib==2.270.0
+constructs==10.8.1           # aws-cdk-lib 2.270.0 declares >=10.5.0,<11.0.0
 pytest==7.4.2
