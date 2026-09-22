@@ -14,10 +14,19 @@ would ever use, and the first `Deploy to Production` failed at `docker push`
 with "name unknown: The repository with name ... does not exist", taking
 `run-migrations` and `deploy` with it.
 
-Two halves to the fix and this file holds the second: something now *creates*
-the repository (`compute_stack`, which deploys before the service that needs
-it), and the name is asserted identical wherever it appears. A rename that
-misses a caller fails here rather than at 3am.
+**Nothing in the CDK creates it**, and that is deliberate -- see
+`stacks/names.py`. A registry is account-scoped while these stacks are
+per-environment, so a fixed name owned by one of them means a second
+environment in the same account cannot deploy. It is created once per account
+by the command in `docs/deployment/deployment-guide.md` §1.3, which makes that
+guide the only instruction there is -- so this file checks that the guide
+names the live repository, that the deploy workflow pushes to it, that the
+stacks reference it, and that no deployment document still names a dead one.
+
+(An earlier version of this docstring said `compute_stack` creates it. That
+was true of a version of the change that was reverted for the reason above,
+and the sentence survived the revert -- twelve lines above a test docstring
+saying the opposite.)
 """
 
 from __future__ import annotations
@@ -70,17 +79,18 @@ def _referenced_repositories(assembly) -> set[str]:
             if resource["Type"] != "AWS::ECS::TaskDefinition":
                 continue
             for container in resource["Properties"].get("ContainerDefinitions", []):
-                blob = json.dumps(container.get("Image"))
-                for match in re.finditer(
-                    r"dkr\.ecr[^\"]*?amazonaws\.com[^\"]*?/([a-z0-9][a-z0-9._/-]*):",
-                    blob,
-                ):
-                    names.add(match.group(1))
-                # The synthesised form splits the host across an Fn::Join, so
-                # also take a repository path that directly follows one.
-                for match in re.finditer(
-                    r"/([a-z0-9][a-z0-9._/-]*/[a-z0-9._-]+):", blob
-                ):
+                image = container.get("Image")
+                # Only OUR registry. A plain string is an external image
+                # (`public.ecr.aws/...`, `ghcr.io/...`) and names no
+                # repository this project has to create; an `Fn::Join` around
+                # `{"Ref": "AWS::URLSuffix"}` is what an imported
+                # `ecr.Repository` synthesises to, and is ours.
+                if not isinstance(image, dict):
+                    continue
+                blob = json.dumps(image)
+                if "dkr.ecr" not in blob:
+                    continue
+                for match in re.finditer(r"/([a-z0-9][a-z0-9._/-]*):", blob):
                     names.add(match.group(1))
     return names
 
@@ -121,8 +131,12 @@ def test_the_deploy_workflow_pushes_to_that_repository():
     text = DEPLOY_WORKFLOW.read_text(encoding="utf-8")
     match = re.search(r"^\s*ECR_BACKEND_REPO:\s*(\S+)\s*$", text, re.M)
     assert match, "deploy-prod.yml no longer sets ECR_BACKEND_REPO"
-    assert match.group(1) == _repository_name(), (
-        f"the deploy workflow pushes to {match.group(1)!r}, but the CDK names "
+    # Strip a quoted scalar: `ECR_BACKEND_REPO: "experimentation-platform/backend"`
+    # is the same YAML value and used to fail with a diff that showed two
+    # identical-looking strings.
+    pushed = match.group(1).strip().strip("\"'")
+    assert pushed == _repository_name(), (
+        f"the deploy workflow pushes to {pushed!r}, but the CDK names "
         f"{_repository_name()!r}"
     )
 
@@ -155,8 +169,14 @@ def test_no_deployment_document_names_a_dead_repository():
         pytest.skip("this tree has no docs/deployment")
 
     live = _repository_name()
+    docs = sorted(DEPLOYMENT_DOCS.rglob("*.md"))
+    assert len(docs) >= 5, (
+        f"only {len(docs)} deployment document(s) found -- a renamed directory "
+        "or a change of extension would leave this scanning nothing and "
+        "passing for ever"
+    )
     offenders = []
-    for doc in sorted(DEPLOYMENT_DOCS.rglob("*.md")):
+    for doc in docs:
         for number, line in enumerate(
             doc.read_text(encoding="utf-8").splitlines(), start=1
         ):
@@ -174,20 +194,38 @@ def test_no_deployment_document_names_a_dead_repository():
     )
 
 
-@pytest.mark.regression
-def test_the_deployment_guide_tells_you_to_create_the_right_one():
-    """And the positive half: the guide must still say how to create it.
+#: `aws ecr create-repository --repository-name <name>`, in either spelling
+#: and across a `\`-continued line.
+_CREATE_REPOSITORY = re.compile(
+    r"aws\s+ecr\s+create-repository\b[\s\\]*(?:--[a-z-]+(?:[= ]\S+)?[\s\\]*)*?"
+    r"--repository-name[= ]\s*(\S+)"
+)
 
-    Nothing in the CDK does, so the guide is the only instruction there is --
-    which is exactly the position that made #211 fatal rather than untidy.
+
+@pytest.mark.regression
+def test_the_guide_creates_the_repository_the_deployment_uses():
+    """The positive half, and the one that actually guards #211.
+
+    The first version of this asserted two independent substrings -- that the
+    guide contains `aws ecr create-repository` somewhere, and the live name
+    somewhere -- which the architecture diagram already satisfied. Changing
+    the create command to a third wrong name (`experimentation-platform/api`)
+    passed all four tests: the guide told an operator to create a repository
+    nothing would ever push to, and the gate said fine.
+
+    A blacklist of names we have already stopped using cannot catch the next
+    wrong one. This reads the argument the command actually carries.
     """
     guide = DEPLOYMENT_DOCS / "deployment-guide.md"
     if not guide.is_file():
         pytest.skip("this tree has no deployment guide")
 
-    text = guide.read_text(encoding="utf-8")
-    assert "aws ecr create-repository" in text, (
-        "the guide no longer tells an operator to create the repository, and "
-        "no CDK stack creates it either -- so nothing does"
+    created = set(_CREATE_REPOSITORY.findall(guide.read_text(encoding="utf-8")))
+    assert created, (
+        "the guide gives no `aws ecr create-repository` command. Nothing in "
+        "the CDK creates the repository either, so nothing would"
     )
-    assert _repository_name() in text, f"the guide never names {_repository_name()!r}"
+    assert created == {_repository_name()}, (
+        f"the guide tells an operator to create {sorted(created)}, but the "
+        f"deployment pushes to and runs from {_repository_name()!r}"
+    )
