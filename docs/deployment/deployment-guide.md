@@ -176,6 +176,60 @@ cdk deploy experimentation-compute-prod --require-approval never
 cdk deploy experimentation-monitoring-prod --require-approval never
 
 # 8. ECS Fargate service, ALB and CodeDeploy blue/green
+#
+# TWO prerequisites, and both are easy to reach this step without:
+#
+#   a) the Secrets Manager secrets of Section 1.2. The task definition names
+#      four of them (five on the full profile) and ECS cannot start a task
+#      whose definition names a secret that is not there -- so the service
+#      never reaches a steady state, and CloudFormation waits, then rolls the
+#      stack back. Create them BEFORE this step.
+#
+#   b) one image in ECR tagged `bootstrap`. CloudFormation cannot create an
+#      ECS service without a task definition, and a task definition cannot
+#      name no image -- but every image after this one belongs to the
+#      pipeline, which rewrites the task definition and ships it through
+#      CodeDeploy. `bootstrap` is deliberately a tag the deploy workflow
+#      never writes, so the revision CloudFormation registers cannot drift
+#      to a later build. Build it from the REPOSITORY ROOT (the code imports
+#      `backend.app.*`, so the build context has to be the root), with the
+#      --target of the profile you are deploying -- `core` or `full`. A
+#      `full` image started against a `core` task definition refuses to boot,
+#      because the core stack deliberately does not supply AUDIT_HMAC_KEY.
+#
+#        cd "$(git rev-parse --show-toplevel)"
+#        ECR_REGISTRY=<account>.dkr.ecr.us-west-2.amazonaws.com
+#        aws ecr get-login-password --region us-west-2 \
+#          | docker login --username AWS --password-stdin "$ECR_REGISTRY"
+#        docker build --target <core|full> -f backend/Dockerfile \
+#          -t "$ECR_REGISTRY/experimentation-platform/backend:bootstrap" .
+#        docker push "$ECR_REGISTRY/experimentation-platform/backend:bootstrap"
+#        cd infrastructure/cdk
+#
+# On a LATER `cdk deploy` -- an infrastructure change to a RUNNING
+# environment -- pin the revision CloudFormation registers to the image
+# already in service, so it is not a bootstrap revision sitting in the family.
+# Read the tag first and check it, rather than nesting the lookup in the
+# deploy: an empty `-c backend_image_tag=` is rejected at synth, but a lookup
+# that returns the wrong thing is not.
+#
+#   RUNNING_TD=$(aws ecs describe-services --cluster experimentation-prod \
+#     --services experimentation-backend-prod \
+#     --query "services[0].taskSets[?status=='PRIMARY'].taskDefinition" \
+#     --output text)
+#   test -n "$RUNNING_TD" || { echo "no PRIMARY task set"; exit 1; }
+#   # NOT services[0].taskDefinition: that field is frozen at CreateService on
+#   # a CODE_DEPLOY service, so it still names the bootstrap revision.
+#   RUNNING_IMAGE=$(aws ecs describe-task-definition --task-definition "$RUNNING_TD" \
+#     --query "taskDefinition.containerDefinitions[?name=='backend'].image" --output text)
+#   echo "$RUNNING_IMAGE"          # check it before using it
+#   TAG=${RUNNING_IMAGE##*:}
+#
+#   cdk deploy experimentation-fargate-prod --require-approval never \
+#     -c backend_image_tag="$TAG"
+#
+# `cdk deploy --all` further down passes no override, so use it only when
+# standing an environment up, never against a running one.
 cdk deploy experimentation-fargate-prod --require-approval never
 
 # 9. ECS migration task definition  (NOTE: migrations, plural)

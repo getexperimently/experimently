@@ -62,29 +62,41 @@ This is the preferred method for all non-emergency rollbacks. It is audited, sen
 
 ### Step 1: Find the Previous Task Definition ARN
 
-```bash
-# Option A: List recent task definitions for the family (newest first)
-# The current bad version is first; you want the one directly below it.
-aws ecs list-task-definitions \
-  --family-prefix experimentation-backend-prod \
-  --sort DESC \
-  --max-results 5 \
-  --query 'taskDefinitionArns'
-# Example output:
-# [
-#   "arn:aws:ecs:us-west-2:123456789012:task-definition/experimentation-backend-prod:44",  <- current (bad)
-#   "arn:aws:ecs:us-west-2:123456789012:task-definition/experimentation-backend-prod:43",  <- target (good)
-#   ...
-# ]
+> **Two producers write to this family, and only one of them is runnable.**
+> `cdk deploy` registers revisions too, and those carry the CDK's `bootstrap`
+> image tag rather than a released build (#82). Rolling onto one starts tasks
+> that cannot pull an image. **Never pick a revision by subtracting 1** —
+> read the image off a candidate before you deploy it.
 
-# Option B: Check what ECS is currently running, then subtract 1 from the revision
+```bash
+# Option A: List recent task definitions for the family (newest first) WITH
+# the image each one carries, so a CloudFormation-registered revision is
+# visible rather than a number in a list.
+for arn in $(aws ecs list-task-definitions \
+      --family-prefix experimentation-backend-prod \
+      --sort DESC --max-results 10 --query 'taskDefinitionArns' --output text); do
+  image=$(aws ecs describe-task-definition --task-definition "$arn" \
+    --query "taskDefinition.containerDefinitions[?name=='backend'].image" --output text)
+  echo "$arn  $image"
+done
+# arn:...:experimentation-backend-prod:45  ...backend:bootstrap   <- CloudFormation; NOT a rollback target
+# arn:...:experimentation-backend-prod:44  ...backend:v1.4.2      <- current (bad)
+# arn:...:experimentation-backend-prod:43  ...backend:v1.4.1      <- target (good)
+
+# Option B: Ask which revision is actually serving traffic.
+# NOT `services[0].taskDefinition`: on a service with a CodeDeploy deployment
+# controller that field is "specified when the service is created with
+# CreateService, and it can be modified with UpdateService" -- and UpdateService
+# is the one call ECS refuses on such a service. So it names the revision
+# CloudFormation created when the stack was first deployed, for the life of the
+# service, and is never the running one. The PRIMARY task set is.
 aws ecs describe-services \
   --cluster experimentation-prod \
   --services experimentation-backend-prod \
-  --query 'services[0].taskDefinition' \
+  --query "services[0].taskSets[?status=='PRIMARY'].taskDefinition" \
   --output text
 # Returns: arn:...:task-definition/experimentation-backend-prod:44
-# You want revision :43 (the one before it)
+# Then use Option A to choose the released revision below it.
 
 # Option C: Review service events to identify what was running before this deployment
 aws ecs describe-services \
@@ -132,17 +144,30 @@ Use this method when GitHub Actions is unavailable or you need to act faster tha
 # Step 1: Set the target task definition ARN (last known-good revision)
 PREV_TASK_DEF="arn:aws:ecs:us-west-2:ACCOUNT_ID:task-definition/experimentation-backend-prod:43"
 
-# Step 2: Get previous task def if you need it dynamically
-# (subtracts 1 from the current revision number)
+# Step 2: Get the running task def if you need it dynamically.
+# Use the PRIMARY task set, not `services[0].taskDefinition` -- see the note in
+# Method 1 Step 1: on a CodeDeploy-controlled service that field never moves
+# off the revision CloudFormation created.
 CURRENT=$(aws ecs describe-services \
   --cluster experimentation-prod \
   --services experimentation-backend-prod \
-  --query 'services[0].taskDefinition' \
+  --query "services[0].taskSets[?status=='PRIMARY'].taskDefinition" \
   --output text)
-echo "Current task def: $CURRENT"
-# Manually construct the previous revision by decrementing the number at the end
+echo "Running task def: $CURRENT"
+# Do NOT decrement the revision number to find the target. CloudFormation
+# registers into this family too, and its revisions carry the `bootstrap`
+# image tag; pick the target with Method 1 Step 1's listing, which prints the
+# image beside each revision.
 
 # Step 3: Update the ECS service to use the previous task definition
+#
+# KNOWN BROKEN (#208): this service has a CodeDeploy deployment controller,
+# and ECS rejects a task-definition change through UpdateService on such a
+# service -- "Unable to update task definition on services with a CODE_DEPLOY
+# deployment controller". Until #208 replaces this with an
+# `aws deploy create-deployment` naming $PREV_TASK_DEF, use Method 1, or
+# `aws deploy stop-deployment --auto-rollback-enabled` while a deployment is
+# still in flight (Method 3 below).
 aws ecs update-service \
   --cluster experimentation-prod \
   --service experimentation-backend-prod \
