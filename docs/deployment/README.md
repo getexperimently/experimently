@@ -43,9 +43,14 @@ Nothing at runtime flags the difference: `/health/ready` answers 200 either way
 (it reports `profile`, it does not judge it) and `abort_if_modules_broken()`
 only fires for a *broken* modules package, never for an absent one. So `core`
 also requires ticking **`accept_unsigned_audit_log`**; the workflow refuses the
-run otherwise, before it assumes the production AWS role. The dashboard image
-is built with the same profile — a core API behind a dashboard that renders
-module chrome is a broken UI.
+run otherwise, before it assumes the production AWS role.
+
+The profile is the **API image's** only; this workflow builds no dashboard
+image. It used to, and that step pushed to an ECR repository nothing creates,
+so it never succeeded (#195). Production has no dashboard delivery path at all
+at the moment — see #212, which is where the shape of one is being decided.
+Until then, a core API deployed here is not paired with a dashboard build by
+anything, so nothing enforces that the two agree on a profile.
 
 `full` needs one secret `core` does not: **`/prod/experimentation/audit-hmac-key`**
 (→ `AUDIT_HMAC_KEY`). `modules.register(hooks)` builds the modules' settings as
