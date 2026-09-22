@@ -29,6 +29,7 @@ set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 EXCLUDE="$REPO_ROOT/scripts/publish/exclude-paths.txt"
+MANIFEST="$REPO_ROOT/scripts/publish/ships-manifest.txt"
 REF=main
 OUT=""
 KEEP=0
@@ -53,6 +54,22 @@ for tool in git git-filter-repo gitleaks trufflehog python3; do
     command -v "$tool" >/dev/null || { echo "export: $tool is not installed" >&2; exit 2; }
 done
 [ -f "$EXCLUDE" ] || { echo "export: $EXCLUDE is missing" >&2; exit 2; }
+[ -f "$MANIFEST" ] || { echo "export: $MANIFEST is missing" >&2; exit 2; }
+
+# Pre-flight, before the multi-minute clone and rewrite: the directories the
+# launch plan names as "must have no history in the export" have to be in the
+# exclusion file, because that file is the only thing that removes them. This
+# costs milliseconds and fails in place of discovering it after the rewrite.
+MUST_BE_EXCLUDED=(ee docs/go-to-market public-preview project wip docs/planning)
+missing=""
+for path in "${MUST_BE_EXCLUDED[@]}"; do
+    grep -qxF -- "$path" "$EXCLUDE" || missing="$missing $path"
+done
+if [ -n "$missing" ]; then
+    echo "export: the launch plan requires these to be excluded, and they are not in" >&2
+    echo "        $EXCLUDE:$missing" >&2
+    exit 2
+fi
 
 if [ -z "$OUT" ]; then
     OUT="$(mktemp -d "${TMPDIR:-/tmp}/experimently-export.XXXXXX")"
@@ -76,7 +93,27 @@ COMMITS_BEFORE=$(git -C "$WORK" rev-list --count HEAD)
 # Every path that ever existed, BEFORE the rewrite: the dangling-reference
 # check needs to know which excluded entries were directories, and after the
 # rewrite they no longer exist anywhere to ask.
-git -C "$WORK" log --all --name-only --format= | sort -u > "$LOGS/history-paths-before.txt"
+# Every path in every commit's tree. The two cheaper spellings are both wrong
+# here, and each was measured on this repository before this one was chosen:
+#
+#   git log --all --name-only   lists nothing for a merge commit, and main has
+#                               34 of them. A file added in a merge is in
+#                               `git ls-files` and reported zero times by this.
+#   git rev-list --objects      lists each OBJECT once, at one path. Identical
+#                               blobs share an object, so a file that also
+#                               exists at a kept path is reported only there --
+#                               194 paths on main are invisible to it, among
+#                               them 2-Week-JavaScript-React-Learning-Plan.md.
+#
+# `ls-tree -r` per commit has neither blind spot: it asks each tree what is in
+# it. 327 commits take under two seconds, which is nothing against a clone and
+# a history rewrite.
+all_paths() {  # $1 = repository
+    git -C "$1" rev-list --all | while read -r commit; do
+        git -C "$1" ls-tree -r --name-only "$commit" || return 1
+    done | sort -u
+}
+all_paths "$WORK" > "$LOGS/history-paths-before.txt"
 
 # ---------------------------------------------------------------------------
 # 2. Rewrite history. filter-repo drops the origin remote afterwards on
@@ -104,7 +141,7 @@ result() {  # $1 = name, $2 = 0|1 (0 = pass), $3 = detail
 # 3a. Nothing excluded survives anywhere in the rewritten history. The check
 #     re-derives the rules from exclude-paths.txt with the same semantics
 #     filter-repo applies, over every path that ever existed.
-git -C "$WORK" log --all --name-only --format= | sort -u > "$LOGS/history-paths.txt"
+all_paths "$WORK" > "$LOGS/history-paths.txt"
 python3 - "$EXCLUDE" "$LOGS/history-paths.txt" > "$LOGS/history-check.txt" 2>&1 <<'PY'
 import fnmatch, sys
 rules = []
@@ -124,10 +161,79 @@ for path in paths:
             bad.append((path, rule)); break
 for path, rule in bad:
     print(f"{path}  (matches {rule})")
+
+# An empty enumeration makes every assertion below vacuous, and "0 paths, 0
+# matches" reads exactly like a clean export. Anything that breaks `all_paths`
+# -- a rewrite that left the repository unreadable, a missing ref, a full disk
+# -- must fail here rather than report success over a history nobody looked at.
+if not paths:
+    print("0 paths ever in history -- the enumeration produced nothing")
+    sys.exit(1)
+if not rules:
+    print("exclude-paths.txt parsed to 0 rules")
+    sys.exit(1)
+
 print(f"{len(paths)} paths ever in history, {len(bad)} still match an exclusion")
 sys.exit(1 if bad else 0)
 PY
 result "excluded paths absent from history" $? "$(tail -1 "$LOGS/history-check.txt")"
+
+# 3a-ii. The same question, asked the other way round.
+#
+#     The sweep above derives its patterns FROM the exclusion file, so it can
+#     only report entries somebody already thought to write down. That is not
+#     a hypothetical weakness: `docs/go-to-market` was named in the launch
+#     plan's acceptance list, never added to the exclusion file, and the sweep
+#     passed for months while eleven files -- the GTM strategy, the competitor
+#     comparison, the design partner playbook, the messaging framework -- sat
+#     in the history the export publishes. The first fix for that added the
+#     missing entries and asserted them by name, which is circular: every name
+#     asserted was also in the exclusion file, so the check could only fire if
+#     someone edited that file, and `TRANSITION_TO_COMMERCIAL.md`,
+#     `docs/deployment/MARKETING_WEBSITE_GUIDE.md` and `ee-manifest.txt` were
+#     still shipping while it passed.
+#
+#     So this one is a positive manifest. Reduce the rewritten history to its
+#     top-level entries plus its `docs/` subdirectories and fail on anything
+#     that is not in ships-manifest.txt. An unlisted directory is a FAILURE by
+#     default, which is the only shape in which forgetting is caught.
+python3 - "$MANIFEST" "$LOGS/history-paths.txt" > "$LOGS/manifest-check.txt" 2>&1 <<'PY'
+import sys
+
+allowed = set()
+for line in open(sys.argv[1]):
+    line = line.split("#", 1)[0].strip()
+    if line:
+        allowed.add(line)
+
+paths = [p.strip() for p in open(sys.argv[2]) if p.strip()]
+
+unlisted = {}
+for path in paths:
+    parts = path.split("/")
+    top = parts[0]
+    if top not in allowed:
+        unlisted.setdefault(top, []).append(path)
+        continue
+    if top == "docs" and len(parts) >= 3:
+        sub = "docs/" + parts[1]
+        if sub not in allowed:
+            unlisted.setdefault(sub, []).append(path)
+
+for entry in sorted(unlisted):
+    examples = sorted(unlisted[entry])
+    print(f"{entry}  ({len(examples)} paths, e.g. {examples[0]})")
+
+if not paths:
+    print("0 paths in the exported history -- the enumeration produced nothing")
+    sys.exit(1)
+
+print(f"{len(paths)} paths, {len(allowed)} manifest entries, {len(unlisted)} unlisted")
+sys.exit(1 if unlisted else 0)
+PY
+MANIFEST_STATUS=$?
+result "every published directory is on the ships manifest" "$MANIFEST_STATUS" \
+    "$(tail -1 "$LOGS/manifest-check.txt")"
 
 # 3b. Secrets, full history, with the default rules and NO path allowlist.
 #     scripts/publish/gitleaks-export.toml extends the defaults (a config
