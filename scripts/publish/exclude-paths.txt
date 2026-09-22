@@ -27,11 +27,78 @@ frontend/CLAUDE.md
 .cursor
 
 # Internal planning: the launch plan, the nine specialist reviews, the
-# superseded go-to-market strategy, the coupling report, the testing audit.
-# Also the one place the pre-reframe vocabulary may still appear.
+# coupling report, the testing audit, and -- since #92 renamed it in here --
+# the go-to-market strategy, which is its largest subdirectory. Also the one
+# place the pre-reframe vocabulary may still appear.
 docs/planning
+
+# The go-to-market strategy at its OLD path. #92 renamed the directory
+# (`R099 docs/go-to-market/GTM_STRATEGY.md -> docs/planning/go-to-market/...`),
+# so `docs/planning` above covers the content as it sits today -- all ten GTM
+# files are under it right now -- and the rename is exactly why this entry is
+# still needed: the history the export publishes contains the files at their
+# pre-rename path, which no `docs/planning` rule matches.
+#
+# The launch plan's acceptance list names `docs/go-to-market` as a directory
+# that must have no history in the export. It was named there and missing here,
+# and the "excluded paths absent from history" sweep passed throughout -- that
+# sweep derives its patterns FROM this file, so it can only check what it is
+# told. That asymmetry is what export.sh's positive manifest now closes.
+docs/go-to-market
+
+# The pre-reframe proprietary tier. `ee/` became `modules/` in #92 and the
+# project went Apache-2.0, but `ee/LICENSE` -- an Elastic-style proprietary
+# licence for a tier that no longer exists -- stayed in the history. Publishing
+# it under an Apache-2.0 project invites exactly one question, and the answer
+# is "nothing here is proprietary". The launch plan names this directory too.
+#
+# `ee-manifest.txt` is the same decision's other half: the file that listed
+# which paths belonged to the proprietary tier. It is a tier inventory for a
+# tier that no longer exists.
+ee
+ee-manifest.txt
+
+# Scratch directories from before the reframe. Neither has been in the tree
+# since; both are named in the launch plan's acceptance list.
 project
 wip
+
+# Internal commercial and marketing material. TRANSITION_TO_COMMERCIAL.md
+# opens "the transition of the Experimently repository from open-source to a
+# commercial product" and names `public-preview/`; MARKETING_WEBSITE_GUIDE.md
+# documents a pricing page with three tiers (Starter, Pro, Enterprise). Both
+# were deleted from main, which leaves them in the history the export
+# publishes -- the same mistake as docs/go-to-market, found by running the
+# launch plan's list by hand rather than by any gate.
+TRANSITION_TO_COMMERCIAL.md
+docs/deployment/MARKETING_WEBSITE_GUIDE.md
+MARKETING_WEBSITE_GUIDE.md
+AWS_ROUTE53_DEPLOYMENT.md
+# ...and the only thing that linked to those two. Despite its path it is not
+# the dashboard's quickstart: it opens "Experimently Marketing Website - Quick
+# Start", tells the reader to have "an AWS Route 53 hosted zone for
+# getexperimently.com", and ends at hello@getexperimently.com. It is still in
+# main's tree, so the export's dangling-reference sweep is what surfaced it --
+# four dead links to files this commit removes. Deleting it from main is
+# tracked separately; publishing it would tell a reader that `cd frontend &&
+# npm run dev` serves a marketing site rather than the dashboard.
+frontend/QUICKSTART.md
+
+# Internal implementation and testing plans for a single feature, plus a
+# working notes file. The same material is under docs/planning/ (excluded);
+# these are the copies that sat at the repository root before #92 moved them,
+# and a rename does not remove the old path from the history.
+EXECUTION_TESTING_PLAN.md
+EXECUTION_TESTING_PLAN_EP-243A.md
+experiment_platform_changes.md
+
+# Personal study notes that were committed to the repository. Not harmful,
+# not the product, and not something an Apache-2.0 release should carry.
+docs/guides/2-Week-JavaScript-React-Learning-Plan.md
+docs/guides/JavaScript-React-Learning-Plan.md
+docs/learnings/detailed-frontend-learning-plan.md
+2-Week-JavaScript-React-Learning-Plan.md
+JavaScript-React-Learning-Plan.md
 
 # An internal audit report, the developer-bypass instructions, and the
 # fabricated "production" metrics of the public-preview mock-ups.
@@ -52,3 +119,8 @@ backend/.venv
 LICENSE.txt
 glob:*coverage.xml
 glob:*.log
+glob:*.DS_Store
+.pre-commit-config.yaml.old
+experimentation_platform.egg-info
+err.txt
+out.txt
