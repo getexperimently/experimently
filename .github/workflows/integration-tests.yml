@@ -6,6 +6,24 @@ on:
   pull_request:
     branches: [main]
 
+
+# Supersede an in-flight run of the same pull request; a batch of Dependabot
+# rebases with no group here turned into roughly 2000 jobs and exhausted the
+# Actions spending limit.
+#
+# `github.ref` rather than `github.head_ref`: for a pull request `github.ref`
+# is the unique `refs/pull/<n>/merge`, while `head_ref` is the bare branch
+# name with no fork owner, so two contributors pushing a branch both named
+# `patch-1` -- GitHub's default for a web-UI edit -- would cancel each other's
+# required checks. `github.event_name` keeps the triggers in separate groups.
+#
+# Only pull requests are cancelled. A push to main runs to completion: cancel
+# it and the commit that is actually on main carries a cancelled status, and a
+# failure it introduced is attributed to whichever merge landed next.
+concurrency:
+  group: integration-tests-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   integration-tests:
     runs-on: ubuntu-latest

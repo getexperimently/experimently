@@ -252,10 +252,16 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version: '1.22'
-          cache-dependency-path: sdk/go/go.sum
+          # The Go SDK is stdlib-only: `git ls-files sdk/go` has go.mod and no
+          # go.sum. setup-go caches by default and hashes `cache-dependency-path`
+          # first, so pointing it at a file that does not exist failed this job
+          # at step two on every `sdk/go/v*` tag -- a release gate that could
+          # only reject. The two other setup-go blocks in this repository
+          # (_platform.yml, sdk-unit-tests.yml) already say `cache: false`.
+          cache: false
 
       - name: Build and test
         working-directory: sdk/go
