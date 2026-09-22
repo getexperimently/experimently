@@ -70,28 +70,39 @@ anything, so a missing secret is a red job, not a crash loop. Create it with
 **Method 1 — GitHub Actions (preferred):**
 Go to **GitHub Actions** → **"Rollback Production"** → enter the previous task definition ARN and reason
 
-**Method 2 — AWS CLI (fastest):**
+**Method 2 — AWS CLI:**
+
+> The service has a **CODE_DEPLOY** deployment controller
+> (`fargate_service_stack.py`), and ECS rejects a task-definition change
+> through `UpdateService` on such a service — *"Unable to update task
+> definition on services with a CODE_DEPLOY deployment controller"*. The
+> `aws ecs update-service --task-definition … --force-new-deployment` that
+> used to be here could not work, and neither could the
+> `aws ecs wait services-stable` after it: the old task set serves throughout a
+> blue/green deployment, so the waiter returns immediately whatever happens
+> (#208). Rolling back means creating a CodeDeploy deployment that names the
+> older revision — **and approving it**, because the deployment group parks for
+> 30 minutes waiting for `ContinueDeployment` and then stops, which
+> auto-rollback turns back into the revision you were rolling away from.
+>
+> That is three calls with an AppSpec in between, which is not something to
+> assemble by hand during an incident. **Use Method 1.** If the workflow itself
+> is unavailable, [rollback-runbook.md](rollback-runbook.md) Method 2 has the
+> full sequence.
+
+How to find the previous task definition, **with its image** — the revision
+list alone is not enough, because CloudFormation also registers into this
+family with a `bootstrap` image that may not exist in ECR (#82):
 ```bash
-PREV_TASK_DEF="arn:aws:ecs:us-west-2:ACCOUNT_ID:task-definition/experimentation-backend-prod:43"
-
-aws ecs update-service \
-  --cluster experimentation-prod \
-  --service experimentation-backend-prod \
-  --task-definition $PREV_TASK_DEF \
-  --force-new-deployment
-
-aws ecs wait services-stable \
-  --cluster experimentation-prod \
-  --services experimentation-backend-prod
-```
-
-How to find the previous task definition ARN:
-```bash
-aws ecs list-task-definitions \
-  --family-prefix experimentation-backend-prod \
-  --sort DESC \
-  --max-results 5 \
-  --query 'taskDefinitionArns'
+for arn in $(aws ecs list-task-definitions \
+               --family-prefix experimentation-backend-prod \
+               --sort DESC --max-results 5 \
+               --query 'taskDefinitionArns' --output text); do
+  printf '%s  %s\n' "$arn" "$(aws ecs describe-task-definition \
+    --task-definition "$arn" \
+    --query 'taskDefinition.containerDefinitions[?name==`backend`].image' \
+    --output text)"
+done
 ```
 
 Full rollback procedure: [rollback-runbook.md](rollback-runbook.md)

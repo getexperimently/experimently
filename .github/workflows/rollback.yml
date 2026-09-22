@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       task_definition_arn:
-        description: 'Previous ECS task definition ARN to rollback to (e.g. arn:aws:ecs:us-west-2:123:task-definition/backend:42)'
+        description: 'Previous ECS task definition to roll back to. An ARN, or family:revision (e.g. experimentation-backend-prod:42).'
         required: true
         type: string
       reason:
@@ -14,6 +14,21 @@ on:
 
 env:
   AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+  ECS_CLUSTER: experimentation-prod
+  ECS_BACKEND_SERVICE: experimentation-backend-prod
+  # The task-definition FAMILY. It spells the same as the service today and is
+  # a different thing; #141 renames the deployed identifiers.
+  ECS_BACKEND_TASK_FAMILY: experimentation-backend-prod
+  CODEDEPLOY_APPLICATION: experimentation-platform
+  CODEDEPLOY_DEPLOYMENT_GROUP: experimentation-prod
+  # An upper bound on the whole rollback, not an assertion about how long one
+  # takes. The deployment group's own waits are 30 minutes for approval and an
+  # hour before the blue task set is terminated (fargate_service_stack.py), so
+  # any ceiling shorter than those fails a rollback that is working. This job
+  # does not sit through either: it calls ContinueDeployment as soon as the
+  # deployment is Ready, and it stops waiting once traffic is on the target
+  # rather than waiting for CodeDeploy to finish tidying up behind it.
+  ROLLBACK_TIMEOUT_SECONDS: '1800'
 
 jobs:
   rollback:
@@ -44,38 +59,263 @@ jobs:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
         continue-on-error: true
 
-      - name: Update ECS service to previous task definition
+      # ECS refuses a task-definition change through UpdateService on a
+      # service with a CODE_DEPLOY deployment controller -- "Unable to update
+      # task definition on services with a CODE_DEPLOY deployment controller"
+      # -- and `fargate_service_stack.py` creates this service with exactly
+      # that controller. So the whole of this job used to fail at its first
+      # step, during an incident, after the "ROLLBACK initiated" message had
+      # already gone out (#208). Rolling a CodeDeploy-controlled service back
+      # means creating a deployment that names the older revision, which is
+      # the same call `deploy-prod.yml` makes to go forward.
+      - name: Check the target revision is one we can roll onto
+        id: target
+        env:
+          TARGET: ${{ inputs.task_definition_arn }}
         run: |
-          aws ecs update-service \
-            --cluster experimentation-prod \
-            --service experimentation-backend-prod \
-            --task-definition "${{ inputs.task_definition_arn }}" \
-            --force-new-deployment
+          set -euo pipefail
 
-      - name: Wait for rollback to stabilize
+          TD="$(aws ecs describe-task-definition --task-definition "$TARGET" \
+                  --query taskDefinition --output json)"
+
+          # The RESOLVED arn, and everything downstream uses it. The input is
+          # allowed to be `family:revision` or even a bare family, both of
+          # which `describe-task-definition` accepts; comparing the raw input
+          # against what ECS reports serving later would then fail a rollback
+          # that worked. A bare family is worse than cosmetic -- it resolves to
+          # the newest ACTIVE revision, which during an incident is quite
+          # likely the revision being rolled back FROM -- so it is refused.
+          ARN="$(jq -r '.taskDefinitionArn' <<<"$TD")"
+          case "$TARGET" in
+            *:[0-9]*) ;;
+            *) echo "::error::$TARGET names a family with no revision. It would resolve to the newest ACTIVE revision, which during an incident may be the one you are rolling back from. Pass ${ARN##*/} instead." ; exit 1 ;;
+          esac
+          echo "arn=$ARN" >> "$GITHUB_OUTPUT"
+
+          status="$(jq -r '.status' <<<"$TD")"
+          if [ "$status" != "ACTIVE" ]; then
+            echo "::error::$ARN is $status, not ACTIVE. A deregistered revision cannot be deployed."
+            exit 1
+          fi
+
+          family="$(jq -r '.family' <<<"$TD")"
+          if [ "$family" != "$ECS_BACKEND_TASK_FAMILY" ]; then
+            echo "::error::$ARN belongs to family $family, not $ECS_BACKEND_TASK_FAMILY."
+            exit 1
+          fi
+
+          # Two producers register into this family. CloudFormation's
+          # revisions carry the CDK's `bootstrap` image, which is a tag the
+          # deploy workflow never writes and which may not exist in ECR at
+          # all -- rolling onto one starts tasks that cannot pull (#82).
+          #
+          # `select(...)` emits NOTHING and exits 0 when no container is named
+          # `backend`, so an empty result has to be its own failure: the
+          # AppSpec below hardcodes `ContainerName: backend`, and a revision
+          # without one fails the CodeDeploy deployment mid-incident after
+          # this guard has said the target is fine.
+          image="$(jq -r '.containerDefinitions[] | select(.name=="backend") | .image' <<<"$TD")"
+          if [ -z "$image" ]; then
+            echo "::error::$ARN has no container named 'backend' (it has: $(jq -r '[.containerDefinitions[].name] | join(", ")' <<<"$TD")). The AppSpec this job builds names that container."
+            exit 1
+          fi
+          case "$image" in
+            *:bootstrap)
+              echo "::error::$ARN runs $image -- that is a CloudFormation-registered revision, not a released one. Pick a revision whose image is a version tag; docs/deployment/rollback-runbook.md Step 1 lists them with their images."
+              exit 1
+              ;;
+          esac
+          # A digest-pinned bootstrap image (repo@sha256:...) carries no tag and
+          # is not detectable here. Step 1 of the runbook prints the image for
+          # every candidate revision for exactly that reason.
+          echo "rolling back to $ARN ($image)"
+
+      # CodeDeploy refuses a second deployment for a deployment group while one
+      # is in flight, and during an incident one usually IS: the bad deploy
+      # that caused this is itself a CodeDeploy deployment, and with a
+      # 30-minute approval wait and an hour of termination wait it is still
+      # running minutes later. Without this the rollback died at its first AWS
+      # call, after the "ROLLBACK initiated" message had gone out.
+      - name: Stop any deployment already in flight
         run: |
-          echo "Waiting for rollback deployment to stabilize..."
-          aws ecs wait services-stable \
-            --cluster experimentation-prod \
-            --services experimentation-backend-prod
-          echo "Rollback complete"
+          set -euo pipefail
+          IN_FLIGHT="$(aws deploy list-deployments \
+            --application-name "$CODEDEPLOY_APPLICATION" \
+            --deployment-group-name "$CODEDEPLOY_DEPLOYMENT_GROUP" \
+            --include-only-statuses Created Queued InProgress Ready \
+            --query 'deployments' --output text)"
 
-      - name: Verify health after rollback
+          if [ -z "$IN_FLIGHT" ] || [ "$IN_FLIGHT" = "None" ]; then
+            echo "no deployment in flight"
+            exit 0
+          fi
+
+          for id in $IN_FLIGHT; do
+            echo "stopping in-flight deployment $id"
+            # --auto-rollback-enabled so stopping it reverts its own traffic
+            # shift rather than leaving the group half-shifted.
+            aws deploy stop-deployment --deployment-id "$id" --auto-rollback-enabled
+          done
+
+          for id in $IN_FLIGHT; do
+            for _ in $(seq 1 60); do
+              st="$(aws deploy get-deployment --deployment-id "$id" \
+                      --query deploymentInfo.status --output text)"
+              case "$st" in
+                Stopped|Succeeded|Failed) echo "$id is $st"; break ;;
+              esac
+              sleep 5
+            done
+          done
+
+      - name: Roll back via CodeDeploy
+        id: codedeploy
+        env:
+          TARGET_ARN: ${{ steps.target.outputs.arn }}
+          # Never interpolate an operator-supplied string into the script body:
+          # `${{ inputs.reason }}` is substituted by Actions before bash parses
+          # the line, so `$(...)` inside it runs with this job's production AWS
+          # credentials. deploy-prod.yml states the same rule.
+          REASON: ${{ inputs.reason }}
         run: |
-          RUNNING=$(aws ecs describe-services \
-            --cluster experimentation-prod \
-            --services experimentation-backend-prod \
-            --query 'services[0].runningCount' --output text)
-          echo "Running tasks after rollback: $RUNNING"
+          set -euo pipefail
+          APPSPEC="$(jq -cn --arg td "$TARGET_ARN" '{
+            version: 1,
+            Resources: [{
+              TargetService: {
+                Type: "AWS::ECS::Service",
+                Properties: {
+                  TaskDefinition: $td,
+                  LoadBalancerInfo: { ContainerName: "backend", ContainerPort: 8000 }
+                }
+              }
+            }]
+          }')"
+          # CodeDeployDefault.ECSAllAtOnce, not the group's configured
+          # CANARY_10_PERCENT_5_MINUTES. The canary is right going forward, on
+          # a revision nobody has run. Rolling back, the target was serving
+          # production minutes ago and the version being replaced is the one
+          # hurting users -- a canary would leave 90% of traffic on it for a
+          # further five minutes, against a runbook target of "under 5 minutes
+          # from decision to rollback complete".
+          DEPLOYMENT_ID="$(aws deploy create-deployment \
+            --application-name "$CODEDEPLOY_APPLICATION" \
+            --deployment-group-name "$CODEDEPLOY_DEPLOYMENT_GROUP" \
+            --deployment-config-name CodeDeployDefault.ECSAllAtOnce \
+            --description "rollback: $REASON" \
+            --revision "$(jq -cn --arg c "$APPSPEC" '{revisionType:"AppSpecContent",appSpecContent:{content:$c}}')" \
+            --query deploymentId --output text)"
+          echo "deployment-id=$DEPLOYMENT_ID" >> "$GITHUB_OUTPUT"
+          echo "CodeDeploy deployment: $DEPLOYMENT_ID"
 
+      # This is the step the previous version was missing entirely, and without
+      # it the rollback could not take. The deployment group sets
+      # `deployment_approval_wait_time=Duration.minutes(30)`, and the CDK
+      # docstring for it is explicit: "If the ContinueDeployment API is not
+      # called within the wait time period, CodeDeploy will stop the
+      # deployment." The group also sets `auto_rollback(stopped_deployment=True)`,
+      # so a stopped deployment reverts -- to the revision being rolled back
+      # from. `grep -rn continue-deployment` over this repository returned
+      # nothing. The old rollback therefore parked for thirty minutes and then
+      # put the broken version back.
+      #
+      # `aws deploy wait deployment-successful` is not used: it cannot approve,
+      # so it could only ever time out here.
+      - name: Shift traffic and wait for it to land
+        env:
+          DEPLOYMENT_ID: ${{ steps.codedeploy.outputs.deployment-id }}
+          TARGET_ARN: ${{ steps.target.outputs.arn }}
+        run: |
+          set -euo pipefail
+          deadline=$(( $(date +%s) + ROLLBACK_TIMEOUT_SECONDS ))
+          continued=0
+
+          while :; do
+            status="$(aws deploy get-deployment --deployment-id "$DEPLOYMENT_ID" \
+                        --query deploymentInfo.status --output text)"
+
+            case "$status" in
+              Ready)
+                if [ "$continued" -eq 0 ]; then
+                  echo "deployment is Ready -- approving the traffic shift"
+                  aws deploy continue-deployment --deployment-id "$DEPLOYMENT_ID" \
+                    --deployment-wait-type READY_WAIT
+                  continued=1
+                fi
+                ;;
+              Failed|Stopped)
+                echo "::error::rollback deployment $DEPLOYMENT_ID is $status"
+                aws deploy get-deployment --deployment-id "$DEPLOYMENT_ID" \
+                  --query 'deploymentInfo.{status:status,error:errorInformation}' --output json
+                exit 1
+                ;;
+            esac
+
+            # Success is "the target is serving", not "CodeDeploy says
+            # Succeeded". After the shift the group waits an hour before
+            # terminating the blue task set, and an operator in an incident
+            # needs to know traffic has moved, not that CodeDeploy has finished
+            # tidying up.
+            serving="$(aws ecs describe-services \
+              --cluster "$ECS_CLUSTER" --services "$ECS_BACKEND_SERVICE" \
+              --query "services[0].taskSets[?status=='PRIMARY'].taskDefinition" \
+              --output text)"
+            if [ "$serving" = "$TARGET_ARN" ]; then
+              echo "traffic is on $TARGET_ARN (deployment $status)"
+              break
+            fi
+
+            if [ "$(date +%s)" -ge "$deadline" ]; then
+              echo "::error::rollback deployment $DEPLOYMENT_ID did not put $TARGET_ARN in service within ${ROLLBACK_TIMEOUT_SECONDS}s (status $status, serving $serving)"
+              exit 1
+            fi
+            sleep 10
+          done
+
+      - name: Verify what is serving traffic
+        env:
+          TARGET_ARN: ${{ steps.target.outputs.arn }}
+        run: |
+          set -euo pipefail
+          # One call, both answers. The PRIMARY task set, not
+          # services[0].taskDefinition: on a CODE_DEPLOY service that field is
+          # "specified when the service is created with CreateService and can
+          # be modified with UpdateService", and UpdateService is the call ECS
+          # refuses here -- so it still names the revision CloudFormation
+          # created and never moves.
+          read -r SERVING RUNNING DESIRED <<<"$(aws ecs describe-services \
+            --cluster "$ECS_CLUSTER" --services "$ECS_BACKEND_SERVICE" \
+            --query "services[0].[taskSets[?status=='PRIMARY'].taskDefinition | [0], runningCount, desiredCount]" \
+            --output text)"
+          echo "serving: $SERVING  ($RUNNING/$DESIRED tasks running)"
+
+          if [ "$SERVING" != "$TARGET_ARN" ]; then
+            echo "::error::expected $TARGET_ARN to be serving, got $SERVING"
+            exit 1
+          fi
+          # A rollback that lands the right revision with one of three tasks
+          # healthy is not a finished rollback, and was previously reported as
+          # a clean success because this count was printed and never compared.
+          if [ "$RUNNING" != "$DESIRED" ]; then
+            echo "::error::$RUNNING of $DESIRED tasks are running on $TARGET_ARN"
+            exit 1
+          fi
+
+      # `if: always()`. Without it every failure path above left #deployments
+      # holding the ":warning: ROLLBACK initiated" message and nothing after
+      # it, so responders reading Slack believed a rollback was in flight while
+      # the job had been dead for minutes -- the harm this workflow's own
+      # description calls out.
       - name: Notify rollback result
+        if: always()
         uses: slackapi/slack-github-action@v1.26.0
         with:
           channel-id: '#deployments'
           slack-message: |
-            :white_check_mark: *Production rollback complete*
+            ${{ job.status == 'success' && ':white_check_mark: *Production rollback complete*' || format(':rotating_light: *Production rollback FAILED ({0})* -- production is NOT rolled back; see the run', job.status) }}
             Task definition: `${{ inputs.task_definition_arn }}`
             Triggered by: ${{ github.actor }}
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
         continue-on-error: true
