@@ -8,6 +8,26 @@ on:
   schedule:
     - cron: '0 8 * * 1'  # Weekly Monday 8am UTC
 
+
+# Supersede an in-flight run of the same pull request; a batch of Dependabot
+# rebases with no group here turned into roughly 2000 jobs and exhausted the
+# Actions spending limit.
+#
+# `github.ref` rather than `github.head_ref`: for a pull request `github.ref`
+# is the unique `refs/pull/<n>/merge`, while `head_ref` is the bare branch
+# name with no fork owner, so two contributors pushing a branch both named
+# `patch-1` -- GitHub's default for a web-UI edit -- would cancel each other's
+# required checks. `github.event_name` keeps the triggers in separate groups, so a
+# merge cannot cancel the weekly scheduled scan -- the one run whose whole
+# purpose is to catch advisories published against pins that never changed.
+#
+# Only pull requests are cancelled. A push to main runs to completion: cancel
+# it and the commit that is actually on main carries a cancelled status, and a
+# failure it introduced is attributed to whichever merge landed next.
+concurrency:
+  group: security-scan-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   python-security:
     name: Python Security Scan
@@ -259,7 +279,7 @@ jobs:
       # stopped shipping pip/setuptools/wheel -- which accounted for every one
       # of the six fixable findings.
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       # build-push-action with the SAME gha cache scopes pr-qa-gate.yml's
       # docker-smoke uses (`api`, `api-full`), and `load: true` so the image

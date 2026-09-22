@@ -24,10 +24,10 @@ Development-only dependencies — what `backend/requirements.txt` adds for test 
 | Package | Version |
 |---|---|
 | `Mako` | 1.4.1 |
-| `PyJWT` | 2.13.0 |
-| `PyMySQL` | 1.2.0 |
-| `SQLAlchemy` | 2.0.52 |
-| `alembic` | 1.19.2 |
+| `PyJWT` | 2.14.0 |
+| `PyMySQL` | 1.2.3 |
+| `SQLAlchemy` | 2.0.54 |
+| `alembic` | 1.20.0 |
 | `annotated-doc` | 0.0.5 |
 | `annotated-types` | 0.8.0 |
 | `anyio` | 4.15.1 |
@@ -70,7 +70,7 @@ Development-only dependencies — what `backend/requirements.txt` adds for test 
 | `psutil` | 5.9.8 |
 | `pybreaker` | 1.4.1 |
 | `scipy` | 1.17.1 |
-| `semver` | 3.0.4 |
+| `semver` | 3.1.0 |
 | `websockets` | 15.0.1 |
 
 #### Apache-2.0 (12)
@@ -78,8 +78,8 @@ Development-only dependencies — what `backend/requirements.txt` adds for test 
 | Package | Version |
 |---|---|
 | `bcrypt` | 5.0.0 |
-| `boto3` | 1.43.89 |
-| `botocore` | 1.43.93 |
+| `boto3` | 1.43.98 |
+| `botocore` | 1.43.99 |
 | `clickhouse-connect` | 1.8.0 |
 | `databricks-sql-connector` | 4.5.0 |
 | `pyarrow` | 25.0.1 |
@@ -105,7 +105,7 @@ Development-only dependencies — what `backend/requirements.txt` adds for test 
 | `python-dotenv` | 1.2.3 |
 | `starlette` | 1.6.0 |
 | `statsmodels` | 0.15.0 |
-| `uvicorn` | 0.52.4 |
+| `uvicorn` | 0.53.0 |
 
 #### PSF-2.0 (3)
 
@@ -162,7 +162,7 @@ Development-only dependencies — what `backend/requirements.txt` adds for test 
 
 | Package | Version |
 |---|---|
-| `psycopg2-binary` | 2.9.12 |
+| `psycopg2-binary` | 2.9.13 |
 
 #### MIT AND PSF-2.0 (1)
 
@@ -393,8 +393,8 @@ Resolved with `license-checker-rseidelsohn --production`.
 
 | Package | Version |
 |---|---|
-| `@openfeature/core` | 1.9.2 |
-| `@openfeature/server-sdk` | 1.20.2 |
+| `@openfeature/core` | 1.12.0 |
+| `@openfeature/server-sdk` | 1.23.0 |
 
 ## Node — React SDK (`sdk/react`)
 

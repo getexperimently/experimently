@@ -131,7 +131,7 @@ jobs:
 
       - name: Set up Go
         if: contains(inputs.sdks, 'go')
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version: '1.22.x'
           # The Go SDK is stdlib-only: there is no go.sum to key a cache on.

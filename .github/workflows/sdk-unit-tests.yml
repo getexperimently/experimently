@@ -209,7 +209,7 @@ jobs:
 
       - name: Set up Go
         if: matrix.lang == 'go'
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           # go.mod declares go 1.21; 1.22 is the oldest supported toolchain.
           go-version: '1.22.x'
