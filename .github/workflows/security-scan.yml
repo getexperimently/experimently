@@ -198,17 +198,51 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y trivy
 
-      # `backend/` covers the core image's pins; the full image adds
-      # modules/requirements.txt on top, and that file was in no gate and in
-      # no SBOM. trivy takes one path per invocation, so the modules get their
-      # own scan and their own SBOM. Absent in a core checkout.
-      # (trivy's pip analyser reads files named requirements.txt only, so
-      # neither tree's .lock is scanned here -- pip-audit above covers those.)
-      - name: Scan filesystem for vulnerabilities
+      # Two scans, because `trivy fs` runs two scanners and only one of them
+      # had a problem. `--scanners` defaults to `vuln,secret`, and the
+      # measurement that motivated this split looked only at the
+      # vulnerability column:
+      #
+      #     Report Summary
+      #     | Target           | Type | Vulnerabilities | Secrets |
+      #     | requirements.txt | pip  |        0        |    -    |
+      #
+      # One row, so "this gate scans one file" -- which is true of the pip
+      # analyser and false of the scan. The secret scanner reads every file in
+      # the tree. Planting a GitHub PAT in `backend/app/` and running the
+      # original command exits 1 on `CRITICAL: GitHub (github-pat)`.
+      #
+      # So: secrets over `backend/`, always. Vulnerabilities over `backend/`,
+      # never -- trivy's pip analyser there sees only
+      # `backend/requirements.txt` (the other three requirements.txt files
+      # under `backend/` are comment-only), and that is the development tier,
+      # the one closure with a reviewed exception list in
+      # `security/dependency-audit.toml` which trivy cannot honour. The moment
+      # an accepted advisory is rated HIGH by trivy's database the step fails
+      # and nothing can unblock it -- the pressure to re-add
+      # `continue-on-error` that #169 exists to remove. A shared ignore file
+      # is not the way out either: probed with a planted offender, trivy
+      # reports CVE ids where pip-audit reports PYSEC, so a `.trivyignore`
+      # built from that TOML would match nothing and silently accept nothing.
+      #
+      # `backend/requirements.txt` keeps its vulnerability coverage through
+      # `scripts/audit_dependencies.py` + pip-audit, which is the gate that
+      # can express "accepted, test-only, review by <date>".
+      - name: Scan the backend tree for secrets
+        run: trivy fs --scanners secret --severity HIGH,CRITICAL --exit-code 1 --format table backend/
+        continue-on-error: false
+
+      # `modules/requirements.txt` is a shipped closure's input and the
+      # shipped tier has no exceptions by design, so there is no mechanism to
+      # conflict with -- both scanners run here. Absent in a core checkout,
+      # which is why the backend scan above is unconditional: a gate that can
+      # scan nothing at all is the vacuous gate this comment set out to avoid.
+      - name: Scan the module requirements for vulnerabilities and secrets
         run: |
-          trivy fs --severity HIGH,CRITICAL --exit-code 1 --format table backend/
           if [ -d modules ]; then
             trivy fs --severity HIGH,CRITICAL --exit-code 1 --format table modules/
+          else
+            echo "core checkout: no modules/ to scan"
           fi
         continue-on-error: false
 
