@@ -97,6 +97,31 @@ Built using modern, scalable architecture leveraging AWS services:
 
 ## 🚀 Getting Started
 
+### Run the whole thing
+
+```bash
+git clone https://github.com/getexperimently/experimently.git
+cd experimently
+docker compose up -d --wait
+```
+
+Open **http://localhost:3000** and sign in with **admin@demo.com / Demo1234!**.
+The API is on http://localhost:8000, its docs at http://localhost:8000/docs.
+Four containers come up — Postgres, Redis, the API and the dashboard — and the
+database is created and seeded on the way.
+
+The first start builds both images from source, so it is the slow one:
+**measured at 2 m 32 s** on an 8-core Docker with a cold build cache (115 s
+build, 37 s to healthy), plus roughly a minute of base-image pulls on a machine
+that has never run it. Afterwards `docker compose up -d` takes seconds, and
+`docker compose down -v` removes it all again, volumes included.
+
+Change `FIRST_SUPERUSER_PASSWORD`, `SECRET_KEY` and `POSTGRES_PASSWORD` in a
+`.env` file before letting anyone else reach it.
+[**Quick start**](docs/getting-started/quick-start.md) has the rest: the
+service table, the verification commands, and the `demo`, `tools` and `aws`
+profiles.
+
 ### For Evaluation
 
 Interested in using this platform for your organization?
