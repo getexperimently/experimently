@@ -81,14 +81,14 @@ def stub_advisories(
     )
 
 
-def run_audit(module: ModuleType, monkeypatch: pytest.MonkeyPatch) -> int:
+def run_audit(module: ModuleType, monkeypatch: pytest.MonkeyPatch, *argv: str) -> int:
     """The script's exit status, however it chose to report it.
 
     `main()` returns 0/1, but `load_ignores()` raises `SystemExit("message")` --
     a *string* code, which Python prints and exits 1 on. Treating any non-zero,
     non-integer code as failure is what a shell sees.
     """
-    monkeypatch.setattr(sys, "argv", ["audit_dependencies.py"])
+    monkeypatch.setattr(sys, "argv", ["audit_dependencies.py", *argv])
     try:
         return module.main()
     except SystemExit as exc:
@@ -431,3 +431,221 @@ def test_a_mixed_and_or_expression_is_refused(licences) -> None:
         "(MIT AND GPL-3.0) OR MIT",
     ):
         assert not licences.is_allowed(expression), expression
+
+
+# ---------------------------------------------------------------------------
+# Carried forward from the P3.6 review rounds (#171)
+# ---------------------------------------------------------------------------
+
+
+class TestTheTierArgumentIsHonoured:
+    """`--tier shipped` used to run the development tier anyway.
+
+    `load_ignores()` and `audit(DEVELOPMENT_FILES)` sat outside the tier
+    condition, so the documented shipped-only invocation still paid for a full
+    pip resolution of `infrastructure/cdk/requirements.txt` -- the cost
+    `--disable-pip` exists to avoid -- and could still exit non-zero for a
+    development-tier problem the caller never asked about.
+    """
+
+    @pytest.mark.regression
+    def test_shipped_does_not_read_the_exception_file(
+        self, audit: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """An expired review date must not fail `--tier shipped`."""
+        write_ignores(
+            audit,
+            tmp_path,
+            """
+            [[ignore]]
+            id = "PYSEC-0000-1"
+            package = "pytest"
+            reason = "expired on purpose"
+            review_by = "2000-01-01"
+            """,
+        )
+        # A LIVE advisory for that id, so the stale-exception check cannot be
+        # what fails the run. Without it this assertion passed with the expiry
+        # branch deleted entirely -- `stub_advisories(..., {})` reports
+        # nothing, so the entry was flagged stale instead and the exit status
+        # was the same 1 for a different reason.
+        stub_advisories(
+            audit,
+            monkeypatch,
+            {"requirements.txt": [("pytest", "7.4.2", "PYSEC-0000-1")]},
+        )
+
+        assert run_audit(audit, monkeypatch, "--tier", "shipped") == 0
+        assert run_audit(audit, monkeypatch, "--tier", "both") == 1, (
+            "the expired entry must still fail the tier that owns it"
+        )
+
+    @pytest.mark.regression
+    def test_shipped_does_not_audit_the_development_files(
+        self, audit: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """And does not pay to resolve them."""
+        write_ignores(audit, tmp_path, "")
+        scanned: list[str] = []
+
+        def fake(requirements: Path) -> list:
+            scanned.append(Path(requirements).name)
+            return []
+
+        monkeypatch.setattr(audit, "run_pip_audit", fake)
+        monkeypatch.setattr(
+            audit, "SHIPPED_FILES", (Path("backend/requirements/runtime.lock"),)
+        )
+        monkeypatch.setattr(
+            audit, "DEVELOPMENT_FILES", (Path("backend/requirements.txt"),)
+        )
+
+        run_audit(audit, monkeypatch, "--tier", "shipped")
+        assert scanned == ["runtime.lock"], (
+            f"--tier shipped resolved {scanned}; requirements.txt is the "
+            "development tier and was not asked for"
+        )
+
+
+class TestDuplicateExceptionsAreRefused:
+    """A repeated id used to keep only the last entry, silently."""
+
+    @pytest.mark.regression
+    def test_the_same_id_twice_for_one_package_is_an_error(
+        self, audit: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        write_ignores(
+            audit,
+            tmp_path,
+            """
+            [[ignore]]
+            id = "PYSEC-0000-9"
+            package = "pytest"
+            reason = "first"
+            review_by = "2099-01-01"
+
+            [[ignore]]
+            id = "PYSEC-0000-9"
+            package = "pytest"
+            reason = "second, contradicting the first"
+            review_by = "2099-01-01"
+            """,
+        )
+        stub_advisories(audit, monkeypatch, {})
+
+        with pytest.raises(SystemExit) as exc:
+            audit.load_ignores()
+        assert "listed twice" in str(exc.value)
+
+        # And through `main()`, which is what CI runs. `load_ignores` reports
+        # by raising `SystemExit(<str>)`; a refactor that caught that to make
+        # a tier tolerant would let a contradicting TOML merge while the
+        # assertion above stayed green.
+        assert run_audit(audit, monkeypatch) == 1, (
+            "a duplicated (id, package) must fail the build, not just the "
+            "function that detects it"
+        )
+
+    @pytest.mark.regression
+    def test_one_id_for_two_packages_is_allowed_and_both_are_honoured(
+        self, audit: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """The case the id-keyed dict destroyed.
+
+        One advisory attributed to a package and to its fork, or across a
+        rename. Keyed by id alone, the second entry replaced the first and its
+        sibling was then reported both as a package mismatch and as unlisted.
+        """
+        write_ignores(
+            audit,
+            tmp_path,
+            """
+            [[ignore]]
+            id = "PYSEC-0000-7"
+            package = "pytest"
+            reason = "the original"
+            review_by = "2099-01-01"
+
+            [[ignore]]
+            id = "PYSEC-0000-7"
+            package = "pytest-fork"
+            reason = "the fork, same advisory"
+            review_by = "2099-01-01"
+            """,
+        )
+        stub_advisories(
+            audit,
+            monkeypatch,
+            {
+                "requirements.txt": [
+                    ("pytest", "7.4.2", "PYSEC-0000-7"),
+                    ("pytest-fork", "1.0.0", "PYSEC-0000-7"),
+                ]
+            },
+        )
+
+        assert run_audit(audit, monkeypatch) == 0, (
+            "both packages are accepted for this advisory, so neither is "
+            "unlisted and neither is a mismatch"
+        )
+
+
+class TestTheStaleCheckMatchesAcceptance:
+    """Both key on (id, package), or a dead entry hides behind a live sibling."""
+
+    @pytest.mark.regression
+    def test_a_dead_entry_is_reported_even_when_a_sibling_id_is_live(
+        self, audit: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """The case rekeying acceptance on (id, package) made reachable.
+
+        Keyed on the id alone, `live_ids` contained PYSEC-0000-7 because the
+        pytest entry fired, so the entry for a package that fires nowhere was
+        not stale and survived for ever.
+        """
+        write_ignores(
+            audit,
+            tmp_path,
+            """
+            [[ignore]]
+            id = "PYSEC-0000-7"
+            package = "pytest"
+            reason = "live"
+            review_by = "2099-01-01"
+
+            [[ignore]]
+            id = "PYSEC-0000-7"
+            package = "totally-dead-package"
+            reason = "fires nowhere"
+            review_by = "2099-01-01"
+            """,
+        )
+        stub_advisories(
+            audit,
+            monkeypatch,
+            {"requirements.txt": [("pytest", "7.4.2", "PYSEC-0000-7")]},
+        )
+
+        assert run_audit(audit, monkeypatch) == 1, (
+            "the entry for totally-dead-package matches no advisory and must "
+            "be reported stale"
+        )
+
+
+class TestEveryAuditedClosureIsNamed:
+    """The trivy gate over `backend/requirements.txt` was dropped on the
+    grounds that this script covers it. Nothing asserted that it does."""
+
+    @pytest.mark.regression
+    def test_the_development_requirements_are_in_a_tier(self, audit: ModuleType):
+        files = {str(p) for p in audit.DEVELOPMENT_FILES + audit.SHIPPED_FILES}
+        assert "backend/requirements.txt" in files, (
+            "backend/requirements.txt is audited by nothing. The trivy "
+            "filesystem vulnerability scan over it was removed because this "
+            "script covers it; that is now the only coverage it has."
+        )
+
+    def test_the_shipped_locks_are_in_a_tier(self, audit: ModuleType):
+        files = {str(p) for p in audit.SHIPPED_FILES}
+        for lock in ("backend/requirements/runtime.lock", "modules/requirements.lock"):
+            assert lock in files, f"{lock} is not audited"
