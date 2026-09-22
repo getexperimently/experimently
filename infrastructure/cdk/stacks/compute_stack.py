@@ -4,7 +4,6 @@ from aws_cdk import (
     RemovalPolicy,
     aws_ec2 as ec2,
     aws_ecs as ecs,
-    aws_ecr as ecr,
     aws_iam as iam,
     aws_lambda as lambda_,
     aws_logs as logs,
