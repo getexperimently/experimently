@@ -11,6 +11,8 @@ from aws_cdk import (
 )
 from constructs import Construct
 
+from stacks.names import BACKEND_ECR_REPOSITORY
+
 # --- The command the task runs -------------------------------------------
 # backend/Dockerfile sets WORKDIR /app and copies the repository layout under
 # it (`COPY backend/ /app/backend/`, and `modules/ /app/modules/` for the full
@@ -133,7 +135,7 @@ class MigrationTaskStack(Stack):
         ecr_repo = ecr.Repository.from_repository_name(
             self,
             "BackendECR",
-            repository_name="experimentation-platform/backend",
+            repository_name=BACKEND_ECR_REPOSITORY,
         )
 
         # --- Secrets from Secrets Manager ---

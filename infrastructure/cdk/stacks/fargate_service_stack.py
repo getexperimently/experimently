@@ -14,6 +14,8 @@ from aws_cdk import (
 )
 from constructs import Construct
 
+from stacks.names import BACKEND_ECR_REPOSITORY
+
 
 class FargateServiceStack(Stack):
     """
@@ -63,7 +65,7 @@ class FargateServiceStack(Stack):
         self.ecr_repo = ecr.Repository.from_repository_name(
             self,
             "BackendECR",
-            repository_name="experimentation-platform/backend",
+            repository_name=BACKEND_ECR_REPOSITORY,
         )
 
         # --- Secrets from Secrets Manager ---
