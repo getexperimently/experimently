@@ -333,10 +333,10 @@ aws ecs describe-services \
 
 ```bash
 aws ecr put-image \
-  --repository-name experimentation-backend \
+  --repository-name experimentation-platform/backend \
   --image-tag "bad-v1.2.3-do-not-deploy" \
   --image-manifest "$(aws ecr batch-get-image \
-    --repository-name experimentation-backend \
+    --repository-name experimentation-platform/backend \
     --image-ids imageTag=v1.2.3 \
     --query 'images[0].imageManifest' --output text)"
 ```

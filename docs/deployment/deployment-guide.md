@@ -61,29 +61,40 @@ To verify a secret is set (without revealing its value):
 gh secret list --env production
 ```
 
-### 1.3 ECR Repositories
+### 1.3 ECR Repository
 
-Two ECR repositories must exist before the first deployment:
+**One** repository, `experimentation-platform/backend`, created once per
+account and region. The migration task deliberately runs the same image with a
+different command, so a second repository would be a second thing to keep in
+step for no gain.
+
+This section used to name two other repositories, and nothing has ever used
+either of them — every producer and consumer says
+`experimentation-platform/backend` — so following it produced a first
+deployment that died at `docker push` with "name unknown". If you created
+repositories from an earlier version of this guide they are unused and can be
+deleted; issue #211 names them.
 
 ```bash
-# Create backend image repository
 aws ecr create-repository \
-  --repository-name experimentation-backend \
+  --repository-name experimentation-platform/backend \
   --region us-west-2 \
   --image-scanning-configuration scanOnPush=true
 
-# Create migration image repository
-aws ecr create-repository \
-  --repository-name experimentation-migrations \
-  --region us-west-2 \
-  --image-scanning-configuration scanOnPush=true
-
-# Verify both exist
 aws ecr describe-repositories \
-  --repository-names experimentation-backend experimentation-migrations \
+  --repository-names experimentation-platform/backend \
   --region us-west-2 \
   --query 'repositories[*].{Name:repositoryName,URI:repositoryUri}'
 ```
+
+`cdk deploy` does **not** create it, deliberately. A registry is
+account-scoped while these stacks are per-environment, so a fixed repository
+name owned by the compute stack would mean only one environment per account
+could deploy — `demo/setup-aws.sh` runs `ENVIRONMENT=demo cdk deploy --all`
+against the same account — and an explicit name plus `RemovalPolicy.RETAIN`
+makes `cdk deploy` fail outright wherever the repository already exists,
+including after any teardown. If it should be managed by CDK, it belongs in a
+once-per-account stack.
 
 ### 1.4 ECS Cluster and Services Deployed
 
@@ -278,13 +289,11 @@ aws secretsmanager create-secret \
   --secret-string '{"user_pool_id":"us-west-2_XXXXX","client_id":"XXXXXXXXXXXXX"}'
 ```
 
-### Step 4: Create ECR Repositories
+### Step 4: ECR Repository
 
-```bash
-# See Section 1.3 above for commands
-aws ecr create-repository --repository-name experimentation-backend --region us-west-2
-aws ecr create-repository --repository-name experimentation-migrations --region us-west-2
-```
+Created once per account in Section 1.3, before Step 2 — the Fargate stack
+(Step 2 #8) creates a service whose task definition names an image in it, and
+the bootstrap image has to be pushed there first.
 
 ### Step 5: Configure GitHub Environments and Required Approvers
 
@@ -367,7 +376,7 @@ The deployment then proceeds through these automated stages:
 | Pre-deployment checks | Verify no active incidents, backup exists | ~2 min |
 | Build Docker image | Build and tag the backend image | ~5 min |
 | Security scan | ECR image scan for CVEs | ~2 min |
-| Push to ECR | Push to `experimentation-backend:v1.2.3` | ~1 min |
+| Push to ECR | Push to `experimentation-platform/backend:v1.2.3` | ~1 min |
 | Database migration | Run `alembic upgrade heads` via ECS task | ~2 min |
 | Deploy to ECS | Register new task definition, update service | ~3 min |
 | Wait for stabilization | ECS replaces tasks (rolling or blue/green) | ~3 min |
@@ -561,7 +570,7 @@ GitHub Actions
 │  Service: experimentation-backend-prod              │
 │  Tasks: 3 (min) → 10 (max)                          │
 │  Image: ACCOUNT.dkr.ecr.us-west-2.amazonaws.com/   │
-│         experimentation-backend:v1.2.3              │
+│         experimentation-platform/backend:v1.2.3     │
 │                                                     │
 │  Secrets injected at runtime from Secrets Manager:  │
 │    DATABASE_URL   ← /prod/experimentation/db-*      │
