@@ -158,11 +158,22 @@ app = FastAPI(
 
 # ---------------------------------------------------------------------------
 # Middleware stack
-# Starlette applies middleware in *reverse* registration order so the first
-# add_middleware call wraps the outermost layer.
+#
+# `add_middleware` inserts at the FRONT of `app.user_middleware`, and Starlette
+# builds the stack by wrapping in reverse of that list -- so the LAST
+# registered call is the outermost layer, not the first. (Measured, not read:
+# with CORS registered first and the rate limiter second, `user_middleware`
+# prints the rate limiter first, and a 429 it returned never reached CORS.)
+#
+# CORS is therefore registered last, so every response a middleware below it
+# returns -- a 429 from the rate limiter especially -- carries the
+# `Access-Control-*` headers a browser needs before it will let the page read
+# the status. Without that, a rate-limited login surfaced in the dashboard as
+# "Can't reach the API" (#85).
 # ---------------------------------------------------------------------------
 
-# Add CORS middleware — restrict methods and headers to what the API actually needs
+# CORS origins — resolved here, registered LAST (below), because the
+# registration order is what decides the nesting.
 cors_origins = [str(origin) for origin in settings.BACKEND_CORS_ORIGINS]
 if not cors_origins:
     # Plain comma-separated form (CORS_ORIGINS=http://a,http://b), see .env.example
@@ -177,29 +188,53 @@ if not cors_origins:
         "http://localhost:3300",  # StreamPulse demo app
     ]
 
+# Rate limiter — disabled during tests to avoid interfering with test assertions
+_rate_limit_enabled = not settings.is_test
+app.add_middleware(RateLimitMiddleware, enabled=_rate_limit_enabled)
+
+# Security headers — lightweight and stateless. Registered AFTER the rate
+# limiter, i.e. outside it, for the same reason CORS is registered outside
+# everything: the limiter returns its 429 without calling `call_next`, so any
+# layer nested inside it never runs. With this the wrong way round the 429 —
+# the one response on this path a hostile client is most likely to see — went
+# out with no `X-Content-Type-Options`, no `X-Frame-Options`, no CSP and, in
+# production, no HSTS.
+app.add_middleware(SecurityHeadersMiddleware)
+
+# Prometheus latency / request-count middleware (EP-013)
+if _monitoring_imports_ok:
+    app.add_middleware(PrometheusMetricsMiddleware)
+    # X-Request-ID on every response + request_id/path/method bound into the
+    # log context. Registered after the middlewares it should wrap, so every
+    # log line from them already carries the id.
+    app.add_middleware(RequestIDMiddleware)
+
+# CORS last, i.e. outermost -- see the note at the top of this block.
+#
+# A preflight is answered here and goes no further. That is also why it no
+# longer spends a request from the login limit, and it is a deliberate
+# trade: a preflight response now carries no security headers, no
+# `X-Request-ID`, and appears in no Prometheus histogram. A CORS preflight
+# has no body and reaches no route, so what is lost is observability of the
+# handshake, not of the request it precedes.
+#
+# `expose_headers` is what a browser will let the page READ. Without
+# `Retry-After` in it, a rate-limited login can be seen but not explained:
+# the dashboard knows it was refused and not for how long.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
     allow_headers=["Authorization", "Content-Type", "X-API-Key"],
-    expose_headers=["X-Request-ID", "X-RateLimit-Limit", "X-RateLimit-Remaining"],
+    expose_headers=[
+        "X-Request-ID",
+        "Retry-After",
+        "X-RateLimit-Limit",
+        "X-RateLimit-Remaining",
+        "X-RateLimit-Window",
+    ],
 )
-
-# Security headers — lightweight and stateless
-app.add_middleware(SecurityHeadersMiddleware)
-
-# Rate limiter — disabled during tests to avoid interfering with test assertions
-_rate_limit_enabled = not settings.is_test
-app.add_middleware(RateLimitMiddleware, enabled=_rate_limit_enabled)
-
-# Prometheus latency / request-count middleware (EP-013)
-if _monitoring_imports_ok:
-    app.add_middleware(PrometheusMetricsMiddleware)
-    # X-Request-ID on every response + request_id/path/method bound into the
-    # log context. Registered last so it is the outermost layer and every
-    # log line from the middlewares above already carries the id.
-    app.add_middleware(RequestIDMiddleware)
 
 # Include API router
 app.include_router(api_router, prefix=settings.API_V1_STR)
