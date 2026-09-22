@@ -167,6 +167,23 @@ jobs:
           fi
           echo "profile=${PROFILE}: all ${#required[@]} required secrets exist"
 
+      # The prerequisite the build discovers five minutes later as an opaque
+      # `docker push` failure. Nothing in the CDK creates this repository --
+      # both stacks call `ecr.Repository.from_repository_name`, which imports
+      # one -- so it is created once per account by hand, and for a long time
+      # the documentation named a repository nothing used (#211). Checked
+      # here, beside the other "does the thing we assume exists exist"
+      # checks, so a missing prerequisite is named in seconds.
+      - name: ECR repository exists
+        run: |
+          set -euo pipefail
+          if ! aws ecr describe-repositories \
+                --repository-names "${ECR_BACKEND_REPO}" >/dev/null 2>&1; then
+            echo "::error::the ECR repository ${ECR_BACKEND_REPO} does not exist. Nothing in the CDK creates it; create it once per account -- docs/deployment/deployment-guide.md section 1.3."
+            exit 1
+          fi
+          echo "ECR repository ${ECR_BACKEND_REPO} exists"
+
       - name: Verify backup exists
         run: |
           LATEST_BACKUP=$(aws rds describe-db-cluster-snapshots \
