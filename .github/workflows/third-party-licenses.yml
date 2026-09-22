@@ -1,0 +1,106 @@
+# THIRD_PARTY_LICENSES.md is the distribution's attribution record, and it had
+# rotted through two dependency changes with nothing to notice (#170): the
+# committed file still named `databricks-sql-connector 3.7.5` after the pin
+# moved to 4.5.0, and still listed the 106-package remark/unified tree that
+# P3.4 removed from the dashboard.
+#
+# It rotted because it could not be regenerated correctly anywhere a person
+# was likely to try. Both resolvers read the machine rather than the lock
+# files: `pip-licenses` reports the active virtualenv, and `license-checker`
+# reads `node_modules`, which npm fills with the *current platform's* optional
+# binaries -- so a laptop run records `@img/sharp-darwin-arm64` in the record
+# for an amd64 Linux image. The generator now refuses outside a matching
+# environment; this job is that environment.
+#
+# Deliberately NOT a required check: it is path-filtered, and a path-filtered
+# job never reports on the pull requests it skips, so requiring it would block
+# every unrelated PR.
+name: Third-party licences
+
+on:
+  pull_request:
+    paths:
+      - 'backend/requirements/runtime.lock'
+      - 'modules/requirements.lock'
+      - '**/package.json'
+      - '**/package-lock.json'
+      - 'scripts/generate_third_party_licenses.py'
+      - 'THIRD_PARTY_LICENSES.md'
+      - '.github/workflows/third-party-licenses.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: THIRD_PARTY_LICENSES.md matches the dependencies
+    runs-on: ubuntu-latest
+    env:
+      # The same pin as Makefile:PIP_LICENSES_VERSION and pr-qa-gate.yml. An
+      # unpinned resolver reintroduces exactly the drift this gate exists to
+      # remove: pip-licenses reports the `License` column, which `normalise()`
+      # maps by exact string, so a release that respells a classifier silently
+      # rewrites rows and turns --check red on a pull request that changed no
+      # dependency. license-checker is pinned in scripts/check_node_licences.py.
+      PIP_LICENSES_VERSION: '5.5.5'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      # The LOCKS, which are what the images install, and the only inputs that
+      # give the same answer twice: `requirements.txt` leaves pip to resolve
+      # everything it does not pin, so a transitive's version in the document
+      # was whatever PyPI served that day -- this gate's second run failed on
+      # `platformdirs 4.11.11 -> 4.11.12` with no dependency change in the
+      # pull request. `--require-hashes` is not decoration here: it is what
+      # makes "the closure the image installs" a claim rather than a hope.
+      #
+      # pip-licenses is installed separately, after, so it is not part of the
+      # hashed set. It does not appear in the document: the generator lists
+      # only what is reachable from a pin.
+      - name: Install the shipped Python closures
+        run: |
+          python -m pip install --upgrade pip
+          pip install --require-hashes \
+            -r backend/requirements/runtime.lock \
+            -r modules/requirements.lock
+          pip install "pip-licenses==${PIP_LICENSES_VERSION}"
+
+      # Every package the generator resolves. `npm ci` rather than `npm i`, so
+      # the lockfile decides; `--ignore-scripts` is NOT passed, because sharp's
+      # optional binaries are the thing this job exists to record correctly.
+      - name: Install the Node closures
+        run: |
+          for pkg in frontend sdk/js sdk/react sdk/react-native sdk/openfeature sdk/edge; do
+            echo "::group::npm ci in $pkg"
+            (cd "$pkg" && npm ci)
+            echo "::endgroup::"
+          done
+
+      # `--out` alongside `--check`: main() writes the rendered document
+      # before it compares, so the artifact costs nothing extra. Running the
+      # generator a second time on failure meant six more npx resolutions and
+      # another pip-licenses pass to obtain a document already in memory.
+      - name: Check the committed file
+        id: check
+        run: |
+          python scripts/generate_third_party_licenses.py \
+            --check --out THIRD_PARTY_LICENSES.generated.md
+
+      # On a failing check, hand back the document this environment produces,
+      # so the fix is "download and commit" rather than "find a Linux box".
+      - name: Upload the regenerated file
+        if: failure() && steps.check.outcome == 'failure'
+        uses: actions/upload-artifact@v7
+        with:
+          name: THIRD_PARTY_LICENSES
+          path: THIRD_PARTY_LICENSES.generated.md
+          if-no-files-found: error
