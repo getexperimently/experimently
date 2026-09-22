@@ -15,11 +15,17 @@ from backend.app.middleware.security_middleware import SecurityHeadersMiddleware
 
 @pytest.fixture
 def client():
-    """Create a test client with security middleware applied."""
-    # Apply security middleware directly to ensure headers are present in tests
-    app.middleware_stack = None  # Reset middleware stack
-    app.add_middleware(SecurityHeadersMiddleware)  # Add security middleware
+    """A client for the real app, which already carries the middleware.
 
+    This used to null `app.middleware_stack` and `add_middleware` another
+    `SecurityHeadersMiddleware`. `main.py` registers it unconditionally, so
+    the extra copy was redundant -- and because `app` is imported, not built
+    per test, it was also permanent: each test using this fixture left one
+    more copy on the shared application for the rest of the session. A full
+    unit run reached `test_preflight_and_429_cors` with four of them, three
+    stacked outside `CORSMiddleware`, and that test's ordering assertion --
+    which passes in isolation -- failed.
+    """
     return TestClient(app)
 
 
