@@ -1,0 +1,130 @@
+# The positive half of the publication gate: every top-level entry, and every
+# `docs/` subdirectory, that MAY appear in the exported history.
+#
+# scripts/publish/exclude-paths.txt says what must be REMOVED, and it can only
+# ever check what someone remembered to write in it. That is how
+# `docs/go-to-market` stayed in the publishable history for months with the
+# "excluded paths absent from history" sweep passing the whole time -- and how
+# `TRANSITION_TO_COMMERCIAL.md`, `docs/deployment/MARKETING_WEBSITE_GUIDE.md`
+# and `ee-manifest.txt` were still there after the first attempt to fix it. An
+# omission from a deny-list is unfalsifiable: nothing can report the entry that
+# was never written.
+#
+# This file inverts the question. export.sh reduces the rewritten history to
+# its top-level entries plus its `docs/` subdirectories and FAILS on anything
+# not listed here, so a new internal directory has to be argued onto this list
+# rather than silently passing.
+#
+# WHAT THIS DOES NOT CATCH: a single internal file dropped inside a directory
+# that legitimately ships. `docs/deployment/MARKETING_WEBSITE_GUIDE.md` was
+# exactly that shape -- `docs/deployment` ships, so only the deny-list entry
+# removes it. This gate catches the common shape (a new top-level entry or a
+# new `docs/` subdirectory); it is not a substitute for reading the deny-list.
+#
+# Entries are the state of `main`'s history as measured, not as remembered:
+# regenerate the candidate list with
+#
+#   git rev-list --objects main | awk 'NF>1{print $2}' | sort -u
+#
+# and reduce it the way export.sh does. One entry per line; `#` comments and
+# blank lines ignored. A trailing comment on an entry line is allowed.
+
+# --- repository root -------------------------------------------------------
+.claude                           # agents/ and commands/ only; everything else there is excluded
+.coveragerc
+.dockerignore
+.editorconfig
+.env.example
+.flake8                           # superseded by ruff; still in the history
+.git-blame-ignore-revs
+.github
+.gitignore
+.gitleaks.toml
+.hadolint.yaml
+.nvmrc
+.pre-commit-config.yaml
+.python-version
+.release-please-manifest.json
+.semgrep.yml
+amplify.yml
+backend
+check_and_fix_db.py
+CODEBASE_INDEX.md                 # a stale navigation index, not strategy
+CLEANUP_SUMMARY.md                # a 2025 housekeeping note, not internal strategy
+CODE_OF_CONDUCT.md
+CONTRIBUTING.md
+demo
+dev-setup
+docker-compose.prod.yml
+docker-compose.test.yml
+docker-compose.yml
+docs
+frontend
+generate_config.py
+generate_project.py
+infrastructure
+LICENSE
+LICENSES
+localstack
+Makefile
+MANIFEST.in
+mkdocs.yml
+modules
+modules-manifest.txt
+NOTICE
+package.json
+pyproject.toml
+pytest.ini
+README.md
+release-please-config.json
+requirements
+requirements.txt
+REUSE.toml
+scripts
+sdk
+security
+SECURITY.md
+setup.cfg
+setup.py
+setup_venv.sh
+tests                             # the top-level tests/ directory that predates backend/tests/
+THIRD_PARTY_LICENSES.md
+Technical_API_Architecture_Guide.md  # design decisions; the PM interview companion is excluded
+VERSION
+__init__.py                       # a stray empty file at the root
+pytest-config.txt                 # a pytest config committed as .txt
+setup.txt                         # early compose setup notes
+
+# --- docs/ subdirectories --------------------------------------------------
+# `docs/planning` and `docs/go-to-market` are deliberately absent: both are
+# excluded, and listing them here would mean the two files disagreed about the
+# same directory. Files sitting directly in `docs/` are not listed -- the gate
+# only reduces `docs/<dir>/...` paths.
+docs/api
+docs/architecture
+docs/auth
+docs/deployment
+docs/design
+docs/development
+docs/examples
+docs/feature-flags
+docs/getting-started
+docs/guides
+docs/hipaa
+docs/infrastructure
+docs/integrations
+docs/issue_fixes
+docs/learnings
+docs/llm-evaluation
+docs/middleware
+docs/monitoring
+docs/performance
+docs/rbac
+docs/sdk
+docs/security
+docs/self-hosting
+docs/statistics
+docs/testing
+docs/tickets
+docs/warehouse
+docs/workspaces
