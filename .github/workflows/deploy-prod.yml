@@ -40,10 +40,8 @@ env:
   AWS_REGION: us-west-2
   AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
   ECR_BACKEND_REPO: experimentation-platform/backend
-  ECR_FRONTEND_REPO: experimentation-platform/frontend
   ECS_CLUSTER: experimentation-prod
   ECS_BACKEND_SERVICE: experimentation-backend-prod
-  ECS_FRONTEND_SERVICE: experimentation-frontend-prod
 
 jobs:
   pre-deployment-checks:
@@ -236,7 +234,7 @@ jobs:
           python -m pytest backend/tests/integration/api/ -v -q
 
   build-and-push:
-    name: Build & Push Docker Images
+    name: Build & Push API Image
     runs-on: ubuntu-latest
     if: (github.repository == 'amarkanday/experimentation-platform' || github.repository == 'getexperimently/experimently') && vars.AWS_ACCOUNT_ID != ''
     needs: run-tests
@@ -245,7 +243,6 @@ jobs:
       contents: read
     outputs:
       backend-image: ${{ steps.build-backend.outputs.image }}
-      frontend-image: ${{ steps.build-frontend.outputs.image }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -304,33 +301,24 @@ jobs:
           docker push $ECR_REGISTRY/$ECR_BACKEND_REPO:latest
           echo "image=$ECR_REGISTRY/$ECR_BACKEND_REPO:$IMAGE_TAG" >> $GITHUB_OUTPUT
 
-      - name: Build and push frontend image
-        id: build-frontend
-        env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          IMAGE_TAG: ${{ inputs.version }}
-          PROFILE: ${{ inputs.profile }}
-        run: |
-          set -euo pipefail
-          # NEXT_PUBLIC_API_URL stays empty when the dashboard's nginx proxies
-          # /api to the API (same origin); set PROD_API_URL only for a split origin.
-          # Build context is the repository root, like the API image: the
-          # Dockerfile copies docs/ (in-app documentation) and, for the full
-          # profile, modules/frontend/ from beside frontend/. The dashboard
-          # follows the API image's profile -- a core API serving no module
-          # routes behind a dashboard that renders module chrome is a broken UI.
-          docker build \
-            --build-arg NEXT_PUBLIC_API_URL=${{ secrets.PROD_API_URL }} \
-            --build-arg GIT_COMMIT=${{ github.sha }} \
-            --build-arg VERSION="${IMAGE_TAG#v}" \
-            --build-arg EXPERIMENTLY_PROFILE="$PROFILE" \
-            -t $ECR_REGISTRY/$ECR_FRONTEND_REPO:$IMAGE_TAG \
-            -t $ECR_REGISTRY/$ECR_FRONTEND_REPO:latest \
-            -f frontend/Dockerfile \
-            .
-          docker push $ECR_REGISTRY/$ECR_FRONTEND_REPO:$IMAGE_TAG
-          docker push $ECR_REGISTRY/$ECR_FRONTEND_REPO:latest
-          echo "image=$ECR_REGISTRY/$ECR_FRONTEND_REPO:$IMAGE_TAG" >> $GITHUB_OUTPUT
+      # The dashboard is NOT deployed from here (#195). What used to stand
+      # here pushed to `experimentation-platform/frontend`, an ECR repository
+      # nothing creates -- neither CDK stack creates any repository, both call
+      # `ecr.Repository.from_repository_name`, which imports one assumed to
+      # exist -- and ECR does not create a repository on push. Its
+      # `frontend-image` output was never consumed either: the only output
+      # read downstream is `backend-image`, in the `Update ECS task definition
+      # with new image` step (`id: task-def`).
+      #
+      # The dashboard ships as a static Next.js export served by nginx,
+      # published by release.yml as `<ghcr.io/owner/repo>-web` (the name is
+      # derived from `github.repository`, so it tracks whatever the repository
+      # is called). That is what docs/self-hosting/releases.md describes and
+      # what docker-compose.yml runs. This half of the workflow predates that
+      # decision.
+      #
+      # Intent, not a claim about the present: production has no dashboard
+      # delivery path at all, and that is tracked, not fixed here (#212).
 
   run-migrations:
     name: Run Database Migrations

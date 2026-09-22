@@ -12,6 +12,10 @@ intact.  Nothing signalled it: ``abort_if_modules_broken()`` only fires for a
 *broken* package, ``/health/ready`` answers 200 with ``profile: core``, and no
 job pushed a ``full`` image anywhere.
 
+This workflow now builds the API image and nothing else: the dashboard build
+it used to carry pushed to an ECR repository nothing creates, so it never
+succeeded (#195), and production has no dashboard delivery path yet (#212).
+
 So the profile is an input with a guard, not a default, and these checks pin
 that shape.  They are cheap text/YAML reads on purpose -- no Docker, no AWS --
 so they run in the ordinary unit job.
@@ -78,8 +82,39 @@ class TestTheProfileIsAnExplicitInput:
         )
         assert "--target full" not in runs
         assert "--target" in runs
-        assert "EXPERIMENTLY_PROFILE=core" not in runs, (
-            "the dashboard's profile is hard-coded; it must follow the API image"
+
+    @pytest.mark.regression
+    def test_the_workflow_builds_only_the_api_image(self):
+        """#195: the dashboard build pushed somewhere that does not exist.
+
+        It targeted `experimentation-platform/frontend`, an ECR repository
+        nothing creates -- both CDK stacks call `from_repository_name`, which
+        imports one -- so the step failed, `build-and-push` failed with it, and
+        every job downstream of it never ran.  Its `frontend-image` output was
+        never read by anything either.
+
+        This replaces an assertion that had become vacuous: it forbade
+        `EXPERIMENTLY_PROFILE=core`, a string that only ever appeared in the
+        deleted step, so after the deletion it could not fail.  A check whose
+        subject is gone is not a check.
+        """
+        runs = _run_text()
+        assert "frontend/Dockerfile" not in runs, (
+            "the dashboard image is built here again; it has no ECR repository "
+            "to be pushed to and nothing consumes it (#195, #212)"
+        )
+        assert "ECR_FRONTEND_REPO" not in WORKFLOW.read_text(), (
+            "the frontend ECR repository is referenced again"
+        )
+
+        outputs = _workflow()["jobs"]["build-and-push"]["outputs"]
+        assert set(outputs) == {"backend-image"}, (
+            f"build-and-push should produce the API image and nothing else, "
+            f"got {sorted(outputs)}"
+        )
+        # Vacuity guard: the assertions above all pass on an empty workflow.
+        assert "backend/Dockerfile" in runs, (
+            "no image is built at all, so the checks above prove nothing"
         )
 
     @pytest.mark.regression
