@@ -28,7 +28,7 @@ This checklist must be completed and signed off before any traffic is sent to th
 - [ ] API keys scoped with least privilege (tracking-only keys cannot access admin endpoints)
 - [ ] MFA enabled for all AWS IAM users with console access (enforced via IAM policy)
 - [ ] Cognito user pool has MFA enabled for ADMIN and DEVELOPER roles
-- [ ] ECR image scanning enabled on the `experimentation-backend` repository
+- [ ] ECR image scanning enabled on the `experimentation-platform/backend` repository
 - [ ] No IAM access keys stored in GitHub secrets that have `AdministratorAccess` policy — deployment role must be scoped
 
 ---
