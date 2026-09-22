@@ -131,7 +131,7 @@ RUN npm run build \
 # -------------------------------------------------------------------------
 # Stage 2: serve
 # -------------------------------------------------------------------------
-FROM nginxinc/nginx-unprivileged:1.27-alpine AS runtime
+FROM nginxinc/nginx-unprivileged:1.29-alpine AS runtime
 
 ARG BUILD_DATE
 ARG GIT_COMMIT
