@@ -26,7 +26,7 @@ permissions:
   contents: read
 
 env:
-  RUFF_VERSION: '0.16.7'
+  RUFF_VERSION: '0.16.8'
   IMPORT_LINTER_VERSION: '2.15'
   REUSE_VERSION: '6.2.0'
   HADOLINT_VERSION: '2.15.1'
