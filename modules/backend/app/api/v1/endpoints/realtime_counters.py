@@ -8,7 +8,7 @@ waiting for batch analytics jobs.
 Endpoints:
     GET  /api/v1/counters/{experiment_id}          — read all counters
     POST /api/v1/counters/{experiment_id}/increment — atomic single increment
-    POST /api/v1/counters/{experiment_id}/bulk      — atomic bulk increment
+    POST /api/v1/counters/bulk                      — atomic bulk increment
     POST /api/v1/counters/{experiment_id}/reset     — reset (ADMIN only)
 
 Reading a counter needs nothing beyond a session; *writing* one needs UPDATE
@@ -16,6 +16,13 @@ on experiments (ADMIN, DEVELOPER or a superuser), because these counters are
 the first source ``BanditScheduler`` consults for a bandit experiment's arm
 statistics — a forged conversion here re-weights live traffic.  Resetting is
 ADMIN only, as it discards data.
+
+The single-write routes take ``{experiment_id}`` **and honour it**: the path
+value is what is written, and a body naming a different experiment is a 400
+rather than a write somewhere else (#95).  They did not used to, and the path
+parameter reached nothing but an error message.  ``/bulk`` has no path
+parameter, because each of its up-to-100 entries names its own experiment —
+see the note on that route.
 """
 
 import logging
@@ -60,18 +67,71 @@ def get_counter_service() -> DynamoDBCounterService:
 
 
 def _require_counter_write(current_user: User) -> None:
-    """Raise 403 unless *current_user* may change an experiment's data.
+    """Raise 403 unless *current_user*'s role may change experiment data.
 
-    The counters are experiment data, so the permission asked for is the
-    platform's own ``experiment: update`` (``backend/app/core/permissions.py``)
-    — the same one that gates editing the experiment these numbers describe.
-    ADMIN, DEVELOPER and superusers pass; ANALYST and VIEWER, who may read
-    every experiment but change none, do not.
+    This is a **role** check, not a per-experiment one, and the docstring
+    used to claim otherwise ("the same one that gates editing the experiment
+    these numbers describe"). It asks ``experiment: update``
+    (``backend/app/core/permissions.py``): ADMIN, DEVELOPER and superusers
+    pass; ANALYST and VIEWER, who may read every experiment but change none,
+    do not.
+
+    A role check is the right one here. A deployment is single tenant
+    (founder, 2026-09-21), so a DEVELOPER may edit any experiment this
+    installation holds -- which is what the core list and update endpoints
+    settled on for the same reason (#83). Tenant isolation is the workspaces
+    module's job: ``Experiment.workspace_id`` is a bare indexed UUID that
+    nothing filters on yet, and when scoping arrives it belongs there, keyed
+    on membership, for every experiment route at once rather than for this
+    one.
     """
     if not check_permission(current_user, ResourceType.EXPERIMENT, Action.UPDATE):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized to write experiment counters",
+        )
+
+
+#: The OpenAPI entry for the 400 below. Without it the generated spec -- and
+#: every client generated from it -- knows only about 200 and FastAPI's
+#: automatic 422, so the one failure a correct caller can hit is invisible.
+MISMATCH_RESPONSE = {
+    status.HTTP_400_BAD_REQUEST: {
+        "description": (
+            "`experiment_id` in the body names a different experiment than "
+            "the one in the path."
+        )
+    }
+}
+
+
+def _require_body_matches_path(*, path_experiment_id: str, body_experiment_id: str):
+    """Refuse a body that names a different experiment than the URL (#95).
+
+    A raise, not a predicate -- hence the name. Both parameters are strings
+    and would be silently interchangeable positionally, so they are
+    keyword-only: swapping them would only flip which id the message calls
+    "path" and which "body", and no assertion on a substring of that message
+    could tell.
+
+    The write itself uses the **path** value, so this is not what makes the
+    write land in the right place -- it is what stops a caller being quietly
+    redirected. A request whose body and URL disagree has no correct
+    interpretation; answering 400 says so instead of picking one.
+
+    400 rather than 422: FastAPI already returns 422 for this body's own
+    schema violations (`amount=0`, an unknown `counter_type`, more than 100
+    increments) with its own list-shaped `detail`. Reusing 422 for a
+    constraint that spans the URL and the body would put two different
+    `detail` shapes behind one status code.
+    """
+    if body_experiment_id != path_experiment_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"experiment_id in the body ({body_experiment_id!r}) does not "
+                f"match the one in the path ({path_experiment_id!r})"
+            ),
         )
 
 
@@ -122,6 +182,7 @@ def get_experiment_counters(
     response_model=IncrementResponse,
     summary="Atomically increment a single counter",
     status_code=status.HTTP_200_OK,
+    responses=MISMATCH_RESPONSE,
 )
 def increment_counter(
     experiment_id: str,
@@ -137,9 +198,17 @@ def increment_counter(
     Requires ``experiment: update`` (ADMIN or DEVELOPER).
     """
     _require_counter_write(current_user)
+    _require_body_matches_path(
+        path_experiment_id=experiment_id,
+        body_experiment_id=request.experiment_id,
+    )
     try:
+        # The path value, not the body's. They are equal by the line above --
+        # which is the point: if that guard is ever removed the write stays
+        # correct, rather than silently reverting to #82's behaviour with
+        # every "called with correct args" test still green.
         new_value = svc.increment_counter(
-            experiment_id=request.experiment_id,
+            experiment_id=experiment_id,
             variant_id=request.variant_id,
             counter_type=request.counter_type,
             amount=request.amount,
@@ -152,13 +221,16 @@ def increment_counter(
             request.counter_type,
             exc,
         )
+        # The log line above already carries `exc` with the experiment and
+        # variant. Repeating it to the caller adds nothing but disclosure: a
+        # boto3 ClientError's text names the table, the operation and the ARN.
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Counter increment failed: {exc}",
+            detail="Counter increment failed",
         )
 
     return IncrementResponse(
-        experiment_id=request.experiment_id,
+        experiment_id=experiment_id,
         variant_id=request.variant_id,
         counter_type=request.counter_type,
         new_value=new_value,
@@ -166,13 +238,12 @@ def increment_counter(
 
 
 @router.post(
-    "/{experiment_id}/bulk",
+    "/bulk",
     response_model=BulkIncrementResponse,
     summary="Bulk-increment multiple counters",
     status_code=status.HTTP_200_OK,
 )
 def bulk_increment(
-    experiment_id: str,
     request: BulkIncrementRequest,
     current_user: User = Depends(deps.get_current_active_user),
     svc: DynamoDBCounterService = Depends(get_counter_service),
@@ -180,9 +251,23 @@ def bulk_increment(
     """
     Increment multiple counters in a single API call.
 
-    Accepts up to 100 increment requests.  Partial failures are collected
-    and reported in the response — the operation does not abort on first error.
+    Accepts up to 100 increment requests, each naming its own experiment.
+    Partial failures are collected and reported in the response — the
+    operation does not abort on first error.
     Requires ``experiment: update`` (ADMIN or DEVELOPER).
+
+    **This route has no ``{experiment_id}``**, and used to. Fixing the single
+    write routes to honour their path (#95) put this one in an impossible
+    position: ``BulkIncrementRequest.increments`` is a list whose every entry
+    carries its own ``experiment_id``, precisely so a collector can flush one
+    buffer spanning several experiments. Requiring them all to equal a path
+    segment would make that required field single-valued and turn a
+    100-increment flush into a 400, while the promise two lines up —
+    "does not abort on first error" — became false.
+
+    A batch has no one experiment to name, so it no longer claims to. The
+    per-entry ``experiment_id`` is the only thing that decides where each
+    increment lands, and nothing in the URL can now disagree with it.
     """
     _require_counter_write(current_user)
     return svc.bulk_increment(request.increments)
@@ -192,6 +277,7 @@ def bulk_increment(
     "/{experiment_id}/reset",
     summary="Reset counters (ADMIN only)",
     status_code=status.HTTP_200_OK,
+    responses=MISMATCH_RESPONSE,
 )
 def reset_counters(
     experiment_id: str,
@@ -216,9 +302,13 @@ def reset_counters(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only ADMIN users can reset counters",
         )
+    _require_body_matches_path(
+        path_experiment_id=experiment_id,
+        body_experiment_id=request.experiment_id,
+    )
 
     svc.reset_counters(
-        experiment_id=request.experiment_id,
+        experiment_id=experiment_id,
         variant_id=request.variant_id,
         counter_type=request.counter_type,
         reason=request.reason,
@@ -226,6 +316,6 @@ def reset_counters(
 
     return {
         "status": "ok",
-        "experiment_id": request.experiment_id,
+        "experiment_id": experiment_id,
         "message": "Counters reset successfully",
     }

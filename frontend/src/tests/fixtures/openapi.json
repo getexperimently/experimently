@@ -257,16 +257,16 @@
         "summary": "Generate compliance report"
       }
     },
+    "/api/v1/counters/bulk": {
+      "post": {
+        "operationId": "bulk_increment_api_v1_counters_bulk_post",
+        "summary": "Bulk-increment multiple counters"
+      }
+    },
     "/api/v1/counters/{experiment_id}": {
       "get": {
         "operationId": "get_experiment_counters_api_v1_counters__experiment_id__get",
         "summary": "Get real-time counters for an experiment"
-      }
-    },
-    "/api/v1/counters/{experiment_id}/bulk": {
-      "post": {
-        "operationId": "bulk_increment_api_v1_counters__experiment_id__bulk_post",
-        "summary": "Bulk-increment multiple counters"
       }
     },
     "/api/v1/counters/{experiment_id}/increment": {
