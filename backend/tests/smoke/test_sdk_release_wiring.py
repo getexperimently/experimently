@@ -131,7 +131,8 @@ def test_every_ecosystem_has_a_job_that_runs_for_it() -> None:
     broke it and deleting the whole ``npm:`` job did not. It was also a bare
     substring search, which ``sdk/openfeature-python`` satisfied for
     ``sdk/openfeature``. Two ways to pass for the wrong reason in six lines --
-    the defect class CLAUDE.md names as this repository's most frequent.
+    the most frequent defect class in this repository: a check that passes
+    for the wrong reason.
 
     So parse the YAML and read the conditions the jobs actually carry. If an
     SDK resolves to an ecosystem no job selects, its tag passes the version

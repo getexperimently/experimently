@@ -151,7 +151,7 @@ async def list_feature_flags(
     # (ADMIN, DEVELOPER) -> all; otherwise own rows only. Its comment read
     # "Analyst/Viewer can only see their own", which inverts the role the docs
     # describe -- ANALYST exists to "view all data but not create or modify"
-    # (CLAUDE.md), so it was the one role guaranteed to be wrong.
+    # so it was the one role guaranteed to be wrong.
     #
     # All four roles carry Action.LIST on feature flags, a deployment is single
     # tenant (founder, 2026-09-21), and tenant isolation belongs to the
