@@ -123,7 +123,7 @@ This checklist must be completed and signed off before any traffic is sent to th
 - [ ] Lambda functions deployed and passing smoke tests:
   - Assignment Lambda
   - Event Processor Lambda
-  - Feature Flag Evaluation Lambda (71 tests, 92% coverage confirmed)
+  - Feature Flag Evaluation Lambda (71 tests)
 - [ ] No `DEBUG=true` or `APP_ENV=development` in production ECS task environment variables
 
 ---

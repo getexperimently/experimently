@@ -336,7 +336,7 @@ Three AWS Lambda functions handle real-time operations:
 
 - Triggered by: API Gateway (evaluation API)
 - Purpose: Sub-10ms feature flag evaluation at scale
-- 71 tests, 92% coverage, production-ready
+- 71 tests covering the handler, the cache and the evaluation path
 - Local Redis cache for rule compilation
 
 ---
