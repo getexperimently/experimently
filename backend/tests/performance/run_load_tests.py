@@ -39,8 +39,20 @@ import time
 from pathlib import Path
 from typing import Optional
 
-# Ensure the repo root is on sys.path so backend.* imports resolve
-_REPO_ROOT = Path(__file__).resolve().parents[4]
+# Ensure the repo root is on sys.path so backend.* imports resolve.
+#
+# parents[3], not parents[4]. This file is at
+# <root>/backend/tests/performance/run_load_tests.py, so the parents are
+# performance(0) tests(1) backend(2) <root>(3) -- and parents[4] is the
+# directory ABOVE the repository.
+#
+# That off-by-one is why this workflow had never passed once in 29 runs since
+# 2026-05-11. `_REPO_ROOT` is the `cwd` for both subprocesses this script
+# starts, so locust resolved the workflow's relative `--locustfile
+# backend/tests/performance/locustfiles/api_load_test.py` against
+# `/home/runner/work` and reported "Could not find" for a file that is tracked
+# and present. `_repo_root_is_the_repository` in test_run_load_tests.py pins it.
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
