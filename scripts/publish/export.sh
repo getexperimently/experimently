@@ -252,11 +252,77 @@ result "trufflehog --only-verified" $? "$(grep -c '"Verified":true' "$LOGS/truff
 # 3d. The claims and identifiers the launch checklist forbids in the tree.
 #     `Type II` alone matches the statistics docs; lock files carry `1B+`
 #     inside integrity hashes.
+#
+#     The second group is a SHAPE, not a literal list, and it is here because
+#     the literal list failed: README.md carried "847 automated tests with 100%
+#     pass rate", "82% code coverage", "89% cache hit rate", "8M+
+#     invocations/month" and "1.8M+ events/day" -- describing a production
+#     deployment that has never existed -- and this sweep reported
+#     `PASS  forbidden claims and identifiers  none` over every one of them,
+#     because none of those literals was in the list. A deny-list of specific
+#     numbers can only catch the numbers someone already noticed, which is the
+#     same failure the ships-manifest replaced for paths.
+#
+#     So: an operational metric with no deployment behind it is matched by its
+#     form. `<n>% <hit rate|pass rate|uptime|of users>` and `<n>M+/K+/B+
+#     <invocations|events|requests|users>` are claims about a running system;
+#     this project has none. A throughput floor an automated test asserts is
+#     fine and reads differently, PROVIDED the claim about where it is asserted
+#     is true. It was not: the first version of this comment, and the README it
+#     describes, said the floors were "asserted on every run" and "asserted in
+#     CI" -- while `test_performance_benchmarks.py` carries
+#     `skipif(os.environ.get("CI") == "true")` and runs in zero CI runs. A
+#     replacement claim has to be measured like any other.
 CLAIMS='214117827798|/Users/ashishmarkanday|99\.97|58M\+|2\.8M\+|SOC 2 Type II|GDPR Compliant|SRM detection|1B\+|"environment": "Production"|Enterprise Edition|Community Edition|licen[cs]e key'
 git -C "$WORK" grep -nE "$CLAIMS" -- . ':!*package-lock.json' ':!*.lock' ':!scripts/publish/' > "$LOGS/claims.txt" 2>&1
-case $? in
+claims_status=$?
+
+#     The unmeasured-metric sweep, run separately because it needs a different
+#     pathspec and a filter. Its first run found 14 hits, of which 6 were real
+#     and 8 were shapes that are legitimate:
+#
+#       legitimate  a test ASSERTING a floor ("> 95% hit rate" in
+#                   feature_flag_evaluation/tests/performance/) -- so test
+#                   trees are excluded;
+#       legitimate  a coverage TARGET ("minimum 80% coverage" in the
+#                   development guidelines) -- so lines stating a target or a
+#                   bound are filtered out;
+#       legitimate  a seed script saying what it generates locally
+#                   ("100K+ events") -- so demo/ is excluded;
+#       legitimate  a caveat that COUNTS the suite honestly while saying it
+#                   proves less than it looks ("~4,600 automated tests but no
+#                   human has walked through the product").
+#
+#     What remained were real: README.md's five, and "71 tests, 92% coverage,
+#     production-ready" in two documents.
+# `%\+? +([a-z]+ +)?` -- one optional word between the number and the keyword.
+# Without it `82% code coverage` did not match, and that is one of the five
+# README lines the comment above says this catches: the tamper that "proved"
+# the pattern restored only three of the five.
+UNMEASURED='[0-9]+(\.[0-9]+)?%\+? +([a-z]+ +)?(cache hit|hit rate|pass rate|uptime|coverage)'
+UNMEASURED="$UNMEASURED"'|[0-9]+(\.[0-9]+)?[MKB]\+ (invocations|events|requests|users|assignments)'
+UNMEASURED="$UNMEASURED"'|[0-9]+ automated tests with'
+git -C "$WORK" grep -nE "$UNMEASURED" -- . \
+        ':!*package-lock.json' ':!*.lock' ':!scripts/publish/' \
+        ':!*tests/*' ':!*test_*.py' ':!*_test.py' ':!demo/*' \
+    | grep -vE '\bminimum\b|\bat least\b|\btargets?\b|\brequired\b|>=|> [0-9]|\bthreshold\b' \
+    > "$LOGS/unmeasured.txt" || true
+# `|| true` on the PIPELINE above is safe -- an empty result is the pass case
+# and is checked by size below, not by status. The `git grep` that could fail
+# silently is the one whose status IS checked, at `claims_status`.
+
+unmeasured_hits=$(wc -l < "$LOGS/unmeasured.txt" | tr -d ' ')
+if [ "$unmeasured_hits" -gt 0 ]; then
+    cat "$LOGS/unmeasured.txt" >> "$LOGS/claims.txt"
+fi
+
+case $claims_status in
     0) result "forbidden claims and identifiers" 1 "$(wc -l < "$LOGS/claims.txt" | tr -d ' ') hits (see claims.txt)" ;;
-    1) result "forbidden claims and identifiers" 0 "none" ;;
+    1) if [ "$unmeasured_hits" -gt 0 ]; then
+           result "forbidden claims and identifiers" 1 "$unmeasured_hits unmeasured metrics (see claims.txt)"
+       else
+           result "forbidden claims and identifiers" 0 "none"
+       fi ;;
     *) result "forbidden claims and identifiers" 1 "git grep failed (see claims.txt)" ;;   # an error is not a pass
 esac
 

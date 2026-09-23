@@ -25,8 +25,11 @@ An experimentation platform that enables teams to make data-driven decisions thr
 Numbers in this README come from the repository's own test and benchmark suites, not from a
 production deployment we cannot show you:
 
-- **Rules engine**: 125k+ simple-operator evaluations/second in the benchmark suite
-  (`backend/tests/performance/`)
+- **Rules engine**: >100k simple-operator evaluations/second on a quiet
+  developer machine — the floor `backend/tests/unit/core/test_performance_benchmarks.py`
+  asserts. It is **skipped in CI** (`skipif CI=true`): shared runners are
+  several times slower and made it flaky, so the number is reproducible
+  locally, not enforced on every merge
 - **Statistical engine**: sequential testing (mSPRT), CUPED, Bayesian and multi-armed bandits, each
   with a DB-backed test that drives the public API
 - **5,400+ backend tests, 640+ dashboard tests, 15 SDKs** verified against a live backend in CI
@@ -69,8 +72,11 @@ Built using modern, scalable architecture leveraging AWS services:
 
 ### Advanced Targeting & Rules Engine
 - **20+ Operators**: Basic (equals, in), String (regex, contains), Advanced (semver, geo-distance, time windows, JSON path)
-- **High Performance**: 125k+ simple evaluations/sec, 2.5k+ complex evaluations/sec
-- **Smart Caching**: Multi-layer caching with 94%+ hit rates
+- **Throughput floors** (`test_performance_benchmarks.py`, run locally —
+  skipped in CI, see above): simple equality >100k/sec, string contains
+  >20k/sec, semver >1k/sec, time windows >1k/sec, geo-distance >500/sec
+- **Smart Caching**: Multi-layer caching — compiled rules (LRU) and evaluation
+  results (LRU with TTL)
 - **Batch Processing**: Efficient evaluation of 1000+ users
 
 ### Automated Safety Monitoring
@@ -155,21 +161,20 @@ Refer to the documentation for:
 ## 🔧 Technology Highlights
 
 ### Backend Services
-- **FastAPI Application**: Comprehensive REST API
-  - 847 automated tests with 100% pass rate
-  - 82% code coverage
-  - Sub-100ms P95 API latency
+- **FastAPI Application**: Comprehensive REST API, with the unit, integration,
+  smoke and module suites required to pass on every pull request — see the
+  checks on any PR for what actually ran and what it covered
 - **Background Schedulers**: Automated experiment lifecycle, rollout management, metrics aggregation
 - **Enhanced Rules Engine**: Advanced targeting with 20+ operators
 
 ### Database & Caching
 - **Aurora PostgreSQL**: Multi-AZ with automatic failover
-- **ElastiCache Redis**: 89% cache hit rate, sub-5ms latency
+- **ElastiCache Redis**: Session and evaluation caching
 - **Data Retention**: Configurable policies (90 days to 7 years)
 
 ### Real-time Processing
-- **Lambda Functions**: 8M+ invocations/month
-- **Kinesis Streams**: 1.8M+ events/day
+- **Lambda Functions**: Assignment, event processing and flag evaluation
+- **Kinesis Streams**: Event ingestion into OpenSearch
 - **OpenSearch**: Real-time analytics queries
 
 ---
@@ -275,7 +280,7 @@ public issues. Contributions are accepted under the DCO — see [CONTRIBUTING.md
 | **Safety Monitoring** | Automated rollback with configurable thresholds | Manual monitoring |
 | **Statistical Methods** | Bayesian + Frequentist analysis | Single method |
 | **Audit Logging** | Append-only trail; tamper-evident signing with the `compliance` module | Limited or none |
-| **Performance** | 125k ops/sec, sub-10ms latency | Varies widely |
+| **Rules evaluation** | >100k simple evaluations/sec locally (`test_performance_benchmarks.py`; skipped on CI runners) | Varies widely |
 | **RBAC** | 4 roles; local auth or AWS Cognito | Basic or none |
 | **Deployment** | Self-hosted on your AWS account | SaaS only |
 | **Customization** | Full platform access | Limited APIs |
