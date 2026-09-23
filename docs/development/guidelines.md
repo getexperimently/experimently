@@ -172,7 +172,7 @@ We follow test-driven development (TDD) practices:
 
 -   Backend code: minimum 80% coverage
 -   Frontend components: minimum 70% coverage
--   Critical paths: 100% coverage
+-   Critical paths: 100% coverage required
 
 ### Testing Framework Standards
 
