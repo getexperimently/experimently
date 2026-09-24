@@ -32,7 +32,7 @@ constructs==10.8.1                 # pinned here too, and at the same version,
                                    # install and therefore what `cdk synth`
                                    # actually runs against; see
                                    # infrastructure/cdk/requirements.txt
-aws-cdk.asset-awscli-v1==2.2.292   # pinned exactly (==) by aws-cdk-lib 2.270.0;
+aws-cdk.asset-awscli-v1==2.2.294   # pinned exactly (==) by aws-cdk-lib 2.270.0;
                                    # a grouped Dependabot update moved this to
                                    # 2.2.294 while also moving aws-cdk-lib to
                                    # 2.270.0, which forbids it -- pip then could
@@ -56,10 +56,10 @@ faker==40.39.0
 factory-boy==3.3.3
 freezegun==1.5.5
 moto==4.2.2
-pyparsing==3.3.2       # required by moto's glue backend (mock_glue), not declared by moto 4.2
+pyparsing==3.3.3       # required by moto's glue backend (mock_glue), not declared by moto 4.2
 python-jose[cryptography]==3.5.0  # required by moto's cognitoidp backend (mock_cognitoidp); app auth uses PyJWT
 jsonschema==4.26.0
-locust==2.39.1   # 2.40+ requires pytest>=8.3; we pin pytest 7.4.
+locust==2.46.6   # 2.40+ requires pytest>=8.3; we pin pytest 7.4.
                  # A grouped Dependabot update moved this to 2.46.6,
                  # straight past the constraint on this line, and pip
                  # then could not resolve the file. Raising it needs
