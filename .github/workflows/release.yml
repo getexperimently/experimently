@@ -294,7 +294,7 @@ jobs:
             "${IMAGE}@${DIGEST}"
 
       - name: Upload the SBOM for the release
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: sbom-api-${{ matrix.profile }}
           path: sbom-api-${{ matrix.profile }}.spdx.json
@@ -412,7 +412,7 @@ jobs:
             "${IMAGE}@${DIGEST}"
 
       - name: Upload the SBOM for the release
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: sbom-web-${{ matrix.profile }}
           path: sbom-web-${{ matrix.profile }}.spdx.json
