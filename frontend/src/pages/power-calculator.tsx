@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useState, useEffect, useCallback } from 'react';
-import { apiFetch } from '@/services/api';
+import { docsUrl } from '@/services/docs';
 import {
   computeSampleSize,
   computePowerCurve,
@@ -24,15 +24,6 @@ import {
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-
-interface PlanAdvice {
-  advice: string;
-  generated_by: string;
-  experiment_name: string;
-  baseline_rate: number;
-  mde: number;
-  runtime_days: number;
-}
 
 // ---------------------------------------------------------------------------
 // Utilities
@@ -65,17 +56,6 @@ function fmtDays(d: number | null): string {
 // API helpers
 // ---------------------------------------------------------------------------
 
-async function fetchPlanningAdvice(params: {
-  experiment_name: string;
-  metric_description: string;
-  baseline_rate: number;
-  mde: number;
-  runtime_days: number;
-  business_context: string;
-}): Promise<PlanAdvice> {
-  return apiFetch<PlanAdvice>('/api/v1/power/plan', { method: 'POST', json: params });
-}
-
 // ---------------------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------------------
@@ -90,19 +70,11 @@ export default function PowerCalculatorPage() {
   const [dailyTraffic, setDailyTraffic] = useState<string>('');
   const [trafficAllocation, setTrafficAllocation] = useState<number>(1.0);
 
-  // AI advice state
-  const [experimentName, setExperimentName] = useState<string>('');
-  const [metricDescription, setMetricDescription] = useState<string>('');
-  const [businessContext, setBusinessContext] = useState<string>('');
-
   // Results state
   const [result, setResult] = useState<SampleSizeResult | null>(null);
   const [curveData, setCurveData] = useState<PowerCurvePoint[]>([]);
-  const [advice, setAdvice] = useState<PlanAdvice | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
-  const [adviceLoading, setAdviceLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
-  const [adviceError, setAdviceError] = useState<string | null>(null);
 
   // ---------------------------------------------------------------------------
   // Debounced calculation
@@ -172,43 +144,6 @@ export default function PowerCalculatorPage() {
       baselineRate, mde, alpha, power, nVariants, dailyTraffic, trafficAllocation,
     );
   }, [baselineRate, mde, alpha, power, nVariants, dailyTraffic, trafficAllocation, debouncedCalculate]);
-
-  // ---------------------------------------------------------------------------
-  // AI advice
-  // ---------------------------------------------------------------------------
-
-  const getAdvice = async () => {
-    if (!result) return;
-    const name = experimentName.trim() || 'My Experiment';
-    const metric = metricDescription.trim() || 'primary conversion metric';
-    const runtime = result.runtime_days ?? 30;
-
-    if (name.length < 3) {
-      setAdviceError('Experiment name must be at least 3 characters.');
-      return;
-    }
-
-    setAdviceLoading(true);
-    setAdviceError(null);
-    setAdvice(null);
-
-    try {
-      const plan = await fetchPlanningAdvice({
-        experiment_name: name,
-        metric_description: metric,
-        baseline_rate: baselineRate,
-        mde,
-        runtime_days: runtime,
-        business_context: businessContext,
-      });
-      setAdvice(plan);
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Failed to get advice';
-      setAdviceError(msg);
-    } finally {
-      setAdviceLoading(false);
-    }
-  };
 
   // ---------------------------------------------------------------------------
   // Chart data transformation
@@ -547,98 +482,18 @@ export default function PowerCalculatorPage() {
                 )}
               </div>
 
-              {/* AI Planning Advice */}
-              <div className="bg-white border border-gray-200 rounded-xl p-5">
-                <h2 className="text-sm font-semibold text-gray-700 mb-1">
-                  AI Planning Advice
-                </h2>
-                <p className="text-xs text-gray-400 mb-4">
-                  Get plain-English interpretation and suggestions for your experiment.
-                  Uses Claude AI when available, falls back to built-in templates.
-                </p>
-
-                <div className="space-y-3 mb-4">
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">
-                      Experiment Name (optional)
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="e.g. Checkout CTA Button Test"
-                      value={experimentName}
-                      onChange={(e) => setExperimentName(e.target.value)}
-                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">
-                      Primary Metric (optional)
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="e.g. checkout conversion rate"
-                      value={metricDescription}
-                      onChange={(e) => setMetricDescription(e.target.value)}
-                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">
-                      Business Context (optional)
-                    </label>
-                    <textarea
-                      placeholder="e.g. Q4 launch, mobile-only traffic segment"
-                      value={businessContext}
-                      onChange={(e) => setBusinessContext(e.target.value)}
-                      rows={2}
-                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none resize-none"
-                    />
-                  </div>
-                </div>
-
-                <button
-                  onClick={getAdvice}
-                  disabled={adviceLoading || !result}
-                  className="bg-blue-600 text-white px-5 py-2.5 rounded-lg text-sm font-medium hover:bg-blue-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {adviceLoading ? 'Generating advice...' : 'Get AI Advice'}
-                </button>
-
-                {adviceError && (
-                  <p className="text-xs text-red-600 mt-2">{adviceError}</p>
-                )}
-
-                {advice && (
-                  <div className="mt-4 bg-blue-50 rounded-lg p-4">
-                    <div className="flex items-center gap-2 mb-2">
-                      <span className="text-xs font-medium text-blue-700 uppercase tracking-wide">
-                        {advice.generated_by === 'ai' ? 'AI-generated advice' : 'Template advice'}
-                      </span>
-                      {advice.generated_by === 'ai' && (
-                        <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">
-                          Claude AI
-                        </span>
-                      )}
-                    </div>
-                    <pre className="text-sm text-gray-700 whitespace-pre-wrap font-sans leading-relaxed">
-                      {advice.advice}
-                    </pre>
-                  </div>
-                )}
-              </div>
-
               {/* Learn more */}
               <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 flex items-center justify-between">
                 <div>
                   <p className="text-sm font-medium text-gray-700">Want to understand the math?</p>
                   <p className="text-xs text-gray-500">Read our statistics guide on power analysis, MDE, and alpha.</p>
                 </div>
-                <Link
-                  href="/docs/statistics/power-analysis"
+                <a
+                  href={docsUrl('statistics/power-analysis')}
                   className="text-blue-600 text-sm font-medium hover:text-blue-700 transition whitespace-nowrap ml-4"
                 >
                   Read the guide
-                </Link>
+                </a>
               </div>
 
             </div>

@@ -4,6 +4,7 @@ import { useRouter } from 'next/router';
 import { useAuth } from '@/contexts/AuthContext';
 import { Wordmark } from '@/components/Wordmark';
 import { LOGIN_PATH, Role, UserMe, safeNextPath } from '@/services/api';
+import { isMarketingSite } from '@/utils/site-mode';
 import { ROLE_COLORS, USER_ROLE_LABELS } from '@/types/admin';
 import { useModules } from '@/contexts/ModulesContext';
 import { MODULES, MODULES_DOC_PATH, ModulesInfo, moduleInstalled } from '@/services/modules';
@@ -192,7 +193,15 @@ export function AppShell({ children }: AppShellProps) {
   const [loggingOut, setLoggingOut] = useState(false);
 
   const pathname = router.pathname;
+  // The marketing build has no API, so every dashboard destination 404s and
+  // nobody can ever sign in. Anonymous is the ONLY state there, so without
+  // this the shell shows Experiments, Feature Flags and a Sign in button on
+  // /docs and /power-calculator -- all three dead. The homepage was fixed
+  // first and this was missed, because the button is rendered client-side
+  // after auth resolves and so does not appear in the static HTML.
+  const marketing = isMarketingSite();
   const visibleNav = NAV_ITEMS.filter((item) => {
+    if (marketing) return item.href === '/docs';
     if (item.superuser) return user !== null && user.is_superuser === true;
     if (item.roles) return user !== null && item.roles.includes(user.role);
     return true;
@@ -204,7 +213,9 @@ export function AppShell({ children }: AppShellProps) {
   // Not on a *failed* probe either: that also resolves to core, and the link
   // says "this instance runs the core profile" -- a claim the dashboard has no
   // grounds for when all it knows is that the API did not answer.
-  const showModulesGuide = !modulesLoading && modulesError === null && profile === 'core';
+  // Also a dashboard concern: the marketing build probes no API, so the
+  // profile it reports is meaningless there.
+  const showModulesGuide = !marketing && !modulesLoading && modulesError === null && profile === 'core';
   const showMore = !modulesLoading && (moduleNav.length > 0 || showModulesGuide);
 
   const handleLogout = async () => {
@@ -275,7 +286,7 @@ export function AppShell({ children }: AppShellProps) {
               <div data-testid="user-menu-loading" className="h-8 w-24 rounded-md bg-slate-100 animate-pulse" />
             )}
 
-            {status === 'anonymous' && (
+            {status === 'anonymous' && !marketing && (
               <Link
                 href={signInHref}
                 data-testid="nav-sign-in"
@@ -283,6 +294,16 @@ export function AppShell({ children }: AppShellProps) {
               >
                 Sign in
               </Link>
+            )}
+
+            {status === 'anonymous' && marketing && (
+              <a
+                href="https://github.com/getexperimently/experimently"
+                data-testid="nav-source"
+                className="px-3 py-1.5 rounded-md text-sm font-medium bg-blue-600 text-white hover:bg-blue-700"
+              >
+                Source
+              </a>
             )}
 
             {status === 'authenticated' && user && (
