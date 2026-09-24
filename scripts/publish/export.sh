@@ -485,11 +485,26 @@ elif [ ! -f "$WORK/mkdocs.yml" ]; then
 elif ! command -v mkdocs > /dev/null 2>&1; then
     result "mkdocs --strict on the export" 1 "mkdocs is not installed; cannot verify the docs site"
 else
-    if (cd "$WORK" && mkdocs build --strict -d "$LOGS/site") > "$LOGS/mkdocs.txt" 2>&1; then
-        result "mkdocs --strict on the export" 0 "the docs site builds"
+    # Build the tree Pages ACTUALLY deploys. docs.yml gates its deploy job on
+    # a v* tag, so it builds the tagged commit -- not the tip. Building the tip
+    # verified the wrong thing: the v0.2.0 deploy failed on a link that the tip
+    # had already fixed and the TAG still carried, while this check reported
+    # "the docs site builds".
+    docs_ref=$(git -C "$WORK" tag --list 'v*' --sort=-v:refname | head -1)
+    if [ -n "$docs_ref" ]; then
+        docs_what="at tag $docs_ref"
+        git -C "$WORK" stash -u -q 2>/dev/null || true
+        git -C "$WORK" checkout -q --detach "$docs_ref" 2>/dev/null
     else
-        result "mkdocs --strict on the export" 1 "the docs site does NOT build (see mkdocs.txt)"
+        docs_what="at the tip (no tag in the export)"
     fi
+    if (cd "$WORK" && mkdocs build --strict -d "$LOGS/site") > "$LOGS/mkdocs.txt" 2>&1; then
+        result "mkdocs --strict on the export" 0 "the docs site builds $docs_what"
+    else
+        result "mkdocs --strict on the export" 1 "the docs site does NOT build $docs_what (see mkdocs.txt)"
+    fi
+    # Back to the branch the rest of the sweep and the push expect.
+    git -C "$WORK" checkout -q main 2>/dev/null || true
 fi
 
 # 3f. No surviving file refers to a removed path (a dead link in the public
