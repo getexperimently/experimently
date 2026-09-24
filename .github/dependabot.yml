@@ -93,8 +93,17 @@ updates:
   # scripts/check_requirements_lock.py fails the lint job when runtime.txt
   # and requirements.txt disagree, so a bump that reaches only one of them
   # cannot merge.
+  #
+  # `/infrastructure/cdk` is in the SAME entry, not its own. The two files
+  # share three pins -- aws-cdk-lib, constructs, pytest -- and
+  # infrastructure/tests/test_requirement_pins_agree.py fails when they
+  # disagree, because `cdk synth` in CI and `cdk synth` on an operator's
+  # machine would then be two different programs. As separate entries on
+  # separate days they drifted one merged pull request at a time: #283 bumped
+  # pytest to 7.4.4 in the CDK file alone and could never go green. One entry
+  # over both directories means a shared pin moves in one pull request.
   - package-ecosystem: "pip"
-    directory: "/backend"
+    directories: ["/backend", "/infrastructure/cdk"]
     commit-message:
       prefix: "chore(deps)"
     schedule:
@@ -105,7 +114,19 @@ updates:
       # Majors are migrations, not bumps -- see the header.
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
-    labels: ["dependencies", "python"]
+      # aws-cdk-lib pins these EXACTLY (`==`), so Dependabot moving one on its
+      # own produces a requirements file pip cannot resolve at all:
+      #
+      #   aws-cdk-lib 2.270.0 depends on aws-cdk.asset-awscli-v1==2.2.292
+      #   ERROR: ResolutionImpossible
+      #
+      # That is not hypothetical twice over. The comment beside the pin in
+      # backend/requirements.txt records it happening once already, and #286
+      # is the recurrence -- the comment was written and no ignore rule was
+      # added, so the same bump came back and failed 13 checks. They move when
+      # aws-cdk-lib moves, which is a major migration someone does by hand.
+      - dependency-name: "aws-cdk.*"
+    labels: ["dependencies", "python", "infrastructure"]
     groups:
       patch-and-minor:
         update-types: ["patch", "minor"]
@@ -156,23 +177,6 @@ updates:
       patch-and-minor:
         update-types: ["patch", "minor"]
 
-  # AWS CDK app (Python), infrastructure/cdk/requirements.txt.
-  - package-ecosystem: "pip"
-    directory: "/infrastructure/cdk"
-    commit-message:
-      prefix: "chore(deps)"
-    schedule:
-      interval: "weekly"
-      day: "monday"
-    open-pull-requests-limit: 3
-    ignore:
-      # Majors are migrations, not bumps -- see the header.
-      - dependency-name: "*"
-        update-types: ["version-update:semver-major"]
-    labels: ["dependencies", "python", "infrastructure"]
-    groups:
-      patch-and-minor:
-        update-types: ["patch", "minor"]
 
   - package-ecosystem: "npm"
     directory: "/frontend"
@@ -225,6 +229,18 @@ updates:
       # Majors are migrations, not bumps -- see the header.
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
+      # react-native is 0.x, and for a 0.x package the MINOR position is where
+      # breaking changes go -- semver's own rule. Dependabot classifies
+      # 0.73 -> 0.87 as minor, so it lands in patch-and-minor and looks
+      # routine; it is a three-year migration. #285 is what that produces:
+      #
+      #   npm error ERESOLVE ... While resolving: react-native@0.87.1
+      #
+      # because 0.87 peer-requires react ^19.2.3 while these SDKs pin React
+      # 18. Six checks failed on one bump. It moves with the React 18 -> 19
+      # migration (#291/#49/#51), by hand, or not at all.
+      - dependency-name: "react-native"
+        update-types: ["version-update:semver-minor"]
     labels: ["dependencies", "sdk"]
     groups:
       patch-and-minor:
@@ -288,6 +304,17 @@ updates:
       # Majors are migrations, not bumps -- see the header.
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
+      # The kotlinx libraries carry Kotlin METADATA, so their version is
+      # coupled to the Kotlin plugin's and they cannot move on their own.
+      # #287 bumped coroutines and serialization to 1.11.0 -- built with
+      # Kotlin 2.x metadata -- while kotlin-gradle-plugin stayed on 1.9.25,
+      # which cannot read it:
+      #
+      #   e: Incompatible classes were found in dependencies.
+      #
+      # They move when the Kotlin plugin moves, in one deliberate change.
+      - dependency-name: "org.jetbrains.kotlinx:*"
+        update-types: ["version-update:semver-minor"]
     labels: ["dependencies", "sdk"]
     groups:
       patch-and-minor:
