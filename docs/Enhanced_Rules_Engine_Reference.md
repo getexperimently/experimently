@@ -664,19 +664,30 @@ print(f"P95 Latency: {metrics.p95_latency_ms:.2f}ms")
 print(f"P99 Latency: {metrics.p99_latency_ms:.2f}ms")
 ```
 
-### Performance Targets
+### Performance floors
 
-**Achieved Performance:**
-- ✅ Simple operators: >100,000 ops/sec
-- ✅ Complex operators: >1,000 ops/sec
-- ✅ Rule compilation: >100 compilations/sec
-- ✅ Cache lookups: >10,000 lookups/sec
-- ✅ End-to-end evaluation: >100 evaluations/sec
+These are **floors asserted by a test**, not measurements from a deployment.
+`backend/tests/unit/core/test_performance_benchmarks.py` (14 benchmarks)
+asserts them, and the assertion is the claim:
 
-**Latency Targets:**
-- ✅ P99 latency: < 10ms (achieved: 1-5ms)
-- ✅ Cache hit latency: < 1ms
-- ✅ Batch 1000 users: < 5 seconds
+| what | asserted floor |
+|---|---|
+| Simple operators | > 100,000 ops/sec |
+| Compiled rule evaluation | > 20,000 ops/sec |
+| Complex operators (semver, geo) | > 1,000 ops/sec |
+| Batch of 1,000 users | < 5 seconds |
+
+**Read the caveat before quoting these.** That file carries
+
+```python
+pytestmark = pytest.mark.skipif(os.environ.get("CI", "").lower() == "true", ...)
+```
+
+so it is **skipped in CI** and runs only on a developer machine. The numbers
+are therefore a floor that holds on a laptop, not a figure any pipeline has
+verified and not a production measurement — nothing about this platform has
+been measured in production. Timings also vary with the machine; treat a
+single local run as indicative.
 
 ## Best Practices
 
@@ -898,18 +909,23 @@ The Enhanced Rules Engine provides:
 ✅ **Backward Compatible** - Existing rules work unchanged
 ✅ **Production Ready** - Caching, metrics, error handling
 
-**Total Implementation:**
-- 21 test files created/updated
-- 4 core modules implemented
-- 56 tests passing (unit tests for service)
-- 15 tests passing (integration tests)
-- 14 tests passing (performance benchmarks)
-- **85+ total tests passing**
+**Coverage** (counted with `pytest --collect-only`, not recalled):
 
-**Performance Achieved:**
-- Simple evaluation: < 1ms P99
-- Complex evaluation: < 5ms P99
-- Cache hit rate: > 90% in production simulation
+| suite | tests |
+|---|---|
+| `test_rules_engine` | 214 |
+| `test_evaluation_cache` | 25 |
+| `test_rules_evaluation_service` | 21 |
+| `test_rule_compiler` | 16 |
+| `test_performance_benchmarks` | 14 (skipped in CI — see above) |
+
+Four core modules: `rules_engine.py`, `rule_compiler.py`,
+`evaluation_cache.py` and `rules_evaluation_service.py`.
+
+No cache-hit-rate figure is quoted here. An earlier version of this page
+claimed "> 90% in production simulation"; there is no production and no such
+simulation. Hit rate depends entirely on your traffic's key distribution and
+the TTL you configure.
 - Throughput: > 100 evaluations/second
 
 ---

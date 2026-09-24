@@ -49,19 +49,19 @@ This directory contains the API documentation for Experimently.
    - [API Key Authentication](endpoints.md#api-key-authentication)
 
 2. **Experiments**
-   - [Creating Experiments](endpoints.md#managing-experiments)
-   - [Managing Variants](specs.md#variants)
-   - [Analyzing Results](endpoints.md#tracking-events)
+   - [Creating and managing experiments](endpoints.md#2-managing-experiments)
+   - [Variants and metrics](specs.md)
+   - [Analysing results](sequential-testing.md) — and
+     [Bayesian](bayesian.md), [CUPED](cuped.md),
+     [dimensional breakdowns](dimensional-analysis.md)
 
 3. **Feature Flags**
-   - [Creating Feature Flags](endpoints.md#feature-flag-management)
-   - [User Targeting](specs.md#targeting)
-   - [Flag Evaluation](endpoints.md#feature-flag-management)
+   - [Creating flags and evaluating them](endpoints.md#3-feature-flag-management)
+   - [Targeting rules](../Enhanced_Rules_Engine_Reference.md)
 
 4. **Event Tracking**
-   - [Tracking Events](endpoints.md#tracking-events)
-   - [User Assignments](endpoints.md#tracking-events)
-   - [Metrics](specs.md#metrics)
+   - [Tracking events](endpoints.md#4-tracking-events)
+   - [Metrics](specs.md)
 
 ## Need Help?
 

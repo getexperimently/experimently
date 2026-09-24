@@ -318,17 +318,17 @@ D
 
 | Control | Where | What It Does |
 |---------|-------|--------------|
-| Security headers | `middleware/security_middleware.py` | HSTS (1yr + preload), CSP (`default-src 'none'`), X-Frame-Options: DENY, X-Content-Type-Options: nosniff, Referrer-Policy, Permissions-Policy |
+| Security headers | `backend/app/middleware/security_middleware.py` | HSTS (1yr + preload), CSP (`default-src 'none'`), X-Frame-Options: DENY, X-Content-Type-Options: nosniff, Referrer-Policy, Permissions-Policy |
 | CORS allowlist | `main.py` + `settings.BACKEND_CORS_ORIGINS` | Only configured origins may make credentialed requests |
-| RBAC enforcement | `core/permissions.py` | Role matrix applied to all endpoints via `check_permission()` |
-| bcrypt password hashing | `core/security.py` | `CryptContext(schemes=["bcrypt"])` with auto-deprecation |
-| API key scopes | `models/api_key.py` | `scopes` column limits what each key can do |
-| API key expiry | `models/api_key.py` | `expires_at` column + `is_valid` property check |
-| Audit logging | `models/audit_log.py` | All CRUD actions on experiments, feature flags, users, permissions recorded |
-| Structured error responses | `middleware/error_middleware.py` | No stack traces in production responses |
-| Server header removal | `middleware/security_middleware.py` | `server` and `x-powered-by` headers stripped |
+| RBAC enforcement | `backend/app/core/permissions.py` | Role matrix applied to all endpoints via `check_permission()` |
+| bcrypt password hashing | `backend/app/core/security.py` | `CryptContext(schemes=["bcrypt"])` with auto-deprecation |
+| API key scopes | `backend/app/models/api_key.py` | `scopes` column limits what each key can do |
+| API key expiry | `backend/app/models/api_key.py` | `expires_at` column + `is_valid` property check |
+| Audit logging | `backend/app/models/audit_log.py` | All CRUD actions on experiments, feature flags, users, permissions recorded |
+| Structured error responses | `backend/app/middleware/error_middleware.py` | No stack traces in production responses |
+| Server header removal | `backend/app/middleware/security_middleware.py` | `server` and `x-powered-by` headers stripped |
 | Secrets Manager | AWS infrastructure | DB credentials, Cognito secrets stored in Secrets Manager (not env vars) |
-| Safety auto-rollback | `core/safety_scheduler.py` | Feature flags automatically rolled back on error rate / latency breach |
+| Safety auto-rollback | `backend/app/core/safety_scheduler.py` | Feature flags automatically rolled back on error rate / latency breach |
 
 ### Planned / Required Before Production
 

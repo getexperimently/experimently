@@ -68,14 +68,14 @@ This directory contains documentation about the system architecture and design o
 ## Common Tasks
 
 1. **System Design**
-   - [Component Architecture](overview.md#components)
-   - [Data Flow](overview.md#data-flow)
-   - [Service Integration](overview.md#integration)
+   - [Component Architecture](overview.md#core-components)
+   - [Data Flow](overview.md)
+   - [Service Integration](overview.md#data-integrations)
 
 2. **Data Management**
-   - [Model Design](models.md#design)
-   - [Schema Changes](models.md#schema)
-   - [Data Validation](models.md#validation)
+   - [The models](models.md#data-models)
+   - [Relationships between them](models.md#database-relationship-configuration)
+   - [Creating a migration](models.md#creating-new-migrations)
 
 3. **Infrastructure**
    - [Resource Management](../infrastructure/aws-iam-setup.md)
@@ -109,5 +109,5 @@ This directory contains documentation about the system architecture and design o
 
 - Review the [Architecture Overview](overview.md)
 - Check the [Models Documentation](models.md)
-- See the [Infrastructure Guides](infrastructure/)
+- See the [Infrastructure Guides](../infrastructure/aws-iam-setup.md)
 - Contact the architecture team for assistance

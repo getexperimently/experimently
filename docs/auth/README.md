@@ -55,12 +55,12 @@ This directory contains documentation related to authentication and authorizatio
 
 2. **Development**
    - [Local Setup](auth-environment-variables.md)
-   - [Testing](cognito-auth-testing.md#running-tests)
-   - [Integration](auth-developer-docs.md#integration)
+   - [Testing](cognito-auth-testing.md)
+   - [Integration](auth-developer-docs.md#frontend-login-integration)
 
 3. **Security**
-   - [Best Practices](auth-developer-docs.md#security)
-   - [Token Management](flow.md#token-management)
+   - [Best Practices](auth-developer-docs.md)
+   - [Token Management](flow.md)
    - [MFA Setup](auth-user-guide.md)
 
 4. **SSO (the `sso` module)**

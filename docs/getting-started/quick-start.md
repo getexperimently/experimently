@@ -220,4 +220,4 @@ The event's `event_name` must equal the metric's `event_name`, the experiment mu
 - [Docker guide](docker-guide.md) — images, profiles, production notes
 - [User guide](../guides/user-guide.md) — for experiment designers and analysts
 - [Testing guide](../development/testing-guide.md)
-- [GDPR considerations](../security/gdpr-compliance-checklist.md)
+- [Security policies](../security/security-policies.md) — access control and data protection

@@ -203,6 +203,41 @@ The FeatureFlagOverride model handles user-specific feature flag settings.
 **Relationships:**
 - `feature_flag`: Many-to-one relationship to FeatureFlag model
 
+## Data Flow and Relationships
+
+The experimentation platform's data models are interconnected in a way that enables:
+
+1. **Experiment Definition**: Users create experiments with variants and metrics
+2. **User Assignment**: Users are assigned to experiment variants
+3. **Event Tracking**: User interactions are tracked as events
+4. **Analysis**: Events are aggregated to calculate metrics and determine experiment outcomes
+
+### Key Relationship Flows:
+
+1. User → Experiment → Variants → Metrics
+2. User → Variant ← Assignment
+3. Event → Experiment → Metrics
+4. Event → Feature Flag → Overrides
+
+## Database Schema Design
+
+All models are organized within the PostgreSQL `experimentation` schema to isolate them from other application components. Key indexes have been created to optimize common queries:
+
+- Experiment status + dates: For finding active experiments
+- Owner + status: For finding a user's active experiments
+- Assignment experiment + user: Unique constraint to ensure consistent assignments
+- Event user + type: For quickly retrieving specific event types for a user
+- Event experiment + type: For fast metric calculations
+
+## Additional Constraints and Validations
+
+Several database constraints ensure data integrity:
+
+- Experiment end date must be after start date
+- Variant traffic allocation must be between 0 and 100
+- Total variant traffic allocation per experiment must sum to 100
+- Metric names must be unique within an experiment
+
 ## Database Relationship Configuration
 
 All relationships between models are configured in the `__init__.py` file. This includes bidirectional relationships and association tables:

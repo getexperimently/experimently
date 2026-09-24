@@ -403,7 +403,7 @@ After an experiment concludes, use dimensional analysis to understand whether th
 
 Access via the **Breakdowns** tab on any experiment results page, or via:
 ```
-GET /api/v1/results/{experiment_id}/breakdown?dimension=device
+GET /api/v1/experiments/{experiment_id}/segmented-results/{segment_by}?dimension=device
 ```
 
 See the [Dimensional Analysis Guide](../api/dimensional-analysis.md).

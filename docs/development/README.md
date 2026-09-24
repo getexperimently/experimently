@@ -45,19 +45,19 @@ This directory contains development guidelines, best practices, and technical do
 ## Common Tasks
 
 1. **Database Management**
-   - [Creating Migrations](database/migrations.md#creating-migrations)
-   - [Running Backups](database/backup.md#backup-procedures)
-   - [Query Optimization](database/usage.md#optimization)
+   - [Creating Migrations](database/migrations.md#creating-new-migrations)
+   - [Running Backups](database/backup.md#backup-mechanism)
+   - [Query Optimization](database/usage.md#performance-optimization)
 
 2. **Development Process**
    - [Git Workflow](guidelines.md#git-workflow)
-   - [Code Reviews](guidelines.md#code-review)
-   - [Testing](guidelines.md#testing)
+   - [Code Reviews](guidelines.md#code-review-process)
+   - [Testing](guidelines.md)
 
 3. **Deployment**
-   - [CI/CD Pipeline](workflow-explanation.md#ci-cd)
-   - [Release Process](workflow-explanation.md#releases)
-   - [Environment Management](workflow-explanation.md#environments)
+   - [CI/CD Pipeline](workflow-explanation.md)
+   - [Release Process](workflow-explanation.md)
+   - [Environment Management](workflow-explanation.md)
 
 4. **Deterministic Backend Test Profile**
    - Start test dependencies with Docker Compose:
@@ -70,7 +70,7 @@ This directory contains development guidelines, best practices, and technical do
 ## Best Practices
 
 1. **Code Quality**
-   - Follow the [coding standards](guidelines.md#standards)
+   - Follow the [coding standards](guidelines.md#coding-standards)
    - Write comprehensive tests
    - Document your code
    - Review before committing

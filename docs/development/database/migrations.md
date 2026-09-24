@@ -161,7 +161,7 @@ alembic -c backend/app/db/alembic.ini revision --autogenerate \
 python -m alembic -c backend/app/db/alembic.ini upgrade heads
 ```
 
-`alembic revision` runs `migrations/env.py` here (`revision_environment = true`
+`alembic revision` runs `backend/app/db/migrations/env.py` here (`revision_environment = true`
 in `alembic.ini`), so it needs the same database connection `--autogenerate`
 does. A core checkout has one head and needs no `--head`.
 

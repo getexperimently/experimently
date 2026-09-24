@@ -235,20 +235,32 @@ Before destroying, export any data you need to retain:
 
 Costs depend heavily on traffic volume and configuration. The following is a rough estimate for a small production deployment:
 
-| Service | Estimated Monthly Cost |
-|---------|----------------------|
-| Aurora PostgreSQL (db.r6g.large writer + reader) | ~$300 |
-| ElastiCache Redis (cache.t3.medium) | ~$50 |
-| ECS Fargate (2 tasks, 2 vCPU / 4 GB each, 24/7) | ~$150 |
-| Lambda invocations (1M events/month) | ~$5 |
-| Kinesis (2 shards) | ~$30 |
-| OpenSearch (t3.medium.search) | ~$60 |
-| CloudFront + Lambda@Edge | ~$20–50 depending on traffic |
-| ALB | ~$25 |
-| **Total estimate** | **~$640–700/month** |
+The instance types below are what the CDK actually deploys with
+`environment=prod`, not a suggested sizing — read them out of
+`enhanced_database_stack.py`, `elasticache_redis_stack.py` and
+`fargate_service_stack.py` if you change them.
+
+| Service | What the stack deploys | Estimated Monthly Cost |
+|---------|------------------------|----------------------|
+| Aurora PostgreSQL | `db.r5.large` (`MEMORY5`/`LARGE`), 2 instances — writer + reader | ~$300 |
+| ElastiCache Redis | `cache.r6g.large` | ~$150 |
+| ECS Fargate | 3 tasks (`desired_count=3`, autoscaling 3–10), 1 vCPU / 2 GB each, 24/7 | ~$110 |
+| Lambda invocations | 1M events/month | ~$5 |
+| Kinesis | 2 shards | ~$30 |
+| OpenSearch | `t3.medium.search` | ~$60 |
+| CloudFront + Lambda@Edge | traffic dependent | ~$20–50 |
+| ALB | one | ~$25 |
+| **Total estimate** | | **~$700–750/month** |
+
+Autoscaling is the figure to watch: Fargate is costed at the floor of three
+tasks. At the ceiling of ten it is roughly $370 rather than $110, so a
+sustained-load month lands nearer $960.
 
 For development/staging environments, you can significantly reduce costs by:
-- Using smaller instance types (`db.t3.medium`, `cache.t3.micro`)
+- Non-prod environments already size down on their own: the CDK picks a
+  smaller Aurora instance, `cache.t4g.medium` for dev/test
+  (`cache.m6g.large` for staging) and a single Aurora instance rather
+  than a writer/reader pair
 - Reducing Aurora to a single instance (disable the reader)
 - Using on-demand Lambda scaling instead of reserved capacity
 

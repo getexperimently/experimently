@@ -314,7 +314,7 @@ copies the repository layout unchanged.
 The same database can be built by one profile and opened by the other. Both
 documented paths handle it the same way: `python -m backend.app.db.bootstrap`
 (what the API container runs on start-up) and `alembic upgrade heads` (what the
-migration task runs) share the repairs below, because `migrations/env.py` calls
+migration task runs) share the repairs below, because `backend/app/db/migrations/env.py` calls
 them after a command-line upgrade.
 
 **Core database, full image.** The core chain marks the revisions that once

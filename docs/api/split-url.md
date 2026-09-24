@@ -192,24 +192,45 @@ Once a user receives the `Set-Cookie` header, their browser stores the assignmen
 
 ## CloudFront CDK Construct
 
-The CDK construct (`infrastructure/constructs/SplitUrlDistribution`) provisions:
+> Split URL testing is a **module**, not part of the core profile. The
+> construct and the Lambda@Edge handler live under `modules/`, so a core
+> checkout does not have them. See [Modules & Profiles](../getting-started/modules.md).
 
-1. A CloudFront distribution attached to your origin (ALB or S3).
-2. A Lambda@Edge function deployed to `us-east-1` (required for Lambda@Edge).
-3. An environment variable (`EXPERIMENTATION_API_URL`) injected into the Lambda to fetch the live `split_url_config` at cold start and cache it for 60 seconds.
+`modules/infrastructure/constructs/split_url_distribution.py` provisions a
+CloudFront distribution wired to a Lambda@Edge viewer-request function:
 
-**CDK Usage** (`infrastructure/app.ts`):
+1. **No caching** (TTL 0) — every request must reach the router, or a user
+   would be served another user's variant from the edge cache.
+2. **HTTPS-only** viewer protocol policy, so the assignment cookie is not sent
+   in clear text.
+3. **`ALLOW_ALL` origin request policy**, so the router receives every header,
+   cookies included.
 
-```typescript
-import { SplitUrlDistribution } from './constructs/SplitUrlDistribution';
+The CDK app is **Python** (`infrastructure/cdk/app.py`; `cdk.json` runs
+`python3 app.py`). There is no TypeScript in this repository's infrastructure.
 
-new SplitUrlDistribution(this, 'CheckoutSplitUrl', {
-  experimentKey: 'checkout-flow-split-url-test',
-  originDomainName: alb.loadBalancerDnsName,
-  experimentationApiUrl: 'https://your-platform.example.com',
-  experimentationApiKey: apiKeySecret.secretValue.toString(),
-});
+```python
+from modules.infrastructure.constructs.split_url_distribution import (
+    SplitUrlDistribution,
+)
+
+split_url = SplitUrlDistribution(
+    self,
+    "CheckoutSplitUrl",
+    router_function=router_fn,        # lambda_.IFunction, in us-east-1
+    origin_domain=alb.load_balancer_dns_name,
+)
+# split_url.distribution  -> the CloudFront Distribution
+# split_url.domain_name   -> e.g. d1234.cloudfront.net
 ```
+
+**How the router gets its configuration.** Not from an API call — the
+experiment config is injected as a custom CloudFront header,
+`X-Split-URL-Config`, set by the CDK behaviour. The handler
+(`modules/lambda/split_url_router/handler.py`) reads that header and passes the
+request through unchanged if it is missing, invalid, or names fewer than two
+variants. Assignment hashes a client fingerprint (IP + User-Agent), so it needs
+no call back to the platform and no cold-start cache.
 
 ---
 

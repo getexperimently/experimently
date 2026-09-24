@@ -6,7 +6,6 @@ This directory contains the security compliance documentation for Experimently.
 |----------|-------------|
 | [Threat Model](threat-model.md) | System threats and mitigations |
 | [Incident Response Plan](incident-response-plan.md) | How to respond to security incidents |
-| [GDPR Compliance Checklist](gdpr-compliance-checklist.md) | GDPR requirements and status |
 | [Security Policies](security-policies.md) | Access control and data policies |
 | [Hardening Changes](hardening-changes.md) | Security controls implemented |
 

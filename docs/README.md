@@ -63,7 +63,7 @@
 ## Getting Started
 
 - [Quick Start](getting-started/quick-start.md) — full setup in 30 minutes
-- [Requirements](getting-started/requirements.md) — Python, Node.js, Docker, AWS CLI versions
+- [Quick start](getting-started/quick-start.md) — prerequisites (Docker, Python, Node) and first run
 - [Environment Setup](getting-started/environment-setup.md) — `.env` configuration
 - [Docker Guide](getting-started/docker-guide.md) — local Postgres, Redis, LocalStack
 - [Python Virtual Environment](getting-started/python-virtual-env-setup.md)
@@ -76,8 +76,7 @@
 
 - [Overview](architecture/overview.md) — AWS architecture, component diagram
 - [Technical Guide](architecture/technical-guide.md) — implementation details, subsystems
-- [Models](architecture/models.md) — SQLAlchemy data model reference
-- [Models Overview](architecture/models-overview.md) — quick reference for entity relationships
+- [Models](architecture/models.md) — every model, their relationships, and the migration chain
 
 ---
 
@@ -107,7 +106,6 @@
 ## Deployment & Operations
 
 - [Deployment Guide](deployment/deployment-guide.md) — ECS Fargate, Blue/Green deployment
-- [Launch Checklist](deployment/launch-checklist.md) — pre-launch go/no-go checklist
 - [Rollback Runbook](deployment/rollback-runbook.md) — rollback decision tree and procedures
 - [Disaster Recovery](deployment/disaster-recovery.md) — RTO/RPO, failure scenarios
 - [Secrets Management](deployment/secrets-management.md) — AWS Secrets Manager, rotation
@@ -121,7 +119,6 @@
 - [Threat Model](security/threat-model.md) — threat scenarios and countermeasures
 - [Security Policies](security/security-policies.md) — access control, data protection
 - [Hardening Changes](security/hardening-changes.md) — WAF, headers, rate limiting
-- [GDPR Compliance](security/gdpr-compliance-checklist.md) — data privacy checklist
 - [Incident Response](security/incident-response-plan.md) — severity levels, response process
 
 ---

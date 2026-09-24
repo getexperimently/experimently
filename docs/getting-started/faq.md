@@ -185,7 +185,7 @@ Yes. The platform supports bidirectional integrations with all three:
 - **Salesforce**: Push experiment results to Salesforce campaign objects via OAuth 2.0
 - **GitHub**: Receive push/pull_request/issues events; webhook payloads are validated using HMAC-SHA256 against your webhook secret
 
-Integrations are created at `POST /api/v1/integrations` and have per-service webhook endpoints at `POST /api/v1/integrations/{id}/webhook/{service}`.
+Integrations are created at `POST /api/v1/integrations` and have per-service webhook endpoints at `POST /api/v1/integrations/webhooks/github   (also /jira, /salesforce)`.
 
 See [Integrations API](../api/integrations.md), [Salesforce Integration](../integrations/salesforce.md), and [GitHub Integration](../integrations/github.md) for detailed setup guides.
 
