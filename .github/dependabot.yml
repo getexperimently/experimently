@@ -1,8 +1,42 @@
 version: 2
 
-# One entry per package manifest Dependabot can read. Every entry groups
-# patch and minor bumps into a single weekly pull request so the queue stays
-# reviewable; majors arrive on their own. The `lint` job's lock check
+# One entry per package manifest Dependabot can read. Every entry groups patch
+# and minor bumps into a single pull request so the queue stays reviewable.
+#
+# MAJORS ARE IGNORED, EVERYWHERE. Every entry carries
+#
+#     ignore:
+#       - dependency-name: "*"
+#         update-types: ["version-update:semver-major"]
+#
+# because a major in this repository is a migration, not a bump, and the
+# evidence is that it was never once merged as one: #225 records 21 major pull
+# requests closed as "each a real migration rather than a bump" -- typescript
+# 5 -> 7 across five packages, pytest 7 -> 9 across ~3,500 tests, moto's
+# decorator rename, a Spring Boot major, a slack-github-action major that would
+# have broken every deploy notification.
+#
+# Closing them achieved nothing: Dependabot re-raises a closed pull request the
+# next time the package publishes, so the queue refilled itself. On 2026-09-22
+# it produced 32 open pull requests in one morning, 20 of them majors, and the
+# CI matrices behind them are the shape that exhausted the Actions spending
+# limit once already. This makes the deferral stick.
+#
+# THE TRADE. An `ignore` rule suppresses the version-update pull request. It
+# does NOT silence Dependabot security ALERTS, which still fire on the
+# Security tab, and it does not affect `security-scan.yml` (pip-audit, npm
+# audit, trivy, CodeQL). But it does mean a major that only a major fixes will
+# not arrive as a pull request -- pytest 7 -> 9 is the live example, since it
+# carries the accepted advisory PYSEC-2026-1845 in
+# security/dependency-audit.toml. **#225 is the tracker; work it deliberately.**
+#
+# Schedules: the ten weekly entries are staggered two per weekday. The nine SDK
+# ecosystems we rarely touch are monthly -- which reduces their frequency but
+# NOT their clustering, because Dependabot has no day-of-month option, so those
+# nine still share one morning once a month. That is nine PRs twelve times a
+# year instead of nine every week, and the limits below cap each at one.
+#
+# github-actions is the exception to the major rule; see the entry itself. The `lint` job's lock check
 # (scripts/check_requirements_lock.py) turns red on a pip bump in either
 # profile until `make lock` regenerates the matching lock
 # (backend/requirements/runtime.lock, modules/requirements.lock), so a Python
@@ -18,7 +52,14 @@ updates:
       prefix: "ci(deps)"
     schedule:
       interval: "weekly"
-    open-pull-requests-limit: 5
+      day: "monday"
+    open-pull-requests-limit: 2
+    # NO major ignore here, deliberately. For every other ecosystem a major is
+    # a migration we choose when to do. For Actions it is how GitHub forces
+    # you off a retired runner runtime -- `actions/checkout@v4 -> v5` and
+    # friends are semver-major, and GitHub has hard-disabled old majors before
+    # (`actions/upload-artifact@v3`). Ignoring them means CI breaks one morning
+    # with no pull request ever having been offered.
     labels: ["dependencies", "github-actions"]
 
   # The four images built from this repository (the API image installs the
@@ -29,7 +70,12 @@ updates:
       prefix: "chore(deps)"
     schedule:
       interval: "weekly"
-    open-pull-requests-limit: 4
+      day: "tuesday"
+    open-pull-requests-limit: 2
+    ignore:
+      # Majors are migrations, not bumps -- see the header.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
     labels: ["dependencies", "docker"]
 
   # ---------------------------------------------------------------------------
@@ -53,7 +99,12 @@ updates:
       prefix: "chore(deps)"
     schedule:
       interval: "weekly"
-    open-pull-requests-limit: 5
+      day: "wednesday"
+    open-pull-requests-limit: 3
+    ignore:
+      # Majors are migrations, not bumps -- see the header.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
     labels: ["dependencies", "python"]
     groups:
       patch-and-minor:
@@ -73,7 +124,12 @@ updates:
       prefix: "chore(deps)"
     schedule:
       interval: "weekly"
+      day: "thursday"
     open-pull-requests-limit: 3
+    ignore:
+      # Majors are migrations, not bumps -- see the header.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
     labels: ["dependencies", "python", "modules"]
     groups:
       patch-and-minor:
@@ -89,7 +145,12 @@ updates:
       prefix: "chore(deps)"
     schedule:
       interval: "weekly"
+      day: "friday"
     open-pull-requests-limit: 3
+    ignore:
+      # Majors are migrations, not bumps -- see the header.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
     labels: ["dependencies", "python", "lambda"]
     groups:
       patch-and-minor:
@@ -102,7 +163,12 @@ updates:
       prefix: "chore(deps)"
     schedule:
       interval: "weekly"
+      day: "monday"
     open-pull-requests-limit: 3
+    ignore:
+      # Majors are migrations, not bumps -- see the header.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
     labels: ["dependencies", "python", "infrastructure"]
     groups:
       patch-and-minor:
@@ -114,7 +180,12 @@ updates:
       prefix: "chore(deps)"
     schedule:
       interval: "weekly"
-    open-pull-requests-limit: 5
+      day: "tuesday"
+    open-pull-requests-limit: 3
+    ignore:
+      # Majors are migrations, not bumps -- see the header.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
     labels: ["dependencies", "javascript"]
     groups:
       patch-and-minor:
@@ -128,7 +199,12 @@ updates:
       prefix: "chore(deps)"
     schedule:
       interval: "weekly"
-    open-pull-requests-limit: 2
+      day: "wednesday"
+    open-pull-requests-limit: 3
+    ignore:
+      # Majors are migrations, not bumps -- see the header.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
     labels: ["dependencies", "javascript", "demo"]
     groups:
       patch-and-minor:
@@ -143,7 +219,12 @@ updates:
       prefix: "chore(deps)"
     schedule:
       interval: "weekly"
-    open-pull-requests-limit: 5
+      day: "thursday"
+    open-pull-requests-limit: 3
+    ignore:
+      # Majors are migrations, not bumps -- see the header.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
     labels: ["dependencies", "sdk"]
     groups:
       patch-and-minor:
@@ -155,7 +236,12 @@ updates:
       prefix: "chore(deps)"
     schedule:
       interval: "weekly"
-    open-pull-requests-limit: 2
+      day: "friday"
+    open-pull-requests-limit: 3
+    ignore:
+      # Majors are migrations, not bumps -- see the header.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
     labels: ["dependencies", "sdk"]
     groups:
       patch-and-minor:
@@ -166,8 +252,12 @@ updates:
     commit-message:
       prefix: "chore(deps)"
     schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 2
+      interval: "monthly"
+    open-pull-requests-limit: 1
+    ignore:
+      # Majors are migrations, not bumps -- see the header.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
     labels: ["dependencies", "sdk"]
 
   # Maven: the parent pom and the two modules (core, spring-boot-starter).
@@ -176,8 +266,12 @@ updates:
     commit-message:
       prefix: "chore(deps)"
     schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 3
+      interval: "monthly"
+    open-pull-requests-limit: 1
+    ignore:
+      # Majors are migrations, not bumps -- see the header.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
     labels: ["dependencies", "sdk"]
     groups:
       patch-and-minor:
@@ -188,8 +282,12 @@ updates:
     commit-message:
       prefix: "chore(deps)"
     schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 2
+      interval: "monthly"
+    open-pull-requests-limit: 1
+    ignore:
+      # Majors are migrations, not bumps -- see the header.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
     labels: ["dependencies", "sdk"]
     groups:
       patch-and-minor:
@@ -200,8 +298,12 @@ updates:
     commit-message:
       prefix: "chore(deps)"
     schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 2
+      interval: "monthly"
+    open-pull-requests-limit: 1
+    ignore:
+      # Majors are migrations, not bumps -- see the header.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
     labels: ["dependencies", "sdk"]
 
   - package-ecosystem: "composer"
@@ -209,8 +311,12 @@ updates:
     commit-message:
       prefix: "chore(deps)"
     schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 2
+      interval: "monthly"
+    open-pull-requests-limit: 1
+    ignore:
+      # Majors are migrations, not bumps -- see the header.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
     labels: ["dependencies", "sdk"]
 
   - package-ecosystem: "nuget"
@@ -218,8 +324,12 @@ updates:
     commit-message:
       prefix: "chore(deps)"
     schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 2
+      interval: "monthly"
+    open-pull-requests-limit: 1
+    ignore:
+      # Majors are migrations, not bumps -- see the header.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
     labels: ["dependencies", "sdk"]
     groups:
       patch-and-minor:
@@ -230,8 +340,12 @@ updates:
     commit-message:
       prefix: "chore(deps)"
     schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 2
+      interval: "monthly"
+    open-pull-requests-limit: 1
+    ignore:
+      # Majors are migrations, not bumps -- see the header.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
     labels: ["dependencies", "sdk"]
 
   - package-ecosystem: "pub"
@@ -239,8 +353,12 @@ updates:
     commit-message:
       prefix: "chore(deps)"
     schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 2
+      interval: "monthly"
+    open-pull-requests-limit: 1
+    ignore:
+      # Majors are migrations, not bumps -- see the header.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
     labels: ["dependencies", "sdk"]
 
   - package-ecosystem: "swift"
@@ -248,6 +366,10 @@ updates:
     commit-message:
       prefix: "chore(deps)"
     schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 2
+      interval: "monthly"
+    open-pull-requests-limit: 1
+    ignore:
+      # Majors are migrations, not bumps -- see the header.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
     labels: ["dependencies", "sdk"]
