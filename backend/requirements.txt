@@ -45,7 +45,7 @@ aws-xray-sdk==2.15.0
 watchtower==3.4.0  # CloudWatch logging
 
 # Testing
-pytest==7.4.2
+pytest==7.4.4
 pytest-asyncio==0.23.4
 pytest-cov==6.0.0
 pytest-mock==3.15.1
