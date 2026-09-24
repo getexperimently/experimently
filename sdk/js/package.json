@@ -29,7 +29,7 @@
   "dependencies": {},
   "devDependencies": {
     "@types/jest": "^30.0.0",
-    "@types/node": "^20.0.0",
+    "@types/node": "^26.6.2",
     "jest": "^30.5.1",
     "ts-jest": "^29.1.0",
     "typescript": "^5.4.0"
