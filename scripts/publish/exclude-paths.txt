@@ -148,3 +148,8 @@ docs/deployment/launch-checklist.md
 docs/deployment/operational-drills.md
 docs/design/platform_wireframes.md
 docs/security/gdpr-compliance-checklist.md
+
+# The SOURCE of the published CHANGELOG.md (export.sh step 2b copies it
+# over the generated one). Shipping both would put two changelogs in the
+# published tree.
+scripts/publish/CHANGELOG.public.md
