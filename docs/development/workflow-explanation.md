@@ -90,7 +90,7 @@ Postgres must be reachable on `localhost:5432` for the backend suites (`docker c
 
 - Backend tests are organised by directory (`unit`, `integration`, `smoke`, `contract`, `e2e`);
   the PR gates run by directory, not by marker, so an unmarked test still runs. Markers are
-  declared in `pytest.ini`.
+  declared in `[tool.pytest.ini_options]` in `pyproject.toml` (there is no `pytest.ini`).
 - Every bug fix ships with a regression test in the suite that would have caught it.
 - A new workflow must either be added to the required-checks list in branch protection
   or documented here as advisory.

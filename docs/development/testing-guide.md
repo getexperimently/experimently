@@ -14,7 +14,8 @@ The platform uses a multi-layer testing strategy:
 | Contract | `backend/tests/contract/` | Validate API response shapes | Fast |
 | Frontend | `frontend/src/tests/` | Test React components | Fast |
 
-> **New features (EP-031–036):** See [`docs/testing/integration-testing-plan.md`](../testing/integration-testing-plan.md)
+> **New features (EP-031–036):** the cross-SDK contract suite lives in
+> `tests/sdk-contract/`; run it with the SDK Contract Tests job.
 > for the full integration testing plan covering Java/JVM SDK, React SDK, SOC 2 / ISO 27001
 > audit logging, Salesforce/Jira/GitHub integrations, Full Bayesian, and Split URL Testing.
 > That document includes test file layouts, key scenarios, fixture definitions, and CI workflow additions.
@@ -129,17 +130,39 @@ npm test -- --coverage      # With coverage report
 
 ## Test Markers
 
-Defined in `backend/pytest.ini`:
+Declared in `[tool.pytest.ini_options] markers` in **`pyproject.toml`**.
+There is no `pytest.ini`; the configuration was consolidated into
+`pyproject.toml`. Declaring a marker there is what stops pytest warning about
+it — `--strict-markers` is **not** enabled (`addopts = ""`), so an undeclared
+marker warns rather than fails.
 
 | Marker | Usage |
 |--------|-------|
-| `@pytest.mark.unit` | Fast unit tests, no external deps |
-| `@pytest.mark.integration` | Requires database |
-| `@pytest.mark.e2e` | Requires full stack running |
-| `@pytest.mark.slow` | Tests taking >5 seconds |
-| `@pytest.mark.requires_db` | Explicit DB requirement |
+| `@pytest.mark.unit` | Fast, no external dependencies |
+| `@pytest.mark.integration` | Requires the database |
+| `@pytest.mark.e2e` | Requires the full stack |
+| `@pytest.mark.regression` | **Guards a specific past bug** — see below |
+| `@pytest.mark.modules` | Needs the modules package; skipped in a core build |
+| `@pytest.mark.smoke` | Wiring checks that must hold for any build of this tree |
+| `@pytest.mark.slow` | Slow running |
+| `@pytest.mark.api` | API tests |
+| `@pytest.mark.contract` | API contract tests |
+| `@pytest.mark.cors` | CORS tests |
+| `@pytest.mark.security` | Security header tests |
+| `@pytest.mark.dependency` | Dependency-injection tests |
+| `@pytest.mark.validation` | Validation tests |
+| `@pytest.mark.realistic` | Realistic scenarios (require a running platform) |
+| `@pytest.mark.requires_db` | Explicit database requirement |
 | `@pytest.mark.requires_aws` | Needs LocalStack or AWS |
-| `@pytest.mark.contract` | API contract validation |
+| `@pytest.mark.cognito_integration` | Cognito tests (require moto) |
+
+`regression` is not optional bookkeeping. Every bug fix carries a
+`@pytest.mark.regression` test that fails on the old code, and the
+`regression-guard` CI job fails a pull request labelled `bug` that changes no
+test file. Run them with `pytest -m regression`.
+
+Note the PR gates run by **directory** (`unit`, `integration`, `smoke`,
+`contract`, `e2e`), not by marker — so an unmarked test still runs.
 
 ---
 
@@ -490,7 +513,7 @@ def test_debug_db_state(db_session, make_experiment):
 
 ```python
 # If tests fail with "Class is not mapped" errors:
-from backend.app.db.session import clear_schema_cache
+from backend.app.core.database_config import clear_schema_cache
 clear_schema_cache()
 ```
 

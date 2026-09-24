@@ -1,6 +1,7 @@
 -r base.txt
 
 # Debugging extras not needed in CI or production.
-# (black/isort/mypy/flake8/mkdocs are already pinned in backend/requirements.txt)
+# (ruff, mypy and mkdocs are already pinned in backend/requirements.txt;
+# ruff replaced black, isort and flake8)
 ipython==8.15.0
 debugpy==1.6.7

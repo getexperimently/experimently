@@ -7,11 +7,11 @@ This guide explains how to access and use the API documentation for the experime
 The API documentation is available in two formats:
 
 1. **Swagger UI**: Interactive documentation where you can try out API endpoints
-   - URL: `/api/v1/docs`
+   - URL: `/docs`
    - Best for: Developers who want to test API endpoints directly
 
 2. **ReDoc**: Clean, responsive documentation with better navigation
-   - URL: `/api/v1/redoc`
+   - URL: `/redoc`
    - Best for: Reviewing API structure and understanding request/response formats
 
 > **Note**: In production environments, these documentation endpoints may be disabled for security reasons.
@@ -147,22 +147,30 @@ Here are the key API workflows for the experimentation platform:
 
 1. Create feature flag (`POST /api/v1/feature-flags`)
 2. Update flag configurations (`PUT /api/v1/feature-flags/{feature_flag_id}`)
-3. Evaluate flags for user (`POST /api/v1/feature-flags/evaluate`)
-4. Create user-specific overrides (`POST /api/v1/feature-flags/{feature_flag_id}/overrides`)
+3. Evaluate a flag for a user
+   (`GET /api/v1/feature-flags/evaluate/{flag_key}?user_id=...`, with an
+   API key; user attributes go in `context` as URL-encoded JSON)
+
+There is no per-user override endpoint. Target individual users with the
+flag's `targeting_rules` instead — see
+[Targeting & Rules](../Enhanced_Rules_Engine_Reference.md).
 
 ## Rate Limiting
 
 The API implements rate limiting to ensure fair usage and system stability:
 
-- Standard endpoints: 100 requests per minute
-- Tracking endpoints: 1000 requests per minute
-- Batch tracking endpoint: 10 requests per minute (each request can contain up to 100 events)
+Limits are per IP, resolved in `backend/app/middleware/rate_limiter.py`:
+an exact path match wins, then the SDK prefixes, then the default.
 
-Rate limit headers are included in responses:
+| paths | limit |
+|---|---|
+| `/api/v1/auth/token`, `/auth/login` | 10 / min |
+| `/api/v1/auth/signup`, `/auth/forgot-password`, `/auth/reset-password` | 5 / min |
+| `/api/v1/tracking/`, `/api/v1/feature-flags/evaluate/`, `/api/v1/feature-flags/user/` | `SDK_RATE_LIMIT_PER_MINUTE`, default **6000 / min** |
+| everything else | **300 / min** |
 
-- `X-RateLimit-Limit`: Maximum requests per minute
-- `X-RateLimit-Remaining`: Remaining requests for the current window
-- `X-RateLimit-Reset`: Time in seconds until the limit resets
+The SDK ceiling is high on purpose: one server-side SDK, or one office behind
+a NAT, is a single IP sending thousands of requests a minute.
 
 ## Security Best Practices
 
@@ -174,15 +182,20 @@ When using the API, follow these security best practices:
 4. **Validate inputs**: Even though the API validates inputs, also validate on the client side
 5. **Handle errors gracefully**: Properly handle API errors in your application
 
-## Webhook Integration
+## Webhooks
 
-The API provides webhooks for real-time event notifications:
+The webhook endpoints are **inbound** — the platform receives callbacks from
+third-party services, it does not send event notifications to yours:
 
-1. Configure webhooks (`POST /api/v1/webhooks`)
-2. Receive event notifications (experiment starts, completions, significant results)
-3. Implement webhook handlers in your application
+```
+POST /api/v1/integrations/webhooks/github
+POST /api/v1/integrations/webhooks/jira
+POST /api/v1/integrations/webhooks/salesforce
+```
 
-Webhook payloads are signed using HMAC-SHA256 for security.
+There is no `POST /api/v1/webhooks` and no outbound event-notification
+feature. For notifications on experiment events, use the Slack and email
+alerting built into the platform instead.
 
 ## SDK Support
 

@@ -128,7 +128,8 @@ Common types:
 4. Ensure all tests pass locally
 5. Push your branch and create a Pull Request
 6. Fill out the PR template with all required information
-7. Request reviews from at least two team members
+7. Request review. `main` requires one approving review and, through
+   `.github/CODEOWNERS`, the owner of every path the change touches
 8. Address review feedback
 
 PRs should be small and focused on a single issue or feature. Large changes should be broken down into smaller PRs.
@@ -138,8 +139,13 @@ PRs should be small and focused on a single issue or feature. Large changes shou
 ### Python
 
 -   Follow [PEP 8](https://www.python.org/dev/peps/pep-0008/) style guide
--   Use [Black](https://github.com/psf/black) for code formatting (line length: 88)
--   Sort imports with [isort](https://pycqa.github.io/isort/)
+-   Format, sort imports and lint with [ruff](https://docs.astral.sh/ruff/)
+    (line length 88, target `py311`). Ruff replaced black, isort and flake8:
+    one tool, one config block (`[tool.ruff]` in `pyproject.toml`), the same
+    version in CI, pre-commit and the venv. `.flake8` no longer exists; do not
+    reintroduce black or isort.
+-   `make format` runs the two fixing commands; `make lint` runs exactly what
+    the `lint` CI job runs. Both scope ruff to `backend/ scripts/ modules/`
 -   Use type hints for all function parameters and return values
 -   Document functions and classes with docstrings (Google style)
 -   Use meaningful variable and function names
@@ -150,7 +156,9 @@ PRs should be small and focused on a single issue or feature. Large changes shou
 -   Use TypeScript for all new code
 -   Use functional components and hooks for React
 -   Prefer named exports over default exports
--   Use ESLint and Prettier for code formatting
+-   Lint with ESLint (`frontend/eslint.config.mjs`, `--max-warnings 0`, over
+    `frontend/src` and `modules/frontend/src`) and typecheck with `tsc
+    --noEmit`. There is no Prettier in this repository
 
 ### Infrastructure as Code
 
@@ -255,14 +263,36 @@ We use GitHub Actions for CI/CD:
 
 ### CI Checks
 
-All PRs must pass these checks:
+`main` requires these 20 checks. This list is what branch protection
+actually enforces, not a description of what CI happens to run -- a pull
+request cannot merge until every one reports success:
 
--   Unit tests
--   Integration tests
--   Code formatting (Black, Prettier)
--   Linting (Flake8, ESLint)
--   Type checking (MyPy, TypeScript)
--   Security scanning (Bandit, npm audit)
+| | |
+|---|---|
+| `Unit Tests` | `integration-tests` |
+| `Smoke Tests` | `Module Tests` |
+| `Frontend Tests` | `Browser E2E` |
+| `SDK Unit Tests` | `SDK Contract Tests` |
+| `SDK Live Contract / sdk-live-contract (core)` | `CDK Stack Tests (Python)` |
+| `core-build` | `full-build` |
+| `Base Requirements Only` | `Docker Smoke` |
+| `lint` | `regression-guard` |
+| `Security Scan Summary` | `Release Gate Summary` |
+| `Export Sweep` | `DCO` |
+
+`lint` is the composite gate: ruff (format + lint), import-linter for the
+core/modules boundary, `reuse lint` for licence headers, the requirements-lock
+checks, eslint and `tsc --noEmit`, hadolint over the Dockerfiles, and
+actionlint over the workflows. `make lint` runs the same thing locally.
+
+Security scanning is Semgrep, Bandit, gitleaks, trufflehog and the container
+and dependency scans, summarised by `Security Scan Summary`. `Export Sweep`
+runs the publication gate (`scripts/publish/export.sh`) on every pull request,
+so a change that would make the repository unpublishable fails before merge.
+
+Note there is no mypy in the gate. It is useful (`mypy backend/app/`) but it
+is not wired into `make lint` or the `lint` job, so do not describe it as
+enforced.
 
 ## Security Guidelines
 

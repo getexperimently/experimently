@@ -120,9 +120,9 @@ If your estimated runtime is too long, you have several options:
 
 2. **Increase the MDE**: Accept a larger minimum effect. If a 5% lift is enough to launch, you do not need to detect a 2% lift.
 
-3. **Apply CUPED variance reduction**: Use pre-experiment covariate data to reduce metric variance. This can reduce required sample size by 20-40%. See the [CUPED guide](/docs/experiments/cuped).
+3. **Apply CUPED variance reduction**: Use pre-experiment covariate data to reduce metric variance. This can reduce required sample size by 20-40%. See the [CUPED guide](../api/cuped.md).
 
-4. **Use sequential testing (mSPRT)**: Instead of a fixed sample, check results continuously with a valid stopping rule. You may stop early when significance is reached, potentially cutting runtime in half. See [Statistical Methods](/docs/experiments/statistics).
+4. **Use sequential testing (mSPRT)**: Instead of a fixed sample, check results continuously with a valid stopping rule. You may stop early when significance is reached, potentially cutting runtime in half. See [Statistical Methods](../api/sequential-testing.md).
 
 5. **Focus on a high-volume segment**: Run the experiment on the user segment most likely to exhibit the effect, where you have the most traffic.
 
@@ -140,7 +140,7 @@ For a 3-variant experiment with alpha=0.05:
 - `corrected_alpha = 0.05 / 2 = 0.025`
 - This increases the required sample size per variant
 
-This is the most conservative correction. For large numbers of variants, you may prefer Benjamini-Hochberg (BH) FDR correction — see the [FDR Correction guide](/docs/statistics/fdr-correction).
+This is the most conservative correction. For large numbers of variants, you may prefer Benjamini-Hochberg (BH) FDR correction — see the [FDR Correction guide](fdr-correction.md).
 
 ---
 
@@ -162,7 +162,7 @@ Consider sequential testing (mSPRT) rather than fixed-sample testing when:
 - You have variable traffic (e.g. weekday/weekend patterns)
 - The cost of running a harmful experiment outweighs the cost of false positives
 
-See [Statistical Methods](/docs/experiments/statistics) for details on mSPRT and early stopping.
+See [Statistical Methods](../api/sequential-testing.md) for details on mSPRT and early stopping.
 
 ---
 
@@ -340,8 +340,8 @@ print(f"Estimated runtime: {result['runtime_days']:.1f} days")
 
 ## Further Reading
 
-- [CUPED Variance Reduction](/docs/experiments/cuped) — reduce required sample size by 20-40%
-- [Sequential Testing](/docs/experiments/statistics) — stop experiments early when significance is reached
-- [Post-Stratification](/docs/statistics/post-stratification) — another variance reduction technique
-- [Multi-Armed Bandits](/docs/experiments/mab) — when to use exploration instead of hypothesis testing
-- [Interaction Detection](/docs/guides/interaction-detection) — avoid bias from experiment overlap
+- [CUPED Variance Reduction](../api/cuped.md) — reduce required sample size by 20-40%
+- [Sequential Testing](../api/sequential-testing.md) — stop experiments early when significance is reached
+- [Post-Stratification](post-stratification.md) — another variance reduction technique
+- [Multi-Armed Bandits](../api/multi-armed-bandit.md) — when to use exploration instead of hypothesis testing
+- [Interaction Detection](../api/interaction-detection.md) — avoid bias from experiment overlap

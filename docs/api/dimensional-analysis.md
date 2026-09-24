@@ -37,7 +37,7 @@ Heterogeneous treatment effect detection flags cases where the treatment effect 
 
 ## API Reference
 
-### GET /api/v1/results/{experiment_id}/breakdown
+### GET /api/v1/experiments/{experiment_id}/segmented-results/{segment_by}
 
 Returns per-segment breakdowns for the experiment results.
 

@@ -107,11 +107,11 @@ The AWS user or role used by the application needs these CloudWatch permissions:
 
 ## Integration with FastAPI
 
-The monitoring middleware should already be integrated in `app/main.py`. If you need to add it manually:
+The monitoring middleware should already be integrated in `backend/app/main.py`. If you need to add it manually:
 
 ```python
-from app.middleware.error_middleware import ErrorMiddleware
-from app.middleware.metrics_middleware import MetricsMiddleware
+from backend.app.middleware.error_middleware import ErrorMiddleware
+from backend.app.middleware.metrics_middleware import MetricsMiddleware
 
 # Add performance metrics middleware (should be first to get accurate measurements)
 app.add_middleware(

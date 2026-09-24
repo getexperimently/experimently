@@ -11,7 +11,6 @@ This directory contains all operational documentation for deploying and operatin
 | [Deployment Guide](deployment-guide.md) | DevOps / Engineers | Step-by-step guide for deploying to production |
 | [Rollback Runbook](rollback-runbook.md) | On-call Engineers | How to roll back a deployment in < 5 minutes |
 | [Disaster Recovery](disaster-recovery.md) | SRE / DevOps | DR scenarios, runbooks, and recovery procedures |
-| [Launch Checklist](launch-checklist.md) | All teams | Pre-launch approval checklist and Go/No-Go sign-off |
 | [Secrets Management](secrets-management.md) | DevOps / Security | How secrets are stored, injected, and rotated |
 
 ---

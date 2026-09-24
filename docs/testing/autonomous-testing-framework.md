@@ -189,15 +189,15 @@ python backend/tests/realistic/data_generator.py --scenario all --dry-run
 
 Three behavioral profiles model different user segments:
 
-### Casual User (`profiles/casual_user.py`)
+### Casual User (`backend/tests/realistic/profiles/casual_user.py`)
 - 1-2 sessions/week, 3% CVR, 65% bounce rate
 - Sensitive to UX complexity (treatment uplift may be negative)
 
-### Power User (`profiles/power_user.py`)
+### Power User (`backend/tests/realistic/profiles/power_user.py`)
 - 6 sessions/week, 20% CVR, 10% bounce rate
 - Early adopter -- responds positively to new features
 
-### Churn Risk User (`profiles/churn_risk_user.py`)
+### Churn Risk User (`backend/tests/realistic/profiles/churn_risk_user.py`)
 - Declining engagement over 4 weeks (10% -> 2% CVR)
 - Re-engagement boost from treatment (+15% CVR)
 - Useful for holdout group and novelty effect testing

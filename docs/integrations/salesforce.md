@@ -87,14 +87,14 @@ The platform uses the **OAuth 2.0 Client Credentials** flow. Credentials are sto
 To receive incoming events from Salesforce, configure a Salesforce Outbound Message (or Process Builder / Flow) to POST to:
 
 ```
-POST /api/v1/integrations/{integration_id}/webhook/salesforce
+POST /api/v1/integrations/webhooks/salesforce
 ```
 
 ### Configuring Outbound Messages in Salesforce
 
 1. In Salesforce, go to **Setup → Workflow Actions → Outbound Messages → New Outbound Message**
 2. Set the **Endpoint URL** to your webhook URL:
-   `https://your-platform.example.com/api/v1/integrations/{integration_id}/webhook/salesforce`
+   `https://your-platform.example.com/api/v1/integrations/webhooks/salesforce`
 3. Set the **User to Send As** to a user with API access
 4. Select the fields you want to include in the payload
 

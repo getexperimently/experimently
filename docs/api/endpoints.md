@@ -1347,7 +1347,7 @@ Returns CUPED-adjusted effect estimates and variance reduction percentage.
 See [Dimensional Analysis Guide](dimensional-analysis.md) for full documentation.
 
 ```
-GET /api/v1/results/{experiment_id}/breakdown
+GET /api/v1/experiments/{experiment_id}/segmented-results/{segment_by}
 ```
 Returns per-segment statistics with Bonferroni-corrected significance thresholds.
 
@@ -1437,7 +1437,7 @@ POST /api/v1/wizard/drafts              — Create draft
 GET  /api/v1/wizard/drafts              — List my drafts
 GET  /api/v1/wizard/drafts/{id}         — Get draft
 PUT  /api/v1/wizard/drafts/{id}         — Update draft step
-POST /api/v1/wizard/drafts/{id}/validate — Validate draft
+POST /api/v1/wizard/validate — Validate draft
 POST /api/v1/wizard/drafts/{id}/submit   — Submit → create experiment
 ```
 
@@ -1467,8 +1467,10 @@ POST   /api/v1/rollout-schedules/stages/{stage_id}/advance — Manual advance
 See [Audit Logging Guide](audit-logging.md) for full documentation.
 
 ```
-GET  /api/v1/audit-logs                   — Query audit logs (ANALYST+)
-GET  /api/v1/audit-logs/{id}              — Get single log entry (ANALYST+)
+GET  /api/v1/audit-logs/                  — Query audit logs (ANALYST+)
+GET  /api/v1/audit-logs/entity/{entity_type}/{entity_id}
+                                          — Entries for one entity (ANALYST+)
+GET  /api/v1/audit-logs/user/{user_id}    — Entries for one actor (ANALYST+)
 GET  /api/v1/audit-logs/stats             — Aggregate stats (ANALYST+)
 GET  /api/v1/audit-logs/stream            — SSE real-time stream (ANALYST+)
 POST /api/v1/feature-flags/bulk-toggle    — Bulk enable/disable/archive (DEVELOPER+)
@@ -1537,10 +1539,10 @@ GET  /api/v1/mcp/manifest                 — MCP tool manifest (public)
 ### Scheduler Health
 
 ```
-GET /api/v1/scheduler/health          — Scheduler health summary
-GET /api/v1/scheduler/jobs            — List scheduled jobs and last run times
-GET /api/v1/scheduler/jobs/{job_name} — Get specific job status
-POST /api/v1/scheduler/jobs/{job_name}/trigger — Manual trigger (ADMIN)
+GET  /api/v1/scheduler/health           — Health summary for every scheduler
+GET  /api/v1/scheduler/health/{name}    — Health of one scheduler
+GET  /api/v1/scheduler/{name}/history   — Recent run history for one scheduler
+POST /api/v1/scheduler/notify/test      — Send a test notification
 ```
 
 ---
@@ -1548,11 +1550,12 @@ POST /api/v1/scheduler/jobs/{job_name}/trigger — Manual trigger (ADMIN)
 ### ETL / Glue Jobs
 
 ```
-GET  /api/v1/etl/jobs                 — List ETL job runs
-POST /api/v1/etl/jobs/{job_name}/run  — Trigger ETL job (ADMIN)
-GET  /api/v1/etl/jobs/{run_id}        — Get job run status
-GET  /api/v1/etl/jobs/{run_id}/logs   — Get job logs
-POST /api/v1/etl/jobs/{run_id}/cancel — Cancel running job (ADMIN)
+POST /api/v1/etl/jobs/run               — Trigger an ETL job run
+GET  /api/v1/etl/jobs/{run_id}/status   — Status of one run
+POST /api/v1/etl/crawler/run            — Trigger the Glue crawler
+GET  /api/v1/etl/crawler/status         — Crawler status
+POST /api/v1/etl/partitions/add         — Register a new partition
+POST /api/v1/etl/query                  — Run an Athena query
 ```
 
 ---
@@ -1625,9 +1628,9 @@ DELETE /api/v1/integrations/{id}          — Deactivate integration (DEVELOPER+
 **Webhook receivers**:
 
 ```
-POST /api/v1/integrations/{id}/webhook/jira        — Receive Jira issue events
-POST /api/v1/integrations/{id}/webhook/salesforce  — Receive Salesforce outbound messages
-POST /api/v1/integrations/{id}/webhook/github      — Receive GitHub events (HMAC-SHA256 validated)
+POST /api/v1/integrations/webhooks/jira        — Receive Jira issue events
+POST /api/v1/integrations/webhooks/salesforce  — Receive Salesforce outbound messages
+POST /api/v1/integrations/webhooks/github      — Receive GitHub events (HMAC-SHA256 validated)
 ```
 
 Supported `IntegrationType` values: `JIRA`, `SALESFORCE`, `GITHUB`.

@@ -44,7 +44,7 @@ This guide provides solutions to common issues with Experimently's monitoring an
    ```
 
 3. **Verify Middleware Registration**
-   Check `app/main.py` to ensure the middleware is registered:
+   Check `backend/app/main.py` to ensure the middleware is registered:
    ```python
    app.add_middleware(
        MetricsMiddleware,
@@ -159,7 +159,7 @@ This guide provides solutions to common issues with Experimently's monitoring an
    ```
 
 3. **Verify Calculation Logic**
-   Review the calculation logic in `app/middleware/metrics_middleware.py`:
+   Review the calculation logic in `backend/app/middleware/metrics_middleware.py`:
    ```python
    # Check calculation steps
    memory_change = end_memory - start_memory if end_memory and start_memory else 0
@@ -215,7 +215,7 @@ This guide provides solutions to common issues with Experimently's monitoring an
 **Solutions:**
 
 1. **Increase Timeout**
-   Modify `app/utils/aws_client.py`:
+   Modify `backend/app/utils/aws_client.py`:
    ```python
    # Increase timeout for client creation
    client = boto3.client('cloudwatch',
@@ -304,7 +304,7 @@ Test CloudWatch metric publishing locally:
 
 ```python
 # test_metrics.py
-from app.utils.aws_client import AWSClient
+from backend.app.utils.aws_client import AWSClient
 
 def test_metrics():
     client = AWSClient.get_cloudwatch_metrics_client(
@@ -340,7 +340,7 @@ Test error capture and logging:
 import asyncio
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
-from app.middleware.error_middleware import ErrorMiddleware
+from backend.app.middleware.error_middleware import ErrorMiddleware
 
 app = FastAPI()
 

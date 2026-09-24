@@ -394,7 +394,8 @@ Starts an experiment.
 #### Stop Experiment
 
 ```
-POST /api/v1/experiments/{experiment_id}/stop
+POST /api/v1/experiments/{experiment_id}/pause
+POST /api/v1/experiments/{experiment_id}/complete
 ```
 
 Stops an experiment.

@@ -56,9 +56,11 @@ curl -X GET "http://localhost:8000/api/v1/audit-logs?entity_type=feature_flag&li
 
 ---
 
-### GET /api/v1/audit-logs/{log_id}
+### GET /api/v1/audit-logs/entity/{entity_type}/{entity_id}
 
-Retrieve a single audit log entry with full detail.
+Every entry recorded against one entity. There is no fetch-one-by-id route;
+query by entity, by actor (`/audit-logs/user/{user_id}`), or filter the
+collection (`/audit-logs/`).
 
 ---
 

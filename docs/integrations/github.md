@@ -82,7 +82,7 @@ The `token` is stored encrypted and never returned in GET responses. The `webhoo
 1. In your GitHub repository, go to **Settings → Webhooks → Add webhook**
 2. Set the **Payload URL** to:
    ```
-   https://your-platform.example.com/api/v1/integrations/{integration_id}/webhook/github
+   https://your-platform.example.com/api/v1/integrations/webhooks/github
    ```
 3. Set **Content type** to `application/json`
 4. Set the **Secret** to the same value you used as `webhook_secret` when creating the integration
@@ -96,7 +96,7 @@ The `token` is stored encrypted and never returned in GET responses. The `webhoo
 ## Webhook Endpoint
 
 ```
-POST /api/v1/integrations/{integration_id}/webhook/github
+POST /api/v1/integrations/webhooks/github
 ```
 
 ### Required Headers

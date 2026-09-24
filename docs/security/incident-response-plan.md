@@ -108,7 +108,7 @@ aws cognito-idp admin-disable-user \
 - Pull CloudTrail logs for the account's AWS activity
 - Review all `experimentation.audit_logs` entries for the past 24 hours for the account
 - Determine what data was accessed: which experiments, which feature flags, which assignment records
-- Determine if data was exported via the results API (`GET /api/v1/results/*`)
+- Determine if data was exported via the results API (`GET /api/v1/results/{experiment_id}` and its sub-routes)
 - Check if any experiment configurations were modified (`action_type = 'experiment_update'`)
 
 **Containment:**

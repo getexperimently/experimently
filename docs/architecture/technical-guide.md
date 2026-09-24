@@ -270,7 +270,7 @@ This means:
 
 ## Results Engine
 
-The analytics results engine (`backend/app/services/analytics_results_engine.py`) computes:
+The analytics results engine (`backend/app/services/analysis_service.py`) computes:
 
 ### Statistical Methods
 
@@ -426,7 +426,7 @@ Recomputes variant weights for multi-armed bandit experiments and persists them 
 POST /api/v1/results/{id}/invalidate-cache
 
 # Force fresh feature flag state
-GET /api/v1/feature-flags/{key}/evaluate?skip_cache=true
+GET /api/v1/feature-flags/evaluate/{flag_key}?skip_cache=true
 ```
 
 ---
@@ -664,7 +664,7 @@ POST /api/v1/feature-flags
 {"key": "new-payment-provider", "rollout_percentage": 5}
 
 # Configure safety monitoring
-POST /api/v1/safety/configs
+POST /api/v1/safety/feature-flags/{feature_flag_id}/config
 {
   "feature_flag_id": "FLAG_ID",
   "max_error_rate": 0.02,     # 2% error rate triggers rollback

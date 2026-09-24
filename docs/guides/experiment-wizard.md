@@ -119,7 +119,7 @@ curl -X PUT "http://localhost:8000/api/v1/wizard/drafts/draft-uuid" \
 
 ---
 
-### POST /api/v1/wizard/drafts/{draft_id}/validate
+### POST /api/v1/wizard/validate
 
 Validate the current draft state before submission. Returns a list of validation errors, or an empty list if the draft is ready to submit.
 
