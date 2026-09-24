@@ -351,7 +351,7 @@ jobs:
 
       - uses: android-actions/setup-android@v4
 
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v6
         with:
           # AGP 8.2 needs Gradle 8.0+. There is no committed gradlew (a
           # gradle-wrapper.jar is a binary blob this repo does not carry); pinning
