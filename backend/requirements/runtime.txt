@@ -38,7 +38,7 @@ slack-sdk==3.44.1
 sendgrid==6.12.5
 
 # Statistics
-numpy==1.26.4
+numpy==2.4.6
 scipy==1.17.1
 pandas==2.2.3
 statsmodels==0.15.0

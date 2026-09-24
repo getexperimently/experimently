@@ -66,7 +66,7 @@ locust==2.39.1   # 2.40+ requires pytest>=8.3; we pin pytest 7.4.
                  # the pytest 7 -> 9 migration first (#225).
 
 # Statistical Analysis
-numpy==1.26.4   # scipy 1.17 needs numpy>=1.26; 2.x is a separate major bump
+numpy==2.4.6   # scipy 1.17 needs numpy>=1.26; 2.x is a separate major bump
 scipy==1.17.1
 pandas==2.2.3   # statsmodels 0.15 needs pandas>=2.2
 statsmodels==0.15.0
