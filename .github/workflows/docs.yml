@@ -9,8 +9,11 @@
 name: Docs
 
 on:
-  pull_request:
-    paths: ['docs/**', 'mkdocs.yml', '.github/workflows/docs.yml']
+  # No `pull_request` trigger: documentation merges without a CI gate
+  # (founder, 2026-09-24). The build still runs on every push to main below,
+  # so a broken link or anchor surfaces within minutes of the merge rather
+  # than blocking the pull request. `Docs` is not one of the 20 required
+  # checks, so removing it here blocks nothing.
   push:
     branches: [main]
     paths: ['docs/**', 'mkdocs.yml', '.github/workflows/docs.yml']
