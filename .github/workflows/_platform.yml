@@ -142,7 +142,7 @@ jobs:
       # Maven itself comes from each module's ./mvnw, not from the runner.
       - name: Set up Java
         if: contains(inputs.sdks, 'java') || contains(inputs.sdks, 'android')
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '17'
