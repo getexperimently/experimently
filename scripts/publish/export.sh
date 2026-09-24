@@ -191,6 +191,36 @@ fi
 log "history rewritten: $COMMITS_BEFORE commits -> $COMMITS_AFTER"
 
 # ---------------------------------------------------------------------------
+# 2b. Replace CHANGELOG.md with the hand-written public one.
+#
+# release-please generates the file in the private repository, so every link
+# in it is wrong here in two ways that cannot both be patched:
+#
+#   - the URLs name the private repository (74 links, all 404)
+#   - the COMMIT HASHES do not exist, because the rewrite above changes every
+#     one of them; that is what strips docs/planning/ and the account id
+#
+# The org name could be sed'ed. The hashes could not, so the generated file is
+# structurally unpublishable and a prose changelog is written by hand instead.
+# Check 3f below fails if it still mentions the private repository.
+# ---------------------------------------------------------------------------
+PUBLIC_CHANGELOG="$REPO_ROOT/scripts/publish/CHANGELOG.public.md"
+if [ -f "$PUBLIC_CHANGELOG" ] && [ -f "$WORK/CHANGELOG.md" ]; then
+    cp "$PUBLIC_CHANGELOG" "$WORK/CHANGELOG.md"
+    git -C "$WORK" add CHANGELOG.md
+    git -C "$WORK" -c user.name="export" -c user.email="export@localhost" \
+        commit -q -m "docs: the public changelog
+
+The generated changelog cannot be published from here: its commit links
+name hashes that do not exist in this repository, because publication
+rewrites history." || true
+    log "replaced CHANGELOG.md with the public one"
+elif [ -f "$WORK/CHANGELOG.md" ]; then
+    echo "export: $PUBLIC_CHANGELOG is missing but CHANGELOG.md ships" >&2
+    exit 1
+fi
+
+# ---------------------------------------------------------------------------
 # 3. The sweep. Each check writes PASS/FAIL to the summary and its evidence to
 #    a log; none of them stops the others.
 # ---------------------------------------------------------------------------
@@ -417,6 +447,19 @@ case $message_status in
            "$(git -C "$WORK" rev-list --count --all) commits, $(git -C "$WORK" tag | wc -l | tr -d ' ') tags" ;;
     *) result "no forbidden identifiers in commit or tag messages" 1 "grep failed (see message-claims.txt)" ;;
 esac
+
+# 3e-bis. The published CHANGELOG does not name the private repository.
+#     The generated one carries 74 such links and hashes that do not exist
+#     here; step 2b replaces it, and this is what proves the replacement ran.
+if [ -f "$WORK/CHANGELOG.md" ]; then
+    if grep -qE 'amarkanday/experimentation-platform' "$WORK/CHANGELOG.md"; then
+        result "the published changelog is the public one" 1 \
+            "CHANGELOG.md still names the private repository"
+    else
+        result "the published changelog is the public one" 0 \
+            "$(wc -l < "$WORK/CHANGELOG.md" | tr -d ' ') lines, no private links"
+    fi
+fi
 
 # 3f. No surviving file refers to a removed path (a dead link in the public
 #     tree). One pattern per entry, derived from the exclusion file: a removed
