@@ -771,10 +771,23 @@ jobs:
           curl -s localhost:3000/docs -o docs.html
           # dynamic route: the results page html, not the login page / 404
           grep -q '"page":"/results/\[id\]"' results.html
-          # /docs is a hub of links into the documentation site (P3.4): the
-          # page is served, and its links leave the dashboard's origin.
+          # /docs is a hub of links into the documentation (P3.4): the page is
+          # served, and its links leave the dashboard's origin.
+          #
+          # Both URL shapes are accepted, because `docsUrl()` has two modes and
+          # this must not pin one. The default is a GitHub blob URL
+          # (`.../docs/getting-started/quick-start.md`); setting
+          # NEXT_PUBLIC_DOCS_URL to a built MkDocs site gives the trailing-slash
+          # directory form (`.../getting-started/quick-start/`). This assertion
+          # used to accept only the second, which is why changing the default
+          # failed here -- correctly: it is exactly the pin doing its job.
+          #
+          # What it does NOT prove is that the link resolves. It cannot: the
+          # target repository is private and has no published docs site yet.
+          # `docs-links.test.ts` covers the half that can be checked offline --
+          # that every linked page exists under docs/.
           grep -q 'Experimently Documentation' docs.html
-          grep -qE 'href="https?://[^"]+/getting-started/quick-start/"' docs.html
+          grep -qE 'href="https?://[^"]+/getting-started/quick-start(\.md|/)"' docs.html
           # /api and /health are proxied to the api container
           curl -sf localhost:3000/health/ready >/dev/null
           test "$(curl -sL -o /dev/null -w '%{http_code}' localhost:3000/api/v1/experiments/)" = "401"
