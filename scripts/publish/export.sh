@@ -28,6 +28,58 @@
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+FORBIDDEN="$REPO_ROOT/scripts/publish/forbidden.txt"
+if [ ! -f "$FORBIDDEN" ]; then
+    # The published copy of this repository does not carry forbidden.txt (it is
+    # in exclude-paths.txt on purpose). This script exports the private tree; it
+    # is not meant to run from the tree it produced.
+    echo "export: $FORBIDDEN is missing -- this is the internal publication" >&2
+    echo "        tool and does not run from a published checkout." >&2
+    exit 1
+fi
+
+# Every `id` and `re` rule, joined into one ERE. `id` strings are literals, so
+# escape the ERE metacharacters in them rather than trusting them to be inert.
+build_claims_regex() {
+    awk '
+        /^[[:space:]]*(#|$)/ { next }
+        $1 == "id" { s = $2; gsub(/[][(){}.*+?^$|\\]/, "\\\\&", s); print s; next }
+        $1 == "mr" { print $2; next }
+        $1 == "re" { sub(/^[[:space:]]*re[[:space:]]+/, ""); print; next }
+    ' "$FORBIDDEN" | paste -sd '|' -
+}
+
+# What may appear in a commit or tag MESSAGE: the `id` and `mr` rules only.
+# `re` rules are tree-only -- see the header of forbidden.txt for why.
+build_message_regex() {
+    awk '
+        /^[[:space:]]*(#|$)/ { next }
+        $1 == "id" { s = $2; gsub(/[][(){}.*+?^$|\\]/, "\\\\&", s); print s; next }
+        $1 == "mr" { print $2; next }
+    ' "$FORBIDDEN" | paste -sd '|' -
+}
+
+# `id` and `mr` rules are read field-wise, so a pattern containing a space
+# would be silently truncated to its first word and the redaction would miss.
+# Reject that here rather than discover it in a published message.
+validate_forbidden() {
+    awk '
+        /^[[:space:]]*(#|$)/ { next }
+        ($1 == "id" || $1 == "mr") && NF != 3 {
+            printf "%s:%d: `%s` rule needs exactly <pattern> <replacement>, no spaces: %s\n", FILENAME, FNR, $1, $0 > "/dev/stderr"; bad = 1 }
+        $1 != "id" && $1 != "mr" && $1 != "re" {
+            printf "%s:%d: unknown rule type `%s`\n", FILENAME, FNR, $1 > "/dev/stderr"; bad = 1 }
+        END { exit bad ? 1 : 0 }
+    ' "$FORBIDDEN"
+}
+
+# The `id` rules as a filter-repo --replace-message file. Generated rather than
+# stored so there is one source of truth, and written outside the export tree.
+write_replace_message() {  # $1 = destination
+    awk '$1 == "id" { print "literal:" $2 "==>" $3 }
+         $1 == "mr" { print "regex:"   $2 "==>" $3 }' "$FORBIDDEN" > "$1"
+    [ -s "$1" ]
+}
 EXCLUDE="$REPO_ROOT/scripts/publish/exclude-paths.txt"
 MANIFEST="$REPO_ROOT/scripts/publish/ships-manifest.txt"
 REF=main
@@ -119,8 +171,18 @@ all_paths "$WORK" > "$LOGS/history-paths-before.txt"
 # 2. Rewrite history. filter-repo drops the origin remote afterwards on
 #    purpose: a rewritten history must never be pushed back where it came from.
 # ---------------------------------------------------------------------------
+REPLACE_MSG="$LOGS/replace-message.txt"
+write_replace_message "$REPLACE_MSG" || { echo "export: no id rules in $FORBIDDEN" >&2; exit 1; }
 log "removing $(grep -cvE '^\s*(#|$)' "$EXCLUDE") excluded paths from every commit"
-(cd "$WORK" && git filter-repo --invert-paths --paths-from-file "$EXCLUDE" --quiet) > "$LOGS/filter-repo.log" 2>&1 \
+# --replace-message redacts the forbidden identifiers from commit and tag
+# MESSAGES. They are not files, so `git grep` never saw them and check 3d
+# reported PASS while two messages in the pushed history read
+# "_REPO_ROOT is <a home directory>". The history is what this script exports,
+# so the log is part of the published artefact and has to meet the same bar.
+# Check 3f below sweeps the result and is what proves this ran.
+(cd "$WORK" && git filter-repo --invert-paths --paths-from-file "$EXCLUDE" \
+        --replace-message "$REPLACE_MSG" --quiet) \
+    > "$LOGS/filter-repo.log" 2>&1 \
     || { echo "export: git filter-repo failed (see $LOGS/filter-repo.log)" >&2; exit 1; }
 COMMITS_AFTER=$(git -C "$WORK" rev-list --count HEAD)
 if [ "$REF" != "main" ]; then
@@ -273,7 +335,16 @@ result "trufflehog --only-verified" $? "$(grep -c '"Verified":true' "$LOGS/truff
 #     CI" -- while `test_performance_benchmarks.py` carries
 #     `skipif(os.environ.get("CI") == "true")` and runs in zero CI runs. A
 #     replacement claim has to be measured like any other.
-CLAIMS='214117827798|/Users/ashishmarkanday|99\.97|58M\+|2\.8M\+|SOC 2 Type II|GDPR Compliant|SRM detection|1B\+|"environment": "Production"|Enterprise Edition|Community Edition|licen[cs]e key'
+# CLAIMS comes from scripts/publish/forbidden.txt, which is NOT published.
+# It used to be a literal on this line -- and this script ships, so the pushed
+# public repository carried the AWS account id and a home directory path here,
+# with every sweep green, because the grep below excludes `scripts/publish/`.
+# A file listing the forbidden strings cannot itself be publishable.
+CLAIMS="$(build_claims_regex)"
+[ -n "$CLAIMS" ] || { echo "export: no forbidden patterns loaded from $FORBIDDEN" >&2; exit 1; }
+validate_forbidden || { echo "export: $FORBIDDEN is malformed (see above)" >&2; exit 1; }
+MESSAGE_CLAIMS="$(build_message_regex)"
+[ -n "$MESSAGE_CLAIMS" ] || { echo "export: no message patterns loaded from $FORBIDDEN" >&2; exit 1; }
 git -C "$WORK" grep -nE "$CLAIMS" -- . ':!*package-lock.json' ':!*.lock' ':!scripts/publish/' > "$LOGS/claims.txt" 2>&1
 claims_status=$?
 
@@ -326,7 +397,28 @@ case $claims_status in
     *) result "forbidden claims and identifiers" 1 "git grep failed (see claims.txt)" ;;   # an error is not a pass
 esac
 
-# 3e. No surviving file refers to a removed path (a dead link in the public
+# 3e. The same forbidden strings, in commit and tag MESSAGES. `git grep`
+#     searches the tree; this export publishes 324 commits of history, and a
+#     message is neither a file nor covered by any other check here. When this
+#     check was first written it found 16 hits in the messages of an export
+#     whose every other sweep passed -- two of them the home directory that is
+#     one of the two strings the cut forbids outright. The redaction at the
+#     rewrite step is what fixes them; this is what proves the redaction ran.
+{
+    git -C "$WORK" log --all --format='commit %h%n%B'
+    git -C "$WORK" for-each-ref refs/tags --format='tag %(refname:short)%0a%(contents)'
+} > "$LOGS/messages.txt" 2>&1
+grep -nE "$MESSAGE_CLAIMS" "$LOGS/messages.txt" > "$LOGS/message-claims.txt"
+message_status=$?
+case $message_status in
+    0) result "no forbidden identifiers in commit or tag messages" 1 \
+           "$(wc -l < "$LOGS/message-claims.txt" | tr -d ' ') hits (see message-claims.txt)" ;;
+    1) result "no forbidden identifiers in commit or tag messages" 0 \
+           "$(git -C "$WORK" rev-list --count --all) commits, $(git -C "$WORK" tag | wc -l | tr -d ' ') tags" ;;
+    *) result "no forbidden identifiers in commit or tag messages" 1 "grep failed (see message-claims.txt)" ;;
+esac
+
+# 3f. No surviving file refers to a removed path (a dead link in the public
 #     tree). One pattern per entry, derived from the exclusion file: a removed
 #     *directory* must be referenced with a trailing slash (`project/`, so the
 #     word "project" is not a hit), a removed *file* as its full path; either
@@ -370,7 +462,7 @@ else
     result "no references to removed paths" 0 "none ($(wc -l < "$LOGS/dangling-patterns.txt" | tr -d ' ') patterns)"
 fi
 
-# 3f. The core profile builds and passes its suites from the export. The
+# 3g. The core profile builds and passes its suites from the export. The
 #     export has no node_modules; borrow this checkout's for the duration.
 if [ "$SKIP_BUILD" -eq 0 ]; then
     if [ -d "$REPO_ROOT/frontend/node_modules" ] && [ ! -e "$WORK/frontend/node_modules" ]; then

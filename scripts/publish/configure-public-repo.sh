@@ -1,0 +1,138 @@
+#!/usr/bin/env bash
+# Apply the repository settings the public repository needs, after the cut.
+#
+#   scripts/publish/configure-public-repo.sh [--repo OWNER/NAME] [--dry-run]
+#
+# ORDER MATTERS, and it is not the order the launch checklist implies. On this
+# plan neither branch protection nor secret scanning can be configured while
+# the repository is PRIVATE -- the API answers
+#
+#   403 Upgrade to GitHub Pro or make this repository public to enable
+#       this feature.
+#
+# so the sequence is: export.sh --push, verify, FLIP TO PUBLIC, then run this.
+# Running it earlier fails on every call, which is why it is a separate script
+# and not a step inside export.sh.
+#
+# Everything here is idempotent: re-running it re-asserts the same settings.
+set -uo pipefail
+
+REPO="getexperimently/experimently"
+DRY=0
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --repo) REPO="$2"; shift 2 ;;
+        --dry-run) DRY=1; shift ;;
+        -h|--help) sed -n '2,25p' "$0"; exit 0 ;;
+        *) echo "unknown argument: $1" >&2; exit 2 ;;
+    esac
+done
+
+# The checks a pull request must pass. The first 18 are what the private
+# repository requires today; `Export Sweep` and `DCO` are added because both
+# now run on every pull request and neither was required.
+REQUIRED_CHECKS=(
+    "Release Gate Summary"
+    "Security Scan Summary"
+    "Unit Tests"
+    "Smoke Tests"
+    "Frontend Tests"
+    "SDK Contract Tests"
+    "integration-tests"
+    "SDK Unit Tests"
+    "Browser E2E"
+    "Docker Smoke"
+    "lint"
+    "regression-guard"
+    "SDK Live Contract / sdk-live-contract (core)"
+    "core-build"
+    "full-build"
+    "Module Tests"
+    "Base Requirements Only"
+    "CDK Stack Tests (Python)"
+    "Export Sweep"
+    "DCO"
+)
+
+run() {  # $1 = description, rest = command
+    local what="$1"; shift
+    if [ "$DRY" -eq 1 ]; then printf 'would: %s\n      %s\n' "$what" "$*"; return 0; fi
+    if "$@" > /tmp/cpr.$$ 2>&1; then
+        printf 'ok    %s\n' "$what"
+    else
+        printf 'FAIL  %s\n' "$what"; sed 's/^/        /' /tmp/cpr.$$
+        FAILED=1
+    fi
+    rm -f /tmp/cpr.$$
+}
+FAILED=0
+
+visibility=$(gh api "repos/$REPO" -q .visibility 2>/dev/null || echo unknown)
+if [ "$visibility" != "public" ] && [ "$DRY" -eq 0 ]; then
+    echo "configure-public-repo: $REPO is '$visibility', not public." >&2
+    echo "  Branch protection and secret scanning cannot be set on a private" >&2
+    echo "  repository on this plan. Flip it to public first, then re-run." >&2
+    exit 1
+elif [ "$visibility" != "public" ]; then
+    echo "note: $REPO is '$visibility'; these calls would fail until it is public."
+    echo
+fi
+
+# Secret scanning and push protection are free on public repositories. Push
+# protection is the one that matters going forward: it rejects a commit
+# containing a recognised credential at push time, rather than reporting it
+# after it is already public.
+run "secret scanning + push protection + private vulnerability reporting" \
+    gh api -X PATCH "repos/$REPO" \
+        -f 'security_and_analysis[secret_scanning][status]=enabled' \
+        -f 'security_and_analysis[secret_scanning_push_protection][status]=enabled' \
+        -F 'security_and_analysis[private_vulnerability_reporting][status]=enabled'
+
+# Branch protection. `required_status_checks.strict` makes a branch merge only
+# when it is up to date with main, which is what stops two independently green
+# pull requests combining into a red main.
+payload=$(python3 - "$@" <<PY
+import json, sys
+checks = json.loads('''$(printf '%s\n' "${REQUIRED_CHECKS[@]}" | python3 -c 'import sys,json; print(json.dumps([l.rstrip("\n") for l in sys.stdin if l.strip()]))')''')
+print(json.dumps({
+    "required_status_checks": {"strict": True, "contexts": checks},
+    "enforce_admins": False,
+    "required_pull_request_reviews": {
+        "required_approving_review_count": 1,
+        "require_code_owner_reviews": True,
+        "dismiss_stale_reviews": True,
+    },
+    "restrictions": None,
+    "required_linear_history": True,
+    "allow_force_pushes": False,
+    "allow_deletions": False,
+    "required_conversation_resolution": True,
+}))
+PY
+)
+if [ "$DRY" -eq 1 ]; then
+    echo "would: branch protection on $REPO main"
+    echo "$payload" | python3 -m json.tool | sed 's/^/      /'
+else
+    if printf '%s' "$payload" | gh api -X PUT "repos/$REPO/branches/main/protection" --input - > /tmp/cpr.$$ 2>&1; then
+        echo "ok    branch protection (${#REQUIRED_CHECKS[@]} required checks, code-owner review)"
+    else
+        echo "FAIL  branch protection"; sed 's/^/        /' /tmp/cpr.$$; FAILED=1
+    fi
+    rm -f /tmp/cpr.$$
+fi
+
+# CODEOWNERS is already in the tree and ships with the export; it does nothing
+# until `require_code_owner_reviews` above is on. Check GitHub can resolve
+# every handle in it -- an owner without write access is silently IGNORED, so
+# a typo here is a rule that never fires rather than an error.
+errs=$(gh api "repos/$REPO/codeowners/errors" -q '.errors | length' 2>/dev/null || echo "?")
+if [ "$errs" = "0" ]; then
+    echo "ok    CODEOWNERS resolves with no errors"
+else
+    echo "FAIL  CODEOWNERS has $errs error(s)"
+    gh api "repos/$REPO/codeowners/errors" | sed 's/^/        /'
+    FAILED=1
+fi
+
+[ "$FAILED" -eq 0 ] && echo "configure-public-repo: OK" || { echo "configure-public-repo: FAILED" >&2; exit 1; }
