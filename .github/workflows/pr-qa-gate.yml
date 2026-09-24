@@ -9,7 +9,56 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # ---------------------------------------------------------------------------
+  # Is this change documentation only?
+  #
+  # The heavy jobs below take ~40 minutes and none of them can observe a change
+  # to docs/. Running them on a documentation pull request buys nothing and is
+  # the reason a typo fix took as long as a schema migration.
+  #
+  # The jobs are SKIPPED rather than not triggered. That distinction is the
+  # whole design: branch protection requires 20 checks to report, so a workflow
+  # that simply does not run on docs/** leaves every one of them missing and
+  # the pull request blocked for ever. A job skipped by an `if:` reports as
+  # successful to branch protection -- verified on #282, which merged CLEAN
+  # with five skipped checks.
+  #
+  # Docs and Export Sweep are separate workflows and still run. That is
+  # deliberate: a documentation change genuinely can break both. It happened
+  # on #281 -- a claims table added to a test file to EXPLAIN the forbidden
+  # strings tripped the publication gate, because the gate greps the tree it
+  # is publishing.
+  changes:
+    name: Detect docs-only change
+    runs-on: ubuntu-latest
+    outputs:
+      docs_only: ${{ steps.check.outputs.docs_only }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - id: check
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          files=$(git diff --name-only "$BASE" "$HEAD")
+          echo "changed files:"; echo "$files" | while read -r f; do echo "  $f"; done
+          # Anything outside these paths means run the full gate. Note
+          # mkdocs.yml counts as docs; a workflow change never does.
+          other=$(echo "$files" | grep -vE '^(docs/|mkdocs\.yml$)' || true)
+          if [ -z "$other" ] && [ -n "$files" ]; then
+            echo "docs_only=true" >> "$GITHUB_OUTPUT"
+            echo "==> documentation only: the heavy jobs will skip"
+          else
+            echo "docs_only=false" >> "$GITHUB_OUTPUT"
+            echo "==> not documentation only: running the full gate"
+          fi
+
   unit-tests:
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
     name: Unit Tests
     runs-on: ubuntu-latest
     services:
@@ -64,6 +113,8 @@ jobs:
   # hour of waiting away. This is the same shape as unit-tests, so it fails in
   # minutes.
   module-tests:
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
     name: Module Tests
     runs-on: ubuntu-latest
     services:
@@ -113,6 +164,8 @@ jobs:
         run: python -m pytest modules/backend/tests -p no:cov -q --tb=short
 
   base-requirements-only:
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
     # The environment nobody was testing: a FULL checkout whose interpreter has
     # ONLY backend/requirements.txt in it -- no modules/requirements.txt, no
     # extras. Every other Python job either installs both sets (module-tests)
@@ -185,6 +238,8 @@ jobs:
         run: python -m pytest backend/tests/smoke -p no:cov -q --tb=short
 
   smoke-tests:
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
     name: Smoke Tests
     runs-on: ubuntu-latest
     services:
@@ -226,6 +281,8 @@ jobs:
         run: python -m pytest backend/tests/smoke/ -p no:cov -q --tb=short
 
   frontend-tests:
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
     name: Frontend Tests
     runs-on: ubuntu-latest
     steps:
@@ -281,6 +338,8 @@ jobs:
           fi
 
   sdk-contracts:
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
     name: SDK Contract Tests
     runs-on: ubuntu-latest
     steps:
@@ -328,6 +387,8 @@ jobs:
   # The same sequence as `make core-build` / `make full-build`; the step that
   # failed is named in the last line of the log.
   profile-build:
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
     # The check name stays `core-build` / `full-build`: an explicit `name:`
     # replaces the default `profile-build (core)` spelling, so the required
     # status checks keep working.
@@ -417,6 +478,8 @@ jobs:
   # Every SDK against a real API, through the shared boot in _platform.yml so
   # the sequence lives in one place (the nightly suites call the same thing).
   sdk-live-contract:
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
     name: SDK Live Contract
     uses: ./.github/workflows/_platform.yml
     with:
@@ -435,6 +498,8 @@ jobs:
   # dev bypass off. Every journey selects by data-testid and fails hard; there
   # is no "skip if the element is missing" tolerance anywhere in them.
   browser-e2e:
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
     name: Browser E2E
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -573,6 +638,8 @@ jobs:
   # readiness -> login -> user API key -> SDK assignment -> dashboard pages
   # (including a dynamic route served by nginx from the static export).
   docker-smoke:
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
     name: Docker Smoke
     runs-on: ubuntu-latest
     timeout-minutes: 25

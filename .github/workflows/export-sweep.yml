@@ -44,8 +44,55 @@ env:
   TRUFFLEHOG_VERSION: '3.97.4'
 
 jobs:
+  # A documentation-only pull request skips the sweep, at the founder's
+  # instruction (2026-09-24), so documentation merges without waiting on CI.
+  #
+  # SKIPPED, not untriggered: `Export Sweep` is one of the 20 checks branch
+  # protection requires, so it has to REPORT. A job skipped by an `if:` reports
+  # as successful; a workflow that does not run leaves the check missing and
+  # blocks the pull request for ever.
+  #
+  # The compensating control is that this same workflow runs on PUSH TO MAIN
+  # (see the trigger above). So a documentation change that would make the
+  # repository unpublishable is caught within minutes of merging rather than
+  # at the cut -- the window is one merge, not one release. That matters
+  # because it has happened: on #281 a claims table added to a test file to
+  # EXPLAIN the forbidden strings tripped this gate, since it greps the tree
+  # it publishes.
+  #
+  # If that window ever costs a red main, put the sweep back on documentation
+  # pull requests. It takes about two minutes.
+  changes:
+    name: Detect docs-only change
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    outputs:
+      docs_only: ${{ steps.check.outputs.docs_only }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - id: check
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          files=$(git diff --name-only "$BASE" "$HEAD")
+          other=$(echo "$files" | grep -vE '^(docs/|mkdocs\.yml$)' || true)
+          if [ -z "$other" ] && [ -n "$files" ]; then
+            echo "docs_only=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "docs_only=false" >> "$GITHUB_OUTPUT"
+          fi
+
   export-sweep:
     name: Export Sweep
+    needs: changes
+    # `always()` so a push to main, where `changes` is skipped entirely, still
+    # runs the sweep -- without it the `needs` would skip this job too and the
+    # compensating control above would not exist.
+    if: always() && needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
