@@ -8,7 +8,7 @@
 # API framework
 fastapi==0.141.1
 uvicorn==0.53.0
-websockets==15.0.1     # uvicorn WebSocket support (/api/v1/ws/...); uvicorn alone serves 404 for upgrades
+websockets==17.1     # uvicorn WebSocket support (/api/v1/ws/...); uvicorn alone serves 404 for upgrades
 pydantic==2.13.5
 pydantic-settings==2.15.0
 email-validator==2.3.0
