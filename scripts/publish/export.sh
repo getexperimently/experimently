@@ -575,6 +575,17 @@ if [ -n "$PUSH_URL" ]; then
     fi
     log "pushing main to $PUSH_URL"
     git -C "$WORK" push public main $( [ "$FORCE_PUSH" -eq 1 ] && echo --force ) || exit 1
+    # Tags go EXPLICITLY. `--follow-tags` sends only annotated tags and
+    # release-please creates lightweight ones, so the tag is silently left
+    # behind -- and the docs site, whose deploy is gated on the tag, then
+    # silently never builds. That is exactly what happened on v0.2.0.
+    for tag in $(git -C "$WORK" tag); do
+        if git -C "$WORK" push public "$tag" 2>/dev/null; then
+            log "pushed tag $tag"
+        else
+            log "tag $tag already on the remote, or rejected"
+        fi
+    done
 fi
 
 if [ "$KEEP" -eq 0 ]; then
