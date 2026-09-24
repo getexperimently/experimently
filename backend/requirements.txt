@@ -55,7 +55,7 @@ sendgrid==6.12.5
 faker==40.39.0
 factory-boy==3.3.3
 freezegun==1.5.5
-moto==4.2.2
+moto==5.2.3
 pyparsing==3.3.2       # required by moto's glue backend (mock_glue), not declared by moto 4.2
 python-jose[cryptography]==3.5.0  # required by moto's cognitoidp backend (mock_cognitoidp); app auth uses PyJWT
 jsonschema==4.26.0
