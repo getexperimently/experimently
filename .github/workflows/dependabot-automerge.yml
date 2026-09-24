@@ -1,0 +1,107 @@
+name: Dependabot auto-merge
+
+# Why this exists.
+#
+# The Dependabot queue kept growing to 12-30 open pull requests and then being
+# bulk-closed by hand, repeatedly. #280 treated that as a volume problem and
+# cut the rate: major ignores on 18 of 19 ecosystems, staggered days, limits
+# 56 -> 37. The queue came back within a day.
+#
+# Volume was never the cause. NOTHING MERGED THEM. There was no auto-merge
+# workflow and `allow_auto_merge` was false on the repository, so every one of
+# the 28 bumps merged in the preceding 60 days was merged by a human -- and a
+# human only does that when they happen to look. The queue grows monotonically
+# between clean-ups by construction.
+#
+# So this closes the loop: a bump that passes the whole gate merges itself.
+# `--auto` does not bypass anything. Branch protection still requires all 20
+# checks and the merge happens only once they are green; a failing bump stays
+# open with a red tick, which is the state you actually want to see.
+#
+# WHAT MERGES ITSELF
+#
+#   patch and minor, any ecosystem   The change a lockfile bump is for. If the
+#                                    suite passes, there is nothing a human
+#                                    adds by clicking the button.
+#   github-actions, INCLUDING major  Deliberate, and the reason github-actions
+#                                    carries no major ignore in
+#                                    dependabot.yml: an Actions major is how
+#                                    GitHub forces you off a retired runner
+#                                    runtime, and CI passing IS the test for
+#                                    one -- the action either runs or it does
+#                                    not.
+#
+# WHAT DOES NOT
+#
+#   major, every other ecosystem     A migration someone chooses to do. These
+#                                    are ignored in dependabot.yml anyway, so
+#                                    reaching this workflow at all means
+#                                    somebody lifted an ignore on purpose;
+#                                    it is left for them to merge.
+#
+# SECURITY SHAPE
+#
+# `pull_request_target` runs the workflow definition from the default branch
+# with a write token. That is a privilege-escalation shape ONLY when combined
+# with a checkout of the pull request's code, because then branch content runs
+# with that token. This job never checks the branch out and runs nothing from
+# it -- it reads metadata and calls the GitHub API. See
+# `dependabot-lock.yml`, which needs branch content and therefore deliberately
+# does not use this trigger.
+#
+# The actor check is belt and braces: `pull_request_target` already gives
+# Dependabot a read-only token on its own runs, and the API rejects a merge
+# that branch protection would not allow.
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, ready_for_review]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  automerge:
+    if: github.actor == 'dependabot[bot]' && github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read the update metadata
+        id: meta
+        uses: dependabot/fetch-metadata@v3
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Decide
+        id: decide
+        env:
+          UPDATE_TYPE: ${{ steps.meta.outputs.update-type }}
+          ECOSYSTEM: ${{ steps.meta.outputs.package-ecosystem }}
+        run: |
+          set -euo pipefail
+          # version-update:semver-{patch,minor,major}
+          case "$UPDATE_TYPE" in
+            version-update:semver-patch|version-update:semver-minor) ok=yes ;;
+            version-update:semver-major)
+              # Actions majors only -- see the header.
+              if [ "$ECOSYSTEM" = "github_actions" ]; then ok=yes; else ok=no; fi ;;
+            *) ok=no ;;
+          esac
+          echo "ok=$ok" >> "$GITHUB_OUTPUT"
+          echo "$ECOSYSTEM / $UPDATE_TYPE -> auto-merge: $ok"
+
+      - name: Enable auto-merge
+        if: steps.decide.outputs.ok == 'yes'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.html_url }}
+        run: gh pr merge --auto --squash "$PR"
+
+      - name: Explain why not
+        if: steps.decide.outputs.ok != 'yes'
+        env:
+          UPDATE_TYPE: ${{ steps.meta.outputs.update-type }}
+          ECOSYSTEM: ${{ steps.meta.outputs.package-ecosystem }}
+        run: |
+          echo "Left for a human: $ECOSYSTEM $UPDATE_TYPE."
+          echo "Majors outside github-actions are migrations, not bumps."
