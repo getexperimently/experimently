@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.2.1](https://github.com/amarkanday/experimentation-platform/compare/v0.2.0...v0.2.1) (2026-09-24)
+
+
+### Bug Fixes
+
+* **publish:** build the docs site from the export, where it actually fails ([#315](https://github.com/amarkanday/experimentation-platform/issues/315)) ([970e6fe](https://github.com/amarkanday/experimentation-platform/commit/970e6fed2391db8e3a0bae07435bcc73e2726a7e))
+* **publish:** stop shipping the Dependabot config to the public repository ([#316](https://github.com/amarkanday/experimentation-platform/issues/316)) ([6fc6757](https://github.com/amarkanday/experimentation-platform/commit/6fc6757f496b6b9688e102b625edbc7bd89aa3c5))
+* the release bumped VERSION and left three fixtures on 0.1.0 ([#313](https://github.com/amarkanday/experimentation-platform/issues/313)) ([7eb6a4d](https://github.com/amarkanday/experimentation-platform/commit/7eb6a4d142ff9e61e64ca0e6ad36560ef2536479))
+
+
+### Documentation
+
+* the release and cut procedure, and push tags explicitly ([#317](https://github.com/amarkanday/experimentation-platform/issues/317)) ([7a82c68](https://github.com/amarkanday/experimentation-platform/commit/7a82c681b553510a715691a3e7f015851c6ddcbc))
+
 ## [0.2.0](https://github.com/amarkanday/experimentation-platform/compare/v0.1.0...v0.2.0) (2026-09-24)
 
 
