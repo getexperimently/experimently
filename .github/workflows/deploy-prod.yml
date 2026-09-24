@@ -111,7 +111,7 @@ jobs:
           echo "Release gate verified for ${TARGET_SHA}"
 
       - name: Notify deployment started
-        uses: slackapi/slack-github-action@v1.26.0
+        uses: slackapi/slack-github-action@v4.0.0
         with:
           channel-id: '#deployments'
           slack-message: |
@@ -570,7 +570,7 @@ jobs:
           [ "$RUNNING" = "$DESIRED" ] && echo "Service healthy" || (echo "Service unhealthy" && exit 1)
 
       - name: Notify deployment result
-        uses: slackapi/slack-github-action@v1.26.0
+        uses: slackapi/slack-github-action@v4.0.0
         with:
           channel-id: '#deployments'
           slack-message: |

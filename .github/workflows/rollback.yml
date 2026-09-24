@@ -47,7 +47,7 @@ jobs:
           aws-region: us-west-2
 
       - name: Notify rollback started
-        uses: slackapi/slack-github-action@v1.26.0
+        uses: slackapi/slack-github-action@v4.0.0
         with:
           channel-id: '#deployments'
           slack-message: |
@@ -308,7 +308,7 @@ jobs:
       # description calls out.
       - name: Notify rollback result
         if: always()
-        uses: slackapi/slack-github-action@v1.26.0
+        uses: slackapi/slack-github-action@v4.0.0
         with:
           channel-id: '#deployments'
           slack-message: |
