@@ -21,7 +21,7 @@
     </description>
 
     <properties>
-        <spring-boot.version>3.1.5</spring-boot.version>
+        <spring-boot.version>3.5.16</spring-boot.version>
     </properties>
 
     <dependencyManagement>
