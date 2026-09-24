@@ -153,3 +153,18 @@ docs/security/gdpr-compliance-checklist.md
 # over the generated one). Shipping both would put two changelogs in the
 # published tree.
 scripts/publish/CHANGELOG.public.md
+
+# Dependabot's configuration, which drives VERSION updates. Shipping it means
+# Dependabot runs on the published repository and opens pull requests there --
+# 12 of them within hours of the cut. Every one is futile: public main is
+# force-replaced by the next cut, so a merge is discarded and the branch forks
+# a history that no longer exists. To anyone reading the project it looks like
+# an unmanaged backlog.
+#
+# Dependency management belongs in the development repository and reaches the
+# public one through the cut, like everything else.
+#
+# Security ALERTS and security-update pull requests are unaffected: those are
+# repository settings, not config-file driven, and they are the ones worth
+# having on a public repository.
+.github/dependabot.yml
