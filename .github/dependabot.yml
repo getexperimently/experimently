@@ -126,6 +126,19 @@ updates:
       # added, so the same bump came back and failed 13 checks. They move when
       # aws-cdk-lib moves, which is a major migration someone does by hand.
       - dependency-name: "aws-cdk.*"
+      # pytest is ANCHORED at 7.4 until the 7 -> 9 migration (#294), and these
+      # two declare a floor above it, so a minor bump of either makes the file
+      # unresolvable:
+      #
+      #   pytest-asyncio 0.26.0 depends on pytest<9 and >=8.2   (#304)
+      #   locust 2.40+ requires pytest>=8.3                     (already noted
+      #                                                          beside the pin)
+      #
+      # They move when pytest moves.
+      - dependency-name: "pytest-asyncio"
+        update-types: ["version-update:semver-minor"]
+      - dependency-name: "locust"
+        update-types: ["version-update:semver-minor"]
     labels: ["dependencies", "python", "infrastructure"]
     groups:
       patch-and-minor:
@@ -241,6 +254,17 @@ updates:
       # migration (#291/#49/#51), by hand, or not at all.
       - dependency-name: "react-native"
         update-types: ["version-update:semver-minor"]
+      # react is ANCHORED at 18.2.0, because react-native 0.73.11 peer-pins it
+      # EXACTLY -- `npm view react-native@0.73.11 peerDependencies` is
+      # {"react": "18.2.0"}, not a range. Bumping react to 18.3.1 is a patch
+      # bump that cannot install (#303):
+      #
+      #   npm error Could not resolve dependency:
+      #   npm error peer react@"18.2.0" from react-native@0.73.11
+      #
+      # react moves with react-native, which moves with #291.
+      - dependency-name: "react"
+      - dependency-name: "react-dom"
     labels: ["dependencies", "sdk"]
     groups:
       patch-and-minor:
@@ -304,16 +328,22 @@ updates:
       # Majors are migrations, not bumps -- see the header.
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
-      # The kotlinx libraries carry Kotlin METADATA, so their version is
-      # coupled to the Kotlin plugin's and they cannot move on their own.
-      # #287 bumped coroutines and serialization to 1.11.0 -- built with
-      # Kotlin 2.x metadata -- while kotlin-gradle-plugin stayed on 1.9.25,
-      # which cannot read it:
+      # This module is ANCHORED to Kotlin 1.9 (kotlin-gradle-plugin 1.9.25).
+      # Anything compiled with Kotlin 2.x fails the build outright:
       #
-      #   e: Incompatible classes were found in dependencies.
+      #   kotlin-stdlib-2.2.21 ... binary version of its metadata is 2.2.0,
+      #   expected version is 1.9.0
       #
-      # They move when the Kotlin plugin moves, in one deliberate change.
-      - dependency-name: "org.jetbrains.kotlinx:*"
+      # #287 was kotlinx-coroutines and kotlinx-serialization going to 1.11.0.
+      # I ignored `org.jetbrains.kotlinx:*` at minor for that, and #302 broke
+      # anyway -- a mockk bump, pulling kotlin-stdlib 2.2.21 TRANSITIVELY,
+      # which no rule naming kotlinx could have caught. Chasing the libraries
+      # one at a time does not work: the next test dependency to publish a
+      # Kotlin 2.x build breaks it again.
+      #
+      # So minor bumps are off for this module entirely until someone does the
+      # Kotlin 2 migration. Patches still flow.
+      - dependency-name: "*"
         update-types: ["version-update:semver-minor"]
     labels: ["dependencies", "sdk"]
     groups:
