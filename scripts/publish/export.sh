@@ -461,6 +461,37 @@ if [ -f "$WORK/CHANGELOG.md" ]; then
     fi
 fi
 
+# 3e-ter. The docs site builds FROM THE EXPORT.
+#     `mkdocs build --strict` passes in this repository and fails in the
+#     published one, because docs/planning/ exists here and is stripped there.
+#     That is not hypothetical: the v0.2.0 Pages deploy failed on exactly one
+#     warning --
+#
+#       Doc file 'README.md' contains a link
+#       'planning/open-core-launch-plan-2026-09.md', but the target is not
+#       found among documentation files.
+#
+#     and check 3f below did not catch it, because the pattern it derives is
+#     `docs/planning/` while the link inside docs/README.md is RELATIVE:
+#     `planning/...`. A relative link to an excluded sibling is invisible to a
+#     path-prefix grep.
+#
+#     Building the real thing in the real tree catches the whole class rather
+#     than one shape of it. Skipped with --skip-build, like core_build.
+if [ "$SKIP_BUILD" -eq 1 ]; then
+    SUMMARY+=("SKIP  mkdocs --strict on the export  (--skip-build)")
+elif [ ! -f "$WORK/mkdocs.yml" ]; then
+    result "mkdocs --strict on the export" 0 "no mkdocs.yml in the export"
+elif ! command -v mkdocs > /dev/null 2>&1; then
+    result "mkdocs --strict on the export" 1 "mkdocs is not installed; cannot verify the docs site"
+else
+    if (cd "$WORK" && mkdocs build --strict -d "$LOGS/site") > "$LOGS/mkdocs.txt" 2>&1; then
+        result "mkdocs --strict on the export" 0 "the docs site builds"
+    else
+        result "mkdocs --strict on the export" 1 "the docs site does NOT build (see mkdocs.txt)"
+    fi
+fi
+
 # 3f. No surviving file refers to a removed path (a dead link in the public
 #     tree). One pattern per entry, derived from the exclusion file: a removed
 #     *directory* must be referenced with a trailing slash (`project/`, so the

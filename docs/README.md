@@ -145,9 +145,11 @@
 
 ---
 
-## Planning records
+## Profiles
 
 - [Modules](getting-started/modules.md) — the core and full profiles, and what each module adds
-- `planning/go-to-market/` — the earlier commercial strategy (design partners, paid tiers), superseded on
-  2026-09-12 by the decision to be fully open source under Apache-2.0; kept as a record, see
-  [planning/open-core-launch-plan-2026-09.md](planning/open-core-launch-plan-2026-09.md)
+
+The platform is fully open source under Apache-2.0, with the SDKs MIT. Both
+build profiles are the same licence and the same price. An earlier commercial
+strategy was superseded by that decision on 2026-09-12; the records of it are
+internal and are not published.
