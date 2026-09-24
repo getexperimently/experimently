@@ -6,6 +6,23 @@
       "package-name": "experimently-platform",
       "bootstrap-sha": "2e89eb4869b58f92004dd43984aaade9ef5957bc",
       "version-file": "VERSION",
+      "extra-files": [
+        {
+          "type": "json",
+          "path": "docs/api/openapi-v1.stable.json",
+          "jsonpath": "$.info.version"
+        },
+        {
+          "type": "json",
+          "path": "docs/api/openapi-v1.full.json",
+          "jsonpath": "$.info.version"
+        },
+        {
+          "type": "json",
+          "path": "frontend/src/tests/fixtures/openapi.json",
+          "jsonpath": "$.info.version"
+        }
+      ],
       "changelog-path": "CHANGELOG.md",
       "include-component-in-tag": false,
       "include-v-in-tag": true,

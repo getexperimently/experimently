@@ -46,6 +46,7 @@
 .python-version
 .release-please-manifest.json
 .semgrep.yml
+CHANGELOG.md
 amplify.yml
 backend
 check_and_fix_db.py
