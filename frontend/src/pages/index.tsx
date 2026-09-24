@@ -5,6 +5,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { PageTitle } from '@/components/PageTitle';
 import { Wordmark } from '@/components/Wordmark';
 import { LOGIN_PATH } from '@/services/api';
+import { isMarketingSite } from '@/utils/site-mode';
 import { docsUrl } from '@/services/docs';
 
 export const HOME_AFTER_LOGIN = '/experiments';
@@ -35,6 +36,9 @@ export const HOME_AFTER_LOGIN = '/experiments';
 export default function HomePage() {
   const router = useRouter();
   const { status } = useAuth();
+  // There is no hosted tier, so the public site offers no sign-in: the button
+  // posted to an endpoint that 404s. See utils/site-mode.ts.
+  const marketing = isMarketingSite();
 
   useEffect(() => {
     if (status === 'authenticated') {
@@ -65,12 +69,21 @@ export default function HomePage() {
             <Link href="/power-calculator" className="text-slate-600 hover:text-slate-900">
               Power calculator
             </Link>
-            <Link
-              href={LOGIN_PATH}
-              className="rounded-md bg-blue-600 px-3.5 py-1.5 font-medium text-white hover:bg-blue-700"
-            >
-              Sign in
-            </Link>
+            {marketing ? (
+              <a
+                href="https://github.com/getexperimently/experimently"
+                className="rounded-md bg-blue-600 px-3.5 py-1.5 font-medium text-white hover:bg-blue-700"
+              >
+                Source
+              </a>
+            ) : (
+              <Link
+                href={LOGIN_PATH}
+                className="rounded-md bg-blue-600 px-3.5 py-1.5 font-medium text-white hover:bg-blue-700"
+              >
+                Sign in
+              </Link>
+            )}
           </nav>
         </header>
 
@@ -91,12 +104,21 @@ export default function HomePage() {
               >
                 Get started
               </a>
-              <Link
-                href={LOGIN_PATH}
-                className="rounded-md border border-slate-300 px-4 py-2 font-medium hover:bg-slate-50"
-              >
-                Sign in to the dashboard
-              </Link>
+              {marketing ? (
+                <Link
+                  href="/power-calculator"
+                  className="rounded-md border border-slate-300 px-4 py-2 font-medium hover:bg-slate-50"
+                >
+                  Try the power calculator
+                </Link>
+              ) : (
+                <Link
+                  href={LOGIN_PATH}
+                  className="rounded-md border border-slate-300 px-4 py-2 font-medium hover:bg-slate-50"
+                >
+                  Sign in to the dashboard
+                </Link>
+              )}
             </div>
             <p className="mt-6 text-sm text-slate-500">
               Apache-2.0. Both build profiles are the same licence and the same price: none.
@@ -173,9 +195,11 @@ docker compose up -d --wait`}</code>
               >
                 Source
               </a>
-              <Link href={LOGIN_PATH} className="hover:text-slate-900">
-                Sign in
-              </Link>
+              {!marketing && (
+                <Link href={LOGIN_PATH} className="hover:text-slate-900">
+                  Sign in
+                </Link>
+              )}
             </nav>
           </div>
         </footer>

@@ -43,3 +43,7 @@ export const Legend = () => <div />;
 export const ErrorBar = () => <div />;
 export const Cell = () => <div />;
 export const ReferenceLine = () => <div />;
+// Used by the power calculator's chart. Its absence made that page render as
+// `undefined` under jest -- "Element type is invalid" -- which nothing caught
+// because no test rendered the page until now.
+export const ReferenceDot = () => <div />;

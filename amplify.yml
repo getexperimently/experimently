@@ -1,3 +1,17 @@
+# AWS Amplify builds getexperimently.com from this file, on every push to the
+# PUBLIC repository's main branch. That is the whole deploy path -- there is no
+# pipeline elsewhere, and `frontend/deploy.sh` is a separate manual route that
+# names an S3 bucket this account does not have.
+#
+# `npm run build` builds the PLATFORM: the dashboard, /admin/*, /experiments,
+# /feature-flags, /results, /workspaces and three "Sign in" buttons. The public
+# site has no API behind it, so every one of those 404s -- `POST
+# /api/v1/auth/login` returns this site's own HTML with a 404 status -- and a
+# visitor evaluating the project met a login form that silently fails.
+#
+# `build:marketing` builds the homepage, the docs hub and the power calculator
+# (which computes in the browser), then prunes the dashboard from the export.
+# See frontend/src/utils/site-mode.ts.
 version: 1
 frontend:
   phases:
@@ -7,8 +21,9 @@ frontend:
         - npm ci
     build:
       commands:
-        - npm run build
+        - npm run build:marketing
   artifacts:
+    # `output: 'export'` in next.config.js, so the artefact is out/.
     baseDirectory: frontend/out
     files:
       - '**/*'

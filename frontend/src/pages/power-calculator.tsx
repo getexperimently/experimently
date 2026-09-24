@@ -3,6 +3,12 @@
 import Link from 'next/link';
 import { useState, useEffect, useCallback } from 'react';
 import { apiFetch } from '@/services/api';
+import {
+  computeSampleSize,
+  computePowerCurve,
+  type SampleSizeResult,
+  type PowerCurvePoint,
+} from '@/utils/power';
 import { PageTitle } from '@/components/PageTitle';
 import {
   LineChart,
@@ -18,34 +24,6 @@ import {
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-
-interface SampleSizeResult {
-  per_variant: number;
-  total: number;
-  alpha: number;
-  power: number;
-  baseline_rate: number;
-  mde_absolute: number;
-  mde_relative: number;
-  confidence_level: number;
-  runtime_days: number | null;
-  n_variants: number;
-  two_tailed: boolean;
-  metric_type: string;
-}
-
-interface PowerCurvePoint {
-  effect_size_relative: number;
-  sample_size_per_variant: number;
-  is_current_target: boolean;
-}
-
-interface PowerCurveResponse {
-  points: PowerCurvePoint[];
-  baseline_rate: number;
-  alpha: number;
-  power_target: number;
-}
 
 interface PlanAdvice {
   advice: string;
@@ -86,47 +64,6 @@ function fmtDays(d: number | null): string {
 // ---------------------------------------------------------------------------
 // API helpers
 // ---------------------------------------------------------------------------
-
-async function fetchSampleSize(params: {
-  baseline_rate: number;
-  minimum_detectable_effect: number;
-  alpha: number;
-  power: number;
-  n_variants: number;
-  daily_traffic: number | null;
-  traffic_allocation: number;
-}): Promise<SampleSizeResult> {
-  const body: Record<string, unknown> = {
-    baseline_rate: params.baseline_rate,
-    minimum_detectable_effect: params.minimum_detectable_effect,
-    alpha: params.alpha,
-    power: params.power,
-    n_variants: params.n_variants,
-    two_tailed: true,
-    metric_type: 'proportion',
-    traffic_allocation: params.traffic_allocation,
-  };
-  if (params.daily_traffic !== null && params.daily_traffic > 0) {
-    body.daily_traffic = params.daily_traffic;
-  }
-  return apiFetch<SampleSizeResult>('/api/v1/power/sample-size', { method: 'POST', json: body });
-}
-
-async function fetchPowerCurve(params: {
-  baseline: number;
-  alpha: number;
-  power: number;
-  mde: number;
-}): Promise<PowerCurveResponse> {
-  return apiFetch<PowerCurveResponse>('/api/v1/power/curve', {
-    query: {
-      baseline: params.baseline,
-      alpha: params.alpha,
-      power: params.power,
-      mde: params.mde,
-    },
-  });
-}
 
 async function fetchPlanningAdvice(params: {
   experiment_name: string;
@@ -193,25 +130,29 @@ export default function PowerCalculatorPage() {
     const dailyTrafficNum = traffic.trim() ? parseInt(traffic, 10) : null;
 
     try {
-      const [sampleResult, curveResult] = await Promise.all([
-        fetchSampleSize({
-          baseline_rate: baseline,
-          minimum_detectable_effect: mdeVal,
-          alpha: alphaVal,
-          power: powerVal,
-          n_variants: variants,
-          daily_traffic: dailyTrafficNum,
-          traffic_allocation: allocation,
-        }),
-        fetchPowerCurve({
-          baseline,
-          alpha: alphaVal,
-          power: powerVal,
-          mde: mdeVal,
-        }),
-      ]);
+      // Computed here, not fetched. `utils/power.ts` is a transcription of
+      // the Python service, pinned to it by power.test.ts. The API round trip
+      // bought nothing -- the arithmetic is closed form -- and cost the page
+      // its ability to work at all wherever the API is not deployed, which is
+      // the published site.
+      const sampleResult = computeSampleSize({
+        baselineRate: baseline,
+        mde: mdeVal,
+        alpha: alphaVal,
+        power: powerVal,
+        nVariants: variants,
+        dailyTraffic: dailyTrafficNum,
+        trafficAllocation: allocation,
+      });
+      const curvePoints = computePowerCurve({
+        baselineRate: baseline,
+        alpha: alphaVal,
+        power: powerVal,
+        nVariants: variants,
+        currentMde: mdeVal,
+      });
       setResult(sampleResult);
-      setCurveData(curveResult.points);
+      setCurveData(curvePoints);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Calculation failed';
       setError(msg);

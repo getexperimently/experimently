@@ -76,8 +76,8 @@ amplify init
 ? Choose the type of app: javascript
 ? What javascript framework: react
 ? Source Directory Path: src
-? Distribution Directory Path: .next
-? Build Command: npm run build
+? Distribution Directory Path: out
+? Build Command: npm run build:marketing
 ? Start Command: npm run start
 ```
 
@@ -126,9 +126,10 @@ frontend:
         - npm ci
     build:
       commands:
-        - npm run build
+        - npm run build:marketing   # NOT `npm run build`: that ships the dashboard
   artifacts:
-    baseDirectory: frontend/.next
+    # `output: 'export'` in next.config.js, so the artefact is out/, not .next
+    baseDirectory: frontend/out
     files:
       - '**/*'
   cache:
@@ -184,7 +185,7 @@ Build the site:
 
 ```bash
 cd frontend
-npm run build
+npm run build:marketing   # NOT `npm run build`: that ships the dashboard
 # Output will be in 'out' directory
 ```
 
@@ -586,7 +587,7 @@ set -e
 
 echo "Building marketing site..."
 cd frontend
-npm run build
+npm run build:marketing   # NOT `npm run build`: that ships the dashboard
 
 echo "Uploading to S3..."
 aws s3 sync out/ s3://getexperimently.com \

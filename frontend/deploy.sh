@@ -48,7 +48,11 @@ npm ci --production=false
 
 # Build the site
 echo -e "\n${BLUE}🔨 Building Next.js application...${NC}"
-npm run build
+# The MARKETING build. A plain `npm run build` ships the whole dashboard --
+# /experiments, /admin/*, /feature-flags, /results, /workspaces and three
+# "Sign in" buttons -- to a site with no API behind it, where every one of
+# them 404s. See frontend/src/utils/site-mode.ts.
+npm run build:marketing
 
 # Check if build was successful
 if [ ! -d "out" ]; then
@@ -84,32 +88,46 @@ aws s3 sync out/ s3://${BUCKET_NAME} \
 
 echo -e "${GREEN}✅ Upload complete${NC}"
 
-# Invalidate CloudFront cache
-if [ -n "$CLOUDFRONT_DISTRIBUTION_ID" ]; then
-    echo -e "\n${BLUE}🔄 Invalidating CloudFront cache...${NC}"
-
-    INVALIDATION_ID=$(aws cloudfront create-invalidation \
-      --distribution-id ${CLOUDFRONT_DISTRIBUTION_ID} \
-      --paths "/*" \
-      --query 'Invalidation.Id' \
-      --output text)
-
-    echo -e "  Invalidation ID: ${INVALIDATION_ID}"
-    echo -e "${GREEN}✅ Cache invalidation started${NC}"
-else
-    echo -e "\n${RED}⚠️  CloudFront distribution ID not set${NC}"
-    echo -e "Set CLOUDFRONT_DISTRIBUTION_ID in this script to enable cache invalidation"
-
-    # Try to find distribution automatically
-    AUTO_DIST_ID=$(aws cloudfront list-distributions \
-      --query "DistributionList.Items[?Aliases.Items[?contains(@, '${BUCKET_NAME}')]].Id" \
+# Invalidate CloudFront cache.
+#
+# This used to DISCOVER the distribution, PRINT it, tell you to paste it back
+# into the script, and then not invalidate. CLOUDFRONT_DISTRIBUTION_ID was
+# empty, so nothing ever ran: the objects carry s-maxage=31536000 and
+# CloudFront served the previous deploy for up to a YEAR. That is not
+# hypothetical -- /power-calculator served the homepage's HTML long after a
+# build had fixed it.
+#
+# So: use the id it finds, and FAIL if it cannot find one. A deploy that
+# uploads new files and leaves the old ones being served has not deployed
+# anything, and saying so loudly beats a green tick.
+if [ -z "$CLOUDFRONT_DISTRIBUTION_ID" ]; then
+    echo -e "\n${BLUE}🔎 Finding the CloudFront distribution for ${BUCKET_NAME}...${NC}"
+    CLOUDFRONT_DISTRIBUTION_ID=$(aws cloudfront list-distributions \
+      --query "DistributionList.Items[?Aliases.Items[?contains(@, '${BUCKET_NAME}')]].Id | [0]" \
       --output text 2>/dev/null || echo "")
-
-    if [ -n "$AUTO_DIST_ID" ]; then
-        echo -e "  Found distribution: ${AUTO_DIST_ID}"
-        echo -e "  Add this to the script: CLOUDFRONT_DISTRIBUTION_ID=\"${AUTO_DIST_ID}\""
-    fi
+    [ "$CLOUDFRONT_DISTRIBUTION_ID" = "None" ] && CLOUDFRONT_DISTRIBUTION_ID=""
 fi
+
+if [ -z "$CLOUDFRONT_DISTRIBUTION_ID" ]; then
+    echo -e "\n${RED}❌ No CloudFront distribution found for ${BUCKET_NAME}.${NC}"
+    echo -e "   The files are in S3 but CloudFront will keep serving the old ones."
+    echo -e "   Set CLOUDFRONT_DISTRIBUTION_ID explicitly, or check the IAM user can"
+    echo -e "   call cloudfront:ListDistributions."
+    exit 1
+fi
+
+echo -e "\n${BLUE}🔄 Invalidating CloudFront cache (${CLOUDFRONT_DISTRIBUTION_ID})...${NC}"
+INVALIDATION_ID=$(aws cloudfront create-invalidation \
+  --distribution-id "${CLOUDFRONT_DISTRIBUTION_ID}" \
+  --paths "/*" \
+  --query 'Invalidation.Id' \
+  --output text)
+echo -e "  Invalidation ID: ${INVALIDATION_ID}"
+echo -e "${GREEN}✅ Cache invalidation started${NC}"
+echo -e "   It is not finished. Until it completes, CloudFront may still serve"
+echo -e "   the previous deploy. Watch it with:"
+echo -e "     aws cloudfront wait invalidation-completed \\"
+echo -e "       --distribution-id ${CLOUDFRONT_DISTRIBUTION_ID} --id ${INVALIDATION_ID}"
 
 # Display deployment info
 echo -e "\n${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
