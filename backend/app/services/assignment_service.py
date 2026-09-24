@@ -1,7 +1,6 @@
 # Experiment assignment service
 # Analysis and reporting service
 # backend/app/services/assignment_service.py
-import hashlib
 import json
 import logging
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -10,6 +9,7 @@ from uuid import UUID
 from sqlalchemy import and_, desc, func
 from sqlalchemy.orm import Session, joinedload
 
+from backend.app.core.consistent_hash import bucket_of
 from backend.app.core.targeting_adapter import (
     expand_context,
     normalise_targeting_rules,
@@ -934,48 +934,50 @@ class AssignmentService:
     def _hash_user_to_variant(
         self, user_id: str, experiment: Experiment
     ) -> Union[str, UUID]:
-        """
-        Determine variant assignment using deterministic hashing.
+        """Assign *user_id* to a variant, by the hash every SDK implements.
 
-        This ensures that the same user will always be assigned to the same variant
-        for a given experiment, based on their user ID and the experiment ID.
+        Uses `backend.app.core.consistent_hash`, which is the algorithm
+        `tests/sdk-contract/golden-vectors.json` pins and all fourteen SDKs
+        implement. Before #81 this method had its own: MD5 of
+        ``"{user_id}:{experiment.id}"`` read as one 128-bit integer modulo 100.
 
-        Args:
-            user_id: ID of the user to assign
-            experiment: Experiment model object with variants
+        Two things were wrong with that, and both are silent:
 
-        Returns:
-            ID of the assigned variant
+        * the whole digest modulo 100 is a different bucket from the first four
+          bytes little-endian -- ``user-123``/``my-flag`` is bucket 79 one way
+          and 69 the other;
+        * it hashed the experiment's UUID primary key, which no client has, so
+          an SDK evaluating locally could not have agreed even in principle.
+
+        The result was a user counted in one variant by the API and another by
+        an SDK, with no error anywhere and every metric joined across the two
+        quietly wrong.
+
+        Assignment is sticky -- `assign_user` only reaches this for a user with
+        no existing row -- so changing the function re-buckets nobody who has
+        already been assigned.
+
+        Falls back to the experiment's UUID when it has no public ``key``
+        (nullable on the model, and older rows predate it). Such an experiment
+        has no SDK-reachable identity anyway, so there is nothing to agree with;
+        what matters is that it stays deterministic.
         """
         if not experiment.variants:
             raise ValueError(f"Experiment {experiment.id} has no variants")
 
-        # Create a hash using user ID and experiment ID
-        hash_input = f"{user_id}:{experiment.id}"
-        hash_value = int(
-            hashlib.md5(hash_input.encode(), usedforsecurity=False).hexdigest(), 16
-        )
+        namespace = experiment.key or str(experiment.id)
+        bucket = bucket_of(user_id, namespace)
 
-        # Get variants with their traffic allocations
-        variants = experiment.variants
+        # Cumulative distribution over allocations expressed 0-100.
+        cumulative = 0
+        for variant in experiment.variants:
+            cumulative += variant.traffic_allocation
+            if bucket < cumulative:
+                return variant.id
 
-        # Create cumulative distribution based on traffic allocation
-        total = 0
-        distribution = []
-        for variant in variants:
-            total += variant.traffic_allocation
-            distribution.append((total, variant.id))
-
-        # Normalize hash to be within range [0, 100)
-        bucket = hash_value % 100
-
-        # Find the assigned variant
-        for threshold, variant_id in distribution:
-            if bucket < threshold:
-                return variant_id
-
-        # Fallback to last variant (should not happen if allocations sum to 100)
-        return variants[-1].id if variants else None
+        # Allocations summing to less than 100 leave a tail; the last variant
+        # takes it, which is what the previous implementation did too.
+        return experiment.variants[-1].id
 
     def delete_assignments_by_experiment(self, experiment_id: Union[str, UUID]) -> int:
         """

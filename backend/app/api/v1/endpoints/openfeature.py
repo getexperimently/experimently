@@ -20,9 +20,7 @@ Authentication:
 
 from __future__ import annotations
 
-import hashlib
 import logging
-import struct
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -30,6 +28,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from backend.app.api import deps
+from backend.app.core.consistent_hash import hash_user
 from backend.app.models.feature_flag import FeatureFlag, FeatureFlagStatus
 from backend.app.models.user import User
 
@@ -90,20 +89,15 @@ class EvaluateResponse(BaseModel):
 # Helpers
 # ---------------------------------------------------------------------------
 
-_HASH_DIVISOR: int = 4294967296  # 2^32
+# The hash lives in `backend.app.core.consistent_hash` -- one implementation for
+# flags, experiment assignment and everything else that buckets a user. This
+# module used to carry its own correct copy while `assignment_service` carried
+# its own incorrect one, and nothing compared them (#81).
 
 
 def _hash_user(user_id: str, flag_key: str) -> float:
-    """
-    Consistent MD5-based hash — byte-for-byte compatible with the Go/Java/Python
-    and TypeScript SDKs.
-
-    hash_user("user-123", "my-flag") ≈ 0.69274
-    """
-    input_str = f"{user_id}:{flag_key}"
-    digest = hashlib.md5(input_str.encode("utf-8"), usedforsecurity=False).digest()
-    (uint32,) = struct.unpack_from("<I", digest[:4])
-    return uint32 / _HASH_DIVISOR
+    """Kept as a thin alias: this name appears in tests and in the SDK docs."""
+    return hash_user(user_id, flag_key)
 
 
 def _evaluate_flag(flag: FeatureFlag, user_id: str) -> EvaluateResponse:
