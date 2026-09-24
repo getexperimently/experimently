@@ -47,7 +47,7 @@ watchtower==3.4.0  # CloudWatch logging
 # Testing
 pytest==7.4.2
 pytest-asyncio==0.23.4
-pytest-cov==6.0.0
+pytest-cov==7.1.0
 pytest-mock==3.15.1
 httpx==0.28.1
 slack-sdk==3.44.1
