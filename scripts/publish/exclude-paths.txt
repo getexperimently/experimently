@@ -126,3 +126,7 @@ glob:*.DS_Store
 experimentation_platform.egg-info
 err.txt
 out.txt
+
+# The forbidden-string list itself. A file naming the strings the cut
+# forbids cannot be published; see the header of forbidden.txt.
+scripts/publish/forbidden.txt
