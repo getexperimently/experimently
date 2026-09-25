@@ -651,6 +651,72 @@ When committing changes:
    ```
 5. Push with `git push origin main`
 
+## How work is done here: plan, review, sign-off, then build
+
+**Founder instruction, standing, for every session.** For anything beyond a
+single-file change:
+
+1. **Write a plan.** Not a sentence of intent -- a document with the shape
+   below.
+2. **Have it reviewed by BOTH `engineering-manager` and `principal-engineer`**
+   (`.claude/agents/`). They review in parallel and they review the PLAN, not
+   code.
+3. **Get sign-off.** A rejection or a condition is not advice; address it and
+   re-submit. Two APPROVED verdicts, or APPROVED WITH CONDITIONS whose
+   conditions you have met, is the gate.
+4. **Only then write code.**
+
+The reviewers' job is to **pressure-test and verify the assumptions**, not to
+nod. `principal-engineer` checks every factual premise by running something,
+because the expensive failures here have all started from a premise that looked
+reasonable and was false -- "the workflow already installs the lock" (it
+resolves without installing), "the deploy runs cdk deploy" (both hits are
+comments, one saying the opposite), "the root package.json is unused" (a test
+opens it at a path built at runtime). `engineering-manager` owns scope,
+sequencing, size and what is irreversible or blocked on a human.
+
+**Why this exists.** Three consecutive review rounds on PR #236, each finding a
+defect in the previous round's *fix*, twice nearly shipping a silent outage.
+The plan-first instruction dates from 2026-09-22; the sign-off requirement was
+added after a session in which it was not followed and the same traps were
+walked into again -- a mandatory setting that would have failed the first
+deploy, and a wildcard pattern that matches nothing and refuses all traffic
+while the health checks stay green.
+
+### Use a SPEC where it earns its place
+
+For a change with a **contract** -- a new setting, a new gate, a new endpoint,
+a new workflow, a format other things parse -- write the spec before the code
+and put it in the plan:
+
+* **What** it does, in one paragraph.
+* **The contract**: inputs, outputs, defaults, and what is refused. Name the
+  values, not the shapes: `ALLOWED_HOSTS` accepts `example.com` and
+  `*.example.com`; it refuses `*example.com`, which matches nothing.
+* **Where it runs** and what must already be true there.
+* **Failure modes**, including the silent ones. What does it look like when
+  this is misconfigured rather than broken?
+* **Verification**: for each property, the defect that proves the check works.
+
+A spec is not ceremony for a one-line fix. It is how a change whose behaviour
+other things depend on gets its edges decided before they are discovered.
+
+### The plan's shape
+
+    GOAL          what this closes, and how you will know it is closed
+    PREMISES      every factual claim, each with what you ran to check it
+    DESIGN        what changes, and what deliberately does not
+    SPLIT         why this is one change and not several
+    SEQUENCE      what must be true before each step
+    ENVIRONMENTS  where it runs vs where you can verify it
+    IRREVERSIBLE  what needs a human at the moment it happens
+    VERIFICATION  per property: the gate, and the defect that proves it fires
+    NOT VERIFIED  what you could not check, and why
+
+The last line is mandatory and it is not an admission of weakness. "This venv
+has no `constructs._jsii`, so CI is the first thing that runs the synth suite"
+is the sentence that tells a reviewer where to look.
+
 ## Verifying a change (read this before saying something works)
 
 Three consecutive review rounds on one pull request each shipped a regression
