@@ -184,6 +184,67 @@ def check_ownership(user: Any, resource_obj: Any) -> bool:
     return False
 
 
+class Scope(str, Enum):
+    """Which feature flags a role's permission to act on flags extends to."""
+
+    ANY = "any"  # every flag, including one with no owner
+    OWN = "own"  # only flags whose owner_id is the user's id; no owner never matches
+
+
+# Whose flags each role may act on, once ROLE_PERMISSIONS has said the role may
+# take the action at all.  Access to feature flags is by role, not by who created
+# the flag: ADMIN and DEVELOPER act on any flag, ANALYST and VIEWER read any flag
+# and change none (ROLE_PERMISSIONS gives them no UPDATE or DELETE).  The owner is
+# recorded and shown, but it is not an access rule.
+#
+# Intent: per-flag restrictions (locking a flag to its owner, approvals) belong in
+# this table, not in ROLE_PERMISSIONS.  An entry missing here means OWN, the
+# narrowest scope that still lets an owner work.
+FEATURE_FLAG_SCOPE: Dict[UserRole, Dict[Action, Scope]] = {
+    UserRole.ADMIN: {
+        Action.READ: Scope.ANY,
+        Action.UPDATE: Scope.ANY,
+        Action.DELETE: Scope.ANY,
+    },
+    UserRole.DEVELOPER: {
+        Action.READ: Scope.ANY,
+        Action.UPDATE: Scope.ANY,
+        Action.DELETE: Scope.ANY,
+    },
+    UserRole.ANALYST: {Action.READ: Scope.ANY},
+    UserRole.VIEWER: {Action.READ: Scope.ANY},
+}
+
+
+def can_act_on_feature_flag(
+    user: Any,
+    owner_id: Optional[Any],
+    action: Action,
+    scope_table: Optional[Dict[UserRole, Dict[Action, Scope]]] = None,
+) -> bool:
+    """Whether *user* may take *action* on a feature flag owned by *owner_id*.
+
+    The one decision for every per-flag route.  A superuser may always act.
+    Otherwise the role must hold *action* on feature flags in ROLE_PERMISSIONS --
+    that check comes first, so owning a flag never lets a read-only role change
+    it -- and then the scope table decides whose flags the permission covers.
+
+    *owner_id* comes from the stored flag, never from a response dict (which
+    renders a missing owner as the string ``"None"``).  *scope_table* exists for
+    tests; callers leave it at the default.
+    """
+    if getattr(user, "is_superuser", False):
+        return True
+    if not check_permission(user, ResourceType.FEATURE_FLAG, action):
+        return False
+    role = getattr(user, "role", UserRole.VIEWER)
+    table = FEATURE_FLAG_SCOPE if scope_table is None else scope_table
+    scope = table.get(role, {}).get(action, Scope.OWN)
+    if scope is Scope.ANY:
+        return True
+    return owner_id is not None and str(owner_id) == str(getattr(user, "id", None))
+
+
 def get_permission_error_message(resource: ResourceType, action: Action) -> str:
     """
     Get a user-friendly error message for permission denial.
