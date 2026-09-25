@@ -83,7 +83,8 @@ jobs:
           # literal here would fail the guard on every run. The only way to
           # keep a literal would be to exempt this file, which is the defect
           # the guard exists to prevent.
-          printf 'role = "arn:aws:iam::%s:role/x"\n' "9876$(echo 54321098)" > planted.py
+          hi=9876; lo=54321098
+          printf 'role = "arn:aws:iam::%s%s:role/x"\n' "$hi" "$lo" > planted.py
           git add -A
           if python3 scripts/leak_guard.py --staged >/dev/null 2>&1; then
             echo "::error::leak-guard accepted a planted AWS account id -- the guard is not working"

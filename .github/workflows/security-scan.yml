@@ -189,20 +189,43 @@ jobs:
   secret-detection:
     name: Secret Detection
     runs-on: ubuntu-latest
-    # gitleaks-action lists the PR's commits via the API on pull_request
-    # events; the default token has no pull-requests scope, so grant it.
+    # Reading the checkout is all the binary needs -- the pull-requests scope
+    # here existed only for gitleaks-action's commit-listing API calls.
     permissions:
       contents: read
-      pull-requests: read
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0  # Full history for git-secrets
 
-      - name: Detect secrets with gitleaks
-        uses: gitleaks/gitleaks-action@v3
+      # The gitleaks BINARY, not gitleaks-action.
+      #
+      # gitleaks-action is free for a personal account and licensed for an
+      # organisation, and this repository moved from `amarkanday` to the
+      # `getexperimently` org. It now fails every run, on main as well as on
+      # pull requests, with:
+      #
+      #   [getexperimently] is an organization. License key is required.
+      #   error: missing gitleaks license.
+      #
+      # The scanner itself is still open source; only the Action wrapper
+      # charges. So install the release binary and run it, which is what
+      # pr-qa-gate.yml and export-sweep.yml in this repository already did --
+      # this job and release-gate.yml were the two that had not been converted.
+      #
+      # --redact so a finding names the file and rule without reprinting the
+      # secret into a public log, which would publish the thing being detected.
+      - name: Install gitleaks
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_VERSION: '8.30.1'
+        run: |
+          curl -fsSL -o /tmp/gitleaks.tar.gz \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          tar -xzf /tmp/gitleaks.tar.gz -C /usr/local/bin gitleaks
+          gitleaks version
+
+      - name: Detect secrets with gitleaks
+        run: gitleaks detect --source . --log-opts="--all" --redact --verbose
 
   container-security:
     name: Container Security Scan

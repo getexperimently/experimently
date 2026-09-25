@@ -95,10 +95,25 @@ jobs:
           # shellcheck disable=SC2086
           bandit -r $targets -ll
 
-      - name: Run gitleaks secret scan
-        uses: gitleaks/gitleaks-action@v3
+      # The binary, not gitleaks-action: the Action is licensed for an
+      # organisation and this repository is now under one, so it fails every
+      # run with "[getexperimently] is an organization. License key is
+      # required." The scanner is open source; only the wrapper charges.
+      # security-scan.yml, pr-qa-gate.yml and export-sweep.yml all install the
+      # release binary this way.
+      - name: Install gitleaks
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_VERSION: '8.30.1'
+        run: |
+          curl -fsSL -o /tmp/gitleaks.tar.gz \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          tar -xzf /tmp/gitleaks.tar.gz -C /usr/local/bin gitleaks
+          gitleaks version
+
+      # --redact: a finding must name the file and the rule without reprinting
+      # the secret into a public log.
+      - name: Run gitleaks secret scan
+        run: gitleaks detect --source . --log-opts="--all" --redact --verbose
 
   gate-summary:
     name: Release Gate Summary
