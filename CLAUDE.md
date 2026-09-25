@@ -661,6 +661,168 @@ When committing changes:
    ```
 5. Push with `git push origin main`
 
+## How work is done here: plan, review, sign-off, then build
+
+**Founder instruction, standing, for every session.** For anything beyond a
+single-file change:
+
+1. **Draft the plan with the three drafting roles** (`.claude/agents/`), in
+   parallel: `software-architect` writes DESIGN and SPEC, `qa-engineer` writes
+   VERIFICATION and NOT VERIFIED, `ux-designer` writes the user- and
+   reader-facing side (dashboard, demo apps, error messages, SDK surface,
+   documentation). You merge their drafts into one document with the shape
+   below, and say where they disagreed and what you chose.
+2. **`principal-engineer` pressure-tests the merged plan**: every factual
+   premise checked by running something.
+3. **`engineering-manager` gives the final verdict**, with the principal
+   engineer's findings in front of it: scope, size, sequence, what is
+   irreversible or blocked on a human, and whether the principal engineer's
+   conditions are met or accepted. A rejection or a condition is not advice;
+   address it and re-submit. An APPROVED verdict, or APPROVED WITH CONDITIONS
+   whose conditions you have met, is the gate.
+4. **Only then write code.**
+
+All five review the PLAN, not code. (Founder instruction, 2026-09-25: the
+drafting roles were added after two rounds in which the author wrote the plan
+alone and the reviewers each found a premise the author had not checked.)
+
+The reviewers' job is to **pressure-test and verify the assumptions**, not to
+nod. `principal-engineer` checks every factual premise by running something,
+because the expensive failures here have all started from a premise that looked
+reasonable and was false -- "the workflow already installs the lock" (it
+resolves without installing), "the deploy runs cdk deploy" (both hits are
+comments, one saying the opposite), "the root package.json is unused" (a test
+opens it at a path built at runtime). `engineering-manager` owns scope,
+sequencing, size and what is irreversible or blocked on a human.
+
+**Why this exists.** Three consecutive review rounds on PR #236, each finding a
+defect in the previous round's *fix*, twice nearly shipping a silent outage.
+The plan-first instruction dates from 2026-09-22; the sign-off requirement was
+added after a session in which it was not followed and the same traps were
+walked into again -- a mandatory setting that would have failed the first
+deploy, and a wildcard pattern that matches nothing and refuses all traffic
+while the health checks stay green.
+
+### How to actually consult the team
+
+**Three rounds, in order.** Draft, in one message, three calls:
+
+    Agent(subagent_type="software-architect", prompt=...)
+    Agent(subagent_type="qa-engineer",        prompt=...)
+    Agent(subagent_type="ux-designer",        prompt=...)
+
+merge their drafts into the plan, then pressure-test it:
+
+    Agent(subagent_type="principal-engineer", prompt=...)
+
+then the final verdict, with the principal engineer's review passed by path:
+
+    Agent(subagent_type="engineering-manager", prompt=...)
+
+Persist every draft to `drafts/v<n>-<role>.md` and every verdict to
+`reviews/v<n>-<role>.md`. A drafter with nothing to say for this change (no
+user-facing effect, say) says so in one line; do not invent scope to fill a
+section.
+
+They are defined in `.claude/agents/`. **If those names are not in your
+available-agents list, they were added after your session started** — the list
+is fixed at session start. Fall back to `general-purpose` and open the prompt
+with "You are the ENGINEERING MANAGER. Read your brief first:
+`.claude/agents/engineering-manager.md`". That is exactly how the first two
+rounds of the launch-readiness plan were run.
+
+**Every reviewer is a fresh invocation with no memory of its previous round.**
+It cannot recall the conditions it set last time. So:
+
+- **Persist every verdict to disk the moment it arrives** — the plan's own
+  directory, `reviews/v<n>-<role>.md`, with the numbered conditions verbatim.
+  The first round of this was lost to a scratchpad and the manager had to ask
+  for its own conditions back.
+- **Pass prior reviews by path, not by paste.** A path cannot be paraphrased
+  into something easier to satisfy.
+
+**What each prompt must carry:**
+
+1. The path to the plan, and to any previous version.
+2. The path to `DECISIONS.md`, with the settled items named — *"these are
+   settled, do not re-litigate them, but DO judge whether the revision
+   discharges them."* Reviewers will otherwise reopen founder decisions, which
+   wastes a round.
+3. Any facts discovered since the last round, so they are checked rather than
+   assumed.
+4. **The specific things you most want pressure-tested** — including the
+   weaknesses you already suspect. Naming your own weak point gets it examined
+   rather than missed; the Stream A red-main hazard was found because it was
+   asked about directly.
+5. Read-only constraints, explicitly: no writes, no AWS calls that create, no
+   publishing.
+
+**Expect rejection, and do not treat it as failure.** Across two rounds the
+reviewers caught a required check that was green for the wrong reason, a
+documentation tag that destroys the fence it annotates, a deploy that reports
+healthy while rejecting every request, a migration that can run production's
+image against staging, and a release gate no tag can satisfy. Each of those
+was cheaper to find in review than in production.
+
+**Then meet the conditions rather than noting them**, and apply the cap: two
+rejected revisions and you stop, work the uncontested parts, and write down
+what is contested and why.
+
+### A blocking question goes to the team, not to a halt
+
+**Founder instruction, standing.** When work is blocked on a question the
+founder has not answered — and especially when nobody is available to answer —
+**put it to `engineering-manager` and `principal-engineer`, and go with their
+recommendation.** Do not stall, and do not guess silently.
+
+Three rules keep this honest:
+
+- **Record it.** The question, the recommendation and the reasoning go in
+  `DECISIONS.md` alongside the founder's own decisions, marked as team-decided
+  rather than founder-decided, so the distinction survives.
+- **It does not extend to the irreversible.** A team recommendation cannot
+  authorise publishing a package, creating infrastructure that bills, a force
+  push, an announcement, or anything else on the IRREVERSIBLE list. Those wait
+  for a human however long that takes.
+- **Cap the rounds.** If reviewers reject a revision twice, stop revising.
+  Work the uncontested parts and leave a written note. Iterating against
+  reviewers with nobody to break a tie is how the fix-round spiral starts, and
+  that is the failure this whole process exists to prevent.
+
+### Use a SPEC where it earns its place
+
+For a change with a **contract** -- a new setting, a new gate, a new endpoint,
+a new workflow, a format other things parse -- write the spec before the code
+and put it in the plan:
+
+* **What** it does, in one paragraph.
+* **The contract**: inputs, outputs, defaults, and what is refused. Name the
+  values, not the shapes: `ALLOWED_HOSTS` accepts `example.com` and
+  `*.example.com`; it refuses `*example.com`, which matches nothing.
+* **Where it runs** and what must already be true there.
+* **Failure modes**, including the silent ones. What does it look like when
+  this is misconfigured rather than broken?
+* **Verification**: for each property, the defect that proves the check works.
+
+A spec is not ceremony for a one-line fix. It is how a change whose behaviour
+other things depend on gets its edges decided before they are discovered.
+
+### The plan's shape
+
+    GOAL          what this closes, and how you will know it is closed
+    PREMISES      every factual claim, each with what you ran to check it
+    DESIGN        what changes, and what deliberately does not
+    SPLIT         why this is one change and not several
+    SEQUENCE      what must be true before each step
+    ENVIRONMENTS  where it runs vs where you can verify it
+    IRREVERSIBLE  what needs a human at the moment it happens
+    VERIFICATION  per property: the gate, and the defect that proves it fires
+    NOT VERIFIED  what you could not check, and why
+
+The last line is mandatory and it is not an admission of weakness. "This venv
+has no `constructs._jsii`, so CI is the first thing that runs the synth suite"
+is the sentence that tells a reviewer where to look.
+
 ## Verifying a change (read this before saying something works)
 
 Three consecutive review rounds on one pull request each shipped a regression
