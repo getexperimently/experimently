@@ -296,9 +296,8 @@ COPY --from=modules-src --chown=appuser:appgroup /modules/backend /app/modules/b
 # The agent instruction files are matched by a glob rather than by name.
 # There are several of them -- the repository root, backend/, and whatever a
 # developer keeps locally -- so naming one asserted about one. A literal name
-# would also be a reference to a path `scripts/publish/export.sh` strips from
-# the public history, which would leave this line asserting, in the published
-# tree, about a file that cannot exist.
+# would also pin one spelling of a file whose set changes as agents come and
+# go, leaving this line asserting about something that need not exist.
 RUN set -eu; \
     for pattern in 'requirements*' 'CLAUDE*' 'Dockerfile' '*.pyc'; do \
         found="$(find /app -name "$pattern" -print -quit 2>/dev/null || true)"; \
@@ -370,9 +369,8 @@ USER appuser
 # The agent instruction files are matched by a glob rather than by name.
 # There are several of them -- the repository root, backend/, and whatever a
 # developer keeps locally -- so naming one asserted about one. A literal name
-# would also be a reference to a path `scripts/publish/export.sh` strips from
-# the public history, which would leave this line asserting, in the published
-# tree, about a file that cannot exist.
+# would also pin one spelling of a file whose set changes as agents come and
+# go, leaving this line asserting about something that need not exist.
 RUN set -eu; \
     for pattern in 'requirements*' 'CLAUDE*' 'Dockerfile' '*.pyc'; do \
         found="$(find /app -name "$pattern" -print -quit 2>/dev/null || true)"; \

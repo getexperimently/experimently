@@ -25,11 +25,12 @@ export const HOME_AFTER_LOGIN = '/experiments';
  * EVERY CLAIM ON THIS PAGE HAS TO BE TRUE. The landing page that used to live
  * here advertised an event volume, an uptime figure and two compliance
  * certifications for software that has never been deployed, so it could not
- * simply be restored -- `scripts/publish/export.sh` refuses to publish a tree
- * containing those, and `index.test.tsx` asserts the absence of the whole
- * class. (The literals are deliberately not repeated here: this file is swept,
- * and quoting a forbidden claim to explain it trips the gate. That has now
- * happened three times in three different files this week.) What is written
+ * simply be restored -- `scripts/leak_guard.py` refuses to let a tree
+ * containing those be pushed at all, and `index.test.tsx` asserts the absence
+ * of the whole class. (The literals are deliberately not repeated here: this
+ * file is scanned, and quoting a forbidden claim to explain it trips the gate.
+ * That has now happened four times in four different files, most recently in
+ * the commit message of the change that introduced leak_guard.py.) What is written
  * below is either checked by a test in this repository or is a statement about
  * the licence and the architecture.
  */

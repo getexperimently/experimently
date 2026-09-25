@@ -16,9 +16,9 @@ The two tests that matter most are the last two:
     messages containing an absolute home path.
 
   * an offender planted IN the guard's own source must be caught BY the guard.
-    The predecessor excluded `scripts/publish/` from its own grep and
-    therefore published the AWS account id printed on line 276 of the very
-    script that forbade it.
+    The predecessor -- the export sweep, since removed -- excluded its own
+    directory from its own grep, and therefore published the AWS account id
+    printed on line 276 of the very script that forbade it.
 """
 
 from __future__ import annotations

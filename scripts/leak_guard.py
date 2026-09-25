@@ -3,8 +3,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """Refuse to let a secret or a false claim into this repository.
 
-This replaces `scripts/publish/export.sh`'s sweep, and it replaces it because
-the sweep can no longer work. The sweep was CORRECTIVE: development happened
+This replaces the sweep that `scripts/publish/export.sh` used to run, and it
+replaces it because that sweep can no longer work. The sweep was CORRECTIVE: development happened
 in a private repository, and a filter-repo export stripped the forbidden
 material on the way out. Development is public now, so there is no "way out"
 left to strip anything on -- a push is publication. The check has to be

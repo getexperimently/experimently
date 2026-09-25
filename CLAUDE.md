@@ -904,60 +904,82 @@ Merge when a review round produces no finding that would break a deployment or
 lose data. Everything else becomes a tracked issue. Without a bar, review
 rounds never end, because each one finds something.
 
-## Releasing, and cutting the public repository
+## Releasing, and the docs site
 
-Four things here are non-obvious, and every one of them cost a wrong report or
-a rejected push on the 0.2.0 release.
+Development happens in this repository now. There is no private repository and
+no export step: a push here is publication, and `scripts/leak_guard.py` is what
+stands between a secret and the world (see `.github/workflows/leak-guard.yml`).
+`scripts/publish/export.sh` and its exclusion list are gone; anything that
+genuinely cannot be public lives in `getexperimently/experimently-internal`.
+
+What remains non-obvious, every item of which cost a wrong report or a failed
+deploy:
 
 ### A `GITHUB_TOKEN` event triggers no workflow
 
 GitHub refuses to run workflows for events its own token created, to stop
 recursion. Two consequences, both certain to recur:
 
-- **The release-please pull request has ZERO checks.** With 18-20 required, it
-  can never satisfy branch protection. It is not blocked on anything you can
-  fix in the pull request; merge it with `--admin` after confirming the diff
-  is only CHANGELOG.md, VERSION and the manifest.
+- **The release-please pull request has ZERO checks.** With 20 required, it can
+  never satisfy branch protection. It is not blocked on anything you can fix in
+  the pull request; merge it with `--admin` after confirming the diff is only
+  CHANGELOG.md, VERSION, the manifest and the three version fixtures.
 - **The tag it pushes triggers nothing.** `release.yml` has a
   `workflow_dispatch` with a tag input for exactly this: `gh workflow run
-  release.yml -f tag=vX.Y.Z`.
+  release.yml -f tag=vX.Y.Z`. A tag pushed by a human token DOES trigger
+  workflows, which is why a hand-pushed tag behaves differently.
+
+Release-please also needs the ORGANISATION to allow it. If it fails with
+
+    release-please failed: GitHub Actions is not permitted to create or
+    approve pull requests
+
+that is not a repository setting you can fix from here -- the repository API
+answers `409 The organization does not allow GitHub Actions to create or
+approve pull requests`. It is
+`github.com/organizations/getexperimently/settings/actions` -> Workflow
+permissions, and it needs an org owner.
 
 ### A release bumps VERSION and leaves the fixtures behind
 
 Three committed files embed the version -- both OpenAPI snapshots under
 `docs/api/` and the frontend's copy. They are `extra-files` in
-`release-please-config.json` now, so the release pull request updates them.
-If a release ever lands with them stale, `make openapi` and commit; the smoke
-test `test_version_sources.py` fails loudly either way.
+`release-please-config.json`, so the release pull request updates them. If a
+release ever lands with them stale, `make openapi` and commit; the smoke test
+`test_version_sources.py` fails loudly either way.
 
-### The cut cannot fast-forward after an exclusion change
+Check a release pull request by diffing it: if anything but the version string
+changed in those three files, the generator and the committed copies have
+diverged and `make openapi` is the fix, not the release.
 
-`git filter-repo` rewrites commit CONTENT, so changing
-`scripts/publish/exclude-paths.txt` changes every resulting hash and the new
-history shares no commits with the published one. The push is then a force
-push -- and `allow_force_pushes` is deliberately **false** on the public
-repository, so it is rejected by the branch protection hook.
+### The docs site deploys from a TAG, and two settings gate it
 
-The procedure is: open "Allow force pushes" in the public repository's branch
-settings, push, close it again. Read the setting back afterwards rather than
-trusting the API's response.
+`docs.yml` builds on every push to main but only deploys when the ref is a
+`v*` tag. Both of these were wrong at once and the site 404'd for weeks while
+the build stayed green -- the build passing tells you nothing about the deploy:
 
-Tags need `git push <url> vX.Y.Z` explicitly. `--follow-tags` sends only
-ANNOTATED tags and release-please creates lightweight ones, so the tag is
-silently left behind -- which means the docs site, whose deploy is gated on
-the tag, silently never builds.
+- **Pages must be enabled** (`build_type: workflow`). Otherwise the deploy step
+  fails with `HttpError: Not Found ... Ensure GitHub Pages has been enabled`.
+- **The `github-pages` environment must allow the tag.** Its deployment branch
+  policy listed only `main`, so every tag deploy was rejected about two seconds
+  in. It needs a `v*` entry of type `tag` alongside it.
 
-### Verify in the exported tree, not this one
+When a deploy fails in seconds rather than failing to build, suspect the
+environment policy before the artifact. And do not read a failed job's log
+through the API to diagnose it: that call can itself return
+`<Error><Code>BlobNotFound</Code>`, which looks exactly like a deploy error and
+only means the log has gone. `/deployments/<id>/statuses` showed `waiting` then
+`failure` two seconds apart and pointed straight at the policy.
 
-`mkdocs build --strict` passes here and fails there, because `docs/planning/`
-exists here and is stripped there. The v0.2.0 Pages deploy failed on one
-relative link -- `planning/...` from inside `docs/README.md` -- that the
-"no references to removed paths" check cannot see, because it derives the
-pattern `docs/planning/` and a relative link carries no prefix.
+### Verify where the thing runs, not where you are
 
-`export.sh` now builds the docs site and runs `core_build.sh` on the export
-for this reason. When something passes locally and you are about to publish,
-the question is always whether the thing you tested is the thing that ships.
+The old version of this section said "verify in the exported tree, not this
+one", because `mkdocs build --strict` passed locally and failed on the export
+where `docs/planning/` had been stripped. There is no export now, but the rule
+it came from is unchanged and still the most expensive one here:
+`scripts/core_build.sh` copies the tree into a directory with **no `.git`**, and
+a test that shells out to git passes everywhere except there. That is what
+broke `core-build` on the pull request that introduced the leak guard.
 
 ## Dependabot: the queue is a merge problem, not a volume problem
 

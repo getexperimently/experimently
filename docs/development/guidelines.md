@@ -286,9 +286,11 @@ checks, eslint and `tsc --noEmit`, hadolint over the Dockerfiles, and
 actionlint over the workflows. `make lint` runs the same thing locally.
 
 Security scanning is Semgrep, Bandit, gitleaks, trufflehog and the container
-and dependency scans, summarised by `Security Scan Summary`. `Export Sweep`
-runs the publication gate (`scripts/publish/export.sh`) on every pull request,
-so a change that would make the repository unpublishable fails before merge.
+and dependency scans, summarised by `Security Scan Summary`. `Leak Guard` runs
+`scripts/leak_guard.py` on every push and pull request -- over the files AND
+the commit messages -- so a secret or a false claim fails before it is
+published rather than after. It is a required check, and pre-commit runs the
+same script locally at both the `pre-commit` and `pre-push` stages.
 
 Note there is no mypy in the gate. It is useful (`mypy backend/app/`) but it
 is not wired into `make lint` or the `lint` job, so do not describe it as

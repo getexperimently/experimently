@@ -2,7 +2,7 @@
 #
 # This repository is public and it is where development happens, so a push IS
 # publication -- there is no export step downstream that could strip anything
-# out afterwards. `scripts/publish/export.sh` used to be that step and is gone.
+# out afterwards. `scripts/publish/export.sh` was that step, and is gone.
 #
 # Runs on every push and every pull request, including from forks, because it
 # needs no secrets and no write permission -- it only reads the checkout. That

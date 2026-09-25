@@ -210,8 +210,8 @@ jobs:
       #
       # The scanner itself is still open source; only the Action wrapper
       # charges. So install the release binary and run it, which is what
-      # pr-qa-gate.yml and export-sweep.yml in this repository already did --
-      # this job and release-gate.yml were the two that had not been converted.
+      # pr-qa-gate.yml in this repository already did -- this job and
+      # release-gate.yml were the two that had not been converted.
       #
       # --redact so a finding names the file and rule without reprinting the
       # secret into a public log, which would publish the thing being detected.
