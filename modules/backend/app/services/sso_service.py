@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import logging
 import secrets
+import threading
 import time
 import uuid
 from typing import Any, Dict, List, Optional
@@ -120,6 +121,27 @@ def _require_saml_support() -> None:
 
 
 _STATE_TTL_SECONDS = 600  # 10 minutes
+
+#: The most unredeemed state tokens the process will hold.
+#:
+#: `GET /api/v1/auth/sso/oidc/{provider}/login` is on the PUBLIC router -- no
+#: authentication dependency -- and every call minted an entry here. Expiry was
+#: consulted only on `pop`, so a token nobody ever redeemed was never removed
+#: by anything. An anonymous caller could therefore grow this dictionary
+#: without limit, one HTTP request at a time, until the container died.
+#:
+#: Evicting expired entries alone does not bound it: the live set is still
+#: "everything minted in the last ten minutes", which is unbounded in the rate
+#: of requests. Hence a hard cap as well.
+#:
+#: 10,000 is far beyond any real concurrent-login count for a self-hosted
+#: deployment and costs on the order of a megabyte.
+_STATE_STORE_MAX = 10_000
+
+#: The store is read-modify-written below (measure, evict, insert), which is
+#: not atomic the way a single dict assignment is. Uvicorn can run handlers on
+#: a thread-pool executor, so the compound operation takes a lock.
+_state_lock = threading.Lock()
 
 
 # ---------------------------------------------------------------------------
@@ -802,10 +824,50 @@ def map_role(config: SSOConfig, groups: List[str]) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _drop_expired(now: float) -> int:
+    """Remove every entry whose TTL has passed. Caller holds ``_state_lock``."""
+    dead = [token for token, expiry in _state_store.items() if expiry <= now]
+    for token in dead:
+        _state_store.pop(token, None)
+    return len(dead)
+
+
 def generate_state_token() -> str:
-    """Generate a cryptographically-random URL-safe state token and store it."""
+    """Generate a cryptographically-random URL-safe state token and store it.
+
+    Bounded, which it was not: this is reachable unauthenticated and nothing
+    removed a token that was never redeemed. See ``_STATE_STORE_MAX``.
+
+    What this does NOT do, deliberately: make the flow robust under abuse. A
+    flood still displaces pending logins, because nothing here can tell an
+    attacker's token from a user's -- the store is keyed by a value the server
+    invented and bound to nobody. Only the redesign tracked in #94 fixes that,
+    by holding no server state at all: a signed, short-TTL token over a value
+    in a ``__Host-`` cookie, verified by signature and cookie match. This
+    change is the memory bound, not that.
+    """
     token = secrets.token_urlsafe(32)
-    _state_store[token] = time.time() + _STATE_TTL_SECONDS
+    now = time.time()
+    with _state_lock:
+        if len(_state_store) >= _STATE_STORE_MAX:
+            _drop_expired(now)
+            if len(_state_store) >= _STATE_STORE_MAX:
+                # Still full of live tokens: shed the oldest in one pass rather
+                # than one at a time, which would be quadratic exactly when the
+                # process is already under load.
+                batch = max(1, _STATE_STORE_MAX // 10)
+                for victim in sorted(_state_store, key=_state_store.__getitem__)[
+                    :batch
+                ]:
+                    _state_store.pop(victim, None)
+                logger.warning(
+                    "SSO state store hit its cap of %d live tokens; shed %d. "
+                    "The login route is unauthenticated, so this is as likely "
+                    "to be abuse as load.",
+                    _STATE_STORE_MAX,
+                    batch,
+                )
+        _state_store[token] = now + _STATE_TTL_SECONDS
     return token
 
 
@@ -826,7 +888,8 @@ def verify_state_token(token: str) -> bool:
             detail="State token is required",
         )
 
-    expiry = _state_store.pop(token, None)
+    with _state_lock:
+        expiry = _state_store.pop(token, None)
     if expiry is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
