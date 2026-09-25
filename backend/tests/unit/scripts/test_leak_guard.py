@@ -236,7 +236,29 @@ def test_push_mode_survives_a_branch_with_no_upstream(tmp_path):
 
 @pytest.mark.unit
 def test_the_repository_itself_is_clean():
-    """The real tree, scanned by the real guard. No fixtures involved."""
+    """The real tree, scanned by the real guard. No fixtures involved.
+
+    Skipped in `scripts/core_build.sh`'s copy, which is a plain directory with
+    no `.git` -- deliberately, so that a profile is proved to stand alone
+    outside a checkout. The guard enumerates with `git ls-files`, so there is
+    nothing there for it to enumerate:
+
+        FAILED ...::test_the_repository_itself_is_clean
+          leak-guard: git rev-parse --show-toplevel failed:
+          fatal: not a git repository
+
+    The skip is keyed on the ABSENCE OF `.git`, which is a structural fact
+    about that copy, and NOT on the guard returning non-zero. A guard that
+    breaks for any other reason still fails this test. That distinction is the
+    whole point: this repository has shipped checks that skipped their way to
+    green, and a skip whose condition is "the thing under test failed" is one
+    of them.
+    """
+    if not (REPO_ROOT / ".git").exists():
+        pytest.skip(
+            "not a git checkout (core_build.sh's copy); git ls-files has "
+            "nothing to enumerate here"
+        )
     result = subprocess.run(
         [sys.executable, str(GUARD)], cwd=REPO_ROOT, capture_output=True, text=True
     )
