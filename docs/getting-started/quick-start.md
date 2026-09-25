@@ -226,7 +226,7 @@ SDK path, each with a traffic simulator. See [demo/DEMO_GUIDE.md](https://github
 **`api` container never becomes healthy**
 
 ```{.bash exec}
-docker compose logs api --tail 100
+docker compose logs api --tail 100 --bogus
 ```
 <!-- expect: [entrypoint] starting: -->
 
