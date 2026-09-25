@@ -291,9 +291,13 @@ class TestFeatureFlagToggleEndpoints:
         assert "not found" in response.json()["detail"].lower()
 
     def test_toggle_feature_flag_permission_denied(self):
-        """Test toggling feature flag without permission."""
+        """A read-only role may not toggle a flag.
+
+        Access to flags is by role, not ownership: a DEVELOPER may toggle any
+        flag, so the refusal is shown with a VIEWER.
+        """
         # Setup mocks
-        mock_user = self.setup_test_user(is_superuser=False)
+        mock_user = self.setup_test_user(role=UserRole.VIEWER, is_superuser=False)
         mock_db = Mock(spec=Session)
 
         # Setup feature flag owned by different user

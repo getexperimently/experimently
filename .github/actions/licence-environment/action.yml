@@ -1,0 +1,80 @@
+# The environment `scripts/generate_third_party_licenses.py` requires, in one
+# place.
+#
+# The generator reads the MACHINE, not the lock files -- `pip-licenses` reports
+# the active virtualenv and `license-checker` reads `node_modules` -- so it
+# refuses to run anywhere that does not match what ships (#170). Every consumer
+# therefore needs the identical setup, and before this action there was one
+# copy of it and a second about to be written. A second copy of a pinned
+# version is the drift this repository keeps being bitten by.
+#
+# WHAT THIS EXECUTES, and why the caller must care: `npm ci` runs lifecycle
+# scripts (deliberately -- `--ignore-scripts` is not passed, because sharp's
+# per-platform binaries are exactly what the attribution record must capture)
+# and `pip install` runs whatever the closure's packages do at install time. So
+# this action EXECUTES THE CODE OF THE TREE IT IS POINTED AT. A caller that
+# checks out a pull request branch must therefore hold a read-only token; see
+# `dependabot-licences.yml`, which splits generation from publication for
+# exactly this reason.
+name: Licence environment
+description: >-
+  Install the Python and Node closures that
+  scripts/generate_third_party_licenses.py resolves against.
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v7
+      with:
+        python-version: '3.11'
+
+    - uses: actions/setup-node@v7
+      with:
+        node-version: '22'
+
+    # The LOCKS, which are what the images install, and the only inputs that
+    # give the same answer twice: `requirements.txt` leaves pip to resolve
+    # everything it does not pin, so a transitive's version in the document was
+    # whatever PyPI served that day -- the gate's second run once failed on
+    # `platformdirs 4.11.11 -> 4.11.12` with no dependency change in the pull
+    # request. `--require-hashes` is not decoration: it is what makes "the
+    # closure the image installs" a claim rather than a hope.
+    #
+    # pip-licenses is installed separately, after, so it is not part of the
+    # hashed set. It does not appear in the document: the generator lists only
+    # what is reachable from a pin.
+    #
+    # The pin is READ from the Makefile, not copied. It was spelled out in
+    # three places (Makefile, pr-qa-gate.yml, third-party-licenses.yml) and an
+    # unpinned resolver reintroduces the drift the gate exists to remove:
+    # pip-licenses reports the `License` column, which `normalise()` maps by
+    # exact string, so a release that respells a classifier silently rewrites
+    # rows and turns --check red on a pull request that changed no dependency.
+    - name: Install the shipped Python closures
+      shell: bash
+      run: |
+        set -euo pipefail
+        PIP_LICENSES_VERSION=$(sed -n 's/^PIP_LICENSES_VERSION := //p' Makefile | head -1)
+        if [ -z "$PIP_LICENSES_VERSION" ]; then
+          echo "::error::could not read PIP_LICENSES_VERSION from the Makefile"
+          exit 1
+        fi
+        echo "pip-licenses version from Makefile: $PIP_LICENSES_VERSION"
+        python -m pip install --upgrade pip
+        pip install --require-hashes \
+          -r backend/requirements/runtime.lock \
+          -r modules/requirements.lock
+        pip install "pip-licenses==${PIP_LICENSES_VERSION}"
+
+    # Every package the generator resolves. `npm ci` rather than `npm i`, so
+    # the lockfile decides; `--ignore-scripts` is NOT passed, because sharp's
+    # optional binaries are the thing the record must get right.
+    - name: Install the Node closures
+      shell: bash
+      run: |
+        set -euo pipefail
+        for pkg in frontend sdk/js sdk/react sdk/react-native sdk/openfeature sdk/edge; do
+          echo "::group::npm ci in $pkg"
+          (cd "$pkg" && npm ci)
+          echo "::endgroup::"
+        done
