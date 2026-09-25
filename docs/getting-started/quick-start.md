@@ -48,7 +48,7 @@ variable, the optional `demo`, `tools` and `aws` profiles, and the host-port ove
 
 Verify:
 
-```{.bash exec}
+```bash
 curl -s localhost:8000/health/ready | jq .status
 curl -s -o /dev/null -w '%{http_code}\n' localhost:8000/api/v1/experiments/
 ```
