@@ -1,137 +1,163 @@
 # Creating Feature Flags
 
-This guide walks through creating, configuring, and activating feature flags via both the dashboard and the REST API.
+This guide creates a flag, adds targeting rules, turns it on for 10% of users and
+evaluates it: first in the dashboard, then with the REST API. The API commands run as
+written against the stack from the [Quick Start](../getting-started/quick-start.md).
 
 ---
 
 ## Prerequisites
 
-You need one of the following to create a feature flag:
-
-- A **user account** with DEVELOPER or ADMIN role (for dashboard and API access via JWT token)
-- An **API key** with `write` scope (for server-to-server API access)
-
-To obtain access, contact your platform administrator or use the Admin UI under Settings → Users.
+- **A running stack.** [Quick Start](../getting-started/quick-start.md) Step 1 starts one
+  on `localhost`. On your own deployment, use its URL wherever this page says
+  `localhost:8000` or `localhost:3000`.
+- **A user account with the ADMIN or DEVELOPER role.** Creating, changing and turning a
+  flag on all take a user login. An API key can't do them (the API answers `401`). An
+  administrator creates accounts under **Admin → Users**. The examples below use the demo
+  administrator, `admin@demo.com`.
+- **An API key**, to evaluate the flag the way your application will. The API section
+  creates one; in the dashboard, it's **Admin → API Keys**.
 
 ---
 
-## Creating a Flag via the Dashboard
+## Creating a Flag in the Dashboard
 
-### Step 1: Navigate to Feature Flags
+### Step 1: Open the form
 
-Open the dashboard at `http://localhost:3000` (or your production URL), click **Feature Flags** in the left navigation, then click **New Flag**.
+Open the dashboard at `http://localhost:3000`, click **Feature Flags** in the top
+navigation, then click **+ New Flag**.
 
-### Step 2: Fill in the Basic Details
+### Step 2: Name the flag
 
 | Field | Description | Example |
 |-------|-------------|---------|
-| **Key** | Unique identifier used in code. Cannot be changed after creation. | `new-checkout-flow` |
-| **Name** | Human-readable label shown in the dashboard. | `New Checkout Flow` |
-| **Description** | What this flag controls and when it should be removed. | `Redesigned single-page checkout experience` |
+| **Name** (required) | The label shown in the dashboard. | `New Checkout Flow` |
+| **Key** (required) | The identifier your code passes to the SDK. It's filled in from the name (`new_checkout_flow`), and you can edit it. Use lowercase letters, digits, `-` and `_`. The dashboard can't change it after the flag is created. | `new-checkout-flow` |
+| **Description** | What the flag controls, and when it should be removed. | `Redesigned single-page checkout experience` |
 
-### Step 3: Set the Default Value
+### Step 3: Add targeting rules (optional)
 
-Choose whether the flag is boolean (on/off) or multivariate (multiple string variants).
+Targeting rules turn the flag on for specific users, whatever the rollout percentage
+is. Under **Targeting Rules**, click **+ Add Group**, then add one **+ Add Condition**
+for each condition. A condition has three parts:
+- an attribute: pick a suggestion such as `user.country`, or type any attribute your
+  application sends;
+- an operator;
+- a value.
 
-For a standard on/off flag, leave the type as **Boolean**. The default value determines what users who are not in the rollout percentage see:
-- **Default: OFF** — the feature is disabled for all users not explicitly rolled out
-- **Default: ON** — the feature is enabled by default; the rollout percentage restricts it
+| Attribute | Operator | Value |
+|-----------|----------|-------|
+| `user.country` | `in` | `US, CA` |
+| `user.plan` | `equals` | `enterprise` |
 
-Most flags should default to OFF.
+Each group's **AND**/**OR** decides how its conditions combine, and the **AND**/**OR**
+above the groups decides how the groups combine.
 
-### Step 4: Configure Targeting Rules (Optional)
+If a user matches a rule, the flag is on for them. If they match no rule, the rollout
+percentage in Step 4 decides. With no groups, the builder reads *No targeting rules —
+all users will match*, and the rollout percentage decides for everyone.
 
-Targeting rules restrict which users are eligible for the flag. Users who do not match the rules always see the default value regardless of rollout percentage.
+### Step 4: Set the rollout percentage
 
-Click **Add Rule** and configure conditions:
-
-```
-country IN [US, CA]          — Only show to North American users
-plan EQUALS enterprise       — Only enterprise plan users
-account_age_days > 30        — Only users with accounts older than 30 days
-```
-
-Rules can be combined with AND/OR logic. Leave empty to target all users.
-
-### Step 5: Set the Rollout Percentage
-
-Set how many eligible users see the feature:
+The **Rollout percentage** slider sets the share of users who get the flag when they
+match no targeting rule:
 
 | Percentage | Effect |
 |------------|--------|
-| `0%` | Flag is disabled for everyone — safe to save and activate without any users seeing it |
-| `5%` | 5% of eligible users see the feature |
-| `100%` | All eligible users see the feature |
+| `0%` | Only users who match a targeting rule get the flag |
+| `5%` | Matching users, plus 5% of everyone else |
+| `100%` | Everyone |
 
-Start at `0%` and increase gradually once you are confident the flag is working correctly.
+Each user always lands on the same side of the percentage. Raising it adds users, and
+takes none away.
 
-### Step 6: Save and Activate
+### Step 5: Create the flag, then turn it on
 
-Click **Save as Draft** to save without making it live, or click **Activate** to immediately start serving the flag.
+Click **Create Feature Flag**. The flag starts **off** (its page reads *Not serving*), so
+creating it never exposes anyone. When you're ready, turn it on with the switch beside
+*Not serving*, and the page then reads *Serving*. The same switch turns it off again.
 
-A flag in **DRAFT** status is saved but not evaluated. A flag in **ACTIVE** status is evaluated for every eligible user request. You can move a flag from DRAFT to ACTIVE at any time.
+The dashboard's **On**/**Off** is the API's `status` of `"active"`/`"inactive"`, and you
+set it with `is_active`.
 
 ---
 
-## Creating a Flag via API
+## Creating a Flag with the API
 
-### Obtain a Token
+Run these in one terminal, in order. Each step uses the shell variables set by the ones
+before it (`$TOKEN`, `$FLAG_ID`, `$KEY`).
+
+**URLs.** The collection URL ends with a slash (`/api/v1/feature-flags/`), and a single
+flag's URL doesn't (`/api/v1/feature-flags/$FLAG_ID`). The other form answers
+`307 Temporary Redirect`. `curl` doesn't follow the redirect, so nothing happens and
+nothing is printed.
+
+### Log in
 
 ```bash
-TOKEN=$(curl -s -X POST http://localhost:8000/api/v1/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"username":"your-username","password":"your-password"}' \
-  | jq -r '.access_token')
+TOKEN=$(curl -s -X POST localhost:8000/api/v1/auth/login \
+  -H 'content-type: application/json' \
+  -d '{"email":"admin@demo.com","password":"Demo1234!"}' | jq -r .access_token)
+
+curl -s localhost:8000/api/v1/auth/me -H "Authorization: Bearer $TOKEN" | jq .role
 ```
 
-Or use an API key:
+The second command prints `"ADMIN"`. If it prints `null`, the login failed (it takes
+the account's `email`, not a username) and `$TOKEN` holds no token.
+
+### Create the flag
 
 ```bash
-# Pass in header instead of Bearer token
-curl -H "X-API-Key: your-api-key" ...
-```
-
-### Create the Flag
-
-```bash
-curl -X POST http://localhost:8000/api/v1/feature-flags \
+FLAG=$(curl -s -X POST localhost:8000/api/v1/feature-flags/ \
   -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
+  -H 'content-type: application/json' \
   -d '{
     "key": "new-checkout-flow",
     "name": "New Checkout Flow",
     "description": "Redesigned single-page checkout experience",
     "rollout_percentage": 0,
-    "status": "DRAFT"
-  }'
-```
+    "is_active": false
+  }')
+FLAG_ID=$(jq -r .id <<<"$FLAG")
 
-**Response: 201 Created**
+jq '{key, status, rollout_percentage}' <<<"$FLAG"
+```
 
 ```json
 {
-  "id": "flag-uuid-here",
   "key": "new-checkout-flow",
-  "name": "New Checkout Flow",
-  "description": "Redesigned single-page checkout experience",
-  "status": "DRAFT",
-  "rollout_percentage": 0,
-  "targeting_rules": [],
-  "created_at": "2026-03-02T10:00:00Z",
-  "updated_at": "2026-03-02T10:00:00Z"
-}'
+  "status": "inactive",
+  "rollout_percentage": 0
+}
 ```
 
-### Add Targeting Rules
+`"is_active": false` creates the flag switched off. **Leave it out and the flag is created
+on**, because `is_active` defaults to `true` in the API. (The dashboard always sends
+`false`.) The response reports the state as `status`. It also carries the flag's
+`id`, which this saves in `$FLAG_ID` for the next steps.
+
+The request takes these fields:
+- `key` and `name` (both required);
+- `description`;
+- `is_active`;
+- `rollout_percentage` (0–100, default 0);
+- `targeting_rules`;
+- `tags`.
+
+**The API ignores any other field without an error.** A `"status"` field, for example,
+has no effect, so check the response. A key that already exists answers `409`, and a key
+with capitals or spaces answers `422`.
+
+### Add targeting rules
 
 `targeting_rules` uses the same shape the dashboard rule builder writes: a top-level
 `logical_operator` combining one or more groups, each group combining its conditions.
-This example targets enterprise-plan users in the US, CA or GB **or** any employee:
+This example targets enterprise-plan users in the US, CA or GB, **or** any employee:
 
 ```bash
-curl -X PUT http://localhost:8000/api/v1/feature-flags/flag-uuid-here \
+curl -s -o /dev/null -w '%{http_code}\n' -X PUT localhost:8000/api/v1/feature-flags/$FLAG_ID \
   -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
+  -H 'content-type: application/json' \
   -d '{
     "targeting_rules": {
       "logical_operator": "OR",
@@ -153,6 +179,8 @@ curl -X PUT http://localhost:8000/api/v1/feature-flags/flag-uuid-here \
     }
   }'
 ```
+
+It prints `200`.
 
 Operators: `equals`, `not_equals`, `contains`, `not_contains`, `starts_with`, `ends_with`,
 `greater_than`, `less_than`, `greater_than_or_equal`, `less_than_or_equal`, `in`, `not_in`,
@@ -186,61 +214,86 @@ So a dashboard rule on `user.country` matches an SDK that sends `{"country": "US
 any renaming on either side. A condition whose attribute is absent from the context does not
 match (except `is_null`, which does).
 
-### Activate the Flag at 10%
+### Turn the flag on at 10%
 
 ```bash
-curl -X PUT http://localhost:8000/api/v1/feature-flags/flag-uuid-here \
+curl -s -X PUT localhost:8000/api/v1/feature-flags/$FLAG_ID \
   -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "rollout_percentage": 10,
-    "status": "ACTIVE"
-  }'
+  -H 'content-type: application/json' \
+  -d '{"rollout_percentage": 10, "is_active": true}' | jq '{status, rollout_percentage}'
+```
+
+```json
+{
+  "status": "active",
+  "rollout_percentage": 10
+}
+```
+
+`"is_active": false` turns it off again. `POST /api/v1/feature-flags/$FLAG_ID/activate`
+and `.../deactivate` do the same without a body. A `"status"` field in the `PUT` is
+ignored.
+
+### Create an API key
+
+Applications evaluate flags with an API key, not a user token. The key is shown only
+once, and this saves it in `$KEY`:
+
+```bash
+KEY=$(curl -s -X POST localhost:8000/api/v1/api-keys \
+  -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+  -d '{"name":"flag-guide"}' | jq -r .key)
 ```
 
 ---
 
 ## Flag Key Naming Conventions
 
-Flag keys must be URL-safe strings. Follow these conventions to keep your flag inventory readable:
+A key is lowercase letters, digits, hyphens and underscores, starting with a letter or
+digit. Anything else is refused with `422`. To keep your flag inventory readable:
 
-- Use lowercase letters, numbers, and hyphens only: `new-checkout-flow`, `dark-mode-v2`
-- Use a noun or noun phrase describing what the flag controls: `redesigned-header`, `ai-recommendations`
-- Include a version suffix if you anticipate multiple iterations: `checkout-flow-v2`
-- Do not include environment names in the key — environments are handled by separate API keys
-- Avoid overly generic names: `experiment-1`, `flag-test` are hard to interpret months later
+- Pick hyphens or underscores and stick to one: `new-checkout-flow`, `dark_mode_v2`. The
+  dashboard fills keys in with underscores.
+- Name what the flag controls: `redesigned-header`, `ai-recommendations`.
+- Add a version suffix if you expect more than one iteration: `checkout-flow-v2`.
+- Don't put an environment name in the key. Each deployment has its own flags.
+- Avoid generic names. `experiment-1` and `flag-test` are hard to interpret months later.
 
 ---
 
-## Setting the Default Value
+## When a Flag Evaluates to Off
 
-The default value is what users receive when:
-- The flag is in DRAFT status
-- The user's rollout hash falls outside the rollout percentage
-- The user does not match the targeting rules
-- The flag evaluation call fails (error fallback)
+A flag is on or off for each user, and there's no separate default value. Evaluation
+returns `enabled: false` when:
 
-For most feature flags, the correct default is `false` (feature disabled). This ensures that before you deliberately roll out the feature, no users are accidentally exposed.
+- the flag is off (`reason: "inactive"`);
+- the user matches no targeting rule and falls outside the rollout percentage
+  (`reason: "rollout"`);
+- the user matches a rule but falls outside that rule's own rollout percentage
+  (`reason: "targeting_rule"`);
+- evaluation fails on the server (`reason: "error"`).
+
+When the call itself fails (a network error or a wrong API key), the SDKs'
+`isFeatureEnabled` and `is_feature_enabled` return `false`. So a flag your code can't
+reach behaves as off.
 
 ---
 
 ## Evaluating the Flag from Your Application
 
-Once a flag is active, evaluate it using an SDK or the tracking API.
-
 ### JavaScript SDK
 
 ```javascript
-import { ExperimentationClient } from '@experimently/js-sdk';
+import { ExperimentationClient } from '@getexperimently/js-sdk';
 
 const client = new ExperimentationClient({
-  apiUrl: 'https://your-platform.example.com',
-  apiKey: 'your-api-key',
+  apiUrl: 'http://localhost:8000',   // your API origin; the SDK appends /api/v1/...
+  apiKey: process.env.EXPERIMENTLY_API_KEY,
 });
 
-const isEnabled = await client.isFeatureEnabled('new-checkout-flow', 'user-123', {
-  plan: 'enterprise',
-  country: 'US',
+const isEnabled = await client.isFeatureEnabled('new-checkout-flow', {
+  userId: 'user-123',
+  attributes: { plan: 'enterprise', country: 'US' },
 });
 
 if (isEnabled) {
@@ -253,11 +306,13 @@ if (isEnabled) {
 ### Python SDK
 
 ```python
+import os
+
 from experimentation import ExperimentationClient
 
 client = ExperimentationClient(
-    api_url="https://your-platform.example.com",
-    api_key="your-api-key",
+    api_url="http://localhost:8000",   # your API origin
+    api_key=os.environ["EXPERIMENTLY_API_KEY"],
 )
 
 is_enabled = client.is_feature_enabled(
@@ -269,21 +324,14 @@ is_enabled = client.is_feature_enabled(
 
 ### REST API (Direct)
 
-Send the targeting context as a URL-encoded JSON object on the GET endpoint (this is what
-the SDKs do), or as the `context` object on the POST variant:
+Send the targeting context as a URL-encoded JSON object on the `GET` endpoint (this is
+what the SDKs do):
 
 ```bash
-# GET with url-encoded context
-curl -G http://localhost:8000/api/v1/feature-flags/evaluate/new-checkout-flow \
-  -H "X-API-Key: your-api-key" \
+curl -s -G localhost:8000/api/v1/feature-flags/evaluate/new-checkout-flow \
+  -H "X-API-Key: $KEY" \
   --data-urlencode "user_id=user-123" \
-  --data-urlencode 'context={"plan":"enterprise","country":"US"}'
-
-# POST with a JSON body
-curl -X POST http://localhost:8000/api/v1/feature-flags/evaluate/new-checkout-flow \
-  -H "X-API-Key: your-api-key" \
-  -H "Content-Type: application/json" \
-  -d '{"user_id": "user-123", "context": {"plan": "enterprise", "country": "US"}}'
+  --data-urlencode 'context={"plan":"enterprise","country":"US"}' | jq
 ```
 
 ```json
@@ -295,6 +343,27 @@ curl -X POST http://localhost:8000/api/v1/feature-flags/evaluate/new-checkout-fl
 }
 ```
 
+Or send it as the `context` object in the body of the `POST` variant:
+
+```bash
+curl -s -X POST localhost:8000/api/v1/feature-flags/evaluate/new-checkout-flow \
+  -H "X-API-Key: $KEY" \
+  -H 'content-type: application/json' \
+  -d '{"user_id": "user-123", "context": {"plan": "enterprise", "country": "US"}}' | jq .reason
+```
+
+It prints `"targeting_rule"`.
+
+The same user on a free plan in Germany matches no rule. The 10% rollout then decides,
+and `user-123` falls outside it:
+
+```bash
+curl -s -G localhost:8000/api/v1/feature-flags/evaluate/new-checkout-flow \
+  -H "X-API-Key: $KEY" \
+  --data-urlencode "user_id=user-123" \
+  --data-urlencode 'context={"plan":"free","country":"DE"}' | jq '{enabled, reason}'
+```
+
 `reason` explains the outcome: `targeting_rule` (a rule matched and its rollout percentage
 decided), `rollout` (no rule matched; the global rollout percentage decided), `inactive` or
 `error`. A `context` that is not a JSON object returns `422`.
@@ -304,21 +373,23 @@ and returns `{"flag-key": true|false, ...}`.
 ### Reporting client-side errors
 
 Safety monitoring computes a flag's error rate from `error_logs` rows divided by its
-evaluations. Clients can contribute the errors they see behind a flag (crashes, failed
+evaluations. Clients can report the errors they see behind a flag (crashes, failed
 requests) with the API key:
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/tracking/errors \
-  -H "X-API-Key: your-api-key" \
-  -H "Content-Type: application/json" \
+curl -s -X POST localhost:8000/api/v1/tracking/errors \
+  -H "X-API-Key: $KEY" \
+  -H 'content-type: application/json' \
   -d '{
     "feature_flag_key": "new-checkout-flow",
     "user_id": "user-123",
     "error_type": "crash",
     "message": "NullPointerException in CheckoutV2",
     "metadata": {"os": "Android", "os_version": "12.0.0"}
-  }'
+  }' | jq .error_type
 ```
+
+It prints `"crash"`, the stored row's `error_type`.
 
 `POST /api/v1/tracking/errors/batch` accepts `{"errors": [...]}` (up to 100) and returns
 `{"success_count", "failure_count", "errors"}`. At least one of `feature_flag_key` /
