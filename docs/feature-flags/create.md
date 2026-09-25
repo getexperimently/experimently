@@ -94,20 +94,21 @@ nothing is printed.
 
 ### Log in
 
-```bash
+```{.bash exec}
 TOKEN=$(curl -s -X POST localhost:8000/api/v1/auth/login \
   -H 'content-type: application/json' \
   -d '{"email":"admin@demo.com","password":"Demo1234!"}' | jq -r .access_token)
 
 curl -s localhost:8000/api/v1/auth/me -H "Authorization: Bearer $TOKEN" | jq .role
 ```
+<!-- expect: "ADMIN" -->
 
 The second command prints `"ADMIN"`. If it prints `null`, the login failed (it takes
 the account's `email`, not a username) and `$TOKEN` holds no token.
 
 ### Create the flag
 
-```bash
+```{.bash exec}
 FLAG=$(curl -s -X POST localhost:8000/api/v1/feature-flags/ \
   -H "Authorization: Bearer $TOKEN" \
   -H 'content-type: application/json' \
@@ -122,6 +123,8 @@ FLAG_ID=$(jq -r .id <<<"$FLAG")
 
 jq '{key, status, rollout_percentage}' <<<"$FLAG"
 ```
+<!-- expect: "status": "inactive" -->
+<!-- expect: "rollout_percentage": 0 -->
 
 ```json
 {
@@ -154,7 +157,7 @@ with capitals or spaces answers `422`.
 `logical_operator` combining one or more groups, each group combining its conditions.
 This example targets enterprise-plan users in the US, CA or GB, **or** any employee:
 
-```bash
+```{.bash exec}
 curl -s -o /dev/null -w '%{http_code}\n' -X PUT localhost:8000/api/v1/feature-flags/$FLAG_ID \
   -H "Authorization: Bearer $TOKEN" \
   -H 'content-type: application/json' \
@@ -179,6 +182,7 @@ curl -s -o /dev/null -w '%{http_code}\n' -X PUT localhost:8000/api/v1/feature-fl
     }
   }'
 ```
+<!-- expect: 200 -->
 
 It prints `200`.
 
@@ -216,12 +220,14 @@ match (except `is_null`, which does).
 
 ### Turn the flag on at 10%
 
-```bash
+```{.bash exec}
 curl -s -X PUT localhost:8000/api/v1/feature-flags/$FLAG_ID \
   -H "Authorization: Bearer $TOKEN" \
   -H 'content-type: application/json' \
   -d '{"rollout_percentage": 10, "is_active": true}' | jq '{status, rollout_percentage}'
 ```
+<!-- expect: "status": "active" -->
+<!-- expect: "rollout_percentage": 10 -->
 
 ```json
 {
@@ -239,7 +245,7 @@ ignored.
 Applications evaluate flags with an API key, not a user token. The key is shown only
 once, and this saves it in `$KEY`:
 
-```bash
+```{.bash exec}
 KEY=$(curl -s -X POST localhost:8000/api/v1/api-keys \
   -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
   -d '{"name":"flag-guide"}' | jq -r .key)
@@ -327,12 +333,14 @@ is_enabled = client.is_feature_enabled(
 Send the targeting context as a URL-encoded JSON object on the `GET` endpoint (this is
 what the SDKs do):
 
-```bash
+```{.bash exec}
 curl -s -G localhost:8000/api/v1/feature-flags/evaluate/new-checkout-flow \
   -H "X-API-Key: $KEY" \
   --data-urlencode "user_id=user-123" \
   --data-urlencode 'context={"plan":"enterprise","country":"US"}' | jq
 ```
+<!-- expect: "enabled": true -->
+<!-- expect: "reason": "targeting_rule" -->
 
 ```json
 {
@@ -345,24 +353,27 @@ curl -s -G localhost:8000/api/v1/feature-flags/evaluate/new-checkout-flow \
 
 Or send it as the `context` object in the body of the `POST` variant:
 
-```bash
+```{.bash exec}
 curl -s -X POST localhost:8000/api/v1/feature-flags/evaluate/new-checkout-flow \
   -H "X-API-Key: $KEY" \
   -H 'content-type: application/json' \
   -d '{"user_id": "user-123", "context": {"plan": "enterprise", "country": "US"}}' | jq .reason
 ```
+<!-- expect: "targeting_rule" -->
 
 It prints `"targeting_rule"`.
 
 The same user on a free plan in Germany matches no rule. The 10% rollout then decides,
 and `user-123` falls outside it:
 
-```bash
+```{.bash exec}
 curl -s -G localhost:8000/api/v1/feature-flags/evaluate/new-checkout-flow \
   -H "X-API-Key: $KEY" \
   --data-urlencode "user_id=user-123" \
   --data-urlencode 'context={"plan":"free","country":"DE"}' | jq '{enabled, reason}'
 ```
+<!-- expect: "enabled": false -->
+<!-- expect: "reason": "rollout" -->
 
 `reason` explains the outcome: `targeting_rule` (a rule matched and its rollout percentage
 decided), `rollout` (no rule matched; the global rollout percentage decided), `inactive` or
@@ -376,7 +387,7 @@ Safety monitoring computes a flag's error rate from `error_logs` rows divided by
 evaluations. Clients can report the errors they see behind a flag (crashes, failed
 requests) with the API key:
 
-```bash
+```{.bash exec}
 curl -s -X POST localhost:8000/api/v1/tracking/errors \
   -H "X-API-Key: $KEY" \
   -H 'content-type: application/json' \
@@ -388,6 +399,7 @@ curl -s -X POST localhost:8000/api/v1/tracking/errors \
     "metadata": {"os": "Android", "os_version": "12.0.0"}
   }' | jq .error_type
 ```
+<!-- expect: "crash" -->
 
 It prints `"crash"`, the stored row's `error_type`.
 
