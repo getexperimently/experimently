@@ -683,6 +683,27 @@ walked into again -- a mandatory setting that would have failed the first
 deploy, and a wildcard pattern that matches nothing and refuses all traffic
 while the health checks stay green.
 
+### A blocking question goes to the team, not to a halt
+
+**Founder instruction, standing.** When work is blocked on a question the
+founder has not answered — and especially when nobody is available to answer —
+**put it to `engineering-manager` and `principal-engineer`, and go with their
+recommendation.** Do not stall, and do not guess silently.
+
+Three rules keep this honest:
+
+- **Record it.** The question, the recommendation and the reasoning go in
+  `DECISIONS.md` alongside the founder's own decisions, marked as team-decided
+  rather than founder-decided, so the distinction survives.
+- **It does not extend to the irreversible.** A team recommendation cannot
+  authorise publishing a package, creating infrastructure that bills, a force
+  push, an announcement, or anything else on the IRREVERSIBLE list. Those wait
+  for a human however long that takes.
+- **Cap the rounds.** If reviewers reject a revision twice, stop revising.
+  Work the uncontested parts and leave a written note. Iterating against
+  reviewers with nobody to break a tie is how the fix-round spiral starts, and
+  that is the failure this whole process exists to prevent.
+
 ### Use a SPEC where it earns its place
 
 For a change with a **contract** -- a new setting, a new gate, a new endpoint,
