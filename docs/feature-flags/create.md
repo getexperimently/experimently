@@ -117,7 +117,8 @@ FLAG=$(curl -s -X POST localhost:8000/api/v1/feature-flags/ \
     "name": "New Checkout Flow",
     "description": "Redesigned single-page checkout experience",
     "rollout_percentage": 0,
-    "is_active": false
+    "is_active": false,
+    "status": "DRAFT"
   }')
 FLAG_ID=$(jq -r .id <<<"$FLAG")
 
