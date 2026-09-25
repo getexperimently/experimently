@@ -120,6 +120,7 @@ class MigrationTaskStack(Stack):
         ecs_cluster,
         env_name: str = "prod",
         db_host: str = None,
+        public_base_url: str = None,
         include_modules: bool = False,
         **kwargs,
     ) -> None:
@@ -241,6 +242,11 @@ class MigrationTaskStack(Stack):
             ),
             environment={
                 "APP_ENV": env_name,
+                # The migration task builds the SAME settings the API does, so
+                # it refuses to start without this for the same reason -- and a
+                # migration that cannot import its settings is a deployment that
+                # fails after the image is already rolling.
+                "PUBLIC_BASE_URL": public_base_url,
                 # Where the database IS. Without it every setting that names a
                 # host falls back to `localhost`: the entry point's `pg_isready`
                 # loop spent DB_WAIT_TIMEOUT=120s against the container itself

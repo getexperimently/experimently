@@ -207,6 +207,14 @@ if analytics_stack is not None:
 # required).
 certificate_arn = os.environ.get("CERTIFICATE_ARN", None)
 
+# The absolute origin users reach the API at, e.g. https://api.example.com.
+# Required at synth by FargateServiceStack -- the application refuses to start
+# in staging/production without knowing what hostname it answers on, because
+# the Host header is attacker-controlled (#220). Both the service and the
+# migration task get it: they build the same settings, and a migration that
+# cannot import its settings fails a deployment after the image is rolling.
+public_base_url = os.environ.get("PUBLIC_BASE_URL", None)
+
 # Fargate service stack: ALB, blue/green CodeDeploy, auto-scaling
 fargate_stack = FargateServiceStack(
     app,
@@ -216,6 +224,7 @@ fargate_stack = FargateServiceStack(
     ecs_security_group=compute_stack.ecs_security_group,
     env_name=env_name,
     certificate_arn=certificate_arn,
+    public_base_url=public_base_url,
     # The profile decides which secrets the task definition has to inject:
     # AUDIT_HMAC_KEY is read only by the modules, and naming a secret that was
     # never created stops ECS from starting the task at all.
@@ -235,6 +244,7 @@ migration_stack = MigrationTaskStack(
     # The migration container connects to the same Aurora cluster the service
     # does; it was given no host at all and so tried localhost.
     db_host=database_stack.aurora_cluster.cluster_endpoint.hostname,
+    public_base_url=public_base_url,
     include_modules=ENABLE_MODULE_STACKS,
     env=env,
 )

@@ -53,6 +53,9 @@ _REALISTIC = {
     "APP_ENV": "prod",
     "REDIS_URL": "redis://cache.example.internal:6379/0",
     "POSTGRES_SERVER": "aurora.example.internal",
+    # Not a secret and not a random string: the settings validator requires an
+    # absolute http(s) origin with no path, and ALLOWED_HOSTS derives its host.
+    "PUBLIC_BASE_URL": "https://api.example.com",
 }
 
 pytestmark = pytest.mark.skipif(

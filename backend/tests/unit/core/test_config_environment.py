@@ -186,9 +186,15 @@ class TestSettingsEnvironmentField:
 # Placeholder secrets are refused in staging as well as production
 # ---------------------------------------------------------------------------
 
+# Everything a hardened environment demands. PUBLIC_BASE_URL joined this with
+# the #220 fix: a production start must know what hostname it answers on,
+# because the Host header is attacker-controlled and ALLOWED_HOSTS derives from
+# this. It is CORE configuration, which is what keeps #91's property intact --
+# a core start still demands nothing that only a module reads.
 _STRONG = {
     "SECRET_KEY": "b" * 64,
     "FIRST_SUPERUSER_PASSWORD": "Str0ng-Passw0rd",
+    "PUBLIC_BASE_URL": "https://api.example.com",
 }
 
 # The values that ship in the repository: class defaults, docker-compose.yml,
@@ -264,10 +270,16 @@ class TestHardenedSecrets:
         "from backend.app.core.config import settings"``.
 
         Verbatim it still fails -- on FIRST_SUPERUSER_PASSWORD, whose class
-        default is ``admin`` and which the core hardening refuses on
-        purpose -- so the assertion is that FIRST_SUPERUSER_PASSWORD is the
-        *only* complaint, and that setting it makes the import succeed with
-        nothing else configured."""
+        default is ``admin``, and since the #220 fix on the absence of any
+        host allow-list. Both are core settings and both are refused on
+        purpose.
+
+        What #91 is about is NOT the number of complaints, it is WHOSE: a CORE
+        production start must never be blocked on a secret only a MODULE reads.
+        So the assertions below are that the core settings are named, that
+        AUDIT_HMAC_KEY and SSO_STATE_SECRET are not, and that setting the core
+        ones makes the import succeed with nothing else configured. A new core
+        requirement should update this deliberately, not discover it."""
         import os
         import subprocess
         import sys
@@ -284,11 +296,13 @@ class TestHardenedSecrets:
         verbatim = subprocess.run(probe, env=env, capture_output=True, text=True)
         assert verbatim.returncode != 0
         assert "FIRST_SUPERUSER_PASSWORD" in verbatim.stderr
-        assert "1 validation error" in verbatim.stderr, verbatim.stderr[-2000:]
+        # The #91 property itself: neither module secret is demanded of a core
+        # start. This is the assertion that must never be relaxed.
         assert "AUDIT_HMAC_KEY" not in verbatim.stderr
         assert "SSO_STATE_SECRET" not in verbatim.stderr
 
         env["FIRST_SUPERUSER_PASSWORD"] = "Str0ng-Passw0rd"
+        env["PUBLIC_BASE_URL"] = "https://api.example.com"
         fixed = subprocess.run(probe, env=env, capture_output=True, text=True)
         assert fixed.returncode == 0, fixed.stderr[-2000:]
 

@@ -275,6 +275,22 @@ class Settings(BaseSettings):
     # no test that talks to the app directly would show.
     PUBLIC_BASE_URL: Optional[str] = None
 
+    # The hostnames this application answers to. A request whose `Host` is not
+    # one of them is refused with 400 before a handler sees it (#220).
+    #
+    # USUALLY LEAVE THIS UNSET. When it is empty it derives from
+    # PUBLIC_BASE_URL's host -- see `effective_allowed_hosts` -- which is the
+    # right default precisely because PUBLIC_BASE_URL is, by definition, the
+    # URL users reach the service at. Set it explicitly only when the service
+    # legitimately answers on more than one name.
+    #
+    # Deriving is not a convenience. Two independently-set values that must
+    # agree is a defect waiting to happen: the earlier attempt at this fix
+    # defaulted the allow-list to the load balancer's own DNS name, which would
+    # have refused 100% of user traffic while every health check stayed green.
+    # A default taken from the URL we publish cannot have that shape.
+    ALLOWED_HOSTS: Annotated[List[str], NoDecode] = []
+
     BACKEND_CORS_ORIGINS: List[AnyHttpUrl] = []
     # CORS_ORIGINS is a plain-string list version of BACKEND_CORS_ORIGINS that
     # can also be set via env var as a comma-separated string. NoDecode stops
@@ -424,6 +440,28 @@ class Settings(BaseSettings):
         return self.ENVIRONMENT == "test"
 
     @property
+    def effective_allowed_hosts(self) -> List[str]:
+        """The hostnames the app answers to, explicit or derived.
+
+        ALLOWED_HOSTS when it is set; otherwise PUBLIC_BASE_URL's host, which
+        is the URL users actually reach the service at and therefore a host we
+        answer to by definition. Empty means the check is off, which is the
+        development default and which a hardened environment cannot reach --
+        `require_a_host_allow_list_when_hardened` below refuses to construct.
+
+        A property rather than a mutated field so that `settings.ALLOWED_HOSTS`
+        keeps meaning "what the operator set", which is what an operator
+        debugging this will look at first.
+        """
+        if self.ALLOWED_HOSTS:
+            return list(self.ALLOWED_HOSTS)
+        if self.PUBLIC_BASE_URL:
+            host = urlparse(self.PUBLIC_BASE_URL).hostname
+            if host:
+                return [host]
+        return []
+
+    @property
     def dev_auth_bypass_active(self) -> bool:
         """True only when the dev-admin bypass is both enabled and permitted."""
         return (
@@ -512,6 +550,52 @@ class Settings(BaseSettings):
             )
         return candidate
 
+    @field_validator("ALLOWED_HOSTS", mode="before")
+    @classmethod
+    def assemble_allowed_hosts(cls, v: Union[str, List[str]]) -> List[str]:
+        """Comma-separated or JSON, the two spellings CORS_ORIGINS also takes."""
+        if isinstance(v, str) and v.strip().startswith("["):
+            import json
+
+            v = json.loads(v)
+        if isinstance(v, str) and v:
+            return [i.strip() for i in v.split(",") if i.strip()]
+        if isinstance(v, list):
+            return [str(i).strip() for i in v if str(i).strip()]
+        return []
+
+    @field_validator("ALLOWED_HOSTS")
+    @classmethod
+    def validate_allowed_host_patterns(cls, v: List[str]) -> List[str]:
+        """Refuse patterns that parse but can never match.
+
+        This is the silent-outage class and it has already been shipped once:
+        a wildcard written `*example.com` (no dot) is not a wildcard. It is a
+        literal hostname containing an asterisk, it matches nothing, and a
+        deployment configured with it refuses every request while every health
+        check stays green -- because the probes are exempt. An outage that
+        monitoring calls fine is the most expensive kind, so the typo is
+        refused here rather than at 3am.
+
+        Accepted: `example.com`, `*.example.com`. Nothing else.
+        """
+        for pattern in v:
+            if pattern == "*":
+                continue  # meaningful ("allow anything"); refused separately below
+            if pattern.startswith("*."):
+                rest = pattern[2:]
+                if rest and "*" not in rest:
+                    continue
+            elif "*" not in pattern and not pattern.startswith("."):
+                continue
+            raise ValueError(
+                f"ALLOWED_HOSTS entry {pattern!r} is not a hostname or a `*.` "
+                "wildcard and would match nothing, refusing every request while "
+                "the health probes -- which are exempt -- stayed green. Write "
+                "`example.com` or `*.example.com`."
+            )
+        return v
+
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod
     def assemble_cors_origins_plain(cls, v: Union[str, List[str]]) -> List[str]:
@@ -525,6 +609,43 @@ class Settings(BaseSettings):
         if isinstance(v, list):
             return v
         return []
+
+    @model_validator(mode="after")
+    def require_a_host_allow_list_when_hardened(self) -> "Settings":
+        """Staging and production must know what hostname they answer on.
+
+        Fail-closed, and there is exactly ONE thing to set to satisfy it:
+        PUBLIC_BASE_URL, which such a deployment needs anyway or the OIDC
+        callback cannot be registered. ALLOWED_HOSTS is for the rarer case of
+        several names.
+
+        Harsher than a warning on purpose. An unset value in production is
+        indistinguishable at runtime from one considered and deliberately
+        opened, and the first is overwhelmingly more likely -- so this says so
+        at deploy time rather than leaving a silent hole. Both task definitions
+        carry PUBLIC_BASE_URL for this reason, which
+        `backend/tests/unit/infrastructure/test_deployment_secrets.py` boots
+        the real settings against.
+        """
+        environment = getattr(self, "ENVIRONMENT", "development")
+        is_testing = os.getenv("TESTING", "").lower() in ("1", "true", "yes")
+        if is_testing or environment not in HARDENED_ENVIRONMENTS:
+            return self
+        if "*" in self.ALLOWED_HOSTS:
+            raise ValueError(
+                "ALLOWED_HOSTS=* defeats the check it configures and is refused "
+                "in staging/production. Name the hostnames instead, or set "
+                "PUBLIC_BASE_URL and let them be derived."
+            )
+        if not self.effective_allowed_hosts:
+            raise ValueError(
+                "This deployment does not know what hostname it answers on, and "
+                "the Host header is attacker-controlled. Set PUBLIC_BASE_URL "
+                "(e.g. https://api.example.com) -- which a production "
+                "deployment needs anyway for the OIDC callback -- or set "
+                "ALLOWED_HOSTS explicitly if the service answers on several."
+            )
+        return self
 
     @field_validator("SECRET_KEY")
     @classmethod

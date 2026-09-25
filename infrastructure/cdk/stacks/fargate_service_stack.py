@@ -53,10 +53,32 @@ class FargateServiceStack(Stack):
         ecs_security_group,
         env_name: str = "prod",
         certificate_arn: str = None,
+        public_base_url: str = None,
         include_modules: bool = False,
         **kwargs,
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
+        # PUBLIC_BASE_URL is the URL users reach this service at, e.g.
+        # https://api.example.com. It is required at SYNTH, like CERTIFICATE_ARN and
+        # for a related reason: the application refuses to start in staging or
+        # production without knowing what hostname it answers on, because the Host
+        # header is attacker-controlled and absolute URLs the app emits -- the OIDC
+        # redirect_uri above all -- were built from it (#220).
+        #
+        # Deliberately NOT defaulting to the load balancer's DNS name. That would
+        # synthesise happily and hand the deployment an allow-list naming a host no
+        # user ever sends, refusing 100% of traffic while every health check stayed
+        # green, because the probes are exempt. A loud failure here beats an outage
+        # that monitoring calls fine.
+        if not public_base_url:
+            raise ValueError(
+                "FargateServiceStack requires the public base URL: set the "
+                "PUBLIC_BASE_URL environment variable (or pass public_base_url) "
+                "to the absolute https:// origin users reach this service at, "
+                "e.g. https://api.example.com. The application refuses to start "
+                "in staging/production without it."
+            )
+
 
         self.env_name = env_name
         self.include_modules = include_modules
@@ -253,6 +275,7 @@ class FargateServiceStack(Stack):
             ),
             environment={
                 "APP_ENV": env_name,
+                "PUBLIC_BASE_URL": public_base_url,
                 "LOG_LEVEL": "INFO",
                 "PYTHONUNBUFFERED": "1",
                 "POSTGRES_DB": "experimentation",
