@@ -683,6 +683,57 @@ walked into again -- a mandatory setting that would have failed the first
 deploy, and a wildcard pattern that matches nothing and refuses all traffic
 while the health checks stay green.
 
+### How to actually consult the team
+
+**Invoke both reviewers in parallel**, in one message, two calls:
+
+    Agent(subagent_type="engineering-manager",  prompt=...)
+    Agent(subagent_type="principal-engineer",   prompt=...)
+
+They are defined in `.claude/agents/`. **If those names are not in your
+available-agents list, they were added after your session started** — the list
+is fixed at session start. Fall back to `general-purpose` and open the prompt
+with "You are the ENGINEERING MANAGER. Read your brief first:
+`.claude/agents/engineering-manager.md`". That is exactly how the first two
+rounds of the launch-readiness plan were run.
+
+**Every reviewer is a fresh invocation with no memory of its previous round.**
+It cannot recall the conditions it set last time. So:
+
+- **Persist every verdict to disk the moment it arrives** — the plan's own
+  directory, `reviews/v<n>-<role>.md`, with the numbered conditions verbatim.
+  The first round of this was lost to a scratchpad and the manager had to ask
+  for its own conditions back.
+- **Pass prior reviews by path, not by paste.** A path cannot be paraphrased
+  into something easier to satisfy.
+
+**What each prompt must carry:**
+
+1. The path to the plan, and to any previous version.
+2. The path to `DECISIONS.md`, with the settled items named — *"these are
+   settled, do not re-litigate them, but DO judge whether the revision
+   discharges them."* Reviewers will otherwise reopen founder decisions, which
+   wastes a round.
+3. Any facts discovered since the last round, so they are checked rather than
+   assumed.
+4. **The specific things you most want pressure-tested** — including the
+   weaknesses you already suspect. Naming your own weak point gets it examined
+   rather than missed; the Stream A red-main hazard was found because it was
+   asked about directly.
+5. Read-only constraints, explicitly: no writes, no AWS calls that create, no
+   publishing.
+
+**Expect rejection, and do not treat it as failure.** Across two rounds the
+reviewers caught a required check that was green for the wrong reason, a
+documentation tag that destroys the fence it annotates, a deploy that reports
+healthy while rejecting every request, a migration that can run production's
+image against staging, and a release gate no tag can satisfy. Each of those
+was cheaper to find in review than in production.
+
+**Then meet the conditions rather than noting them**, and apply the cap: two
+rejected revisions and you stop, work the uncontested parts, and write down
+what is contested and why.
+
 ### A blocking question goes to the team, not to a halt
 
 **Founder instruction, standing.** When work is blocked on a question the
