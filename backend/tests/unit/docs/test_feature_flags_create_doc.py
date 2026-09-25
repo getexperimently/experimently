@@ -31,7 +31,8 @@ PAGE = (
     pathlib.Path(__file__).resolve().parents[4] / "docs" / "feature-flags" / "create.md"
 )
 
-_FENCE = re.compile(r"^```(\S*)\s*$")
+# ```bash, or the tagged form the documentation runner requires (```{.bash exec}).
+_FENCE = re.compile(r"^```(?:\{\.)?(\w*)[^`]*$")
 PLACEHOLDERS = (
     "your-username",
     "your-password",

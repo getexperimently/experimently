@@ -20,14 +20,14 @@ Only needed if you want to run the backend or dashboard outside Docker: Python 3
 
 Clone the repository:
 
-```bash
+```{.bash skip reason="the runner starts inside a checkout"}
 git clone https://github.com/getexperimently/experimently.git
 cd experimently
 ```
 
 Then start everything from the repository root:
 
-```bash
+```{.bash exec timeout=1200}
 docker compose up -d --wait
 ```
 
@@ -48,10 +48,12 @@ variable, the optional `demo`, `tools` and `aws` profiles, and the host-port ove
 
 Verify:
 
-```bash
+```{.bash exec}
 curl -s localhost:8000/health/ready | jq .status
 curl -s -o /dev/null -w '%{http_code}\n' localhost:8000/api/v1/experiments/
 ```
+<!-- expect: "healthy" -->
+<!-- expect: 401 -->
 
 The first prints `"healthy"`. The second prints `401`, because the API requires a login.
 
@@ -61,13 +63,14 @@ The first prints `"healthy"`. The second prints `401`, because the API requires 
 
 In the browser, open http://localhost:3000 and sign in. From the shell:
 
-```bash
+```{.bash exec}
 TOKEN=$(curl -s -X POST localhost:8000/api/v1/auth/login \
   -H 'content-type: application/json' \
   -d '{"email":"admin@demo.com","password":"Demo1234!"}' | jq -r .access_token)
 
 curl -s localhost:8000/api/v1/auth/me -H "Authorization: Bearer $TOKEN" | jq .role
 ```
+<!-- expect: "ADMIN" -->
 
 It prints `"ADMIN"`.
 
@@ -81,7 +84,7 @@ for 15 minutes.
 Through the dashboard: **Experiments → + New Experiment**, add two variants and one
 metric, then **Start**. Through the API:
 
-```bash
+```{.bash exec}
 EXPERIMENT=$(curl -s -X POST localhost:8000/api/v1/experiments/ \
   -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
   -d '{
@@ -101,6 +104,7 @@ ID=$(jq -r .id <<<"$EXPERIMENT")
 
 curl -s -X POST localhost:8000/api/v1/experiments/$ID/start -H "Authorization: Bearer $TOKEN" | jq .status
 ```
+<!-- expect: "active" -->
 
 The last command prints `"active"`.
 
@@ -114,7 +118,7 @@ Step 5 must use the same name.
 SDKs and your application authenticate with an API key, not a user token. The key is
 shown once.
 
-```bash
+```{.bash exec}
 KEY=$(curl -s -X POST localhost:8000/api/v1/api-keys \
   -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
   -d '{"name":"my-app"}' | jq -r .key)
@@ -124,21 +128,23 @@ KEY=$(curl -s -X POST localhost:8000/api/v1/api-keys \
 
 ## Step 5: Assign users and track events
 
-```bash
+```{.bash exec}
 curl -s -X POST localhost:8000/api/v1/tracking/assign \
   -H "X-API-Key: $KEY" -H 'content-type: application/json' \
   -d '{"experiment_key":"homepage_button_colour","user_id":"user-123","context":{"country":"DE"}}' | jq
 ```
+<!-- expect: "assigned": true -->
 
 The response carries `variant_name`, `variant_id`, `is_control`, `configuration`, and
 `assigned` with a `reason` (`assigned`, `holdout`, `mutual_exclusion` or `targeting`).
 Assignments are sticky: the same `user_id` always gets the same variant.
 
-```bash
+```{.bash exec}
 curl -s -X POST localhost:8000/api/v1/tracking/track \
   -H "X-API-Key: $KEY" -H 'content-type: application/json' \
   -d '{"event_type":"conversion","event_name":"cta_click","user_id":"user-123","experiment_key":"homepage_button_colour","value":1}' | jq .event_name
 ```
+<!-- expect: "cta_click" -->
 
 It prints `"cta_click"`, the event it stored.
 
@@ -150,9 +156,10 @@ The same two calls exist in every SDK; see the [SDK guide](../sdk-guide.md).
 
 Dashboard: **Experiments → your experiment → View results**. API:
 
-```bash
+```{.bash exec}
 curl -s localhost:8000/api/v1/results/$ID -H "Authorization: Bearer $TOKEN" | jq .summary
 ```
+<!-- expect: "total_conversions": 1 -->
 
 Results include per-variant conversion rates, p-values, confidence intervals and a
 sample-size check.
@@ -161,7 +168,7 @@ sample-size check.
 
 ## Step 7: Feature flags
 
-```bash
+```{.bash exec}
 FLAG=$(curl -s -X POST localhost:8000/api/v1/feature-flags/ \
   -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
   -d '{"key":"new_checkout","name":"New checkout","rollout_percentage":10,"is_active":false}' | jq -r .id)
@@ -170,6 +177,9 @@ curl -s -X POST localhost:8000/api/v1/feature-flags/$FLAG/activate -H "Authoriza
 
 curl -s "localhost:8000/api/v1/feature-flags/evaluate/new_checkout?user_id=user-2" -H "X-API-Key: $KEY" | jq
 ```
+<!-- expect: "active" -->
+<!-- expect: "enabled": true -->
+<!-- expect: "reason": "rollout" -->
 
 The flag is created switched off (`"is_active": false`; leave it out and it starts on).
 The second command turns it on for 10% of users and prints `"active"`. The third
@@ -183,7 +193,7 @@ Evaluation returns `{key, enabled, config, reason}`. An inactive flag evaluates 
 
 ## Running outside Docker
 
-```bash
+```{.bash skip reason="starts long-running development servers"}
 docker compose up -d --wait postgres redis
 python3.11 -m venv venv && source venv/bin/activate
 pip install -r backend/requirements.txt
@@ -195,7 +205,7 @@ The first line starts only the database and cache. The bootstrap creates the sch
 the first administrator, and is safe to run again. In a second terminal, start the
 dashboard on http://localhost:3000; it proxies `/api` to port 8000:
 
-```bash
+```{.bash skip reason="starts a long-running development server"}
 cd frontend && npm ci && npm run dev
 ```
 
@@ -215,9 +225,10 @@ SDK path, each with a traffic simulator. See [demo/DEMO_GUIDE.md](https://github
 
 **`api` container never becomes healthy**
 
-```bash
+```{.bash exec}
 docker compose logs api --tail 100
 ```
+<!-- expect: [entrypoint] starting: -->
 
 The entrypoint prints the bootstrap and seed steps. A `SECRET_KEY` shorter than 32
 characters, or `DEV_AUTH_BYPASS=true` with `ENVIRONMENT=production`, stops the API on
@@ -229,7 +240,7 @@ Set `POSTGRES_HOST_PORT`, `REDIS_HOST_PORT`, `API_HOST_PORT` or `FRONTEND_HOST_P
 
 **Start from scratch**
 
-```bash
+```{.bash exec}
 docker compose down -v
 ```
 

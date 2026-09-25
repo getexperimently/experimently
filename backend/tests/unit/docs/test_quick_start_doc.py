@@ -35,7 +35,8 @@ PAGE = (
     / "quick-start.md"
 )
 
-_FENCE = re.compile(r"^```(\w*)\s*$")
+# ```bash, or the tagged form the documentation runner requires (```{.bash exec}).
+_FENCE = re.compile(r"^```(?:\{\.)?(\w*)[^`]*$")
 
 
 def _shell_blocks() -> list[tuple[int, list[str]]]:

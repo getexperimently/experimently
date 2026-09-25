@@ -1,0 +1,29 @@
+# The documents whose shell examples are checked by scripts/doc_examples.py.
+# Each count is exact: a document whose tags or expectations change must change
+# its numbers here, so an example cannot drop out of the check silently.
+# The counts are what `python scripts/doc_examples.py --check` prints; never
+# adjust them to make a check pass -- find out why they moved.
+
+[meta]
+documents = 3
+
+[[document]]
+path = "docs/getting-started/quick-start.md"
+environment = "bare"
+exec = 11
+skip = 3
+expects = 11
+
+[[document]]
+path = "docs/development/doc-examples.md"
+environment = "bare"
+exec = 0
+skip = 2
+expects = 0
+
+[[document]]
+path = "docs/feature-flags/create.md"
+environment = "stack"
+exec = 9
+skip = 0
+expects = 12

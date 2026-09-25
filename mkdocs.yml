@@ -198,6 +198,7 @@ nav:
 - Contributing:
   - Development Guidelines: development/guidelines.md
   - Testing Guide: development/testing-guide.md
+  - Runnable Doc Examples: development/doc-examples.md
   - Dependency Injection: development/dependency-injection.md
   - CI Workflows: development/workflow-explanation.md
   - Database Migrations: development/database/migrations.md
