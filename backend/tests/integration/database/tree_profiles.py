@@ -9,14 +9,11 @@ a tree alembic may write a revision file into (:func:`full_tree`).
 A core build is defined by a tree with no ``modules/`` directory
 (``scripts/core_build.sh`` makes one by deleting it), so :func:`core_tree`
 builds the smallest thing that answers to that description: ``backend/`` copied
-into a fresh directory, plus the ``sitecustomize.py`` that seals it.  Three
-properties matter; the last two come from it being a real directory rather
-than a symlink:
+into a fresh directory and nothing else.  Three properties matter and all three
+come from it being a real directory rather than a symlink:
 
 * ``import modules`` fails, so ``modules_loader`` reports the core profile and
-  ``Base.metadata`` holds the core tables only.  The copy does not give this on
-  its own -- an editable install resolves ``modules`` back into the checkout --
-  so ``core_tree_guard.py`` enforces it;
+  ``Base.metadata`` holds the core tables only;
 * ``alembic.ini``'s second version location resolves inside the copy, where it
   does not exist, so alembic sees **one** head -- the core chain's;
 * ``db/bootstrap.py``'s ``_REPO_ROOT`` is ``Path(__file__).resolve()``-derived,
@@ -73,20 +70,9 @@ def _copy_package(root: pathlib.Path, *parts: str) -> None:
 
 
 def core_tree(destination) -> pathlib.Path:
-    """A checkout of this tree with no modules package, rooted at *destination*.
-
-    The copy alone does not make ``import modules`` fail: an editable install's
-    finder maps ``modules`` (and any ``backend.*`` child the copy lacks) back
-    into the checkout.  ``core_tree_guard.py``, installed here as
-    ``sitecustomize.py``, removes that route in every interpreter started in
-    the tree, or stops the interpreter if it cannot (#47).
-    """
+    """A checkout of this tree with no modules package, rooted at *destination*."""
     root = pathlib.Path(destination)
     _copy_package(root, "backend")
-    shutil.copy2(
-        pathlib.Path(__file__).with_name("core_tree_guard.py"),
-        root / "sitecustomize.py",
-    )
     assert not (root / "modules").exists()
     return root
 
