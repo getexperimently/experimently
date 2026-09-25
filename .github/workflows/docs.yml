@@ -46,7 +46,7 @@ jobs:
             "$(grep -E '^mkdocs-material-extensions==' backend/requirements.txt)"
       - name: Build (strict)
         run: mkdocs build
-      - uses: actions/upload-pages-artifact@v4
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: site
 
