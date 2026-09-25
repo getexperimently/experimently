@@ -17,6 +17,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from backend.app.api import deps
+from backend.app.core.permissions import Action, can_act_on_feature_flag
 from backend.app.models.audit_log import ActionType
 from backend.app.models.feature_flag import FeatureFlag, FeatureFlagStatus
 from backend.app.models.user import User
@@ -47,7 +48,8 @@ async def bulk_toggle_flags(
     """
     Toggle multiple feature flags in a single operation.
     Each flag's result is reported individually.
-    Requires UPDATE permission on feature_flag resource.
+    Each flag needs UPDATE on feature flags for the caller's role; a flag the
+    caller may not change is reported with success=false and left unchanged.
     Creates one audit log entry per successfully-processed flag.
     The operation is partial-success by design: if some flags fail,
     the endpoint still returns 200 with per-flag results.
@@ -65,6 +67,20 @@ async def bulk_toggle_flags(
                         flag_key="unknown",
                         success=False,
                         error="Feature flag not found",
+                    )
+                )
+                continue
+
+            # Before any change to the row: a refused flag must be left exactly
+            # as it was, because the final commit below covers every flag.
+            # Archive is a status change, so all three actions need UPDATE.
+            if not can_act_on_feature_flag(current_user, flag.owner_id, Action.UPDATE):
+                results.append(
+                    BulkToggleResult(
+                        flag_id=str(flag.id),
+                        flag_key=flag.key,
+                        success=False,
+                        error="Not enough permissions to change this feature flag",
                     )
                 )
                 continue
