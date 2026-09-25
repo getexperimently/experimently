@@ -173,6 +173,7 @@ FLAG=$(curl -s -X POST localhost:8000/api/v1/feature-flags/ \
   -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
   -d '{"key":"new_checkout","name":"New checkout","rollout_percentage":10,"is_active":false}' | jq -r .id)
 
+curl -s -X POST localhost:8000/api/v1/feature-flags/$FLAG/activate -H "Authorization: Bearer $TOKEN" | jq .status
 
 curl -s "localhost:8000/api/v1/feature-flags/evaluate/new_checkout?user_id=user-2" -H "X-API-Key: $KEY" | jq
 ```
