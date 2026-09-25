@@ -23,7 +23,7 @@ psycopg2-binary==2.9.13
 redis==8.1.0
 
 # AWS (Cognito auth provider, SSM secrets, DynamoDB counters, CloudWatch logs)
-boto3==1.43.98
+boto3==1.43.99
 watchtower==3.4.0
 
 # HTTP clients (notifications, integrations)
