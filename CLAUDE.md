@@ -1,0 +1,1050 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Overview
+
+This is an AWS-based experimentation platform for A/B testing and feature flags with real-time evaluation capabilities. The platform enables data-driven decisions through robust experimentation and feature management.
+
+## Project Structure
+
+- **backend/**: FastAPI Python services with comprehensive APIs for experiments, feature flags, users, and analytics
+- **modules/**: the optional modules — the same layout one level down
+  (`modules/backend/app`, `modules/backend/tests`, `modules/frontend/src`,
+  `modules/infrastructure/cdk`, `modules/lambda`). Present in a full checkout,
+  absent in a core one; `modules-manifest.txt` is the authority on what belongs
+  there. Everything under `backend/` must work with the directory deleted.
+- **frontend/**: Next.js React application for experiment management and analytics dashboards
+- **infrastructure/**: AWS CDK infrastructure definitions for deployment
+- **sdk/**: Client SDKs (JavaScript and Python) for integrating with applications
+- **docs/**: Comprehensive project documentation
+- **scripts/**: repository tooling — `core_build.sh` (prove a profile stands
+  alone), the requirements-lock checks, the third-party licence report
+- **backend/lambda/**: AWS Lambda functions for real-time operations
+
+## Development Commands
+
+### Backend (Python)
+
+```bash
+# Setup environment (from the repository root)
+python3.11 -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+pip install -r backend/requirements.txt
+
+# Run development server (the package is backend.app)
+uvicorn backend.app.main:app --reload
+
+# Or use the Makefile: `make db && make dev`
+
+# Testing
+pytest  # Run all tests
+pytest backend/tests/unit/  # Unit tests only
+pytest backend/tests/integration/  # Integration tests only
+
+# Code quality (ruff replaces black, isort and flake8). The scope is
+# `backend/ modules/ scripts/` -- exactly what `make format` / `make lint` and
+# the lint CI job pass; linting backend/ alone leaves the modules and the
+# repository tooling unchecked.
+ruff format backend/ modules/ scripts/        # Format code
+ruff check backend/ modules/ scripts/ --fix   # Lint and auto-fix (includes import sorting)
+mypy backend/app/                             # Type checking
+make format                 # The two ruff commands above
+make lint                   # Everything the `lint` CI job runs (see below)
+
+# Database migrations. A full checkout has TWO heads -- the core chain and the
+# `modules` branch -- so it is always `heads`, and a new revision has to name
+# the head it extends (`alembic heads` prints both).
+python -m alembic -c backend/app/db/alembic.ini upgrade heads
+python -m alembic -c backend/app/db/alembic.ini heads
+python -m alembic -c backend/app/db/alembic.ini revision --autogenerate --head <core head id> -m "description"
+python -m alembic -c backend/app/db/alembic.ini revision --autogenerate --head modules@head -m "description"
+```
+
+### Frontend (Next.js)
+
+```bash
+cd frontend
+npm install
+npm run dev    # Development server
+npm test       # Run tests
+npm run build  # Production build
+```
+
+### Infrastructure (AWS CDK)
+
+```bash
+cd infrastructure
+cdk bootstrap aws://ACCOUNT-NUMBER/REGION
+cdk deploy --all
+```
+
+### Docker Development
+
+```bash
+# Start local development environment
+docker-compose up -d
+
+# View logs
+docker-compose logs -f
+```
+
+## Architecture
+
+The platform uses a modern microservices architecture:
+
+### Backend Services
+- **FastAPI Application**: Main API server with comprehensive endpoints for experiments, feature flags, users, metrics, and safety monitoring
+- **Background Schedulers**: Automated systems for experiment scheduling, rollout management, metrics collection, and safety monitoring
+- **Lambda Functions**: Real-time services for experiment assignment, feature flag evaluation, and event processing
+
+### Key Backend Components
+- **API Layer**: RESTful endpoints organized by resource type (experiments, feature flags, users, etc.)
+- **Services Layer**: Business logic for experiments, feature flags, authentication, safety monitoring
+- **Data Layer**: SQLAlchemy models with PostgreSQL backend
+- **Authentication**: AWS Cognito integration with role-based access control (RBAC)
+- **Middleware**: Security headers, request logging, metrics collection, error tracking
+
+### Database Architecture
+- **Primary Database**: PostgreSQL (Aurora) for core application data
+- **Caching**: Redis (ElastiCache) for session management and caching
+- **Analytics**: Kinesis streams with Lambda processors feeding into OpenSearch
+- **Time-series Data**: Specialized storage for metrics and events
+
+### Frontend Architecture
+- **Next.js**: React-based dashboard for experiment and feature flag management
+- **Components**: Reusable UI components for experiments, feature flags, and analytics
+- **API Integration**: TypeScript client services for backend communication
+
+## Development Guidelines
+
+### Python/Backend Standards
+- Use Python 3.11+ with type annotations
+- Follow PEP 8 style guidelines
+- Use Pydantic v2 patterns (field_validator, model_validator, ConfigDict)
+- Import with full paths: `from backend.app.models.metrics.metric import RawMetric`
+- Never use relative imports like `from app.models...`
+
+### Database Operations
+- Use SQLAlchemy for all database operations
+- Include schema in table definitions
+- Use Alembic for migrations: `alembic revision --autogenerate --head <head> -m "description"`,
+  where `<head>` is the core head id from `alembic heads` for a core change and `modules@head`
+  for a module's. A full checkout has two heads, so a bare `--autogenerate` fails with
+  "Multiple heads are present"; alembic puts the new file beside the head it extends.
+- Set proper environment variables: `POSTGRES_DB=experimentation POSTGRES_SCHEMA=experimentation`
+- **Fresh database?** Run `python -m backend.app.db.bootstrap` from the repo root. It creates the
+  schema from the models and stamps the alembic head (the historical migration chain cannot be
+  replayed from an empty database). On an existing database it simply runs `alembic upgrade heads`.
+- `backend/tests/conftest.py`, alembic `env.py` and the bootstrap all read the same
+  `POSTGRES_SERVER`/`POSTGRES_PORT`/`POSTGRES_USER`/`POSTGRES_PASSWORD` variables.
+
+### Testing Requirements
+
+**CRITICAL: Always Use Virtual Environment**
+- **Before running ANY tests, ALWAYS activate the virtualenv first**
+- The virtualenv is at `venv/` in the repository root
+- Activation command: `source venv/bin/activate`
+- **Never run tests without activating venv first - this will cause import errors**
+
+```bash
+# Correct workflow for running tests:
+cd "$(git rev-parse --show-toplevel)"
+source venv/bin/activate
+export APP_ENV=test
+export TESTING=true
+python -m pytest backend/tests/ -v
+
+# Run specific test files
+source venv/bin/activate && python -m pytest backend/tests/unit/core/test_rules_engine.py -v
+
+# Run with markers
+source venv/bin/activate && pytest -m "unit" -v
+```
+
+**Test Best Practices**:
+- Write comprehensive tests for all new features
+- Use `pytest` with appropriate markers (unit, integration, api)
+- **Every bug fix carries a `@pytest.mark.regression` test** that fails on the
+  old code. The `regression-guard` job fails a pull request labelled `bug` that
+  changes no test file; `.github/pull_request_template.md` asks for the test by
+  name. Declare markers in `pyproject.toml` (`[tool.pytest.ini_options] markers`)
+  and run them with `pytest -m regression`.
+- Clear schema cache between tests with `clear_schema_cache()`
+- Ensure PostgreSQL is running locally before tests
+- Test users must have a `hashed_password` value set to avoid integrity errors
+
+### Authentication & Permissions
+- Feature flag and report dependencies are async (use `await`)
+- Experiment dependencies are synchronous
+- Use role-based access control (ADMIN, DEVELOPER, ANALYST, VIEWER)
+- Permission checking: `check_permission(user, resource_type, action)`
+- Mock authentication in tests with proper user objects including `hashed_password`
+
+### Key Implementation Notes
+
+#### Experiment Scheduling
+- Experiments support automatic start/end date scheduling
+- Background scheduler runs every 15 minutes checking for state transitions
+- API endpoint: `PUT /api/v1/experiments/{experiment_id}/schedule`
+- Must be in DRAFT or PAUSED status to schedule
+
+#### Feature Flag Rollout Schedules
+- Gradual rollout system with configurable stages
+- API endpoints under `/api/v1/rollout-schedules`
+- Background scheduler processes active rollouts
+- Supports time-based, metric-based, and manual triggers
+
+#### Safety Monitoring
+- Automated safety checks for feature flags monitoring error rates, latency
+- API endpoints under `/api/v1/safety` (`/settings`, `/feature-flags/{id}/config|check|rollback`)
+- Rollback mechanism for problematic feature flags
+- `SafetyService` (`backend/app/services/safety_service.py`) reads error metrics from `error_logs` and latency from `raw_metrics`; a missing per-flag config is returned as a default with `id = DEFAULT_CONFIG_ID` (nil UUID), never a 404
+
+#### Public tracking API and conversion matching
+- SDKs use `POST /api/v1/tracking/assign` (sticky assignment by `experiment_key`), `POST /api/v1/tracking/track`, `POST /api/v1/tracking/batch`, `GET /api/v1/feature-flags/evaluate/{key}?user_id=` with `X-API-Key`. The `/events` and `/assignments` routers are informational stubs.
+- The tracking API stores the event's own name in `event_type` (e.g. `"purchase"`), while `EventService.track_conversion` stores `"conversion"`. **Every analysis path must match conversions with `backend/app/services/event_matching.py`** (`conversion_event_filter(metric.event_name)`), never `Event.event_type == "conversion"`.
+- Experiments need a public `key` (auto-slugged on create) for the tracking API to find them.
+
+#### Multi-Armed Bandits
+- `BanditSchedulerRunner` starts in the app lifespan (`BANDIT_UPDATE_INTERVAL_MINUTES`, default 5; skipped when `APP_ENV=test`). Stats source order: DynamoDB `get_experiment_counters` → PostgreSQL (assignments + primary-metric conversions) → `BanditState` → zero priors.
+- `/tracking/assign` routes new users by `BanditState.variant_weights` for `optimization_type != "fixed"`; existing assignments are always kept.
+
+#### Rate limits and CORS
+- SDK paths (`/api/v1/tracking/*`, `/feature-flags/evaluate/*`, `/feature-flags/user/*`) share `SDK_RATE_LIMIT_PER_MINUTE` (default 6000/min per IP); auth endpoints stay strict; everything else 300/min. Limits resolve via `resolve_rate_limit()` in `backend/app/middleware/rate_limiter.py`.
+- `CORS_ORIGINS` is a plain comma-separated list (annotated `NoDecode`); `BACKEND_CORS_ORIGINS` must be a JSON array. Dev defaults include ports 3000, 3001, 3100, 3200, 8000.
+
+#### Demo applications
+- `./demo/setup-local.sh` seeds demo data, starts the API (8000), dashboard (3100), the **ShopLab** storefront (`demo/shoplab`, 3200), **StreamPulse** (`demo/streampulse`, 3300) and their simulators. Pieces by hand: `python backend/scripts/seed_shoplab.py` / `seed_streampulse.py` (idempotent; `--reset`, `--no-history`; write `demo/<app>/.api_key` and `.env.local`), `cd demo/<app> && npm run dev`, `python demo/<app>/simulator/traffic.py --rate 3`, and for StreamPulse `python demo/streampulse/simulator/rollout_story.py --auto` (needs the backend running with `SAFETY_CHECK_INTERVAL_MINUTES=1 ROLLOUT_CHECK_INTERVAL_MINUTES=1`).
+- Both demo apps consume the React SDK from source (`sdk/react/src`) via a webpack/tsconfig alias; tests there mock the SDK.
+
+#### Feature-flag targeting and assignment eligibility
+- Flag `targeting_rules` are stored in the **dashboard shape** (`{"logical_operator","groups":[{"logical_operator","conditions":[{"attribute","operator","value"}]}]}`, operators like `equals`, `semver_gte`, `in`). `backend/app/core/targeting_adapter.py` normalises that (and the native `TargetingRules` shape) to the Enhanced Rules Engine; the legacy list shape (`[{"type": "context", ...}]`) still takes the old path. `expand_context()` aliases attributes (`country` ↔ `user.country`, nested dicts flatten to dotted keys). Use these helpers anywhere rules are evaluated; do not add a fourth format.
+- SDKs send user attributes as `context` (URL-encoded JSON) on `GET /feature-flags/evaluate/{key}`; responses carry `reason` (`targeting_rule|rollout|inactive|error`).
+- `AssignmentService.assign_user` checks global holdout → mutual exclusion group → experiment targeting for NEW users; ineligible users get HTTP 200 with the control variant and `assigned: false, reason: holdout|mutual_exclusion|targeting`, no assignment row, no exposure.
+- Clients report errors with `POST /api/v1/tracking/errors[/batch]` (API key) → `error_logs`; the safety monitor divides them by flag evaluations and rolls back to the config's `rollback_percentage`. Cadences: `SAFETY_CHECK_INTERVAL_MINUTES`, `ROLLOUT_CHECK_INTERVAL_MINUTES`, `BANDIT_UPDATE_INTERVAL_MINUTES`.
+- `backend.app.models.register_core_models()` imports every *core* model module so standalone scripts can configure the SQLAlchemy mappers; add a new core model to `CORE_MODEL_MODULES` there. Module models are registered through `hooks.register_model_module()` by the modules registration (`modules/backend/app/register.py`), and schema builders load them with `modules_loader.require_modules_or_absent()`.
+
+#### Metrics Import Standards
+- Always use fully qualified imports: `from backend.app.models.metrics.metric import RawMetric, MetricType`
+- Avoid re-exports in `__init__.py` files
+- Verify with `grep -rnE '^\s*(from|import) app\.' backend/ modules/ --include='*.py'`; any
+  hit is the defect. A relative `from .base import Base` inside
+  `backend/app/models/` is NOT -- it resolves to the same module object.
+
+## Monitoring & Deployment
+
+### CloudWatch Integration
+```bash
+# Create log groups
+aws logs create-log-group --log-group-name /experimentation-platform/api
+aws logs create-log-group --log-group-name /experimentation-platform/services
+aws logs create-log-group --log-group-name /experimentation-platform/errors
+
+# Deploy monitoring dashboards
+cd infrastructure/cloudwatch
+./deploy-dashboards.sh
+```
+
+### Application URLs
+- Backend API: http://localhost:8000
+- Frontend: http://localhost:3000
+- API Documentation: http://localhost:8000/docs
+- Health Check: http://localhost:8000/health
+
+## Common Development Tasks
+
+### Running Single Tests
+```bash
+# ALWAYS activate venv first!
+source venv/bin/activate
+
+# Run specific test file
+python -m pytest backend/tests/unit/services/test_experiment_scheduler.py -v
+
+# Run tests with specific marker
+pytest -m "unit" -v
+
+# Run tests without coverage (faster)
+python -m pytest backend/tests/ -p no:cov
+```
+
+### Database Operations
+```bash
+# Check migration history
+python -m alembic -c backend/app/db/alembic.ini history
+
+# The two heads of a full checkout: the core chain and the `modules` branch
+python -m alembic -c backend/app/db/alembic.ini heads
+
+# Mark current database state
+alembic stamp heads
+```
+
+### Debugging Common Issues
+- Database connections must use `localhost` on macOS
+- Clear caches when tests fail unexpectedly: `clear_schema_cache()`
+- Two heads is the normal state of a full checkout, not an error to fix: `upgrade heads`,
+  and name the head a new revision extends. Do NOT `alembic merge` them (see below)
+- Watch for duplicate SQLAlchemy relationship definitions
+- Ensure proper async/await usage in permission functions
+- **CRITICAL**: Always activate virtualenv before running tests or Python commands
+
+## Detailed Development Guidelines
+
+### Code Style Standards
+- **Lint and format with ruff** (`make lint` / `make format`). Ruff replaced
+  black, isort and flake8 in the P1 lint gate: one tool, one config block
+  (`[tool.ruff]` in `pyproject.toml`), the same version in CI, pre-commit and
+  the venv. `.flake8` is gone; do not reintroduce black or isort.
+- Follow PEP 8 for Python code
+- Use type annotations for all functions and methods
+- Document public functions with comprehensive docstrings
+- Use Pydantic v2 patterns consistently:
+  - Replace `validator` with `field_validator`
+  - Replace class-based `Config` with `model_config = ConfigDict(...)`
+  - Use `model_validator` for complex validations
+  - Import from correct paths: `from pydantic import field_validator, model_validator, ConfigDict`
+  - Use `from pydantic_settings import BaseSettings, SettingsConfigDict` for settings
+
+### Critical Database Migration Guidelines
+- Migration files are located in `backend/app/db/migrations/versions/`
+- When creating new migrations:
+  - Use `alembic revision --autogenerate --head <head> -m "description"` to generate
+    migration files, naming the head it extends: the core head id from `alembic heads`
+    for a core change, `modules@head` for a module's (that one lands in
+    `modules/backend/app/db/migrations/versions/`)
+  - **Always** check the generated file for accuracy, especially for complex changes
+  - **Verify** that `down_revision` points to the correct previous migration ID
+  - **Always use revision IDs, not migration names**, in the `down_revision` field
+- Running migrations:
+  - Use `python -m alembic -c backend/app/db/alembic.ini upgrade heads` to apply migrations
+  - Use `python -m alembic -c backend/app/db/alembic.ini history` to view migration history
+  - Set environment variables properly: `POSTGRES_DB=experimentation POSTGRES_SCHEMA=experimentation`
+- Migration troubleshooting:
+  - **Two heads is the steady state of a full checkout, not a problem**: the core chain and
+    the `modules` branch are separate on purpose, so that deleting `modules/` leaves a
+    consistent core chain. Never run `alembic merge` on them. The merge file lands in the
+    *core* versions directory with `down_revision = (<core head>, 'modules_0001_rbac')`, and
+    every core checkout -- which has no `modules_0001_rbac` -- then fails to load the script
+    directory at all. Use `upgrade heads` (plural) and `--head <head>` on a new revision.
+  - `upgrade head` (singular) fails with "Multiple head revisions are present"; that is the
+    reminder to type `heads`, not a reason to merge.
+  - For database/migration mismatches, use `alembic stamp heads` to mark the current state
+  - **Always verify migration chain integrity before deploying**
+
+### Metrics Model Import Standards (Critical)
+**Issue**: Inconsistent import paths for metrics models (especially `RawMetric`) cause Python to treat them as distinct classes, resulting in:
+- Memory duplication
+- SQLAlchemy "Class is not mapped" errors
+- Type checking failures
+- Unexpected behavior during runtime
+
+**Solution & Prevention**:
+1. **Standardized Import Paths**: Always use fully qualified imports: `from backend.app.models.metrics.metric import RawMetric, MetricType`
+2. **Never root an import at `app`** -- `from app.models.metrics.metric import RawMetric`
+   is a *different module object* from the `backend.app`-rooted one, which is
+   the whole defect. A relative `from .base import Base` inside
+   `backend/app/models/` resolves to `backend.app.models.base`, the same
+   object, and is fine.
+3. **Avoid Re-exports**: Don't re-export classes in `__init__.py` files; import directly from the defining module
+4. **Verification**: `grep -rnE '^\s*(from|import) app\.' backend/ modules/ --include='*.py'`.
+   No output means the convention holds, which is the state of `main`. There is
+   no script and no dedicated test for this: `standardize_metrics_imports.py`
+   and `backend/tests/unit/metrics/test_metrics_imports.py` were cited here for
+   months and neither has ever existed in this repository.
+
+### Permission System Architecture
+
+#### Role-Based Access Control (RBAC)
+The `core/permissions.py` module implements a comprehensive RBAC system with four roles:
+- **ADMIN**: Full access to all resources and actions
+- **DEVELOPER**: Can create and manage experiments and feature flags
+- **ANALYST**: Can view all data but cannot create or modify resources
+- **VIEWER**: Read-only access to approved resources
+
+#### Critical Permission Implementation Notes
+**Experiment Delete Endpoint Special Case**:
+- **Do NOT use** `can_delete_experiment` dependency function in the `delete_experiment` endpoint
+- **Design conflict**: The dependency chain requires ACTIVE experiments but delete endpoint requires DRAFT status
+- **Solution**: Use inline permission checks directly within the endpoint:
+  - Accept required `experiment_key` query parameter
+  - Retrieve experiment directly from database
+  - Perform permission checks in the endpoint
+  - Check experiment status (must be DRAFT)
+
+#### Feature Flag Permissions
+- Feature flags use ownership-based permission model
+- Endpoints requiring authentication use `deps.get_current_active_user`
+- API endpoints for feature flag evaluation use API key authentication via `deps.get_api_key`
+- Feature flag permissions are implemented as **async functions** in `deps.py`:
+  - `get_feature_flag_access`: Checks if user can access a feature flag (requires `await`)
+  - `can_create_feature_flag`: Checks if user can create a feature flag (requires `await`)
+  - `can_update_feature_flag`: Checks if user can update a feature flag (requires `await`)
+  - `can_delete_feature_flag`: Checks if user can delete a feature flag (requires `await`)
+- Schema validation requires `owner_id` to be an integer - ensure proper type casting in tests
+
+### Async/Sync Pattern Guidelines
+- **Feature flag and report-related dependencies are asynchronous** (use `await`)
+- **Experiment-related dependencies are synchronous**
+- When testing async functions:
+  - Use `@pytest.mark.asyncio` decorator on test functions
+  - Use `async def` for test function declarations
+  - Use `await` when calling async functions
+- **Critical**: Check for READ permission before UPDATE permission in the correct order
+- Don't mix async and sync patterns incorrectly - follow the implementation in `deps.py`
+
+### Test Environment Configuration
+
+#### Database Setup Requirements
+- Ensure PostgreSQL is running locally in Docker for tests
+- Database connection string should use `localhost` on macOS
+- Test users must have a `hashed_password` value set to avoid integrity errors
+
+#### Complete Authentication Mocking for API Tests
+For API tests that use tokens, mock multiple components of the auth system:
+
+1. Mock the `get_current_user` and `get_current_active_user` dependencies
+2. Mock token decoding to bypass AWS Cognito validation
+3. Mock the Cognito auth service to return user data with appropriate groups
+
+**Example comprehensive auth mocking**:
+```python
+@pytest.fixture
+def admin_token(admin_user, monkeypatch):
+    token = "mock_admin_token"
+
+    # Mock get_current_user
+    async def mock_get_current_user():
+        return admin_user
+    monkeypatch.setattr("backend.app.api.deps.get_current_user", mock_get_current_user)
+
+    # Mock get_current_active_user
+    def mock_get_current_active_user():
+        return admin_user
+    monkeypatch.setattr("backend.app.api.deps.get_current_active_user", mock_get_current_active_user)
+
+    # Mock auth_service.get_user_with_groups
+    def mock_get_user_with_groups(*args, **kwargs):
+        return {
+            "username": admin_user.username,
+            "attributes": {"email": admin_user.email},
+            "groups": ["admin-group"]  # This will map to ADMIN role
+        }
+    monkeypatch.setattr("backend.app.services.auth_service.CognitoAuthService.get_user_with_groups",
+                       mock_get_user_with_groups)
+
+    # Mock token decoder
+    def mock_decode_token(*args, **kwargs):
+        return {"sub": str(admin_user.id), "username": admin_user.username}
+    monkeypatch.setattr("backend.app.core.security.decode_token", mock_decode_token)
+
+    return token
+```
+
+#### Permission Testing Patterns
+- Test both regular users and superusers when creating test cases
+- Verify that proper 403 responses are returned when unauthorized actions are attempted
+- Use mock objects that accurately represent actual objects including ownership properties
+- All permission tests should validate that:
+  - ADMIN users can perform all actions
+  - DEVELOPER users can create and manage resources
+  - ANALYST users can view but not modify resources
+  - VIEWER users have read-only access
+  - Unauthorized actions return 403 Forbidden responses
+
+**For feature flag and report tests**:
+- Use `@pytest.mark.asyncio` decorator
+- Define test functions as `async def test_function_name`
+- Use `await` when calling async dependency functions
+- Properly mock both `check_permission` and `check_ownership` in permissions tests
+
+**For experiment tests**:
+- Use regular synchronous test functions
+- Call dependency functions directly without `await`
+
+### Safety Monitoring System
+
+#### Database Schema
+The safety monitoring system uses three main tables:
+1. **safety_settings**: Global safety configuration
+2. **feature_flag_safety_configs**: Per-feature flag safety configuration
+3. **safety_rollback_records**: History of safety-triggered rollbacks
+
+#### API Testing Patterns
+```python
+# For superuser endpoints
+with patch("backend.app.api.deps.get_current_superuser", return_value=mock_user):
+    response = client.get("/api/v1/safety/settings")
+
+# For rollback endpoints, also mock the permission check
+with patch("backend.app.core.permissions.check_permission", return_value=True):
+    with patch("backend.app.api.deps.get_current_active_user", return_value=mock_user):
+        response = client.post(f"/api/v1/safety/rollback/{feature_flag_id}")
+```
+
+## Feature Flag Rollout Schedules
+
+The platform supports gradual rollout of feature flags through rollout schedules. This enables controlled, staged deployments of features with configurable criteria for progression.
+
+### Key Components
+
+1. **Rollout Schedules**: Define a plan for gradually increasing a feature flag's rollout percentage over time.
+2. **Rollout Stages**: Individual steps within a schedule, each with a target percentage and conditions for activation.
+3. **Triggers**: Criteria that determine when to progress to the next stage (time-based, metric-based, or manual).
+
+### Database Models
+
+- `RolloutSchedule`: Main model for rollout schedules.
+- `RolloutStage`: Model for individual stages within a schedule.
+
+### API Endpoints
+
+All rollout schedule endpoints are available under `/api/v1/rollout-schedules`.
+
+- `POST /`: Create a new rollout schedule
+- `GET /`: List rollout schedules with optional filtering
+- `GET /{schedule_id}`: Get a specific rollout schedule
+- `PUT /{schedule_id}`: Update a rollout schedule
+- `DELETE /{schedule_id}`: Delete a rollout schedule
+- `POST /{schedule_id}/activate`: Activate a rollout schedule
+- `POST /{schedule_id}/pause`: Pause an active rollout schedule
+- `POST /{schedule_id}/cancel`: Cancel a rollout schedule
+- `POST /{schedule_id}/stages`: Add a stage to a rollout schedule
+- `PUT /stages/{stage_id}`: Update a rollout stage
+- `DELETE /stages/{stage_id}`: Delete a rollout stage
+- `POST /stages/{stage_id}/advance`: Manually advance a stage
+
+### Scheduler
+
+The `RolloutScheduler` runs in the background to automatically process active rollout schedules. It:
+
+1. Checks for schedules with pending stages that are eligible for activation
+2. Updates feature flag rollout percentages according to the stages
+3. Transitions stages and schedules through their lifecycle (pending → in_progress → completed)
+
+### Usage Example
+
+```python
+# Create a new rollout schedule
+schedule_data = {
+    "name": "Gradual Rollout for Feature X",
+    "description": "Gradually roll out Feature X over 3 weeks",
+    "feature_flag_id": "123e4567-e89b-12d3-a456-426614174000",
+    "start_date": "2023-12-01T00:00:00Z",
+    "end_date": "2023-12-31T23:59:59Z",
+    "max_percentage": 100,
+    "min_stage_duration": 24,  # Minimum 24 hours between stages
+    "stages": [
+        {
+            "name": "Initial Rollout",
+            "description": "First 10% of users",
+            "stage_order": 1,
+            "target_percentage": 10,
+            "trigger_type": "time_based",
+            "start_date": "2023-12-01T00:00:00Z"
+        },
+        {
+            "name": "Expanded Rollout",
+            "description": "Expand to 50% of users",
+            "stage_order": 2,
+            "target_percentage": 50,
+            "trigger_type": "time_based",
+            "start_date": "2023-12-15T00:00:00Z"
+        },
+        {
+            "name": "Full Rollout",
+            "description": "Roll out to all users",
+            "stage_order": 3,
+            "target_percentage": 100,
+            "trigger_type": "manual"
+        }
+    ]
+}
+```
+
+### Common Gotchas
+
+1. Rollout percentages must be non-decreasing across stages (e.g., 10% → 50% → 100%).
+2. Active schedules cannot have their stages deleted.
+3. Stage orders must be sequential without gaps.
+4. For time-based triggers, ensure the dates are in UTC timezone.
+5. Manual stages must be explicitly advanced using the API.
+
+## Enhanced Rules Engine (EP-001)
+
+The platform includes a comprehensive enhanced rules evaluation engine with advanced operators and performance optimizations.
+
+### Key Features
+
+1. **Advanced Operators**: 20+ operators including semantic version comparison, geo-distance, time windows, JSON path, array operations
+2. **Performance Optimizations**: Rule compilation caching, evaluation result caching, batch evaluation support
+3. **Metrics Collection**: P50, P95, P99 latency tracking with configurable sample windows
+4. **Thread Safety**: Concurrent evaluation support with proper locking mechanisms
+
+### Core Components
+
+- **RulesEvaluationService**: High-level service integrating caching, compilation, and metrics (`backend/app/services/rules_evaluation_service.py`)
+- **RuleCompiler**: Rule compilation and validation with LRU caching (`backend/app/core/rule_compiler.py`)
+- **EvaluationCache**: Thread-safe LRU cache for evaluation results with TTL support (`backend/app/core/evaluation_cache.py`)
+- **Rules Engine**: Core evaluation logic with all operator implementations (`backend/app/core/rules_engine.py`)
+
+### Operator Reference
+
+See `/docs/Enhanced_Rules_Engine_Reference.md` for complete operator documentation including:
+- Usage examples for all 20+ operators
+- Performance characteristics
+- Best practices and anti-patterns
+- Real-world scenario examples
+
+### Test Coverage
+
+- **131+ tests** covering all aspects of the enhanced rules engine
+- Days 1-2: Advanced operator tests (41 tests)
+- Days 3-4: Compilation and caching tests (54 tests)
+- Days 5-6: Service layer tests (21 tests)
+- Days 7-8: Integration tests (15 tests)
+- All tests passing with 51% overall code coverage
+
+### Performance Targets
+
+- Simple operator evaluation: > 100k ops/second
+- Complex operators (semver, geo): > 1k ops/second
+- 1000 user batch evaluation: < 5 seconds
+- Cache lookup: < 100ms for 10k lookups
+- Rule compilation cache provides 1.3-1.7x speedup
+
+## Git Workflow for Claude Code
+
+**The pull request title is the release note.** `main` is squash-merged and
+GitHub makes the squash subject the pull request title, which is what
+release-please parses to build the changelog and choose the version bump. A
+title that is not a conventional commit is invisible to it -- the release is
+still cut, the work simply does not appear in it and does not move the
+version. That is what happened to P3.5 (#165/#167): its subject was prose, and
+the release pull request it produced contained three historical `docs:`
+commits and nothing from the change that had just landed.
+
+So every pull request title is `type(optional scope): description`, with
+`type` one of `feat fix perf deps docs build ci refactor test chore revert
+style` -- the set `release-please-config.json` understands. The
+`conventional-title` job checks it and re-runs when the title is edited. If
+you pass `--subject` to `gh pr merge`, that wins over the title, and it has to
+satisfy the same rule.
+
+When committing changes:
+1. Use `git status` to check changes
+2. Use `git diff` to review modifications
+3. Stage files with `git add <files>`
+4. Create detailed commit messages following the format:
+   ```
+   Brief summary (50 chars or less)
+
+   Detailed explanation of changes:
+   - What was changed
+   - Why it was changed
+   - Any technical details
+
+   🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+   Co-Authored-By: Claude <noreply@anthropic.com>
+   ```
+5. Push with `git push origin main`
+
+## Verifying a change (read this before saying something works)
+
+Three consecutive review rounds on one pull request each shipped a regression
+created by the previous round's fix. Every one of them was invisible locally
+and obvious in CI, for the same reason: **the developer environment is the one
+place those bugs cannot appear.** The venv has every package installed, the
+tree has both profiles present, the database is already migrated. CI, the
+container and production have none of those properties.
+
+So: a green local suite is the weakest evidence available. It says the code
+works in the environment least like the one it runs in.
+
+### Verify in the environment the code actually runs in
+
+- Before claiming a dependency change is safe, install **exactly** what the
+  target installs. `backend/requirements.txt` is what every test job and
+  developer venv gets; `backend/requirements/runtime.lock` is what the image
+  gets; `modules/requirements.txt` is what the full image adds. A pin that
+  moves between them changes which environments can import it.
+- Before claiming a profile works, build the tree that profile actually ships:
+  `scripts/core_build.sh` (a copy with `modules/` deleted), not the checkout
+  with an environment variable set. Nothing under `backend/` reads
+  `EXPERIMENTLY_PROFILE`; the profile is decided by whether `import modules`
+  succeeds.
+- Before claiming a migration works, rehearse the **transitions**, not the
+  states: a core database met by a full image, a full database met by a core
+  image, and a database at the previous release's revision upgraded with
+  `heads`. Print the `alembic_version` rows and the affected constraints after
+  each. `db/bootstrap.py` repairs things the raw `alembic upgrade heads` that
+  production runs does not.
+
+### Pin the mechanisms that act at a distance
+
+Alembic's revision graph, alembic's reflection scope and the dependency
+closure all have non-local effects: a correct-looking local edit changes
+behaviour somewhere no local test looks. Those properties are asserted
+literally — the exact head set, the exact apply order, an autogenerate that
+produces an **empty** migration against a freshly bootstrapped database — so a
+silent reorder or a widened reflection fails loudly with a diff instead of
+quietly proposing `op.drop_table` against a production schema. Do not relax
+those tests to make a change pass; they are the contract.
+
+### When a rehearsal repeats, make it a test
+
+If you find yourself running the same manual rehearsal in successive rounds of
+work, it belongs in CI. That is where the transition tests in
+`backend/tests/integration/database/` came from.
+
+### Reviewing your own fixes
+
+After a round of fixes, aim the next review at the **diff of the diffs** —
+what the fixes changed — rather than at the whole change again. That is where
+the remaining risk is. And distinguish the two kinds of finding: a bug that
+became *reachable* because a gate was removed is pre-existing and finite;
+a bug the last fix *created* is the signal that the mechanism needs a pin.
+
+### A tool does not do what its flag is called
+
+Almost every wrong thing written into the P3.5/P3.6 gates came from believing a
+name instead of running the thing. In one pass, all of these were false:
+
+- `pip-audit --no-deps` does **not** stop pip resolving. 75 pins in
+  `backend/requirements.txt` audited **179** packages, including one the file
+  does not pin. `--disable-pip` is what stops it, and pip-audit rejects that
+  flag on an unhashed file unless `--no-deps` is *also* given.
+- `--strict` did nothing, because the exit status was discarded. A package
+  pip-audit cannot resolve comes back as `skip_reason` with no `vulns`, so the
+  gate printed "no advisories" over a package it never audited.
+- `rm -rf` on a path that does not exist **exits 0**. Every cleanup line in a
+  Dockerfile fails open unless something afterwards asserts the result.
+- `MANIFEST.in`'s `include VERSION` is not what puts `VERSION` in the sdist —
+  setuptools adds a dynamic-version file itself, and `exclude VERSION` does not
+  even take it out.
+- `license-checker` on a tree with no `node_modules` **exits 0** reporting one
+  entry, the package itself. It does not error.
+- `gitleaks` deliberately ignores AWS's published example key, so probing with
+  `AKIAIOSFODNN7EXAMPLE` makes a working scanner look broken.
+- `toJSON(needs)` is `{job: {result, outputs}}`, not `job=result` pairs.
+- `npm audit --omit=dev` still reports a package that is a peer dependency
+  *and* a devDependency.
+
+So: before a flag, a default or an absence-of-error becomes load-bearing, run
+it once and look. One command is cheaper than the review round that finds it.
+
+### Tamper-test the gate where the gate runs, not where you are
+
+"Verify in the environment the code runs in" applies to the *gate and its
+tests*, and this is where it keeps biting. Three times in one PR:
+
+- a gate test made its fixture with `git worktree`, which fails in
+  `core_build.sh`'s deliberately non-repository copy;
+- a licence gate covering six npm closures was **vacuous in CI**, because the
+  job installs only `frontend` — it "found" something locally purely because
+  this laptop had the other five installed;
+- the test written to fix that took the same shortcut and passed locally,
+  failed in CI.
+
+Cheap moves that would have caught all three: `mv frontend/node_modules` aside
+and re-run; `git archive HEAD` into a plain directory and run there; build the
+image and inspect it rather than reasoning about the `COPY`.
+
+**And when a tamper does not fire, suspect the probe before the gate.** A
+gate that looks broken is usually a bad probe — the example-key case above cost
+a round-trip of believing gitleaks was rule-less again.
+
+### The comment saying *why* is the likeliest false line in the diff
+
+Code is checked by tests; the justification beside it is checked by nothing, and
+it is written from intent before the thing is measured. In one PR: a
+`MANIFEST.in` comment that named the wrong mechanism, a CodeQL header
+describing an upload that had become conditional, "neither branch below would
+accept it" about a mixed SPDX expression that was accepted, and "all three are
+clean" about three files that are *empty* — not the same claim. Write the
+comment after measuring, or write it as intent.
+
+### Absence of a reference is not absence of a dependency
+
+Before deleting a file, four negative checks said the repository root
+`package.json` was unused: no `git grep` hit, no lockfile beside it, no
+`npm ci` at the root in any workflow, no `/` entry in `.github/dependabot.yml`.
+Every one of them was true. CI failed anyway —
+`frontend/src/tests/modules-alias.test.ts` opens it at a path built from
+`REPO_ROOT`, asserting the repo root declares no module `"type"`, because
+Turbopack takes the module format from the nearest package.json above
+`modules/frontend/src`.
+
+No search for the string `package.json` could have found that. The consumer
+builds the path at runtime, and what it asserts is the file's *contents*.
+
+So a deletion is justified by **running the suites that could plausibly touch
+the thing**, not by a grep that comes back empty. Ask what would read this
+without naming it: a path composed from a root constant, a directory listing, a
+glob, a framework resolving "the nearest X above Y", a fixture discovering
+files. And note which suites you could not run locally — the frontend suite is
+the one that caught this, and `make lint` never reaches it in a checkout with
+no `frontend/node_modules`.
+
+### Every gate must be tamper-tested
+
+The most frequent defect in this repository is not broken code — it is a check
+that passes for the wrong reason. Found in one review cycle: `find -name
+'workspaces*'` matching the chunk *directory* instead of the page it guarded;
+a "core image ships no module packages" assertion made of six hand-typed names
+that already missed two; a `profile: core` CI input that selected nothing,
+so the check named `(core)` tested the full profile; a `make` recipe guard
+whose `exit 0` ended only its own line's shell; `--steps <typo>` skipping every
+step and exiting `OK`; a CI gate that called `load_modules(force=True)` and
+thereby erased the failure it existed to detect; a route allow-list keyed on
+prefixes, so a new anonymous route under an existing prefix passed; and a CDK
+test that stubbed `App.synth` to a no-op, so the app was never synthesised.
+
+So: **when you add or change a gate, break the thing it guards and watch it
+fail.** Paste that evidence in the report. A gate you have only ever seen pass
+is not a gate. This applies to assertions, CI steps, shell guards, lint scopes
+and tests alike.
+
+That includes a check you *generate* rather than type. A grep written into four
+instruction files through a Python f-string arrived double-escaped (`\\s` for
+`\s`) and matched nothing — it would have reported "clean" for ever. Every
+layer of quoting between you and the thing that runs is a place for the check
+to die silently, so run the emitted command against a planted offender and
+watch it fire.
+
+### A new gate's first failures are evidence, not defects
+
+The first run of the export sweep failed two of its five checks: ten forbidden
+claims and 197 dangling references. None of the 197 was a dead link -- 205 of
+them were the *word* "project", matched by a directory entry with no trailing
+slash, and ten were `.env.dev`, a file the docs legitimately tell you to
+create. Eight of the ten claim hits were absolute paths in the `.claude/agents`
+and `.claude/commands` files that had just been *carved out* of the exclusion
+list to be kept; the other two were the script matching its own pattern.
+
+Two rules from that:
+
+- **Read the evidence file before fixing anything.** A text-matching gate over
+  a codebase must anchor on path-shaped references (a removed directory is
+  `project/`, not `project`; a removed file is its full path), must exclude its
+  own source, and must distinguish "committed by mistake" (`.env.dev`) from
+  "documentation people link to". Fix the gate's precision first, then look at
+  what is left -- and paste the *residual* hits in the report, not the raw count.
+- **An exception you carve into an exclusion list is a new obligation.** The
+  moment `.claude/agents` was kept, its files had to meet the same bar as the
+  rest of the tree, and they did not. Re-run every sweep over whatever you just
+  decided to keep.
+
+### Prefer the dumbest thing that works
+
+Twice in this repository a "safer" rewrite was less safe than what it replaced.
+The readiness sanitiser replaced a plain 200-character truncation with three
+regexes: it left credentials in place in the JSON and quoted forms its own
+docstring gave as examples, and it backtracked quadratically — 12.9 s on a
+5.5 kB line, minutes on a longer one, in a synchronous call inside an async
+handler on a one-worker container, i.e. an unauthenticated denial of service.
+
+In redaction, authentication, and anything parsing untrusted text: bound every
+quantifier, truncate before processing rather than after, compare on bytes
+(Starlette decodes headers as latin-1 and `hmac.compare_digest` raises
+`TypeError` on a non-ASCII `str` — this has been a live 500 twice), and prefer
+a boring construct you can reason about over a clever one you cannot.
+
+### Do not hoist a repair into a shared path without enumerating its callers
+
+Three defects in one cycle came from moving logic out of `db/bootstrap.py` into
+`migrations/env.py` "so every path gets it". `reconcile_with_models` then ran
+`create_all` on *every* `alembic upgrade` that reached head — creating
+unmigrated tables in production, outside the migration transaction, invisible
+to the next autogenerate. `may_run_alembic`'s upgrade-shaped test made
+`downgrade` and `stamp` silent no-ops. And the third repair was left behind,
+so the raw `alembic upgrade heads` that production actually runs still died.
+
+Widening where something runs widens what it can break. List the callers, say
+what each now gets, and scope the change to the ones that asked for it.
+
+### A claim about behaviour needs a test, or say it is intent
+
+The README promised "a route whose module is not installed answers 501" when
+only three brokered routes did and the rest 404'd; the migration docs gave a
+rollback command that had come to mean "drop all 26 revisions"; a Dockerfile
+comment asserted that a glob matching nothing is tolerated (it is not, on the
+classic builder); a code comment said three webhooks authenticated their
+sender when two verified nothing at all. Operators follow prose. If a
+statement is about observable behaviour — a status code, a default, a command
+— either pin it with a test or write it as intent, not as fact.
+
+### Running commands
+
+Never pipe a command whose failure matters through `tail` or `head`: it
+replaces the exit status with the pipe's, and a killed run then reads as
+success. Three agents and I were each fooled by this in one session. Redirect
+to a file and read the file.
+
+A comment inside a `\`-continued command ends it. Explaining an `aws ecs
+run-task` flag on its own line mid-continuation left the command running with
+four arguments and the rest parsed as separate commands; actionlint's SC2215
+caught it, and that code is not among the five the lint job suppresses. Put the
+comment above the command.
+
+For a bulk rewrite across many sites, check every *shape* of site afterwards,
+not the first one — a scripted edit here silently mangled the blocks that
+compared two timings while getting the single-timing ones right.
+
+Never assert a single wall-clock timing. Three separate flaky gates in this
+repository came from `assert duration < X` or `assert duration2 < duration1`;
+take the best of several runs (what `timeit` does), or assert on the
+deterministic thing the timing was standing in for.
+
+### The merge bar
+
+Merge when a review round produces no finding that would break a deployment or
+lose data. Everything else becomes a tracked issue. Without a bar, review
+rounds never end, because each one finds something.
+
+## Releasing, and cutting the public repository
+
+Four things here are non-obvious, and every one of them cost a wrong report or
+a rejected push on the 0.2.0 release.
+
+### A `GITHUB_TOKEN` event triggers no workflow
+
+GitHub refuses to run workflows for events its own token created, to stop
+recursion. Two consequences, both certain to recur:
+
+- **The release-please pull request has ZERO checks.** With 18-20 required, it
+  can never satisfy branch protection. It is not blocked on anything you can
+  fix in the pull request; merge it with `--admin` after confirming the diff
+  is only CHANGELOG.md, VERSION and the manifest.
+- **The tag it pushes triggers nothing.** `release.yml` has a
+  `workflow_dispatch` with a tag input for exactly this: `gh workflow run
+  release.yml -f tag=vX.Y.Z`.
+
+### A release bumps VERSION and leaves the fixtures behind
+
+Three committed files embed the version -- both OpenAPI snapshots under
+`docs/api/` and the frontend's copy. They are `extra-files` in
+`release-please-config.json` now, so the release pull request updates them.
+If a release ever lands with them stale, `make openapi` and commit; the smoke
+test `test_version_sources.py` fails loudly either way.
+
+### The cut cannot fast-forward after an exclusion change
+
+`git filter-repo` rewrites commit CONTENT, so changing
+`scripts/publish/exclude-paths.txt` changes every resulting hash and the new
+history shares no commits with the published one. The push is then a force
+push -- and `allow_force_pushes` is deliberately **false** on the public
+repository, so it is rejected by the branch protection hook.
+
+The procedure is: open "Allow force pushes" in the public repository's branch
+settings, push, close it again. Read the setting back afterwards rather than
+trusting the API's response.
+
+Tags need `git push <url> vX.Y.Z` explicitly. `--follow-tags` sends only
+ANNOTATED tags and release-please creates lightweight ones, so the tag is
+silently left behind -- which means the docs site, whose deploy is gated on
+the tag, silently never builds.
+
+### Verify in the exported tree, not this one
+
+`mkdocs build --strict` passes here and fails there, because `docs/planning/`
+exists here and is stripped there. The v0.2.0 Pages deploy failed on one
+relative link -- `planning/...` from inside `docs/README.md` -- that the
+"no references to removed paths" check cannot see, because it derives the
+pattern `docs/planning/` and a relative link carries no prefix.
+
+`export.sh` now builds the docs site and runs `core_build.sh` on the export
+for this reason. When something passes locally and you are about to publish,
+the question is always whether the thing you tested is the thing that ships.
+
+## Dependabot: the queue is a merge problem, not a volume problem
+
+The open-PR count reached 12-30 and was bulk-closed by hand at least three
+times. Each time the response was to reduce the *rate* -- major ignores,
+staggered schedules, lower `open-pull-requests-limit` (#280 did all three).
+The queue came back within a day, every time.
+
+The cause was never volume. **Nothing merged them.** There was no auto-merge
+workflow and `allow_auto_merge` was `false` on the repository, so every bump
+was merged by a human who happened to look. With 19 ecosystems producing
+updates weekly or monthly, the queue grows monotonically between clean-ups by
+construction. Closing them by hand resets the counter and changes nothing.
+
+`.github/workflows/dependabot-automerge.yml` closes the loop:
+
+- **patch and minor, any ecosystem** -- merges itself once the gate is green
+- **github-actions, including majors** -- also merges itself, which is why
+  `dependabot.yml` carries no major ignore for that one ecosystem: an Actions
+  major is how GitHub forces you off a retired runner runtime, and CI passing
+  *is* the test for one
+- **majors everywhere else** -- left alone; they are migrations, and
+  `dependabot.yml` ignores them anyway
+
+`gh pr merge --auto` bypasses nothing. Branch protection still requires all 20
+checks; a failing bump stays open and red, which is the signal you want.
+
+So before reaching for the limits again: **if the queue is growing, ask what
+is supposed to drain it.** A rate limit on an undrained queue only changes how
+fast it fills. The same reasoning applies to any bot-generated backlog.
+
+## Claude Code Best Practices
+
+1. **Always activate virtualenv first** before running any Python commands
+2. Read relevant documentation files in `/docs` before making changes
+3. Check existing test patterns before writing new tests
+4. Use the Task tool for complex multi-file searches rather than running grep directly
+5. Run tests after making changes to verify functionality
+6. Follow the established code style and import patterns
+7. When fixing bugs, understand the root cause before implementing fixes
+8. Reference file paths with line numbers when discussing code locations
+
+## Common Patterns for Claude Code
+
+### Running Tests
+```bash
+# Standard test workflow
+source venv/bin/activate
+export APP_ENV=test TESTING=true
+python -m pytest backend/tests/unit/core/ -v --tb=short
+
+# Quick test without coverage
+source venv/bin/activate && python -m pytest backend/tests/ -p no:cov -q
+```
+
+### Database Migrations
+```bash
+# Create migration. `--head` names the head it extends: the core head id that
+# `alembic heads` prints, or `modules@head` for a module's.
+alembic revision --autogenerate --head <head> -m "description"
+
+# Apply migration (`heads`, plural: a full checkout has two)
+python -m alembic -c backend/app/db/alembic.ini upgrade heads
+
+# Check migration status
+python -m alembic -c backend/app/db/alembic.ini current
+```
+
+### Code Quality Checks
+```bash
+# Format and auto-fix backend/, modules/ and scripts/ in place
+# (ruff: format + lint + import order)
+make format
+
+# The full lint gate, in this order:
+#   ruff check / ruff format --check   backend/ modules/ scripts/
+#   lint-imports                       the core/modules import boundary
+#                                      ([tool.importlinter] in pyproject.toml,
+#                                      backend/lambda/.importlinter)
+#   reuse lint                         every file carries a licence, and
+#                                      LICENSES/Apache-2.0.txt matches LICENSE
+#   check_requirements_lock.py         both requirements locks match their inputs
+#   eslint + tsc                       frontend/
+#   hadolint                           the four Dockerfiles
+#   actionlint                         .github/workflows
+make lint
+
+# Run type checking
+mypy backend/app/
+```

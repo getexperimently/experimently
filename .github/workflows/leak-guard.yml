@@ -1,0 +1,93 @@
+# Refuse to publish a secret or a false claim.
+#
+# This repository is public and it is where development happens, so a push IS
+# publication -- there is no export step downstream that could strip anything
+# out afterwards. `scripts/publish/export.sh` used to be that step and is gone.
+#
+# Runs on every push and every pull request, including from forks, because it
+# needs no secrets and no write permission -- it only reads the checkout. That
+# is deliberate: a guard that cannot run on a fork's pull request is a guard
+# with a hole shaped exactly like the contribution path.
+#
+# The tamper evidence for every rule is in
+# backend/tests/unit/scripts/test_leak_guard.py -- each rule is planted against and watched
+# to fire, which is the bar this repository holds gates to. A gate that has
+# only ever been seen to pass is not a gate.
+name: Leak Guard
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: leak-guard-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  leak-guard:
+    name: Leak Guard
+    runs-on: ubuntu-latest
+    steps:
+      # Full history: the commit-message sweep needs the commits themselves,
+      # and a shallow clone silently gives it nothing to read. The tree being
+      # clean while sixteen commit MESSAGES carried an absolute home path is
+      # the exact incident this job exists for.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Work out what to scan
+        id: scope
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+            head="${{ github.event.pull_request.head.sha }}"
+            echo "range=$base..$head" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ] \
+               && git cat-file -e "${{ github.event.before }}^{commit}" 2>/dev/null; then
+            echo "range=${{ github.event.before }}..${{ github.sha }}" >> "$GITHUB_OUTPUT"
+          else
+            # A new branch, or a force push whose old tip is gone. Nothing to
+            # diff against, so scan the whole tree -- more work, never less.
+            echo "range=" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Both, always. The range scan reads commit messages, which the
+      # whole-tree scan cannot see; the whole-tree scan reads files an
+      # untouched-but-already-bad path would hide from the range scan. Neither
+      # subsumes the other, and each is seconds.
+      - name: Scan the changed range, messages included
+        if: steps.scope.outputs.range != ''
+        run: python3 scripts/leak_guard.py --range "${{ steps.scope.outputs.range }}"
+
+      - name: Scan every tracked file
+        run: python3 scripts/leak_guard.py
+
+      - name: Prove the guard still fires
+        # A gate whose rules have silently stopped matching reports "clean"
+        # for ever and looks identical to a healthy one. So plant an offender
+        # on every run and require the guard to reject it. This has caught a
+        # double-escaped pattern in this repository before.
+        run: |
+          set -euo pipefail
+          tmp=$(mktemp -d); cd "$tmp"
+          git init -q -b main .
+          mkdir -p scripts
+          cp "$GITHUB_WORKSPACE/scripts/leak_guard.py" scripts/
+          # Assembled, not spelled out: this file is scanned too, and a
+          # literal here would fail the guard on every run. The only way to
+          # keep a literal would be to exempt this file, which is the defect
+          # the guard exists to prevent.
+          hi=9876; lo=54321098
+          printf 'role = "arn:aws:iam::%s%s:role/x"\n' "$hi" "$lo" > planted.py
+          git add -A
+          if python3 scripts/leak_guard.py --staged >/dev/null 2>&1; then
+            echo "::error::leak-guard accepted a planted AWS account id -- the guard is not working"
+            exit 1
+          fi
+          echo "tamper check: the guard rejected a planted account id, as it must"
