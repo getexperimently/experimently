@@ -70,6 +70,15 @@ jobs:
           pip install --upgrade pip
           pip install -r requirements.txt
 
+      # Editable, from the repository root, as nightly-qa and a developer venv
+      # install it. Its finder maps `modules` back into this checkout from any
+      # directory -- the leak the core-tree tests must survive (#47). Without
+      # it they pass whatever the harness does, so the integration run sets
+      # EXPERIMENTLY_REQUIRE_EDITABLE and test_the_integration_job_is_armed
+      # fails if this step is ever dropped.
+      - name: Install the repository (editable)
+        run: pip install -e . --no-deps
+
       # Creates the schema from the models on a fresh database and stamps the
       # alembic head (see backend/app/db/bootstrap.py); on an existing
       # database it runs `alembic upgrade head`.
@@ -97,6 +106,7 @@ jobs:
           POSTGRES_PORT: 5432
           POSTGRES_SCHEMA: test_experimentation
           DATABASE_URI: "postgresql://postgres:postgres@localhost:5432/experimentation_test"
+          EXPERIMENTLY_REQUIRE_EDITABLE: "1"
         run: |
           # No marker filter: 30 of the integration files carry no marker and were
           # silently deselected (570 of 1462 tests, including every regression test
