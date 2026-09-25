@@ -14,7 +14,7 @@ const REPO_ROOT = path.resolve(__dirname, '../..');
 // One rule, two spellings. webpack takes absolute paths; Turbopack's
 // `resolveAlias` takes paths RELATIVE TO THIS PACKAGE and prefixes anything
 // else with `./` -- an absolute path there became
-// `./Users/ashish.../node_modules/react` and failed to resolve.
+// `./Users/<you>/node_modules/react` and failed to resolve.
 const ALIAS_TARGETS = {
   '@getexperimently/react-sdk': SDK_ENTRY,
   // Force a single React copy. Without this, the SDK source could resolve

@@ -35,3 +35,33 @@ repos:
         files: ^(backend|modules|scripts)/
       - id: ruff-format
         files: ^(backend|modules|scripts)/
+
+  # The publication gate, run locally so it fails before a push rather than
+  # after one. This repository is public and development happens in it, so a
+  # push IS publication -- there is no export step downstream to strip
+  # anything out. `git push --no-verify` skips this; CI runs the same script
+  # on every push and pull request and does not skip.
+  #
+  # Two stages on purpose:
+  #   pre-commit  the staged files, so the feedback lands while you are still
+  #               in the change that caused it.
+  #   pre-push    the whole tree AND every commit message about to leave, which
+  #               is the part that matters -- the tree was clean and sixteen
+  #               commit MESSAGES carried an absolute home path the one time
+  #               this actually escaped.
+  - repo: local
+    hooks:
+      - id: leak-guard
+        name: leak guard (staged)
+        entry: python3 scripts/leak_guard.py --staged
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
+      - id: leak-guard-push
+        name: leak guard (tree and outgoing commit messages)
+        entry: python3 scripts/leak_guard.py --push
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
