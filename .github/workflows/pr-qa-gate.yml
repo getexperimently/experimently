@@ -753,6 +753,13 @@ jobs:
       # start, and migrations/env.py fails every alembic command with it. The
       # variables below are the ones a production task definition injects
       # (infrastructure/cdk/stacks/fargate_service_stack.py).
+      #
+      # That correspondence is maintained BY HAND and nothing checks it, which
+      # is how this step broke once already: PUBLIC_BASE_URL was added to both
+      # task definitions and not here, so the image refused to boot on a change
+      # whose unit tests were green. If you add a variable the application
+      # demands in production, it belongs in three places -- both CDK stacks
+      # and this list.
       - name: Full image boots with production settings
         run: |
           set -euo pipefail
@@ -763,6 +770,10 @@ jobs:
             -e FIRST_SUPERUSER_PASSWORD="$KEY"
             -e POSTGRES_PASSWORD=ci-only-not-a-real-password
             -e REDIS_URL=redis://localhost:6379/0
+            # A production start must know what hostname it answers on: the
+            # Host header is attacker-controlled and ALLOWED_HOSTS derives from
+            # this (#220). Never resolved here -- the import opens no socket.
+            -e PUBLIC_BASE_URL=https://api.example.com
           )
           # Importing main.py runs the registration and the abort check; it
           # opens no connection, so no database or Redis is needed here.

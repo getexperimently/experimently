@@ -28,6 +28,7 @@ from backend.app.middleware.relative_redirect_middleware import (
     RelativeSlashRedirectMiddleware,
 )
 from backend.app.middleware.security_middleware import SecurityHeadersMiddleware
+from backend.app.middleware.trusted_host_middleware import TrustedHostMiddleware
 from backend.app.modules_loader import abort_if_modules_broken, load_modules
 
 # --- EP-013 additions ---
@@ -202,6 +203,35 @@ app.add_middleware(RelativeSlashRedirectMiddleware)
 # Rate limiter — disabled during tests to avoid interfering with test assertions
 _rate_limit_enabled = not settings.is_test
 app.add_middleware(RateLimitMiddleware, enabled=_rate_limit_enabled)
+
+# Trusted Host — refuse a request whose `Host` is not one of ours (#220).
+# `Host` is attacker-controlled on any path that reaches the app, and absolute
+# URLs built from it make a crafted one dangerous; `PUBLIC_BASE_URL` already
+# removed the OIDC `redirect_uri` from that category, and this covers every
+# handler that has not been audited and every one not yet written.
+#
+# `effective_allowed_hosts`, not `ALLOWED_HOSTS`: with the latter unset it
+# derives from PUBLIC_BASE_URL's host, which is the URL users actually reach
+# the service at. The earlier attempt at this defaulted to the load balancer's
+# own DNS name and would have refused 100% of user traffic while every health
+# check stayed green.
+#
+# Registered AFTER the rate limiter and BEFORE the security headers, putting it
+# outside the limiter and inside SecurityHeadersMiddleware. Both halves matter:
+#
+#   outside the limiter  a forged `Host` costs a header comparison, not a
+#                        rate-limit bucket and a database session.
+#   inside the headers   its 400 is a response a hostile client is by
+#                        construction most likely to see, so it carries the
+#                        same headers as everything else -- exactly why the
+#                        429 below is positioned the way it is.
+#
+# The probes are exempt inside the middleware: the ALB health-checks `/health`
+# with the TARGET'S OWN IP as `Host`, so without that a correct allow-list
+# fails every probe and rolls the deployment back with the app itself healthy.
+app.add_middleware(
+    TrustedHostMiddleware, allowed_hosts=settings.effective_allowed_hosts
+)
 
 # Security headers — lightweight and stateless. Registered AFTER the rate
 # limiter, i.e. outside it, for the same reason CORS is registered outside

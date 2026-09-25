@@ -71,6 +71,11 @@ def _app_environment(cdk_dir: Path, **overrides: str):
             "arn:aws:acm:us-west-2:123456789012:certificate/"
             "00000000-0000-0000-0000-000000000000"
         ),
+        # Required at synth for the same class of reason as the certificate:
+        # FargateServiceStack refuses to build without knowing the origin users
+        # reach the service at, because the application refuses to START
+        # without it in staging/production (#220). Never resolved at synth.
+        PUBLIC_BASE_URL="https://api.example.com",
     )
     os.environ.pop("EXPERIMENTLY_PROFILE", None)
     os.environ.update(overrides)
