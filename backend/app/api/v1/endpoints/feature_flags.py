@@ -31,7 +31,12 @@ from backend.app.core.metrics import (
     record_cache_miss,
     record_flag_evaluation,
 )
-from backend.app.core.permissions import Action, ResourceType, check_permission
+from backend.app.core.permissions import (
+    Action,
+    ResourceType,
+    can_act_on_feature_flag,
+    check_permission,
+)
 from backend.app.crud import crud_feature_flag
 from backend.app.models.audit_log import ActionType, EntityType
 from backend.app.models.compliance_audit_event import AuditAction, AuditOutcome
@@ -230,17 +235,11 @@ async def create_feature_flag(
 
     # Create feature flag
     try:
-        # Create feature flag with updated owner_id
-        # Set owner_id on the feature flag data
-        feature_flag_in_dict = feature_flag_in.model_dump()
-        feature_flag_in_dict["owner_id"] = current_user.id
-
-        # Convert back to pydantic model
-        updated_feature_flag_in = FeatureFlagCreate(**feature_flag_in_dict)
-
-        # Create the feature flag using the service
+        # The creator is the owner.  It is set by the service on the stored row,
+        # not through the request schema, which has no owner field (and must not:
+        # a client could otherwise create a flag in someone else's name).
         feature_flag = feature_flag_service.create_feature_flag(
-            flag_data=updated_feature_flag_in
+            flag_data=feature_flag_in, owner_id=current_user.id
         )
 
         # Convert SQLAlchemy model to dictionary manually
@@ -317,7 +316,7 @@ async def get_feature_flag(
     Get feature flag by ID.
 
     Retrieves the detailed information for a specific feature flag.
-    Users can only access feature flags they own or have permission to view.
+    Every role may read every flag (the list endpoint already shows them all).
 
     Returns:
         Dict[str, Any]: The feature flag details
@@ -326,6 +325,19 @@ async def get_feature_flag(
         HTTPException 404: If feature flag not found
         HTTPException 403: If user doesn't have access to this feature flag
     """
+    # Access is decided on the stored row, before anything is served -- the
+    # cached copy included.
+    owner_row = db.query(FeatureFlag.owner_id).filter(FeatureFlag.id == flag_id).first()
+    if owner_row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Feature flag not found"
+        )
+    if not can_act_on_feature_flag(current_user, owner_row.owner_id, Action.READ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not enough permissions to access this feature flag",
+        )
+
     # Check cache first if enabled
     if cache_control.enabled and cache_control.redis:
         cache_key = f"feature_flag:{flag_id}"
@@ -345,15 +357,6 @@ async def get_feature_flag(
     if not feature_flag:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Feature flag not found"
-        )
-
-    # Check access permission (superusers can see all, regular users only their own)
-    if not current_user.is_superuser and str(feature_flag["owner_id"]) != str(
-        current_user.id
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not enough permissions to access this feature flag",
         )
 
     # Cache result if enabled
@@ -414,7 +417,7 @@ async def update_feature_flag(
         )
 
     # Check access permission
-    if not current_user.is_superuser and flag.owner_id != current_user.id:
+    if not can_act_on_feature_flag(current_user, flag.owner_id, Action.UPDATE):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not enough permissions to update this feature flag",
@@ -568,7 +571,7 @@ async def delete_feature_flag(
         )
 
     # Check if the user is either the owner or a superuser
-    if flag.owner_id != current_user.id and not current_user.is_superuser:
+    if not can_act_on_feature_flag(current_user, flag.owner_id, Action.DELETE):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You must be the owner or a superuser to delete this feature flag",
@@ -652,7 +655,7 @@ async def activate_feature_flag(
         )
 
     # Check access permission
-    if not current_user.is_superuser and flag.owner_id != current_user.id:
+    if not can_act_on_feature_flag(current_user, flag.owner_id, Action.UPDATE):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not enough permissions to activate this feature flag",
@@ -726,7 +729,7 @@ async def deactivate_feature_flag(
         )
 
     # Check access permission
-    if not current_user.is_superuser and flag.owner_id != current_user.id:
+    if not can_act_on_feature_flag(current_user, flag.owner_id, Action.UPDATE):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not enough permissions to deactivate this feature flag",
@@ -1010,7 +1013,7 @@ async def toggle_feature_flag(
         )
 
     # Check access permission
-    if not current_user.is_superuser and flag.owner_id != current_user.id:
+    if not can_act_on_feature_flag(current_user, flag.owner_id, Action.UPDATE):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not enough permissions to toggle this feature flag",
@@ -1126,7 +1129,7 @@ async def enable_feature_flag(
         )
 
     # Check access permission
-    if not current_user.is_superuser and flag.owner_id != current_user.id:
+    if not can_act_on_feature_flag(current_user, flag.owner_id, Action.UPDATE):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not enough permissions to enable this feature flag",
@@ -1225,7 +1228,7 @@ async def disable_feature_flag(
         )
 
     # Check access permission
-    if not current_user.is_superuser and flag.owner_id != current_user.id:
+    if not can_act_on_feature_flag(current_user, flag.owner_id, Action.UPDATE):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not enough permissions to disable this feature flag",
