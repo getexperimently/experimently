@@ -49,6 +49,31 @@ def cleanup_overrides():
     app.dependency_overrides.clear()
 
 
+@pytest.fixture(autouse=True)
+def _remove_what_the_test_created(db_session):
+    """Leave the shared test database as it was: the list tests page at 100."""
+    yield
+    db_session.rollback()
+    flags = db_session.query(FeatureFlag.id).filter(FeatureFlag.key.like("fc93-%"))
+    flag_ids = [row.id for row in flags]
+    if flag_ids:
+        schedules = db_session.query(RolloutSchedule.id).filter(
+            RolloutSchedule.feature_flag_id.in_(flag_ids)
+        )
+        schedule_ids = [row.id for row in schedules]
+        if schedule_ids:
+            db_session.query(RolloutStage).filter(
+                RolloutStage.rollout_schedule_id.in_(schedule_ids)
+            ).delete(synchronize_session=False)
+            db_session.query(RolloutSchedule).filter(
+                RolloutSchedule.id.in_(schedule_ids)
+            ).delete(synchronize_session=False)
+        db_session.query(FeatureFlag).filter(FeatureFlag.id.in_(flag_ids)).delete(
+            synchronize_session=False
+        )
+    db_session.commit()
+
+
 def _user(db_session, role: UserRole, is_superuser: bool) -> User:
     suffix = uuid.uuid4().hex[:8]
     user = User(

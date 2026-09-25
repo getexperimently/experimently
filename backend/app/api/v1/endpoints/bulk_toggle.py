@@ -48,8 +48,7 @@ async def bulk_toggle_flags(
     """
     Toggle multiple feature flags in a single operation.
     Each flag's result is reported individually.
-    Each flag needs UPDATE on feature flags for the caller's role; a flag the
-    caller may not change is reported with success=false and left unchanged.
+    Requires UPDATE permission on feature_flag resource.
     Creates one audit log entry per successfully-processed flag.
     The operation is partial-success by design: if some flags fail,
     the endpoint still returns 200 with per-flag results.

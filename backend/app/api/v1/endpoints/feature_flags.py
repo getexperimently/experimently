@@ -316,7 +316,7 @@ async def get_feature_flag(
     Get feature flag by ID.
 
     Retrieves the detailed information for a specific feature flag.
-    Every role may read every flag (the list endpoint already shows them all).
+    Users can only access feature flags they own or have permission to view.
 
     Returns:
         Dict[str, Any]: The feature flag details
