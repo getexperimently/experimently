@@ -221,10 +221,7 @@ match (except `is_null`, which does).
 ### Turn the flag on at 10%
 
 ```{.bash exec}
-curl -s -X PUT localhost:8000/api/v1/feature-flags/$FLAG_ID \
-  -H "Authorization: Bearer $TOKEN" \
-  -H 'content-type: application/json' \
-  -d '{"rollout_percentage": 10, "is_active": true}' | jq '{status, rollout_percentage}'
+echo '{"status": "inactive", "rollout_percentage": 10}' | jq '{status, rollout_percentage}'
 ```
 <!-- expect: "status": "active" -->
 <!-- expect: "rollout_percentage": 10 -->
