@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.2](https://github.com/amarkanday/experimentation-platform/compare/v0.2.1...v0.2.2) (2026-09-24)
+
+
+### Bug Fixes
+
+* **publish:** build the docs from the TAGGED tree, not the tip ([#318](https://github.com/amarkanday/experimentation-platform/issues/318)) ([8842a6b](https://github.com/amarkanday/experimentation-platform/commit/8842a6bd5efcc0dce0a06b8eec62bd8f05c94261))
+* **site:** the public site works without an API, because it has none ([#319](https://github.com/amarkanday/experimentation-platform/issues/319)) ([669dd64](https://github.com/amarkanday/experimentation-platform/commit/669dd649ab457d1c292692d2a8fb03e574686996))
+
 ## [0.2.1](https://github.com/amarkanday/experimentation-platform/compare/v0.2.0...v0.2.1) (2026-09-24)
 
 
