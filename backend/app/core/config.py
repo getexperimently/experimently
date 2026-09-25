@@ -9,6 +9,7 @@ import logging
 import os
 import warnings
 from typing import Annotated, Any, Dict, List, Literal, Optional, Union
+from urllib.parse import urlparse
 
 from pydantic import (
     AnyHttpUrl,
@@ -257,6 +258,23 @@ class Settings(BaseSettings):
     LOCAL_AUTH_MAX_FAILED_ATTEMPTS: int = 10
     LOCAL_AUTH_LOCKOUT_MINUTES: int = 15
 
+    # The canonical absolute base URL this service is reached at, e.g.
+    # `https://api.example.com`. Every absolute URL the app EMITS is built from
+    # this rather than from the request, so no handler asks the request for the
+    # application's own identity.
+    #
+    # `_get_redirect_uri` in the SSO endpoints is the one that mattered (#220):
+    # it built the OIDC `redirect_uri` -- the address an authorization code is
+    # returned to -- from `request.base_url`, which is the `Host` header and a
+    # scheme that `X-Forwarded-Proto` can set (#237). Both halves are
+    # client-controlled, so a crafted request steered the code elsewhere.
+    #
+    # Optional, and unset is the development default. It is also the fix for
+    # the ordinary case behind a TLS-terminating proxy, where the request's own
+    # scheme is `http` and every absolute URL built from it is wrong in a way
+    # no test that talks to the app directly would show.
+    PUBLIC_BASE_URL: Optional[str] = None
+
     BACKEND_CORS_ORIGINS: List[AnyHttpUrl] = []
     # CORS_ORIGINS is a plain-string list version of BACKEND_CORS_ORIGINS that
     # can also be set via env var as a comma-separated string. NoDecode stops
@@ -467,6 +485,32 @@ class Settings(BaseSettings):
         elif isinstance(v, (list, str)):
             return v
         raise ValueError(v)
+
+    @field_validator("PUBLIC_BASE_URL")
+    @classmethod
+    def validate_public_base_url(cls, v: Optional[str]) -> Optional[str]:
+        """A scheme and a host, no path, no trailing slash.
+
+        Rejecting a path matters: this is concatenated with
+        `/api/v1/auth/sso/oidc/{provider}/callback`, and an OIDC `redirect_uri`
+        must match the IdP's registration EXACTLY -- so a stray path or slash
+        is not cosmetic, it is a callback the IdP refuses.
+        """
+        if v is None or not v.strip():
+            return None
+        candidate = v.strip().rstrip("/")
+        parsed = urlparse(candidate)
+        if parsed.scheme not in ("http", "https") or not parsed.netloc:
+            raise ValueError(
+                "PUBLIC_BASE_URL must be an absolute http(s) URL with a host, "
+                f"e.g. https://api.example.com -- got {v!r}"
+            )
+        if parsed.path:
+            raise ValueError(
+                "PUBLIC_BASE_URL must not carry a path; it is the origin the "
+                f"service is reached at -- got {v!r}"
+            )
+        return candidate
 
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod

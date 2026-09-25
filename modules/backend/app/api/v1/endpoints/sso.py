@@ -180,8 +180,30 @@ def _issue_jwt(user: User) -> str:
 def _get_redirect_uri(
     request: Request, provider: str, config_id: Optional[str] = None
 ) -> str:
-    """Build the OIDC callback redirect URI."""
-    base = str(request.base_url).rstrip("/")
+    """Build the OIDC callback redirect URI.
+
+    From ``PUBLIC_BASE_URL`` when it is set, and only then from the request.
+
+    ``request.base_url`` is the scheme and the ``Host`` header, and both halves
+    are client-controlled: ``Host`` on any path that reaches the app, and the
+    scheme through ``X-Forwarded-Proto`` for as long as uvicorn is started with
+    a permissive ``--forwarded-allow-ips`` (#237). This is the value an
+    authorization code comes back to, so a crafted ``Host`` steered the code to
+    an attacker's host -- authorization-code interception, #220.
+
+    ``ALLOWED_HOSTS`` now refuses a foreign ``Host`` before this function is
+    reached, so this is the second of two locks rather than the only one. It is
+    still worth having: it is the difference between "no host we do not accept"
+    and "exactly one host, the one we published to the IdP" -- and an OIDC
+    ``redirect_uri`` must match the IdP's registration EXACTLY, so deriving it
+    from whichever of several accepted hosts a particular request happened to
+    use is a bug even with no attacker present.
+
+    It also fixes the ordinary case behind a TLS-terminating proxy, where the
+    request's own scheme is ``http`` and every absolute URL built from it is
+    wrong in a way no test that talks to the app directly would show.
+    """
+    base = settings.PUBLIC_BASE_URL or str(request.base_url).rstrip("/")
     return f"{base}/api/v1/auth/sso/oidc/{provider}/callback"
 
 
