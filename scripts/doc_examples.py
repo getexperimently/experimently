@@ -816,7 +816,15 @@ def judge(
                 )
                 break
             position = found
-        if outcome.stdout.strip() and not block.expects:
+        # The one block exempt: the Quick Start's stack start. When compose has to
+        # build, it writes BuildKit's progress to stdout (nothing when the images
+        # exist), so no expectation can hold on both paths; `--wait` failing unless
+        # every service is healthy, and the next block's expectations, verify it.
+        if (
+            outcome.stdout.strip()
+            and not block.expects
+            and block.body.strip() != STACK_UP
+        ):
             printed = "\n".join(outcome.stdout.strip().split("\n")[:20])
             problems.append(
                 f"{where}: block printed output but carries no expectation; "

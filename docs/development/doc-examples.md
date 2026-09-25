@@ -93,7 +93,10 @@ It prints `"healthy"`.
 `TEXT` has to appear in what the block prints (stdout), in the order the lines are
 given, and a match can't start or end inside a word: `"active"` doesn't match
 `"inactive"`, and `1` doesn't match `10`. A block that prints something needs at least
-one `expect` line.
+one `expect` line. The one exception is the Quick Start's `docker compose up -d --wait`:
+when it has to build the images it prints the build log, and when they exist it prints
+nothing, so it's checked by its exit status (`--wait` fails unless every service is
+healthy) and by the next block's expectations.
 
 Choose a value that would be **different if the step had failed**. `curl -s` exits 0 on
 a `404` or a `422`, so an example that doesn't check its output passes when it's broken.

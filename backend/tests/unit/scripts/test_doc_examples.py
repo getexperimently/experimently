@@ -517,3 +517,15 @@ def test_the_failure_issue_job_waits_for_render_and_examples_only():
     )
     needs = workflow["jobs"]["failure-issue"]["needs"]
     assert set(needs) == {"render", "examples"}
+
+
+def test_only_the_stack_start_may_print_without_an_expectation():
+    """compose writes the build log to stdout when it builds, nothing when it doesn't."""
+    printed = dx.Outcome(
+        reached=True, rc=0, flags="ehuB", pipefail="pf", stdout="#1 build\n"
+    )
+    stack_up = dx.Block(30, "exec", "bash", dx.STACK_UP)
+    other = dx.Block(40, "exec", "bash", "docker compose up -d")
+    assert dx.judge([stack_up], [printed], None, 0, "p.md") == []
+    problems = dx.judge([other], [printed], None, 0, "p.md")
+    assert problems and "no expectation" in problems[0]
