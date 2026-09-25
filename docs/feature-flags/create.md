@@ -109,7 +109,7 @@ the account's `email`, not a username) and `$TOKEN` holds no token.
 ### Create the flag
 
 ```{.bash exec}
-FLAG=$(curl -s -X POST localhost:8000/api/v1/feature-flags \
+FLAG=$(curl -s -X POST localhost:8000/api/v1/feature-flags/ \
   -H "Authorization: Bearer $TOKEN" \
   -H 'content-type: application/json' \
   -d '{
