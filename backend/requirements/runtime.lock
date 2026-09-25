@@ -87,9 +87,9 @@ bcrypt==5.0.0 \
     --hash=sha256:f8429e1c410b4073944f03bd778a9e066e7fad723564a52ff91841d278dfc822 \
     --hash=sha256:fc746432b951e92b58317af8e0ca746efe93e66555f1b40888865ef5bf56446b
     # via -r backend/requirements/runtime.txt
-boto3==1.43.98 \
-    --hash=sha256:1ec732e023fb29c12dc8520f925b5bbbed29eeb36b5764b5a5c26052d7c721f7 \
-    --hash=sha256:7454f666a9e852a56db0a7fa23be33a899f64e27828930eac43c3edba7b34e17
+boto3==1.43.99 \
+    --hash=sha256:328c8640e7b7dbdaebc271e6eea0f7301218872d67d0661a7beda7d3a1799c07 \
+    --hash=sha256:3becba8d7bdf80ea0010c68bc6b0772adb8be344f06bdcea77629002be19beb7
     # via
     #   -r backend/requirements/runtime.txt
     #   watchtower
