@@ -998,7 +998,7 @@ def run_document(
                 ]
         problems = execute(blocks, rel, env)
     finally:
-        _docker("compose", "down", "-v", "--remove-orphans", env=env, timeout=600)
+        _docker("compose", "down", "--remove-orphans", env=env, timeout=600)
         left = project_resources(project)
         if left:
             problems.append(
