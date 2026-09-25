@@ -5,7 +5,7 @@
 # adjust them to make a check pass -- find out why they moved.
 
 [meta]
-documents = 3
+documents = 2
 
 [[document]]
 path = "docs/getting-started/quick-start.md"
