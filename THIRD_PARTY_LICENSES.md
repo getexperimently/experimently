@@ -78,7 +78,7 @@ Development-only dependencies — what `backend/requirements.txt` adds for test 
 | Package | Version |
 |---|---|
 | `bcrypt` | 5.0.0 |
-| `boto3` | 1.43.98 |
+| `boto3` | 1.43.99 |
 | `botocore` | 1.43.99 |
 | `clickhouse-connect` | 1.8.0 |
 | `databricks-sql-connector` | 4.5.0 |
