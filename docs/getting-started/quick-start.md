@@ -52,7 +52,7 @@ Verify:
 curl -s localhost:8000/health/ready | jq .status
 curl -s -o /dev/null -w '%{http_code}\n' localhost:8000/api/v1/experiments/
 ```
-<!-- expect: "healthy" -->
+<!-- expect: "ok" -->
 <!-- expect: 401 -->
 
 The first prints `"healthy"`. The second prints `401`, because the API requires a login.
