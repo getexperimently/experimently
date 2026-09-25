@@ -216,10 +216,30 @@ def resolve_rate_limit(
 
 
 def _get_client_ip(request: Request) -> str:
-    """Extract the real client IP, respecting ``X-Forwarded-For`` if present."""
-    forwarded_for = request.headers.get("X-Forwarded-For")
-    if forwarded_for:
-        return forwarded_for.split(",")[0].strip()
+    """The address this request really came from, as the server resolved it.
+
+    ``request.client.host`` and nothing else. This function used to read
+    ``X-Forwarded-For`` itself and take ``split(",")[0]`` -- the LEFTMOST
+    entry -- which is the opposite of correct, because each proxy APPENDS to
+    that header. The leftmost value is therefore whatever the CLIENT sent, and
+    a client that prepended a fresh random address per request was handed a
+    fresh bucket per request: an unlimited budget, including against the strict
+    login limit this middleware exists to enforce (#237).
+
+    Reading the header here was also redundant. uvicorn runs with
+    ``--proxy-headers`` and a narrowed ``--forwarded-allow-ips`` (see
+    ``backend/docker-entrypoint.sh``) and has already resolved the client from
+    ``X-Forwarded-For`` by the time any middleware runs -- walking the list in
+    reverse and returning the first host it does not trust. So the correct
+    answer is sitting in ``request.client``; this used to compute a second,
+    wrong one beside it and use that.
+
+    Not falling back to the header when ``request.client`` is absent, either.
+    An absent client means no transport told us who connected, and a header the
+    peer controls is not a safer answer than admitting we do not know -- it is
+    the same vulnerability with an extra step. ``"unknown"`` shares one bucket,
+    which is the conservative direction.
+    """
     return request.client.host if request.client else "unknown"
 
 
