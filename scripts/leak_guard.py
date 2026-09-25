@@ -3,8 +3,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """Refuse to let a secret or a false claim into this repository.
 
-This replaces `scripts/publish/export.sh`'s sweep, and it replaces it because
-the sweep can no longer work. The sweep was CORRECTIVE: development happened
+This replaces the sweep that `scripts/publish/export.sh` used to run, and it
+replaces it because that sweep can no longer work. The sweep was CORRECTIVE: development happened
 in a private repository, and a filter-repo export stripped the forbidden
 material on the way out. Development is public now, so there is no "way out"
 left to strip anything on -- a push is publication. The check has to be
@@ -267,6 +267,18 @@ def scan_file(path: Path, rel: str):
                 yield rel, line_no, rule, value, why
 
 
+def report(findings) -> None:
+    print(f"leak-guard: {len(findings)} finding(s)\n", file=sys.stderr)
+    for where, line_no, rule, value, why in findings:
+        loc = f"{where}:{line_no}" if line_no else where
+        print(f"  {loc}\n      {rule}: {value!r}\n      {why}\n", file=sys.stderr)
+    print(
+        "This repository is public. A push is publication -- there is no "
+        "export step\nleft to strip these out afterwards. Fix them here.",
+        file=sys.stderr,
+    )
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument(
@@ -280,6 +292,12 @@ def main() -> int:
         help="scan files changed in A..B and those commit messages",
     )
     ap.add_argument(
+        "--stdin",
+        action="store_true",
+        help="scan text on standard input instead of files (the pull request "
+        "title and body, which GitHub turns into the squash commit message)",
+    )
+    ap.add_argument(
         "--push",
         action="store_true",
         help="scan what is about to be pushed (the pre-push hook); "
@@ -290,6 +308,28 @@ def main() -> int:
         "--all", action="store_true", help="scan every tracked file (the default)"
     )
     args = ap.parse_args()
+
+    if args.stdin:
+        # A pull request's title and body are a PUBLICATION SURFACE, and not an
+        # obvious one: GitHub composes the squash commit message from them, so a
+        # forbidden string reaches `main` even when every commit on the branch
+        # is clean. That is not hypothetical -- it is exactly how an absolute
+        # home path reached the merge commit of the change that ADDED this
+        # guard. The branch commits had been amended; the pull request body had
+        # not, and nothing was looking at it.
+        text = sys.stdin.read()
+        findings = [
+            ("pull request title/body", 0, rule, value, why)
+            for rule, value, why in shape_findings(text)
+        ] + [
+            ("pull request title/body", 0, rule, value, why)
+            for rule, value, why in claim_findings(text)
+        ]
+        if findings:
+            report(findings)
+            return 1
+        print(f"leak-guard: clean ({len(text)} bytes of pull request text)")
+        return 0
 
     root = Path(git("rev-parse", "--show-toplevel").strip())
     if args.push and not args.rng:
@@ -331,15 +371,7 @@ def main() -> int:
                 )
 
     if findings:
-        print(f"leak-guard: {len(findings)} finding(s)\n", file=sys.stderr)
-        for where, line_no, rule, value, why in findings:
-            loc = f"{where}:{line_no}" if line_no else where
-            print(f"  {loc}\n      {rule}: {value!r}\n      {why}\n", file=sys.stderr)
-        print(
-            "This repository is public. A push is publication -- there is no "
-            "export step\nleft to strip these out afterwards. Fix them here.",
-            file=sys.stderr,
-        )
+        report(findings)
         return 1
 
     msg = f"leak-guard: clean ({scanned} of {what}"

@@ -21,8 +21,8 @@ SCRIPT = REPO_ROOT / "scripts" / "check_dco.py"
 
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "dco.yml"
 
-# NOT a skipif. `scripts/` ships (it is on scripts/publish/ships-manifest.txt),
-# so there is no distribution in which this script is legitimately absent --
+# NOT a skipif. `scripts/` ships in every distribution, so there is no
+# distribution in which this script is legitimately absent --
 # which means a skip here could only ever fire on the one tamper that matters,
 # deleting the gate. Twelve silent skips and a green Unit Tests job is exactly
 # the vacuous pass this repository keeps rediscovering.

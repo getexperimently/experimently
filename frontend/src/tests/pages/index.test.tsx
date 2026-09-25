@@ -103,21 +103,22 @@ describe('HomePage (/)', () => {
    *
    * The landing page that used to live at `/` advertised an event volume, an
    * uptime figure and two compliance certifications for software that has
-   * never been deployed. `scripts/publish/export.sh` refuses to publish a tree
-   * containing them, so restoring that page would also have made the
+   * never been deployed. `scripts/leak_guard.py` refuses to let a tree
+   * containing them be pushed, so restoring that page would also have made the
    * repository unpublishable.
    *
    * WHY THE PATTERNS ARE ASSEMBLED RATHER THAN WRITTEN OUT. There is a real
    * tension here: a test asserting the absence of a forbidden string has to
-   * name that string, and the sweep forbids a tracked file from containing it.
-   * Spelling them out failed the export on this very pull request -- five hits,
+   * name that string, and the guard forbids a tracked file from containing it.
+   * Spelling them out failed the gate on this very pull request -- five hits,
    * all of them this table. So each is built from fragments at run time and the
-   * literal never appears in the source. The sweep stays strict and the test
-   * keeps its teeth.
+   * literal never appears in the source. The guard stays strict and the test
+   * keeps its teeth. `backend/tests/unit/scripts/test_leak_guard.py` assembles
+   * its fixtures for the same reason, and found out the same way.
    *
-   * These mirror `export.sh`'s CLAIMS and UNMEASURED lists but are NOT shared
-   * with it -- nothing links the two, so keep them in step by hand and treat
-   * the export sweep as the authority. This is the fast feedback, not the gate.
+   * These mirror the CLAIM_RULES in `scripts/leak_guard.py` but are NOT shared
+   * with them -- nothing links the two, so keep them in step by hand and treat
+   * the leak guard as the authority. This is the fast feedback, not the gate.
    *
    * Matched against `container.textContent`, not `queryByText`: the latter sees
    * only one element's direct text children, so a claim split across nested

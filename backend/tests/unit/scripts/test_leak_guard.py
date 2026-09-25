@@ -16,9 +16,9 @@ The two tests that matter most are the last two:
     messages containing an absolute home path.
 
   * an offender planted IN the guard's own source must be caught BY the guard.
-    The predecessor excluded `scripts/publish/` from its own grep and
-    therefore published the AWS account id printed on line 276 of the very
-    script that forbade it.
+    The predecessor -- the export sweep, since removed -- excluded its own
+    directory from its own grep, and therefore published the AWS account id
+    printed on line 276 of the very script that forbade it.
 """
 
 from __future__ import annotations
@@ -232,6 +232,43 @@ def test_push_mode_survives_a_branch_with_no_upstream(tmp_path):
         f"\n{leaking.stdout}{leaking.stderr}"
     )
     assert "message" in leaking.stderr
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "label,text,expected",
+    [
+        ("a home path in the body", f"chore: t\n\nRan from {MAC_HOME}/x.", 1),
+        ("a false claim in the body", "feat: x\n\nWe are SOC 2 Type II certified.", 1),
+        (
+            "an account id in the body",
+            f"fix: y\n\narn:aws:iam::{FAKE_ACCOUNT}:role/z",
+            1,
+        ),
+        ("a clean body", "chore: t\n\nNothing wrong here.", 0),
+    ],
+    ids=["home", "claim", "account", "clean"],
+)
+def test_stdin_mode_scans_pull_request_text(tmp_path, label, text, expected):
+    """A pull request's title and body are a publication surface.
+
+    GitHub composes the squash commit message from them, so a forbidden string
+    reaches `main` even when every commit on the branch is clean. That is how
+    an absolute home path reached the merge commit of the change that ADDED
+    this guard: the branch commits were amended after the guard rejected them,
+    the pull request body was not, and nothing was looking at it.
+    """
+    repo = _repo(tmp_path)
+    result = subprocess.run(
+        [sys.executable, "scripts/leak_guard.py", "--stdin"],
+        cwd=repo,
+        input=text,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == expected, (
+        f"--stdin got it wrong for {label}\n{result.stdout}{result.stderr}"
+    )
 
 
 @pytest.mark.unit

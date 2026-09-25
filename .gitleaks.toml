@@ -28,8 +28,9 @@ paths = [
   'demo/[^/]+/src/__tests__/',
 ]
 # Every value here is a visibly fake placeholder the default rules match in
-# this tree or its history. scripts/publish/gitleaks-export.toml carries the
-# same list with NO path allowlist; it is the one the publication sweep uses.
+# this tree or its history. The CI jobs run gitleaks with NO path allowlist
+# over all history (security-scan.yml, release-gate.yml, pr-qa-gate.yml);
+# this config is the local convenience, not the gate.
 stopwords = [
   "your_access_token", "your_api_key", "your-api-key", "YOUR_API_KEY",
   "your_admin_token", "your-api-key-here", "expired_token",

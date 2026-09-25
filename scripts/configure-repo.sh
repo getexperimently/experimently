@@ -1,20 +1,20 @@
 #!/usr/bin/env bash
-# Apply the repository settings the public repository needs, after the cut.
+# Assert this repository's settings: branch protection and its required
+# checks, secret scanning, push protection, private vulnerability reporting.
 #
-#   scripts/publish/configure-public-repo.sh [--repo OWNER/NAME] [--dry-run]
+#   scripts/configure-repo.sh [--repo OWNER/NAME] [--dry-run]
 #
-# ORDER MATTERS, and it is not the order the launch checklist implies. On this
-# plan neither branch protection nor secret scanning can be configured while
-# the repository is PRIVATE -- the API answers
+# Everything here is idempotent -- re-running it re-asserts the same settings
+# and reads each one back rather than trusting the response to the write. Run
+# it after changing a required check, or to check nothing has drifted.
 #
-#   403 Upgrade to GitHub Pro or make this repository public to enable
-#       this feature.
-#
-# so the sequence is: export.sh --push, verify, FLIP TO PUBLIC, then run this.
-# Running it earlier fails on every call, which is why it is a separate script
-# and not a step inside export.sh.
-#
-# Everything here is idempotent: re-running it re-asserts the same settings.
+# It was `scripts/publish/configure-public-repo.sh` and ran once, by hand,
+# immediately after the repository was flipped to public: neither branch
+# protection nor secret scanning can be configured on a PRIVATE repository on
+# this plan (the API answers `403 Upgrade to GitHub Pro or make this repository
+# public to enable this feature`), so it could not be part of the export. There
+# is no export any more -- development happens here -- so it is simply the
+# repository's settings script now.
 set -uo pipefail
 
 REPO="getexperimently/experimently"
@@ -23,7 +23,7 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --repo) REPO="$2"; shift 2 ;;
         --dry-run) DRY=1; shift ;;
-        -h|--help) sed -n '2,25p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,17p' "$0"; exit 0 ;;
         *) echo "unknown argument: $1" >&2; exit 2 ;;
     esac
 done
@@ -50,7 +50,7 @@ REQUIRED_CHECKS=(
     "Module Tests"
     "Base Requirements Only"
     "CDK Stack Tests (Python)"
-    "Export Sweep"
+    "Leak Guard"
     "DCO"
 )
 

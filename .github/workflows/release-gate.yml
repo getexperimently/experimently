@@ -99,8 +99,8 @@ jobs:
       # organisation and this repository is now under one, so it fails every
       # run with "[getexperimently] is an organization. License key is
       # required." The scanner is open source; only the wrapper charges.
-      # security-scan.yml, pr-qa-gate.yml and export-sweep.yml all install the
-      # release binary this way.
+      # security-scan.yml and pr-qa-gate.yml both install the release binary
+      # this way.
       - name: Install gitleaks
         env:
           GITLEAKS_VERSION: '8.30.1'

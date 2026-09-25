@@ -31,9 +31,9 @@ venv/
 infrastructure/
 backend/tests/
 backend/lambda/
-# Internal-only, and on scripts/publish/exclude-paths.txt for the public cut --
-# so it must not travel in a published image either. Found by listing /app in a
-# built image while removing the requirements files.
+# Agent instructions are for working ON this repository, not for running it,
+# so they must not travel in an image. Found by listing /app in a built image
+# while removing the requirements files.
 **/CLAUDE.md
 **/Dockerfile
 tests/

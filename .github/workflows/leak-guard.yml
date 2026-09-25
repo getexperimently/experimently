@@ -2,7 +2,7 @@
 #
 # This repository is public and it is where development happens, so a push IS
 # publication -- there is no export step downstream that could strip anything
-# out afterwards. `scripts/publish/export.sh` used to be that step and is gone.
+# out afterwards. `scripts/publish/export.sh` was that step, and is gone.
 #
 # Runs on every push and every pull request, including from forks, because it
 # needs no secrets and no write permission -- it only reads the checkout. That
@@ -67,6 +67,24 @@ jobs:
 
       - name: Scan every tracked file
         run: python3 scripts/leak_guard.py
+
+      # The pull request's TITLE and BODY, because GitHub composes the squash
+      # commit message from them. Every commit on the branch can be clean and
+      # `main` still ends up with a forbidden string in its history -- which is
+      # not hypothetical, it is how an absolute home path reached the merge
+      # commit of the change that added this guard. The branch commits had been
+      # amended after the guard rejected them; the pull request body had not,
+      # and nothing was looking at it.
+      - name: Scan the pull request title and body
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json title,body \
+            -q '.title + "\n\n" + .body' > /tmp/pr-text.txt
+          python3 scripts/leak_guard.py --stdin < /tmp/pr-text.txt
 
       - name: Prove the guard still fires
         # A gate whose rules have silently stopped matching reports "clean"

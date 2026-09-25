@@ -2,10 +2,13 @@
 
 Notable changes to Experimently. Dates are release dates.
 
-This file is written by hand. The internal repository generates one with
-release-please, and that version cannot be published: its commit links point
-at hashes this repository does not contain, because publication rewrites
-history. See `scripts/publish/export.sh`.
+This file is written by hand, and is a carry-over from when this repository
+was published by exporting a private one: release-please ran there, and its
+commit links pointed at hashes this repository does not contain, because the
+export rewrote history. Development moved here on 2026-09-25, so that no
+longer applies and release-please can generate this file directly. Until it
+does, entries below 0.2.2 are hand-written and the links in them are the
+reason why.
 
 ## 0.2.0 — 2026-09-24
 

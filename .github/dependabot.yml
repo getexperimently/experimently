@@ -1,0 +1,446 @@
+version: 2
+
+# One entry per package manifest Dependabot can read. Every entry groups patch
+# and minor bumps into a single pull request so the queue stays reviewable.
+#
+# MAJORS ARE IGNORED, EVERYWHERE. Every entry carries
+#
+#     ignore:
+#       - dependency-name: "*"
+#         update-types: ["version-update:semver-major"]
+#
+# because a major in this repository is a migration, not a bump, and the
+# evidence is that it was never once merged as one: #225 records 21 major pull
+# requests closed as "each a real migration rather than a bump" -- typescript
+# 5 -> 7 across five packages, pytest 7 -> 9 across ~3,500 tests, moto's
+# decorator rename, a Spring Boot major, a slack-github-action major that would
+# have broken every deploy notification.
+#
+# Closing them achieved nothing: Dependabot re-raises a closed pull request the
+# next time the package publishes, so the queue refilled itself. On 2026-09-22
+# it produced 32 open pull requests in one morning, 20 of them majors, and the
+# CI matrices behind them are the shape that exhausted the Actions spending
+# limit once already. This makes the deferral stick.
+#
+# THE TRADE. An `ignore` rule suppresses the version-update pull request. It
+# does NOT silence Dependabot security ALERTS, which still fire on the
+# Security tab, and it does not affect `security-scan.yml` (pip-audit, npm
+# audit, trivy, CodeQL). But it does mean a major that only a major fixes will
+# not arrive as a pull request -- pytest 7 -> 9 is the live example, since it
+# carries the accepted advisory PYSEC-2026-1845 in
+# security/dependency-audit.toml. **#225 is the tracker; work it deliberately.**
+#
+# Schedules: the ten weekly entries are staggered two per weekday. The nine SDK
+# ecosystems we rarely touch are monthly -- which reduces their frequency but
+# NOT their clustering, because Dependabot has no day-of-month option, so those
+# nine still share one morning once a month. That is nine PRs twelve times a
+# year instead of nine every week, and the limits below cap each at one.
+#
+# github-actions is the exception to the major rule; see the entry itself. The `lint` job's lock check
+# (scripts/check_requirements_lock.py) turns red on a pip bump in either
+# profile until `make lock` regenerates the matching lock
+# (backend/requirements/runtime.lock, modules/requirements.lock), so a Python
+# bump is merged together with its lock.
+
+updates:
+  # ---------------------------------------------------------------------------
+  # Repository tooling
+  # ---------------------------------------------------------------------------
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    commit-message:
+      prefix: "ci(deps)"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 2
+    # NO major ignore here, deliberately. For every other ecosystem a major is
+    # a migration we choose when to do. For Actions it is how GitHub forces
+    # you off a retired runner runtime -- `actions/checkout@v4 -> v5` and
+    # friends are semver-major, and GitHub has hard-disabled old majors before
+    # (`actions/upload-artifact@v3`). Ignoring them means CI breaks one morning
+    # with no pull request ever having been offered.
+    labels: ["dependencies", "github-actions"]
+
+  # The four images built from this repository (the API image installs the
+  # lock, so a base-image bump and a Python bump are separate pull requests).
+  - package-ecosystem: "docker"
+    directories: ["/backend", "/frontend", "/demo/shoplab", "/demo/streampulse"]
+    commit-message:
+      prefix: "chore(deps)"
+    schedule:
+      interval: "weekly"
+      day: "tuesday"
+    open-pull-requests-limit: 2
+    ignore:
+      # Majors are migrations, not bumps -- see the header.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+    labels: ["dependencies", "docker"]
+
+  # ---------------------------------------------------------------------------
+  # Backend, dashboard, infrastructure
+  # ---------------------------------------------------------------------------
+  # Two directories, not one. `/backend` is backend/requirements.txt, the
+  # superset every CI job and every developer venv installs.
+  # One entry, `/backend`, covers backend/requirements.txt AND the pin files
+  # under backend/requirements/ (runtime.txt, dev.txt): Dependabot's pip
+  # fetcher reads a `requirements/` subdirectory of the named directory --
+  # PR #119 ("in /backend") bumped pandas in both files at once. A second
+  # entry for `/backend/requirements` was added on the belief that nothing
+  # watched runtime.txt; in fact it re-read the parent's requirements.txt and
+  # opened a duplicate of every pull request (#120/#123, #121/#124).
+  # scripts/check_requirements_lock.py fails the lint job when runtime.txt
+  # and requirements.txt disagree, so a bump that reaches only one of them
+  # cannot merge.
+  #
+  # `/infrastructure/cdk` is in the SAME entry, not its own. The two files
+  # share three pins -- aws-cdk-lib, constructs, pytest -- and
+  # infrastructure/tests/test_requirement_pins_agree.py fails when they
+  # disagree, because `cdk synth` in CI and `cdk synth` on an operator's
+  # machine would then be two different programs. As separate entries on
+  # separate days they drifted one merged pull request at a time: #283 bumped
+  # pytest to 7.4.4 in the CDK file alone and could never go green. One entry
+  # over both directories means a shared pin moves in one pull request.
+  - package-ecosystem: "pip"
+    directories: ["/backend", "/infrastructure/cdk"]
+    commit-message:
+      prefix: "chore(deps)"
+    schedule:
+      interval: "weekly"
+      day: "wednesday"
+    open-pull-requests-limit: 3
+    ignore:
+      # Majors are migrations, not bumps -- see the header.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+      # aws-cdk-lib pins these EXACTLY (`==`), so Dependabot moving one on its
+      # own produces a requirements file pip cannot resolve at all:
+      #
+      #   aws-cdk-lib 2.270.0 depends on aws-cdk.asset-awscli-v1==2.2.292
+      #   ERROR: ResolutionImpossible
+      #
+      # That is not hypothetical twice over. The comment beside the pin in
+      # backend/requirements.txt records it happening once already, and #286
+      # is the recurrence -- the comment was written and no ignore rule was
+      # added, so the same bump came back and failed 13 checks. They move when
+      # aws-cdk-lib moves, which is a major migration someone does by hand.
+      - dependency-name: "aws-cdk.*"
+      # pytest is ANCHORED at 7.4 until the 7 -> 9 migration (#294), and these
+      # two declare a floor above it, so a minor bump of either makes the file
+      # unresolvable:
+      #
+      #   pytest-asyncio 0.26.0 depends on pytest<9 and >=8.2   (#304)
+      #   locust 2.40+ requires pytest>=8.3                     (already noted
+      #                                                          beside the pin)
+      #
+      # They move when pytest moves.
+      - dependency-name: "pytest-asyncio"
+        update-types: ["version-update:semver-minor"]
+      - dependency-name: "locust"
+        update-types: ["version-update:semver-minor"]
+    labels: ["dependencies", "python", "infrastructure"]
+    groups:
+      patch-and-minor:
+        update-types: ["patch", "minor"]
+
+  # The modules' own runtime dependencies (modules/requirements.txt): the SAML
+  # signature stack (python3-saml, which pulls xmlsec/lxml), authlib, and the
+  # Databricks / ClickHouse / MySQL warehouse drivers. They left
+  # backend/requirements.txt when the modules moved under modules/ and were
+  # then updated by nothing -- python3-saml/xmlsec verify SAML signatures, so
+  # that gap was the one that mattered most. Dependabot edits
+  # modules/requirements.txt; the lock check stays red until
+  # `make lock-modules` regenerates modules/requirements.lock.
+  - package-ecosystem: "pip"
+    directory: "/modules"
+    commit-message:
+      prefix: "chore(deps)"
+    schedule:
+      interval: "weekly"
+      day: "thursday"
+    open-pull-requests-limit: 3
+    ignore:
+      # Majors are migrations, not bumps -- see the header.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+    labels: ["dependencies", "python", "modules"]
+    groups:
+      patch-and-minor:
+        update-types: ["patch", "minor"]
+
+  # Lambda functions: each has its own requirements.txt (backend/lambda/<fn>).
+  - package-ecosystem: "pip"
+    directories:
+      - "/backend/lambda/assignment"
+      - "/backend/lambda/event_processor"
+      - "/backend/lambda/feature_flag_evaluation"
+    commit-message:
+      prefix: "chore(deps)"
+    schedule:
+      interval: "weekly"
+      day: "friday"
+    open-pull-requests-limit: 3
+    ignore:
+      # Majors are migrations, not bumps -- see the header.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+    labels: ["dependencies", "python", "lambda"]
+    groups:
+      patch-and-minor:
+        update-types: ["patch", "minor"]
+
+
+  - package-ecosystem: "npm"
+    directory: "/frontend"
+    commit-message:
+      prefix: "chore(deps)"
+    schedule:
+      interval: "weekly"
+      day: "tuesday"
+    open-pull-requests-limit: 3
+    ignore:
+      # Majors are migrations, not bumps -- see the header.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+    labels: ["dependencies", "javascript"]
+    groups:
+      patch-and-minor:
+        update-types: ["patch", "minor"]
+
+  # Demo applications (ShopLab, StreamPulse): Next.js apps consuming the React
+  # SDK from source.
+  - package-ecosystem: "npm"
+    directories: ["/demo/shoplab", "/demo/streampulse"]
+    commit-message:
+      prefix: "chore(deps)"
+    schedule:
+      interval: "weekly"
+      day: "wednesday"
+    open-pull-requests-limit: 3
+    ignore:
+      # Majors are migrations, not bumps -- see the header.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+    labels: ["dependencies", "javascript", "demo"]
+    groups:
+      patch-and-minor:
+        update-types: ["patch", "minor"]
+
+  # ---------------------------------------------------------------------------
+  # Client SDKs (sdk/<lang>, MIT) — one entry per ecosystem
+  # ---------------------------------------------------------------------------
+  - package-ecosystem: "npm"
+    directories: ["/sdk/js", "/sdk/react", "/sdk/react-native", "/sdk/openfeature", "/sdk/edge"]
+    commit-message:
+      prefix: "chore(deps)"
+    schedule:
+      interval: "weekly"
+      day: "thursday"
+    open-pull-requests-limit: 3
+    ignore:
+      # Majors are migrations, not bumps -- see the header.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+      # react-native is 0.x, and for a 0.x package the MINOR position is where
+      # breaking changes go -- semver's own rule. Dependabot classifies
+      # 0.73 -> 0.87 as minor, so it lands in patch-and-minor and looks
+      # routine; it is a three-year migration. #285 is what that produces:
+      #
+      #   npm error ERESOLVE ... While resolving: react-native@0.87.1
+      #
+      # because 0.87 peer-requires react ^19.2.3 while these SDKs pin React
+      # 18. Six checks failed on one bump. It moves with the React 18 -> 19
+      # migration (#291/#49/#51), by hand, or not at all.
+      - dependency-name: "react-native"
+        update-types: ["version-update:semver-minor"]
+      # react is ANCHORED at 18.2.0, because react-native 0.73.11 peer-pins it
+      # EXACTLY -- `npm view react-native@0.73.11 peerDependencies` is
+      # {"react": "18.2.0"}, not a range. Bumping react to 18.3.1 is a patch
+      # bump that cannot install (#303):
+      #
+      #   npm error Could not resolve dependency:
+      #   npm error peer react@"18.2.0" from react-native@0.73.11
+      #
+      # react moves with react-native, which moves with #291.
+      #
+      # react-test-renderer is the same anchor, and #303's list missed it
+      # because it was built from the two packages that had already failed
+      # rather than from the property. react, react-dom and react-test-renderer
+      # ship from one repository as a matched set and peer-require each other
+      # at the SAME version -- `npm view react-test-renderer@18.3.1
+      # peerDependencies` is {"react": "^18.3.1"}, so bumping it alone is
+      # unresolvable against the react@18.2.0 that react-native pins (#310):
+      #
+      #   npm error Could not resolve dependency:
+      #   npm error peer react@"^18.3.1" from react-test-renderer@18.3.1
+      #
+      # All three move together, with react-native, or not at all.
+      - dependency-name: "react"
+      - dependency-name: "react-dom"
+      - dependency-name: "react-test-renderer"
+    labels: ["dependencies", "sdk"]
+    groups:
+      patch-and-minor:
+        update-types: ["patch", "minor"]
+
+  - package-ecosystem: "pip"
+    directories: ["/sdk/python", "/sdk/openfeature-python"]
+    commit-message:
+      prefix: "chore(deps)"
+    schedule:
+      interval: "weekly"
+      day: "friday"
+    open-pull-requests-limit: 3
+    ignore:
+      # Majors are migrations, not bumps -- see the header.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+    labels: ["dependencies", "sdk"]
+    groups:
+      patch-and-minor:
+        update-types: ["patch", "minor"]
+
+  - package-ecosystem: "gomod"
+    directory: "/sdk/go"
+    commit-message:
+      prefix: "chore(deps)"
+    schedule:
+      interval: "monthly"
+    open-pull-requests-limit: 1
+    ignore:
+      # Majors are migrations, not bumps -- see the header.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+    labels: ["dependencies", "sdk"]
+
+  # Maven: the parent pom and the two modules (core, spring-boot-starter).
+  - package-ecosystem: "maven"
+    directories: ["/sdk/java", "/sdk/java/core", "/sdk/java/spring-boot-starter"]
+    commit-message:
+      prefix: "chore(deps)"
+    schedule:
+      interval: "monthly"
+    open-pull-requests-limit: 1
+    ignore:
+      # Majors are migrations, not bumps -- see the header.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+    labels: ["dependencies", "sdk"]
+    groups:
+      patch-and-minor:
+        update-types: ["patch", "minor"]
+
+  - package-ecosystem: "gradle"
+    directory: "/sdk/android"
+    commit-message:
+      prefix: "chore(deps)"
+    schedule:
+      interval: "monthly"
+    open-pull-requests-limit: 1
+    ignore:
+      # Majors are migrations, not bumps -- see the header.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+      # This module is ANCHORED to Kotlin 1.9 (kotlin-gradle-plugin 1.9.25).
+      # Anything compiled with Kotlin 2.x fails the build outright:
+      #
+      #   kotlin-stdlib-2.2.21 ... binary version of its metadata is 2.2.0,
+      #   expected version is 1.9.0
+      #
+      # #287 was kotlinx-coroutines and kotlinx-serialization going to 1.11.0.
+      # I ignored `org.jetbrains.kotlinx:*` at minor for that, and #302 broke
+      # anyway -- a mockk bump, pulling kotlin-stdlib 2.2.21 TRANSITIVELY,
+      # which no rule naming kotlinx could have caught. Chasing the libraries
+      # one at a time does not work: the next test dependency to publish a
+      # Kotlin 2.x build breaks it again.
+      #
+      # So minor bumps are off for this module entirely until someone does the
+      # Kotlin 2 migration. Patches still flow.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-minor"]
+    labels: ["dependencies", "sdk"]
+    groups:
+      patch-and-minor:
+        update-types: ["patch", "minor"]
+
+  - package-ecosystem: "bundler"
+    directory: "/sdk/ruby"
+    commit-message:
+      prefix: "chore(deps)"
+    schedule:
+      interval: "monthly"
+    open-pull-requests-limit: 1
+    ignore:
+      # Majors are migrations, not bumps -- see the header.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+    labels: ["dependencies", "sdk"]
+
+  - package-ecosystem: "composer"
+    directory: "/sdk/php"
+    commit-message:
+      prefix: "chore(deps)"
+    schedule:
+      interval: "monthly"
+    open-pull-requests-limit: 1
+    ignore:
+      # Majors are migrations, not bumps -- see the header.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+    labels: ["dependencies", "sdk"]
+
+  - package-ecosystem: "nuget"
+    directory: "/sdk/dotnet"
+    commit-message:
+      prefix: "chore(deps)"
+    schedule:
+      interval: "monthly"
+    open-pull-requests-limit: 1
+    ignore:
+      # Majors are migrations, not bumps -- see the header.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+    labels: ["dependencies", "sdk"]
+    groups:
+      patch-and-minor:
+        update-types: ["patch", "minor"]
+
+  - package-ecosystem: "mix"
+    directory: "/sdk/elixir"
+    commit-message:
+      prefix: "chore(deps)"
+    schedule:
+      interval: "monthly"
+    open-pull-requests-limit: 1
+    ignore:
+      # Majors are migrations, not bumps -- see the header.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+    labels: ["dependencies", "sdk"]
+
+  - package-ecosystem: "pub"
+    directory: "/sdk/flutter"
+    commit-message:
+      prefix: "chore(deps)"
+    schedule:
+      interval: "monthly"
+    open-pull-requests-limit: 1
+    ignore:
+      # Majors are migrations, not bumps -- see the header.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+    labels: ["dependencies", "sdk"]
+
+  - package-ecosystem: "swift"
+    directory: "/sdk/ios"
+    commit-message:
+      prefix: "chore(deps)"
+    schedule:
+      interval: "monthly"
+    open-pull-requests-limit: 1
+    ignore:
+      # Majors are migrations, not bumps -- see the header.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+    labels: ["dependencies", "sdk"]
