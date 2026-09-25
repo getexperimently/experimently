@@ -58,13 +58,16 @@ user = User(
 )
 ```
 
-**Async deps (feature flags, reports) need `@pytest.mark.asyncio`:**
+**Async deps (the flag create gate, reports) need `@pytest.mark.asyncio`:**
 ```python
 @pytest.mark.asyncio
-async def test_feature_flag_permission():
-    result = await can_update_feature_flag(flag, user)
-    assert result is True
+async def test_feature_flag_create_permission():
+    assert await can_create_feature_flag(current_user=developer) is True
 ```
+
+**Per-flag access is one synchronous rule, by role:** test it with a non-superuser of
+each role (superuser fixtures bypass it), and create flags through the API when the
+owner matters.
 
 **Experiment deps are synchronous — no `async def` or `await`.**
 

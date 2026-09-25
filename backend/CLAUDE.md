@@ -82,24 +82,31 @@ fully-qualified path.
 
 ## Async/Sync Patterns
 
-### Feature Flag & Report Dependencies (ASYNC)
+### Feature Flag Access
+
+Access to a flag is by role, not ownership. Every route that changes a flag calls the
+one rule, which is synchronous:
 
 ```python
-# In deps.py - these are ASYNC
-async def get_feature_flag_access(...) -> FeatureFlag:
-    # Check READ permission first
-    if not await check_permission(current_user, "feature_flag", "READ"):
-        raise HTTPException(403)
-    return feature_flag
+from backend.app.core.permissions import Action, can_act_on_feature_flag
 
-# In endpoints - use await
+
 @router.put("/feature-flags/{flag_id}")
 async def update_feature_flag(
-    flag: FeatureFlag = Depends(get_feature_flag_access),
-    ...
+    flag_id: UUID,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_active_user),
 ):
-    # endpoint logic
+    flag = db.query(FeatureFlag).filter(FeatureFlag.id == flag_id).first()
+    if flag is None:
+        raise HTTPException(404, "Feature flag not found")
+    if not can_act_on_feature_flag(current_user, flag.owner_id, Action.UPDATE):
+        raise HTTPException(403, "Not enough permissions to update this feature flag")
+    ...
 ```
+
+Create is gated by the async dependency `deps.can_create_feature_flag`. The other flag
+helpers in `deps.py` are not used by any route.
 
 ### Experiment Dependencies (SYNC)
 
@@ -123,14 +130,14 @@ def update_experiment(
 Always check READ before UPDATE/DELETE:
 
 ```python
-# ✅ CORRECT order
-if not await check_permission(user, "feature_flag", "READ"):
+# ✅ CORRECT order (check_permission is synchronous and returns a bool)
+if not check_permission(user, ResourceType.EXPERIMENT, Action.READ):
     raise HTTPException(403, "Not authorized to view this resource")
-if not await check_permission(user, "feature_flag", "UPDATE"):
+if not check_permission(user, ResourceType.EXPERIMENT, Action.UPDATE):
     raise HTTPException(403, "Not authorized to update this resource")
 
 # ❌ WRONG - checking UPDATE before READ
-if not await check_permission(user, "feature_flag", "UPDATE"):
+if not check_permission(user, ResourceType.EXPERIMENT, Action.UPDATE):
     raise HTTPException(403)  # Less informative error
 ```
 
@@ -223,9 +230,9 @@ import pytest
 
 # For async functions
 @pytest.mark.asyncio
-async def test_feature_flag_permission():
-    result = await get_feature_flag_access(...)
-    assert result is not None
+async def test_feature_flag_create_permission():
+    result = await can_create_feature_flag(current_user=developer_user)
+    assert result is True
 
 
 # For sync functions
@@ -313,14 +320,19 @@ class Settings(BaseSettings):
 ### Permission Checking
 
 ```python
-from backend.app.core.permissions import check_permission, UserRole
+from backend.app.core.permissions import (
+    Action,
+    ResourceType,
+    can_act_on_feature_flag,
+    check_permission,
+)
 
-# In sync context
-if not check_permission(user, "experiment", "CREATE"):
+# check_permission is synchronous in sync and async handlers alike
+if not check_permission(user, ResourceType.EXPERIMENT, Action.CREATE):
     raise HTTPException(403, "Not authorized")
 
-# In async context
-if not await check_permission(user, "feature_flag", "UPDATE"):
+# a particular feature flag: the per-flag rule
+if not can_act_on_feature_flag(user, flag.owner_id, Action.UPDATE):
     raise HTTPException(403, "Not authorized")
 ```
 

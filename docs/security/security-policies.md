@@ -63,7 +63,7 @@ The following permissions are enforced by `backend/app/core/permissions.py`:
 
 **Special rules:**
 - Feature flag and report permission checks in `backend/app/api/deps.py` are async functions; experiment checks are synchronous
-- Ownership-based permissions apply in addition to role-based permissions: owners can modify their own resources even if their role would not normally permit it
+- Ownership-based permissions apply in addition to role-based permissions: owners can modify their own resources even if their role would not normally permit it -- **except feature flags**, which are governed by role alone (`can_act_on_feature_flag` in `permissions.py`): ADMIN and DEVELOPER may change any flag, ANALYST and VIEWER none, owner or not
 - The `is_superuser` flag overrides all RBAC checks (see `check_permission` in `permissions.py`)
 
 ### 1.3 Access Review Cycle

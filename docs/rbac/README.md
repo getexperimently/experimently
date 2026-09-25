@@ -12,9 +12,12 @@ Experimently implements a robust Role-Based Access Control (RBAC) system to mana
 Users in the system can have one of the following roles:
 
 - **Admin**: Full access to all features and resources
-- **Developer**: Can create and manage experiments and feature flags
-- **Analyst**: Can view experiments and create analytics reports
-- **Viewer**: Read-only access to approved resources
+- **Developer**: Can create and manage experiments, and create and manage any feature flag
+- **Analyst**: Can view experiments and feature flags, and create analytics reports
+- **Viewer**: Read-only access to approved resources; can view every feature flag
+
+Feature flags are governed by role, not by who created them: an owner is recorded on
+each flag and shown, but owning a flag does not let an Analyst or Viewer change it.
 
 Each role has a specific set of permissions that determine what actions they can perform on various resources.
 
@@ -57,6 +60,10 @@ In addition to role-based permissions, the system also supports ownership-based 
 - Users who create a resource automatically become its owner
 - Owners have full access to their own resources regardless of their role
 - Non-owners can only access resources based on their role permissions
+
+**Feature flags are the exception.** A flag's owner is recorded and shown, but access to
+flags is decided by role alone: ADMIN and DEVELOPER may change any flag, and ANALYST and
+VIEWER may change none, including one they own.
 
 ## Usage in Code
 
