@@ -374,15 +374,25 @@ The `core/permissions.py` module implements a comprehensive RBAC system with fou
   - Check experiment status (must be DRAFT)
 
 #### Feature Flag Permissions
-- Feature flags use ownership-based permission model
-- Endpoints requiring authentication use `deps.get_current_active_user`
-- API endpoints for feature flag evaluation use API key authentication via `deps.get_api_key`
-- Feature flag permissions are implemented as **async functions** in `deps.py`:
-  - `get_feature_flag_access`: Checks if user can access a feature flag (requires `await`)
-  - `can_create_feature_flag`: Checks if user can create a feature flag (requires `await`)
-  - `can_update_feature_flag`: Checks if user can update a feature flag (requires `await`)
-  - `can_delete_feature_flag`: Checks if user can delete a feature flag (requires `await`)
-- Schema validation requires `owner_id` to be an integer - ensure proper type casting in tests
+- **Access to a flag is by role, not ownership** (founder decision D11): ADMIN and
+  DEVELOPER read, create, change and delete any flag; ANALYST and VIEWER read any flag
+  and change none, not even one they own. The creator is recorded as `owner_id` (a
+  UUID) and shown, but it is not an access rule.
+- **The one decision is `can_act_on_feature_flag(user, owner_id, action)`** in
+  `backend/app/core/permissions.py`: the role matrix first, then `FEATURE_FLAG_SCOPE`
+  (all "any flag" today; per-flag locks or approvals would go there). Every route that
+  changes a flag calls it -- the per-flag routes, bulk-toggle, and every rollout
+  schedule and stage change (against the schedule's flag).
+  `backend/tests/smoke/test_flag_change_routes_guarded.py` pins the exact set of
+  mutating routes; a new one fails until it is classified there.
+- Create is gated by the routed, async `deps.can_create_feature_flag`. The other flag
+  helpers in `deps.py` (`get_feature_flag_access`, `can_update_feature_flag`,
+  `can_delete_feature_flag`) are **not used by any route**; do not build on them.
+- Endpoints requiring authentication use `deps.get_current_active_user`; flag evaluation
+  uses API key authentication via `deps.get_api_key`.
+- In tests, "admin" fixtures are usually superusers, which bypass every check. Test
+  permissions with a non-superuser of each role, and create flags through the API when
+  the owner matters (fixtures that write `owner_id` directly hide create bugs).
 
 ### Async/Sync Pattern Guidelines
 - **Feature flag and report-related dependencies are asynchronous** (use `await`)

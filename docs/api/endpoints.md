@@ -40,6 +40,9 @@ The API uses two types of authentication:
    - Can create and manage their own experiments
    - Cannot access admin endpoints
 
+   - Feature flags are by role, not ownership: ADMIN and DEVELOPER may read, create,
+     change and delete any flag; ANALYST and VIEWER may read any flag and change none
+
 2. **Superusers**:
    - Can access all user data
    - Can manage all experiments

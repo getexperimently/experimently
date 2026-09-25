@@ -149,19 +149,30 @@ curl -H "X-API-Key: your-key" \
 | Role | Create | Update | Delete | View |
 |------|--------|--------|--------|------|
 | ADMIN | All | All | All | All |
-| DEVELOPER | Experiments, Flags | Own resources | Own resources | All |
+| DEVELOPER | Experiments, Flags | Own experiments; any flag | Own experiments; any flag | All |
 | ANALYST | None | None | None | All |
-| VIEWER | None | None | None | Approved only |
+| VIEWER | None | None | None | Approved experiments; all flags |
 
-Permission checks in code:
+Feature flags are governed by role, not ownership: the owner is recorded but does not
+decide access.
+
+Permission checks in code (both return a bool; the caller raises the 403):
 
 ```python
-# Sync (experiments)
-from backend.app.core.permissions import check_permission
-check_permission(current_user, "experiment", "UPDATE")  # raises 403 if denied
+from backend.app.core.permissions import (
+    Action,
+    ResourceType,
+    can_act_on_feature_flag,
+    check_permission,
+)
 
-# Async (feature flags)
-await check_permission(current_user, "feature_flag", "DELETE")
+# a role's permission on a resource type
+if not check_permission(current_user, ResourceType.EXPERIMENT, Action.UPDATE):
+    raise HTTPException(status_code=403, detail="Not enough permissions")
+
+# a particular feature flag
+if not can_act_on_feature_flag(current_user, flag.owner_id, Action.DELETE):
+    raise HTTPException(status_code=403, detail="Not enough permissions")
 ```
 
 ---
