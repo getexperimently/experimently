@@ -817,8 +817,10 @@ def judge(
                 break
             position = found
         if outcome.stdout.strip() and not block.expects:
+            printed = "\n".join(outcome.stdout.strip().split("\n")[:20])
             problems.append(
-                f"{where}: block printed output but carries no expectation\n{tail}"
+                f"{where}: block printed output but carries no expectation; "
+                f"its stdout began:\n{printed}"
             )
     if problem and not problems:
         problems.append(f"{name}: {problem}")
