@@ -150,7 +150,40 @@ if [ "$1" = "uvicorn" ]; then
     if [ "$has_workers" = "false" ]; then
         set -- "$@" --workers "$WEB_CONCURRENCY"
     fi
-    set -- "$@" --proxy-headers --forwarded-allow-ips="*" --no-server-header
+    # --forwarded-allow-ips decides WHOSE X-Forwarded-* uvicorn believes, and
+    # `*` meant everybody's. Measured against the pinned uvicorn 0.53.0, with a
+    # client that forged a hop and an ALB that appended the real one:
+    #
+    #   X-Forwarded-For: 9.9.9.9, 203.0.113.9, 10.0.3.10
+    #                    ^forged  ^real client ^the ALB
+    #
+    #   --forwarded-allow-ips="*"      -> client = 9.9.9.9      (the forgery)
+    #   --forwarded-allow-ips=<private> -> client = 203.0.113.9 (correct)
+    #
+    # With `*`, uvicorn takes `x_forwarded_for_hosts[0]` -- the LEFTMOST entry,
+    # which is whatever the client sent, because each proxy APPENDS. Narrowed,
+    # it walks the list in reverse and returns the first host it does not
+    # trust. Same header, opposite answer.
+    #
+    # Two things rode on that: `scope["scheme"]` came from a client-settable
+    # X-Forwarded-Proto, and the rate limiter keyed its buckets on the client
+    # address -- so prepending a fresh random IP per request bought an
+    # unlimited budget, including on the strict login limit (#237).
+    #
+    # The default is the PRIVATE ranges rather than a specific VPC CIDR, on
+    # purpose. A load balancer is always inside the VPC and therefore always
+    # RFC1918; a real client arriving from the internet never is. So uvicorn
+    # trusts the hop in front, skips any private hops in the list, and returns
+    # the first public address -- without this container having to be told its
+    # own VPC's CIDR. Getting that value wrong is the failure mode this avoids:
+    # a list that does not contain the load balancer makes uvicorn ignore the
+    # proxy headers entirely, every client appears to BE the load balancer, and
+    # the rate limiter silently collapses to a single shared bucket.
+    #
+    # FORWARDED_ALLOW_IPS overrides it for a topology this does not fit.
+    set -- "$@" --proxy-headers \
+        --forwarded-allow-ips="${FORWARDED_ALLOW_IPS:-127.0.0.1,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16}" \
+        --no-server-header
 fi
 
 log "starting: $*"
