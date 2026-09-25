@@ -167,18 +167,57 @@ class TestRedisRateLimiter:
 
 
 class TestGetClientIp:
-    """Tests for _get_client_ip helper."""
+    """Tests for _get_client_ip helper.
 
-    def test_uses_x_forwarded_for(self):
+    ``test_uses_x_forwarded_for`` used to live here and asserted that
+    ``"1.2.3.4, 10.0.0.1"`` resolved to ``"1.2.3.4"``. That was the
+    vulnerability written down as a contract: each proxy APPENDS to
+    X-Forwarded-For, so the leftmost entry is whatever the client sent, and
+    keying rate-limit buckets on it handed anyone who prepended a random
+    address an unlimited budget (#237). It is replaced, not relaxed -- the
+    tests below pin the opposite behaviour.
+    """
+
+    def test_it_uses_the_resolved_client_and_not_the_header(self):
+        """uvicorn has already resolved this correctly; the header has not."""
         request = MagicMock()
         request.headers = {"X-Forwarded-For": "1.2.3.4, 10.0.0.1"}
-        assert _get_client_ip(request) == "1.2.3.4"
+        request.client.host = "203.0.113.9"
+        assert _get_client_ip(request) == "203.0.113.9"
+
+    def test_a_forged_header_cannot_change_the_bucket(self):
+        """The attack, directly: same connection, different forged headers.
+
+        If either of these returned the header's value, a client would get a
+        fresh bucket per request simply by varying it.
+        """
+        seen = set()
+        for forged in ("9.9.9.9", "8.8.8.8", "1.1.1.1, 2.2.2.2", ""):
+            request = MagicMock()
+            request.headers = {"X-Forwarded-For": forged}
+            request.client.host = "203.0.113.9"
+            seen.add(_get_client_ip(request))
+        assert seen == {"203.0.113.9"}, (
+            f"the forged header changed the rate-limit key: {seen}"
+        )
 
     def test_uses_client_host_when_no_forwarded_header(self):
         request = MagicMock()
         request.headers = {}
         request.client.host = "192.168.1.1"
         assert _get_client_ip(request) == "192.168.1.1"
+
+    def test_no_client_is_unknown_rather_than_the_header(self):
+        """One shared bucket beats a bucket the peer chooses.
+
+        An absent ``request.client`` means no transport told us who connected.
+        Falling back to a header the peer controls would be the same
+        vulnerability with an extra step.
+        """
+        request = MagicMock()
+        request.headers = {"X-Forwarded-For": "9.9.9.9"}
+        request.client = None
+        assert _get_client_ip(request) == "unknown"
 
     def test_returns_unknown_when_no_client(self):
         request = MagicMock()
