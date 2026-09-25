@@ -18,9 +18,16 @@ Only needed if you want to run the backend or dashboard outside Docker: Python 3
 
 ## Step 1: Start the stack
 
+Clone the repository:
+
 ```bash
 git clone https://github.com/getexperimently/experimently.git
 cd experimently
+```
+
+Then start everything from the repository root:
+
+```bash
 docker compose up -d --wait
 ```
 
@@ -42,9 +49,11 @@ variable, the optional `demo`, `tools` and `aws` profiles, and the host-port ove
 Verify:
 
 ```bash
-curl -s localhost:8000/health/ready | jq .status        # "healthy"
-curl -s -o /dev/null -w '%{http_code}\n' localhost:8000/api/v1/experiments/   # 401 — auth is on
+curl -s localhost:8000/health/ready | jq .status
+curl -s -o /dev/null -w '%{http_code}\n' localhost:8000/api/v1/experiments/
 ```
+
+The first prints `"healthy"`. The second prints `401`, because the API requires a login.
 
 ---
 
@@ -57,8 +66,10 @@ TOKEN=$(curl -s -X POST localhost:8000/api/v1/auth/login \
   -H 'content-type: application/json' \
   -d '{"email":"admin@demo.com","password":"Demo1234!"}' | jq -r .access_token)
 
-curl -s localhost:8000/api/v1/auth/me -H "Authorization: Bearer $TOKEN" | jq .role   # "ADMIN"
+curl -s localhost:8000/api/v1/auth/me -H "Authorization: Bearer $TOKEN" | jq .role
 ```
+
+It prints `"ADMIN"`.
 
 Tokens last 12 hours (`LOCAL_AUTH_TOKEN_TTL_MINUTES`). Ten failed logins lock an account
 for 15 minutes.
@@ -90,6 +101,8 @@ ID=$(jq -r .id <<<"$EXPERIMENT")
 
 curl -s -X POST localhost:8000/api/v1/experiments/$ID/start -H "Authorization: Bearer $TOKEN" | jq .status
 ```
+
+The last command prints `"active"`.
 
 Conversions are matched to a metric by `event_name`, so the events your app sends in
 Step 5 must use the same name.
@@ -124,8 +137,10 @@ Assignments are sticky: the same `user_id` always gets the same variant.
 ```bash
 curl -s -X POST localhost:8000/api/v1/tracking/track \
   -H "X-API-Key: $KEY" -H 'content-type: application/json' \
-  -d '{"event_type":"conversion","event_name":"cta_click","user_id":"user-123","experiment_key":"homepage_button_colour","value":1}'
+  -d '{"event_type":"conversion","event_name":"cta_click","user_id":"user-123","experiment_key":"homepage_button_colour","value":1}' | jq .event_name
 ```
+
+It prints `"cta_click"`, the event it stored.
 
 The same two calls exist in every SDK; see the [SDK guide](../sdk-guide.md).
 
@@ -149,12 +164,17 @@ sample-size check.
 ```bash
 FLAG=$(curl -s -X POST localhost:8000/api/v1/feature-flags/ \
   -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
-  -d '{"key":"new_checkout","name":"New checkout","rollout_percentage":10}' | jq -r .id)
+  -d '{"key":"new_checkout","name":"New checkout","rollout_percentage":10,"is_active":false}' | jq -r .id)
 
 curl -s -X POST localhost:8000/api/v1/feature-flags/$FLAG/activate -H "Authorization: Bearer $TOKEN" | jq .status
 
-curl -s "localhost:8000/api/v1/feature-flags/evaluate/new_checkout?user_id=user-123" -H "X-API-Key: $KEY" | jq
+curl -s "localhost:8000/api/v1/feature-flags/evaluate/new_checkout?user_id=user-2" -H "X-API-Key: $KEY" | jq
 ```
+
+The flag is created switched off (`"is_active": false`; leave it out and it starts on).
+The second command turns it on for 10% of users and prints `"active"`. The third
+evaluates it for `user-2` and prints `"enabled": true` with `"reason": "rollout"`:
+`user-2` is inside the 10%, `user-123` is not, and a user always gets the same answer.
 
 Evaluation returns `{key, enabled, config, reason}`. An inactive flag evaluates to
 `enabled: false` with reason `inactive`; only an unknown key is a 404.
@@ -164,13 +184,19 @@ Evaluation returns `{key, enabled, config, reason}`. An inactive flag evaluates 
 ## Running outside Docker
 
 ```bash
-docker compose up -d --wait postgres redis          # database and cache only
+docker compose up -d --wait postgres redis
 python3.11 -m venv venv && source venv/bin/activate
 pip install -r backend/requirements.txt
-python -m backend.app.db.bootstrap                   # schema + first admin (idempotent)
+python -m backend.app.db.bootstrap
 AUTH_PROVIDER=local uvicorn backend.app.main:app --reload --port 8000
+```
 
-cd frontend && npm ci && npm run dev                 # http://localhost:3000, proxies /api to :8000
+The first line starts only the database and cache. The bootstrap creates the schema and
+the first administrator, and is safe to run again. In a second terminal, start the
+dashboard on http://localhost:3000; it proxies `/api` to port 8000:
+
+```bash
+cd frontend && npm ci && npm run dev
 ```
 
 Run these from the repository root; the backend is imported as `backend.app.*`.
@@ -204,8 +230,10 @@ Set `POSTGRES_HOST_PORT`, `REDIS_HOST_PORT`, `API_HOST_PORT` or `FRONTEND_HOST_P
 **Start from scratch**
 
 ```bash
-docker compose down -v      # drops the database volume; seeds run again on next start
+docker compose down -v
 ```
+
+This drops the database volume; the seeds run again on the next start.
 
 **Events are not counted as conversions**
 

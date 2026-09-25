@@ -103,8 +103,14 @@ class FeatureFlagService:
 
         return query.scalar() or 0
 
-    def create_feature_flag(self, flag_data: FeatureFlagCreate) -> FeatureFlag:
-        """Create a new feature flag."""
+    def create_feature_flag(
+        self, flag_data: FeatureFlagCreate, owner_id: UUID
+    ) -> FeatureFlag:
+        """Create a new feature flag owned by *owner_id*.
+
+        *owner_id* is required on purpose: the request schema has no owner field,
+        so a caller that forgets it would store a flag with no owner.
+        """
         try:
             # Convert Pydantic model to dict and create DB model
             flag_dict = flag_data.model_dump()
@@ -124,6 +130,7 @@ class FeatureFlagService:
                     flag_dict.pop(key)
 
             flag = FeatureFlag(**flag_dict)
+            flag.owner_id = owner_id
 
             # Add and commit to DB
             self.db.add(flag)

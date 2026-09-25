@@ -13,8 +13,12 @@ from sqlalchemy.orm import Session
 
 from backend.app.api import deps
 from backend.app.core.logging import get_logger
+from backend.app.core.permissions import Action, can_act_on_feature_flag
+from backend.app.models.feature_flag import FeatureFlag
 from backend.app.models.rollout_schedule import (
+    RolloutSchedule,
     RolloutScheduleStatus,
+    RolloutStage,
 )
 from backend.app.models.user import User
 from backend.app.schemas.rollout_schedule import (
@@ -31,6 +35,53 @@ from backend.app.services.rollout_service import RolloutService
 logger = get_logger(__name__)
 
 router = APIRouter()
+
+
+def _require_update_on_flag(
+    db: Session,
+    user: User,
+    *,
+    flag_id: Optional[UUID] = None,
+    schedule_id: Optional[UUID] = None,
+    stage_id: Optional[UUID] = None,
+) -> None:
+    """Refuse unless *user* may change the feature flag this request would move.
+
+    A schedule changes its flag's rollout percentage, so every change to a
+    schedule or a stage needs UPDATE on that flag.  The flag is reached from
+    whichever id the route has: the flag itself (create), the schedule, or the
+    stage (stage -> schedule -> flag).  Called before each route's ``try``, whose
+    ``except Exception`` would otherwise turn these 404s and 403s into 500s.
+    """
+    if stage_id is not None:
+        stage = db.query(RolloutStage).filter(RolloutStage.id == stage_id).first()
+        if stage is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Rollout stage not found with ID: {stage_id}",
+            )
+        schedule_id = stage.rollout_schedule_id
+    if schedule_id is not None:
+        schedule = (
+            db.query(RolloutSchedule).filter(RolloutSchedule.id == schedule_id).first()
+        )
+        if schedule is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Rollout schedule not found with ID: {schedule_id}",
+            )
+        flag_id = schedule.feature_flag_id
+    flag = db.query(FeatureFlag).filter(FeatureFlag.id == flag_id).first()
+    if flag is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Feature flag not found with ID: {flag_id}",
+        )
+    if not can_act_on_feature_flag(user, flag.owner_id, Action.UPDATE):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not enough permissions to change this feature flag's rollout",
+        )
 
 
 @router.post(
@@ -51,6 +102,7 @@ def create_rollout_schedule(
     This endpoint allows users to create a gradual rollout schedule for a feature flag.
     A schedule consists of multiple stages with defined criteria for progression.
     """
+    _require_update_on_flag(db, current_user, flag_id=data.feature_flag_id)
     try:
         schedule = RolloutService.create_rollout_schedule(
             db=db, data=data, owner_id=current_user.id
@@ -157,6 +209,7 @@ def update_rollout_schedule(
     This endpoint allows updating the properties of a rollout schedule,
     including its stages and status transitions.
     """
+    _require_update_on_flag(db, current_user, schedule_id=schedule_id)
     try:
         schedule = RolloutService.update_rollout_schedule(
             db=db, schedule_id=schedule_id, data=data
@@ -196,6 +249,7 @@ def delete_rollout_schedule(
     This endpoint allows deletion of a rollout schedule. Active schedules
     cannot be deleted and must be paused or cancelled first.
     """
+    _require_update_on_flag(db, current_user, schedule_id=schedule_id)
     try:
         success = RolloutService.delete_rollout_schedule(db=db, schedule_id=schedule_id)
 
@@ -232,6 +286,7 @@ def activate_rollout_schedule(
     This endpoint transitions a schedule from DRAFT or PAUSED to ACTIVE status,
     which enables its automatic processing by the scheduler.
     """
+    _require_update_on_flag(db, current_user, schedule_id=schedule_id)
     try:
         schedule = RolloutService.activate_rollout_schedule(
             db=db, schedule_id=schedule_id
@@ -271,6 +326,7 @@ def pause_rollout_schedule(
     This endpoint transitions a schedule from ACTIVE to PAUSED status,
     which temporarily suspends its processing by the scheduler.
     """
+    _require_update_on_flag(db, current_user, schedule_id=schedule_id)
     try:
         schedule = RolloutService.pause_rollout_schedule(db=db, schedule_id=schedule_id)
 
@@ -308,6 +364,7 @@ def cancel_rollout_schedule(
     This endpoint transitions a schedule to CANCELLED status,
     which permanently stops its processing by the scheduler.
     """
+    _require_update_on_flag(db, current_user, schedule_id=schedule_id)
     try:
         schedule = RolloutService.cancel_rollout_schedule(
             db=db, schedule_id=schedule_id
@@ -349,6 +406,7 @@ def add_rollout_stage(
     This endpoint allows adding a new stage to an existing rollout schedule.
     The stage defines a target percentage and criteria for activation.
     """
+    _require_update_on_flag(db, current_user, schedule_id=schedule_id)
     try:
         stage = RolloutService.add_rollout_stage(
             db=db, schedule_id=schedule_id, data=data
@@ -389,6 +447,7 @@ def update_rollout_stage(
     This endpoint allows updating the properties of a rollout stage,
     including its target percentage and trigger criteria.
     """
+    _require_update_on_flag(db, current_user, stage_id=stage_id)
     try:
         stage = RolloutService.update_rollout_stage(db=db, stage_id=stage_id, data=data)
 
@@ -426,6 +485,7 @@ def delete_rollout_stage(
     This endpoint allows deletion of a pending rollout stage.
     Stages that are already in progress or completed cannot be deleted.
     """
+    _require_update_on_flag(db, current_user, stage_id=stage_id)
     try:
         success = RolloutService.delete_rollout_stage(db=db, stage_id=stage_id)
 
@@ -462,6 +522,7 @@ def manually_advance_stage(
     This endpoint allows manually triggering a stage transition
     for stages with manual trigger types.
     """
+    _require_update_on_flag(db, current_user, stage_id=stage_id)
     try:
         stage = RolloutService.manually_advance_stage(db=db, stage_id=stage_id)
 
