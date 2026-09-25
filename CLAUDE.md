@@ -656,15 +656,25 @@ When committing changes:
 **Founder instruction, standing, for every session.** For anything beyond a
 single-file change:
 
-1. **Write a plan.** Not a sentence of intent -- a document with the shape
-   below.
-2. **Have it reviewed by BOTH `engineering-manager` and `principal-engineer`**
-   (`.claude/agents/`). They review in parallel and they review the PLAN, not
-   code.
-3. **Get sign-off.** A rejection or a condition is not advice; address it and
-   re-submit. Two APPROVED verdicts, or APPROVED WITH CONDITIONS whose
-   conditions you have met, is the gate.
+1. **Draft the plan with the three drafting roles** (`.claude/agents/`), in
+   parallel: `software-architect` writes DESIGN and SPEC, `qa-engineer` writes
+   VERIFICATION and NOT VERIFIED, `ux-designer` writes the user- and
+   reader-facing side (dashboard, demo apps, error messages, SDK surface,
+   documentation). You merge their drafts into one document with the shape
+   below, and say where they disagreed and what you chose.
+2. **`principal-engineer` pressure-tests the merged plan**: every factual
+   premise checked by running something.
+3. **`engineering-manager` gives the final verdict**, with the principal
+   engineer's findings in front of it: scope, size, sequence, what is
+   irreversible or blocked on a human, and whether the principal engineer's
+   conditions are met or accepted. A rejection or a condition is not advice;
+   address it and re-submit. An APPROVED verdict, or APPROVED WITH CONDITIONS
+   whose conditions you have met, is the gate.
 4. **Only then write code.**
+
+All five review the PLAN, not code. (Founder instruction, 2026-09-25: the
+drafting roles were added after two rounds in which the author wrote the plan
+alone and the reviewers each found a premise the author had not checked.)
 
 The reviewers' job is to **pressure-test and verify the assumptions**, not to
 nod. `principal-engineer` checks every factual premise by running something,
@@ -685,10 +695,24 @@ while the health checks stay green.
 
 ### How to actually consult the team
 
-**Invoke both reviewers in parallel**, in one message, two calls:
+**Three rounds, in order.** Draft, in one message, three calls:
 
-    Agent(subagent_type="engineering-manager",  prompt=...)
-    Agent(subagent_type="principal-engineer",   prompt=...)
+    Agent(subagent_type="software-architect", prompt=...)
+    Agent(subagent_type="qa-engineer",        prompt=...)
+    Agent(subagent_type="ux-designer",        prompt=...)
+
+merge their drafts into the plan, then pressure-test it:
+
+    Agent(subagent_type="principal-engineer", prompt=...)
+
+then the final verdict, with the principal engineer's review passed by path:
+
+    Agent(subagent_type="engineering-manager", prompt=...)
+
+Persist every draft to `drafts/v<n>-<role>.md` and every verdict to
+`reviews/v<n>-<role>.md`. A drafter with nothing to say for this change (no
+user-facing effect, say) says so in one line; do not invent scope to fill a
+section.
 
 They are defined in `.claude/agents/`. **If those names are not in your
 available-agents list, they were added after your session started** — the list

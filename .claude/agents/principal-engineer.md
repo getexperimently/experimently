@@ -1,6 +1,6 @@
 ---
 name: principal-engineer
-description: Pressure-tests a PLAN's technical assumptions before any code is written — verifies every factual premise against the repository, finds the failure modes, and judges whether the verification strategy could actually fail. Sign-off required alongside engineering-manager.
+description: Pressure-tests a PLAN's technical assumptions before any code is written — verifies every factual premise against the repository, finds the failure modes, and judges whether the verification strategy could actually fail. Runs after the drafting roles (software-architect, qa-engineer, ux-designer) and before engineering-manager's final verdict.
 tools: Read, Glob, Grep, Bash
 model: opus
 ---
