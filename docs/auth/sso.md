@@ -123,7 +123,7 @@ curl -X POST https://api.example.com/auth/sso/configs \
    GET /auth/sso/saml/{config_id}/metadata
    ```
 3. In Okta, set the following:
-   - **Single sign-on URL (ACS URL)**: `https://your-platform.com/auth/sso/saml/{config_id}/acs`
+   - **Single sign-on URL (ACS URL)**: `https://your-platform.com/api/v1/auth/sso/saml/{config_id}/acs`
    - **Audience URI (SP Entity ID)**: The `SAML_SP_ENTITY_ID` environment variable value
    - **Name ID format**: `EmailAddress`
    - **Application username**: `Email`
@@ -141,7 +141,7 @@ curl -X POST https://api.example.com/auth/sso/configs \
 1. In Azure, go to **Enterprise Applications → New Application → Create your own application → Integrate with Azure AD (non-gallery)**.
 2. Under **Single sign-on → SAML**, configure:
    - **Identifier (Entity ID)**: value of `SAML_SP_ENTITY_ID`
-   - **Reply URL (ACS URL)**: `https://your-platform.com/auth/sso/saml/{config_id}/acs`
+   - **Reply URL (ACS URL)**: `https://your-platform.com/api/v1/auth/sso/saml/{config_id}/acs`
 3. Under **Attributes & Claims**, ensure the `emailaddress` claim maps to `user.mail`.
 4. Add a group claim: **Groups assigned to the application**.
 5. Download the **Certificate (Base64)** and copy the **Login URL** and **Azure AD Identifier**.
@@ -150,7 +150,7 @@ curl -X POST https://api.example.com/auth/sso/configs \
 ### Azure Active Directory (OIDC)
 
 1. In Azure, go to **App Registrations → New Registration**.
-2. Set the redirect URI to: `https://your-platform.com/auth/sso/oidc/microsoft/callback`.
+2. Set the redirect URI to: `https://your-platform.com/api/v1/auth/sso/oidc/microsoft/callback`.
 3. Under **Certificates & Secrets**, create a new client secret.
 4. Under **API Permissions**, add `openid`, `profile`, `email`, and `GroupMember.Read.All`.
 5. Create the SSO config:
@@ -173,7 +173,7 @@ curl -X POST https://api.example.com/auth/sso/configs \
 
 1. In Google Cloud Console, go to **APIs & Services → Credentials → Create OAuth 2.0 Client ID**.
 2. Set the application type to **Web application**.
-3. Add the authorized redirect URI: `https://your-platform.com/auth/sso/oidc/google/callback`.
+3. Add the authorized redirect URI: `https://your-platform.com/api/v1/auth/sso/oidc/google/callback`.
 4. Copy the **Client ID** and **Client Secret**.
 5. Create the SSO config:
 
@@ -196,7 +196,7 @@ Google OIDC does not natively provide group membership. If role mapping by group
 ### GitHub (OIDC)
 
 1. In GitHub, go to **Settings → Developer Settings → OAuth Apps → New OAuth App** (for a personal app) or **Organization Settings → OAuth Apps** (for an org app).
-2. Set the **Authorization callback URL** to: `https://your-platform.com/auth/sso/oidc/github/callback`.
+2. Set the **Authorization callback URL** to: `https://your-platform.com/api/v1/auth/sso/oidc/github/callback`.
 3. Create the SSO config:
 
 ```bash
@@ -287,7 +287,9 @@ Enforced SSO does not affect platform super-admin accounts, which can always log
 
 ### State Tokens and CSRF Protection
 
-The platform generates a cryptographically random state token for each OIDC flow initiation and SAML authentication request. The token is verified upon callback to prevent CSRF attacks. Tokens are single-use and expire after 10 minutes.
+Starting an OIDC sign-in sets a signed, `HttpOnly`, `SameSite=Lax` cookie, `__Host-experimently_oidc`, in the browser that started it, and sends the provider a random `state` and a PKCE S256 challenge. The callback is accepted only with that cookie and the `state` inside it, so a callback link made in another browser -- an attacker's own login -- is refused before its code is exchanged. The cookie also carries the PKCE verifier, so an intercepted code cannot be redeemed without it. It expires after 10 minutes, and every callback expires it; the provider refuses a second use of a code. The API keeps no sign-in state of its own, so any API task can finish a sign-in another one started.
+
+Because the cookie is `Secure`, serve the API over HTTPS. Browsers that treat `http://localhost` as a secure context (Chrome and Firefox do) also accept it there, for development.
 
 ### SAML Assertion Validation
 
@@ -362,7 +364,7 @@ SSO_SESSION_COOKIE_SAMESITE=Lax
 
 ### "Invalid ACS URL"
 
-- Confirm the ACS URL configured in the IdP matches exactly: `https://your-platform.com/auth/sso/saml/{config_id}/acs`
+- Confirm the ACS URL configured in the IdP matches exactly: `https://your-platform.com/api/v1/auth/sso/saml/{config_id}/acs`
 - The `config_id` in the URL must match the UUID returned by `POST /auth/sso/configs`.
 
 ### "State token expired or invalid"

@@ -13,7 +13,7 @@ Covers:
   - get_oidc_user_info: success (mocked HTTP)
   - provision_user: new user (JIT), existing user, role update
   - map_role: various group mappings, default, no mapping
-  - generate_state_token / verify_state_token: roundtrip, expired, invalid
+  - start_oidc_login / redeem_oidc_state: the signed state cookie
   - build_oidc_authorization_url: structure checks
 """
 
@@ -32,22 +32,22 @@ from backend.app.models.user import User, UserRole
 from modules.backend.app.models.sso_config import SSOConfig, SSOProviderType
 from modules.backend.app.services import sso_service
 from modules.backend.app.services.sso_service import (
-    _state_store,
     build_oidc_authorization_url,
     create_sso_config,
     delete_sso_config,
     exchange_oidc_code,
     generate_saml_metadata,
-    generate_state_token,
     get_oidc_user_info,
     get_sso_config,
     get_sso_config_by_id,
     list_sso_configs,
     map_role,
     parse_saml_response,
+    pkce_challenge,
     provision_user,
+    redeem_oidc_state,
+    start_oidc_login,
     update_sso_config,
-    verify_state_token,
 )
 
 # ---------------------------------------------------------------------------
@@ -592,7 +592,11 @@ class TestExchangeOIDCCode:
         mock_client.post = AsyncMock(return_value=mock_response)
 
         result = await exchange_oidc_code(
-            cfg, "auth-code", "https://example.com/callback", http_client=mock_client
+            cfg,
+            "auth-code",
+            "https://example.com/callback",
+            code_verifier="v" * 43,
+            http_client=mock_client,
         )
         assert result.get("access_token") == "google-token"
 
@@ -610,7 +614,11 @@ class TestExchangeOIDCCode:
         mock_client.post = AsyncMock(return_value=mock_response)
 
         result = await exchange_oidc_code(
-            cfg, "code", "https://example.com/callback", http_client=mock_client
+            cfg,
+            "code",
+            "https://example.com/callback",
+            code_verifier="v" * 43,
+            http_client=mock_client,
         )
         assert "access_token" in result
 
@@ -628,7 +636,11 @@ class TestExchangeOIDCCode:
         mock_client.post = AsyncMock(return_value=mock_response)
 
         result = await exchange_oidc_code(
-            cfg, "code", "https://example.com/callback", http_client=mock_client
+            cfg,
+            "code",
+            "https://example.com/callback",
+            code_verifier="v" * 43,
+            http_client=mock_client,
         )
         assert result.get("access_token") == "ms-token"
 
@@ -640,7 +652,9 @@ class TestExchangeOIDCCode:
         cfg.sso_url = None
 
         with pytest.raises(HTTPException) as exc_info:
-            await exchange_oidc_code(cfg, "code", "https://example.com/callback")
+            await exchange_oidc_code(
+                cfg, "code", "https://example.com/callback", code_verifier="v" * 43
+            )
         assert exc_info.value.status_code == 400
 
     @pytest.mark.asyncio
@@ -651,7 +665,11 @@ class TestExchangeOIDCCode:
 
         with pytest.raises(HTTPException) as exc_info:
             await exchange_oidc_code(
-                cfg, "code", "https://example.com/callback", http_client=mock_client
+                cfg,
+                "code",
+                "https://example.com/callback",
+                code_verifier="v" * 43,
+                http_client=mock_client,
             )
         assert exc_info.value.status_code == 400
 
@@ -909,73 +927,132 @@ class TestMapRole:
 
 
 # ---------------------------------------------------------------------------
-# generate_state_token / verify_state_token
+# start_oidc_login / redeem_oidc_state
 # ---------------------------------------------------------------------------
 
 
-class TestStateTokens:
-    def setup_method(self):
-        """Clear the state store before each test."""
-        _state_store.clear()
+def _okta_config(config_id: uuid.UUID | None = None) -> MagicMock:
+    cfg = MagicMock(spec=SSOConfig)
+    cfg.id = config_id or uuid.uuid4()
+    cfg.provider_type = SSOProviderType.OKTA
+    return cfg
 
-    def test_generate_returns_string(self):
-        token = generate_state_token()
-        assert isinstance(token, str)
-        assert len(token) > 10
 
-    def test_token_is_url_safe(self):
-        token = generate_state_token()
+class TestOIDCLoginState:
+    def test_a_started_login_redeems_with_its_own_state(self):
+        cfg = _okta_config()
+        started = start_oidc_login(cfg, "okta")
+        redeemed = redeem_oidc_state(started.cookie_value, started.state)
+        assert redeemed.config_id == cfg.id
+        assert redeemed.provider == "okta"
+        assert redeemed.code_verifier == started.code_verifier
+
+    def test_the_verifier_is_within_rfc_7636_bounds(self):
+        verifier = start_oidc_login(_okta_config(), "okta").code_verifier
+        assert 43 <= len(verifier) <= 128
         import re
 
-        # URL-safe base64 contains only alphanumeric, -, _
-        assert re.match(r"^[A-Za-z0-9_\-]+$", token)
+        assert re.fullmatch(r"[A-Za-z0-9\-._~]+", verifier)
 
-    def test_verify_valid_token_returns_true(self):
-        token = generate_state_token()
-        result = verify_state_token(token)
-        assert result is True
+    def test_each_login_gets_its_own_state_and_verifier(self):
+        cfg = _okta_config()
+        logins = [start_oidc_login(cfg, "okta") for _ in range(20)]
+        assert len({s.state for s in logins}) == 20
+        assert len({s.code_verifier for s in logins}) == 20
 
-    def test_verify_removes_token_from_store(self):
-        token = generate_state_token()
-        verify_state_token(token)
-        assert token not in _state_store
-
-    def test_verify_token_is_single_use(self):
-        token = generate_state_token()
-        verify_state_token(token)
+    def test_no_cookie_is_refused(self):
+        started = start_oidc_login(_okta_config(), "okta")
         with pytest.raises(HTTPException) as exc_info:
-            verify_state_token(token)
+            redeem_oidc_state(None, started.state)
         assert exc_info.value.status_code == 400
 
-    def test_verify_unknown_token_raises_400(self):
+    @pytest.mark.regression
+    def test_another_logins_cookie_is_refused(self):
+        """The login-CSRF case: the attacker's own state, the victim's cookie."""
+        cfg = _okta_config()
+        victims = start_oidc_login(cfg, "okta")
+        attackers = start_oidc_login(cfg, "okta")
         with pytest.raises(HTTPException) as exc_info:
-            verify_state_token("random-unknown-token")
+            redeem_oidc_state(victims.cookie_value, attackers.state)
+        assert exc_info.value.status_code == 400
+        assert "does not match" in exc_info.value.detail
+
+    def test_a_missing_url_state_is_refused(self):
+        started = start_oidc_login(_okta_config(), "okta")
+        for state in (None, ""):
+            with pytest.raises(HTTPException):
+                redeem_oidc_state(started.cookie_value, state)
+
+    def test_a_non_ascii_url_state_is_refused_not_a_500(self):
+        started = start_oidc_login(_okta_config(), "okta")
+        with pytest.raises(HTTPException) as exc_info:
+            redeem_oidc_state(started.cookie_value, "\u00e9t\u00e9")
         assert exc_info.value.status_code == 400
 
-    def test_verify_empty_token_raises_400(self):
+    def test_a_tampered_cookie_is_refused(self):
+        started = start_oidc_login(_okta_config(), "okta")
+        head, payload, sig = started.cookie_value.split(".")
+        forged = f"{head}.{payload}.{sig[:-2]}{'AA' if sig[-2:] != 'AA' else 'BB'}"
         with pytest.raises(HTTPException) as exc_info:
-            verify_state_token("")
-        assert exc_info.value.status_code == 400
+            redeem_oidc_state(forged, started.state)
+        assert "not valid" in exc_info.value.detail
 
-    def test_verify_expired_token_raises_400(self):
-        token = generate_state_token()
-        # Manually set expiry to the past
-        _state_store[token] = time.time() - 1
+    def test_a_cookie_signed_with_the_raw_secret_is_refused(self):
+        """The state key is derived, so an access-token-shaped forgery fails."""
+        import jwt
+
+        from backend.app.core.config import settings as core_settings
+
+        now = int(time.time())
+        forged = jwt.encode(
+            {
+                "aud": "experimently:oidc-state",
+                "iat": now,
+                "exp": now + 60,
+                "st": "s",
+                "cv": "v" * 43,
+                "cfg": str(uuid.uuid4()),
+                "prv": "okta",
+            },
+            core_settings.SECRET_KEY,
+            algorithm="HS256",
+        )
+        with pytest.raises(HTTPException):
+            redeem_oidc_state(forged, "s")
+
+    def test_an_access_token_is_not_a_state_cookie(self):
+        from backend.app.core.security import create_local_access_token
+
+        user = MagicMock(id=uuid.uuid4(), email="a@b.c", role=UserRole.ADMIN)
+        with pytest.raises(HTTPException):
+            redeem_oidc_state(create_local_access_token(user), "anything")
+
+    def test_an_expired_login_is_refused(self, monkeypatch):
+        """Started longer ago than the TTL plus the 30 s leeway."""
+        past = time.time() - sso_service.OIDC_STATE_TTL_SECONDS - 31
+        monkeypatch.setattr(sso_service.time, "time", lambda: past)
+        started = start_oidc_login(_okta_config(), "okta")
+        monkeypatch.undo()
         with pytest.raises(HTTPException) as exc_info:
-            verify_state_token(token)
-        assert exc_info.value.status_code == 400
+            redeem_oidc_state(started.cookie_value, started.state)
+        assert "expired" in exc_info.value.detail
 
-    def test_each_token_is_unique(self):
-        tokens = {generate_state_token() for _ in range(20)}
-        assert len(tokens) == 20
+    def test_the_leeway_is_thirty_seconds_not_more(self, monkeypatch):
+        """Inside the leeway still redeems; this is the boundary of the one above."""
+        past = time.time() - sso_service.OIDC_STATE_TTL_SECONDS - 20
+        monkeypatch.setattr(sso_service.time, "time", lambda: past)
+        started = start_oidc_login(_okta_config(), "okta")
+        monkeypatch.undo()
+        redeem_oidc_state(started.cookie_value, started.state)
 
-    def test_multiple_tokens_can_coexist(self):
-        t1 = generate_state_token()
-        t2 = generate_state_token()
-        t3 = generate_state_token()
-        assert verify_state_token(t1) is True
-        assert verify_state_token(t2) is True
-        assert verify_state_token(t3) is True
+    def test_the_process_holds_no_login_state(self):
+        """Nothing to fill from the unauthenticated login route (#94)."""
+        cfg = _okta_config()
+        before = {k: v for k, v in vars(sso_service).items() if isinstance(v, dict)}
+        sizes = {k: len(v) for k, v in before.items()}
+        for _ in range(100):
+            start_oidc_login(cfg, "okta")
+        assert {k: len(v) for k, v in before.items()} == sizes
 
 
 # ---------------------------------------------------------------------------
@@ -988,7 +1065,7 @@ class TestBuildOIDCAuthorizationURL:
         cfg = _make_google_config()
         state = "test-state-token"
         url = build_oidc_authorization_url(
-            cfg, "google", "https://example.com/callback", state
+            cfg, "google", "https://example.com/callback", state, "v" * 43
         )
         assert "accounts.google.com" in url
         assert "client_id=google-client-id" in url
@@ -1002,7 +1079,7 @@ class TestBuildOIDCAuthorizationURL:
         cfg.sso_url = None
 
         url = build_oidc_authorization_url(
-            cfg, "github", "https://example.com/cb", "state-abc"
+            cfg, "github", "https://example.com/cb", "state-abc", "v" * 43
         )
         assert "github.com" in url
         assert "gh-client-id" in url
@@ -1014,7 +1091,7 @@ class TestBuildOIDCAuthorizationURL:
         cfg.sso_url = None
 
         url = build_oidc_authorization_url(
-            cfg, "microsoft", "https://example.com/cb", "state-xyz"
+            cfg, "microsoft", "https://example.com/cb", "state-xyz", "v" * 43
         )
         assert "microsoftonline" in url
 
@@ -1022,20 +1099,22 @@ class TestBuildOIDCAuthorizationURL:
         cfg = _make_google_config()
         with pytest.raises(HTTPException) as exc_info:
             build_oidc_authorization_url(
-                cfg, "unknown_provider", "https://example.com/cb", "state"
+                cfg, "unknown_provider", "https://example.com/cb", "state", "v" * 43
             )
         assert exc_info.value.status_code == 400
 
     def test_redirect_uri_included(self):
         cfg = _make_google_config()
         redirect_uri = "https://myapp.com/callback"
-        url = build_oidc_authorization_url(cfg, "google", redirect_uri, "state-123")
+        url = build_oidc_authorization_url(
+            cfg, "google", redirect_uri, "state-123", "v" * 43
+        )
         assert "redirect_uri" in url
 
     def test_scope_included(self):
         cfg = _make_google_config()
         url = build_oidc_authorization_url(
-            cfg, "google", "https://example.com/cb", "st"
+            cfg, "google", "https://example.com/cb", "st", "v" * 43
         )
         assert "scope" in url
 
@@ -1046,6 +1125,6 @@ class TestBuildOIDCAuthorizationURL:
         cfg.sso_url = "https://my-org.okta.com"
 
         url = build_oidc_authorization_url(
-            cfg, "okta", "https://example.com/cb", "state"
+            cfg, "okta", "https://example.com/cb", "state", "v" * 43
         )
         assert "my-org.okta.com" in url

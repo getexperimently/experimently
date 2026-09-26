@@ -75,17 +75,43 @@ def _create_config(client: TestClient, payload: Dict) -> Dict:
     return resp.json()
 
 
-def _state() -> str:
-    """A state token the callback will accept.
+def _start_login(
+    client: TestClient, org_domain: str, provider: str = "google"
+) -> Dict[str, str]:
+    """Start a login the way a browser does and keep what it would keep.
 
-    The four callback tests below used to send no `state` at all and still got
-    a JWT: the verification sat inside `if state:`.  They now mint one the way
-    `GET /oidc/{provider}/login` does, so the happy path exercises the check
-    instead of stepping around it.
+    Returns the ``state`` from the provider redirect and the ``Cookie`` header
+    that sends the login's state cookie back. The cookie is ``Secure`` and the
+    test client talks plain http, so it is passed by hand, never by the jar.
     """
+    from urllib.parse import parse_qs, urlparse
+
     from modules.backend.app.services import sso_service
 
-    return sso_service.generate_state_token()
+    resp = client.get(
+        f"{BASE}/oidc/{provider}/login",
+        params={"org_domain": org_domain},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 302, resp.text
+    state = parse_qs(urlparse(resp.headers["location"]).query)["state"][0]
+    name = sso_service.OIDC_STATE_COOKIE
+    set_cookie = resp.headers["set-cookie"]
+    assert set_cookie.startswith(f"{name}="), set_cookie
+    value = set_cookie.split(";", 1)[0].split("=", 1)[1]
+    client.cookies.clear()
+    return {"state": state, "cookie": f"{name}={value}"}
+
+
+def _callback(
+    client: TestClient, login: Dict[str, str], provider: str = "google", **params
+):
+    query = {"code": "auth-code", "state": login["state"], **params}
+    return client.get(
+        f"{BASE}/oidc/{provider}/callback",
+        params=query,
+        headers={"cookie": login["cookie"]},
+    )
 
 
 def _make_saml_response_b64(name_id: str = "user@acme.com") -> str:
@@ -712,6 +738,7 @@ class TestOIDCCallback:
     def test_google_callback_issues_token(self, admin_client: TestClient):
         payload = _google_config_payload()
         _create_config(admin_client, payload)
+        login = _start_login(admin_client, payload["org_domain"])
 
         with (
             patch(
@@ -731,14 +758,7 @@ class TestOIDCCallback:
                 },
             ),
         ):
-            resp = admin_client.get(
-                f"{BASE}/oidc/google/callback",
-                params={
-                    "code": "auth-code",
-                    "state": _state(),
-                    "org_domain": payload["org_domain"],
-                },
-            )
+            resp = _callback(admin_client, login)
         assert resp.status_code == 200, resp.text
         data = resp.json()
         assert "access_token" in data
@@ -759,6 +779,10 @@ class TestOIDCCallback:
         assert resp.status_code == 400
 
     def test_callback_unknown_provider_returns_404(self, admin_client: TestClient):
+        """A login started for google, called back on another provider's path."""
+        payload = _google_config_payload()
+        _create_config(admin_client, payload)
+        login = _start_login(admin_client, payload["org_domain"])
         with (
             patch(
                 "modules.backend.app.services.sso_service.exchange_oidc_code",
@@ -776,15 +800,13 @@ class TestOIDCCallback:
                 },
             ),
         ):
-            resp = admin_client.get(
-                f"{BASE}/oidc/nonexistent/callback",
-                params={"code": "auth-code", "state": _state()},
-            )
+            resp = _callback(admin_client, login, provider="nonexistent")
         assert resp.status_code == 404
 
     def test_callback_returns_user_email(self, admin_client: TestClient):
         payload = _google_config_payload()
         _create_config(admin_client, payload)
+        login = _start_login(admin_client, payload["org_domain"])
 
         with (
             patch(
@@ -804,20 +826,14 @@ class TestOIDCCallback:
                 },
             ),
         ):
-            resp = admin_client.get(
-                f"{BASE}/oidc/google/callback",
-                params={
-                    "code": "auth-code",
-                    "state": _state(),
-                    "org_domain": payload["org_domain"],
-                },
-            )
+            resp = _callback(admin_client, login)
         assert resp.status_code == 200
         assert resp.json()["email"] == f"bob@{payload['org_domain']}"
 
     def test_callback_returns_role(self, admin_client: TestClient):
         payload = _google_config_payload()
         _create_config(admin_client, payload)
+        login = _start_login(admin_client, payload["org_domain"])
 
         with (
             patch(
@@ -837,14 +853,7 @@ class TestOIDCCallback:
                 },
             ),
         ):
-            resp = admin_client.get(
-                f"{BASE}/oidc/google/callback",
-                params={
-                    "code": "auth-code",
-                    "state": _state(),
-                    "org_domain": payload["org_domain"],
-                },
-            )
+            resp = _callback(admin_client, login)
         assert resp.status_code == 200
         assert "role" in resp.json()
 
@@ -970,11 +979,14 @@ class TestOIDCCallbackStateIsMandatory:
         payload = _google_config_payload()
         _create_config(admin_client, payload)
 
+        login = _start_login(admin_client, payload["org_domain"])
+
         exchange, user_info = self._mocks()
         with exchange as exchange_mock, user_info:
             resp = admin_client.get(
                 f"{BASE}/oidc/google/callback",
-                params={"code": "attacker-code", "org_domain": payload["org_domain"]},
+                params={"code": "attacker-code"},
+                headers={"cookie": login["cookie"]},
             )
 
         assert resp.status_code == 400, resp.text
@@ -986,48 +998,114 @@ class TestOIDCCallbackStateIsMandatory:
     def test_a_callback_with_a_forged_state_is_refused(self, admin_client: TestClient):
         payload = _google_config_payload()
         _create_config(admin_client, payload)
+        login = _start_login(admin_client, payload["org_domain"])
 
         exchange, user_info = self._mocks()
         with exchange as exchange_mock, user_info:
-            resp = admin_client.get(
-                f"{BASE}/oidc/google/callback",
-                params={
-                    "code": "attacker-code",
-                    "state": "not-a-state-we-issued",
-                    "org_domain": payload["org_domain"],
-                },
+            resp = _callback(
+                admin_client,
+                {**login, "state": "not-a-state-we-issued"},
+                code="attacker-code",
             )
 
         assert resp.status_code == 400, resp.text
         assert "access_token" not in resp.text
         exchange_mock.assert_not_awaited()
 
-    def test_a_state_is_single_use(self, admin_client: TestClient):
-        """Replaying the callback with a state already redeemed is refused —
-        the guarantee `verify_state_token` was written for, now that every
-        callback has to go through it."""
+    @pytest.mark.regression
+    def test_a_state_without_its_browsers_cookie_is_refused(
+        self, admin_client: TestClient
+    ):
+        """#66: a state the server issued, but to a different browser.
+
+        The attacker starts a login, gets their own state and code, and sends
+        the victim a callback link carrying both. The victim's browser has no
+        cookie for that login -- or has one for a login of its own -- so the
+        callback is refused before the code is exchanged. It used to be
+        accepted: the state was checked against a server-side list, bound to
+        nobody.
+        """
         payload = _google_config_payload()
         _create_config(admin_client, payload)
-        state = _state()
+        attackers = _start_login(admin_client, payload["org_domain"])
+        victims = _start_login(admin_client, payload["org_domain"])
+
+        exchange, user_info = self._mocks()
+        with exchange as exchange_mock, user_info:
+            no_cookie = admin_client.get(
+                f"{BASE}/oidc/google/callback",
+                params={"code": "attacker-code", "state": attackers["state"]},
+            )
+            wrong_cookie = _callback(
+                admin_client,
+                {"state": attackers["state"], "cookie": victims["cookie"]},
+                code="attacker-code",
+            )
+
+        assert no_cookie.status_code == 400, no_cookie.text
+        assert wrong_cookie.status_code == 400, wrong_cookie.text
+        assert "does not match" in wrong_cookie.json()["detail"]
+        exchange_mock.assert_not_awaited()
+
+    def test_every_callback_expires_the_state_cookie(self, admin_client: TestClient):
+        """The browser's half of single use: success and refusal alike."""
+        from modules.backend.app.services import sso_service
+
+        payload = _google_config_payload()
+        _create_config(admin_client, payload)
+        expected = (
+            f'{sso_service.OIDC_STATE_COOKIE}=""; HttpOnly; Max-Age=0; Path=/; '
+            "SameSite=lax; Secure"
+        )
 
         exchange, user_info = self._mocks(payload["org_domain"])
         with exchange, user_info:
-            first = admin_client.get(
-                f"{BASE}/oidc/google/callback",
-                params={
-                    "code": "auth-code",
-                    "state": state,
-                    "org_domain": payload["org_domain"],
-                },
+            ok = _callback(
+                admin_client, _start_login(admin_client, payload["org_domain"])
             )
-            replay = admin_client.get(
-                f"{BASE}/oidc/google/callback",
-                params={
-                    "code": "auth-code",
-                    "state": state,
-                    "org_domain": payload["org_domain"],
-                },
+            refused = _callback(
+                admin_client,
+                {**_start_login(admin_client, payload["org_domain"]), "state": "x"},
             )
 
-        assert first.status_code == 200, first.text
-        assert replay.status_code == 400, replay.text
+        assert ok.status_code == 200, ok.text
+        assert refused.status_code == 400, refused.text
+        for resp in (ok, refused):
+            assert resp.headers.get_list("set-cookie") == [expected]
+
+    def test_the_login_sets_a_host_prefixed_lax_cookie(self, admin_client: TestClient):
+        from modules.backend.app.services import sso_service
+
+        payload = _google_config_payload()
+        _create_config(admin_client, payload)
+        resp = admin_client.get(
+            f"{BASE}/oidc/google/login",
+            params={"org_domain": payload["org_domain"]},
+            follow_redirects=False,
+        )
+        (cookie,) = resp.headers.get_list("set-cookie")
+        name, rest = cookie.split("=", 1)
+        assert name == sso_service.OIDC_STATE_COOKIE
+        attributes = [part.strip() for part in rest.split(";")[1:]]
+        assert attributes == [
+            "HttpOnly",
+            f"Max-Age={sso_service.OIDC_STATE_TTL_SECONDS}",
+            "Path=/",
+            "SameSite=lax",
+            "Secure",
+        ]
+        assert "Domain" not in cookie
+
+    def test_the_login_sends_a_pkce_challenge(self, admin_client: TestClient):
+        from urllib.parse import parse_qs, urlparse
+
+        payload = _google_config_payload()
+        _create_config(admin_client, payload)
+        resp = admin_client.get(
+            f"{BASE}/oidc/google/login",
+            params={"org_domain": payload["org_domain"]},
+            follow_redirects=False,
+        )
+        query = parse_qs(urlparse(resp.headers["location"]).query)
+        assert query["code_challenge_method"] == ["S256"]
+        assert len(query["code_challenge"][0]) == 43
