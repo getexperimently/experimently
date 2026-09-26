@@ -304,6 +304,22 @@ def test_any_other_aws_error_is_unknown_not_ok(capsys):
     assert code == guard.UNKNOWN, out
 
 
+@pytest.mark.regression
+def test_a_null_weight_in_the_rule_is_could_not_tell_not_refused(capsys):
+    """`"Weight": null` raises TypeError (`None > 0`). That once escaped main()
+    and exited 1, which this script uses for REFUSED; a crash is 2."""
+    aws = FakeAws(
+        "listener-default-dashboard.json",
+        "rules-api-blue.json",
+        "services-primary-blue.json",
+    )
+    rules = aws.responses[("elbv2", "describe-rules")]
+    rules["Rules"][0]["Actions"][0]["ForwardConfig"]["TargetGroups"][0]["Weight"] = None
+    code, out = _run(aws, capsys=capsys)
+    assert code == guard.UNKNOWN, out
+    assert "UNKNOWN: could not tell: TypeError" in out
+
+
 def test_a_stack_that_is_not_ours_is_unknown(capsys):
     stack = _fixture("stack-resources.json")
     stack["StackResources"] = [
