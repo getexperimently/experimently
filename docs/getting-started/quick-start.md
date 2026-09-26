@@ -20,7 +20,7 @@ Only needed if you want to run the backend or dashboard outside Docker: Python 3
 
 Clone the repository:
 
-```{.bash skip reason="the runner starts inside a checkout"}
+```{.bash skip reason="checkout: the runner starts inside a checkout"}
 git clone https://github.com/getexperimently/experimently.git
 cd experimently
 ```
@@ -193,7 +193,7 @@ Evaluation returns `{key, enabled, config, reason}`. An inactive flag evaluates 
 
 ## Running outside Docker
 
-```{.bash skip reason="starts long-running development servers"}
+```{.bash skip reason="server: starts long-running development servers"}
 docker compose up -d --wait postgres redis
 python3.11 -m venv venv && source venv/bin/activate
 pip install -r backend/requirements.txt
@@ -205,7 +205,7 @@ The first line starts only the database and cache. The bootstrap creates the sch
 the first administrator, and is safe to run again. In a second terminal, start the
 dashboard on http://localhost:3000; it proxies `/api` to port 8000:
 
-```{.bash skip reason="starts a long-running development server"}
+```{.bash skip reason="server: starts a long-running development server"}
 cd frontend && npm ci && npm run dev
 ```
 

@@ -69,7 +69,7 @@ def test_exec_and_skip_blocks_are_read_with_their_expectations():
         <!-- expect: there -->
         """,
         f"""
-        {FENCE}{{.bash skip reason="needs a browser"}}
+        {FENCE}{{.bash skip reason="demo: needs a browser"}}
         open http://localhost:3000
         {FENCE}
         """,
@@ -81,14 +81,14 @@ def test_exec_and_skip_blocks_are_read_with_their_expectations():
     )
     run, skip = blocks(text)
     assert (run.kind, run.timeout, run.expects) == ("exec", 30, ["hi", "there"])
-    assert (skip.kind, skip.reason) == ("skip", "needs a browser")
+    assert (skip.kind, skip.reason) == ("skip", "demo: needs a browser")
 
 
 @pytest.mark.parametrize(
     "info, message",
     [
         ("bash", "untagged shell fence"),
-        ("sh", "untagged shell fence"),
+        ("sh", "'sh' names a shell the runner does not know"),
         ("bash exec", "not brace form"),
         ("{bash exec}", "without '.'"),
         ("{.bash exec} trailing", "text after '}'"),
@@ -101,7 +101,7 @@ def test_exec_and_skip_blocks_are_read_with_their_expectations():
         ("{.bash exec foo}", "unknown attribute"),
         ("{.bash exec timeout=0}", "timeout must be 1-3600"),
         ("{.bash exec timeout=9999}", "timeout must be 1-3600"),
-        ("{.sh exec}", "only .bash blocks run"),
+        ("{.sh exec}", "'sh' names a shell the runner does not know"),
         ("{.python exec}", "not shell"),
         ("{.bash .python exec}", "exactly one language class"),
     ],
@@ -112,7 +112,9 @@ def test_malformed_tags_are_refused(info, message):
 
 
 def test_an_expectation_after_a_skip_or_a_json_block_is_refused():
-    skip = page(f'{FENCE}{{.bash skip reason="x"}}\necho\n{FENCE}\n<!-- expect: y -->')
+    skip = page(
+        f'{FENCE}{{.bash skip reason="dev: x"}}\necho\n{FENCE}\n<!-- expect: y -->'
+    )
     json_ = page(f"{FENCE}json\n{{}}\n{FENCE}\n<!-- expect: y -->")
     assert "does not run" in refused(skip)
     assert "does not run" in refused(json_)
@@ -221,27 +223,44 @@ def test_an_empty_run_block_is_refused():
 
 @pytest.fixture
 def repo(tmp_path, monkeypatch):
-    """A scratch repository root with one enrolled page."""
+    """A scratch repository root with one enrolled page, and no pending list."""
     monkeypatch.setattr(dx, "ROOT", tmp_path)
+    monkeypatch.setattr(dx, "ENROLMENT", tmp_path / "scripts" / "doc_examples.toml")
+    monkeypatch.setattr(dx, "PENDING_FROZEN", {}, raising=False)
+    (tmp_path / "scripts").mkdir()
     (tmp_path / "docs").mkdir()
     (tmp_path / "docs" / "p.md").write_text(
         page(
             f"{FENCE}{{.bash exec}}\necho hi\n{FENCE}\n<!-- expect: hi -->",
-            f'{FENCE}{{.bash skip reason="x"}}\necho no\n{FENCE}',
+            f'{FENCE}{{.bash skip reason="dev: x"}}\necho no\n{FENCE}',
         )
     )
     return tmp_path
 
 
+def write(root: pathlib.Path, rel: str, text: str) -> None:
+    path = root / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+
+
 def enrol(root, body: str) -> pathlib.Path:
-    path = root / "doc_examples.toml"
+    path = root / "scripts" / "doc_examples.toml"
     path.write_text(textwrap.dedent(body))
     return path
+
+
+def problems_of(path: pathlib.Path) -> list[str]:
+    with pytest.raises(dx.Refused) as excinfo:
+        dx.check(path)
+    return excinfo.value.problems
 
 
 GOOD = """
     [meta]
     documents = 1
+    exec = 1
+    universe = ["docs/p.md"]
 
     [[document]]
     path = "docs/p.md"
@@ -255,33 +274,60 @@ GOOD = """
 def test_exact_counts_pass(repo, capsys):
     counts = dx.check(enrol(repo, GOOD))
     assert counts == {"docs/p.md": {"exec": 1, "skip": 1, "expects": 1}}
+    assert (
+        "universe: 1 pages; 1 enrolled, 0 exempt, 0 pending" in capsys.readouterr().out
+    )
 
 
 @pytest.mark.parametrize(
     "old, new, message",
     [
-        ("expects = 1", "expects = 2", "expects 1 != 2 enrolled"),
-        ("exec = 1", "exec = 0", "exec 1 != 0 enrolled"),
+        (
+            "expects = 1\n",
+            "expects = 2\n",
+            "docs/p.md: found 1 expectations; the enrolment says 2. If you added or "
+            "removed one on purpose, set expects = 1.",
+        ),
+        (
+            "    exec = 1\n    skip",
+            "    exec = 0\n    skip",
+            "docs/p.md: found 1 exec blocks; the enrolment says 0.",
+        ),
         (
             "documents = 1",
             "documents = 2",
-            "enrolled 1 document(s); [meta] documents = 2",
+            "scripts/doc_examples.toml lists 1 documents but [meta] documents = 2; "
+            "set it to 1.",
+        ),
+        (
+            "exec = 1\n    universe",
+            "exec = 2\n    universe",
+            "the documents' exec counts add up to 1 but [meta] exec = 2; set it to 1.",
         ),
         ('environment = "bare"', 'environment = "local"', "'local' is not implemented"),
         ('environment = "bare"', 'environment = "cloud"', "is not one of"),
-        ('path = "docs/p.md"', 'path = "docs/missing.md"', "is not a markdown file"),
+        (
+            'path = "docs/p.md"',
+            'path = "docs/missing.md"',
+            "docs/missing.md is enrolled but does not exist. Renamed? Change the path.",
+        ),
         ('path = "docs/p.md"', 'path = "../p.md"', "is not a markdown file"),
     ],
 )
 def test_enrolment_mismatches_are_refused(repo, old, new, message):
-    with pytest.raises(dx.Refused, match=__import__("re").escape(message)):
-        dx.check(enrol(repo, GOOD.replace(old, new)))
+    body = GOOD.replace(old, new, 1)
+    assert body != GOOD
+    assert any(message in p for p in problems_of(enrol(repo, body))), message
 
 
 def test_working_instructions_cannot_be_enrolled(repo):
     (repo / "CLAUDE.md").write_text("# x\n")
-    with pytest.raises(dx.Refused, match="working instructions"):
-        dx.check(enrol(repo, GOOD.replace("docs/p.md", "CLAUDE.md")))
+    assert any(
+        "working instructions" in p
+        for p in problems_of(
+            enrol(repo, GOOD.replace('path = "docs/p.md"', 'path = "CLAUDE.md"'))
+        )
+    )
 
 
 def test_a_stack_page_needs_exactly_one_stack_start(repo):
@@ -289,10 +335,20 @@ def test_a_stack_page_needs_exactly_one_stack_start(repo):
     qs.mkdir()
     one = f"{FENCE}{{.bash exec}}\ndocker compose up -d --wait\n{FENCE}"
     two = one + "\n\n" + one
-    body = GOOD.replace("documents = 1", "documents = 2").replace(
-        'environment = "bare"', 'environment = "stack"'
-    ) + textwrap.dedent(
+    body = textwrap.dedent(
         """
+        [meta]
+        documents = 2
+        exec = {total}
+        universe = ["docs/getting-started/quick-start.md", "docs/p.md"]
+
+        [[document]]
+        path = "docs/p.md"
+        environment = "stack"
+        exec = 1
+        skip = 1
+        expects = 1
+
         [[document]]
         path = "docs/getting-started/quick-start.md"
         environment = "bare"
@@ -302,10 +358,631 @@ def test_a_stack_page_needs_exactly_one_stack_start(repo):
         """
     )
     (qs / "quick-start.md").write_text(page(one))
-    dx.check(enrol(repo, body.format(n=1)))
+    dx.check(enrol(repo, body.format(n=1, total=2)))
     (qs / "quick-start.md").write_text(page(two))
-    with pytest.raises(dx.Refused, match="2 exec blocks equal"):
-        dx.check(enrol(repo, body.format(n=2)))
+    assert any(
+        "2 exec blocks equal" in p
+        for p in problems_of(enrol(repo, body.format(n=2, total=3)))
+    )
+
+
+# ---------------------------------------------------------------------------
+# The universe: every page the walk finds is under the contract
+# ---------------------------------------------------------------------------
+
+
+def test_the_walk_prunes_by_name_at_any_depth(tmp_path):
+    for rel in (
+        "README.md",
+        "docs/a.md",
+        ".github/pull_request_template.md",
+        "frontend/node_modules/pkg/README.md",
+        "sdk/js/node_modules/x/y/README.md",
+        "node_modules/z.md",
+        "venv/lib/x.md",
+        "demo/app/venv/x.md",
+        "site/index.md",
+        "docs/site/built.md",
+        ".claude/worktrees/w/docs/a.md",
+        ".pytest_cache/README.md",
+        "frontend/.next/x.md",
+        "CLAUDE.md",
+        "backend/CLAUDE.md",
+        "notes.txt",
+    ):
+        write(tmp_path, rel, "# x\n")
+    assert dx.walk(tmp_path) == {
+        "README.md",
+        "docs/a.md",
+        ".github/pull_request_template.md",
+    }
+
+
+def test_a_new_page_the_universe_does_not_list_is_refused(repo):
+    write(repo, "docs/guides/new.md", "# New\n\nNo code at all.\n")
+    assert problems_of(enrol(repo, GOOD)) == [
+        "docs/guides/new.md: a page scripts/doc_examples.toml does not know. Add it "
+        "to [meta] universe (docs/development/doc-examples.md#enrolling-a-page)."
+    ]
+
+
+def test_a_listed_page_the_walk_does_not_find_is_refused(repo):
+    body = GOOD.replace(
+        'universe = ["docs/p.md"]', 'universe = ["docs/gone.md", "docs/p.md"]'
+    )
+    assert problems_of(enrol(repo, body)) == [
+        "docs/gone.md is in [meta] universe but the walk does not find it. Renamed? "
+        "Change the path. Deleted? Remove it."
+    ]
+
+
+def test_a_page_in_a_pruned_directory_cannot_be_enrolled(repo):
+    write(repo, "docs/site/p.md", (repo / "docs" / "p.md").read_text())
+    body = GOOD.replace('path = "docs/p.md"', 'path = "docs/site/p.md"')
+    found = problems_of(enrol(repo, body))
+    assert any(
+        "docs/site/p.md is listed but is outside the universe" in p for p in found
+    )
+
+
+@pytest.mark.regression
+def test_a_document_dropped_with_its_count_is_refused(repo):
+    """R-E1 (E-T1): deleting an entry together with its count used to pass."""
+    write(
+        repo,
+        "docs/q.md",
+        page(f"{FENCE}{{.bash exec}}\necho q\n{FENCE}\n<!-- expect: q -->"),
+    )
+    both = textwrap.dedent(GOOD).replace(
+        'universe = ["docs/p.md"]', 'universe = ["docs/p.md", "docs/q.md"]'
+    ).replace("documents = 1", "documents = 2").replace(
+        "exec = 1\nuniverse", "exec = 2\nuniverse"
+    ) + textwrap.dedent(
+        """
+        [[document]]
+        path = "docs/q.md"
+        environment = "bare"
+        exec = 1
+        skip = 0
+        expects = 1
+        """
+    )
+    dx.check(enrol(repo, both))
+    dropped = both.split('[[document]]\npath = "docs/q.md"')[0]
+    dropped = dropped.replace("documents = 2", "documents = 1").replace(
+        "exec = 2\nuniverse", "exec = 1\nuniverse"
+    )
+    assert problems_of(enrol(repo, dropped)) == [
+        "docs/q.md: 1 shell block, and the page is not enrolled. Add it to "
+        "scripts/doc_examples.toml (docs/development/doc-examples.md#enrolling-a-page), "
+        "or list it as exempt with a reason."
+    ]
+
+
+@pytest.mark.regression
+def test_a_zero_fence_document_cannot_hold_a_place(repo):
+    """R-E2 (E-T1b): swapping a real page for one with no shell block kept the count."""
+    write(repo, "docs/empty.md", "# Empty\n\n```json\n{}\n```\n")
+    body = GOOD.replace(
+        'universe = ["docs/p.md"]', 'universe = ["docs/empty.md", "docs/p.md"]'
+    )
+    swapped = (
+        body.replace('path = "docs/p.md"', 'path = "docs/empty.md"')
+        .replace(
+            "exec = 1\n    skip = 1\n    expects = 1",
+            "exec = 0\n    skip = 0\n    expects = 0",
+        )
+        .replace("exec = 1\n    universe", "exec = 0\n    universe")
+    )
+    found = problems_of(enrol(repo, swapped))
+    assert (
+        "docs/empty.md is listed as enrolled but has no shell blocks; remove the entry "
+        "and set [meta] documents to match."
+    ) in found
+    assert any(
+        p.startswith("docs/p.md: 2 shell blocks, and the page is not enrolled")
+        for p in found
+    )
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize(
+    "language",
+    [
+        "zsh",
+        "sh-session",
+        "shell-session",
+        "console",
+        "shell",
+        "sh",
+        "fish",
+        "powershell",
+        "ps1",
+        "Bash",
+    ],
+)
+@pytest.mark.parametrize("enrolled", [True, False], ids=["enrolled", "unlisted"])
+def test_a_shell_fence_in_an_unknown_shell_language_is_refused(
+    repo, language, enrolled
+):
+    """R-E3 (E-T6): a block retagged ```zsh left the check, counts and all."""
+    target = "docs/p.md" if enrolled else "docs/other.md"
+    if not enrolled:
+        write(repo, target, "# Other\n")
+    body = (
+        GOOD
+        if enrolled
+        else GOOD.replace(
+            'universe = ["docs/p.md"]', 'universe = ["docs/other.md", "docs/p.md"]'
+        )
+    )
+    path = repo / target
+    lines = path.read_text().split("\n")
+    lines += ["", f"{FENCE}{language}", "echo retagged", FENCE, ""]
+    path.write_text("\n".join(lines))
+    line = len(lines) - 3
+    assert (
+        f"{target}:{line}: '{language}' names a shell the runner does not know; use {{.bash …}}"
+        in problems_of(enrol(repo, body))
+    )
+
+
+def test_a_fence_that_names_no_language_is_refused_on_every_page(repo):
+    write(repo, "README.md", "# Readme\n\n```\nsome output\n```\n")
+    body = GOOD.replace(
+        'universe = ["docs/p.md"]', 'universe = ["README.md", "docs/p.md"]'
+    )
+    assert problems_of(enrol(repo, body)) == [
+        "README.md:3: the fence names no language; name one (`text` for output) "
+        "(docs/development/doc-examples.md#tagging-a-shell-block)"
+    ]
+
+
+def test_the_lists_are_disjoint(repo):
+    body = GOOD + textwrap.dedent(
+        """
+        [[exempt]]
+        path = "docs/p.md"
+        reason = "x"
+        """
+    )
+    assert any(
+        "docs/p.md is listed 2 times (enrolled, exempt)" in p
+        for p in problems_of(enrol(repo, body))
+    )
+
+
+def test_an_exempt_page_needs_a_reason_and_a_shell_block_and_obeys_the_rules(repo):
+    write(
+        repo,
+        "docs/ops.md",
+        "# Ops\n\n```bash\naws s3 ls  # lists\n```\n\n```bash\necho 'x\n```\n",
+    )
+    write(repo, "docs/none.md", "# None\n")
+    body = GOOD.replace(
+        'universe = ["docs/p.md"]',
+        'universe = ["docs/none.md", "docs/ops.md", "docs/p.md"]',
+    ) + textwrap.dedent(
+        """
+        [[exempt]]
+        path = "docs/ops.md"
+        reason = "operator runbook, run by hand"
+
+        [[exempt]]
+        path = "docs/none.md"
+        reason = "x"
+        """
+    )
+    found = problems_of(enrol(repo, body))
+    assert (
+        "docs/none.md is listed as exempt but has no shell blocks; remove the entry."
+        in found
+    )
+    assert any(p.startswith('docs/ops.md:4: shell comment "# lists"') for p in found)
+    assert any(p.startswith("docs/ops.md:7: syntax (bash -n)") for p in found)
+    assert len(found) == 3, found
+    assert any(
+        "exempt needs a reason" in p
+        for p in problems_of(enrol(repo, body.replace('reason = "x"', 'reason = " "')))
+    )
+
+
+# ---------------------------------------------------------------------------
+# Pending: the rollout list, frozen in code, only shrinks
+# ---------------------------------------------------------------------------
+
+PENDING_PAGE = (
+    "# Ops\n\n```bash\naws s3 ls  # lists the buckets\n```\n\n```\nout\n```\n"
+)
+WITH_PENDING = (
+    GOOD.replace('universe = ["docs/p.md"]', 'universe = ["docs/ops.md", "docs/p.md"]')
+    + """
+    [pending]
+    "docs/ops.md" = { comments = 1, unlabelled = 1, syntax = 0 }
+"""
+)
+
+
+@pytest.fixture
+def pending_repo(repo, monkeypatch):
+    write(repo, "docs/ops.md", PENDING_PAGE)
+    monkeypatch.setattr(dx, "PENDING_FROZEN", {"docs/ops.md": (1, 1, 0)})
+    return repo
+
+
+def test_a_pending_page_carries_its_exact_residual(pending_repo, capsys):
+    dx.check(enrol(pending_repo, WITH_PENDING))
+    assert (
+        "pending residual: 1 comment lines, 1 unlabelled fences, 0 bash -n failures"
+        in capsys.readouterr().out
+    )
+    found = problems_of(
+        enrol(pending_repo, WITH_PENDING.replace("comments = 1", "comments = 0"))
+    )
+    assert found == [
+        "docs/ops.md: found 1 shell comment lines; [pending] says 0. Set comments = 1."
+    ]
+
+
+def test_pending_cannot_grow(pending_repo):
+    write(pending_repo, "docs/new.md", "# New\n\n```bash\necho new\n```\n")
+    body = (
+        WITH_PENDING.replace(
+            '"docs/ops.md", "docs/p.md"]', '"docs/new.md", "docs/ops.md", "docs/p.md"]'
+        )
+        + '    "docs/new.md" = { comments = 0, unlabelled = 0, syntax = 0 }\n'
+    )
+    found = problems_of(enrol(pending_repo, body))
+    assert len(found) == 1 and found[0].startswith(
+        "docs/new.md: pending cannot grow, and this page was not pending when the list "
+        "was frozen (PENDING_FROZEN in scripts/doc_examples.py)."
+    ), found
+
+
+def test_a_pending_residual_can_only_fall(pending_repo):
+    write(
+        pending_repo,
+        "docs/ops.md",
+        PENDING_PAGE.replace("aws s3 ls", "# more\naws s3 ls"),
+    )
+    found = problems_of(
+        enrol(pending_repo, WITH_PENDING.replace("comments = 1", "comments = 2"))
+    )
+    assert found == [
+        "docs/ops.md: 2 shell comment lines, more than the 1 this page had when pending "
+        "was frozen; the residual can only fall."
+    ]
+    write(
+        pending_repo, "docs/ops.md", PENDING_PAGE.replace("  # lists the buckets", "")
+    )
+    dx.check(enrol(pending_repo, WITH_PENDING.replace("comments = 1", "comments = 0")))
+
+
+def test_a_pending_page_with_nothing_pending_must_leave(pending_repo):
+    write(pending_repo, "docs/ops.md", "# Ops\n\n```text\nout\n```\n")
+    found = problems_of(
+        enrol(
+            pending_repo,
+            WITH_PENDING.replace(
+                "comments = 1, unlabelled = 1", "comments = 0, unlabelled = 0"
+            ),
+        )
+    )
+    assert found == [
+        "docs/ops.md is pending but has nothing pending (no shell blocks, and every fence "
+        "names a language); remove its [pending] entry."
+    ]
+
+
+def test_an_exec_tag_on_a_pending_page_is_refused(pending_repo):
+    write(
+        pending_repo, "docs/ops.md", PENDING_PAGE + "\n```{.bash exec}\necho hi\n```\n"
+    )
+    assert any(
+        "docs/ops.md:11: an exec block on a pending page never runs" in p
+        for p in problems_of(enrol(pending_repo, WITH_PENDING))
+    )
+
+
+def test_the_frozen_pending_list_is_the_enrolment_s_pending_list_or_larger():
+    """The TOML may only drop pages the frozen list holds, never add one."""
+    pending = dx.load().pending
+    assert set(pending) <= set(dx.PENDING_FROZEN)
+
+
+# ---------------------------------------------------------------------------
+# Skip reasons, package managers, AWS, bash -n on skip blocks
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize(
+    "reason, ok",
+    [
+        ("x", False),
+        ("because it needs AWS", False),
+        ("aws needs an account", False),
+        ("aws: needs an account", True),
+        ("AWS: needs an account", False),
+        ("cloud: needs an account", False),
+        ("aws:", False),
+        ("aws: ", False),
+        ("bug #123: the endpoint returns 500", True),
+        ("bug: the endpoint returns 500", False),
+        ("bug #abc: x", False),
+        ("bug#1: x", False),
+        ("dev #1: x", False),
+        ("fragment: fill in your values", True),
+    ],
+)
+def test_skip_reason_names_a_category(reason, ok):
+    """R-E7: `reason="x"` said nothing about why a block could not run."""
+    text = page(f'{FENCE}{{.bash skip reason="{reason}"}}\necho hi\n{FENCE}')
+    if ok:
+        (block,) = blocks(text)
+        assert dx.category_of(block.reason) == reason.split(":")[0].split(" ")[0]
+    else:
+        assert (
+            "skip reason must start with one of: checkout, dev, server, aws"
+            in refused(text)
+        )
+
+
+@pytest.mark.parametrize(
+    "body, tool",
+    [
+        ("pip install openfeature-sdk experimently experimently-openfeature", "pip"),
+        ("gem install experimently", "gem"),
+        ("npx @getexperimently/cli init", "npx"),
+        ("uv pip install experimently", "uv"),
+        ("cd sdk/js && npm ci", "npm"),
+        ("sudo pip3 install experimently", "pip3"),
+        ("python -m pip install experimently", "python -m pip"),
+        ("dotnet add package Experimently.SDK", "dotnet add"),
+        ("composer require experimently/sdk", "composer"),
+        ("go get github.com/getexperimently/go-sdk", "go get"),
+        ("FOO=1 yarn add @getexperimently/js-sdk", "yarn"),
+        ("VERSION=$(npm view x version)", "npm"),
+        ("if true; then pnpm i; fi", "pnpm"),
+        ("pipx run experimently", "pipx"),
+        ("poetry add experimently", "poetry"),
+    ],
+)
+def test_a_block_that_runs_may_not_install_or_run_a_package(body, tool):
+    """M6 (T29): until the names are published, a run would fetch a squatter's."""
+    text = page(f"{FENCE}{{.bash exec}}\n{body}\n{FENCE}")
+    assert f"may not run '{tool}'" in refused(text)
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "aws sts get-caller-identity",
+        "cdk deploy --all",
+        "sam build",
+        "cd infrastructure && cdk synth",
+        "ARN=$(aws sts get-caller-identity --query Arn)",
+    ],
+)
+def test_a_block_that_runs_may_not_reach_aws(body):
+    """PE C10: an exec block never reaches an AWS account."""
+    text = page(f"{FENCE}{{.bash exec}}\n{body}\n{FENCE}")
+    assert "may not call '" in refused(text)
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "echo npm pip aws",
+        "curl -s https://registry.npmjs.org/react | jq .name",
+        'echo "run npm ci"',
+        "ls node_modules",
+        "echo sam-and-cdk",
+    ],
+)
+def test_the_words_alone_are_not_a_package_manager_or_aws(body):
+    (block,) = blocks(page(f"{FENCE}{{.bash exec}}\n{body}\n{FENCE}"))
+    assert dx.block_problems(block, "p.md") == []
+
+
+def test_a_registry_skip_must_run_a_package_manager():
+    good = page(
+        f'{FENCE}{{.bash skip reason="registry: not published"}}\npip install experimently\n{FENCE}'
+    )
+    bad = page(
+        f'{FENCE}{{.bash skip reason="registry: not published"}}\ncurl localhost\n{FENCE}'
+    )
+    (block,) = blocks(good)
+    assert dx.block_problems(block, "p.md") == []
+    assert (
+        "the skip reason says 'registry' but the block runs no package manager"
+        in refused(bad)
+    )
+
+
+def test_bash_n_runs_on_skip_blocks_too_except_fragments():
+    broken = "aws s3 cp 'x"
+    skip = page(
+        f'{FENCE}{{.bash skip reason="aws: needs an account"}}\n{broken}\n{FENCE}'
+    )
+    fragment = page(
+        f'{FENCE}{{.bash skip reason="fragment: fill it in"}}\n{broken}\n{FENCE}'
+    )
+    assert "syntax (bash -n)" in refused(skip)
+    (block,) = blocks(fragment)
+    assert dx.block_problems(block, "p.md") == []
+
+
+def test_bash_n_is_refused_with_a_bash_older_than_4_4(tmp_path, monkeypatch):
+    """PE C16: macOS's /bin/bash 3.2 would give different answers than CI."""
+    fake = tmp_path / "bash"
+    fake.write_text("#!/bin/sh\necho 3.2\n")
+    fake.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{tmp_path}{__import__('os').pathsep}/usr/bin:/bin")
+    monkeypatch.setattr(dx, "_SYNTAX_BASH", [])
+    with pytest.raises(dx.Refused, match="is bash 3.2; the examples need bash >= 4.4"):
+        dx.syntax_problem("echo hi")
+
+
+def test_the_aws_cli_cannot_read_the_callers_credentials():
+    env = dx.scrubbed_env("docex-unit", {})
+    assert (
+        env["AWS_CONFIG_FILE"]
+        == env["AWS_SHARED_CREDENTIALS_FILE"]
+        == __import__("os").devnull
+    )
+    problems = _run_page(
+        'echo "$AWS_SHARED_CREDENTIALS_FILE $AWS_CONFIG_FILE"',
+        expects={0: [f"{__import__('os').devnull} {__import__('os').devnull}"]},
+    )
+    assert problems == [], problems
+
+
+# ---------------------------------------------------------------------------
+# Messages: every problem in one run, one prefix, annotations in CI
+# ---------------------------------------------------------------------------
+
+
+def test_every_problem_is_reported_in_one_run(repo, monkeypatch, capsys):
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    write(
+        repo,
+        "docs/p.md",
+        page(
+            f"{FENCE}{{.bash exec}}\necho a  # one\necho b  # two\n{FENCE}\n<!-- expect: a -->",
+            f'{FENCE}{{.bash skip reason="x"}}\necho no  # three\n{FENCE}',
+        ),
+    )
+    enrol(repo, GOOD)
+    assert dx.main(["--check"]) == 2
+    err = capsys.readouterr().err.strip().split("\n")
+    assert err[-1] == "4 problems"
+    refusals = err[:-1]
+    assert len(refusals) == 4, err
+    assert all(
+        line.count("refused:") == 1 and line.startswith("refused: ")
+        for line in refusals
+    )
+    assert sum('shell comment "#' in line for line in refusals) == 2
+    assert sum("skip reason must start" in line for line in refusals) == 1
+
+
+def test_problems_are_annotated_in_github_actions(repo, monkeypatch, capsys):
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    write(
+        repo,
+        "docs/p.md",
+        (repo / "docs" / "p.md").read_text().replace("echo no", "echo no  # a, b: c"),
+    )
+    enrol(repo, GOOD)
+    assert dx.main(["--check"]) == 2
+    err = capsys.readouterr().err
+    assert (
+        '::error file=docs/p.md,line=9::docs/p.md:9: shell comment "# a, b: c" breaks '
+        "when pasted into zsh." in err
+    ), err
+
+
+def test_the_authoring_pages_sample_is_what_the_check_prints(repo, monkeypatch, capsys):
+    """The 'When the check fails' sample is real output, not a paraphrase."""
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    authoring = (REPO / "docs" / "development" / "doc-examples.md").read_text()
+    section = authoring.split("## When the check fails", 1)[1]
+    sample = section.split("```text\n", 1)[1].split("\n```", 1)[0]
+    (repo / "docs" / "p.md").unlink()
+    write(
+        repo,
+        "docs/guides/new-page.md",
+        "# New page\n\nStart it:\n\n```bash\necho start\n```\n\n```zsh\necho z\n```\n",
+    )
+    write(
+        repo,
+        "docs/guides/tour.md",
+        "# Tour\n\nCreate a flag and read back its id. The block below prints it.\n\n"
+        + "\n" * 8
+        + "```{.bash exec}\n"
+        + "curl -s localhost:8000/api/v1/feature-flags/ | jq -r '.[0].id'  # prints the flag's id\n"
+        + "```\n<!-- expect: - -->\n",
+    )
+    enrol(
+        repo,
+        """
+        [meta]
+        documents = 1
+        exec = 1
+        universe = ["docs/guides/tour.md"]
+
+        [[document]]
+        path = "docs/guides/tour.md"
+        environment = "bare"
+        exec = 1
+        skip = 0
+        expects = 1
+        """,
+    )
+    assert dx.main(["--check"]) == 2
+    assert capsys.readouterr().err.strip() == sample.strip()
+
+
+# ---------------------------------------------------------------------------
+# Output a CI log can use: measured counts, line by line
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.regression
+def test_the_run_counts_the_blocks_it_executed():
+    """R-E4: `passed (N exec)` printed the enrolment's number, not what ran."""
+    text = page(
+        f"{FENCE}{{.bash exec}}\necho a\n{FENCE}\n<!-- expect: a -->",
+        f"{FENCE}{{.bash exec}}\necho b\n{FENCE}\n<!-- expect: b -->",
+    )
+    problems, reached = dx.execute_counted(
+        blocks(text), "p.md", dx.scrubbed_env("docex-unit", {})
+    )
+    assert (problems, reached) == ([], 2)
+    stops = page(
+        f"{FENCE}{{.bash exec}}\necho a\n{FENCE}\n<!-- expect: a -->",
+        f"{FENCE}{{.bash exec}}\nexit 0\n{FENCE}",
+        f"{FENCE}{{.bash exec}}\necho c\n{FENCE}\n<!-- expect: c -->",
+    )
+    _, stopped = dx.execute_counted(
+        blocks(stops), "p.md", dx.scrubbed_env("docex-unit", {})
+    )
+    assert stopped == 1
+    doc = {"path": "p.md", "exec": 3}
+    line, found = dx.run_verdict(doc, problems, reached)
+    assert line == "p.md: FAILED (2/3 exec blocks ran)"
+    assert found == ["p.md: 2 exec blocks reached their end; the enrolment says 3"]
+    assert dx.run_verdict({"path": "p.md", "exec": 2}, [], 2) == (
+        "p.md: passed (2/2 exec blocks ran)",
+        [],
+    )
+
+
+@pytest.mark.regression
+def test_the_runner_writes_its_output_line_by_line():
+    """R-E5 (the runner's half): a pipe is block-buffered, so a job killed mid-run
+    lost the name of the page it was on.  The deadline half is E0b's."""
+    import subprocess
+
+    probe = textwrap.dedent(
+        f"""
+        import importlib.util, sys
+        spec = importlib.util.spec_from_file_location("dx", {str(REPO / "scripts" / "doc_examples.py")!r})
+        dx = importlib.util.module_from_spec(spec)
+        sys.modules["dx"] = dx
+        spec.loader.exec_module(dx)
+        try:
+            dx.main([])
+        except SystemExit:
+            pass
+        print(sys.stdout.line_buffering, sys.stderr.line_buffering)
+        """
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", probe], capture_output=True, text=True, check=False
+    )
+    assert result.stdout.strip() == "True True", result.stderr
 
 
 # ---------------------------------------------------------------------------
@@ -338,7 +1015,7 @@ def _problems(text: str) -> list[str]:
 def test_good_tags_render_as_code():
     text = page(
         f"{FENCE}{{.bash exec timeout=30}}\necho hi\n{FENCE}\n<!-- expect: hi -->",
-        f'{FENCE}{{.bash skip reason="x"}}\necho no\n{FENCE}',
+        f'{FENCE}{{.bash skip reason="dev: x"}}\necho no\n{FENCE}',
     )
     assert _problems(text) == []
     assert "expect" not in _render(text).replace("<!-- expect: hi -->", "")
@@ -354,7 +1031,7 @@ def test_good_tags_render_as_code():
             f"{FENCE}bash exec\necho destroyed\n{FENCE}",
             f"{FENCE}bash\necho next\n{FENCE}",
         ),  # swallows the next fence
-        page(f'{FENCE}{{.bash skip reason="a"}} trailing\necho x\n{FENCE}'),
+        page(f'{FENCE}{{.bash skip reason="dev: a"}} trailing\necho x\n{FENCE}'),
     ],
     ids=["destroyed-last", "destroyed-then-fence", "trailing-text"],
 )
