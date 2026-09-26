@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import ast
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -51,7 +52,10 @@ _STRONG = "f" * 64
 _REALISTIC = {
     # `"APP_ENV": env_name`, and env_name is "prod" in production.
     "APP_ENV": "prod",
-    "REDIS_URL": "redis://cache.example.internal:6379/0",
+    # The Redis stack's primary endpoint and port (CloudFormation tokens in
+    # the stack, so not literals the AST can read).
+    "REDIS_HOST": "master.cache.example.internal",
+    "REDIS_PORT": "6379",
     "POSTGRES_SERVER": "aurora.example.internal",
     # Not a secret and not a random string: the settings validator requires an
     # absolute http(s) origin with no path, and ALLOWED_HOSTS derives its host.
@@ -210,6 +214,47 @@ def test_the_module_secrets_are_gated_on_the_profile(name: str):
         "a core deployment has no such secret and ECS would refuse the task"
     )
     assert "include_modules" in stack.read_text()
+
+
+DEPLOY_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "deploy-prod.yml"
+
+
+def _stack_secret_names() -> set[str]:
+    """Every ``/<env>/experimentation/<name>`` secret the two stacks import."""
+    pattern = re.compile(r'f"/\{env_name\}/experimentation/([a-z0-9-]+)"')
+    return {
+        name for stack in STACKS.values() for name in pattern.findall(stack.read_text())
+    }
+
+
+def _preflight_secret_names() -> tuple[set[str], set[str]]:
+    """``(always, full-only)`` from the deploy pre-flight's ``required`` arrays."""
+    text = DEPLOY_WORKFLOW.read_text()
+    (always,) = re.findall(r"^\s*required=\(([^)]*)\)", text, re.M)
+    (full,) = re.findall(r"^\s*required\+=\(([^)]*)\)", text, re.M)
+    return set(always.split()), set(full.split())
+
+
+@pytest.mark.unit
+@pytest.mark.regression
+def test_the_deploy_preflight_checks_exactly_the_secrets_the_stacks_name():
+    """The pre-flight and the task definitions agree on which secrets exist.
+
+    A secret the stacks name but the pre-flight does not check is a task ECS
+    refuses to start, found twenty minutes into a deployment; one the pre-flight
+    demands but nothing reads (the old Redis URL secret was that, #147) blocks every
+    deployment on a secret an operator has to hand-make for nothing.
+    """
+    if not DEPLOY_WORKFLOW.is_file():
+        pytest.skip("this tree has no deploy workflow")
+    always, full_only = _preflight_secret_names()
+    names = _stack_secret_names()
+    module_only = {"audit-hmac-key"}
+    assert always == names - module_only, (
+        f"pre-flight checks {sorted(always)}; the task definitions name "
+        f"{sorted(names - module_only)} unconditionally"
+    )
+    assert full_only == module_only & names
 
 
 @pytest.mark.unit

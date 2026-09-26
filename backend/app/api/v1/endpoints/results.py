@@ -109,6 +109,7 @@ def _get_cache_service() -> CacheService:
             host=settings.REDIS_HOST,
             port=int(settings.REDIS_PORT),
             db=0,
+            ssl=bool(settings.REDIS_SSL),
         )
         # Quick ping to verify the connection is alive.
         r.ping()
@@ -784,6 +785,7 @@ def invalidate_results_cache(
             host=settings.REDIS_HOST,
             port=int(settings.REDIS_PORT),
             db=0,
+            ssl=bool(settings.REDIS_SSL),
         )
         cache = CacheService(redis_client=r)
         cache.clear(pattern=f"results:{experiment_id}:*")

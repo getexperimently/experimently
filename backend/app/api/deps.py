@@ -81,6 +81,7 @@ async def get_redis_pool():
                 host=settings.REDIS_HOST,
                 port=settings.REDIS_PORT,
                 db=settings.REDIS_DB,
+                ssl=bool(settings.REDIS_SSL),
                 decode_responses=True,
             )
         except Exception as e:
