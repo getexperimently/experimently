@@ -1,0 +1,124 @@
+{
+  "StackResources": [
+    {
+      "StackName": "experimentation-fargate-staging",
+      "StackId": "arn:aws:cloudformation:us-west-2:123456789012:stack/experimentation-fargate-staging/1f0e2d3c-4b5a-6978-8a9b-0c1d2e3f4a5b",
+      "LogicalResourceId": "BackendALB30CEFCD3",
+      "PhysicalResourceId": "arn:aws:elasticloadbalancing:us-west-2:123456789012:loadbalancer/app/experimentation-staging/50dc6c495c0c9188",
+      "ResourceType": "AWS::ElasticLoadBalancingV2::LoadBalancer",
+      "Timestamp": "2026-09-20T10:00:00.000Z",
+      "ResourceStatus": "UPDATE_COMPLETE",
+      "DriftInformation": {
+        "StackResourceDriftStatus": "NOT_CHECKED"
+      }
+    },
+    {
+      "StackName": "experimentation-fargate-staging",
+      "StackId": "arn:aws:cloudformation:us-west-2:123456789012:stack/experimentation-fargate-staging/1f0e2d3c-4b5a-6978-8a9b-0c1d2e3f4a5b",
+      "LogicalResourceId": "BackendALBHttpsListenerC622C572",
+      "PhysicalResourceId": "arn:aws:elasticloadbalancing:us-west-2:123456789012:listener/app/experimentation-staging/50dc6c495c0c9188/f2f7dc8efc522ab2",
+      "ResourceType": "AWS::ElasticLoadBalancingV2::Listener",
+      "Timestamp": "2026-09-20T10:00:00.000Z",
+      "ResourceStatus": "UPDATE_COMPLETE",
+      "DriftInformation": {
+        "StackResourceDriftStatus": "NOT_CHECKED"
+      }
+    },
+    {
+      "StackName": "experimentation-fargate-staging",
+      "StackId": "arn:aws:cloudformation:us-west-2:123456789012:stack/experimentation-fargate-staging/1f0e2d3c-4b5a-6978-8a9b-0c1d2e3f4a5b",
+      "LogicalResourceId": "BackendALBHttpsListenerApiPaths10RuleAFEE23AE",
+      "PhysicalResourceId": "arn:aws:elasticloadbalancing:us-west-2:123456789012:listener-rule/app/experimentation-staging/50dc6c495c0c9188/f2f7dc8efc522ab2/9683b2d02a6cabee",
+      "ResourceType": "AWS::ElasticLoadBalancingV2::ListenerRule",
+      "Timestamp": "2026-09-20T10:00:00.000Z",
+      "ResourceStatus": "UPDATE_COMPLETE",
+      "DriftInformation": {
+        "StackResourceDriftStatus": "NOT_CHECKED"
+      }
+    },
+    {
+      "StackName": "experimentation-fargate-staging",
+      "StackId": "arn:aws:cloudformation:us-west-2:123456789012:stack/experimentation-fargate-staging/1f0e2d3c-4b5a-6978-8a9b-0c1d2e3f4a5b",
+      "LogicalResourceId": "BackendALBTestListenerD8F804A9",
+      "PhysicalResourceId": "arn:aws:elasticloadbalancing:us-west-2:123456789012:listener/app/experimentation-staging/50dc6c495c0c9188/0467ef3c8400ae65",
+      "ResourceType": "AWS::ElasticLoadBalancingV2::Listener",
+      "Timestamp": "2026-09-20T10:00:00.000Z",
+      "ResourceStatus": "UPDATE_COMPLETE",
+      "DriftInformation": {
+        "StackResourceDriftStatus": "NOT_CHECKED"
+      }
+    },
+    {
+      "StackName": "experimentation-fargate-staging",
+      "StackId": "arn:aws:cloudformation:us-west-2:123456789012:stack/experimentation-fargate-staging/1f0e2d3c-4b5a-6978-8a9b-0c1d2e3f4a5b",
+      "LogicalResourceId": "BlueTargetGroupF108EB01",
+      "PhysicalResourceId": "arn:aws:elasticloadbalancing:us-west-2:123456789012:targetgroup/exper-BlueT-1A2B3C4D5E6F/0123456789abcdef",
+      "ResourceType": "AWS::ElasticLoadBalancingV2::TargetGroup",
+      "Timestamp": "2026-09-20T10:00:00.000Z",
+      "ResourceStatus": "UPDATE_COMPLETE",
+      "DriftInformation": {
+        "StackResourceDriftStatus": "NOT_CHECKED"
+      }
+    },
+    {
+      "StackName": "experimentation-fargate-staging",
+      "StackId": "arn:aws:cloudformation:us-west-2:123456789012:stack/experimentation-fargate-staging/1f0e2d3c-4b5a-6978-8a9b-0c1d2e3f4a5b",
+      "LogicalResourceId": "GreenTargetGroupEEB2DF3E",
+      "PhysicalResourceId": "arn:aws:elasticloadbalancing:us-west-2:123456789012:targetgroup/exper-Green-6F5E4D3C2B1A/fedcba9876543210",
+      "ResourceType": "AWS::ElasticLoadBalancingV2::TargetGroup",
+      "Timestamp": "2026-09-20T10:00:00.000Z",
+      "ResourceStatus": "UPDATE_COMPLETE",
+      "DriftInformation": {
+        "StackResourceDriftStatus": "NOT_CHECKED"
+      }
+    },
+    {
+      "StackName": "experimentation-fargate-staging",
+      "StackId": "arn:aws:cloudformation:us-west-2:123456789012:stack/experimentation-fargate-staging/1f0e2d3c-4b5a-6978-8a9b-0c1d2e3f4a5b",
+      "LogicalResourceId": "DashboardTargetGroup18AA0486",
+      "PhysicalResourceId": "arn:aws:elasticloadbalancing:us-west-2:123456789012:targetgroup/exper-Dashb-AABBCCDDEEFF/00112233aabbccdd",
+      "ResourceType": "AWS::ElasticLoadBalancingV2::TargetGroup",
+      "Timestamp": "2026-09-20T10:00:00.000Z",
+      "ResourceStatus": "UPDATE_COMPLETE",
+      "DriftInformation": {
+        "StackResourceDriftStatus": "NOT_CHECKED"
+      }
+    },
+    {
+      "StackName": "experimentation-fargate-staging",
+      "StackId": "arn:aws:cloudformation:us-west-2:123456789012:stack/experimentation-fargate-staging/1f0e2d3c-4b5a-6978-8a9b-0c1d2e3f4a5b",
+      "LogicalResourceId": "BackendService7A4224EE",
+      "PhysicalResourceId": "arn:aws:ecs:us-west-2:123456789012:service/experimentation-staging/experimentation-backend-staging",
+      "ResourceType": "AWS::ECS::Service",
+      "Timestamp": "2026-09-20T10:00:00.000Z",
+      "ResourceStatus": "UPDATE_COMPLETE",
+      "DriftInformation": {
+        "StackResourceDriftStatus": "NOT_CHECKED"
+      }
+    },
+    {
+      "StackName": "experimentation-fargate-staging",
+      "StackId": "arn:aws:cloudformation:us-west-2:123456789012:stack/experimentation-fargate-staging/1f0e2d3c-4b5a-6978-8a9b-0c1d2e3f4a5b",
+      "LogicalResourceId": "BackendServiceTaskCountTarget0CA57D80",
+      "PhysicalResourceId": "service/experimentation-staging/experimentation-backend-staging|ecs:service:DesiredCount|ecs",
+      "ResourceType": "AWS::ApplicationAutoScaling::ScalableTarget",
+      "Timestamp": "2026-09-20T10:00:00.000Z",
+      "ResourceStatus": "UPDATE_COMPLETE",
+      "DriftInformation": {
+        "StackResourceDriftStatus": "NOT_CHECKED"
+      }
+    },
+    {
+      "StackName": "experimentation-fargate-staging",
+      "StackId": "arn:aws:cloudformation:us-west-2:123456789012:stack/experimentation-fargate-staging/1f0e2d3c-4b5a-6978-8a9b-0c1d2e3f4a5b",
+      "LogicalResourceId": "DashboardService8C6E1873",
+      "PhysicalResourceId": "arn:aws:ecs:us-west-2:123456789012:service/experimentation-staging/experimentation-dashboard-staging",
+      "ResourceType": "AWS::ECS::Service",
+      "Timestamp": "2026-09-20T10:00:00.000Z",
+      "ResourceStatus": "UPDATE_COMPLETE",
+      "DriftInformation": {
+        "StackResourceDriftStatus": "NOT_CHECKED"
+      }
+    }
+  ]
+}

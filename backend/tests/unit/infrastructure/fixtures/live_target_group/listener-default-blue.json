@@ -1,0 +1,34 @@
+{
+  "Listeners": [
+    {
+      "ListenerArn": "arn:aws:elasticloadbalancing:us-west-2:123456789012:listener/app/experimentation-staging/50dc6c495c0c9188/f2f7dc8efc522ab2",
+      "LoadBalancerArn": "arn:aws:elasticloadbalancing:us-west-2:123456789012:loadbalancer/app/experimentation-staging/50dc6c495c0c9188",
+      "Port": 443,
+      "Protocol": "HTTPS",
+      "Certificates": [
+        {
+          "CertificateArn": "arn:aws:acm:us-west-2:123456789012:certificate/00000000-0000-0000-0000-000000000000"
+        }
+      ],
+      "SslPolicy": "ELBSecurityPolicy-2016-08",
+      "DefaultActions": [
+        {
+          "Type": "forward",
+          "TargetGroupArn": "arn:aws:elasticloadbalancing:us-west-2:123456789012:targetgroup/exper-BlueT-1A2B3C4D5E6F/0123456789abcdef",
+          "Order": 1,
+          "ForwardConfig": {
+            "TargetGroups": [
+              {
+                "TargetGroupArn": "arn:aws:elasticloadbalancing:us-west-2:123456789012:targetgroup/exper-BlueT-1A2B3C4D5E6F/0123456789abcdef",
+                "Weight": 1
+              }
+            ],
+            "TargetGroupStickinessConfig": {
+              "Enabled": false
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
