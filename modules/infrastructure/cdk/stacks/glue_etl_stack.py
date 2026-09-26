@@ -6,11 +6,10 @@ Provisions the full Glue ETL infrastructure for the experimentation platform:
 Resources created:
     1. Glue IAM Role          — Glue service principal with S3, Glue catalog, and
                                 CloudWatch permissions.
-    2. Glue Database          — 'experimentation' catalog database (if not already
-                                created by analytics_stack).
-    3. Glue ETL Job           — 'experimentation-events-etl' (JSON → Parquet).
-    4. Glue Metrics Job       — 'experimentation-metrics-etl' (metric aggregation).
-    5. Glue Crawler           — 'experimentation-crawler' for raw_events table.
+    2. Glue Database          — 'experimentation_<env>' catalog database.
+    3. Glue ETL Job           — 'experimentation-events-etl-<env>' (JSON → Parquet).
+    4. Glue Metrics Job       — 'experimentation-metrics-etl-<env>' (metric aggregation).
+    5. Glue Crawler           — 'experimentation-crawler-<env>' for raw_events table.
     6. EventBridge Rule       — Daily cron trigger at 02:00 UTC.
     7. Lambda Invoker         — Lambda function that calls glue:StartJobRun from
                                 EventBridge events.
@@ -30,7 +29,6 @@ Usage:
 from aws_cdk import (
     Stack,
     Duration,
-    RemovalPolicy,
     aws_glue as glue,
     aws_iam as iam,
     aws_lambda as lambda_,
@@ -40,16 +38,12 @@ from aws_cdk import (
 )
 from constructs import Construct
 
+from stacks.environments import data_removal_policy, retains_data
+from stacks.names import glue_names
+
 
 class GlueETLStack(Stack):
     """CDK stack for Glue ETL jobs, crawler, and EventBridge scheduling."""
-
-    # Stable resource names (no random suffix — ETL resources are referenced
-    # by name from the FastAPI service and should be predictable).
-    ETL_JOB_NAME = "experimentation-events-etl"
-    METRICS_JOB_NAME = "experimentation-metrics-etl"
-    GLUE_DATABASE_NAME = "experimentation"
-    CRAWLER_NAME = "experimentation-crawler"
 
     def __init__(
         self,
@@ -64,6 +58,22 @@ class GlueETLStack(Stack):
         self.env_name = env_name
         self.data_lake_bucket = data_lake_bucket
 
+        # Stable, environment-scoped names (stacks/names.py). The FastAPI
+        # service calls these by name; they were literal and account-scoped,
+        # so two environments in one account collided on all four (#139). The
+        # Fargate stack gives the API the same names from the same function.
+        names = glue_names(env_name)
+        self.ETL_JOB_NAME = names["GLUE_ETL_JOB_NAME"]
+        self.METRICS_JOB_NAME = names["GLUE_METRICS_JOB_NAME"]
+        self.GLUE_DATABASE_NAME = names["GLUE_DATABASE"]
+        self.CRAWLER_NAME = names["GLUE_CRAWLER_NAME"]
+
+        # Outside prod both buckets go with the stack (stacks/environments.py);
+        # CloudFormation deletes only an empty bucket, so auto_delete_objects
+        # adds the CDK's Custom::S3AutoDeleteObjects Lambda to empty them.
+        removal_policy = data_removal_policy(env_name)
+        auto_delete_objects = not retains_data(env_name)
+
         # ----------------------------------------------------------------
         # 1. Athena query-results bucket
         # ----------------------------------------------------------------
@@ -75,7 +85,8 @@ class GlueETLStack(Stack):
             # deploys this repository first and every later adopter gets
             # BucketAlreadyExists mid-deploy (#176). Nothing refers to either
             # bucket by name -- both are passed around as constructs.
-            removal_policy=RemovalPolicy.RETAIN,
+            removal_policy=removal_policy,
+            auto_delete_objects=auto_delete_objects,
             lifecycle_rules=[
                 s3.LifecycleRule(
                     expiration=Duration.days(30),
@@ -93,7 +104,8 @@ class GlueETLStack(Stack):
             "GlueScriptsBucket",
             # Unnamed, for the reason above. `glue-scripts-dev-us-west-2`
             # is generic enough to be taken by someone unrelated already.
-            removal_policy=RemovalPolicy.RETAIN,
+            removal_policy=removal_policy,
+            auto_delete_objects=auto_delete_objects,
         )
 
         # ----------------------------------------------------------------
@@ -314,8 +326,8 @@ import os
 
 glue = boto3.client('glue')
 
-ETL_JOB_NAME = os.environ.get('ETL_JOB_NAME', 'experimentation-events-etl')
-METRICS_JOB_NAME = os.environ.get('METRICS_JOB_NAME', 'experimentation-metrics-etl')
+ETL_JOB_NAME = os.environ['ETL_JOB_NAME']
+METRICS_JOB_NAME = os.environ['METRICS_JOB_NAME']
 
 
 def handler(event, context):

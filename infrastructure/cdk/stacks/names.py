@@ -13,11 +13,11 @@ A name belongs here when more than one tree has to spell it the same way.
 deploy workflow and every deployment document still agree about this one, so a
 rename that misses a caller fails a test rather than a deployment.
 
-Not here yet, and deliberately: the ECS cluster name
-(`experimentation-{env}`), which `deploy-prod.yml` and `rollback.yml` also
-spell out. It was made explicit in #80 and nothing asserts the agreement; it
-is the obvious next entry, and moving it is a change to those workflows rather
-than a comment.
+The per-environment names below (#139, #142) are here because the stacks and
+the deploy workflows both spell them. Every one carries the environment: two
+environments in one account must never claim the same physical name, which
+`infrastructure/tests/test_environments_do_not_collide.py` asserts over every
+resource type the app synthesises.
 """
 
 from __future__ import annotations
@@ -57,3 +57,55 @@ DASHBOARD_ECR_REPOSITORY = "experimentation-platform/web"
 #: The script carries its own copy of both; a unit test asserts they agree.
 API_LIVE_TARGET_GROUP_CONTEXT = "api_live_target_group"
 API_LIVE_TARGET_GROUP_DEFAULT = "blue"
+
+
+# --- Per-environment names (#139, #142) --------------------------------------
+
+
+def ecs_cluster_name(env_name: str) -> str:
+    """The ECS cluster, ``experimentation-<env>``.
+
+    It was ``experimentation-dev`` in every environment: the compute stack read
+    the CDK context key ``env``, which nothing sets, instead of ``ENVIRONMENT``
+    (#142). Staging and prod therefore both built a cluster named for dev, and
+    the second of them to deploy in an account failed on the name.
+    """
+    return f"experimentation-{env_name}"
+
+
+def codedeploy_application_name(env_name: str) -> str:
+    """The CodeDeploy application, ``experimentation-platform-<env>``.
+
+    It was ``experimentation-platform`` everywhere: an account-scoped name, so a
+    second environment in the same account could not be created at all (#139).
+    """
+    return f"experimentation-platform-{env_name}"
+
+
+def migration_task_family(env_name: str) -> str:
+    """The migration task definition family, ``experimentation-migrate-<env>``.
+
+    One family shared by every environment meant ``--task-definition
+    experimentation-migrate`` resolved to whichever environment registered a
+    revision last -- staging's migration could run prod's task definition.
+    """
+    return f"experimentation-migrate-{env_name}"
+
+
+def glue_names(env_name: str) -> dict[str, str]:
+    """The ``etl`` module's Glue names, keyed by the API setting that reads each.
+
+    Glue job, crawler and database names are account-scoped, and these were
+    literal (``experimentation-events-etl`` ...), so dev and staging in one
+    account collided on all four. The API finds them through the settings named
+    by the keys (``modules/backend/app/settings.py``); the Fargate stack sets
+    those variables on the task from this same function, so the stack that
+    creates a name and the service that calls it cannot disagree. The database
+    uses an underscore: Athena does not accept a hyphen in a database name.
+    """
+    return {
+        "GLUE_ETL_JOB_NAME": f"experimentation-events-etl-{env_name}",
+        "GLUE_METRICS_JOB_NAME": f"experimentation-metrics-etl-{env_name}",
+        "GLUE_DATABASE": f"experimentation_{env_name}",
+        "GLUE_CRAWLER_NAME": f"experimentation-crawler-{env_name}",
+    }

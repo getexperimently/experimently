@@ -89,26 +89,26 @@ class VpcStack(Stack):
         # Store VPC and subnet information in SSM Parameter Store for cross-stack reference
         ssm.StringParameter(
             self, "VpcId",
-            parameter_name="/experimentation/vpc/id",
+            parameter_name=f"/experimentation/{environment}/vpc/id",
             string_value=self.vpc.vpc_id
         )
         
         # Store comma-separated lists of subnet IDs in SSM for easy lookup
         ssm.StringParameter(
             self, "PublicSubnetIds",
-            parameter_name="/experimentation/vpc/public-subnet-ids",
+            parameter_name=f"/experimentation/{environment}/vpc/public-subnet-ids",
             string_value=",".join([subnet.subnet_id for subnet in self.vpc.public_subnets])
         )
         
         ssm.StringParameter(
             self, "PrivateSubnetIds",
-            parameter_name="/experimentation/vpc/private-subnet-ids",
+            parameter_name=f"/experimentation/{environment}/vpc/private-subnet-ids",
             string_value=",".join([subnet.subnet_id for subnet in self.vpc.private_subnets])
         )
         
         ssm.StringParameter(
             self, "IsolatedSubnetIds",
-            parameter_name="/experimentation/vpc/isolated-subnet-ids",
+            parameter_name=f"/experimentation/{environment}/vpc/isolated-subnet-ids",
             string_value=",".join([subnet.subnet_id for subnet in self.vpc.isolated_subnets])
         )
 
@@ -195,7 +195,7 @@ These endpoints allow services within the VPC to access AWS services without goi
 ## SSH to the bastion is opt-in
 
 The VPC creates a bastion security group — the Aurora cluster grants it access,
-and its id is published to SSM at `/experimentation/vpc/bastion-sg-id` — but it
+and its id is published to SSM at `/experimentation/<env>/vpc/bastion-sg-id` — but it
 has **no ingress rule unless you ask for one**:
 
 ```bash

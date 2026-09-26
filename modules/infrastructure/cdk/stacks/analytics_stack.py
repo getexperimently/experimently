@@ -1,7 +1,6 @@
 from aws_cdk import (
     Stack,
     Duration,
-    RemovalPolicy,
     aws_ec2 as ec2,
     aws_kinesis as kinesis,
     aws_lambda as lambda_,
@@ -12,6 +11,8 @@ from aws_cdk import (
     aws_lambda_event_sources as lambda_event_sources,
 )
 from constructs import Construct
+
+from stacks.environments import data_removal_policy, retains_data
 
 
 class AnalyticsStack(Stack):
@@ -49,10 +50,15 @@ class AnalyticsStack(Stack):
     nothing needed to change to follow them.
     """
 
-    def __init__(self, scope: Construct, construct_id: str, vpc, **kwargs) -> None:
+    def __init__(
+        self, scope: Construct, construct_id: str, vpc, env_name: str, **kwargs
+    ) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
-        env_name = self.node.try_get_context("env") or "dev"
+        # From app.py's ENVIRONMENT. It was the CDK context key `env`, which
+        # nothing sets, so the Lambda below was told ENVIRONMENT=dev in every
+        # environment (#142, the same defect as the compute stack's cluster).
+        retain = retains_data(env_name)
 
         # No explicit physical names anywhere in this stack -- see the class
         # docstring. CloudFormation derives one from the stack name and the
@@ -62,15 +68,28 @@ class AnalyticsStack(Stack):
             "EventsStream",
             shard_count=1,  # Increase for production
             retention_period=Duration.hours(24),
+            # Kept on teardown in prod only (stacks/environments.py). A
+            # retained stream bills per shard-hour with nothing writing to it.
+            removal_policy=data_removal_policy(env_name),
         )
 
         # RETAIN plus a name that changed every synth is what orphaned
         # `exp-data-hdv7dl4h-us-west-2` in this account: the replacement was
         # created and the old bucket kept, with nothing pointing at it.
+        #
+        # Outside prod the bucket is destroyed with the stack, which
+        # CloudFormation can only do to an EMPTY bucket -- and this one is
+        # versioned and written by Firehose, so it never is. auto_delete_objects
+        # adds a custom resource (a CDK-provided Lambda,
+        # Custom::S3AutoDeleteObjectsCustomResourceProvider, and its role) that
+        # on stack deletion denies new writes and deletes every object version
+        # and delete marker. It acts only on a bucket carrying the
+        # `aws-cdk:auto-delete-objects` tag, i.e. one deployed with this code.
         self.data_lake_bucket = s3.Bucket(
             self,
             "DataLakeBucket",
-            removal_policy=RemovalPolicy.RETAIN,
+            removal_policy=data_removal_policy(env_name),
+            auto_delete_objects=not retain,
             versioned=True,
         )
 
@@ -169,6 +188,9 @@ class AnalyticsStack(Stack):
             ],
             encryption_at_rest=opensearch.EncryptionAtRestOptions(enabled=True),
             node_to_node_encryption=True,
+            # Kept on teardown in prod only: a retained domain bills per
+            # instance-hour whether or not anything queries it.
+            removal_policy=data_removal_policy(env_name),
         )
 
         # Rest of implementation unchanged...

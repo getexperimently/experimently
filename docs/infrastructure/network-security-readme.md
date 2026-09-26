@@ -25,7 +25,7 @@ This Terraform configuration sets up a robust network infrastructure with compre
 
 ## NAT Gateway Setup
 
-- Two NAT Gateways for high availability
+- NAT gateways: two in `prod` (one per AZ, for availability), one in every other environment
 - One NAT Gateway per availability zone
 - Enables private subnets to access internet securely
 - Uses Elastic IPs for stable external access
