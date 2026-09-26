@@ -12,8 +12,8 @@
 # scripts/doc_examples.py), and each page's residual counts can only fall.
 
 [meta]
-documents = 8
-exec = 34
+documents = 9
+exec = 36
 universe = [
     ".github/pull_request_template.md",
     "CHANGELOG.md",
@@ -234,6 +234,13 @@ exec = 2
 skip = 0
 expects = 1
 
+[[document]]
+path = "docs/getting-started/modules.md"
+environment = "stack-full"
+exec = 2
+skip = 4
+expects = 2
+
 [pending]
 "backend/lambda/README.md" = { comments = 0, unlabelled = 1, syntax = 0 }
 "backend/lambda/event_processor/README.md" = { comments = 5, unlabelled = 1, syntax = 0 }
@@ -276,7 +283,6 @@ expects = 1
 "docs/development/workflow-explanation.md" = { comments = 5, unlabelled = 0, syntax = 0 }
 "docs/feature-flags/rollouts.md" = { comments = 0, unlabelled = 1, syntax = 0 }
 "docs/feature-flags/safety.md" = { comments = 0, unlabelled = 0, syntax = 0 }
-"docs/getting-started/modules.md" = { comments = 12, unlabelled = 0, syntax = 0 }
 "docs/getting-started/pre-commit-hooks.md" = { comments = 5, unlabelled = 0, syntax = 0 }
 "docs/getting-started/python-virtual-env-setup.md" = { comments = 6, unlabelled = 1, syntax = 0 }
 "docs/getting-started/vscode-settings.md" = { comments = 0, unlabelled = 0, syntax = 0 }
