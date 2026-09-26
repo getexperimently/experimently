@@ -104,7 +104,7 @@ jobs:
     needs: plan
     runs-on: ubuntu-latest
     # A shard holds at most PAGES_PER_SHARD pages (scripts/doc_examples.py),
-    # measured at 60-73 s each, so its run step stays near 8 minutes. The runner
+    # measured at 55-79 s each, so its run step stays under 8 minutes. The runner
     # stops itself before this timeout, at the deadline the first step exports,
     # so a hang is named rather than killed.
     timeout-minutes: ${{ github.event_name == 'pull_request' && 15 || 20 }}

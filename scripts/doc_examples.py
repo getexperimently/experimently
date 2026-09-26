@@ -276,15 +276,17 @@ MODULES_URL = "http://localhost:8000/api/v1/modules"
 # ---------------------------------------------------------------------------
 # Shards (E0b).  Every page that runs costs about the same: one stack start
 # (the runner's, or the page's own `docker compose up`) and its teardown.
-# Measured on PR #199's run 36267027036: 60-73 s a page for thirteen of its
-# fourteen pages (the fourteenth starts nothing: 0.3 s).  PAGE_SECONDS is the
-# worst of those, rounded up; a shard holds as many pages as fit its run step
-# in SHARD_BUDGET_SECONDS, which leaves the job's setup (~1.5 min) inside the
-# 10-minute shard budget and well inside the job's timeout.  The summary warns
-# when a page takes longer than PAGE_SECONDS: that is the signal to measure
-# again, never a failure (no gate asserts a wall-clock time).
+# Measured on GitHub's runners with pre-built images, 2026-09-26: 55-79 s a
+# page that starts a stack, across runs 36267027036 (#199, one job),
+# 36269912546, 36270433347 and 36270972235 (sharded); a page that starts
+# nothing takes under a second.  PAGE_SECONDS is the worst of those, rounded
+# up; a shard holds as many pages as fit its run step in SHARD_BUDGET_SECONDS,
+# which leaves the job's setup (~1.5 min) inside the 10-minute shard budget
+# and well inside the job's timeout.  The summary warns when a page takes
+# longer than PAGE_SECONDS: that is the signal to measure again, never a
+# failure (no gate asserts a wall-clock time).
 # ---------------------------------------------------------------------------
-PAGE_SECONDS = 75
+PAGE_SECONDS = 80
 SHARD_BUDGET_SECONDS = 480
 PAGES_PER_SHARD = SHARD_BUDGET_SECONDS // PAGE_SECONDS
 # The image profile a page's stack needs.  Order is the plan's order.
