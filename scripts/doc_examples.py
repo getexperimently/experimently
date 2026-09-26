@@ -113,7 +113,7 @@ AUTHORING = "docs/development/doc-examples.md"
 # rule would count frontend/node_modules/**/README.md -- and so is every
 # dot-directory except .github.  CLAUDE.md files and .claude/ are working
 # instructions, not documentation (T1).
-PRUNED_DIRS = ("node_modules", "venv", "site")
+PRUNED_DIRS = ("node_modules", "venv", "site", "workspaces")
 KEPT_DOT_DIRS = (".github",)
 
 # Skip reasons begin with one of these, then ": " (``bug`` is ``bug #<n>: ``).

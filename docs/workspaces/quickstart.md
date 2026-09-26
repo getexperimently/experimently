@@ -12,7 +12,6 @@ scoped API key, and start using the workspace-scoped API in the SDK.
 
 Any authenticated platform user can create a workspace.
 
-<!--
 ```http
 POST /api/v1/workspaces/
 Authorization: Bearer <your-token>
@@ -25,7 +24,6 @@ Content-Type: application/json
   "plan": "free"
 }
 ```
--->
 
 **Response (201 Created):**
 ```json
