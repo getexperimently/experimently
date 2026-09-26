@@ -161,12 +161,16 @@ These secrets must be populated before the first deployment. See [secrets-manage
 
 | Secret Path | Injected as | Description |
 |-------------|-------------|-------------|
-| `/prod/experimentation/db-password` | `POSTGRES_PASSWORD` | Aurora PostgreSQL application user password |
 | `/prod/experimentation/jwt-secret` | `SECRET_KEY` | JWT signing secret (minimum 32 characters) |
 | `/prod/experimentation/redis-url` | `REDIS_URL` | Redis connection URL with auth token |
 | `/prod/experimentation/first-superuser-password` | `FIRST_SUPERUSER_PASSWORD` | Password for the first administrator; the default `admin` is refused in production |
 | `/prod/experimentation/audit-hmac-key` | `AUDIT_HMAC_KEY` | **`profile: full` only** — signs the compliance audit log; the modules refuse to register without it |
 | `/prod/experimentation/cognito-config` | — | Cognito user pool ID and client ID (JSON) |
+
+The database credentials are not in this table: `POSTGRES_USER` and
+`POSTGRES_PASSWORD` come from the secret the database stack generates for
+Aurora (`experimentation-database-<env>-aurora-credentials`), and
+`POSTGRES_SERVER` from its writer endpoint. Nothing to create.
 
 Every row except `cognito-config` is injected by the ECS task definitions
 (`infrastructure/cdk/stacks/fargate_service_stack.py` and

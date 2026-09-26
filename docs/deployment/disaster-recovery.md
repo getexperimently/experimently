@@ -217,7 +217,7 @@ aws rds describe-db-clusters \
 # Update the database connection secret with the new endpoint
 # (password remains the same; only host changes)
 EXISTING_SECRET=$(aws secretsmanager get-secret-value \
-  --secret-id /prod/experimentation/db-password \
+  --secret-id experimentation-database-prod-aurora-credentials \
   --query 'SecretString' --output text)
 
 # Update with new hostname in your connection string

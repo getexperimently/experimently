@@ -101,6 +101,7 @@ from backend.app.db.schema import (
     point_metadata_at,
     resolve_schema_name,
 )
+from backend.app.db.url import postgres_url
 
 logger = logging.getLogger(__name__)
 
@@ -126,7 +127,8 @@ def database_url() -> str:
     )
     port = os.environ.get("POSTGRES_PORT", "5432")
     db = os.environ.get("POSTGRES_DB", "experimentation")
-    return f"postgresql://{user}:{password}@{host}:{port}/{db}"
+    # Password percent-encoded (#146): see backend/app/db/url.py.
+    return postgres_url(user=user, password=password, host=host, port=port, database=db)
 
 
 def schema_name() -> str:

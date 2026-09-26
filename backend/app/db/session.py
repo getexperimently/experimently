@@ -14,6 +14,7 @@ from sqlalchemy.schema import CreateSchema
 
 from backend.app.core.config import settings
 from backend.app.core.database_config import get_schema_name
+from backend.app.db.url import postgres_url
 from backend.app.models.base import Base
 
 # Check for DATABASE_URI environment variable, otherwise use settings
@@ -30,7 +31,14 @@ if not database_uri:
         database_uri = str(settings.DATABASE_URI)
     # Fall back to constructing from components
     else:
-        database_uri = f"postgresql://{settings.POSTGRES_USER}:{settings.POSTGRES_PASSWORD}@{settings.POSTGRES_SERVER}:{settings.POSTGRES_PORT}/{settings.POSTGRES_DB}"
+        # Password percent-encoded (#146): see backend/app/db/url.py.
+        database_uri = postgres_url(
+            user=settings.POSTGRES_USER,
+            password=settings.POSTGRES_PASSWORD,
+            host=settings.POSTGRES_SERVER,
+            port=settings.POSTGRES_PORT,
+            database=settings.POSTGRES_DB,
+        )
 
 # Create engine with appropriate configuration
 engine = create_engine(

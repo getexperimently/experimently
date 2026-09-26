@@ -23,6 +23,7 @@ from pydantic import (
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 from backend.app.core.version import get_version
+from backend.app.db.url import postgres_url
 
 logger = logging.getLogger(__name__)
 
@@ -251,6 +252,22 @@ def resolve_environment_from_process_env() -> str:
         logger.warning(message)
         return canonical_environment(legacy)
     return "development"
+
+
+def _postgres_url(data: Dict[str, Any]) -> str:
+    """The database URL from the POSTGRES_* fields, password percent-encoded.
+
+    ``PostgresDsn.build`` does not encode, so a password containing ``#``,
+    ``?``, ``%``, ``:`` or a space either broke the URL or refused to validate
+    (#146). ``backend/app/db/url.py`` explains the encoding.
+    """
+    return postgres_url(
+        user=data.get("POSTGRES_USER") or "",
+        password=data.get("POSTGRES_PASSWORD") or "",
+        host=data.get("POSTGRES_SERVER"),
+        port=int(data.get("POSTGRES_PORT", 5432)),
+        database=data.get("POSTGRES_DB", ""),
+    )
 
 
 class Settings(BaseSettings):
@@ -892,15 +909,9 @@ class Settings(BaseSettings):
     ) -> Any:
         """Assemble database connection string if not provided directly."""
         if isinstance(v, str):
+            # Supplied whole, so used as given: it must already be encoded.
             return v
-        return PostgresDsn.build(
-            scheme="postgresql",
-            username=info.data.get("POSTGRES_USER"),
-            password=info.data.get("POSTGRES_PASSWORD"),
-            host=info.data.get("POSTGRES_SERVER"),
-            port=int(info.data.get("POSTGRES_PORT", 5432)),
-            path=info.data.get("POSTGRES_DB", ""),
-        )
+        return _postgres_url(info.data)
 
     @field_validator("SQLALCHEMY_DATABASE_URI", mode="before")
     @classmethod
@@ -913,14 +924,7 @@ class Settings(BaseSettings):
         if database_uri:
             return database_uri
         # Otherwise build from components
-        return PostgresDsn.build(
-            scheme="postgresql",
-            username=info.data.get("POSTGRES_USER"),
-            password=info.data.get("POSTGRES_PASSWORD"),
-            host=info.data.get("POSTGRES_SERVER"),
-            port=int(info.data.get("POSTGRES_PORT", 5432)),
-            path=info.data.get("POSTGRES_DB", ""),
-        )
+        return _postgres_url(info.data)
 
     @field_validator("REDIS_URI", mode="before")
     @classmethod
@@ -1029,29 +1033,6 @@ class ProdSettings(Settings):
     model_config = SettingsConfigDict(
         env_file=ENV_FILES["production"], case_sensitive=True, extra="ignore"
     )
-
-    def get_db_url(self) -> str:
-        """
-        Get the database URL, loading from Secrets Manager if needed.
-
-        In production with ECS, POSTGRES_PASSWORD is injected directly
-        from Secrets Manager as an env var by the task definition.
-        This method is a fallback for non-ECS production deployments
-        where the password was not injected via env var.
-        """
-        if self.ENVIRONMENT == "production" and not self.POSTGRES_PASSWORD:
-            try:
-                from backend.app.core.secrets import build_secret_name, get_secret
-
-                password = get_secret(build_secret_name("db-password"))
-                return (
-                    f"postgresql://{self.POSTGRES_USER}:{password}"
-                    f"@{self.POSTGRES_SERVER}:{self.POSTGRES_PORT}"
-                    f"/{self.POSTGRES_DB}"
-                )
-            except Exception:
-                pass  # Fall through to standard URL construction
-        return str(self.SQLALCHEMY_DATABASE_URI)
 
 
 # ---------------------------------------------------------------------------

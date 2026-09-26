@@ -15,6 +15,7 @@ from aws_cdk import (
 from constructs import Construct
 
 from stacks.dashboard_service import DashboardService
+from stacks.database_access import require_database
 from stacks.names import (
     API_LIVE_TARGET_GROUP_CONTEXT,
     API_LIVE_TARGET_GROUP_DEFAULT,
@@ -59,6 +60,13 @@ class FargateServiceStack(Stack):
     - The Secrets Manager secrets listed in docs/deployment/README.md must
       exist. ECS cannot start a task whose task definition names a secret that
       is not there, and the application cannot start without their values.
+      The database credentials are NOT among them: they come from the secret
+      the database stack generated for Aurora (``db_credentials``).
+
+    ``db_host``, ``db_credentials`` and ``db_security_group`` are the database
+    stack's writer endpoint, generated credentials secret and security group
+    (#78). Synth refuses to build the stack without them; the security group is
+    what this stack opens to the ECS tasks on 5432.
 
     ``include_modules`` is the deployment's profile (``app.py`` passes
     ``ENABLE_MODULE_STACKS``). ``True`` adds the full profile's own secret,
@@ -78,9 +86,20 @@ class FargateServiceStack(Stack):
         include_modules: bool = False,
         api_desired_count: int = 3,
         dashboard_desired_count: int = 1,
+        db_host: str = None,
+        db_credentials=None,
+        db_security_group=None,
         **kwargs,
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
+        require_database("FargateServiceStack", db_host, db_credentials)
+        if db_security_group is None:
+            raise ValueError(
+                "FargateServiceStack requires db_security_group: Aurora's "
+                "security group (database_stack.rds_security_group), which "
+                "has to admit the ECS tasks on 5432 or every connection times "
+                "out."
+            )
         # PUBLIC_BASE_URL is the URL users reach this service at, e.g.
         # https://api.example.com. It is required at SYNTH, like CERTIFICATE_ARN and
         # for a related reason: the application refuses to start in staging or
@@ -117,9 +136,12 @@ class FargateServiceStack(Stack):
         # These secrets must be created manually (or by another stack) before
         # deploying this stack. The secret paths follow the convention:
         #   /<env>/experimentation/<secret-name>
-        db_secret = secretsmanager.Secret.from_secret_name_v2(
-            self, "DbSecret", f"/{env_name}/experimentation/db-password"
-        )
+        #
+        # The database password is not one of them (#78, #146). It was
+        # `/<env>/experimentation/db-password`, a secret a human created by
+        # hand and nothing ever set on the cluster, so the task would have
+        # presented a password Aurora had never heard of. The credentials now
+        # come from `db_credentials`, the secret Aurora was created with.
         jwt_secret = secretsmanager.Secret.from_secret_name_v2(
             self, "JwtSecret", f"/{env_name}/experimentation/jwt-secret"
         )
@@ -140,7 +162,7 @@ class FargateServiceStack(Stack):
             "SuperuserPasswordSecret",
             f"/{env_name}/experimentation/first-superuser-password",
         )
-        required_secrets = [db_secret, jwt_secret, redis_secret, superuser_secret]
+        required_secrets = [jwt_secret, redis_secret, superuser_secret]
 
         # AUDIT_HMAC_KEY is the full profile's: `modules.register(hooks)` builds
         # ModulesSettings as its first step and its validator rejects the dev
@@ -301,12 +323,27 @@ class FargateServiceStack(Stack):
                 "PUBLIC_BASE_URL": public_base_url,
                 "LOG_LEVEL": "INFO",
                 "PYTHONUNBUFFERED": "1",
+                # This environment's Aurora WRITER endpoint (#78), imported
+                # from the database stack. Without it the application falls
+                # back to localhost and `/health` -- the ALB's health check,
+                # which runs the database check -- never passes.
+                "POSTGRES_SERVER": db_host,
                 "POSTGRES_DB": "experimentation",
                 "POSTGRES_SCHEMA": "experimentation",
                 "POSTGRES_PORT": "5432",
             },
             secrets={
-                "POSTGRES_PASSWORD": ecs.Secret.from_secrets_manager(db_secret),
+                # Both halves from the secret Aurora generated its master
+                # credentials into; ECS grants the execution role read access
+                # to it. The generated password can hold any printable
+                # character except the four the database stack excludes, so
+                # the application percent-encodes it (backend/app/db/url.py).
+                "POSTGRES_USER": ecs.Secret.from_secrets_manager(
+                    db_credentials, field="username"
+                ),
+                "POSTGRES_PASSWORD": ecs.Secret.from_secrets_manager(
+                    db_credentials, field="password"
+                ),
                 "SECRET_KEY": ecs.Secret.from_secrets_manager(jwt_secret),
                 "REDIS_URL": ecs.Secret.from_secrets_manager(redis_secret),
                 "FIRST_SUPERUSER_PASSWORD": ecs.Secret.from_secrets_manager(
@@ -579,6 +616,24 @@ class FargateServiceStack(Stack):
                 0
             ].security_group_id,
             description="Load balancer to target",
+        )
+
+        # The tasks to Aurora, on the same pattern as the rule above and
+        # written here for the same kind of reason: this is the one stack that
+        # knows both groups. The database stack cannot name the ECS group
+        # (compute depends on database), and Aurora's group was created with
+        # no ingress at all, so without this every connection from a task
+        # times out (#78). The migration task runs in the same ECS group
+        # (migration_task_stack.py outputs it), so this one rule admits both.
+        ec2.CfnSecurityGroupIngress(
+            self,
+            "TasksToDatabaseIngress",
+            group_id=db_security_group.security_group_id,
+            ip_protocol="tcp",
+            from_port=5432,
+            to_port=5432,
+            source_security_group_id=ecs_security_group.security_group_id,
+            description="ECS tasks to Aurora PostgreSQL",
         )
 
         # --- CodeDeploy IAM Role ---
