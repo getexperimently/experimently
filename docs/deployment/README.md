@@ -207,6 +207,10 @@ rest -- chiefly undoing one:
 
 ### Health Checks
 
+The last two commands below are the dashboard's: `GET /` (everything that is
+not an API path) answers 200 `text/html`, and, as a rolling service, what it
+runs is its PRIMARY deployment, not a task set.
+
 ```bash
 # Through the public origin (PUBLIC_BASE_URL). /health is readiness: it runs
 # the database check, and it is what the load balancer probes.
@@ -224,10 +228,8 @@ aws ecs describe-services \
   --services "experimentation-backend-$ENV" \
   --query "services[0].{Running:runningCount,Desired:desiredCount,Serving:taskSets[?status=='PRIMARY'].taskDefinition|[0]}"
 
-# The dashboard: everything that is not an API path. 200 text/html.
 curl -sS -o /dev/null -w '%{http_code} %{content_type}\n' https://app.example.com/
 
-# The dashboard is a rolling service: its PRIMARY deployment, not task sets.
 aws ecs describe-services \
   --cluster "experimentation-$ENV" \
   --services "experimentation-dashboard-$ENV" \

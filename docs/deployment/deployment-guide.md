@@ -359,6 +359,9 @@ in a later release, once nothing running reads it.
 
 ## 5. Post-Deployment Verification
 
+The last two commands are the dashboard's: `GET /` answers 200 `text/html`,
+and its PRIMARY deployment names the new revision, `COMPLETED`.
+
 ```bash
 ENV=staging   # or prod
 BASE=https://app.<domain>
@@ -370,7 +373,7 @@ aws ecs describe-services --cluster "experimentation-$ENV" \
   --services "experimentation-backend-$ENV" \
   --query "services[0].{Running:runningCount,Desired:desiredCount,Serving:taskSets[?status=='PRIMARY'].taskDefinition|[0]}"
 
-curl -sS -o /dev/null -w '%{http_code} %{content_type}\n' "$BASE/"   # 200 text/html
+curl -sS -o /dev/null -w '%{http_code} %{content_type}\n' "$BASE/"
 aws ecs describe-services --cluster "experimentation-$ENV" \
   --services "experimentation-dashboard-$ENV" \
   --query "services[0].deployments[?status=='PRIMARY'].{td:taskDefinition,state:rolloutState,running:runningCount,desired:desiredCount}"

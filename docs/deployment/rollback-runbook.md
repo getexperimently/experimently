@@ -130,11 +130,15 @@ aws ecs describe-services \
   --cluster "experimentation-$ENV" \
   --services experimentation-backend-$ENV \
   --query 'services[0].events[:5]'
+```
 
-# The dashboard: the same listing for its own family and container. Only a
-# revision whose image is a digest (web@sha256:...) is a release; a deploy
-# registered it. `:bootstrap` or a version tag is one CloudFormation
-# registered, and Rollback refuses it.
+The dashboard has the same listing for its own family and container. Only a
+revision whose image is a digest (`web@sha256:...`) is a release: a deploy
+registered it. A `:bootstrap` or version-tag image is a revision CloudFormation
+registered, and Rollback refuses it. The second command shows what the
+dashboard is serving: its PRIMARY *deployment* (it has no task sets).
+
+```bash
 for arn in $(aws ecs list-task-definitions \
       --family-prefix experimentation-dashboard-$ENV \
       --sort DESC --max-results 10 --query 'taskDefinitionArns' --output text); do
@@ -143,7 +147,6 @@ for arn in $(aws ecs list-task-definitions \
   echo "$arn  $image"
 done
 
-# What the dashboard is serving: its PRIMARY *deployment* (it has no task sets).
 aws ecs describe-services \
   --cluster "experimentation-$ENV" \
   --services experimentation-dashboard-$ENV \
@@ -333,22 +336,22 @@ curl -sf "https://app.<domain>/health" && echo "Health check PASSED" || echo "He
 workflow always rolls the API back too, and stops any in-flight API deployment
 with auto-rollback; and within about an hour of a deploy's traffic shift,
 Deploy refuses a re-run while that CodeDeploy deployment is still active. Pick
-the target from Method 1 Step 1's dashboard listing (a digest image):
+the target from Method 1 Step 1's dashboard listing (a digest image). For a
+rolling service, pointing it at the revision IS the rollback. Then wait on the
+PRIMARY deployment, not `wait services-stable` (see "The dashboard is the
+opposite case"): if the PRIMARY turns back to the revision you replaced, the
+circuit breaker rejected the target, so stop the loop and read the service
+events.
 
 ```bash
 DASH_TASK_DEF="arn:aws:ecs:us-west-2:ACCOUNT_ID:task-definition/experimentation-dashboard-$ENV:6"
 
-# A rolling service: pointing it at the revision IS the rollback.
 aws ecs update-service \
   --cluster "experimentation-$ENV" \
   --service experimentation-dashboard-$ENV \
   --task-definition "$DASH_TASK_DEF" \
   --query "service.deployments[?status=='PRIMARY'].id" --output text
 
-# Wait on the PRIMARY deployment, NOT `wait services-stable` (see "The
-# dashboard is the opposite case"). If the PRIMARY turns back to the revision
-# you replaced, the circuit breaker rejected the target: stop and read the
-# service events.
 until [ "$(aws ecs describe-services --cluster "experimentation-$ENV" \
              --services experimentation-dashboard-$ENV \
              --query "services[0].deployments[?status=='PRIMARY'].[taskDefinition,rolloutState] | [0]" \
