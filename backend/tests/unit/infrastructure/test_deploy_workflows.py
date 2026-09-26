@@ -18,8 +18,10 @@ pinned here, each with the defect it exists to catch:
 * the image pushed once as ``:<tag>-<profile>``, labelled with the commit
   actually built, and named by digest in every task definition registered
   (#71, #70, #138, QA 1c/2/10/11);
-* no forward-deploy wait that can roll back a successful deployment (#143;
-  the forward loop itself is B3b);
+* a forward deploy that completes (#143, PE v2 C6-C8): it refuses while an
+  earlier deployment is active, approves the shift only on healthy targets,
+  with READY_WAIT, never stops a deployment and never waits for Succeeded,
+  and succeeds on the one serving predicate (scripts/api_serving.py);
 * the smoke test a real request through the public origin, inside the deploy
   job, with nothing installed (#144, PE v2 C10).
 
@@ -30,6 +32,8 @@ here rather than turning into green skips (QA 4d).
 
 from __future__ import annotations
 
+import ast
+import importlib.util
 import re
 from pathlib import Path
 from typing import Any, Iterator
@@ -42,6 +46,7 @@ WORKFLOWS = REPO_ROOT / ".github" / "workflows"
 ACTIONS = REPO_ROOT / ".github" / "actions"
 DEPLOY = WORKFLOWS / "deploy.yml"
 ROLLBACK = WORKFLOWS / "rollback.yml"
+SCRIPTS = REPO_ROOT / "scripts"
 DB_MIGRATE = WORKFLOWS / "db-migrate.yml"
 AWS_WORKFLOWS = (DEPLOY, ROLLBACK, DB_MIGRATE)
 IDS = [p.name for p in AWS_WORKFLOWS]
@@ -426,6 +431,7 @@ MUTATIONS = (
     "create-deployment",
     "continue-deployment",
     "stop-deployment",
+    "shift_traffic.py",
 )
 #: The refusals, each a read.
 REFUSALS = {
@@ -435,6 +441,7 @@ REFUSALS = {
     "profile vs task definition": "injects no AUDIT_HMAC_KEY",
     "missing secrets": "aws secretsmanager describe-secret",
     "ECR repository": "aws ecr describe-repositories",
+    "earlier deployment still active": "scripts/refuse_active_deployment.py",
 }
 
 
@@ -614,30 +621,174 @@ def test_the_network_comes_from_the_stack_outputs(path):
     assert "fromJSON(steps.fargate.outputs.json).TaskSecurityGroup" in text
 
 
-# --- CodeDeploy in B3a: nothing that rolls a success back (#143) ----------------
+# --- CodeDeploy: the forward deploy completes (#143, PE v2 C6-C8) -------------
 
 
-@pytest.mark.regression
-def test_the_forward_deploy_cannot_roll_back_a_successful_deployment():
-    """The waiter accepts only Succeeded, an hour after the shift; on its
-    timeout the old step stopped the deployment with auto-rollback -- rolling
-    back a deployment that had succeeded (#143).
+def _python_code_strings(path: Path) -> list[str]:
+    """Every string literal in a Python file except its docstrings.
+
+    What a script can pass to `aws` is a string literal in its code; what its
+    docstring says about `stop-deployment` is not a call.
     """
-    code = "\n".join(_runs(DEPLOY))
-    assert "wait deployment-successful" not in code
-    assert "stop-deployment" not in code
-    assert "timeout 1200" not in code
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    docstrings = set()
+    for node in ast.walk(tree):
+        if isinstance(
+            node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+        ):
+            body = node.body
+            if (
+                body
+                and isinstance(body[0], ast.Expr)
+                and isinstance(body[0].value, ast.Constant)
+                and isinstance(body[0].value.value, str)
+            ):
+                docstrings.add(id(body[0].value))
+    return [
+        node.value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant)
+        and isinstance(node.value, str)
+        and id(node) not in docstrings
+    ]
+
+
+_SCRIPT_REF = re.compile(r"\bscripts/([A-Za-z0-9_.-]+\.(?:sh|py))\b")
+_PY_IMPORT = re.compile(r"^(?:import|from)\s+([A-Za-z_][A-Za-z0-9_]*)", re.M)
+
+
+def _script_closure(names: list[str]) -> list[Path]:
+    """The scripts named, and every sibling module a Python one imports."""
+    seen: list[Path] = []
+    queue = [SCRIPTS / n for n in names]
+    while queue:
+        path = queue.pop(0)
+        if path in seen:
+            continue
+        assert path.is_file(), f"{path.relative_to(REPO_ROOT)} does not exist"
+        seen.append(path)
+        if path.suffix == ".py":
+            for name in _PY_IMPORT.findall(path.read_text(encoding="utf-8")):
+                if (SCRIPTS / f"{name}.py").is_file():
+                    queue.append(SCRIPTS / f"{name}.py")
+    return seen
+
+
+def _script_code(path: Path) -> str:
+    if path.suffix == ".py":
+        return "\n".join(_python_code_strings(path))
+    return _code(path.read_text(encoding="utf-8"))
+
+
+def _forward_path() -> list[tuple[str, str]]:
+    """The deploy job, step by step, each step's code followed by its scripts'."""
+    pieces = []
+    for index, step in enumerate(_steps(_deploy_job())):
+        code = _run_of(step)
+        scripts = _script_closure(_SCRIPT_REF.findall(code))
+        text = "\n".join([code, *(_script_code(p) for p in scripts)])
+        pieces.append((f"deploy[{index}] {step.get('name', '')}", text))
+    return pieces
+
+
+#: What the forward deploy must never do (#143, PE v2 C7). The waiter accepts
+#: only Succeeded, an hour after the shift; the old step then stopped the
+#: deployment with auto-rollback -- rolling back one that had succeeded.
+FORBIDDEN_IN_THE_FORWARD_PATH = (
+    "wait deployment-successful",
+    "stop-deployment",
+    "timeout 1200",
+    "TERMINATION_WAIT",
+)
 
 
 @pytest.mark.regression
-def test_the_traffic_shift_is_an_explicit_placeholder_until_b3b():
+@pytest.mark.parametrize("forbidden", FORBIDDEN_IN_THE_FORWARD_PATH)
+def test_the_forward_deploy_cannot_roll_back_a_successful_deployment(forbidden):
+    pieces = _forward_path()
+    scanned = "\n".join(text for _, text in pieces)
+    # Not vacuous: the scripts' code is in what was scanned.
+    assert "continue-deployment" in scanned and "describe-target-health" in scanned
+    offenders = [where for where, text in pieces if forbidden in text]
+    assert not offenders, f"{forbidden!r} in the forward deploy: {offenders}"
+
+
+@pytest.mark.regression
+def test_no_stop_deployment_after_continue_deployment():
+    """The plan's ordering rule, on its own: once the shift is approved,
+    nothing in the forward path may stop the deployment."""
+    text = "\n".join(t for _, t in _forward_path())
+    approved = text.find("continue-deployment")
+    assert approved >= 0, "the forward deploy never approves its traffic shift"
+    assert "stop-deployment" not in text[approved:]
+
+
+def _module(name: str):
+    spec = importlib.util.spec_from_file_location(name, SCRIPTS / f"{name}.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.mark.regression
+def test_the_loop_may_only_approve_and_read():
+    """Pinned exactly: the one CodeDeploy write the loop may make is
+    continue-deployment, and it passes READY_WAIT."""
+    shift = _module("shift_traffic")
+    assert shift.OPERATIONS == {
+        ("deploy", "get-deployment"),
+        ("deploy", "continue-deployment"),
+        ("ecs", "describe-services"),
+        ("elbv2", "describe-target-health"),
+    }
+    strings = _python_code_strings(SCRIPTS / "shift_traffic.py")
+    assert "READY_WAIT" in strings and "--deployment-wait-type" in strings
+    refuse = _module("refuse_active_deployment")
+    assert refuse.OPERATIONS == {
+        ("deploy", "list-deployments"),
+        ("deploy", "get-deployment"),
+    }
+
+
+def _shift_step() -> tuple[int, dict[str, Any]]:
     steps = _steps(_deploy_job())
+    (index,) = _step_index(steps, lambda s: "scripts/shift_traffic.py" in _run_of(s))
+    return index, steps[index]
+
+
+@pytest.mark.regression
+def test_the_traffic_shift_follows_the_deployment_and_precedes_the_smoke():
+    steps = _steps(_deploy_job())
+    index, step = _shift_step()
     (create,) = _step_index(steps, lambda s: "create-deployment" in _run_of(s))
-    placeholder = steps[create + 1]
-    assert "#143" in placeholder["name"]
-    assert "exit 1" in _run_of(placeholder)
-    assert "does not approve the traffic shift yet: #143" in _run_of(placeholder)
-    assert "continue-deployment" not in "\n".join(_runs(DEPLOY))
+    smoke, _ = _smoke()
+    assert create < index < smoke
+    # The stable id C4 reads, and the ARN this run registered.
+    assert step["id"] == "api-serving"
+    assert step["env"]["TASK_DEFINITION"] == "${{ steps.api-td.outputs.arn }}"
+    assert step["env"]["DEPLOYMENT_ID"] == "${{ steps.codedeploy.outputs.id }}"
+    code = _run_of(step)
+    for flag, value in (
+        ("--deadline-seconds", '"$CODEDEPLOY_DEADLINE_SECONDS"'),
+        ("--interval-seconds", '"$CODEDEPLOY_POLL_SECONDS"'),
+        ("--cluster", '"$ECS_CLUSTER"'),
+        ("--service", '"$ECS_BACKEND_SERVICE"'),
+        ("--task-definition", '"$TASK_DEFINITION"'),
+    ):
+        assert f"{flag} {value}" in code, flag
+    # The placeholder that stopped every run is gone.
+    text = DEPLOY.read_text(encoding="utf-8")
+    assert "does not approve the traffic shift yet" not in text
+    assert "PLACEHOLDER" not in text
+
+
+@pytest.mark.regression
+def test_the_codedeploy_deadline_is_a_named_value_inside_the_job_timeout():
+    env = _load(DEPLOY)["env"]
+    deadline = env["CODEDEPLOY_DEADLINE_SECONDS"]
+    assert isinstance(deadline, str) and deadline.isdigit(), deadline
+    assert env["CODEDEPLOY_POLL_SECONDS"].isdigit()
+    assert int(deadline) < _deploy_job()["timeout-minutes"] * 60
 
 
 # --- smoke (#144, PE v2 C10) ---------------------------------------------------
@@ -756,6 +907,22 @@ def test_the_summary_hands_over_the_rollback_line():
     (previous,) = [s for s in steps if s.get("id") == "previous"]
     assert "taskSets[?status=='PRIMARY'].taskDefinition" in _run_of(previous)
     assert summary["env"]["PREVIOUS"] == "${{ steps.previous.outputs.arn }}"
+
+
+@pytest.mark.regression
+def test_the_summary_prints_the_live_group_and_says_the_canary_is_timed_only():
+    """PE v2 C8 and EM C5: the live group and the next cdk value; T21's honesty."""
+    steps = _steps(_deploy_job())
+    (summary,) = [s for s in steps if s.get("name") == "Run summary"]
+    code = _run_of(summary)
+    assert summary["env"]["LIVE_GROUP"] == (
+        "${{ steps.api-serving.outputs.live_target_group }}"
+    )
+    assert summary["env"]["SHIFT_RESULT"] == "${{ steps.api-serving.outputs.result }}"
+    assert "| Live API target group |" in code
+    assert "-c api_live_target_group=${LIVE_GROUP}" in code
+    assert "The canary is timed only" in code
+    assert "nothing rolls back automatically on application errors" in code
 
 
 @pytest.mark.regression

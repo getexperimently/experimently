@@ -19,20 +19,15 @@ The FastAPI application runs on **Amazon ECS Fargate** — a serverless containe
 The platform uses **AWS CodeDeploy** for zero-downtime blue/green deployments:
 
 1. A new task definition is registered with the updated container image
-2. CodeDeploy creates a "green" target group and shifts 10% of traffic to it
-3. After a configurable bake time (default 5 minutes), full traffic is shifted to green
-4. If health checks fail at any stage, traffic shifts back to the blue target group automatically
+2. CodeDeploy starts the new tasks in the idle target group; the Deploy workflow approves the shift once every one is healthy
+3. The canary shifts 10% of traffic, waits 5 minutes, then shifts the rest
+4. The canary is timed only: nothing rolls back automatically on application errors. CodeDeploy rolls back only a deployment that fails or is stopped, and the [Rollback workflow](../deployment/rollback-runbook.md) is the response to a bad release
 
-To deploy a new version:
-
-```bash
-# Build and push the Docker image
-docker build -t your-account.dkr.ecr.region.amazonaws.com/experimentation-api:latest .
-docker push your-account.dkr.ecr.region.amazonaws.com/experimentation-api:latest
-
-# Deploy via CDK (re-deploys the ECS service with the new image)
-cd infrastructure && cdk deploy experimentation-fargate-prod
-```
+To deploy a new version, run **Actions → Deploy** with a release tag
+([deployment guide, section 3](../deployment/deployment-guide.md#3-every-deploy)).
+The API's revision moves through CodeDeploy, not through `cdk deploy`: the
+service has a CODE_DEPLOY deployment controller, and ECS refuses a
+task-definition change through UpdateService on such a service.
 
 ### Environment Variables
 

@@ -83,6 +83,15 @@ env:
   # One region (docs/self-hosting/cdk.md deploys the stacks to the same one).
   AWS_REGION: us-west-2
   ECR_BACKEND_REPO: experimentation-platform/backend
+  # How long the forward deploy waits for the API to serve the new revision:
+  # the replacement tasks starting, the approval, the canary's five minutes
+  # and the final shift. It is a bound, not an estimate. When it passes, the
+  # run goes red and nothing is stopped (scripts/shift_traffic.py). The
+  # deployment group's own approval wait is 30 minutes, so a deadline that
+  # passes before the approval leaves CodeDeploy to stop an unapproved
+  # deployment, which is harmless.
+  CODEDEPLOY_DEADLINE_SECONDS: '1800'
+  CODEDEPLOY_POLL_SECONDS: '10'
 
 jobs:
   preflight:
@@ -377,6 +386,17 @@ jobs:
             exit 1
           fi
 
+      # A successful deploy's CodeDeploy deployment stays active for an hour
+      # after its traffic shift, while the group keeps the old task set: that
+      # hour is Rollback's window. CodeDeploy refuses a second deployment
+      # meanwhile, so without this a deploy inside the hour would build,
+      # snapshot and migrate, then fail at create-deployment. Refused here,
+      # read-only, naming the deployment and roughly how long it has left.
+      # Never stopped: stopping a shifted deployment rolls back a success
+      # (PE v2 C7).
+      - name: Refuse while an earlier deployment is still active
+        run: python3 scripts/refuse_active_deployment.py "$CODEDEPLOY_APPLICATION" "$CODEDEPLOY_DEPLOYMENT_GROUP"
+
       # For the rollback line in the summary: the revision serving BEFORE this
       # deploy. The PRIMARY task set, not services[0].taskDefinition, which on
       # a CODE_DEPLOY service is frozen at CreateService.
@@ -578,36 +598,42 @@ jobs:
           echo "id=$id" >> "$GITHUB_OUTPUT"
           echo "CodeDeploy deployment: $id"
 
-      # ================= PLACEHOLDER -- replaced by #143 (B3b) =================
-      # The forward traffic shift is NOT implemented in this release, and this
-      # step stops the run here, red, on purpose.
+      # Approve the shift and wait for the API to serve this revision (#143).
+      # scripts/shift_traffic.py is rollback.yml's polling loop: on Ready it
+      # checks every target in the replacement target group is healthy
+      # (count == desired), then sends continue-deployment READY_WAIT once;
+      # Failed/Stopped end it; Baking is not terminal. Success is
+      # scripts/api_serving.py: the PRIMARY task set is this ARN AND
+      # check_live_target_group.py confirms the /api/* rule forwards to that
+      # task set's target group. It never stops a deployment.
       #
-      # What stood here -- `timeout 1200 aws deploy wait deployment-successful`,
-      # then `stop-deployment --auto-rollback-enabled` on timeout -- could not
-      # work and was harmful: the deployment group waits up to 30 minutes for a
-      # ContinueDeployment nobody sent, and the waiter accepts only Succeeded,
-      # which arrives an hour after the traffic shift. So every deploy "timed
-      # out", and on a deploy that HAD shifted, the stop rolled a successful
-      # release back (#143).
+      # The canary is TIMED ONLY (DECISIONS T21): no alarm is attached to the
+      # deployment group, so a release that passes /health and fails elsewhere
+      # reaches 100%. The response is Rollback, within the hour CodeDeploy
+      # keeps the old task set.
       #
-      # Until #143 lands: the green task set is provisioned and nothing
-      # approves it, so CodeDeploy stops the deployment when its approval wait
-      # ends and the revision serving before this run keeps serving. The
-      # migration above HAS been applied.
-      - name: Traffic shift is not automated yet (#143)
+      # `id: api-serving` is stable: later steps read its outputs, and its
+      # success is what "the API is serving this run's revision" means.
+      - name: Shift traffic and confirm the API serves this revision
+        id: api-serving
         env:
           DEPLOYMENT_ID: ${{ steps.codedeploy.outputs.id }}
           TASK_DEFINITION: ${{ steps.api-td.outputs.arn }}
-          PREVIOUS: ${{ steps.previous.outputs.arn }}
         run: |
-          echo "::error title=Stopped before the traffic shift (#143)::CodeDeploy deployment ${DEPLOYMENT_ID} for ${TASK_DEFINITION} was created, but this workflow does not approve the traffic shift yet: #143 adds that and the check that the new revision is serving. Nothing has shifted; ${PREVIOUS:-the current revision} keeps serving, and CodeDeploy stops the unapproved deployment when its 30-minute approval wait ends. The migration was applied."
-          exit 1
+          set -euo pipefail
+          python3 scripts/shift_traffic.py \
+            --deployment-id "$DEPLOYMENT_ID" \
+            --cluster "$ECS_CLUSTER" \
+            --service "$ECS_BACKEND_SERVICE" \
+            --task-definition "$TASK_DEFINITION" \
+            --deadline-seconds "$CODEDEPLOY_DEADLINE_SECONDS" \
+            --interval-seconds "$CODEDEPLOY_POLL_SECONDS"
 
-      # Reached once #143 replaces the placeholder above. A real request, not a
-      # probe: /health answers 200 whatever the routes do, and the ALB already
-      # used it to pass the tasks. Through the public origin (vars.PUBLIC_BASE_URL),
-      # never the ALB's DNS name, which TrustedHost rejects (D14). No package is
-      # installed on this host: it holds the environment's AWS role.
+      # A real request, not a probe: /health answers 200 whatever the routes
+      # do, and the ALB already used it to pass the tasks. Through the public
+      # origin (vars.PUBLIC_BASE_URL), never the ALB's DNS name, which
+      # TrustedHost rejects (D14). No package is installed on this host: it
+      # holds the environment's AWS role.
       - name: Smoke test through the public URL
         env:
           PUBLIC_BASE_URL: ${{ vars.PUBLIC_BASE_URL }}
@@ -653,6 +679,8 @@ jobs:
           MIGRATION: ${{ steps.migrate.outcome }}
           NEW_REVISION: ${{ steps.api-td.outputs.arn }}
           DEPLOYMENT_ID: ${{ steps.codedeploy.outputs.id }}
+          SHIFT_RESULT: ${{ steps.api-serving.outputs.result }}
+          LIVE_GROUP: ${{ steps.api-serving.outputs.live_target_group }}
           PREVIOUS: ${{ steps.previous.outputs.arn }}
           JOB_STATUS: ${{ job.status }}
         run: |
@@ -675,7 +703,19 @@ jobs:
             echo "| New API revision | \`${NEW_REVISION:-not registered}\` |"
             echo "| CodeDeploy deployment | \`${DEPLOYMENT_ID:-not created}\` |"
             echo "| Serving before this run | \`${PREVIOUS:-nothing (first deploy)}\` |"
+            echo "| Traffic shift | ${SHIFT_RESULT:-not reached} |"
+            echo "| Live API target group | \`${LIVE_GROUP:-not confirmed}\` |"
             echo ""
+            if [ -n "$LIVE_GROUP" ]; then
+              echo "Next \`cdk deploy\` of \`${FARGATE_STACK}\`: pass \`-c api_live_target_group=${LIVE_GROUP}\` (check it first: \`python3 scripts/check_live_target_group.py --env ${TARGET_ENV} --expect ${LIVE_GROUP}\`)."
+            else
+              echo "Live API target group not confirmed: run \`python3 scripts/check_live_target_group.py --env ${TARGET_ENV}\` before any \`cdk deploy\` of \`${FARGATE_STACK}\`."
+            fi
+            echo ""
+            if [ -n "$DEPLOYMENT_ID" ]; then
+              echo "The canary is timed only: no alarm watches it, and nothing rolls back automatically on application errors. If this release misbehaves, roll back within the hour CodeDeploy keeps the previous task set. Until deployment ${DEPLOYMENT_ID} is no longer active (about an hour after its traffic shift, or when CodeDeploy stops an unapproved one), the next deploy to ${TARGET_ENV} is refused."
+              echo ""
+            fi
             if [ -n "$PREVIOUS" ]; then
               echo "Rollback: Actions → Rollback → environment=${TARGET_ENV}, task_definition_arn=${PREVIOUS##*/}"
             else

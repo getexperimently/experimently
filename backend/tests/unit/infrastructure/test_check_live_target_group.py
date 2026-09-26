@@ -189,6 +189,37 @@ def test_a_traffic_shift_in_progress_is_refused(capsys):
     assert "traffic shift is in progress" in out
 
 
+@pytest.mark.regression
+def test_a_split_is_its_own_refusal_and_no_target_is_not_one():
+    """The forward deploy's loop reads a split as "still shifting" (PE v2 C8);
+    everything else refused stays a plain refusal. The CLI's exit is 1 for both."""
+    aws = FakeAws(
+        "listener-default-dashboard.json",
+        "rules-api-blue.json",
+        "services-primary-blue.json",
+    )
+    rules = aws.responses[("elbv2", "describe-rules")]
+    blue = rules["Rules"][0]["Actions"][0]["TargetGroupArn"]
+    green = _fixture("rules-api-green.json")["Rules"][0]["Actions"][0]["TargetGroupArn"]
+    for rule in rules["Rules"][:2]:
+        rule["Actions"][0]["ForwardConfig"]["TargetGroups"] = [
+            {"TargetGroupArn": blue, "Weight": 90},
+            {"TargetGroupArn": green, "Weight": 10},
+        ]
+    with pytest.raises(guard.Shifting):
+        guard.check(aws, "staging", "blue")
+    assert issubclass(guard.Shifting, guard.Refused)
+
+    for rule in rules["Rules"][:2]:
+        rule["Actions"][0]["ForwardConfig"]["TargetGroups"] = [
+            {"TargetGroupArn": blue, "Weight": 0},
+            {"TargetGroupArn": green, "Weight": 0},
+        ]
+    with pytest.raises(guard.Refused) as refused:
+        guard.check(aws, "staging", "blue")
+    assert not isinstance(refused.value, guard.Shifting)
+
+
 def test_the_health_rule_on_a_different_group_is_refused(capsys):
     aws = FakeAws(
         "listener-default-dashboard.json",

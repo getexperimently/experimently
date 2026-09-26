@@ -90,6 +90,13 @@ class Refused(Exception):
     """Deploying would be unsafe, or already is; exit 1."""
 
 
+class Shifting(Refused):
+    """The API rule splits traffic across blue and green: a CodeDeploy traffic
+    shift is in progress. Still exit 1 here; `scripts/api_serving.py` tells it
+    apart from the other refusals, because to a deploy waiting for its own
+    shift it means "not yet", not "wrong"."""
+
+
 Runner = Callable[[Sequence[str]], dict]
 
 
@@ -201,11 +208,13 @@ def live_from_listener(aws: Runner, listener_arn: str, groups: dict[str, str]) -
         where = "the listener's default action"
         targets = _forward_targets(listeners[0].get("DefaultActions", []))
 
-    if len(targets) != 1:
-        raise Refused(
+    if len(targets) > 1:
+        raise Shifting(
             f"{where} forwards to {len(targets)} target groups with weight: a "
             "CodeDeploy traffic shift is in progress. Wait for it to finish."
         )
+    if not targets:
+        raise Refused(f"{where} forwards to no target group with weight")
     return _name(targets.pop(), groups, where)
 
 

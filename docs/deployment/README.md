@@ -57,14 +57,30 @@ checklist in [the deployment guide](deployment-guide.md#1-before-the-first-deplo
 4. Read the run summary: it names what was built and deployed, and hands you
    the rollback line.
 
-> **Until #143 lands, a deploy stops before the traffic shift -- red, on
-> purpose.** It builds and pushes the image, snapshots the database, runs the
-> migration, registers the new revision and creates the CodeDeploy
-> deployment, then stops: the step that approved the traffic shift could only
-> ever time out, and its timeout rolled back deployments that had succeeded.
-> Nothing shifts; the revision already serving keeps serving, and CodeDeploy
-> stops the unapproved deployment when its 30-minute approval wait ends. The
-> migration **has** been applied.
+**How the traffic moves.** The deploy creates a CodeDeploy blue/green
+deployment. When CodeDeploy reports it `Ready`, the deploy checks that every
+target in the new task set's target group is healthy, as many as the task set
+wants, and then approves the shift. The deployment group's canary sends 10%
+of traffic to the new revision, waits five minutes, then sends the rest. The
+run succeeds when the new revision is the API's PRIMARY task set **and** the
+HTTPS listener's `/api/*` rule forwards to that task set's target group. The
+summary then prints the live group and the `-c api_live_target_group=<blue|green>`
+value the next `cdk deploy` of the Fargate stack needs.
+
+> **The canary is timed only.** No alarm watches it, so nothing rolls back
+> automatically on application errors. A release that answers `/health` and
+> fails everywhere else still reaches 100% after five minutes. The response is
+> **Rollback**, within the hour CodeDeploy keeps the previous task set. Alarm
+> based rollback is tracked in #148 and is a prerequisite for the first
+> production deploy, unless the founder waives it.
+
+**One deploy per environment per hour.** After the shift, CodeDeploy keeps
+the previous task set for an hour, and the deployment stays active that whole
+time. CodeDeploy accepts no second deployment meanwhile, so a deploy
+dispatched within the hour is refused before it changes anything. The
+refusal names the deployment and roughly how long it has left. The deploy never
+stops that deployment: stopping one whose traffic has shifted rolls back a
+release that succeeded. Rollback does stop it, deliberately.
 
 **One at a time per environment.** Deploy and Database Migration share a
 concurrency group per environment and are never cancelled mid-run. GitHub keeps
