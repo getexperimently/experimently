@@ -12,7 +12,6 @@ from typing import Annotated, Any, Dict, List, Literal, Optional, Union
 from urllib.parse import urlparse
 
 from pydantic import (
-    AnyHttpUrl,
     EmailStr,
     Field,
     PostgresDsn,
@@ -26,6 +25,58 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 from backend.app.core.version import get_version
 
 logger = logging.getLogger(__name__)
+
+#: The allow-list when neither CORS setting is given (#130 tracks limiting it
+#: to development).
+DEFAULT_CORS_ORIGINS = (
+    "http://localhost:3100",
+    "http://localhost:3000",
+    "http://localhost:3001",
+    "http://localhost:3200",  # ShopLab demo storefront
+    "http://localhost:3300",  # StreamPulse demo app
+)
+
+_DEFAULT_PORTS = {"http": 80, "https": 443}
+
+
+def normalise_origin(value: Any) -> Optional[str]:
+    """An origin as a browser sends it in ``Origin``, or ``None`` if it is not one.
+
+    ``scheme://host[:port]``: scheme and host lower-cased, the scheme's default
+    port dropped, no trailing slash. ``*`` is returned as it is. Refused
+    (``None``): anything that is not http(s) with a host, or that carries
+    userinfo, a path other than ``/``, parameters, a query or a fragment, or a
+    port that does not parse. A browser never sends any of those, so such an
+    entry could match no request.
+    """
+    if not isinstance(value, str):
+        value = str(value) if value is not None else ""
+    candidate = value.strip()
+    if candidate == "*":
+        return "*"
+    try:
+        parsed = urlparse(candidate)
+        port = parsed.port
+    except ValueError:
+        return None
+    scheme = parsed.scheme.lower()
+    host = (parsed.hostname or "").lower()
+    if (
+        scheme not in _DEFAULT_PORTS
+        or not host
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.path not in ("", "/")
+        or parsed.params
+        or parsed.query
+        or parsed.fragment
+        or any(c.isspace() for c in candidate)
+    ):
+        return None
+    if port is not None and port != _DEFAULT_PORTS[scheme]:
+        return f"{scheme}://{host}:{port}"
+    return f"{scheme}://{host}"
+
 
 # Minimum acceptable length for SECRET_KEY in non-test environments
 _MIN_SECRET_KEY_LENGTH = 32
@@ -291,7 +342,11 @@ class Settings(BaseSettings):
     # A default taken from the URL we publish cannot have that shape.
     ALLOWED_HOSTS: Annotated[List[str], NoDecode] = []
 
-    BACKEND_CORS_ORIGINS: List[AnyHttpUrl] = []
+    # Plain strings, normalised by `cors_allowed_origins`: as `AnyHttpUrl`
+    # every entry rendered with a trailing slash that no browser `Origin`
+    # carries, so this setting matched nothing (#126), and one malformed entry
+    # failed settings validation and stopped the API starting.
+    BACKEND_CORS_ORIGINS: Annotated[List[str], NoDecode] = []
     # CORS_ORIGINS is a plain-string list version of BACKEND_CORS_ORIGINS that
     # can also be set via env var as a comma-separated string. NoDecode stops
     # pydantic-settings from JSON-decoding the raw value so the "before"
@@ -440,6 +495,34 @@ class Settings(BaseSettings):
         return self.ENVIRONMENT == "test"
 
     @property
+    def cors_allowed_origins(self) -> List[str]:
+        """The origins CORSMiddleware allows, normalised.
+
+        `BACKEND_CORS_ORIGINS` if it has a usable entry, else `CORS_ORIGINS`,
+        else `DEFAULT_CORS_ORIGINS` -- the order main.py has always used. An
+        entry that is not an origin (see `normalise_origin`) is dropped with an
+        ERROR log, never an exception: a bad entry matched no request before,
+        and must not stop the API starting now.
+        """
+        for name in ("BACKEND_CORS_ORIGINS", "CORS_ORIGINS"):
+            kept: List[str] = []
+            for entry in getattr(self, name) or []:
+                if entry is None or not str(entry).strip():
+                    continue
+                origin = normalise_origin(entry)
+                if origin is None:
+                    logger.error(
+                        "%s entry %r is not an origin (scheme://host[:port]); ignoring it",
+                        name,
+                        str(entry)[:200],
+                    )
+                elif origin not in kept:
+                    kept.append(origin)
+            if kept:
+                return kept
+        return list(DEFAULT_CORS_ORIGINS)
+
+    @property
     def effective_allowed_hosts(self) -> List[str]:
         """The hostnames the app answers to, explicit or derived.
 
@@ -514,15 +597,23 @@ class Settings(BaseSettings):
             )
         return self
 
-    @field_validator("BACKEND_CORS_ORIGINS")
+    @field_validator("BACKEND_CORS_ORIGINS", mode="before")
     @classmethod
-    def assemble_cors_origins(cls, v: Union[str, List[str]]) -> Union[List[str], str]:
-        """Parse CORS origins from string or list."""
-        if isinstance(v, str) and not v.startswith("["):
-            return [i.strip() for i in v.split(",")]
-        elif isinstance(v, (list, str)):
-            return v
-        raise ValueError(v)
+    def assemble_cors_origins(cls, v: Union[str, List[str]]) -> List[str]:
+        """JSON array or comma-separated; entries are checked by `cors_allowed_origins`."""
+        if isinstance(v, str) and v.strip().startswith("["):
+            import json
+
+            try:
+                v = json.loads(v)
+            except ValueError:
+                logger.error("BACKEND_CORS_ORIGINS is not valid JSON; ignoring it")
+                return []
+        if isinstance(v, str):
+            return [i.strip() for i in v.split(",") if i.strip()]
+        if isinstance(v, list):
+            return [str(i) for i in v]
+        return []
 
     @field_validator("PUBLIC_BASE_URL")
     @classmethod
