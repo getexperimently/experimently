@@ -106,6 +106,9 @@ DOCS_TESTS = (
     "backend/tests/unit/infrastructure/test_dashboard_image_docs.py",
     "backend/tests/unit/infrastructure/test_rollback_uses_codedeploy.py",
     "backend/tests/unit/db/test_alembic_plan.py",
+    # Reads docs/auth/sso.md and the SSO code through `ast`; imports no module
+    # code, and passes with backend/requirements.txt alone (checked).
+    "modules/backend/tests/unit/services/test_sso_docs_messages.py",
 )
 
 #: Python tests that name docs/ but are deliberately NOT in DOCS_TESTS.

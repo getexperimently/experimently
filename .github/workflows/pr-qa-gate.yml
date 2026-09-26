@@ -485,6 +485,7 @@ jobs:
           backend/tests/unit/infrastructure/test_dashboard_image_docs.py
           backend/tests/unit/infrastructure/test_rollback_uses_codedeploy.py
           backend/tests/unit/db/test_alembic_plan.py
+          modules/backend/tests/unit/services/test_sso_docs_messages.py
 
       - name: Set up Node.js
         if: needs.changes.outputs.docs_only != 'true'
