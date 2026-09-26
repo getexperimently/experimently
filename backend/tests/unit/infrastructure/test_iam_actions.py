@@ -150,3 +150,38 @@ def test_the_doc_says_where_the_subject_comes_from():
     for identity in ("bootstrap identity", "`cdk deploy` identity", "workflow role"):
         assert identity in text.lower() or identity in text, identity
     assert "sts:AssumeRole" in text and "cdk-hnb659fds-*" in text
+
+
+@pytest.mark.regression
+def test_iam_scan_follows_a_scripts_sibling_imports(tmp_path, monkeypatch):
+    """shift_traffic.py reaches AWS through api_serving.py and
+    check_live_target_group.py. A module a workflow script imports is scanned
+    too, so its calls are in the role even when no workflow names its file."""
+    iam = _module()
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    (scripts / "entry.py").write_text("import helper\n")
+    (scripts / "helper.py").write_text('OPS = {("elbv2", "describe-rules")}\n')
+    workflows = tmp_path / ".github" / "workflows"
+    workflows.mkdir(parents=True)
+    workflow = workflows / "deploy.yml"
+    workflow.write_text(
+        yaml.safe_dump(
+            {"jobs": {"j": {"steps": [{"run": "python3 scripts/entry.py"}]}}}
+        )
+    )
+    monkeypatch.setattr(iam, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(iam, "WORKFLOWS", [workflow])
+    monkeypatch.setattr(iam, "ACTIONS_DIR", tmp_path / ".github" / "actions")
+    assert scripts / "helper.py" in iam.sources()
+    assert "elasticloadbalancing:DescribeRules" in iam.calls()
+
+
+def test_the_real_forward_deploy_scripts_are_scanned():
+    places = {p.split(":")[0] for ps in _module().calls().values() for p in ps}
+    for script in (
+        "scripts/shift_traffic.py",
+        "scripts/refuse_active_deployment.py",
+        "scripts/check_live_target_group.py",
+    ):
+        assert script in places, script

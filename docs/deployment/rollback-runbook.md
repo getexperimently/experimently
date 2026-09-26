@@ -273,14 +273,37 @@ After using Method 2, post an incident note in `#deployments` and open a follow-
 
 ---
 
-## Method 3: CodeDeploy Automatic Rollback
+## Method 3: What CodeDeploy rolls back by itself (little)
 
-CodeDeploy is configured to automatically roll back when a deployment fails its health checks during blue/green traffic shifting. No manual action is required in most cases.
+**The canary is timed only.** The deployment group has no alarms
+(DECISIONS T21). CodeDeploy's own rollback covers only a deployment that
+*fails* or is *stopped*, for example a new task set whose tasks never become
+healthy. A release that passes `/health` and returns errors everywhere else
+passes the canary and reaches 100% of traffic. Nothing rolls it back.
+**Method 1 is the response**, within the hour CodeDeploy keeps the previous
+task set.
 
-**When it triggers automatically:**
-- ECS health check fails on the new (green) task group
-- Smoke tests configured in the deployment group fail
-- Deployment times out before reaching healthy state
+**Rollback before a fix-forward.** Within the hour after a deploy's traffic
+shift, the deploy workflow refuses a new release while that deployment is
+active. To ship a fix, run Rollback first (Method 1), then deploy the fix.
+Rollback's own deployment is then the active one, and the next forward deploy
+is refused until it is no longer active. That is expected to be about an hour,
+because the deployment group's 60-minute termination wait applies to every
+deployment in the group, Rollback's included. This is expected behaviour, to be
+observed on the first staging deploy
+([deployment guide, section 3](deployment-guide.md#3-every-deploy)).
+
+**Before the first production deploy**, alarm-based rollback
+([#148](https://github.com/getexperimently/experimently/issues/148)) is in
+place, or the founder has waived it in writing. Until then this section
+describes the whole of the automatic protection.
+
+**When CodeDeploy does roll back by itself:**
+- the new task set's tasks never become healthy, so the deployment fails
+  before any traffic moves (the deploy workflow also refuses to approve the
+  shift until every target is healthy);
+- the deployment is never approved, so CodeDeploy stops it when its 30-minute
+  approval wait ends. Nothing had shifted.
 
 **To stop an in-progress deployment and force immediate rollback:**
 

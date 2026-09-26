@@ -224,16 +224,23 @@ dashboard is still on `:bootstrap`.
 
 ## Blue/Green Deployment for Zero-Downtime Updates
 
-The API service uses blue/green deployment through AWS CodeDeploy. When you run `cdk deploy experimentation-fargate-<env>` with a new image:
+The API service uses blue/green deployment through AWS CodeDeploy, and the
+**Deploy** workflow is what drives it ([deployment guide, section 3](../deployment/deployment-guide.md#3-every-deploy)).
+The API's revision moves through CodeDeploy, not through `cdk deploy`: the
+service has a CODE_DEPLOY deployment controller, and ECS refuses a
+task-definition change through UpdateService on such a service. For each
+deploy:
 
-1. CDK registers a new ECS task definition
-2. CodeDeploy creates a "green" target group and starts new tasks
-3. After new tasks pass health checks, CodeDeploy shifts 10% of traffic to green
-4. After a 5-minute bake period, 100% of traffic shifts to green
-5. Old (blue) tasks are terminated after another 5 minutes
-6. If health checks fail at any step, CodeDeploy automatically shifts traffic back to blue
+1. The workflow registers a new task definition and creates a CodeDeploy deployment
+2. CodeDeploy starts the new tasks in the target group that is not live, and reports `Ready`
+3. When every new target is healthy, the workflow approves the shift
+4. The canary sends 10% of traffic to the new tasks, waits 5 minutes, then sends the rest
+5. The old tasks are kept for an hour, so Rollback can put them back, and then terminated
 
-This process runs with zero downtime for end users.
+The canary is timed only: no alarm watches it, so nothing rolls back
+automatically on application errors. CodeDeploy rolls back only a deployment
+that fails (new tasks that never become healthy) or is stopped. See the
+[rollback runbook](../deployment/rollback-runbook.md).
 
 ---
 

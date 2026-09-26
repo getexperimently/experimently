@@ -203,10 +203,16 @@ jobs:
       - name: Stop any deployment already in flight
         run: |
           set -euo pipefail
+          # Every non-final status, the same set as scripts/refuse_active_deployment.py's
+          # ACTIVE (a test pins them equal). Baking included: whether the hour the
+          # group keeps the old task set reports InProgress or Baking is unobserved,
+          # and that hour is when a rollback is most likely (PE B3b C2).
+          # No --max-items, --page-size or --no-paginate: the CLI then pages
+          # list-deployments itself and prints every page merged (a test pins it).
           IN_FLIGHT="$(aws deploy list-deployments \
             --application-name "$CODEDEPLOY_APPLICATION" \
             --deployment-group-name "$CODEDEPLOY_DEPLOYMENT_GROUP" \
-            --include-only-statuses Created Queued InProgress Ready \
+            --include-only-statuses Created Queued InProgress Baking Ready \
             --query 'deployments' --output text)"
 
           if [ -z "$IN_FLIGHT" ] || [ "$IN_FLIGHT" = "None" ]; then
