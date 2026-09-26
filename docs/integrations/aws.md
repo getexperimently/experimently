@@ -162,9 +162,10 @@ OPENSEARCH_ENDPOINT=https://your-domain.es.amazonaws.com
 
 ## CloudFront and Lambda@Edge
 
-**The CDK does not create a CloudFront distribution**, and nothing in it hosts
-the dashboard: there is no S3 bucket for frontend assets and no CDN in front of
-them. The dashboard is not yet deployed by the CDK (#69).
+**The CDK does not create a CloudFront distribution**, and there is no S3 bucket
+for frontend assets. The dashboard is an ECS service behind the same Application
+Load Balancer as the API, which sends it every path except `/api/*`, `/health`,
+`/health/*` and `/metrics`; see [AWS CDK Deployment](../self-hosting/cdk.md).
 
 ### Lambda@Edge for Split URL Testing
 

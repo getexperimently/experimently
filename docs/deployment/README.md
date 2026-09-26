@@ -239,10 +239,14 @@ every row with a resource type against a synth of `staging` and `prod`.
 | GitHub environment | `staging`, `prod` | — |
 
 There is no `:latest` and no bare `:<tag>`: each release is pushed once per
-profile as `:<tag>-<profile>` (reused, not rebuilt, when another environment
-deploys the same release), and every task definition the workflows register
-names the image **by digest**, so a later push to a tag cannot change what a
-running environment starts.
+profile as `:<tag>-<profile>` (reused, not rebuilt, when the same release is
+deployed again into the same account), and every task definition the workflows
+register names the image **by digest**, so a later push to a tag cannot change
+what a running environment starts. Staging and prod are meant to be separate
+AWS accounts, each with its own ECR, so prod builds the release itself from the
+tag: it runs the same release (tag, commit and profile; the deploy refuses an
+image whose labels name another commit or profile), not the same digest
+staging ran.
 
 ---
 

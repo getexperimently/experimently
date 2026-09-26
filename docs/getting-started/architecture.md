@@ -15,7 +15,7 @@ This document describes the high-level technical architecture of the platform: h
                        ▼
 ┌──────────────────────────────────────────────────────────────────┐
 │                Application Load Balancer (HTTPS)                 │
-│   (the CDK creates no CloudFront; the dashboard is not deployed) │
+│  (no CloudFront; /api/* → API, everything else → the dashboard)  │
 └──────────────────────┬───────────────────────────────────────────┘
                        │
                        ▼
@@ -243,8 +243,11 @@ Custom roles and direct permission grants extend the base role system for fine-g
 
 The AWS infrastructure is defined as code using **AWS CDK v2**, in Python (`infrastructure/cdk/app.py`). Running `cdk deploy --all` from `infrastructure/cdk` provisions the stacks below.
 
-**The dashboard is not yet deployed by the CDK** (#69): no stack builds or serves
-it, and none creates CloudFront. The split-URL module's CloudFront construct
+The Fargate stack runs the dashboard as its own ECS service behind the API's load
+balancer: `/api/*`, `/health`, `/health/*` and `/metrics` go to the API, everything
+else to the dashboard. `cdk deploy` starts it on `experimentation-platform/web:bootstrap`;
+rolling each release onto it through the Deploy workflow is #69, not yet done. No
+stack creates CloudFront. The split-URL module's CloudFront construct
 exists but `app.py` does not use it. See [AWS CDK Deployment](../self-hosting/cdk.md).
 
 ### Stacks
@@ -257,7 +260,7 @@ exists but `app.py` does not use it. See [AWS CDK Deployment](../self-hosting/cd
 | `experimentation-redis-<env>` | ElastiCache Redis replication group, subnet group, security group |
 | `experimentation-dynamodb-<env>` | Five DynamoDB tables (assignments, events, experiments, feature flags, overrides) |
 | `experimentation-compute-<env>` | ECS cluster, task security group, the database-access Lambda |
-| `experimentation-fargate-<env>` | ALB, HTTPS + test listeners, blue/green target groups, Fargate service, CodeDeploy application and deployment group, auto-scaling |
+| `experimentation-fargate-<env>` | ALB, HTTPS + test listeners, blue/green target groups, the API's Fargate service, CodeDeploy application and deployment group, auto-scaling; the dashboard's ECS service and target group |
 | `experimentation-migrations-<env>` | One-off ECS task definition that runs the alembic upgrade |
 | `experimentation-monitoring-<env>` | CloudWatch dashboards, alarms, log groups, metric filters, SNS topic |
 | `experimentation-dynamodb-counters-<env>` | **Full profile only** — the real-time experiment-counters table |

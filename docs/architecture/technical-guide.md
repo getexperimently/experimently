@@ -725,10 +725,14 @@ The safety monitor automatically sets `rollout_percentage=0` and creates a rollb
 | CloudWatch | Monitoring + alerting |
 | Secrets Manager | Credentials storage |
 
-The dashboard is not yet deployed by the CDK (#69): no stack hosts it, and
-nothing creates CloudFront or an S3 bucket for it. In Docker Compose and in the
-`frontend/Dockerfile` image it is served by nginx, which also proxies `/api/` to
-the API.
+The dashboard runs as its own ECS service behind the API's load balancer: the
+HTTPS listener sends `/api/*`, `/health`, `/health/*` and `/metrics` to the API
+and everything else to the dashboard. `cdk deploy` starts it on the
+`experimentation-platform/web:bootstrap` image; rolling each release onto it
+through the Deploy workflow is #69, not yet done. Nothing creates CloudFront or
+an S3 bucket for it. It is the `frontend/Dockerfile` image, a static export
+served by nginx, which proxies `/api/` to the API in Docker Compose and proxies
+nothing in AWS.
 
 ---
 
