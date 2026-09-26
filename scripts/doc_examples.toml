@@ -231,11 +231,11 @@ expects = 12
 "docs/auth/auth-environment-variables.md" = { comments = 0, unlabelled = 4, syntax = 0 }
 "docs/auth/cognito-auth-testing.md" = { comments = 0, unlabelled = 0, syntax = 0 }
 "docs/auth/sso.md" = { comments = 0, unlabelled = 0, syntax = 0 }
-"docs/deployment/README.md" = { comments = 13, unlabelled = 0, syntax = 0 }
-"docs/deployment/deployment-guide.md" = { comments = 10, unlabelled = 1, syntax = 3 }
+"docs/deployment/README.md" = { comments = 10, unlabelled = 0, syntax = 0 }
+"docs/deployment/deployment-guide.md" = { comments = 1, unlabelled = 1, syntax = 3 }
 "docs/deployment/disaster-recovery.md" = { comments = 51, unlabelled = 0, syntax = 1 }
 "docs/deployment/iam-permissions.md" = { comments = 2, unlabelled = 1, syntax = 1 }
-"docs/deployment/rollback-runbook.md" = { comments = 106, unlabelled = 1, syntax = 0 }
+"docs/deployment/rollback-runbook.md" = { comments = 54, unlabelled = 1, syntax = 0 }
 "docs/deployment/secrets-management.md" = { comments = 10, unlabelled = 1, syntax = 0 }
 "docs/development/database/migrations.md" = { comments = 18, unlabelled = 1, syntax = 1 }
 "docs/development/guidelines.md" = { comments = 3, unlabelled = 2, syntax = 0 }
