@@ -65,7 +65,6 @@ universe = [
     "docs/auth/flow.md",
     "docs/auth/sso.md",
     "docs/cognito_integration.md",
-    "docs/deployment/AWS_ROUTE53_DEPLOYMENT.md",
     "docs/deployment/README.md",
     "docs/deployment/deployment-guide.md",
     "docs/deployment/disaster-recovery.md",
@@ -152,7 +151,6 @@ universe = [
     "docs/statistics/fdr-correction.md",
     "docs/statistics/post-stratification.md",
     "docs/statistics/power-analysis.md",
-    "docs/testing/autonomous-testing-framework.md",
     "docs/warehouse/clickhouse.md",
     "docs/warehouse/databricks.md",
     "docs/warehouse/mysql.md",
@@ -202,18 +200,16 @@ skip = 0
 expects = 12
 
 [pending]
-"CONTRIBUTING.md" = { comments = 12, unlabelled = 2, syntax = 0 }
+"CONTRIBUTING.md" = { comments = 0, unlabelled = 2, syntax = 0 }
 "README.md" = { comments = 0, unlabelled = 0, syntax = 0 }
 "backend/lambda/README.md" = { comments = 0, unlabelled = 1, syntax = 0 }
 "backend/lambda/event_processor/README.md" = { comments = 5, unlabelled = 1, syntax = 0 }
 "demo/DEMO_GUIDE.md" = { comments = 5, unlabelled = 0, syntax = 0 }
-"demo/shoplab/README.md" = { comments = 13, unlabelled = 0, syntax = 0 }
-"demo/streampulse/README.md" = { comments = 16, unlabelled = 0, syntax = 0 }
+"demo/shoplab/README.md" = { comments = 12, unlabelled = 0, syntax = 0 }
+"demo/streampulse/README.md" = { comments = 15, unlabelled = 0, syntax = 0 }
 "demo/streampulse/simulator/README.md" = { comments = 4, unlabelled = 0, syntax = 0 }
-"docs/Enhanced_Rules_Engine_Reference.md" = { comments = 0, unlabelled = 1, syntax = 0 }
 "docs/api/README.md" = { comments = 0, unlabelled = 0, syntax = 0 }
 "docs/api/alerting.md" = { comments = 0, unlabelled = 0, syntax = 0 }
-"docs/api/api-docs-guide.md" = { comments = 0, unlabelled = 1, syntax = 0 }
 "docs/api/audit-logging.md" = { comments = 0, unlabelled = 1, syntax = 0 }
 "docs/api/auth.md" = { comments = 0, unlabelled = 0, syntax = 0 }
 "docs/api/bayesian.md" = { comments = 0, unlabelled = 1, syntax = 0 }
@@ -222,24 +218,21 @@ expects = 12
 "docs/api/data-export.md" = { comments = 7, unlabelled = 2, syntax = 0 }
 "docs/api/dimensional-analysis.md" = { comments = 0, unlabelled = 1, syntax = 0 }
 "docs/api/endpoints.md" = { comments = 24, unlabelled = 24, syntax = 1 }
-"docs/api/integrations.md" = { comments = 3, unlabelled = 8, syntax = 0 }
+"docs/api/integrations.md" = { comments = 0, unlabelled = 8, syntax = 0 }
 "docs/api/interaction-detection.md" = { comments = 0, unlabelled = 1, syntax = 0 }
 "docs/api/multi-armed-bandit.md" = { comments = 0, unlabelled = 0, syntax = 0 }
 "docs/api/mutual-exclusion-groups.md" = { comments = 0, unlabelled = 0, syntax = 0 }
 "docs/api/rbac.md" = { comments = 5, unlabelled = 12, syntax = 0 }
 "docs/api/sequential-testing.md" = { comments = 0, unlabelled = 0, syntax = 0 }
-"docs/api/specs.md" = { comments = 0, unlabelled = 26, syntax = 0 }
 "docs/api/split-url.md" = { comments = 0, unlabelled = 3, syntax = 0 }
 "docs/api/warehouse-analytics.md" = { comments = 0, unlabelled = 0, syntax = 0 }
 "docs/architecture/models.md" = { comments = 2, unlabelled = 1, syntax = 1 }
-"docs/architecture/overview.md" = { comments = 0, unlabelled = 3, syntax = 0 }
 "docs/architecture/technical-guide.md" = { comments = 11, unlabelled = 5, syntax = 0 }
 "docs/auth/auth-environment-variables.md" = { comments = 0, unlabelled = 4, syntax = 0 }
 "docs/auth/cognito-auth-testing.md" = { comments = 0, unlabelled = 0, syntax = 0 }
 "docs/auth/sso.md" = { comments = 0, unlabelled = 0, syntax = 0 }
-"docs/deployment/AWS_ROUTE53_DEPLOYMENT.md" = { comments = 29, unlabelled = 2, syntax = 0 }
 "docs/deployment/README.md" = { comments = 13, unlabelled = 0, syntax = 0 }
-"docs/deployment/deployment-guide.md" = { comments = 7, unlabelled = 1, syntax = 3 }
+"docs/deployment/deployment-guide.md" = { comments = 10, unlabelled = 1, syntax = 3 }
 "docs/deployment/disaster-recovery.md" = { comments = 51, unlabelled = 0, syntax = 1 }
 "docs/deployment/iam-permissions.md" = { comments = 2, unlabelled = 1, syntax = 1 }
 "docs/deployment/rollback-runbook.md" = { comments = 106, unlabelled = 1, syntax = 0 }
@@ -250,8 +243,6 @@ expects = 12
 "docs/development/workflow-explanation.md" = { comments = 5, unlabelled = 0, syntax = 0 }
 "docs/feature-flags/rollouts.md" = { comments = 0, unlabelled = 1, syntax = 0 }
 "docs/feature-flags/safety.md" = { comments = 0, unlabelled = 0, syntax = 0 }
-"docs/getting-started/architecture.md" = { comments = 0, unlabelled = 4, syntax = 0 }
-"docs/getting-started/concepts.md" = { comments = 0, unlabelled = 4, syntax = 0 }
 "docs/getting-started/docker-compose-file.md" = { comments = 4, unlabelled = 0, syntax = 0 }
 "docs/getting-started/docker-guide.md" = { comments = 0, unlabelled = 1, syntax = 1 }
 "docs/getting-started/environment-setup.md" = { comments = 3, unlabelled = 5, syntax = 0 }
@@ -260,7 +251,6 @@ expects = 12
 "docs/getting-started/python-virtual-env-setup.md" = { comments = 6, unlabelled = 1, syntax = 0 }
 "docs/getting-started/vscode-settings.md" = { comments = 0, unlabelled = 0, syntax = 0 }
 "docs/guides/experiment-wizard.md" = { comments = 0, unlabelled = 1, syntax = 0 }
-"docs/guides/user-guide.md" = { comments = 0, unlabelled = 8, syntax = 0 }
 "docs/hipaa/overview.md" = { comments = 4, unlabelled = 0, syntax = 1 }
 "docs/infrastructure/aws-iam-setup.md" = { comments = 0, unlabelled = 0, syntax = 0 }
 "docs/infrastructure/cloudwatch-setup.md" = { comments = 7, unlabelled = 4, syntax = 0 }
@@ -268,7 +258,7 @@ expects = 12
 "docs/infrastructure/network-security-readme.md" = { comments = 3, unlabelled = 0, syntax = 0 }
 "docs/infrastructure/redis-summary.md" = { comments = 2, unlabelled = 0, syntax = 0 }
 "docs/infrastructure/vpc-stack-implementation.md" = { comments = 0, unlabelled = 0, syntax = 0 }
-"docs/integrations/aws.md" = { comments = 10, unlabelled = 0, syntax = 0 }
+"docs/integrations/aws.md" = { comments = 6, unlabelled = 0, syntax = 0 }
 "docs/integrations/github.md" = { comments = 3, unlabelled = 4, syntax = 0 }
 "docs/integrations/salesforce.md" = { comments = 0, unlabelled = 1, syntax = 0 }
 "docs/llm-evaluation/overview.md" = { comments = 0, unlabelled = 2, syntax = 0 }
@@ -276,39 +266,33 @@ expects = 12
 "docs/mcp-server.md" = { comments = 2, unlabelled = 0, syntax = 0 }
 "docs/monitoring/dashboard-reference.md" = { comments = 0, unlabelled = 0, syntax = 0 }
 "docs/monitoring/index.md" = { comments = 0, unlabelled = 1, syntax = 0 }
-"docs/monitoring/log-insights-queries.md" = { comments = 0, unlabelled = 13, syntax = 0 }
-"docs/monitoring/monitoring-guide.md" = { comments = 4, unlabelled = 1, syntax = 0 }
+"docs/monitoring/monitoring-guide.md" = { comments = 2, unlabelled = 1, syntax = 0 }
 "docs/monitoring/setup-guide.md" = { comments = 7, unlabelled = 1, syntax = 0 }
 "docs/monitoring/troubleshooting-guide.md" = { comments = 3, unlabelled = 1, syntax = 0 }
 "docs/performance/load-testing.md" = { comments = 17, unlabelled = 3, syntax = 0 }
-"docs/sdk-guide.md" = { comments = 2, unlabelled = 0, syntax = 0 }
+"docs/sdk-guide.md" = { comments = 4, unlabelled = 0, syntax = 0 }
 "docs/sdk/android.md" = { comments = 1, unlabelled = 0, syntax = 0 }
 "docs/sdk/dotnet.md" = { comments = 3, unlabelled = 0, syntax = 0 }
-"docs/sdk/edge.md" = { comments = 3, unlabelled = 0, syntax = 0 }
+"docs/sdk/edge.md" = { comments = 6, unlabelled = 0, syntax = 0 }
 "docs/sdk/elixir.md" = { comments = 4, unlabelled = 0, syntax = 0 }
 "docs/sdk/flutter.md" = { comments = 2, unlabelled = 0, syntax = 0 }
 "docs/sdk/go.md" = { comments = 3, unlabelled = 0, syntax = 0 }
 "docs/sdk/ios.md" = { comments = 2, unlabelled = 0, syntax = 0 }
 "docs/sdk/java.md" = { comments = 2, unlabelled = 0, syntax = 0 }
-"docs/sdk/javascript.md" = { comments = 4, unlabelled = 1, syntax = 0 }
-"docs/sdk/openfeature.md" = { comments = 8, unlabelled = 2, syntax = 0 }
-"docs/sdk/php.md" = { comments = 3, unlabelled = 0, syntax = 0 }
+"docs/sdk/javascript.md" = { comments = 6, unlabelled = 1, syntax = 0 }
+"docs/sdk/openfeature.md" = { comments = 9, unlabelled = 2, syntax = 0 }
+"docs/sdk/php.md" = { comments = 4, unlabelled = 0, syntax = 0 }
 "docs/sdk/python.md" = { comments = 5, unlabelled = 0, syntax = 0 }
-"docs/sdk/react-native.md" = { comments = 4, unlabelled = 1, syntax = 0 }
-"docs/sdk/react.md" = { comments = 3, unlabelled = 0, syntax = 0 }
+"docs/sdk/react-native.md" = { comments = 6, unlabelled = 1, syntax = 0 }
+"docs/sdk/react.md" = { comments = 2, unlabelled = 0, syntax = 0 }
 "docs/sdk/ruby.md" = { comments = 3, unlabelled = 0, syntax = 0 }
-"docs/security-architecture.md" = { comments = 0, unlabelled = 1, syntax = 0 }
 "docs/security/api-keys.md" = { comments = 4, unlabelled = 1, syntax = 0 }
 "docs/security/incident-response-plan.md" = { comments = 40, unlabelled = 3, syntax = 6 }
-"docs/security/security-policies.md" = { comments = 0, unlabelled = 1, syntax = 0 }
-"docs/security/threat-model.md" = { comments = 0, unlabelled = 3, syntax = 0 }
-"docs/self-hosting/cdk.md" = { comments = 12, unlabelled = 1, syntax = 2 }
+"docs/self-hosting/cdk.md" = { comments = 14, unlabelled = 1, syntax = 3 }
 "docs/self-hosting/migrations.md" = { comments = 12, unlabelled = 4, syntax = 1 }
 "docs/self-hosting/monitoring.md" = { comments = 5, unlabelled = 0, syntax = 0 }
 "docs/self-hosting/releases.md" = { comments = 1, unlabelled = 1, syntax = 0 }
 "docs/statistics/fdr-correction.md" = { comments = 0, unlabelled = 1, syntax = 0 }
-"docs/statistics/power-analysis.md" = { comments = 0, unlabelled = 3, syntax = 0 }
-"docs/testing/autonomous-testing-framework.md" = { comments = 33, unlabelled = 5, syntax = 1 }
 "docs/warehouse/clickhouse.md" = { comments = 1, unlabelled = 0, syntax = 0 }
 "docs/warehouse/databricks.md" = { comments = 0, unlabelled = 0, syntax = 0 }
 "docs/warehouse/mysql.md" = { comments = 1, unlabelled = 0, syntax = 0 }
@@ -325,8 +309,8 @@ expects = 12
 "sdk/js/README.md" = { comments = 2, unlabelled = 0, syntax = 0 }
 "sdk/openfeature-python/README.md" = { comments = 3, unlabelled = 0, syntax = 0 }
 "sdk/openfeature/README.md" = { comments = 2, unlabelled = 0, syntax = 0 }
-"sdk/php/README.md" = { comments = 3, unlabelled = 0, syntax = 0 }
+"sdk/php/README.md" = { comments = 4, unlabelled = 0, syntax = 0 }
 "sdk/python/README.md" = { comments = 4, unlabelled = 0, syntax = 0 }
-"sdk/react/README.md" = { comments = 4, unlabelled = 0, syntax = 0 }
+"sdk/react/README.md" = { comments = 3, unlabelled = 0, syntax = 0 }
 "sdk/ruby/README.md" = { comments = 3, unlabelled = 0, syntax = 0 }
 "tests/sdk-contract/README.md" = { comments = 3, unlabelled = 0, syntax = 0 }
