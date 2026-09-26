@@ -1,7 +1,7 @@
 {
   "info": {
     "title": "Experimently",
-    "version": "0.2.5"
+    "version": "0.2.6"
   },
   "openapi": "3.1.0",
   "paths": {
