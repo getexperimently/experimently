@@ -1,0 +1,56 @@
+# tests/alb/docker-compose.alb.yml -- the planned AWS topology, in compose.
+#
+# An override for the repository's docker-compose.yml, used by the Docker
+# Smoke job (.github/workflows/pr-qa-gate.yml, "ALB topology" steps):
+#
+#   docker compose -f docker-compose.yml -f tests/alb/docker-compose.alb.yml \
+#     up -d --wait --no-build postgres redis api frontend alb
+#
+# Paths below are relative to the FIRST -f file's directory (the repository
+# root), which is how compose resolves every file in a multi-file project.
+#
+# What it changes, and why each one is the AWS shape:
+#
+#   alb       a new nginx playing the Application Load Balancer: /api/*,
+#             /health, /health/*, /metrics to the api, the rest to the
+#             dashboard, Host preserved (tests/alb/nginx.conf).
+#   frontend  API_UPSTREAM=http://127.0.0.1:1: in AWS the dashboard's nginx
+#             does not proxy /api -- the ALB owns that route -- so here a
+#             request that reached the dashboard for /api fails (502) instead
+#             of being quietly forwarded.
+#   api       PUBLIC_BASE_URL is the one public origin (founder decision D14:
+#             app.<domain> serves both the dashboard and the API). With it set
+#             the API's Host check is ON even in ENVIRONMENT=development:
+#             ALLOWED_HOSTS is left unset on purpose, so the allow-list is the
+#             one production gets, derived from PUBLIC_BASE_URL's host
+#             (Settings.effective_allowed_hosts). Setting ALLOWED_HOSTS here
+#             would take precedence and hide a wrong PUBLIC_BASE_URL -- the
+#             exact defect this rehearsal exists to catch.
+
+services:
+  api:
+    environment:
+      PUBLIC_BASE_URL: https://app.example.test
+
+  frontend:
+    environment:
+      API_UPSTREAM: http://127.0.0.1:1
+
+  alb:
+    # The dashboard image's own base (frontend/Dockerfile, runtime stage).
+    image: nginxinc/nginx-unprivileged:1.29-alpine
+    volumes:
+      - ./tests/alb/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      - "${ALB_HOST_PORT:-8090}:8080"
+    depends_on:
+      api:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
+    healthcheck:
+      # Through the ALB to the dashboard's static /healthz (default action).
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
