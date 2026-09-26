@@ -631,7 +631,10 @@ def verify_id_token(
     """
 
     def refuse(reason: str) -> HTTPException:
-        logger.warning("OIDC ID token refused for SSO config %s: %s", config.id, reason)
+        # Logs a claim NAME ("nonce", "aud", ...), never the token or a value.
+        logger.warning(  # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure
+            "OIDC ID token refused for SSO config %s: %s", config.id, reason
+        )
         return HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"OIDC ID token was not accepted ({reason})",
@@ -640,7 +643,12 @@ def verify_id_token(
     if not id_token or not isinstance(id_token, str):
         raise refuse("missing")
     try:
-        claims = jwt.decode(id_token, options={"verify_signature": False})
+        # Deliberately unverified: this token came straight from the token
+        # endpoint over https (OIDC Core s.3.1.3.7 step 6); iss, aud, exp and
+        # nonce are checked below. Never call this on a token from the browser.
+        # fmt: off
+        claims = jwt.decode(id_token, options={"verify_signature": False})  # nosemgrep: python.jwt.security.unverified-jwt-decode.unverified-jwt-decode
+        # fmt: on
     except jwt.PyJWTError:
         raise refuse("malformed") from None
 
