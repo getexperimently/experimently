@@ -68,9 +68,11 @@ their summary job is.
 
 ## AWS deployment workflows
 
-`deploy-dev.yml`, `deploy-prod.yml`, `db-migrate.yml` and `rollback.yml` deploy the CDK
-stacks to AWS. They run only when the repository variable `AWS_ACCOUNT_ID` is set on the
-upstream repository, so forks and self-hosted checkouts never attempt a deploy. See
+`deploy-prod.yml`, `db-migrate.yml` and `rollback.yml` act on AWS: they build and push the
+API image and roll it out through CodeDeploy, run the migration task, and roll back. None of
+them runs `cdk deploy`; the stacks are deployed by hand. They run only when the repository
+variable `AWS_ACCOUNT_ID` is set on the upstream repository, so forks and self-hosted
+checkouts never attempt a deploy. See
 [docs/deployment](../deployment/README.md).
 
 ## Running the same checks locally
