@@ -9,21 +9,36 @@ for devices, and the dashboard API with a bearer token for the story.
 | `devices.py` | Deterministic population of simulated devices (seeded RNG) following the spec mix: iOS 55% (16.x/17.x/18.x = 20/60/20), Android 45% (12.x/13.x/14.x = 25/35/40), regions US 45 · GB 15 · DE 12 · IN 18 · BR 10, premium 30%, employee 1%, app 3.1.0/3.2.0/3.2.1 = 30/50/20. `Device.attributes()` is the targeting `context` (`os`, `os_version`, `app_version`, `region`, `tier`, `employee`, `device_model`, `device_id`). `PRESET_DEVICES` mirrors the app's five device presets. |
 | `traffic.py` | Ticks through app sessions: evaluates the 4 flags (`GET /feature-flags/evaluate/{key}?user_id=&context=<url-encoded JSON>`), assigns the 5 experiments (`POST /tracking/assign` with `context`), walks the screens with the spec's true rates and sends the §3 events through `POST /tracking/batch`. `assigned: false` (global holdout, mutual exclusion group, targeting) means no events for that experiment. Prints stats every 10 s. |
 | `rollout_story.py` | The 7-step "Player v2" narrative (see below). |
-| `test_traffic.py`, `test_story.py` | 30 offline pytest tests (fake clients, no network). |
+| `test_traffic.py`, `test_story.py` | Offline pytest tests (fake clients, no network). |
 
 ## Traffic
 
-```bash
+From the repository root, with the venv active, this sends steady traffic, 6 sessions a second
+for five minutes:
+
+```{.bash skip reason="demo: runs the demo applications (Stream F)"}
 source venv/bin/activate
-python demo/streampulse/simulator/traffic.py --rate 6 --duration 300          # steady traffic
+python demo/streampulse/simulator/traffic.py --rate 6 --duration 300
+```
+
+The crash incident, for 90 seconds:
+
+```{.bash skip reason="demo: runs the demo applications (Stream F)"}
 python demo/streampulse/simulator/traffic.py --incident android12 --rate 6 --duration 90
-python demo/streampulse/simulator/traffic.py --dry-run --seed 1                # one session, no network
-python demo/streampulse/simulator/traffic.py --dry-run --incident android12    # one crashing session
+```
+
+`--dry-run` prints one session's planned events without touching the network; with
+`--incident android12` the session is a crashing one:
+
+```{.bash skip reason="demo: runs the demo applications (Stream F)"}
+python demo/streampulse/simulator/traffic.py --dry-run --seed 1
+python demo/streampulse/simulator/traffic.py --dry-run --incident android12
 ```
 
 Options: `--api-url` (default `http://localhost:8000`), `--api-key` (default: `demo/streampulse/.api_key`),
 `--rate` sessions/s, `--duration` seconds (0 = forever), `--seed`, `--devices N` (population size, default 5000),
-`--incident {off,android12}`, `--max-ticks`, `--no-probe`, `--dry-run`.
+`--population-seed` (keep it fixed so device ids are stable), `--incident {off,android12}`, `--max-ticks`,
+`--no-probe`, `--dry-run`.
 
 At start-up it prints what the five app presets get right now (flag on/off + `reason`, variant + `assigned`/`reason`),
 e.g. the internal tester gets `player_v2=ON(targeting_rule)` and `ai_search` is ON only for iOS 17+ / US / premium.
@@ -43,12 +58,30 @@ threshold (≈ 3%, warning only), which is why the story runs the incident after
 
 ## Rollout story
 
-```bash
-python demo/streampulse/simulator/rollout_story.py --step 1      # one step
-python demo/streampulse/simulator/rollout_story.py --auto --pace 20
+The story calls the dashboard API with a bearer token. `--token` defaults to `dev`, which the
+backend accepts only with its development bypass on: `DEV_AUTH_BYPASS=true` and `ENVIRONMENT`
+`development` or `test`. `.env.example` ships `DEV_AUTH_BYPASS=false` and `setup-local.sh` does
+not change it, so otherwise the story stops with "the dashboard API rejected the bearer token
+(401)". Sign in as the demo admin instead and keep the token:
+
+```{.bash skip reason="demo: runs the demo applications (Stream F)"}
+TOKEN=$(curl -s -X POST localhost:8000/api/v1/auth/login \
+  -H 'content-type: application/json' \
+  -d '{"email":"admin@demo.com","password":"Demo1234!"}' | jq -r .access_token)
 ```
 
-`--token` defaults to `dev`: locally Cognito is not configured, so any bearer token maps to the dev admin.
+To run one step, here the first:
+
+```{.bash skip reason="demo: runs the demo applications (Stream F)"}
+python demo/streampulse/simulator/rollout_story.py --token "$TOKEN" --step 1
+```
+
+To run all seven, pausing 20 seconds between steps (`--pace`, default 15):
+
+```{.bash skip reason="demo: runs the demo applications (Stream F)"}
+python demo/streampulse/simulator/rollout_story.py --token "$TOKEN" --auto --pace 20
+```
+
 Other options: `--api-url`, `--api-key` (for the step-3 traffic), `--dashboard-url` (default `http://localhost:3100`),
 `--app-url` (default `http://localhost:3300`), `--incident-rate/--incident-duration`, `--rollback-wait`, `--no-wait`.
 
@@ -75,7 +108,7 @@ Every step is idempotent — re-running it prints the current state and writes n
 
 ## Tests
 
-```bash
+```{.bash skip reason="dev: runs the simulator's offline tests in a development checkout"}
 source venv/bin/activate
 python -m pytest demo/streampulse/simulator -q -o addopts="" -p no:cacheprovider
 ```
