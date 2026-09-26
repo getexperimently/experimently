@@ -18,6 +18,8 @@ The `sso` module adds Single Sign-On (SSO) via SAML 2.0 and OpenID Connect (OIDC
 | OneLogin | SAML 2.0 | Yes | Yes |
 | Auth0 | SAML 2.0 + OIDC | Yes | Yes |
 
+The OIDC providers `microsoft`, `azure_ad` and `onelogin` are **not supported yet**: signing in through a configuration of one of those types is refused. A SAML configuration (`provider_type: "saml"`) for the same identity provider is not affected.
+
 ---
 
 ## Overview
@@ -68,7 +70,6 @@ curl -X POST https://api.example.com/auth/sso/configs \
       "analysts": "ANALYST",
       "viewers": "VIEWER"
     },
-    "jit_provisioning": true,
     "is_enforced": false
   }'
 ```
@@ -90,7 +91,6 @@ curl -X POST https://api.example.com/auth/sso/configs \
       "admin-team": "ADMIN",
       "engineering": "DEVELOPER"
     },
-    "jit_provisioning": true,
     "is_enforced": false
   }'
 ```
@@ -109,7 +109,6 @@ curl -X POST https://api.example.com/auth/sso/configs \
 | `client_id` | `string` | OIDC | OAuth2 client ID from the IdP |
 | `client_secret` | `string` | OIDC | OAuth2 client secret from the IdP |
 | `role_mapping` | `object` | No | Maps IdP group names to platform roles |
-| `jit_provisioning` | `boolean` | No | Create users on first login (default: `true`) |
 | `is_enforced` | `boolean` | No | Block password login for this org's domain (default: `false`) |
 
 ---
@@ -223,7 +222,9 @@ GitHub team slugs in `role_mapping` should be in the format `{org-name}/{team-sl
 
 ## JIT User Provisioning
 
-When `jit_provisioning: true` (the default), users who authenticate via SSO for the first time are automatically provisioned with a platform account.
+Users who authenticate via SSO for the first time are provisioned with a platform account automatically. There is no setting to turn this off; to stop sign-ins through a configuration, set its `is_active` to `false`.
+
+A sign-in is accepted only for an email address in the configuration's `org_domain`, exactly: `bob@acme.com` for `acme.com`, but not `bob@eu.acme.com` or `bob@acme.io`. Use one configuration per domain. The comparison ignores case and surrounding spaces. An existing account is matched by email address, ignoring case; if more than one account matches, the sign-in is refused.
 
 The following attributes are populated from the IdP assertion or token:
 
@@ -234,7 +235,7 @@ The following attributes are populated from the IdP assertion or token:
 | `last_name` | `last_name` attribute | `family_name` claim |
 | `role` | Derived from `groups` via `role_mapping` | Derived from groups via `role_mapping` |
 
-If no role mapping matches, the user is provisioned with the `VIEWER` role by default.
+If no role mapping matches, a new user is provisioned with the `VIEWER` role.
 
 ---
 
@@ -256,7 +257,8 @@ The `role_mapping` field maps IdP group names or email addresses to platform rol
 Rules:
 - Matching is case-sensitive.
 - A user's role is determined by the first matching group in the mapping. Order groups from highest to lowest privilege.
-- Users in no mapped group receive the `VIEWER` role if JIT provisioning is enabled.
+- A new user in no mapped group receives the `VIEWER` role.
+- An existing user's role changes only when one of their groups is in the mapping. A sign-in with no mapped group leaves the role as it is, so removing someone from every mapped group does not demote them: to demote someone through SSO, map one of their groups to `VIEWER`. Superuser status is never changed by a sign-in.
 - If a user is in multiple mapped groups, the highest-privilege role wins (ADMIN > DEVELOPER > ANALYST > VIEWER).
 
 ---

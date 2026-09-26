@@ -33,6 +33,7 @@ from urllib.parse import urlencode, urlparse
 # parsing IdP-supplied SAML responses (Bandit B314, Semgrep use-defused-xml).
 from defusedxml import ElementTree as ET
 from fastapi import HTTPException, status
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from backend.app.core.config import settings as core_settings
@@ -762,6 +763,60 @@ def _normalize_userinfo(provider_key: str, raw: Dict[str, Any]) -> Dict[str, Any
 # ---------------------------------------------------------------------------
 
 
+#: Providers whose sign-in is refused until they are supported properly.
+UNSUPPORTED_OIDC_PROVIDERS = frozenset({"microsoft", "azure_ad", "onelogin"})
+
+UNSUPPORTED_PROVIDER_DETAIL = "This single sign-on provider is not supported yet"
+EMAIL_INVALID_DETAIL = "SSO assertion did not contain a valid email address"
+EMAIL_DOMAIN_DETAIL = (
+    "This account's email is not in the domain this single sign-on is configured for"
+)
+EMAIL_AMBIGUOUS_DETAIL = (
+    "More than one account matches this email address; ask an administrator"
+)
+
+
+def require_supported_provider(provider: str) -> None:
+    """Refuse, with a fixed 400, a provider on the unsupported list."""
+    if provider in UNSUPPORTED_OIDC_PROVIDERS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=UNSUPPORTED_PROVIDER_DETAIL,
+        )
+
+
+def normalise_domain(value: Optional[str]) -> str:
+    """``org_domain`` as compared: stripped, lower-cased, no leading ``@``."""
+    return (value or "").strip().lstrip("@").lower()
+
+
+def _sso_email(user_info: Dict[str, Any], config: SSOConfig) -> str:
+    """The email a sign-in may use: well-formed, ASCII, in the config's domain.
+
+    ASCII is checked before lower-casing: ``str.lower`` folds some non-ASCII
+    characters into ASCII ones (U+212A KELVIN SIGN becomes ``k``), which would
+    let an address that is not in the domain compare equal to one that is.
+    """
+    raw = user_info.get("email")
+    email = raw.strip() if isinstance(raw, str) else ""
+    if not email or not email.isascii():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=EMAIL_INVALID_DETAIL
+        )
+    email = email.lower()
+    local, _, domain = email.rpartition("@")
+    if not local or not domain:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=EMAIL_INVALID_DETAIL
+        )
+    expected = normalise_domain(config.org_domain)
+    if not expected or domain != expected:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail=EMAIL_DOMAIN_DETAIL
+        )
+    return email
+
+
 def provision_user(
     db: Session,
     user_info: Dict[str, Any],
@@ -769,34 +824,37 @@ def provision_user(
 ) -> User:
     """Find or create (JIT provision) a User from SSO user_info.
 
-    - Looks up by ``email`` first.
-    - If not found, creates a new User with a random UUID username.
-    - Maps IdP groups to platform role via ``map_role``.
+    - The email must be in the configuration's ``org_domain``, exactly (no
+      subdomains): one configuration per domain.
+    - Looks the user up by email, case-insensitively; more than one match is
+      refused rather than guessed.
+    - An existing user's role changes only when one of their groups matches
+      the configuration's ``role_mapping``. A sign-in with no matching group
+      leaves the role as it is; to demote someone through SSO, map one of
+      their groups to ``viewer``. ``is_superuser`` is never changed.
+    - A new user gets the mapped role, or ``viewer``.
 
     Returns the existing or newly-created User object.
     """
-    email = (user_info.get("email") or "").lower().strip()
-    if not email:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="SSO assertion did not contain a valid email address",
-        )
+    email = _sso_email(user_info, config)
+    groups = user_info.get("groups", []) or []
+    mapped = mapped_role(config, groups)
 
-    existing_user = db.query(User).filter(User.email == email).first()
-    if existing_user:
-        # Update role mapping on every login
-        groups = user_info.get("groups", [])
-        new_role_str = map_role(config, groups)
-        new_role = UserRole(new_role_str) if new_role_str else existing_user.role
-        existing_user.role = new_role
-        db.commit()
-        db.refresh(existing_user)
+    matches = db.query(User).filter(func.lower(User.email) == email).limit(2).all()
+    if len(matches) > 1:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=EMAIL_AMBIGUOUS_DETAIL
+        )
+    if matches:
+        existing_user = matches[0]
+        if mapped is not None:
+            existing_user.role = UserRole(mapped)
+            db.commit()
+            db.refresh(existing_user)
         return existing_user
 
     # JIT provisioning
-    groups = user_info.get("groups", [])
-    role_str = map_role(config, groups)
-    role = UserRole(role_str) if role_str else UserRole.VIEWER
+    role = UserRole(mapped) if mapped else UserRole.VIEWER
 
     # Derive a username from email local part + random suffix to avoid collisions
     local_part = email.split("@")[0].replace(".", "_").replace("+", "_")[:40]
@@ -832,6 +890,16 @@ def provision_user(
     return new_user
 
 
+def mapped_role(config: SSOConfig, groups: List[str]) -> Optional[str]:
+    """The role the first group with a mapping maps to, or ``None`` if none does."""
+    mapping: Dict[str, str] = config.role_mapping or {}
+    for group in groups or []:
+        role = mapping.get(group)
+        if role:
+            return role.lower()
+    return None
+
+
 def map_role(config: SSOConfig, groups: List[str]) -> str:
     """Map a list of IdP group names to a platform role string.
 
@@ -839,18 +907,11 @@ def map_role(config: SSOConfig, groups: List[str]) -> str:
     e.g. ``{"admins": "admin", "devs": "developer"}``.
 
     Priority: first matching group wins.  Falls back to ``"viewer"`` when no
-    group matches (or mapping is empty / absent).
+    group matches (or mapping is empty / absent). This is the role for a NEW
+    account; an existing account keeps its role unless a group matches
+    (:func:`provision_user`).
     """
-    mapping: Dict[str, str] = config.role_mapping or {}
-    if not mapping or not groups:
-        return "viewer"
-
-    for group in groups:
-        role = mapping.get(group)
-        if role:
-            return role.lower()
-
-    return "viewer"
+    return mapped_role(config, groups) or "viewer"
 
 
 # ---------------------------------------------------------------------------

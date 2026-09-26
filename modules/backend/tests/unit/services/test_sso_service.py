@@ -95,6 +95,13 @@ def _make_db_session() -> MagicMock:
     db.filter.return_value = db
     db.first.return_value = None
     db.all.return_value = []
+    # `provision_user` reads `.limit(2).all()`; answer it from `first`, which
+    # the tests set, so one fixture drives both query shapes.
+    limited = MagicMock()
+    limited.all.side_effect = lambda: (
+        [db.first.return_value] if db.first.return_value else []
+    )
+    db.limit.return_value = limited
     db.add = MagicMock()
     db.commit = MagicMock()
     db.refresh = MagicMock()
