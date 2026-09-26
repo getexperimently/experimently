@@ -1712,7 +1712,7 @@ def test_removing_the_fetch_makes_the_step_red_not_green(pr_checkout):
     )
     assert result.returncode == 2, result.stdout + result.stderr
     assert "cannot read scripts/doc_examples.toml at the base" in result.stdout
-    assert "refs/doc-demotion/base" in result.stdout
+    assert "'refs/doc-demotion/base'. Refusing to report no demotions." in result.stdout
 
 
 def test_the_guard_is_its_own_step_in_the_required_job():

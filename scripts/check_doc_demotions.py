@@ -193,7 +193,11 @@ def main(argv: Optional[List[str]] = None) -> int:
             raise Unreadable(f"cannot read the pull request's toml: {error}") from error
         status, lines = run(base_text, head_text, args.labels)
     except Unreadable as error:
-        print(annotate("error", f"{error}. Refusing to report no demotions."))
+        print(
+            annotate(
+                "error", f"{str(error).rstrip('.')}. Refusing to report no demotions."
+            )
+        )
         return 2
     print("\n".join(lines))
     return status
