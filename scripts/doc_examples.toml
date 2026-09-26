@@ -12,7 +12,7 @@
 # scripts/doc_examples.py), and each page's residual counts can only fall.
 
 [meta]
-documents = 3
+documents = 7
 exec = 20
 universe = [
     ".github/pull_request_template.md",
@@ -199,15 +199,41 @@ exec = 9
 skip = 0
 expects = 12
 
+# Stream E batch 2: the demo READMEs, contract-only until Stream F runs the
+# demo applications.  Every block is skip; nothing on these pages executes.
+[[document]]
+path = "demo/DEMO_GUIDE.md"
+environment = "bare"
+exec = 0
+skip = 3
+expects = 0
+
+[[document]]
+path = "demo/shoplab/README.md"
+environment = "bare"
+exec = 0
+skip = 6
+expects = 0
+
+[[document]]
+path = "demo/streampulse/README.md"
+environment = "bare"
+exec = 0
+skip = 7
+expects = 0
+
+[[document]]
+path = "demo/streampulse/simulator/README.md"
+environment = "bare"
+exec = 0
+skip = 7
+expects = 0
+
 [pending]
 "CONTRIBUTING.md" = { comments = 0, unlabelled = 2, syntax = 0 }
 "README.md" = { comments = 0, unlabelled = 0, syntax = 0 }
 "backend/lambda/README.md" = { comments = 0, unlabelled = 1, syntax = 0 }
 "backend/lambda/event_processor/README.md" = { comments = 5, unlabelled = 1, syntax = 0 }
-"demo/DEMO_GUIDE.md" = { comments = 5, unlabelled = 0, syntax = 0 }
-"demo/shoplab/README.md" = { comments = 12, unlabelled = 0, syntax = 0 }
-"demo/streampulse/README.md" = { comments = 15, unlabelled = 0, syntax = 0 }
-"demo/streampulse/simulator/README.md" = { comments = 4, unlabelled = 0, syntax = 0 }
 "docs/api/README.md" = { comments = 0, unlabelled = 0, syntax = 0 }
 "docs/api/alerting.md" = { comments = 0, unlabelled = 0, syntax = 0 }
 "docs/api/audit-logging.md" = { comments = 0, unlabelled = 1, syntax = 0 }
