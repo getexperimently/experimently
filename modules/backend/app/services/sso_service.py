@@ -7,7 +7,8 @@ Provides helpers for:
   - OIDC/OAuth2 authorization-code exchange and user-info fetch
   - Just-In-Time (JIT) user provisioning
   - Role mapping from IdP groups to platform roles
-  - CSRF state token generation and verification
+  - The OIDC login's state: a signed cookie binding the callback to the
+    browser that started the login, carrying the PKCE verifier
 
 SAML operations degrade to stub implementations when the ``python3-saml``
 (onelogin) package is not installed, so the service remains importable in
@@ -20,17 +21,21 @@ else a missing library is an error and every SAML route answers 501
 
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
 import logging
 import re
 import secrets
-import threading
 import time
 import uuid
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlencode, urlparse
 
 # defusedxml guards against entity-expansion / external-entity attacks when
 # parsing IdP-supplied SAML responses (Bandit B314, Semgrep use-defused-xml).
+import jwt
 from defusedxml import ElementTree as ET
 from fastapi import HTTPException, status
 from sqlalchemy import func
@@ -74,10 +79,6 @@ SAML_NOT_INSTALLED_DETAIL = (
     "and libxml2 libraries) and restart the API."
 )
 
-# In-memory state token store: {token: expiry_timestamp}
-# In production this should be Redis-backed.
-_state_store: Dict[str, float] = {}
-
 
 def saml_stub_allowed() -> bool:
     """Whether the signature-blind SAML stub below may stand in for the library.
@@ -120,30 +121,6 @@ def _require_saml_support() -> None:
         status_code=status.HTTP_501_NOT_IMPLEMENTED,
         detail=SAML_NOT_INSTALLED_DETAIL,
     )
-
-
-_STATE_TTL_SECONDS = 600  # 10 minutes
-
-#: The most unredeemed state tokens the process will hold.
-#:
-#: `GET /api/v1/auth/sso/oidc/{provider}/login` is on the PUBLIC router -- no
-#: authentication dependency -- and every call minted an entry here. Expiry was
-#: consulted only on `pop`, so a token nobody ever redeemed was never removed
-#: by anything. An anonymous caller could therefore grow this dictionary
-#: without limit, one HTTP request at a time, until the container died.
-#:
-#: Evicting expired entries alone does not bound it: the live set is still
-#: "everything minted in the last ten minutes", which is unbounded in the rate
-#: of requests. Hence a hard cap as well.
-#:
-#: 10,000 is far beyond any real concurrent-login count for a self-hosted
-#: deployment and costs on the order of a megabyte.
-_STATE_STORE_MAX = 10_000
-
-#: The store is read-modify-written below (measure, evict, insert), which is
-#: not atomic the way a single dict assignment is. Uvicorn can run handlers on
-#: a thread-pool executor, so the compound operation takes a lock.
-_state_lock = threading.Lock()
 
 
 # ---------------------------------------------------------------------------
@@ -562,6 +539,146 @@ def _parse_saml_response_stub(
 # ---------------------------------------------------------------------------
 
 
+def _provider_endpoint(config: SSOConfig, meta: Dict[str, str], key: str) -> str:
+    """One of the provider's endpoints, with ``{sso_url}`` filled in; https only.
+
+    The ID token is checked without its signature, relying on TLS to the
+    token endpoint instead (OIDC Core s.3.1.3.7 step 6), and the client secret
+    and access token travel to these endpoints -- so a plain-http endpoint is
+    refused everywhere except the test environment, whose fake provider is
+    local. The built-in providers' endpoints are https constants; this is the
+    check on an administrator-supplied ``sso_url``.
+    """
+    url = meta[key]
+    if "{sso_url}" in url and config.sso_url:
+        url = url.replace("{sso_url}", config.sso_url.rstrip("/"))
+    if urlparse(url).scheme != "https" and not core_settings.is_test:
+        logger.error("Refusing a non-https OIDC %s for SSO config %s", key, config.id)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="OIDC provider endpoints must use https; check this SSO configuration's sso_url",
+        )
+    return url
+
+
+def uses_id_token(provider_key: str) -> bool:
+    """Whether the provider is OpenID Connect (an ID token) or plain OAuth 2 (GitHub)."""
+    meta = _OIDC_PROVIDERS.get(provider_key) or {}
+    return "openid" in meta.get("scope", "").split()
+
+
+_MICROSOFT_TENANT = re.compile(
+    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+)
+
+
+def expected_issuers(
+    config: SSOConfig, provider_key: str, claims: Dict[str, Any]
+) -> set:
+    """The ``iss`` values an ID token from this configuration may carry.
+
+    Per provider, because each names itself differently:
+
+    * google -- both ``https://accounts.google.com`` and ``accounts.google.com``.
+    * microsoft (the ``common`` endpoint), azure_ad -- one issuer per tenant,
+      ``https://login.microsoftonline.com/{tid}/v2.0``, with ``tid`` the
+      token's own tenant claim.
+    * okta -- the authorization server: ``sso_url`` for a custom one
+      (``https://org.okta.com/oauth2/default``), the org URL for the org one
+      (``sso_url`` ``https://org.okta.com/oauth2`` -> ``https://org.okta.com``).
+    * onelogin -- ``https://{subdomain}.onelogin.com/oidc/2``, from the token
+      endpoint's host.
+    """
+    if provider_key == "google":
+        return {"https://accounts.google.com", "accounts.google.com"}
+    if provider_key in ("microsoft", "azure_ad"):
+        tid = str(claims.get("tid") or "")
+        if _MICROSOFT_TENANT.fullmatch(tid):
+            return {f"https://login.microsoftonline.com/{tid}/v2.0"}
+        return set()
+    if provider_key == "okta":
+        base = (config.sso_url or "").rstrip("/")
+        if not base:
+            return set()
+        return {base[: -len("/oauth2")]} if base.endswith("/oauth2") else {base}
+    if provider_key == "onelogin":
+        host = urlparse(_OIDC_PROVIDERS["onelogin"]["token_endpoint"]).hostname
+        return {f"https://{host}/oidc/2"} if host else set()
+    return set()
+
+
+#: Clock skew allowed on the ID token's ``exp``.
+_ID_TOKEN_LEEWAY_SECONDS = 60
+
+
+def verify_id_token(
+    config: SSOConfig,
+    provider_key: str,
+    id_token: Optional[str],
+    nonce: str,
+) -> Dict[str, Any]:
+    """Check the ID token from this login's own token response (OIDC Core s.3.1.3.7).
+
+    Its signature is not checked: it came straight from the token endpoint
+    over https (step 6 allows TLS server validation instead). The claims are:
+    ``iss`` (step 2, per provider -- :func:`expected_issuers`), ``aud`` holds
+    this client and ``azp`` is this client when there are several (steps 3-5),
+    ``exp`` (step 9), and ``nonce`` equals the one this browser's cookie
+    carries (step 11). The nonce is what binds the token to this login where a
+    provider ignores PKCE.
+
+    Refuses with a fixed 400 naming only the claim that failed.
+    """
+
+    def refuse(reason: str) -> HTTPException:
+        # Logs a claim NAME ("nonce", "aud", ...), never the token or a value.
+        logger.warning(  # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure
+            "OIDC ID token refused for SSO config %s: %s", config.id, reason
+        )
+        return HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"OIDC ID token was not accepted ({reason})",
+        )
+
+    if not id_token or not isinstance(id_token, str):
+        raise refuse("missing")
+    try:
+        # Deliberately unverified: this token came straight from the token
+        # endpoint over https (OIDC Core s.3.1.3.7 step 6); iss, aud, exp and
+        # nonce are checked below. Never call this on a token from the browser.
+        # fmt: off
+        claims = jwt.decode(id_token, options={"verify_signature": False})  # nosemgrep: python.jwt.security.unverified-jwt-decode.unverified-jwt-decode
+        # fmt: on
+    except jwt.PyJWTError:
+        raise refuse("malformed") from None
+
+    issuers = expected_issuers(config, provider_key, claims)
+    if not issuers or claims.get("iss") not in issuers:
+        raise refuse("iss")
+
+    client_id = config.entity_id or ""
+    aud = claims.get("aud")
+    audiences = [aud] if isinstance(aud, str) else aud if isinstance(aud, list) else []
+    if not client_id or client_id not in audiences:
+        raise refuse("aud")
+    if len(audiences) > 1 and claims.get("azp") != client_id:
+        raise refuse("azp")
+
+    exp = claims.get("exp")
+    if (
+        not isinstance(exp, (int, float))
+        or exp + _ID_TOKEN_LEEWAY_SECONDS < time.time()
+    ):
+        raise refuse("exp")
+
+    token_nonce = claims.get("nonce")
+    if not isinstance(token_nonce, str) or not hmac.compare_digest(
+        token_nonce.encode("utf-8"), nonce.encode("utf-8")
+    ):
+        raise refuse("nonce")
+    return claims
+
+
 _OAUTH_ERROR_CODE = re.compile(r"[a-z_]{1,64}")
 
 
@@ -598,9 +715,15 @@ async def exchange_oidc_code(
     config: SSOConfig,
     code: str,
     redirect_uri: str,
+    *,
+    code_verifier: str,
     http_client: Any = None,
 ) -> Dict[str, Any]:
     """Exchange an OAuth2 authorization code for tokens.
+
+    ``code_verifier`` is the PKCE verifier from the login's state cookie; it
+    is sent on every branch, so a code intercepted on its way back to the
+    callback cannot be redeemed without it.
 
     ``http_client`` is an optional injected HTTP client (e.g. an
     ``httpx.AsyncClient`` mock) used in tests.  When ``None`` and authlib is
@@ -620,9 +743,7 @@ async def exchange_oidc_code(
             detail=f"Unknown OIDC provider '{provider_key}'",
         )
 
-    token_url = meta["token_endpoint"]
-    if "{sso_url}" in token_url and config.sso_url:
-        token_url = token_url.replace("{sso_url}", config.sso_url.rstrip("/"))
+    token_url = _provider_endpoint(config, meta, "token_endpoint")
 
     token_params = {
         "grant_type": "authorization_code",
@@ -630,6 +751,7 @@ async def exchange_oidc_code(
         "redirect_uri": redirect_uri,
         "client_id": config.entity_id or "",
         "client_secret": config.client_secret or "",
+        "code_verifier": code_verifier,
     }
 
     try:
@@ -649,6 +771,7 @@ async def exchange_oidc_code(
                     token_url,
                     code=code,
                     redirect_uri=redirect_uri,
+                    code_verifier=code_verifier,
                 )
                 return dict(token)
 
@@ -695,9 +818,7 @@ async def get_oidc_user_info(
             detail=f"Unknown OIDC provider '{provider_key}'",
         )
 
-    userinfo_url = meta["userinfo_endpoint"]
-    if "{sso_url}" in userinfo_url and config.sso_url:
-        userinfo_url = userinfo_url.replace("{sso_url}", config.sso_url.rstrip("/"))
+    userinfo_url = _provider_endpoint(config, meta, "userinfo_endpoint")
 
     headers = {"Authorization": f"Bearer {access_token}"}
 
@@ -771,6 +892,15 @@ EMAIL_INVALID_DETAIL = "SSO assertion did not contain a valid email address"
 EMAIL_DOMAIN_DETAIL = (
     "This account's email is not in the domain this single sign-on is configured for"
 )
+EMAIL_UNVERIFIED_DETAIL = (
+    "The identity provider has not verified this account's email address"
+)
+IDENTITY_MISMATCH_DETAIL = (
+    "The identity provider's user info does not match its ID token"
+)
+IDENTITY_TAKEN_DETAIL = (
+    "This identity is already linked to another account; ask an administrator"
+)
 EMAIL_AMBIGUOUS_DETAIL = (
     "More than one account matches this email address; ask an administrator"
 )
@@ -817,6 +947,115 @@ def _sso_email(user_info: Dict[str, Any], config: SSOConfig) -> str:
     return email
 
 
+async def verified_email(
+    config: SSOConfig,
+    provider_key: str,
+    id_claims: Dict[str, Any],
+    user_info: Dict[str, Any],
+    access_token: str,
+    http_client: Any = None,
+) -> Dict[str, Any]:
+    """The user info a sign-in may provision with: an email the provider verified.
+
+    Returns ``user_info`` with ``email`` (and, for OpenID Connect providers,
+    ``sub``) replaced by the values the provider vouches for:
+
+    * okta -- the ID token's ``email``, with ``email_verified`` true.
+    * google -- the ID token's ``email``, with ``email_verified`` true and
+      ``hd`` (the Workspace domain) equal to the email's domain: Google is
+      authoritative for an address only for its own Workspace domains.
+    * github -- no ID token; ``GET /user/emails``: a verified address in the
+      configuration's domain -- the primary one if it is one of them, otherwise
+      the only one, otherwise refused.
+    * anything else -- refused (microsoft, azure_ad and onelogin are refused
+      before this by :func:`require_supported_provider`).
+
+    For OpenID Connect providers the user info's ``sub`` must equal the ID
+    token's (OIDC Core s.5.3.2). ``email_verified`` must be the boolean
+    ``true``; the string ``"true"`` is not accepted.
+    """
+    checked = dict(user_info)
+    if provider_key in ("okta", "google"):
+        if str(user_info.get("sub") or "") != str(id_claims.get("sub") or "") or not (
+            id_claims.get("sub")
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=IDENTITY_MISMATCH_DETAIL,
+            )
+        if id_claims.get("email_verified") is not True:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN, detail=EMAIL_UNVERIFIED_DETAIL
+            )
+        email = id_claims.get("email")
+        if provider_key == "google":
+            hd = id_claims.get("hd")
+            domain = email.rpartition("@")[2].lower() if isinstance(email, str) else ""
+            if not isinstance(hd, str) or hd.lower() != domain:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN, detail=EMAIL_DOMAIN_DETAIL
+                )
+        checked["email"] = email
+        checked["sub"] = str(id_claims["sub"])
+        return checked
+    if provider_key == "github":
+        checked["email"] = await _github_verified_email(
+            config, access_token, http_client
+        )
+        return checked
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST, detail=UNSUPPORTED_PROVIDER_DETAIL
+    )
+
+
+_GITHUB_EMAILS_URL = "https://api.github.com/user/emails"
+
+
+async def _github_verified_email(
+    config: SSOConfig, access_token: str, http_client: Any = None
+) -> str:
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Accept": "application/vnd.github+json",
+    }
+    try:
+        if http_client is not None:
+            response = await http_client.get(_GITHUB_EMAILS_URL, headers=headers)
+            entries = response.json() if hasattr(response, "json") else response
+        else:
+            import requests  # type: ignore
+
+            resp = requests.get(
+                _GITHUB_EMAILS_URL, headers=headers, timeout=10, allow_redirects=False
+            )
+            if resp.is_redirect:
+                raise requests.HTTPError("emails endpoint redirected", response=resp)
+            resp.raise_for_status()
+            entries = resp.json()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _refusal("OIDC userinfo fetch failed", exc) from None
+
+    domain = normalise_domain(config.org_domain)
+    candidates = [
+        entry
+        for entry in (entries if isinstance(entries, list) else [])
+        if isinstance(entry, dict)
+        and entry.get("verified") is True
+        and isinstance(entry.get("email"), str)
+        and entry["email"].strip().rpartition("@")[2].lower() == domain
+    ]
+    primary = [entry for entry in candidates if entry.get("primary") is True]
+    if primary:
+        return primary[0]["email"]
+    if len(candidates) == 1:
+        return candidates[0]["email"]
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN, detail=EMAIL_UNVERIFIED_DETAIL
+    )
+
+
 def provision_user(
     db: Session,
     user_info: Dict[str, Any],
@@ -853,7 +1092,15 @@ def provision_user(
             db.refresh(existing_user)
         return existing_user
 
-    # JIT provisioning
+    # JIT provisioning. The account is found by email only, never by the
+    # provider's subject: a row created earlier under the same subject keeps
+    # its own email, and a sign-in under another email is refused rather than
+    # handed that row or crashing on the unique column (#122).
+    external_id = user_info.get("sub") or user_info.get("name_id")
+    if external_id and db.query(User).filter(User.external_id == external_id).first():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=IDENTITY_TAKEN_DETAIL
+        )
     role = UserRole(mapped) if mapped else UserRole.VIEWER
 
     # Derive a username from email local part + random suffix to avoid collisions
@@ -882,7 +1129,7 @@ def provision_user(
         role=role,
         first_name=first_name,
         last_name=last_name,
-        external_id=user_info.get("sub") or user_info.get("name_id"),
+        external_id=external_id,
     )
     db.add(new_user)
     db.commit()
@@ -915,89 +1162,145 @@ def map_role(config: SSOConfig, groups: List[str]) -> str:
 
 
 # ---------------------------------------------------------------------------
-# State token helpers (CSRF protection for OIDC flows)
+# The OIDC login's state (#66)
 # ---------------------------------------------------------------------------
+#
+# The login route used to mint a random state and remember it in a
+# process-local dictionary. That state was bound to no browser -- any
+# callback carrying any unredeemed state was accepted, so an attacker could
+# complete a login with their own code in a victim's browser -- it did not
+# survive more than one API task, and the route that filled the dictionary is
+# unauthenticated.
+#
+# Now the server holds nothing. The login route sets a signed, short-lived
+# cookie in the browser that started the login; the callback accepts only a
+# `state` that matches the one inside that cookie. The cookie also carries the
+# PKCE verifier, so a code intercepted on its way back is useless without it,
+# and names the SSO configuration the login was started for.
+
+#: `__Host-`: the browser accepts it only with `Secure`, `Path=/` and no
+#: `Domain`, so no other host -- a sibling subdomain included -- can set or
+#: overwrite it.
+OIDC_STATE_COOKIE = "__Host-experimently_oidc"
+
+#: How long a started login stays redeemable.
+OIDC_STATE_TTL_SECONDS = 600
+
+#: Clock skew allowed on the cookie's `exp` and `iat`.
+_STATE_LEEWAY_SECONDS = 30
+
+_STATE_AUDIENCE = "experimently:oidc-state"
 
 
-def _drop_expired(now: float) -> int:
-    """Remove every entry whose TTL has passed. Caller holds ``_state_lock``."""
-    dead = [token for token, expiry in _state_store.items() if expiry <= now]
-    for token in dead:
-        _state_store.pop(token, None)
-    return len(dead)
+def _state_key() -> bytes:
+    """The cookie's signing key: derived from SECRET_KEY, used for nothing else.
 
-
-def generate_state_token() -> str:
-    """Generate a cryptographically-random URL-safe state token and store it.
-
-    Bounded, which it was not: this is reachable unauthenticated and nothing
-    removed a token that was never redeemed. See ``_STATE_STORE_MAX``.
-
-    What this does NOT do, deliberately: make the flow robust under abuse. A
-    flood still displaces pending logins, because nothing here can tell an
-    attacker's token from a user's -- the store is keyed by a value the server
-    invented and bound to nobody. Only the redesign tracked in #94 fixes that,
-    by holding no server state at all: a signed, short-TTL token over a value
-    in a ``__Host-`` cookie, verified by signature and cookie match. This
-    change is the memory bound, not that.
+    A token signed with this key can never pass for an access token, and an
+    access token can never pass for one of these, even though both are HS256
+    under the same secret.
     """
-    token = secrets.token_urlsafe(32)
-    now = time.time()
-    with _state_lock:
-        if len(_state_store) >= _STATE_STORE_MAX:
-            _drop_expired(now)
-            if len(_state_store) >= _STATE_STORE_MAX:
-                # Still full of live tokens: shed the oldest in one pass rather
-                # than one at a time, which would be quadratic exactly when the
-                # process is already under load.
-                batch = max(1, _STATE_STORE_MAX // 10)
-                for victim in sorted(_state_store, key=_state_store.__getitem__)[
-                    :batch
-                ]:
-                    _state_store.pop(victim, None)
-                logger.warning(
-                    "SSO state store hit its cap of %d live tokens; shed %d. "
-                    "The login route is unauthenticated, so this is as likely "
-                    "to be abuse as load.",
-                    _STATE_STORE_MAX,
-                    batch,
-                )
-        _state_store[token] = now + _STATE_TTL_SECONDS
-    return token
+    return hmac.new(
+        core_settings.SECRET_KEY.encode("utf-8"),
+        b"experimently:oidc-state:v1",
+        hashlib.sha256,
+    ).digest()
 
 
-def verify_state_token(token: str) -> bool:
-    """Verify a state token is valid and has not expired.
+def pkce_challenge(verifier: str) -> str:
+    """The S256 code challenge for *verifier* (RFC 7636 s.4.2)."""
+    digest = hashlib.sha256(verifier.encode("ascii")).digest()
+    return base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
 
-    Deletes the token from the store on success (single-use).
 
-    Returns:
-        True if valid.
+@dataclass(frozen=True)
+class OIDCLoginStart:
+    """What the login route needs: the URL's `state` and the cookie to set."""
 
-    Raises:
-        HTTPException 400 if the token is missing, expired, or unknown.
+    state: str
+    code_verifier: str
+    nonce: str
+    cookie_value: str
+
+
+@dataclass(frozen=True)
+class OIDCLoginState:
+    """What the callback gets back from a cookie that verified."""
+
+    config_id: uuid.UUID
+    provider: str
+    code_verifier: str
+    nonce: str
+
+
+def start_oidc_login(config: SSOConfig, provider: str) -> OIDCLoginStart:
+    """Mint the state, the PKCE verifier and the signed cookie that holds both."""
+    state = secrets.token_urlsafe(32)
+    # 64 random bytes -> 86 characters, inside RFC 7636's 43..128.
+    verifier = secrets.token_urlsafe(64)
+    nonce = secrets.token_urlsafe(32)
+    now = int(time.time())
+    claims = {
+        "aud": _STATE_AUDIENCE,
+        "iat": now,
+        "exp": now + OIDC_STATE_TTL_SECONDS,
+        "st": state,
+        "cv": verifier,
+        "nn": nonce,
+        "cfg": str(config.id),
+        "prv": provider,
+    }
+    cookie = jwt.encode(claims, _state_key(), algorithm="HS256")
+    return OIDCLoginStart(
+        state=state, code_verifier=verifier, nonce=nonce, cookie_value=cookie
+    )
+
+
+def _state_refusal(detail: str) -> HTTPException:
+    return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
+
+
+def redeem_oidc_state(
+    cookie_value: Optional[str], url_state: Optional[str]
+) -> OIDCLoginState:
+    """Accept a callback only from the browser that started this login.
+
+    Refuses, with a fixed 400: no cookie; a cookie that does not verify, has
+    expired or is not one of ours; and a URL `state` that is absent or is not
+    the one in the cookie. Single use is the identity provider's side of it:
+    an authorization code is redeemable once, and the callback expires the
+    cookie whatever the outcome.
     """
-    if not token:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="State token is required",
+    if not cookie_value:
+        raise _state_refusal(
+            "OIDC sign-in was not started in this browser, or its cookie was not sent"
         )
-
-    with _state_lock:
-        expiry = _state_store.pop(token, None)
-    if expiry is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid or unknown state token",
+    try:
+        claims = jwt.decode(
+            cookie_value,
+            _state_key(),
+            algorithms=["HS256"],
+            audience=_STATE_AUDIENCE,
+            leeway=_STATE_LEEWAY_SECONDS,
+            options={"require": ["aud", "iat", "exp", "st", "cv", "nn", "cfg", "prv"]},
         )
+    except jwt.ExpiredSignatureError:
+        raise _state_refusal("OIDC sign-in expired; start it again") from None
+    except jwt.PyJWTError:
+        raise _state_refusal("OIDC sign-in state is not valid") from None
 
-    if time.time() > expiry:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="State token has expired",
-        )
-
-    return True
+    expected = str(claims["st"]).encode("utf-8")
+    if not url_state or not hmac.compare_digest(url_state.encode("utf-8"), expected):
+        raise _state_refusal("OIDC state does not match this browser's sign-in")
+    try:
+        config_id = uuid.UUID(str(claims["cfg"]))
+    except ValueError:
+        raise _state_refusal("OIDC sign-in state is not valid") from None
+    return OIDCLoginState(
+        config_id=config_id,
+        provider=str(claims["prv"]),
+        code_verifier=str(claims["cv"]),
+        nonce=str(claims["nn"]),
+    )
 
 
 def build_oidc_authorization_url(
@@ -1005,8 +1308,14 @@ def build_oidc_authorization_url(
     provider_key: str,
     redirect_uri: str,
     state: str,
+    code_verifier: str,
+    nonce: Optional[str] = None,
 ) -> str:
-    """Build the authorization URL to redirect the user to the OIDC provider."""
+    """Build the authorization URL to redirect the user to the OIDC provider.
+
+    Always with a PKCE S256 challenge (RFC 9700 s.2.1.1). A provider that does
+    not support PKCE ignores the parameters.
+    """
     meta = _OIDC_PROVIDERS.get(provider_key)
     if not meta:
         raise HTTPException(
@@ -1014,9 +1323,7 @@ def build_oidc_authorization_url(
             detail=f"Unknown OIDC provider '{provider_key}'",
         )
 
-    auth_url = meta["authorization_endpoint"]
-    if "{sso_url}" in auth_url and config.sso_url:
-        auth_url = auth_url.replace("{sso_url}", config.sso_url.rstrip("/"))
+    auth_url = _provider_endpoint(config, meta, "authorization_endpoint")
 
     params = {
         "client_id": config.entity_id or "",
@@ -1024,5 +1331,9 @@ def build_oidc_authorization_url(
         "scope": meta.get("scope", "openid email profile"),
         "redirect_uri": redirect_uri,
         "state": state,
+        "code_challenge": pkce_challenge(code_verifier),
+        "code_challenge_method": "S256",
     }
+    if nonce and uses_id_token(provider_key):
+        params["nonce"] = nonce
     return f"{auth_url}?{urlencode(params)}"

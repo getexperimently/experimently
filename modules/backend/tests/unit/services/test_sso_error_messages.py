@@ -128,7 +128,7 @@ def test_a_failed_exchange_is_reported_without_its_text(
     _Provider.mode = mode
     refusal = _refusal(
         sso_service.exchange_oidc_code(
-            _config(provider), "garbage-code", "https://app/cb"
+            _config(provider), "garbage-code", "https://app/cb", code_verifier="v" * 43
         )
     )
     assert refusal.status_code == 400
@@ -144,7 +144,7 @@ def test_an_error_code_that_is_not_one_is_dropped(provider, monkeypatch, use_aut
     _Provider.mode = "bad-code"
     refusal = _refusal(
         sso_service.exchange_oidc_code(
-            _config(provider), "garbage-code", "https://app/cb"
+            _config(provider), "garbage-code", "https://app/cb", code_verifier="v" * 43
         )
     )
     assert refusal.detail == "OIDC token exchange failed"
@@ -156,7 +156,7 @@ def test_the_token_request_does_not_follow_a_redirect(provider, monkeypatch):
     _Provider.mode = "redirect"
     refusal = _refusal(
         sso_service.exchange_oidc_code(
-            _config(provider), "garbage-code", "https://app/cb"
+            _config(provider), "garbage-code", "https://app/cb", code_verifier="v" * 43
         )
     )
     assert refusal.detail == "OIDC token exchange failed"
@@ -184,5 +184,9 @@ def test_an_unreachable_provider_is_not_named(monkeypatch):
     cfg.entity_id = "client-id"
     cfg.client_secret = "client-secret-value"
     cfg.sso_url = "http://127.0.0.1:1"
-    refusal = _refusal(sso_service.exchange_oidc_code(cfg, "code", "https://app/cb"))
+    refusal = _refusal(
+        sso_service.exchange_oidc_code(
+            cfg, "code", "https://app/cb", code_verifier="v" * 43
+        )
+    )
     assert refusal.detail == "OIDC token exchange failed"

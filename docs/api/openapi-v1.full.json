@@ -17106,7 +17106,7 @@
     },
     "/api/v1/auth/sso/oidc/{provider}/callback": {
       "get": {
-        "description": "Handle the OIDC callback: exchange code for tokens, fetch user info, provision user.",
+        "description": "Finish a login this browser started: redeem the code, provision the user.\n\nEvery outcome expires the state cookie, so a login is redeemable once from\nthis browser; the provider refuses a second use of the code.",
         "operationId": "oidc_callback_api_v1_auth_sso_oidc__provider__callback_get",
         "parameters": [
           {
@@ -17165,22 +17165,6 @@
               ],
               "title": "Error"
             }
-          },
-          {
-            "in": "query",
-            "name": "org_domain",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Org Domain"
-            }
           }
         ],
         "responses": {
@@ -17214,7 +17198,7 @@
     },
     "/api/v1/auth/sso/oidc/{provider}/login": {
       "get": {
-        "description": "Redirect the user to the OIDC provider's authorization endpoint.",
+        "description": "Redirect the browser to the provider, holding the login's state in a cookie.",
         "operationId": "oidc_login_api_v1_auth_sso_oidc__provider__login_get",
         "parameters": [
           {
