@@ -123,11 +123,8 @@ NOT_DOCS_TESTS = {
     # Hands the classifier path STRINGS such as "docs/a.py"; opens no file.
     "backend/tests/unit/scripts/test_classify_changes.py": "fixture strings only",
 }
-# Not Python, so not scanned here, and not run on a docs-only change:
-# frontend/src/tests/services/docs-links.test.ts (DOCS_ROOT built from
-# __dirname) checks every docsUrl() link addresses a page under docs/. Deleting
-# or renaming a linked page on a docs-only pull request is NOT caught before
-# merge. Recorded as a residual in the plan; running it needs Node and npm ci.
+# docs-links.test.ts (Jest) runs on a docs-only change as its pinned Python
+# twin, backend/tests/unit/docs/test_dashboard_docs_links.py.
 # The real-tree scan in test_leak_guard.py reads docs/ through `git ls-files`;
 # the required Leak Guard workflow runs the same guard on every pull request.
 
