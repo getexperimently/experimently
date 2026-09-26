@@ -144,7 +144,6 @@ These secrets must be set in the GitHub repository under **Settings → Secrets 
 
 | Secret | Description |
 |--------|-------------|
-| `DEV_AWS_ROLE_ARN` | IAM role ARN assumed via GitHub OIDC for dev frontend deploy |
 | `PROD_AWS_ROLE_ARN` | IAM role ARN assumed via GitHub OIDC for production deploy/rollback |
 | `STAGING_AWS_ROLE_ARN` | IAM role ARN assumed via GitHub OIDC for staging DB migrations |
 | `PROD_API_URL` | Production API base URL (e.g., `https://api.experimentation.example.com`) |
