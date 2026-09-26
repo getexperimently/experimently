@@ -105,7 +105,7 @@ Redis is optional to the application: without it the rate limiter falls back
 to per-task memory and the caches are skipped, and `/health/ready` still
 answers 200 unless `REDIS_REQUIRED=true`. So a Redis the tasks cannot reach (a
 TLS failure, say) does **not** fail a deployment by itself. Two things exist to
-catch it, and the staging rehearsal (Stream I) uses one of them:
+catch it, and the first staging deploy uses one of them:
 
 - set `REDIS_REQUIRED=true` in staging, so readiness -- the ALB health check --
   fails without Redis; or
