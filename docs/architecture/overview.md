@@ -16,8 +16,8 @@ The architecture is designed to provide high-performance experiment evaluation, 
     **The dashboard is its own ECS service behind the same load balancer**: the
     HTTPS listener sends `/api/*`, `/health`, `/health/*` and `/metrics` to the
     API and everything else to the dashboard. `cdk deploy` starts it on the
-    `experimentation-platform/web:bootstrap` image; rolling each release onto it
-    through the Deploy workflow is #69, not yet done. No stack creates CloudFront
+    `experimentation-platform/web:bootstrap` image; the Deploy workflow rolls
+    each release onto it by digest, after the API. No stack creates CloudFront
     or API Gateway. The dashboard is a static Next.js export served by nginx; in
     Docker Compose that nginx also proxies `/api/` to the API, and in AWS it
     proxies nothing.
