@@ -157,10 +157,10 @@ a `404` or a `422`, so an example that doesn't check its output passes when it's
   `swift package|build`, `dotnet add|restore|build`): our package names aren't
   published yet, so a run would fetch whatever else holds the name. Nor may it call
   `aws`, `cdk` or `sam`. Writing `\aws`, `"aws"` or `/usr/local/bin/aws` is the same
-  command. Text inside a here-document written by `cat` or `tee` is data and is not
-  checked; a here-document fed to anything else (`bash <<EOF`, `python3 <<EOF`,
-  `cat <<EOF | sh`) runs, and is checked like any other line. Tag such a block
-  `skip` with the `registry` or `aws` category.
+  command. Text inside a here-document is checked like any other line, even one
+  written to a file by `cat`, because a here-document is too easily executed
+  (`bash <<EOF`, `. <(cat <<EOF`, `(cat <<EOF) | bash`). Tag such a block `skip`
+  with the `registry` or `aws` category, or write the file another way.
 
 Every block, `exec` or `skip`, must also pass `bash -n` (with bash 4.4 or later, the one
 that runs the examples; macOS's `/bin/bash` is 3.2 and is refused). A `skip` block whose

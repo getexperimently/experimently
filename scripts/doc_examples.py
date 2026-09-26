@@ -611,63 +611,20 @@ _PACKAGE_MANAGER = re.compile(
 _CLOUD = re.compile(_COMMAND_AT + r"(?P<tool>aws|cdk|sam)" + _WORD_END, re.M)
 
 
-# Commands whose here-document is data they store, not code they run.  Any
-# other receiver (bash, sh, python3, node, ssh, ...) EXECUTES its body, so the
-# body is scanned like any other line.  Fail-closed: an unknown receiver scans.
-_DATA_SINKS = ("cat", "tee")
-_SEGMENT_START = re.compile(r"(?:;|&&|\|\||\||\(|\$\(|`|\b(?:then|do|else)\s)")
-_PREFIX_WORD = re.compile(
-    r"^(?:\\?(?:[^\s;&|()<>\"'`:]*/)?(?:sudo|exec|time|command|env)\s+"
-    r"|[A-Za-z_][A-Za-z0-9_]*=\S*\s+)"
-)
-
-
-def _heredoc_is_data(line: str, start: int) -> bool:
-    """Whether the here-document opened at *start* of *line* feeds a data sink.
-
-    True only for `cat`/`tee` (after the usual prefixes) or a bare redirection,
-    and only when their output is not piped on or substituted into another
-    command (`cat <<EOF | bash`, `bash -c "$(cat <<EOF`).
-    """
-    before, after = line[:start], line[start:]
-    if "|" in after.replace("||", ""):
-        return False
-    starts = [m.end() for m in _SEGMENT_START.finditer(before)]
-    cut = starts[-1] if starts else 0
-    if "$(" in before[:cut] or "`" in before[:cut]:
-        return False
-    segment = before[cut:].strip()
-    while True:
-        prefix = _PREFIX_WORD.match(segment)
-        if not prefix:
-            break
-        segment = segment[prefix.end() :]
-    if not segment or segment[0] in "<>":
-        return True  # a bare redirection: nothing runs the body
-    word = segment.split()[0].lstrip("\\").strip("\"'")
-    return word.rsplit("/", 1)[-1] in _DATA_SINKS
-
-
 def shell_text(body: str) -> str:
-    """*body* as the M6/AWS scans read it: `\\`-newline continuations joined,
-    and the contents of a here-document fed to `cat` or `tee` blanked (data).
-    Every other here-document body is left in place, because its receiver
-    runs it."""
-    kept, terminator, blank = [], None, False
-    for line in body.split("\n"):
-        if terminator is not None:
-            if line.strip() == terminator:
-                terminator = None
-                kept.append(line)
-            else:
-                kept.append("" if blank else line)
-            continue
-        kept.append(line)
-        heredoc = _HEREDOC.search(line)
-        if heredoc:
-            terminator = heredoc.group("word")
-            blank = _heredoc_is_data(line, heredoc.start())
-    return re.sub(r"\\\n", " ", "\n".join(kept))
+    """*body* as the M6/AWS/registry scans read it: `\\`-newline continuations
+    joined, and nothing else changed.
+
+    Here-document bodies are scanned like any other line.  Deciding which
+    heredocs are only data (`cat <<EOF > f`) and which run (`bash <<EOF`,
+    `. <(cat <<EOF`, `(cat <<EOF) | bash`, ...) took three review rounds and
+    was still bypassable, so there is no such decision: an exec block whose
+    heredoc merely mentions `npm install` is refused too, and its author makes
+    it a skip block or writes the file another way.  (``comments`` still
+    treats heredoc bodies as data: that rule is about what zsh sees when the
+    block is pasted, not about what runs.)
+    """
+    return re.sub(r"\\\n", " ", body)
 
 
 def comments(body: str) -> list[tuple[int, str]]:

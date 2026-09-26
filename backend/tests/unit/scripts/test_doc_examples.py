@@ -1248,20 +1248,6 @@ def test_normalising_does_not_make_arguments_commands(body):
     assert dx.block_problems(block, "p.md") == []
 
 
-@pytest.mark.regression
-def test_a_here_document_body_is_not_a_command():
-    """Heredoc contents are data: comments() skips them, and so do M6 and AWS."""
-    data = "cat <<'EOF' > setup.txt\nnpm install experimently\naws s3 ls\nEOF"
-    (block,) = blocks(page(f"{FENCE}{{.bash exec}}\n{data}\n{FENCE}"))
-    assert dx.block_problems(block, "p.md") == []
-    real = page(f"{FENCE}{{.bash exec}}\n{data}\nnpm install experimently\n{FENCE}")
-    assert "may not run 'npm'" in refused(real)
-    registry = page(
-        f'{FENCE}{{.bash skip reason="registry: not published"}}\n{data}\n{FENCE}'
-    )
-    assert "block runs no package manager" in refused(registry)
-
-
 def _fake_old_bash(tmp_path, monkeypatch):
     fake = tmp_path / "fakebin" / "bash"
     fake.parent.mkdir()
@@ -1379,44 +1365,56 @@ def test_a_page_named_in_upper_case_is_in_the_universe(repo, tmp_path):
 # ---------------------------------------------------------------------------
 
 
+# Round 3: no heredoc is exempt from the install/aws scans.  Every classifier
+# of "data" heredocs was bypassable (`. <(cat <<EOF`, `(cat <<EOF) | bash`),
+# so the rule is the dumb one, and these pin it -- including the cost.
+HEREDOCS_THAT_RUN_OR_MIGHT = {
+    "bash": ("bash <<'EOF'", "EOF"),
+    "sh": ("sh <<EOF", "EOF"),
+    "python3": ("python3 <<'PY'", "PY"),
+    "node": ("node <<'JS'", "JS"),
+    "ssh": ("ssh host <<EOF", "EOF"),
+    "cat | bash": ("cat <<'EOF' | bash", "EOF"),
+    "source <(cat": ("source <(cat <<'EOF'", "EOF\n)"),
+    ". <(cat": (". <(cat <<EOF", "EOF\n)"),
+    "bash <(cat": ("bash <(cat <<EOF", "EOF\n)"),
+    "bash < <(cat": ("bash < <(cat <<EOF", "EOF\n)"),
+    "(cat) | bash": ("(cat <<EOF", "EOF\n) | bash"),
+    "cat > f (the accepted cost)": ("cat <<'EOF' > setup.txt", "EOF"),
+    "tee f (the accepted cost)": ("tee setup.txt <<'EOF'", "EOF"),
+}
+
+
 @pytest.mark.regression
+@pytest.mark.parametrize("name", HEREDOCS_THAT_RUN_OR_MIGHT)
 @pytest.mark.parametrize(
-    "opener, body, message",
+    "line, message",
     [
-        ("bash <<'EOF'", "aws s3 rm --recursive s3://x", "may not call 'aws'"),
-        ("sh <<EOF", "npm install left-pad", "may not run 'npm'"),
-        ("python3 <<'PY'", "pip install experimently", "may not run 'pip'"),
-        ("node <<'JS'", "npm install left-pad", "may not run 'npm'"),
-        ("/bin/bash -s <<EOF", "aws sts get-caller-identity", "may not call 'aws'"),
-        ("cat <<'EOF' | bash", "aws s3 ls", "may not call 'aws'"),
-        ("bash -c \"$(cat <<'EOF'", "npm install x", "may not run 'npm'"),
-        ("ssh host <<EOF", "aws s3 ls", "may not call 'aws'"),
+        ("aws s3 rm --recursive s3://x", "may not call 'aws'"),
+        ("npm install left-pad", "may not run 'npm'"),
     ],
+    ids=["aws", "npm"],
 )
-def test_a_here_document_that_is_executed_is_scanned(opener, body, message):
-    """Only cat/tee store a heredoc; every other receiver runs it (fail-closed)."""
-    terminator = opener.split("<<", 1)[1].strip("'\" ").split()[0].strip("'\"")
-    close = f'{terminator}\n)"' if opener.startswith('bash -c "$(') else terminator
-    text = page(f"{FENCE}{{.bash exec}}\n{opener}\n{body}\n{close}\n{FENCE}")
+def test_a_here_document_body_is_scanned_like_any_other_line(name, line, message):
+    """Fail-closed: whatever receives the heredoc, its body is checked."""
+    opener, close = HEREDOCS_THAT_RUN_OR_MIGHT[name]
+    text = page(f"{FENCE}{{.bash exec}}\n{opener}\n{line}\n{close}\n{FENCE}")
     assert message in refused(text)
 
 
-@pytest.mark.parametrize(
-    "opener",
-    [
-        "cat <<'EOF' > setup.txt",
-        "cat > setup.txt <<EOF",
-        "tee setup.txt <<'EOF'",
-        "sudo tee /etc/setup.txt <<'EOF'",
-        "/bin/cat <<EOF",
-        "> setup.txt <<'EOF'",
-        "echo start && cat <<'EOF' > setup.txt",
-    ],
-)
-def test_a_here_document_stored_by_cat_or_tee_is_data(opener):
-    body = f"{opener}\nnpm install experimently\naws s3 ls\nEOF"
-    (block,) = blocks(page(f"{FENCE}{{.bash exec}}\n{body}\n{FENCE}"))
+def test_a_registry_skip_counts_an_install_inside_a_here_document():
+    """The registry predicate reads the same text the refusal does."""
+    body = "sh <<'EOF'\npip install experimently\nEOF"
+    (block,) = blocks(
+        page(f'{FENCE}{{.bash skip reason="registry: not published"}}\n{body}\n{FENCE}')
+    )
     assert dx.block_problems(block, "p.md") == []
+
+
+def test_a_here_document_is_still_data_for_the_comment_rule():
+    """zsh passes a heredoc body through untouched, so `#` there is not a comment."""
+    body = "cat <<'EOF' > config.yml\n# PORT is the listen port\nEOF"
+    assert dx.comment_lines(body) == []
 
 
 @pytest.mark.regression
