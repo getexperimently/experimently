@@ -7,8 +7,10 @@ answers per user + key and never buckets locally.
 ## Install
 
 ```bash
-npm install @getexperimently/react-sdk   # peer deps: react >=17, react-dom >=17
+npm install @getexperimently/react-sdk
 ```
+
+Its peer dependencies are `react` >= 17 and `react-dom` >= 17.
 
 Consuming from source (as the ShopLab demo does): alias `@getexperimently/react-sdk`
 to `sdk/react/src` in your bundler and tsconfig.

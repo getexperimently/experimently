@@ -15,8 +15,10 @@ Source: `sdk/react`. A complete working integration is the ShopLab demo storefro
 ## Installation
 
 ```bash
-npm install @getexperimently/react-sdk   # peer deps: react >= 17, react-dom >= 17
+npm install @getexperimently/react-sdk
 ```
+
+Its peer dependencies are `react` >= 17 and `react-dom` >= 17.
 
 To consume the SDK from source inside this monorepo (what `demo/shoplab` does), alias
 `@getexperimently/react-sdk` to `sdk/react/src` in `tsconfig.json` `paths` and in
