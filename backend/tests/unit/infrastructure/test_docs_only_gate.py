@@ -273,6 +273,11 @@ class TestProfileBuildSteps:
 
     @pytest.mark.parametrize("path", DOCS_TESTS)
     def test_every_docs_test_exists(self, path):
+        # The step runs in the full checkout, before core-build copies the
+        # tree without modules/; in that core copy a modules/ path is absent
+        # by design, not gone.
+        if path.startswith("modules/") and not (REPO_ROOT / "modules").exists():
+            pytest.skip("core tree: modules/ is deleted by design")
         assert (REPO_ROOT / path).exists(), f"{path} is gone: the step would error"
 
     def test_every_python_docs_reader_is_classified(self):
