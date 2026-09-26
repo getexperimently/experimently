@@ -294,20 +294,66 @@ def test_the_docs_do_not_tell_an_operator_to_use_that_call(document: Path):
     # Anywhere on the line, not just at its start: the call reappears just as
     # easily inside `X=$(aws ecs update-service ...)`, and an earlier version
     # anchored on `^\s*` let exactly that through when tampered.
-    offenders = []
-    in_fence = False
-    for number, line in enumerate(
-        document.read_text(encoding="utf-8").splitlines(), start=1
-    ):
-        stripped = line.strip()
-        if stripped.startswith("```"):
-            in_fence = not in_fence
-            continue
-        if not in_fence:
-            continue
-        if "aws ecs update-service" in line and not stripped.startswith("#"):
-            offenders.append(f"{number}: {stripped}")
+    offenders = _update_service_offenders(document.read_text(encoding="utf-8"))
     assert not offenders, (
         f"{document.name} still tells an operator to run a call this service "
         "rejects:\n" + "\n".join(f"  {o}" for o in offenders)
     )
+
+
+def _update_service_offenders(text: str) -> list[str]:
+    """Fenced, uncommented `aws ecs update-service` commands for the API.
+
+    A `\\`-continued command is joined first, so `aws ecs \\` + `update-service`
+    on the next line is still one call. The dashboard (#69) is a rolling
+    service, for which update-service IS the rollback: a command that names
+    `experimentation-dashboard-` is the one exemption, stated here rather
+    than got round by splitting the line.
+    """
+    offenders = []
+    in_fence = False
+    command, first = "", 0
+    for number, line in enumerate(text.splitlines(), start=1):
+        stripped = line.strip()
+        if stripped.startswith("```"):
+            in_fence = not in_fence
+            command = ""
+            continue
+        if not in_fence or (not command and stripped.startswith("#")):
+            continue
+        if not command:
+            first = number
+        command += " " + stripped.rstrip("\\")
+        if stripped.endswith("\\"):
+            continue
+        joined = " ".join(command.split())
+        command = ""
+        if (
+            "aws ecs update-service" in joined
+            and "experimentation-dashboard-" not in joined
+        ):
+            offenders.append(f"{first}: {joined}")
+    return offenders
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize(
+    "block, offends",
+    [
+        ("aws ecs update-service --service experimentation-backend-$ENV", True),
+        (
+            "aws ecs \\\n  update-service \\\n  --service experimentation-backend-$ENV",
+            True,
+        ),
+        ("X=$(aws ecs update-service --service s)", True),
+        ("# aws ecs update-service --service experimentation-backend-$ENV", False),
+        (
+            "aws ecs update-service \\\n  --service experimentation-dashboard-$ENV",
+            False,
+        ),
+    ],
+    ids=["one-line", "continued", "substitution", "comment", "dashboard"],
+)
+def test_the_update_service_scan(block: str, offends: bool):
+    text = "```bash\n" + block + "\n```\n"
+    assert bool(_update_service_offenders(text)) is offends
