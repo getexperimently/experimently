@@ -9,10 +9,12 @@ This guide covers deploying your marketing website using AWS services with Route
     at the repository root. The options below are ways that site *could* be
     hosted; none of them is created by the CDK in `infrastructure/cdk`.
 
-    **The dashboard is not yet deployed by the CDK.** The CDK's Fargate stack
-    runs the API behind an Application Load Balancer and nothing else, so there
-    is no dashboard for an `app.` subdomain to point at (#69). The
-    documentation is published to GitHub Pages, not CloudFront and S3.
+    **The API and the dashboard share one origin.** The CDK's Fargate stack
+    runs both behind one Application Load Balancer, which sends `/api/*`,
+    `/health`, `/health/*` and `/metrics` to the API and everything else to the
+    dashboard, so a single record such as `app.` points at that load balancer
+    for both. The documentation is published to GitHub Pages, not CloudFront
+    and S3.
 
 ## Architecture Overview
 
@@ -20,11 +22,10 @@ This guide covers deploying your marketing website using AWS services with Route
 Route 53 (DNS)
 ├── getexperimently.com          → CloudFront → S3, or Amplify (Marketing Site)
 ├── www.getexperimently.com      → CloudFront → S3 (Redirect to apex)
-└── api.getexperimently.com      → ALB → ECS (Backend API, the CDK's Fargate stack)
+└── app.getexperimently.com      → ALB → ECS (the API and the dashboard, the CDK's Fargate stack)
 ```
 
-Not provided today: an `app.` subdomain for the dashboard (the CDK does not
-deploy one), and a `docs.` subdomain (the documentation is on GitHub Pages).
+Not provided: a `docs.` subdomain (the documentation is on GitHub Pages).
 
 ## Deployment Options
 
@@ -501,15 +502,17 @@ aws route53 change-resource-record-sets \
 
 ## 📋 Configure Other Subdomains
 
-### app.getexperimently.com — not provided today
+### app.getexperimently.com (ECS/ALB)
 
-The CDK does not deploy the dashboard, so there is no load balancer or
-distribution for an `app.` record to point at (#69).
+The CDK's Fargate stack creates one Application Load Balancer, in front of the
+API and the dashboard: `/api/*`, `/health`, `/health/*` and `/metrics` go to the
+API, everything else to the dashboard. One record serves both; the steps below
+use `api.` as the example name, and they are the same for `app.`.
 
 ### api.getexperimently.com (ECS/ALB)
 
-The CDK's Fargate stack creates one Application Load Balancer, in front of the
-API.
+The same load balancer under a second name, if you want one. The dashboard
+and the API are served together, so a separate `api.` name is optional.
 
 ```bash
 # Get your ALB DNS name and its hosted zone (both are per region)
@@ -653,7 +656,7 @@ aws cloudwatch put-metric-alarm \
 
 1. **Marketing Site** (`getexperimently.com`): AWS Amplify (what `amplify.yml` builds today) or CloudFront + S3
 2. **API** (`api.getexperimently.com`): ECS/Fargate + ALB, created by the CDK's Fargate stack
-3. **App Dashboard**: not provided today. The CDK does not deploy the dashboard (#69).
+3. **App Dashboard**: the same load balancer as the API; the CDK's Fargate stack runs it as its own ECS service
 4. **Docs**: GitHub Pages, from `.github/workflows/docs.yml`
 
 **Quick Start:**

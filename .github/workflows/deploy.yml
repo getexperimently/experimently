@@ -412,10 +412,14 @@ jobs:
       # One tag per release and profile, `:<tag>-<profile>`, pushed once. No
       # `:latest` and no bare `:<tag>`: both used to be pushed on every build,
       # so a staging build of the core profile moved the tag prod's next
-      # scale-out would pull (#71, #138). If the tag already exists -- the same
-      # release deployed to another environment -- its image is reused, not
-      # rebuilt, so staging and prod run the same bytes. Either way what the
-      # task definitions name is the DIGEST.
+      # scale-out would pull (#71, #138). If the tag already exists in this
+      # account's repository -- a repeat deploy of the same release here --
+      # its image is reused, not rebuilt. Staging and prod are separate
+      # accounts (D7, "Refuse the wrong AWS account" above), each with its
+      # own ECR, so prod builds the release itself from the tag: the same
+      # tag, commit and profile (check_labels below refuses an image whose
+      # labels name another commit or profile), not the digest staging ran.
+      # Either way what the task definitions name is the DIGEST.
       - name: Build and push the image once, and resolve its digest
         id: image
         env:
