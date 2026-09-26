@@ -124,11 +124,12 @@ context-aware logging configured in `backend/app/core/logger.py`.
 | `json_logs` | `True` (non-dev) | `True` → JSON output for CloudWatch; `False` → colourised dev output |
 | `service_name` | `"experimentation-platform"` | Added to every log event as `service` |
 
-Environment variables that control behaviour at startup:
+Environment variables that control behaviour at startup: `LOG_LEVEL` overrides
+the log level, and `APP_ENV=dev` triggers human-readable console output.
 
 ```bash
-LOG_LEVEL=DEBUG      # override log level
-APP_ENV=dev          # triggers human-readable console output
+LOG_LEVEL=DEBUG
+APP_ENV=dev
 ```
 
 ### Emitting structured log events

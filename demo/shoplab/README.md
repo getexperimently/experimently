@@ -36,6 +36,8 @@ SDK to every experiment the visitor has been assigned to in the session.
 Prerequisites: the Experimently backend on `http://localhost:8000`, the dashboard on
 `http://localhost:3100`, Node 18+, and the repo's Python venv.
 
+In step 2, `cp -n` copies `.env.example` only if `.env.local` does not exist yet.
+
 ```bash
 # 1. Seed the ShopLab experiments, flags, history and API key (from the repo root).
 #    backend/scripts/seed_shoplab.py is idempotent; it writes demo/shoplab/.api_key
@@ -46,7 +48,7 @@ python backend/scripts/seed_shoplab.py
 
 # 2. Environment (the seed script already wrote NEXT_PUBLIC_EXPERIMENTLY_API_KEY into .env.local)
 cd demo/shoplab
-cp -n .env.example .env.local                   # only if .env.local does not exist yet
+cp -n .env.example .env.local
 #   NEXT_PUBLIC_EXPERIMENTLY_API_URL        default http://localhost:8000
 #   NEXT_PUBLIC_EXPERIMENTLY_API_KEY        plaintext key for `shoplab-storefront`
 #   NEXT_PUBLIC_EXPERIMENTLY_DASHBOARD_URL  default http://localhost:3100

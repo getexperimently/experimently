@@ -21,6 +21,11 @@ Source: `sdk/dotnet`.
 
 ## Installation
 
+**Not yet published.** `Experimently.SDK` is not on NuGet yet, so the command below fails today.
+Reference the project from a clone of this repository instead, as shown after it
+(`dotnet add reference /path/to/experimently/sdk/dotnet/src/Experimently/Experimently.csproj`
+adds the same line; this has not been tested here).
+
 ```bash
 dotnet add package Experimently.SDK
 ```

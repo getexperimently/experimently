@@ -6,7 +6,7 @@ This document describes the high-level technical architecture of the platform: h
 
 ## High-Level Components
 
-```
+```text
 ┌──────────────────────────────────────────────────────────────────┐
 │                        Client Applications                        │
 │           (web, mobile, server — via SDK or REST API)            │
@@ -140,7 +140,7 @@ Traditional relational databases struggle with high-frequency counter updates be
 
 ### Counter Schema
 
-```
+```text
 partition_key: experiment_id
 sort_key:      variant_id#metric_key
 impressions:   (atomic counter)
@@ -155,7 +155,7 @@ The metrics collector scheduler reads from DynamoDB every 15 minutes and writes 
 
 Raw events flow through a pipeline for aggregation and search:
 
-```
+```text
 Client App
     |
     v
@@ -182,7 +182,7 @@ Event Processor Lambda
 
 Split URL experiments use a different flow from standard A/B tests. Instead of modifying a component within a page, the entire URL path changes between variants. This is handled at the CDN layer:
 
-```
+```text
 User Request
     |
     v

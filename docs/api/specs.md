@@ -4,7 +4,7 @@ This document outlines the API endpoints for Experimently, providing a reference
 
 ## Base URL
 
-```
+```text
 Production: https://api.experimently.example.com
 Development: https://dev-api.experimently.example.com
 ```
@@ -13,7 +13,7 @@ Development: https://dev-api.experimently.example.com
 
 All API requests must include an API key in the `Authorization` header:
 
-```
+```text
 Authorization: Bearer YOUR_API_KEY
 ```
 
@@ -56,7 +56,7 @@ All responses are returned in JSON format with the following structure:
 
 #### List Experiments
 
-```
+```text
 GET /api/v1/experiments
 ```
 
@@ -114,7 +114,7 @@ Retrieves a list of experiments.
 
 #### Get Experiment
 
-```
+```text
 GET /api/v1/experiments/{experiment_id}
 ```
 
@@ -183,7 +183,7 @@ Retrieves details of a specific experiment.
 
 #### Create Experiment
 
-```
+```text
 POST /api/v1/experiments
 ```
 
@@ -293,7 +293,7 @@ Creates a new experiment.
 
 #### Update Experiment
 
-```
+```text
 PUT /api/v1/experiments/{experiment_id}
 ```
 
@@ -366,7 +366,7 @@ Same as the create experiment request body. Only include the fields you want to 
 
 #### Start Experiment
 
-```
+```text
 POST /api/v1/experiments/{experiment_id}/start
 ```
 
@@ -393,7 +393,7 @@ Starts an experiment.
 
 #### Stop Experiment
 
-```
+```text
 POST /api/v1/experiments/{experiment_id}/pause
 POST /api/v1/experiments/{experiment_id}/complete
 ```
@@ -421,7 +421,7 @@ Stops an experiment.
 
 #### Get Experiment Results
 
-```
+```text
 GET /api/v1/experiments/{experiment_id}/results
 ```
 
@@ -470,7 +470,7 @@ Retrieves the results of an experiment.
 
 #### List Feature Flags
 
-```
+```text
 GET /api/v1/feature-flags
 ```
 
@@ -519,7 +519,7 @@ Retrieves a list of feature flags.
 
 #### Get Feature Flag
 
-```
+```text
 GET /api/v1/feature-flags/{flag_id}
 ```
 
@@ -580,7 +580,7 @@ Retrieves details of a specific feature flag.
 
 #### Create Feature Flag
 
-```
+```text
 POST /api/v1/feature-flags
 ```
 
@@ -673,7 +673,7 @@ Creates a new feature flag.
 
 #### Update Feature Flag
 
-```
+```text
 PUT /api/v1/feature-flags/{flag_id}
 ```
 
@@ -695,7 +695,7 @@ Similar to the response from the Get Feature Flag endpoint, with updated values.
 
 #### Toggle Feature Flag
 
-```
+```text
 PATCH /api/v1/feature-flags/{flag_id}/toggle
 ```
 
@@ -730,7 +730,7 @@ Enables or disables a feature flag.
 
 #### Evaluate Feature Flag (SDK)
 
-```
+```text
 GET /api/v1/feature-flags/evaluate/{flag_key}?user_id={user_id}
 ```
 
@@ -739,7 +739,7 @@ applies the flag's status, targeting rules and rollout percentage; SDKs never bu
 
 **Example Request**
 
-```
+```text
 GET /api/v1/feature-flags/evaluate/new_checkout_flow?user_id=user_123
 X-API-Key: eptk_...
 ```
@@ -764,7 +764,7 @@ their public **keys**. Per-IP rate limit: `SDK_RATE_LIMIT_PER_MINUTE` (default 6
 
 #### Assign User to Experiment
 
-```
+```text
 POST /api/v1/tracking/assign
 ```
 
@@ -799,7 +799,7 @@ Returns `404` when no ACTIVE experiment has that key.
 
 #### Track Event
 
-```
+```text
 POST /api/v1/tracking/track
 ```
 
@@ -844,7 +844,7 @@ Returns `404` when neither key exists and `422` when both are missing.
 
 #### Batch Track Events
 
-```
+```text
 POST /api/v1/tracking/batch
 ```
 
@@ -876,7 +876,7 @@ Failures are reported per event.
 
 #### Track Event by Ids
 
-```
+```text
 POST /api/v1/tracking/events
 ```
 
@@ -885,7 +885,7 @@ Same as `/tracking/track` but addressed by internal ids (`experiment_id`, `varia
 
 #### Get User Assignments
 
-```
+```text
 GET /api/v1/tracking/assignments/{user_id}?active_only=true
 ```
 
@@ -898,7 +898,7 @@ Lists the user's experiment assignments.
 
 #### List Users
 
-```
+```text
 GET /api/v1/users
 ```
 
@@ -945,7 +945,7 @@ Retrieves a list of users with access to the platform.
 
 #### Create User
 
-```
+```text
 POST /api/v1/users
 ```
 
@@ -979,7 +979,7 @@ Creates a new user with access to the platform.
 
 #### List API Keys
 
-```
+```text
 GET /api/v1/api-keys
 ```
 
@@ -1010,7 +1010,7 @@ Retrieves a list of API keys for the account.
 
 #### Create API Key
 
-```
+```text
 POST /api/v1/api-keys
 ```
 
@@ -1040,7 +1040,7 @@ Creates a new API key.
 
 #### Revoke API Key
 
-```
+```text
 DELETE /api/v1/api-keys/{key_id}
 ```
 
