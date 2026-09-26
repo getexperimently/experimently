@@ -704,3 +704,48 @@ class TestEveryRoleSeesThePlatform:
         assert response.json()["total"] >= 1, (
             "total is owner-scoped while the items are not"
         )
+
+
+# ---------------------------------------------------------------------------
+# Issue #197: the stored optimization type survives serialisation
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+@pytest.mark.regression
+class TestBanditOptimizationTypeIsReported:
+    """A bandit experiment was reported as `"fixed"` by create, get and list.
+
+    `ExperimentService._experiment_to_dict` did not copy `optimization_type`,
+    so `ExperimentResponse` filled in its default. The row was right; every
+    response was wrong.
+    """
+
+    def test_create_get_and_list_report_the_stored_type(
+        self, admin_client, db_session: Session
+    ):
+        payload = _valid_create_payload(f"Bandit #197 {uuid.uuid4().hex[:8]}")
+        payload["optimization_type"] = "thompson_sampling"
+
+        created = admin_client.post("/api/v1/experiments/", json=payload)
+        assert created.status_code == 201, created.text
+        body = created.json()
+        exp_id = body["id"]
+
+        stored = db_session.get(Experiment, uuid.UUID(exp_id))
+        assert stored.optimization_type == "thompson_sampling"
+
+        assert body["optimization_type"] == "thompson_sampling"
+
+        fetched = admin_client.get(f"/api/v1/experiments/{exp_id}")
+        assert fetched.status_code == 200, fetched.text
+        assert fetched.json()["optimization_type"] == "thompson_sampling"
+
+        listed = admin_client.get("/api/v1/experiments/", params={"limit": 500})
+        assert listed.status_code == 200, listed.text
+        by_id = {i["id"]: i for i in listed.json()["items"]}
+        assert by_id[exp_id]["optimization_type"] == "thompson_sampling"
+
+    def test_a_fixed_experiment_still_reports_fixed(self, admin_client):
+        body = _create_experiment(admin_client, f"Fixed #197 {uuid.uuid4().hex[:8]}")
+        assert body["optimization_type"] == "fixed"

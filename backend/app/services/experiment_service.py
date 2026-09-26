@@ -985,6 +985,19 @@ class ExperimentService:
             "key": experiment.key,
             "experiment_metadata": experiment.experiment_metadata or {},
             "split_url_config": experiment.split_url_config,
+            # Issue #197: every column ExperimentResponse declares with a
+            # default must be copied here, or the response reports the
+            # default instead of the stored value (a bandit read as "fixed").
+            "optimization_type": experiment.optimization_type or "fixed",
+            "sequential_testing_enabled": bool(experiment.sequential_testing_enabled),
+            "sequential_testing_method": experiment.sequential_testing_method,
+            "sequential_testing_config": experiment.sequential_testing_config,
+            "variance_reduction_config": experiment.variance_reduction_config,
+            "mutual_exclusion_group_id": (
+                str(experiment.mutual_exclusion_group_id)
+                if experiment.mutual_exclusion_group_id
+                else None
+            ),
         }
 
         # Add variants if loaded
