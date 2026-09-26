@@ -64,7 +64,7 @@ The probability of detecting a real effect. Standard is 0.80 (80%).
 
 For a two-proportions z-test (the standard for conversion rate experiments), the required sample size per variant is:
 
-```
+```text
 n = [z_alpha * sqrt(2 * p_bar * (1 - p_bar))
      + z_power * sqrt(p1*(1-p1) + p2*(1-p2))]^2
     / (p2 - p1)^2
@@ -90,7 +90,7 @@ This is the **Fleiss (2003)** formula, which is more accurate than the simpler p
 
 Once you have the required sample size per variant, you can estimate the runtime:
 
-```
+```text
 daily_per_variant = daily_traffic * traffic_allocation / n_variants
 days = required_sample_size / daily_per_variant
 ```
@@ -132,7 +132,7 @@ If your estimated runtime is too long, you have several options:
 
 When you have more than 2 variants (e.g. A/B/C), the platform applies **Bonferroni correction** to control the family-wise error rate:
 
-```
+```text
 corrected_alpha = alpha / (n_variants - 1)
 ```
 

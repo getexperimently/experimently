@@ -49,6 +49,8 @@ and a live readout of `streampulse_player_v2` for the current device.
 Prerequisites: the Experimently backend on `http://localhost:8000`, the dashboard on
 `http://localhost:3100`, Node 18+, and the repo's Python venv.
 
+In step 2, `cp -n` copies `.env.example` only if `.env.local` does not exist yet.
+
 ```bash
 # 1. Seed the StreamPulse catalogue (from the repo root). Idempotent; writes the API key to
 #    demo/streampulse/.api_key and NEXT_PUBLIC_EXPERIMENTLY_API_KEY into demo/streampulse/.env.local.
@@ -59,7 +61,7 @@ python backend/scripts/seed_streampulse.py
 
 # 2. Environment (the seed already wrote the key line into .env.local)
 cd demo/streampulse
-cp -n .env.example .env.local                   # only if .env.local does not exist yet
+cp -n .env.example .env.local
 #   NEXT_PUBLIC_EXPERIMENTLY_API_URL        default http://localhost:8000
 #   NEXT_PUBLIC_EXPERIMENTLY_API_KEY        plaintext key for `streampulse-app`
 #   NEXT_PUBLIC_EXPERIMENTLY_DASHBOARD_URL  default http://localhost:3100
