@@ -17,6 +17,7 @@ from stacks.elasticache_redis_stack import (
 from stacks.authentication_stack import AuthenticationStack
 from stacks.fargate_service_stack import FargateServiceStack
 from stacks.migration_task_stack import MigrationTaskStack
+from stacks.environments import nat_gateway_count
 
 # ---------------------------------------------------------------------------
 # The modules' stacks (modules/infrastructure/cdk/stacks, issue #89)
@@ -133,7 +134,14 @@ auth_stack = AuthenticationStack(
 )
 
 # Create the networking stack (VPC, subnets, etc.)
-vpc_stack = VpcStack(app, f"experimentation-vpc-{env_name}", env=env)
+vpc_stack = VpcStack(
+    app,
+    f"experimentation-vpc-{env_name}",
+    environment=env_name,
+    # Two in prod (one per AZ), one elsewhere (DECISIONS D7).
+    nat_gateways=nat_gateway_count(env_name),
+    env=env,
+)
 
 # Create the DynamoDB tables stack
 dynamodb_stack = DynamoDBTablesStack(
@@ -171,7 +179,11 @@ redis_stack.add_dependency(vpc_stack)
 
 # Create the compute stack (ECS, Lambda)
 compute_stack = ComputeStack(
-    app, f"experimentation-compute-{env_name}", vpc=vpc_stack.vpc, env=env
+    app,
+    f"experimentation-compute-{env_name}",
+    vpc=vpc_stack.vpc,
+    env_name=env_name,
+    env=env,
 )
 compute_stack.add_dependency(vpc_stack)
 compute_stack.add_dependency(database_stack)
@@ -182,7 +194,11 @@ compute_stack.add_dependency(redis_stack)  # Add dependency on Redis stack
 analytics_stack = None
 if ENABLE_MODULE_STACKS:
     analytics_stack = AnalyticsStack(
-        app, f"experimentation-analytics-{env_name}", vpc=vpc_stack.vpc, env=env
+        app,
+        f"experimentation-analytics-{env_name}",
+        vpc=vpc_stack.vpc,
+        env_name=env_name,
+        env=env,
     )
     analytics_stack.add_dependency(vpc_stack)
     analytics_stack.add_dependency(dynamodb_stack)
@@ -203,6 +219,7 @@ monitoring_stack = MonitoringStack(
     events_stream_name=(
         analytics_stack.events_stream.stream_name if analytics_stack else None
     ),
+    env_name=env_name,
     env=env,
 )
 monitoring_stack.add_dependency(vpc_stack)

@@ -3,9 +3,10 @@ from aws_cdk import (
     aws_cognito as cognito,
     Duration,
     CfnOutput,
-    RemovalPolicy,
 )
 from constructs import Construct
+
+from stacks.environments import data_removal_policy
 
 
 class AuthenticationStack(Stack):
@@ -68,10 +69,10 @@ class AuthenticationStack(Stack):
                 sms=True,
                 otp=True,
             ),
-            # Deletion policy for the development environment
-            removal_policy=(
-                RemovalPolicy.DESTROY if environment == "dev" else RemovalPolicy.RETAIN
-            ),
+            # Kept on teardown in prod only (stacks/environments.py). It was
+            # RETAIN everywhere but dev, so a staging teardown left a named
+            # pool behind and the next staging deploy collided with it.
+            removal_policy=data_removal_policy(environment),
         )
 
         # Add custom attributes

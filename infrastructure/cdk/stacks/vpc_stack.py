@@ -3,15 +3,32 @@ from constructs import Construct
 
 
 class VpcStack(Stack):
-    def __init__(self, scope: Construct, construct_id: str, **kwargs) -> None:
+    """The network. ``nat_gateways`` comes from app.py, which asks
+    ``stacks.environments.nat_gateway_count`` -- passed in rather than
+    imported here because ``infrastructure/tests/test_vpc_stack.py`` imports
+    this module as ``infrastructure.cdk.stacks.vpc_stack``, where the
+    ``stacks`` package the other stacks import from is not on the path.
+    """
+
+    def __init__(
+        self,
+        scope: Construct,
+        construct_id: str,
+        environment: str = "dev",
+        nat_gateways: int = 1,
+        **kwargs,
+    ) -> None:
         super().__init__(scope, construct_id, **kwargs)
+        self.environment_name = environment
 
         # Create a VPC with public and private subnets across two AZs
         self.vpc = ec2.Vpc(
             self,
             "ExperimentationVPC",
             max_azs=2,
-            nat_gateways=2,  # One NAT Gateway per AZ for high availability
+            # One per AZ in prod; one elsewhere (DECISIONS D7). Each NAT
+            # gateway bills by the hour whether or not anything uses it.
+            nat_gateways=nat_gateways,
             ip_addresses=ec2.IpAddresses.cidr("10.0.0.0/16"),
             subnet_configuration=[
                 ec2.SubnetConfiguration(
@@ -287,7 +304,7 @@ class VpcStack(Stack):
         ssm.StringParameter(
             self,
             "VpcId",
-            parameter_name="/experimentation/vpc/id",
+            parameter_name=f"/experimentation/{environment}/vpc/id",
             string_value=self.vpc.vpc_id,
         )
 
@@ -295,7 +312,7 @@ class VpcStack(Stack):
         ssm.StringParameter(
             self,
             "PublicSubnetIds",
-            parameter_name="/experimentation/vpc/public-subnet-ids",
+            parameter_name=f"/experimentation/{environment}/vpc/public-subnet-ids",
             string_value=",".join(
                 [subnet.subnet_id for subnet in self.vpc.public_subnets]
             ),
@@ -304,7 +321,7 @@ class VpcStack(Stack):
         ssm.StringParameter(
             self,
             "PrivateSubnetIds",
-            parameter_name="/experimentation/vpc/private-subnet-ids",
+            parameter_name=f"/experimentation/{environment}/vpc/private-subnet-ids",
             string_value=",".join(
                 [subnet.subnet_id for subnet in self.vpc.private_subnets]
             ),
@@ -313,7 +330,7 @@ class VpcStack(Stack):
         ssm.StringParameter(
             self,
             "IsolatedSubnetIds",
-            parameter_name="/experimentation/vpc/isolated-subnet-ids",
+            parameter_name=f"/experimentation/{environment}/vpc/isolated-subnet-ids",
             string_value=",".join(
                 [subnet.subnet_id for subnet in self.vpc.isolated_subnets]
             ),
@@ -323,21 +340,21 @@ class VpcStack(Stack):
         ssm.StringParameter(
             self,
             "AppSecurityGroupId",
-            parameter_name="/experimentation/vpc/app-sg-id",
+            parameter_name=f"/experimentation/{environment}/vpc/app-sg-id",
             string_value=self.app_security_group.security_group_id,
         )
 
         ssm.StringParameter(
             self,
             "DbSecurityGroupId",
-            parameter_name="/experimentation/vpc/db-sg-id",
+            parameter_name=f"/experimentation/{environment}/vpc/db-sg-id",
             string_value=self.db_security_group.security_group_id,
         )
 
         ssm.StringParameter(
             self,
             "BastionSecurityGroupId",
-            parameter_name="/experimentation/vpc/bastion-sg-id",
+            parameter_name=f"/experimentation/{environment}/vpc/bastion-sg-id",
             string_value=self.bastion_security_group.security_group_id,
         )
 

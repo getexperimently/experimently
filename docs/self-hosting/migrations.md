@@ -295,8 +295,8 @@ In production (ECS Fargate), migrations are run as a one-off ECS task before the
 ```bash
 # Run as a one-off ECS task
 aws ecs run-task \
-  --cluster experimentation-cluster \
-  --task-definition experimentation-migrate \
+  --cluster experimentation-<env> \
+  --task-definition experimentation-migrate-<env> \
   --overrides '{"containerOverrides":[{"name":"backend","command":["python","-m","alembic","-c","backend/app/db/alembic.ini","upgrade","heads"]}]}' \
   --launch-type FARGATE \
   --network-configuration "awsvpcConfiguration={subnets=[subnet-xxxx],securityGroups=[sg-xxxx]}"

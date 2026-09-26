@@ -22,7 +22,6 @@ Lambda execution roles can be granted access.
 
 from aws_cdk import (
     Duration,
-    RemovalPolicy,
     Stack,
     CfnOutput,
     Tags,
@@ -31,6 +30,8 @@ from aws_cdk import (
     aws_ssm as ssm,
 )
 from constructs import Construct
+
+from stacks.environments import data_removal_policy
 
 
 class DynamoDBCountersStack(Stack):
@@ -70,10 +71,9 @@ class DynamoDBCountersStack(Stack):
             else dynamodb.BillingMode.PAY_PER_REQUEST  # still PAY_PER_REQUEST for counters
         )
 
-        # Removal policy: destroy in dev (cost), retain in prod (safety)
-        removal_policy = (
-            RemovalPolicy.DESTROY if environment == "dev" else RemovalPolicy.RETAIN
-        )
+        # Retain in prod only (stacks/environments.py): the table is named, so a
+        # retained staging copy blocks the next staging deploy.
+        removal_policy = data_removal_policy(environment)
 
         # ----------------------------------------------------------------
         # Main counters table

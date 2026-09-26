@@ -31,16 +31,23 @@ class MonitoringStack(Stack):
         construct_id: str,
         vpc,
         events_stream_name: str | None = None,
+        env_name: str = "dev",
         **kwargs,
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
+
+        # Every name below is account-scoped (alarms, dashboards, the topic,
+        # the log group), and every one was literal: dev and staging in one
+        # account collided on fourteen of them (#139). Each now ends in the
+        # environment.
+        suffix = f"-{env_name}"
 
         # Create an SNS topic for alerts
         self.alerts_topic = sns.Topic(
             self,
             "AlertsTopic",
             display_name="Experimently Alerts",
-            topic_name="experimentation-alerts",
+            topic_name="experimentation-alerts" + suffix,
         )
 
         # Add an email subscription (replace with actual email)
@@ -50,7 +57,9 @@ class MonitoringStack(Stack):
 
         # Create a CloudWatch Dashboard
         dashboard = cloudwatch.Dashboard(
-            self, "ExperimentationDashboard", dashboard_name="experimentation-platform"
+            self,
+            "ExperimentationDashboard",
+            dashboard_name="experimentation-platform" + suffix,
         )
 
         # Add API Gateway metrics
@@ -307,7 +316,7 @@ class MonitoringStack(Stack):
             threshold=5,
             comparison_operator=cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
             alarm_description="API Gateway is returning 5XX errors",
-            alarm_name="ExperimentationApi5xxErrors",
+            alarm_name="ExperimentationApi5xxErrors" + suffix,
         )
 
         api_5xx_alarm.add_alarm_action(cloudwatch_actions.SnsAction(self.alerts_topic))
@@ -327,7 +336,7 @@ class MonitoringStack(Stack):
             threshold=5,
             comparison_operator=cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
             alarm_description="Lambda function is experiencing errors",
-            alarm_name="AssignmentLambdaErrors",
+            alarm_name="AssignmentLambdaErrors" + suffix,
         )
 
         lambda_error_alarm.add_alarm_action(
@@ -349,7 +358,7 @@ class MonitoringStack(Stack):
             threshold=10,
             comparison_operator=cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
             alarm_description="DynamoDB table is experiencing throttling",
-            alarm_name="AssignmentsTableThrottling",
+            alarm_name="AssignmentsTableThrottling" + suffix,
         )
 
         dynamodb_throttling_alarm.add_alarm_action(
@@ -371,7 +380,7 @@ class MonitoringStack(Stack):
             threshold=80,
             comparison_operator=cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
             alarm_description="Aurora cluster CPU is high",
-            alarm_name="AuroraHighCPU",
+            alarm_name="AuroraHighCPU" + suffix,
         )
 
         aurora_cpu_alarm.add_alarm_action(
@@ -395,7 +404,7 @@ class MonitoringStack(Stack):
                 threshold=300000,  # 5 minutes
                 comparison_operator=cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
                 alarm_description="Kinesis stream processing is falling behind",
-                alarm_name="KinesisProcessingDelay",
+                alarm_name="KinesisProcessingDelay" + suffix,
             )
 
             iterator_age_alarm.add_alarm_action(
@@ -417,7 +426,7 @@ class MonitoringStack(Stack):
             threshold=5000,  # 5 seconds
             comparison_operator=cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
             alarm_description="Lambda function execution time is high",
-            alarm_name="AssignmentLambdaDuration",
+            alarm_name="AssignmentLambdaDuration" + suffix,
         )
 
         lambda_duration_alarm.add_alarm_action(
@@ -439,7 +448,7 @@ class MonitoringStack(Stack):
             threshold=80,
             comparison_operator=cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
             alarm_description="Redis CPU utilization is high",
-            alarm_name="RedisHighCPU",
+            alarm_name="RedisHighCPU" + suffix,
         )
 
         redis_cpu_alarm.add_alarm_action(
@@ -450,7 +459,7 @@ class MonitoringStack(Stack):
         application_logs = logs.LogGroup(
             self,
             "ApplicationLogs",
-            log_group_name="/experimentation/application",
+            log_group_name=f"/experimentation/{env_name}/application",
             retention=logs.RetentionDays.TWO_WEEKS,
             removal_policy=RemovalPolicy.DESTROY,
         )
@@ -473,7 +482,7 @@ class MonitoringStack(Stack):
             threshold=10,
             comparison_operator=cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
             alarm_description="High number of error logs detected",
-            alarm_name="ApplicationErrorLogs",
+            alarm_name="ApplicationErrorLogs" + suffix,
         )
 
         error_logs_alarm.add_alarm_action(
@@ -484,7 +493,7 @@ class MonitoringStack(Stack):
         app_dashboard = cloudwatch.Dashboard(
             self,
             "ApplicationDashboard",
-            dashboard_name="experimentation-application-metrics",
+            dashboard_name="experimentation-application-metrics" + suffix,
         )
 
         # Add application-specific widgets (these would be custom metrics published by your application)
@@ -699,7 +708,7 @@ class MonitoringStack(Stack):
             threshold=10,
             comparison_operator=cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
             alarm_description="High 5xx error rate detected in the FastAPI application",
-            alarm_name="AppHighErrorRate",
+            alarm_name="AppHighErrorRate" + suffix,
         )
         high_error_rate_alarm.add_alarm_action(
             cloudwatch_actions.SnsAction(self.alerts_topic)
@@ -719,7 +728,7 @@ class MonitoringStack(Stack):
             threshold=2.0,
             comparison_operator=cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
             alarm_description="p99 request latency exceeded 2 seconds",
-            alarm_name="AppHighLatencyP99",
+            alarm_name="AppHighLatencyP99" + suffix,
         )
         high_latency_alarm.add_alarm_action(
             cloudwatch_actions.SnsAction(self.alerts_topic)
@@ -739,7 +748,7 @@ class MonitoringStack(Stack):
             threshold=100,
             comparison_operator=cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
             alarm_description="More than 100 concurrent active experiments",
-            alarm_name="AppHighActiveExperiments",
+            alarm_name="AppHighActiveExperiments" + suffix,
         )
         high_active_experiments_alarm.add_alarm_action(
             cloudwatch_actions.SnsAction(self.alerts_topic)

@@ -149,12 +149,12 @@ cdk deploy experimentation-monitoring-dev
 ### experimentation-vpc-<env>
 
 - VPC with public and private subnets across 2 availability zones
-- Two NAT Gateways (one per availability zone) for outbound internet access from private subnets
+- NAT gateways for outbound internet access from private subnets: two in `prod` (one per availability zone), one in every other environment
 - Security groups for ALB, ECS tasks, RDS, and ElastiCache
 
 ### experimentation-database-<env> and experimentation-redis-<env>
 
-- **Aurora PostgreSQL** cluster: writer + 1 reader on `db.r5.large` for `prod`, writer + 1 reader on `db.t3.medium` for `staging`, a single `db.t3.medium` otherwise
+- **Aurora PostgreSQL** cluster: writer + 1 reader on `db.r5.large` for `prod`, a single `db.t3.medium` in every other environment
 - **ElastiCache Redis** replication group: 3 nodes on `cache.r6g.large` for `prod`, 2 on `cache.m6g.large` for `staging`, a single `cache.t4g.medium` otherwise
 - Subnet groups and parameter groups
 - Redis snapshots kept 7 days in `prod`, 3 in `staging`, 1 otherwise
@@ -227,23 +227,122 @@ This shows additions, modifications, and deletions. Review carefully — some ch
 
 ---
 
-## Destroy All Resources
+## Destroying an environment
 
-To tear down the entire environment:
+Only `prod` keeps its data when its stacks are destroyed. Every other
+environment (`dev`, `staging`, `demo`) is disposable: its database, tables,
+buckets, stream, search domain, user pool, key and log groups are deleted with
+it, so the next deploy of the same environment starts clean instead of failing
+on the names the last one left behind. The rule is one line,
+`retains_data(env) == (env == "prod")`, in
+`infrastructure/cdk/stacks/environments.py`.
+
+Before destroying `prod`, export anything you need that the retained resources
+below do not already keep: `pg_dump` the database, export audit logs
+(`GET /api/v1/compliance/export`), archive CloudWatch logs.
+
+### Tearing an environment down
+
+`cdk destroy --all` destroys the stacks in dependency order. By hand, the same
+order is: a stack that imports from another, or depends on it, goes first --
+so monitoring and the Glue stack go before analytics, and fargate before
+compute.
 
 ```bash
-cdk destroy --all
+cdk destroy experimentation-migrations-<env>
+cdk destroy experimentation-fargate-<env>
+cdk destroy experimentation-glue-etl-<env>
+cdk destroy experimentation-monitoring-<env>
+cdk destroy experimentation-analytics-<env>
+cdk destroy experimentation-compute-<env>
+cdk destroy experimentation-redis-<env>
+cdk destroy experimentation-database-<env>
+cdk destroy experimentation-dynamodb-counters-<env>
+cdk destroy experimentation-dynamodb-<env>
+cdk destroy experimentation-auth-<env>
+cdk destroy experimentation-vpc-<env>
 ```
 
-**Warning**: This action is irreversible and will delete:
-- The Aurora PostgreSQL database and all stored data
-- All S3 bucket contents
-- All CloudWatch logs
+The glue, analytics and counters stacks exist only in a full checkout; skip
+their lines in a core one. `infrastructure/tests/test_environments_do_not_collide.py`
+checks this order against the synthesised imports and stack dependencies.
 
-Before destroying, export any data you need to retain:
-- Dump the database: `pg_dump`
-- Export audit logs: `GET /api/v1/compliance/export`
-- Archive CloudWatch logs
+The buckets outside `prod` are emptied before they are deleted:
+`auto_delete_objects=True` adds a custom resource backed by a CDK-provided
+Lambda (`Custom::S3AutoDeleteObjectsCustomResourceProvider`, with its own IAM
+role) that, when the stack is deleted, denies new writes to the bucket and
+deletes every object version and delete marker. It acts only on a bucket
+carrying the `aws-cdk:auto-delete-objects` tag, which is to say **a bucket
+deployed with this version or later**. A bucket deployed before it -- by an
+earlier version, whose template also said RETAIN -- is left behind by the
+teardown and must be emptied and deleted by hand.
+
+### What `cdk destroy` leaves behind and bills
+
+Everything below survives `cdk destroy --all`. The first group is kept on
+purpose, in `prod` only; the rest is created outside the stacks' templates and
+is yours to remove.
+
+| What | Where it comes from | Environments | Billed while it exists | How to remove it |
+|------|---------------------|--------------|------------------------|------------------|
+| The final snapshot CloudFormation takes of the Aurora cluster | the cluster's SNAPSHOT policy | prod | snapshot storage | `aws rds delete-db-cluster-snapshot` |
+| KMS key (the alias is deleted) | RETAIN; the final snapshot is encrypted with it | prod | per key per month | `aws kms schedule-key-deletion` -- only after the snapshot is gone |
+| Cognito user pool `experimentation-platform-users-prod` | RETAIN | prod | per monthly active user | `aws cognito-idp delete-user-pool` |
+| DynamoDB tables `experimentation-{assignments,events,experiments,feature-flags,overrides}-prod`, `experiment-counters-prod` | RETAIN | prod | capacity (the core tables are provisioned in prod) and storage | `aws dynamodb delete-table` |
+| Log groups `/ecs/experimentation-{backend,dashboard,migrate}-prod` | RETAIN | prod | log storage | `aws logs delete-log-group` |
+| Data-lake, Athena-results and Glue-scripts buckets | RETAIN | prod (full) | storage, every object version | empty (all versions), then `aws s3 rb` |
+| Kinesis stream and OpenSearch domain | RETAIN | prod (full) | per shard-hour; per instance-hour | `aws kinesis delete-stream`; `aws opensearch delete-domain` |
+| `pre-migration-*` and `pre-deploy-*` Aurora cluster snapshots | taken by the deploy and migrate workflows, not by CloudFormation | every environment they ran against | snapshot storage | `aws rds delete-db-cluster-snapshot`. Outside prod the KMS key they are encrypted with is deleted with the stack, so they cannot be restored afterwards |
+| The secrets under `/<env>/experimentation/` | created by hand before the first deploy ([Secrets Management](../deployment/secrets-management.md)) | every environment | per secret per month | `aws secretsmanager delete-secret` |
+| ECR repositories `experimentation-platform/backend` and `experimentation-platform/web`, and their images | created by hand once per account ([Deployment Guide](../deployment/deployment-guide.md)) | shared by all environments | image storage | `aws ecr delete-repository --force`, once no environment needs them |
+| The CDK bootstrap stack `CDKToolkit`: its `cdk-*-assets-<account>-<region>` bucket and `cdk-*-container-assets-*` repository | `cdk bootstrap`, once per account and region | shared by all environments | storage | `aws cloudformation delete-stack --stack-name CDKToolkit`, after emptying the bucket |
+| Log groups AWS services create at run time: `/aws/lambda/<function>` for the functions without a managed log group, `/aws/ecs/containerinsights/<cluster>/performance`, `/aws-glue/*` | the services themselves, not CloudFormation | every environment | log storage | `aws logs delete-log-group` |
+
+Two things are deleted but not immediately:
+
+- **The database credentials secret** (`experimentation-database-<env>-aurora-credentials`)
+  may be scheduled for deletion with a recovery window rather than removed. If
+  the next deploy of the same environment fails with "a secret with this name is
+  already scheduled for deletion", remove it with
+  `aws secretsmanager delete-secret --secret-id <name> --force-delete-without-recovery`.
+- **The KMS key outside prod** is scheduled for deletion after the 30-day
+  waiting period, and its alias is removed at once, so it does not block a
+  redeploy.
+
+### Moving an environment deployed before the rename
+
+This version names the ECS cluster from `ENVIRONMENT` (`experimentation-<env>`;
+it was `experimentation-dev` in every environment, #142) and renames the
+CodeDeploy application to `experimentation-platform-<env>` (#139). **An
+environment deployed by an earlier version cannot be updated in place.** The
+cluster's name is part of an export the fargate stack imports, and
+CloudFormation refuses to change an export another stack is using, so
+`cdk deploy --all` fails on the compute stack.
+
+The fargate stack is the only importer of that export -- the analytics stack
+imports nothing from compute and is not touched. So, for each environment
+deployed before this change:
+
+```bash
+cdk destroy --exclusively experimentation-fargate-<env>
+aws logs delete-log-group --log-group-name /ecs/experimentation-backend-<env>
+aws logs delete-log-group --log-group-name /ecs/experimentation-dashboard-<env>
+cdk deploy experimentation-compute-<env>
+cdk deploy experimentation-fargate-<env>
+cdk deploy --all
+```
+
+- `--exclusively` matters: without it the CDK CLI also destroys the stacks that
+  depend on fargate, which is the migrations stack.
+- The two `delete-log-group` lines are needed because the earlier version's
+  template retained those log groups, and the destroy follows the template that
+  is deployed, not this one. A recreated fargate stack would otherwise fail on
+  the names. Skip the dashboard line if that log group does not exist.
+- Destroying fargate stops the API and the dashboard until the last step
+  finishes; the database, Redis and the data stores are not touched.
+- `infrastructure/tests/test_environments_do_not_collide.py` derives the list
+  of stacks to destroy from the synthesised import graph and checks it against
+  the commands above.
 
 ---
 
@@ -274,8 +373,8 @@ sustained-load month lands nearer $940.
 For development/staging environments, you can significantly reduce costs by:
 - Non-prod environments already size down on their own: the CDK picks a
   smaller Aurora instance, `cache.t4g.medium` for dev/test
-  (`cache.m6g.large` for staging) and, outside `prod` and `staging`, a
-  single Aurora instance rather than a writer/reader pair
+  (`cache.m6g.large` for staging), a single Aurora instance rather than a
+  writer/reader pair, and one NAT gateway rather than two
 - Reducing Aurora to a single instance (disable the reader)
 - Using on-demand Lambda scaling instead of reserved capacity
 
