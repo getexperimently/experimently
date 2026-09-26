@@ -195,7 +195,8 @@ describe('LoginPage', () => {
     renderLogin();
     await fillAndSubmit();
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      "Can't reach the API at http://localhost:8000. Is the backend running?",
+      "Can't reach the API at http://localhost:8000. Check that the backend is running and that " +
+        "this dashboard's origin is listed in CORS_ORIGINS.",
     );
   });
 
@@ -226,6 +227,47 @@ describe('LoginPage', () => {
       );
     });
     await waitFor(() => expect(mockReplace).toHaveBeenCalledWith('/experiments'));
+  });
+
+  it('says why a stored session ended when /auth/me answered 500 (#72)', async () => {
+    localStorage.setItem(TOKEN_STORAGE_KEY, 'tok');
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 500,
+      statusText: 'Internal Server Error',
+      headers: {
+        get: (name: string) =>
+          ({ 'content-type': 'text/plain; charset=utf-8', 'x-request-id': 'req-me-500' })[
+            name.toLowerCase()
+          ] ?? null,
+      },
+      text: () => Promise.resolve('Internal Server Error'),
+    } as unknown as Response);
+    renderLogin();
+    expect(await screen.findByTestId('login-session-error')).toHaveTextContent(
+      'Signed out because the server returned an error (HTTP 500). Request ID: req-me-500.',
+    );
+    expect(screen.getByRole('alert')).not.toHaveTextContent("Can't reach");
+    // The token is kept: the next reload may find the server healthy again.
+    expect(localStorage.getItem(TOKEN_STORAGE_KEY)).toBe('tok');
+  });
+
+  it('shows no session message for a visitor who was never signed in', async () => {
+    renderLogin();
+    await waitFor(() => expect(mockFetch).not.toHaveBeenCalled());
+    expect(screen.queryByTestId('login-session-error')).not.toBeInTheDocument();
+  });
+
+  it('a failed sign-in replaces the session message rather than stacking under it', async () => {
+    localStorage.setItem(TOKEN_STORAGE_KEY, 'tok');
+    mockFetch.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    renderLogin();
+    expect(await screen.findByTestId('login-session-error')).toHaveTextContent("Can't reach the API");
+    mockFetch.mockResolvedValueOnce(jsonResponse(401, { detail: 'Incorrect email or password' }));
+    await fillAndSubmit();
+    expect(await screen.findByTestId('login-error')).toHaveTextContent('Email or password is incorrect.');
+    expect(screen.queryByTestId('login-session-error')).not.toBeInTheDocument();
+    expect(screen.getAllByRole('alert')).toHaveLength(1);
   });
 
   it('redirects straight through when already authenticated', async () => {

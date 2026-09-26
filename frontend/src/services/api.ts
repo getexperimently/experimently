@@ -115,6 +115,8 @@ export interface ApiErrorInit {
   detail?: unknown;
   message?: string;
   cause?: unknown;
+  /** The response's `X-Request-ID`, when the API sent one. */
+  requestId?: string;
 }
 
 /**
@@ -122,11 +124,15 @@ export interface ApiErrorInit {
  * body from FastAPI (string, object or validation list). When the backend
  * returns a typed error such as `{"detail": {"code": "workspace_role_required"}}`
  * the code is exposed as `code`. `status === 0` means the API was unreachable.
+ * `requestId` is the response's `X-Request-ID` header (the API lists it in
+ * CORS `expose_headers`, so a cross-origin dashboard can read it too); an
+ * administrator finds the request in the API log by it.
  */
 export class ApiError extends Error {
   readonly status: number;
   readonly detail: unknown;
   readonly code?: string;
+  readonly requestId?: string;
 
   constructor(init: ApiErrorInit) {
     super(init.message ?? messageForDetail(init.status, init.detail));
@@ -135,6 +141,7 @@ export class ApiError extends Error {
     this.detail = init.detail;
     const code = detailCode(init.detail);
     if (code) this.code = code;
+    if (init.requestId) this.requestId = init.requestId;
     if (init.cause !== undefined) {
       (this as { cause?: unknown }).cause = init.cause;
     }
@@ -152,6 +159,10 @@ export class ApiError extends Error {
 
   get isNetworkError(): boolean {
     return this.status === 0;
+  }
+
+  get isServerError(): boolean {
+    return this.status >= 500;
   }
 }
 
@@ -273,32 +284,55 @@ export function redirectToLogin(next?: string): void {
 
 type LooseResponse = Partial<Response> & { ok: boolean; status?: number; statusText?: string };
 
-async function readErrorDetail(response: LooseResponse): Promise<unknown> {
+interface ErrorBody {
+  detail: unknown;
+  /** False for a body that is not JSON: a plain-text 500, a proxy's HTML page. */
+  json: boolean;
+}
+
+async function readErrorDetail(response: LooseResponse): Promise<ErrorBody> {
+  const unwrap = (parsed: unknown): unknown =>
+    parsed && typeof parsed === 'object' && 'detail' in (parsed as object)
+      ? (parsed as { detail: unknown }).detail
+      : parsed;
   try {
     if (typeof response.text === 'function') {
       const text = await response.text();
-      if (!text) return undefined;
+      if (!text) return { detail: undefined, json: false };
       try {
-        const parsed = JSON.parse(text) as unknown;
-        if (parsed && typeof parsed === 'object' && 'detail' in (parsed as object)) {
-          return (parsed as { detail: unknown }).detail;
-        }
-        return parsed;
+        return { detail: unwrap(JSON.parse(text) as unknown), json: true };
       } catch {
-        return text;
+        return { detail: text, json: false };
       }
     }
     if (typeof response.json === 'function') {
-      const parsed = (await response.json()) as unknown;
-      if (parsed && typeof parsed === 'object' && 'detail' in (parsed as object)) {
-        return (parsed as { detail: unknown }).detail;
-      }
-      return parsed;
+      return { detail: unwrap((await response.json()) as unknown), json: true };
     }
   } catch {
     /* unreadable body */
   }
-  return undefined;
+  return { detail: undefined, json: false };
+}
+
+/** `X-Request-ID`, if present and shaped like an id (it is shown to the user). */
+function readRequestId(response: LooseResponse): string | undefined {
+  const headers = response.headers;
+  if (!headers || typeof headers.get !== 'function') return undefined;
+  const value = headers.get('x-request-id');
+  return value && /^[A-Za-z0-9._:-]{1,128}$/.test(value) ? value : undefined;
+}
+
+/**
+ * Copy for a 5xx whose body says nothing useful (the API's plain-text
+ * "Internal Server Error", or a proxy's page). The server answered, so this is
+ * deliberately not the "can't reach the API" message.
+ */
+export function serverErrorMessage(status: number, requestId?: string): string {
+  const head = `Something went wrong on the server (HTTP ${status}).`;
+  return requestId
+    ? `${head} This is not a connection problem. Request ID: ${requestId}. ` +
+        'Your administrator can find the details by searching the API log for this ID.'
+    : `${head} Your administrator can find the details in the API log.`;
 }
 
 async function readSuccessBody<T>(response: LooseResponse, path: string): Promise<T> {
@@ -326,11 +360,19 @@ async function readSuccessBody<T>(response: LooseResponse, path: string): Promis
   }
 }
 
-function unreachableMessage(): string {
+/**
+ * Copy for a request that got no response the browser would show us. That is
+ * a backend that is down, or one that answered without CORS headers for this
+ * origin -- the browser reports both the same way.
+ */
+export function unreachableMessage(): string {
   const base = apiBase();
   const where =
     base || (typeof window !== 'undefined' && window.location ? window.location.origin : 'the API');
-  return `Can't reach the API at ${where}. Is the backend running? See docs → Quick start.`;
+  const message =
+    `Can't reach the API at ${where}. Check that the backend is running and that ` +
+    "this dashboard's origin is listed in CORS_ORIGINS.";
+  return process.env.NODE_ENV === 'development' ? `${message} See docs → Quick start.` : message;
 }
 
 // ---------------------------------------------------------------------------
@@ -390,7 +432,8 @@ export async function apiFetch<T = unknown>(
   }
 
   const status = response.status ?? 0;
-  const detail = await readErrorDetail(response);
+  const { detail, json: bodyIsJson } = await readErrorDetail(response);
+  const requestId = readRequestId(response);
 
   if (status === 401 && auth) {
     clearToken();
@@ -399,12 +442,18 @@ export async function apiFetch<T = unknown>(
     }
   }
 
-  const message =
-    detail !== undefined
-      ? messageForDetail(status, detail)
-      : response.statusText || messageForDetail(status, undefined);
+  let message: string;
+  if (status >= 500 && !bodyIsJson) {
+    message = serverErrorMessage(status, requestId);
+  } else {
+    message =
+      detail !== undefined
+        ? messageForDetail(status, detail)
+        : response.statusText || messageForDetail(status, undefined);
+    if (status >= 500 && requestId) message = `${message} (Request ID: ${requestId})`;
+  }
 
-  throw new ApiError({ status, detail, message });
+  throw new ApiError({ status, detail, message, requestId });
 }
 
 function hasHeader(headers: Record<string, string>, name: string): boolean {

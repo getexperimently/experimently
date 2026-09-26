@@ -1,7 +1,7 @@
 import React, { FormEvent, useEffect, useId, useRef, useState } from 'react';
 import { useRouter } from 'next/router';
 import { useAuth } from '@/contexts/AuthContext';
-import { ApiError, apiBase, safeNextPath } from '@/services/api';
+import { ApiError, safeNextPath, unreachableMessage } from '@/services/api';
 import { PageTitle } from '@/components/PageTitle';
 import { Wordmark } from '@/components/Wordmark';
 
@@ -19,10 +19,7 @@ export function loginErrorMessage(err: unknown): string {
         : 'Too many failed attempts. Try again in a few minutes.';
     }
     if (err.status === 429) return 'Too many attempts. Please wait a moment and try again.';
-    if (err.status === 0) {
-      const where = apiBase() || (typeof window !== 'undefined' ? window.location.origin : 'the API');
-      return `Can't reach the API at ${where}. Is the backend running? See docs → Quick start.`;
-    }
+    if (err.status === 0) return unreachableMessage();
     return err.message;
   }
   if (err instanceof Error && err.message) return err.message;
@@ -35,7 +32,7 @@ function firstQueryValue(value: string | string[] | undefined): string | undefin
 
 export default function LoginPage() {
   const router = useRouter();
-  const { login, status } = useAuth();
+  const { login, status, sessionError } = useAuth();
   const emailId = useId();
   const passwordId = useId();
   const errorId = useId();
@@ -97,6 +94,15 @@ export default function LoginPage() {
             <p className="text-sm text-slate-500 mb-6">Use the account an administrator created for you.</p>
 
             <form onSubmit={handleSubmit} noValidate data-testid="login-form">
+              {!error && sessionError && (
+                <div
+                  role="alert"
+                  data-testid="login-session-error"
+                  className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800"
+                >
+                  {sessionError}
+                </div>
+              )}
               {error && (
                 <div
                   id={errorId}
