@@ -155,6 +155,8 @@ universe = [
     "docs/warehouse/databricks.md",
     "docs/warehouse/mysql.md",
     "docs/websocket-streaming.md",
+    "docs/workspaces/overview.md",
+    "docs/workspaces/quickstart.md",
     "frontend/README.md",
     "infrastructure/cdk/README.md",
     "sdk/android/README.md",
