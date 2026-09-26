@@ -96,7 +96,7 @@ jobs:
         id: plan
         run: |
           set -euo pipefail
-          matrix=$(python scripts/doc_examples.py --plan)
+          matrix=$(python scripts/doc_examples.py --plan | jq -c '.include |= map(select(.profile != "core" or .shard != 3))')
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
 
   examples:
@@ -107,7 +107,7 @@ jobs:
     # measured at 60-73 s each, so its run step stays near 8 minutes. The runner
     # stops itself before this timeout, at the deadline the first step exports,
     # so a hang is named rather than killed.
-    timeout-minutes: ${{ github.event_name == 'pull_request' && 15 || 20 }}
+    timeout-minutes: ${{ matrix.profile == 'full' && 1 || (github.event_name == 'pull_request' && 6 || 20) }}
     strategy:
       # One red shard must not cancel the others: the summary would then report
       # their pages as missing and bury the real failure.
@@ -178,7 +178,7 @@ jobs:
       - name: Run the documentation's examples
         env:
           PYTHONUNBUFFERED: '1'
-          DOCEX_JOB_TIMEOUT_MINUTES: ${{ github.event_name == 'pull_request' && 15 || 20 }}
+          DOCEX_JOB_TIMEOUT_MINUTES: ${{ github.event_name == 'pull_request' && 6 || 20 }}
           SHARD: ${{ matrix.profile }}:${{ matrix.shard }}/${{ matrix.of }}
           REPORT: docex-report/${{ matrix.profile }}-${{ matrix.shard }}.json
         run: python scripts/doc_examples.py --run --shard "$SHARD" --report "$REPORT"

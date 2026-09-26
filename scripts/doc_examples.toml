@@ -13,7 +13,7 @@
 
 [meta]
 documents = 9
-exec = 36
+exec = 37
 universe = [
     ".github/pull_request_template.md",
     "CHANGELOG.md",
@@ -230,7 +230,7 @@ expects = 6
 [[document]]
 path = "docs/getting-started/environment-setup.md"
 environment = "bare"
-exec = 2
+exec = 3
 skip = 0
 expects = 1
 
