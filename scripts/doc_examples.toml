@@ -258,7 +258,7 @@ expects = 12
 "docs/infrastructure/network-security-readme.md" = { comments = 3, unlabelled = 0, syntax = 0 }
 "docs/infrastructure/redis-summary.md" = { comments = 2, unlabelled = 0, syntax = 0 }
 "docs/infrastructure/vpc-stack-implementation.md" = { comments = 0, unlabelled = 0, syntax = 0 }
-"docs/integrations/aws.md" = { comments = 6, unlabelled = 0, syntax = 0 }
+"docs/integrations/aws.md" = { comments = 4, unlabelled = 0, syntax = 0 }
 "docs/integrations/github.md" = { comments = 3, unlabelled = 4, syntax = 0 }
 "docs/integrations/salesforce.md" = { comments = 0, unlabelled = 1, syntax = 0 }
 "docs/llm-evaluation/overview.md" = { comments = 0, unlabelled = 2, syntax = 0 }

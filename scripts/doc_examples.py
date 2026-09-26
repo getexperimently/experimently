@@ -185,7 +185,7 @@ PENDING_FROZEN: dict[str, tuple[int, int, int]] = {
     "docs/infrastructure/network-security-readme.md": (3, 0, 0),
     "docs/infrastructure/redis-summary.md": (2, 0, 0),
     "docs/infrastructure/vpc-stack-implementation.md": (0, 0, 0),
-    "docs/integrations/aws.md": (6, 0, 0),
+    "docs/integrations/aws.md": (4, 0, 0),
     "docs/integrations/github.md": (3, 4, 0),
     "docs/integrations/salesforce.md": (0, 1, 0),
     "docs/llm-evaluation/overview.md": (0, 2, 0),
