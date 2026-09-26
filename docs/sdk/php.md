@@ -22,8 +22,19 @@ Source: `sdk/php`.
 
 ## Installation
 
+**Not yet published.** `experimently/sdk` is not on Packagist yet, so the first line below fails
+today. Point Composer at `sdk/php` in a clone of this repository with a path repository instead,
+as in the second block (this has not been tested here).
+
 ```bash
 composer require experimently/sdk
+```
+
+```bash
+git clone https://github.com/getexperimently/experimently.git
+# then, in your project:
+composer config repositories.experimently path /path/to/experimently/sdk/php
+composer require experimently/sdk:@dev
 ```
 
 Without composer, `require` the files under `sdk/php/src/` directly (`examples/contract_smoke.php`

@@ -775,6 +775,10 @@ curl -X GET "http://localhost:8000/api/v1/experiments/" \
 ### Python SDK
 
 #### Installation
+
+**Not yet published.** The `experimently` package is not on PyPI yet, so this line fails today.
+Install from this repository instead, as described in the [Python SDK](../sdk/python.md#installation) page.
+
 ```bash
 pip install experimently
 ```
@@ -821,6 +825,11 @@ assignments = client.get_user_assignments(
 ### JavaScript SDK
 
 #### Installation
+
+**Not yet published.** `@getexperimently/js-sdk` is not on npm yet, so this line fails today.
+Build and install it from this repository instead, as described in the
+[JavaScript SDK](../sdk/javascript.md#installation) page.
+
 ```bash
 npm install @getexperimently/js-sdk
 ```

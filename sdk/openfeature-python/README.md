@@ -7,6 +7,10 @@ user + flag; nothing is bucketed locally.
 
 ## Install
 
+**Not yet published.** Neither `experimently` nor `experimently-openfeature` is on PyPI yet, so
+the first line below fails today. Install both from the root of a clone of this repository with
+the second line (`openfeature-sdk` itself is on PyPI and is installed as a dependency).
+
 ```bash
 pip install openfeature-sdk experimently experimently-openfeature            # once published
 pip install -e sdk/python -e sdk/openfeature-python                          # from this repository
