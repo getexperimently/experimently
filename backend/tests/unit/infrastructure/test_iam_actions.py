@@ -77,6 +77,10 @@ def test_every_aws_call_is_granted():
     # The sources include the scripts the workflows run, not only the YAML.
     places = {p.split(":")[0] for ps in found.values() for p in ps}
     assert "scripts/run_migration_task.sh" in places
+    # A staged script (C4c): granted before any workflow names it, so the
+    # policy can be re-applied in every account before the deploy that runs it.
+    assert "scripts/ecs_rolling_rollout.sh" in places
+    assert "ecs:UpdateService" in found
     assert ".github/actions/stack-outputs/action.yml" in places
 
 

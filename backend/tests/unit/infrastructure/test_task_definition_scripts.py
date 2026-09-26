@@ -4,6 +4,9 @@
 db-migrate.yml register a task definition, and it accepts only an image DIGEST
 (#138, QA 2): a version tag lives in one ECR repository shared by every
 environment and profile, and ECS resolves a tag each time it starts a task.
+It replaces one named container's image: `backend` by default (the API and
+migration families, two arguments), or the third argument (`dashboard` for the
+dashboard's family, C4c / QA 2b). Its tests run for both.
 
 `scripts/run_migration_task.sh` runs a migration by its registered revision
 ARN, never a family (QA 1c), waits with its own deadline, and turns the three
@@ -53,8 +56,10 @@ query = opt("--query") or ""
 if (service, verb) == ("ecs", "describe-task-definition"):
     if opt("--task-definition").startswith("arn:"):
         registered = json.loads(canned("registered.json"))
+        # The read-back names its container in the query: ...[?name=='<c>']...
+        name = query.split("name=='", 1)[1].split("'", 1)[0]
         image = canned("readback_image") or next(
-            c["image"] for c in registered["containerDefinitions"] if c["name"] == "backend")
+            c["image"] for c in registered["containerDefinitions"] if c["name"] == name)
         print(image)
     else:
         td = canned("describe.json")
@@ -125,11 +130,11 @@ def aws(tmp_path):
     return run
 
 
-def _described(**extra) -> str:
+def _described(family: str = FAMILY, container: str = "backend", **extra) -> str:
     return json.dumps(
         {
-            "taskDefinitionArn": f"arn:aws:ecs:us-west-2:123456789012:task-definition/{FAMILY}:6",
-            "family": FAMILY,
+            "taskDefinitionArn": f"arn:aws:ecs:us-west-2:123456789012:task-definition/{family}:6",
+            "family": family,
             "revision": 6,
             "status": "ACTIVE",
             "requiresAttributes": [{"name": "x"}],
@@ -141,7 +146,7 @@ def _described(**extra) -> str:
             "memory": "1024",
             "containerDefinitions": [
                 {
-                    "name": "backend",
+                    "name": container,
                     "image": "123456789012.dkr.ecr.us-west-2.amazonaws.com/experimentation-platform/backend:bootstrap",
                     "secrets": [{"name": "SECRET_KEY", "valueFrom": "arn:x"}],
                 }
@@ -153,17 +158,35 @@ def _described(**extra) -> str:
 
 # --- register_task_definition.sh -----------------------------------------------
 
+#: (family, container, the extra arguments that select it). The backend case
+#: passes two arguments, exactly as deploy.yml and db-migrate.yml do.
+TARGETS = [
+    pytest.param(FAMILY, "backend", (), id="backend-two-arguments"),
+    pytest.param(
+        "experimentation-dashboard-staging",
+        "dashboard",
+        ("dashboard",),
+        id="dashboard",
+    ),
+]
+
 
 @pytest.mark.regression
-def test_registers_the_digest_and_changes_nothing_else(aws):
+@pytest.mark.parametrize("family, container, extra", TARGETS)
+def test_registers_the_digest_and_changes_nothing_else(aws, family, container, extra):
     code, out, err, calls, registered = aws(
-        REGISTER, FAMILY, IMAGE, describe__json=_described()
+        REGISTER,
+        family,
+        IMAGE,
+        *extra,
+        describe__json=_described(family=family, container=container),
     )
     assert code == 0, err
     assert out.strip() == ARN, "stdout must be the ARN and nothing else"
-    (backend,) = registered["containerDefinitions"]
-    assert backend["image"] == IMAGE
-    assert backend["secrets"] == [{"name": "SECRET_KEY", "valueFrom": "arn:x"}]
+    (only,) = registered["containerDefinitions"]
+    assert only["name"] == container
+    assert only["image"] == IMAGE
+    assert only["secrets"] == [{"name": "SECRET_KEY", "valueFrom": "arn:x"}]
     assert registered["executionRoleArn"].endswith("role/exec")
     for field in (
         "taskDefinitionArn",
@@ -176,12 +199,31 @@ def test_registers_the_digest_and_changes_nothing_else(aws):
     ):
         assert field not in registered, field
     # Based on the FAMILY's newest revision (CloudFormation's shape).
-    assert ["ecs", "describe-task-definition", "--task-definition", FAMILY] == calls[0][
+    assert ["ecs", "describe-task-definition", "--task-definition", family] == calls[0][
         :4
     ]
+    # The read-back asks for the same container it replaced.
+    readback = calls[-1]
+    assert readback[readback.index("--query") + 1] == (
+        f"taskDefinition.containerDefinitions[?name=='{container}'].image | [0]"
+    )
+
+
+@pytest.mark.parametrize("family, container, extra", TARGETS)
+def test_only_the_named_container_changes(aws, family, container, extra):
+    """A second container keeps its image: the edit is `select(.name == $name)`."""
+    td = json.loads(_described(family=family, container=container))
+    td["containerDefinitions"].append({"name": "sidecar", "image": "sidecar:1"})
+    code, _, err, _, registered = aws(
+        REGISTER, family, IMAGE, *extra, describe__json=json.dumps(td)
+    )
+    assert code == 0, err
+    images = {c["name"]: c["image"] for c in registered["containerDefinitions"]}
+    assert images == {container: IMAGE, "sidecar": "sidecar:1"}
 
 
 @pytest.mark.regression
+@pytest.mark.parametrize("family, container, extra", TARGETS)
 @pytest.mark.parametrize(
     "image",
     [
@@ -191,9 +233,13 @@ def test_registers_the_digest_and_changes_nothing_else(aws):
         "",
     ],
 )
-def test_refuses_anything_but_a_digest(aws, image):
+def test_refuses_anything_but_a_digest(aws, family, container, extra, image):
     code, out, err, calls, registered = aws(
-        REGISTER, FAMILY, image, describe__json=_described()
+        REGISTER,
+        family,
+        image,
+        *extra,
+        describe__json=_described(family=family, container=container),
     )
     assert code != 0
     assert registered is None and not [
@@ -203,25 +249,76 @@ def test_refuses_anything_but_a_digest(aws, image):
         assert "not an image digest" in err
 
 
-def test_refuses_a_family_that_does_not_exist(aws):
-    code, _, err, _, registered = aws(REGISTER, FAMILY, IMAGE)
+@pytest.mark.parametrize("family, container, extra", TARGETS)
+def test_refuses_a_family_that_does_not_exist(aws, family, container, extra):
+    code, _, err, _, registered = aws(REGISTER, family, IMAGE, *extra)
     assert code == 1 and registered is None
-    assert f"No task definition family {FAMILY}" in err
+    assert f"No task definition family {family}" in err
 
 
-def test_refuses_a_revision_without_exactly_one_backend(aws):
-    two = json.loads(_described())
+@pytest.mark.parametrize("family, container, extra", TARGETS)
+def test_refuses_a_revision_without_exactly_one_such_container(
+    aws, family, container, extra
+):
+    two = json.loads(_described(family=family, container=container))
     two["containerDefinitions"].append(dict(two["containerDefinitions"][0]))
     code, _, err, _, registered = aws(
-        REGISTER, FAMILY, IMAGE, describe__json=json.dumps(two)
+        REGISTER, family, IMAGE, *extra, describe__json=json.dumps(two)
     )
     assert code == 1 and registered is None
-    assert "2 containers named 'backend'" in err
+    assert f"2 containers named '{container}' (it has: {container}, {container})" in err
 
 
-def test_refuses_when_the_stored_revision_is_not_what_was_sent(aws):
+@pytest.mark.regression
+def test_the_default_container_is_backend_so_the_dashboard_needs_its_name(aws):
+    """Two arguments against the dashboard's family: refused, naming what it has.
+
+    That is what a caller that forgot the third argument gets, rather than a
+    revision with a second, stray image.
+    """
+    family = "experimentation-dashboard-staging"
+    code, _, err, calls, registered = aws(
+        REGISTER,
+        family,
+        IMAGE,
+        describe__json=_described(family=family, container="dashboard"),
+    )
+    assert code == 1 and registered is None
+    assert "0 containers named 'backend' (it has: dashboard)" in err
+    assert not [c for c in calls if c[1] == "register-task-definition"]
+
+
+@pytest.mark.parametrize(
+    "container", ["", "dash board", "x'] | [0", "a;b", "$(id)", "dashboard\n"]
+)
+def test_refuses_a_container_name_ecs_would_not_accept(aws, container):
+    """The name is interpolated into a jq filter and a JMESPath query."""
+    code, _, err, calls, registered = aws(
+        REGISTER, FAMILY, IMAGE, container, describe__json=_described()
+    )
+    assert code == 2, err
+    assert "usage" in err
+    assert not calls and registered is None
+
+
+def test_refuses_more_than_three_arguments(aws):
+    code, _, err, calls, _ = aws(
+        REGISTER, FAMILY, IMAGE, "backend", "extra", describe__json=_described()
+    )
+    assert code == 2 and "usage" in err and not calls
+
+
+@pytest.mark.parametrize("family, container, extra", TARGETS)
+def test_refuses_when_the_stored_revision_is_not_what_was_sent(
+    aws, family, container, extra
+):
     code, _, err, _, _ = aws(
-        REGISTER, FAMILY, IMAGE, describe__json=_described(), readback_image="other:tag"
+        REGISTER,
+        family,
+        IMAGE,
+        *extra,
+        describe__json=_described(family=family, container=container),
+        readback_image="other:tag",
     )
     assert code == 1
     assert "was registered with 'other:tag'" in err

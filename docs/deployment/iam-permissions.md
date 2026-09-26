@@ -94,7 +94,9 @@ The account also needs the GitHub OIDC provider
 [`infrastructure/cdk/github-actions-deploy-policy.json`](https://github.com/getexperimently/experimently/blob/main/infrastructure/cdk/github-actions-deploy-policy.json),
 generated -- like the table below -- by `scripts/iam_actions.py` from every
 `aws <service> <verb>` in `deploy.yml`, `rollback.yml`, `db-migrate.yml`, the
-local actions under `.github/actions/`, and the scripts those run. A unit test
+local actions under `.github/actions/`, the scripts those run, and any script
+listed in `STAGED_SCRIPTS` there (one the role will run that no workflow names
+yet, so the policy can be re-applied before the deploy that needs it). A unit test
 fails when a workflow gains a call the committed copies do not grant, so the
 list cannot fall behind the workflows. `iam:PassRole` is granted only for
 passing roles to ECS tasks.
@@ -102,6 +104,16 @@ passing roles to ECS tasks.
 Resources are `*`. Narrowing them to one environment's ARNs is worth doing;
 it is not done here, because the names mix generated identifiers (the Aurora
 cluster, the task roles) that are only known after `cdk deploy`.
+
+`ecs:UpdateService` is on `*` too, and that is a deliberate choice, not an
+oversight. It is there for `scripts/ecs_rolling_rollout.sh`, which rolls the
+dashboard service out to a new revision, but the action can also change any
+service's desired count, load balancers and deployment controller, the API's
+included. It adds no reach the role lacks: the role already holds
+`ecs:RunTask`, `ecs:RegisterTaskDefinition` and `iam:PassRole` to ECS tasks on
+`*`, which together run any image with any task role in the account. Each
+environment is its own AWS account (D7), so the account is the boundary, not
+the resource list.
 
 Three of the actions are not visible in the workflow text and come from AWS's
 documentation of what the call needs: `iam:PassRole` (registering and running
@@ -132,11 +144,13 @@ before the first dispatch.
 | `ecr:PutImage` | `.github/workflows/deploy.yml: docker push` |
 | `ecr:UploadLayerPart` | `.github/workflows/deploy.yml: docker push` |
 | `ecs:DescribeClusters` | `.github/workflows/deploy.yml: aws ecs describe-clusters` |
-| `ecs:DescribeServices` | `.github/workflows/db-migrate.yml: aws ecs describe-services`<br>`.github/workflows/deploy.yml: aws ecs describe-services`<br>`.github/workflows/rollback.yml: aws ecs describe-services` |
-| `ecs:DescribeTaskDefinition` | `.github/workflows/db-migrate.yml: aws ecs describe-task-definition`<br>`.github/workflows/deploy.yml: aws ecs describe-task-definition`<br>`.github/workflows/rollback.yml: aws ecs describe-task-definition`<br>`scripts/register_task_definition.sh: aws ecs describe-task-definition` |
-| `ecs:DescribeTasks` | `scripts/run_migration_task.sh: aws ecs describe-tasks` |
+| `ecs:DescribeServices` | `.github/workflows/db-migrate.yml: aws ecs describe-services`<br>`.github/workflows/deploy.yml: aws ecs describe-services`<br>`.github/workflows/rollback.yml: aws ecs describe-services`<br>`scripts/ecs_rolling_rollout.sh: aws ecs describe-services` |
+| `ecs:DescribeTaskDefinition` | `.github/workflows/db-migrate.yml: aws ecs describe-task-definition`<br>`.github/workflows/deploy.yml: aws ecs describe-task-definition`<br>`.github/workflows/rollback.yml: aws ecs describe-task-definition`<br>`scripts/ecs_rolling_rollout.sh: aws ecs describe-task-definition`<br>`scripts/register_task_definition.sh: aws ecs describe-task-definition` |
+| `ecs:DescribeTasks` | `scripts/ecs_rolling_rollout.sh: aws ecs describe-tasks`<br>`scripts/run_migration_task.sh: aws ecs describe-tasks` |
+| `ecs:ListTasks` | `scripts/ecs_rolling_rollout.sh: aws ecs list-tasks` |
 | `ecs:RegisterTaskDefinition` | `scripts/register_task_definition.sh: aws ecs register-task-definition` |
 | `ecs:RunTask` | `scripts/run_migration_task.sh: aws ecs run-task` |
+| `ecs:UpdateService` | `scripts/ecs_rolling_rollout.sh: aws ecs update-service` |
 | `iam:PassRole` | `scripts/register_task_definition.sh: aws ecs register-task-definition`<br>`scripts/run_migration_task.sh: aws ecs run-task` |
 | `logs:GetLogEvents` | `scripts/run_migration_task.sh: aws logs get-log-events` |
 | `rds:CreateDBClusterSnapshot` | `.github/workflows/db-migrate.yml: aws rds create-db-cluster-snapshot`<br>`.github/workflows/deploy.yml: aws rds create-db-cluster-snapshot` |
