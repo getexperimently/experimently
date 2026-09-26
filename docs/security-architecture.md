@@ -8,7 +8,7 @@ This document describes the security architecture of the experimentation platfor
 
 What the CDK deploys (`infrastructure/cdk`):
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────────┐
 │                         INTERNET                                │
 ├─────────────────────────────────────────────────────────────────┤
