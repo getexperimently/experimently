@@ -40,7 +40,9 @@ shifted rolls back a release that may be succeeding (#143).
 Deadlines and intervals are parameters. The unit tests run with 0.
 
 Exit status: 0 the API is serving the revision; 1 anything else, with the
-reason on stdout as a workflow `::error`. When `GITHUB_OUTPUT` is set it
+reason on stdout as a workflow `::error`. An exception it does not expect (a
+missing `aws` binary, a malformed rule) is `result=unknown` with its type and
+message, not an uncaught traceback with no `result`. When `GITHUB_OUTPUT` is set it
 writes `approved=true` as soon as it approves the shift, `result` (serving |
 failed | unhealthy | timeout | wrong-route | unknown), and, on success,
 `live_target_group`.
@@ -271,6 +273,13 @@ def shift(
             "unknown",
             "Could not tell whether the API is serving",
             f"{exc}. Deployment {deployment_id} was last {status}; it was not stopped.",
+        )
+    except Exception as exc:  # any other crash is "could not tell" too
+        return _fail(
+            "unknown",
+            "Could not tell whether the API is serving",
+            f"{type(exc).__name__}: {exc}. Deployment {deployment_id} was last "
+            f"{status}; it was not stopped.",
         )
 
 
