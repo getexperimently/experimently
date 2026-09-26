@@ -64,9 +64,12 @@ def test_every_doc_anchor_a_workflow_prints_exists():
 @pytest.mark.regression
 def test_the_runbook_works_for_either_environment():
     text = RUNBOOK.read_text()
-    assert "export ENV=prod   # or staging" in text
     fences = re.findall(r"```bash\n(.*?)```", text, re.S)
     code = "\n".join(fences)
+    # One line sets the environment, and the sentence before it names the
+    # other one: a trailing `# or staging` on that line is a comment zsh runs.
+    assert re.search(r"^export ENV=prod$", code, re.M), "no line sets ENV"
+    assert "`export ENV=staging`" in text, "the prose does not name staging"
     for literal in ("experimentation-prod", "backend-prod", "platform-prod", "-prod-"):
         assert literal not in code, f"a runbook command names {literal!r}"
 
@@ -78,6 +81,28 @@ def test_the_runbook_shows_revisions_by_digest():
     text = RUNBOOK.read_text()
     assert not re.search(r"backend:v\d", text), re.findall(r".*backend:v\d.*", text)
     assert "backend@sha256:" in text
+
+
+#: `ENV=prod   # or staging`: bash reads a comment; zsh (interactive_comments
+#: off, its default) reads a command named `#` with ENV=prod in ITS
+#: environment, so the shell's ENV keeps whatever it was -- mid-rollback, the
+#: other environment. The choice goes in the sentence before the block.
+_COMMENTED_ASSIGNMENT = re.compile(
+    r"^[ \t]*(?:export[ \t]+)?[A-Za-z_]\w*=\S*[ \t]+#", re.M
+)
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize(
+    "path", sorted((DOCS / "deployment").glob("*.md")), ids=lambda p: p.name
+)
+def test_no_deploy_command_assigns_a_variable_beside_a_comment(path):
+    fences = re.findall(
+        r"^```(?:bash|sh|shell|console)\n(.*?)^```", path.read_text(), re.S | re.M
+    )
+    assert fences, f"{path.name}: no shell fences read; the scan is not reading"
+    hits = [m.group(0) for body in fences for m in _COMMENTED_ASSIGNMENT.finditer(body)]
+    assert not hits, f"{path.name}: {hits}"
 
 
 @pytest.mark.regression
