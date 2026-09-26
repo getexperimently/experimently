@@ -1,13 +1,19 @@
-import React, { FormEvent, useEffect, useId, useRef, useState } from 'react';
+import React, { FormEvent, useCallback, useEffect, useId, useRef, useState } from 'react';
 import { useRouter } from 'next/router';
 import { useAuth } from '@/contexts/AuthContext';
 import { ApiError, safeNextPath, unreachableMessage } from '@/services/api';
 import { PageTitle } from '@/components/PageTitle';
 import { Wordmark } from '@/components/Wordmark';
+// The SSO button and `/login?sso_error=` copy: the SSO module's; a core build
+// resolves this to a stub that renders nothing.
+import SsoSignIn from '@modules/components/sso/SsoSignIn';
 
 export const DEFAULT_AFTER_LOGIN = '/experiments';
 
 type FormState = 'idle' | 'submitting';
+
+/** C1b's copy for a rate-limited sign-in; the SSO exchange's 429 shows it too. */
+export const RATE_LIMITED_MESSAGE = 'Too many attempts. Please wait a moment and try again.';
 
 /** Map an API failure to the copy shown in the alert box. */
 export function loginErrorMessage(err: unknown): string {
@@ -18,7 +24,7 @@ export function loginErrorMessage(err: unknown): string {
         ? err.detail
         : 'Too many failed attempts. Try again in a few minutes.';
     }
-    if (err.status === 429) return 'Too many attempts. Please wait a moment and try again.';
+    if (err.status === 429) return RATE_LIMITED_MESSAGE;
     if (err.status === 0) return unreachableMessage();
     return err.message;
   }
@@ -42,6 +48,8 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [formState, setFormState] = useState<FormState>('idle');
   const [error, setError] = useState<string | null>(null);
+  // Set when the error in the alert came from an SSO sign-in: re-opens its form.
+  const [ssoRetry, setSsoRetry] = useState<(() => void) | null>(null);
   const emailRef = useRef<HTMLInputElement>(null);
 
   const nextPath = safeNextPath(firstQueryValue(router.query.next), DEFAULT_AFTER_LOGIN);
@@ -54,8 +62,15 @@ export default function LoginPage() {
   }, [status, formState, router, nextPath]);
 
   useEffect(() => {
-    if (error) emailRef.current?.focus();
-  }, [error]);
+    // An SSO error focuses the SSO form's email instead (SsoSignIn does).
+    if (error && !ssoRetry) emailRef.current?.focus();
+  }, [error, ssoRetry]);
+
+  const handleSsoError = useCallback((message: string | null, retry: (() => void) | null) => {
+    setError(message);
+    // A function in state must be wrapped, or React calls it as an updater.
+    setSsoRetry(() => retry);
+  }, []);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -69,6 +84,7 @@ export default function LoginPage() {
 
     setFormState('submitting');
     setError(null);
+    setSsoRetry(null);
     try {
       await login(trimmedEmail, password);
       await router.replace(nextPath);
@@ -111,6 +127,16 @@ export default function LoginPage() {
                   className="login-error mb-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
                 >
                   {error}
+                  {ssoRetry && (
+                    <button
+                      type="button"
+                      data-testid="sso-retry"
+                      onClick={ssoRetry}
+                      className="mt-2 block font-medium text-red-800 underline hover:text-red-900"
+                    >
+                      Start sign-in again
+                    </button>
+                  )}
                 </div>
               )}
 
@@ -182,6 +208,13 @@ export default function LoginPage() {
                 {submitting ? 'Signing in…' : 'Sign in'}
               </button>
             </form>
+
+            <SsoSignIn
+              nextPath={nextPath}
+              onError={handleSsoError}
+              rateLimitedMessage={RATE_LIMITED_MESSAGE}
+              unreachableMessage={unreachableMessage}
+            />
 
             <details className="mt-5 text-sm">
               <summary className="cursor-pointer text-slate-500 hover:text-slate-800 select-none">

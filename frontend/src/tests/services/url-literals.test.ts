@@ -13,13 +13,13 @@
  *
  * ## Profiles
  *
- * The dump is taken from a full-profile build and carries 62 paths that only
+ * The dump is taken from a full-profile build and carries 64 paths that only
  * the modules serve. A core backend serves the rest, so the rule "every URL
  * literal exists in the dump" needs a profile, not a single document. Rather
  * than keeping two dumps in sync, one dump is kept and
  * `openapi.module-paths.json` names the modules' subset:
  *
- *   EXPERIMENTLY_PROFILE=core  →  those 62 paths are removed from the
+ *   EXPERIMENTLY_PROFILE=core  →  those 64 paths are removed from the
  *                                 document, and only the core tree
  *                                 (`frontend/src`, minus anything the manifest
  *                                 still lists there) is scanned.
@@ -294,8 +294,8 @@ describe(`frontend /api/v1 URL literals match the backend OpenAPI spec (${PROFIL
       expect(unknown).toEqual([]);
     });
 
-    it('the module subset is the 62 paths the modules registration mounts', () => {
-      expect(modulePaths).toHaveLength(62);
+    it('the module subset is the 64 paths the modules registration mounts', () => {
+      expect(modulePaths).toHaveLength(64);
       expect(modulePaths).toContain('/api/v1/rbac/roles');
       expect(modulePaths).toContain('/api/v1/workspaces/');
       // Routes whose URL is declared on a core router in every profile (501
@@ -311,7 +311,7 @@ describe(`frontend /api/v1 URL literals match the backend OpenAPI spec (${PROFIL
 
     it('the core document is the dump minus exactly those paths', () => {
       const core = coreDocument(fullDoc, modulePaths);
-      expect(Object.keys(core.paths)).toHaveLength(Object.keys(fullDoc.paths).length - 62);
+      expect(Object.keys(core.paths)).toHaveLength(Object.keys(fullDoc.paths).length - 64);
       expect(core.paths['/api/v1/rbac/roles']).toBeUndefined();
       expect(core.paths['/api/v1/experiments/']).toBeDefined();
       expect(core.paths['/api/v1/modules']).toBeDefined();

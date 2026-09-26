@@ -19,9 +19,20 @@ flow test is about:
   ``unverified-email``, ``other-domain`` (the ID token's email is at another
   domain), ``userinfo-email-differs`` (user info names another address than
   the ID token) or ``sub-mismatch`` (user info's ``sub`` differs).
+* Modes for the dashboard sign-in's error table (C2b): ``access-denied``
+  (``/v1/authorize`` redirects back with ``error=access_denied`` and the
+  state, and issues no code); ``no-email`` (the ID token and the user info
+  carry NO email, and the ID token drops ``email_verified`` too -- the API
+  refuses that as unverified, ``sso_unverified``); ``empty-email``,
+  ``non-ascii-email`` and ``malformed-email`` (``email_verified`` true, and the
+  email is ``""``, has a non-ASCII character, or has no ``@`` -- the API
+  refuses those as invalid, ``sso_email``).
+* ``GET /_mode?set=<mode>`` changes the mode of a running provider, so one
+  process serves every journey of a browser test.
 
-Usage: ``python fake_oidc_provider.py <client_id> <client_secret> <email>``.
-Prints ``READY <port>`` once it is listening.
+Usage: ``python fake_oidc_provider.py <client_id> <client_secret> <email>
+[--port N]``. Prints ``READY <port>`` once it is listening; without
+``--port`` it listens on a free port.
 """
 
 from __future__ import annotations
@@ -40,6 +51,8 @@ from urllib.parse import parse_qs, urlencode, urlparse
 
 CLIENT_ID, CLIENT_SECRET, EMAIL = sys.argv[1], sys.argv[2], sys.argv[3]
 ID_TOKEN_MODE = os.environ.get("FAKE_OIDC_ID_TOKEN", "good")
+#: The user info's `groups`: FAKE_OIDC_GROUPS, comma-separated (default none).
+GROUPS = [g for g in os.environ.get("FAKE_OIDC_GROUPS", "").split(",") if g]
 ISSUER = ""  # set once the port is known
 
 _codes: dict[str, dict[str, str]] = {}
@@ -49,6 +62,14 @@ _lock = threading.Lock()
 
 def _b64(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
+
+
+_INVALID_EMAILS = {
+    "empty-email": "",
+    # U+212A KELVIN SIGN, which str.lower() folds to an ASCII "k".
+    "non-ascii-email": "\u212aelvin@" + EMAIL.rpartition("@")[2],
+    "malformed-email": "no-at-sign",
+}
 
 
 def _id_token(nonce: str) -> str:
@@ -75,6 +96,11 @@ def _id_token(nonce: str) -> str:
         claims["email_verified"] = False
     elif ID_TOKEN_MODE == "other-domain":
         claims["email"] = "someone@elsewhere.example"
+    elif ID_TOKEN_MODE == "no-email":
+        del claims["email"]
+        del claims["email_verified"]
+    elif ID_TOKEN_MODE in _INVALID_EMAILS:
+        claims["email"] = _INVALID_EMAILS[ID_TOKEN_MODE]
     head = _b64(json.dumps({"alg": "HS256", "typ": "JWT"}).encode())
     body = _b64(json.dumps(claims).encode())
     sig = hmac.new(b"fake-provider-key", f"{head}.{body}".encode(), hashlib.sha256)
@@ -104,8 +130,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self._send(400, {"error": error, "error_description": description})
 
     def do_GET(self) -> None:
+        global ID_TOKEN_MODE
         url = urlparse(self.path)
         query = {k: v[0] for k, v in parse_qs(url.query).items()}
+        if url.path == "/_mode":
+            if query.get("set"):
+                ID_TOKEN_MODE = query["set"]
+            return self._send(200, {"mode": ID_TOKEN_MODE})
         if url.path == "/v1/authorize":
             if query.get("client_id") != CLIENT_ID:
                 return self._refuse("unauthorized_client", "unknown client")
@@ -115,6 +146,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 "code_challenge"
             ):
                 return self._refuse("invalid_request", "PKCE S256 is required")
+            if ID_TOKEN_MODE == "access-denied":
+                target = (
+                    query["redirect_uri"]
+                    + "?"
+                    + urlencode(
+                        {"error": "access_denied", "state": query.get("state", "")}
+                    )
+                )
+                self.send_response(302)
+                self.send_header("Location", target)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return None
             code = secrets.token_urlsafe(16)
             with _lock:
                 _codes[code] = {
@@ -139,11 +183,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if not known:
                 return self._send(401, {"error": "invalid_token"})
             info = {"sub": f"sub-{EMAIL}", "email": EMAIL, "name": "Fake User"}
-            if ID_TOKEN_MODE == "userinfo-email-differs":
+            if ID_TOKEN_MODE == "no-email":
+                del info["email"]
+            elif ID_TOKEN_MODE == "userinfo-email-differs":
                 info["email"] = "not-" + EMAIL
             elif ID_TOKEN_MODE == "sub-mismatch":
                 info["sub"] = "someone-else"
-            return self._send(200, {**info, "groups": []})
+            return self._send(200, {**info, "groups": GROUPS})
         return self._send(404, {"error": "not_found"})
 
     def do_POST(self) -> None:
@@ -182,7 +228,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
 def main() -> None:
     global ISSUER
-    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    port = 0
+    if "--port" in sys.argv:
+        port = int(sys.argv[sys.argv.index("--port") + 1])
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", port), Handler)
     ISSUER = f"http://127.0.0.1:{server.server_port}"
     print(f"READY {server.server_port}", flush=True)
     server.serve_forever()

@@ -1112,7 +1112,9 @@ class TestOIDCCallbackStateIsMandatory:
         attributes = [part.strip() for part in rest.split(";")[1:]]
         assert attributes == [
             "HttpOnly",
-            f"Max-Age={sso_service.OIDC_STATE_TTL_SECONDS}",
+            # Five minutes past the login's own expiry, so a late callback
+            # still brings the cookie and is told `sso_expired` (C2b).
+            f"Max-Age={sso_service.OIDC_STATE_TTL_SECONDS + 300}",
             "Path=/",
             "SameSite=lax",
             "Secure",

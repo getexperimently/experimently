@@ -33,13 +33,46 @@ SSO operates alongside the existing AWS Cognito authentication. When SSO is conf
 
 ---
 
+## Signing In from the Dashboard
+
+When the API lists the `sso` module (`GET /api/v1/modules`), the dashboard's sign-in page shows **Sign in with SSO**. The user enters a work email; the dashboard sends only its domain.
+
+1. The dashboard makes a random 32-byte secret, keeps it in the tab's `sessionStorage`, and navigates to `GET /api/v1/auth/sso/login?domain=<domain>&return_to=<dashboard origin>&handoff=<base64url SHA-256 of the secret>`.
+2. The API finds the active OIDC configuration for the domain and redirects to its provider. The provider returns to the same callback it always has, `{PUBLIC_BASE_URL}/api/v1/auth/sso/oidc/{provider}/callback`: nothing changes in the identity provider's registration.
+3. The callback redirects to `<dashboard>/sso/complete#code=<hand-off code>`. The code is valid for 60 seconds and is bound to the tab's secret. The access token itself never appears in a URL.
+4. `/sso/complete` sends the code and the secret to `POST /api/v1/auth/sso/exchange` and receives the same session a password sign-in returns.
+
+A browser's history keeps `/sso/complete#code=...`. That code expires after 60 seconds, and without the secret held by the tab that started the sign-in it cannot be exchanged.
+
+When a sign-in fails, the browser returns to `<dashboard>/login?sso_error=<code>` and the page explains what happened: `sso_expired`, `sso_state`, `sso_idp_error`, `sso_email`, `sso_unverified`, `sso_domain`, `sso_account`, `sso_inactive`, `sso_not_configured`, `sso_saml_only` or `sso_failed`. For `sso_failed` and `sso_account` the page shows a Request ID; search the API log for it. The identity provider's own error text is never shown, only its OAuth error code (for example `access_denied`).
+
+### Where the dashboard is: `DASHBOARD_ORIGINS`
+
+`return_to` must be one of the dashboard origins the API accepts. These are:
+
+- `DASHBOARD_ORIGINS`: optional, comma-separated or a JSON array, for example `https://app.example.com`. The first entry is the primary one.
+- `PUBLIC_BASE_URL`'s origin.
+- In `ENVIRONMENT=development` only: `http://localhost:3000` (`npm run dev`) and `http://localhost:3100` (the static export).
+
+The CORS list is not used here, because it also names the demo apps and any site running an SDK.
+
+**Set `DASHBOARD_ORIGINS` when the dashboard is not served from `PUBLIC_BASE_URL`**, for example when `PUBLIC_BASE_URL` is `https://api.example.com` and the dashboard is `https://app.example.com`. Otherwise every dashboard sign-in is refused with 400. In staging and production, the API logs a warning at startup when `DASHBOARD_ORIGINS` is empty and `PUBLIC_BASE_URL`'s host starts with `api.`.
+
+A callback that arrives without the sign-in's cookie, or with a cookie the API did not issue, cannot say which dashboard it came from. It is sent to the primary dashboard origin (the first `DASHBOARD_ORIGINS` entry, otherwise `PUBLIC_BASE_URL`'s origin) at `/login?sso_error=sso_state`. **Development only:** when neither `DASHBOARD_ORIGINS` nor `PUBLIC_BASE_URL` is set, there is no primary origin, and such a callback is answered with a JSON 400 instead of a redirect.
+
+The older `GET /auth/sso/oidc/{provider}/login` still works without `return_to`, for API and CLI callers. Its callback returns the token as JSON, as before.
+
+---
+
 ## API Endpoints
 
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/auth/sso/saml/{config_id}/metadata` | Returns SP metadata XML to give to the IdP |
 | `POST` | `/auth/sso/saml/{config_id}/acs` | ACS (Assertion Consumer Service) endpoint — IdP posts SAML assertions here |
-| `GET` | `/auth/sso/oidc/{provider}/login` | Initiates the OIDC authorization code flow |
+| `GET` | `/auth/sso/login` | Starts a dashboard sign-in: `domain`, `return_to` and `handoff` are all required, and a missing or malformed one is a 400 |
+| `POST` | `/auth/sso/exchange` | Exchanges a dashboard sign-in's hand-off code and secret for a session (`{access_token, token_type, user}`); rate-limited like the password login |
+| `GET` | `/auth/sso/oidc/{provider}/login` | Initiates the OIDC authorization code flow (API and CLI callers; the callback answers JSON) |
 | `GET` | `/auth/sso/oidc/{provider}/callback` | OIDC callback endpoint that exchanges the code for tokens |
 | `POST` | `/auth/sso/configs` | Create a new SSO configuration (admin only) |
 | `GET` | `/auth/sso/configs` | List all SSO configurations (admin only) |
@@ -301,7 +334,7 @@ Enforced SSO does not affect platform super-admin accounts, which can always log
 
 ### State Tokens and CSRF Protection
 
-Starting an OIDC sign-in sets a signed, `HttpOnly`, `SameSite=Lax` cookie, `__Host-experimently_oidc`, in the browser that started it, and sends the provider a random `state` and a PKCE S256 challenge. The callback is accepted only with that cookie and the `state` inside it, so a callback link made in another browser -- an attacker's own login -- is refused before its code is exchanged. The cookie also carries the PKCE verifier, so an intercepted code cannot be redeemed without it. It expires after 10 minutes, and every callback expires it; the provider refuses a second use of a code. The API keeps no sign-in state of its own, so any API task can finish a sign-in another one started.
+Starting an OIDC sign-in sets a signed, `HttpOnly`, `SameSite=Lax` cookie, `__Host-experimently_oidc`, in the browser that started it, and sends the provider a random `state` and a PKCE S256 challenge. The callback is accepted only with that cookie and the `state` inside it, so a callback link made in another browser -- an attacker's own login -- is refused before its code is exchanged. The cookie also carries the PKCE verifier, so an intercepted code cannot be redeemed without it. The sign-in expires after 10 minutes. The cookie is kept 5 minutes longer, so a callback that arrives late still carries it and is reported as expired (`sso_expired`) rather than as a sign-in from another browser. Every callback expires the cookie, and the provider refuses a second use of a code. The API keeps no sign-in state of its own, so any API task can finish a sign-in another one started.
 
 The login also sends a `nonce`, and the ID token in the token endpoint's response must carry it, together with this client in `aud`, the provider's own `iss`, and an `exp` that has not passed. The ID token's signature is not checked. It comes straight from the token endpoint over TLS, which OpenID Connect Core §3.1.3.7 allows in place of a signature check. For the same reason, every provider endpoint must use `https`: an SSO configuration whose `sso_url` is `http://` is refused, in every environment except `test`. GitHub is OAuth 2, not OpenID Connect, and has no ID token.
 
@@ -360,6 +393,10 @@ OIDC_AUTH0_DOMAIN=your-tenant.auth0.com
 # State token security
 # Generate with: openssl rand -hex 32
 
+# Where the dashboard is, when it is not PUBLIC_BASE_URL (see "Signing In from
+# the Dashboard"). The first entry is the primary one.
+DASHBOARD_ORIGINS=https://app.example.com
+
 # JIT provisioning default role when no group mapping matches
 SSO_DEFAULT_ROLE=VIEWER
 
@@ -388,6 +425,10 @@ SSO_SESSION_COOKIE_SAMESITE=Lax
 - The OIDC or SAML flow took longer than 10 minutes to complete.
 - The user's browser blocked the state cookie (check `SameSite` and `Secure` settings).
 - Multiple tabs initiated different auth flows simultaneously.
+
+### Every dashboard sign-in answers 400 "return_to is not a dashboard origin this API accepts"
+
+- The dashboard's origin is neither `PUBLIC_BASE_URL`'s origin nor listed in `DASHBOARD_ORIGINS`. Set `DASHBOARD_ORIGINS` to the origin shown in the browser's address bar, with no path and no trailing slash, for example `https://app.example.com`.
 
 ### "User provisioned but has wrong role"
 

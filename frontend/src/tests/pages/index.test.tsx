@@ -175,6 +175,10 @@ describe('_app routeKind', () => {
     expect(routeKind('/')).toBe('bare');
   });
 
+  it('keeps /sso/complete bare, so RequireAuth never carries its fragment to /login (C2b)', () => {
+    expect(routeKind('/sso/complete')).toBe('bare');
+  });
+
   it('keeps docs, the power calculator and error pages open', () => {
     expect(routeKind('/docs')).toBe('open');
     expect(routeKind('/docs/[...slug]')).toBe('open');
