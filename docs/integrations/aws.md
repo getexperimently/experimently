@@ -91,19 +91,25 @@ DATABASE_POOL_TIMEOUT=30
 
 User JWT sessions are stored in Redis with a TTL matching the token expiry time. This allows the API service to scale horizontally without sticky sessions — any task can validate any user's session.
 
+`REDIS_HOST` is the cluster's primary endpoint. `REDIS_SSL` is `true` because
+in-transit encryption is on, and a plaintext client is refused.
+
 ```bash
-REDIS_HOST=master.your-cluster.xxxxx.use1.cache.amazonaws.com   # the primary endpoint
+REDIS_HOST=master.your-cluster.xxxxx.use1.cache.amazonaws.com
 REDIS_PORT=6379
-REDIS_SSL=true   # in-transit encryption is on; a plaintext client is refused
+REDIS_SSL=true
 ```
 
 ### Application Cache
 
 Feature flag configurations and experiment assignments are cached in Redis. The default TTL is 60 seconds. Changes to flags and experiments propagate to all users within one cache cycle.
 
+`REDIS_CACHE_TTL` is the cache TTL in seconds, and `REDIS_CACHE_MAX_SIZE` the
+maximum number of items in the cache:
+
 ```bash
-REDIS_CACHE_TTL=60           # Cache TTL in seconds
-REDIS_CACHE_MAX_SIZE=10000   # Max items in cache
+REDIS_CACHE_TTL=60
+REDIS_CACHE_MAX_SIZE=10000
 ```
 
 ---

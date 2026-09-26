@@ -8,17 +8,26 @@ answers per user + key and never buckets locally.
 
 **Not yet published.** `@getexperimently/react-sdk` is not on npm yet, so the command below fails
 today. Build it from a clone of this repository and install the packed tarball instead (the
-second block below).
+blocks below).
 
 ```bash
-npm install @getexperimently/react-sdk   # peer deps: react >=17, react-dom >=17
+npm install @getexperimently/react-sdk
 ```
+
+Its peer dependencies are `react` >= 17 and `react-dom` >= 17.
+
+To install from source, clone the repository and build a package; `npm pack` writes
+`getexperimently-react-sdk-1.1.0.tgz`:
 
 ```bash
 git clone https://github.com/getexperimently/experimently.git
 cd experimently/sdk/react
-npm ci && npm run build && npm pack      # writes getexperimently-react-sdk-1.1.0.tgz
-# then, in your app:
+npm ci && npm run build && npm pack
+```
+
+Then install that file in your app:
+
+```bash
 npm install /path/to/experimently/sdk/react/getexperimently-react-sdk-1.1.0.tgz
 ```
 
