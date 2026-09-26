@@ -1738,12 +1738,26 @@ def test_a_dashboard_half_never_reached_is_read_and_named(runner):
 
 
 @pytest.mark.regression
-def test_another_environments_dashboard_revision_in_the_api_field_says_which():
+def test_another_environments_dashboard_revision_in_the_api_field_says_which(runner):
     """Code review suggestion b: the same "Re-run with environment=" as the
-    dashboard field's check."""
-    code = _code(_step(ROLLBACK, "target")["run"])
+    dashboard field's check, run through the step's own script."""
+    prod = DASH_OLD.replace("staging", "prod")
+    runner.scenario(
+        [
+            rule(
+                "ecs describe-task-definition",
+                answers=[_task_definition(prod, OLD_WEB_IMAGE)["taskDefinition"]],
+            )
+        ]
+    )
+    code, out, _, _ = runner.run(
+        ROLLBACK,
+        _step(ROLLBACK, "target"),
+        inputs={"task_definition_arn": "experimentation-dashboard-prod:6"},
+    )
+    assert code == 1, out
     assert (
-        "You chose environment=${TARGET_ENV} but ${ARN##*/} is a ${dashboard_env} dashboard "
-        "revision; it goes in dashboard_task_definition_arn, not task_definition_arn. "
-        "Re-run with environment=${dashboard_env}." in code
+        "You chose environment=staging but experimentation-dashboard-prod:6 is a prod "
+        "dashboard revision; it goes in dashboard_task_definition_arn, not "
+        "task_definition_arn. Re-run with environment=prod." in out
     )
