@@ -414,9 +414,9 @@ jobs:
       # so a staging build of the core profile moved the tag prod's next
       # scale-out would pull (#71, #138). If the tag already exists in this
       # account's repository -- a repeat deploy of the same release here --
-      # its image is reused, not rebuilt. Staging and prod are separate
-      # accounts (D7, "Refuse the wrong AWS account" above), each with its
-      # own ECR, so prod builds the release itself from the tag: the same
+      # its image is reused, not rebuilt. Staging and prod are meant to be
+      # separate accounts (D7, "Refuse the wrong AWS account" above), each
+      # with its own ECR, so prod builds the release itself from the tag: the same
       # tag, commit and profile (check_labels below refuses an image whose
       # labels name another commit or profile), not the digest staging ran.
       # Either way what the task definitions name is the DIGEST.
