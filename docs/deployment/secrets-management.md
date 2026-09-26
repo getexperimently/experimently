@@ -362,7 +362,7 @@ aws logs filter-log-events \
   --start-time $(date -u -d '7 days ago' +%s000)
 ```
 
-See `docs/security/incident-response-plan.md` Runbook 2 for the full compromised API key response procedure.
+If the key may have been exposed through a vulnerability in Experimently itself, report it privately as [SECURITY.md](https://github.com/getexperimently/experimently/blob/main/SECURITY.md) describes; see [Responding to an incident on your deployment](../security/incident-response.md).
 
 ---
 

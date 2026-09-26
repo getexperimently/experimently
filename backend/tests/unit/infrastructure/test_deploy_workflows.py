@@ -23,7 +23,11 @@ pinned here, each with the defect it exists to catch:
   with READY_WAIT, never stops a deployment and never waits for Succeeded,
   and succeeds on the one serving predicate (scripts/api_serving.py);
 * the smoke test a real request through the public origin, inside the deploy
-  job, with nothing installed (#144, PE v2 C10).
+  job, with nothing installed (#144, PE v2 C10);
+* the dashboard built with the API before anything changes, and rolled out
+  after it (#69): its refusals among REFUSALS, its rollout script among
+  MUTATIONS. The behaviour of those steps is driven with fakes in
+  test_dashboard_deploy_wiring.py.
 
 Unlike the older workflow tests these do NOT skip when a file is missing: a
 tree that ships `.github/workflows` must ship these three, so a rename fails
@@ -432,6 +436,12 @@ MUTATIONS = (
     "continue-deployment",
     "stop-deployment",
     "shift_traffic.py",
+    # The dashboard (#69). The workflow calls the SCRIPT; `update-service`
+    # appears only inside it, so the name is what classifies the step (PE v1
+    # C4). `--no-update` (rollback's confirm-only call) is counted too, which
+    # is conservative.
+    "ecs_rolling_rollout.sh",
+    "update-service",
 )
 #: The refusals, each a read.
 REFUSALS = {
@@ -441,8 +451,42 @@ REFUSALS = {
     "profile vs task definition": "injects no AUDIT_HMAC_KEY",
     "missing secrets": "aws secretsmanager describe-secret",
     "ECR repository": "aws ecr describe-repositories",
+    "dashboard ECR repository": 'for repo in "$ECR_BACKEND_REPO" "$ECR_DASHBOARD_REPO"',
     "earlier deployment still active": "scripts/refuse_active_deployment.py",
+    "dashboard service": "scripts/dashboard_revision.py serving --refuse-unsteady",
 }
+
+
+#: rollback.yml's refusals: the API target and the dashboard target, both
+#: checked before anything is stopped or rolled.
+ROLLBACK_REFUSALS = {
+    "API target": "--query taskDefinition --output json",
+    "dashboard target": "scripts/dashboard_revision.py target",
+}
+
+
+@pytest.mark.regression
+def test_every_rollback_refusal_comes_before_the_first_aws_mutation():
+    (job,) = _environment_jobs(ROLLBACK).values()
+    steps = _steps(job)
+    mutations = [
+        i for i, s in enumerate(steps) if any(m in _run_of(s) for m in MUTATIONS)
+    ]
+    assert mutations, "rollback.yml changes nothing, so this checked nothing"
+    for what, marker in ROLLBACK_REFUSALS.items():
+        (index,) = [i for i, s in enumerate(steps) if marker in _run_of(s)]
+        assert index < min(mutations), (
+            f"rollback's {what} check runs at step {index}, after the first "
+            f"change at step {min(mutations)}"
+        )
+    # Exactly these change AWS, in this order: the API first, then the
+    # dashboard.
+    assert [steps[i].get("id") or steps[i]["name"] for i in mutations] == [
+        "Stop any deployment already in flight",
+        "codedeploy",
+        "Shift traffic and wait for it to land",
+        "dashboard-rollback",
+    ]
 
 
 @pytest.mark.regression
@@ -562,12 +606,21 @@ def test_every_task_definition_registered_names_the_digest():
                 f"{path.name} registers a task definition without the "
                 "digest-only script"
             )
-    registrations = [
-        s for s in _steps(_deploy_job()) if "register_task_definition.sh" in _run_of(s)
-    ]
-    assert len(registrations) == 2
-    for step in registrations:
-        assert step["env"]["IMAGE"] == "${{ steps.image.outputs.image }}"
+    registrations = {
+        s["id"]: s
+        for s in _steps(_deploy_job())
+        if "register_task_definition.sh" in _run_of(s)
+    }
+    # Exactly these three, each fed its own image (QA 2a): the API's image for
+    # the migration and the API, the dashboard's for the dashboard.
+    assert {k: s["env"]["IMAGE"] for k, s in registrations.items()} == {
+        "migrate-td": "${{ steps.image.outputs.image }}",
+        "api-td": "${{ steps.image.outputs.image }}",
+        "dashboard-td": "${{ steps.web-image.outputs.image }}",
+    }
+    assert '"$ECS_DASHBOARD_TASK_FAMILY" "$IMAGE" dashboard' in _run_of(
+        registrations["dashboard-td"]
+    )
 
 
 @pytest.mark.regression
@@ -804,25 +857,27 @@ def test_the_migrated_warning_is_true_of_the_case_it_runs_in():
     assert len(warnings) == 2, sorted(warnings)
     (before,) = [s for s in warnings.values() if "is still serving" in _run_of(s)]
     (after,) = [s for s in warnings.values() if s is not before]
+    # `&& steps.api-serving.outcome != 'success'` (C4): once the shift step
+    # succeeded -- including when the shift was approved in the console, so
+    # `approved` is unset -- neither applies; the "API deployed, dashboard not
+    # confirmed" step does. test_dashboard_deploy_wiring.py evaluates all
+    # three for exclusivity.
     assert before["if"] == (
         "failure() && steps.migrate.outcome == 'success' && "
-        "steps.api-serving.outputs.approved != 'true'"
+        "steps.api-serving.outputs.approved != 'true' && "
+        "steps.api-serving.outcome != 'success'"
     )
     assert after["if"] == (
         "failure() && steps.migrate.outcome == 'success' && "
-        "steps.api-serving.outputs.approved == 'true'"
+        "steps.api-serving.outputs.approved == 'true' && "
+        "steps.api-serving.outcome != 'success'"
     )
     assert "is still serving" not in _run_of(after)
     assert "may be serving" in _run_of(after)
 
 
-@pytest.mark.regression
-def test_the_codedeploy_deadline_is_a_named_value_inside_the_job_timeout():
-    env = _load(DEPLOY)["env"]
-    deadline = env["CODEDEPLOY_DEADLINE_SECONDS"]
-    assert isinstance(deadline, str) and deadline.isdigit(), deadline
-    assert env["CODEDEPLOY_POLL_SECONDS"].isdigit()
-    assert int(deadline) < _deploy_job()["timeout-minutes"] * 60
+# The CodeDeploy deadline's place in the job timeout is one term of the sum
+# in test_dashboard_deploy_wiring.py::test_the_job_timeout_covers_every_named_wait.
 
 
 # --- smoke (#144, PE v2 C10) ---------------------------------------------------
@@ -935,7 +990,11 @@ def test_the_summary_hands_over_the_rollback_line():
         "Image",
         "Migration",
         "New API revision",
-        "Serving before this run",
+        "API serving before this run",
+        "Dashboard image",
+        "New dashboard revision",
+        "Dashboard serving before this run",
+        "Dashboard rollout",
     ):
         assert f"| {field} |" in code, field
     (previous,) = [s for s in steps if s.get("id") == "previous"]

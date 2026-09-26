@@ -6,8 +6,15 @@ name: Regression Guard
 # moment someone applies or removes the label.
 #
 # The job always runs and always reports: a pull request without the `bug`
-# label passes immediately. That matters because a job skipped by a top-level
-# `if:` reports nothing at all, which leaves a required check pending forever.
+# label passes the first step immediately. That matters because a job skipped
+# by a top-level `if:` reports nothing at all, which leaves a required check
+# pending forever.
+#
+# The same required job carries a second guard, in a step of its own: a pull
+# request that lowers any document's `exec` count in scripts/doc_examples.toml
+# (an example that stops running) needs the `docs-demotion` label
+# (scripts/check_doc_demotions.py). It is here, not in Doc Examples, because
+# this job is required and re-runs on `labeled`; Doc Examples is neither.
 
 on:
   pull_request:
@@ -83,3 +90,27 @@ jobs:
           echo
           echo "Regression coverage found in:"
           printf '%s\n' "$TESTS" | awk '{ print "  " $0 }'
+
+      # A separate step, not more lines in the one above: that script ends in
+      # `exit 0` on every pull request not labelled `bug`, so anything appended
+      # to it would never run on the pull requests this guards. It runs on
+      # every pull request, documentation-only ones included (this workflow has
+      # no paths filter), and after the step above even when that one fails.
+      #
+      # It fails closed. The fetch writes the base into a ref of its own and the
+      # script reads only that ref, so a fetch that fails, or is deleted, is
+      # `invalid object name` and red -- never "no demotions". Hence no
+      # `|| true` and no 2>/dev/null. The `docs-demotion` label waives a
+      # demotion here and nothing else; it does not waive an unreadable base.
+      - name: A documentation example that stops running must be labelled
+        if: ${{ !cancelled() }}
+        env:
+          LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          # An empty refspec source is the remote's HEAD, not an error: an
+          # empty BASE_SHA would silently compare against whatever main is.
+          : "${BASE_SHA:?the pull_request event carries no base SHA}"
+          git fetch --no-tags origin "+${BASE_SHA}:refs/doc-demotion/base"
+          python3 scripts/check_doc_demotions.py --base-ref refs/doc-demotion/base --labels "$LABELS"

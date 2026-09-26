@@ -30,17 +30,24 @@ Verified against a live backend: **yes (2026-09-11)** — via
 ### Installation
 
 **Not yet published.** Neither `@getexperimently/js-sdk` nor `@getexperimently/openfeature-provider`
-is on npm yet, so the first line below fails today. Build both from a clone of this repository and
-install the two directories instead (`@openfeature/server-sdk` itself is on npm).
+is on npm yet, so this fails today:
 
 ```bash
 npm install @openfeature/server-sdk @getexperimently/js-sdk @getexperimently/openfeature-provider
-# from a clone of this repository (the provider's build also builds sdk/js):
+```
+
+Build both from a clone of this repository instead (the provider's build also builds `sdk/js`):
+
+```bash
 git clone https://github.com/getexperimently/experimently.git
 npm --prefix experimently/sdk/js ci
 npm --prefix experimently/sdk/openfeature ci
 npm --prefix experimently/sdk/openfeature run build
-# then, in your app:
+```
+
+Then, in your app, install the two directories (`@openfeature/server-sdk` itself is on npm):
+
+```bash
 npm install @openfeature/server-sdk /path/to/experimently/sdk/js /path/to/experimently/sdk/openfeature
 ```
 
@@ -151,7 +158,12 @@ Every request carries `X-API-Key: <key>`, `Content-Type: application/json`, `Acc
 
 ```bash
 cd sdk/openfeature && npm run build --silent && node examples/contract_smoke.mjs
-# {"sdk":"openfeature","assign":{"variant_name":"control","is_control":true,"sticky":true},"flag":{"enabled":true},"track":{"ok":true},"fanout":{"ok":true}}
+```
+
+It prints one line:
+
+```json
+{"sdk":"openfeature","assign":{"variant_name":"control","is_control":true,"sticky":true},"flag":{"enabled":true},"track":{"ok":true},"fanout":{"ok":true}}
 ```
 
 Env: `EXPERIMENTLY_API_URL` (default `http://localhost:8000`), `EXPERIMENTLY_API_KEY` (required),
@@ -162,10 +174,13 @@ through `OpenFeature.getClient().getBooleanDetails`; assignment and tracking go 
 
 ### Tests (TypeScript)
 
+`npx jest` runs the tests, with `fetch` mocked; it builds `../js` first. `npm run build` runs
+`tsc` into `dist/`:
+
 ```bash
 cd sdk/openfeature && npm install
-npx jest          # 51 tests, fetch is mocked (builds ../js first)
-npm run build     # tsc → dist/
+npx jest
+npm run build
 ```
 
 ---
@@ -181,12 +196,17 @@ definitions are downloaded. Requires Python 3.9+ and `openfeature-sdk >= 0.9.0`.
 ### Installation
 
 **Not yet published.** Neither `experimently` nor `experimently-openfeature` is on PyPI yet, so
-the first line below fails today. Install both from the root of a clone of this repository with
-the second line (`openfeature-sdk` itself is on PyPI and is installed as a dependency).
+this fails today:
 
 ```bash
-pip install openfeature-sdk experimently experimently-openfeature   # once published
-pip install -e sdk/python -e sdk/openfeature-python                          # from this repository
+pip install openfeature-sdk experimently experimently-openfeature
+```
+
+Install both from the root of a clone of this repository instead (`openfeature-sdk` itself is on
+PyPI and is installed as a dependency):
+
+```bash
+pip install -e sdk/python -e sdk/openfeature-python
 ```
 
 ### Quick start
@@ -287,7 +307,12 @@ Every request carries `X-API-Key: <key>`, `Content-Type: application/json`, `Acc
 
 ```bash
 EXPERIMENTLY_API_KEY=<key> python sdk/openfeature-python/examples/contract_smoke.py
-# {"sdk":"openfeature-python","assign":{"variant_name":"control","is_control":true,"sticky":true},"flag":{"enabled":true},"track":{"ok":true},"fanout":{"ok":true}}
+```
+
+It prints one line:
+
+```json
+{"sdk":"openfeature-python","assign":{"variant_name":"control","is_control":true,"sticky":true},"flag":{"enabled":true},"track":{"ok":true},"fanout":{"ok":true}}
 ```
 
 Env: `EXPERIMENTLY_API_URL` (default `http://localhost:8000`), `EXPERIMENTLY_API_KEY` (required),
@@ -300,9 +325,11 @@ Verified against a live backend: **yes (2026-09-11)** — via
 
 ### Tests (Python)
 
+The tests fake HTTP:
+
 ```bash
 source venv/bin/activate
-python -m pytest sdk/openfeature-python/tests -q -o addopts="" -p no:cacheprovider   # 79 tests, HTTP is faked
+python -m pytest sdk/openfeature-python/tests -q -o addopts="" -p no:cacheprovider
 ```
 
 ---

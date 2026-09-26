@@ -64,9 +64,12 @@ def test_every_doc_anchor_a_workflow_prints_exists():
 @pytest.mark.regression
 def test_the_runbook_works_for_either_environment():
     text = RUNBOOK.read_text()
-    assert "export ENV=prod   # or staging" in text
     fences = re.findall(r"```bash\n(.*?)```", text, re.S)
     code = "\n".join(fences)
+    # One line sets the environment, and the sentence before it names the
+    # other one: a trailing `# or staging` on that line is a comment zsh runs.
+    assert re.search(r"^export ENV=prod$", code, re.M), "no line sets ENV"
+    assert "`export ENV=staging`" in text, "the prose does not name staging"
     for literal in ("experimentation-prod", "backend-prod", "platform-prod", "-prod-"):
         assert literal not in code, f"a runbook command names {literal!r}"
 
@@ -78,6 +81,28 @@ def test_the_runbook_shows_revisions_by_digest():
     text = RUNBOOK.read_text()
     assert not re.search(r"backend:v\d", text), re.findall(r".*backend:v\d.*", text)
     assert "backend@sha256:" in text
+
+
+#: `ENV=prod   # or staging`: bash reads a comment; zsh (interactive_comments
+#: off, its default) reads a command named `#` with ENV=prod in ITS
+#: environment, so the shell's ENV keeps whatever it was -- mid-rollback, the
+#: other environment. The choice goes in the sentence before the block.
+_COMMENTED_ASSIGNMENT = re.compile(
+    r"^[ \t]*(?:export[ \t]+)?[A-Za-z_]\w*=\S*[ \t]+#", re.M
+)
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize(
+    "path", sorted((DOCS / "deployment").glob("*.md")), ids=lambda p: p.name
+)
+def test_no_deploy_command_assigns_a_variable_beside_a_comment(path):
+    fences = re.findall(
+        r"^```(?:bash|sh|shell|console)\n(.*?)^```", path.read_text(), re.S | re.M
+    )
+    assert fences, f"{path.name}: no shell fences read; the scan is not reading"
+    hits = [m.group(0) for body in fences for m in _COMMENTED_ASSIGNMENT.finditer(body)]
+    assert not hits, f"{path.name}: {hits}"
 
 
 @pytest.mark.regression
@@ -192,3 +217,52 @@ def test_the_guide_has_the_ordered_checklist():
     assert text.index("required reviewer") < text.index("Variables `AWS_ACCOUNT_ID`")
     # The OIDC subject is decoded before the trust policy is written (PE C5).
     assert "Decode a\n  real token" in text or "decode a real token" in text.lower()
+
+
+# --- the dashboard's deploy and rollback (#69) ---------------------------------
+
+
+@pytest.mark.regression
+def test_the_iam_doc_says_why_update_service_is_on_star_and_to_re_apply():
+    """UpdateService on `*`, and why; and the re-apply before the first deploy."""
+    text = " ".join((DOCS / "deployment" / "iam-permissions.md").read_text().split())
+    assert "`ecs:UpdateService`" in text
+    assert "on `*`" in text and "dominates" in text
+    assert (
+        "Roles created from a policy before the dashboard rollout lack "
+        "`ecs:UpdateService`" in text
+    )
+
+
+@pytest.mark.regression
+def test_the_guide_pins_the_dashboard_digest_and_the_runbook_covers_the_dashboard():
+    assert "dashboard_image_tag=sha256:" in GUIDE.read_text()
+    runbook = RUNBOOK.read_text()
+    assert "deployments[?status=='PRIMARY']" in runbook
+    assert "dashboard_task_definition_arn" in runbook
+    assert "### The dashboard is the opposite case" in runbook
+
+
+_RERUN = re.compile(r"re-?run(ning)? (the )?rollback|rollback again", re.I)
+
+
+@pytest.mark.regression
+def test_no_copy_advises_running_rollback_again():
+    """EM ruling C3: a second Rollback inside the hour stops the first one's
+    deployment with auto-rollback and puts the bad API release back. The only
+    mention allowed is the warning against it."""
+    texts = {
+        "rollback.yml": (WORKFLOWS / "rollback.yml").read_text(),
+        "deploy.yml": (WORKFLOWS / "deploy.yml").read_text(),
+        "runbook": RUNBOOK.read_text(),
+    }
+    for where, text in texts.items():
+        flat = " ".join(text.split())
+        for match in _RERUN.finditer(flat):
+            # The one allowed form is the warning: "Do not dispatch Rollback again".
+            before = flat[max(0, match.start() - 20) : match.start()]
+            assert before.endswith("Do not dispatch "), (
+                where,
+                flat[max(0, match.start() - 60) : match.end() + 40],
+            )
+    assert "Do not dispatch Rollback again while" in " ".join(texts["runbook"].split())

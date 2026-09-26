@@ -54,8 +54,9 @@ checklist in [the deployment guide](deployment-guide.md#1-before-the-first-deplo
    the tag as `version`, pick the `profile` (below).
 3. Approve the run when the environment asks. There is one approval per
    deploy, and nothing in AWS has changed before it.
-4. Read the run summary: it names what was built and deployed, and hands you
-   the rollback line.
+4. Read the run summary: it names what was built and deployed for both halves
+   -- the API and the dashboard, each with its new revision and what was
+   serving before -- and hands you one rollback line that covers both.
 
 > **Not yet run against a real AWS account.** The CodeDeploy forward deploy
 > and the Rollback workflow are tested against a simulated `aws` only.
@@ -70,6 +71,19 @@ run succeeds when the new revision is the API's PRIMARY task set **and** the
 HTTPS listener's `/api/*` rule forwards to that task set's target group. The
 summary then prints the live group and the `-c api_live_target_group=<blue|green>`
 value the next `cdk deploy` of the Fargate stack needs.
+
+**Then the dashboard.** Only after the API answers its smoke request, the
+deploy registers the dashboard's task definition with the new image's digest,
+checks the API is still serving this run's revision, and rolls the dashboard's
+ECS service onto it. It succeeds only when the dashboard's PRIMARY deployment
+is the new revision, `COMPLETED`, with every task running (a circuit-breaker
+rollback is red), `GET /` answers 200 with `text/html`, and a last check finds
+the API still serving this run's revision. The summary prints the dashboard's
+running digest as `-c dashboard_image_tag=sha256:<hex>` for the next `cdk
+deploy`. A dashboard failure leaves the new API in place; Deploy refuses a
+re-run for about an hour after the shift, and the rollback line reverts the API
+too, so the dashboard alone goes back with
+[rollback-runbook.md](rollback-runbook.md) Method 2.
 
 > **The canary is timed only.** No alarm watches it, so nothing rolls back
 > automatically on application errors. A release that answers `/health` and
@@ -132,7 +146,10 @@ anything. Create it with [secrets-management.md](secrets-management.md).
 
 **Method 1 — GitHub Actions (preferred):** **Actions → Rollback**, from `main`:
 `environment`, the `task_definition_arn` the deploy's run summary printed
-(`experimentation-backend-<env>:<n>`), and a reason.
+(`experimentation-backend-<env>:<n>`), the optional
+`dashboard_task_definition_arn` it printed beside it
+(`experimentation-dashboard-<env>:<n>`; empty leaves the dashboard as it is),
+and a reason. The API is always rolled back.
 
 **Method 2 — AWS CLI:**
 
@@ -153,10 +170,12 @@ anything. Create it with [secrets-management.md](secrets-management.md).
 How to find the previous task definition, **with its image** — the revision
 list alone is not enough, because CloudFormation also registers into this
 family with a `bootstrap` image that may not exist in ECR (#82). A revision a
-deploy registered names its image by digest (`…/backend@sha256:…`):
+deploy registered names its image by digest (`…/backend@sha256:…`). The
+block sets `ENV=staging`; for production, change it to `ENV=prod` before you
+run it:
 
 ```bash
-ENV=prod   # or staging
+ENV=staging
 for arn in $(aws ecs list-task-definitions \
                --family-prefix "experimentation-backend-$ENV" \
                --sort DESC --max-results 5 \
@@ -190,6 +209,10 @@ rest -- chiefly undoing one:
 
 ### Health Checks
 
+The last two commands below are the dashboard's: `GET /` (everything that is
+not an API path) answers 200 `text/html`, and, as a rolling service, what it
+runs is its PRIMARY deployment, not a task set.
+
 ```bash
 # Through the public origin (PUBLIC_BASE_URL). /health is readiness: it runs
 # the database check, and it is what the load balancer probes.
@@ -200,12 +223,24 @@ curl -s https://app.example.com/health
 # The smoke test the deploy runs: a real route, unauthenticated.
 curl -s https://app.example.com/api/v1/experiments/
 # 401 {"detail":"Not authenticated"}
+```
 
-ENV=prod   # or staging
+Then ask ECS what is running and serving. The block sets `ENV=staging`; for
+production, change it to `ENV=prod`:
+
+```bash
+ENV=staging
 aws ecs describe-services \
   --cluster "experimentation-$ENV" \
   --services "experimentation-backend-$ENV" \
   --query "services[0].{Running:runningCount,Desired:desiredCount,Serving:taskSets[?status=='PRIMARY'].taskDefinition|[0]}"
+
+curl -sS -o /dev/null -w '%{http_code} %{content_type}\n' https://app.example.com/
+
+aws ecs describe-services \
+  --cluster "experimentation-$ENV" \
+  --services "experimentation-dashboard-$ENV" \
+  --query "services[0].deployments[?status=='PRIMARY'].{td:taskDefinition,state:rolloutState}"
 ```
 
 ---
@@ -224,6 +259,7 @@ every row with a resource type against a synth of `staging` and `prod`.
 | API task definition family | `experimentation-backend-<env>` | `AWS::ECS::TaskDefinition` |
 | Migration task definition family | `experimentation-migrate-<env>` | `AWS::ECS::TaskDefinition` |
 | Dashboard service | `experimentation-dashboard-<env>` | `AWS::ECS::Service` |
+| Dashboard task definition family | `experimentation-dashboard-<env>` | `AWS::ECS::TaskDefinition` |
 | API log group | `/ecs/experimentation-backend-<env>` | `AWS::Logs::LogGroup` |
 | Migration log group | `/ecs/experimentation-migrate-<env>` | `AWS::Logs::LogGroup` |
 | Dashboard log group | `/ecs/experimentation-dashboard-<env>` | `AWS::Logs::LogGroup` |
@@ -239,7 +275,7 @@ every row with a resource type against a synth of `staging` and `prod`.
 | Secrets you create | `/<env>/experimentation/<name>` (Secrets Manager) | — |
 | Parameters the stacks write | `/experimentation/<env>/...` (SSM -- the other order, #67) | — |
 | API image | `experimentation-platform/backend:<tag>-<profile>`, run by digest; `:bootstrap` for `cdk deploy` | — |
-| Dashboard image | `experimentation-platform/web:bootstrap` | — |
+| Dashboard image | `experimentation-platform/web:<tag>-<profile>`, run by digest; `:bootstrap` only for the first `cdk deploy` | — |
 | GitHub environment | `staging`, `prod` | — |
 
 There is no `:latest` and no bare `:<tag>`: each release is pushed once per
@@ -251,6 +287,11 @@ AWS accounts, each with its own ECR, so prod builds the release itself from the
 tag: it runs the same release (tag, commit and profile; the deploy refuses an
 image whose labels name another commit or profile), not the same digest
 staging ran.
+
+The dashboard image is built with an empty `NEXT_PUBLIC_API_URL`, so it calls
+the API on its own origin and one image serves any environment. The
+`api.<domain>` fallback would need a per-environment image, which Deploy does
+not build.
 
 ---
 
@@ -317,8 +358,10 @@ with the pins the [deployment guide](deployment-guide.md) gives, never `--all`.
 
 ## Useful AWS CLI Commands
 
+The block sets `ENV=staging`; for production, change it to `ENV=prod`:
+
 ```bash
-ENV=prod   # or staging
+ENV=staging
 
 # Watch what is serving during a deployment: the PRIMARY task set moves,
 # services[0].taskDefinition does not (it is frozen at CreateService).

@@ -36,6 +36,9 @@ RESOURCE_NAMES = {
     "ECS_CLUSTER": ("AWS::ECS::Cluster", "ClusterName"),
     "ECS_BACKEND_SERVICE": ("AWS::ECS::Service", "ServiceName"),
     "ECS_BACKEND_TASK_FAMILY": ("AWS::ECS::TaskDefinition", "Family"),
+    # The dashboard's rolling service and its family (#69).
+    "ECS_DASHBOARD_SERVICE": ("AWS::ECS::Service", "ServiceName"),
+    "ECS_DASHBOARD_TASK_FAMILY": ("AWS::ECS::TaskDefinition", "Family"),
     "MIGRATE_TASK_FAMILY": ("AWS::ECS::TaskDefinition", "Family"),
     "MIGRATE_LOG_GROUP": ("AWS::Logs::LogGroup", "LogGroupName"),
     "CODEDEPLOY_APPLICATION": ("AWS::CodeDeploy::Application", "ApplicationName"),
@@ -115,7 +118,15 @@ def test_workflow_names_exist_in_that_environment(synths, workflow, env):
                 f"{workflow}: no stack imports a secret under {name}"
             )
             checked += 1
-    assert checked >= 5, f"{workflow}: only {checked} names checked"
+    # Exact, per workflow: a name dropped from a job's env (or never read
+    # because a key was renamed) changes the count and fails here (QA 4c).
+    assert checked == NAMES_CHECKED[workflow], (
+        f"{workflow}: {checked} names checked, expected {NAMES_CHECKED[workflow]}"
+    )
+
+
+#: How many environment-built names each workflow's bound job carries.
+NAMES_CHECKED = {"deploy.yml": 12, "rollback.yml": 7, "db-migrate.yml": 6}
 
 
 README = REPO_ROOT / "docs" / "deployment" / "README.md"

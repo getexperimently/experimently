@@ -29,8 +29,11 @@ Exit status:
     1  NOT_YET  the PRIMARY task set is another revision, or the /api/* rule
                 splits traffic across blue and green (a CodeDeploy traffic
                 shift is still in progress)
-    2  UNKNOWN  an AWS call failed, or what it read does not look like this
-                repository's stacks
+    2  UNKNOWN  an AWS call failed, what it read does not look like this
+                repository's stacks, or the script itself raised (a missing
+                `aws` binary, a malformed rule). A crash is never 1: callers
+                retry on 1, and a crash retried until the deadline reads as a
+                slow shift instead of a broken check.
     3  WRONG    the PRIMARY task set is this revision, but the /api/* rule
                 forwards somewhere else, with no split: the API route is not
                 where the tasks are
@@ -136,7 +139,14 @@ def main(argv: Sequence[str] | None = None, aws: live.Runner = live.run_aws) -> 
             file=sys.stderr,
         )
         return UNKNOWN
-    status, sentence, colour = verdict(aws, *args)
+    try:
+        status, sentence, colour = verdict(aws, *args)
+    except Exception as exc:  # any crash is "could not tell", never "not yet"
+        status, sentence, colour = (
+            UNKNOWN,
+            f"could not tell: {type(exc).__name__}: {exc}",
+            None,
+        )
     if status == SERVING:
         print(f"serving: {sentence}")
         print(

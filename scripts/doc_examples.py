@@ -224,7 +224,6 @@ PENDING_FROZEN: dict[str, tuple[int, int, int]] = {
     "docs/sdk/react.md": (2, 0, 0),
     "docs/sdk/ruby.md": (3, 0, 0),
     "docs/security/api-keys.md": (4, 1, 0),
-    "docs/security/incident-response-plan.md": (40, 3, 6),
     "docs/self-hosting/cdk.md": (14, 1, 3),
     "docs/self-hosting/migrations.md": (12, 4, 1),
     "docs/self-hosting/monitoring.md": (5, 0, 0),

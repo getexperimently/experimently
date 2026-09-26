@@ -4,8 +4,10 @@ Every refusal is driven with a fixture page; the render rules are driven with
 HTML produced by the same Markdown extensions MkDocs uses (read from
 ``mkdocs.yml``), never hand-written HTML; and the real repository's enrolment is
 checked as it stands, so a page edit that breaks the contract fails here too.
-No Docker, no git, no network: the repository root comes from this file's path,
-so the tests also run in ``scripts/core_build.sh``'s copy.
+No Docker and no network, and git only in repositories that the demotion-guard
+tests create under ``tmp_path`` (never this checkout's): the repository root
+comes from this file's path, so the tests also run in ``scripts/core_build.sh``'s
+copy.
 """
 
 from __future__ import annotations
@@ -1679,3 +1681,292 @@ def test_the_render_job_runs_the_walk_zsh_and_zero_skip_checks():
     assert after and all(s.get("if") == "${{ !cancelled() }}" for s in after), [
         s["name"] for s in after if s.get("if") != "${{ !cancelled() }}"
     ]
+
+
+# ---------------------------------------------------------------------------
+# The demotion guard (scripts/check_doc_demotions.py), run by the required
+# `regression-guard` job: an example that stops running needs a label.
+# These tests use git, but only in repositories they create under tmp_path.
+# ---------------------------------------------------------------------------
+
+_gspec = importlib.util.spec_from_file_location(
+    "check_doc_demotions", REPO / "scripts" / "check_doc_demotions.py"
+)
+dd = importlib.util.module_from_spec(_gspec)
+_gspec.loader.exec_module(dd)
+
+GUARD_WORKFLOW = REPO / ".github" / "workflows" / "regression-guard.yml"
+GUARD_STEP = "A documentation example that stops running must be labelled"
+
+
+def enrolment(**docs: int) -> str:
+    """A toml with one [[document]] per keyword: path stem -> exec count."""
+    return "[meta]\n" + "".join(
+        f'\n[[document]]\npath = "docs/{name}.md"\nexec = {count}\nskip = 0\n'
+        for name, count in docs.items()
+    )
+
+
+def guard(tmp_path, base: str, head: str, labels: str = "[]", capsys=None):
+    (tmp_path / "base.toml").write_text(base)
+    (tmp_path / "head.toml").write_text(head)
+    status = dd.main(
+        [
+            "--base-file",
+            str(tmp_path / "base.toml"),
+            "--head-file",
+            str(tmp_path / "head.toml"),
+            "--labels",
+            labels,
+        ]
+    )
+    return status, (capsys.readouterr().out if capsys else "")
+
+
+def test_an_exec_drop_without_the_label_is_red(tmp_path, capsys, monkeypatch):
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    status, out = guard(
+        tmp_path,
+        enrolment(quick=11, create=9),
+        enrolment(quick=10, create=9),
+        capsys=capsys,
+    )
+    assert status == 1
+    assert (
+        "docs/quick.md: exec 11 -> 10 against the base; label the pull request "
+        "docs-demotion if this is intended" in out
+    )
+    assert "create" not in out
+
+
+def test_the_same_drop_with_the_label_is_green(tmp_path, capsys, monkeypatch):
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    status, out = guard(
+        tmp_path,
+        enrolment(quick=11),
+        enrolment(quick=10),
+        labels='["bug", "docs-demotion"]',
+        capsys=capsys,
+    )
+    assert status == 0
+    assert "warning: docs/quick.md: exec 11 -> 10" in out  # still reported
+    assert "1 demotion(s) accepted" in out
+
+
+def test_another_label_does_not_waive_a_demotion(tmp_path):
+    status, _ = guard(
+        tmp_path, enrolment(quick=11), enrolment(quick=10), labels='["docs-demotions"]'
+    )
+    assert status == 1
+
+
+def test_the_comparison_is_per_document_not_by_total(tmp_path, capsys):
+    """One page gaining an example does not pay for another losing one."""
+    status, out = guard(
+        tmp_path, enrolment(a=3, b=3), enrolment(a=2, b=4), capsys=capsys
+    )
+    assert status == 1
+    assert "docs/a.md: exec 3 -> 2" in out
+
+
+def test_a_document_that_leaves_the_enrolment_is_a_drop_to_zero(tmp_path, capsys):
+    status, out = guard(tmp_path, enrolment(a=3, b=1), enrolment(b=1), capsys=capsys)
+    assert status == 1
+    assert "docs/a.md: exec 3 -> 0 against the base (no longer enrolled)" in out
+
+
+def test_a_zero_exec_document_may_leave_and_counts_may_rise(tmp_path, capsys):
+    status, out = guard(
+        tmp_path, enrolment(a=0, b=1), enrolment(b=2, c=1), capsys=capsys
+    )
+    assert status == 0, out
+    assert "No documentation example stopped running (2 documents on the base)" in out
+
+
+@pytest.mark.parametrize(
+    "base, head, labels, message",
+    [
+        ("[[document]\n", enrolment(a=1), "[]", "the base scripts/doc_examples.toml"),
+        (enrolment(a=1), "not toml =", "[]", "the pull request's scripts/doc_examples"),
+        ('[[document]]\npath = "docs/a.md"\n', enrolment(a=1), "[]", "whole-number"),
+        (
+            '[[document]]\npath = "docs/a.md"\nexec = true\n',
+            enrolment(a=1),
+            "[]",
+            "whole",
+        ),
+        (enrolment(a=1) + enrolment(a=1)[7:], enrolment(a=1), "[]", "enrolled twice"),
+        (enrolment(a=1), enrolment(a=1), "bug", "not a JSON array"),
+        # The label acknowledges a demotion someone saw; not an unreadable base.
+        ("[[document]\n", enrolment(a=1), '["docs-demotion"]', "not valid TOML"),
+    ],
+)
+def test_an_unreadable_side_is_red_never_no_demotions(
+    tmp_path, capsys, base, head, labels, message
+):
+    status, out = guard(tmp_path, base, head, labels, capsys=capsys)
+    assert status == 2
+    assert message in out
+    assert "Refusing to report no demotions" in out
+    assert "No documentation example" not in out
+
+
+def test_a_missing_base_file_is_red(tmp_path, capsys):
+    (tmp_path / "head.toml").write_text(enrolment(a=1))
+    status = dd.main(
+        [
+            "--base-file",
+            str(tmp_path / "absent.toml"),
+            "--head-file",
+            str(tmp_path / "head.toml"),
+        ]
+    )
+    assert status == 2
+    assert "cannot read the base toml" in capsys.readouterr().out
+
+
+def test_an_empty_base_ref_is_red(capsys):
+    """`github.event.pull_request.base.sha` empty is an unknown base, not HEAD."""
+    assert dd.main(["--base-ref", ""]) == 2
+    assert "the base commit is unknown" in capsys.readouterr().out
+
+
+def _git_env(tmp_path) -> dict:
+    import os
+
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    env.update(
+        GIT_CONFIG_GLOBAL=os.devnull,
+        GIT_CONFIG_NOSYSTEM="1",
+        GIT_AUTHOR_NAME="t",
+        GIT_AUTHOR_EMAIL="t@example.com",
+        GIT_COMMITTER_NAME="t",
+        GIT_COMMITTER_EMAIL="t@example.com",
+        HOME=str(tmp_path),
+    )
+    env.pop("GITHUB_ACTIONS", None)
+    # The step calls `python3`; make that this interpreter (tomllib needs 3.11).
+    shims = tmp_path / "bin"
+    shims.mkdir(exist_ok=True)
+    (shims / "python3").symlink_to(sys.executable)
+    env["PATH"] = f"{shims}{os.pathsep}{env.get('PATH', '')}"
+    return env
+
+
+def _git(cwd, env, *args) -> str:
+    import subprocess
+
+    return subprocess.run(
+        ["git", *args], cwd=cwd, env=env, check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+
+@pytest.fixture
+def pr_checkout(tmp_path):
+    """An `origin` whose main has quick=11, and a full clone (as fetch-depth: 0
+    leaves it) at a pull request that lowers it to 10: (clone, env, base_sha)."""
+    env = _git_env(tmp_path)
+    origin = tmp_path / "origin"
+    (origin / "scripts").mkdir(parents=True)
+    _git(origin, env, "init", "-q", "-b", "main")
+    (origin / "scripts" / "doc_examples.toml").write_text(enrolment(quick=11))
+    (origin / "scripts" / "check_doc_demotions.py").write_bytes(
+        (REPO / "scripts" / "check_doc_demotions.py").read_bytes()
+    )
+    _git(origin, env, "add", ".")
+    _git(origin, env, "commit", "-q", "-m", "base")
+    base_sha = _git(origin, env, "rev-parse", "HEAD")
+    clone = tmp_path / "clone"
+    _git(tmp_path, env, "clone", "-q", str(origin), str(clone))
+    (clone / "scripts" / "doc_examples.toml").write_text(enrolment(quick=10))
+    _git(clone, env, "commit", "-q", "-am", "demote")
+    return clone, env, base_sha
+
+
+def _guard_job() -> dict:
+    return yaml.safe_load(GUARD_WORKFLOW.read_text())["jobs"]["regression-guard"]
+
+
+def _step_script() -> str:
+    (step,) = [s for s in _guard_job()["steps"] if s.get("name") == GUARD_STEP]
+    return step["run"]
+
+
+def _run_step(clone, env, base_sha, labels="[]", script=None):
+    import subprocess
+
+    return subprocess.run(
+        ["bash", "-c", script if script is not None else _step_script()],
+        cwd=clone,
+        env={**env, "BASE_SHA": base_sha, "LABELS": labels},
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_the_step_itself_is_red_on_a_drop_and_green_with_the_label(pr_checkout):
+    clone, env, base_sha = pr_checkout
+    red = _run_step(clone, env, base_sha)
+    assert red.returncode == 1, red.stdout + red.stderr
+    assert "docs/quick.md: exec 11 -> 10" in red.stdout
+    green = _run_step(clone, env, base_sha, labels='["docs-demotion"]')
+    assert green.returncode == 0, green.stdout + green.stderr
+
+
+def test_the_step_is_red_when_the_base_is_missing(pr_checkout):
+    """An unknown SHA is `not our ref`; an EMPTY one would be `+:ref`, which git
+    reads as the remote's HEAD and fetches happily -- the step refuses it."""
+    clone, env, _ = pr_checkout
+    for missing in ("0" * 40, ""):
+        result = _run_step(clone, env, missing, labels='["docs-demotion"]')
+        assert result.returncode != 0, (missing, result.stdout)
+        assert "No documentation example" not in result.stdout
+
+
+def test_removing_the_fetch_makes_the_step_red_not_green(pr_checkout):
+    """The clone already holds the base commit (fetch-depth: 0), so reading
+    "$BASE_SHA" directly would pass with no fetch at all. The step reads only
+    the ref its fetch writes, so deleting the fetch is `invalid object name`."""
+    clone, env, base_sha = pr_checkout
+    script = _step_script()
+    without_fetch = "\n".join(
+        line
+        for line in script.splitlines()
+        if not line.lstrip().startswith("git fetch")
+    )
+    assert without_fetch != script
+    result = _run_step(
+        clone, env, base_sha, labels='["docs-demotion"]', script=without_fetch
+    )
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "cannot read scripts/doc_examples.toml at the base" in result.stdout
+    assert "'refs/doc-demotion/base'. Refusing to report no demotions." in result.stdout
+
+
+def test_the_guard_is_its_own_step_in_the_required_job():
+    """Branch protection requires the JOB `regression-guard`. The bug check's
+    script ends in `exit 0` on an unlabelled pull request, so the guard is a
+    separate step, unconditional but for cancellation, with no fail-open."""
+    doc = yaml.safe_load(GUARD_WORKFLOW.read_text())
+    triggers = doc[True]["pull_request"]  # PyYAML reads the key `on` as True
+    assert {"labeled", "unlabeled", "synchronize", "opened"} <= set(triggers["types"])
+    assert "paths" not in triggers and "paths-ignore" not in triggers
+    job = doc["jobs"]["regression-guard"]
+    assert job["name"] == "regression-guard"
+    assert "if" not in job
+    assert job["steps"][0]["with"]["fetch-depth"] == 0
+    (step,) = [s for s in job["steps"] if s.get("name") == GUARD_STEP]
+    assert step.get("if") == "${{ !cancelled() }}"
+    assert step["env"]["BASE_SHA"] == "${{ github.event.pull_request.base.sha }}"
+    assert (
+        step["env"]["LABELS"]
+        == "${{ toJSON(github.event.pull_request.labels.*.name) }}"
+    )
+    run = step["run"]
+    assert run.startswith("set -euo pipefail\n")
+    assert ': "${BASE_SHA:?' in run
+    assert "|| true" not in run and "/dev/null" not in run and "exit 0" not in run
+    assert 'git fetch --no-tags origin "+${BASE_SHA}:refs/doc-demotion/base"' in run
+    assert "--base-ref refs/doc-demotion/base" in run
+    others = [s.get("run", "") for s in job["steps"] if s is not step]
+    assert not any("check_doc_demotions" in r for r in others)
