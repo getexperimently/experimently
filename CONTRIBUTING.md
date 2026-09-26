@@ -23,26 +23,26 @@ There is no paperwork and no copyright assignment, anywhere in the tree.
 
 Sign off every commit:
 
-```bash
+```{.bash skip reason="dev: commits to your branch"}
 git commit -s -m "Fix flag evaluation for empty targeting rules"
 ```
 
 `-s` appends a line to the commit message:
 
-```
+```text
 Signed-off-by: Your Name <your.email@example.com>
 ```
 
-It must match the author of the commit. To set it up once:
+It must match the author of the commit. To set it up once, with your own name and address:
 
-```bash
+```{.bash skip reason="dev: changes this checkout's git identity"}
 git config user.name  "Your Name"
 git config user.email "your.email@example.com"
 ```
 
 To sign off a branch you already wrote:
 
-```bash
+```{.bash skip reason="dev: rewrites your branch"}
 git rebase --signoff main
 ```
 
@@ -74,14 +74,14 @@ Everything runs from the repository root. Prerequisites: Python 3.11, Node 22
 then the frontend's. `make dev` starts Postgres and Redis, bootstraps the schema
 and the first admin, then runs the API on :8000 with reload:
 
-```bash
+```{.bash skip reason="server: installs the dependencies, then runs the API with reload"}
 make venv install
 make dev
 ```
 
 In a second shell, `make web` serves the dashboard on :3100:
 
-```bash
+```{.bash skip reason="server: serves the dashboard until you stop it"}
 make web
 ```
 
@@ -131,7 +131,7 @@ configuration and `testpaths` covers `backend/tests` and `modules/backend/tests`
 
 The test shell, if you run pytest by hand rather than through `make`:
 
-```bash
+```{.bash skip reason="dev: runs the backend unit tests in your virtualenv"}
 source venv/bin/activate
 export APP_ENV=test TESTING=true POSTGRES_SCHEMA=test_experimentation
 python -m pytest backend/tests/unit -p no:cov -q
@@ -142,12 +142,23 @@ into index names and foreign-key targets at import time, and alembic reflects
 whatever `POSTGRES_SCHEMA` names. The two must agree or `alembic revision
 --autogenerate` compares one schema's models against another schema's tables
 and proposes creating -- or dropping -- everything. The same export sequence
-applies when generating a migration:
+applies when generating a migration. First list the heads:
 
-```bash
+```{.bash skip reason="dev: reads the migration graph in your virtualenv"}
 export APP_ENV=test TESTING=true POSTGRES_SCHEMA=test_experimentation
-python -m alembic -c backend/app/db/alembic.ini revision --autogenerate --head <core head id> -m "..."
+python -m alembic -c backend/app/db/alembic.ini heads
 ```
+
+It prints two, such as `b8c9d0e1f2a3 (head)` and `modules_0001_rbac (modules) (head)`.
+The core head is the one without `(modules)`. Generate the revision on it, with your own
+message in place of `describe the change`:
+
+```{.bash skip reason="dev: writes a migration file"}
+CORE_HEAD=$(python -m alembic -c backend/app/db/alembic.ini heads | grep -v '(modules)' | cut -d' ' -f1)
+python -m alembic -c backend/app/db/alembic.ini revision --autogenerate --head "$CORE_HEAD" -m "describe the change"
+```
+
+For a change to a module, the head is `modules@head` instead of `"$CORE_HEAD"`.
 
 `backend/tests/integration/database/test_autogenerate_is_empty.py` is the
 standing check that a freshly bootstrapped database produces an empty
@@ -163,7 +174,7 @@ request labelled `bug` that adds no test.
 `make lint` is exactly what the `lint` CI job runs. `make format` runs
 `ruff format` and `ruff check --fix`, in place:
 
-```bash
+```{.bash skip reason="dev: runs this repository's linters"}
 make lint
 make format
 ```
@@ -178,9 +189,16 @@ workflows when those two are installed (`brew install hadolint actionlint`).
 pin in `backend/requirements/runtime.txt` needs `make lock` afterwards: the API
 image installs the hashed lock, not the loose pins.
 
+### Documentation
+
+The shell examples in the documentation are run in CI as written. A page you add or
+change with a shell block has to be tagged and enrolled; see
+[Runnable Documentation Examples](docs/development/doc-examples.md), and run
+`python scripts/doc_examples.py --check` before you push.
+
 ## Layer map
 
-```
+```text
 backend/app/        FastAPI application: api/, core/, services/, models/, schemas/
 backend/lambda/     Lambda handlers (assignment, event processor, flag evaluation)
 backend/scripts/    One-off and seed scripts

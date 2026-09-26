@@ -73,12 +73,15 @@ synchronous. Full reference: [Python SDK](sdk/python.md).
 
 ### Installation
 
-**Not yet published.** The `experimently` package is not on PyPI yet, so the first line below
-fails today. Install it from a clone of this repository with the second line.
+**Not yet published.** The `experimently` package is not on PyPI yet, so this fails today:
 
 ```bash
 pip install experimently
-# or from source:
+```
+
+Install it from a clone of this repository instead:
+
+```bash
 pip install -e ./sdk/python
 ```
 
@@ -165,15 +168,23 @@ Smoke against a live backend: `python sdk/python/examples/contract_smoke.py`.
 
 ### Installation
 
-**Not yet published.** `@getexperimently/js-sdk` is not on npm yet, so the first line below fails
-today. Build it from a clone of this repository and install the packed tarball instead.
+**Not yet published.** `@getexperimently/js-sdk` is not on npm yet, so this fails today:
 
 ```bash
 npm install @getexperimently/js-sdk
-# or from source, in a clone of this repository:
+```
+
+Build it from a clone of this repository instead. `npm pack` writes
+`getexperimently-js-sdk-1.0.0.tgz`:
+
+```bash
 cd sdk/js
-npm ci && npm run build && npm pack      # writes getexperimently-js-sdk-1.0.0.tgz
-# then, in your app:
+npm ci && npm run build && npm pack
+```
+
+Then, in your app, install the packed tarball:
+
+```bash
 npm install /path/to/experimently/sdk/js/getexperimently-js-sdk-1.0.0.tgz
 ```
 

@@ -1,199 +1,188 @@
-
-# Comprehensive Guide for Docker Local Development
+# Docker Local Development
 
 ## Overview
 
-This guide will help you set up and manage your local development environment using Docker Compose, tailored specifically for Experimently. The setup includes a PostgreSQL database, Redis caching, LocalStack for AWS service emulation, and optional tools such as PGAdmin for database management.
+This guide runs Experimently locally with Docker Compose and shows how to reach each
+service. By default the compose file at the repository root starts PostgreSQL, Redis, the
+API and the dashboard. Three optional profiles add more: `tools` (pgAdmin), `aws`
+(LocalStack, for developing the optional AWS integrations) and `demo` (the ShopLab and
+StreamPulse demo applications). [The Docker Compose stack](docker-compose-file.md) lists
+every service, port and variable.
 
 ## Prerequisites
 
-- Docker installed (version 20.x+ recommended)
-- Docker Compose installed (version 2.x recommended)
-- AWS CLI installed (configured to use LocalStack endpoint)
+- Docker 24 or later, with Compose v2 (`docker compose`, not the retired `docker-compose`)
+- `curl` and `jq`
+- The AWS CLI, only for the LocalStack section below
 
 ## Project Structure
 
-Your project structure should look similar to:
+The commands below run from the root of a clone of the repository, which contains:
 
-```bash
-project-root/
+```text
+experimently/
 ├── backend/
 ├── frontend/
 ├── localstack/
-│   └── init scripts if needed
+│   └── init-aws.sh
 ├── docker-compose.yml
-└── .env (optional for environment variables)
+└── .env              (optional; your own settings)
 ```
 
 ## Docker Compose File Overview
 
-The provided `docker-compose.yml` includes the following key services:
+`docker-compose.yml` defines these services:
 
-- **PostgreSQL**: Database storage
-- **Redis**: Caching layer
-- **LocalStack**: Local emulation of AWS services
-- **PGAdmin** *(optional)*: Database administration UI
-- **Backend API** *(optional, commented)*
-- **Frontend Web** *(optional, commented)*
+- **postgres**: the database (PostgreSQL 16)
+- **redis**: caching and rate-limit counters (Redis 7)
+- **api**: the backend, built from `backend/Dockerfile`
+- **frontend**: the dashboard, built from `frontend/Dockerfile`
+- **pgadmin** (profile `tools`): a database browser
+- **localstack** (profile `aws`): local emulation of AWS services
+- **shoplab**, **streampulse** and their simulators (profile `demo`)
 
 ## Getting Started
 
 ### Step 1: Start Services
 
-Navigate to your project root directory:
+From the repository root, start the default services:
 
-```bash
-cd project-root
+```{.bash exec timeout=1200}
+docker compose up -d --wait
 ```
 
-Start your Docker environment:
-
-```bash
-docker-compose up -d
-```
-
-This command spins up PostgreSQL, Redis, LocalStack, and PGAdmin (if uncommented).
+The first start builds the API and dashboard images, which takes a few minutes. `--wait`
+returns once every service is healthy.
 
 ### Step 2: Verify Services
 
-Check that all services are running:
+List the services that are running:
 
-```bash
-docker-compose ps
+```{.bash exec}
+docker compose ps --services --status running | sort
 ```
+<!-- expect: api -->
+<!-- expect: frontend -->
+<!-- expect: postgres -->
+<!-- expect: redis -->
+
+It prints `api`, `frontend`, `postgres` and `redis`, one per line.
 
 ### Step 3: Connect to PostgreSQL
 
-Use PGAdmin at `http://localhost:5050` or connect via terminal:
+Open a `psql` session inside the `postgres` container:
 
-```bash
-docker exec -it experimentation-postgres psql -U postgres
+```{.bash skip reason="server: opens an interactive psql session"}
+docker compose exec postgres psql -U postgres -d experimentation
 ```
 
-Credentials:
-- User: `postgres`
-- Password: `postgres`
-- Database: `experimentation`
+The user and password are both `postgres`, and the database is `experimentation`. The
+tables live in the `experimentation` schema. To run a single query instead, pass it with
+`-c`; this one lists the administrators the first start created:
+
+```{.bash exec}
+docker compose exec postgres psql -U postgres -d experimentation -tAc "select email from experimentation.users where is_superuser"
+```
+<!-- expect: admin@demo.com -->
+
+It prints `admin@demo.com`.
+
+PostgreSQL is also published on `localhost:5432` for tools on your machine. With the
+`tools` profile, pgAdmin runs at http://localhost:5050:
+
+```{.bash skip reason="server: starts pgAdmin, which pulls its own image"}
+docker compose --profile tools up -d --wait pgadmin
+```
 
 ### Step 4: Interact with Redis
 
-Check Redis health:
+Check that Redis answers:
 
-```bash
-docker exec -it experimentation-redis redis-cli ping
+```{.bash exec}
+docker compose exec redis redis-cli ping
 ```
+<!-- expect: PONG -->
 
-Should return:
-
-```
-PONG
-```
+It prints `PONG`.
 
 ### Step 5: Working with LocalStack
 
-LocalStack is accessible at:
+LocalStack runs only with the `aws` profile. Start it:
 
-```bash
-http://localhost:4566
+```{.bash skip reason="server: starts LocalStack, which pulls a large image"}
+docker compose --profile aws up -d --wait localstack
 ```
+
+It listens on http://localhost:4566.
+
+**Not run by our documentation checks: these commands use the AWS CLI.** They talk to
+LocalStack on your machine, not to an AWS account, but the checks never run the AWS CLI.
 
 #### AWS CLI Configuration for LocalStack
 
-Configure AWS CLI to interact with LocalStack:
+LocalStack accepts any credentials. Set dummy ones for this shell only, so that nothing is
+written to your `~/.aws` and no real profile is used:
 
-```bash
-aws configure --profile localstack
+```{.bash skip reason="aws: sets dummy AWS CLI credentials for LocalStack"}
+export AWS_ACCESS_KEY_ID=test
+export AWS_SECRET_ACCESS_KEY=test
+export AWS_DEFAULT_REGION=us-west-2
 ```
 
-Use the following dummy credentials:
-
-- AWS Access Key ID: `test`
-- AWS Secret Access Key: `test`
-- Default region: `us-west-2`
-- Default output format: `json`
-
-Example AWS CLI usage with LocalStack:
-
-```bash
-aws --endpoint-url=http://localhost:4566 --profile localstack dynamodb list-tables
-```
+Every command below passes `--endpoint-url=http://localhost:4566`, which sends it to
+LocalStack.
 
 #### Creating and Listing DynamoDB Tables
 
-Create a table using AWS CLI:
+Create a table:
 
-```bash
-aws --endpoint-url=http://localhost:4566 --profile localstack dynamodb create-table --table-name testTable --attribute-definitions AttributeName=id,AttributeType=S --key-schema AttributeName=id,KeyType=HASH --billing-mode PAY_PER_REQUEST
+```{.bash skip reason="aws: uses the AWS CLI against LocalStack"}
+aws --endpoint-url=http://localhost:4566 dynamodb create-table --table-name testTable --attribute-definitions AttributeName=id,AttributeType=S --key-schema AttributeName=id,KeyType=HASH --billing-mode PAY_PER_REQUEST
 ```
 
 List tables:
 
-```bash
-aws --endpoint-url=http://localhost:4566 --profile localstack dynamodb list-tables
+```{.bash skip reason="aws: uses the AWS CLI against LocalStack"}
+aws --endpoint-url=http://localhost:4566 dynamodb list-tables
 ```
 
 #### Working with S3
 
 Create a bucket:
 
-```bash
-aws --endpoint-url=http://localhost:4566 --profile localstack s3 mb s3://my-bucket
+```{.bash skip reason="aws: uses the AWS CLI against LocalStack"}
+aws --endpoint-url=http://localhost:4566 s3 mb s3://my-bucket
 ```
 
 List buckets:
 
-```bash
-aws --endpoint-url=http://localhost:4566 --profile localstack s3 ls
+```{.bash skip reason="aws: uses the AWS CLI against LocalStack"}
+aws --endpoint-url=http://localhost:4566 s3 ls
 ```
 
-### Step 6: Optional Backend and Frontend
+### Step 6: Rebuild After a Change
 
-To enable and start backend and frontend services, uncomment the respective sections in your `docker-compose.yml`.
+The `api` and `frontend` containers run images built from your working tree; they do not
+reload when you edit the code. Rebuild and restart them after a change:
 
-Rebuild and start:
-
-```bash
-docker-compose up --build -d
+```{.bash skip reason="dev: rebuilds the images from your working tree"}
+docker compose up -d --build --wait
 ```
 
-Backend API is accessible at `http://localhost:8000`, frontend at `http://localhost:3000`.
+The API is at http://localhost:8000 and the dashboard at http://localhost:3000.
 
 ## Development Workflow
 
-### Backend Development
+For hot reloading, run the API or the dashboard outside Docker and keep only PostgreSQL
+and Redis in it: see "Running outside Docker" in the [Quick Start](quick-start.md) and
+"Running the stack" in `CONTRIBUTING.md`.
 
-Mount your backend directory for hot-reloading during development. Modify code within `./backend`, and the changes will reflect automatically without rebuilding the container. Ensure your backend Dockerfile or Docker Compose configuration uses a command like `uvicorn backend.app.main:app --reload` for FastAPI or similar tools for your chosen framework to enable automatic reloading.
+## Stopping
 
-**Example (FastAPI)**:
+Stop everything and drop the volumes, which deletes the database:
 
-Your `Dockerfile.dev`:
-
-```Dockerfile
-FROM python:3.9-slim
-WORKDIR /app
-COPY ./requirements.txt /app/
-RUN pip install --upgrade pip && pip install -r requirements.txt
-COPY . /app
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+```{.bash exec}
+docker compose down -v
 ```
 
-### Frontend Development
-
-The frontend setup utilizes Next.js with hot-reloading enabled by default. Modify frontend code in `./frontend`, and the browser will automatically reflect these changes. Ensure your frontend Dockerfile.dev or Docker Compose configuration uses Next.js development mode.
-
-**Example (Next.js)**:
-
-Your `Dockerfile.dev`:
-
-```Dockerfile
-FROM node:18-alpine
-WORKDIR /app
-COPY package.json package-lock.json ./
-RUN npm install
-COPY . .
-CMD ["npm", "run", "dev"]
-```
-
----
-
-This setup will streamline your local development, ensure consistency across environments, and simplify collaboration across your development team.
+The next `docker compose up -d --wait` creates the database and applies the seeds again.

@@ -18,16 +18,24 @@ Verified against a live backend: **yes (2026-09-11)** via the contract smoke bel
 
 ## Installation
 
-**Not yet published.** `@getexperimently/js-sdk` is not on npm yet, so the first line below fails
-today. Build it from a clone of this repository and install the packed tarball instead.
+**Not yet published.** `@getexperimently/js-sdk` is not on npm yet, so this fails today:
 
 ```bash
 npm install @getexperimently/js-sdk
-# or, from a clone of this repository:
+```
+
+Build it from a clone of this repository instead. `npm pack` writes
+`getexperimently-js-sdk-1.0.0.tgz`:
+
+```bash
 git clone https://github.com/getexperimently/experimently.git
 cd experimently/sdk/js
-npm ci && npm run build && npm pack      # writes getexperimently-js-sdk-1.0.0.tgz
-# then, in your app:
+npm ci && npm run build && npm pack
+```
+
+Then, in your app, install the packed tarball:
+
+```bash
 npm install /path/to/experimently/sdk/js/getexperimently-js-sdk-1.0.0.tgz
 ```
 
@@ -280,7 +288,12 @@ const client = new ExperimentationClient({
 
 ```bash
 cd sdk/js && npm run build --silent && node examples/contract_smoke.mjs
-# {"sdk":"js","assign":{"variant_name":"control","is_control":true,"sticky":true},"flag":{"enabled":true},"track":{"ok":true},"fanout":{"ok":true}}
+```
+
+It prints one line:
+
+```json
+{"sdk":"js","assign":{"variant_name":"control","is_control":true,"sticky":true},"flag":{"enabled":true},"track":{"ok":true},"fanout":{"ok":true}}
 ```
 
 Env: `EXPERIMENTLY_API_URL` (default `http://localhost:8000`), `EXPERIMENTLY_API_KEY` (required),
@@ -296,8 +309,11 @@ With a seeded backend (`python backend/scripts/seed_sdk_contract.py`):
 
 ## Development
 
+`npx jest` runs the unit tests, with `fetch` mocked; `npm run build` runs `tsc` into `dist/`
+(CommonJS and `.d.ts`):
+
 ```bash
 cd sdk/js && npm install
-npx jest          # 105 unit tests, fetch is mocked
-npm run build     # tsc → dist/ (CommonJS + .d.ts)
+npx jest
+npm run build
 ```

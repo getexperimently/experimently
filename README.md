@@ -105,11 +105,31 @@ Built using modern, scalable architecture leveraging AWS services:
 
 ### Run the whole thing
 
-```bash
+You need Docker with Compose v2, `curl` and `jq`. Clone the repository:
+
+```{.bash skip reason="checkout: the runner starts inside a checkout"}
 git clone https://github.com/getexperimently/experimently.git
 cd experimently
+```
+
+Then start the stack from the repository root:
+
+```{.bash exec timeout=1200}
 docker compose up -d --wait
 ```
+
+Check that you can sign in:
+
+```{.bash exec}
+TOKEN=$(curl -s -X POST localhost:8000/api/v1/auth/login \
+  -H 'content-type: application/json' \
+  -d '{"email":"admin@demo.com","password":"Demo1234!"}' | jq -r .access_token)
+
+curl -s localhost:8000/api/v1/auth/me -H "Authorization: Bearer $TOKEN" | jq .role
+```
+<!-- expect: "ADMIN" -->
+
+It prints `"ADMIN"`.
 
 Open **http://localhost:3000** and sign in with **admin@demo.com / Demo1234!**.
 The API is on http://localhost:8000, its docs at http://localhost:8000/docs.

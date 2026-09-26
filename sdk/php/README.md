@@ -25,7 +25,11 @@ composer require experimently/sdk
 
 ```bash
 git clone https://github.com/getexperimently/experimently.git
-# then, in your project:
+```
+
+Then, in your project, add the path repository and require the package from it:
+
+```bash
 composer config repositories.experimently path /path/to/experimently/sdk/php
 composer require experimently/sdk:@dev
 ```
@@ -159,7 +163,12 @@ It is exported as a utility only — nothing in the SDK uses it to decide a vari
 
 ```bash
 EXPERIMENTLY_API_KEY=<key> php sdk/php/examples/contract_smoke.php
-# {"sdk":"php","assign":{"variant_name":"control","is_control":true,"sticky":true},"flag":{"enabled":true},"track":{"ok":true},"fanout":{"ok":true}}
+```
+
+It prints one line:
+
+```json
+{"sdk":"php","assign":{"variant_name":"control","is_control":true,"sticky":true},"flag":{"enabled":true},"track":{"ok":true},"fanout":{"ok":true}}
 ```
 
 Env: `EXPERIMENTLY_API_URL` (default `http://localhost:8000`), `EXPERIMENTLY_API_KEY` (required),
@@ -173,12 +182,19 @@ on a machine with PHP 8.1+.
 
 ## Running Tests
 
+`./vendor/bin/phpunit` runs the PHPUnit 10 suite, with HTTP faked by `tests/FakeHttpClient.php`:
+
 ```bash
 cd sdk/php
 composer install
-./vendor/bin/phpunit            # PHPUnit 10; HTTP is faked (tests/FakeHttpClient.php)
+./vendor/bin/phpunit
+```
 
-php test_standalone.php         # no composer needed: hash vector, types, cache, client request shapes
+`php test_standalone.php` needs no Composer: it checks the hash vector, the types, the cache and
+the client's request shapes:
+
+```bash
+php test_standalone.php
 ```
 
 The PHPUnit suite (client, cache, HTTP client, hash tests) and `test_standalone.php` were reviewed

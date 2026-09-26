@@ -77,9 +77,11 @@ def test_every_aws_call_is_granted():
     # The sources include the scripts the workflows run, not only the YAML.
     places = {p.split(":")[0] for ps in found.values() for p in ps}
     assert "scripts/run_migration_task.sh" in places
-    # A staged script (C4c): granted before any workflow names it, so the
-    # policy can be re-applied in every account before the deploy that runs it.
+    # The dashboard's rollout script, which deploy.yml and rollback.yml run.
     assert "scripts/ecs_rolling_rollout.sh" in places
+    assert "scripts/dashboard_revision.py" in {
+        str(p.relative_to(REPO_ROOT)) for p in iam.sources()
+    }
     assert "ecs:UpdateService" in found
     assert ".github/actions/stack-outputs/action.yml" in places
 
@@ -87,9 +89,9 @@ def test_every_aws_call_is_granted():
 def test_a_staged_script_is_not_already_run_by_a_workflow(monkeypatch):
     """STAGED_SCRIPTS is for scripts no workflow or action names YET.
 
-    Once one is wired in (C4 wires ecs_rolling_rollout.sh), the workflow is
-    what grants it and the entry must be removed, or a script later unwired
-    would stay granted by a list nobody reads.
+    Once one is wired in, the workflow is what grants it and the entry must be
+    removed, or a script later unwired would stay granted by a list nobody
+    reads. ecs_rolling_rollout.sh was the first: re-adding it now fails here.
     """
     iam = _module()
     staged = list(iam.STAGED_SCRIPTS)
