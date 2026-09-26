@@ -76,6 +76,17 @@ Create a custom policy with more precise permissions:
 }
 ```
 
+Outside `prod`, the stacks' S3 buckets are created with
+`auto_delete_objects=True`, so that `cdk destroy` can delete them (see
+[What `cdk destroy` leaves behind](../self-hosting/cdk.md#what-cdk-destroy-leaves-behind-and-bills)).
+That adds, per stack with such a bucket, one CDK-provided Lambda function
+(`Custom::S3AutoDeleteObjectsCustomResourceProvider`), the IAM role it runs
+as, a `Custom::S3AutoDeleteObjects` custom resource per bucket, and a bucket
+policy granting that role `s3:PutBucketPolicy`, `s3:GetBucket*`, `s3:List*`
+and `s3:DeleteObject*` on the bucket. The function's code is a CDK asset
+(Node.js), uploaded to the bootstrap bucket on deploy. Whatever identity deploys the stacks therefore needs to create
+Lambda functions, IAM roles and bucket policies in non-prod environments too.
+
 ### Step 3: Add Tags
 
 Add organizational tags:

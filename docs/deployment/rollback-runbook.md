@@ -202,7 +202,7 @@ APPSPEC=$(jq -cn --arg td "$PREV_TASK_DEF" '{
 # and the revision being replaced is the one hurting users -- a canary would
 # leave 90% of traffic on it for another five minutes.
 DEPLOYMENT_ID=$(aws deploy create-deployment \
-  --application-name experimentation-platform \
+  --application-name experimentation-platform-prod \
   --deployment-group-name experimentation-prod \
   --deployment-config-name CodeDeployDefault.ECSAllAtOnce \
   --description "manual rollback" \
@@ -270,7 +270,7 @@ CodeDeploy is configured to automatically roll back when a deployment fails its 
 ```bash
 # Step 1: Get the active deployment ID
 aws deploy list-deployments \
-  --application-name experimentation-platform \
+  --application-name experimentation-platform-prod \
   --deployment-group-name experimentation-prod \
   --include-only-statuses InProgress \
   --query 'deployments[0]' \
@@ -398,7 +398,7 @@ APPSPEC=$(jq -cn --arg td "$CURRENT" '{
 }')
 
 aws deploy create-deployment \
-  --application-name experimentation-platform \
+  --application-name experimentation-platform-prod \
   --deployment-group-name experimentation-prod \
   --description "restart after PITR restore" \
   --revision "$(jq -cn --arg c "$APPSPEC" '{revisionType:"AppSpecContent",appSpecContent:{content:$c}}')"

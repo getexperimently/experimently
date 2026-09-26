@@ -1,7 +1,6 @@
 from aws_cdk import (
     Stack,
     CfnOutput,
-    RemovalPolicy,
     Tags,
     aws_ec2 as ec2,
     aws_rds as rds,
@@ -10,6 +9,12 @@ from aws_cdk import (
     aws_ssm as ssm,
 )
 from constructs import Construct
+
+from stacks.environments import (
+    aurora_instance_count,
+    data_removal_policy,
+    database_removal_policy,
+)
 
 
 class EnhancedDatabaseStack(Stack):
@@ -53,7 +58,11 @@ class EnhancedDatabaseStack(Stack):
             alias=f"alias/{construct_id}-postgres-key",
             description=f"KMS key for {construct_id} PostgreSQL encryption",
             enable_key_rotation=True,
-            removal_policy=RemovalPolicy.RETAIN,
+            # Kept in prod, where the retained cluster snapshot is encrypted
+            # with it and unreadable without it. Elsewhere the cluster is
+            # destroyed without a snapshot, so the key has nothing to protect
+            # and is scheduled for deletion (stacks/environments.py).
+            removal_policy=data_removal_policy(environment),
         )
 
         # Tag the key for easier identification
@@ -149,8 +158,9 @@ class EnhancedDatabaseStack(Stack):
         )
 
         # 5. DETERMINE ENVIRONMENT-SPECIFIC CONFIGURATIONS
-        # Scale according to environment
-        instance_count = 2 if environment in ["prod", "staging"] else 1
+        # A writer and a reader in prod; one instance elsewhere (T24). Staging
+        # used to get the pair.
+        instance_count = aurora_instance_count(environment)
 
         instance_type = (
             ec2.InstanceType.of(ec2.InstanceClass.MEMORY5, ec2.InstanceSize.LARGE)
@@ -188,7 +198,10 @@ class EnhancedDatabaseStack(Stack):
             subnet_group=db_subnet_group,
             storage_encrypted=True,
             storage_encryption_key=db_encryption_key,
-            removal_policy=RemovalPolicy.SNAPSHOT,
+            # A final snapshot in prod; nothing elsewhere. A snapshot is a
+            # billed resource `cdk destroy` leaves behind, which staging
+            # should not (stacks/environments.py).
+            removal_policy=database_removal_policy(environment),
         )
 
         # What the application tasks need from this stack (#78): the WRITER
@@ -246,6 +259,19 @@ class EnhancedDatabaseStack(Stack):
             value=self.aurora_cluster.cluster_read_endpoint.socket_address,
             description="Aurora PostgreSQL read endpoint",
             export_name=f"{self.stack_name}-ReadEndpoint",
+        )
+
+        # The cluster's identifier, which the deploy workflows pass to
+        # `rds create-db-cluster-snapshot`. CloudFormation generates it (the
+        # cluster is deliberately not renamed: a DBClusterIdentifier change
+        # REPLACES the cluster), so the only way to learn it is to ask the
+        # stack. Not exported: `describe-stacks` reads an output, and an export
+        # would be one more thing pinning this stack in place.
+        CfnOutput(
+            self,
+            "ClusterIdentifier",
+            value=self.aurora_cluster.cluster_identifier,
+            description="Aurora PostgreSQL cluster identifier",
         )
 
         CfnOutput(

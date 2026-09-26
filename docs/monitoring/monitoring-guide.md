@@ -196,9 +196,11 @@ curl -H "X-Request-ID: my-trace-id-123" https://api.example.com/api/v1/health
 ## 5. CloudWatch Dashboard Sections
 
 The `MonitoringStack` CDK construct
-(`infrastructure/cdk/stacks/monitoring_stack.py`) provisions two dashboards:
+(`infrastructure/cdk/stacks/monitoring_stack.py`) provisions two dashboards. Every dashboard, alarm, topic and log group
+name below ends in the environment (`-staging`, `-prod`, ...), so two
+environments can share an account:
 
-### `experimentation-platform` (infrastructure metrics)
+### `experimentation-platform-<env>` (infrastructure metrics)
 
 | Widget | Metrics |
 |---|---|
@@ -209,7 +211,7 @@ The `MonitoringStack` CDK construct
 | RDS Aurora | CPU, DB connections, free memory, read/write latency |
 | ElastiCache Redis | CPU, current connections, cache hits/misses |
 
-### `experimentation-application-metrics` (application metrics)
+### `experimentation-application-metrics-<env>` (application metrics)
 
 | Widget | Source |
 |---|---|
@@ -269,7 +271,7 @@ The `MonitoringStack` CDK construct
 
 ### SNS topic
 
-All alarms send notifications to the `experimentation-alerts` SNS topic.
+All alarms send notifications to the `experimentation-alerts-<env>` SNS topic.
 To add a new subscriber (email, PagerDuty webhook, etc.) update the
 `alerts_topic.add_subscription(...)` call in `monitoring_stack.py`.
 
@@ -281,7 +283,7 @@ To add a new subscriber (email, PagerDuty webhook, etc.) update the
 
 Application logs are written to:
 ```
-/experimentation/application
+/experimentation/<env>/application
 ```
 
 Retention: **2 weeks** (configurable via `retention` in `monitoring_stack.py`).

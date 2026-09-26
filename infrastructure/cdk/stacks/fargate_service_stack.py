@@ -1,7 +1,6 @@
 from aws_cdk import (
     Stack,
     Duration,
-    RemovalPolicy,
     CfnOutput,
     aws_ec2 as ec2,
     aws_ecs as ecs,
@@ -16,10 +15,13 @@ from constructs import Construct
 
 from stacks.dashboard_service import DashboardService
 from stacks.database_access import require_database
+from stacks.environments import data_removal_policy
 from stacks.names import (
     API_LIVE_TARGET_GROUP_CONTEXT,
     API_LIVE_TARGET_GROUP_DEFAULT,
     BACKEND_ECR_REPOSITORY,
+    codedeploy_application_name,
+    glue_names,
 )
 
 #: HTTPS listener rules that send the API's paths to its live target group.
@@ -230,7 +232,9 @@ class FargateServiceStack(Stack):
             "BackendLogGroup",
             log_group_name=f"/ecs/experimentation-backend-{env_name}",
             retention=logs.RetentionDays.THREE_MONTHS,
-            removal_policy=RemovalPolicy.RETAIN,
+            # Named, so a retained copy blocks the next deploy of the same
+            # environment. Kept in prod only (stacks/environments.py).
+            removal_policy=data_removal_policy(env_name),
         )
 
         # --- The image this task definition carries ---------------------------
@@ -652,7 +656,8 @@ class FargateServiceStack(Stack):
         self.codedeploy_app = codedeploy.EcsApplication(
             self,
             "CodeDeployApp",
-            application_name="experimentation-platform",
+            # Account-scoped, so it carries the environment (#139).
+            application_name=codedeploy_application_name(env_name),
         )
 
         # --- CodeDeploy Deployment Group ---
@@ -718,7 +723,37 @@ class FargateServiceStack(Stack):
             scale_out_cooldown=Duration.seconds(30),
         )
 
+        # --- The etl module's Glue names ---
+        # The Glue stack names its jobs, crawler and database per environment
+        # (stacks/names.py); the API calls them through these settings, whose
+        # defaults are the old account-wide names. Set from the same function
+        # so the two cannot drift. Core deployments have no Glue at all.
+        if include_modules:
+            for variable, value in glue_names(env_name).items():
+                self.container.add_environment(variable, value)
+
         # --- CloudFormation Outputs ---
+        # Where the API's tasks run: the subnets and security group a one-off
+        # task (the migration) must be given to reach what the service
+        # reaches. Plain outputs, not exports -- a workflow reads them with
+        # `describe-stacks`, and an export would be one more thing that pins
+        # this stack in place.
+        CfnOutput(
+            self,
+            "TaskSubnets",
+            value=",".join(
+                vpc.select_subnets(
+                    subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS
+                ).subnet_ids
+            ),
+            description="Subnets the API tasks run in (comma-separated)",
+        )
+        CfnOutput(
+            self,
+            "TaskSecurityGroup",
+            value=ecs_security_group.security_group_id,
+            description="Security group the API tasks run in",
+        )
         CfnOutput(
             self,
             "ALBDnsName",

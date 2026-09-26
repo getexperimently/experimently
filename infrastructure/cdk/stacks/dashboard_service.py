@@ -29,7 +29,7 @@ What this service deliberately is NOT:
 
 from __future__ import annotations
 
-from aws_cdk import Duration, RemovalPolicy
+from aws_cdk import Duration
 from aws_cdk import aws_ec2 as ec2
 from aws_cdk import aws_ecr as ecr
 from aws_cdk import aws_ecs as ecs
@@ -37,6 +37,7 @@ from aws_cdk import aws_elasticloadbalancingv2 as elbv2
 from aws_cdk import aws_logs as logs
 from constructs import Construct
 
+from stacks.environments import data_removal_policy
 from stacks.names import DASHBOARD_ECR_REPOSITORY
 
 #: The port the dashboard image's nginx listens on (`frontend/nginx.conf`,
@@ -102,7 +103,9 @@ class DashboardService(Construct):
             "LogGroup",
             log_group_name=f"/ecs/experimentation-dashboard-{env_name}",
             retention=logs.RetentionDays.THREE_MONTHS,
-            removal_policy=RemovalPolicy.RETAIN,
+            # Named: kept in prod only (stacks/environments.py), so a rebuilt
+            # staging does not collide with its predecessor's log group.
+            removal_policy=data_removal_policy(env_name),
         )
 
         # 0.25 vCPU / 0.5 GB: the smallest Fargate size, for static nginx.
