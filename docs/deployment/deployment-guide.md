@@ -141,22 +141,51 @@ cdk deploy --all --require-approval never
 
 `cdk deploy --all` is for standing an environment up. On one that is already
 running, deploy `experimentation-fargate-<env>` on its own, pinned to what is
-live -- CodeDeploy swaps the API's blue and green target groups outside
-CloudFormation, and a `cdk deploy` that names the empty one sends every API
-request to it while every probe stays green:
+live. Both pins go on **every** such deploy, because releases reach the API and
+the dashboard outside CloudFormation and a `cdk deploy` undoes them silently:
+
+- **The API's live target group.** CodeDeploy swaps the API's blue and green
+  target groups outside CloudFormation, and a `cdk deploy` that names the empty
+  one sends every API request to it while every probe stays green.
+- **The dashboard's running digest.** The dashboard service rolls under the ECS
+  deployment controller. Once releases reach it (#69), each one points it at a
+  task definition revision, by image digest, that CloudFormation never saw;
+  until then it runs `:bootstrap` and the check says so. A `cdk deploy` that
+  changes the dashboard's task definition in any way re-points the service at CloudFormation's own
+  revision, whose image is `web:<dashboard_image_tag>` -- `web:bootstrap` when
+  the value is not given. The dashboard silently goes back to the placeholder,
+  and every probe stays green.
+
+Two read-only checks print the values to pass, and refuse a value that does not
+match what is running:
 
 ```bash
-python3 scripts/check_live_target_group.py --env "$ENVIRONMENT"   # from the repo root; read-only
+# from the repo root; both read-only
+python3 scripts/check_live_target_group.py --env "$ENVIRONMENT"   # prints api_live_target_group
+python3 scripts/check_dashboard_image.py --env "$ENVIRONMENT"     # prints dashboard_image_tag
 RUNNING_TD=$(aws ecs describe-services --cluster "experimentation-$ENVIRONMENT" \
   --services "experimentation-backend-$ENVIRONMENT" \
   --query "services[0].taskSets[?status=='PRIMARY'].taskDefinition" --output text)
 test -n "$RUNNING_TD" || { echo "no PRIMARY task set"; exit 1; }
 aws ecs describe-task-definition --task-definition "$RUNNING_TD" \
   --query "taskDefinition.containerDefinitions[?name=='backend'].image" --output text
-# pass the image's tag, or keep bootstrap, and the value the check printed:
+# re-run both checks with the values you will pass; each exits non-zero on a mismatch:
+python3 scripts/check_live_target_group.py --env "$ENVIRONMENT" --expect <blue|green>
+python3 scripts/check_dashboard_image.py --env "$ENVIRONMENT" --expect sha256:<hex>
+# pass the backend image's tag, or keep bootstrap, and the two values the checks printed:
 cdk deploy "experimentation-fargate-$ENVIRONMENT" --require-approval never \
-  -c backend_image_tag=<tag> -c api_live_target_group=<blue|green>
+  -c backend_image_tag=<tag> -c api_live_target_group=<blue|green> \
+  -c dashboard_image_tag=sha256:<hex>
 ```
+
+The dashboard pin is the **digest** the check prints (`sha256:<hex>`), not an
+image tag: a tag can be moved to other bytes, and the digest synthesises the
+image as `experimentation-platform/web@sha256:<hex>`, the exact image already
+running. If the check reports that the dashboard runs `:bootstrap` -- no release
+has reached it yet -- there is nothing to pin: leave `dashboard_image_tag` out
+and skip its `--expect`. If it reports any other tag, there is no digest to pin
+either: `-c dashboard_image_tag=<that tag>` names the same reference, which may
+since have been moved to other bytes.
 
 Check: `aws cloudformation list-stacks --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE --query "StackSummaries[?contains(StackName, 'experimentation-')].StackName"`.
 **Stop here if** a stack rolled back: the first missing secret or image is the

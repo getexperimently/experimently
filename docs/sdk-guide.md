@@ -73,6 +73,9 @@ synchronous. Full reference: [Python SDK](sdk/python.md).
 
 ### Installation
 
+**Not yet published.** The `experimently` package is not on PyPI yet, so the first line below
+fails today. Install it from a clone of this repository with the second line.
+
 ```bash
 pip install experimently
 # or from source:
@@ -162,10 +165,16 @@ Smoke against a live backend: `python sdk/python/examples/contract_smoke.py`.
 
 ### Installation
 
+**Not yet published.** `@getexperimently/js-sdk` is not on npm yet, so the first line below fails
+today. Build it from a clone of this repository and install the packed tarball instead.
+
 ```bash
 npm install @getexperimently/js-sdk
-# or from source:
-npm install ./sdk/js
+# or from source, in a clone of this repository:
+cd sdk/js
+npm ci && npm run build && npm pack      # writes getexperimently-js-sdk-1.0.0.tgz
+# then, in your app:
+npm install /path/to/experimently/sdk/js/getexperimently-js-sdk-1.0.0.tgz
 ```
 
 ### Quick Start
@@ -293,6 +302,10 @@ const client = new ExperimentationClient({
 (auto-configuration). Full reference: [Java SDK](sdk/java.md).
 
 ### Installation
+
+**Not yet published.** `com.getexperimently:experimently-sdk` and the Spring Boot starter are not
+on Maven Central yet, so the dependency below resolves only after you run `mvn install` in
+`sdk/java` of a clone of this repository, which installs both into your local `~/.m2`.
 
 ```xml
 <dependency>

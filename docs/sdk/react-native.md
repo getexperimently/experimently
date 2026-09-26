@@ -17,10 +17,23 @@ mocked `fetch`; there is no contract smoke for React Native.
 
 ## Installation
 
+**Not yet published.** `@getexperimently/react-native-sdk` is not on npm yet, so the two commands
+below fail today. Pack it from a clone of this repository (it ships TypeScript source, so there
+is no build step) and install the tarball instead; installing that tarball into a React Native app
+has not been tested.
+
 ```bash
 npm install @getexperimently/react-native-sdk @react-native-async-storage/async-storage md5
 # or
 yarn add @getexperimently/react-native-sdk @react-native-async-storage/async-storage md5
+```
+
+```bash
+git clone https://github.com/getexperimently/experimently.git
+cd experimently/sdk/react-native
+npm pack      # writes getexperimently-react-native-sdk-0.1.0.tgz
+# then, in your app:
+npm install /path/to/experimently/sdk/react-native/getexperimently-react-native-sdk-0.1.0.tgz @react-native-async-storage/async-storage md5
 ```
 
 - **iOS**: `cd ios && pod install` (required by `@react-native-async-storage/async-storage`).

@@ -22,7 +22,7 @@ The architecture is designed to provide high-performance experiment evaluation, 
     Docker Compose that nginx also proxies `/api/` to the API, and in AWS it
     proxies nothing.
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────────────────────────┐
 │                                  Client Applications                             │
 └───────────────────┬─────────────────────────────────────┬─────────────────────┬─┘
@@ -135,7 +135,7 @@ The architecture is designed to provide high-performance experiment evaluation, 
 
 ### 1. Experiment Management & Feature Flags System
 
-```
+```text
 ┌───────────────────────────────────────┐
 │      Experiment Management UI         │
 └─────────────────┬─────────────────────┘
@@ -174,7 +174,7 @@ The architecture is designed to provide high-performance experiment evaluation, 
 
 ### 2. Real-Time Event Collection & Analysis
 
-```
+```text
 ┌───────────────────────────────────────┐
 │      Client SDK                       │
 │      - Experiment exposure tracking   │
