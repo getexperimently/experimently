@@ -12,8 +12,8 @@
 # scripts/doc_examples.py), and each page's residual counts can only fall.
 
 [meta]
-documents = 9
-exec = 36
+documents = 20
+exec = 87
 universe = [
     ".github/pull_request_template.md",
     "CHANGELOG.md",
@@ -241,6 +241,83 @@ exec = 2
 skip = 4
 expects = 2
 
+[[document]]
+path = "docs/api/README.md"
+environment = "stack"
+exec = 2
+skip = 0
+expects = 2
+
+[[document]]
+path = "docs/api/alerting.md"
+environment = "stack"
+exec = 5
+skip = 0
+expects = 8
+
+[[document]]
+path = "docs/api/audit-logging.md"
+environment = "stack"
+exec = 8
+skip = 0
+expects = 18
+
+[[document]]
+path = "docs/api/bayesian.md"
+environment = "stack"
+exec = 2
+skip = 2
+expects = 3
+
+[[document]]
+path = "docs/api/cuped.md"
+environment = "stack"
+exec = 3
+skip = 0
+expects = 4
+
+[[document]]
+path = "docs/api/data-export.md"
+environment = "stack"
+exec = 10
+skip = 0
+expects = 18
+
+[[document]]
+path = "docs/api/dimensional-analysis.md"
+environment = "stack"
+exec = 6
+skip = 0
+expects = 11
+
+[[document]]
+path = "docs/api/interaction-detection.md"
+environment = "stack"
+exec = 5
+skip = 0
+expects = 8
+
+[[document]]
+path = "docs/api/sequential-testing.md"
+environment = "stack"
+exec = 3
+skip = 0
+expects = 6
+
+[[document]]
+path = "docs/statistics/fdr-correction.md"
+environment = "stack"
+exec = 3
+skip = 0
+expects = 8
+
+[[document]]
+path = "docs/websocket-streaming.md"
+environment = "stack"
+exec = 4
+skip = 1
+expects = 8
+
 [pending]
 "backend/lambda/README.md" = { comments = 0, unlabelled = 1, syntax = 0 }
 "backend/lambda/event_processor/README.md" = { comments = 5, unlabelled = 1, syntax = 0 }
@@ -248,22 +325,13 @@ expects = 2
 "demo/shoplab/README.md" = { comments = 12, unlabelled = 0, syntax = 0 }
 "demo/streampulse/README.md" = { comments = 15, unlabelled = 0, syntax = 0 }
 "demo/streampulse/simulator/README.md" = { comments = 4, unlabelled = 0, syntax = 0 }
-"docs/api/README.md" = { comments = 0, unlabelled = 0, syntax = 0 }
-"docs/api/alerting.md" = { comments = 0, unlabelled = 0, syntax = 0 }
-"docs/api/audit-logging.md" = { comments = 0, unlabelled = 1, syntax = 0 }
 "docs/api/auth.md" = { comments = 0, unlabelled = 0, syntax = 0 }
-"docs/api/bayesian.md" = { comments = 0, unlabelled = 1, syntax = 0 }
 "docs/api/compliance.md" = { comments = 2, unlabelled = 5, syntax = 0 }
-"docs/api/cuped.md" = { comments = 0, unlabelled = 1, syntax = 0 }
-"docs/api/data-export.md" = { comments = 7, unlabelled = 2, syntax = 0 }
-"docs/api/dimensional-analysis.md" = { comments = 0, unlabelled = 1, syntax = 0 }
 "docs/api/endpoints.md" = { comments = 24, unlabelled = 24, syntax = 1 }
 "docs/api/integrations.md" = { comments = 0, unlabelled = 8, syntax = 0 }
-"docs/api/interaction-detection.md" = { comments = 0, unlabelled = 1, syntax = 0 }
 "docs/api/multi-armed-bandit.md" = { comments = 0, unlabelled = 0, syntax = 0 }
 "docs/api/mutual-exclusion-groups.md" = { comments = 0, unlabelled = 0, syntax = 0 }
 "docs/api/rbac.md" = { comments = 5, unlabelled = 12, syntax = 0 }
-"docs/api/sequential-testing.md" = { comments = 0, unlabelled = 0, syntax = 0 }
 "docs/api/split-url.md" = { comments = 0, unlabelled = 3, syntax = 0 }
 "docs/api/warehouse-analytics.md" = { comments = 0, unlabelled = 0, syntax = 0 }
 "docs/architecture/models.md" = { comments = 2, unlabelled = 1, syntax = 1 }
@@ -297,7 +365,6 @@ expects = 2
 "docs/integrations/aws.md" = { comments = 4, unlabelled = 0, syntax = 0 }
 "docs/integrations/github.md" = { comments = 3, unlabelled = 4, syntax = 0 }
 "docs/integrations/salesforce.md" = { comments = 0, unlabelled = 1, syntax = 0 }
-"docs/llm-evaluation/overview.md" = { comments = 0, unlabelled = 2, syntax = 0 }
 "docs/llm-evaluation/quickstart.md" = { comments = 2, unlabelled = 1, syntax = 0 }
 "docs/mcp-server.md" = { comments = 2, unlabelled = 0, syntax = 0 }
 "docs/monitoring/dashboard-reference.md" = { comments = 0, unlabelled = 0, syntax = 0 }
@@ -327,11 +394,9 @@ expects = 2
 "docs/self-hosting/migrations.md" = { comments = 12, unlabelled = 4, syntax = 1 }
 "docs/self-hosting/monitoring.md" = { comments = 5, unlabelled = 0, syntax = 0 }
 "docs/self-hosting/releases.md" = { comments = 1, unlabelled = 1, syntax = 0 }
-"docs/statistics/fdr-correction.md" = { comments = 0, unlabelled = 1, syntax = 0 }
 "docs/warehouse/clickhouse.md" = { comments = 1, unlabelled = 0, syntax = 0 }
 "docs/warehouse/databricks.md" = { comments = 0, unlabelled = 0, syntax = 0 }
 "docs/warehouse/mysql.md" = { comments = 1, unlabelled = 0, syntax = 0 }
-"docs/websocket-streaming.md" = { comments = 3, unlabelled = 2, syntax = 0 }
 "frontend/README.md" = { comments = 7, unlabelled = 1, syntax = 0 }
 "sdk/android/README.md" = { comments = 3, unlabelled = 0, syntax = 0 }
 "sdk/dotnet/README.md" = { comments = 2, unlabelled = 2, syntax = 0 }

@@ -10,7 +10,7 @@ connected clients. The frontend uses the `useExperimentStream` hook and the
 
 ## Architecture
 
-```
+```text
 Browser (LiveResultsPanel)
     |
     | WebSocket ws://host/api/v1/ws/experiments/{id}/results
@@ -28,12 +28,66 @@ PostgreSQL (Aurora)
 
 ### WebSocket Endpoint
 
-```
+```text
 ws://localhost:8000/api/v1/ws/experiments/{experiment_id}/results
 ```
 
 On connect the server sends an initial snapshot. Periodic updates are sent every
-30 seconds (configurable via `RESULTS_STREAM_INTERVAL_SECONDS`).
+30 seconds (configurable via `RESULTS_STREAM_INTERVAL_SECONDS`). The socket needs an
+access token; see [Authentication](#authentication) below for the three ways to send it.
+
+Run the commands on this page in one terminal, in order, against the stack from the
+[Quick Start](getting-started/quick-start.md). Each uses the shell variables set by the
+ones before it. Log in first:
+
+```{.bash exec}
+TOKEN=$(curl -s -X POST localhost:8000/api/v1/auth/login \
+  -H 'content-type: application/json' \
+  -d '{"email":"admin@demo.com","password":"Demo1234!"}' | jq -r .access_token)
+
+curl -s localhost:8000/api/v1/auth/me -H "Authorization: Bearer $TOKEN" | jq .role
+```
+<!-- expect: "ADMIN" -->
+
+It prints `"ADMIN"`. This saves the id of the demo data's `checkout_button_color`
+experiment in `$EXP_ID`. The collection URL ends with a slash, `/api/v1/experiments/`;
+without it the API answers `307`, which `curl` doesn't follow:
+
+```{.bash exec}
+EXP_ID=$(curl -s localhost:8000/api/v1/experiments/ \
+  -H "Authorization: Bearer $TOKEN" \
+  | jq -r '.items[] | select(.key == "checkout_button_color") | .id')
+
+echo "$EXP_ID" | wc -c
+```
+<!-- expect: 37 -->
+
+It prints `37`, the length of an id and its newline.
+
+Any WebSocket client can connect, such as `websocat` or a browser. `curl` alone can show
+the first snapshot: it sends the upgrade request with the token as the subprotocol, then
+prints what arrives until `--max-time` stops it three seconds later. That stop is exit
+code 28, which the block accepts. The snapshot arrives inside a binary WebSocket frame, so
+`grep` reads it as bytes (`LC_ALL=C grep -a`) and picks out the event, status and variant
+keys:
+
+```{.bash exec}
+{ curl -s -N --http1.1 --max-time 3 \
+    -H 'Connection: Upgrade' \
+    -H 'Upgrade: websocket' \
+    -H 'Sec-WebSocket-Version: 13' \
+    -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' \
+    -H "Sec-WebSocket-Protocol: experimently.bearer, $TOKEN" \
+    localhost:8000/api/v1/ws/experiments/$EXP_ID/results || [ $? -eq 28 ]; } \
+  | LC_ALL=C grep -aoE '"(event|status|key)": "[a-z_]*"'
+```
+<!-- expect: "event": "results_update" -->
+<!-- expect: "status": "active" -->
+<!-- expect: "key": "blue_button" -->
+<!-- expect: "key": "green_button" -->
+
+It prints `"event": "results_update"`, the experiment's `"status": "active"`, and its two
+variants, `blue_button` and `green_button`. The whole snapshot has the shape below.
 
 ### Client Message Protocol
 
@@ -85,6 +139,18 @@ On connect the server sends an initial snapshot. Periodic updates are sent every
 |--------|------|-------------|
 | `GET` | `/api/v1/ws/experiments/{id}/results/subscribers` | Active subscriber count |
 | `GET` | `/api/v1/ws/active-experiments` | All experiments with active subscribers |
+
+Both are informational and need no token. With the `curl` connection above closed,
+nobody is subscribed:
+
+```{.bash exec}
+curl -s localhost:8000/api/v1/ws/experiments/$EXP_ID/results/subscribers | jq .subscriber_count
+curl -s localhost:8000/api/v1/ws/active-experiments
+```
+<!-- expect: 0 -->
+<!-- expect: {"active_experiments":[]} -->
+
+It prints `0`, then `{"active_experiments":[]}`.
 
 ### Key Classes
 
@@ -153,18 +219,12 @@ The `LiveResultsPanel` is accessible via the **⚡ Live** tab in the
 
 ### Running
 
-```bash
+In a development checkout, with the virtual environment active, this runs the two unit
+test files and the integration test file together:
+
+```{.bash skip reason="dev: runs this repository's test suite in a development checkout"}
 source venv/bin/activate
 export APP_ENV=test TESTING=true
-
-# Unit tests
-python -m pytest backend/tests/unit/services/test_websocket_manager.py -v
-python -m pytest backend/tests/unit/services/test_results_streaming_service.py -v
-
-# Integration tests
-python -m pytest backend/tests/integration/api/test_websocket_results.py -v
-
-# All together
 python -m pytest \
   backend/tests/unit/services/test_websocket_manager.py \
   backend/tests/unit/services/test_results_streaming_service.py \
@@ -172,14 +232,15 @@ python -m pytest \
   -v --tb=short
 ```
 
+Pass one of the three paths instead to run that file alone.
+
 ### Test Coverage
 
-| Test file | Tests | Covers |
-|-----------|-------|--------|
-| `test_websocket_manager.py` | 22 | ConnectionManager lifecycle, broadcast, concurrency |
-| `test_results_streaming_service.py` | 23 | Snapshot schema, DB error handling, significance logic |
-| `test_websocket_results.py` | 34 | WebSocket protocol, HTTP endpoints, edge cases |
-| **Total** | **79** | |
+| Test file | Covers |
+|-----------|--------|
+| `test_websocket_manager.py` | ConnectionManager lifecycle, broadcast, concurrency |
+| `test_results_streaming_service.py` | Snapshot schema, DB error handling, significance logic |
+| `test_websocket_results.py` | WebSocket protocol, HTTP endpoints, edge cases |
 
 All tests mock the DB session; no live PostgreSQL required.
 

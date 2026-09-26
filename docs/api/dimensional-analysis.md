@@ -21,7 +21,7 @@ This is useful for:
 
 When testing multiple segments simultaneously, running standard p-value tests at `α = 0.05` per segment inflates the overall false positive rate. The service applies **Bonferroni correction**:
 
-```
+```text
 adjusted_alpha = base_alpha / num_segments
 ```
 
@@ -35,77 +35,160 @@ Heterogeneous treatment effect detection flags cases where the treatment effect 
 
 ---
 
+## Where the segments come from
+
+A segment is a value of a key in the events' `metadata`. Send the dimension with the
+events you track, as in `"metadata": {"device": "mobile"}`, and the breakdown groups the
+experiment's users by it. A user whose events don't carry the key is counted under the
+segment `unknown`.
+
+Run the commands on this page in one terminal, in order, against the stack from the
+[Quick Start](../getting-started/quick-start.md). Each uses the shell variables set by the
+ones before it. Log in first:
+
+```{.bash exec}
+TOKEN=$(curl -s -X POST localhost:8000/api/v1/auth/login \
+  -H 'content-type: application/json' \
+  -d '{"email":"admin@demo.com","password":"Demo1234!"}' | jq -r .access_token)
+
+curl -s localhost:8000/api/v1/auth/me -H "Authorization: Bearer $TOKEN" | jq .role
+```
+<!-- expect: "ADMIN" -->
+
+It prints `"ADMIN"`. The examples use the demo data's `checkout_button_color` experiment,
+whose primary metric counts `checkout_completed` events. Its demo events carry no
+metadata, so this page tracks a few that do. That takes an API key, which this saves in
+`$KEY`, with the experiment's id in `$EXP_ID`. The collection URL ends with a slash,
+`/api/v1/experiments/`; without it the API answers `307`, which `curl` doesn't follow:
+
+```{.bash exec}
+KEY=$(curl -s -X POST localhost:8000/api/v1/api-keys \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'content-type: application/json' \
+  -d '{"name": "Segment demo"}' | jq -r .key)
+EXP_ID=$(curl -s localhost:8000/api/v1/experiments/ \
+  -H "Authorization: Bearer $TOKEN" \
+  | jq -r '.items[] | select(.key == "checkout_button_color") | .id')
+
+echo "${KEY:0:5}"
+```
+<!-- expect: eptk_ -->
+
+It prints `eptk_`, the start of every API key. This assigns eight users to the
+experiment:
+
+```{.bash exec}
+for i in 1 2 3 4 5 6 7 8; do
+  curl -s -X POST localhost:8000/api/v1/tracking/assign \
+    -H "X-API-Key: $KEY" \
+    -H 'content-type: application/json' \
+    -d '{"experiment_key": "checkout_button_color", "user_id": "segment-user-'"$i"'"}' \
+    | jq -r .assigned
+done | sort | uniq -c
+```
+<!-- expect: 8 true -->
+
+It prints `8 true`: all eight were enrolled. Then each completes a checkout, the odd
+numbers on `desktop` and the even ones on `mobile`. `jq` builds the batch of eight events:
+
+```{.bash exec}
+jq -n '{events: [range(1; 9) | {
+  event_type: "checkout_completed",
+  user_id: "segment-user-\(.)",
+  experiment_key: "checkout_button_color",
+  metadata: {device: (if . % 2 == 0 then "mobile" else "desktop" end)}
+}]}' \
+  | curl -s -X POST localhost:8000/api/v1/tracking/batch \
+    -H "X-API-Key: $KEY" \
+    -H 'content-type: application/json' \
+    -d @- | jq .success_count
+```
+<!-- expect: 8 -->
+
+It prints `8`.
+
+---
+
 ## API Reference
 
-### GET /api/v1/experiments/{experiment_id}/segmented-results/{segment_by}
+### GET /api/v1/results/{experiment_id}?breakdown={dimension}
 
-Returns per-segment breakdowns for the experiment results.
-
-**Query Parameters**
+The experiment's results, with a `breakdown` field that splits the primary metric by one
+dimension, with the Bonferroni-corrected significance test above. Without `breakdown`, the
+field is `null`. Any logged-in user can read it.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `dimension` | string | ✅ | Dimension to break down by (e.g. `device`, `country`, `plan`) |
-| `metric_id` | UUID | ❌ | Metric to analyze. Defaults to the experiment's primary metric |
-| `base_alpha` | float | ❌ | Base significance threshold before Bonferroni correction. Default: `0.05` |
+| `breakdown` | string | ✅ | The metadata key to break down by (e.g. `device`, `country`, `plan`) |
+| `confidence_level` | float | ❌ | 0.80–0.99, default `0.95` |
 
-**Example Request**
-
-```bash
-curl -X GET "http://localhost:8000/api/v1/results/exp-uuid/breakdown?dimension=device" \
-  -H "Authorization: Bearer $TOKEN"
+```{.bash exec}
+curl -s "localhost:8000/api/v1/results/$EXP_ID?breakdown=device" \
+  -H "Authorization: Bearer $TOKEN" \
+  | jq '.breakdown | {dimension, is_exploratory, adjusted_alpha, segments: [.segments[].segment_value]}'
 ```
+<!-- expect: "dimension": "device" -->
+<!-- expect: "is_exploratory": true -->
+<!-- expect: "desktop" -->
+<!-- expect: "mobile" -->
 
-**Example Response**
+It prints the dimension, `"is_exploratory": true`, the corrected threshold and the
+segments: `desktop`, `mobile`, and `unknown` for the users' assignment events, which carry
+no `device`. With three segments the threshold is 0.05 / 3, about `0.0167`. One segment in
+full:
 
 ```json
 {
-  "experiment_id": "exp-uuid",
-  "dimension": "device",
-  "base_alpha": 0.05,
-  "num_segments": 3,
-  "adjusted_alpha": 0.0167,
-  "segments": [
+  "segment_value": "desktop",
+  "sample_size": 4,
+  "variants": [
     {
-      "segment_value": "mobile",
-      "sample_size": 8420,
-      "adjusted_alpha": 0.0167,
-      "is_exploratory": true,
-      "variants": [
-        {
-          "variant_id": "ctrl-uuid",
-          "variant_name": "control",
-          "is_control": true,
-          "sample_size": 4210,
-          "conversions": 421,
-          "mean": 0.100,
-          "confidence_interval": [0.091, 0.109],
-          "p_value": null,
-          "is_significant": false
-        },
-        {
-          "variant_id": "var-uuid",
-          "variant_name": "treatment",
-          "is_control": false,
-          "sample_size": 4210,
-          "conversions": 548,
-          "mean": 0.130,
-          "confidence_interval": [0.120, 0.140],
-          "p_value": 0.0001,
-          "is_significant": true
-        }
-      ]
+      "variant_id": "34852c9e-05db-4168-b164-d1e8332503d5",
+      "variant_name": "34852c9e-05db-4168-b164-d1e8332503d5",
+      "is_control": true,
+      "sample_size": 1,
+      "conversions": 1,
+      "mean": 1.0,
+      "confidence_interval": [0.1486, 1.0],
+      "p_value": null,
+      "is_significant": false
     },
     {
-      "segment_value": "desktop",
-      "sample_size": 6200,
-      "adjusted_alpha": 0.0167,
-      "is_exploratory": true,
-      "variants": [...]
+      "variant_id": "f180194d-b5d7-40bc-abd8-a6b155772845",
+      "variant_name": "f180194d-b5d7-40bc-abd8-a6b155772845",
+      "is_control": false,
+      "sample_size": 3,
+      "conversions": 3,
+      "mean": 1.0,
+      "confidence_interval": [0.3436, 1.0],
+      "p_value": 1.0,
+      "is_significant": false
     }
   ]
 }
 ```
+
+`variant_name` is the variant's id in this release, not its name
+([#218](https://github.com/getexperimently/experimently/issues/218)); match variants by
+`variant_id`. The breakdown also carries `has_heterogeneous_effects` and `hte_warning`.
+
+### GET /api/v1/experiments/{experiment_id}/segmented-results/{segment_by}
+
+Counts per segment, variant and metric, with no significance test. Only segments with the
+key are listed (no `unknown`), `conversion_rate` is a percentage, and an experiment in
+`draft` answers `400`. `metric_id` narrows it to one metric:
+
+```{.bash exec}
+curl -s localhost:8000/api/v1/experiments/$EXP_ID/segmented-results/device \
+  -H "Authorization: Bearer $TOKEN" \
+  | jq '[.segments[] | {segment_value, variants: [.metrics[0].variants[] | {variant_name, sample_size, conversions}]}]'
+```
+<!-- expect: "segment_value": "desktop" -->
+<!-- expect: "variant_name": "blue_button" -->
+<!-- expect: "segment_value": "mobile" -->
+
+It prints the `desktop` and `mobile` segments, each with the users and conversions of
+`blue_button` and `green_button`.
 
 ---
 
@@ -129,13 +212,8 @@ curl -X GET "http://localhost:8000/api/v1/results/exp-uuid/breakdown?dimension=d
 | `browser` | `chrome`, `safari`, `firefox` |
 | `new_user` | `true`, `false` |
 
-Dimension data must be included in the event tracking payload as user properties for the breakdown to be available.
-
 ---
 
 ## Permissions
 
-- **VIEWER**: ✅ Read access
-- **ANALYST**: ✅ Read access
-- **DEVELOPER**: ✅ Read access
-- **ADMIN**: ✅ Full access
+Any logged-in user can read both breakdowns, whatever the role.
