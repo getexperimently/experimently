@@ -38,7 +38,9 @@ READ-ONLY. It runs exactly four AWS CLI operations, all describe calls:
     cdk deploy experimentation-fargate-staging -c api_live_target_group=<blue|green>
 
 Exit status: 0 safe to deploy with --expect; 1 refused; 2 could not tell
-(an AWS call failed, or the stack does not look like this repository's).
+(an AWS call failed, the stack does not look like this repository's, or the
+script itself raised -- a missing `aws` binary, a malformed rule; a crash is
+never 1, "refused").
 """
 
 from __future__ import annotations
@@ -318,6 +320,9 @@ def main(argv: Sequence[str] | None = None, aws: Runner = run_aws) -> int:
         return REFUSED
     except (Unknown, AwsError) as exc:
         print(f"UNKNOWN: {exc}", file=sys.stderr)
+        return UNKNOWN
+    except Exception as exc:  # any crash is "could not tell", never "refused"
+        print(f"UNKNOWN: could not tell: {type(exc).__name__}: {exc}", file=sys.stderr)
         return UNKNOWN
     print(f"ok: {live} is live; deploy with -c {CONTEXT_KEY}={live}")
     return OK
