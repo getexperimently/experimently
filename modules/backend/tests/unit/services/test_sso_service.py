@@ -327,10 +327,12 @@ class TestUpdateSSOConfig:
     def test_update_same_domain_no_conflict(self):
         db = _make_db_session()
         cfg = _make_saml_config(org_domain="acme.com")
-        db.first.return_value = cfg
+        # First call: get by id. Second: the conflict check, which excludes
+        # this row itself and so finds nothing (the real query is pinned
+        # against Postgres in test_sso_org_domain_normalised.py).
+        db.first.side_effect = [cfg, None]
 
-        # Update to same domain should NOT trigger conflict check
-        result = update_sso_config(db, cfg.id, {"org_domain": "acme.com"})
+        update_sso_config(db, cfg.id, {"org_domain": "acme.com"})
         db.commit.assert_called_once()
 
     def test_update_is_enforced(self):
