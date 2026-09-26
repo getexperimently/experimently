@@ -171,6 +171,10 @@ source venv/bin/activate && pytest -m "unit" -v
   name. Declare markers in `pyproject.toml` (`[tool.pytest.ini_options] markers`)
   and run them with `pytest -m regression`.
 - Clear schema cache between tests with `clear_schema_cache()`
+- **No test reaches real AWS.** The root `conftest.py` loads
+  `backend/tests/no_real_aws.py` (the SDKs carry a copy): dummy credentials, no
+  `~/.aws`, and a failing `aws` first on `PATH` that prints `NO-REAL-AWS`. A
+  test that needs the CLI prepends its own fake `aws` to `PATH`; that one wins.
 - Ensure PostgreSQL is running locally before tests
 - Test users must have a `hashed_password` value set to avoid integrity errors
 
