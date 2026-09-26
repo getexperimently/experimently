@@ -87,7 +87,23 @@ aws ecr describe-repositories \
   --query 'repositories[*].{Name:repositoryName,URI:repositoryUri}'
 ```
 
-`cdk deploy` does **not** create it, deliberately. A registry is
+**A second repository, for the dashboard: `experimentation-platform/web`.**
+The Fargate stack runs the dashboard (`frontend/Dockerfile`, static nginx) as
+its own ECS service behind the same load balancer: `/api/*`, `/health`,
+`/health/*` and `/metrics` go to the API and everything else to the dashboard,
+on one origin. Create this repository, and push a `web:bootstrap` image to it
+(Step 2 #8 below), **before any `cdk deploy` of the Fargate stack** — a stack
+from before the dashboard included. Nothing in the deploy workflow builds or
+pushes the dashboard image yet, so `bootstrap` is what the dashboard runs.
+
+```bash
+aws ecr create-repository \
+  --repository-name experimentation-platform/web \
+  --region us-west-2 \
+  --image-scanning-configuration scanOnPush=true
+```
+
+`cdk deploy` does **not** create either repository, deliberately. A registry is
 account-scoped while these stacks are per-environment, so a fixed repository
 name owned by the compute stack would mean only one environment per account
 could deploy — `demo/setup-aws.sh` runs `ENVIRONMENT=demo cdk deploy --all`
@@ -215,7 +231,28 @@ cdk deploy experimentation-monitoring-prod --require-approval never
 #        docker build --target <core|full> -f backend/Dockerfile \
 #          -t "$ECR_REGISTRY/experimentation-platform/backend:bootstrap" .
 #        docker push "$ECR_REGISTRY/experimentation-platform/backend:bootstrap"
+#
+#      and the same for the dashboard, in its own repository (Section 1.3),
+#      built with the API's profile so the dashboard shows the API's pages:
+#
+#        docker build -f frontend/Dockerfile \
+#          --build-arg EXPERIMENTLY_PROFILE=<core|full> \
+#          -t "$ECR_REGISTRY/experimentation-platform/web:bootstrap" .
+#        docker push "$ECR_REGISTRY/experimentation-platform/web:bootstrap"
 #        cd infrastructure/cdk
+#
+# THEN, before EVERY `cdk deploy` of this stack on an environment that is
+# already running: which API target group is live? CodeDeploy swaps blue and
+# green on every deployment, outside CloudFormation, and the listener's API
+# rules are written against the one `-c api_live_target_group` names (default
+# blue). Naming the empty one sends every API request to a target group with
+# no tasks, while `/` and every probe stay green. The check is read-only
+# (four describe calls) and prints the value to pass; it refuses when the
+# value would be wrong, or when the load balancer and ECS already disagree:
+#
+#   python3 scripts/check_live_target_group.py --env prod    # from the repo root
+#   cdk deploy experimentation-fargate-prod --require-approval never \
+#     -c api_live_target_group=<the value it printed>
 #
 # On a LATER `cdk deploy` -- an infrastructure change to a RUNNING
 # environment -- pin the revision CloudFormation registers to the image
@@ -236,8 +273,10 @@ cdk deploy experimentation-monitoring-prod --require-approval never
 #   echo "$RUNNING_IMAGE"          # check it before using it
 #   TAG=${RUNNING_IMAGE##*:}
 #
+#   python3 "$(git rev-parse --show-toplevel)/scripts/check_live_target_group.py" \
+#     --env prod            # prints the api_live_target_group value, or refuses
 #   cdk deploy experimentation-fargate-prod --require-approval never \
-#     -c backend_image_tag="$TAG"
+#     -c backend_image_tag="$TAG" -c api_live_target_group=<the value it printed>
 #
 # `cdk deploy --all` further down passes no override, so use it only when
 # standing an environment up, never against a running one.

@@ -115,9 +115,31 @@ npx cdk bootstrap "aws://$AWS_ACCOUNT_ID/$AWS_REGION" \
 # ---------------------------------------------------------------------------
 # 6. CDK Deploy
 # ---------------------------------------------------------------------------
+# NOTE: this script is a `cdk deploy` path, and it does not work end to end
+# today (#73). Before a deploy can succeed, a human has to do, once per
+# account, what nothing here does (docs/deployment/deployment-guide.md,
+# section 1.3 and Step 2 #8):
+#   - create the ECR repositories experimentation-platform/backend AND
+#     experimentation-platform/web -- the CDK imports both by name and creates
+#     neither, deliberately;
+#   - push an image tagged `bootstrap` to each: backend/Dockerfile and
+#     frontend/Dockerfile, built from the repository root;
+#   - export CERTIFICATE_ARN and PUBLIC_BASE_URL, which `cdk synth` requires.
+#
+# The load balancer's API rules follow the `api_live_target_group` context
+# (blue or green). On a demo stack that is already running, CodeDeploy may
+# have left green live, and deploying with blue would send every API request
+# to an empty target group. The check below is read-only and refuses that;
+# when it prints green, re-run with API_LIVE_TARGET_GROUP=green.
+API_LIVE_TARGET_GROUP="${API_LIVE_TARGET_GROUP:-blue}"
+log "Checking which API target group is live (expecting $API_LIVE_TARGET_GROUP)..."
+python3 "$REPO_ROOT/scripts/check_live_target_group.py" \
+    --env demo --expect "$API_LIVE_TARGET_GROUP"
+
 log "Deploying demo stacks (this takes 15-20 min on first run)..."
 ENVIRONMENT=demo npx cdk deploy --all \
     --require-approval never \
+    -c api_live_target_group="$API_LIVE_TARGET_GROUP" \
     --outputs-file "$DEMO_DIR/cdk-demo-outputs.json"
 ok "CDK deployment complete."
 

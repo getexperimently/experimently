@@ -97,7 +97,20 @@ if env_name not in VALID_ENVIRONMENTS:
 is_demo = env_name == "demo"
 db_instance_size = "db.t3.small" if is_demo else "db.t3.medium"
 cache_node_type = "cache.t3.micro" if is_demo else "cache.t3.small"
-fargate_desired_count = 1 if is_demo else 2
+
+# ECS tasks per service, per environment. `fargate_desired_count` used to be
+# computed here (1 for demo, 2 otherwise) and passed nowhere, while the stack
+# hard-coded 3 -- so every environment ran 3 API tasks.
+#
+#   API:       staging 2 (DECISIONS D13: the minimum that proves multi-task
+#              behaviour, #66); demo 1 and dev 2 as this file already
+#              intended; prod 3, unchanged -- nothing has decided to reduce it.
+#   dashboard: staging 1 (D13; a rolling deploy at min 100% / max 200% has no
+#              gap even at one task); demo and dev 1. prod 2 is the team's
+#              recommendation (one per AZ) and the founder's decision to make:
+#              a default here, never a required setting.
+API_DESIRED_COUNT = {"dev": 2, "staging": 2, "prod": 3, "demo": 1}
+DASHBOARD_DESIRED_COUNT = {"dev": 1, "staging": 1, "prod": 2, "demo": 1}
 
 # Define CDK environment (account and region)
 # Account/region come from the environment only: CDK sets CDK_DEFAULT_ACCOUNT
@@ -207,7 +220,8 @@ if analytics_stack is not None:
 # required).
 certificate_arn = os.environ.get("CERTIFICATE_ARN", None)
 
-# The absolute origin users reach the API at, e.g. https://api.example.com.
+# The absolute origin users reach the dashboard and the API at -- one origin,
+# e.g. https://app.example.com (DECISIONS D14).
 # Required at synth by FargateServiceStack -- the application refuses to start
 # in staging/production without knowing what hostname it answers on, because
 # the Host header is attacker-controlled (#220). Both the service and the
@@ -229,6 +243,8 @@ fargate_stack = FargateServiceStack(
     # AUDIT_HMAC_KEY is read only by the modules, and naming a secret that was
     # never created stops ECS from starting the task at all.
     include_modules=ENABLE_MODULE_STACKS,
+    api_desired_count=API_DESIRED_COUNT[env_name],
+    dashboard_desired_count=DASHBOARD_DESIRED_COUNT[env_name],
     env=env,
 )
 fargate_stack.add_dependency(compute_stack)
