@@ -233,6 +233,6 @@ describe('error handling', () => {
       statusText: '',
       text: () => Promise.resolve(''),
     } as Response);
-    await expect(workspaceService.get('w1')).rejects.toThrow('Request failed with status 500');
+    await expect(workspaceService.get('w1')).rejects.toThrow('Something went wrong on the server (HTTP 500).');
   });
 });

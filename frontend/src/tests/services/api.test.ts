@@ -12,7 +12,9 @@ import {
   navigation,
   redirectToLogin,
   safeNextPath,
+  serverErrorMessage,
   setToken,
+  unreachableMessage,
   wsBase,
 } from '@/services/api';
 
@@ -215,9 +217,9 @@ describe('apiFetch — errors', () => {
     expect(err.message).toBe('name: field required');
   });
 
-  it('falls back to statusText when the body is unreadable', async () => {
-    mockFetch.mockResolvedValueOnce({ ok: false, status: 500, statusText: 'Internal Server Error' } as Response);
-    await expect(apiFetch('/x')).rejects.toThrow('Internal Server Error');
+  it('falls back to statusText when a 4xx body is unreadable', async () => {
+    mockFetch.mockResolvedValueOnce({ ok: false, status: 418, statusText: "I'm a teapot" } as Response);
+    await expect(apiFetch('/x')).rejects.toThrow("I'm a teapot");
   });
 
   it('wraps network failures as ApiError status 0', async () => {
@@ -291,5 +293,115 @@ describe('redirectToLogin / safeNextPath', () => {
     expect(safeNextPath('/feature-flags/1')).toBe('/feature-flags/1');
     redirectToLogin('//evil.com');
     expect(assignSpy).toHaveBeenLastCalledWith('/login');
+  });
+});
+
+/** A failed response with a raw body and the given headers (case-insensitive). */
+function rawResponse(status: number, body: string, headers: Record<string, string> = {}): Response {
+  const lower = Object.fromEntries(Object.entries(headers).map(([k, v]) => [k.toLowerCase(), v]));
+  return {
+    ok: false,
+    status,
+    statusText: 'STATUS',
+    headers: { get: (name: string) => lower[name.toLowerCase()] ?? null },
+    text: () => Promise.resolve(body),
+  } as unknown as Response;
+}
+
+describe('server errors (#72)', () => {
+  it('a plain-text 500 says "server error" with the request id, not the body', async () => {
+    mockFetch.mockResolvedValueOnce(
+      rawResponse(500, 'Internal Server Error', {
+        'Content-Type': 'text/plain; charset=utf-8',
+        'X-Request-ID': 'req-72-abc',
+      }),
+    );
+    const err = await rejection(apiFetch('/x'));
+    expect(err.status).toBe(500);
+    expect(err.isServerError).toBe(true);
+    expect(err.isNetworkError).toBe(false);
+    expect(err.requestId).toBe('req-72-abc');
+    expect(err.message).toBe(
+      'Something went wrong on the server (HTTP 500). This is not a connection problem. ' +
+        'Request ID: req-72-abc. Your administrator can find the details by searching the API log for this ID.',
+    );
+    expect(err.message).not.toContain("Can't reach");
+  });
+
+  it('without a request id it still says server error', async () => {
+    mockFetch.mockResolvedValueOnce(rawResponse(500, 'Internal Server Error'));
+    const err = await rejection(apiFetch('/x'));
+    expect(err.requestId).toBeUndefined();
+    expect(err.message).toBe(
+      'Something went wrong on the server (HTTP 500). Your administrator can find the details in the API log.',
+    );
+  });
+
+  it("a proxy's HTML 502 page is not shown as the message", async () => {
+    mockFetch.mockResolvedValueOnce(
+      rawResponse(502, '<html><body><h1>502 Bad Gateway</h1></body></html>', { 'Content-Type': 'text/html' }),
+    );
+    const err = await rejection(apiFetch('/x'));
+    expect(err.message).toBe(serverErrorMessage(502));
+    expect(err.message).not.toContain('<');
+  });
+
+  it('a 5xx with a JSON detail keeps the detail and adds the request id', async () => {
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse(503, { detail: 'Module not available' }, {
+        headers: {
+          get: (name: string) =>
+            ({ 'content-type': 'application/json', 'x-request-id': 'req-503' })[name.toLowerCase()] ?? null,
+        },
+      } as Partial<Response>),
+    );
+    const err = await rejection(apiFetch('/x'));
+    expect(err.message).toBe('Module not available (Request ID: req-503)');
+    expect(err.detail).toBe('Module not available');
+  });
+
+  it('a 4xx message is unchanged by a request id', async () => {
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse(404, { detail: 'Not found' }, {
+        headers: { get: (name: string) => (name.toLowerCase() === 'x-request-id' ? 'req-404' : null) },
+      } as Partial<Response>),
+    );
+    const err = await rejection(apiFetch('/x'));
+    expect(err.message).toBe('Not found');
+    expect(err.requestId).toBe('req-404');
+  });
+
+  it('a header value that is not id-shaped is not shown', async () => {
+    mockFetch.mockResolvedValueOnce(
+      rawResponse(500, '', { 'X-Request-ID': 'x'.repeat(129) }),
+    );
+    const tooLong = await rejection(apiFetch('/x'));
+    expect(tooLong.requestId).toBeUndefined();
+    mockFetch.mockResolvedValueOnce(rawResponse(500, '', { 'X-Request-ID': 'a b<script>' }));
+    const odd = await rejection(apiFetch('/x'));
+    expect(odd.requestId).toBeUndefined();
+    expect(odd.message).toBe(serverErrorMessage(500));
+  });
+});
+
+describe('unreachable copy', () => {
+  const env = process.env as Record<string, string | undefined>;
+  const original = env.NODE_ENV;
+  afterEach(() => {
+    env.NODE_ENV = original;
+  });
+
+  it('names CORS_ORIGINS, because a missing CORS header looks the same as a down backend', () => {
+    process.env.NEXT_PUBLIC_API_URL = 'https://app.example.com';
+    env.NODE_ENV = 'production';
+    expect(unreachableMessage()).toBe(
+      "Can't reach the API at https://app.example.com. Check that the backend is running and that " +
+        "this dashboard's origin is listed in CORS_ORIGINS.",
+    );
+  });
+
+  it('points at the quick start only in development', () => {
+    env.NODE_ENV = 'development';
+    expect(unreachableMessage()).toContain('See docs → Quick start.');
   });
 });
