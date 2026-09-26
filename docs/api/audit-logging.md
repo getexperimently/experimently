@@ -254,5 +254,4 @@ It prints `"total_changes": 1` and the bulk toggle's entry: `toggle_disable`, fr
 
 | Action | Who |
 |--------|-----|
-| View audit logs, stats, the stream and flag history | Any logged-in user, whatever the role |
 | Bulk toggle feature flags | ADMIN or DEVELOPER |
