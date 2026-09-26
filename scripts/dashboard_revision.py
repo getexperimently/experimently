@@ -277,9 +277,12 @@ def target(
                 f"revision. Re-run with environment={other}.{nothing}"
             )
         if got.startswith(api_prefix):
+            other = got.removeprefix(api_prefix)
             raise Refused(
-                f"{short} is an API revision of another environment; it does not "
-                f"go in dashboard_task_definition_arn.{nothing}"
+                f"You chose environment={env} but {short} is a {other} API "
+                "revision; it goes in task_definition_arn, not "
+                f"dashboard_task_definition_arn. Re-run with environment={other}."
+                f"{nothing}"
             )
         raise Refused(f"{arn} belongs to family {got}, not {family}.{nothing}")
     images = _dashboard_images(task_definition)

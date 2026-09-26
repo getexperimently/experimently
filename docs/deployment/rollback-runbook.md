@@ -87,6 +87,14 @@ first stops any CodeDeploy deployment in flight with auto-rollback, which
 reverts an API that shifted within the last hour. To put back the dashboard
 alone, use Method 2's dashboard block.
 
+**If the API went back and the dashboard did not**, the run says so (its Slack
+line reads "API rolled back to …; dashboard NOT rolled back (…)"), and the
+system is in the newer-dashboard, older-API state. Put the dashboard back with
+Method 2's dashboard block. Do not dispatch Rollback again while the rollback's
+own CodeDeploy deployment is active (about an hour after its shift): its stop
+step would stop that deployment with auto-rollback and put the API back on the
+release you rolled back from.
+
 ### Step 1: Find the Previous Task Definition ARN
 
 > **Two producers write to this family, and only one of them is runnable.**

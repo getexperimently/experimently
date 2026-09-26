@@ -837,9 +837,9 @@ jobs:
               echo "api_line=${last//$'\r'/ }"
             } >> "$GITHUB_OUTPUT"
             case "$code" in
-              1) why="the API is not serving ${API_TD_ARN##*/}: another revision is PRIMARY, a traffic shift is in progress, or the check crashed (the line above says which)" ;;
+              1) why="the API is not serving ${API_TD_ARN##*/}: another revision is PRIMARY, or a traffic shift is in progress (the line above says which)" ;;
               3) why="the API's route and its tasks disagree: ${API_TD_ARN##*/} is the PRIMARY task set but the /api/* rule forwards to the other group (the line above)" ;;
-              *) why="could not tell whether the API is serving ${API_TD_ARN##*/} (exit $code; the line above)" ;;
+              *) why="could not tell whether the API is serving ${API_TD_ARN##*/}: an AWS call failed or the check crashed (exit $code; the line above)" ;;
             esac
             echo "::error title=Dashboard not rolled out::${why}. The dashboard was not changed: it is still on ${PREVIOUS_DASHBOARD_TD##*/}."
             exit 1
@@ -916,9 +916,9 @@ jobs:
               echo "api_line=${last//$'\r'/ }"
             } >> "$GITHUB_OUTPUT"
             case "$code" in
-              1) why="the API is not serving ${API_TD_ARN##*/}: another revision is PRIMARY, a traffic shift is in progress, or the check crashed (the line above says which)" ;;
+              1) why="the API is not serving ${API_TD_ARN##*/}: another revision is PRIMARY, or a traffic shift is in progress (the line above says which)" ;;
               3) why="the API's route and its tasks disagree: ${API_TD_ARN##*/} is the PRIMARY task set but the /api/* rule forwards to the other group (the line above)" ;;
-              *) why="could not tell whether the API is serving ${API_TD_ARN##*/} (exit $code; the line above)" ;;
+              *) why="could not tell whether the API is serving ${API_TD_ARN##*/}: an AWS call failed or the check crashed (exit $code; the line above)" ;;
             esac
             echo "::error title=API changed after the dashboard rolled out::After the dashboard rolled out, ${why}. The dashboard is on this run's revision. Check both before anything else: python3 scripts/api_serving.py ${ECS_CLUSTER} ${ECS_BACKEND_SERVICE} ${API_TD_ARN}"
             exit 1

@@ -216,3 +216,28 @@ def test_the_guide_pins_the_dashboard_digest_and_the_runbook_covers_the_dashboar
     assert "deployments[?status=='PRIMARY']" in runbook
     assert "dashboard_task_definition_arn" in runbook
     assert "### The dashboard is the opposite case" in runbook
+
+
+_RERUN = re.compile(r"re-?run(ning)? (the )?rollback|rollback again", re.I)
+
+
+@pytest.mark.regression
+def test_no_copy_advises_running_rollback_again():
+    """EM ruling C3: a second Rollback inside the hour stops the first one's
+    deployment with auto-rollback and puts the bad API release back. The only
+    mention allowed is the warning against it."""
+    texts = {
+        "rollback.yml": (WORKFLOWS / "rollback.yml").read_text(),
+        "deploy.yml": (WORKFLOWS / "deploy.yml").read_text(),
+        "runbook": RUNBOOK.read_text(),
+    }
+    for where, text in texts.items():
+        flat = " ".join(text.split())
+        for match in _RERUN.finditer(flat):
+            # The one allowed form is the warning: "Do not dispatch Rollback again".
+            before = flat[max(0, match.start() - 20) : match.start()]
+            assert before.endswith("Do not dispatch "), (
+                where,
+                flat[max(0, match.start() - 60) : match.end() + 40],
+            )
+    assert "Do not dispatch Rollback again while" in " ".join(texts["runbook"].split())

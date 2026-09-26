@@ -493,8 +493,8 @@ The titles, and what each means:
 
 - **"Dashboard not rolled out"** -- the API check before the rollout failed, so
   the dashboard was not touched. The line above it is the check's own: another
-  revision is PRIMARY, a traffic shift is in progress or the check crashed
-  (exit 1), the check could not tell (exit 2), or the route and the tasks
+  revision is PRIMARY or a traffic shift is in progress (exit 1), the check
+  could not tell because an AWS call failed or it crashed (exit 2), or the route and the tasks
   disagree (exit 3). Find out what changed the API (usually a Rollback run)
   before anything else.
 - **"… rolled back by ECS"** -- the new dashboard's tasks did not become

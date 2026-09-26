@@ -1417,11 +1417,11 @@ def test_rollback_does_not_touch_a_dashboard_that_changed_since_it_was_validated
     assert code == 1, out
     assert runner.updates() == []
     assert (
-        "The API has been rolled back to experimentation-backend-staging:42 (CodeDeploy "
+        "The API is on experimentation-backend-staging:42 (CodeDeploy "
         "deployment d-ROLLBACK1" in out
     )
     assert (
-        "The dashboard was not changed, because it is no longer experimentation-dashboard-staging:7"
+        "(it is no longer experimentation-dashboard-staging:7), so it was not touched"
         in out
     )
     assert "experimentation-dashboard-staging:8" in out  # what it is now
@@ -1439,7 +1439,7 @@ def test_rollback_confirms_a_dashboard_already_on_the_target_without_redeploying
         "target": {"arn": API_FAMILY_REVISION},
         "codedeploy": {"deployment-id": "d-ROLLBACK1"},
     }
-    code, out, _, _ = runner.run(
+    code, out, written, _ = runner.run(
         ROLLBACK,
         _step(ROLLBACK, "dashboard-rollback"),
         outputs,
@@ -1448,6 +1448,10 @@ def test_rollback_confirms_a_dashboard_already_on_the_target_without_redeploying
     )
     assert code == 0, out
     assert runner.updates() == []
+    # Not "rolled back to": nothing was changed (code review suggestion c).
+    assert written["result"] == (
+        "already serving experimentation-dashboard-staging:6; nothing changed"
+    )
 
 
 @pytest.mark.regression
@@ -1510,3 +1514,236 @@ def test_an_empty_dashboard_input_records_what_is_serving_under_other_names(runn
     )
     assert code == 0, out
     assert written["serving_arn"] == DASH_NEW and "arn" not in written
+
+
+# --- the rollback-order ruling (EM c4-rollback-order conditions 1-4) --------------
+
+
+@pytest.mark.regression
+def test_the_dashboard_rollback_keeps_the_default_success_gate():
+    """EM ruling C1: the refusal text says "the API is on <target>", which is
+    true only because this step runs after the API verify step succeeded."""
+    step = _step(ROLLBACK, "dashboard-rollback")
+    assert step["if"] == "inputs.dashboard_task_definition_arn != ''"
+    assert _index(ROLLBACK, "api-verify") < _index(ROLLBACK, "dashboard-rollback")
+
+
+ROLLED_TO_OLD = {
+    "service": svc(
+        dep(DASH_OLD, "ecs-svc/6000", state="IN_PROGRESS", running=0),
+        dep(DASH_NEW, "ecs-svc/7777", status="ACTIVE"),
+    )
+}
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize(
+    "polls, update, title",
+    [
+        ([svc(dep(DASH_THIRD, "ecs-svc/8888"))], None, "Dashboard not rolled back"),
+        (
+            [
+                svc(
+                    dep(DASH_NEW, "ecs-svc/7778", state="IN_PROGRESS", running=0),
+                    dep(DASH_OLD, "ecs-svc/6000", status="ACTIVE", state="FAILED"),
+                )
+            ],
+            ROLLED_TO_OLD,
+            "Dashboard rollback did not take",
+        ),
+        (
+            [
+                svc(
+                    dep(DASH_OLD, "ecs-svc/6000", state="IN_PROGRESS", running=0),
+                    dep(DASH_NEW, "ecs-svc/7777", status="ACTIVE"),
+                )
+            ],
+            ROLLED_TO_OLD,
+            "Dashboard rollback did not finish",
+        ),
+        (
+            [],
+            {"error": "An error occurred (InvalidParameterException)"},
+            "Dashboard not rolled back",
+        ),
+    ],
+    ids=["refused", "circuit-breaker", "deadline", "generic"],
+)
+def test_every_dashboard_rollback_failure_names_the_state_and_the_way_out(
+    runner, polls, update, title
+):
+    """EM ruling C3: each branch says the API is on the target, what the
+    dashboard is serving, that this is the newer-dashboard/older-API state,
+    points at Method 2, and warns against dispatching Rollback again."""
+    before = (
+        svc(dep(DASH_THIRD, "ecs-svc/8888"))
+        if title == "Dashboard not rolled back" and not update
+        else svc(dep(DASH_NEW, "ecs-svc/7777"))
+    )
+    runner.scenario(
+        dashboard_rules(polls, before=before, update=update)
+        + [
+            rule(
+                "ecs describe-task-definition",
+                answers=[_task_definition(DASH_NEW, WEB_IMAGE)],
+            )
+        ]
+    )
+    outputs = {
+        "dashboard-target": {"arn": DASH_OLD, "expect": DASH_NEW},
+        "target": {"arn": API_FAMILY_REVISION},
+        "codedeploy": {"deployment-id": "d-ROLLBACK1"},
+    }
+    code, out, written, _ = runner.run(
+        ROLLBACK,
+        _step(ROLLBACK, "dashboard-rollback"),
+        outputs,
+        {"dashboard_task_definition_arn": "experimentation-dashboard-staging:6"},
+        **FAST,
+    )
+    assert code != 0, out
+    (line,) = [
+        ln for ln in out.splitlines() if ln.startswith(f"::error title={title}::")
+    ]
+    assert "The API is on experimentation-backend-staging:42" in line
+    assert "The dashboard was not rolled back with it: " in line
+    assert " is serving " in line or "could not read" in line
+    assert "the newer-dashboard, older-API state" in line
+    assert "rollback-runbook.md Method 2, the dashboard block" in line
+    assert (
+        "Do not dispatch Rollback again while CodeDeploy deployment d-ROLLBACK1 is active"
+        in line
+    )
+    assert written["result"]
+
+
+def _summary(
+    runner: Runner,
+    api_verify: str,
+    dashboard_outcome: str,
+    given: str,
+    result: str = "",
+):
+    outputs = {
+        "target": {"arn": API_FAMILY_REVISION},
+        "codedeploy": {"deployment-id": "d-ROLLBACK1"},
+        "api-verify": {"__outcome__": api_verify},
+        "dashboard-target": {"arn": DASH_OLD, "expect": DASH_NEW} if given else {},
+        "dashboard-rollback": {"__outcome__": dashboard_outcome, "result": result},
+    }
+    return runner.run(
+        ROLLBACK,
+        _step(ROLLBACK, "Run summary"),
+        outputs,
+        {
+            "dashboard_task_definition_arn": given,
+            "job.status": "success"
+            if api_verify == "success" and dashboard_outcome in ("success", "")
+            else "failure",
+        },
+    )
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize(
+    "api_verify, dashboard_outcome, given, result, slack",
+    [
+        (
+            "success",
+            "",
+            "",
+            "",
+            "staging: API rolled back to experimentation-backend-staging:42; dashboard left as it is",
+        ),
+        (
+            "success",
+            "success",
+            "experimentation-dashboard-staging:6",
+            "rolled back to experimentation-dashboard-staging:6",
+            "staging: API rolled back to experimentation-backend-staging:42; dashboard rolled back to experimentation-dashboard-staging:6",
+        ),
+        (
+            "success",
+            "failure",
+            "experimentation-dashboard-staging:6",
+            "rejected by ECS's circuit breaker; serving experimentation-dashboard-staging:7",
+            "staging: API rolled back to experimentation-backend-staging:42; dashboard NOT rolled back (rejected by ECS's circuit breaker; serving experimentation-dashboard-staging:7)",
+        ),
+        (
+            "failure",
+            "",
+            "",
+            "",
+            "staging: API NOT rolled back (its verify step: failure); dashboard left as it is",
+        ),
+    ],
+    ids=["api-only-ok", "both-ok", "api-ok-dashboard-failed", "api-failed"],
+)
+def test_the_result_line_keys_on_the_api_verify_step(
+    runner, api_verify, dashboard_outcome, given, result, slack
+):
+    """EM ruling C2 (the code review's CRITICAL): never "NOT rolled back" for
+    an API that was rolled back and verified."""
+    runner.scenario([])
+    code, out, written, summary = _summary(
+        runner, api_verify, dashboard_outcome, given, result
+    )
+    assert code == 0, out
+    assert written["slack"] == slack
+    assert summary.startswith(f"## Rollback of {slack}\n")
+
+
+@pytest.mark.regression
+def test_slack_says_what_the_summary_says():
+    step = _step(ROLLBACK, "Notify rollback result")
+    message = step["with"]["slack-message"]
+    assert "steps.summary.outputs.slack" in message
+    assert "is NOT rolled back" not in message
+    assert "job.status == 'success' &&" not in message
+
+
+@pytest.mark.regression
+def test_a_dashboard_half_never_reached_is_read_and_named(runner):
+    """EM ruling C4: the API half failed with a dashboard revision given; the
+    summary reads (read-only) and prints what the dashboard is serving."""
+    runner.scenario(
+        [
+            rule(
+                "ecs describe-services",
+                "experimentation-dashboard-staging",
+                answers=[_services_answer(svc(dep(DASH_NEW, "n")))],
+            ),
+            rule(
+                "ecs describe-task-definition",
+                answers=[_task_definition(DASH_NEW, WEB_IMAGE)],
+            ),
+        ]
+    )
+    code, out, written, summary = _summary(
+        runner, "failure", "skipped", "experimentation-dashboard-staging:6"
+    )
+    assert code == 0, out
+    assert written["slack"] == (
+        "staging: API NOT rolled back (its verify step: failure); dashboard NOT rolled back (not reached)"
+    )
+    assert (
+        "Dashboard not rolled back (the API half failed): experimentation-dashboard-staging "
+        "is serving experimentation-dashboard-staging:7" in summary
+    )
+    assert "newer-dashboard, older-API state" in summary
+    assert {tuple(c[:2]) for c in runner.calls()} == {
+        ("ecs", "describe-services"),
+        ("ecs", "describe-task-definition"),
+    }
+
+
+@pytest.mark.regression
+def test_another_environments_dashboard_revision_in_the_api_field_says_which():
+    """Code review suggestion b: the same "Re-run with environment=" as the
+    dashboard field's check."""
+    code = _code(_step(ROLLBACK, "target")["run"])
+    assert (
+        "You chose environment=${TARGET_ENV} but ${ARN##*/} is a ${dashboard_env} dashboard "
+        "revision; it goes in dashboard_task_definition_arn, not task_definition_arn. "
+        "Re-run with environment=${dashboard_env}." in code
+    )
