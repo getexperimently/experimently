@@ -363,7 +363,12 @@ async def oidc_login(
     started = sso_service.start_oidc_login(config, provider)
     redirect_uri = _get_redirect_uri(request, provider)
     auth_url = sso_service.build_oidc_authorization_url(
-        config, provider, redirect_uri, started.state, started.code_verifier
+        config,
+        provider,
+        redirect_uri,
+        started.state,
+        started.code_verifier,
+        started.nonce,
     )
 
     response = RedirectResponse(url=auth_url, status_code=302)
@@ -451,6 +456,11 @@ async def _finish_oidc_login(
     token_data = await sso_service.exchange_oidc_code(
         config, code, redirect_uri, code_verifier=login.code_verifier
     )
+    if sso_service.uses_id_token(provider):
+        # From this exchange's own response, never from the browser.
+        sso_service.verify_id_token(
+            config, provider, token_data.get("id_token"), login.nonce
+        )
     access_token = token_data.get("access_token", "")
 
     user_info = await sso_service.get_oidc_user_info(config, access_token)

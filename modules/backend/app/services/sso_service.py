@@ -538,6 +538,138 @@ def _parse_saml_response_stub(
 # ---------------------------------------------------------------------------
 
 
+def _provider_endpoint(config: SSOConfig, meta: Dict[str, str], key: str) -> str:
+    """One of the provider's endpoints, with ``{sso_url}`` filled in; https only.
+
+    The ID token is checked without its signature, relying on TLS to the
+    token endpoint instead (OIDC Core s.3.1.3.7 step 6), and the client secret
+    and access token travel to these endpoints -- so a plain-http endpoint is
+    refused everywhere except the test environment, whose fake provider is
+    local. The built-in providers' endpoints are https constants; this is the
+    check on an administrator-supplied ``sso_url``.
+    """
+    url = meta[key]
+    if "{sso_url}" in url and config.sso_url:
+        url = url.replace("{sso_url}", config.sso_url.rstrip("/"))
+    if urlparse(url).scheme != "https" and not core_settings.is_test:
+        logger.error("Refusing a non-https OIDC %s for SSO config %s", key, config.id)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="OIDC provider endpoints must use https; check this SSO configuration's sso_url",
+        )
+    return url
+
+
+def uses_id_token(provider_key: str) -> bool:
+    """Whether the provider is OpenID Connect (an ID token) or plain OAuth 2 (GitHub)."""
+    meta = _OIDC_PROVIDERS.get(provider_key) or {}
+    return "openid" in meta.get("scope", "").split()
+
+
+_MICROSOFT_TENANT = re.compile(
+    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+)
+
+
+def expected_issuers(
+    config: SSOConfig, provider_key: str, claims: Dict[str, Any]
+) -> set:
+    """The ``iss`` values an ID token from this configuration may carry.
+
+    Per provider, because each names itself differently:
+
+    * google -- both ``https://accounts.google.com`` and ``accounts.google.com``.
+    * microsoft (the ``common`` endpoint), azure_ad -- one issuer per tenant,
+      ``https://login.microsoftonline.com/{tid}/v2.0``, with ``tid`` the
+      token's own tenant claim.
+    * okta -- the authorization server: ``sso_url`` for a custom one
+      (``https://org.okta.com/oauth2/default``), the org URL for the org one
+      (``sso_url`` ``https://org.okta.com/oauth2`` -> ``https://org.okta.com``).
+    * onelogin -- ``https://{subdomain}.onelogin.com/oidc/2``, from the token
+      endpoint's host.
+    """
+    if provider_key == "google":
+        return {"https://accounts.google.com", "accounts.google.com"}
+    if provider_key in ("microsoft", "azure_ad"):
+        tid = str(claims.get("tid") or "")
+        if _MICROSOFT_TENANT.fullmatch(tid):
+            return {f"https://login.microsoftonline.com/{tid}/v2.0"}
+        return set()
+    if provider_key == "okta":
+        base = (config.sso_url or "").rstrip("/")
+        if not base:
+            return set()
+        return {base[: -len("/oauth2")]} if base.endswith("/oauth2") else {base}
+    if provider_key == "onelogin":
+        host = urlparse(_OIDC_PROVIDERS["onelogin"]["token_endpoint"]).hostname
+        return {f"https://{host}/oidc/2"} if host else set()
+    return set()
+
+
+#: Clock skew allowed on the ID token's ``exp``.
+_ID_TOKEN_LEEWAY_SECONDS = 60
+
+
+def verify_id_token(
+    config: SSOConfig,
+    provider_key: str,
+    id_token: Optional[str],
+    nonce: str,
+) -> Dict[str, Any]:
+    """Check the ID token from this login's own token response (OIDC Core s.3.1.3.7).
+
+    Its signature is not checked: it came straight from the token endpoint
+    over https (step 6 allows TLS server validation instead). The claims are:
+    ``iss`` (step 2, per provider -- :func:`expected_issuers`), ``aud`` holds
+    this client and ``azp`` is this client when there are several (steps 3-5),
+    ``exp`` (step 9), and ``nonce`` equals the one this browser's cookie
+    carries (step 11). The nonce is what binds the token to this login where a
+    provider ignores PKCE.
+
+    Refuses with a fixed 400 naming only the claim that failed.
+    """
+
+    def refuse(reason: str) -> HTTPException:
+        logger.warning("OIDC ID token refused for SSO config %s: %s", config.id, reason)
+        return HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"OIDC ID token was not accepted ({reason})",
+        )
+
+    if not id_token or not isinstance(id_token, str):
+        raise refuse("missing")
+    try:
+        claims = jwt.decode(id_token, options={"verify_signature": False})
+    except jwt.PyJWTError:
+        raise refuse("malformed") from None
+
+    issuers = expected_issuers(config, provider_key, claims)
+    if not issuers or claims.get("iss") not in issuers:
+        raise refuse("iss")
+
+    client_id = config.entity_id or ""
+    aud = claims.get("aud")
+    audiences = [aud] if isinstance(aud, str) else aud if isinstance(aud, list) else []
+    if not client_id or client_id not in audiences:
+        raise refuse("aud")
+    if len(audiences) > 1 and claims.get("azp") != client_id:
+        raise refuse("azp")
+
+    exp = claims.get("exp")
+    if (
+        not isinstance(exp, (int, float))
+        or exp + _ID_TOKEN_LEEWAY_SECONDS < time.time()
+    ):
+        raise refuse("exp")
+
+    token_nonce = claims.get("nonce")
+    if not isinstance(token_nonce, str) or not hmac.compare_digest(
+        token_nonce.encode("utf-8"), nonce.encode("utf-8")
+    ):
+        raise refuse("nonce")
+    return claims
+
+
 _OAUTH_ERROR_CODE = re.compile(r"[a-z_]{1,64}")
 
 
@@ -602,9 +734,7 @@ async def exchange_oidc_code(
             detail=f"Unknown OIDC provider '{provider_key}'",
         )
 
-    token_url = meta["token_endpoint"]
-    if "{sso_url}" in token_url and config.sso_url:
-        token_url = token_url.replace("{sso_url}", config.sso_url.rstrip("/"))
+    token_url = _provider_endpoint(config, meta, "token_endpoint")
 
     token_params = {
         "grant_type": "authorization_code",
@@ -679,9 +809,7 @@ async def get_oidc_user_info(
             detail=f"Unknown OIDC provider '{provider_key}'",
         )
 
-    userinfo_url = meta["userinfo_endpoint"]
-    if "{sso_url}" in userinfo_url and config.sso_url:
-        userinfo_url = userinfo_url.replace("{sso_url}", config.sso_url.rstrip("/"))
+    userinfo_url = _provider_endpoint(config, meta, "userinfo_endpoint")
 
     headers = {"Authorization": f"Bearer {access_token}"}
 
@@ -895,6 +1023,7 @@ class OIDCLoginStart:
 
     state: str
     code_verifier: str
+    nonce: str
     cookie_value: str
 
 
@@ -905,6 +1034,7 @@ class OIDCLoginState:
     config_id: uuid.UUID
     provider: str
     code_verifier: str
+    nonce: str
 
 
 def start_oidc_login(config: SSOConfig, provider: str) -> OIDCLoginStart:
@@ -912,6 +1042,7 @@ def start_oidc_login(config: SSOConfig, provider: str) -> OIDCLoginStart:
     state = secrets.token_urlsafe(32)
     # 64 random bytes -> 86 characters, inside RFC 7636's 43..128.
     verifier = secrets.token_urlsafe(64)
+    nonce = secrets.token_urlsafe(32)
     now = int(time.time())
     claims = {
         "aud": _STATE_AUDIENCE,
@@ -919,11 +1050,14 @@ def start_oidc_login(config: SSOConfig, provider: str) -> OIDCLoginStart:
         "exp": now + OIDC_STATE_TTL_SECONDS,
         "st": state,
         "cv": verifier,
+        "nn": nonce,
         "cfg": str(config.id),
         "prv": provider,
     }
     cookie = jwt.encode(claims, _state_key(), algorithm="HS256")
-    return OIDCLoginStart(state=state, code_verifier=verifier, cookie_value=cookie)
+    return OIDCLoginStart(
+        state=state, code_verifier=verifier, nonce=nonce, cookie_value=cookie
+    )
 
 
 def _state_refusal(detail: str) -> HTTPException:
@@ -952,7 +1086,7 @@ def redeem_oidc_state(
             algorithms=["HS256"],
             audience=_STATE_AUDIENCE,
             leeway=_STATE_LEEWAY_SECONDS,
-            options={"require": ["aud", "iat", "exp", "st", "cv", "cfg", "prv"]},
+            options={"require": ["aud", "iat", "exp", "st", "cv", "nn", "cfg", "prv"]},
         )
     except jwt.ExpiredSignatureError:
         raise _state_refusal("OIDC sign-in expired; start it again") from None
@@ -970,6 +1104,7 @@ def redeem_oidc_state(
         config_id=config_id,
         provider=str(claims["prv"]),
         code_verifier=str(claims["cv"]),
+        nonce=str(claims["nn"]),
     )
 
 
@@ -979,6 +1114,7 @@ def build_oidc_authorization_url(
     redirect_uri: str,
     state: str,
     code_verifier: str,
+    nonce: Optional[str] = None,
 ) -> str:
     """Build the authorization URL to redirect the user to the OIDC provider.
 
@@ -992,9 +1128,7 @@ def build_oidc_authorization_url(
             detail=f"Unknown OIDC provider '{provider_key}'",
         )
 
-    auth_url = meta["authorization_endpoint"]
-    if "{sso_url}" in auth_url and config.sso_url:
-        auth_url = auth_url.replace("{sso_url}", config.sso_url.rstrip("/"))
+    auth_url = _provider_endpoint(config, meta, "authorization_endpoint")
 
     params = {
         "client_id": config.entity_id or "",
@@ -1005,4 +1139,6 @@ def build_oidc_authorization_url(
         "code_challenge": pkce_challenge(code_verifier),
         "code_challenge_method": "S256",
     }
+    if nonce and uses_id_token(provider_key):
+        params["nonce"] = nonce
     return f"{auth_url}?{urlencode(params)}"

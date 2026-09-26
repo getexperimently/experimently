@@ -21,6 +21,7 @@ indistinguishable from a passing one in a summary line.
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import threading
@@ -58,12 +59,19 @@ def email() -> str:
 
 
 @pytest.fixture
-def provider(email) -> Iterator[str]:
+def id_token_mode() -> str:
+    """How the fake provider's ID token behaves; overridden per test."""
+    return "good"
+
+
+@pytest.fixture
+def provider(email, id_token_mode) -> Iterator[str]:
     proc = subprocess.Popen(
         [sys.executable, str(PROVIDER_SCRIPT), CLIENT_ID, CLIENT_SECRET, email],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
+        env={**os.environ, "FAKE_OIDC_ID_TOKEN": id_token_mode},
     )
     first_line: list[str] = []
     reader = threading.Thread(
@@ -196,4 +204,26 @@ def test_the_callback_needs_the_cookie_that_carries_the_verifier(
     callback, _ = _sign_in(browser, config)
     resp = browser.get(callback)
     assert resp.status_code == 400, resp.text
+    assert "access_token" not in resp.text
+
+
+@pytest.mark.parametrize(
+    ("id_token_mode", "reason"),
+    [
+        ("wrong-nonce", "nonce"),
+        ("wrong-iss", "iss"),
+        ("wrong-aud", "aud"),
+        ("expired", "exp"),
+        ("none", "missing"),
+    ],
+)
+def test_an_id_token_that_is_not_this_logins_is_refused(
+    browser, config, branch, id_token_mode, reason
+):
+    """C2n: the ID token from the exchange must name this client, this provider,
+    this login's nonce, and not have expired."""
+    callback, cookie = _sign_in(browser, config)
+    resp = browser.get(callback, headers={"cookie": cookie})
+    assert resp.status_code == 400, resp.text
+    assert resp.json()["detail"] == f"OIDC ID token was not accepted ({reason})"
     assert "access_token" not in resp.text
