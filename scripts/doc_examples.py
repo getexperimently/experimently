@@ -40,7 +40,20 @@ authors).  It checks, without running anything:
     runs each enrolled page's blocks, in order, in one ``bash`` session per page,
     under a compose project of the page's own, and checks each block exited 0 and
     printed its expectations.  Exit 0 all passed, 1 a page ran and failed, 2
-    refused before running anything.
+    refused before running anything.  ``--shard PROFILE:K/N`` runs one shard of
+    the plan (below) and ``--report FILE`` writes what it measured.
+
+``--plan``
+    the shards CI runs, as a GitHub Actions matrix: the pages that run, split by
+    the image profile they need (``core``: ``bare`` and ``stack``; ``full``:
+    ``stack-full``) and dealt, in path order, across as many shards as keep each
+    one inside the budget (``PAGES_PER_SHARD``).  Computed from the enrolment,
+    never listed by hand.
+
+``--summarise DIR``
+    after every shard: fails unless each page that runs appears in exactly one
+    shard report, every block it has reached its end, and the blocks reached add
+    up to ``[meta] exec``.  Zero reports is a failure.
 
 Standard library only.
 """
@@ -52,6 +65,7 @@ import dataclasses
 import functools
 import html.parser
 import json
+import math
 import os
 import pathlib
 import re
@@ -65,7 +79,9 @@ import tempfile
 import threading
 import time
 import tomllib
-from typing import Optional
+import urllib.error
+import urllib.request
+from typing import Callable, Optional
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 ENROLMENT = ROOT / "scripts" / "doc_examples.toml"
@@ -93,7 +109,7 @@ OTHER_SHELLS = (
     "batch",
     "cmd",
 )
-ENVIRONMENTS = ("bare", "stack", "local")
+ENVIRONMENTS = ("bare", "stack", "stack-full", "local")
 DEFAULT_TIMEOUT = 120
 AUTHORING = "docs/development/doc-examples.md"
 
@@ -247,6 +263,39 @@ PENDING_FROZEN: dict[str, tuple[int, int, int]] = {
 # a copy: a quick-start edit that changes the command fails here.
 STACK_DOC = "docs/getting-started/quick-start.md"
 STACK_UP = "docker compose up -d --wait"
+# The same for ``stack-full``: the full profile's start, as the modules page
+# gives it.  The prefix is inline, as a reader types it, so the page's blocks do
+# not inherit EXPERIMENTLY_PROFILE.
+STACK_FULL_DOC = "docs/getting-started/modules.md"
+STACK_FULL_UP = "EXPERIMENTLY_PROFILE=full docker compose up -d --wait"
+# Asked after the full stack starts: an image that silently built `core` would
+# otherwise answer every module route 404, and a page that does not assert on
+# its output would pass.
+MODULES_URL = "http://localhost:8000/api/v1/modules"
+
+# ---------------------------------------------------------------------------
+# Shards (E0b).  Every page that runs costs about the same: one stack start
+# (the runner's, or the page's own `docker compose up`) and its teardown.
+# Measured on PR #199's run 36267027036: 60-73 s a page for thirteen of its
+# fourteen pages (the fourteenth starts nothing: 0.3 s).  PAGE_SECONDS is the
+# worst of those, rounded up; a shard holds as many pages as fit its run step
+# in SHARD_BUDGET_SECONDS, which leaves the job's setup (~1.5 min) inside the
+# 10-minute shard budget and well inside the job's timeout.  The summary warns
+# when a page takes longer than PAGE_SECONDS: that is the signal to measure
+# again, never a failure (no gate asserts a wall-clock time).
+# ---------------------------------------------------------------------------
+PAGE_SECONDS = 75
+SHARD_BUDGET_SECONDS = 480
+PAGES_PER_SHARD = SHARD_BUDGET_SECONDS // PAGE_SECONDS
+# The image profile a page's stack needs.  Order is the plan's order.
+PROFILES = ("core", "full")
+
+# The run deadline: the job's own start and timeout, exported by the workflow
+# (the timeout from the same expression as `timeout-minutes`).  The runner
+# stops this long before GitHub would, so it can name the page and block,
+# tear the stack down and write its report while the job is still alive.
+DEADLINE_MARGIN_SECONDS = 120
+REPORT_VERSION = 1
 
 
 class Refused(Exception):
@@ -792,6 +841,7 @@ class Enrolment:
     # What is wrong with the entries themselves; check() reports these with
     # the pages' problems, so one run shows everything.
     problems: list[str] = dataclasses.field(default_factory=list)
+    exec_total: int = 0  # [meta] exec
 
 
 def walk(root: Optional[pathlib.Path] = None) -> set[str]:
@@ -956,7 +1006,9 @@ def load(path: Optional[pathlib.Path] = None) -> Enrolment:
         if rel in seen:
             problems.append(f"{name}: {rel} is in [meta] universe twice")
         seen.add(rel)
-    return Enrolment(documents, exempt, pending, meta["universe"], name, problems)
+    return Enrolment(
+        documents, exempt, pending, meta["universe"], name, problems, meta["exec"]
+    )
 
 
 def load_enrolment(path: Optional[pathlib.Path] = None) -> list[dict]:
@@ -975,20 +1027,31 @@ def blocks_of(rel: str) -> list[Block]:
 
 
 def _check_stack(documents: list[dict], parsed: dict[str, list[Block]]) -> None:
-    if not any(d["environment"] == "stack" for d in documents):
-        return
-    stack_doc = next((d for d in documents if d["path"] == STACK_DOC), None)
-    if stack_doc is None or stack_doc["environment"] != "bare":
-        raise Refused(f"a 'stack' document needs {STACK_DOC} enrolled as 'bare'")
-    ups = [
-        b
-        for b in parsed.get(STACK_DOC, [])
-        if b.kind == "exec" and b.body.strip() == STACK_UP
-    ]
-    if len(ups) != 1:
-        raise Refused(
-            f"{STACK_DOC}: {len(ups)} exec blocks equal {STACK_UP!r} (expected exactly 1)"
-        )
+    problems = []
+    for environment, doc_path, doc_environment, up in (
+        ("stack", STACK_DOC, "bare", STACK_UP),
+        ("stack-full", STACK_FULL_DOC, "stack-full", STACK_FULL_UP),
+    ):
+        if not any(d["environment"] == environment for d in documents):
+            continue
+        source = next((d for d in documents if d["path"] == doc_path), None)
+        if source is None or source["environment"] != doc_environment:
+            problems.append(
+                f"a {environment!r} document needs {doc_path} enrolled as "
+                f"{doc_environment!r}"
+            )
+            continue
+        ups = [
+            b
+            for b in parsed.get(doc_path, [])
+            if b.kind == "exec" and b.body.strip() == up
+        ]
+        if len(ups) != 1:
+            problems.append(
+                f"{doc_path}: {len(ups)} exec blocks equal {up!r} (expected exactly 1)"
+            )
+    if problems:
+        raise Refused(problems)
 
 
 _COUNTED = {"exec": "exec blocks", "skip": "skip blocks", "expects": "expectations"}
@@ -1346,6 +1409,325 @@ def render(
 
 
 # ---------------------------------------------------------------------------
+# Shards, the run deadline and the shard reports (E0b)
+# ---------------------------------------------------------------------------
+
+Shard = tuple[str, int, int]  # (profile, k, n), k counted from 1
+_SHARD = re.compile(
+    r"^(?P<profile>[a-z]+):(?P<k>[1-9][0-9]{0,2})/(?P<n>[1-9][0-9]{0,2})$"
+)
+
+
+def profile_of(doc: dict) -> str:
+    """The image profile a page's stack needs."""
+    return "full" if doc["environment"] == "stack-full" else "core"
+
+
+def runs(doc: dict) -> bool:
+    """Whether a page has anything to run."""
+    return _count(doc["exec"]) and doc["exec"] > 0
+
+
+def shard_label(shard: Shard) -> str:
+    profile, k, n = shard
+    return f"{profile}:{k}/{n}"
+
+
+def parse_shard(text: str) -> Shard:
+    match = _SHARD.match(text or "")
+    if not match or match.group("profile") not in PROFILES:
+        raise Refused(
+            f"--shard {text!r}: write PROFILE:K/N, PROFILE one of {', '.join(PROFILES)}"
+        )
+    k, n = int(match.group("k")), int(match.group("n"))
+    if k > n:
+        raise Refused(f"--shard {text!r}: shard {k} of {n} does not exist")
+    return match.group("profile"), k, n
+
+
+def shard_plan(documents: list[dict]) -> dict[Shard, list[str]]:
+    """Every page that runs, in exactly one shard.
+
+    Per profile, the pages in path order are dealt round-robin across
+    ceil(pages / PAGES_PER_SHARD) shards, so no shard holds more than
+    PAGES_PER_SHARD.  A function of the enrolment alone: the matrix and each
+    shard's pages come from it, and nothing lists a page by hand.  (The
+    summary's expected pages do NOT come from here, but from the enrolment
+    directly, so a page this function lost is still missed.)
+    """
+    by_profile: dict[str, list[str]] = {profile: [] for profile in PROFILES}
+    for doc in sorted(documents, key=lambda d: d["path"]):
+        if runs(doc):
+            by_profile[profile_of(doc)].append(doc["path"])
+    plan: dict[Shard, list[str]] = {}
+    for profile in PROFILES:
+        pages = by_profile[profile]
+        n = math.ceil(len(pages) / PAGES_PER_SHARD)
+        for k in range(1, n + 1):
+            plan[(profile, k, n)] = pages[k - 1 :: n]
+    return plan
+
+
+def matrix(plan: dict[Shard, list[str]]) -> dict:
+    """The plan as a GitHub Actions matrix (``strategy.matrix``)."""
+    return {
+        "include": [{"profile": profile, "shard": k, "of": n} for profile, k, n in plan]
+    }
+
+
+@dataclasses.dataclass
+class Deadline:
+    """When the runner stops: the job's start + its timeout - the margin."""
+
+    at: float  # epoch seconds
+    clock: Callable[[], float] = time.time
+
+    def remaining(self) -> float:
+        return self.at - self.clock()
+
+    def reached(self) -> bool:
+        return self.remaining() <= 0
+
+    def describe(self) -> str:
+        return time.strftime("%H:%M:%S UTC", time.gmtime(self.at))
+
+
+def deadline_from_env(
+    environ: Optional[dict] = None, clock: Callable[[], float] = time.time
+) -> Optional[Deadline]:
+    """The deadline the workflow exported, or None when it exported none.
+
+    ``DOCEX_JOB_START`` is the job's first step's ``date +%s``;
+    ``DOCEX_JOB_TIMEOUT_MINUTES`` is the job's ``timeout-minutes`` expression,
+    copied textually (a test pins the two as identical).  One without the other
+    is refused: a deadline half-configured is not a deadline.
+    """
+    environ = os.environ if environ is None else environ
+    start = environ.get("DOCEX_JOB_START")
+    minutes = environ.get("DOCEX_JOB_TIMEOUT_MINUTES")
+    if start is None and minutes is None:
+        return None
+    if not (start and start.isdigit() and minutes and minutes.isdigit()):
+        raise Refused(
+            "DOCEX_JOB_START and DOCEX_JOB_TIMEOUT_MINUTES must both be whole "
+            f"numbers (got {start!r} and {minutes!r}): the job's start in epoch "
+            "seconds, and its timeout-minutes"
+        )
+    budget = int(minutes) * 60 - DEADLINE_MARGIN_SECONDS
+    if budget <= 0:
+        raise Refused(
+            f"a {minutes}-minute job timeout leaves nothing after the "
+            f"{DEADLINE_MARGIN_SECONDS} s the runner keeps to tear down and report"
+        )
+    deadline = Deadline(int(start) + budget, clock)
+    if deadline.reached():
+        raise Refused(
+            f"the run deadline ({deadline.describe()}) passed before the run began"
+        )
+    return deadline
+
+
+def _teardown_seconds(deadline: Optional[Deadline]) -> int:
+    """How long a teardown may take: past the deadline, inside the margin."""
+    if deadline is None:
+        return 600
+    return int(min(600, max(60, deadline.remaining() + DEADLINE_MARGIN_SECONDS / 2)))
+
+
+def write_report(
+    path: pathlib.Path, shard: Optional[Shard], pages: dict, stopped: Optional[str]
+) -> None:
+    """What one shard measured: per page, its exec count, the blocks that
+    reached their end (from the sentinels), whether it passed, and its time."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data = {
+        "version": REPORT_VERSION,
+        "shard": shard_label(shard) if shard else None,
+        "pages": pages,
+        "stopped": stopped,
+    }
+    path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def _report_problem(data) -> Optional[str]:
+    if not isinstance(data, dict) or data.get("version") != REPORT_VERSION:
+        return f"not a version-{REPORT_VERSION} shard report"
+    if not isinstance(data.get("shard"), str) or not isinstance(
+        data.get("pages"), dict
+    ):
+        return "a shard report needs 'shard' and 'pages'"
+    for page, result in data["pages"].items():
+        if (
+            not isinstance(result, dict)
+            or set(result) != {"exec", "reached", "passed", "seconds"}
+            or not _count(result["exec"])
+            or not _count(result["reached"])
+            or not isinstance(result["passed"], bool)
+            or not isinstance(result["seconds"], (int, float))
+        ):
+            return f"{page}: malformed result {result!r}"
+    return None
+
+
+def _annotate(kind: str, message: str, out) -> None:
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        print(f"::{kind}::{_escape(message)}", file=out)
+
+
+def summarise(
+    directory: pathlib.Path, path: Optional[pathlib.Path] = None, out=None
+) -> None:
+    """Every page that runs ran exactly once, and all of its blocks reached their end.
+
+    The pages expected come from the enrolment, not from the plan, and the
+    shards expected from the plan: a page the plan lost, a shard that never ran
+    and a report that never arrived are each named.
+    """
+    out = out or sys.stdout
+    enrolment = load(path)
+    if enrolment.problems:
+        raise Refused(enrolment.problems)
+    documents = enrolment.documents
+    expected = {d["path"]: d["exec"] for d in documents if runs(d)}
+    plan = shard_plan(documents)
+    reports = sorted(directory.rglob("*.json")) if directory.is_dir() else []
+    if not reports:
+        raise Failed(
+            f"no shard reports under {directory}: no shard ran, or none uploaded "
+            f"its report; {len(expected)} pages did not run"
+        )
+    problems: list[str] = []
+    seen: dict[Shard, str] = {}
+    where: dict[str, list[str]] = {}
+    results: dict[str, dict] = {}
+    for report in reports:
+        name = report.relative_to(directory).as_posix()
+        try:
+            data = json.loads(report.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as error:
+            problems.append(f"{name}: unreadable ({error})")
+            continue
+        problem = _report_problem(data)
+        if problem:
+            problems.append(f"{name}: {problem}")
+            continue
+        try:
+            shard = parse_shard(data["shard"])
+        except Refused as refusal:
+            problems += [f"{name}: {p}" for p in refusal.problems]
+            continue
+        label = shard_label(shard)
+        if shard not in plan:
+            problems.append(
+                f"{name}: shard {label} is not in the plan "
+                f"({', '.join(shard_label(s) for s in plan)})"
+            )
+            continue
+        if shard in seen:
+            problems.append(f"shard {label} reported twice ({seen[shard]}, {name})")
+            continue
+        seen[shard] = name
+        if data["stopped"]:
+            problems.append(f"shard {label}: {data['stopped']}")
+        for page, result in data["pages"].items():
+            where.setdefault(page, []).append(label)
+            results[page] = result
+    unreported: set[str] = set()
+    for shard, pages in plan.items():
+        if shard not in seen:
+            unreported.update(pages)
+            problems.append(
+                f"shard {shard_label(shard)} sent no report (it did not run, or was "
+                f"killed before it wrote one); its pages did not run: {', '.join(pages)}"
+            )
+    for page in sorted(where):
+        if page not in expected:
+            problems.append(f"{page}: in a shard report, but not a page that runs")
+        elif len(where[page]) > 1:
+            problems.append(
+                f"{page}: ran {len(where[page])} times ({', '.join(where[page])}); "
+                "every page runs exactly once"
+            )
+    for page, exec_count in sorted(expected.items()):
+        if page not in where:
+            if page not in unreported:
+                problems.append(f"{page}: in no shard's report; it did not run")
+            continue
+        result = results[page]
+        if result["exec"] != exec_count:
+            problems.append(
+                f"{page}: its shard ran it as {result['exec']} exec blocks; the "
+                f"enrolment says {exec_count}"
+            )
+        if result["reached"] != exec_count:
+            problems.append(
+                f"{page}: {result['reached']} exec blocks reached their end; the "
+                f"enrolment says {exec_count}"
+            )
+        elif not result["passed"]:
+            problems.append(f"{page}: FAILED in shard {where[page][0]} (see its log)")
+
+    reached = sum(r["reached"] for p, r in results.items() if p in expected)
+    ran = len(set(where) & set(expected))
+    for shard in plan:
+        pages = [p for p in plan[shard] if p in results]
+        seconds = sum(results[p]["seconds"] for p in pages)
+        state = "reported" if shard in seen else "NO REPORT"
+        print(
+            f"shard {shard_label(shard)}: {len(pages)}/{len(plan[shard])} pages, "
+            f"{seconds:.0f} s running pages ({state})",
+            file=out,
+        )
+        if seconds > SHARD_BUDGET_SECONDS:
+            _annotate(
+                "warning",
+                f"shard {shard_label(shard)} ran its pages in {seconds:.0f} s, over "
+                f"the {SHARD_BUDGET_SECONDS} s budget; measure PAGE_SECONDS again",
+                out,
+            )
+    for page in sorted(results):
+        seconds = results[page]["seconds"]
+        print(f"  {page}: {seconds:.1f} s", file=out)
+        if seconds > PAGE_SECONDS:
+            _annotate(
+                "warning",
+                f"{page} took {seconds:.0f} s, more than PAGE_SECONDS "
+                f"({PAGE_SECONDS}); measure again before the shards overrun",
+                out,
+            )
+    print(
+        f"measured: {ran}/{len(expected)} pages ran, {reached} exec blocks reached "
+        f"their end; [meta] exec = {enrolment.exec_total}",
+        file=out,
+    )
+    if reached != enrolment.exec_total:
+        problems.append(
+            f"{reached} exec blocks reached their end across the shards; "
+            f"[meta] exec = {enrolment.exec_total}"
+        )
+    if problems:
+        raise Failed("\n".join(problems))
+    print(f"{len(plan)} shard(s): every page ran once and every block ran", file=out)
+
+
+def bug_issues(path: Optional[pathlib.Path] = None) -> list[int]:
+    """The issue numbers ``bug #N:`` skip reasons name, on the enrolled pages."""
+    numbers: set[int] = set()
+    for doc in load_enrolment(path):
+        rel = doc["path"]
+        if not (ROOT / rel).is_file():
+            continue
+        for fence in parse_fences((ROOT / rel).read_text(encoding="utf-8"), rel):
+            try:
+                block = classify(fence, rel)
+            except Refused:
+                continue
+            if block and block.kind == "skip" and category_of(block.reason) == "bug":
+                numbers.add(int(_REASON.match(block.reason).group("issue")[2:]))
+    return sorted(numbers)
+
+
+# ---------------------------------------------------------------------------
 # Execution: one bash per document, blocks separated by sentinels
 # ---------------------------------------------------------------------------
 
@@ -1442,10 +1824,16 @@ def write_script(blocks: list[Block], nonce: str) -> str:
 
 
 def run_script(
-    script: str, blocks: list[Block], env: dict[str, str], bash: str, nonce: str
+    script: str,
+    blocks: list[Block],
+    env: dict[str, str],
+    bash: str,
+    nonce: str,
+    deadline: Optional[Deadline] = None,
 ) -> tuple[list[Outcome], Optional[str], int]:
     """Run *script*; return each block's outcome, a problem if the run itself broke,
-    and bash's exit status."""
+    and bash's exit status.  At *deadline* the process group is killed, and the
+    block that was running is the first one reported as not reaching its end."""
     begin = re.compile(re.escape(f"@@DOCEX:{nonce}:BEGIN:") + r"(\d+)@@")
     end = re.compile(
         re.escape(f"@@DOCEX:{nonce}:END:") + r"(\d+):(\d+):([^:@]*):([a-z]*)@@"
@@ -1512,6 +1900,11 @@ def run_script(
             current, since, size = state["current"], state["since"], state["size"]
         if size > OUTPUT_CAP:
             problem = f"output exceeded {OUTPUT_CAP} bytes; stopped"
+        elif deadline is not None and deadline.reached():
+            problem = (
+                f"the run deadline ({deadline.describe()}) was reached; "
+                "process group killed"
+            )
         elif current is not None and time.monotonic() - since > blocks[current].timeout:
             problem = (
                 f"block {current}: timed out after {blocks[current].timeout}s; "
@@ -1604,14 +1997,15 @@ def judge(
                 )
                 break
             position = found
-        # The one block exempt: the Quick Start's stack start. When compose has to
+        # The blocks exempt: the stack starts (Quick Start's, and the modules
+        # page's full-profile one). When compose has to
         # build, it writes BuildKit's progress to stdout (nothing when the images
         # exist), so no expectation can hold on both paths; `--wait` failing unless
         # every service is healthy, and the next block's expectations, verify it.
         if (
             outcome.stdout.strip()
             and not block.expects
-            and block.body.strip() != STACK_UP
+            and block.body.strip() not in (STACK_UP, STACK_FULL_UP)
         ):
             printed = "\n".join(outcome.stdout.strip().split("\n")[:20])
             problems.append(
@@ -1626,7 +2020,10 @@ def judge(
 
 
 def execute_counted(
-    blocks: list[Block], name: str, env: dict[str, str]
+    blocks: list[Block],
+    name: str,
+    env: dict[str, str],
+    deadline: Optional[Deadline] = None,
 ) -> tuple[list[str], int]:
     """Run a document's exec blocks in one shell; the problems, and how many
     blocks reached their end (counted from the sentinels, not the enrolment)."""
@@ -1636,7 +2033,7 @@ def execute_counted(
     nonce = secrets.token_hex(8)
     bash = bash_executable(env)
     outcomes, problem, rc = run_script(
-        write_script(runnable, nonce), runnable, env, bash, nonce
+        write_script(runnable, nonce), runnable, env, bash, nonce, deadline
     )
     reached = sum(o.reached for o in outcomes)
     return judge(runnable, outcomes, problem, rc, name), reached
@@ -1763,6 +2160,64 @@ def _report_dropped(out) -> None:
         print("ignoring .env (COMPOSE_DISABLE_ENV_FILE=1)", file=out)
 
 
+def run_bounded(
+    argv: list[str],
+    env: dict[str, str],
+    timeout: int,
+    deadline: Optional[Deadline] = None,
+) -> tuple[Optional[int], str, str, Optional[str]]:
+    """Run *argv* in a process group of its own; (rc, stdout, stderr, why).
+
+    *why* is None when it finished, else why it was stopped: its own timeout,
+    or the run deadline, whichever comes first.  The whole group is killed, so
+    nothing it started (compose's plugins, a build) outlives it.
+    """
+    limit, why = float(timeout), f"timed out after {timeout}s"
+    if deadline is not None and deadline.remaining() < limit:
+        limit = max(0.0, deadline.remaining())
+        why = f"the run deadline ({deadline.describe()}) was reached"
+    process = subprocess.Popen(
+        argv,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        cwd=ROOT,
+        env=env,
+        start_new_session=True,
+        text=True,
+        errors="replace",
+    )
+    try:
+        stdout, stderr = process.communicate(timeout=limit)
+    except subprocess.TimeoutExpired:
+        _kill_group(process.pid)
+        stdout, stderr = process.communicate()
+        return None, stdout, stderr, f"{why}; process group killed"
+    return process.returncode, stdout, stderr, None
+
+
+def _get_json(url: str):
+    with urllib.request.urlopen(url, timeout=10) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def full_profile_problem(rel: str, fetch: Callable[[str], object] = _get_json):
+    """None when the running API says it is the full profile, else the problem."""
+    try:
+        answer = fetch(MODULES_URL)
+    except (OSError, ValueError) as error:
+        return (
+            f"{rel}: the full profile did not load: GET {MODULES_URL} failed ({error})"
+        )
+    profile = answer.get("profile") if isinstance(answer, dict) else None
+    if profile != "full":
+        return (
+            f"{rel}: the full profile did not load: GET /api/v1/modules says "
+            f"profile {profile!r}"
+        )
+    return None
+
+
 def run_document(
     doc: dict,
     blocks: list[Block],
@@ -1770,6 +2225,8 @@ def run_document(
     overrides: dict[str, str],
     stack_up: Optional[Block],
     out,
+    deadline: Optional[Deadline] = None,
+    stack_full_up: Optional[Block] = None,
 ) -> tuple[list[str], int]:
     """The page's problems, and how many of its exec blocks reached their end."""
     rel = doc["path"]
@@ -1779,26 +2236,43 @@ def run_document(
     print(f"{rel}: running under compose project {project}", file=out)
     problems: list[str] = []
     reached = 0
+    starts = {
+        "stack": (STACK_UP, stack_up),
+        "stack-full": (STACK_FULL_UP, stack_full_up),
+    }
     try:
-        if doc["environment"] == "stack":
-            up = subprocess.run(
-                [bash_executable(env), "--noprofile", "--norc", "-c", STACK_UP],
-                stdin=subprocess.DEVNULL,
-                capture_output=True,
-                text=True,
-                cwd=ROOT,
-                env=env,
-                timeout=stack_up.timeout if stack_up else DEFAULT_TIMEOUT,
-                check=False,
+        if doc["environment"] in starts:
+            command, source = starts[doc["environment"]]
+            rc, _, stderr, why = run_bounded(
+                [bash_executable(env), "--noprofile", "--norc", "-c", command],
+                env,
+                source.timeout if source else DEFAULT_TIMEOUT,
+                deadline,
             )
-            if up.returncode != 0:
+            if why or rc != 0:
                 problems = [
-                    f"{rel}: the stack did not start ({STACK_UP}):\n{up.stderr[-2000:]}"
+                    f"{rel}: the stack did not start ({command}): "
+                    f"{why or f'exit {rc}'}\n{stderr[-2000:]}"
                 ]
                 return problems, reached
-        problems, reached = execute_counted(blocks, rel, env)
+            if doc["environment"] == "stack-full":
+                problem = full_profile_problem(rel)
+                if problem:
+                    problems = [problem]
+                    return problems, reached
+        problems, reached = execute_counted(blocks, rel, env, deadline)
     finally:
-        _docker("compose", "down", "-v", "--remove-orphans", env=env, timeout=600)
+        try:
+            _docker(
+                "compose",
+                "down",
+                "-v",
+                "--remove-orphans",
+                env=env,
+                timeout=_teardown_seconds(deadline),
+            )
+        except subprocess.TimeoutExpired:
+            problems.append(f"{rel}: teardown (docker compose down -v) timed out")
         left = project_resources(project)
         if left:
             problems.append(
@@ -1825,48 +2299,133 @@ def run_verdict(doc: dict, problems: list[str], reached: int) -> tuple[str, list
     return f"{rel}: {verdict} ({reached}/{expected} exec blocks ran)", problems
 
 
+def _start_block(parsed: dict[str, list[Block]], doc: str, up: str) -> Optional[Block]:
+    return next(
+        (b for b in parsed.get(doc, []) if b.kind == "exec" and b.body.strip() == up),
+        None,
+    )
+
+
 def run(
     path: Optional[pathlib.Path] = None,
     only: Optional[str] = None,
     overrides: Optional[dict[str, str]] = None,
-    out=sys.stdout,
+    out=None,
+    shard: Optional[Shard] = None,
+    report: Optional[pathlib.Path] = None,
+    deadline: Optional[Deadline] = None,
+    clock: Callable[[], float] = time.monotonic,
+    run_page: Optional[Callable] = None,
 ) -> None:
+    """Run the pages that run (one shard of them, with *shard*).
+
+    Prints each page's measured count and seconds, then the shard's measured
+    total; with *report*, writes them for the summary, even when a page fails
+    or the deadline stops the run.  *run_page* replaces ``run_document`` in
+    tests (no Docker).
+    """
     overrides = overrides or {}
+    out = out or sys.stdout
+    run_page = run_page or run_document
     check(path, out=out)  # the static contract first; nothing runs if it fails
     documents = load_enrolment(path)
     if only and only not in {d["path"] for d in documents}:
         raise Refused(f"{only} is not enrolled")
-    parsed = {d["path"]: blocks_of(d["path"]) for d in documents}
-    stack_up = (
-        next(
-            (
-                b
-                for b in parsed[STACK_DOC]
-                if b.kind == "exec" and b.body.strip() == STACK_UP
-            ),
-            None,
-        )
-        if STACK_DOC in parsed
-        else None
+    selected = {d["path"] for d in documents if runs(d)}
+    if shard is not None:
+        plan = shard_plan(documents)
+        if shard not in plan:
+            raise Refused(
+                f"shard {shard_label(shard)} is not in the plan "
+                f"({', '.join(shard_label(s) for s in plan) or 'no shards'}); "
+                "the matrix is stale or hand-written"
+            )
+        selected &= set(plan[shard])
+    if only:
+        selected &= {only}
+    full = sorted(
+        d["path"]
+        for d in documents
+        if d["path"] in selected and d["environment"] == "stack-full"
     )
+    if full and not (ROOT / "modules").is_dir():
+        raise Refused(
+            f"{', '.join(full)}: needs the full profile, and this tree has no "
+            "modules/ (a core tree); run a core shard"
+        )
+    parsed = {d["path"]: blocks_of(d["path"]) for d in documents}
+    stack_up = _start_block(parsed, STACK_DOC, STACK_UP)
+    stack_full_up = _start_block(parsed, STACK_FULL_DOC, STACK_FULL_UP)
     _report_dropped(out)
     print(f"bash: {bash_executable(scrubbed_env('docex-probe', overrides))}", file=out)
-    before = _volumes()
-    problems = []
-    for index, doc in enumerate(documents):
-        if only and doc["path"] != only:
-            continue
-        if not any(b.kind == "exec" for b in parsed[doc["path"]]):
-            continue
-        found, reached = run_document(
-            doc, parsed[doc["path"]], index, overrides, stack_up, out
+    label = f"shard {shard_label(shard)}" if shard else "all pages"
+    if deadline is not None:
+        print(
+            f"{label}: run deadline {deadline.describe()} "
+            f"({deadline.remaining():.0f} s from now)",
+            file=out,
         )
-        line, found = run_verdict(doc, found, reached)
-        print(line, file=out)
-        problems += found
-    lost = sorted(before - _volumes())
-    if lost:
-        problems.append(f"volumes that existed before the run are gone: {lost}")
+    before = _volumes()
+    problems: list[str] = []
+    results: dict[str, dict] = {}
+    stopped: Optional[str] = None
+    try:
+        for index, doc in enumerate(documents):
+            if doc["path"] not in selected:
+                continue
+            rel = doc["path"]
+            if stopped is None and deadline is not None and deadline.reached():
+                stopped = (
+                    f"the run deadline ({deadline.describe()}) was reached; the "
+                    "pages after it did not start"
+                )
+            if stopped is not None:
+                results[rel] = {
+                    "exec": doc["exec"],
+                    "reached": 0,
+                    "passed": False,
+                    "seconds": 0,
+                }
+                problems.append(f"{rel}: not run: {stopped}")
+                print(f"{rel}: NOT RUN (run deadline)", file=out)
+                continue
+            started = clock()
+            found, reached = run_page(
+                doc,
+                parsed[rel],
+                index,
+                overrides,
+                stack_up,
+                out,
+                deadline,
+                stack_full_up,
+            )
+            seconds = clock() - started
+            line, found = run_verdict(doc, found, reached)
+            print(f"{line} in {seconds:.1f}s", file=out)
+            results[rel] = {
+                "exec": doc["exec"],
+                "reached": reached,
+                "passed": not found,
+                "seconds": round(seconds, 1),
+            }
+            problems += found
+        if stopped is None and deadline is not None and deadline.reached():
+            stopped = f"the run deadline ({deadline.describe()}) was reached"
+        lost = sorted(before - _volumes())
+        if lost:
+            problems.append(f"volumes that existed before the run are gone: {lost}")
+    finally:
+        reached_total = sum(r["reached"] for r in results.values())
+        enrolled_total = sum(r["exec"] for r in results.values())
+        print(
+            f"{label}: {len(results)} page(s), {reached_total} exec blocks reached "
+            f"their end (measured); the enrolment says {enrolled_total} for these "
+            "pages",
+            file=out,
+        )
+        if report is not None:
+            write_report(report, shard, results, stopped)
     if problems:
         raise Failed("\n\n".join(problems))
 
@@ -1910,7 +2469,30 @@ def main(argv: Optional[list[str]] = None) -> int:
         "--render", metavar="SITE_DIR", type=pathlib.Path, help="check a built site"
     )
     mode.add_argument("--run", action="store_true", help="run the examples in Docker")
+    mode.add_argument(
+        "--plan", action="store_true", help="print the shards as a GitHub matrix"
+    )
+    mode.add_argument(
+        "--summarise",
+        metavar="DIR",
+        type=pathlib.Path,
+        help="check the shard reports under DIR",
+    )
+    mode.add_argument(
+        "--bug-issues",
+        action="store_true",
+        help="print the issue numbers 'bug #N' skip reasons name",
+    )
     parser.add_argument("--only", metavar="PATH", help="with --run: one enrolled page")
+    parser.add_argument(
+        "--shard", metavar="PROFILE:K/N", help="with --run: one shard of --plan"
+    )
+    parser.add_argument(
+        "--report",
+        metavar="FILE",
+        type=pathlib.Path,
+        help="with --run: write what was measured, for --summarise",
+    )
     parser.add_argument(
         "--env",
         action="append",
@@ -1929,13 +2511,43 @@ def main(argv: Optional[list[str]] = None) -> int:
             return 2
         overrides[name] = value
         print(f"override: {name}={value}")
+    if (args.shard or args.report) and not args.run:
+        print("refused: --shard and --report go with --run", file=sys.stderr)
+        return 2
     try:
         if args.check:
             check()
         elif args.render:
             render(args.render)
+        elif args.plan:
+            plan = shard_plan(load_enrolment())
+            for shard, pages in plan.items():
+                print(f"{shard_label(shard)}: {', '.join(pages)}", file=sys.stderr)
+            print(json.dumps(matrix(plan), separators=(",", ":")))
+        elif args.summarise:
+            summarise(args.summarise)
+        elif args.bug_issues:
+            for number in bug_issues():
+                print(number)
         else:
-            run(only=args.only, overrides=overrides)
+            shard = parse_shard(args.shard) if args.shard else None
+            deadline = deadline_from_env()
+            if (
+                shard is not None
+                and deadline is None
+                and os.environ.get("GITHUB_ACTIONS") == "true"
+            ):
+                raise Refused(
+                    "a shard in GitHub Actions needs its deadline: export "
+                    "DOCEX_JOB_START and DOCEX_JOB_TIMEOUT_MINUTES"
+                )
+            run(
+                only=args.only,
+                overrides=overrides,
+                shard=shard,
+                report=args.report,
+                deadline=deadline,
+            )
     except Refused as refusal:
         report_refusal(refusal)
         return 2

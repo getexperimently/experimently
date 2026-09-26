@@ -13,6 +13,7 @@ copy.
 from __future__ import annotations
 
 import importlib.util
+import json
 import pathlib
 import sys
 import textwrap
@@ -1190,12 +1191,14 @@ def test_a_timeout_kills_the_group_and_names_the_block(tmp_path):
         _os.kill(background, 0)
 
 
-def test_the_failure_issue_job_waits_for_render_and_examples_only():
+def test_the_failure_issue_job_waits_for_render_examples_and_summary_only():
+    """Not cache-warm (a cold cache is not a red page); the summary, because a
+    shard that never ran is red only there (PE C6)."""
     workflow = yaml.safe_load(
         (REPO / ".github" / "workflows" / "doc-examples.yml").read_text()
     )
     needs = workflow["jobs"]["failure-issue"]["needs"]
-    assert set(needs) == {"render", "examples"}
+    assert set(needs) == {"render", "examples", "summary"}
 
 
 def test_only_the_stack_start_may_print_without_an_expectation():
@@ -1742,3 +1745,587 @@ def test_the_guard_is_its_own_step_in_the_required_job():
     assert "--base-ref refs/doc-demotion/base" in run
     others = [s.get("run", "") for s in job["steps"] if s is not step]
     assert not any("check_doc_demotions" in r for r in others)
+
+
+# ---------------------------------------------------------------------------
+# E0b: shards, the summary, the run deadline and the measured count
+# ---------------------------------------------------------------------------
+
+DOC_EXAMPLES_WORKFLOW = REPO / ".github" / "workflows" / "doc-examples.yml"
+
+
+def _doc(path: str, environment: str = "stack", exec_count: int = 3) -> dict:
+    return {
+        "path": path,
+        "environment": environment,
+        "exec": exec_count,
+        "skip": 0,
+        "expects": 0,
+    }
+
+
+# Thirty pages: both profiles, bare pages that run and pages that run nothing.
+MANY = (
+    [_doc(f"docs/s{i:02}.md") for i in range(17)]
+    + [_doc(f"docs/b{i:02}.md", "bare", 2) for i in range(4)]
+    + [_doc(f"docs/f{i:02}.md", "stack-full", 1) for i in range(7)]
+    + [_doc("docs/none.md", "bare", 0), _doc("docs/zero-stack.md", "stack", 0)]
+)
+
+
+def _assert_partition(documents: list[dict]) -> dict:
+    plan = dx.shard_plan(documents)
+    runs = {d["path"] for d in documents if d["exec"] > 0}
+    union = [p for pages in plan.values() for p in pages]
+    assert sorted(union) == sorted(runs), (
+        "the union of the shards is every page that runs"
+    )
+    assert len(union) == len(set(union)), "the shards are disjoint"
+    environment = {d["path"]: d["environment"] for d in documents}
+    for (profile, k, n), pages in plan.items():
+        assert 1 <= k <= n and pages
+        assert len(pages) <= dx.PAGES_PER_SHARD, (profile, k, n, pages)
+        assert {environment[p] == "stack-full" for p in pages} == {profile == "full"}
+    return plan
+
+
+def test_the_shards_are_every_page_that_runs_once():
+    plan = _assert_partition(MANY)
+    assert [dx.shard_label(s) for s in plan] == [
+        "core:1/4",
+        "core:2/4",
+        "core:3/4",
+        "core:4/4",
+        "full:1/2",
+        "full:2/2",
+    ]
+    assert dx.shard_plan(list(reversed(MANY))) == plan, "order-independent"
+    assert dx.matrix(plan)["include"][4] == {"profile": "full", "shard": 1, "of": 2}
+
+
+def test_the_repository_s_shards_are_every_page_that_runs_once():
+    plan = _assert_partition(dx.load_enrolment())
+    assert plan, "no page runs: the matrix would be empty"
+
+
+def test_a_shard_fits_its_budget_by_construction():
+    """The per-shard budget is a function of measured numbers, not a timing
+    assertion: PAGES_PER_SHARD pages of PAGE_SECONDS each fit the budget, and
+    the budget leaves the job's setup inside the 10-minute shard."""
+    assert dx.PAGES_PER_SHARD * dx.PAGE_SECONDS <= dx.SHARD_BUDGET_SECONDS
+    assert dx.SHARD_BUDGET_SECONDS + 90 <= 600
+    assert dx.PAGES_PER_SHARD >= 1
+
+
+@pytest.mark.parametrize(
+    "text", ["core", "core:0/2", "core:3/2", "full:1", "cloud:1/1", "core:1/2 "]
+)
+def test_a_malformed_shard_is_refused(text):
+    with pytest.raises(dx.Refused):
+        dx.parse_shard(text)
+
+
+def _report(directory: pathlib.Path, shard, pages: dict, stopped=None) -> None:
+    profile, k, _ = shard
+    dx.write_report(directory / f"{profile}-{k}" / "r.json", shard, pages, stopped)
+
+
+def _ok(doc: dict, reached=None, passed=True) -> dict:
+    return {
+        "exec": doc["exec"],
+        "reached": doc["exec"] if reached is None else reached,
+        "passed": passed,
+        "seconds": 61.5,
+    }
+
+
+@pytest.fixture
+def many(tmp_path, monkeypatch):
+    """The MANY enrolment as the summary reads it, and every shard's clean report."""
+    enrolment = dx.Enrolment(
+        MANY, [], {}, [], "doc_examples.toml", [], sum(d["exec"] for d in MANY)
+    )
+    monkeypatch.setattr(dx, "load", lambda path=None: enrolment)
+    reports = tmp_path / "reports"
+    by_path = {d["path"]: d for d in MANY}
+    for shard, pages in dx.shard_plan(MANY).items():
+        _report(reports, shard, {p: _ok(by_path[p]) for p in pages})
+    return reports
+
+
+def _summary_problems(directory) -> str:
+    with pytest.raises(dx.Failed) as excinfo:
+        dx.summarise(directory)
+    return str(excinfo.value)
+
+
+def test_the_summary_passes_when_every_page_ran_once(many, capsys):
+    dx.summarise(many)
+    out = capsys.readouterr().out
+    total = sum(d["exec"] for d in MANY)
+    assert f"measured: 28/28 pages ran, {total} exec blocks reached" in out
+    assert "6 shard(s): every page ran once and every block ran" in out
+
+
+def test_no_report_at_all_is_a_failure(tmp_path, many):
+    assert "no shard reports" in _summary_problems(tmp_path / "nothing-downloaded")
+    (tmp_path / "empty").mkdir()
+    assert "no shard reports" in _summary_problems(tmp_path / "empty")
+
+
+def test_a_shard_that_never_ran_is_named_with_its_pages(many):
+    missing = dx.shard_plan(MANY)[("core", 2, 4)]
+    for report in (many / "core-2").iterdir():
+        report.unlink()
+    problems = _summary_problems(many)
+    assert "shard core:2/4 sent no report" in problems
+    assert all(page in problems for page in missing)
+
+
+def test_a_page_dropped_from_every_shard_is_named(many, monkeypatch):
+    """The plan loses a page (the tamper): the summary's expected pages come from
+    the enrolment, not from the plan, so the loss is still seen."""
+    real = dx.shard_plan
+
+    def lossy(documents):
+        return {
+            s: [p for p in pages if p != "docs/s05.md"]
+            for s, pages in real(documents).items()
+        }
+
+    monkeypatch.setattr(dx, "shard_plan", lossy)
+    for directory in many.iterdir():
+        for report in directory.iterdir():
+            data = json.loads(report.read_text())
+            data["pages"].pop("docs/s05.md", None)
+            report.write_text(json.dumps(data))
+    problems = _summary_problems(many)
+    assert "docs/s05.md: in no shard's report; it did not run" in problems
+    assert "exec blocks reached their end across the shards; [meta] exec" in problems
+
+
+def test_a_page_that_ran_twice_is_refused(many):
+    extra = many / "core-1" / "r.json"
+    data = json.loads(extra.read_text())
+    other = dx.shard_plan(MANY)[("core", 2, 4)][0]
+    data["pages"][other] = _ok(_doc(other))
+    extra.write_text(json.dumps(data))
+    assert f"{other}: ran 2 times (core:1/4, core:2/4)" in _summary_problems(many)
+
+
+def test_a_dropped_block_in_the_measured_count_is_refused(many):
+    """A shard that ran a page's blocks but one: reached < exec, and the total
+    no longer equals [meta] exec."""
+    report = many / "full-1" / "r.json"
+    data = json.loads(report.read_text())
+    page = sorted(data["pages"])[0]
+    data["pages"][page]["reached"] -= 1
+    report.write_text(json.dumps(data))
+    problems = _summary_problems(many)
+    assert f"{page}: 0 exec blocks reached their end; the enrolment says 1" in problems
+    total = sum(d["exec"] for d in MANY)
+    assert f"{total - 1} exec blocks reached their end across the shards" in problems
+
+
+@pytest.mark.parametrize(
+    "mutate, message",
+    [
+        (
+            lambda d: d["pages"][sorted(d["pages"])[0]].update(passed=False),
+            "FAILED in shard",
+        ),
+        (lambda d: d.update(shard="core:9/9"), "is not in the plan"),
+        (lambda d: d.update(version=0), "not a version-1 shard report"),
+        (
+            lambda d: d.update(stopped="the run deadline was reached"),
+            "the run deadline",
+        ),
+        (
+            lambda d: d["pages"][sorted(d["pages"])[0]].update(reached="all"),
+            "malformed result",
+        ),
+    ],
+    ids=["failed-page", "unplanned-shard", "version", "stopped", "malformed"],
+)
+def test_the_summary_refuses_a_bad_report(many, mutate, message):
+    report = many / "core-1" / "r.json"
+    data = json.loads(report.read_text())
+    mutate(data)
+    report.write_text(json.dumps(data))
+    assert message in _summary_problems(many)
+
+
+def test_the_same_shard_twice_is_refused(many):
+    (many / "again").mkdir()
+    (many / "again" / "r.json").write_text((many / "core-1" / "r.json").read_text())
+    assert "shard core:1/4 reported twice" in _summary_problems(many)
+
+
+# --- the runner's side of a shard, with no Docker -------------------------
+
+
+def _shard_repo(repo, pages: int, exec_count: int = 2) -> pathlib.Path:
+    """A scratch repository whose pages run (``bare``), each with exec_count blocks."""
+    block = f"{FENCE}{{.bash exec}}\necho hi\n{FENCE}\n<!-- expect: hi -->"
+    paths = [f"docs/q{i:02}.md" for i in range(pages)]
+    for rel in paths:
+        write(repo, rel, page(*[block] * exec_count))
+    (repo / "docs" / "p.md").unlink()
+    body = (
+        f"[meta]\ndocuments = {pages}\nexec = {pages * exec_count}\n"
+        f"universe = {json.dumps(paths)}\n"
+    )
+    for rel in paths:
+        body += (
+            f'\n[[document]]\npath = "{rel}"\nenvironment = "bare"\n'
+            f"exec = {exec_count}\nskip = 0\nexpects = {exec_count}\n"
+        )
+    return enrol(repo, body)
+
+
+class FakePages:
+    """Stands in for run_document: records what ran, and reports its blocks."""
+
+    def __init__(self, drop=None, after=None):
+        self.ran: list[str] = []
+        self.drop = drop  # a page whose last block silently does not run
+        self.after = after  # called after each page (a clock to advance)
+
+    def __call__(self, doc, blocks, index, overrides, stack_up, out, deadline, full_up):
+        self.ran.append(doc["path"])
+        reached = sum(b.kind == "exec" for b in blocks)
+        if doc["path"] == self.drop:
+            reached -= 1
+        if self.after:
+            self.after()
+        return [], reached
+
+
+@pytest.fixture
+def no_docker(monkeypatch):
+    monkeypatch.setattr(dx, "_volumes", lambda: set())
+    monkeypatch.setattr(dx, "_report_dropped", lambda out: None)
+
+
+def test_a_shard_runs_its_pages_only_and_reports_what_it_measured(
+    repo, no_docker, tmp_path, capsys
+):
+    toml = _shard_repo(repo, 8)
+    plan = dx.shard_plan(dx.load_enrolment(toml))
+    assert list(plan) == [("core", 1, 2), ("core", 2, 2)]
+    fake = FakePages()
+    report = tmp_path / "out" / "core-2.json"
+    dx.run(toml, shard=("core", 2, 2), report=report, run_page=fake)
+    assert fake.ran == plan[("core", 2, 2)]
+    out = capsys.readouterr().out
+    assert "docs/q01.md: passed (2/2 exec blocks ran) in " in out
+    assert (
+        "shard core:2/2: 4 page(s), 8 exec blocks reached their end (measured)" in out
+    )
+    data = json.loads(report.read_text())
+    assert data["shard"] == "core:2/2" and data["stopped"] is None
+    assert set(data["pages"]) == set(plan[("core", 2, 2)])
+    assert all(r["reached"] == 2 and r["passed"] for r in data["pages"].values())
+
+
+def test_a_dropped_block_fails_the_page_and_reaches_the_report(
+    repo, no_docker, tmp_path, capsys
+):
+    """The count printed and reported is measured (the plant: one block of a
+    page never runs), not copied from the enrolment."""
+    toml = _shard_repo(repo, 3)
+    report = tmp_path / "r.json"
+    with pytest.raises(dx.Failed) as excinfo:
+        dx.run(
+            toml,
+            shard=("core", 1, 1),
+            report=report,
+            run_page=FakePages(drop="docs/q01.md"),
+        )
+    assert "docs/q01.md: 1 exec blocks reached their end; the enrolment says 2" in str(
+        excinfo.value
+    )
+    assert "docs/q01.md: FAILED (1/2 exec blocks ran)" in capsys.readouterr().out
+    page_result = json.loads(report.read_text())["pages"]["docs/q01.md"]
+    assert (page_result["reached"], page_result["passed"]) == (1, False)
+
+
+def test_a_shard_the_plan_does_not_have_is_refused(repo, no_docker):
+    toml = _shard_repo(repo, 3)
+    with pytest.raises(dx.Refused, match="shard core:1/2 is not in the plan"):
+        dx.run(toml, shard=("core", 1, 2), run_page=FakePages())
+
+
+def test_the_deadline_stops_the_shard_and_names_what_did_not_run(
+    repo, no_docker, tmp_path, capsys
+):
+    """A fake clock: the deadline passes while the second page runs, so the third
+    never starts, and the report says so."""
+    toml = _shard_repo(repo, 3)
+    now = [1000.0]
+    deadline = dx.Deadline(at=1150.0, clock=lambda: now[0])
+
+    def tick():
+        now[0] += 100
+
+    report = tmp_path / "r.json"
+    with pytest.raises(dx.Failed) as excinfo:
+        dx.run(
+            toml,
+            shard=("core", 1, 1),
+            report=report,
+            deadline=deadline,
+            run_page=FakePages(after=tick),
+        )
+    assert "docs/q02.md: not run: the run deadline (" in str(excinfo.value)
+    assert "docs/q02.md: NOT RUN (run deadline)" in capsys.readouterr().out
+    data = json.loads(report.read_text())
+    assert data["stopped"].startswith("the run deadline (")
+    assert data["pages"]["docs/q02.md"] == {
+        "exec": 2,
+        "reached": 0,
+        "passed": False,
+        "seconds": 0,
+    }
+
+
+def test_the_deadline_kills_the_process_group_and_names_the_block(tmp_path):
+    """A block that would outlive the job: the runner kills its group at the
+    deadline, before the block's own timeout, and names the page and block."""
+    pidfile = tmp_path / "pid"
+    text = page(
+        f"{FENCE}{{.bash exec}}\necho first\n{FENCE}\n<!-- expect: first -->",
+        f"{FENCE}{{.bash exec timeout=600}}\nsleep 300 & echo $! > {pidfile}; wait\n{FENCE}",
+    )
+    deadline = dx.Deadline(at=dx.time.time() + 2)
+    problems, reached = dx.execute_counted(
+        blocks(text), "p.md", dx.scrubbed_env("docex-unit", {}), deadline
+    )
+    joined = "\n".join(problems)
+    assert reached == 1
+    assert "p.md:8: block did not reach its end (the run deadline (" in joined
+    assert "was reached; process group killed)" in joined
+    background = int(pidfile.read_text())
+    import os as _os
+
+    with pytest.raises(ProcessLookupError):
+        _os.kill(background, 0)
+
+
+def test_a_stack_start_stops_at_the_deadline_too(tmp_path):
+    deadline = dx.Deadline(at=dx.time.time() + 1)
+    rc, _, _, why = dx.run_bounded(
+        ["bash", "-c", "sleep 60"], dx.scrubbed_env("docex-unit", {}), 600, deadline
+    )
+    assert rc is None and why.startswith("the run deadline (")
+    rc, _, _, why = dx.run_bounded(
+        ["bash", "-c", "sleep 60"], dx.scrubbed_env("docex-unit", {}), 1, None
+    )
+    assert rc is None and why == "timed out after 1s; process group killed"
+    assert dx.run_bounded(["true"], dx.scrubbed_env("docex-unit", {}), 5)[0] == 0
+
+
+@pytest.mark.parametrize(
+    "environ, expected",
+    [
+        ({}, None),
+        (
+            {"DOCEX_JOB_START": "1000", "DOCEX_JOB_TIMEOUT_MINUTES": "15"},
+            1000 + 900 - 120,
+        ),
+        ({"DOCEX_JOB_START": "1000"}, "must both be whole numbers"),
+        ({"DOCEX_JOB_TIMEOUT_MINUTES": "15"}, "must both be whole numbers"),
+        (
+            {"DOCEX_JOB_START": "soon", "DOCEX_JOB_TIMEOUT_MINUTES": "15"},
+            "whole numbers",
+        ),
+        (
+            {"DOCEX_JOB_START": "1000", "DOCEX_JOB_TIMEOUT_MINUTES": "2"},
+            "leaves nothing",
+        ),
+        ({"DOCEX_JOB_START": "10", "DOCEX_JOB_TIMEOUT_MINUTES": "15"}, "passed before"),
+    ],
+    ids=["unset", "set", "no-timeout", "no-start", "not-a-number", "too-short", "past"],
+)
+def test_the_deadline_comes_from_the_job_s_start_and_timeout(environ, expected):
+    clock = lambda: 1100.0  # noqa: E731
+    if isinstance(expected, str):
+        with pytest.raises(dx.Refused, match=expected):
+            dx.deadline_from_env(environ, clock)
+    elif expected is None:
+        assert dx.deadline_from_env(environ, clock) is None
+    else:
+        assert dx.deadline_from_env(environ, clock).at == expected
+
+
+def test_a_shard_in_github_actions_without_a_deadline_is_refused(monkeypatch, capsys):
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.delenv("DOCEX_JOB_START", raising=False)
+    monkeypatch.delenv("DOCEX_JOB_TIMEOUT_MINUTES", raising=False)
+    assert dx.main(["--run", "--shard", "core:1/1"]) == 2
+    assert "needs its deadline" in capsys.readouterr().err
+
+
+# --- stack-full ------------------------------------------------------------
+
+
+def test_the_full_profile_probe(tmp_path):
+    full = {"profile": "full", "modules": ["rbac"], "version": "1"}
+    assert dx.full_profile_problem("p.md", lambda url: full) is None
+    core = dx.full_profile_problem("p.md", lambda url: {"profile": "core"})
+    assert core == (
+        "p.md: the full profile did not load: GET /api/v1/modules says profile 'core'"
+    )
+
+    def refused(url):
+        raise OSError("connection refused")
+
+    assert "failed (connection refused)" in dx.full_profile_problem("p.md", refused)
+
+
+def test_a_stack_full_page_needs_the_modules_page_s_one_full_start(repo):
+    getting = repo / "docs" / "getting-started"
+    getting.mkdir()
+    one = f"{FENCE}{{.bash exec}}\n{dx.STACK_FULL_UP}\n{FENCE}"
+    body = textwrap.dedent(
+        """
+        [meta]
+        documents = 2
+        exec = {total}
+        universe = ["docs/getting-started/modules.md", "docs/p.md"]
+
+        [[document]]
+        path = "docs/p.md"
+        environment = "stack-full"
+        exec = 1
+        skip = 1
+        expects = 1
+
+        [[document]]
+        path = "docs/getting-started/modules.md"
+        environment = "{env}"
+        exec = {n}
+        skip = 0
+        expects = 0
+        """
+    )
+    (getting / "modules.md").write_text(page(one))
+    dx.check(enrol(repo, body.format(n=1, total=2, env="stack-full")))
+    assert any(
+        "needs docs/getting-started/modules.md enrolled as 'stack-full'" in p
+        for p in problems_of(enrol(repo, body.format(n=1, total=2, env="bare")))
+    )
+    (getting / "modules.md").write_text(page(one, one))
+    assert any(
+        "2 exec blocks equal" in p
+        for p in problems_of(enrol(repo, body.format(n=2, total=3, env="stack-full")))
+    )
+
+
+def test_a_full_page_is_refused_in_a_core_tree(repo, no_docker):
+    """No modules/ directory: a stack-full page cannot run, and says to run a
+    core shard, rather than failing every module call with a 404."""
+    getting = repo / "docs" / "getting-started"
+    getting.mkdir()
+    (getting / "modules.md").write_text(
+        page(f"{FENCE}{{.bash exec}}\n{dx.STACK_FULL_UP}\n{FENCE}")
+    )
+    toml = enrol(
+        repo,
+        """
+        [meta]
+        documents = 1
+        exec = 1
+        universe = ["docs/getting-started/modules.md", "docs/p.md"]
+
+        [[document]]
+        path = "docs/getting-started/modules.md"
+        environment = "stack-full"
+        exec = 1
+        skip = 0
+        expects = 0
+        """,
+    )
+    (repo / "docs" / "p.md").write_text("# no shell\n")
+    with pytest.raises(
+        dx.Refused, match="needs the full profile, and this tree has no"
+    ):
+        dx.run(toml, shard=("full", 1, 1), run_page=FakePages())
+    (repo / "modules").mkdir()
+    fake = FakePages()
+    dx.run(toml, shard=("full", 1, 1), run_page=fake)
+    assert fake.ran == ["docs/getting-started/modules.md"]
+
+
+# --- the workflow ----------------------------------------------------------
+
+
+def _jobs() -> dict:
+    return yaml.safe_load(DOC_EXAMPLES_WORKFLOW.read_text())["jobs"]
+
+
+def test_the_matrix_is_the_runner_s_plan_and_one_red_shard_cancels_nothing():
+    jobs = _jobs()
+    plan_step = [s for s in jobs["plan"]["steps"] if s.get("id") == "plan"][0]
+    assert "python scripts/doc_examples.py --plan" in plan_step["run"]
+    assert plan_step["run"].startswith("set -euo pipefail\n")
+    examples = jobs["examples"]
+    assert examples["needs"] == "plan"
+    assert examples["strategy"]["fail-fast"] is False
+    assert (
+        examples["strategy"]["matrix"] == "${{ fromJSON(needs.plan.outputs.matrix) }}"
+    )
+
+
+def test_the_deadline_is_exported_from_the_job_s_own_start_and_timeout():
+    """PE C7: the timeout the runner is told is the job's timeout-minutes
+    expression, textually; the start is the job's first step."""
+    examples = _jobs()["examples"]
+    first = examples["steps"][0]
+    assert first["run"] == 'echo "DOCEX_JOB_START=$(date +%s)" >> "$GITHUB_ENV"'
+    (run,) = [s for s in examples["steps"] if "--run" in s.get("run", "")]
+    assert run["env"]["DOCEX_JOB_TIMEOUT_MINUTES"] == examples["timeout-minutes"]
+    assert run["env"]["PYTHONUNBUFFERED"] == "1"
+    assert run["run"] == (
+        'python scripts/doc_examples.py --run --shard "$SHARD" --report "$REPORT"'
+    )
+    assert run["env"]["SHARD"] == (
+        "${{ matrix.profile }}:${{ matrix.shard }}/${{ matrix.of }}"
+    )
+
+
+def test_every_shard_uploads_its_report_and_the_summary_reads_them_all():
+    jobs = _jobs()
+    (upload,) = [
+        s
+        for s in jobs["examples"]["steps"]
+        if s.get("uses", "").startswith("actions/upload-artifact@")
+    ]
+    assert upload["if"] == "always()"
+    assert upload["with"]["overwrite"] is True
+    assert upload["with"]["name"].startswith("doc-examples-report-")
+    run_env = [s for s in jobs["examples"]["steps"] if "--run" in s.get("run", "")][0]
+    assert run_env["env"]["REPORT"].startswith(upload["with"]["path"])
+    summary = jobs["summary"]
+    assert summary["if"] == "${{ !cancelled() }}"
+    assert set(summary["needs"]) == {"plan", "examples"}
+    (download,) = [
+        s
+        for s in summary["steps"]
+        if s.get("uses", "").startswith("actions/download-artifact@")
+    ]
+    assert download["with"]["pattern"] == "doc-examples-report-*"
+    assert download["with"]["merge-multiple"] is True
+    (check_step,) = [s for s in summary["steps"] if "--summarise" in s.get("run", "")]
+    assert check_step["run"] == (
+        f"python scripts/doc_examples.py --summarise {download['with']['path']}"
+    )
+    assert "if" not in check_step, "the summary's check runs even with no download"
+
+
+def test_no_path_filter_can_skip_the_summary():
+    """`paths:` is workflow-level: one on pull_request would drop the summary
+    together with the shards it exists to count (PE C6)."""
+    triggers = yaml.safe_load(DOC_EXAMPLES_WORKFLOW.read_text())[True]
+    pull_request = triggers["pull_request"] or {}
+    assert "paths" not in pull_request and "paths-ignore" not in pull_request
