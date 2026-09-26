@@ -3,10 +3,11 @@ name: Platform
 # =============================================================================
 # Reusable workflow: boot the platform, run one named suite against it.
 #
-# Every job that needs a *running* Experimently — the SDK live contract, the
-# nightly suites — used to repeat the same twenty lines: pg + redis services,
-# Python, bootstrap, seeds, uvicorn from the repository root, poll /health.
-# This is that sequence, once.
+# Every job that needs a *running* Experimently used to repeat the same twenty
+# lines: pg + redis services, Python, bootstrap, seeds, uvicorn from the
+# repository root, poll /health. This is that sequence, once. Its one caller
+# today is pr-qa-gate.yml's sdk-live-contract; the nightly suites do NOT call it
+# (the `integration` and `smoke` suites below are there for when one does).
 #
 #   jobs:
 #     live-contract:
@@ -24,6 +25,15 @@ name: Platform
 #
 # Toolchains beyond Python are installed only when the suite asks for them
 # (`sdks` names them), so a pytest suite does not wait for .NET.
+#
+# `skip: true` makes the job a no-op that still REPORTS, under its own name.
+# That is the whole point: branch protection requires
+# `SDK Live Contract / sdk-live-contract (core)`, and a caller skipped by a
+# job-level `if:` never produces that name (#133 sat BLOCKED on it). So every
+# step's condition starts with `!inputs.skip`, wrapped in `${{ }}` because a
+# bare condition starting with `!` is a YAML tag, not an expression. The
+# services still start; that cost is accepted. Pinned by
+# backend/tests/unit/infrastructure/test_docs_only_gate.py.
 # =============================================================================
 
 on:
@@ -49,6 +59,10 @@ on:
         description: 'Job timeout.'
         type: number
         default: 30
+      skip:
+        description: 'Report the check without doing the work (every step but the first is skipped). pr-qa-gate.yml sets it on a docs-only change.'
+        type: boolean
+        default: false
 
 jobs:
   platform:
@@ -102,7 +116,13 @@ jobs:
       EXPERIMENTLY_API_URL: http://127.0.0.1:8000
 
     steps:
+      - name: Skipped
+        if: ${{ inputs.skip }}
+        run: |
+          echo "skip is set (a docs-only change): ${{ inputs.suite }} (${{ inputs.profile }}) is not needed and every step below is skipped."
+
       - uses: actions/checkout@v7
+        if: ${{ !inputs.skip }}
 
       # `profile: core` has to mean a core API, not just an environment
       # variable. Nothing under backend/ reads EXPERIMENTLY_PROFILE:
@@ -112,11 +132,12 @@ jobs:
       # scripts/core_build.sh proves the core profile, and the assertion after
       # the boot below checks the API agrees.
       - name: Make the core profile real
-        if: inputs.profile == 'core'
+        if: ${{ !inputs.skip && inputs.profile == 'core' }}
         run: rm -rf modules
 
       # ── toolchains ──────────────────────────────────────────────────────────
       - name: Set up Python
+        if: ${{ !inputs.skip }}
         uses: actions/setup-python@v7
         with:
           python-version: '3.11'
@@ -124,13 +145,13 @@ jobs:
           cache-dependency-path: backend/requirements.txt
 
       - name: Set up Node.js
-        if: contains(inputs.sdks, 'js') || contains(inputs.sdks, 'react') || contains(inputs.sdks, 'edge') || contains(inputs.sdks, 'openfeature')
+        if: ${{ !inputs.skip && (contains(inputs.sdks, 'js') || contains(inputs.sdks, 'react') || contains(inputs.sdks, 'edge') || contains(inputs.sdks, 'openfeature')) }}
         uses: actions/setup-node@v7
         with:
           node-version: '22'
 
       - name: Set up Go
-        if: contains(inputs.sdks, 'go')
+        if: ${{ !inputs.skip && contains(inputs.sdks, 'go') }}
         uses: actions/setup-go@v7
         with:
           go-version: '1.22.x'
@@ -141,7 +162,7 @@ jobs:
       # the same Kotlin sources for a plain JVM — see sdk/android/jvm/pom.xml).
       # Maven itself comes from each module's ./mvnw, not from the runner.
       - name: Set up Java
-        if: contains(inputs.sdks, 'java') || contains(inputs.sdks, 'android')
+        if: ${{ !inputs.skip && (contains(inputs.sdks, 'java') || contains(inputs.sdks, 'android')) }}
         uses: actions/setup-java@v6
         with:
           distribution: temurin
@@ -149,26 +170,27 @@ jobs:
           cache: maven
 
       - name: Set up Ruby
-        if: contains(inputs.sdks, 'ruby')
+        if: ${{ !inputs.skip && contains(inputs.sdks, 'ruby') }}
         uses: ruby/setup-ruby@v1
         with:
           ruby-version: '3.2'
 
       - name: Set up PHP
-        if: contains(inputs.sdks, 'php')
+        if: ${{ !inputs.skip && contains(inputs.sdks, 'php') }}
         uses: shivammathur/setup-php@v2
         with:
           php-version: '8.2'
           extensions: json, curl
 
       - name: Set up .NET
-        if: contains(inputs.sdks, 'dotnet')
+        if: ${{ !inputs.skip && contains(inputs.sdks, 'dotnet') }}
         uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '6.0.x'
 
       # ── dependencies ────────────────────────────────────────────────────────
       - name: Install backend dependencies
+        if: ${{ !inputs.skip }}
         run: pip install -r backend/requirements.txt
 
       # The modules import packages backend/requirements.txt deliberately does
@@ -177,11 +199,11 @@ jobs:
       # and then refuses at the first call -- which is exactly the failure this
       # file must not hide.
       - name: Install module dependencies
-        if: inputs.profile == 'full'
+        if: ${{ !inputs.skip && inputs.profile == 'full' }}
         run: pip install -r modules/requirements.txt
 
       - name: Install SDK dependencies
-        if: inputs.suite == 'sdk-live-contract'
+        if: ${{ !inputs.skip && inputs.suite == 'sdk-live-contract' }}
         env:
           SDKS: ${{ inputs.sdks }}
         run: |
@@ -202,10 +224,11 @@ jobs:
       # Everything runs from the repository root: the code imports backend.app.*
       # and `cd backend` breaks those imports.
       - name: Create the schema
+        if: ${{ !inputs.skip }}
         run: python -m backend.app.db.bootstrap
 
       - name: Apply seeds
-        if: inputs.seed != ''
+        if: ${{ !inputs.skip && inputs.seed != '' }}
         env:
           SEED: ${{ inputs.seed }}
         run: |
@@ -228,6 +251,7 @@ jobs:
           done
 
       - name: Start the API
+        if: ${{ !inputs.skip }}
         run: |
           nohup python -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000 > backend.log 2>&1 &
           for _ in $(seq 1 60); do
@@ -248,6 +272,7 @@ jobs:
       # too -- /api/v1/workspaces/ is mounted by the registration and exists in
       # no core build, so it is 404 there and an authentication refusal here.
       - name: Assert the running profile
+        if: ${{ !inputs.skip }}
         run: |
           set -euo pipefail
           curl -sf http://127.0.0.1:8000/api/v1/modules -o modules.json
@@ -283,6 +308,7 @@ jobs:
 
       # ── suite ───────────────────────────────────────────────────────────────
       - name: Run suite
+        if: ${{ !inputs.skip }}
         env:
           SUITE: ${{ inputs.suite }}
           SDKS: ${{ inputs.sdks }}
@@ -309,5 +335,5 @@ jobs:
           esac
 
       - name: Backend log (on failure)
-        if: failure()
+        if: ${{ !inputs.skip && failure() }}
         run: tail -n 200 backend.log

@@ -16,18 +16,34 @@ jobs:
   # to docs/. Running them on a documentation pull request buys nothing and is
   # the reason a typo fix took as long as a schema migration.
   #
-  # The jobs are SKIPPED rather than not triggered. That distinction is the
-  # whole design: branch protection requires 20 checks to report, so a workflow
-  # that simply does not run on docs/** leaves every one of them missing and
-  # the pull request blocked for ever. A job skipped by an `if:` reports as
-  # successful to branch protection -- verified on #282, which merged CLEAN
-  # with five skipped checks.
+  # The jobs are SKIPPED rather than not triggered: branch protection requires
+  # 20 checks to report, so a workflow that simply does not run on docs/**
+  # leaves every one of them missing and the pull request blocked for ever.
   #
-  # Docs and Export Sweep are separate workflows and still run. That is
-  # deliberate: a documentation change genuinely can break both. It happened
-  # on #281 -- a claims table added to a test file to EXPLAIN the forbidden
-  # strings tripped the publication gate, because the gate greps the tree it
-  # is publishing.
+  # A job-level `if:` is enough ONLY for a plain job, whose skipped check keeps
+  # its name and is accepted. It is NOT enough for the two below that
+  # protection names by an expanded or called name: skipped before its matrix
+  # expands, `profile-build` reports once as the literal
+  # `${{ matrix.profile }}-build` and never as `core-build`/`full-build`; a
+  # skipped reusable-workflow caller reports as `SDK Live Contract` and never
+  # as `SDK Live Contract / sdk-live-contract (core)`. That is what left #133
+  # (docs/auth/sso.md only) BLOCKED with every check that ran green. So those
+  # two always run, and every one of their steps is conditioned instead: the
+  # checks report under their real names, in seconds, and on a docs-only
+  # change the core leg still runs the tests that pin docs/ content.
+  # backend/tests/unit/infrastructure/test_docs_only_gate.py pins all of it.
+  #
+  # The classification is scripts/classify_changes.py (docs/ except docs/api/,
+  # plus mkdocs.yml; an empty list is not docs-only). `--no-renames` is
+  # load-bearing: without it `git mv backend/a.py docs/a.py` lists only
+  # docs/a.py and a code change is classed as documentation.
+  #
+  # Leak Guard and Doc Examples are separate workflows and run on every pull
+  # request, docs-only included. Neither is where docs content is REQUIRED to
+  # pass: Doc Examples is not a required check, and Docs has no pull_request
+  # trigger at all (documentation merges without a site-build gate; founder,
+  # 2026-09-24). The required home of the docs tests is profile-build's core
+  # leg below.
   changes:
     name: Detect docs-only change
     runs-on: ubuntu-latest
@@ -43,18 +59,7 @@ jobs:
           HEAD: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
-          files=$(git diff --name-only "$BASE" "$HEAD")
-          echo "changed files:"; echo "$files" | while read -r f; do echo "  $f"; done
-          # Anything outside these paths means run the full gate. Note
-          # mkdocs.yml counts as docs; a workflow change never does.
-          other=$(echo "$files" | grep -vE '^(docs/|mkdocs\.yml$)' || true)
-          if [ -z "$other" ] && [ -n "$files" ]; then
-            echo "docs_only=true" >> "$GITHUB_OUTPUT"
-            echo "==> documentation only: the heavy jobs will skip"
-          else
-            echo "docs_only=false" >> "$GITHUB_OUTPUT"
-            echo "==> not documentation only: running the full gate"
-          fi
+          git diff --no-renames --name-only "$BASE" "$HEAD" | python3 scripts/classify_changes.py >> "$GITHUB_OUTPUT"
 
   unit-tests:
     needs: changes
@@ -392,9 +397,13 @@ jobs:
   #
   # The same sequence as `make core-build` / `make full-build`; the step that
   # failed is named in the last line of the log.
+  #
+  # No job-level `if:` (see the `changes` job): on a docs-only change every
+  # step below is skipped except the reason and, in the core leg only, the
+  # tests that pin docs/ content -- which is why a docs-only pull request
+  # still starts both legs and their Postgres service.
   profile-build:
     needs: changes
-    if: needs.changes.outputs.docs_only != 'true'
     # The check name stays `core-build` / `full-build`: an explicit `name:`
     # replaces the default `profile-build (core)` spelling, so the required
     # status checks keep working.
@@ -439,16 +448,55 @@ jobs:
       REUSE_VERSION: '6.2.0'
       PIP_LICENSES_VERSION: '5.5.5'
     steps:
-      - uses: actions/checkout@v7
+      - name: Docs-only change
+        if: needs.changes.outputs.docs_only == 'true'
+        run: |
+          echo "docs-only change: the ${{ matrix.profile }} profile build is not needed and every build step below is skipped."
+          if [ "${{ matrix.profile }}" = 'core' ]; then
+            echo "The core leg still runs the tests that pin docs/ content."
+          fi
 
+      # The tree, for the build or (core leg, docs-only) for the docs tests.
+      - uses: actions/checkout@v7
+        if: needs.changes.outputs.docs_only != 'true' || matrix.profile == 'core'
+
+      # Python likewise.
       - name: Set up Python
+        if: needs.changes.outputs.docs_only != 'true' || matrix.profile == 'core'
         uses: actions/setup-python@v7
         with:
           python-version: '3.11'
           cache: pip
           cache-dependency-path: backend/requirements.txt
 
+      # The tests that read docs/ -- directly or through a path built from the
+      # repository root -- and would otherwise never run on the pull request
+      # that breaks them, because unit-tests and smoke-tests skip on a
+      # docs-only change. Only on a docs-only change: on any other change
+      # unit-tests and smoke-tests run every one of them already. Which docs
+      # readers are here and why the others are not is pinned, with reasons,
+      # in backend/tests/unit/infrastructure/test_docs_only_gate.py.
+      - name: Install backend dependencies (docs tests)
+        if: needs.changes.outputs.docs_only == 'true' && matrix.profile == 'core'
+        run: pip install -r backend/requirements.txt
+
+      - name: Docs content tests
+        if: needs.changes.outputs.docs_only == 'true' && matrix.profile == 'core'
+        run: >-
+          python -m pytest -p no:cov -q --tb=short
+          backend/tests/unit/scripts/test_doc_examples.py
+          backend/tests/unit/docs/
+          backend/tests/smoke/test_openapi_snapshot.py
+          backend/tests/smoke/test_version_sources.py
+          backend/tests/unit/infrastructure/test_dashboard_image_docs.py
+          backend/tests/unit/infrastructure/test_rollback_uses_codedeploy.py
+          backend/tests/unit/infrastructure/test_deploy_docs.py
+          backend/tests/unit/infrastructure/test_iam_actions.py
+          backend/tests/unit/db/test_alembic_plan.py
+          modules/backend/tests/unit/services/test_sso_docs_messages.py
+
       - name: Set up Node.js
+        if: needs.changes.outputs.docs_only != 'true'
         uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
@@ -456,6 +504,7 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
 
       - name: Install backend dependencies
+        if: needs.changes.outputs.docs_only != 'true'
         run: pip install -r backend/requirements.txt "reuse==${REUSE_VERSION}" "pip-licenses==${PIP_LICENSES_VERSION}"
 
       # The modules import packages backend/requirements.txt deliberately does
@@ -464,10 +513,11 @@ jobs:
       # is guarded, so without this the licence step would report them as
       # "pinned but not installed here".
       - name: Install module dependencies
-        if: matrix.profile == 'full'
+        if: needs.changes.outputs.docs_only != 'true' && matrix.profile == 'full'
         run: pip install -r modules/requirements.txt
 
       - name: Install gitleaks
+        if: needs.changes.outputs.docs_only != 'true'
         run: |
           curl -fsSL -o /tmp/gitleaks.tar.gz \
             "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
@@ -475,6 +525,7 @@ jobs:
           gitleaks version
 
       - name: ${{ matrix.profile }} build
+        if: needs.changes.outputs.docs_only != 'true'
         run: scripts/core_build.sh --profile ${{ matrix.profile }} ${{ matrix.steps }}
 
   # Live SDK contract: every SDK's contract_smoke against a real backend.
@@ -482,13 +533,17 @@ jobs:
   # job above only covers hashing). Toolchains not available on ubuntu-latest
   # (Android, Flutter, Elixir, iOS) are exercised by their unit tests only.
   # Every SDK against a real API, through the shared boot in _platform.yml so
-  # the sequence lives in one place (the nightly suites call the same thing).
+  # the sequence lives in one place (this is its only caller today).
+  #
+  # No job-level `if:` (see the `changes` job): a skipped caller never reports
+  # the required `SDK Live Contract / sdk-live-contract (core)`. On a docs-only
+  # change `skip` makes every step of the called job a no-op instead.
   sdk-live-contract:
     needs: changes
-    if: needs.changes.outputs.docs_only != 'true'
     name: SDK Live Contract
     uses: ./.github/workflows/_platform.yml
     with:
+      skip: ${{ needs.changes.outputs.docs_only == 'true' }}
       profile: core
       seed: sdk-contract
       suite: sdk-live-contract
