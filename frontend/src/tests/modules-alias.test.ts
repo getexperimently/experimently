@@ -395,10 +395,11 @@ describe('the @modules/* alias — one rule, every toolchain', () => {
       expect(missing).toEqual([]);
     });
 
-    it('carries a stub for each of the seven module routes', () => {
+    it('carries a stub for each of the eight module routes', () => {
       expect(stubs).toEqual(
         expect.arrayContaining([
           'pages/admin/roles',
+          'pages/sso/complete',
           'pages/workspaces/index',
           'pages/workspaces/new',
           'pages/workspaces/[id]/index',
@@ -431,7 +432,7 @@ describe('the @modules/* alias — one rule, every toolchain', () => {
       // not the one admin page a VIEWER can open.
       if (!fs.existsSync(MODULES_DIR)) return;
       const pages = sourceFiles(path.join(MODULES_DIR, 'pages'));
-      expect(pages).toHaveLength(7);
+      expect(pages).toHaveLength(8);
       for (const file of pages) {
         const source = fs.readFileSync(file, 'utf8');
         expect(source).toMatch(/withModule\(/);
@@ -444,9 +445,10 @@ describe('the @modules/* alias — one rule, every toolchain', () => {
       ).toMatch(/withAdminGuard\(/);
     });
 
-    it('leaves the seven page files in src/pages as one-line re-exports', () => {
+    it('leaves the eight page files in src/pages as one-line re-exports', () => {
       const routes = [
         'admin/roles.tsx',
+        'sso/complete.tsx',
         'workspaces/index.tsx',
         'workspaces/new.tsx',
         'workspaces/[id]/index.tsx',
@@ -457,7 +459,7 @@ describe('the @modules/* alias — one rule, every toolchain', () => {
 
       // These page files are core (not in `modules-manifest.txt`): a core
       // build keeps them, and `@modules/pages/*` resolves them to the stubs.
-      // Either all seven are present or none are — a partial set means
+      // Either all eight are present or none are — a partial set means
       // something deleted half a seam.
       const present = routes.filter((file) => fs.existsSync(file));
       expect([0, routes.length]).toContain(present.length);

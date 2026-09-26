@@ -1,5 +1,9 @@
-/** Routes rendered without the application shell. */
-const BARE_ROUTES = new Set<string>(['/login', '/']);
+/**
+ * Routes rendered without the application shell. `/sso/complete` is one so
+ * that it is never `protected`: RequireAuth would bounce an anonymous visitor
+ * to `/login?next=`, carrying the SSO hand-off fragment along (C2b).
+ */
+const BARE_ROUTES = new Set<string>(['/login', '/', '/sso/complete']);
 
 /**
  * Routes inside the shell that do not require a session. The API is still the

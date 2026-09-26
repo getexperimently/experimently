@@ -6,9 +6,12 @@ import { API_URL, BASE_URL, IS_EXTERNAL_BASE_URL, PORT } from "./tests/e2e/env";
 /**
  * Playwright configuration for the Experimently dashboard.
  *
- * Two projects:
+ * Three projects:
  *   - `journeys` — the five fail-hard PR journeys (`*.journey.spec.ts`), the
  *     required `browser-e2e` gate. Run them with `--project=journeys`.
+ *   - `sso` — sign in with SSO from the dashboard (`*.sso.spec.ts`, C2b). It
+ *     needs its own API process and the fake OIDC provider, which the
+ *     `browser-e2e` job starts as steps; see tests/e2e/sso-sign-in.sso.spec.ts.
  *   - `extended` — everything else under tests/e2e (accessibility, visual
  *     regression); nightly territory, not a PR gate.
  *
@@ -94,9 +97,14 @@ export default defineConfig({
       use: { ...devices["Desktop Chrome"] },
     },
     {
+      name: "sso",
+      testMatch: /\.sso\.spec\.ts$/,
+      use: { ...devices["Desktop Chrome"] },
+    },
+    {
       name: "extended",
       testMatch: /\.spec\.ts$/,
-      testIgnore: /\.journey\.spec\.ts$/,
+      testIgnore: [/\.journey\.spec\.ts$/, /\.sso\.spec\.ts$/],
       use: { ...devices["Desktop Chrome"] },
     },
   ],

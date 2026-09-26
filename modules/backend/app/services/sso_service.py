@@ -68,6 +68,62 @@ except ImportError:  # pragma: no cover
 
 logger = logging.getLogger(__name__)
 
+
+# ---------------------------------------------------------------------------
+# Refusals and the dashboard's `sso_error` codes
+# ---------------------------------------------------------------------------
+#
+# Every refusal of an OIDC sign-in is an `SSORefusal`: an HTTPException, so a
+# JSON-mode caller (the legacy `/oidc/{provider}/login` flow) gets exactly the
+# status and detail it always did, which also carries the code a dashboard
+# sign-in is redirected to `/login?sso_error=<code>` with. A plain
+# HTTPException that reaches the dashboard callback is `sso_failed`.
+
+SSO_EXPIRED = "sso_expired"
+SSO_STATE = "sso_state"
+SSO_IDP_ERROR = "sso_idp_error"
+SSO_EMAIL = "sso_email"
+SSO_UNVERIFIED = "sso_unverified"
+SSO_DOMAIN = "sso_domain"
+SSO_ACCOUNT = "sso_account"
+SSO_INACTIVE = "sso_inactive"
+SSO_NOT_CONFIGURED = "sso_not_configured"
+SSO_SAML_ONLY = "sso_saml_only"
+SSO_FAILED = "sso_failed"
+
+SSO_ERROR_CODES = frozenset(
+    {
+        SSO_EXPIRED,
+        SSO_STATE,
+        SSO_IDP_ERROR,
+        SSO_EMAIL,
+        SSO_UNVERIFIED,
+        SSO_DOMAIN,
+        SSO_ACCOUNT,
+        SSO_INACTIVE,
+        SSO_NOT_CONFIGURED,
+        SSO_SAML_ONLY,
+        SSO_FAILED,
+    }
+)
+
+
+class SSORefusal(HTTPException):
+    """A refused sign-in: the JSON status and detail, plus its `sso_error` code."""
+
+    def __init__(
+        self,
+        status_code: int,
+        detail: str,
+        sso_error: str = SSO_FAILED,
+        *,
+        idp_error: Optional[str] = None,
+    ) -> None:
+        super().__init__(status_code=status_code, detail=detail)
+        self.sso_error = sso_error if sso_error in SSO_ERROR_CODES else SSO_FAILED
+        self.idp_error = idp_error
+
+
 #: Refusal used by every SAML route when ``python3-saml`` is not installed and
 #: the environment is not one where the stub may stand in for it.  501 is the
 #: same "this deployment does not have it" answer the core gives for a
@@ -554,9 +610,10 @@ def _provider_endpoint(config: SSOConfig, meta: Dict[str, str], key: str) -> str
         url = url.replace("{sso_url}", config.sso_url.rstrip("/"))
     if urlparse(url).scheme != "https" and not core_settings.is_test:
         logger.error("Refusing a non-https OIDC %s for SSO config %s", key, config.id)
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="OIDC provider endpoints must use https; check this SSO configuration's sso_url",
+        raise SSORefusal(
+            status.HTTP_400_BAD_REQUEST,
+            "OIDC provider endpoints must use https; check this SSO configuration's sso_url",
+            SSO_FAILED,
         )
     return url
 
@@ -635,9 +692,10 @@ def verify_id_token(
         logger.warning(  # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure
             "OIDC ID token refused for SSO config %s: %s", config.id, reason
         )
-        return HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"OIDC ID token was not accepted ({reason})",
+        return SSORefusal(
+            status.HTTP_400_BAD_REQUEST,
+            f"OIDC ID token was not accepted ({reason})",
+            SSO_FAILED,
         )
 
     if not id_token or not isinstance(id_token, str):
@@ -705,9 +763,10 @@ def _idp_error_code(exc: BaseException) -> Optional[str]:
 def _refusal(what: str, exc: BaseException) -> HTTPException:
     code = _idp_error_code(exc)
     logger.error("%s: %s%s", what, type(exc).__name__, f" ({code})" if code else "")
-    return HTTPException(
-        status_code=status.HTTP_400_BAD_REQUEST,
-        detail=f"{what}" + (f" ({code})" if code else ""),
+    return SSORefusal(
+        status.HTTP_400_BAD_REQUEST,
+        f"{what}" + (f" ({code})" if code else ""),
+        SSO_FAILED,
     )
 
 
@@ -738,9 +797,10 @@ async def exchange_oidc_code(
     provider_key = config.provider_type.value
     meta = _OIDC_PROVIDERS.get(provider_key)
     if not meta:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Unknown OIDC provider '{provider_key}'",
+        raise SSORefusal(
+            status.HTTP_400_BAD_REQUEST,
+            f"Unknown OIDC provider '{provider_key}'",
+            SSO_FAILED,
         )
 
     token_url = _provider_endpoint(config, meta, "token_endpoint")
@@ -813,9 +873,10 @@ async def get_oidc_user_info(
     provider_key = config.provider_type.value
     meta = _OIDC_PROVIDERS.get(provider_key)
     if not meta:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Unknown OIDC provider '{provider_key}'",
+        raise SSORefusal(
+            status.HTTP_400_BAD_REQUEST,
+            f"Unknown OIDC provider '{provider_key}'",
+            SSO_FAILED,
         )
 
     userinfo_url = _provider_endpoint(config, meta, "userinfo_endpoint")
@@ -909,9 +970,8 @@ EMAIL_AMBIGUOUS_DETAIL = (
 def require_supported_provider(provider: str) -> None:
     """Refuse, with a fixed 400, a provider on the unsupported list."""
     if provider in UNSUPPORTED_OIDC_PROVIDERS:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=UNSUPPORTED_PROVIDER_DETAIL,
+        raise SSORefusal(
+            status.HTTP_400_BAD_REQUEST, UNSUPPORTED_PROVIDER_DETAIL, SSO_FAILED
         )
 
 
@@ -930,20 +990,14 @@ def _sso_email(user_info: Dict[str, Any], config: SSOConfig) -> str:
     raw = user_info.get("email")
     email = raw.strip() if isinstance(raw, str) else ""
     if not email or not email.isascii():
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=EMAIL_INVALID_DETAIL
-        )
+        raise SSORefusal(status.HTTP_400_BAD_REQUEST, EMAIL_INVALID_DETAIL, SSO_EMAIL)
     email = email.lower()
     local, _, domain = email.rpartition("@")
     if not local or not domain:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=EMAIL_INVALID_DETAIL
-        )
+        raise SSORefusal(status.HTTP_400_BAD_REQUEST, EMAIL_INVALID_DETAIL, SSO_EMAIL)
     expected = normalise_domain(config.org_domain)
     if not expected or domain != expected:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail=EMAIL_DOMAIN_DETAIL
-        )
+        raise SSORefusal(status.HTTP_403_FORBIDDEN, EMAIL_DOMAIN_DETAIL, SSO_DOMAIN)
     return email
 
 
@@ -979,21 +1033,20 @@ async def verified_email(
         if str(user_info.get("sub") or "") != str(id_claims.get("sub") or "") or not (
             id_claims.get("sub")
         ):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=IDENTITY_MISMATCH_DETAIL,
+            raise SSORefusal(
+                status.HTTP_400_BAD_REQUEST, IDENTITY_MISMATCH_DETAIL, SSO_ACCOUNT
             )
         if id_claims.get("email_verified") is not True:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN, detail=EMAIL_UNVERIFIED_DETAIL
+            raise SSORefusal(
+                status.HTTP_403_FORBIDDEN, EMAIL_UNVERIFIED_DETAIL, SSO_UNVERIFIED
             )
         email = id_claims.get("email")
         if provider_key == "google":
             hd = id_claims.get("hd")
             domain = email.rpartition("@")[2].lower() if isinstance(email, str) else ""
             if not isinstance(hd, str) or hd.lower() != domain:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN, detail=EMAIL_DOMAIN_DETAIL
+                raise SSORefusal(
+                    status.HTTP_403_FORBIDDEN, EMAIL_DOMAIN_DETAIL, SSO_DOMAIN
                 )
         checked["email"] = email
         checked["sub"] = str(id_claims["sub"])
@@ -1003,8 +1056,8 @@ async def verified_email(
             config, access_token, http_client
         )
         return checked
-    raise HTTPException(
-        status_code=status.HTTP_400_BAD_REQUEST, detail=UNSUPPORTED_PROVIDER_DETAIL
+    raise SSORefusal(
+        status.HTTP_400_BAD_REQUEST, UNSUPPORTED_PROVIDER_DETAIL, SSO_FAILED
     )
 
 
@@ -1051,9 +1104,7 @@ async def _github_verified_email(
         return primary[0]["email"]
     if len(candidates) == 1:
         return candidates[0]["email"]
-    raise HTTPException(
-        status_code=status.HTTP_403_FORBIDDEN, detail=EMAIL_UNVERIFIED_DETAIL
-    )
+    raise SSORefusal(status.HTTP_403_FORBIDDEN, EMAIL_UNVERIFIED_DETAIL, SSO_UNVERIFIED)
 
 
 def provision_user(
@@ -1081,9 +1132,7 @@ def provision_user(
 
     matches = db.query(User).filter(func.lower(User.email) == email).limit(2).all()
     if len(matches) > 1:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT, detail=EMAIL_AMBIGUOUS_DETAIL
-        )
+        raise SSORefusal(status.HTTP_409_CONFLICT, EMAIL_AMBIGUOUS_DETAIL, SSO_ACCOUNT)
     if matches:
         existing_user = matches[0]
         if mapped is not None:
@@ -1098,9 +1147,7 @@ def provision_user(
     # handed that row or crashing on the unique column (#122).
     external_id = user_info.get("sub") or user_info.get("name_id")
     if external_id and db.query(User).filter(User.external_id == external_id).first():
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT, detail=IDENTITY_TAKEN_DETAIL
-        )
+        raise SSORefusal(status.HTTP_409_CONFLICT, IDENTITY_TAKEN_DETAIL, SSO_ACCOUNT)
     role = UserRole(mapped) if mapped else UserRole.VIEWER
 
     # Derive a username from email local part + random suffix to avoid collisions
@@ -1186,8 +1233,15 @@ OIDC_STATE_COOKIE = "__Host-experimently_oidc"
 #: How long a started login stays redeemable.
 OIDC_STATE_TTL_SECONDS = 600
 
+#: The cookie outlives the login it carries by five minutes, so a callback
+#: that arrives late still brings it -- and is told `sso_expired`, from the
+#: cookie's own `exp`, rather than finding no cookie at all.
+OIDC_STATE_COOKIE_MAX_AGE = OIDC_STATE_TTL_SECONDS + 300
+
 #: Clock skew allowed on the cookie's `exp` and `iat`.
 _STATE_LEEWAY_SECONDS = 30
+
+_STATE_REQUIRED_CLAIMS = ["aud", "iat", "exp", "st", "cv", "nn", "cfg", "prv"]
 
 _STATE_AUDIENCE = "experimently:oidc-state"
 
@@ -1232,8 +1286,21 @@ class OIDCLoginState:
     nonce: str
 
 
-def start_oidc_login(config: SSOConfig, provider: str) -> OIDCLoginStart:
-    """Mint the state, the PKCE verifier and the signed cookie that holds both."""
+def start_oidc_login(
+    config: SSOConfig,
+    provider: str,
+    *,
+    return_to: Optional[str] = None,
+    handoff: Optional[str] = None,
+) -> OIDCLoginStart:
+    """Mint the state, the PKCE verifier and the signed cookie that holds both.
+
+    A login started from the dashboard also carries ``rt`` (the dashboard
+    origin to return to -- an entry of ``dashboard_origins``, never a value
+    rebuilt from the request) and ``hh`` (the hand-off hash the code minted at
+    the callback is bound to). ``rt`` is what puts the callback in redirect
+    mode.
+    """
     state = secrets.token_urlsafe(32)
     # 64 random bytes -> 86 characters, inside RFC 7636's 43..128.
     verifier = secrets.token_urlsafe(64)
@@ -1249,14 +1316,18 @@ def start_oidc_login(config: SSOConfig, provider: str) -> OIDCLoginStart:
         "cfg": str(config.id),
         "prv": provider,
     }
+    if return_to is not None:
+        claims["rt"] = return_to
+    if handoff is not None:
+        claims["hh"] = handoff
     cookie = jwt.encode(claims, _state_key(), algorithm="HS256")
     return OIDCLoginStart(
         state=state, code_verifier=verifier, nonce=nonce, cookie_value=cookie
     )
 
 
-def _state_refusal(detail: str) -> HTTPException:
-    return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
+def _state_refusal(detail: str, sso_error: str = SSO_STATE) -> SSORefusal:
+    return SSORefusal(status.HTTP_400_BAD_REQUEST, detail, sso_error)
 
 
 def redeem_oidc_state(
@@ -1281,10 +1352,12 @@ def redeem_oidc_state(
             algorithms=["HS256"],
             audience=_STATE_AUDIENCE,
             leeway=_STATE_LEEWAY_SECONDS,
-            options={"require": ["aud", "iat", "exp", "st", "cv", "nn", "cfg", "prv"]},
+            options={"require": _STATE_REQUIRED_CLAIMS},
         )
     except jwt.ExpiredSignatureError:
-        raise _state_refusal("OIDC sign-in expired; start it again") from None
+        raise _state_refusal(
+            "OIDC sign-in expired; start it again", SSO_EXPIRED
+        ) from None
     except jwt.PyJWTError:
         raise _state_refusal("OIDC sign-in state is not valid") from None
 
@@ -1303,6 +1376,131 @@ def redeem_oidc_state(
     )
 
 
+def peek_oidc_state(cookie_value: Optional[str]) -> Optional[Dict[str, Any]]:
+    """The claims of a state cookie that is ours, expired or not; else None.
+
+    Signature, audience and the required claims are checked; ``exp`` is not.
+    Used only to learn where a dashboard sign-in returns to (``rt``), so that
+    an expired one can still be sent back there as ``sso_expired``. Nothing is
+    redeemed on the strength of this: the callback still relies on
+    :func:`redeem_oidc_state`, which checks ``exp``.
+    """
+    if not cookie_value:
+        return None
+    try:
+        return jwt.decode(
+            cookie_value,
+            _state_key(),
+            algorithms=["HS256"],
+            audience=_STATE_AUDIENCE,
+            leeway=_STATE_LEEWAY_SECONDS,
+            options={"require": _STATE_REQUIRED_CLAIMS, "verify_exp": False},
+        )
+    except jwt.PyJWTError:
+        return None
+
+
+# ---------------------------------------------------------------------------
+# The dashboard hand-off (C2b)
+# ---------------------------------------------------------------------------
+#
+# A dashboard sign-in does not put the access token in a URL. The callback
+# redirects to `{dashboard}/sso/complete#code=<hand-off code>`: a 60-second
+# JWT naming the user and `hh`, the SHA-256 of a 32-byte secret the dashboard
+# generated and kept in this tab's sessionStorage. The dashboard then POSTs
+# `{code, secret}` to `/exchange` for the token. A code read out of browser
+# history is dead after 60 s and useless without the secret, which leaves the
+# browser only in that POST body. It is not single-use within its 60 s (the
+# server keeps no state); the secret binding is what stops replay by anyone
+# who can read history.
+
+HANDOFF_TTL_SECONDS = 60
+_HANDOFF_AUDIENCE = "experimently:sso-handoff"
+#: `secret` and `hh`: unpadded base64url of 32 bytes.
+_B64URL_32_BYTES = re.compile(r"[A-Za-z0-9_-]{43}")
+MAX_HANDOFF_CODE_LENGTH = 2048
+
+HANDOFF_REFUSED_DETAIL = "This sign-in could not be completed; start it again"
+
+
+def _handoff_key() -> bytes:
+    """The hand-off code's signing key: derived from SECRET_KEY, used for nothing else."""
+    return hmac.new(
+        core_settings.SECRET_KEY.encode("utf-8"),
+        b"experimently:sso-handoff:v1",
+        hashlib.sha256,
+    ).digest()
+
+
+def is_handoff_value(value: Any) -> bool:
+    """True for exactly 43 base64url characters: the shape of `secret` and `hh`."""
+    return isinstance(value, str) and bool(_B64URL_32_BYTES.fullmatch(value))
+
+
+def handoff_hash(secret: str) -> str:
+    """``hh`` for *secret*: unpadded base64url(SHA-256(the 32 decoded bytes)).
+
+    The bytes, not the base64 text, are hashed; the dashboard computes the
+    same value with Web Crypto.
+    """
+    if not is_handoff_value(secret):
+        raise ValueError("secret must be 43 base64url characters")
+    raw = base64.urlsafe_b64decode(secret + "=")
+    digest = hashlib.sha256(raw).digest()
+    return base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
+
+
+def issue_handoff_code(user_id: uuid.UUID, hh: str) -> str:
+    """The code the callback puts in the dashboard's URL fragment."""
+    now = int(time.time())
+    claims = {
+        "aud": _HANDOFF_AUDIENCE,
+        "iat": now,
+        "exp": now + HANDOFF_TTL_SECONDS,
+        "sub": str(user_id),
+        "hh": hh,
+        "jti": secrets.token_urlsafe(16),
+    }
+    return jwt.encode(claims, _handoff_key(), algorithm="HS256")
+
+
+def redeem_handoff_code(code: Any, secret: Any) -> uuid.UUID:
+    """The user id a hand-off code names, if *secret* is the one it is bound to.
+
+    Refuses with a fixed 400: a code that is not a string of at most 2048
+    characters; a secret that is not 43 base64url characters; a code whose
+    signature, audience or ``exp`` (no leeway) does not verify; and a secret
+    whose hash is not the code's ``hh`` (compared in constant time, as bytes).
+    """
+    refused = HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST, detail=HANDOFF_REFUSED_DETAIL
+    )
+    if not isinstance(code, str) or not code or len(code) > MAX_HANDOFF_CODE_LENGTH:
+        raise refused
+    if not is_handoff_value(secret):
+        raise refused
+    try:
+        claims = jwt.decode(
+            code,
+            _handoff_key(),
+            algorithms=["HS256"],
+            audience=_HANDOFF_AUDIENCE,
+            leeway=0,
+            options={"require": ["aud", "exp", "sub", "hh", "jti"]},
+        )
+    except jwt.PyJWTError:
+        raise refused from None
+    expected = claims.get("hh")
+    if not isinstance(expected, str) or not hmac.compare_digest(
+        handoff_hash(secret).encode("ascii"), expected.encode("utf-8")
+    ):
+        raise refused
+    try:
+        return uuid.UUID(str(claims["sub"]))
+    except ValueError:
+        raise refused from None
+
+
 def build_oidc_authorization_url(
     config: SSOConfig,
     provider_key: str,
@@ -1318,9 +1516,10 @@ def build_oidc_authorization_url(
     """
     meta = _OIDC_PROVIDERS.get(provider_key)
     if not meta:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Unknown OIDC provider '{provider_key}'",
+        raise SSORefusal(
+            status.HTTP_400_BAD_REQUEST,
+            f"Unknown OIDC provider '{provider_key}'",
+            SSO_FAILED,
         )
 
     auth_url = _provider_endpoint(config, meta, "authorization_endpoint")

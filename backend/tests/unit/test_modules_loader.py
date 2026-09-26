@@ -162,6 +162,10 @@ class TestModulesRegistration:
             "/auth/sso/saml/{config_id}/acs",
             "/auth/sso/oidc/{provider}/login",
             "/auth/sso/oidc/{provider}/callback",
+            # The dashboard's SSO sign-in (C2b): its start, and the exchange
+            # whose credential is the hand-off code plus the tab's secret.
+            "/auth/sso/login",
+            "/auth/sso/exchange",
             # The invite preview: the token in the URL is the credential.
             "/workspaces/invites/{token}",
         }
