@@ -553,4 +553,4 @@ If rollback does not resolve the issue within 15 minutes, escalate immediately â
 | T+30 | Data loss confirmed or outage continuing | Page VP Engineering |
 | T+60 | Full region or account-level issue | Initiate disaster recovery plan |
 
-Contacts: See `docs/security/incident-response-plan.md` Section 9 for PagerDuty escalation policies and after-hours contacts.
+Contacts: your own team's escalation policy and after-hours contacts. See also [Responding to an incident on your deployment](../security/incident-response.md).

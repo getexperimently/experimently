@@ -388,7 +388,7 @@ Regional failover requires Engineering Lead and VP Engineering approval due to d
 
 **Detection:** AWS GuardDuty alert, CloudWatch anomaly, or customer report.
 
-Refer immediately to `docs/security/incident-response-plan.md` for the complete security incident response procedure.
+See [Responding to an incident on your deployment](../security/incident-response.md). If the cause may be a vulnerability in Experimently itself, report it privately as [SECURITY.md](https://github.com/getexperimently/experimently/blob/main/SECURITY.md) describes.
 
 Key immediate actions:
 
@@ -501,4 +501,4 @@ Document test results in the monthly DR testing log in Confluence.
 | AWS Support | https://console.aws.amazon.com/support | Premium Support (use for Aurora and regional failures) |
 | DPO | dpo@yourcompany.com | Required if customer data is affected |
 
-Full contact list: `docs/security/incident-response-plan.md` Section 9.
+The rows above are examples: put your own team's contacts here.
