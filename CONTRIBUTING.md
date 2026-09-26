@@ -70,11 +70,19 @@ the licence you are contributing under.
 Everything runs from the repository root. Prerequisites: Python 3.11, Node 22
 (see `.nvmrc`), Docker.
 
+`make venv install` creates the virtualenv and installs the backend dependencies,
+then the frontend's. `make dev` starts Postgres and Redis, bootstraps the schema
+and the first admin, then runs the API on :8000 with reload:
+
 ```bash
-make venv install     # virtualenv + backend deps, then frontend deps
-make dev              # Postgres + Redis, bootstrap the schema and the first
-                      # admin, then the API on :8000 with reload
-make web              # in a second shell: the dashboard on :3100
+make venv install
+make dev
+```
+
+In a second shell, `make web` serves the dashboard on :3100:
+
+```bash
+make web
 ```
 
 `make dev` runs `AUTH_PROVIDER=local uvicorn backend.app.main:app` after
@@ -104,14 +112,14 @@ Other useful targets — `make help` lists them all:
 
 ### Tests
 
-```bash
-make test             # what a pull request must pass: backend + frontend
-make test-unit        # backend unit tests (most need Postgres too)
-make test-integration # backend integration tests (needs Postgres on localhost:5432)
-make test-modules     # the modules' own suite (needs modules/requirements.txt installed)
-make test-frontend    # dashboard jest tests, tsc --noEmit, production build
-make test-sdk         # cross-SDK golden-vector contract tests
-```
+| Target | What it runs |
+|---|---|
+| `make test` | What a pull request must pass: backend + frontend |
+| `make test-unit` | Backend unit tests (most need Postgres too) |
+| `make test-integration` | Backend integration tests (needs Postgres on localhost:5432) |
+| `make test-modules` | The modules' own suite (needs `modules/requirements.txt` installed) |
+| `make test-frontend` | Dashboard jest tests, `tsc --noEmit`, production build |
+| `make test-sdk` | Cross-SDK golden-vector contract tests |
 
 Both suites need PostgreSQL on **localhost:5432**. `make db` starts it. The unit
 suite is not database-free despite the name: 26 of its files take the
@@ -152,9 +160,12 @@ request labelled `bug` that adds no test.
 
 ### Lint
 
+`make lint` is exactly what the `lint` CI job runs. `make format` runs
+`ruff format` and `ruff check --fix`, in place:
+
 ```bash
-make lint             # exactly what the `lint` CI job runs
-make format           # ruff format + ruff check --fix, in place
+make lint
+make format
 ```
 
 `make lint` runs `ruff check backend/ modules/ scripts/`, `ruff format --check`,
