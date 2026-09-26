@@ -345,6 +345,69 @@ def parse_fences(text: str, name: str) -> list[Fence]:
     return fences
 
 
+_LIST_ITEM = re.compile(r"^(?P<indent> *)(?:[-*+]|[0-9]{1,9}[.)])(?: +|$)")
+# MkDocs containers whose body is indented four spaces: admonitions, collapsible
+# admonitions and content tabs.
+_CONTAINER = re.compile(r"^(?P<indent> *)(?:!!!|\?\?\?\+?|===)(?: |$)")
+
+
+def indented_code_lines(text: str) -> list[int]:
+    """1-based first lines of the indented code blocks in *text*.
+
+    An indented code block renders as code and can be pasted, but it has no
+    info string, so nothing could say what it is.  The rule is python-markdown's
+    (what MkDocs renders with): a line indented four or more columns past the
+    enclosing list item or container, after a blank line or a heading, outside
+    a fence and an HTML comment.  A test pins it to the renderer on every page.
+    """
+    found: list[int] = []
+    contexts: list[int] = []  # the column a list item's or container's body starts
+    boundary = True  # the previous line ends a block (start, blank, heading, fence)
+    fence: Optional[str] = None
+    in_code, code_column, in_comment = False, 0, False
+    for number, raw in enumerate(text.split("\n"), 1):
+        line = raw.expandtabs(4)
+        stripped = line.strip()
+        if fence is not None:
+            if stripped and set(stripped) == {fence[0]} and len(stripped) >= len(fence):
+                fence, boundary = None, True
+            continue
+        if in_comment:
+            in_comment = "-->" not in line
+            boundary = not in_comment
+            continue
+        if not stripped:
+            boundary = True
+            continue
+        indent = len(line) - len(line.lstrip(" "))
+        if in_code and indent >= code_column:
+            continue
+        in_code = False
+        if boundary:
+            while contexts and indent < contexts[-1]:
+                contexts.pop()
+        base = contexts[-1] if contexts else 0
+        if boundary and indent >= base + 4:
+            found.append(number)
+            in_code, code_column, boundary = True, base + 4, False
+            continue
+        opener = _OPENER.match(line)
+        if opener and not (
+            opener.group("marker")[0] == "`" and "`" in opener.group("info")
+        ):
+            fence = opener.group("marker")
+            continue
+        if stripped.startswith("<!--"):
+            in_comment = "-->" not in stripped[4:]
+            boundary = not in_comment
+            continue
+        item = _LIST_ITEM.match(line) or _CONTAINER.match(line)
+        if item:
+            contexts.append(len(item.group("indent")) + 4)
+        boundary = stripped.startswith("#") and indent < 4
+    return found
+
+
 # ---------------------------------------------------------------------------
 # The tag grammar
 # ---------------------------------------------------------------------------
@@ -539,21 +602,46 @@ _ESCAPES = (
 # `cd sdk && npm ci` is.
 _COMMAND_AT = (
     r"(?:^|[;&|(`{]|\$\(|\b(?:then|do|else)\s)\s*"
-    r"(?:(?:sudo|exec|time|command|env)\s+)*"
+    r"(?:\\?(?:[^\s;&|()<>\"'`]*/)?(?:sudo|exec|time|command|env)\s+)*"
     r"(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*"
+    # The command word itself is normalised: a leading backslash (`\aws`
+    # bypasses an alias), surrounding quotes (`"aws"`) and any path prefix
+    # (`/usr/local/bin/aws`, `./gradlew`) are all the same command.
+    r"\\?[\"']?(?:[^\s;&|()<>\"'`]*/)?"
 )
+_WORD_END = r"[\"']?(?![\w.-])"
 # M6 (T29): until the package names are published (D8), no example that runs
 # may install or run a package from a public registry -- the names return 404
 # today, so a run would fetch whatever a squatter registers.  Every install
-# verb the run image can execute, not a list of our names.
+# verb the run image can execute (PE FALSE 4), not a list of our names.
 _PACKAGE_MANAGER = re.compile(
     _COMMAND_AT + r"(?P<tool>pip[0-9.]*|pipx|poetry|uvx?|npm|npx|yarn|pnpm|bunx?"
-    r"|gem|composer|python[0-9.]*\s+-m\s+pip|go\s+(?:get|install|run)"
-    r"|cargo\s+install|dotnet\s+(?:add|tool\s+install))(?![\w.-])",
+    r"|gem|composer|python[0-9.]*[\"']?\s+-m\s+pip|go\s+(?:get|install|run)"
+    r"|cargo\s+install|mvnw?|gradlew?|swift\s+(?:package|build)"
+    r"|dotnet\s+(?:add|restore|build|tool\s+install))" + _WORD_END,
     re.M,
 )
 # PE C10: an example that runs never reaches an AWS account.
-_CLOUD = re.compile(_COMMAND_AT + r"(?P<tool>aws|cdk|sam)(?![\w.-])", re.M)
+_CLOUD = re.compile(_COMMAND_AT + r"(?P<tool>aws|cdk|sam)" + _WORD_END, re.M)
+
+
+def shell_text(body: str) -> str:
+    """*body* with here-document contents blanked: they are data, not commands
+    (the same rule ``comments`` applies)."""
+    kept, terminator = [], None
+    for line in body.split("\n"):
+        if terminator is not None:
+            if line.strip() == terminator:
+                terminator = None
+                kept.append(line)
+            else:
+                kept.append("")
+            continue
+        kept.append(line)
+        heredoc = _HEREDOC.search(line)
+        if heredoc:
+            terminator = heredoc.group("word")
+    return "\n".join(kept)
 
 
 def comments(body: str) -> list[tuple[int, str]]:
@@ -599,7 +687,7 @@ def comment_problem(name: str, line: int, text: str) -> str:
     )
 
 
-_SYNTAX_BASH: list[str] = []
+_SYNTAX_BASH: list[Optional[str]] = []
 
 
 def syntax_problem(body: str) -> Optional[str]:
@@ -611,7 +699,13 @@ def syntax_problem(body: str) -> Optional[str]:
     """
     if not _SYNTAX_BASH:
         _SYNTAX_BASH.append(bash_executable({"PATH": os.environ.get("PATH", "")}))
+    if _SYNTAX_BASH[0] is None:  # check() found no usable bash and said so once
+        return None
     return _bash_n(_SYNTAX_BASH[0], body)
+
+
+def _syntax_checked() -> bool:
+    return not (_SYNTAX_BASH and _SYNTAX_BASH[0] is None)
 
 
 @functools.lru_cache(maxsize=4096)
@@ -637,7 +731,9 @@ def block_problems(block: Block, name: str) -> list[str]:
     ]
     category = category_of(block.reason) if block.kind == "skip" else None
     if block.kind == "skip":
-        if category == "registry" and not _PACKAGE_MANAGER.search(block.body):
+        if category == "registry" and not _PACKAGE_MANAGER.search(
+            shell_text(block.body)
+        ):
             problems.append(
                 f"{where}: the skip reason says 'registry' but the block runs no "
                 "package manager; name the category that fits"
@@ -663,7 +759,7 @@ def block_problems(block: Block, name: str) -> list[str]:
     for pattern, what in _ESCAPES:
         if pattern.search(block.body):
             problems.append(f"{where}: the block {what}")
-    installer = _PACKAGE_MANAGER.search(block.body)
+    installer = _PACKAGE_MANAGER.search(shell_text(block.body))
     if installer:
         tool = " ".join(installer.group("tool").split())
         problems.append(
@@ -671,7 +767,7 @@ def block_problems(block: Block, name: str) -> list[str]:
             "or runs a package until the package names are published (D8). Tag it "
             '{.bash skip reason="registry: …"}'
         )
-    cloud = _CLOUD.search(block.body)
+    cloud = _CLOUD.search(shell_text(block.body))
     if cloud:
         problems.append(
             f"{where}: a block that runs may not call '{cloud.group('tool')}': "
@@ -732,7 +828,7 @@ def walk(root: Optional[pathlib.Path] = None) -> set[str]:
             if d not in PRUNED_DIRS and (not d.startswith(".") or d in KEPT_DOT_DIRS)
         )
         for file in files:
-            if file.endswith(".md") and file != "CLAUDE.md":
+            if file.lower().endswith(".md") and file != "CLAUDE.md":
                 found.add((pathlib.Path(directory) / file).relative_to(root).as_posix())
     return found
 
@@ -754,7 +850,7 @@ def _path_problem(name: str, rel, listed_as: str) -> Optional[str]:
         not isinstance(rel, str)
         or rel.startswith("/")
         or ".." in pathlib.PurePosixPath(rel).parts
-        or not rel.endswith(".md")
+        or not rel.lower().endswith(".md")
     ):
         return f"{name}: {rel} is not a markdown file in the repository"
     if pathlib.PurePosixPath(rel).name == "CLAUDE.md" or rel.startswith(".claude/"):
@@ -981,6 +1077,8 @@ def _pending_page(
             "fence names a language); remove its [pending] entry."
         )
     for key, ceiling in zip(_PENDING_KEYS, frozen):
+        if key == "syntax" and not _syntax_checked():
+            continue  # not measured without a usable bash (already reported)
         value, what = measured[key], _PENDING_WHAT[key]
         if _count(entry[key]) and value != entry[key]:
             problems.append(
@@ -1016,9 +1114,24 @@ def _exempt_page(rel: str, shell: list[Fence]) -> list[str]:
 
 def check(path: Optional[pathlib.Path] = None, out=None) -> dict[str, dict[str, int]]:
     """The whole contract, over every page the walk finds; every problem at once."""
-    out = out or sys.stdout
+    _SYNTAX_BASH.clear()
+    try:
+        return _check(path, out or sys.stdout)
+    finally:
+        # Resolved afresh on every run; "no usable bash" never outlives one.
+        _SYNTAX_BASH.clear()
+
+
+def _check(path: Optional[pathlib.Path], out) -> dict[str, dict[str, int]]:
     enrolment = load(path)
     problems: list[str] = list(enrolment.problems)
+    try:
+        syntax_problem("true")
+    except Refused as refusal:
+        # One problem, and every other rule still runs (bash -n is skipped).
+        problems += [f"{p}; bash -n was not run on any block" for p in refusal.problems]
+        _SYNTAX_BASH.clear()
+        _SYNTAX_BASH.append(None)
     found = walk()
     universe = {p for p in enrolment.universe if _in_this_tree(p)}
     for rel in sorted(found - universe):
@@ -1052,11 +1165,17 @@ def check(path: Optional[pathlib.Path] = None, out=None) -> dict[str, dict[str, 
     for rel in sorted(found):
         kind, entry = status.get(rel, ("none", None))
         tally[kind] += 1
+        text = (ROOT / rel).read_text(encoding="utf-8")
         try:
-            fences = parse_fences((ROOT / rel).read_text(encoding="utf-8"), rel)
+            fences = parse_fences(text, rel)
         except Refused as refusal:
             problems += refusal.problems
             continue
+        problems += [
+            f"{rel}:{line}: an indented code block; use a fenced block with a "
+            f"language (`text` for output) ({AUTHORING}#tagging-a-shell-block)"
+            for line in indented_code_lines(text)
+        ]
         shell, unlabelled = [], []
         for fence in fences:
             language = fence_language(fence.info)

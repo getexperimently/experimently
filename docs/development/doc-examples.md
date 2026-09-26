@@ -98,6 +98,7 @@ cd frontend && npm ci && npm run dev
 | `` ```{.bash skip reason="needs AWS"} `` | the reason names no category |
 | `` ```zsh `` | a shell the runner doesn't know (on every page, enrolled or not) |
 | ` ``` ` with no language | on every page; use `text` for output |
+| a block indented four spaces | on every page: it renders as code but names no language; fence it |
 
 Blocks in other languages (`json`, `python`, `javascript`, …) aren't run and need no tag.
 
@@ -152,10 +153,12 @@ a `404` or a `422`, so an example that doesn't check its output passes when it's
   An `expect` line catches it.
 - **Nothing is installed, and no cloud account is reached.** A block that runs may not
   call a package manager (`pip`, `pipx`, `poetry`, `uv`, `npm`, `npx`, `yarn`, `pnpm`,
-  `bun`, `gem`, `composer`, `go get|install|run`, `cargo install`, `dotnet add`): our
-  package names aren't published yet, so a run would fetch whatever else holds the
-  name. Nor may it call `aws`, `cdk` or `sam`. Tag such a block `skip` with the
-  `registry` or `aws` category.
+  `bun`, `gem`, `composer`, `go get|install|run`, `cargo install`, `mvn`, `gradle`,
+  `swift package|build`, `dotnet add|restore|build`): our package names aren't
+  published yet, so a run would fetch whatever else holds the name. Nor may it call
+  `aws`, `cdk` or `sam`. Writing `\aws`, `"aws"` or `/usr/local/bin/aws` is the same
+  command. Text inside a here-document is data and is not checked for either. Tag
+  such a block `skip` with the `registry` or `aws` category.
 
 Every block, `exec` or `skip`, must also pass `bash -n` (with bash 4.4 or later, the one
 that runs the examples; macOS's `/bin/bash` is 3.2 and is refused). A `skip` block whose

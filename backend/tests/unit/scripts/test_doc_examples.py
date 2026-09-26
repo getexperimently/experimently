@@ -1206,3 +1206,169 @@ def test_only_the_stack_start_may_print_without_an_expectation():
     assert dx.judge([stack_up], [printed], None, 0, "p.md") == []
     problems = dx.judge([other], [printed], None, 0, "p.md")
     assert problems and "no expectation" in problems[0]
+
+
+# ---------------------------------------------------------------------------
+# Fix round (code review of #179): bypasses, old bash, indented blocks, .MD
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize(
+    "body, message",
+    [
+        ("\\aws sts get-caller-identity", "may not call 'aws'"),
+        ("\\pip install experimently", "may not run 'pip'"),
+        ("/usr/local/bin/aws sts get-caller-identity", "may not call 'aws'"),
+        ("/usr/bin/pip install experimently", "may not run 'pip'"),
+        ('"aws" sts get-caller-identity', "may not call 'aws'"),
+        ("'npm' ci", "may not run 'npm'"),
+        ("sudo /usr/bin/env FOO=1 \\npx x", "may not run 'npx'"),
+        ("cd sdk/java && mvn install", "may not run 'mvn'"),
+        ("cd sdk/android && ./gradlew build", "may not run 'gradlew'"),
+        ("gradle build", "may not run 'gradle'"),
+        ("swift package resolve", "may not run 'swift package'"),
+        ("swift build", "may not run 'swift build'"),
+        ("dotnet restore", "may not run 'dotnet restore'"),
+        ("dotnet build", "may not run 'dotnet build'"),
+        ("dotnet add package Experimently.SDK", "may not run 'dotnet add'"),
+    ],
+)
+def test_a_command_word_is_normalised_before_it_is_matched(body, message):
+    """A backslash, quotes or a path prefix is still the same command."""
+    assert message in refused(page(f"{FENCE}{{.bash exec}}\n{body}\n{FENCE}"))
+
+
+@pytest.mark.parametrize(
+    "body",
+    ["echo '/usr/bin/aws'", "ls ./gradlew", "echo swift", 'echo "\\npm"'],
+)
+def test_normalising_does_not_make_arguments_commands(body):
+    (block,) = blocks(page(f"{FENCE}{{.bash exec}}\n{body}\n{FENCE}"))
+    assert dx.block_problems(block, "p.md") == []
+
+
+@pytest.mark.regression
+def test_a_here_document_body_is_not_a_command():
+    """Heredoc contents are data: comments() skips them, and so do M6 and AWS."""
+    data = "cat <<'EOF' > setup.txt\nnpm install experimently\naws s3 ls\nEOF"
+    (block,) = blocks(page(f"{FENCE}{{.bash exec}}\n{data}\n{FENCE}"))
+    assert dx.block_problems(block, "p.md") == []
+    real = page(f"{FENCE}{{.bash exec}}\n{data}\nnpm install experimently\n{FENCE}")
+    assert "may not run 'npm'" in refused(real)
+    registry = page(
+        f'{FENCE}{{.bash skip reason="registry: not published"}}\n{data}\n{FENCE}'
+    )
+    assert "block runs no package manager" in refused(registry)
+
+
+def _fake_old_bash(tmp_path, monkeypatch):
+    fake = tmp_path / "fakebin" / "bash"
+    fake.parent.mkdir()
+    fake.write_text("#!/bin/sh\necho 3.2\n")
+    fake.chmod(0o755)
+    monkeypatch.setenv(
+        "PATH",
+        f"{fake.parent}{__import__('os').pathsep}/usr/bin{__import__('os').pathsep}/bin",
+    )
+
+
+@pytest.mark.regression
+def test_an_old_bash_is_one_problem_among_the_others(repo, monkeypatch, tmp_path):
+    """bash < 4.4 used to escape check() and discard every other problem."""
+    write(repo, "docs/new.md", "# New\n")
+    _fake_old_bash(tmp_path, monkeypatch)
+    found = problems_of(enrol(repo, GOOD))
+    assert len(found) == 2, found
+    assert any("is bash 3.2; the examples need bash >= 4.4" in p for p in found)
+    assert any(p.startswith("docs/new.md: a page") for p in found)
+    # and the next run resolves bash again rather than silently skipping bash -n
+    with pytest.raises(dx.Refused, match="bash 3.2"):
+        dx.syntax_problem("echo hi")
+
+
+def test_an_old_bash_skips_the_pending_syntax_count_rather_than_misreporting_it(
+    repo, monkeypatch, tmp_path
+):
+    write(repo, "docs/ops.md", "# Ops\n\n```bash\necho 'x\n```\n")
+    monkeypatch.setattr(dx, "PENDING_FROZEN", {"docs/ops.md": (0, 0, 1)})
+    body = (
+        GOOD.replace(
+            'universe = ["docs/p.md"]', 'universe = ["docs/ops.md", "docs/p.md"]'
+        )
+        + '\n[pending]\n"docs/ops.md" = { comments = 0, unlabelled = 0, syntax = 1 }\n'
+    )
+    dx.check(enrol(repo, body))
+    _fake_old_bash(tmp_path, monkeypatch)
+    found = problems_of(enrol(repo, body))
+    assert len(found) == 1 and "bash 3.2" in found[0], found
+
+
+INDENTED = {
+    "plain": ("# P\n\nText.\n\n    curl -s localhost:8000/health\n", [5]),
+    "after a heading": ("# P\n    curl x\n", [2]),
+    "tab": ("# P\n\ntext\n\n\tcurl x\n", [5]),
+    "list continuation": ("# P\n\n- item\n\n    continued paragraph\n", []),
+    "numbered continuation": ("# P\n\n1. step\n\n    more text\n", []),
+    "code in a list": ("# P\n\n- item\n\n        curl -s x\n", [5]),
+    "nested list": ("# P\n\n- a\n\n    - b\n\n        text\n", []),
+    "admonition": ("# P\n\n!!! note\n    body text\n\n    more body\n", []),
+    "tab container": ('# P\n\n=== "A"\n\n    body text\n', []),
+    "lazy paragraph": ("# P\n\ntext\n    still the paragraph\n", []),
+    "in a fence": ("# P\n\n```text\n\n    not a block\n```\n", []),
+    "fence in a list": ("# P\n\n1. Run:\n\n    ```bash\n    ls\n    ```\n", []),
+    "in an html comment": ("# P\n\n<!--\n\n    hidden\n-->\n", []),
+    "after the list ends": ("# P\n\n- item\n\nback to text\n\n    curl x\n", [7]),
+    "two lines one block": ("# P\n\ntext\n\n    a\n\n    b\n", [5]),
+}
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("name", INDENTED)
+def test_indented_code_blocks_are_found_where_the_site_renders_them(name):
+    """What the check calls an indented code block is what MkDocs renders as one."""
+    text, lines = INDENTED[name]
+    assert dx.indented_code_lines(text) == lines
+    scan = dx._PageScan()
+    scan.feed(_render(text))
+    assert scan.code_blocks - len(dx.parse_fences(text, "p.md")) == len(lines)
+
+
+def test_no_page_renders_code_the_check_cannot_see():
+    """Pinned to the renderer on every walked page, so the rule cannot drift."""
+    drift = {}
+    for rel in sorted(dx.walk(REPO)):
+        text = (REPO / rel).read_text(encoding="utf-8")
+        scan = dx._PageScan()
+        scan.feed(_render(text))
+        hidden = scan.code_blocks - len(dx.parse_fences(text, rel))
+        if hidden != len(dx.indented_code_lines(text)):
+            drift[rel] = (hidden, dx.indented_code_lines(text))
+    assert drift == {}
+
+
+@pytest.mark.regression
+def test_an_indented_curl_block_is_refused_on_any_page(repo):
+    write(
+        repo,
+        "README.md",
+        "# Readme\n\nCheck it:\n\n    curl -s localhost:8000/health\n",
+    )
+    body = GOOD.replace(
+        'universe = ["docs/p.md"]', 'universe = ["README.md", "docs/p.md"]'
+    )
+    assert problems_of(enrol(repo, body)) == [
+        "README.md:5: an indented code block; use a fenced block with a language "
+        "(`text` for output) (docs/development/doc-examples.md#tagging-a-shell-block)"
+    ]
+
+
+@pytest.mark.regression
+def test_a_page_named_in_upper_case_is_in_the_universe(repo, tmp_path):
+    write(tmp_path / "w", "docs/SNEAKY.MD", "# x\n")
+    write(tmp_path / "w", "docs/Mixed.Md", "# x\n")
+    assert dx.walk(tmp_path / "w") == {"docs/SNEAKY.MD", "docs/Mixed.Md"}
+    write(repo, "docs/SNEAKY.MD", "# Sneaky\n\n```bash\ncurl -s x  # hidden\n```\n")
+    found = problems_of(enrol(repo, GOOD))
+    assert any(p.startswith("docs/SNEAKY.MD: a page") for p in found), found
+    assert any(p.startswith("docs/SNEAKY.MD: 1 shell block") for p in found), found
