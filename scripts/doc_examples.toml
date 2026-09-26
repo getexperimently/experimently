@@ -12,8 +12,8 @@
 # scripts/doc_examples.py), and each page's residual counts can only fall.
 
 [meta]
-documents = 8
-exec = 34
+documents = 16
+exec = 100
 universe = [
     ".github/pull_request_template.md",
     "CHANGELOG.md",
@@ -234,6 +234,62 @@ exec = 2
 skip = 0
 expects = 1
 
+[[document]]
+path = "docs/security/api-keys.md"
+environment = "stack"
+exec = 7
+skip = 0
+expects = 10
+
+[[document]]
+path = "docs/api/auth.md"
+environment = "stack"
+exec = 10
+skip = 1
+expects = 13
+
+[[document]]
+path = "docs/feature-flags/rollouts.md"
+environment = "stack"
+exec = 10
+skip = 0
+expects = 13
+
+[[document]]
+path = "docs/feature-flags/safety.md"
+environment = "stack"
+exec = 9
+skip = 0
+expects = 15
+
+[[document]]
+path = "docs/api/multi-armed-bandit.md"
+environment = "stack"
+exec = 5
+skip = 0
+expects = 8
+
+[[document]]
+path = "docs/api/mutual-exclusion-groups.md"
+environment = "stack"
+exec = 8
+skip = 0
+expects = 14
+
+[[document]]
+path = "docs/guides/experiment-wizard.md"
+environment = "stack"
+exec = 11
+skip = 0
+expects = 18
+
+[[document]]
+path = "docs/llm-evaluation/quickstart.md"
+environment = "stack"
+exec = 6
+skip = 4
+expects = 8
+
 [pending]
 "backend/lambda/README.md" = { comments = 0, unlabelled = 1, syntax = 0 }
 "backend/lambda/event_processor/README.md" = { comments = 5, unlabelled = 1, syntax = 0 }
@@ -244,7 +300,6 @@ expects = 1
 "docs/api/README.md" = { comments = 0, unlabelled = 0, syntax = 0 }
 "docs/api/alerting.md" = { comments = 0, unlabelled = 0, syntax = 0 }
 "docs/api/audit-logging.md" = { comments = 0, unlabelled = 1, syntax = 0 }
-"docs/api/auth.md" = { comments = 0, unlabelled = 0, syntax = 0 }
 "docs/api/bayesian.md" = { comments = 0, unlabelled = 1, syntax = 0 }
 "docs/api/compliance.md" = { comments = 2, unlabelled = 5, syntax = 0 }
 "docs/api/cuped.md" = { comments = 0, unlabelled = 1, syntax = 0 }
@@ -253,8 +308,6 @@ expects = 1
 "docs/api/endpoints.md" = { comments = 24, unlabelled = 24, syntax = 1 }
 "docs/api/integrations.md" = { comments = 0, unlabelled = 8, syntax = 0 }
 "docs/api/interaction-detection.md" = { comments = 0, unlabelled = 1, syntax = 0 }
-"docs/api/multi-armed-bandit.md" = { comments = 0, unlabelled = 0, syntax = 0 }
-"docs/api/mutual-exclusion-groups.md" = { comments = 0, unlabelled = 0, syntax = 0 }
 "docs/api/rbac.md" = { comments = 5, unlabelled = 12, syntax = 0 }
 "docs/api/sequential-testing.md" = { comments = 0, unlabelled = 0, syntax = 0 }
 "docs/api/split-url.md" = { comments = 0, unlabelled = 3, syntax = 0 }
@@ -274,13 +327,10 @@ expects = 1
 "docs/development/guidelines.md" = { comments = 3, unlabelled = 2, syntax = 0 }
 "docs/development/testing-guide.md" = { comments = 25, unlabelled = 0, syntax = 0 }
 "docs/development/workflow-explanation.md" = { comments = 5, unlabelled = 0, syntax = 0 }
-"docs/feature-flags/rollouts.md" = { comments = 0, unlabelled = 1, syntax = 0 }
-"docs/feature-flags/safety.md" = { comments = 0, unlabelled = 0, syntax = 0 }
 "docs/getting-started/modules.md" = { comments = 12, unlabelled = 0, syntax = 0 }
 "docs/getting-started/pre-commit-hooks.md" = { comments = 5, unlabelled = 0, syntax = 0 }
 "docs/getting-started/python-virtual-env-setup.md" = { comments = 6, unlabelled = 1, syntax = 0 }
 "docs/getting-started/vscode-settings.md" = { comments = 0, unlabelled = 0, syntax = 0 }
-"docs/guides/experiment-wizard.md" = { comments = 0, unlabelled = 1, syntax = 0 }
 "docs/hipaa/overview.md" = { comments = 4, unlabelled = 0, syntax = 1 }
 "docs/infrastructure/aws-iam-setup.md" = { comments = 0, unlabelled = 0, syntax = 0 }
 "docs/infrastructure/cloudwatch-setup.md" = { comments = 7, unlabelled = 4, syntax = 0 }
@@ -292,7 +342,6 @@ expects = 1
 "docs/integrations/github.md" = { comments = 3, unlabelled = 4, syntax = 0 }
 "docs/integrations/salesforce.md" = { comments = 0, unlabelled = 1, syntax = 0 }
 "docs/llm-evaluation/overview.md" = { comments = 0, unlabelled = 2, syntax = 0 }
-"docs/llm-evaluation/quickstart.md" = { comments = 2, unlabelled = 1, syntax = 0 }
 "docs/mcp-server.md" = { comments = 2, unlabelled = 0, syntax = 0 }
 "docs/monitoring/dashboard-reference.md" = { comments = 0, unlabelled = 0, syntax = 0 }
 "docs/monitoring/index.md" = { comments = 0, unlabelled = 1, syntax = 0 }
@@ -316,7 +365,6 @@ expects = 1
 "docs/sdk/react-native.md" = { comments = 0, unlabelled = 1, syntax = 0 }
 "docs/sdk/react.md" = { comments = 2, unlabelled = 0, syntax = 0 }
 "docs/sdk/ruby.md" = { comments = 3, unlabelled = 0, syntax = 0 }
-"docs/security/api-keys.md" = { comments = 4, unlabelled = 1, syntax = 0 }
 "docs/self-hosting/cdk.md" = { comments = 14, unlabelled = 1, syntax = 3 }
 "docs/self-hosting/migrations.md" = { comments = 12, unlabelled = 4, syntax = 1 }
 "docs/self-hosting/monitoring.md" = { comments = 5, unlabelled = 0, syntax = 0 }
