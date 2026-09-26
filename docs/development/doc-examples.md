@@ -13,6 +13,31 @@ pull request (the `doc-examples` workflow). A page fails when:
 
 ---
 
+## Which pages are checked
+
+Every Markdown page in the repository, except `CLAUDE.md` files and anything under
+`.claude/`. The check walks the tree for them (skipping `node_modules`, `venv`, `site`
+and hidden directories other than `.github`), and the list it finds must equal
+`[meta] universe` in `scripts/doc_examples.toml` exactly. A new page, or a renamed one,
+fails the check until the list says so.
+
+On every one of those pages:
+
+- every code fence names a language (use `text` for output, a directory tree or
+  anything else that is not code);
+- a shell fence is `bash`; `sh`, `shell`, `console`, `zsh`, `sh-session`,
+  `shell-session`, `fish`, `powershell`, `ps1` and the like are refused, because
+  nothing would check what they contain;
+- a page with a `bash` block is exactly one of **enrolled**, **exempt** or **pending**.
+
+Pending is the rollout, and it only shrinks: the list of pending pages was frozen in
+`scripts/doc_examples.py` when the walk landed, so a page can leave it but not join
+it. Each pending page records what is left to fix on it (its shell comment lines,
+unlabelled fences and blocks that fail `bash -n`), exactly, and each number can only
+fall.
+
+---
+
 ## Is my page enrolled?
 
 Enrolled pages are listed in `scripts/doc_examples.toml`. Each entry names the page, the
@@ -36,8 +61,7 @@ just to make the check pass: find out why it moved.
 
 ## Tagging a shell block
 
-Every fenced block whose language is `bash`, `sh`, `shell` or `console` carries exactly
-one tag, in braces.
+On an enrolled page, every `bash` block carries exactly one tag, in braces.
 
 **Run it:**
 
@@ -47,18 +71,18 @@ curl -s localhost:8000/health/ready | jq .status
 ```
 ````
 
-**Don't run it, and say why.** The reason is required. It's visible to anyone reading the
-page source, so write it for them:
+**Don't run it, and say why.** The reason is required, and it starts with a category
+(see [Pages that cannot run here](#pages-that-cannot-run-here)). It's visible to anyone
+reading the page source, so write it for them:
 
 ````markdown
-```{.bash skip reason="starts a long-running development server"}
+```{.bash skip reason="server: starts a long-running development server"}
 cd frontend && npm ci && npm run dev
 ```
 ````
 
 `exec` takes an optional `timeout=<seconds>` (1–3600, default 120), as in
-`{.bash exec timeout=1200}`. Only `.bash` blocks run; `.sh`, `.shell` and `.console`
-blocks can only be `skip`.
+`{.bash exec timeout=1200}`.
 
 **Refused**, with the file and line:
 
@@ -71,6 +95,10 @@ blocks can only be `skip`.
 | `` ```{.bash exec skip} `` | both tags, or neither |
 | `` ```{.bash skip} `` | `skip` without a `reason` |
 | `` ```{.bash exec title="x"} `` | any other attribute (none are allowed yet) |
+| `` ```{.bash skip reason="needs AWS"} `` | the reason names no category |
+| `` ```zsh `` | a shell the runner doesn't know (on every page, enrolled or not) |
+| ` ``` ` with no language | on every page; use `text` for output |
+| a block indented four spaces | on every page: it renders as code but names no language; fence it |
 
 Blocks in other languages (`json`, `python`, `javascript`, …) aren't run and need no tag.
 
@@ -112,11 +140,8 @@ a `404` or a `422`, so an example that doesn't check its output passes when it's
 - **The page's blocks share one shell, top to bottom.** A variable set in one block is
   there in the next. Nothing from your own environment is: each page runs with only
   `PATH`, `HOME`, `USER`, `TMPDIR` and Docker's own settings.
-- **No `#` comments in a shell block.** macOS's default `zsh` doesn't treat `#` as a
-  comment when you paste, so `jq .status   # "healthy"` fails with
-  `Could not open file #`. Say the expected value in the prose instead. A `#` inside
-  quotes, in the middle of a word (`$#`, `${#x}`, a URL's `#anchor`) or inside a
-  here-document is not a comment and is fine.
+- **No `#` comments in a shell block**, `skip` blocks included (see
+  [Rewriting a comment](#rewriting-a-comment)).
 - **Trailing slashes are real.** `POST /api/v1/feature-flags/` needs the slash; without it
   the API answers `307`, `curl` doesn't follow it, and nothing is printed.
 - **Refused because they hide a failure:** `export X=$(command)` (and `declare`, `local`,
@@ -126,8 +151,66 @@ a `404` or a `422`, so an example that doesn't check its output passes when it's
   `yes | head -1` and `… | grep -q x` (exit 141 when the pipe closes early).
 - **Shapes that pass when the page is wrong:** a failure in the middle of `a && b`.
   An `expect` line catches it.
+- **Nothing is installed, and no cloud account is reached.** A block that runs may not
+  call a package manager (`pip`, `pipx`, `poetry`, `uv`, `npm`, `npx`, `yarn`, `pnpm`,
+  `bun`, `gem`, `composer`, `go get|install|run`, `cargo install`, `mvn`, `gradle`,
+  `swift package|build`, `dotnet add|restore|build`): our package names aren't
+  published yet, so a run would fetch whatever else holds the name. Nor may it call
+  `aws`, `cdk` or `sam`. Writing `\aws`, `"aws"` or `/usr/local/bin/aws` is the same
+  command. Text inside a here-document is checked like any other line, even one
+  written to a file by `cat`, because a here-document is too easily executed
+  (`bash <<EOF`, `. <(cat <<EOF`, `(cat <<EOF) | bash`). Tag such a block `skip`
+  with the `registry` or `aws` category, or write the file another way.
 
-Every block that runs must also pass `bash -n`.
+Every block, `exec` or `skip`, must also pass `bash -n` (with bash 4.4 or later, the one
+that runs the examples; macOS's `/bin/bash` is 3.2 and is refused). A `skip` block whose
+reason is `fragment: …` is not syntax-checked, since it is a template to fill in; if it
+isn't shell at all, label it `text` instead.
+
+---
+
+## Pages that cannot run here
+
+A `skip` reason starts with one of these categories, then `: ` and the words a reader
+of the source will see:
+
+| Category | The block… |
+|---|---|
+| `checkout` | clones or enters the repository (the runner is already inside one) |
+| `dev` | is a contributor's command in a development checkout (venv, make, pytest, this repository's own tooling) |
+| `server` | starts a long-running process |
+| `aws` | needs an AWS account or credentials |
+| `idp` | needs an identity-provider tenant (Cognito, SAML, OIDC) |
+| `secret` | needs a credential or third-party account the reader holds |
+| `registry` | installs a package from a public registry; it must name the package manager |
+| `toolchain` | needs a language toolchain the runner doesn't use (Go, .NET, JVM, Swift, …) |
+| `destructive` | changes state a reader must choose to change (restore, rollback, delete) |
+| `demo` | needs the demo applications |
+| `fragment` | is a template to fill in, not runnable as written |
+| `bug #N` | fails because of the product defect in issue N: `bug #123: …` |
+
+The check prints how many skipped blocks each category holds.
+
+---
+
+## Rewriting a comment
+
+macOS's default `zsh` doesn't treat `#` as a comment when you paste, so
+`jq .status   # "healthy"` fails with `Could not open file #`, and a whole-line
+`# step 2` fails with `command not found: #`. Worse, `ENV=prod   # or staging` fails
+silently and leaves `ENV` at whatever it was before. Say it in the sentence before or
+after the block instead:
+
+````markdown
+Set the environment you are rolling back (`prod` or `staging`):
+
+```{.bash skip reason="aws: rolls back a deployment"}
+ENV=prod
+```
+````
+
+A `#` inside quotes, in the middle of a word (`$#`, `${#x}`, a URL's `#anchor`) or
+inside a here-document is not a comment and is fine.
 
 ---
 
@@ -169,7 +252,7 @@ working tree, so your next `docker compose up` recreates its containers from the
 
 ## Checking a page locally
 
-```{.bash skip reason="checks the documentation itself"}
+```{.bash skip reason="dev: checks the documentation itself"}
 python scripts/doc_examples.py --check
 ```
 
@@ -177,13 +260,13 @@ To run the examples, stop anything that holds the stack's ports first (your own
 `docker compose stop` is enough; your volumes are left alone). `--env` moves a port if
 something else holds it, and `--only` runs one page:
 
-```{.bash skip reason="runs the documentation's examples"}
+```{.bash skip reason="dev: runs the documentation's examples"}
 python scripts/doc_examples.py --run --only docs/feature-flags/create.md
 ```
 
 For the render check, build the site with the site's own toolchain first:
 
-```{.bash skip reason="builds the documentation site"}
+```{.bash skip reason="dev: builds the documentation site"}
 bash scripts/docs_toolchain.sh && mkdocs build && python scripts/doc_examples.py --render site
 ```
 
@@ -191,17 +274,47 @@ bash scripts/docs_toolchain.sh && mkdocs build && python scripts/doc_examples.py
 
 ## When the check fails
 
-Every refusal names the page and the line of the block, and says what to change:
+Every problem is reported in the same run, one line each. Each names the page (and the
+line, where there is one) and says what to change. In CI each line is also an
+annotation on the pull request's diff. For a new page with a `zsh` block, and a comment
+left in an enrolled one:
 
 ```text
-refused: docs/getting-started/quick-start.md:44: untagged shell fence '```bash'; tag it {.bash exec} or {.bash skip reason="..."}
+refused: docs/guides/new-page.md: a page scripts/doc_examples.toml does not know. Add it to [meta] universe (docs/development/doc-examples.md#enrolling-a-page).
+refused: docs/guides/new-page.md:9: 'zsh' names a shell the runner does not know; use {.bash …}
+refused: docs/guides/new-page.md: 1 shell block, and the page is not enrolled. Add it to scripts/doc_examples.toml (docs/development/doc-examples.md#enrolling-a-page), or list it as exempt with a reason.
+refused: docs/guides/tour.md:14: shell comment "# prints the flag's id" breaks when pasted into zsh. Move it into the sentence before or after the block (docs/development/doc-examples.md#rewriting-a-comment).
+4 problems
 ```
 
 ---
 
 ## Enrolling a page
 
-1. Tag every shell block `exec` or `skip`.
-2. Add `expect` lines, and say the same values in the prose.
-3. Run `python scripts/doc_examples.py --check`, and copy the counts it prints into the
-   page's entry in `scripts/doc_examples.toml`.
+1. Add the page's path to `[meta] universe` if it is new.
+2. Tag every shell block `exec` or `skip`, remove its comments, and give every fence a
+   language.
+3. Add `expect` lines, and say the same values in the prose.
+4. Run `python scripts/doc_examples.py --check`, and copy the counts it prints into a
+   `[[document]]` entry in `scripts/doc_examples.toml`; add its `exec` to `[meta] exec`,
+   add one to `[meta] documents`, and remove the page's line from `[pending]` if it has
+   one.
+
+A page with no `bash` block needs no entry, and enrolling one is refused.
+
+---
+
+## Exempting a page
+
+A page whose shell blocks are deliberately left untagged is listed as exempt, with a
+reason (1–200 characters), instead of enrolled:
+
+```toml
+[[exempt]]
+path = "docs/example.md"
+reason = "why its blocks are not tagged"
+```
+
+An exempt page still obeys the rules for every page (languages named, no other shell)
+and its `bash` blocks still carry no comments and pass `bash -n`. An exempt page with no
+`bash` block is refused.
