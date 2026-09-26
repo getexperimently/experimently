@@ -1,0 +1,104 @@
+{
+  "Rules": [
+    {
+      "RuleArn": "arn:aws:elasticloadbalancing:us-west-2:123456789012:listener-rule/app/experimentation-staging/50dc6c495c0c9188/f2f7dc8efc522ab2/9683b2d02a6cabee",
+      "Priority": "10",
+      "Conditions": [
+        {
+          "Field": "path-pattern",
+          "Values": [
+            "/api/*"
+          ],
+          "PathPatternConfig": {
+            "Values": [
+              "/api/*"
+            ]
+          }
+        }
+      ],
+      "Actions": [
+        {
+          "Type": "forward",
+          "TargetGroupArn": "arn:aws:elasticloadbalancing:us-west-2:123456789012:targetgroup/exper-Green-6F5E4D3C2B1A/fedcba9876543210",
+          "Order": 1,
+          "ForwardConfig": {
+            "TargetGroups": [
+              {
+                "TargetGroupArn": "arn:aws:elasticloadbalancing:us-west-2:123456789012:targetgroup/exper-Green-6F5E4D3C2B1A/fedcba9876543210",
+                "Weight": 1
+              }
+            ],
+            "TargetGroupStickinessConfig": {
+              "Enabled": false
+            }
+          }
+        }
+      ],
+      "IsDefault": false
+    },
+    {
+      "RuleArn": "arn:aws:elasticloadbalancing:us-west-2:123456789012:listener-rule/app/experimentation-staging/50dc6c495c0c9188/f2f7dc8efc522ab2/1a2b3c4d5e6f7a8b",
+      "Priority": "11",
+      "Conditions": [
+        {
+          "Field": "path-pattern",
+          "Values": [
+            "/health",
+            "/health/*",
+            "/metrics"
+          ],
+          "PathPatternConfig": {
+            "Values": [
+              "/health",
+              "/health/*",
+              "/metrics"
+            ]
+          }
+        }
+      ],
+      "Actions": [
+        {
+          "Type": "forward",
+          "TargetGroupArn": "arn:aws:elasticloadbalancing:us-west-2:123456789012:targetgroup/exper-Green-6F5E4D3C2B1A/fedcba9876543210",
+          "Order": 1,
+          "ForwardConfig": {
+            "TargetGroups": [
+              {
+                "TargetGroupArn": "arn:aws:elasticloadbalancing:us-west-2:123456789012:targetgroup/exper-Green-6F5E4D3C2B1A/fedcba9876543210",
+                "Weight": 1
+              }
+            ],
+            "TargetGroupStickinessConfig": {
+              "Enabled": false
+            }
+          }
+        }
+      ],
+      "IsDefault": false
+    },
+    {
+      "RuleArn": "arn:aws:elasticloadbalancing:us-west-2:123456789012:listener-rule/app/experimentation-staging/50dc6c495c0c9188/f2f7dc8efc522ab2/0000000000000000",
+      "Priority": "default",
+      "Conditions": [],
+      "Actions": [
+        {
+          "Type": "forward",
+          "TargetGroupArn": "arn:aws:elasticloadbalancing:us-west-2:123456789012:targetgroup/exper-Dashb-AABBCCDDEEFF/00112233aabbccdd",
+          "Order": 1,
+          "ForwardConfig": {
+            "TargetGroups": [
+              {
+                "TargetGroupArn": "arn:aws:elasticloadbalancing:us-west-2:123456789012:targetgroup/exper-Dashb-AABBCCDDEEFF/00112233aabbccdd",
+                "Weight": 1
+              }
+            ],
+            "TargetGroupStickinessConfig": {
+              "Enabled": false
+            }
+          }
+        }
+      ],
+      "IsDefault": true
+    }
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "Rules": [
+    {
+      "RuleArn": "arn:aws:elasticloadbalancing:us-west-2:123456789012:listener-rule/app/experimentation-staging/50dc6c495c0c9188/f2f7dc8efc522ab2/0000000000000000",
+      "Priority": "default",
+      "Conditions": [],
+      "Actions": [
+        {
+          "Type": "forward",
+          "TargetGroupArn": "arn:aws:elasticloadbalancing:us-west-2:123456789012:targetgroup/exper-Green-6F5E4D3C2B1A/fedcba9876543210",
+          "Order": 1,
+          "ForwardConfig": {
+            "TargetGroups": [
+              {
+                "TargetGroupArn": "arn:aws:elasticloadbalancing:us-west-2:123456789012:targetgroup/exper-Green-6F5E4D3C2B1A/fedcba9876543210",
+                "Weight": 1
+              }
+            ],
+            "TargetGroupStickinessConfig": {
+              "Enabled": false
+            }
+          }
+        }
+      ],
+      "IsDefault": true
+    }
+  ]
+}

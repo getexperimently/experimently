@@ -23,6 +23,12 @@ guide the only instruction there is -- so this file checks that the guide
 names the live repository, that the deploy workflow pushes to it, that the
 stacks reference it, and that no deployment document still names a dead one.
 
+Since #69 there is a second, `experimentation-platform/web`, for the
+dashboard's image, imported and created the same way. The stacks and the guide
+are checked against the exact pair. The deploy workflow is still checked for
+the backend's alone: nothing builds or pushes the dashboard image yet (Stream
+C's C4), so its `bootstrap` image is pushed by hand (guide section 1.3).
+
 (An earlier version of this docstring said `compute_stack` creates it. That
 was true of a version of the change that was reverted for the reason above,
 and the sentence survived the revert -- twelve lines above a test docstring
@@ -65,6 +71,22 @@ def _repository_name() -> str:
         sys.path.remove(str(CDK_DIR))
 
 
+#: Every repository the stacks import: the backend's and, since #69, the
+#: dashboard's. Also read from the CDK. The set is compared EXACTLY -- a third
+#: repository, or either one misspelt, is a repository an operator has to
+#: create by hand and would not know about.
+def _repository_names() -> set[str]:
+    import sys
+
+    sys.path.insert(0, str(CDK_DIR))
+    try:
+        from stacks.names import BACKEND_ECR_REPOSITORY, DASHBOARD_ECR_REPOSITORY
+
+        return {BACKEND_ECR_REPOSITORY, DASHBOARD_ECR_REPOSITORY}
+    finally:
+        sys.path.remove(str(CDK_DIR))
+
+
 def _referenced_repositories(assembly) -> set[str]:
     """Every repository name an ECS container image refers to.
 
@@ -97,22 +119,27 @@ def _referenced_repositories(assembly) -> set[str]:
 
 @pytest.mark.regression
 def test_every_referenced_repository_is_the_one_we_name(assembly):
-    """The stacks import a repository by name; they must import the same one.
+    """The stacks import repositories by name; exactly the two we name.
 
-    Nothing in the CDK *creates* it, deliberately -- see `stacks/names.py`.
+    Nothing in the CDK *creates* them, deliberately -- see `stacks/names.py`.
     A registry is account-scoped and these stacks are per-environment, so a
     fixed name owned by one of them means a second environment in the same
     account cannot deploy.
+
+    Exact, in both directions: a name referenced but not in `names.py` is a
+    repository nobody is told to create, and a name in `names.py` that nothing
+    references is a guide telling operators to create a dead one.
     """
     referenced = _referenced_repositories(assembly)
     assert referenced, (
         "no container image refers to a repository at all, so nothing below "
         "examined anything"
     )
-    wrong = referenced - {_repository_name()}
-    assert not wrong, (
-        f"these repositories are referenced but are not {_repository_name()!r}: "
-        f"{sorted(wrong)}"
+    expected = _repository_names()
+    assert referenced == expected, (
+        f"referenced but not named in stacks/names.py: "
+        f"{sorted(referenced - expected)}; named but referenced by nothing: "
+        f"{sorted(expected - referenced)}"
     )
 
 
@@ -225,7 +252,7 @@ def test_the_guide_creates_the_repository_the_deployment_uses():
         "the guide gives no `aws ecr create-repository` command. Nothing in "
         "the CDK creates the repository either, so nothing would"
     )
-    assert created == {_repository_name()}, (
+    assert created == _repository_names(), (
         f"the guide tells an operator to create {sorted(created)}, but the "
-        f"deployment pushes to and runs from {_repository_name()!r}"
+        f"stacks run from {sorted(_repository_names())}"
     )

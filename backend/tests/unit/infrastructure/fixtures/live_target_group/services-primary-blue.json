@@ -1,0 +1,35 @@
+{
+  "services": [
+    {
+      "serviceArn": "arn:aws:ecs:us-west-2:123456789012:service/experimentation-staging/experimentation-backend-staging",
+      "serviceName": "experimentation-backend-staging",
+      "clusterArn": "arn:aws:ecs:us-west-2:123456789012:cluster/experimentation-staging",
+      "status": "ACTIVE",
+      "desiredCount": 2,
+      "runningCount": 2,
+      "deploymentController": {
+        "type": "CODE_DEPLOY"
+      },
+      "taskSets": [
+        {
+          "id": "ecs-svc/1111111111111111111",
+          "taskSetArn": "arn:aws:ecs:us-west-2:123456789012:task-set/experimentation-staging/experimentation-backend-staging/ecs-svc/1111111111111111111",
+          "status": "PRIMARY",
+          "taskDefinition": "arn:aws:ecs:us-west-2:123456789012:task-definition/experimentation-backend-staging:42",
+          "computedDesiredCount": 2,
+          "runningCount": 2,
+          "launchType": "FARGATE",
+          "loadBalancers": [
+            {
+              "targetGroupArn": "arn:aws:elasticloadbalancing:us-west-2:123456789012:targetgroup/exper-BlueT-1A2B3C4D5E6F/0123456789abcdef",
+              "containerName": "backend",
+              "containerPort": 8000
+            }
+          ],
+          "stabilityStatus": "STEADY_STATE"
+        }
+      ]
+    }
+  ],
+  "failures": []
+}
