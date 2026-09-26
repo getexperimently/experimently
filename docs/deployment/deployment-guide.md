@@ -130,8 +130,10 @@ For each environment, **protection first**, then configuration:
 
 ### 1.6 The stacks
 
+Bootstrap once per account and region, then deploy the stacks:
+
 ```bash
-cdk bootstrap aws://<account>/us-west-2          # once per account and region
+cdk bootstrap aws://<account>/us-west-2
 
 cd infrastructure/cdk
 export ENVIRONMENT=staging CDK_DEFAULT_REGION=us-west-2
@@ -157,22 +159,28 @@ the dashboard outside CloudFormation and a `cdk deploy` undoes them silently:
   and every probe stays green.
 
 Two read-only checks print the values to pass, and refuse a value that does not
-match what is running:
+match what is running. Run them from the repository root: the first prints
+`api_live_target_group`, the second `dashboard_image_tag`. The commands after
+them print the image of the backend revision that is serving:
 
 ```bash
-# from the repo root; both read-only
-python3 scripts/check_live_target_group.py --env "$ENVIRONMENT"   # prints api_live_target_group
-python3 scripts/check_dashboard_image.py --env "$ENVIRONMENT"     # prints dashboard_image_tag
+python3 scripts/check_live_target_group.py --env "$ENVIRONMENT"
+python3 scripts/check_dashboard_image.py --env "$ENVIRONMENT"
 RUNNING_TD=$(aws ecs describe-services --cluster "experimentation-$ENVIRONMENT" \
   --services "experimentation-backend-$ENVIRONMENT" \
   --query "services[0].taskSets[?status=='PRIMARY'].taskDefinition" --output text)
 test -n "$RUNNING_TD" || { echo "no PRIMARY task set"; exit 1; }
 aws ecs describe-task-definition --task-definition "$RUNNING_TD" \
   --query "taskDefinition.containerDefinitions[?name=='backend'].image" --output text
-# re-run both checks with the values you will pass; each exits non-zero on a mismatch:
+```
+
+Then re-run both checks with the values you will pass (each exits non-zero on a
+mismatch), and deploy, passing the backend image's tag (or keeping `bootstrap`)
+and the two values the checks printed:
+
+```bash
 python3 scripts/check_live_target_group.py --env "$ENVIRONMENT" --expect <blue|green>
 python3 scripts/check_dashboard_image.py --env "$ENVIRONMENT" --expect sha256:<hex>
-# pass the backend image's tag, or keep bootstrap, and the two values the checks printed:
 cdk deploy "experimentation-fargate-$ENVIRONMENT" --require-approval never \
   -c backend_image_tag=<tag> -c api_live_target_group=<blue|green> \
   -c dashboard_image_tag=sha256:<hex>
@@ -335,12 +343,17 @@ in a later release, once nothing running reads it.
 
 ## 5. Post-Deployment Verification
 
+The block sets `ENV=staging`; for production, change it to `ENV=prod`.
+`/health` is the readiness check: look at `checks.database.status` in what it
+prints. The unauthenticated request to `/api/v1/experiments/` answers
+`401 {"detail":"Not authenticated"}`:
+
 ```bash
-ENV=staging   # or prod
+ENV=staging
 BASE=https://app.<domain>
 
-curl -s "$BASE/health"                      # readiness: checks.database.status
-curl -s "$BASE/api/v1/experiments/"         # 401 {"detail":"Not authenticated"}
+curl -s "$BASE/health"
+curl -s "$BASE/api/v1/experiments/"
 
 aws ecs describe-services --cluster "experimentation-$ENV" \
   --services "experimentation-backend-$ENV" \

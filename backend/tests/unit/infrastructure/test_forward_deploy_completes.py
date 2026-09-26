@@ -560,6 +560,27 @@ def test_could_not_tell_is_red_not_green(aws):
     assert "Could not tell whether the API is serving" in out
 
 
+def _null_weight(rules: dict = RULES_GREEN) -> dict:
+    """The /api/* rule with `"Weight": null`: `None > 0` raises TypeError."""
+    rules = copy.deepcopy(rules)
+    rules["Rules"][0]["Actions"][0]["ForwardConfig"]["TargetGroups"][0]["Weight"] = None
+    return rules
+
+
+@pytest.mark.regression
+def test_a_crash_in_the_serving_check_is_unknown_not_an_untyped_exit(aws):
+    """A TypeError from a malformed rule once escaped shift() uncaught: exit 1
+    with a traceback and no `result` output for the workflow to read."""
+    code, out, _, outputs = _shift(
+        aws, [tick("InProgress", AFTER, _null_weight())], deadline="0"
+    )
+    assert code == 1, out
+    assert outputs == {"result": "unknown"}, out
+    assert "Could not tell whether the API is serving" in out
+    assert "TypeError" in out
+    assert "Traceback" not in out
+
+
 # --- api_serving.py on its own: the predicate C4 calls ------------------------------
 
 
@@ -607,6 +628,35 @@ def test_the_expected_colour_is_derived_not_defaulted(aws):
 def test_the_predicate_exit_codes(aws, services, rules, arn, expected):
     code, out, calls, _ = _serving(aws, services, rules, arn)
     assert code == expected, out
+
+
+@pytest.mark.regression
+def test_a_null_weight_in_the_rule_is_could_not_tell_not_not_yet(aws):
+    """Exit 1 means "retry" to every caller. A TypeError from `"Weight": null`
+    once exited 1, so a broken check read as a shift still in progress."""
+    code, out, _, _ = _serving(aws, AFTER, _null_weight())
+    assert code == 2, out
+    assert "UNKNOWN" in out and "TypeError" in out, out
+    assert "Traceback" not in out
+
+
+@pytest.mark.regression
+def test_a_missing_aws_binary_is_could_not_tell_not_not_yet(tmp_path):
+    """No `aws` on PATH raises FileNotFoundError inside subprocess.run; that
+    once exited 1 ("not yet"), and a caller would have retried to its deadline."""
+    empty = tmp_path / "no-aws"
+    empty.mkdir()
+    result = subprocess.run(
+        [sys.executable, str(SERVING), CLUSTER, SERVICE, NEW],
+        env=_no_aws_credentials({**os.environ, "PATH": str(empty)}),
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    out = result.stdout + result.stderr
+    assert result.returncode == 2, out
+    assert "UNKNOWN" in out and "FileNotFoundError" in out, out
+    assert "Traceback" not in out
 
 
 def test_the_predicate_refuses_a_service_of_another_environment(aws):
