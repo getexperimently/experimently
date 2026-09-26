@@ -299,6 +299,16 @@ For the render check, build the site with the site's own toolchain first:
 bash scripts/docs_toolchain.sh && mkdocs build && python scripts/doc_examples.py --render site
 ```
 
+The render check covers every page under `docs/`, enrolled or not: a fence the site
+doesn't show as code, such as one inside an HTML comment, fails it on any page.
+Pages outside `docs/` aren't part of the site, so nothing renders them.
+
+CI's render job also runs two checks that `--check` can't, because `--check` has to
+work in a copy of the tree with no `.git` and no zsh. `--walk-vs-git` fails if the pages
+the check walks differ from the Markdown files git tracks (less `CLAUDE.md` files and
+`.claude/`). `--zsh-oracle` fails if zsh's own parser and the comment rule disagree about
+any line of a `bash` block. Both run locally too, given git and zsh.
+
 ---
 
 ## When the check fails
