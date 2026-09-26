@@ -192,3 +192,27 @@ def test_the_guide_has_the_ordered_checklist():
     assert text.index("required reviewer") < text.index("Variables `AWS_ACCOUNT_ID`")
     # The OIDC subject is decoded before the trust policy is written (PE C5).
     assert "Decode a\n  real token" in text or "decode a real token" in text.lower()
+
+
+# --- the dashboard's deploy and rollback (#69) ---------------------------------
+
+
+@pytest.mark.regression
+def test_the_iam_doc_says_why_update_service_is_on_star_and_to_re_apply():
+    """UpdateService on `*`, and why; and the re-apply before the first deploy."""
+    text = " ".join((DOCS / "deployment" / "iam-permissions.md").read_text().split())
+    assert "`ecs:UpdateService`" in text
+    assert "on `*`" in text and "dominates" in text
+    assert (
+        "Roles created from a policy before the dashboard rollout lack "
+        "`ecs:UpdateService`" in text
+    )
+
+
+@pytest.mark.regression
+def test_the_guide_pins_the_dashboard_digest_and_the_runbook_covers_the_dashboard():
+    assert "dashboard_image_tag=sha256:" in GUIDE.read_text()
+    runbook = RUNBOOK.read_text()
+    assert "deployments[?status=='PRIMARY']" in runbook
+    assert "dashboard_task_definition_arn" in runbook
+    assert "### The dashboard is the opposite case" in runbook

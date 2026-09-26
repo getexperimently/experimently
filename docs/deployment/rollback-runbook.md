@@ -51,6 +51,9 @@ Is any of the following true?
           |   YES ──→ ROLLBACK APPLICATION + DATABASE (Method 1 + DB Rollback section)
           |   NO  ──→ HOTFIX (deploy new tag following standard procedure)
           |
+          |   Only the dashboard is broken, and the API is fine?
+          |   YES ──→ DASHBOARD ONLY (Method 2, the dashboard block)
+          |
           v
    Monitor for 5 more minutes; page if it worsens
 ```
@@ -72,8 +75,17 @@ Is any of the following true?
 This is the preferred method. It is audited and sends Slack notifications. It does **not** run smoke tests; Step 5 of Method 2 and the post-rollback checklist are by hand.
 
 The deploy that went wrong printed the target for you: its run summary ends
-with `Rollback: Actions → Rollback → environment=<env>, task_definition_arn=experimentation-backend-<env>:<n>`.
-Use that, and skip Step 1.
+with `Rollback: Actions → Rollback → environment=<env>, task_definition_arn=experimentation-backend-<env>:<n>, dashboard_task_definition_arn=experimentation-dashboard-<env>:<m>`.
+Use that, and skip Step 1. It carries both revisions, the API's and the
+dashboard's, so both go back. The dashboard part is left out when the dashboard
+was not on a release before that deploy (the bootstrap image, or a tag a `cdk
+deploy` registered): there is then no released dashboard to go back to, and the
+summary says so.
+
+The workflow always rolls the **API** back. It has no dashboard-only mode: it
+first stops any CodeDeploy deployment in flight with auto-rollback, which
+reverts an API that shifted within the last hour. To put back the dashboard
+alone, use Method 2's dashboard block.
 
 ### Step 1: Find the Previous Task Definition ARN
 
@@ -118,6 +130,25 @@ aws ecs describe-services \
   --cluster "experimentation-$ENV" \
   --services experimentation-backend-$ENV \
   --query 'services[0].events[:5]'
+
+# The dashboard: the same listing for its own family and container. Only a
+# revision whose image is a digest (web@sha256:...) is a release; a deploy
+# registered it. `:bootstrap` or a version tag is one CloudFormation
+# registered, and Rollback refuses it.
+for arn in $(aws ecs list-task-definitions \
+      --family-prefix experimentation-dashboard-$ENV \
+      --sort DESC --max-results 10 --query 'taskDefinitionArns' --output text); do
+  image=$(aws ecs describe-task-definition --task-definition "$arn" \
+    --query "taskDefinition.containerDefinitions[?name=='dashboard'].image" --output text)
+  echo "$arn  $image"
+done
+
+# What the dashboard is serving: its PRIMARY *deployment* (it has no task sets).
+aws ecs describe-services \
+  --cluster "experimentation-$ENV" \
+  --services experimentation-dashboard-$ENV \
+  --query "services[0].deployments[?status=='PRIMARY'].[taskDefinition,rolloutState]" \
+  --output text
 ```
 
 ### Step 2: Trigger the Rollback Workflow
@@ -129,6 +160,13 @@ aws ecs describe-services \
      environment's family is refused with "Re-run with environment=…"
    - **Reason for rollback:** Brief description, e.g., `"Error rate 8% after v1.2.3 deploy, p99 latency 5200ms"`
    - **Previous task definition ARN:** The ARN from Step 1 (the last known-good revision)
+   - **dashboard_task_definition_arn** (optional): the dashboard revision from
+     Step 1, `experimentation-dashboard-$ENV:<n>`. Leave it empty to leave the
+     dashboard as it is; the run summary then says what the dashboard is
+     serving. A dashboard revision in the API field, or an API revision in the
+     dashboard field, is refused by name ("… is a dashboard revision; it goes
+     in dashboard_task_definition_arn, not task_definition_arn", and the
+     reverse)
 4. Click **Run workflow**
 
 The workflow will:
@@ -143,6 +181,11 @@ The workflow will:
   auto-rollback turns back into the revision you were rolling away from
 - Wait until the target revision is the **PRIMARY task set** and every desired
   task is running
+- If a dashboard revision was given (it was checked before anything changed:
+  ACTIVE, in the dashboard family of this environment, one `dashboard`
+  container, a digest image): roll the dashboard's service onto it, and refuse,
+  without changing it, if the dashboard's PRIMARY deployment is no longer the
+  revision the check saw (another Deploy, Rollback or `cdk deploy` changed it)
 - Notify `#deployments` with the result, success or failure
 
 It does **not** run smoke tests; `/health` is Step 5 below, by hand.
@@ -169,6 +212,23 @@ Running task count should stay at the desired count throughout. This is a
 provisioned alongside the current one and traffic moves to it in one shift, so
 `Serving` changes from the old revision to the new one at once rather than
 tasks being replaced one at a time.
+
+### The dashboard is the opposite case
+
+The dashboard's service (`experimentation-dashboard-$ENV`) uses the ECS
+**rolling** deployment controller, not CodeDeploy. Everything said above about
+the API is reversed for it:
+
+- `aws ecs update-service --task-definition` **is** the right call; there is no
+  CodeDeploy deployment and no traffic shift to approve.
+- What it is serving is its PRIMARY **deployment**,
+  `deployments[?status=='PRIMARY']`, not `taskSets` (it has none).
+  `services[0].taskDefinition` does move for it.
+- `aws ecs wait services-stable` reports **success after the deployment circuit
+  breaker has rolled a failed revision back**: one deployment, every task
+  running, just not the revision you asked for. Wait on the PRIMARY
+  deployment's `taskDefinition` and `rolloutState` instead, as Method 2's
+  dashboard block does.
 
 ---
 
@@ -267,6 +327,35 @@ echo "Rollback complete. Running verification..."
 
 # Step 5: Verify health
 curl -sf "https://app.<domain>/health" && echo "Health check PASSED" || echo "Health check FAILED"
+```
+
+**The dashboard alone.** This is the only dashboard-only path. The Rollback
+workflow always rolls the API back too, and stops any in-flight API deployment
+with auto-rollback; and within about an hour of a deploy's traffic shift,
+Deploy refuses a re-run while that CodeDeploy deployment is still active. Pick
+the target from Method 1 Step 1's dashboard listing (a digest image):
+
+```bash
+DASH_TASK_DEF="arn:aws:ecs:us-west-2:ACCOUNT_ID:task-definition/experimentation-dashboard-$ENV:6"
+
+# A rolling service: pointing it at the revision IS the rollback.
+aws ecs update-service \
+  --cluster "experimentation-$ENV" \
+  --service experimentation-dashboard-$ENV \
+  --task-definition "$DASH_TASK_DEF" \
+  --query "service.deployments[?status=='PRIMARY'].id" --output text
+
+# Wait on the PRIMARY deployment, NOT `wait services-stable` (see "The
+# dashboard is the opposite case"). If the PRIMARY turns back to the revision
+# you replaced, the circuit breaker rejected the target: stop and read the
+# service events.
+until [ "$(aws ecs describe-services --cluster "experimentation-$ENV" \
+             --services experimentation-dashboard-$ENV \
+             --query "services[0].deployments[?status=='PRIMARY'].[taskDefinition,rolloutState] | [0]" \
+             --output text)" = "$(printf '%s\tCOMPLETED' "$DASH_TASK_DEF")" ]; do
+  sleep 10
+done
+curl -sS -o /dev/null -w '%{http_code} %{content_type}\n' "https://app.<domain>/"
 ```
 
 After using Method 2, post an incident note in `#deployments` and open a follow-up task to capture it in the GitHub Actions audit log.
@@ -464,6 +553,9 @@ Complete every item before closing the incident. Do not declare the incident res
 - [ ] p99 API latency returned to < 500ms
 - [ ] ECS running task count equals desired count (2 in staging, 3 in prod)
 - [ ] ECS deployment status is `PRIMARY` with a single active deployment
+- [ ] The dashboard's running count equals its desired count (1 in staging,
+      2 in prod), on the revision you meant, `rolloutState` `COMPLETED`
+- [ ] `GET https://app.<domain>/` returns 200 with `text/html`
 
 ```bash
 # Quick health verification commands
@@ -472,6 +564,11 @@ aws ecs describe-services \
   --cluster "experimentation-$ENV" \
   --services experimentation-backend-$ENV \
   --query 'services[0].{Running:runningCount,Desired:desiredCount,Status:status}'
+aws ecs describe-services \
+  --cluster "experimentation-$ENV" \
+  --services experimentation-dashboard-$ENV \
+  --query "services[0].deployments[?status=='PRIMARY'].{td:taskDefinition,state:rolloutState,running:runningCount,desired:desiredCount}"
+curl -sS -o /dev/null -w '%{http_code} %{content_type}\n' "https://app.<domain>/"
 ```
 
 ### Smoke Tests (within 10 minutes of rollback)

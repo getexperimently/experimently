@@ -148,9 +148,9 @@ the dashboard outside CloudFormation and a `cdk deploy` undoes them silently:
   target groups outside CloudFormation, and a `cdk deploy` that names the empty
   one sends every API request to it while every probe stays green.
 - **The dashboard's running digest.** The dashboard service rolls under the ECS
-  deployment controller. Once releases reach it (#69), each one points it at a
-  task definition revision, by image digest, that CloudFormation never saw;
-  until then it runs `:bootstrap` and the check says so. A `cdk deploy` that
+  deployment controller. Each deploy registers a task definition revision for
+  it, by image digest, that CloudFormation never saw, and rolls the service
+  onto it; before the first deploy it runs `:bootstrap` and the check says so. A `cdk deploy` that
   changes the dashboard's task definition in any way re-points the service at CloudFormation's own
   revision, whose image is `web:<dashboard_image_tag>` -- `web:bootstrap` when
   the value is not given. The dashboard silently goes back to the placeholder,
@@ -177,6 +177,11 @@ cdk deploy "experimentation-fargate-$ENVIRONMENT" --require-approval never \
   -c backend_image_tag=<tag> -c api_live_target_group=<blue|green> \
   -c dashboard_image_tag=sha256:<hex>
 ```
+
+Every deploy's run summary also prints the digest the dashboard is running
+after it, as `-c dashboard_image_tag=sha256:<hex>` with the matching `--expect`
+check. Re-run the check anyway before a `cdk deploy`: a Rollback or another
+deploy since then moves it.
 
 The dashboard pin is the **digest** the check prints (`sha256:<hex>`), not an
 image tag: a tag can be moved to other bytes, and the digest synthesises the
@@ -246,11 +251,14 @@ place, or the founder has waived it in writing.
 4. **Approve** when the environment asks. Nothing in AWS has changed yet.
 5. The deploy job then, in order: refuses an unconfigured environment, the
    wrong AWS account, missing stacks, a profile the stacks were not deployed
-   for, missing secrets or repository, a CodeDeploy deployment of this
-   environment that is still active -- all before any change -- and then
-   builds `:<tag>-<profile>` from the tag (or reuses it if an earlier deploy of
-   the same release into this account already pushed it), checks the image's
-   labels name the tag's commit,
+   for, missing secrets or either ECR repository, a CodeDeploy deployment of
+   this environment that is still active, and a dashboard service that is
+   missing, mid-rollout or not on the ECS rolling controller -- all before any
+   change -- and then builds `:<tag>-<profile>` from the tag (or reuses it if an
+   earlier deploy of the same release into this account already pushed it),
+   checks the image's labels name the tag's commit, does the same for the
+   dashboard image (`experimentation-platform/web:<tag>-<profile>`, the profile
+   passed as a build argument), and only then
    snapshots the database (`pre-deploy-<env>-<tag>-<time>`), registers and
    runs the migration by digest, registers the API revision by digest, and
    creates the CodeDeploy deployment.
@@ -269,9 +277,25 @@ place, or the founder has waived it in writing.
    `401 {"detail":"Not authenticated"}`). A failed smoke test does **not**
    roll back. The run summary gives the line:
    `Rollback: Actions → Rollback → environment=<env>, task_definition_arn=experimentation-backend-<env>:<n>`.
-8. **The summary** names the live API target group and the value for the next
-   `cdk deploy` of `experimentation-fargate-<env>`:
-   `-c api_live_target_group=<blue|green>` ([section 1.6](#16-the-stacks)).
+8. **The dashboard**, only after the API answered. The run registers the
+   dashboard's task definition with the new image's digest, checks again that
+   the API is still serving this run's revision (a Rollback run may have
+   started meanwhile), and rolls the dashboard's service onto the new
+   revision, refusing if the dashboard is no longer on the revision it
+   recorded before anything changed. It waits on the PRIMARY deployment until
+   it is the new revision, `COMPLETED`, with every task running: a rollout the
+   circuit breaker rolled back is red, not "stable". Then
+   `GET ${PUBLIC_BASE_URL}/` must answer 200 with `text/html`. The **last**
+   check of the run is the API check once more.
+9. **The summary** names the live API target group and the dashboard's running
+   digest, with the values for the next `cdk deploy` of
+   `experimentation-fargate-<env>`: `-c api_live_target_group=<blue|green>` and
+   `-c dashboard_image_tag=sha256:<hex>` ([section 1.6](#16-the-stacks)), and a
+   rollback line carrying both revisions.
+
+The deploy job's timeout is 150 minutes: every wait in it is a named bound
+(snapshot, migration, traffic shift, dashboard rollout, the two smoke tests)
+and the sum leaves room for two uncached image builds.
 
 **The canary is timed only.** No alarm is attached to the deployment group
 (DECISIONS T21). So a release that passes `/health` and fails everywhere else
@@ -345,10 +369,16 @@ curl -s "$BASE/api/v1/experiments/"         # 401 {"detail":"Not authenticated"}
 aws ecs describe-services --cluster "experimentation-$ENV" \
   --services "experimentation-backend-$ENV" \
   --query "services[0].{Running:runningCount,Desired:desiredCount,Serving:taskSets[?status=='PRIMARY'].taskDefinition|[0]}"
+
+curl -sS -o /dev/null -w '%{http_code} %{content_type}\n' "$BASE/"   # 200 text/html
+aws ecs describe-services --cluster "experimentation-$ENV" \
+  --services "experimentation-dashboard-$ENV" \
+  --query "services[0].deployments[?status=='PRIMARY'].{td:taskDefinition,state:rolloutState,running:runningCount,desired:desiredCount}"
 ```
 
 Expected: `Running == Desired`, and `Serving` the revision the run summary
-named.
+named; the dashboard's one PRIMARY deployment on the new dashboard revision,
+`COMPLETED`, running equal to desired.
 
 ---
 
@@ -362,11 +392,14 @@ Actions → Deploy (from main; environment = staging | prod)
                 build :<tag>-<profile> from ./release (or reuse it)
                 snapshot  →  migration (by digest)  →  API revision (by digest)
                 CodeDeploy blue/green  →  healthy targets  →  approve  →
-                canary (timed only)  →  PRIMARY + /api/* rule  →  smoke  →  summary
+                canary (timed only)  →  PRIMARY + /api/* rule  →  smoke  →
+                API check  →  dashboard rollout (by digest)  →  dashboard smoke  →
+                API check  →  summary
       |
       v
 ECS cluster experimentation-<env>
-  service experimentation-backend-<env>   image .../backend@sha256:...
+  service experimentation-backend-<env>     image .../backend@sha256:...
+  service experimentation-dashboard-<env>   image .../web@sha256:...
   secrets  /<env>/experimentation/*  and the Aurora-generated credentials
   Aurora (identifier: stack output)  ·  Redis over TLS (REDIS_SSL=true)
 ```
@@ -440,6 +473,47 @@ the *previous* release, not the new one.
 2. Before any further deploy, record the observation. Then see the fallbacks
    named in `fargate_service_stack.py` (ECS-native blue/green, or separate
    hosts).
+
+### The dashboard did not roll out
+
+These all come after the API has shifted, so the API is new and the dashboard
+is not (or its state is in question). Three things hold for each:
+
+- **Deploy refuses a re-run** until the CodeDeploy deployment of this run is no
+  longer active, about an hour after its traffic shift.
+- **The rollback line in the run summary reverts the API too**, not only the
+  dashboard.
+- **The dashboard alone**, inside that hour, is the
+  [rollback runbook](rollback-runbook.md)'s Method 2, dashboard block.
+
+The titles, and what each means:
+
+- **"Dashboard not rolled out"** -- the API check before the rollout failed, so
+  the dashboard was not touched. The line above it is the check's own: another
+  revision is PRIMARY, a traffic shift is in progress or the check crashed
+  (exit 1), the check could not tell (exit 2), or the route and the tasks
+  disagree (exit 3). Find out what changed the API (usually a Rollback run)
+  before anything else.
+- **"… rolled back by ECS"** -- the new dashboard's tasks did not become
+  healthy, and the deployment circuit breaker put the previous revision back.
+  The service events and a stopped task's reason are printed above; the task
+  log is `/ecs/experimentation-dashboard-<env>`.
+- **"… changed during this run"** -- the dashboard's PRIMARY deployment is
+  neither this run's revision nor the one before it: a Rollback run, another
+  deploy or a `cdk deploy` changed it. This run did not change it back.
+- **"… rollout did not finish"** -- the deadline passed with ECS still working
+  on it. The run stopped waiting and stopped nothing; watch the service.
+- **"Workflow role cannot update …"** -- the role predates the dashboard
+  rollout; re-apply the policy ([IAM permissions](iam-permissions.md)).
+- **"Dashboard smoke test failed"** -- ECS reports the new revision serving,
+  but `GET /` did not answer 200 `text/html`: check the HTTPS listener's
+  default action in `experimentation-fargate-<env>`.
+- **"API changed after the dashboard rolled out"** -- the last API check
+  failed: the dashboard is new and the API may not be. Check both before
+  anything else (`scripts/api_serving.py`, and the dashboard describe in
+  section 5).
+- **"API deployed, dashboard not confirmed"** -- the summary line of all of the
+  above: it says whether the API check passed, and what the dashboard is on.
 
 ### "Smoke test failing after deployment"
 

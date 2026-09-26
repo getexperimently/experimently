@@ -83,6 +83,9 @@ env:
   # One region (docs/self-hosting/cdk.md deploys the stacks to the same one).
   AWS_REGION: us-west-2
   ECR_BACKEND_REPO: experimentation-platform/backend
+  # The dashboard's image (#69). Created by hand like the backend's
+  # (deployment guide section 1.3); the CDK imports both by name.
+  ECR_DASHBOARD_REPO: experimentation-platform/web
   # How long the forward deploy waits for the API to serve the new revision:
   # the replacement tasks starting, the approval, the canary's five minutes
   # and the final shift. It is a bound, not an estimate. When it passes, the
@@ -92,6 +95,24 @@ env:
   # deployment, which is harmless.
   CODEDEPLOY_DEADLINE_SECONDS: '1800'
   CODEDEPLOY_POLL_SECONDS: '10'
+  # Every other wait the deploy job can sit through, named so a unit test
+  # (test_dashboard_deploy_wiring.py) sums them against timeout-minutes. Each
+  # is a bound, not an estimate:
+  #   the snapshot waiter, cut off by `timeout` so that its bound is this
+  #   value and not whatever the runner's AWS CLI polls for;
+  SNAPSHOT_DEADLINE_SECONDS: '1800'
+  #   the migration task (scripts/run_migration_task.sh reads it; its own
+  #   default is the same);
+  MIGRATION_TIMEOUT_SECONDS: '1800'
+  #   the dashboard's rolling deployment (scripts/ecs_rolling_rollout.sh's
+  #   --deadline and --interval);
+  DASHBOARD_ROLLOUT_DEADLINE_SECONDS: '1200'
+  DASHBOARD_ROLLOUT_POLL_SECONDS: '15'
+  #   each smoke test, the API's and the dashboard's: attempts, the pause
+  #   between two, and curl's --max-time for one.
+  SMOKE_ATTEMPTS: '5'
+  SMOKE_SLEEP_SECONDS: '10'
+  SMOKE_MAX_TIME_SECONDS: '15'
 
 jobs:
   preflight:
@@ -188,7 +209,9 @@ jobs:
     name: Deploy ${{ inputs.version }} to ${{ inputs.environment }}
     needs: preflight
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    # The named waits above add up to about 115 minutes before two cold image
+    # builds; the budget test states their allowance.
+    timeout-minutes: 150
     environment: ${{ inputs.environment }}
     permissions:
       id-token: write
@@ -204,6 +227,10 @@ jobs:
       ECS_CLUSTER: experimentation-${{ inputs.environment }}
       ECS_BACKEND_SERVICE: experimentation-backend-${{ inputs.environment }}
       ECS_BACKEND_TASK_FAMILY: experimentation-backend-${{ inputs.environment }}
+      # The dashboard's rolling-update service and its task-definition family
+      # (stacks/dashboard_service.py). They spell the same and are two things.
+      ECS_DASHBOARD_SERVICE: experimentation-dashboard-${{ inputs.environment }}
+      ECS_DASHBOARD_TASK_FAMILY: experimentation-dashboard-${{ inputs.environment }}
       MIGRATE_TASK_FAMILY: experimentation-migrate-${{ inputs.environment }}
       MIGRATE_LOG_GROUP: /ecs/experimentation-migrate-${{ inputs.environment }}
       CODEDEPLOY_APPLICATION: experimentation-platform-${{ inputs.environment }}
@@ -373,18 +400,20 @@ jobs:
           fi
           echo "profile=${PROFILE}: all ${#required[@]} required secrets exist"
 
-      # Nothing in the CDK creates this repository -- both stacks import it by
-      # name -- so it is created once per account by hand (deployment guide,
-      # section 1.3). Named here in seconds rather than as a `docker push`
-      # failure.
-      - name: ECR repository exists
+      # Nothing in the CDK creates these repositories -- the stacks import them
+      # by name -- so each is created once per account by hand (deployment
+      # guide, section 1.3). Named here in seconds rather than as a `docker
+      # push` failure.
+      - name: ECR repositories exist
         run: |
           set -euo pipefail
-          if ! aws ecr describe-repositories \
-                --repository-names "${ECR_BACKEND_REPO}" >/dev/null 2>&1; then
-            echo "::error::the ECR repository ${ECR_BACKEND_REPO} does not exist in ${AWS_REGION}. Nothing in the CDK creates it; create it once per account and region -- docs/deployment/deployment-guide.md section 1.3."
-            exit 1
-          fi
+          for repo in "$ECR_BACKEND_REPO" "$ECR_DASHBOARD_REPO"; do
+            if ! aws ecr describe-repositories \
+                  --repository-names "${repo}" >/dev/null 2>&1; then
+              echo "::error::the ECR repository ${repo} does not exist in ${AWS_REGION}. Nothing in the CDK creates it; create it once per account and region -- docs/deployment/deployment-guide.md section 1.3."
+              exit 1
+            fi
+          done
 
       # A successful deploy's CodeDeploy deployment stays active for an hour
       # after its traffic shift, while the group keeps the old task set: that
@@ -409,6 +438,22 @@ jobs:
           case "$serving" in None|null) serving="" ;; esac
           echo "arn=$serving" >> "$GITHUB_OUTPUT"
           echo "serving now: ${serving:-nothing (first deploy)}"
+
+      # The dashboard (#69), read-only, before anything changes. Refuses a
+      # service that is missing (stacks before v0.4.0), not on the ECS rolling
+      # controller, wanting no tasks or mid-rollout, and a family without
+      # exactly one `dashboard` container. Records its PRIMARY deployment's
+      # revision (the rollout's --expect-primary later) and, only when that
+      # revision runs a release (a digest), the value the summary's rollback
+      # line carries -- by the predicate rollback.yml accepts it by. Warns when
+      # the image is neither a release nor the bootstrap placeholder.
+      - name: Refuse a dashboard that cannot be rolled out, and record what it serves
+        id: previous-dashboard
+        run: |
+          set -euo pipefail
+          python3 scripts/dashboard_revision.py serving --refuse-unsteady \
+            --cluster "$ECS_CLUSTER" --service "$ECS_DASHBOARD_SERVICE" \
+            --family "$ECS_DASHBOARD_TASK_FAMILY" --github-output "$GITHUB_OUTPUT"
 
       - name: Notify deployment started
         uses: slackapi/slack-github-action@v1.26.0
@@ -515,6 +560,84 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           echo "image: $ECR_REGISTRY/$ECR_BACKEND_REPO@$digest (tag $IMAGE_TAG, commit $RELEASE_COMMIT)"
 
+      # The dashboard's image, by the same rules, and also BEFORE the snapshot
+      # and the migration: a frontend that does not compile leaves nothing
+      # migrated. The profile is a build-arg (frontend/Dockerfile has no stage
+      # named after it), and the label check refuses an image of another
+      # profile or commit. The image's API base is empty (NEXT_PUBLIC_API_URL
+      # is ""), so one image serves any origin (D14).
+      - name: Build and push the dashboard image once, and resolve its digest
+        id: web-image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        run: |
+          set -euo pipefail
+          IMAGE_TAG="${VERSION}-${PROFILE}"
+          REF="$ECR_REGISTRY/$ECR_DASHBOARD_REPO:$IMAGE_TAG"
+          RELEASE_COMMIT="$(git -C release rev-parse HEAD)"
+
+          check_labels() {
+            local ref="$1" built revision
+            built="$(docker inspect --format '{{index .Config.Labels "io.experimently.profile"}}' "$ref")"
+            revision="$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$ref")"
+            if [ "$built" != "$PROFILE" ]; then
+              echo "::error::requested profile '$PROFILE' but $ref is labelled '$built'"
+              exit 1
+            fi
+            if [ "$revision" != "$RELEASE_COMMIT" ]; then
+              echo "::error::$ref is labelled revision '$revision', but ${VERSION} is $RELEASE_COMMIT"
+              exit 1
+            fi
+          }
+
+          digest=""
+          if found="$(aws ecr describe-images --repository-name "$ECR_DASHBOARD_REPO" \
+                        --image-ids imageTag="$IMAGE_TAG" \
+                        --query 'imageDetails[0].imageDigest' --output text 2>&1)"; then
+            digest="$found"
+          else
+            case "$found" in
+              *ImageNotFoundException*) ;;
+              *) echo "::error::could not look up $REF: $found"; exit 1 ;;
+            esac
+          fi
+
+          if [ -n "$digest" ]; then
+            echo "$REF already exists ($digest): reusing it"
+            docker pull "$ECR_REGISTRY/$ECR_DASHBOARD_REPO@$digest"
+            check_labels "$ECR_REGISTRY/$ECR_DASHBOARD_REPO@$digest"
+            reused=true
+          else
+            # The build context is the release's repository root: the
+            # Dockerfile copies frontend/ and, for full, modules/frontend/.
+            docker build \
+              --build-arg BUILD_DATE="$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \
+              --build-arg GIT_COMMIT="$RELEASE_COMMIT" \
+              --build-arg VERSION="${VERSION#v}" \
+              --build-arg EXPERIMENTLY_PROFILE="$PROFILE" \
+              -t "$REF" \
+              -f release/frontend/Dockerfile \
+              release
+            check_labels "$REF"
+            docker push "$REF"
+            digest="$(aws ecr describe-images --repository-name "$ECR_DASHBOARD_REPO" \
+                        --image-ids imageTag="$IMAGE_TAG" \
+                        --query 'imageDetails[0].imageDigest' --output text)"
+            reused=false
+          fi
+
+          if ! [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::could not resolve a digest for $REF (got '$digest')"
+            exit 1
+          fi
+          {
+            echo "image=$ECR_REGISTRY/$ECR_DASHBOARD_REPO@$digest"
+            echo "digest=$digest"
+            echo "tag=$IMAGE_TAG"
+            echo "reused=$reused"
+          } >> "$GITHUB_OUTPUT"
+          echo "dashboard image: $ECR_REGISTRY/$ECR_DASHBOARD_REPO@$digest (tag $IMAGE_TAG, commit $RELEASE_COMMIT)"
+
       # Always, before the migration. The check this replaces compared the
       # CLI's `None` (its text for an empty result) with "NONE", so it never
       # took a snapshot when there was no backup (QA SILENT 5). A snapshot per
@@ -532,7 +655,8 @@ jobs:
           aws rds create-db-cluster-snapshot \
             --db-cluster-identifier "$DB_CLUSTER" \
             --db-cluster-snapshot-identifier "$id" >/dev/null
-          aws rds wait db-cluster-snapshot-available --db-cluster-snapshot-identifier "$id"
+          timeout "$SNAPSHOT_DEADLINE_SECONDS" \
+            aws rds wait db-cluster-snapshot-available --db-cluster-snapshot-identifier "$id"
           echo "id=$id" >> "$GITHUB_OUTPUT"
           echo "snapshot $id of $DB_CLUSTER is available"
 
@@ -652,34 +776,211 @@ jobs:
           url="${PUBLIC_BASE_URL%/}/api/v1/experiments/"
           expected='{"detail":"Not authenticated"}'
           code="" body=""
-          for attempt in 1 2 3 4 5; do
-            code="$(curl -sS -o smoke-body.txt -w '%{http_code}' --max-time 15 "$url")" || true
+          for attempt in $(seq 1 "$SMOKE_ATTEMPTS"); do
+            code="$(curl -sS -o smoke-body.txt -w '%{http_code}' --max-time "$SMOKE_MAX_TIME_SECONDS" "$url")" || true
             body="$(cat smoke-body.txt 2>/dev/null || true)"
             if [ "$code" = "401" ] && [ "$body" = "$expected" ]; then
               echo "smoke: GET $url -> 401 $body"
               exit 0
             fi
             echo "attempt $attempt: HTTP ${code:-none}, body ${body:0:200}"
-            sleep 10
+            sleep "$SMOKE_SLEEP_SECONDS"
           done
-          echo "::error title=Smoke test failed::GET $url answered HTTP ${code:-none} with '${body:0:200}'; expected 401 $expected. Nothing rolls back automatically: use the rollback line in this run's summary."
+          echo "::error title=Smoke test failed::GET $url answered HTTP ${code:-none} with '${body:0:200}'; expected 401 $expected. The dashboard was not rolled out. Nothing rolls back automatically: use the rollback line in this run's summary."
           exit 1
+
+      # ---- The dashboard (#69): only once the API is serving and answering. ----
+      # This order leaves "new API, old dashboard" for the minutes of the
+      # rollout. The other order would leave a new dashboard calling routes an
+      # old API may not have.
+
+      # The CDK owns the task definition's shape; this run owns its image. The
+      # third argument is the container the dashboard's family names.
+      - name: Register the dashboard task definition with this image
+        id: dashboard-td
+        env:
+          IMAGE: ${{ steps.web-image.outputs.image }}
+        run: |
+          set -euo pipefail
+          arn="$(bash scripts/register_task_definition.sh "$ECS_DASHBOARD_TASK_FAMILY" "$IMAGE" dashboard)"
+          echo "arn=$arn" >> "$GITHUB_OUTPUT"
+
+      # The race guard and the mutation are ONE step, so no `if:` can run one
+      # without the other:
+      #   (a) scripts/api_serving.py, the one "the API is serving this ARN"
+      #       predicate, must still say the API is serving THIS run's
+      #       revision. A Rollback run started since the smoke test would
+      #       otherwise leave an old API behind a new dashboard, and green;
+      #   (b) the rollout script refuses, before update-service, unless the
+      #       dashboard's PRIMARY is still the revision recorded before
+      #       anything changed (--expect-primary, always passed).
+      # The rollout's verdict comes from the PRIMARY deployment, never from
+      # `aws ecs wait services-stable`, which calls a circuit-breaker
+      # rollback stable (scripts/ecs_rolling_rollout.sh).
+      - name: Roll the dashboard out, if the API is still serving this revision
+        id: dashboard-rollout
+        env:
+          API_TD_ARN: ${{ steps.api-td.outputs.arn }}
+          DASHBOARD_TD: ${{ steps.dashboard-td.outputs.arn }}
+          PREVIOUS_DASHBOARD_TD: ${{ steps.previous-dashboard.outputs.arn }}
+        run: |
+          set -euo pipefail
+          if api="$(python3 scripts/api_serving.py "$ECS_CLUSTER" "$ECS_BACKEND_SERVICE" "$API_TD_ARN" 2>&1)"; then
+            echo "$api"
+            echo "api_guard=0" >> "$GITHUB_OUTPUT"
+          else
+            code=$?
+            echo "$api"
+            last="$(tail -n 1 <<<"$api")"
+            {
+              echo "api_guard=$code"
+              echo "api_line=${last//$'\r'/ }"
+            } >> "$GITHUB_OUTPUT"
+            case "$code" in
+              1) why="the API is not serving ${API_TD_ARN##*/}: another revision is PRIMARY, a traffic shift is in progress, or the check crashed (the line above says which)" ;;
+              3) why="the API's route and its tasks disagree: ${API_TD_ARN##*/} is the PRIMARY task set but the /api/* rule forwards to the other group (the line above)" ;;
+              *) why="could not tell whether the API is serving ${API_TD_ARN##*/} (exit $code; the line above)" ;;
+            esac
+            echo "::error title=Dashboard not rolled out::${why}. The dashboard was not changed: it is still on ${PREVIOUS_DASHBOARD_TD##*/}."
+            exit 1
+          fi
+          if bash scripts/ecs_rolling_rollout.sh \
+               --expect-primary "$PREVIOUS_DASHBOARD_TD" \
+               --interval "$DASHBOARD_ROLLOUT_POLL_SECONDS" \
+               --deadline "$DASHBOARD_ROLLOUT_DEADLINE_SECONDS" \
+               "$ECS_CLUSTER" "$ECS_DASHBOARD_SERVICE" "$DASHBOARD_TD" >dashboard-rollout.txt; then
+            cat dashboard-rollout.txt
+            echo "outcome=completed" >> "$GITHUB_OUTPUT"
+          else
+            code=$?
+            cat dashboard-rollout.txt
+            verdict="$(grep -o '::error title=[^:]*::' dashboard-rollout.txt)" || verdict=""
+            case "$verdict" in
+              *"rolled back by ECS"*) outcome="rolled back by ECS's circuit breaker; serving ${PREVIOUS_DASHBOARD_TD##*/}" ;;
+              *"changed during this run"*) outcome="changed by another run" ;;
+              *"did not finish"*) outcome="did not finish in ${DASHBOARD_ROLLOUT_DEADLINE_SECONDS}s" ;;
+              *"cannot update"*) outcome="not started: permission denied" ;;
+              *) outcome="failed (exit $code; the step's error says why)" ;;
+            esac
+            echo "outcome=$outcome" >> "$GITHUB_OUTPUT"
+            exit "$code"
+          fi
+
+      # ECS says the new revision is PRIMARY and complete; this says the load
+      # balancer's default action reaches it, through the public origin.
+      - name: Smoke test the dashboard through the public URL
+        env:
+          PUBLIC_BASE_URL: ${{ vars.PUBLIC_BASE_URL }}
+          DASHBOARD_TD: ${{ steps.dashboard-td.outputs.arn }}
+        run: |
+          set -euo pipefail
+          url="${PUBLIC_BASE_URL%/}/"
+          code="" type=""
+          for attempt in $(seq 1 "$SMOKE_ATTEMPTS"); do
+            if ! got="$(curl -sS -o dashboard-body.html -w '%{http_code} %{content_type}' --max-time "$SMOKE_MAX_TIME_SECONDS" "$url")"; then
+              got="none"
+            fi
+            code="${got%% *}"
+            type="${got#"$code"}"
+            type="${type# }"
+            if [ "$code" = "200" ] && [[ "$type" == text/html* ]]; then
+              echo "dashboard smoke: GET $url -> 200 $type"
+              exit 0
+            fi
+            echo "attempt $attempt: HTTP ${code:-none} (${type:-no content type})"
+            sleep "$SMOKE_SLEEP_SECONDS"
+          done
+          echo "::error title=Dashboard smoke test failed::GET $url answered HTTP ${code:-none} (${type:-no content type}); expected 200 with the dashboard page. ECS reports ${DASHBOARD_TD##*/} serving, so the load balancer's default action may not reach it: check the HTTPS listener of ${FARGATE_STACK}. Nothing rolls back automatically. The rollback line in this run's summary puts back the API and the dashboard; for the dashboard alone, docs/deployment/rollback-runbook.md Method 2."
+          exit 1
+
+      # The LAST assertion before the job can succeed: the API check again,
+      # after the dashboard rolled and answered. A Rollback run that stopped
+      # this run's CodeDeploy deployment between the check above and
+      # update-service would otherwise end green, an old API behind the new
+      # dashboard. Nothing may come after this step but reporting.
+      - name: The API is still serving this revision
+        id: api-recheck
+        env:
+          API_TD_ARN: ${{ steps.api-td.outputs.arn }}
+        run: |
+          set -euo pipefail
+          if api="$(python3 scripts/api_serving.py "$ECS_CLUSTER" "$ECS_BACKEND_SERVICE" "$API_TD_ARN" 2>&1)"; then
+            echo "$api"
+            echo "api=0" >> "$GITHUB_OUTPUT"
+          else
+            code=$?
+            echo "$api"
+            last="$(tail -n 1 <<<"$api")"
+            {
+              echo "api=$code"
+              echo "api_line=${last//$'\r'/ }"
+            } >> "$GITHUB_OUTPUT"
+            case "$code" in
+              1) why="the API is not serving ${API_TD_ARN##*/}: another revision is PRIMARY, a traffic shift is in progress, or the check crashed (the line above says which)" ;;
+              3) why="the API's route and its tasks disagree: ${API_TD_ARN##*/} is the PRIMARY task set but the /api/* rule forwards to the other group (the line above)" ;;
+              *) why="could not tell whether the API is serving ${API_TD_ARN##*/} (exit $code; the line above)" ;;
+            esac
+            echo "::error title=API changed after the dashboard rolled out::After the dashboard rolled out, ${why}. The dashboard is on this run's revision. Check both before anything else: python3 scripts/api_serving.py ${ECS_CLUSTER} ${ECS_BACKEND_SERVICE} ${API_TD_ARN}"
+            exit 1
+          fi
 
       # Two cases, told apart by whether the shift was approved: "the previous
       # revision is still serving" is true only if it was not (PE B3b C3).
       - name: If the migration was applied and the shift was never approved
-        if: failure() && steps.migrate.outcome == 'success' && steps.api-serving.outputs.approved != 'true'
+        if: failure() && steps.migrate.outcome == 'success' && steps.api-serving.outputs.approved != 'true' && steps.api-serving.outcome != 'success'
         env:
           PREVIOUS: ${{ steps.previous.outputs.arn }}
+          PREVIOUS_DASHBOARD: ${{ steps.previous-dashboard.outputs.arn }}
         run: |
-          echo "::warning title=Migrated, not deployed::The migration was applied; the deployment then failed before any traffic shifted. The database is at ${VERSION}'s heads; ${PREVIOUS:-the previous revision} is still serving. This is safe only if the migration is backward-compatible (docs/deployment/deployment-guide.md#backward-compatible-migrations)."
+          echo "::warning title=Migrated, not deployed::The migration was applied; the deployment then failed before any traffic shifted. The database is at ${VERSION}'s heads; ${PREVIOUS:-the previous revision} is still serving, and the dashboard is unchanged (${PREVIOUS_DASHBOARD:-not read}). This is safe only if the migration is backward-compatible (docs/deployment/deployment-guide.md#backward-compatible-migrations)."
 
       - name: If the migration was applied and the shift was approved
-        if: failure() && steps.migrate.outcome == 'success' && steps.api-serving.outputs.approved == 'true'
+        if: failure() && steps.migrate.outcome == 'success' && steps.api-serving.outputs.approved == 'true' && steps.api-serving.outcome != 'success'
         env:
           NEW_REVISION: ${{ steps.api-td.outputs.arn }}
         run: |
           echo "::warning title=Migrated, shift approved, run failed::The migration was applied and the traffic shift was approved, so ${NEW_REVISION} may be serving some or all traffic. Check with: python3 scripts/api_serving.py ${ECS_CLUSTER} ${ECS_BACKEND_SERVICE} ${NEW_REVISION} (exit 0 = serving). If this release is bad, use the rollback line in this run's summary."
+
+      # The API's shift succeeded and something after it failed: the API
+      # smoke, the dashboard's registration, rollout or smoke, or an API check.
+      # "The API is serving" is said only when the API check before the
+      # rollout passed and the one after did not fail. Exclusive with the two
+      # warnings above, which require the shift step to have failed.
+      - name: If the API was deployed and the dashboard was not
+        if: failure() && steps.api-serving.outcome == 'success'
+        env:
+          NEW_REVISION: ${{ steps.api-td.outputs.arn }}
+          DEPLOYMENT_ID: ${{ steps.codedeploy.outputs.id }}
+          PREVIOUS_DASHBOARD: ${{ steps.previous-dashboard.outputs.arn }}
+          GUARD: ${{ steps.dashboard-rollout.outputs.api_guard }}
+          GUARD_LINE: ${{ steps.dashboard-rollout.outputs.api_line }}
+          RECHECK: ${{ steps.api-recheck.outputs.api }}
+          RECHECK_LINE: ${{ steps.api-recheck.outputs.api_line }}
+          ROLLOUT: ${{ steps.dashboard-rollout.outputs.outcome }}
+        run: |
+          set -euo pipefail
+          code="" line=""
+          if [ -n "$RECHECK" ] && [ "$RECHECK" != 0 ]; then
+            code="$RECHECK" line="$RECHECK_LINE"
+          elif [ -n "$GUARD" ] && [ "$GUARD" != 0 ]; then
+            code="$GUARD" line="$GUARD_LINE"
+          fi
+          case "$code" in
+            "")
+              if [ "$GUARD" = 0 ]; then
+                api="The API is serving ${VERSION} (${NEW_REVISION##*/})."
+              else
+                api="The API's traffic shift to ${NEW_REVISION##*/} completed; the run failed before it checked the API again."
+              fi ;;
+            1|3) api="The API is no longer serving this run's revision ${NEW_REVISION##*/}: ${line}" ;;
+            *) api="Whether the API is still serving ${NEW_REVISION##*/} could not be told: ${line}" ;;
+          esac
+          case "$ROLLOUT" in
+            "") dashboard="The dashboard was not changed: it is still on ${PREVIOUS_DASHBOARD##*/}." ;;
+            completed) dashboard="The dashboard is on this run's revision." ;;
+            *) dashboard="The dashboard's rollout: ${ROLLOUT}." ;;
+          esac
+          echo "::error title=API deployed, dashboard not confirmed::${api} ${dashboard} Deploy refuses a re-run until CodeDeploy deployment ${DEPLOYMENT_ID} is no longer active (about an hour after its traffic shift). The rollback line in this run's summary puts back the API as well as the dashboard. To put back or retry the dashboard alone inside that hour, use docs/deployment/rollback-runbook.md Method 2."
 
       - name: Run summary
         if: always()
@@ -695,12 +996,67 @@ jobs:
           SHIFT_RESULT: ${{ steps.api-serving.outputs.result }}
           LIVE_GROUP: ${{ steps.api-serving.outputs.live_target_group }}
           PREVIOUS: ${{ steps.previous.outputs.arn }}
+          DASHBOARD_IMAGE: ${{ steps.web-image.outputs.image }}
+          DASHBOARD_TAG: ${{ steps.web-image.outputs.tag }}
+          DASHBOARD_REUSED: ${{ steps.web-image.outputs.reused }}
+          DASHBOARD_DIGEST: ${{ steps.web-image.outputs.digest }}
+          NEW_DASHBOARD: ${{ steps.dashboard-td.outputs.arn }}
+          PREVIOUS_DASHBOARD: ${{ steps.previous-dashboard.outputs.arn }}
+          PREVIOUS_DASHBOARD_IMAGE: ${{ steps.previous-dashboard.outputs.image }}
+          PREVIOUS_DASHBOARD_RELEASE: ${{ steps.previous-dashboard.outputs.release_arn }}
+          PREVIOUS_DASHBOARD_DIGEST: ${{ steps.previous-dashboard.outputs.digest }}
+          ROLLOUT: ${{ steps.dashboard-rollout.outputs.outcome }}
+          GUARD: ${{ steps.dashboard-rollout.outputs.api_guard }}
+          GUARD_LINE: ${{ steps.dashboard-rollout.outputs.api_line }}
+          RECHECK: ${{ steps.api-recheck.outputs.api }}
+          RECHECK_LINE: ${{ steps.api-recheck.outputs.api_line }}
+          DASHBOARD_TD_OUTCOME: ${{ steps.dashboard-td.outcome }}
           JOB_STATUS: ${{ job.status }}
         run: |
+          # Not `$([ "$REUSED" = true ] && echo ...)`: under the runner's `bash
+          # -e`, that substitution's status 1 on a fresh build ended this step
+          # before it wrote a line, and failed a deploy that had succeeded.
           image_line="${IMAGE:-not built}"
           if [ -n "$IMAGE_TAG" ]; then
-            image_line="${image_line} (tag ${IMAGE_TAG}$([ "$REUSED" = true ] && echo ', reused'))"
+            reused_note=""
+            if [ "$REUSED" = true ]; then reused_note=", reused"; fi
+            image_line="${image_line} (tag ${IMAGE_TAG}${reused_note})"
           fi
+          dashboard_image_line="${DASHBOARD_IMAGE:-not built}"
+          if [ -n "$DASHBOARD_TAG" ]; then
+            reused_note=""
+            if [ "$DASHBOARD_REUSED" = true ]; then reused_note=", reused"; fi
+            dashboard_image_line="${dashboard_image_line} (tag ${DASHBOARD_TAG}${reused_note})"
+          fi
+          # Exactly one of the W4 cells.
+          if [ -n "$ROLLOUT" ]; then
+            rollout_cell="$ROLLOUT"
+          elif [ -n "$GUARD" ] && [ "$GUARD" != 0 ]; then
+            rollout_cell="not started: the API check before it failed (exit ${GUARD})"
+          elif [ "$DASHBOARD_TD_OUTCOME" = failure ]; then
+            rollout_cell="not started: the dashboard task definition was not registered"
+          else
+            rollout_cell="not started: the run stopped before it"
+          fi
+          # "API changed" only for exits 1 and 3: 2 is "could not tell".
+          api_changed=""
+          for pair in "${GUARD}|${GUARD_LINE}" "${RECHECK}|${RECHECK_LINE}"; do
+            case "${pair%%|*}" in
+              1|3) api_changed="${pair#*|}" ;;
+            esac
+          done
+          # The dashboard's rollback value: only a release (the digest predicate
+          # rollback.yml accepts by, scripts/dashboard_revision.py).
+          dashboard_param=""
+          if [ -n "$PREVIOUS_DASHBOARD_RELEASE" ]; then
+            dashboard_param=", dashboard_task_definition_arn=${PREVIOUS_DASHBOARD_RELEASE##*/}"
+          fi
+          # The digest the dashboard is running now, for the next cdk deploy.
+          running=""
+          case "$ROLLOUT" in
+            completed) running="$DASHBOARD_DIGEST" ;;
+            ""|"rolled back by ECS"*) running="$PREVIOUS_DASHBOARD_DIGEST" ;;
+          esac
           {
             echo "## Deploy ${VERSION} to ${TARGET_ENV}: ${JOB_STATUS}"
             echo ""
@@ -715,14 +1071,27 @@ jobs:
             echo "| Migration | ${MIGRATION:-not run} |"
             echo "| New API revision | \`${NEW_REVISION:-not registered}\` |"
             echo "| CodeDeploy deployment | \`${DEPLOYMENT_ID:-not created}\` |"
-            echo "| Serving before this run | \`${PREVIOUS:-nothing (first deploy)}\` |"
+            echo "| API serving before this run | \`${PREVIOUS:-nothing (first deploy)}\` |"
             echo "| Traffic shift | ${SHIFT_RESULT:-not reached} |"
             echo "| Live API target group | \`${LIVE_GROUP:-not confirmed}\` |"
+            echo "| Dashboard image | \`${dashboard_image_line}\` |"
+            echo "| New dashboard revision | \`${NEW_DASHBOARD:-not registered}\` |"
+            echo "| Dashboard serving before this run | \`${PREVIOUS_DASHBOARD:-not read}\` (\`${PREVIOUS_DASHBOARD_IMAGE:-image not read}\`) |"
+            echo "| Dashboard rollout | ${rollout_cell} |"
             echo ""
+            if [ -n "$api_changed" ]; then
+              echo "API changed: after this run's traffic shift the API check reported: ${api_changed}"
+              echo ""
+            fi
             if [ -n "$LIVE_GROUP" ]; then
               echo "Next \`cdk deploy\` of \`${FARGATE_STACK}\`: pass \`-c api_live_target_group=${LIVE_GROUP}\` (check it first: \`python3 scripts/check_live_target_group.py --env ${TARGET_ENV} --expect ${LIVE_GROUP}\`)."
             else
               echo "Live API target group not confirmed: run \`python3 scripts/check_live_target_group.py --env ${TARGET_ENV}\` before any \`cdk deploy\` of \`${FARGATE_STACK}\`."
+            fi
+            if [ -n "$running" ]; then
+              echo "The dashboard is running \`${running}\`: the same \`cdk deploy\` also takes \`-c dashboard_image_tag=${running}\` (check it first: \`python3 scripts/check_dashboard_image.py --env ${TARGET_ENV} --expect ${running}\`)."
+            else
+              echo "Dashboard image not confirmed: run \`python3 scripts/check_dashboard_image.py --env ${TARGET_ENV}\` before any \`cdk deploy\` of \`${FARGATE_STACK}\`, and pass the \`-c dashboard_image_tag\` it prints."
             fi
             echo ""
             if [ -n "$DEPLOYMENT_ID" ]; then
@@ -730,7 +1099,11 @@ jobs:
               echo ""
             fi
             if [ -n "$PREVIOUS" ]; then
-              echo "Rollback: Actions → Rollback → environment=${TARGET_ENV}, task_definition_arn=${PREVIOUS##*/}"
+              echo "Rollback: Actions → Rollback → environment=${TARGET_ENV}, task_definition_arn=${PREVIOUS##*/}${dashboard_param}"
+              if [ -z "$dashboard_param" ] && [ -n "$PREVIOUS_DASHBOARD" ]; then
+                echo ""
+                echo "The dashboard was on ${PREVIOUS_DASHBOARD_IMAGE:-an image this run could not read} before this run, not a release: there is no released dashboard to roll back to."
+              fi
             else
               echo "Rollback: there was no revision serving before this run, so there is nothing to roll back to."
             fi
@@ -743,6 +1116,7 @@ jobs:
           channel-id: '#deployments'
           slack-message: |
             *${{ inputs.environment }} deployment ${{ job.status }}*: `${{ inputs.version }}` (${{ inputs.profile }})
+            Dashboard: ${{ steps.dashboard-rollout.outputs.outcome || 'not rolled out' }}
             Deployed by: ${{ github.actor }}
             Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         env:
