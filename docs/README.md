@@ -109,7 +109,7 @@
 - [Rollback Runbook](deployment/rollback-runbook.md) — rollback decision tree and procedures
 - [Disaster Recovery](deployment/disaster-recovery.md) — RTO/RPO, failure scenarios
 - [Secrets Management](deployment/secrets-management.md) — AWS Secrets Manager, rotation
-- [Route 53 Setup](deployment/AWS_ROUTE53_DEPLOYMENT.md) — DNS configuration
+- [Route 53 Setup](deployment/AWS_ROUTE53_DEPLOYMENT.md) — DNS for the project's marketing site, not a self-hosted deployment
 
 ---
 

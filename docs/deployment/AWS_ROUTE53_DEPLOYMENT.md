@@ -2,16 +2,29 @@
 
 This guide covers deploying your marketing website using AWS services with Route 53 for DNS management.
 
+!!! warning "What this page is, and what exists today"
+    This page is about hosting the project's **marketing site**
+    (`getexperimently.com`), not about running a self-hosted Experimently. That
+    site is built by AWS Amplify from [`amplify.yml`](https://github.com/getexperimently/experimently/blob/main/amplify.yml)
+    at the repository root. The options below are ways that site *could* be
+    hosted; none of them is created by the CDK in `infrastructure/cdk`.
+
+    **The dashboard is not yet deployed by the CDK.** The CDK's Fargate stack
+    runs the API behind an Application Load Balancer and nothing else, so there
+    is no dashboard for an `app.` subdomain to point at (#69). The
+    documentation is published to GitHub Pages, not CloudFront and S3.
+
 ## Architecture Overview
 
 ```
 Route 53 (DNS)
-├── getexperimently.com          → CloudFront → S3 (Marketing Site)
+├── getexperimently.com          → CloudFront → S3, or Amplify (Marketing Site)
 ├── www.getexperimently.com      → CloudFront → S3 (Redirect to apex)
-├── app.getexperimently.com      → ALB → ECS (App Dashboard)
-├── api.getexperimently.com      → ALB → ECS (Backend API)
-└── docs.getexperimently.com     → CloudFront → S3 (Documentation)
+└── api.getexperimently.com      → ALB → ECS (Backend API, the CDK's Fargate stack)
 ```
+
+Not provided today: an `app.` subdomain for the dashboard (the CDK does not
+deploy one), and a `docs.` subdomain (the documentation is on GitHub Pages).
 
 ## Deployment Options
 
@@ -488,37 +501,21 @@ aws route53 change-resource-record-sets \
 
 ## 📋 Configure Other Subdomains
 
-### app.getexperimently.com (ECS/ALB)
+### app.getexperimently.com — not provided today
 
-Once your ECS application is deployed:
-
-```bash
-# Get your ALB DNS name from ECS
-ALB_DNS="your-alb-name.us-west-2.elb.amazonaws.com"
-ALB_ZONE_ID="Z1H1FL5HABSF5"  # ALB hosted zone for us-west-2
-
-aws route53 change-resource-record-sets \
-  --hosted-zone-id YOUR_HOSTED_ZONE_ID \
-  --change-batch '{
-    "Changes": [{
-      "Action": "UPSERT",
-      "ResourceRecordSet": {
-        "Name": "app.getexperimently.com",
-        "Type": "A",
-        "AliasTarget": {
-          "HostedZoneId": "'$ALB_ZONE_ID'",
-          "DNSName": "'$ALB_DNS'",
-          "EvaluateTargetHealth": true
-        }
-      }
-    }]
-  }'
-```
+The CDK does not deploy the dashboard, so there is no load balancer or
+distribution for an `app.` record to point at (#69).
 
 ### api.getexperimently.com (ECS/ALB)
 
+The CDK's Fargate stack creates one Application Load Balancer, in front of the
+API.
+
 ```bash
-# Same ALB as app, or separate ALB
+# Get your ALB DNS name and its hosted zone (both are per region)
+ALB_DNS="your-alb-name.us-west-2.elb.amazonaws.com"
+ALB_ZONE_ID="Z1H1FL5HABSF5"  # ALB hosted zone for us-west-2
+
 aws route53 change-resource-record-sets \
   --hosted-zone-id YOUR_HOSTED_ZONE_ID \
   --change-batch '{
@@ -537,23 +534,21 @@ aws route53 change-resource-record-sets \
   }'
 ```
 
-### docs.getexperimently.com (S3 + CloudFront)
+### Documentation
 
-Same process as marketing site, or use:
-- GitHub Pages
-- GitBook
-- ReadTheDocs
-- Docusaurus on S3
+The documentation is built with MkDocs and published to GitHub Pages by
+`.github/workflows/docs.yml`; it has no `docs.` subdomain and no CloudFront or
+S3 behind it.
 
 ---
 
 ## 🔒 SSL Certificates Summary
 
-### For CloudFront Distributions (Marketing, Docs)
+### For CloudFront Distributions (Marketing site, if you choose CloudFront)
 - **Region**: Must be in `us-east-1`
 - **Certificate**: `*.getexperimently.com` and `getexperimently.com`
 
-### For ALB (App, API)
+### For ALB (API)
 - **Region**: Same as your ALB (e.g., `us-west-2`)
 - **Certificate**: `*.getexperimently.com` and `getexperimently.com`
 
@@ -656,10 +651,10 @@ aws cloudwatch put-metric-alarm \
 
 **For your use case, I recommend:**
 
-1. **Marketing Site** (`getexperimently.com`): AWS Amplify or CloudFront + S3
-2. **App Dashboard** (`app.getexperimently.com`): ECS/Fargate + ALB (already in infrastructure)
-3. **API** (`api.getexperimently.com`): ECS/Fargate + ALB (already in infrastructure)
-4. **Docs** (`docs.getexperimently.com`): CloudFront + S3 (with documentation generator)
+1. **Marketing Site** (`getexperimently.com`): AWS Amplify (what `amplify.yml` builds today) or CloudFront + S3
+2. **API** (`api.getexperimently.com`): ECS/Fargate + ALB, created by the CDK's Fargate stack
+3. **App Dashboard**: not provided today. The CDK does not deploy the dashboard (#69).
+4. **Docs**: GitHub Pages, from `.github/workflows/docs.yml`
 
 **Quick Start:**
 ```bash

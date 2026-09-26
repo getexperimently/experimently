@@ -186,7 +186,7 @@ Refer to the documentation for:
   tamper-evident audit signing, compliance report packs and PHI encryption. We do not hold SOC 2,
   ISO 27001 or HIPAA attestations and do not claim them.
 - **Encryption**: AES-256 at rest (KMS) and TLS 1.2+ in transit when deployed with the provided CDK
-- **Network Security**: VPC isolation, Security Groups, WAF, DDoS protection (CDK deployment)
+- **Network Security**: VPC isolation, security groups, and an HTTPS-only load balancer (HTTP redirects to HTTPS) in front of the API (CDK deployment). The CDK does not deploy a WAF, CloudFront or the dashboard today
 
 ---
 

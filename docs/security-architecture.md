@@ -6,37 +6,46 @@ This document describes the security architecture of the experimentation platfor
 
 ## System Architecture — Security View
 
+What the CDK deploys (`infrastructure/cdk`):
+
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                         INTERNET                                │
 ├─────────────────────────────────────────────────────────────────┤
-│  AWS WAF → ALB (TLS 1.2+) → ECS Fargate (Security Groups)     │
+│  ALB (HTTPS; HTTP redirected to HTTPS) → ECS Fargate            │
+│  (public subnets)                         (Security Groups)     │
 │                                                                 │
-│  ┌───────────────┐     ┌──────────────────┐                     │
-│  │  CloudFront   │────▶│  Next.js Frontend │                    │
-│  │  (HTTPS only) │     │  (CSP headers)    │                    │
-│  └───────────────┘     └──────────────────┘                     │
-│                                                                 │
-│  ┌───────────────┐     ┌──────────────────┐                     │
-│  │  API Gateway / │────▶│  FastAPI Backend  │                    │
-│  │  ALB + WAF     │     │  (RBAC + Rate    │                    │
-│  │                │     │   Limiting)       │                    │
-│  └───────────────┘     └──────┬───────────┘                     │
+│                        ┌──────────────────┐                     │
+│                        │  FastAPI Backend │                     │
+│                        │  (RBAC + Rate    │                     │
+│                        │   Limiting)      │                     │
+│                        └──────┬───────────┘                     │
 │                               │                                 │
 │            ┌──────────────────┼──────────────────┐              │
-│            ▼                  ▼                   ▼              │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐          │
-│  │  Aurora PG    │  │  ElastiCache │  │  DynamoDB    │          │
-│  │  (Encrypted)  │  │  Redis       │  │  (Encrypted) │          │
-│  │  (VPC only)   │  │  (VPC only)  │  │  (IAM auth)  │          │
-│  └──────────────┘  └──────────────┘  └──────────────┘          │
+│            ▼                  ▼                  ▼              │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐           │
+│  │  Aurora PG   │  │  ElastiCache │  │  DynamoDB    │           │
+│  │  (Encrypted) │  │  Redis       │  │  (Encrypted) │           │
+│  │  (VPC only)  │  │  (VPC only)  │  │  (IAM auth)  │           │
+│  └──────────────┘  └──────────────┘  └──────────────┘           │
 │                                                                 │
 │  ┌──────────────┐  ┌──────────────┐                             │
-│  │  AWS Cognito  │  │  KMS         │                            │
-│  │  (Auth/MFA)   │  │  (Key Mgmt)  │                            │
+│  │  AWS Cognito │  │  KMS         │                             │
+│  │  (Auth/MFA)  │  │  (Key Mgmt)  │                             │
 │  └──────────────┘  └──────────────┘                             │
 └─────────────────────────────────────────────────────────────────┘
 ```
+
+Not in that picture, because nothing deploys it:
+
+- **No AWS WAF, CloudFront or API Gateway.** The load balancer is the public
+  edge, and the API's own rate limiter is the only request throttling.
+- **The dashboard is not yet deployed by the CDK** (#69). Where it runs today
+  (Docker Compose, or the image built from `frontend/Dockerfile`) it is a
+  static Next.js export served by an **nginx web container**, which sets the
+  Content-Security-Policy and the other security headers
+  (`frontend/nginx.conf`) and proxies `/api/`, `/ws/` and `/health` to the API.
+  In that arrangement the browser talks only to nginx.
 
 ## Authentication & Authorization
 
@@ -122,7 +131,7 @@ This document describes the security architecture of the experimentation platfor
 
 | Surface | Threats | Mitigations |
 |---|---|---|
-| Public API | Injection, DDoS, brute force | WAF, rate limiting, input validation |
+| Public API | Injection, DDoS, brute force | Rate limiting, input validation (no WAF is deployed) |
 | Authentication | Credential stuffing, token theft | Cognito MFA, short token expiry |
 | Database | SQL injection, data exfiltration | ORM, encryption, VPC isolation |
 | Admin Dashboard | XSS, CSRF, session hijack | CSP, CORS, secure cookies |
@@ -136,7 +145,7 @@ This document describes the security architecture of the experimentation platfor
 | Modified experiment data | Tampering | High | RBAC + audit logging |
 | Denied experiment results | Repudiation | Medium | Immutable audit trail |
 | Exposed user PII | Information Disclosure | High | Encryption + log masking |
-| API overload | Denial of Service | Medium | Rate limiting + WAF |
+| API overload | Denial of Service | Medium | Application rate limiting (no WAF is deployed) |
 | Privilege escalation | Elevation of Privilege | Critical | RBAC + permission checks |
 
 ## Network Security
