@@ -17,6 +17,11 @@
  * the answer depends on repository visibility). What it does check is that a
  * link never points at a page that does not exist — which is the failure this
  * codebase can actually introduce, by renaming or deleting a doc.
+ *
+ * A pull request that changes docs/ alone runs no Node, so this rule also
+ * lives in Python: `backend/tests/unit/docs/test_dashboard_docs_links.py`,
+ * which the docs-only leg runs. That file reads this one as text and pins the
+ * regex, the skips and the README branch below; change the rule in both.
  */
 import { existsSync, readFileSync, readdirSync, statSync } from 'fs';
 import { join, resolve } from 'path';
