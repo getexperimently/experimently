@@ -594,11 +594,16 @@ All endpoints may return the following error responses:
 ```
 
 ### 500 Internal Server Error
-```json
-{
-  "detail": "Internal server error"
-}
+
+An unhandled error answers with a plain-text body, not JSON:
+
+```text
+Internal Server Error
 ```
+
+It carries the usual CORS headers, so a dashboard on another origin can read it, and an
+`X-Request-ID` header: search the API log for that id to find the traceback. The body never
+includes the error's details.
 
 ## Error Handling Examples
 
