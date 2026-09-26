@@ -68,6 +68,11 @@ class FargateServiceStack(Stack):
     (#78). Synth refuses to build the stack without them; the security group is
     what this stack opens to the ECS tasks on 5432.
 
+    ``redis_host`` and ``redis_port`` are the Redis stack's primary endpoint
+    (#147). Synth refuses to build the stack without them: the application
+    falls back to ``localhost`` and "degrades gracefully", so a missing host is
+    an outage of rate limiting and caching that no probe reports.
+
     ``include_modules`` is the deployment's profile (``app.py`` passes
     ``ENABLE_MODULE_STACKS``). ``True`` adds the full profile's own secret,
     ``AUDIT_HMAC_KEY``; see the comment beside it.
@@ -89,6 +94,8 @@ class FargateServiceStack(Stack):
         db_host: str = None,
         db_credentials=None,
         db_security_group=None,
+        redis_host: str = None,
+        redis_port: str = None,
         **kwargs,
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
@@ -99,6 +106,14 @@ class FargateServiceStack(Stack):
                 "security group (database_stack.rds_security_group), which "
                 "has to admit the ECS tasks on 5432 or every connection times "
                 "out."
+            )
+        if not redis_host or not redis_port:
+            raise ValueError(
+                "FargateServiceStack requires redis_host and redis_port: the "
+                "Redis stack's primary endpoint (redis_stack.primary_host, "
+                "redis_stack.primary_port). Without them the application "
+                "connects to localhost, finds nothing, and silently runs "
+                "without rate-limit storage or caching (#147)."
             )
         # PUBLIC_BASE_URL is the URL users reach this service at, e.g.
         # https://api.example.com. It is required at SYNTH, like CERTIFICATE_ARN and
@@ -145,9 +160,6 @@ class FargateServiceStack(Stack):
         jwt_secret = secretsmanager.Secret.from_secret_name_v2(
             self, "JwtSecret", f"/{env_name}/experimentation/jwt-secret"
         )
-        redis_secret = secretsmanager.Secret.from_secret_name_v2(
-            self, "RedisSecret", f"/{env_name}/experimentation/redis-url"
-        )
         # Every secret below is one the container REFUSES TO START without in a
         # hardened environment, and the task definition is the only thing that
         # can supply it: the image ships no .env file (.dockerignore keeps
@@ -162,7 +174,12 @@ class FargateServiceStack(Stack):
             "SuperuserPasswordSecret",
             f"/{env_name}/experimentation/first-superuser-password",
         )
-        required_secrets = [jwt_secret, redis_secret, superuser_secret]
+        # There is no Redis secret (#147). The one this used to inject held a
+        # connection URL in a variable nothing in the application reads. The
+        # connection is
+        # REDIS_HOST/REDIS_PORT/REDIS_SSL in the environment below, taken from
+        # the Redis stack, and the replication group has no AUTH token.
+        required_secrets = [jwt_secret, superuser_secret]
 
         # AUDIT_HMAC_KEY is the full profile's: `modules.register(hooks)` builds
         # ModulesSettings as its first step and its validator rejects the dev
@@ -331,6 +348,14 @@ class FargateServiceStack(Stack):
                 "POSTGRES_DB": "experimentation",
                 "POSTGRES_SCHEMA": "experimentation",
                 "POSTGRES_PORT": "5432",
+                # This environment's ElastiCache primary endpoint (#147). The
+                # replication group has in-transit encryption on and refuses a
+                # plaintext connection, so every client the application builds
+                # must speak TLS: REDIS_SSL is passed as `ssl=` to all of them
+                # (backend/tests/unit/core/test_redis_tls.py).
+                "REDIS_HOST": redis_host,
+                "REDIS_PORT": redis_port,
+                "REDIS_SSL": "true",
             },
             secrets={
                 # Both halves from the secret Aurora generated its master
@@ -345,7 +370,6 @@ class FargateServiceStack(Stack):
                     db_credentials, field="password"
                 ),
                 "SECRET_KEY": ecs.Secret.from_secrets_manager(jwt_secret),
-                "REDIS_URL": ecs.Secret.from_secrets_manager(redis_secret),
                 "FIRST_SUPERUSER_PASSWORD": ecs.Secret.from_secrets_manager(
                     superuser_secret
                 ),

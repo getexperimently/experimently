@@ -884,7 +884,10 @@ jobs:
             -e SECRET_KEY="$KEY"
             -e FIRST_SUPERUSER_PASSWORD="$KEY"
             -e POSTGRES_PASSWORD=ci-only-not-a-real-password
-            -e REDIS_URL=redis://localhost:6379/0
+            # What the API task sets for Redis (#147); never connected to here.
+            -e REDIS_HOST=localhost
+            -e REDIS_PORT=6379
+            -e REDIS_SSL=true
             # A production start must know what hostname it answers on: the
             # Host header is attacker-controlled and ALLOWED_HOSTS derives from
             # this (#220). Never resolved here -- the import opens no socket.

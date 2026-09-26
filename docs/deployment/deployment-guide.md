@@ -136,8 +136,9 @@ The following secrets must exist and contain valid values before the application
 | Secret Path | Description |
 |-------------|-------------|
 | `/prod/experimentation/jwt-secret` | JWT signing secret (minimum 32 characters) |
-| `/prod/experimentation/redis-url` | Redis connection URL including auth token |
-| `/prod/experimentation/cognito-config` | Cognito user pool ID and client ID (JSON) |
+| `/prod/experimentation/first-superuser-password` | Password for the first administrator; the default `admin` is refused in production |
+| `/prod/experimentation/audit-hmac-key` | **`profile: full` only**: signs the compliance audit log |
+| `/prod/experimentation/cognito-config` | Cognito user pool ID and client ID (JSON); nothing in the deployment reads it |
 
 See [Secrets Management](secrets-management.md) for how to create these. The
 database credentials are not among them: the database stack generates them into
@@ -316,10 +317,8 @@ aws secretsmanager create-secret \
   --name /prod/experimentation/jwt-secret \
   --secret-string "$(openssl rand -base64 48)"
 
-# Redis URL (replace placeholders)
-aws secretsmanager create-secret \
-  --name /prod/experimentation/redis-url \
-  --secret-string "redis://:REDIS_AUTH_TOKEN@experimentation-redis.prod.internal:6379/0"
+# No Redis secret: the API task takes REDIS_HOST/REDIS_PORT from the Redis
+# stack and speaks TLS to it (REDIS_SSL=true); see secrets-management.md.
 
 # Cognito config
 aws secretsmanager create-secret \
@@ -611,9 +610,10 @@ GitHub Actions
 │         experimentation-platform/backend:v1.2.3     │
 │                                                     │
 │  Secrets injected at runtime from Secrets Manager:  │
-│    DATABASE_URL   ← /prod/experimentation/db-*      │
+│    POSTGRES_*     ← Aurora-generated credentials    │
 │    JWT_SECRET     ← /prod/experimentation/jwt-*     │
-│    REDIS_URL      ← /prod/experimentation/redis-*   │
+│  From the Redis stack (TLS, REDIS_SSL=true):        │
+│    REDIS_HOST     ← primary endpoint                │
 └────────────────────┬────────────────────────────────┘
                      |
           ┌──────────┴──────────┐

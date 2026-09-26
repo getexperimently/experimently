@@ -163,7 +163,10 @@ class MigrationTaskStack(Stack):
         # import, which is every alembic command failing -- see the comments in
         # stacks/fargate_service_stack.py, which names the same secrets.
         #
-        # REDIS_URL is genuinely not needed: it has no such validator.
+        # Redis is genuinely not needed: a migration never connects to it, and
+        # no Redis setting has such a validator. (Nor does the API task name a
+        # Redis secret any more: it gets REDIS_HOST/REDIS_PORT from the Redis
+        # stack, #147.)
         #
         # The database credentials are not looked up by name here: they come
         # from `db_credentials`, the secret Aurora was created with (#78).

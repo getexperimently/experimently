@@ -150,7 +150,9 @@ jobs:
           # No db-password: the database credentials are the secret the
           # database stack generated for Aurora, read by the task definitions
           # directly (#78). A hand-made copy could only ever disagree with it.
-          required=(jwt-secret redis-url first-superuser-password)
+          # No Redis secret: the API task takes REDIS_HOST/REDIS_PORT from the
+          # Redis stack and names no Redis secret (#147).
+          required=(jwt-secret first-superuser-password)
           if [ "${PROFILE}" = "full" ]; then
             # Only the modules read it, and modules.register(hooks) builds
             # their settings first: without it the registration fails, the API
