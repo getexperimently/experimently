@@ -67,7 +67,10 @@ jobs:
           bash --noprofile --norc -c 'echo "bash $BASH_VERSION"'
           zsh --version
 
+      # Every check below runs even when an earlier one failed, so a lost zsh
+      # install does not hide the contract, and one red hides no other.
       - name: Contract (tags, contents, counts)
+        if: ${{ !cancelled() }}
         run: python scripts/doc_examples.py --check
 
       - name: The walk equals git ls-files
@@ -78,17 +81,20 @@ jobs:
         if: ${{ !cancelled() }}
         run: python scripts/doc_examples.py --zsh-oracle
 
-      # Nothing here may skip: the zsh oracle's unit test skips where zsh is
-      # absent (Unit Tests, core-build), and this is where it must run.
+      # Nothing here may skip: the zsh oracle's unit tests skip where zsh is
+      # absent (Unit Tests, core-build), and this is where they must run. The
+      # skip check runs even when a test failed, so a failure hides no skip.
       - name: Documentation regression tests
         if: ${{ !cancelled() }}
         env:
           APP_ENV: test
           TESTING: 'true'
         run: |
+          rc=0
           python -m pytest backend/tests/unit/docs/ backend/tests/unit/scripts/test_doc_examples.py \
-            -p no:cov -q -rs --junitxml=docs-junit.xml
-          python3 scripts/check_junit_skips.py docs-junit.xml backend/tests/unit/docs backend/tests/unit/scripts
+            -p no:cov -q -rs --junitxml=docs-junit.xml || rc=1
+          python3 scripts/check_junit_skips.py docs-junit.xml backend/tests/unit/docs backend/tests/unit/scripts || rc=1
+          exit "$rc"
 
       # Rendered even when an earlier step failed: a tag that breaks the page is
       # reported by both checks, and the render check is the one that sees the
