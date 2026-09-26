@@ -3,11 +3,21 @@ name: Release Gate
 on:
   pull_request:
     branches: [main]
+  # Every commit on main gets a Release Gate Summary, so the commit a
+  # release tag points at carries one and the deploy's gate can pass (#137).
+  # A tag trigger would not do it: release-please's tags are pushed with
+  # GITHUB_TOKEN, which starts no workflows.
+  push:
+    branches: [main]
   workflow_dispatch:
 
+# Pull requests share a group per branch and cancel superseded runs. A push to
+# main is keyed by its commit and never cancelled: a pending run is replaced
+# by a newer one in the same group, which on main would drop the gate of the
+# commit a release is cut from.
 concurrency:
-  group: release-gate-${{ github.ref }}
-  cancel-in-progress: true
+  group: release-gate-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   backend-gate:

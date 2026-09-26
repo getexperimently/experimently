@@ -135,12 +135,14 @@ The following secrets must exist and contain valid values before the application
 
 | Secret Path | Description |
 |-------------|-------------|
-| `/prod/experimentation/db-password` | Aurora PostgreSQL password for the application user |
 | `/prod/experimentation/jwt-secret` | JWT signing secret (minimum 32 characters) |
 | `/prod/experimentation/redis-url` | Redis connection URL including auth token |
 | `/prod/experimentation/cognito-config` | Cognito user pool ID and client ID (JSON) |
 
-See [Secrets Management](secrets-management.md) for how to create these.
+See [Secrets Management](secrets-management.md) for how to create these. The
+database credentials are not among them: the database stack generates them into
+`experimentation-database-prod-aurora-credentials` and the task definitions read
+that secret directly.
 
 ### 1.6 GitHub Environments Configured
 
@@ -307,10 +309,7 @@ aws cloudformation list-stacks \
 See [Secrets Management](secrets-management.md) for the complete commands. Summary:
 
 ```bash
-# Database password (generated securely)
-aws secretsmanager create-secret \
-  --name /prod/experimentation/db-password \
-  --secret-string "$(openssl rand -base64 32)"
+# No database password: the database stack generates it (see secrets-management.md)
 
 # JWT signing secret
 aws secretsmanager create-secret \

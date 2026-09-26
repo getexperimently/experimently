@@ -87,7 +87,7 @@
 - [Auth Environment Variables](auth/auth-environment-variables.md) — Cognito configuration
 - [Auth User Guide](auth/auth-user-guide.md) — registration, login, password policies
 - [Cognito Testing](auth/cognito-auth-testing.md) — testing auth locally
-- [SSO](auth/sso.md) — SAML 2.0 and OIDC setup for Okta, Azure AD, Google, GitHub (the `sso` module)
+- [SSO](auth/sso.md) — SAML 2.0 and OIDC setup for Okta, Google, GitHub, and Azure AD through SAML (the `sso` module)
 
 ---
 

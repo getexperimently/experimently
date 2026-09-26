@@ -10,6 +10,7 @@ from aws_cdk import (
 )
 from constructs import Construct
 
+from stacks.database_access import require_database
 from stacks.environments import data_removal_policy
 from stacks.names import BACKEND_ECR_REPOSITORY, migration_task_family
 
@@ -100,10 +101,15 @@ class MigrationTaskStack(Stack):
     The task exits (succeeds or fails) after the migration completes, making
     it easy to detect failures and gate subsequent deployment steps.
 
-    ``db_host`` is the Aurora writer endpoint (``app.py`` passes the database
-    stack's ``cluster_endpoint.hostname``); without it the container talks to
-    ``localhost``. ``include_modules`` is the deployment's profile and decides
-    whether the full profile's ``AUDIT_HMAC_KEY`` is injected.
+    ``db_host`` is the Aurora writer endpoint and ``db_credentials`` the secret
+    Aurora generated its master credentials into (``app.py`` passes the
+    database stack's ``writer_host`` and ``db_credentials``); synth refuses
+    the stack without either (#78). ``ecs_security_group`` is the group the
+    task must be run in -- the one the fargate stack admits to Aurora on
+    5432 -- and is published as the ``MigrationSecurityGroupId`` output for
+    ``run-task``'s ``securityGroups``. ``include_modules`` is the deployment's
+    profile and decides whether the full profile's ``AUDIT_HMAC_KEY`` is
+    injected.
 
     :data:`MIGRATION_COMMAND` is the container's **CMD**, and the image's
     ENTRYPOINT runs before it; ``RUN_MIGRATIONS=false`` in the environment is
@@ -122,9 +128,17 @@ class MigrationTaskStack(Stack):
         db_host: str = None,
         public_base_url: str = None,
         include_modules: bool = False,
+        db_credentials=None,
+        ecs_security_group=None,
         **kwargs,
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
+        require_database("MigrationTaskStack", db_host, db_credentials)
+        if ecs_security_group is None:
+            raise ValueError(
+                "MigrationTaskStack requires ecs_security_group: the group the "
+                "task runs in, which must be the one admitted to Aurora on 5432."
+            )
 
         self.env_name = env_name
         self.ecs_cluster = ecs_cluster
@@ -150,11 +164,9 @@ class MigrationTaskStack(Stack):
         # stacks/fargate_service_stack.py, which names the same secrets.
         #
         # REDIS_URL is genuinely not needed: it has no such validator.
-        db_secret = secretsmanager.Secret.from_secret_name_v2(
-            self,
-            "DbSecret",
-            f"/{env_name}/experimentation/db-password",
-        )
+        #
+        # The database credentials are not looked up by name here: they come
+        # from `db_credentials`, the secret Aurora was created with (#78).
         jwt_secret = secretsmanager.Secret.from_secret_name_v2(
             self,
             "JwtSecret",
@@ -165,7 +177,7 @@ class MigrationTaskStack(Stack):
             "SuperuserPasswordSecret",
             f"/{env_name}/experimentation/first-superuser-password",
         )
-        required_secrets = [db_secret, jwt_secret, superuser_secret]
+        required_secrets = [jwt_secret, superuser_secret]
 
         audit_secret = None
         if include_modules:
@@ -254,7 +266,7 @@ class MigrationTaskStack(Stack):
                 # loop spent DB_WAIT_TIMEOUT=120s against the container itself
                 # and exited 1, and had it got past that, alembic would have
                 # "migrated" a database that is not there.
-                **({"POSTGRES_SERVER": db_host} if db_host else {}),
+                "POSTGRES_SERVER": db_host,
                 "POSTGRES_DB": "experimentation",
                 "POSTGRES_SCHEMA": "experimentation",
                 "POSTGRES_PORT": "5432",
@@ -274,7 +286,14 @@ class MigrationTaskStack(Stack):
                 "PYTHONUNBUFFERED": "1",
             },
             secrets={
-                "POSTGRES_PASSWORD": ecs.Secret.from_secrets_manager(db_secret),
+                # The same secret the API service reads, and the one Aurora's
+                # master credentials were generated into.
+                "POSTGRES_USER": ecs.Secret.from_secrets_manager(
+                    db_credentials, field="username"
+                ),
+                "POSTGRES_PASSWORD": ecs.Secret.from_secrets_manager(
+                    db_credentials, field="password"
+                ),
                 "SECRET_KEY": ecs.Secret.from_secrets_manager(jwt_secret),
                 "FIRST_SUPERUSER_PASSWORD": ecs.Secret.from_secrets_manager(
                     superuser_secret
@@ -306,6 +325,16 @@ class MigrationTaskStack(Stack):
             value=self.task_definition.family,
             description="Family name of the migration ECS task definition (use :LATEST for most recent)",
             export_name=f"{self.stack_name}-MigrationTaskFamily",
+        )
+        # The group `aws ecs run-task` must put this task in: the ECS
+        # tasks' group, which is the one admitted to Aurora on 5432
+        # (fargate_service_stack.py, TasksToDatabaseIngress). A task run in
+        # any other group is not admitted to Aurora.
+        CfnOutput(
+            self,
+            "MigrationSecurityGroupId",
+            value=ecs_security_group.security_group_id,
+            description="Security group to run the migration task in (admitted to Aurora)",
         )
         CfnOutput(
             self,

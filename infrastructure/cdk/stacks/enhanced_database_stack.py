@@ -204,6 +204,16 @@ class EnhancedDatabaseStack(Stack):
             removal_policy=database_removal_policy(environment),
         )
 
+        # What the application tasks need from this stack (#78): the WRITER
+        # endpoint -- never the read endpoint, which refuses every write the
+        # API and the migrations make -- the credentials Aurora was actually
+        # created with, and the security group that has to admit them.
+        # fargate_service_stack.py and migration_task_stack.py take these from
+        # app.py, so each environment's tasks import this environment's values.
+        self.writer_host = self.aurora_cluster.cluster_endpoint.hostname
+        self.db_credentials = db_credentials
+        self.rds_security_group = rds_security_group
+
         # Add tags to the database cluster for easier identification and management
         Tags.of(self.aurora_cluster).add("Name", f"{construct_id}-aurora-cluster")
         Tags.of(self.aurora_cluster).add("Environment", environment)
