@@ -6,10 +6,11 @@
 **Time Target:** < 5 minutes from decision to rollback complete
 
 Every command below is written for either environment. Set this first, in the
-shell you will paste into:
+shell you will paste into. The line names `prod`; to rehearse, or to roll back
+staging, change it to `export ENV=staging`:
 
 ```bash
-export ENV=prod   # or staging
+export ENV=prod
 ```
 
 **Rehearse it.** Before prod is ever relied on, do it in staging: two gated
@@ -94,10 +95,17 @@ for arn in $(aws ecs list-task-definitions \
     --query "taskDefinition.containerDefinitions[?name=='backend'].image" --output text)
   echo "$arn  $image"
 done
-# arn:...:experimentation-backend-$ENV:45  ...backend:bootstrap   <- CloudFormation; NOT a rollback target
-# arn:...:experimentation-backend-$ENV:44  ...backend@sha256:9f2c…   <- current (bad): a deploy registered it, by digest
-# arn:...:experimentation-backend-$ENV:43  ...backend@sha256:41ab…   <- target (good): the last known-good release
+```
 
+It prints one line per revision, newest first, for example:
+
+```text
+arn:...:experimentation-backend-$ENV:45  ...backend:bootstrap   <- CloudFormation; NOT a rollback target
+arn:...:experimentation-backend-$ENV:44  ...backend@sha256:9f2c…   <- current (bad): a deploy registered it, by digest
+arn:...:experimentation-backend-$ENV:43  ...backend@sha256:41ab…   <- target (good): the last known-good release
+```
+
+```bash
 # Option B: Ask which revision is actually serving traffic.
 # NOT `services[0].taskDefinition`: on a service with a CodeDeploy deployment
 # controller that field is "specified when the service is created with
@@ -176,32 +184,40 @@ tasks being replaced one at a time.
 
 Use this method when GitHub Actions is unavailable or you need to act faster than the workflow allows. This method is faster but does not automatically run smoke tests — you must run them manually after.
 
-```bash
-# Step 1: Set the target task definition ARN (last known-good revision)
-PREV_TASK_DEF="arn:aws:ecs:us-west-2:ACCOUNT_ID:task-definition/experimentation-backend-$ENV:43"
+**Step 1.** Set the target task definition ARN (the last known-good revision):
 
-# Step 2: Get the running task def if you need it dynamically.
-# Use the PRIMARY task set, not `services[0].taskDefinition` -- see the note in
-# Method 1 Step 1: on a CodeDeploy-controlled service that field never moves
-# off the revision CloudFormation created.
+```bash
+PREV_TASK_DEF="arn:aws:ecs:us-west-2:ACCOUNT_ID:task-definition/experimentation-backend-$ENV:43"
+```
+
+**Step 2.** Get the running task definition, if you need it. Use the PRIMARY
+task set, not `services[0].taskDefinition` -- see the note in Method 1 Step 1:
+on a CodeDeploy-controlled service that field never moves off the revision
+CloudFormation created.
+
+```bash
 CURRENT=$(aws ecs describe-services \
   --cluster "experimentation-$ENV" \
   --services experimentation-backend-$ENV \
   --query "services[0].taskSets[?status=='PRIMARY'].taskDefinition" \
   --output text)
 echo "Running task def: $CURRENT"
-# Do NOT decrement the revision number to find the target. CloudFormation
-# registers into this family too, and its revisions carry the `bootstrap`
-# image tag; pick the target with Method 1 Step 1's listing, which prints the
-# image beside each revision.
+```
 
-# Step 3: Deploy the previous task definition through CodeDeploy.
-#
-# NOT `aws ecs update-service --task-definition`. This service has a
-# CodeDeploy deployment controller, and ECS refuses a task-definition change
-# through UpdateService on one: "Unable to update task definition on services
-# with a CODE_DEPLOY deployment controller". Going back is the same call as
-# going forward, with an older revision.
+Do NOT decrement the revision number to find the target. CloudFormation
+registers into this family too, and its revisions carry the `bootstrap` image
+tag; pick the target with Method 1 Step 1's listing, which prints the image
+beside each revision.
+
+**Step 3.** Deploy the previous task definition through CodeDeploy.
+
+NOT `aws ecs update-service --task-definition`. This service has a CodeDeploy
+deployment controller, and ECS refuses a task-definition change through
+UpdateService on one: "Unable to update task definition on services with a
+CODE_DEPLOY deployment controller". Going back is the same call as going
+forward, with an older revision.
+
+```bash
 APPSPEC=$(jq -cn --arg td "$PREV_TASK_DEF" '{
   version: 1,
   Resources: [{ TargetService: {
@@ -212,12 +228,15 @@ APPSPEC=$(jq -cn --arg td "$PREV_TASK_DEF" '{
     }
   }}]
 }')
+```
 
-# --deployment-config-name: all-at-once, NOT the deployment group's
-# CANARY_10_PERCENT_5_MINUTES. The canary is right going forward, on a revision
-# nobody has run. Rolling back, the target was serving production minutes ago
-# and the revision being replaced is the one hurting users -- a canary would
-# leave 90% of traffic on it for another five minutes.
+`--deployment-config-name` is all-at-once, NOT the deployment group's
+CANARY_10_PERCENT_5_MINUTES. The canary is right going forward, on a revision
+nobody has run. Rolling back, the target was serving production minutes ago
+and the revision being replaced is the one hurting users -- a canary would
+leave 90% of traffic on it for another five minutes.
+
+```bash
 DEPLOYMENT_ID=$(aws deploy create-deployment \
   --application-name experimentation-platform-$ENV \
   --deployment-group-name "experimentation-$ENV" \
@@ -226,30 +245,38 @@ DEPLOYMENT_ID=$(aws deploy create-deployment \
   --revision "$(jq -cn --arg c "$APPSPEC" '{revisionType:"AppSpecContent",appSpecContent:{content:$c}}')" \
   --query deploymentId --output text)
 echo "deployment: $DEPLOYMENT_ID"
+```
 
-# Step 3b: APPROVE THE TRAFFIC SHIFT. Do not skip this.
-#
-# The deployment group sets deployment_approval_wait_time = 30 minutes. When
-# the green task set is provisioned CodeDeploy goes to status `Ready` and
-# WAITS. If ContinueDeployment is not called it stops the deployment, and the
-# group's auto_rollback(stopped_deployment=True) then puts back the revision
-# you are rolling away from. A rollback that is never approved is a rollback
-# that silently undoes itself half an hour later.
+**Step 3b. APPROVE THE TRAFFIC SHIFT. Do not skip this.**
+
+The deployment group sets `deployment_approval_wait_time` = 30 minutes. When
+the green task set is provisioned CodeDeploy goes to status `Ready` and WAITS.
+If ContinueDeployment is not called it stops the deployment, and the group's
+`auto_rollback(stopped_deployment=True)` then puts back the revision you are
+rolling away from. A rollback that is never approved is a rollback that
+silently undoes itself half an hour later.
+
+```bash
 while [ "$(aws deploy get-deployment --deployment-id "$DEPLOYMENT_ID" \
              --query deploymentInfo.status --output text)" != "Ready" ]; do
   sleep 5
 done
 aws deploy continue-deployment --deployment-id "$DEPLOYMENT_ID" \
   --deployment-wait-type READY_WAIT
+```
 
-# Step 4: Wait for the ROLLBACK, not for the service.
-#
-# `aws ecs wait services-stable` returns almost immediately here: during a
-# blue/green deployment the old task set is serving the whole time, so the
-# service is stable and the waiter says nothing about whether the rollback
-# took. Watch the PRIMARY task set instead: that is what moves, and it tells
-# you traffic has shifted without waiting for CodeDeploy to terminate the old
-# task set (the group keeps it for an hour).
+**Step 4.** Wait for the ROLLBACK, not for the service.
+
+`aws ecs wait services-stable` returns almost immediately here: during a
+blue/green deployment the old task set is serving the whole time, so the
+service is stable and the waiter says nothing about whether the rollback took.
+That is why the old form, `aws ecs wait services-stable --cluster
+"experimentation-$ENV" --services experimentation-backend-$ENV`, is misleading
+and is not used. Watch the PRIMARY task set instead: that is what moves, and it
+tells you traffic has shifted without waiting for CodeDeploy to terminate the
+old task set (the group keeps it for an hour).
+
+```bash
 until [ "$(aws ecs describe-services --cluster "experimentation-$ENV" \
              --services experimentation-backend-$ENV \
              --query "services[0].taskSets[?status=='PRIMARY'].taskDefinition" \
@@ -257,15 +284,12 @@ until [ "$(aws ecs describe-services --cluster "experimentation-$ENV" \
   sleep 5
 done
 
-# (the old, misleading form -- every line commented, because this block is
-#  meant to be pasted and two bare flag lines would run as a command)
-# aws ecs wait services-stable \
-#   --cluster "experimentation-$ENV" \
-#   --services experimentation-backend-$ENV
-
 echo "Rollback complete. Running verification..."
+```
 
-# Step 5: Verify health
+**Step 5.** Verify health:
+
+```bash
 curl -sf "https://app.<domain>/health" && echo "Health check PASSED" || echo "Health check FAILED"
 ```
 
@@ -375,19 +399,27 @@ Only take this path if:
 - The migration caused data corruption or irreversible data loss
 - The Engineering Lead has explicitly approved this path
 
+The cluster's identifier is generated by CloudFormation; the stack publishes it:
+
 ```bash
-# The cluster's identifier is generated by CloudFormation; the stack publishes it.
 CLUSTER=$(aws cloudformation describe-stacks --stack-name "experimentation-database-$ENV" \
   --query "Stacks[0].Outputs[?OutputKey=='ClusterIdentifier'].OutputValue" --output text)
+```
 
-# Find the most recent pre-deployment snapshot (a deploy takes one before
-# migrating: pre-deploy-<env>-<tag>-<time>; a manual migration: pre-migration-...)
+Find the most recent pre-deployment snapshot. A deploy takes one before
+migrating, named `pre-deploy-<env>-<tag>-<time>`; a manual migration's is named
+`pre-migration-...`:
+
+```bash
 aws rds describe-db-cluster-snapshots \
   --db-cluster-identifier "$CLUSTER" \
   --query 'sort_by(DBClusterSnapshots, &SnapshotCreateTime)[-5:].{ID:DBClusterSnapshotIdentifier,Time:SnapshotCreateTime,Status:Status}'
+```
 
-# Aurora supports point-in-time recovery (PITR) to any 5-minute window in the last 35 days.
-# Restore to a new cluster from the target snapshot (~30 min):
+Aurora supports point-in-time recovery (PITR) to any 5-minute window in the
+last 35 days. Restore to a new cluster from the target snapshot (~30 min):
+
+```bash
 aws rds restore-db-cluster-to-point-in-time \
   --db-cluster-identifier "$CLUSTER-restored" \
   --source-db-cluster-identifier "$CLUSTER" \
@@ -399,20 +431,20 @@ aws rds restore-db-cluster-to-point-in-time \
 # STOP. A restore to a NEW cluster cannot be picked up by a redeploy today.
 #
 # Both backend task definitions take POSTGRES_SERVER from the database STACK's
-# writer endpoint, and POSTGRES_USER / POSTGRES_PASSWORD from the stack's
-# generated secret, as CloudFormation imports (#78). A cluster restored beside
-# the stack is not that endpoint, so there is no "connection string in Secrets
-# Manager" to update, and a new deployment would bring the tasks back pointing
-# at the original cluster -- while this runbook reported success. (The restored
-# cluster also keeps the master password of the snapshot, which is the one in
-# the secret only if it has not been rotated since.)
+# writer endpoint, and POSTGRES_USER and POSTGRES_PASSWORD from the generated
+# secret of the stack, as CloudFormation imports, issue 78. A cluster restored
+# beside the stack is not that endpoint, so there is no connection string in
+# Secrets Manager to update, and a new deployment would bring the tasks back
+# pointing at the original cluster -- while this runbook reported success. The
+# restored cluster also keeps the master password of the snapshot, which is
+# the one in the secret only if it has not been rotated since.
 #
-# So restoring to `$CLUSTER-restored` means one of:
+# So restoring to CLUSTER-restored means one of:
 #
 #   - restore IN PLACE instead, so the endpoint the tasks already resolve does
-#     not change; or
-#   - repoint the DNS name the tasks use at the restored cluster; or
-#   - change the database stack to own the restored cluster and `cdk deploy`
+#     not change, or
+#   - repoint the DNS name the tasks use at the restored cluster, or
+#   - change the database stack to own the restored cluster and cdk deploy
 #     it and the Fargate stack, which rewrites the imported endpoint.
 #
 # Decide which BEFORE an incident. Tracked as a gap in the deploy path.
@@ -420,8 +452,8 @@ aws rds restore-db-cluster-to-point-in-time \
 #
 # The restart below is correct for this controller and is what you run once the
 # tasks would come back pointing at the right database. Through CodeDeploy,
-# naming the revision already serving: `aws ecs update-service
-# --force-new-deployment` is the usual way to restart a service and is not
+# naming the revision already serving: aws ecs update-service
+# --force-new-deployment is the usual way to restart a service and is not
 # documented either way for a CODE_DEPLOY-controlled service, which this one
 # is. Rather than find out during a restore, use the call that is correct for
 # this controller regardless.

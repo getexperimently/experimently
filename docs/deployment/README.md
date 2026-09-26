@@ -153,10 +153,12 @@ anything. Create it with [secrets-management.md](secrets-management.md).
 How to find the previous task definition, **with its image** — the revision
 list alone is not enough, because CloudFormation also registers into this
 family with a `bootstrap` image that may not exist in ECR (#82). A revision a
-deploy registered names its image by digest (`…/backend@sha256:…`):
+deploy registered names its image by digest (`…/backend@sha256:…`). The
+block sets `ENV=staging`; for production, change it to `ENV=prod` before you
+run it:
 
 ```bash
-ENV=prod   # or staging
+ENV=staging
 for arn in $(aws ecs list-task-definitions \
                --family-prefix "experimentation-backend-$ENV" \
                --sort DESC --max-results 5 \
@@ -200,8 +202,13 @@ curl -s https://app.example.com/health
 # The smoke test the deploy runs: a real route, unauthenticated.
 curl -s https://app.example.com/api/v1/experiments/
 # 401 {"detail":"Not authenticated"}
+```
 
-ENV=prod   # or staging
+Then ask ECS what is running and serving. The block sets `ENV=staging`; for
+production, change it to `ENV=prod`:
+
+```bash
+ENV=staging
 aws ecs describe-services \
   --cluster "experimentation-$ENV" \
   --services "experimentation-backend-$ENV" \
@@ -317,8 +324,10 @@ with the pins the [deployment guide](deployment-guide.md) gives, never `--all`.
 
 ## Useful AWS CLI Commands
 
+The block sets `ENV=staging`; for production, change it to `ENV=prod`:
+
 ```bash
-ENV=prod   # or staging
+ENV=staging
 
 # Watch what is serving during a deployment: the PRIMARY task set moves,
 # services[0].taskDefinition does not (it is frozen at CreateService).
