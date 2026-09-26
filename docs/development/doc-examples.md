@@ -220,11 +220,18 @@ inside a here-document is not a comment and is fine.
 |---|---|
 | `bare` | Docker is available and nothing is running. The page starts its own stack. |
 | `stack` | The Quick Start's `docker compose up -d --wait` has already run. |
+| `stack-full` | The full profile's `EXPERIMENTLY_PROFILE=full docker compose up -d --wait` has already run, and `GET /api/v1/modules` said `"profile": "full"`. For a page about a module. |
 | `local` | Reserved for the demo applications, and refused as not implemented yet. |
 
 A `stack` page is coupled to the Quick Start by assertion: the Quick Start must be
 enrolled as `bare` and contain exactly one block that runs
-`docker compose up -d --wait`, or the check fails.
+`docker compose up -d --wait`, or the check fails. A `stack-full` page is coupled the
+same way to [Modules and profiles](../getting-started/modules.md), which must be enrolled
+as `stack-full` and contain exactly one block that runs
+`EXPERIMENTLY_PROFILE=full docker compose up -d --wait`. If the full stack starts but
+`GET /api/v1/modules` doesn't say `"profile": "full"`, the page fails with "the full
+profile did not load" rather than running its blocks against a core API, where every
+module route answers `404`. A `stack-full` page can't run in a tree without `modules/`.
 
 ### How a run will stay away from your own stack
 
@@ -248,6 +255,28 @@ prevention: it reports a loss, it can't undo one. Running pages locally also reb
 retags the local `experimently-api:core` and `experimently-web:core` images from your
 working tree, so your next `docker compose up` recreates its containers from them.
 
+### How CI runs the pages
+
+CI splits the pages that run into **shards**, each a job of its own, and a **summary**
+job checks them all:
+
+- The runner decides the shards, from `scripts/doc_examples.toml`
+  (`python scripts/doc_examples.py --plan` prints them). Pages are grouped by the images
+  they need: `core` for `bare` and `stack` pages, `full` for `stack-full` pages. Each
+  group is dealt across as many shards as keep each one to a few pages, since each page
+  starts a stack of its own and takes about a minute. Enrolling a page never means
+  editing the workflow.
+- Each shard prints every page's result with how long it took, then the number of
+  `exec` blocks that actually reached their end. That number is counted as the blocks
+  run, never copied from the enrolment file.
+- A shard stops itself two minutes before the job's time limit. It stops the block that
+  was running, names the page and line, removes the page's stack, and reports the pages
+  it never started.
+- The summary fails unless every page that runs ran in exactly one shard, every one of
+  its `exec` blocks reached its end, and the total equals `[meta] exec`. A shard that
+  never ran fails it, and so does a page that no shard ran. It also warns when a
+  `bug #N` skip names an issue that's no longer open.
+
 ---
 
 ## Checking a page locally
@@ -269,6 +298,16 @@ For the render check, build the site with the site's own toolchain first:
 ```{.bash skip reason="dev: builds the documentation site"}
 bash scripts/docs_toolchain.sh && mkdocs build && python scripts/doc_examples.py --render site
 ```
+
+The render check covers every page under `docs/`, enrolled or not: a fence the site
+doesn't show as code, such as one inside an HTML comment, fails it on any page.
+Pages outside `docs/` aren't part of the site, so nothing renders them.
+
+CI's render job also runs two checks that `--check` can't, because `--check` has to
+work in a copy of the tree with no `.git` and no zsh. `--walk-vs-git` fails if the pages
+the check walks differ from the Markdown files git tracks (less `CLAUDE.md` files and
+`.claude/`). `--zsh-oracle` fails if zsh's own parser and the comment rule disagree about
+any line of a `bash` block. Both run locally too, given git and zsh.
 
 ---
 

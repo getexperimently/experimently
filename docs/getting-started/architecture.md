@@ -246,7 +246,7 @@ The AWS infrastructure is defined as code using **AWS CDK v2**, in Python (`infr
 The Fargate stack runs the dashboard as its own ECS service behind the API's load
 balancer: `/api/*`, `/health`, `/health/*` and `/metrics` go to the API, everything
 else to the dashboard. `cdk deploy` starts it on `experimentation-platform/web:bootstrap`;
-rolling each release onto it through the Deploy workflow is #69, not yet done. No
+the Deploy workflow rolls each release onto it by digest, after the API. No
 stack creates CloudFront. The split-URL module's CloudFront construct
 exists but `app.py` does not use it. See [AWS CDK Deployment](../self-hosting/cdk.md).
 

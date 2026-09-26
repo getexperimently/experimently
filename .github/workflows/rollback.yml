@@ -2,8 +2,13 @@ name: Rollback
 run-name: Rollback ${{ inputs.environment }} to ${{ inputs.task_definition_arn }}
 
 # Puts a previous, released revision of the API back into service through
-# CodeDeploy, for either environment (DECISIONS D6). A deploy's run summary
-# prints the line to paste: environment=<env>, task_definition_arn=<family:n>.
+# CodeDeploy, for either environment (DECISIONS D6), and -- when
+# dashboard_task_definition_arn is given -- the dashboard's too, through its
+# own rolling deployment (#69). A deploy's run summary prints the line to
+# paste: environment=<env>, task_definition_arn=<family:n>[,
+# dashboard_task_definition_arn=<family:n>]. The API is always rolled back:
+# there is no dashboard-only path here, because the stop step below reverts
+# any in-flight API deployment (runbook Method 2 is the dashboard-only path).
 # docs/deployment/rollback-runbook.md is the procedure around it.
 
 on:
@@ -19,6 +24,11 @@ on:
         description: 'Revision to roll back to: an ARN, or family:revision (e.g. experimentation-backend-<environment>:42). A deploy run summary prints it.'
         required: true
         type: string
+      dashboard_task_definition_arn:
+        description: 'Dashboard revision to roll back to, family:revision (e.g. experimentation-dashboard-<environment>:7). Leave empty to leave the dashboard as it is. A deploy run summary prints it.'
+        required: false
+        type: string
+        default: ''
       reason:
         description: 'Reason for rollback'
         required: true
@@ -44,6 +54,9 @@ env:
   # deployment is Ready, and it stops waiting once traffic is on the target
   # rather than waiting for CodeDeploy to finish tidying up behind it.
   ROLLBACK_TIMEOUT_SECONDS: '1800'
+  # The dashboard's rolling deployment, as in deploy.yml.
+  DASHBOARD_ROLLOUT_DEADLINE_SECONDS: '1200'
+  DASHBOARD_ROLLOUT_POLL_SECONDS: '15'
 
 jobs:
   rollback:
@@ -62,6 +75,9 @@ jobs:
       # The task-definition FAMILY. It spells the same as the service and is a
       # different thing.
       ECS_BACKEND_TASK_FAMILY: experimentation-backend-${{ inputs.environment }}
+      # The dashboard's rolling-update service and its family (#69).
+      ECS_DASHBOARD_SERVICE: experimentation-dashboard-${{ inputs.environment }}
+      ECS_DASHBOARD_TASK_FAMILY: experimentation-dashboard-${{ inputs.environment }}
       CODEDEPLOY_APPLICATION: experimentation-platform-${{ inputs.environment }}
       CODEDEPLOY_DEPLOYMENT_GROUP: experimentation-${{ inputs.environment }}
     steps:
@@ -95,6 +111,13 @@ jobs:
             exit 1
           fi
 
+      # The tooling (scripts/), from main: the dashboard's check and rollout
+      # are scripts. Nothing else is checked out.
+      - name: Check out the rollback tooling (main)
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v6
         with:
@@ -118,6 +141,7 @@ jobs:
             *${{ inputs.environment }} ROLLBACK initiated* (warning)
             Reason: ${{ inputs.reason }}
             Rolling back to: `${{ inputs.task_definition_arn }}`
+            Dashboard: `${{ inputs.dashboard_task_definition_arn || 'left as it is' }}`
             Triggered by: ${{ github.actor }}
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
@@ -163,7 +187,12 @@ jobs:
           family="$(jq -r '.family' <<<"$TD")"
           if [ "$family" != "$ECS_BACKEND_TASK_FAMILY" ]; then
             other="${family#experimentation-backend-}"
-            if [ "$other" != "$family" ]; then
+            dashboard_env="${family#experimentation-dashboard-}"
+            if [ "$family" = "$ECS_DASHBOARD_TASK_FAMILY" ]; then
+              echo "::error::${ARN##*/} is a dashboard revision; it goes in dashboard_task_definition_arn, not task_definition_arn. Nothing has been rolled back."
+            elif [ "$dashboard_env" != "$family" ]; then
+              echo "::error::You chose environment=${TARGET_ENV} but ${ARN##*/} is a ${dashboard_env} dashboard revision; it goes in dashboard_task_definition_arn, not task_definition_arn. Re-run with environment=${dashboard_env}. Nothing has been rolled back."
+            elif [ "$other" != "$family" ]; then
               echo "::error::You chose environment=${TARGET_ENV} but ${ARN##*/} is a ${other} revision. Re-run with environment=${other}."
             else
               echo "::error::$ARN belongs to family $family, not $ECS_BACKEND_TASK_FAMILY."
@@ -193,6 +222,36 @@ jobs:
               ;;
           esac
           echo "rolling back to $ARN ($image)"
+
+      # The dashboard's half, validated before anything changes, by the same
+      # predicate the deploy summary used to print it: a release is a digest
+      # (scripts/dashboard_revision.py). Also records the dashboard's PRIMARY
+      # now, which the rollout below refuses to replace if it has changed.
+      # Given empty, it records only what the dashboard is serving, so the
+      # summary can say so.
+      - name: Check the dashboard revision
+        id: dashboard-target
+        env:
+          DASHBOARD_TARGET: ${{ inputs.dashboard_task_definition_arn }}
+        run: |
+          set -euo pipefail
+          if [ -z "$DASHBOARD_TARGET" ]; then
+            echo "no dashboard revision given: the dashboard is left as it is"
+            # Read-only, for the summary; under its own output names, so it
+            # cannot be mistaken for a target.
+            if python3 scripts/dashboard_revision.py serving \
+                 --cluster "$ECS_CLUSTER" --service "$ECS_DASHBOARD_SERVICE" \
+                 --github-output serving.out; then
+              sed 's/^/serving_/' serving.out >> "$GITHUB_OUTPUT"
+            else
+              echo "(could not read what the dashboard is serving)"
+            fi
+            exit 0
+          fi
+          python3 scripts/dashboard_revision.py target \
+            --cluster "$ECS_CLUSTER" --service "$ECS_DASHBOARD_SERVICE" \
+            --family "$ECS_DASHBOARD_TASK_FAMILY" --api-family "$ECS_BACKEND_TASK_FAMILY" \
+            --github-output "$GITHUB_OUTPUT" "$DASHBOARD_TARGET"
 
       # CodeDeploy refuses a second deployment for a deployment group while one
       # is in flight, and during an incident one usually IS: the bad deploy
@@ -339,6 +398,7 @@ jobs:
           done
 
       - name: Verify what is serving traffic
+        id: api-verify
         env:
           TARGET_ARN: ${{ steps.target.outputs.arn }}
         run: |
@@ -367,15 +427,119 @@ jobs:
             exit 1
           fi
 
+      # The dashboard, after the API is back and verified: the API rollback is
+      # never delayed by the dashboard's rolling deployment, and CodeDeploy's
+      # path above is unchanged. The rollout refuses, without update-service,
+      # if the dashboard's PRIMARY is no longer what the check above recorded
+      # (another Deploy, Rollback or cdk deploy since). When the target is
+      # already PRIMARY there is nothing to roll: --no-update only confirms it.
+      - name: Roll the dashboard back
+        id: dashboard-rollback
+        if: inputs.dashboard_task_definition_arn != ''
+        env:
+          DASHBOARD_TARGET_ARN: ${{ steps.dashboard-target.outputs.arn }}
+          DASHBOARD_EXPECT: ${{ steps.dashboard-target.outputs.expect }}
+          TARGET_ARN: ${{ steps.target.outputs.arn }}
+          DEPLOYMENT_ID: ${{ steps.codedeploy.outputs.deployment-id }}
+        run: |
+          set -euo pipefail
+          mode=()
+          if [ "$DASHBOARD_EXPECT" = "$DASHBOARD_TARGET_ARN" ]; then
+            mode=(--no-update)
+            echo "the dashboard is already on ${DASHBOARD_TARGET_ARN##*/}: confirming it, not redeploying it"
+          fi
+          if bash scripts/ecs_rolling_rollout.sh ${mode[@]+"${mode[@]}"} \
+               --expect-primary "$DASHBOARD_EXPECT" \
+               --interval "$DASHBOARD_ROLLOUT_POLL_SECONDS" \
+               --deadline "$DASHBOARD_ROLLOUT_DEADLINE_SECONDS" \
+               "$ECS_CLUSTER" "$ECS_DASHBOARD_SERVICE" "$DASHBOARD_TARGET_ARN" >dashboard-rollback.txt; then
+            cat dashboard-rollback.txt
+            if [ "${#mode[@]}" -gt 0 ]; then
+              echo "result=already serving ${DASHBOARD_TARGET_ARN##*/}; nothing changed" >> "$GITHUB_OUTPUT"
+            else
+              echo "result=rolled back to ${DASHBOARD_TARGET_ARN##*/}" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            code=$?
+            cat dashboard-rollback.txt
+            # Every failure here comes after the API was rolled back and
+            # verified (this step's `if:` keeps the default success() gate), so
+            # each one names that state and the one safe way out of it.
+            if now="$(python3 scripts/dashboard_revision.py serving --cluster "$ECS_CLUSTER" --service "$ECS_DASHBOARD_SERVICE")"; then
+              now="${now%%$'\n'*}"
+            else
+              now="(this run could not read what the dashboard is serving)"
+            fi
+            state="The API is on ${TARGET_ARN##*/} (CodeDeploy deployment ${DEPLOYMENT_ID}; any deployment in flight was stopped with auto-rollback first). The dashboard was not rolled back with it: ${now}. This is the newer-dashboard, older-API state until the dashboard is put back."
+            way_out="To put the dashboard back, use docs/deployment/rollback-runbook.md Method 2, the dashboard block. Do not dispatch Rollback again while CodeDeploy deployment ${DEPLOYMENT_ID} is active: its stop step would stop that deployment with auto-rollback and put the API back on the release you rolled back from."
+            if grep -q 'which this run read earlier' dashboard-rollback.txt; then
+              echo "::error title=Dashboard not rolled back::The dashboard changed after this run validated it (it is no longer ${DASHBOARD_EXPECT##*/}), so it was not touched. ${state} ${way_out}"
+              echo "result=not changed: it changed after this run validated it" >> "$GITHUB_OUTPUT"
+            elif grep -q 'rolled back by ECS' dashboard-rollback.txt; then
+              echo "::error title=Dashboard rollback did not take::ECS's circuit breaker rejected ${DASHBOARD_TARGET_ARN##*/} and put ${DASHBOARD_EXPECT##*/} back. ${state} ${way_out}"
+              echo "result=rejected by ECS's circuit breaker; serving ${DASHBOARD_EXPECT##*/}" >> "$GITHUB_OUTPUT"
+            elif grep -q 'did not finish' dashboard-rollback.txt; then
+              echo "::error title=Dashboard rollback did not finish::ECS is still rolling ${DASHBOARD_TARGET_ARN##*/} out; this run stopped waiting and did not stop it. ${state} ${way_out}"
+              echo "result=did not finish in ${DASHBOARD_ROLLOUT_DEADLINE_SECONDS}s" >> "$GITHUB_OUTPUT"
+            else
+              echo "::error title=Dashboard not rolled back::The dashboard rollout failed (exit $code; the error above says why). ${state} ${way_out}"
+              echo "result=failed (exit $code; the step's error says why)" >> "$GITHUB_OUTPUT"
+            fi
+            exit "$code"
+          fi
+
+      # The outcome is keyed on the API's verify step and the dashboard's
+      # step, never on job.status alone: when the API was rolled back and only
+      # the dashboard failed, "NOT rolled back" would send the operator to
+      # start a second Rollback, whose stop step reverts the first one.
       - name: Run summary
+        id: summary
         if: always()
         env:
           TARGET_ARN: ${{ steps.target.outputs.arn }}
           DEPLOYMENT_ID: ${{ steps.codedeploy.outputs.deployment-id }}
+          DASHBOARD_INPUT: ${{ inputs.dashboard_task_definition_arn }}
+          DASHBOARD_TARGET_ARN: ${{ steps.dashboard-target.outputs.arn }}
+          DASHBOARD_SERVING_ARN: ${{ steps.dashboard-target.outputs.serving_arn }}
+          DASHBOARD_SERVING_IMAGE: ${{ steps.dashboard-target.outputs.serving_image }}
+          DASHBOARD_RESULT: ${{ steps.dashboard-rollback.outputs.result }}
+          DASHBOARD_OUTCOME: ${{ steps.dashboard-rollback.outcome }}
+          API_VERIFY: ${{ steps.api-verify.outcome }}
           JOB_STATUS: ${{ job.status }}
         run: |
+          target="${TARGET_ARN##*/}"
+          target="${target:-the target (not resolved)}"
+          # The dashboard's half was given but never ran: read what it is
+          # serving now (read-only), so the stuck state is on the page.
+          not_reached=""
+          if [ -n "$DASHBOARD_INPUT" ] && [ "$DASHBOARD_OUTCOME" != success ] && [ "$DASHBOARD_OUTCOME" != failure ]; then
+            if now="$(python3 scripts/dashboard_revision.py serving --cluster "$ECS_CLUSTER" --service "$ECS_DASHBOARD_SERVICE")"; then
+              not_reached="${now%%$'\n'*}"
+            else
+              not_reached="this run could not read what it is serving"
+            fi
+          fi
+          if [ "$API_VERIFY" = success ]; then
+            api="API rolled back to ${target}"
+            if [ -z "$DASHBOARD_INPUT" ]; then
+              dash="dashboard left as it is"
+            elif [ "$DASHBOARD_OUTCOME" = success ]; then
+              dash="dashboard ${DASHBOARD_RESULT}"
+            else
+              dash="dashboard NOT rolled back (${DASHBOARD_RESULT:-not reached})"
+            fi
+          else
+            api="API NOT rolled back (its verify step: ${API_VERIFY:-not reached})"
+            if [ -z "$DASHBOARD_INPUT" ]; then
+              dash="dashboard left as it is"
+            else
+              dash="dashboard NOT rolled back (not reached)"
+            fi
+          fi
+          headline="${TARGET_ENV}: ${api}; ${dash}"
+          echo "slack=${headline}" >> "$GITHUB_OUTPUT"
           {
-            echo "## Rollback of ${TARGET_ENV}: ${JOB_STATUS}"
+            echo "## Rollback of ${headline}"
             echo ""
             echo "| | |"
             echo "|---|---|"
@@ -383,8 +547,25 @@ jobs:
             echo "| Account / region | \`${EXPECTED_ACCOUNT_ID:-not checked}\` / \`${AWS_REGION}\` |"
             echo "| Target revision | \`${TARGET_ARN:-not resolved}\` |"
             echo "| CodeDeploy deployment | \`${DEPLOYMENT_ID:-not created}\` |"
+            if [ -n "$DASHBOARD_INPUT" ]; then
+              echo "| Dashboard target | \`${DASHBOARD_TARGET_ARN:-not resolved}\` |"
+              echo "| Dashboard result | ${DASHBOARD_RESULT:-not reached} |"
+            fi
             echo ""
-            echo "Only the API was rolled back. A migration the bad release applied is still applied: docs/deployment/rollback-runbook.md, Database Rollback Procedure."
+            if [ -z "$DASHBOARD_INPUT" ]; then
+              # An API-only rollback leaves the dashboard as it was: say what
+              # that is, so a new dashboard on an old API is visible.
+              if [ -n "$DASHBOARD_SERVING_ARN" ]; then
+                echo "Dashboard not rolled back: it is serving ${DASHBOARD_SERVING_ARN##*/} (${DASHBOARD_SERVING_IMAGE})."
+              else
+                echo "Dashboard not rolled back, and this run could not read what it is serving."
+              fi
+            elif [ -n "$not_reached" ]; then
+              echo "Dashboard not rolled back (the API half failed): ${not_reached}. If the stop step already reverted the API, this is the newer-dashboard, older-API state: put the dashboard back with docs/deployment/rollback-runbook.md Method 2, the dashboard block."
+            fi
+            echo ""
+            echo "Job status: ${JOB_STATUS}."
+            echo "A migration the bad release applied is still applied: docs/deployment/rollback-runbook.md, Database Rollback Procedure."
           } >> "$GITHUB_STEP_SUMMARY"
 
       # `if: always()`. Without it every failure path above left #deployments
@@ -397,7 +578,7 @@ jobs:
         with:
           channel-id: '#deployments'
           slack-message: |
-            ${{ job.status == 'success' && format('*{0} rollback complete* (success)', inputs.environment) || format('*{0} rollback FAILED ({1})* -- {0} is NOT rolled back; see the run', inputs.environment, job.status) }}
+            *Rollback of ${{ steps.summary.outputs.slack || format('{0}: outcome unknown ({1}); see the run', inputs.environment, job.status) }}*
             Task definition: `${{ inputs.task_definition_arn }}`
             Triggered by: ${{ github.actor }}
             Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

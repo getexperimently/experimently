@@ -24,10 +24,10 @@ names the live repository, that the deploy workflow pushes to it, that the
 stacks reference it, and that no deployment document still names a dead one.
 
 Since #69 there is a second, `experimentation-platform/web`, for the
-dashboard's image, imported and created the same way. The stacks and the guide
-are checked against the exact pair. The deploy workflow is still checked for
-the backend's alone: nothing builds or pushes the dashboard image yet (Stream
-C's C4), so its `bootstrap` image is pushed by hand (guide section 1.3).
+dashboard's image, imported and created the same way. The stacks, the guide
+and the deploy workflow (which pushes both) are each checked against the exact
+pair. Only the dashboard's `bootstrap` image, for the first `cdk deploy`, is
+pushed by hand (guide section 1.3).
 
 (An earlier version of this docstring said `compute_stack` creates it. That
 was true of a version of the change that was reverted for the reason above,
@@ -165,6 +165,16 @@ def test_the_deploy_workflow_pushes_to_that_repository():
     assert pushed == _repository_name(), (
         f"the deploy workflow pushes to {pushed!r}, but the CDK names "
         f"{_repository_name()!r}"
+    )
+    # Every repository the workflow names, exactly the pair the stacks import
+    # (#69: it builds and pushes the dashboard's too).
+    named = {
+        value.strip().strip("\"'")
+        for value in re.findall(r"^\s*ECR_[A-Z]+_REPO:\s*(\S+)\s*$", text, re.M)
+    }
+    assert named == _repository_names(), (
+        f"deploy.yml pushes to {sorted(named)}, but the stacks import "
+        f"{sorted(_repository_names())}"
     )
 
 

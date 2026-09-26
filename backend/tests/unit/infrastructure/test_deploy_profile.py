@@ -12,9 +12,12 @@ intact.  Nothing signalled it: ``abort_if_modules_broken()`` only fires for a
 *broken* package, ``/health/ready`` answers 200 with ``profile: core``, and no
 job pushed a ``full`` image anywhere.
 
-This workflow now builds the API image and nothing else: the dashboard build
-it used to carry pushed to an ECR repository nothing creates, so it never
-succeeded (#195), and production has no dashboard delivery path yet (#212).
+This workflow builds exactly two images, each with the requested profile: the
+API's (`--target <profile>`) and, since #69, the dashboard's
+(`--build-arg EXPERIMENTLY_PROFILE=<profile>`; its Dockerfile has no stage per
+profile). An earlier dashboard build pushed to `experimentation-platform/
+frontend`, a repository nothing creates, and never succeeded (#195); the one
+here pushes to `experimentation-platform/web`, which the CDK imports.
 
 So the profile is an input with a guard, not a default, and these checks pin
 that shape.  They are cheap text/YAML reads on purpose -- no Docker, no AWS --
@@ -85,37 +88,44 @@ class TestTheProfileIsAnExplicitInput:
         assert "--target" in runs
 
     @pytest.mark.regression
-    def test_the_workflow_builds_only_the_api_image(self):
-        """#195: the dashboard build pushed somewhere that does not exist.
+    def test_the_workflow_builds_exactly_the_two_images_the_cdk_imports(self):
+        """The API's and the dashboard's, from the release, into the two
+        repositories the stacks import (#69).
 
-        It targeted `experimentation-platform/frontend`, an ECR repository
-        nothing creates -- both CDK stacks call `from_repository_name`, which
-        imports one -- so the step failed, `build-and-push` failed with it, and
-        every job downstream of it never ran.  Its `frontend-image` output was
-        never read by anything either.
-
-        This replaces an assertion that had become vacuous: it forbade
-        `EXPERIMENTLY_PROFILE=core`, a string that only ever appeared in the
-        deleted step, so after the deletion it could not fail.  A check whose
-        subject is gone is not a check.
+        #195 was a dashboard build that pushed to `experimentation-platform/
+        frontend`, which nothing creates, so it failed and took every job after
+        it down. The dashboard build here pushes to
+        `experimentation-platform/web`, the repository `stacks/names.py` names
+        and the stacks import (infrastructure/tests/test_ecr_repository_agrees.py
+        checks the pair against the CDK).
         """
-        runs = _run_text()
-        assert "frontend/Dockerfile" not in runs, (
-            "the dashboard image is built here again; it has no ECR repository "
-            "to be pushed to and nothing consumes it (#195, #212)"
+        text = WORKFLOW.read_text()
+        assert "ECR_FRONTEND_REPO" not in text, (
+            "the dead frontend ECR repository is referenced again (#195)"
         )
-        assert "ECR_FRONTEND_REPO" not in WORKFLOW.read_text(), (
-            "the frontend ECR repository is referenced again"
-        )
+        assert "experimentation-platform/frontend" not in text
 
+        runs = _run_text()
         builds = re.findall(r"-f\s+(\S*Dockerfile)", runs)
-        assert builds == ["release/backend/Dockerfile"], (
-            f"the deploy should build the API image and nothing else, got {builds}"
-        )
-        # Vacuity guard: the assertions above all pass on an empty workflow.
-        assert "backend/Dockerfile" in runs, (
-            "no image is built at all, so the checks above prove nothing"
-        )
+        assert builds == [
+            "release/backend/Dockerfile",
+            "release/frontend/Dockerfile",
+        ], f"the deploy should build the API image then the dashboard's, got {builds}"
+        env = _workflow()["env"]
+        assert env["ECR_BACKEND_REPO"] == "experimentation-platform/backend"
+        assert env["ECR_DASHBOARD_REPO"] == "experimentation-platform/web"
+
+    @pytest.mark.regression
+    def test_the_dashboard_image_is_built_for_the_requested_profile(self):
+        """Its Dockerfile's default is `core`: without the build-arg a full
+        deploy would ship a core dashboard, and `--target full` does not exist
+        in frontend/Dockerfile (the build fails)."""
+        (step,) = [s for s in _steps("deploy") if s.get("id") == "web-image"]
+        code = step["run"]
+        assert '--build-arg EXPERIMENTLY_PROFILE="$PROFILE"' in code
+        assert "--target" not in code
+        # And the label check refuses an image labelled with another profile.
+        assert '"$built" != "$PROFILE"' in code
 
     @pytest.mark.regression
     def test_core_cannot_be_deployed_without_acknowledging_the_unsigned_log(self):
