@@ -12,8 +12,8 @@
 # scripts/doc_examples.py), and each page's residual counts can only fall.
 
 [meta]
-documents = 11
-exec = 86
+documents = 16
+exec = 100
 universe = [
     ".github/pull_request_template.md",
     "CHANGELOG.md",
@@ -141,7 +141,7 @@ universe = [
     "docs/security/README.md",
     "docs/security/api-keys.md",
     "docs/security/hardening-changes.md",
-    "docs/security/incident-response-plan.md",
+    "docs/security/incident-response.md",
     "docs/security/security-policies.md",
     "docs/security/threat-model.md",
     "docs/self-hosting/cdk.md",
@@ -200,6 +200,41 @@ skip = 0
 expects = 12
 
 [[document]]
+path = "README.md"
+environment = "bare"
+exec = 2
+skip = 1
+expects = 1
+
+[[document]]
+path = "CONTRIBUTING.md"
+environment = "bare"
+exec = 0
+skip = 9
+expects = 0
+
+[[document]]
+path = "docs/getting-started/docker-guide.md"
+environment = "bare"
+exec = 5
+skip = 9
+expects = 6
+
+[[document]]
+path = "docs/getting-started/docker-compose-file.md"
+environment = "bare"
+exec = 5
+skip = 2
+expects = 6
+
+[[document]]
+path = "docs/getting-started/environment-setup.md"
+environment = "bare"
+exec = 2
+skip = 0
+expects = 1
+
+[[document]]
 path = "docs/security/api-keys.md"
 environment = "stack"
 exec = 7
@@ -256,8 +291,6 @@ skip = 4
 expects = 8
 
 [pending]
-"CONTRIBUTING.md" = { comments = 0, unlabelled = 2, syntax = 0 }
-"README.md" = { comments = 0, unlabelled = 0, syntax = 0 }
 "backend/lambda/README.md" = { comments = 0, unlabelled = 1, syntax = 0 }
 "backend/lambda/event_processor/README.md" = { comments = 5, unlabelled = 1, syntax = 0 }
 "demo/DEMO_GUIDE.md" = { comments = 5, unlabelled = 0, syntax = 0 }
@@ -294,9 +327,6 @@ expects = 8
 "docs/development/guidelines.md" = { comments = 3, unlabelled = 2, syntax = 0 }
 "docs/development/testing-guide.md" = { comments = 25, unlabelled = 0, syntax = 0 }
 "docs/development/workflow-explanation.md" = { comments = 5, unlabelled = 0, syntax = 0 }
-"docs/getting-started/docker-compose-file.md" = { comments = 4, unlabelled = 0, syntax = 0 }
-"docs/getting-started/docker-guide.md" = { comments = 0, unlabelled = 1, syntax = 1 }
-"docs/getting-started/environment-setup.md" = { comments = 3, unlabelled = 5, syntax = 0 }
 "docs/getting-started/modules.md" = { comments = 12, unlabelled = 0, syntax = 0 }
 "docs/getting-started/pre-commit-hooks.md" = { comments = 5, unlabelled = 0, syntax = 0 }
 "docs/getting-started/python-virtual-env-setup.md" = { comments = 6, unlabelled = 1, syntax = 0 }
@@ -319,23 +349,22 @@ expects = 8
 "docs/monitoring/setup-guide.md" = { comments = 7, unlabelled = 1, syntax = 0 }
 "docs/monitoring/troubleshooting-guide.md" = { comments = 3, unlabelled = 1, syntax = 0 }
 "docs/performance/load-testing.md" = { comments = 17, unlabelled = 3, syntax = 0 }
-"docs/sdk-guide.md" = { comments = 4, unlabelled = 0, syntax = 0 }
+"docs/sdk-guide.md" = { comments = 0, unlabelled = 0, syntax = 0 }
 "docs/sdk/android.md" = { comments = 1, unlabelled = 0, syntax = 0 }
 "docs/sdk/dotnet.md" = { comments = 3, unlabelled = 0, syntax = 0 }
-"docs/sdk/edge.md" = { comments = 6, unlabelled = 0, syntax = 0 }
+"docs/sdk/edge.md" = { comments = 0, unlabelled = 0, syntax = 0 }
 "docs/sdk/elixir.md" = { comments = 4, unlabelled = 0, syntax = 0 }
 "docs/sdk/flutter.md" = { comments = 2, unlabelled = 0, syntax = 0 }
 "docs/sdk/go.md" = { comments = 3, unlabelled = 0, syntax = 0 }
 "docs/sdk/ios.md" = { comments = 2, unlabelled = 0, syntax = 0 }
 "docs/sdk/java.md" = { comments = 2, unlabelled = 0, syntax = 0 }
-"docs/sdk/javascript.md" = { comments = 6, unlabelled = 1, syntax = 0 }
-"docs/sdk/openfeature.md" = { comments = 9, unlabelled = 2, syntax = 0 }
-"docs/sdk/php.md" = { comments = 4, unlabelled = 0, syntax = 0 }
+"docs/sdk/javascript.md" = { comments = 0, unlabelled = 1, syntax = 0 }
+"docs/sdk/openfeature.md" = { comments = 0, unlabelled = 2, syntax = 0 }
+"docs/sdk/php.md" = { comments = 0, unlabelled = 0, syntax = 0 }
 "docs/sdk/python.md" = { comments = 5, unlabelled = 0, syntax = 0 }
-"docs/sdk/react-native.md" = { comments = 6, unlabelled = 1, syntax = 0 }
+"docs/sdk/react-native.md" = { comments = 0, unlabelled = 1, syntax = 0 }
 "docs/sdk/react.md" = { comments = 2, unlabelled = 0, syntax = 0 }
 "docs/sdk/ruby.md" = { comments = 3, unlabelled = 0, syntax = 0 }
-"docs/security/incident-response-plan.md" = { comments = 40, unlabelled = 3, syntax = 6 }
 "docs/self-hosting/cdk.md" = { comments = 14, unlabelled = 1, syntax = 3 }
 "docs/self-hosting/migrations.md" = { comments = 12, unlabelled = 4, syntax = 1 }
 "docs/self-hosting/monitoring.md" = { comments = 5, unlabelled = 0, syntax = 0 }
@@ -357,7 +386,7 @@ expects = 8
 "sdk/js/README.md" = { comments = 2, unlabelled = 0, syntax = 0 }
 "sdk/openfeature-python/README.md" = { comments = 3, unlabelled = 0, syntax = 0 }
 "sdk/openfeature/README.md" = { comments = 2, unlabelled = 0, syntax = 0 }
-"sdk/php/README.md" = { comments = 4, unlabelled = 0, syntax = 0 }
+"sdk/php/README.md" = { comments = 0, unlabelled = 0, syntax = 0 }
 "sdk/python/README.md" = { comments = 4, unlabelled = 0, syntax = 0 }
 "sdk/react/README.md" = { comments = 3, unlabelled = 0, syntax = 0 }
 "sdk/ruby/README.md" = { comments = 3, unlabelled = 0, syntax = 0 }
