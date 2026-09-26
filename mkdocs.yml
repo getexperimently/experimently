@@ -169,7 +169,7 @@ nav:
   - Threat Model: security/threat-model.md
   - Security Policies: security/security-policies.md
   - Hardening Changes: security/hardening-changes.md
-  - Incident Response: security/incident-response-plan.md
+  - Incident Response: security/incident-response.md
   - API Keys: security/api-keys.md
 - Authentication:
   - How Auth Works: auth/flow.md
