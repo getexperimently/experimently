@@ -167,9 +167,3 @@ class BaseAppSettings(BaseSettings):
 - Verify environment variables are set correctly
 - Check file permissions on the .env files
 - Enable DEBUG mode to see more detailed logs
-
-TAMPER: a block that outlives the job.
-
-```{.bash exec timeout=1800}
-sleep 1500
-```

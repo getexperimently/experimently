@@ -285,7 +285,7 @@ MODULES_URL = "http://localhost:8000/api/v1/modules"
 # again, never a failure (no gate asserts a wall-clock time).
 # ---------------------------------------------------------------------------
 PAGE_SECONDS = 75
-SHARD_BUDGET_SECONDS = 150  # TAMPER: 2 pages a shard
+SHARD_BUDGET_SECONDS = 480
 PAGES_PER_SHARD = SHARD_BUDGET_SECONDS // PAGE_SECONDS
 # The image profile a page's stack needs.  Order is the plan's order.
 PROFILES = ("core", "full")
@@ -1464,9 +1464,7 @@ def shard_plan(documents: list[dict]) -> dict[Shard, list[str]]:
         pages = by_profile[profile]
         n = math.ceil(len(pages) / PAGES_PER_SHARD)
         for k in range(1, n + 1):
-            plan[(profile, k, n)] = [
-                p for p in pages[k - 1 :: n] if p != "README.md"
-            ]  # TAMPER: a page dropped from every shard
+            plan[(profile, k, n)] = pages[k - 1 :: n]
     return plan
 
 
@@ -2030,8 +2028,6 @@ def execute_counted(
     """Run a document's exec blocks in one shell; the problems, and how many
     blocks reached their end (counted from the sentinels, not the enrolment)."""
     runnable = [b for b in blocks if b.kind == "exec"]
-    if name == "docs/getting-started/docker-guide.md":
-        runnable = runnable[:-1]  # TAMPER: a dropped block
     if not runnable:
         return [], 0
     nonce = secrets.token_hex(8)

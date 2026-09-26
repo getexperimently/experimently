@@ -96,7 +96,7 @@ jobs:
         id: plan
         run: |
           set -euo pipefail
-          matrix=$(python scripts/doc_examples.py --plan | jq -c '.include |= map(select(.profile != "core" or .shard != 3))')
+          matrix=$(python scripts/doc_examples.py --plan)
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
 
   examples:
@@ -107,7 +107,7 @@ jobs:
     # measured at 60-73 s each, so its run step stays near 8 minutes. The runner
     # stops itself before this timeout, at the deadline the first step exports,
     # so a hang is named rather than killed.
-    timeout-minutes: ${{ matrix.profile == 'full' && 1 || (github.event_name == 'pull_request' && 6 || 20) }}
+    timeout-minutes: ${{ github.event_name == 'pull_request' && 15 || 20 }}
     strategy:
       # One red shard must not cancel the others: the summary would then report
       # their pages as missing and bury the real failure.
@@ -157,7 +157,7 @@ jobs:
       # layers the profiles share. The full dashboard's scope, `docex-web-full`,
       # has no other writer; cache-warm below fills it.
       - name: Pre-build the images compose would build (full)
-        if: github.event_name == 'pull_request' && matrix.profile == 'full'
+        if: false  # MEASUREMENT: compose builds the full images from nothing
         uses: docker/bake-action@v7
         env:
           EXPERIMENTLY_PROFILE: full
@@ -178,7 +178,7 @@ jobs:
       - name: Run the documentation's examples
         env:
           PYTHONUNBUFFERED: '1'
-          DOCEX_JOB_TIMEOUT_MINUTES: ${{ github.event_name == 'pull_request' && 6 || 20 }}
+          DOCEX_JOB_TIMEOUT_MINUTES: ${{ github.event_name == 'pull_request' && 15 || 20 }}
           SHARD: ${{ matrix.profile }}:${{ matrix.shard }}/${{ matrix.of }}
           REPORT: docex-report/${{ matrix.profile }}-${{ matrix.shard }}.json
         run: python scripts/doc_examples.py --run --shard "$SHARD" --report "$REPORT"
@@ -286,7 +286,12 @@ jobs:
     # Not cache-warm: a cold cache is not a red documentation page. The
     # summary, because a shard that never ran is red only there.
     needs: [render, examples, summary]
-    if: failure() && github.event_name != 'pull_request'
+    # A shard that reaches timeout-minutes concludes `cancelled`, not `failure`
+    # (measured: E0b's tamper run 36270360056), so a cancelled job is red here
+    # too. The summary also fails then, for the missing report; this does not
+    # depend on it. `!cancelled()` still leaves out a run that was itself
+    # cancelled.
+    if: ${{ github.event_name != 'pull_request' && !cancelled() && (failure() || contains(needs.*.result, 'cancelled')) }}
     permissions:
       contents: read
       issues: write

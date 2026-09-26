@@ -1201,6 +1201,18 @@ def test_the_failure_issue_job_waits_for_render_examples_and_summary_only():
     assert set(needs) == {"render", "examples", "summary"}
 
 
+def test_a_timed_out_shard_files_the_issue_too():
+    """A job that reaches timeout-minutes concludes `cancelled` (measured on the
+    E0b tamper run), which `failure()` alone does not see."""
+    condition = yaml.safe_load(
+        (REPO / ".github" / "workflows" / "doc-examples.yml").read_text()
+    )["jobs"]["failure-issue"]["if"]
+    assert condition == (
+        "${{ github.event_name != 'pull_request' && !cancelled() && "
+        "(failure() || contains(needs.*.result, 'cancelled')) }}"
+    )
+
+
 def test_only_the_stack_start_may_print_without_an_expectation():
     """compose writes the build log to stdout when it builds, nothing when it doesn't."""
     printed = dx.Outcome(
