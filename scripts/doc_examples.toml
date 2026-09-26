@@ -141,7 +141,7 @@ universe = [
     "docs/security/README.md",
     "docs/security/api-keys.md",
     "docs/security/hardening-changes.md",
-    "docs/security/incident-response-plan.md",
+    "docs/security/incident-response.md",
     "docs/security/security-policies.md",
     "docs/security/threat-model.md",
     "docs/self-hosting/cdk.md",
@@ -313,7 +313,6 @@ expects = 0
 "docs/sdk/react.md" = { comments = 2, unlabelled = 0, syntax = 0 }
 "docs/sdk/ruby.md" = { comments = 3, unlabelled = 0, syntax = 0 }
 "docs/security/api-keys.md" = { comments = 4, unlabelled = 1, syntax = 0 }
-"docs/security/incident-response-plan.md" = { comments = 40, unlabelled = 3, syntax = 6 }
 "docs/self-hosting/cdk.md" = { comments = 14, unlabelled = 1, syntax = 3 }
 "docs/self-hosting/migrations.md" = { comments = 12, unlabelled = 4, syntax = 1 }
 "docs/self-hosting/monitoring.md" = { comments = 5, unlabelled = 0, syntax = 0 }
