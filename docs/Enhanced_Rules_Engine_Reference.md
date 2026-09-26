@@ -12,7 +12,7 @@ The Enhanced Rules Engine provides high-performance rule evaluation for experime
 
 ## Architecture
 
-```
+```text
 ┌──────────────────────────────────────────────────────────────┐
 │                 RulesEvaluationService                       │
 │  - Evaluation caching (TTL: 5min, Size: 10K)               │

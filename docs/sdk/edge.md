@@ -15,8 +15,17 @@ Source: `sdk/edge`. Verified against a live backend: **yes (2026-09-11)** via th
 
 ## Installation
 
+**Not yet published.** `@getexperimently/edge-sdk` is not on npm yet, so the first line below
+fails today. Build it from a clone of this repository and install the packed tarball instead.
+
 ```bash
 npm install @getexperimently/edge-sdk
+# or, from a clone of this repository:
+git clone https://github.com/getexperimently/experimently.git
+cd experimently/sdk/edge
+npm ci && npm run build && npm pack      # writes getexperimently-edge-sdk-0.2.0.tgz
+# then, in your app:
+npm install /path/to/experimently/sdk/edge/getexperimently-edge-sdk-0.2.0.tgz
 ```
 
 Entry points: the package root (`EdgeExperimentationClient`), `/cloudflare`, `/vercel` and `/deno`.

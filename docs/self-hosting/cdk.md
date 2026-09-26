@@ -1,8 +1,8 @@
 # AWS CDK Deployment
 
-The platform's AWS infrastructure is defined as code using **AWS CDK v2**, in **Python**: the app is `infrastructure/cdk/app.py`, and `infrastructure/cdk/cdk.json` runs it with `python3 app.py`. `cdk deploy --all` provisions the API and the data stores it needs in your AWS account.
+The platform's AWS infrastructure is defined as code using **AWS CDK v2**, in **Python**: the app is `infrastructure/cdk/app.py`, and `infrastructure/cdk/cdk.json` runs it with `python3 app.py`. `cdk deploy --all` provisions the API, the dashboard and the data stores they need in your AWS account.
 
-**The dashboard is not yet deployed by the CDK.** No stack builds, stores or serves it: the Fargate stack runs the API container alone, behind the one load balancer the CDK creates. Until that lands (#69), the dashboard runs where the `frontend/Dockerfile` image runs, such as the Docker Compose stack in the [Quick Start](../getting-started/quick-start.md).
+**The Fargate stack runs two services behind one Application Load Balancer**: the API, and the dashboard as its own ECS service (`experimentation-dashboard-<env>`). The HTTPS listener sends `/api/*`, `/health`, `/health/*` and `/metrics` to the API and everything else to the dashboard. `cdk deploy` starts the dashboard on the `experimentation-platform/web:bootstrap` image, which you push before the first deploy ([deployment guide §1.3](../deployment/deployment-guide.md)). The Deploy workflow does not yet roll each release onto the dashboard; that is #69.
 
 ---
 
@@ -147,6 +147,23 @@ cdk deploy experimentation-fargate-dev
 cdk deploy experimentation-monitoring-dev
 ```
 
+**Redeploying `experimentation-fargate-<env>` on a running environment** needs
+two pins, printed by two read-only checks run from the repository root:
+
+```bash
+python3 scripts/check_live_target_group.py --env <env>   # -> api_live_target_group
+python3 scripts/check_dashboard_image.py --env <env>     # -> dashboard_image_tag
+cdk deploy experimentation-fargate-<env> \
+  -c api_live_target_group=<blue|green> -c dashboard_image_tag=sha256:<hex>
+```
+
+Without them the deploy undoes what the release workflow did, and every probe
+stays green: the API's routes can point at the empty one of its blue and green
+target groups, and a change to the dashboard's task definition
+puts it back on the `web:bootstrap` placeholder image. The [Deployment Guide, section 1.6](../deployment/deployment-guide.md#16-the-stacks)
+has the full sequence, including `backend_image_tag` and what to do when the
+dashboard is still on `:bootstrap`.
+
 ---
 
 ## What Gets Deployed
@@ -169,7 +186,8 @@ cdk deploy experimentation-monitoring-dev
 - **ECS Fargate** cluster
 - ECS task definition for the API container (1 vCPU, 2 GB memory)
 - ECS service with 3 tasks (`desired_count=3`), auto-scaling between 3 and 10
-- **Application Load Balancer** with an HTTPS listener and an HTTP-to-HTTPS redirect, in front of the API only
+- **Application Load Balancer** with an HTTPS listener and an HTTP-to-HTTPS redirect, in front of the API and the dashboard: `/api/*`, `/health`, `/health/*` and `/metrics` go to the API, everything else to the dashboard
+- The dashboard's own ECS service, `experimentation-dashboard-<env>` (rolling deployment with the circuit breaker; 1 task in `staging`, 2 in `prod`), started on `experimentation-platform/web:bootstrap`
 - AWS CodeDeploy deployment group for blue/green deployments
 - IAM task role with permissions for DynamoDB, Kinesis, Secrets Manager, and Cognito
 
@@ -198,7 +216,6 @@ cdk deploy experimentation-monitoring-dev
 
 ### What is not deployed
 
-- **The dashboard.** The CDK does not deploy it today (#69); see the top of this page.
 - **CloudFront.** No stack creates a distribution. The split-URL module ships a
   construct for one (`modules/infrastructure/constructs/split_url_distribution.py`),
   but `app.py` does not use it; see [Split URL testing](../api/split-url.md).
@@ -207,16 +224,23 @@ cdk deploy experimentation-monitoring-dev
 
 ## Blue/Green Deployment for Zero-Downtime Updates
 
-The API service uses blue/green deployment through AWS CodeDeploy. When you run `cdk deploy experimentation-fargate-<env>` with a new image:
+The API service uses blue/green deployment through AWS CodeDeploy, and the
+**Deploy** workflow is what drives it ([deployment guide, section 3](../deployment/deployment-guide.md#3-every-deploy)).
+The API's revision moves through CodeDeploy, not through `cdk deploy`: the
+service has a CODE_DEPLOY deployment controller, and ECS refuses a
+task-definition change through UpdateService on such a service. For each
+deploy:
 
-1. CDK registers a new ECS task definition
-2. CodeDeploy creates a "green" target group and starts new tasks
-3. After new tasks pass health checks, CodeDeploy shifts 10% of traffic to green
-4. After a 5-minute bake period, 100% of traffic shifts to green
-5. Old (blue) tasks are terminated after another 5 minutes
-6. If health checks fail at any step, CodeDeploy automatically shifts traffic back to blue
+1. The workflow registers a new task definition and creates a CodeDeploy deployment
+2. CodeDeploy starts the new tasks in the target group that is not live, and reports `Ready`
+3. When every new target is healthy, the workflow approves the shift
+4. The canary sends 10% of traffic to the new tasks, waits 5 minutes, then sends the rest
+5. The old tasks are kept for an hour, so Rollback can put them back, and then terminated
 
-This process runs with zero downtime for end users.
+The canary is timed only: no alarm watches it, so nothing rolls back
+automatically on application errors. CodeDeploy rolls back only a deployment
+that fails (new tasks that never become healthy) or is stopped. See the
+[rollback runbook](../deployment/rollback-runbook.md).
 
 ---
 

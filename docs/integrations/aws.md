@@ -19,20 +19,15 @@ The FastAPI application runs on **Amazon ECS Fargate** — a serverless containe
 The platform uses **AWS CodeDeploy** for zero-downtime blue/green deployments:
 
 1. A new task definition is registered with the updated container image
-2. CodeDeploy creates a "green" target group and shifts 10% of traffic to it
-3. After a configurable bake time (default 5 minutes), full traffic is shifted to green
-4. If health checks fail at any stage, traffic shifts back to the blue target group automatically
+2. CodeDeploy starts the new tasks in the idle target group; the Deploy workflow approves the shift once every one is healthy
+3. The canary shifts 10% of traffic, waits 5 minutes, then shifts the rest
+4. The canary is timed only: nothing rolls back automatically on application errors. CodeDeploy rolls back only a deployment that fails or is stopped, and the [Rollback workflow](../deployment/rollback-runbook.md) is the response to a bad release
 
-To deploy a new version:
-
-```bash
-# Build and push the Docker image
-docker build -t your-account.dkr.ecr.region.amazonaws.com/experimentation-api:latest .
-docker push your-account.dkr.ecr.region.amazonaws.com/experimentation-api:latest
-
-# Deploy via CDK (re-deploys the ECS service with the new image)
-cd infrastructure && cdk deploy experimentation-fargate-prod
-```
+To deploy a new version, run **Actions → Deploy** with a release tag
+([deployment guide, section 3](../deployment/deployment-guide.md#3-every-deploy)).
+The API's revision moves through CodeDeploy, not through `cdk deploy`: the
+service has a CODE_DEPLOY deployment controller, and ECS refuses a
+task-definition change through UpdateService on such a service.
 
 ### Environment Variables
 
@@ -91,19 +86,25 @@ DATABASE_POOL_TIMEOUT=30
 
 User JWT sessions are stored in Redis with a TTL matching the token expiry time. This allows the API service to scale horizontally without sticky sessions — any task can validate any user's session.
 
+`REDIS_HOST` is the cluster's primary endpoint. `REDIS_SSL` is `true` because
+in-transit encryption is on, and a plaintext client is refused.
+
 ```bash
-REDIS_HOST=master.your-cluster.xxxxx.use1.cache.amazonaws.com   # the primary endpoint
+REDIS_HOST=master.your-cluster.xxxxx.use1.cache.amazonaws.com
 REDIS_PORT=6379
-REDIS_SSL=true   # in-transit encryption is on; a plaintext client is refused
+REDIS_SSL=true
 ```
 
 ### Application Cache
 
 Feature flag configurations and experiment assignments are cached in Redis. The default TTL is 60 seconds. Changes to flags and experiments propagate to all users within one cache cycle.
 
+`REDIS_CACHE_TTL` is the cache TTL in seconds, and `REDIS_CACHE_MAX_SIZE` the
+maximum number of items in the cache:
+
 ```bash
-REDIS_CACHE_TTL=60           # Cache TTL in seconds
-REDIS_CACHE_MAX_SIZE=10000   # Max items in cache
+REDIS_CACHE_TTL=60
+REDIS_CACHE_MAX_SIZE=10000
 ```
 
 ---
@@ -167,9 +168,10 @@ OPENSEARCH_ENDPOINT=https://your-domain.es.amazonaws.com
 
 ## CloudFront and Lambda@Edge
 
-**The CDK does not create a CloudFront distribution**, and nothing in it hosts
-the dashboard: there is no S3 bucket for frontend assets and no CDN in front of
-them. The dashboard is not yet deployed by the CDK (#69).
+**The CDK does not create a CloudFront distribution**, and there is no S3 bucket
+for frontend assets. The dashboard is an ECS service behind the same Application
+Load Balancer as the API, which sends it every path except `/api/*`, `/health`,
+`/health/*` and `/metrics`; see [AWS CDK Deployment](../self-hosting/cdk.md).
 
 ### Lambda@Edge for Split URL Testing
 

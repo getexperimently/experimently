@@ -16,6 +16,11 @@ the SDK caches the answer per user + key. Nothing is bucketed locally.
 
 ## Installation
 
+**Not yet published.** `Experimently.SDK` is not on NuGet yet, so the command below fails today.
+Reference the project from a clone of this repository instead, as described after it
+(`dotnet add reference /path/to/experimently/sdk/dotnet/src/Experimently/Experimently.csproj`;
+this has not been tested here).
+
 ```bash
 dotnet add package Experimently.SDK
 ```

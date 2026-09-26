@@ -90,6 +90,13 @@ class Refused(Exception):
     """Deploying would be unsafe, or already is; exit 1."""
 
 
+class Shifting(Refused):
+    """The API rule splits traffic across blue and green: a CodeDeploy traffic
+    shift is in progress. Still exit 1 here; `scripts/api_serving.py` tells it
+    apart from the other refusals, because to a deploy waiting for its own
+    shift it means "not yet", not "wrong"."""
+
+
 Runner = Callable[[Sequence[str]], dict]
 
 
@@ -186,26 +193,46 @@ def live_from_listener(aws: Runner, listener_arn: str, groups: dict[str, str]) -
     if api_rules:
         where = f"the {API_PATH} rule"
         targets = _forward_targets(api_rules[0].get("Actions", []))
+        siblings = [
+            rule
+            for rule in rules
+            if rule is not api_rules[0]
+            and not rule.get("IsDefault")
+            and ("/health" in _path_values(rule) or "/metrics" in _path_values(rule))
+        ]
+        # A split in EITHER rule is a traffic shift in progress, and is said
+        # so before the two are compared: CodeDeploy may rewrite them in
+        # separate calls, and "api split, health not yet" is still shifting,
+        # not wrong (PE B3b C1).
+        for rule, name in [(api_rules[0], where)] + [
+            (s, "the /health rule") for s in siblings
+        ]:
+            split = _forward_targets(rule.get("Actions", []))
+            if len(split) > 1:
+                raise Shifting(
+                    f"{name} forwards to {len(split)} target groups with weight: "
+                    "a CodeDeploy traffic shift is in progress. Wait for it to "
+                    "finish."
+                )
         # The sibling rule must go to the same place.
-        for rule in rules:
-            if rule is api_rules[0] or rule.get("IsDefault"):
-                continue
-            if "/health" in _path_values(rule) or "/metrics" in _path_values(rule):
-                if _forward_targets(rule.get("Actions", [])) != targets:
-                    raise Refused(
-                        "the /health and /api/* rules forward to different "
-                        "target groups; one of them is already wrong"
-                    )
+        for rule in siblings:
+            if _forward_targets(rule.get("Actions", [])) != targets:
+                raise Refused(
+                    "the /health and /api/* rules forward to different "
+                    "target groups; one of them is already wrong"
+                )
     else:
         # A stack from before the dashboard: the API is the default action.
         where = "the listener's default action"
         targets = _forward_targets(listeners[0].get("DefaultActions", []))
 
-    if len(targets) != 1:
-        raise Refused(
+    if len(targets) > 1:
+        raise Shifting(
             f"{where} forwards to {len(targets)} target groups with weight: a "
             "CodeDeploy traffic shift is in progress. Wait for it to finish."
         )
+    if not targets:
+        raise Refused(f"{where} forwards to no target group with weight")
     return _name(targets.pop(), groups, where)
 
 

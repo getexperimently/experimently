@@ -6,8 +6,9 @@
 
 Sources (PE v1 C12): `.github/workflows/{deploy,rollback,db-migrate}.yml`,
 every `.github/actions/**/action.yml`, every file under `scripts/` those
-workflows or actions run, and `STAGED_SCRIPTS` (scripts the role will run that
-no workflow names yet). Each `aws <service> <verb>` in them becomes an IAM
+workflows or actions run, every sibling module such a Python script imports,
+and `STAGED_SCRIPTS` (scripts the role will run that no workflow names yet).
+Each `aws <service> <verb>` in them becomes an IAM
 action; `docker push`/`docker pull` and the ECR login action add the registry
 actions they need; `register-task-definition` and `run-task` add
 `iam:PassRole` (scoped to ECS tasks in the policy).
@@ -113,6 +114,10 @@ ACTION_USES = {
 _AWS = re.compile(r"\baws\s+([a-z0-9-]+)\s+(wait\s+[a-z0-9-]+|[a-z0-9-]+)")
 _SCRIPT = re.compile(r"\bscripts/[A-Za-z0-9_./-]+\.(?:sh|py)\b")
 _PY_OPERATION = re.compile(r'\(\s*"([a-z0-9-]+)",\s*"([a-z0-9-]+)"\s*\)')
+#: A top-level `import x` / `from x import ...` in a script. When `x.py` sits
+#: beside it, that module's calls are the script's calls: shift_traffic.py
+#: reaches AWS through api_serving.py and check_live_target_group.py.
+_PY_IMPORT = re.compile(r"^(?:import|from)\s+([A-Za-z_][A-Za-z0-9_]*)", re.M)
 
 
 def _pascal(verb: str) -> str:
@@ -174,6 +179,11 @@ def sources() -> list[Path]:
                     f"{path.relative_to(REPO_ROOT)} runs {match}, which does not exist"
                 )
             queue.append(script)
+        if path.suffix == ".py":
+            for name in _PY_IMPORT.findall(text):
+                sibling = path.parent / f"{name}.py"
+                if sibling.is_file():
+                    queue.append(sibling)
     return seen
 
 

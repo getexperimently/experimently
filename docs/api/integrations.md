@@ -225,11 +225,11 @@ The active jira integration has no webhook_secret in its encrypted_config, so ev
 inbound delivery to /api/v1/integrations/webhooks/jira is refused with 401. Add one …
 ```
 
-The remedy is one `PUT`, which replaces `encrypted_config` whole — so read the current value back, add the key, and send it:
+The remedy is one `PUT`, which replaces `encrypted_config` whole — so read the current value back, add the key, and send it. Set `TOKEN` to an ADMIN bearer token, and `TYPE` to the integration: `jira` below, or `salesforce` or `github`. The last line prints the secret to configure at the provider.
 
 ```bash
-TOKEN=…                      # an ADMIN bearer token
-TYPE=jira                    # or salesforce, github
+TOKEN=…
+TYPE=jira
 SECRET=$(openssl rand -hex 32)
 
 curl -sf -H "Authorization: Bearer $TOKEN" \
@@ -238,7 +238,7 @@ curl -sf -H "Authorization: Bearer $TOKEN" \
   | curl -sf -X PUT -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
          --data @- "http://localhost:8000/api/v1/integrations/$TYPE"
 
-echo "$SECRET"               # configure this at the provider
+echo "$SECRET"
 ```
 
 Then set the same value at the provider: GitHub's webhook *Secret* field, Jira's webhook secret (Jira Cloud) or the `X-Experimently-Webhook-Secret` header on the relay in front of it, and the same header on the Salesforce outbound message or callout.

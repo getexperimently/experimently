@@ -11,8 +11,16 @@ Full reference: [`docs/sdk/ruby.md`](../../docs/sdk/ruby.md).
 
 ## Installation
 
+**Not yet published.** The `experimently` gem is not on RubyGems yet, so the first line below
+fails today. Take it from this repository with the second block instead.
+
 ```ruby
 gem "experimently", "~> 0.1"
+```
+
+```ruby
+# Gemfile, until the gem is published
+gem "experimently", git: "https://github.com/getexperimently/experimently.git", branch: "main", glob: "sdk/ruby/*.gemspec"
 ```
 
 The gemspec requires **Ruby >= 2.6.0** (`required_ruby_version`); the specs in this repo were run

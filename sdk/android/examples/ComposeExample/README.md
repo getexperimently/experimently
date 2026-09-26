@@ -12,6 +12,10 @@ implementation(project(":sdk"))
 
 Or, when published to Maven:
 
+**Not yet published.** `com.getexperimently:experimently-android` is not on Maven Central yet, so
+the line below fails today. Use the `project(":sdk")` dependency above, which builds the SDK from
+this repository (see [`sdk/android/README.md`](../../README.md) for the `settings.gradle.kts` lines).
+
 ```kotlin
 implementation("com.getexperimently:experimently-android:1.0.0")
 ```

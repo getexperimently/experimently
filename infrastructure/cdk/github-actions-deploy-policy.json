@@ -5,6 +5,7 @@
       "Sid": "DeployWorkflows",
       "Effect": "Allow",
       "Action": [
+        "cloudformation:DescribeStackResources",
         "cloudformation:DescribeStacks",
         "codedeploy:ContinueDeployment",
         "codedeploy:CreateDeployment",
@@ -31,6 +32,9 @@
         "ecs:RegisterTaskDefinition",
         "ecs:RunTask",
         "ecs:UpdateService",
+        "elasticloadbalancing:DescribeListeners",
+        "elasticloadbalancing:DescribeRules",
+        "elasticloadbalancing:DescribeTargetHealth",
         "logs:GetLogEvents",
         "rds:CreateDBClusterSnapshot",
         "rds:DescribeDBClusterSnapshots",

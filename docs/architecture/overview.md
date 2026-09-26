@@ -8,16 +8,21 @@ The architecture is designed to provide high-performance experiment evaluation, 
 
 !!! warning "This is the design, not what the CDK deploys today"
     The diagram below is the target design. What `infrastructure/cdk` deploys
-    today is the API on ECS Fargate behind one Application Load Balancer, with
+    today is the API and the dashboard on ECS Fargate behind one Application
+    Load Balancer, with
     Aurora PostgreSQL, ElastiCache Redis and DynamoDB tables; see
     [AWS CDK Deployment](../self-hosting/cdk.md).
 
-    **The dashboard is not yet deployed by the CDK** (#69). No stack creates
-    CloudFront or API Gateway. In Docker Compose and in the `frontend/Dockerfile`
-    image the dashboard is a static Next.js export served by nginx, which also
-    proxies `/api/` to the API.
+    **The dashboard is its own ECS service behind the same load balancer**: the
+    HTTPS listener sends `/api/*`, `/health`, `/health/*` and `/metrics` to the
+    API and everything else to the dashboard. `cdk deploy` starts it on the
+    `experimentation-platform/web:bootstrap` image; rolling each release onto it
+    through the Deploy workflow is #69, not yet done. No stack creates CloudFront
+    or API Gateway. The dashboard is a static Next.js export served by nginx; in
+    Docker Compose that nginx also proxies `/api/` to the API, and in AWS it
+    proxies nothing.
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────────────────────────┐
 │                                  Client Applications                             │
 └───────────────────┬─────────────────────────────────────┬─────────────────────┬─┘
@@ -32,7 +37,7 @@ The architecture is designed to provide high-performance experiment evaluation, 
               ▼                                  ▼                                ▼
 ┌───────────────────────────┐     ┌───────────────────────────┐     ┌─────────────────────────┐
 │  Next.js dashboard        │     │   ECS/Fargate Containers  │     │   Lambda Functions      │
-│  (not deployed by CDK)    │     │   (Core Backend Services) │     │   (Real-time Services)  │
+│  (ECS, behind the ALB)    │     │   (Core Backend Services) │     │   (Real-time Services)  │
 └─────────────┬─────────────┘     └──────────────┬────────────┘     └────────────┬────────────┘
               │                                  │                                │
               │                                  │                                │
@@ -79,7 +84,7 @@ The architecture is designed to provide high-performance experiment evaluation, 
 
 ### 2. Application Layer
 
--   **Next.js dashboard**: Web UI for experiment management, feature flag configuration, and dashboards. Not yet deployed by the CDK (#69); it runs as the nginx image built from `frontend/Dockerfile`, as in Docker Compose
+-   **Next.js dashboard**: Web UI for experiment management, feature flag configuration, and dashboards. It runs as the nginx image built from `frontend/Dockerfile`: in AWS as its own ECS service behind the load balancer (started on `web:bootstrap`; per-release rollout is #69), and in Docker Compose
 -   **Core Backend Services (ECS/Fargate)**:
     -   Experiment Management Service
     -   Feature Flag Service
@@ -130,7 +135,7 @@ The architecture is designed to provide high-performance experiment evaluation, 
 
 ### 1. Experiment Management & Feature Flags System
 
-```
+```text
 ┌───────────────────────────────────────┐
 │      Experiment Management UI         │
 └─────────────────┬─────────────────────┘
@@ -169,7 +174,7 @@ The architecture is designed to provide high-performance experiment evaluation, 
 
 ### 2. Real-Time Event Collection & Analysis
 
-```
+```text
 ┌───────────────────────────────────────┐
 │      Client SDK                       │
 │      - Experiment exposure tracking   │

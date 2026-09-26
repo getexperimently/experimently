@@ -37,6 +37,19 @@ FAMILY = "experimentation-migrate-staging"
 ARN = f"arn:aws:ecs:us-west-2:123456789012:task-definition/{FAMILY}:7"
 TASK = "arn:aws:ecs:us-west-2:123456789012:task/experimentation-staging/0abc"
 
+
+#: No credential reaches a test's subprocess, so even an `aws` that is not the
+#: fake has nothing to sign a request with (PE B3b C5, defence in depth).
+def _no_aws_credentials(env: dict) -> dict:
+    env = {k: v for k, v in env.items() if not k.startswith("AWS_")}
+    env.update(
+        AWS_CONFIG_FILE="/nonexistent/aws-config",
+        AWS_SHARED_CREDENTIALS_FILE="/nonexistent/aws-credentials",
+        AWS_EC2_METADATA_DISABLED="true",
+    )
+    return env
+
+
 FAKE_AWS = r"""#!{python}
 import json, os, sys
 args = sys.argv[1:]
@@ -103,12 +116,14 @@ def aws(tmp_path):
             (state / name.replace("__", ".")).write_text(content)
         result = subprocess.run(
             ["bash", str(script), *args],
-            env={
-                **os.environ,
-                "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}",
-                "FAKE_AWS_STATE": str(state),
-                **(env or {}),
-            },
+            env=_no_aws_credentials(
+                {
+                    **os.environ,
+                    "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}",
+                    "FAKE_AWS_STATE": str(state),
+                    **(env or {}),
+                }
+            ),
             capture_output=True,
             text=True,
         )

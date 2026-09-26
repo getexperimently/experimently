@@ -187,7 +187,7 @@ When using the API, follow these security best practices:
 The webhook endpoints are **inbound** — the platform receives callbacks from
 third-party services, it does not send event notifications to yours:
 
-```
+```text
 POST /api/v1/integrations/webhooks/github
 POST /api/v1/integrations/webhooks/jira
 POST /api/v1/integrations/webhooks/salesforce

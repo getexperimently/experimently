@@ -8,7 +8,7 @@ This document describes the security architecture of the experimentation platfor
 
 What the CDK deploys (`infrastructure/cdk`):
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────────┐
 │                         INTERNET                                │
 ├─────────────────────────────────────────────────────────────────┤
@@ -40,12 +40,15 @@ Not in that picture, because nothing deploys it:
 
 - **No AWS WAF, CloudFront or API Gateway.** The load balancer is the public
   edge, and the API's own rate limiter is the only request throttling.
-- **The dashboard is not yet deployed by the CDK** (#69). Where it runs today
-  (Docker Compose, or the image built from `frontend/Dockerfile`) it is a
-  static Next.js export served by an **nginx web container**, which sets the
-  Content-Security-Policy and the other security headers
-  (`frontend/nginx.conf`) and proxies `/api/`, `/ws/` and `/health` to the API.
-  In that arrangement the browser talks only to nginx.
+- **The dashboard** is not drawn above. It is a static Next.js export served by
+  an **nginx web container** (the image built from `frontend/Dockerfile`), which
+  sets the Content-Security-Policy and the other security headers
+  (`frontend/nginx.conf`). In AWS it is its own ECS service behind the same
+  load balancer: the ALB sends `/api/*`, `/health`, `/health/*` and `/metrics`
+  to the API and everything else to the dashboard, and the dashboard's nginx
+  proxies nothing (its `API_UPSTREAM` is `http://127.0.0.1:1`, so a stray
+  `/api` request gets a 502). In Docker Compose there is no ALB: nginx proxies
+  `/api/`, `/ws/` and `/health` to the API, and the browser talks only to nginx.
 
 ## Authentication & Authorization
 

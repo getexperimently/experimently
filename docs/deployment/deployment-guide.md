@@ -141,22 +141,51 @@ cdk deploy --all --require-approval never
 
 `cdk deploy --all` is for standing an environment up. On one that is already
 running, deploy `experimentation-fargate-<env>` on its own, pinned to what is
-live -- CodeDeploy swaps the API's blue and green target groups outside
-CloudFormation, and a `cdk deploy` that names the empty one sends every API
-request to it while every probe stays green:
+live. Both pins go on **every** such deploy, because releases reach the API and
+the dashboard outside CloudFormation and a `cdk deploy` undoes them silently:
+
+- **The API's live target group.** CodeDeploy swaps the API's blue and green
+  target groups outside CloudFormation, and a `cdk deploy` that names the empty
+  one sends every API request to it while every probe stays green.
+- **The dashboard's running digest.** The dashboard service rolls under the ECS
+  deployment controller. Once releases reach it (#69), each one points it at a
+  task definition revision, by image digest, that CloudFormation never saw;
+  until then it runs `:bootstrap` and the check says so. A `cdk deploy` that
+  changes the dashboard's task definition in any way re-points the service at CloudFormation's own
+  revision, whose image is `web:<dashboard_image_tag>` -- `web:bootstrap` when
+  the value is not given. The dashboard silently goes back to the placeholder,
+  and every probe stays green.
+
+Two read-only checks print the values to pass, and refuse a value that does not
+match what is running:
 
 ```bash
-python3 scripts/check_live_target_group.py --env "$ENVIRONMENT"   # from the repo root; read-only
+# from the repo root; both read-only
+python3 scripts/check_live_target_group.py --env "$ENVIRONMENT"   # prints api_live_target_group
+python3 scripts/check_dashboard_image.py --env "$ENVIRONMENT"     # prints dashboard_image_tag
 RUNNING_TD=$(aws ecs describe-services --cluster "experimentation-$ENVIRONMENT" \
   --services "experimentation-backend-$ENVIRONMENT" \
   --query "services[0].taskSets[?status=='PRIMARY'].taskDefinition" --output text)
 test -n "$RUNNING_TD" || { echo "no PRIMARY task set"; exit 1; }
 aws ecs describe-task-definition --task-definition "$RUNNING_TD" \
   --query "taskDefinition.containerDefinitions[?name=='backend'].image" --output text
-# pass the image's tag, or keep bootstrap, and the value the check printed:
+# re-run both checks with the values you will pass; each exits non-zero on a mismatch:
+python3 scripts/check_live_target_group.py --env "$ENVIRONMENT" --expect <blue|green>
+python3 scripts/check_dashboard_image.py --env "$ENVIRONMENT" --expect sha256:<hex>
+# pass the backend image's tag, or keep bootstrap, and the two values the checks printed:
 cdk deploy "experimentation-fargate-$ENVIRONMENT" --require-approval never \
-  -c backend_image_tag=<tag> -c api_live_target_group=<blue|green>
+  -c backend_image_tag=<tag> -c api_live_target_group=<blue|green> \
+  -c dashboard_image_tag=sha256:<hex>
 ```
+
+The dashboard pin is the **digest** the check prints (`sha256:<hex>`), not an
+image tag: a tag can be moved to other bytes, and the digest synthesises the
+image as `experimentation-platform/web@sha256:<hex>`, the exact image already
+running. If the check reports that the dashboard runs `:bootstrap` -- no release
+has reached it yet -- there is nothing to pin: leave `dashboard_image_tag` out
+and skip its `--expect`. If it reports any other tag, there is no digest to pin
+either: `-c dashboard_image_tag=<that tag>` names the same reference, which may
+since have been moved to other bytes.
 
 Check: `aws cloudformation list-stacks --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE --query "StackSummaries[?contains(StackName, 'experimentation-')].StackName"`.
 **Stop here if** a stack rolled back: the first missing secret or image is the
@@ -182,17 +211,27 @@ In **staging**, before prod is ever deployed (DECISIONS D6):
 6. Tear down, and compare what is left with
    [what `cdk destroy` leaves behind](../self-hosting/cdk.md#what-cdk-destroy-leaves-behind-and-bills).
 
-> **Until #143 lands, steps 1 and 3 stop before the traffic shift**, red, by
-> design: see [section 3](#3-every-deploy). The rehearsal waits for it.
+Tag B cannot be deployed within the hour after tag A's traffic shift: tag A's
+CodeDeploy deployment is still active while the old task set is kept, and the
+deploy refuses until it is not (section 3).
 
-Prod: the same checklist, with a reviewer who did not dispatch the run. There
-is no automatic rollback on application errors: the canary is timed, not
-judged, and the response to a bad release is the Rollback workflow within the
-hour the old task set is kept.
+Prod: the same checklist, with a reviewer who did not dispatch the run. The
+canary is timed only: no alarm watches it, and nothing rolls back
+automatically on application errors. The response to a bad release is the
+Rollback workflow, within the hour the old task set is kept. **Before the first
+production deploy**, alarm-based rollback
+([#148](https://github.com/getexperimently/experimently/issues/148)) is in
+place, or the founder has waived it in writing.
 
 ---
 
 ## 3. Every deploy
+
+> **Not yet run against a real AWS account.** The CodeDeploy forward deploy
+> described here, and the Rollback workflow, are tested against a simulated
+> `aws` only. The first staging deploy is the first time either runs against
+> AWS, so do that in staging before prod, and read the run and its summary
+> closely.
 
 1. **A release tag.** release-please cuts them; the Release Gate runs on every
    push to `main`, so the tag's commit has a result. For a tag cut before that:
@@ -207,21 +246,59 @@ hour the old task set is kept.
 4. **Approve** when the environment asks. Nothing in AWS has changed yet.
 5. The deploy job then, in order: refuses an unconfigured environment, the
    wrong AWS account, missing stacks, a profile the stacks were not deployed
-   for, missing secrets or repository -- all before any change -- and then
-   builds `:<tag>-<profile>` from the tag (or reuses it if another environment
-   already pushed it), checks the image's labels name the tag's commit,
+   for, missing secrets or repository, a CodeDeploy deployment of this
+   environment that is still active -- all before any change -- and then
+   builds `:<tag>-<profile>` from the tag (or reuses it if an earlier deploy of
+   the same release into this account already pushed it), checks the image's
+   labels name the tag's commit,
    snapshots the database (`pre-deploy-<env>-<tag>-<time>`), registers and
    runs the migration by digest, registers the API revision by digest, and
    creates the CodeDeploy deployment.
-6. **Until #143:** the run stops there, red: *"Stopped before the traffic
-   shift (#143)"*. Nothing shifts; the previous revision keeps serving and
-   CodeDeploy stops the unapproved deployment after its 30-minute wait. The
-   migration **has** been applied, which is safe only when it is
-   backward-compatible (below).
-7. **After #143:** the traffic shift, then the smoke request
-   (`GET ${PUBLIC_BASE_URL}/api/v1/experiments/` → `401 {"detail":"Not authenticated"}`).
-   A failed smoke test does **not** roll back; the run summary gives the line:
+6. **The traffic shift.** When CodeDeploy reports the deployment `Ready`, the
+   run checks that every target in the new task set's target group is
+   `healthy` and that their number is the task set's desired count. Then it
+   approves the shift (`continue-deployment --deployment-wait-type
+   READY_WAIT`). The canary sends 10% of traffic, waits five minutes, then
+   sends the rest. The step succeeds when the new revision is the PRIMARY task
+   set **and** `scripts/check_live_target_group.py` confirms that the `/api/*`
+   rule forwards to that task set's target group (`scripts/api_serving.py`).
+   A rule still split between blue and green means the shift is in progress,
+   and the step waits. It gives up after `CODEDEPLOY_DEADLINE_SECONDS` (30
+   minutes) and **never stops the deployment**.
+7. **The smoke request** (`GET ${PUBLIC_BASE_URL}/api/v1/experiments/` →
+   `401 {"detail":"Not authenticated"}`). A failed smoke test does **not**
+   roll back. The run summary gives the line:
    `Rollback: Actions → Rollback → environment=<env>, task_definition_arn=experimentation-backend-<env>:<n>`.
+8. **The summary** names the live API target group and the value for the next
+   `cdk deploy` of `experimentation-fargate-<env>`:
+   `-c api_live_target_group=<blue|green>` ([section 1.6](#16-the-stacks)).
+
+**The canary is timed only.** No alarm is attached to the deployment group
+(DECISIONS T21). So a release that passes `/health` and fails everywhere else
+reaches 100% of traffic five minutes after the approval, and nothing rolls it
+back. What protects you is the smoke request, your own monitoring, and the
+**Rollback** workflow within the hour CodeDeploy keeps the previous task set.
+
+**One deploy per environment per hour.** For an hour after the shift,
+CodeDeploy keeps the previous task set, and the deployment stays active that
+whole time. It accepts no second deployment meanwhile. So a deploy dispatched
+within that hour is refused at once, before anything is built, naming the
+deployment and roughly how long it has left. A deployment that was never
+approved stays active until its 30-minute approval wait ends. The deploy never
+stops a deployment itself. Rollback does, on purpose.
+
+**Shipping a fix within that hour means Rollback first.** A fix-forward deploy is
+refused while the bad release's deployment is active. Run **Rollback**, which
+stops that deployment and puts the previous revision back, and deploy the fix
+afterwards. Rollback's own CodeDeploy deployment is then the active one, and
+the next forward deploy is refused until it is no longer active. That is
+expected to be about another hour, because the 60-minute termination wait is a
+setting of the deployment group (the synthesised template's
+`TerminateBlueInstancesOnDeploymentSuccess.TerminationWaitTimeInMinutes: 60`)
+and `create-deployment` has no parameter that overrides it. Rollback's
+all-at-once `--deployment-config-name` changes how traffic moves, not how long
+the old task set is kept. This is expected behaviour, not yet observed: the
+first staging deploy is where it is seen.
 
 One deploy or manual migration per environment at a time. A newer dispatch
 waiting behind a running deploy replaces an older one that was still waiting
@@ -284,7 +361,8 @@ Actions → Deploy (from main; environment = staging | prod)
                 refusals (account, stacks, profile, secrets, ECR)
                 build :<tag>-<profile> from ./release (or reuse it)
                 snapshot  →  migration (by digest)  →  API revision (by digest)
-                CodeDeploy blue/green  →  [#143: shift]  →  smoke  →  summary
+                CodeDeploy blue/green  →  healthy targets  →  approve  →
+                canary (timed only)  →  PRIMARY + /api/* rule  →  smoke  →  summary
       |
       v
 ECS cluster experimentation-<env>
@@ -315,6 +393,53 @@ The run prints the task's last 100 log lines. The full log is CloudWatch log
 group `/ecs/experimentation-migrate-<env>`, stream `migrate/backend/<task id>`.
 A migration that failed half-way needs its downgrade before a re-deploy
 ([Rollback Runbook](rollback-runbook.md)).
+
+### "A deployment is still active"
+
+The previous deploy's CodeDeploy deployment is still active: it is inside the
+hour CodeDeploy keeps the old task set, or it is waiting for an approval that
+the deploy never sent. The refusal names it and estimates how long it has
+left. Wait and re-run. If the release it deployed is bad, run **Rollback**,
+which stops it and puts the older revision back. Do not stop it by hand with
+`--auto-rollback-enabled` unless rolling that release back is what you want.
+
+### "Traffic shift not approved"
+
+The new task set's targets never all became healthy before the deadline, so
+the deploy did not approve the shift. Nothing moved, and the previous revision
+keeps serving. CodeDeploy stops the deployment when its 30-minute approval wait
+ends. The migration **has** been applied. Read the API's log
+(`/ecs/experimentation-backend-<env>`) for why the new tasks fail their
+health check.
+
+### "Traffic shift not confirmed"
+
+The deploy approved the shift, and when its deadline passed the new revision
+was not yet serving through the `/api/*` rule. **The deployment was not
+stopped**, because stopping it could roll back a release that is succeeding.
+Watch it with `aws deploy get-deployment --deployment-id <id>` and
+`python3 scripts/api_serving.py experimentation-<env> experimentation-backend-<env> <new revision ARN>`
+(exit 0 means it is serving). If the release is bad, use the rollback line.
+
+### The API route and the PRIMARY task set disagree
+
+The new revision is the PRIMARY task set, but the HTTPS listener's `/api/*`
+rule forwards to the *other* target group, with no split. The API route is not
+where the new tasks are. When the old task set is terminated, an hour after
+the shift, every API request gets a 503. This is the unobserved question of
+whether a CodeDeploy traffic shift rewrites listener *rules* or only the
+default action. The first staging deploy is where it is first seen.
+
+Until then the old task set keeps answering through the rule, so users see
+the *previous* release, not the new one.
+
+1. Roll back within the hour, with the rollback line in the run summary.
+   Rollback is expected to leave the previous revision on the group the rule
+   names. That is not observed yet, so confirm it afterwards with
+   `python3 scripts/check_live_target_group.py --env <env>`.
+2. Before any further deploy, record the observation. Then see the fallbacks
+   named in `fargate_service_stack.py` (ECS-native blue/green, or separate
+   hosts).
 
 ### "Smoke test failing after deployment"
 
