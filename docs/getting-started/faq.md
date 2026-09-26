@@ -16,7 +16,7 @@ The platform includes a REST API backend (FastAPI), a React management dashboard
 
 Yes. The platform is designed to be deployed in your own AWS account using the provided CDK infrastructure definitions. You own your data and control your deployment. There is no vendor lock-in and no data leaves your infrastructure.
 
-Running `cdk deploy --all` from the `infrastructure/cdk/` directory provisions the AWS environment for the API: the ECS Fargate API service behind an Application Load Balancer, the Aurora PostgreSQL database, the Redis cache and Lambda functions. It does not create a CloudFront distribution, and the dashboard is not yet deployed by the CDK (#69). A checkout that also has `modules/` gets the real-time DynamoDB counters table and the Kinesis/OpenSearch/Glue data lake alongside them — see [AWS CDK Deployment](../self-hosting/cdk.md) for which stacks each profile deploys.
+Running `cdk deploy --all` from the `infrastructure/cdk/` directory provisions the AWS environment: the API and the dashboard as ECS Fargate services behind one Application Load Balancer, the Aurora PostgreSQL database, the Redis cache and Lambda functions. The dashboard starts on the `web:bootstrap` image you push first; the Deploy workflow does not yet roll releases onto it (#69). It does not create a CloudFront distribution. A checkout that also has `modules/` gets the real-time DynamoDB counters table and the Kinesis/OpenSearch/Glue data lake alongside them — see [AWS CDK Deployment](../self-hosting/cdk.md) for which stacks each profile deploys.
 
 ---
 

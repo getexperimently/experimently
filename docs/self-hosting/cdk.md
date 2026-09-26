@@ -1,8 +1,8 @@
 # AWS CDK Deployment
 
-The platform's AWS infrastructure is defined as code using **AWS CDK v2**, in **Python**: the app is `infrastructure/cdk/app.py`, and `infrastructure/cdk/cdk.json` runs it with `python3 app.py`. `cdk deploy --all` provisions the API and the data stores it needs in your AWS account.
+The platform's AWS infrastructure is defined as code using **AWS CDK v2**, in **Python**: the app is `infrastructure/cdk/app.py`, and `infrastructure/cdk/cdk.json` runs it with `python3 app.py`. `cdk deploy --all` provisions the API, the dashboard and the data stores they need in your AWS account.
 
-**The dashboard is not yet deployed by the CDK.** No stack builds, stores or serves it: the Fargate stack runs the API container alone, behind the one load balancer the CDK creates. Until that lands (#69), the dashboard runs where the `frontend/Dockerfile` image runs, such as the Docker Compose stack in the [Quick Start](../getting-started/quick-start.md).
+**The Fargate stack runs two services behind one Application Load Balancer**: the API, and the dashboard as its own ECS service (`experimentation-dashboard-<env>`). The HTTPS listener sends `/api/*`, `/health`, `/health/*` and `/metrics` to the API and everything else to the dashboard. `cdk deploy` starts the dashboard on the `experimentation-platform/web:bootstrap` image, which you push before the first deploy ([deployment guide §1.3](../deployment/deployment-guide.md)). The Deploy workflow does not yet roll each release onto the dashboard; that is #69.
 
 ---
 
@@ -186,7 +186,8 @@ dashboard is still on `:bootstrap`.
 - **ECS Fargate** cluster
 - ECS task definition for the API container (1 vCPU, 2 GB memory)
 - ECS service with 3 tasks (`desired_count=3`), auto-scaling between 3 and 10
-- **Application Load Balancer** with an HTTPS listener and an HTTP-to-HTTPS redirect, in front of the API only
+- **Application Load Balancer** with an HTTPS listener and an HTTP-to-HTTPS redirect, in front of the API and the dashboard: `/api/*`, `/health`, `/health/*` and `/metrics` go to the API, everything else to the dashboard
+- The dashboard's own ECS service, `experimentation-dashboard-<env>` (rolling deployment with the circuit breaker; 1 task in `staging`, 2 in `prod`), started on `experimentation-platform/web:bootstrap`
 - AWS CodeDeploy deployment group for blue/green deployments
 - IAM task role with permissions for DynamoDB, Kinesis, Secrets Manager, and Cognito
 
@@ -215,7 +216,6 @@ dashboard is still on `:bootstrap`.
 
 ### What is not deployed
 
-- **The dashboard.** The CDK does not deploy it today (#69); see the top of this page.
 - **CloudFront.** No stack creates a distribution. The split-URL module ships a
   construct for one (`modules/infrastructure/constructs/split_url_distribution.py`),
   but `app.py` does not use it; see [Split URL testing](../api/split-url.md).

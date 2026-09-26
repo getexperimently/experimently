@@ -237,8 +237,9 @@ hour the old task set is kept.
 5. The deploy job then, in order: refuses an unconfigured environment, the
    wrong AWS account, missing stacks, a profile the stacks were not deployed
    for, missing secrets or repository -- all before any change -- and then
-   builds `:<tag>-<profile>` from the tag (or reuses it if another environment
-   already pushed it), checks the image's labels name the tag's commit,
+   builds `:<tag>-<profile>` from the tag (or reuses it if an earlier deploy of
+   the same release into this account already pushed it), checks the image's
+   labels name the tag's commit,
    snapshots the database (`pre-deploy-<env>-<tag>-<time>`), registers and
    runs the migration by digest, registers the API revision by digest, and
    creates the CodeDeploy deployment.
