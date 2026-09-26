@@ -884,6 +884,15 @@ EMAIL_INVALID_DETAIL = "SSO assertion did not contain a valid email address"
 EMAIL_DOMAIN_DETAIL = (
     "This account's email is not in the domain this single sign-on is configured for"
 )
+EMAIL_UNVERIFIED_DETAIL = (
+    "The identity provider has not verified this account's email address"
+)
+IDENTITY_MISMATCH_DETAIL = (
+    "The identity provider's user info does not match its ID token"
+)
+IDENTITY_TAKEN_DETAIL = (
+    "This identity is already linked to another account; ask an administrator"
+)
 EMAIL_AMBIGUOUS_DETAIL = (
     "More than one account matches this email address; ask an administrator"
 )
@@ -930,6 +939,115 @@ def _sso_email(user_info: Dict[str, Any], config: SSOConfig) -> str:
     return email
 
 
+async def verified_email(
+    config: SSOConfig,
+    provider_key: str,
+    id_claims: Dict[str, Any],
+    user_info: Dict[str, Any],
+    access_token: str,
+    http_client: Any = None,
+) -> Dict[str, Any]:
+    """The user info a sign-in may provision with: an email the provider verified.
+
+    Returns ``user_info`` with ``email`` (and, for OpenID Connect providers,
+    ``sub``) replaced by the values the provider vouches for:
+
+    * okta -- the ID token's ``email``, with ``email_verified`` true.
+    * google -- the ID token's ``email``, with ``email_verified`` true and
+      ``hd`` (the Workspace domain) equal to the email's domain: Google is
+      authoritative for an address only for its own Workspace domains.
+    * github -- no ID token; ``GET /user/emails``: a verified address in the
+      configuration's domain -- the primary one if it is one of them, otherwise
+      the only one, otherwise refused.
+    * anything else -- refused (microsoft, azure_ad and onelogin are refused
+      before this by :func:`require_supported_provider`).
+
+    For OpenID Connect providers the user info's ``sub`` must equal the ID
+    token's (OIDC Core s.5.3.2). ``email_verified`` must be the boolean
+    ``true``; the string ``"true"`` is not accepted.
+    """
+    checked = dict(user_info)
+    if provider_key in ("okta", "google"):
+        if str(user_info.get("sub") or "") != str(id_claims.get("sub") or "") or not (
+            id_claims.get("sub")
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=IDENTITY_MISMATCH_DETAIL,
+            )
+        if id_claims.get("email_verified") is not True:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN, detail=EMAIL_UNVERIFIED_DETAIL
+            )
+        email = id_claims.get("email")
+        if provider_key == "google":
+            hd = id_claims.get("hd")
+            domain = email.rpartition("@")[2].lower() if isinstance(email, str) else ""
+            if not isinstance(hd, str) or hd.lower() != domain:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN, detail=EMAIL_DOMAIN_DETAIL
+                )
+        checked["email"] = email
+        checked["sub"] = str(id_claims["sub"])
+        return checked
+    if provider_key == "github":
+        checked["email"] = await _github_verified_email(
+            config, access_token, http_client
+        )
+        return checked
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST, detail=UNSUPPORTED_PROVIDER_DETAIL
+    )
+
+
+_GITHUB_EMAILS_URL = "https://api.github.com/user/emails"
+
+
+async def _github_verified_email(
+    config: SSOConfig, access_token: str, http_client: Any = None
+) -> str:
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Accept": "application/vnd.github+json",
+    }
+    try:
+        if http_client is not None:
+            response = await http_client.get(_GITHUB_EMAILS_URL, headers=headers)
+            entries = response.json() if hasattr(response, "json") else response
+        else:
+            import requests  # type: ignore
+
+            resp = requests.get(
+                _GITHUB_EMAILS_URL, headers=headers, timeout=10, allow_redirects=False
+            )
+            if resp.is_redirect:
+                raise requests.HTTPError("emails endpoint redirected", response=resp)
+            resp.raise_for_status()
+            entries = resp.json()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _refusal("OIDC userinfo fetch failed", exc) from None
+
+    domain = normalise_domain(config.org_domain)
+    candidates = [
+        entry
+        for entry in (entries if isinstance(entries, list) else [])
+        if isinstance(entry, dict)
+        and entry.get("verified") is True
+        and isinstance(entry.get("email"), str)
+        and entry["email"].strip().rpartition("@")[2].lower() == domain
+    ]
+    primary = [entry for entry in candidates if entry.get("primary") is True]
+    if primary:
+        return primary[0]["email"]
+    if len(candidates) == 1:
+        return candidates[0]["email"]
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN, detail=EMAIL_UNVERIFIED_DETAIL
+    )
+
+
 def provision_user(
     db: Session,
     user_info: Dict[str, Any],
@@ -966,7 +1084,15 @@ def provision_user(
             db.refresh(existing_user)
         return existing_user
 
-    # JIT provisioning
+    # JIT provisioning. The account is found by email only, never by the
+    # provider's subject: a row created earlier under the same subject keeps
+    # its own email, and a sign-in under another email is refused rather than
+    # handed that row or crashing on the unique column (#122).
+    external_id = user_info.get("sub") or user_info.get("name_id")
+    if external_id and db.query(User).filter(User.external_id == external_id).first():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=IDENTITY_TAKEN_DETAIL
+        )
     role = UserRole(mapped) if mapped else UserRole.VIEWER
 
     # Derive a username from email local part + random suffix to avoid collisions
@@ -995,7 +1121,7 @@ def provision_user(
         role=role,
         first_name=first_name,
         last_name=last_name,
-        external_id=user_info.get("sub") or user_info.get("name_id"),
+        external_id=external_id,
     )
     db.add(new_user)
     db.commit()

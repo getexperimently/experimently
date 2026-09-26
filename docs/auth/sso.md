@@ -226,6 +226,16 @@ Users who authenticate via SSO for the first time are provisioned with a platfor
 
 A sign-in is accepted only for an email address in the configuration's `org_domain`, exactly: `bob@acme.com` for `acme.com`, but not `bob@eu.acme.com` or `bob@acme.io`. Use one configuration per domain. The comparison ignores case and surrounding spaces. An existing account is matched by email address, ignoring case; if more than one account matches, the sign-in is refused.
 
+The email address must be one the identity provider has verified:
+
+| Provider | Where the email comes from | Required |
+|---|---|---|
+| Okta | the ID token's `email` | `email_verified` is `true` |
+| Google | the ID token's `email` | `email_verified` is `true`, and `hd` (the Google Workspace domain) equals the email's domain. A personal Google account has no `hd`, so it cannot sign in. |
+| GitHub | `GET /user/emails` | a verified address in `org_domain`: the primary one if it is in the domain, otherwise the only one in the domain. The public profile email is not used. |
+
+An account already linked to the same identity under a different email address is not reused: that sign-in is refused, and an administrator resolves it.
+
 The following attributes are populated from the IdP assertion or token:
 
 | Platform Field | SAML Source | OIDC Source |

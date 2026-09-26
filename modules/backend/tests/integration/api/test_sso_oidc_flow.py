@@ -233,3 +233,32 @@ def test_an_id_token_that_is_not_this_logins_is_refused(
     assert resp.status_code == 400, resp.text
     assert resp.json()["detail"] == f"OIDC ID token was not accepted ({reason})"
     assert "access_token" not in resp.text
+
+
+@pytest.mark.parametrize(
+    ("id_token_mode", "status", "detail"),
+    [
+        ("unverified-email", 403, sso_service.EMAIL_UNVERIFIED_DETAIL),
+        ("other-domain", 403, sso_service.EMAIL_DOMAIN_DETAIL),
+        ("sub-mismatch", 400, sso_service.IDENTITY_MISMATCH_DETAIL),
+    ],
+)
+def test_a_sign_in_must_present_an_email_the_provider_verified(
+    browser, config, branch, id_token_mode, status, detail
+):
+    """V2: the email comes from the ID token, verified, in the config's domain."""
+    callback, cookie = _sign_in(browser, config)
+    resp = browser.get(callback, headers={"cookie": cookie})
+    assert resp.status_code == status, resp.text
+    assert resp.json()["detail"] == detail
+    assert "access_token" not in resp.text
+
+
+@pytest.mark.parametrize("id_token_mode", ["userinfo-email-differs"])
+def test_the_id_tokens_email_wins_over_the_user_infos(
+    browser, config, email, branch, id_token_mode
+):
+    callback, cookie = _sign_in(browser, config)
+    resp = browser.get(callback, headers={"cookie": cookie})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["email"] == email

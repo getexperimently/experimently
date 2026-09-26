@@ -118,9 +118,19 @@ def _callback(
 def skip_id_token_check():
     """These tests mock the exchange; the ID-token checks have their own tests
     (``test_sso_oidc_flow.py`` end to end, ``test_sso_service.py`` per claim)."""
-    with patch(
-        "modules.backend.app.services.sso_service.verify_id_token",
-        return_value={},
+
+    async def passthrough(config, provider, id_claims, user_info, access_token):
+        return user_info
+
+    with (
+        patch(
+            "modules.backend.app.services.sso_service.verify_id_token",
+            return_value={},
+        ),
+        patch(
+            "modules.backend.app.services.sso_service.verified_email",
+            side_effect=passthrough,
+        ),
     ):
         yield
 

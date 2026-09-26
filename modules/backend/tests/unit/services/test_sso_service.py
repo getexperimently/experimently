@@ -1324,3 +1324,174 @@ class TestNonceInTheAuthorizationURL:
         first, second = start_oidc_login(cfg, "okta"), start_oidc_login(cfg, "okta")
         assert first.nonce != second.nonce
         assert redeem_oidc_state(first.cookie_value, first.state).nonce == first.nonce
+
+
+# ---------------------------------------------------------------------------
+# verified_email (C2v V2) -- through the provider dispatch
+# ---------------------------------------------------------------------------
+
+
+def _v_config(provider: SSOProviderType, domain: str = "acme.com") -> MagicMock:
+    cfg = MagicMock(spec=SSOConfig)
+    cfg.id = uuid.uuid4()
+    cfg.provider_type = provider
+    cfg.org_domain = domain
+    return cfg
+
+
+def _id(**claims) -> Dict[str, Any]:
+    base = {"sub": "s-1", "email": "bob@acme.com", "email_verified": True}
+    base.update(claims)
+    return {k: v for k, v in base.items() if v is not None}
+
+
+class TestVerifiedEmail:
+    @pytest.mark.asyncio
+    async def test_okta_uses_the_id_tokens_verified_email(self):
+        info = await sso_service.verified_email(
+            _v_config(SSOProviderType.OKTA),
+            "okta",
+            _id(),
+            {"sub": "s-1", "email": "someone-else@acme.com"},
+            "at",
+        )
+        assert info["email"] == "bob@acme.com"
+        assert info["sub"] == "s-1"
+
+    @pytest.mark.regression
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("verified", [False, "true", None])
+    async def test_an_unverified_email_is_refused(self, verified):
+        with pytest.raises(HTTPException) as exc_info:
+            await sso_service.verified_email(
+                _v_config(SSOProviderType.OKTA),
+                "okta",
+                _id(email_verified=verified),
+                {"sub": "s-1"},
+                "at",
+            )
+        assert exc_info.value.status_code == 403
+        assert exc_info.value.detail == sso_service.EMAIL_UNVERIFIED_DETAIL
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("userinfo_sub", ["other", "", None])
+    async def test_user_info_must_name_the_id_tokens_subject(self, userinfo_sub):
+        with pytest.raises(HTTPException) as exc_info:
+            await sso_service.verified_email(
+                _v_config(SSOProviderType.OKTA),
+                "okta",
+                _id(),
+                {"sub": userinfo_sub},
+                "at",
+            )
+        assert exc_info.value.detail == sso_service.IDENTITY_MISMATCH_DETAIL
+
+    @pytest.mark.regression
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("hd", [None, "other.com", "eu.acme.com"])
+    async def test_google_requires_its_workspace_domain_to_be_the_emails(self, hd):
+        with pytest.raises(HTTPException) as exc_info:
+            await sso_service.verified_email(
+                _v_config(SSOProviderType.GOOGLE),
+                "google",
+                _id(hd=hd),
+                {"sub": "s-1"},
+                "at",
+            )
+        assert exc_info.value.status_code == 403
+        assert exc_info.value.detail == sso_service.EMAIL_DOMAIN_DETAIL
+
+    @pytest.mark.asyncio
+    async def test_google_with_its_workspace_domain_is_accepted(self):
+        info = await sso_service.verified_email(
+            _v_config(SSOProviderType.GOOGLE),
+            "google",
+            _id(hd="ACME.com"),
+            {"sub": "s-1"},
+            "at",
+        )
+        assert info["email"] == "bob@acme.com"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("provider", ["microsoft", "azure_ad", "onelogin", "saml"])
+    async def test_other_providers_are_refused(self, provider):
+        with pytest.raises(HTTPException) as exc_info:
+            await sso_service.verified_email(
+                _v_config(SSOProviderType.OKTA), provider, _id(), {"sub": "s-1"}, "at"
+            )
+        assert exc_info.value.detail == sso_service.UNSUPPORTED_PROVIDER_DETAIL
+
+
+def _github_client(entries) -> AsyncMock:
+    response = MagicMock()
+    response.json.return_value = entries
+    client = AsyncMock()
+    client.get = AsyncMock(return_value=response)
+    return client
+
+
+class TestGitHubVerifiedEmail:
+    async def _email(self, entries) -> str:
+        info = await sso_service.verified_email(
+            _v_config(SSOProviderType.GITHUB),
+            "github",
+            {},
+            {"sub": "12345", "email": "public@acme.com"},
+            "gh-token",
+            http_client=_github_client(entries),
+        )
+        return info["email"]
+
+    @pytest.mark.asyncio
+    async def test_the_primary_in_domain_address(self):
+        assert (
+            await self._email(
+                [
+                    {"email": "a@acme.com", "verified": True, "primary": False},
+                    {"email": "b@acme.com", "verified": True, "primary": True},
+                ]
+            )
+            == "b@acme.com"
+        )
+
+    @pytest.mark.asyncio
+    async def test_the_only_in_domain_address_when_the_primary_is_elsewhere(self):
+        assert (
+            await self._email(
+                [
+                    {"email": "me@gmail.com", "verified": True, "primary": True},
+                    {"email": "a@acme.com", "verified": True, "primary": False},
+                ]
+            )
+            == "a@acme.com"
+        )
+
+    @pytest.mark.regression
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "entries",
+        [
+            [{"email": "a@acme.com", "verified": False, "primary": True}],
+            [
+                {"email": "a@acme.com", "verified": True, "primary": False},
+                {"email": "b@acme.com", "verified": True, "primary": False},
+            ],
+            [{"email": "a@eu.acme.com", "verified": True, "primary": True}],
+            [],
+            "not-a-list",
+        ],
+        ids=["unverified", "two-non-primary", "subdomain", "none", "garbage"],
+    )
+    async def test_otherwise_refused(self, entries):
+        with pytest.raises(HTTPException) as exc_info:
+            await self._email(entries)
+        assert exc_info.value.status_code == 403
+        assert exc_info.value.detail == sso_service.EMAIL_UNVERIFIED_DETAIL
+
+    @pytest.mark.asyncio
+    async def test_the_public_profile_email_is_never_used(self):
+        """/user's `email` is whatever the user made public: not evidence."""
+        with pytest.raises(HTTPException):
+            await self._email(
+                [{"email": "public@acme.com", "verified": False, "primary": True}]
+            )

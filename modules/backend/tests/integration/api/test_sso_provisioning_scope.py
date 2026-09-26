@@ -298,3 +298,25 @@ def test_unsupported_providers_are_refused_at_login_and_callback(
     for resp in (login, callback):
         assert resp.status_code == 400, resp.text
         assert resp.json()["detail"] == sso_service.UNSUPPORTED_PROVIDER_DETAIL
+
+
+def test_accounts_are_found_by_email_never_by_the_providers_subject(
+    db_session: Session,
+):
+    """A row created earlier under a subject is not handed to a sign-in under
+    another email, and the unique column is a refusal, not a 500 (#122)."""
+    domain = _domain()
+    cfg = _config(db_session, domain)
+    first = sso_service.provision_user(
+        db_session, {**_info(f"kim@{domain}"), "sub": "subject-1"}, cfg
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        sso_service.provision_user(
+            db_session, {**_info(f"lee@{domain}"), "sub": "subject-1"}, cfg
+        )
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail == sso_service.IDENTITY_TAKEN_DETAIL
+    assert _count(db_session, f"lee@{domain}") == 0
+    db_session.expire_all()
+    assert db_session.get(User, first.id).email == f"kim@{domain}"

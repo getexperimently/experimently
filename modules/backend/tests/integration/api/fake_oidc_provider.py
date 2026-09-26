@@ -15,7 +15,10 @@ flow test is about:
   an Okta custom authorization server's is its ``sso_url``), ``aud`` (the
   client), ``exp`` and the ``nonce`` the authorize request carried -- unless
   ``FAKE_OIDC_ID_TOKEN`` says to misbehave: ``wrong-nonce``, ``wrong-iss``,
-  ``wrong-aud``, ``expired`` or ``none``.
+  ``wrong-aud``, ``expired`` or ``none``; or to vouch for the wrong person:
+  ``unverified-email``, ``other-domain`` (the ID token's email is at another
+  domain), ``userinfo-email-differs`` (user info names another address than
+  the ID token) or ``sub-mismatch`` (user info's ``sub`` differs).
 
 Usage: ``python fake_oidc_provider.py <client_id> <client_secret> <email>``.
 Prints ``READY <port>`` once it is listening.
@@ -58,6 +61,7 @@ def _id_token(nonce: str) -> str:
         "exp": int(time.time()) + 300,
         "nonce": nonce,
         "email": EMAIL,
+        "email_verified": True,
     }
     if ID_TOKEN_MODE == "wrong-nonce":
         claims["nonce"] = "not-this-logins-nonce"
@@ -67,6 +71,10 @@ def _id_token(nonce: str) -> str:
         claims["aud"] = "another-client"
     elif ID_TOKEN_MODE == "expired":
         claims["exp"] = int(time.time()) - 3600
+    elif ID_TOKEN_MODE == "unverified-email":
+        claims["email_verified"] = False
+    elif ID_TOKEN_MODE == "other-domain":
+        claims["email"] = "someone@elsewhere.example"
     head = _b64(json.dumps({"alg": "HS256", "typ": "JWT"}).encode())
     body = _b64(json.dumps(claims).encode())
     sig = hmac.new(b"fake-provider-key", f"{head}.{body}".encode(), hashlib.sha256)
@@ -130,15 +138,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 known = auth.startswith("Bearer ") and auth[7:] in _tokens
             if not known:
                 return self._send(401, {"error": "invalid_token"})
-            return self._send(
-                200,
-                {
-                    "sub": f"sub-{EMAIL}",
-                    "email": EMAIL,
-                    "name": "Fake User",
-                    "groups": [],
-                },
-            )
+            info = {"sub": f"sub-{EMAIL}", "email": EMAIL, "name": "Fake User"}
+            if ID_TOKEN_MODE == "userinfo-email-differs":
+                info["email"] = "not-" + EMAIL
+            elif ID_TOKEN_MODE == "sub-mismatch":
+                info["sub"] = "someone-else"
+            return self._send(200, {**info, "groups": []})
         return self._send(404, {"error": "not_found"})
 
     def do_POST(self) -> None:
