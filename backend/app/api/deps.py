@@ -7,6 +7,7 @@ from fastapi.security import (
 )
 from loguru import logger
 from pydantic import BaseModel
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from backend.app.core.cognito import map_cognito_groups_to_role, should_be_superuser
@@ -483,6 +484,14 @@ def get_api_key(
             detail="Invalid API Key",
             headers={"WWW-Authenticate": "APIKey"},
         )
+
+    # Issue #198: record the use, throttled inside update_last_used. A failure
+    # here is bookkeeping, not authentication, so it never fails the request.
+    try:
+        api_key.update_last_used(db)
+    except SQLAlchemyError as exc:
+        db.rollback()
+        logger.warning(f"Could not record API key use for key {api_key.id}: {exc}")
 
     return user
 
