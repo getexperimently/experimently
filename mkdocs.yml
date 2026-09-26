@@ -208,5 +208,4 @@ nav:
   - Pre-commit Hooks: getting-started/pre-commit-hooks.md
   - Editor Setup: getting-started/vscode-settings.md
   - Testing Cognito Auth: auth/cognito-auth-testing.md
-  - Autonomous Testing: testing/autonomous-testing-framework.md
   - Load Testing: performance/load-testing.md
