@@ -32,8 +32,8 @@ The secrets a human creates are:
 | `/<env>/experimentation/first-superuser-password` | both |
 | `/<env>/experimentation/audit-hmac-key` | `full` only |
 
-plus `/<env>/experimentation/redis-url`, which the API task definition still
-reads until the Redis connection is taken from the Redis stack (#147).
+Nothing else: the database credentials and the Redis connection come from their
+stacks (below).
 
 ### Database credentials: nothing to create
 
@@ -79,26 +79,42 @@ aws secretsmanager create-secret \
   --tags '[{"Key":"Environment","Value":"production"},{"Key":"Service","Value":"experimently"}]'
 ```
 
-### Redis Connection URL
+### Redis: nothing to create
 
-Replace `REDIS_AUTH_TOKEN` with the actual ElastiCache auth token and the hostname with your ElastiCache primary endpoint:
+There is no Redis secret any more (#147). The old one held a connection URL,
+injected as a variable nothing in the application reads; every Redis client is
+built from `REDIS_HOST` and `REDIS_PORT`, which the task did not set, so the
+tasks talked to `localhost` and ran without Redis.
 
-```bash
-# Get the ElastiCache primary endpoint
-aws elasticache describe-replication-groups \
-  --replication-group-id experimentation-redis-prod \
-  --query 'ReplicationGroups[0].NodeGroups[0].PrimaryEndpoint.Address'
+The API task definition now takes its Redis connection from the Redis stack
+(`experimentation-redis-<env>`), as plain environment, not secrets:
 
-# Get the ElastiCache auth token (if configured during cluster creation)
-# Or generate one:
-REDIS_TOKEN=$(openssl rand -base64 24)
+| Variable | Value |
+|----------|-------|
+| `REDIS_HOST` | the replication group's **primary** endpoint address |
+| `REDIS_PORT` | the primary endpoint's port |
+| `REDIS_SSL` | `true` |
 
-aws secretsmanager create-secret \
-  --name /prod/experimentation/redis-url \
-  --description "Redis connection URL for ElastiCache (includes auth token)" \
-  --secret-string "redis://:${REDIS_TOKEN}@experimentation-redis-prod.XXXXX.cache.amazonaws.com:6379/0" \
-  --tags '[{"Key":"Environment","Value":"production"},{"Key":"Service","Value":"experimently"}]'
-```
+The replication group has in-transit encryption on, so it refuses a plaintext
+connection; `REDIS_SSL=true` makes every Redis client the application builds
+connect over TLS (`ssl=True`). It defaults to `false`, for the plaintext
+`redis:7` used locally and in CI. The replication group has no AUTH token, so
+there is no password to store: `REDIS_PASSWORD` stays unset.
+
+Redis is optional to the application: without it the rate limiter falls back
+to per-task memory and the caches are skipped, and `/health/ready` still
+answers 200 unless `REDIS_REQUIRED=true`. So a Redis the tasks cannot reach (a
+TLS failure, say) does **not** fail a deployment by itself. Two things exist to
+catch it, and the staging rehearsal (Stream I) uses one of them:
+
+- set `REDIS_REQUIRED=true` in staging, so readiness -- the ALB health check --
+  fails without Redis; or
+- read `checks.redis.status` from the `/health/ready` body, which is
+  `healthy` or `unhealthy` in every environment (production shows the status
+  only, not the error).
+
+This change sets neither: the deployed task keeps the default,
+`REDIS_REQUIRED=false`.
 
 ### Cognito Configuration
 
@@ -163,13 +179,13 @@ aws secretsmanager list-secrets \
   --output table
 ```
 
-`Deploy to Production` checks for `jwt-secret`, `redis-url` and
+`Deploy to Production` checks for `jwt-secret` and
 `first-superuser-password`, plus `audit-hmac-key` for the `full` profile,
 before it builds anything ("Required secrets exist for this profile").
 `cognito-config` may also be listed; nothing in the deployment reads it. The
 database credentials are not under this prefix: they are the database stack's
-`experimentation-database-<env>-aurora-credentials`.
-
+`experimentation-database-<env>-aurora-credentials`. Nor is Redis: see
+[Redis: nothing to create](#redis-nothing-to-create).
 ---
 
 ## How Secrets Are Injected at Runtime
@@ -190,6 +206,10 @@ task_definition.add_container(
         "PYTHONUNBUFFERED": "1",
         "POSTGRES_DB": "experimentation",
         "POSTGRES_SCHEMA": "experimentation",
+        # Not secrets: the Redis stack's primary endpoint, spoken to over TLS.
+        "REDIS_HOST": redis_stack.primary_host,
+        "REDIS_PORT": redis_stack.primary_port,
+        "REDIS_SSL": "true",
     },
     secrets={
         # The secret the database stack generated Aurora's credentials into.
@@ -202,11 +222,6 @@ task_definition.add_container(
         "JWT_SECRET": ecs.Secret.from_secrets_manager(
             secretsmanager.Secret.from_secret_name_v2(
                 stack, "JwtSecret", "/prod/experimentation/jwt-secret"
-            )
-        ),
-        "REDIS_URL": ecs.Secret.from_secrets_manager(
-            secretsmanager.Secret.from_secret_name_v2(
-                stack, "RedisUrl", "/prod/experimentation/redis-url"
             )
         ),
         "COGNITO_CONFIG": ecs.Secret.from_secrets_manager(
@@ -226,7 +241,7 @@ import os
 
 POSTGRES_PASSWORD = os.environ["POSTGRES_PASSWORD"]  # from the Aurora-generated secret
 JWT_SECRET = os.environ["JWT_SECRET"]            # from /prod/experimentation/jwt-secret
-REDIS_URL = os.environ.get("REDIS_URL", "")      # from /prod/experimentation/redis-url
+REDIS_HOST = os.environ["REDIS_HOST"]            # the Redis stack's primary endpoint
 ```
 
 ---
@@ -237,7 +252,6 @@ REDIS_URL = os.environ.get("REDIS_URL", "")      # from /prod/experimentation/re
 |--------|-------------------|--------|-----------------|
 | `experimentation-database-prod-aurora-credentials` | 180 days | Secrets Manager Lambda rotation (single-user) | Yes: ECS injects it when a task starts |
 | `/prod/experimentation/jwt-secret` | 90 days | Manual rotation (see below) | Yes (force ECS restart) |
-| `/prod/experimentation/redis-url` (auth token) | 365 days | Manual (ElastiCache token rotation) | Yes |
 | `/prod/experimentation/cognito-config` | On Cognito pool change | Manual update | Yes |
 | GitHub Actions deployment secrets | 365 days | Manual (GitHub Settings) | N/A |
 

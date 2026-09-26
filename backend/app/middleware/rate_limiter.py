@@ -86,11 +86,13 @@ class RedisRateLimiter:
         redis_port: int = 6379,
         redis_password: Optional[str] = None,
         redis_db: int = 0,
+        redis_ssl: bool = False,
     ) -> None:
         self._redis_host = redis_host
         self._redis_port = redis_port
         self._redis_password = redis_password
         self._redis_db = redis_db
+        self._redis_ssl = redis_ssl
         self._redis_client: Optional[object] = None
         self._redis_available: bool = True
         self._fallback = SlidingWindowRateLimiter()
@@ -106,6 +108,7 @@ class RedisRateLimiter:
                     port=self._redis_port,
                     password=self._redis_password or None,
                     db=self._redis_db,
+                    ssl=self._redis_ssl,
                     socket_connect_timeout=2,
                     socket_timeout=1,
                     decode_responses=True,
@@ -284,6 +287,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 redis_port=int(settings.REDIS_PORT),
                 redis_password=settings.REDIS_PASSWORD,
                 redis_db=settings.REDIS_DB,
+                redis_ssl=bool(settings.REDIS_SSL),
             )
         else:
             self._limiter = SlidingWindowRateLimiter()

@@ -78,7 +78,8 @@ Create a `.env` file in the backend directory with these variables:
 ```
 # Development settings - NEVER use these in production
 DATABASE_URL=postgresql://postgres:postgres@localhost:5432/experimentation
-REDIS_URL=redis://localhost:6379/0
+REDIS_HOST=localhost
+REDIS_PORT=6379
 AWS_PROFILE=experimentation-dev
 ENVIRONMENT=development
 LOG_LEVEL=DEBUG

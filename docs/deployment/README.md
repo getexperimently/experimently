@@ -162,7 +162,6 @@ These secrets must be populated before the first deployment. See [secrets-manage
 | Secret Path | Injected as | Description |
 |-------------|-------------|-------------|
 | `/prod/experimentation/jwt-secret` | `SECRET_KEY` | JWT signing secret (minimum 32 characters) |
-| `/prod/experimentation/redis-url` | `REDIS_URL` | Redis connection URL with auth token |
 | `/prod/experimentation/first-superuser-password` | `FIRST_SUPERUSER_PASSWORD` | Password for the first administrator; the default `admin` is refused in production |
 | `/prod/experimentation/audit-hmac-key` | `AUDIT_HMAC_KEY` | **`profile: full` only** — signs the compliance audit log; the modules refuse to register without it |
 | `/prod/experimentation/cognito-config` | — | Cognito user pool ID and client ID (JSON) |
@@ -177,6 +176,13 @@ Every row except `cognito-config` is injected by the ECS task definitions
 `migration_task_stack.py`) and is one the application refuses to start without:
 the image ships no `.env` file, so the task definition is the only source.
 `Deploy to Production` fails in **Pre-deployment Checks** if one is missing.
+
+Redis is not in this table: the API task takes `REDIS_HOST` and `REDIS_PORT`
+from the Redis stack's primary endpoint and sets `REDIS_SSL=true`, because the
+replication group refuses plaintext. Nothing to create; see
+[Redis: nothing to create](secrets-management.md#redis-nothing-to-create),
+which also says how the staging rehearsal proves the tasks really reach it
+(`REDIS_REQUIRED=true`, or `checks.redis.status` in `/health/ready`).
 
 ---
 

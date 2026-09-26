@@ -195,6 +195,7 @@ def check_redis() -> Dict[str, Any]:
             port=int(settings.REDIS_PORT),
             password=settings.REDIS_PASSWORD or None,
             db=int(settings.REDIS_DB or 0),
+            ssl=bool(settings.REDIS_SSL),
             socket_connect_timeout=1,
             socket_timeout=1,
         )

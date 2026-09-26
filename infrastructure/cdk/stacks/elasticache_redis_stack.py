@@ -93,6 +93,12 @@ class ElastiCacheRedisStack(Stack):
             transit_encryption_enabled=True,
         )
 
+        # Where the API task connects (#147): the PRIMARY endpoint, the one that
+        # takes writes. The rate limiter INCRs and the caches SET, so a reader
+        # endpoint would fail every write. The port is a string attribute.
+        self.primary_host = self.redis_cluster.attr_primary_end_point_address
+        self.primary_port = self.redis_cluster.attr_primary_end_point_port
+
         # Add tags
         Tags.of(self.redis_cluster).add("Name", f"{construct_id}-redis")
         Tags.of(self.redis_cluster).add("Environment", environment)

@@ -41,7 +41,8 @@ The ECS task reads configuration from AWS Secrets Manager at startup. Set the fo
 | Variable | Description |
 |----------|-------------|
 | `DATABASE_URL` | Aurora PostgreSQL connection string |
-| `REDIS_URL` | ElastiCache Redis URL |
+| `REDIS_HOST` / `REDIS_PORT` | ElastiCache primary endpoint and port (from the Redis stack) |
+| `REDIS_SSL` | `true` on AWS: the replication group requires TLS |
 | `SECRET_KEY` | Application secret key (min 32 chars) |
 | `COGNITO_USER_POOL_ID` | AWS Cognito User Pool ID |
 | `COGNITO_CLIENT_ID` | Cognito app client ID |
@@ -91,7 +92,9 @@ DATABASE_POOL_TIMEOUT=30
 User JWT sessions are stored in Redis with a TTL matching the token expiry time. This allows the API service to scale horizontally without sticky sessions — any task can validate any user's session.
 
 ```bash
-REDIS_URL=redis://your-cluster.xxxxx.0001.use1.cache.amazonaws.com:6379
+REDIS_HOST=master.your-cluster.xxxxx.use1.cache.amazonaws.com   # the primary endpoint
+REDIS_PORT=6379
+REDIS_SSL=true   # in-transit encryption is on; a plaintext client is refused
 ```
 
 ### Application Cache
@@ -309,7 +312,9 @@ The ECS task role and Lambda execution roles need the following permissions:
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `DATABASE_URL` | Yes | Aurora PostgreSQL connection string |
-| `REDIS_URL` | Yes | ElastiCache Redis URL |
+| `REDIS_HOST` | Yes | ElastiCache primary endpoint (`localhost` if unset) |
+| `REDIS_PORT` | No | ElastiCache port (default `6379`) |
+| `REDIS_SSL` | Yes, on AWS | `true` to connect over TLS (default `false`) |
 | `SECRET_KEY` | Yes | Application secret key (min 32 chars) |
 | `COGNITO_USER_POOL_ID` | Yes | AWS Cognito User Pool ID |
 | `COGNITO_CLIENT_ID` | Yes | Cognito app client ID |

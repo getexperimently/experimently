@@ -10,7 +10,7 @@ Secret naming convention:
 Examples:
   /prod/experimentation/first-superuser-password
   /prod/experimentation/jwt-secret
-  /prod/experimentation/redis-url
+  /prod/experimentation/audit-hmac-key
   /staging/experimentation/jwt-secret
 """
 
@@ -85,7 +85,7 @@ def build_secret_name(key: str, environment: Optional[str] = None) -> str:
     Build the standard secret name for this platform.
 
     Args:
-        key: Secret key (e.g. 'jwt-secret', 'redis-url')
+        key: Secret key (e.g. 'jwt-secret', 'first-superuser-password')
         environment: Override environment (defaults to APP_ENV env var)
 
     Returns:

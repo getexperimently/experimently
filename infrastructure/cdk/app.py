@@ -269,6 +269,10 @@ fargate_stack = FargateServiceStack(
     db_host=database_stack.writer_host,
     db_credentials=database_stack.db_credentials,
     db_security_group=database_stack.rds_security_group,
+    # Where Redis is (#147): the replication group's primary endpoint. The task
+    # speaks TLS to it (REDIS_SSL, set in the stack); there is no secret.
+    redis_host=redis_stack.primary_host,
+    redis_port=redis_stack.primary_port,
     env=env,
 )
 fargate_stack.add_dependency(compute_stack)
