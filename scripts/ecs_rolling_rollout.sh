@@ -104,18 +104,28 @@ describe() {
 
 SVC=""
 # The last 10 service events and one stopped task's reason, best effort: a
-# failure to read them must not change the verdict.
+# failure to read them must not change the verdict. The stopped task is one of
+# THIS revision's: the service's newest stopped tasks are read and filtered on
+# taskDefinitionArn, so an older revision's unrelated failure is not reported
+# as this rollout's.
 diagnose() {
   echo "--- $SERVICE: last service events ---"
   jq -r '[.events[]?][:10][] | "\(.createdAt // "")  \(.message // "")"' <<<"$SVC" || true
-  local task
-  task="$(aws ecs list-tasks --cluster "$CLUSTER" --service-name "$SERVICE" \
-            --desired-status STOPPED --query 'taskArns[0]' --output text 2>/dev/null)" || task=""
-  if [ -n "$task" ] && [ "$task" != "None" ]; then
-    echo "--- one stopped task ---"
-    aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$task" \
-      --query 'tasks[0].[taskDefinitionArn, stoppedReason]' --output text 2>/dev/null \
-      || echo "(its reason could not be read)"
+  local stopped reason
+  stopped="$(aws ecs list-tasks --cluster "$CLUSTER" --service-name "$SERVICE" \
+               --desired-status STOPPED --query 'taskArns[:20]' --output text 2>/dev/null)" || stopped=""
+  reason=""
+  if [ -n "$stopped" ] && [ "$stopped" != "None" ]; then
+    # shellcheck disable=SC2086  # one argument per task ARN
+    reason="$(aws ecs describe-tasks --cluster "$CLUSTER" --tasks $stopped \
+                --query "tasks[?taskDefinitionArn=='$TASK_DEFINITION'] | [0].[taskArn, stoppedReason]" \
+                --output text 2>/dev/null)" || reason=""
+  fi
+  if [ -n "$reason" ] && [ "$reason" != "None" ]; then
+    echo "--- one stopped task of ${TASK_DEFINITION##*/} ---"
+    echo "$reason"
+  else
+    echo "(no stopped task of ${TASK_DEFINITION##*/} could be read)"
   fi
   echo "---"
 }
@@ -127,10 +137,18 @@ image_of() {
 
 # --- before any mutation ------------------------------------------------------
 
-if ! OUT="$(describe)"; then
-  echo "::error::Could not describe ECS service $SERVICE in $CLUSTER. Nothing was changed."
-  exit 1
-fi
+# A read can be throttled: retry it a bounded number of times, --interval apart.
+PRE_ATTEMPTS=3
+ATTEMPT=1
+until OUT="$(describe)"; do
+  if [ "$ATTEMPT" -ge "$PRE_ATTEMPTS" ]; then
+    echo "::error::Could not describe ECS service $SERVICE in $CLUSTER after $PRE_ATTEMPTS attempts (the errors are above). Nothing was changed."
+    exit 1
+  fi
+  echo "$SERVICE: could not read the service (attempt $ATTEMPT of $PRE_ATTEMPTS); retrying" >&2
+  ATTEMPT=$(( ATTEMPT + 1 ))
+  sleep "$INTERVAL"
+done
 SVC="$(jq -c '.services[0] // empty' <<<"$OUT")"
 if [ -z "$SVC" ] || [ "$(jq -r '.status // ""' <<<"$SVC")" != "ACTIVE" ]; then
   echo "::error::No ACTIVE ECS service $SERVICE in $CLUSTER. Nothing was changed."
@@ -197,10 +215,12 @@ fi
 
 END=$(( $(date +%s) + DEADLINE ))
 LAST=""
+READ_FAILS=0
 LISTED=false PRIMARIES=0 P_ID="-" P_TD="-" STATE="-" RUNNING=0 DESIRED=0 FAILED=0 COUNT=0
 while :; do
   if OUT="$(describe)" && NEXT="$(jq -c '.services[0] // empty' <<<"$OUT")" && [ -n "$NEXT" ]; then
     SVC="$NEXT"
+    READ_FAILS=0
     IFS=$'\t' read -r LISTED PRIMARIES P_ID P_TD STATE RUNNING DESIRED FAILED COUNT < <(
       jq -r --arg id "$ID" '
         [.deployments[]?] as $d
@@ -245,15 +265,20 @@ while :; do
       LAST="$LINE"
     fi
   else
+    READ_FAILS=$(( READ_FAILS + 1 ))
     echo "$SERVICE: could not read the service; retrying" >&2
   fi
 
   if [ "$(date +%s)" -ge "$END" ]; then
     diagnose
+    UNREAD=""
+    if [ "$READ_FAILS" -gt 0 ]; then
+      UNREAD=" The last $READ_FAILS describe-services call(s) failed (the errors are above), so this is the last state read, not the current one."
+    fi
     if [ "$SEEN" = 1 ]; then
-      echo "::error title=$SERVICE rollout did not finish::After ${DEADLINE}s $SERVICE's deployment of ${TASK_DEFINITION##*/} is $STATE ($RUNNING/$DESIRED running, $FAILED failed tasks, $COUNT deployment(s)). ECS is still working on it; this run stopped waiting and did not stop it."
+      echo "::error title=$SERVICE rollout did not finish::After ${DEADLINE}s $SERVICE's deployment of ${TASK_DEFINITION##*/} is $STATE ($RUNNING/$DESIRED running, $FAILED failed tasks, $COUNT deployment(s)). ECS is still working on it; this run stopped waiting and did not stop it.$UNREAD"
     else
-      echo "::error title=$SERVICE rollout did not finish::After ${DEADLINE}s ECS has not listed deployment $ID of ${TASK_DEFINITION##*/}. This run stopped waiting and did not stop anything."
+      echo "::error title=$SERVICE rollout did not finish::After ${DEADLINE}s ECS has not listed deployment $ID of ${TASK_DEFINITION##*/}. This run stopped waiting and did not stop anything.$UNREAD"
     fi
     exit 1
   fi

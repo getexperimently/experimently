@@ -20,8 +20,11 @@ The cases are R1-R9 and R11 of the plan (R10 is the API half of the race guard,
 which C4's workflow wiring owns). Each is driven with a fake `aws` first on PATH
 that serves a scripted sequence of `describe-services` answers (the first is the
 pre-mutation read; the last repeats). Every run uses `--interval 0`; a case
-that must reach the deadline uses `--deadline 0`, one that must not uses a
-large deadline and a subprocess timeout. Nothing asserts on elapsed time.
+that must reach the deadline uses `--deadline 0`; the others use a 3 s
+deadline, so a classifier that never decides fails on an assertion (its outcome
+and a bounded `describe-services` count), not on a timeout. A 10 s safety net
+fails by name if `--deadline` itself is unenforced. Nothing asserts on elapsed
+time.
 """
 
 from __future__ import annotations
@@ -69,7 +72,17 @@ if (service, verb) == ("ecs", "describe-services"):
     counter = os.path.join(state, "describe.count")
     n = int(canned("describe.count", "0"))
     open(counter, "w").write(str(n + 1))
-    answer = answers[min(n, len(answers) - 1)]
+    # Throttling: fail the chosen calls (0 is the pre-mutation read), or
+    # every call from one on.
+    fail = json.loads(canned("describe_fail.json", "{{}}"))
+    if n in fail.get("calls", []) or (fail.get("from") is not None and n >= fail["from"]):
+        print("An error occurred (ThrottlingException) when calling the "
+              "DescribeServices operation: Rate exceeded", file=sys.stderr)
+        sys.exit(254)
+    # A failed call consumes no answer: the sequence is what was READ.
+    answered = int(canned("answered.count", "0"))
+    open(os.path.join(state, "answered.count"), "w").write(str(answered + 1))
+    answer = answers[min(answered, len(answers) - 1)]
     if answer is None:
         print(json.dumps({{"services": [], "failures": [{{"reason": "MISSING"}}]}}))
     else:
@@ -83,9 +96,16 @@ elif (service, verb) == ("ecs", "update-service"):
 elif (service, verb) == ("ecs", "describe-task-definition"):
     print("123456789012.dkr.ecr.us-west-2.amazonaws.com/experimentation-platform/web@sha256:" + "b" * 64)
 elif (service, verb) == ("ecs", "list-tasks"):
-    print("arn:aws:ecs:us-west-2:123456789012:task/experimentation-staging/dead")
+    print("\t".join(t["arn"] for t in json.loads(canned("stopped.json"))) or "None")
 elif (service, verb) == ("ecs", "describe-tasks"):
-    print(opt("--tasks") and "{new}\tEssential container in task exited")
+    # The script asks for the first of the listed tasks whose
+    # taskDefinitionArn is its own: tasks[?taskDefinitionArn=='<td>'] | [0]...
+    query = opt("--query")
+    wanted = query.split("taskDefinitionArn=='", 1)[1].split("'", 1)[0] if "taskDefinitionArn=='" in query else None
+    asked = args[args.index("--tasks") + 1:]
+    match = [t for t in json.loads(canned("stopped.json"))
+             if t["arn"] in asked and (wanted is None or t["td"] == wanted)]
+    print(f"{{match[0]['arn']}}\t{{match[0]['reason']}}" if match else "None")
 else:
     print(f"fake aws: unexpected call {{args}}", file=sys.stderr)
     sys.exit(99)
@@ -156,6 +176,19 @@ IN_PROGRESS = svc(
 )
 DONE = svc(dep(NEW, OURS))
 
+#: Every run polls at --interval 0. The deadline is short, so a classifier that
+#: never decides runs into it and fails on an ASSERTION (the outcome and the
+#: bounded describe-services count) within seconds; a case that must reach the
+#: deadline passes "0".
+DEADLINE = "3"
+#: Only an unenforced --deadline reaches this; it fails the test by name.
+SAFETY_NET_SECONDS = 10
+
+TASK = "arn:aws:ecs:us-west-2:123456789012:task/experimentation-staging"
+STOPPED_OF_THIS_REVISION = [
+    {"arn": f"{TASK}/dead", "td": NEW, "reason": "Essential container in task exited"}
+]
+
 
 @pytest.fixture
 def rollout(tmp_path):
@@ -174,37 +207,54 @@ def rollout(tmp_path):
         before: dict | None = BEFORE,
         update: dict | None = None,
         update_error: str | None = None,
-        deadline: str = "600",
+        deadline: str = DEADLINE,
         target: str = NEW,
+        describe_fail: dict | None = None,
+        stopped: list | None = None,
     ):
         (state / "services.json").write_text(json.dumps([before, *polls]))
         (state / "update.json").write_text(json.dumps(update or UPDATED))
+        (state / "describe_fail.json").write_text(json.dumps(describe_fail or {}))
+        (state / "stopped.json").write_text(
+            json.dumps(STOPPED_OF_THIS_REVISION if stopped is None else stopped)
+        )
         if update_error:
             (state / "update_error").write_text(update_error)
-        result = subprocess.run(
-            [
-                "bash",
-                str(ROLLOUT),
-                "--interval",
-                "0",
-                "--deadline",
-                deadline,
-                *flags,
-                CLUSTER,
-                SERVICE,
-                target,
-            ],
-            env={
-                **os.environ,
-                "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}",
-                "FAKE_AWS_STATE": str(state),
-            },
-            capture_output=True,
-            text=True,
-            # A classifier that never decides would spin on the repeated last
-            # answer until --deadline; this turns that into a failure.
-            timeout=120,
+        # No real credential chain: a script that reached past the fake would
+        # fail rather than touch an account.
+        env = {k: v for k, v in os.environ.items() if not k.startswith("AWS_")}
+        env.update(
+            AWS_CONFIG_FILE=str(tmp_path / "no-such-config"),
+            AWS_SHARED_CREDENTIALS_FILE=str(tmp_path / "no-such-credentials"),
         )
+        try:
+            result = subprocess.run(
+                [
+                    "bash",
+                    str(ROLLOUT),
+                    "--interval",
+                    "0",
+                    "--deadline",
+                    deadline,
+                    *flags,
+                    CLUSTER,
+                    SERVICE,
+                    target,
+                ],
+                env={
+                    **env,
+                    "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}",
+                    "FAKE_AWS_STATE": str(state),
+                },
+                capture_output=True,
+                text=True,
+                timeout=SAFETY_NET_SECONDS,
+            )
+        except subprocess.TimeoutExpired:
+            pytest.fail(
+                f"the script did not exit within {SAFETY_NET_SECONDS}s at --deadline "
+                f"{deadline}: --deadline appears unenforced"
+            )
         log = state / "calls.log"
         calls = (
             [json.loads(x) for x in log.read_text().splitlines()]
@@ -218,6 +268,11 @@ def rollout(tmp_path):
 
 def updates(calls: list) -> list:
     return [c for c in calls if c[:2] == ["ecs", "update-service"]]
+
+
+def describes(calls: list) -> int:
+    """How many describe-services calls: the pre-mutation read plus each poll."""
+    return len([c for c in calls if c[:2] == ["ecs", "describe-services"]])
 
 
 # --- R1: the rollout takes -----------------------------------------------------
@@ -234,6 +289,7 @@ def test_r1_a_completed_rollout_of_this_revision_succeeds(rollout):
     (update,) = updates(calls)
     assert update[update.index("--task-definition") + 1] == NEW
     assert "--force-new-deployment" not in update
+    assert describes(calls) == 3
     # A progress line, on stderr.
     assert "PRIMARY experimentation-dashboard-staging:7 IN_PROGRESS, 0/1 running" in err
 
@@ -278,6 +334,8 @@ def test_r3_running_below_desired_is_not_a_success(rollout):
     assert "rollout did not finish" in out
     assert "COMPLETED (0/1 running" in out
     assert len(updates(calls)) == 1
+    # --deadline 0: the pre-mutation read and exactly one poll.
+    assert describes(calls) == 2
 
 
 @pytest.mark.regression
@@ -295,6 +353,7 @@ def test_r6_still_in_progress_at_the_deadline_is_not_rerun(rollout):
     assert "IN_PROGRESS (0/1 running, 0 failed tasks, 2 deployment(s))" in out
     assert "did not stop it" in out
     assert len(updates(calls)) == 1
+    assert describes(calls) == 2
 
 
 # --- R5: our deployment gone after it was seen -----------------------------------
@@ -309,6 +368,8 @@ def test_r5_this_runs_deployment_no_longer_listed_is_a_failure(rollout):
     assert f"This run's deployment {OURS}" in out and "no longer listed" in out
     assert "ecs-svc/9999" in out
     assert len(updates(calls)) == 1
+    # It decided at the first poll that showed it: pre-read + 2 polls.
+    assert describes(calls) == 3
 
 
 # --- the seen-id anchor (eventual consistency) --------------------------------------
@@ -326,6 +387,7 @@ def test_the_first_poll_may_still_show_the_state_before_the_update(rollout):
     assert code == 0, out + err
     assert f"waiting for ECS to list deployment {OURS}" in err
     assert len(updates(calls)) == 1
+    assert describes(calls) == 5
 
 
 def test_never_listed_by_the_deadline_is_not_a_success(rollout):
@@ -420,6 +482,7 @@ def test_a_third_revision_during_the_wait_is_not_called_a_circuit_breaker(rollou
     assert "neither this run's revision (experimentation-dashboard-staging:7)" in out
     assert "rolled back by ECS" not in out
     assert len(updates(calls)) == 1
+    assert describes(calls) == 3
 
 
 def test_a_failed_deployment_that_stays_primary_fails_at_once(rollout):
@@ -428,6 +491,7 @@ def test_a_failed_deployment_that_stays_primary_fails_at_once(rollout):
     assert code == 1
     assert "FAILED (0/1 running, 3 failed tasks)" in out
     assert len(updates(calls)) == 1
+    assert describes(calls) == 2
 
 
 # --- refusals before any mutation ------------------------------------------------
@@ -508,6 +572,78 @@ def test_no_update_on_another_revision_fails_without_changing_it(rollout):
     assert code == 1
     assert "is serving experimentation-dashboard-staging:6, not" in out
     assert updates(calls) == []
+
+
+# --- throttled reads --------------------------------------------------------------
+
+
+@pytest.mark.regression
+def test_a_throttled_first_read_is_retried_before_anything_changes(rollout):
+    code, out, err, calls = rollout([IN_PROGRESS, DONE], describe_fail={"calls": [0]})
+    assert code == 0, out + err
+    assert "attempt 1 of 3" in err
+    assert len(updates(calls)) == 1
+    assert describes(calls) == 4
+
+
+@pytest.mark.regression
+def test_a_service_that_cannot_be_read_is_refused_without_an_update(rollout):
+    code, out, _, calls = rollout([DONE], describe_fail={"from": 0})
+    assert code == 1
+    assert "Could not describe ECS service" in out and "after 3 attempts" in out
+    assert "Nothing was changed" in out
+    assert updates(calls) == []
+    # Bounded: three attempts, then the refusal.
+    assert describes(calls) == 3
+
+
+@pytest.mark.regression
+def test_a_throttled_poll_is_not_a_verdict(rollout):
+    """The first poll fails; the next ones answer, and the rollout completes."""
+    code, out, err, calls = rollout([IN_PROGRESS, DONE], describe_fail={"calls": [1]})
+    assert code == 0, out + err
+    assert "could not read the service; retrying" in err
+    assert len(updates(calls)) == 1
+    assert describes(calls) == 4
+
+
+@pytest.mark.regression
+def test_polls_that_keep_failing_end_at_the_deadline(rollout):
+    code, out, _, calls = rollout([DONE], describe_fail={"from": 1}, deadline="0")
+    assert code == 1
+    assert "rollout did not finish" in out
+    assert "The last 1 describe-services call(s) failed" in out
+    assert len(updates(calls)) == 1
+    assert describes(calls) == 2
+
+
+# --- diagnose(): the stopped task is this revision's -----------------------------
+
+
+@pytest.mark.regression
+def test_an_older_revisions_stopped_task_is_not_reported(rollout):
+    rolled_back = svc(
+        dep(OLD, ROLLBACK, state="IN_PROGRESS", running=0),
+        dep(NEW, OURS, status="ACTIVE", state="FAILED", running=0, failed=2),
+    )
+    stopped = [
+        {"arn": f"{TASK}/old", "td": OLD, "reason": "an old OutOfMemoryError"},
+        {
+            "arn": f"{TASK}/ours",
+            "td": NEW,
+            "reason": "Essential container in task exited",
+        },
+    ]
+    code, out, _, _ = rollout([IN_PROGRESS, rolled_back], stopped=stopped)
+    assert code == 1
+    assert "OutOfMemoryError" not in out
+    assert f"{TASK}/ours\tEssential container in task exited" in out
+
+    code, out, _, _ = rollout([], stopped=stopped[:1])
+    assert "OutOfMemoryError" not in out
+    assert (
+        "(no stopped task of experimentation-dashboard-staging:7 could be read)" in out
+    )
 
 
 # --- the text of the script ------------------------------------------------------

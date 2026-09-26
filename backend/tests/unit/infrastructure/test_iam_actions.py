@@ -84,6 +84,25 @@ def test_every_aws_call_is_granted():
     assert ".github/actions/stack-outputs/action.yml" in places
 
 
+def test_a_staged_script_is_not_already_run_by_a_workflow(monkeypatch):
+    """STAGED_SCRIPTS is for scripts no workflow or action names YET.
+
+    Once one is wired in (C4 wires ecs_rolling_rollout.sh), the workflow is
+    what grants it and the entry must be removed, or a script later unwired
+    would stay granted by a list nobody reads.
+    """
+    iam = _module()
+    staged = list(iam.STAGED_SCRIPTS)
+    assert all(p.is_file() for p in staged), staged
+    monkeypatch.setattr(iam, "STAGED_SCRIPTS", [])
+    wired = set(iam.sources())
+    stale = [str(p.relative_to(REPO_ROOT)) for p in staged if p in wired]
+    assert not stale, (
+        f"{stale} are run by a workflow or action now: remove them from "
+        "STAGED_SCRIPTS in scripts/iam_actions.py"
+    )
+
+
 @pytest.mark.regression
 @pytest.mark.parametrize("suffix", [".sh", ".yml"])
 def test_iam_scan_sees_a_line_continued_call(tmp_path, suffix):
