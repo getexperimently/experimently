@@ -108,3 +108,5 @@ curl -X POST http://localhost:8000/api/v1/auth/auth/forgot-password \
 ```json
 {
   "message": "Password reset code has been sent to your email."
+}
+```
