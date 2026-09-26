@@ -59,6 +59,12 @@ jobs:
 
       # ubuntu-24.04 ships no zsh. The oracle below refuses without it, and the
       # regression tests' zero-skip check fails, so a lost install is red here.
+      - name: Install zsh
+        run: |
+          start=$SECONDS
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq zsh
+          echo "zsh installed in $((SECONDS - start)) s"
 
       # Recorded because ubuntu-latest moves (to 26.04 in November 2026).
       # bash -n in the contract refuses a bash below 4.4 itself.

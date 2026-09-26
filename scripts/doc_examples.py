@@ -657,7 +657,7 @@ def comments(body: str) -> list[tuple[int, str]]:
                     quote = None
             elif char in "'\"":
                 quote = char
-            elif char == "#" and (column == 0 or line[column - 1] in " \t;&|("):
+            elif char == "#":
                 found.append((number, line[column:].strip()))
                 break
         heredoc = _HEREDOC.search(line)
