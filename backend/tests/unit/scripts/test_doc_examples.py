@@ -1666,8 +1666,16 @@ def test_the_render_job_runs_the_walk_zsh_and_zero_skip_checks():
         assert command in runs, command
     assert install < runs.index("python scripts/doc_examples.py --zsh-oracle")
     tests = next(r for r in runs if "test_doc_examples.py" in r)
-    assert "--junitxml=docs-junit.xml" in tests
+    assert "--junitxml=docs-junit.xml || rc=1" in tests
+    # The skip check runs after a failing test too (a failure hid it once).
     assert (
         "scripts/check_junit_skips.py docs-junit.xml backend/tests/unit/docs "
-        "backend/tests/unit/scripts" in tests
+        "backend/tests/unit/scripts || rc=1" in tests
     )
+    assert tests.rstrip().endswith('exit "$rc"')
+    # A failed version step (no zsh) must not skip the contract or the others.
+    steps = workflow["jobs"]["render"]["steps"]
+    after = [s for s in steps[install + 2 :] if "run" in s]
+    assert after and all(s.get("if") == "${{ !cancelled() }}" for s in after), [
+        s["name"] for s in after if s.get("if") != "${{ !cancelled() }}"
+    ]
