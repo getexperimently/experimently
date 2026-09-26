@@ -31,7 +31,9 @@
  *
  * `url-literals.test.ts` does this for `/api/v1/` paths; `docs-links.test.ts`
  * does it here — every `docsUrl('...')` literal in the dashboard must resolve
- * to a file that exists under `docs/`.
+ * to a file that exists under `docs/`. Its Python twin,
+ * `backend/tests/unit/docs/test_dashboard_docs_links.py`, applies the same rule
+ * on a docs-only pull request and pins itself to the Jest file's text.
  */
 
 /** The repository the markdown lives in, and the branch links point at. */
