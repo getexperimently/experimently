@@ -1360,7 +1360,7 @@ class TestVerifiedEmail:
 
     @pytest.mark.regression
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("verified", [False, "true", None])
+    @pytest.mark.parametrize("verified", [False, None, "True", "1", "yes", 1, "false"])
     async def test_an_unverified_email_is_refused(self, verified):
         with pytest.raises(HTTPException) as exc_info:
             await sso_service.verified_email(
@@ -1372,6 +1372,24 @@ class TestVerifiedEmail:
             )
         assert exc_info.value.status_code == 403
         assert exc_info.value.detail == sso_service.EMAIL_UNVERIFIED_DETAIL
+
+    @pytest.mark.regression
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("provider", "extra"),
+        [(SSOProviderType.OKTA, {}), (SSOProviderType.GOOGLE, {"hd": "acme.com"})],
+    )
+    async def test_the_string_true_is_verified(self, provider, extra):
+        """Google's own example ID token sends ``"email_verified": "true"``."""
+        info = await sso_service.verified_email(
+            _v_config(provider),
+            provider.value,
+            _id(email_verified="true", **extra),
+            {"sub": "s-1"},
+            "at",
+        )
+        assert info["email"] == "bob@acme.com"
+        assert info["sub"] == "s-1"
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("userinfo_sub", ["other", "", None])
