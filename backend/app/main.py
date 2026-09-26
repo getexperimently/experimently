@@ -29,6 +29,7 @@ from backend.app.middleware.relative_redirect_middleware import (
 )
 from backend.app.middleware.security_middleware import SecurityHeadersMiddleware
 from backend.app.middleware.trusted_host_middleware import TrustedHostMiddleware
+from backend.app.middleware.unhandled_error_middleware import UnhandledErrorMiddleware
 from backend.app.modules_loader import abort_if_modules_broken, load_modules
 
 # --- EP-013 additions ---
@@ -192,12 +193,17 @@ if not cors_origins:
         "http://localhost:3300",  # StreamPulse demo app
     ]
 
+# An unhandled route exception becomes a 500 the browser can read (#72).
+# Registered FIRST, i.e. innermost of all the layers below, so its 500 passes
+# back out through every one of them -- CORS, the request id, the security
+# headers -- instead of being sent by Starlette's outermost ServerErrorMiddleware
+# with none of them. Its position is asserted in test_unhandled_error_cors.py.
+app.add_middleware(UnhandledErrorMiddleware)
+
 # Trailing-slash redirects keep the client's own origin (#86). Registered
-# FIRST, i.e. innermost of the layers below, so it is the last thing between
-# the router and the response and sees that redirect before anything else can
-# act on it. (Starlette still inserts its own ExceptionMiddleware between this
-# and the router, so "wraps the router directly" would be too strong.) The
-# position is asserted in test_relative_slash_redirect.py, not just claimed.
+# second, so it sits just outside the error layer above and sees the router's
+# redirect before anything else can act on it. (Starlette still inserts its own
+# ExceptionMiddleware between these and the router.)
 app.add_middleware(RelativeSlashRedirectMiddleware)
 
 # Rate limiter — disabled during tests to avoid interfering with test assertions
