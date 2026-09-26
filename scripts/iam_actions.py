@@ -166,11 +166,23 @@ def sources() -> list[Path]:
     return seen
 
 
-def calls() -> dict[str, set[str]]:
+def _join_continuations(text: str) -> str:
+    """Fold shell line continuations, so `aws ecs \\` + `update-service` is one call.
+
+    Without this the split form -- the usual shape of a long call -- matched
+    nothing, and the call's action was simply absent from the role.
+    """
+    return re.sub(r"\\[ \t]*\r?\n[ \t]*", " ", text)
+
+
+def calls(paths: list[Path] | None = None) -> dict[str, set[str]]:
     """IAM action -> the places (file: call) that need it."""
     found: dict[str, set[str]] = defaultdict(set)
-    for path in sources():
-        where = str(path.relative_to(REPO_ROOT))
+    for path in sources() if paths is None else paths:
+        try:
+            where = str(path.relative_to(REPO_ROOT))
+        except ValueError:
+            where = str(path)
         if path.suffix == ".yml":
             steps = _yaml_steps(path)
             text = "\n".join(_code(s["run"]) for s in steps if "run" in s)
@@ -185,6 +197,7 @@ def calls() -> dict[str, set[str]]:
                     if service in SERVICES:
                         for action in iam_actions_for(service, verb):
                             found[action].add(f"{where}: aws {service} {verb}")
+        text = _join_continuations(text)
         for service, verb in _AWS.findall(text):
             for action in iam_actions_for(service, verb):
                 found[action].add(f"{where}: aws {service} {re.sub(r' +', ' ', verb)}")

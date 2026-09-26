@@ -95,8 +95,8 @@ for arn in $(aws ecs list-task-definitions \
   echo "$arn  $image"
 done
 # arn:...:experimentation-backend-$ENV:45  ...backend:bootstrap   <- CloudFormation; NOT a rollback target
-# arn:...:experimentation-backend-$ENV:44  ...backend:v1.4.2      <- current (bad)
-# arn:...:experimentation-backend-$ENV:43  ...backend:v1.4.1      <- target (good)
+# arn:...:experimentation-backend-$ENV:44  ...backend@sha256:9f2c…   <- current (bad): a deploy registered it, by digest
+# arn:...:experimentation-backend-$ENV:43  ...backend@sha256:41ab…   <- target (good): the last known-good release
 
 # Option B: Ask which revision is actually serving traffic.
 # NOT `services[0].taskDefinition`: on a service with a CodeDeploy deployment

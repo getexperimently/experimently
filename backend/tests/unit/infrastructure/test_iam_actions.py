@@ -20,6 +20,7 @@ import sys
 from pathlib import Path
 
 import pytest
+import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 SCRIPT = REPO_ROOT / "scripts" / "iam_actions.py"
@@ -58,12 +59,45 @@ def test_every_aws_call_is_granted():
         actions = statement["Action"]
         granted |= set([actions] if isinstance(actions, str) else actions)
     found = iam.calls()
-    assert len(found) >= 20, f"only {len(found)} actions found; the scan is not reading"
-    assert found.keys() <= granted, sorted(found.keys() - granted)
+    # Exactly the granted set, both ways: a call the role lacks, and an action
+    # the role holds that no call needs, each fail with the difference.
+    assert set(found) == granted, {
+        "called but not granted": sorted(set(found) - granted),
+        "granted but never called": sorted(granted - set(found)),
+    }
+    # Not vacuous: the calls every deploy makes are among them.
+    assert {
+        "ecs:RegisterTaskDefinition",
+        "ecs:RunTask",
+        "codedeploy:CreateDeployment",
+        "rds:CreateDBClusterSnapshot",
+        "cloudformation:DescribeStacks",
+        "iam:PassRole",
+    } <= set(found)
     # The sources include the scripts the workflows run, not only the YAML.
     places = {p.split(":")[0] for ps in found.values() for p in ps}
     assert "scripts/run_migration_task.sh" in places
     assert ".github/actions/stack-outputs/action.yml" in places
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("suffix", [".sh", ".yml"])
+def test_iam_scan_sees_a_line_continued_call(tmp_path, suffix):
+    """`aws ecs \\` + `update-service ...` on the next line is one call.
+
+    The scan used to read a line at a time, so the split form -- the usual
+    shape of a long call -- was invisible and `--check` stayed at exit 0 with
+    the action missing from the role.
+    """
+    iam = _module()
+    script = "set -euo pipefail\naws ecs \\\n  update-service --cluster c --service s\n"
+    source = tmp_path / f"probe{suffix}"
+    if suffix == ".yml":
+        source.write_text(yaml.safe_dump({"jobs": {"j": {"steps": [{"run": script}]}}}))
+    else:
+        source.write_text(script)
+    found = iam.calls([source])
+    assert "ecs:UpdateService" in found, dict(found)
 
 
 def test_an_unmapped_service_is_refused():

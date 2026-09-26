@@ -64,6 +64,15 @@ def test_the_runbook_works_for_either_environment():
 
 
 @pytest.mark.regression
+def test_the_runbook_shows_revisions_by_digest():
+    """A deploy registers `backend@sha256:...`; a sample showing a version tag
+    teaches the operator to look for something that is never there."""
+    text = RUNBOOK.read_text()
+    assert not re.search(r"backend:v\d", text), re.findall(r".*backend:v\d.*", text)
+    assert "backend@sha256:" in text
+
+
+@pytest.mark.regression
 def test_the_runbook_does_not_delete_a_release_tag():
     text = RUNBOOK.read_text()
     assert ":refs/tags/" not in text

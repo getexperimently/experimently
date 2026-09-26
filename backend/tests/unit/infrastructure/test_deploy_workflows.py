@@ -215,12 +215,17 @@ def _run_scripts(path: Path) -> Iterator[tuple[str, str]]:
             yield f"{job}[{index}] {step.get('name', '')}", step["run"]
 
 
+def _offenders(scripts: list[tuple[str, str]]) -> list[str]:
+    return [
+        f"{where}: {line.strip()}"
+        for where, script in scripts
+        for line in script.splitlines()
+        if "${{" in line
+    ]
+
+
 @pytest.mark.regression
-@pytest.mark.parametrize(
-    "path",
-    [*AWS_WORKFLOWS, ACTIONS / "stack-outputs" / "action.yml"],
-    ids=[*IDS, "stack-outputs"],
-)
+@pytest.mark.parametrize("path", AWS_WORKFLOWS, ids=IDS)
 def test_nothing_is_interpolated_into_a_shell_script(path):
     """`${{ }}` inside `run:` is substituted before bash parses the line.
 
@@ -229,21 +234,44 @@ def test_nothing_is_interpolated_into_a_shell_script(path):
     script through `env:`. Stricter than `inputs.*` alone: a step output is
     just as able to carry a quote.
     """
-    if path.parent.parent == ACTIONS:
-        steps = yaml.safe_load(path.read_text())["runs"]["steps"]
-        scripts = [(s.get("id", "?"), s["run"]) for s in steps if "run" in s]
-    else:
-        scripts = list(_run_scripts(path))
+    scripts = list(_run_scripts(path))
     assert scripts, f"{path.name} has no run: steps, so this checked nothing"
-    offenders = [
-        f"{where}: {line.strip()}"
-        for where, script in scripts
-        for line in script.splitlines()
-        if "${{" in line
-    ]
+    offenders = _offenders(scripts)
     assert not offenders, (
         f"{path.name} interpolates an expression into a shell script; pass it "
         "through env: instead:\n" + "\n".join(f"  {o}" for o in offenders)
+    )
+
+
+#: Every composite action in the repository, by directory. Exact: a new action
+#: fails here until it is looked at, and the test below covers it by glob.
+COMPOSITE_ACTIONS = ["licence-environment", "stack-outputs"]
+_ACTION_FILES = sorted(ACTIONS.glob("*/action.yml"))
+
+
+def test_the_composite_actions_are_exactly_these():
+    assert [p.parent.name for p in _ACTION_FILES] == COMPOSITE_ACTIONS
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize(
+    "path", _ACTION_FILES, ids=[p.parent.name for p in _ACTION_FILES]
+)
+def test_no_composite_action_interpolates_into_run(path):
+    """The same rule for every composite action, found by glob.
+
+    A composite action's `${{ inputs.* }}` is its caller's value -- for
+    stack-outputs, a job holding the environment's AWS role -- and is
+    substituted into `run:` before bash parses it just the same.
+    """
+    steps = yaml.safe_load(path.read_text())["runs"]["steps"]
+    scripts = [(s.get("id", s.get("name", "?")), s["run"]) for s in steps if "run" in s]
+    assert scripts, f"{path.parent.name} has no run: steps, so this checked nothing"
+    offenders = _offenders(scripts)
+    assert not offenders, (
+        f"{path.parent.name}/action.yml interpolates an expression into a shell "
+        "script; pass it through env: instead:\n"
+        + "\n".join(f"  {o}" for o in offenders)
     )
 
 
