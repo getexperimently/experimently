@@ -1023,8 +1023,11 @@ class ProdSettings(Settings):
     ENVIRONMENT: EnvironmentName = "production"
     PROJECT_NAME: str = "Experimently"
     PROJECT_DESCRIPTION: str = "A platform for managing experiments and feature flags"
-    CACHE_ENABLED: bool = True
-    CACHE_CONTROL: Dict[str, Any] = {"enabled": True, "redis": None, "ttl": 3600}
+    # Off by default, as in development and test. On, the flag list 500s (its
+    # CACHE_CONTROL client is None) and, with a reachable Redis, the flag
+    # detail 500s on an un-awaited async client (#100). Opting in is #100's.
+    CACHE_ENABLED: bool = False
+    CACHE_CONTROL: Dict[str, Any] = {"enabled": False, "redis": None, "ttl": 3600}
 
     model_config = SettingsConfigDict(
         env_file=ENV_FILES["production"], case_sensitive=True, extra="ignore"
