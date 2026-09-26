@@ -870,10 +870,36 @@ jobs:
           curl -sf localhost:3000/health/ready >/dev/null
           test "$(curl -sL -o /dev/null -w '%{http_code}' localhost:3000/api/v1/experiments/)" = "401"
 
+      # The steps above run with the API's Host check OFF (development, no
+      # PUBLIC_BASE_URL), so their 401 says nothing about the deployed shape,
+      # where a Host the API does not serve is refused with 400 on every
+      # non-probe path while the probes stay green. This re-creates the api and
+      # frontend in the planned AWS topology (tests/alb/docker-compose.alb.yml:
+      # an nginx playing the ALB, the dashboard's nginx not proxying /api, and
+      # PUBLIC_BASE_URL=https://app.example.test) and checks it through that
+      # ALB with the public Host (tests/alb/rehearse.sh).
+      #
+      # A step rather than its own job: it reuses the images and the seeded
+      # database already in this job; a job of its own would have to build and
+      # load both images again. Measured locally, the re-create plus every
+      # check took 18 s and 29 s in two runs.
+      #
+      # Tamper-tested locally: PUBLIC_BASE_URL=https://api.example.test fails
+      # with "expected 401 without credentials, got 400" (while /health/ready
+      # is 200); /api/* routed to the dashboard fails with "got 502";
+      # PUBLIC_BASE_URL empty fails the foreign-Host check with 401; the
+      # dashboard proxying /api and a connect-src without 'self' fail too.
+      - name: ALB topology rehearsal (Host check on)
+        run: |
+          set -euo pipefail
+          docker compose -f docker-compose.yml -f tests/alb/docker-compose.alb.yml \
+            up -d --wait --no-build postgres redis api frontend alb
+          bash tests/alb/rehearse.sh
+
       - name: Container logs (on failure)
         if: failure()
-        run: docker compose -f docker-compose.yml logs --no-color --tail=200
+        run: docker compose -f docker-compose.yml -f tests/alb/docker-compose.alb.yml logs --no-color --tail=200
 
       - name: Tear down
         if: always()
-        run: docker compose -f docker-compose.yml down -v --remove-orphans
+        run: docker compose -f docker-compose.yml -f tests/alb/docker-compose.alb.yml down -v --remove-orphans

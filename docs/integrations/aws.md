@@ -164,34 +164,29 @@ OPENSEARCH_ENDPOINT=https://your-domain.es.amazonaws.com
 
 ## CloudFront and Lambda@Edge
 
-**Amazon CloudFront** serves as the CDN for static frontend assets and as the execution layer for split URL experiments via Lambda@Edge.
-
-### Static Asset Distribution
-
-The Next.js frontend build output is hosted in an S3 bucket and served through CloudFront with long-lived cache headers for hashed assets and short TTLs for HTML.
+**The CDK does not create a CloudFront distribution**, and nothing in it hosts
+the dashboard: there is no S3 bucket for frontend assets and no CDN in front of
+them. The dashboard is not yet deployed by the CDK (#69).
 
 ### Lambda@Edge for Split URL Testing
 
-For split URL experiments, a Lambda@Edge function is attached to the CloudFront distribution's `viewer-request` event:
+The split-URL module ships a CDK construct,
+`modules/infrastructure/constructs/split_url_distribution.py`, that creates a
+CloudFront distribution with a Lambda@Edge `viewer-request` router in front of
+your application. `infrastructure/cdk/app.py` does not use it, so a deployment
+gets it only if you add it to a stack yourself. The router
+(`modules/lambda/split_url_router/handler.py`):
 
-1. Reads the assignment cookie (`exp_{experiment_key}`)
-2. If absent, hashes the user ID to assign a variant
+1. Reads the assignment cookie
+2. If absent, hashes the client fingerprint (IP + User-Agent) to assign a variant
 3. Returns a `302 Found` redirect to the variant URL
-4. Sets a 1-year `Set-Cookie` header for assignment persistence
+4. Sets a `Set-Cookie` header recording the assignment (30 days by default; `cookie_ttl_days` in the experiment config)
 
 Lambda@Edge functions must be deployed to `us-east-1` (a CloudFront requirement) and are globally replicated to all edge locations.
 
-```typescript
-// CDK construct usage (infrastructure/app.ts)
-import { SplitUrlDistribution } from './constructs/SplitUrlDistribution';
-
-new SplitUrlDistribution(this, 'CheckoutSplitUrl', {
-  experimentKey: 'checkout-flow-v2',
-  originDomainName: alb.loadBalancerDnsName,
-  experimentationApiUrl: 'https://your-api.example.com',
-  experimentationApiKey: apiKeySecret.secretValue.toString(),
-});
-```
+The construct is Python, like the rest of the CDK app. Its usage, and how the
+router receives its configuration, are in
+[Split URL testing](../api/split-url.md#cloudfront-cdk-construct).
 
 ---
 
