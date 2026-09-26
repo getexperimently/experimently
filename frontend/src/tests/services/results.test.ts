@@ -92,7 +92,7 @@ describe('ResultsService.getDailyResults', () => {
 
   it('throws on non-ok response', async () => {
     mockError(500, 'Server Error');
-    await expect(ResultsService.getDailyResults('abc')).rejects.toThrow('Server Error');
+    await expect(ResultsService.getDailyResults('abc')).rejects.toThrow('Something went wrong on the server (HTTP 500).');
   });
 });
 
