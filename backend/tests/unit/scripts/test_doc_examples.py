@@ -1456,6 +1456,234 @@ def test_working_instructions_are_excluded_in_any_case(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# E0a-3: render every docs/ page, the walk against git, the zsh-lexer oracle
+# ---------------------------------------------------------------------------
+
+
+def _site(root: pathlib.Path, site: pathlib.Path, *rels: str) -> None:
+    """A built site with a page for each of *rels*, through the site's extensions."""
+    for rel in rels:
+        stem = pathlib.PurePosixPath(rel).relative_to("docs").with_suffix("")
+        out = site / stem / "index.html"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(_render((root / rel).read_text()))
+
+
+@pytest.mark.regression
+def test_render_covers_a_docs_page_that_is_not_enrolled(repo, tmp_path):
+    """PE C4: a fence hidden in an HTML comment on a page with no shell block."""
+    write(
+        repo,
+        "docs/other.md",
+        f"# Other\n\n<!--\n{FENCE}http\nGET /health\n{FENCE}\n-->\n\nText.\n",
+    )
+    write(repo, "README.md", f"# Readme\n\n<!--\n{FENCE}text\nx\n{FENCE}\n-->\n")
+    site = tmp_path / "site"
+    _site(repo, site, "docs/p.md", "docs/other.md")
+    with pytest.raises(dx.Refused) as excinfo:
+        dx.render(site)
+    # Outside docs/ nothing is rendered (T1's asymmetry), so README.md is silent.
+    assert excinfo.value.problems == [
+        "docs/other.md: 0 rendered code blocks, 1 fences in source"
+    ]
+
+
+def test_render_refuses_a_docs_page_the_site_does_not_have(repo, tmp_path):
+    write(repo, "docs/sub/new.md", "# New\n")
+    site = tmp_path / "site"
+    _site(repo, site, "docs/p.md")
+    with pytest.raises(dx.Refused) as excinfo:
+        dx.render(site)
+    assert excinfo.value.problems == [
+        f"docs/sub/new.md: no page at {site / 'sub/new/index.html'} "
+        "(excluded from the site?)"
+    ]
+
+
+def test_render_passes_when_every_page_rendered(repo, tmp_path):
+    write(repo, "docs/README.md", f"# Home\n\n{FENCE}text\nx\n{FENCE}\n")
+    site = tmp_path / "site"
+    _site(repo, site, "docs/p.md")
+    (site / "index.html").write_text(_render((repo / "docs/README.md").read_text()))
+    dx.render(site)
+
+
+def test_the_git_side_drops_only_working_instructions():
+    listing = "\0".join(
+        [
+            "CLAUDE.md",
+            "frontend/Claude.MD",
+            ".claude/agents/x.md",
+            "docs/A.MD",
+            "docs/site/hidden.md",
+            ".github/pull_request_template.md",
+            "node_modules/x/README.md",
+            "notes.txt",
+            "",
+        ]
+    )
+    assert dx.tracked_pages(listing) == {
+        "docs/A.MD",
+        "docs/site/hidden.md",
+        ".github/pull_request_template.md",
+        "node_modules/x/README.md",
+    }
+
+
+def _git_lists(monkeypatch, stdout: str, returncode: int = 0) -> None:
+    import subprocess
+
+    def fake(argv, **kwargs):
+        assert argv[:2] == ["git", "-C"] and argv[3:] == ["ls-files", "-z"], argv
+        return subprocess.CompletedProcess(argv, returncode, stdout, "fatal: no")
+
+    monkeypatch.setattr(dx.subprocess, "run", fake)
+
+
+@pytest.mark.regression
+def test_a_tracked_page_the_walk_prunes_is_a_difference(repo, monkeypatch):
+    """PE C2: `docs/site/new.md` is tracked, and the walk prunes `site`."""
+    write(repo, "docs/site/new.md", "# Hidden\n")
+    _git_lists(monkeypatch, "docs/p.md\0docs/site/new.md\0CLAUDE.md\0")
+    with pytest.raises(dx.Refused) as excinfo:
+        dx.compare_walk()
+    assert excinfo.value.problems == [
+        "docs/site/new.md: git tracks this page but the walk does not find it, so "
+        "no rule is applied to it (a pruned or hidden directory?)"
+    ]
+
+
+def test_an_untracked_page_the_walk_finds_is_a_difference(repo, monkeypatch):
+    write(repo, "docs/scratch.md", "# Scratch\n")
+    _git_lists(monkeypatch, "docs/p.md\0")
+    with pytest.raises(dx.Refused) as excinfo:
+        dx.compare_walk()
+    assert excinfo.value.problems == [
+        "docs/scratch.md: the walk finds this page but git does not track it"
+    ]
+
+
+def test_the_walk_comparison_fails_closed_without_git(repo, monkeypatch):
+    _git_lists(monkeypatch, "", returncode=128)
+    with pytest.raises(dx.Refused, match="git ls-files failed"):
+        dx.compare_walk()
+    _git_lists(monkeypatch, "")
+    with pytest.raises(dx.Refused, match="lists no Markdown page"):
+        dx.compare_walk()
+
+
+def test_the_walk_comparison_holds_when_they_agree(repo, monkeypatch):
+    _git_lists(monkeypatch, "docs/p.md\0.claude/x.md\0")
+    dx.compare_walk()
+
+
+def _need_zsh(lines: int) -> None:
+    """Skip, loudly and counted, where zsh is absent (Unit Tests, core-build).
+
+    The render job installs zsh and fails on any skip in this file, so the skip
+    can only happen where the oracle is not the thing being checked.
+    """
+    import shutil
+
+    if shutil.which("zsh") is None:
+        pytest.skip(
+            f"zsh is not installed: the zsh-lexer oracle checked 0 of {lines} "
+            "shell lines here (the Doc Examples render job installs zsh and runs it)"
+        )
+
+
+ZSH_SHAPES = [
+    "echo docs#/x a#b $# ${#a[@]} *#*",
+    "curl -s 'x#y' \"#z\"",
+    "SLACK_DEFAULT_CHANNEL=#platform-alerts",
+    "echo x   # trailing",
+    "# whole line",
+    "true;# after a separator",
+    "(# in a subshell",
+    "cat <<'EOF' > f.yml",
+    "# data, not a comment",
+    "EOF",
+    "",
+]
+
+
+def test_the_zsh_oracle_agrees_on_the_comment_shapes(repo):
+    write(
+        repo,
+        "docs/z.md",
+        f"# Z\n\n{FENCE}bash\n" + "\n".join(ZSH_SHAPES) + f"\n{FENCE}\n",
+    )
+    lines = dx.shell_lines()
+    _need_zsh(len(lines))
+    # The heredoc's body and terminator are data, not shell; its opener is read.
+    assert [t for rel, _, t, _ in lines if rel == "docs/z.md"] == [
+        s for s in ZSH_SHAPES if s not in ("# data, not a comment", "EOF")
+    ]
+    dx.zsh_oracle()
+
+
+@pytest.mark.regression
+def test_the_zsh_oracle_fires_on_a_scanner_that_takes_any_hash(repo, monkeypatch):
+    """The QA plant: comment_lines as "any unquoted #" disagrees with zsh."""
+    write(repo, "docs/z.md", f"# Z\n\n{FENCE}bash\nX=#a\n{FENCE}\n")
+    lines = dx.shell_lines()
+    _need_zsh(len(lines))
+
+    def any_hash(body):
+        return [n for n, line in enumerate(body.split("\n")) if "#" in line]
+
+    monkeypatch.setattr(dx, "comment_lines", any_hash)
+    with pytest.raises(dx.Refused) as excinfo:
+        dx.zsh_oracle()
+    assert excinfo.value.problems == [
+        "docs/z.md:4: zsh's lexer finds no comment and comment_lines does: 'X=#a'"
+    ]
+
+
+def test_the_zsh_oracle_is_refused_not_skipped_without_zsh(repo, monkeypatch):
+    monkeypatch.setattr(dx.shutil, "which", lambda name, path=None: None)
+    with pytest.raises(dx.Refused, match="zsh is not on PATH"):
+        dx.zsh_oracle()
+
+
+def test_comment_lines_agree_with_zsh_on_every_shell_line_in_the_repository():
+    """The oracle over the real tree: every line outside a heredoc, every page."""
+    _need_zsh(len(dx.shell_lines()))
+    dx.zsh_oracle()
+
+
+def test_the_render_job_runs_the_walk_zsh_and_zero_skip_checks():
+    """The render job installs zsh, runs both CI-only checks and allows no skip."""
+    workflow = yaml.safe_load(
+        (REPO / ".github" / "workflows" / "doc-examples.yml").read_text()
+    )
+    runs = [s.get("run", "") for s in workflow["jobs"]["render"]["steps"]]
+    install = next(i for i, r in enumerate(runs) if "apt-get install -y -qq zsh" in r)
+    assert any("zsh --version" in r for r in runs)
+    for command in (
+        "python scripts/doc_examples.py --walk-vs-git",
+        "python scripts/doc_examples.py --zsh-oracle",
+        "python scripts/doc_examples.py --render site",
+    ):
+        assert command in runs, command
+    assert install < runs.index("python scripts/doc_examples.py --zsh-oracle")
+    tests = next(r for r in runs if "test_doc_examples.py" in r)
+    assert "--junitxml=docs-junit.xml || rc=1" in tests
+    # The skip check runs after a failing test too (a failure hid it once).
+    assert (
+        "scripts/check_junit_skips.py docs-junit.xml backend/tests/unit/docs "
+        "backend/tests/unit/scripts || rc=1" in tests
+    )
+    assert tests.rstrip().endswith('exit "$rc"')
+    # A failed version step (no zsh) must not skip the contract or the others.
+    steps = workflow["jobs"]["render"]["steps"]
+    after = [s for s in steps[install + 2 :] if "run" in s]
+    assert after and all(s.get("if") == "${{ !cancelled() }}" for s in after), [
+        s["name"] for s in after if s.get("if") != "${{ !cancelled() }}"
+    ]
+
+
+# ---------------------------------------------------------------------------
 # The demotion guard (scripts/check_doc_demotions.py), run by the required
 # `regression-guard` job: an example that stops running needs a label.
 # These tests use git, but only in repositories they create under tmp_path.

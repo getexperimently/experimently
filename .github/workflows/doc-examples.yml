@@ -7,12 +7,15 @@
 # on main, the nightly and a dispatch, compose builds from nothing, which is the
 # path a reader takes.
 #
-# `render` checks the contract on every enrolled page -- every shell fence
+# `render` checks the contract on every page the walk finds -- every shell fence
 # tagged in the form the site renders as code, nothing a reader cannot paste,
 # exact counts -- then builds the site with the site's own toolchain and checks
-# each enrolled page rendered its fences as code. It also runs the documentation
-# regression tests, because the PR QA Gate skips unit tests on a pull request
-# that changes only docs/, which is exactly the pull request that breaks a page.
+# every docs/ page rendered its fences as code. Two checks run only here, because
+# they need what check() cannot assume (it also runs in core-build's copy, with
+# no .git and no zsh): the walk against `git ls-files`, and the comment scanner
+# against zsh's own lexer. It also runs the documentation regression tests,
+# because the PR QA Gate skips unit tests on a pull request that changes only
+# docs/, which is exactly the pull request that breaks a page.
 #
 # Not a required check (documentation merges without a CI gate; founder,
 # 2026-09-24). A red run on main, the nightly or a dispatch files an issue.
@@ -54,14 +57,50 @@ jobs:
           pip install -r backend/requirements.txt
           bash scripts/docs_toolchain.sh
 
+      # ubuntu-24.04 ships no zsh. The oracle below refuses without it, and the
+      # regression tests' zero-skip check fails, so a lost install is red here.
+      - name: Install zsh
+        run: |
+          start=$SECONDS
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq zsh
+          echo "zsh installed in $((SECONDS - start)) s"
+
+      # Recorded because ubuntu-latest moves (to 26.04 in November 2026).
+      # bash -n in the contract refuses a bash below 4.4 itself.
+      - name: Tool versions
+        run: |
+          bash --noprofile --norc -c 'echo "bash $BASH_VERSION"'
+          zsh --version
+
+      # Every check below runs even when an earlier one failed, so a lost zsh
+      # install does not hide the contract, and one red hides no other.
       - name: Contract (tags, contents, counts)
+        if: ${{ !cancelled() }}
         run: python scripts/doc_examples.py --check
 
+      - name: The walk equals git ls-files
+        if: ${{ !cancelled() }}
+        run: python scripts/doc_examples.py --walk-vs-git
+
+      - name: Comments, against zsh's own lexer
+        if: ${{ !cancelled() }}
+        run: python scripts/doc_examples.py --zsh-oracle
+
+      # Nothing here may skip: the zsh oracle's unit tests skip where zsh is
+      # absent (Unit Tests, core-build), and this is where they must run. The
+      # skip check runs even when a test failed, so a failure hides no skip.
       - name: Documentation regression tests
+        if: ${{ !cancelled() }}
         env:
           APP_ENV: test
           TESTING: 'true'
-        run: python -m pytest backend/tests/unit/docs/ backend/tests/unit/scripts/test_doc_examples.py -p no:cov -q
+        run: |
+          rc=0
+          python -m pytest backend/tests/unit/docs/ backend/tests/unit/scripts/test_doc_examples.py \
+            -p no:cov -q -rs --junitxml=docs-junit.xml || rc=1
+          python3 scripts/check_junit_skips.py docs-junit.xml backend/tests/unit/docs backend/tests/unit/scripts || rc=1
+          exit "$rc"
 
       # Rendered even when an earlier step failed: a tag that breaks the page is
       # reported by both checks, and the render check is the one that sees the

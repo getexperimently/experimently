@@ -33,8 +33,18 @@ authors).  It checks, without running anything:
     exactly, and each can only fall.  Every problem is reported in one run.
 
 ``--render SITE_DIR``
-    after ``mkdocs build``: every enrolled page under ``docs/`` renders each of
-    its fences as a code block, and no fence leaked into a paragraph.
+    after ``mkdocs build``: every page under ``docs/`` the walk finds, enrolled
+    or not, renders each of its fences as a code block, and no fence leaked
+    into a paragraph.
+
+``--walk-vs-git``
+    the walk finds exactly ``git ls-files`` Markdown (any case) minus T1.  Needs
+    ``.git``, so it runs in CI's render job, not in ``check()``.
+
+``--zsh-oracle``
+    ``comment_lines`` agrees with zsh's own lexer on every line outside a
+    here-document of every ``bash`` fence the walk finds.  Needs zsh; refused
+    without it.
 
 ``--run``
     runs each enrolled page's blocks, in order, in one ``bash`` session per page,
@@ -1319,14 +1329,22 @@ def render_problems(source: str, page_html: str, name: str) -> list[str]:
     return problems
 
 
-def render(
-    site: pathlib.Path, path: Optional[pathlib.Path] = None, out=sys.stdout
-) -> None:
+def render(site: pathlib.Path, out=sys.stdout) -> None:
+    """Every ``docs/`` page the walk finds rendered each of its fences as code.
+
+    Every page, not only the enrolled ones (PE C4): a fence the site does not
+    render as code -- wrapped in an HTML comment, or broken by its info string
+    -- is invisible to a reader on any page, and a page with no shell block
+    today is the one nobody looks at.  Nothing outside ``docs/`` is rendered:
+    MkDocs builds no page for it (T1's stated asymmetry).
+    """
+    started = time.monotonic()
     problems = []
-    for doc in load_enrolment(path):
-        rel = pathlib.PurePosixPath(doc["path"])
-        if rel.parts[0] != "docs":
-            continue  # outside docs/, MkDocs builds no page (T1's stated asymmetry)
+    pages = sorted(rel for rel in walk() if rel.startswith("docs/"))
+    if not pages:
+        raise Refused(f"the walk found no page under {ROOT / 'docs'}")
+    for rel_text in pages:
+        rel = pathlib.PurePosixPath(rel_text)
         page_rel = rel.relative_to("docs").with_suffix("")
         if page_rel.name in ("README", "index"):
             page = site / page_rel.parent / "index.html"
@@ -1335,14 +1353,182 @@ def render(
         if not page.is_file():
             problems.append(f"{rel}: no page at {page} (excluded from the site?)")
             continue
-        problems += render_problems(
-            (ROOT / rel).read_text(encoding="utf-8"),
-            page.read_text(encoding="utf-8"),
-            str(rel),
-        )
-        print(f"{rel}: rendered", file=out)
+        try:
+            problems += render_problems(
+                (ROOT / rel).read_text(encoding="utf-8"),
+                page.read_text(encoding="utf-8"),
+                str(rel),
+            )
+        except Refused as refusal:  # an unclosed fence; --check says so too
+            problems += refusal.problems
+    print(
+        f"{len(pages)} docs/ pages checked against the built site in "
+        f"{time.monotonic() - started:.1f} s",
+        file=out,
+    )
     if problems:
-        raise Refused("\n".join(problems))
+        raise Refused(problems)
+
+
+# ---------------------------------------------------------------------------
+# Where .git exists: the walk against git (PE C2)
+# ---------------------------------------------------------------------------
+
+
+def tracked_pages(listing: str) -> set[str]:
+    """The pages the walk must find, from ``git ls-files -z`` output.
+
+    Every tracked file ending ``.md`` in any case, minus T1 (``CLAUDE.md`` files
+    and ``.claude/``), and nothing else.  Deliberately not built from
+    PRUNED_DIRS or the walker's dot-directory rule: this is the other side of
+    the comparison, so a tracked page inside a directory the walk prunes (a
+    ``docs/site/x.md``, or a directory added to PRUNED_DIRS) is a difference.
+    """
+    pages = set()
+    for rel in listing.split("\0"):
+        if not rel.lower().endswith(".md"):
+            continue
+        parts = rel.split("/")
+        if parts[-1].lower() == "claude.md" or parts[0] == ".claude":
+            continue
+        pages.add(rel)
+    return pages
+
+
+def compare_walk(out=sys.stdout) -> None:
+    """Refused unless the walk finds exactly the tracked pages (minus T1).
+
+    Needs ``.git``, so it runs in the render job and not in ``check()``, which
+    must also run in core-build's copy.
+    """
+    listing = subprocess.run(
+        ["git", "-C", str(ROOT), "ls-files", "-z"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if listing.returncode != 0:
+        raise Refused(
+            "git ls-files failed, so the walk cannot be compared with git: "
+            + (listing.stderr.strip() or f"exit {listing.returncode}")
+        )
+    tracked, walked = tracked_pages(listing.stdout), walk()
+    if not tracked:
+        raise Refused("git ls-files lists no Markdown page; nothing was compared")
+    problems = [
+        f"{rel}: git tracks this page but the walk does not find it, so no rule "
+        "is applied to it (a pruned or hidden directory?)"
+        for rel in sorted(tracked - walked)
+    ] + [
+        f"{rel}: the walk finds this page but git does not track it"
+        for rel in sorted(walked - tracked)
+    ]
+    print(
+        f"walk: {len(walked)} pages; git ls-files: {len(tracked)} Markdown pages "
+        "outside CLAUDE.md and .claude/",
+        file=out,
+    )
+    if problems:
+        raise Refused(problems)
+    print("the walk equals git ls-files minus T1", file=out)
+
+
+# ---------------------------------------------------------------------------
+# The zsh-lexer oracle (#98): comment_lines against zsh's own parser
+# ---------------------------------------------------------------------------
+
+# One zsh reads one line at a time and says whether its lexer finds a comment:
+# (Z+n+) splits the line into words keeping a comment as text, (Z+Cn+) splits
+# it removing the comment, so the two differ exactly when there is one.
+_ZSH_LEXER = r"""
+while IFS= read -r line; do
+  a=(${(Z+n+)line})
+  b=(${(Z+Cn+)line})
+  if (( ${#a} == ${#b} )) && [[ "${(pj:\0:)a}" == "${(pj:\0:)b}" ]]; then
+    print -r -- -
+  else
+    print -r -- C
+  fi
+done
+"""
+
+
+def shell_lines() -> list[tuple[str, int, str, bool]]:
+    """(page, line, text, comment_lines says comment) for every line outside a
+    here-document in every ``bash`` fence on every page the walk finds."""
+    found = []
+    for rel in sorted(walk()):
+        try:
+            fences = parse_fences((ROOT / rel).read_text(encoding="utf-8"), rel)
+        except Refused:
+            continue  # an unclosed fence: --check refuses the page
+        for fence in fences:
+            if fence_language(fence.info) not in SHELL:
+                continue
+            body = "\n".join(fence.body)
+            flagged = set(comment_lines(body))
+            terminator = None
+            for number, line in enumerate(fence.body):
+                if terminator is not None:
+                    if line.strip() == terminator:
+                        terminator = None
+                    continue
+                found.append((rel, fence.line + 1 + number, line, number in flagged))
+                heredoc = _HEREDOC.search(line)
+                if heredoc:
+                    terminator = heredoc.group("word")
+    return found
+
+
+def zsh_oracle(out=sys.stdout) -> None:
+    """Refused unless zsh's lexer and ``comment_lines`` agree on every line.
+
+    Refused, not skipped, when zsh is absent: this runs where zsh was
+    installed for it (the render job), so an absent zsh is a broken job.
+    """
+    zsh = shutil.which("zsh")
+    if zsh is None:
+        raise Refused(
+            "zsh is not on PATH, so the zsh-lexer oracle checked nothing "
+            "(ubuntu-24.04 does not ship it: apt-get install -y zsh)"
+        )
+    version = subprocess.run(
+        [zsh, "--version"], capture_output=True, text=True, check=False
+    ).stdout.strip()
+    lines = shell_lines()
+    lexed = subprocess.run(
+        [zsh, "-f", "-c", _ZSH_LEXER],
+        input="".join(text + "\n" for _, _, text, _ in lines),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    verdicts = lexed.stdout.split("\n")[:-1]
+    if lexed.returncode != 0 or len(verdicts) != len(lines):
+        raise Refused(
+            f"zsh read {len(verdicts)} of {len(lines)} lines and exited "
+            f"{lexed.returncode}: {lexed.stderr.strip()[:200]}"
+        )
+    problems = []
+    for (rel, number, text, scanner), verdict in zip(lines, verdicts):
+        if (verdict == "C") != scanner:
+            shown = (
+                text.strip() if len(text.strip()) <= 80 else text.strip()[:77] + "..."
+            )
+            problems.append(
+                f"{rel}:{number}: zsh's lexer finds "
+                f"{'a comment' if verdict == 'C' else 'no comment'} and "
+                f"comment_lines {'does' if scanner else 'does not'}: {shown!r}"
+            )
+    agree = len(lines) - len(problems)
+    print(
+        f"{version}: {agree}/{len(lines)} shell lines agree "
+        f"({sum(v == 'C' for v in verdicts)} comment lines by zsh, "
+        f"{sum(s for *_, s in lines)} by comment_lines)",
+        file=out,
+    )
+    if problems:
+        raise Refused(problems)
 
 
 # ---------------------------------------------------------------------------
@@ -1910,6 +2096,16 @@ def main(argv: Optional[list[str]] = None) -> int:
         "--render", metavar="SITE_DIR", type=pathlib.Path, help="check a built site"
     )
     mode.add_argument("--run", action="store_true", help="run the examples in Docker")
+    mode.add_argument(
+        "--walk-vs-git",
+        action="store_true",
+        help="the walk must equal git ls-files minus T1 (needs .git)",
+    )
+    mode.add_argument(
+        "--zsh-oracle",
+        action="store_true",
+        help="comment_lines must agree with zsh's own lexer (needs zsh)",
+    )
     parser.add_argument("--only", metavar="PATH", help="with --run: one enrolled page")
     parser.add_argument(
         "--env",
@@ -1934,6 +2130,10 @@ def main(argv: Optional[list[str]] = None) -> int:
             check()
         elif args.render:
             render(args.render)
+        elif args.walk_vs_git:
+            compare_walk()
+        elif args.zsh_oracle:
+            zsh_oracle()
         else:
             run(only=args.only, overrides=overrides)
     except Refused as refusal:
