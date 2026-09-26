@@ -665,12 +665,21 @@ jobs:
           echo "::error title=Smoke test failed::GET $url answered HTTP ${code:-none} with '${body:0:200}'; expected 401 $expected. Nothing rolls back automatically: use the rollback line in this run's summary."
           exit 1
 
-      - name: If the migration was applied and the deploy did not finish
-        if: failure() && steps.migrate.outcome == 'success'
+      # Two cases, told apart by whether the shift was approved: "the previous
+      # revision is still serving" is true only if it was not (PE B3b C3).
+      - name: If the migration was applied and the shift was never approved
+        if: failure() && steps.migrate.outcome == 'success' && steps.api-serving.outputs.approved != 'true'
         env:
           PREVIOUS: ${{ steps.previous.outputs.arn }}
         run: |
-          echo "::warning title=Migrated, not deployed::The migration was applied; the deployment then failed. The database is at ${VERSION}'s heads; ${PREVIOUS:-the previous revision} is still serving. This is safe only if the migration is backward-compatible (docs/deployment/deployment-guide.md#backward-compatible-migrations)."
+          echo "::warning title=Migrated, not deployed::The migration was applied; the deployment then failed before any traffic shifted. The database is at ${VERSION}'s heads; ${PREVIOUS:-the previous revision} is still serving. This is safe only if the migration is backward-compatible (docs/deployment/deployment-guide.md#backward-compatible-migrations)."
+
+      - name: If the migration was applied and the shift was approved
+        if: failure() && steps.migrate.outcome == 'success' && steps.api-serving.outputs.approved == 'true'
+        env:
+          NEW_REVISION: ${{ steps.api-td.outputs.arn }}
+        run: |
+          echo "::warning title=Migrated, shift approved, run failed::The migration was applied and the traffic shift was approved, so ${NEW_REVISION} may be serving some or all traffic. Check with: python3 scripts/api_serving.py ${ECS_CLUSTER} ${ECS_BACKEND_SERVICE} ${NEW_REVISION} (exit 0 = serving). If this release is bad, use the rollback line in this run's summary."
 
       - name: Run summary
         if: always()

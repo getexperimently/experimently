@@ -193,16 +193,34 @@ def live_from_listener(aws: Runner, listener_arn: str, groups: dict[str, str]) -
     if api_rules:
         where = f"the {API_PATH} rule"
         targets = _forward_targets(api_rules[0].get("Actions", []))
+        siblings = [
+            rule
+            for rule in rules
+            if rule is not api_rules[0]
+            and not rule.get("IsDefault")
+            and ("/health" in _path_values(rule) or "/metrics" in _path_values(rule))
+        ]
+        # A split in EITHER rule is a traffic shift in progress, and is said
+        # so before the two are compared: CodeDeploy may rewrite them in
+        # separate calls, and "api split, health not yet" is still shifting,
+        # not wrong (PE B3b C1).
+        for rule, name in [(api_rules[0], where)] + [
+            (s, "the /health rule") for s in siblings
+        ]:
+            split = _forward_targets(rule.get("Actions", []))
+            if len(split) > 1:
+                raise Shifting(
+                    f"{name} forwards to {len(split)} target groups with weight: "
+                    "a CodeDeploy traffic shift is in progress. Wait for it to "
+                    "finish."
+                )
         # The sibling rule must go to the same place.
-        for rule in rules:
-            if rule is api_rules[0] or rule.get("IsDefault"):
-                continue
-            if "/health" in _path_values(rule) or "/metrics" in _path_values(rule):
-                if _forward_targets(rule.get("Actions", [])) != targets:
-                    raise Refused(
-                        "the /health and /api/* rules forward to different "
-                        "target groups; one of them is already wrong"
-                    )
+        for rule in siblings:
+            if _forward_targets(rule.get("Actions", [])) != targets:
+                raise Refused(
+                    "the /health and /api/* rules forward to different "
+                    "target groups; one of them is already wrong"
+                )
     else:
         # A stack from before the dashboard: the API is the default action.
         where = "the listener's default action"

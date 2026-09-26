@@ -148,6 +148,10 @@ def check(
     group: str,
     now: float,
 ) -> tuple[int, list[str]]:
+    # AWS CLI v2 pages list-deployments itself (botocore's paginator, result
+    # key `deployments`) and prints the pages merged, unless --max-items,
+    # --page-size or --no-paginate is passed. None is, so this is every active
+    # deployment, on whatever page. A test pins the absence of those flags.
     listed = aws(
         [
             "deploy",

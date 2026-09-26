@@ -190,6 +190,28 @@ def test_a_traffic_shift_in_progress_is_refused(capsys):
 
 
 @pytest.mark.regression
+@pytest.mark.parametrize("split", ["api", "health"])
+def test_a_split_in_either_rule_is_shifting_before_the_rules_are_compared(split):
+    """PE B3b C1: one rule split and the other not is a shift in progress. It
+    used to be compared first and refused as "already wrong"."""
+    aws = FakeAws(
+        "listener-default-dashboard.json",
+        "rules-api-blue.json",
+        "services-primary-blue.json",
+    )
+    rules = aws.responses[("elbv2", "describe-rules")]
+    blue = rules["Rules"][0]["Actions"][0]["TargetGroupArn"]
+    green = _fixture("rules-api-green.json")["Rules"][0]["Actions"][0]["TargetGroupArn"]
+    index = 0 if split == "api" else 1
+    rules["Rules"][index]["Actions"][0]["ForwardConfig"]["TargetGroups"] = [
+        {"TargetGroupArn": blue, "Weight": 90},
+        {"TargetGroupArn": green, "Weight": 10},
+    ]
+    with pytest.raises(guard.Shifting):
+        guard.check(aws, "staging", "blue")
+
+
+@pytest.mark.regression
 def test_a_split_is_its_own_refusal_and_no_target_is_not_one():
     """The forward deploy's loop reads a split as "still shifting" (PE v2 C8);
     everything else refused stays a plain refusal. The CLI's exit is 1 for both."""

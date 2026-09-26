@@ -133,6 +133,55 @@ def test_the_deploy_docs_say_the_canary_is_timed_only(path):
         assert "issues/148" in text and "founder" in text, path.name
 
 
+@pytest.mark.regression
+@pytest.mark.parametrize(
+    "path", [DOCS / "deployment" / "README.md", GUIDE], ids=lambda p: p.name
+)
+def test_the_docs_say_the_deploy_path_is_unproven(path):
+    """EM B3b C8: until a real account has run it, the docs say so."""
+    text = " ".join(path.read_text().split())
+    assert "Not yet run against a real AWS account" in text, path.name
+    assert "first staging deploy" in text, path.name
+
+
+@pytest.mark.regression
+def test_the_public_docs_do_not_name_internal_streams():
+    """Operators read "the first staging deploy", not a plan's stream name."""
+    hits = [
+        f"{p.relative_to(REPO_ROOT)}:{n}"
+        for p in sorted(DOCS.rglob("*.md"))
+        for n, line in enumerate(p.read_text().splitlines(), 1)
+        if re.search(r"\bStream [A-Z]\b", line)
+    ]
+    assert not hits, hits
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("path", [GUIDE, RUNBOOK], ids=lambda p: p.name)
+def test_the_fix_forward_cost_is_written_down(path):
+    """EM B3b C5: within the hour, Rollback first; then its own hour."""
+    text = " ".join(path.read_text().split())
+    assert re.search(r"Rollback first", text), path.name
+    assert "the next forward deploy is refused until it is no longer active" in text
+    assert "expected behaviour" in text and "first staging deploy" in text
+
+
+@pytest.mark.regression
+def test_the_policy_upgrade_step_is_written_down():
+    """PE B3b C6: roles made before the four new read actions need the policy."""
+    text = " ".join((DOCS / "deployment" / "iam-permissions.md").read_text().split())
+    assert "must have it re-applied" in text
+    for action in (
+        "cloudformation:DescribeStackResources",
+        "elasticloadbalancing:DescribeListeners",
+        "elasticloadbalancing:DescribeRules",
+        "elasticloadbalancing:DescribeTargetHealth",
+    ):
+        assert action in text, action
+    assert "Could not tell whether the API is serving" in text
+    assert "Nothing shifts" in text
+
+
 def test_the_guide_has_the_ordered_checklist():
     headings = [
         m.group(1) for m in re.finditer(r"^### (1\.\d) ", GUIDE.read_text(), re.M)

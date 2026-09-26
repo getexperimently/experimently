@@ -783,6 +783,40 @@ def test_the_traffic_shift_follows_the_deployment_and_precedes_the_smoke():
 
 
 @pytest.mark.regression
+def test_rollback_stops_every_status_the_deploy_refuses_on():
+    """PE B3b C2: the deploy refuses while a deployment is in any ACTIVE status
+    and sends the operator to Rollback; Rollback must then be able to stop it."""
+    code = "\n".join(_runs(ROLLBACK))
+    match = re.search(r"--include-only-statuses((?:\s+[A-Za-z]+)+)", code)
+    assert match, "rollback.yml lists no in-flight statuses"
+    statuses = tuple(match.group(1).split())
+    assert statuses == _module("refuse_active_deployment").ACTIVE
+
+
+@pytest.mark.regression
+def test_the_migrated_warning_is_true_of_the_case_it_runs_in():
+    """PE B3b C3: "the previous revision is still serving" only when the shift
+    was never approved; after an approval, a warning that says it may not be."""
+    steps = _steps(_deploy_job())
+    warnings = {
+        s["name"]: s for s in steps if "steps.migrate.outcome" in str(s.get("if", ""))
+    }
+    assert len(warnings) == 2, sorted(warnings)
+    (before,) = [s for s in warnings.values() if "is still serving" in _run_of(s)]
+    (after,) = [s for s in warnings.values() if s is not before]
+    assert before["if"] == (
+        "failure() && steps.migrate.outcome == 'success' && "
+        "steps.api-serving.outputs.approved != 'true'"
+    )
+    assert after["if"] == (
+        "failure() && steps.migrate.outcome == 'success' && "
+        "steps.api-serving.outputs.approved == 'true'"
+    )
+    assert "is still serving" not in _run_of(after)
+    assert "may be serving" in _run_of(after)
+
+
+@pytest.mark.regression
 def test_the_codedeploy_deadline_is_a_named_value_inside_the_job_timeout():
     env = _load(DEPLOY)["env"]
     deadline = env["CODEDEPLOY_DEADLINE_SECONDS"]

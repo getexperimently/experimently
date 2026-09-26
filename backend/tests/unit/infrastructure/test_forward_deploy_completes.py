@@ -23,6 +23,16 @@ every call, so no AWS is involved. A scenario is a list of *ticks*: every
 `deploy get-deployment` call starts the next one, and every other call is
 answered from the current tick. Deadlines and intervals are parameters. The
 loop tests run with an interval of 0, and no test measures elapsed time.
+
+The fake answers `list-deployments` with one `{"deployments": [...]}`, the
+MERGED result. That is what AWS CLI v2 prints for a paginated operation when
+none of `--max-items`, `--page-size` or `--no-paginate` is passed: it follows
+`nextToken` itself. So the fake models what the script sees, and a test pins
+that neither caller passes one of those flags (EM B3b C4).
+
+No test here can reach real AWS: the subprocesses get a fake `aws` first on
+PATH and no credentials (`_no_aws_credentials`), and the in-process allow-list
+tests make starting any process raise (PE B3b C5).
 """
 
 from __future__ import annotations
@@ -127,6 +137,18 @@ def tick(
     }
 
 
+#: No credential reaches a test's subprocess, so even an `aws` that is not the
+#: fake has nothing to sign a request with (PE B3b C5, defence in depth).
+def _no_aws_credentials(env: dict) -> dict:
+    env = {k: v for k, v in env.items() if not k.startswith("AWS_")}
+    env.update(
+        AWS_CONFIG_FILE="/nonexistent/aws-config",
+        AWS_SHARED_CREDENTIALS_FILE="/nonexistent/aws-credentials",
+        AWS_EC2_METADATA_DISABLED="true",
+    )
+    return env
+
+
 FAKE_AWS = r"""#!{python}
 import json, os, sys
 args = sys.argv[1:]
@@ -177,12 +199,14 @@ def aws(tmp_path):
         outputs.write_text("")
         result = subprocess.run(
             [sys.executable, str(script), *args],
-            env={
-                **os.environ,
-                "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}",
-                "FAKE_AWS_STATE": str(state),
-                "GITHUB_OUTPUT": str(outputs),
-            },
+            env=_no_aws_credentials(
+                {
+                    **os.environ,
+                    "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}",
+                    "FAKE_AWS_STATE": str(state),
+                    "GITHUB_OUTPUT": str(outputs),
+                }
+            ),
             capture_output=True,
             text=True,
             timeout=120,
@@ -262,7 +286,11 @@ def test_a_deploy_is_approved_on_healthy_targets_and_succeeds_when_serving(aws):
     assert ops.index("elbv2 describe-target-health") < ops.index(
         "deploy continue-deployment"
     )
-    assert outputs == {"result": "serving", "live_target_group": "green"}
+    assert outputs == {
+        "approved": "true",
+        "result": "serving",
+        "live_target_group": "green",
+    }
     assert f"serving: {NEW} is the PRIMARY task set" in out
     assert not [c for c in calls if "stop-deployment" in c]
 
@@ -280,6 +308,37 @@ def test_the_approval_is_sent_once_however_long_ready_lasts(aws):
     )
     assert code == 0, out
     assert len(_continues(calls)) == 1
+
+
+@pytest.mark.regression
+def test_no_approval_before_ready_even_with_every_target_healthy(aws):
+    """PE B3b C4: the approval is the loop's one write, and only Ready earns it."""
+    code, out, calls, outputs = _shift(
+        aws,
+        [
+            tick("InProgress", health=_health("healthy", "healthy")),
+            tick("InProgress", health=_health("healthy", "healthy")),
+            tick("InProgress", health=_health("healthy", "healthy")),
+            tick("Ready"),
+            tick("InProgress", AFTER, RULES_GREEN),
+        ],
+    )
+    assert code == 0, out
+    ops = _ops(calls)
+    polls = [i for i, op in enumerate(ops) if op == "deploy get-deployment"]
+    (approval,) = [i for i, op in enumerate(ops) if op == "deploy continue-deployment"]
+    # After the fourth poll (the Ready tick), never before it.
+    assert polls[3] < approval < polls[4]
+    assert outputs["approved"] == "true"
+
+
+@pytest.mark.regression
+def test_the_approval_is_recorded_for_the_warning_steps(aws):
+    """PE B3b C3: deploy.yml's two "migrated" warnings key on `approved`."""
+    _, _, _, outputs = _shift(aws, [tick("InProgress")], deadline="0")
+    assert "approved" not in outputs
+    _, _, _, outputs = _shift(aws, [tick("Ready", BEFORE, _split())], deadline="0")
+    assert outputs == {"approved": "true", "result": "timeout"}
 
 
 @pytest.mark.regression
@@ -359,7 +418,7 @@ def test_a_replacement_task_set_wanting_no_tasks_is_not_approved(aws):
 def test_failed_or_stopped_ends_the_run_red(aws, status):
     code, out, calls, outputs = _shift(aws, [tick("Ready"), tick(status)])
     assert code == 1
-    assert outputs == {"result": "failed"}
+    assert outputs == {"approved": "true", "result": "failed"}
     assert f"is {status} after this run approved the traffic shift" in out
 
 
@@ -371,7 +430,7 @@ def test_a_deadline_after_the_approval_leaves_the_deployment_running(aws):
     )
     assert code == 1
     assert len(_continues(calls)) == 1
-    assert outputs == {"result": "timeout"}
+    assert outputs == {"approved": "true", "result": "timeout"}
     assert "It was NOT stopped" in out
     assert set(_ops(calls)) <= {
         "deploy get-deployment",
@@ -386,12 +445,33 @@ def test_succeeded_but_not_serving_is_red(aws):
     assert code == 1 and outputs == {"result": "failed"}
 
 
-def test_the_loop_refuses_any_other_operation_before_starting_a_process():
+def _no_process(monkeypatch, module) -> list:
+    """Make starting any process fail the test, and record the attempt.
+
+    The allow-list tests below call `run_aws` in-process. If the guard were
+    broken, the real `aws` would run: during the PE's tamper a real
+    StopDeployment reached AWS and failed only for want of credentials.
+    """
+    attempts: list = []
+
+    def refuse(*args, **kwargs):
+        attempts.append(args)
+        raise AssertionError(f"a test tried to start a process: {args!r}")
+
+    monkeypatch.setattr(module.subprocess, "run", refuse)
+    monkeypatch.setattr(subprocess, "run", refuse)
+    return attempts
+
+
+@pytest.mark.regression
+def test_the_loop_refuses_any_other_operation_before_starting_a_process(monkeypatch):
     spec = importlib.util.spec_from_file_location("shift_traffic", SHIFT)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    attempts = _no_process(monkeypatch, module)
     with pytest.raises(ValueError, match="not an operation this script may run"):
         module.run_aws(["deploy", "stop-deployment", "--deployment-id", "d-1"])
+    assert not attempts
 
 
 # --- shift_traffic.py + api_serving.py: success ordering (PE v2 C8) ---------------
@@ -413,6 +493,47 @@ def test_a_split_rule_after_the_flip_is_still_shifting(aws):
     assert outputs["live_target_group"] == "green"
 
 
+def _sibling_split(api: str) -> dict:
+    """The /api/* rule on `api` (blue|green|split), the /health rule split."""
+    rules = copy.deepcopy(RULES_GREEN if api == "green" else RULES_BLUE)
+    if api == "split":
+        rules = _split()
+    rules["Rules"][1]["Actions"][0]["ForwardConfig"]["TargetGroups"] = [
+        {"TargetGroupArn": BLUE, "Weight": 50},
+        {"TargetGroupArn": GREEN, "Weight": 50},
+    ]
+    return rules
+
+
+def _api_split_health_unsplit() -> dict:
+    rules = _split()
+    rules["Rules"][1] = copy.deepcopy(RULES_BLUE["Rules"][1])
+    return rules
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize(
+    "rules",
+    [_api_split_health_unsplit(), _sibling_split("green"), _sibling_split("blue")],
+    ids=["api-split-health-blue", "api-green-health-split", "api-blue-health-split"],
+)
+def test_a_split_in_either_rule_is_still_shifting(aws, rules):
+    """PE B3b C1: CodeDeploy may rewrite the two rules in separate calls. A
+    split in either is a shift in progress, not a wrong route."""
+    code, out, _, _ = _serving(aws, AFTER, rules)
+    assert code == 1, out  # NOT_YET, not WRONG (3)
+    code, out, calls, outputs = _shift(
+        aws,
+        [
+            tick("Ready"),
+            tick("InProgress", AFTER, rules),
+            tick("InProgress", AFTER, RULES_GREEN),
+        ],
+    )
+    assert code == 0, out
+    assert outputs["result"] == "serving"
+
+
 @pytest.mark.regression
 def test_an_unsplit_rule_on_the_other_group_after_the_flip_is_red(aws):
     """C3 OPEN 1 made visible: the traffic shift left the /api/* rule behind."""
@@ -420,7 +541,7 @@ def test_an_unsplit_rule_on_the_other_group_after_the_flip_is_red(aws):
         aws, [tick("Ready"), tick("InProgress", AFTER, RULES_BLUE)]
     )
     assert code == 1
-    assert outputs == {"result": "wrong-route"}
+    assert outputs == {"approved": "true", "result": "wrong-route"}
     assert "Roll back with the line in this run's summary" in out
     assert "The deployment was not stopped" in out
 
@@ -561,6 +682,41 @@ def test_an_active_deployment_is_refused_by_name_and_never_stopped(aws, status):
     assert set(_ops(calls)) == {"deploy list-deployments", "deploy get-deployment"}
 
 
+#: Flags that stop AWS CLI v2 from following nextToken and merging the pages.
+PAGE_LIMITING_FLAGS = (
+    "--max-items",
+    "--page-size",
+    "--no-paginate",
+    "--starting-token",
+)
+
+
+@pytest.mark.regression
+def test_the_listing_lets_the_cli_merge_every_page(aws):
+    """AWS CLI v2 pages `list-deployments` itself (botocore paginator,
+    result key `deployments`) and merges the pages, unless one of these flags
+    is passed. Any of them would hide an active deployment on a later page."""
+    _, _, calls, _ = _refuse(aws, [], {})
+    (listing,) = calls
+    for flag in PAGE_LIMITING_FLAGS:
+        assert flag not in listing, flag
+
+
+@pytest.mark.regression
+def test_rollback_lets_the_cli_merge_every_page():
+    """The same for rollback.yml's in-flight listing: a deployment on a later
+    page would not be stopped, and Rollback's create-deployment would fail."""
+    text = (REPO_ROOT / ".github" / "workflows" / "rollback.yml").read_text()
+    code = "\n".join(
+        line for line in text.splitlines() if not line.lstrip().startswith("#")
+    )
+    call = code[code.index("aws deploy list-deployments") :]
+    call = call[: call.index("--output text")]
+    assert "--include-only-statuses" in call  # the call, not something else
+    for flag in PAGE_LIMITING_FLAGS:
+        assert flag not in call, flag
+
+
 def test_one_that_finished_since_it_was_listed_passes(aws):
     code, out, _, _ = _refuse(aws, ["d-PRIOR"], {"d-PRIOR": _info("Succeeded")})
     assert code == 0, out
@@ -608,7 +764,10 @@ def test_an_operator_typed_description_stays_on_one_line():
     assert "\n" not in sentence
 
 
-def test_the_refusal_refuses_any_write_before_starting_a_process():
+@pytest.mark.regression
+def test_the_refusal_refuses_any_write_before_starting_a_process(monkeypatch):
     refuse = _refuse_module()
+    attempts = _no_process(monkeypatch, refuse)
     with pytest.raises(ValueError, match="not a read-only operation"):
         refuse.run_aws(["deploy", "stop-deployment", "--deployment-id", "d-1"])
+    assert not attempts

@@ -57,6 +57,10 @@ checklist in [the deployment guide](deployment-guide.md#1-before-the-first-deplo
 4. Read the run summary: it names what was built and deployed, and hands you
    the rollback line.
 
+> **Not yet run against a real AWS account.** The CodeDeploy forward deploy
+> and the Rollback workflow are tested against a simulated `aws` only.
+> The first staging deploy is the first time either runs against AWS.
+
 **How the traffic moves.** The deploy creates a CodeDeploy blue/green
 deployment. When CodeDeploy reports it `Ready`, the deploy checks that every
 target in the new task set's target group is healthy, as many as the task set

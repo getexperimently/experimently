@@ -27,8 +27,11 @@ This is rollback.yml's polling loop, applied to the forward deploy.
   hour is the window in which Rollback can act (DECISIONS T21).
 
 It NEVER stops a deployment. The only CodeDeploy write it can make is
-`continue-deployment`: `OPERATIONS` below is the whole allow-list, and
-`run_aws` refuses anything else before a process starts. A deadline passed
+`continue-deployment`. Two allow-lists cover every AWS call it makes:
+`OPERATIONS` below, for its own `run_aws` (the deployment, the replacement
+task set, target health), and `check_live_target_group.READ_ONLY_OPERATIONS`,
+four describe calls, for the `serving()` path through `api_serving.py`. Each
+`run_aws` refuses anything outside its list before a process starts. A deadline passed
 before the approval leaves the deployment to CodeDeploy, which stops it when
 the approval wait ends; nothing has shifted by then. A deadline passed after
 the approval leaves it running. Stopping a deployment whose traffic has
@@ -38,8 +41,9 @@ Deadlines and intervals are parameters. The unit tests run with 0.
 
 Exit status: 0 the API is serving the revision; 1 anything else, with the
 reason on stdout as a workflow `::error`. When `GITHUB_OUTPUT` is set it
-writes `result` (serving | failed | unhealthy | timeout | wrong-route |
-unknown) and, on success, `live_target_group`.
+writes `approved=true` as soon as it approves the shift, `result` (serving |
+failed | unhealthy | timeout | wrong-route | unknown), and, on success,
+`live_target_group`.
 """
 
 from __future__ import annotations
@@ -203,6 +207,9 @@ def shift(
                         ]
                     )
                     continued = True
+                    # Written the moment the approval is sent: from here on the
+                    # new revision may be serving, whatever happens next.
+                    _output(approved="true")
                 elif why != last_health:
                     print(f"Ready, not yet approved: {why}")
                     last_health = why

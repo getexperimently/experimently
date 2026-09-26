@@ -198,6 +198,12 @@ place, or the founder has waived it in writing.
 
 ## 3. Every deploy
 
+> **Not yet run against a real AWS account.** The CodeDeploy forward deploy
+> described here, and the Rollback workflow, are tested against a simulated
+> `aws` only. The first staging deploy is the first time either runs against
+> AWS, so do that in staging before prod, and read the run and its summary
+> closely.
+
 1. **A release tag.** release-please cuts them; the Release Gate runs on every
    push to `main`, so the tag's commit has a result. For a tag cut before that:
    `gh workflow run release-gate.yml --ref vX.Y.Z`, then wait for it.
@@ -251,6 +257,19 @@ within that hour is refused at once, before anything is built, naming the
 deployment and roughly how long it has left. A deployment that was never
 approved stays active until its 30-minute approval wait ends. The deploy never
 stops a deployment itself. Rollback does, on purpose.
+
+**Shipping a fix within that hour means Rollback first.** A fix-forward deploy is
+refused while the bad release's deployment is active. Run **Rollback**, which
+stops that deployment and puts the previous revision back, and deploy the fix
+afterwards. Rollback's own CodeDeploy deployment is then the active one, and
+the next forward deploy is refused until it is no longer active. That is
+expected to be about another hour, because the 60-minute termination wait is a
+setting of the deployment group (the synthesised template's
+`TerminateBlueInstancesOnDeploymentSuccess.TerminationWaitTimeInMinutes: 60`)
+and `create-deployment` has no parameter that overrides it. Rollback's
+all-at-once `--deployment-config-name` changes how traffic moves, not how long
+the old task set is kept. This is expected behaviour, not yet observed: the
+first staging deploy is where it is seen.
 
 One deploy or manual migration per environment at a time. A newer dispatch
 waiting behind a running deploy replaces an older one that was still waiting
@@ -380,8 +399,7 @@ rule forwards to the *other* target group, with no split. The API route is not
 where the new tasks are. When the old task set is terminated, an hour after
 the shift, every API request gets a 503. This is the unobserved question of
 whether a CodeDeploy traffic shift rewrites listener *rules* or only the
-default action (Stream C OPEN 1). Stream I's staging rehearsal is where it is
-first seen.
+default action. The first staging deploy is where it is first seen.
 
 Until then the old task set keeps answering through the rule, so users see
 the *previous* release, not the new one.
