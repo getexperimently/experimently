@@ -18,6 +18,7 @@ import {
   clearToken,
   getToken,
   setToken,
+  unreachableMessage,
 } from '@/services/api';
 
 export type AuthStatus = 'loading' | 'authenticated' | 'anonymous';
@@ -35,6 +36,12 @@ export interface AuthContextValue {
   refresh: () => Promise<UserMe | null>;
   /** True when the current user has one of the given roles. */
   hasRole: (...roles: Role[]) => boolean;
+  /**
+   * Why a stored session could not be restored, when the reason was not a
+   * rejected token: a server error or an unreachable API. The login page shows
+   * it, so the redirect there is not silent. `null` otherwise.
+   */
+  sessionError: string | null;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -42,6 +49,16 @@ const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 const ME_PATH = '/api/v1/auth/me';
 const LOGIN_PATH = '/api/v1/auth/login';
 const LOGOUT_PATH = '/api/v1/auth/logout';
+
+/** Copy for a session that could not be restored for a reason other than 401. */
+export function sessionErrorMessage(err: unknown): string {
+  if (err instanceof ApiError && err.isNetworkError) return unreachableMessage();
+  if (err instanceof ApiError && err.isServerError) {
+    const id = err.requestId ? ` Request ID: ${err.requestId}.` : '';
+    return `Signed out because the server returned an error (HTTP ${err.status}).${id}`;
+  }
+  return 'Signed out because your session could not be checked. Sign in again.';
+}
 
 /**
  * Only the bearer token is persisted (`localStorage["experimently.token"]`).
@@ -51,6 +68,7 @@ const LOGOUT_PATH = '/api/v1/auth/logout';
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<UserMe | null>(null);
   const [status, setStatus] = useState<AuthStatus>('loading');
+  const [sessionError, setSessionError] = useState<string | null>(null);
   const mounted = useRef(true);
 
   const applyAnonymous = useCallback(() => {
@@ -69,6 +87,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (mounted.current) {
         setUser(me);
         setStatus('authenticated');
+        setSessionError(null);
       }
       return me;
     } catch (err) {
@@ -78,7 +97,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return null;
       }
       // API unreachable or 5xx: keep the token for the next reload but treat
-      // the session as anonymous so protected pages fall back to /login.
+      // the session as anonymous so protected pages fall back to /login, and
+      // say why there.
+      if (mounted.current) setSessionError(sessionErrorMessage(err));
       applyAnonymous();
       return null;
     }
@@ -117,6 +138,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (mounted.current) {
       setUser(result.user);
       setStatus('authenticated');
+      setSessionError(null);
     }
     return result.user;
   }, []);
@@ -130,6 +152,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     }
     clearToken();
+    setSessionError(null);
     applyAnonymous();
   }, [applyAnonymous]);
 
@@ -147,8 +170,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       logout,
       refresh: loadMe,
       hasRole,
+      sessionError,
     }),
-    [user, status, login, logout, loadMe, hasRole],
+    [user, status, login, logout, loadMe, hasRole, sessionError],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

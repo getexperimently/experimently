@@ -83,7 +83,7 @@ describe('ExperimentsService.list', () => {
     const err = await ExperimentsService.list().catch((e) => e);
     expect(err).toBeInstanceOf(ApiError);
     expect(err.status).toBe(500);
-    expect(err.message).toBe('Internal Server Error');
+    expect(err.message).toContain('Something went wrong on the server (HTTP 500).');
   });
 });
 

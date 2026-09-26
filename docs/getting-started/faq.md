@@ -16,7 +16,7 @@ The platform includes a REST API backend (FastAPI), a React management dashboard
 
 Yes. The platform is designed to be deployed in your own AWS account using the provided CDK infrastructure definitions. You own your data and control your deployment. There is no vendor lock-in and no data leaves your infrastructure.
 
-Running `cdk deploy --all` from the `infrastructure/` directory provisions the complete AWS environment, including the ECS Fargate API service, Aurora PostgreSQL database, Redis cache, Lambda functions, and CloudFront distribution. A checkout that also has `modules/` gets the real-time DynamoDB counters table and the Kinesis/OpenSearch/Glue data lake alongside them — see [AWS CDK Deployment](../self-hosting/cdk.md) for which stacks each profile deploys.
+Running `cdk deploy --all` from the `infrastructure/cdk/` directory provisions the AWS environment for the API: the ECS Fargate API service behind an Application Load Balancer, the Aurora PostgreSQL database, the Redis cache and Lambda functions. It does not create a CloudFront distribution, and the dashboard is not yet deployed by the CDK (#69). A checkout that also has `modules/` gets the real-time DynamoDB counters table and the Kinesis/OpenSearch/Glue data lake alongside them — see [AWS CDK Deployment](../self-hosting/cdk.md) for which stacks each profile deploys.
 
 ---
 
@@ -31,7 +31,7 @@ A full production deployment uses the following AWS services:
 | ElastiCache Redis | Session storage and caching |
 | DynamoDB | Real-time impression and conversion counters |
 | Lambda | Experiment assignment, event processing, feature flag evaluation |
-| CloudFront | CDN and Lambda@Edge for split URL testing |
+| CloudFront | Not created by the CDK. Only needed if you wire in the split-URL module's Lambda@Edge construct yourself |
 | Kinesis | Event streaming pipeline |
 | OpenSearch | Event indexing and ad-hoc analytics queries |
 | Cognito | User authentication and JWT token issuance |

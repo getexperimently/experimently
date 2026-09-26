@@ -42,10 +42,18 @@ BOUNDARY 1: Internet — Untrusted
          | HTTPS (TLS 1.2+)
          v
 
-BOUNDARY 2: AWS Edge — Partially Trusted
-  [CloudFront CDN]  →  (static frontend assets, S3)
-  [AWS WAF]         →  (rate limiting, IP reputation, OWASP CRS rules)
-  [API Gateway]     →  (routes /api/v1/* to ECS; /evaluate/* to Lambda)
+BOUNDARY 2: Edge — Partially Trusted
+  [Application Load Balancer] → HTTPS listener (HTTP redirected to HTTPS),
+                                forwards to the API tasks on ECS. The only
+                                edge the CDK creates: there is no CloudFront,
+                                AWS WAF or API Gateway in front of it.
+  [nginx web container]       → serves the dashboard (a static Next.js
+                                export), sets its CSP and security headers,
+                                and proxies /api/, /ws/ and /health to the
+                                API. This is what serves the dashboard in
+                                Docker Compose and in the frontend/Dockerfile
+                                image; the dashboard is not yet deployed by
+                                the CDK (#69).
 
          |
          | VPC-internal HTTPS
@@ -124,8 +132,8 @@ BOUNDARY 5: Analytics Pipeline — Internal
 
 - **Motivation:** Data theft, service disruption, reconnaissance
 - **Capabilities:** Web scanning tools (Nuclei, ZAP), SQL injection frameworks (SQLMap), credential stuffing
-- **Access point:** Public internet → API Gateway / CloudFront
-- **Constraints:** No valid credentials; blocked by WAF if deploying pattern-matching rules
+- **Access point:** Public internet → the Application Load Balancer (API), or the nginx web container (dashboard)
+- **Constraints:** No valid credentials; the API's per-IP rate limiter. No WAF is deployed, so nothing pattern-matches requests before the application sees them
 
 ### TA-2: Authenticated Malicious Insider / Compromised Account
 
@@ -161,29 +169,23 @@ BOUNDARY 5: Analytics Pipeline — Internal
 
 ```
                            PUBLIC INTERNET
-                                 |
-                    ┌────────────▼──────────────┐
-                    │     CloudFront CDN         │
-                    │  (static assets: S3)       │
-                    └────────────┬──────────────┘
-                                 |
-                    ┌────────────▼──────────────┐
-                    │       AWS WAF              │
-                    │  Rate limit / OWASP rules  │
-                    └────────────┬──────────────┘
-                                 |
-               ┌─────────────────▼──────────────────┐
-               │           API Gateway               │
-               │  /api/v1/* → ECS Fargate            │
-               │  /evaluate/* → Lambda               │
-               └──────┬──────────────────┬───────────┘
-                      │                  │
-          ┌───────────▼────┐   ┌─────────▼──────────┐
-          │  FastAPI (ECS) │   │ Feature Flag Lambda │
-          │  Port 8000     │   │ (local Redis cache) │
-          └──────┬─────────┘   └─────────────────────┘
-                 │
-     ┌───────────┼──────────────┬────────────────┐
+                                |
+          ┌─────────────────────┴────────────────────────┐
+          │                                              │
+┌─────────▼────────────────┐          ┌──────────────────▼─────────┐
+│ nginx web container      │          │ Application Load Balancer  │
+│ dashboard (static files) │          │ HTTPS; HTTP → HTTPS        │
+│ not deployed by the CDK  │          │ (the CDK's only edge)      │
+└─────────┬────────────────┘          └──────────────────┬─────────┘
+          │ /api/, /ws/, /health                         │
+          └─────────────────────┬────────────────────────┘
+                                │
+                       ┌────────▼───────┐
+                       │ FastAPI (ECS)  │
+                       │ Port 8000      │
+                       └────────┬───────┘
+                                │
+     ┌───────────┬──────────────┼────────────────┐
      │           │              │                │
      ▼           ▼              ▼                ▼
  ┌───────┐  ┌────────┐   ┌──────────┐   ┌────────────────┐
@@ -202,7 +204,7 @@ BOUNDARY 5: Analytics Pipeline — Internal
                     └──────────────────────┘
 
 Data flows carrying PII/sensitive data:
-  [1] Browser/SDK → API Gateway: JWT/API key + user_id + event data (TLS)
+  [1] Browser/SDK → ALB (or nginx, for the dashboard): JWT/API key + user_id + event data (TLS at the ALB)
   [2] FastAPI → Aurora: user assignments, events, experiment state (TLS, VPC)
   [3] FastAPI → Redis: session tokens, rule cache (VPC, optional auth)
   [4] FastAPI → Kinesis: event records with user_id (VPC, IAM)
@@ -272,7 +274,7 @@ Data flows carrying PII/sensitive data:
 |--------|----------|-------------|-----------|--------|------|
 | Secrets in environment variables | Information Disclosure | If ECS task definitions are readable, DB passwords are exposed | Medium | Critical | High |
 | Aurora publicly accessible | Information Disclosure | Misconfigured security group exposes port 5432 | Low | Critical | High |
-| S3 bucket public access | Information Disclosure | Frontend S3 bucket ACL set to public-read-write | Low | High | Medium |
+| S3 bucket public access | Information Disclosure | Data-lake or Athena-results bucket (full profile) made public by a policy change | Low | High | Medium |
 | Lambda IAM over-permissions | Elevation of Privilege | Lambda execution role with `*` DynamoDB / S3 actions | Medium | High | High |
 | CloudWatch log exfiltration | Information Disclosure | Log groups lack resource policies; readable by any IAM principal in account | Medium | Medium | Medium |
 | Container image with known CVEs | Tampering | Stale base image with unpatched OS vulnerabilities | High | High | High |
@@ -345,7 +347,7 @@ D
 | Restrict CORS to production frontend domain only | P1 | T9 |
 | Enable Redis AUTH and TLS | P1 | T10 |
 | Rate-limit safety rollback trigger per flag per hour | P2 | T11 |
-| Enable AWS WAF with OWASP Core Rule Set on API Gateway | P1 | Multiple |
+| Enable AWS WAF with OWASP Core Rule Set on the ALB (none is deployed today) | P1 | Multiple |
 | Enable AWS GuardDuty across all regions | P1 | TA-4 |
 | Enable AWS Security Hub and set score target > 90% | P2 | TA-4 |
 | Implement Content-Security-Policy for dashboard frontend (Next.js) | P2 | XSS |

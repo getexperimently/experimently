@@ -14,8 +14,8 @@ This document describes the high-level technical architecture of the platform: h
                        │
                        ▼
 ┌──────────────────────────────────────────────────────────────────┐
-│                     CloudFront CDN                                │
-│              (static assets, Lambda@Edge for split URLs)         │
+│                Application Load Balancer (HTTPS)                 │
+│   (the CDK creates no CloudFront; the dashboard is not deployed) │
 └──────────────────────┬───────────────────────────────────────────┘
                        │
                        ▼
@@ -241,7 +241,11 @@ Custom roles and direct permission grants extend the base role system for fine-g
 
 ## CDK Infrastructure
 
-All AWS infrastructure is defined as code using **AWS CDK v2** (TypeScript). Running `cdk deploy --all` provisions the complete environment from scratch.
+The AWS infrastructure is defined as code using **AWS CDK v2**, in Python (`infrastructure/cdk/app.py`). Running `cdk deploy --all` from `infrastructure/cdk` provisions the stacks below.
+
+**The dashboard is not yet deployed by the CDK** (#69): no stack builds or serves
+it, and none creates CloudFront. The split-URL module's CloudFront construct
+exists but `app.py` does not use it. See [AWS CDK Deployment](../self-hosting/cdk.md).
 
 ### Stacks
 

@@ -21,6 +21,7 @@ else a missing library is an error and every SAML route answers 501
 from __future__ import annotations
 
 import logging
+import re
 import secrets
 import threading
 import time
@@ -560,6 +561,38 @@ def _parse_saml_response_stub(
 # ---------------------------------------------------------------------------
 
 
+_OAUTH_ERROR_CODE = re.compile(r"[a-z_]{1,64}")
+
+
+def _idp_error_code(exc: BaseException) -> Optional[str]:
+    """The OAuth ``error`` code a provider sent, if any -- never its free text.
+
+    A failed exchange or userinfo call carries text the caller must not see: the
+    provider's ``error_description``, the token URL, connection errors naming
+    internal hosts. Only the standard error code (``invalid_grant``, ...) is
+    passed on, and only if it looks like one.
+    """
+    code = getattr(exc, "error", None)
+    if code is None:
+        response = getattr(exc, "response", None)
+        try:
+            code = response.json().get("error") if response is not None else None
+        except Exception:
+            code = None
+    if isinstance(code, str) and _OAUTH_ERROR_CODE.fullmatch(code):
+        return code
+    return None
+
+
+def _refusal(what: str, exc: BaseException) -> HTTPException:
+    code = _idp_error_code(exc)
+    logger.error("%s: %s%s", what, type(exc).__name__, f" ({code})" if code else "")
+    return HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail=f"{what}" + (f" ({code})" if code else ""),
+    )
+
+
 async def exchange_oidc_code(
     config: SSOConfig,
     code: str,
@@ -621,20 +654,20 @@ async def exchange_oidc_code(
         # Fallback: synchronous requests (always available in stdlib-adjacent)
         import requests  # type: ignore
 
-        resp = requests.post(token_url, data=token_params, timeout=10)
+        # No redirects: a redirected POST would re-send the client secret to
+        # wherever the redirect points.
+        resp = requests.post(
+            token_url, data=token_params, timeout=10, allow_redirects=False
+        )
+        if resp.is_redirect:
+            raise requests.HTTPError("token endpoint redirected", response=resp)
         resp.raise_for_status()
         return resp.json()
 
     except HTTPException:
         raise
     except Exception as exc:
-        # Log the failure class only: the exception text can echo the token
-        # request/response, which carries the client secret and tokens.
-        logger.error("OIDC code exchange failed: %s", type(exc).__name__)
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"OIDC token exchange failed: {exc}",
-        )
+        raise _refusal("OIDC token exchange failed", exc) from None
 
 
 async def get_oidc_user_info(
@@ -679,11 +712,16 @@ async def get_oidc_user_info(
                 token={"access_token": access_token}
             ) as client:
                 resp = await client.get(userinfo_url)
+                resp.raise_for_status()  # an error body is not user info
                 raw = resp.json()
         else:
             import requests  # type: ignore
 
-            resp = requests.get(userinfo_url, headers=headers, timeout=10)
+            resp = requests.get(
+                userinfo_url, headers=headers, timeout=10, allow_redirects=False
+            )
+            if resp.is_redirect:
+                raise requests.HTTPError("userinfo endpoint redirected", response=resp)
             resp.raise_for_status()
             raw = resp.json()
 
@@ -692,11 +730,7 @@ async def get_oidc_user_info(
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error("OIDC userinfo fetch failed: %s", exc)
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"OIDC userinfo fetch failed: {exc}",
-        )
+        raise _refusal("OIDC userinfo fetch failed", exc) from None
 
 
 def _normalize_userinfo(provider_key: str, raw: Dict[str, Any]) -> Dict[str, Any]:

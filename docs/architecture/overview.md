@@ -6,6 +6,17 @@ Based on the detailed requirements for an experimentation platform with A/B test
 
 The architecture is designed to provide high-performance experiment evaluation, real-time event collection, advanced statistical analysis, and flexible targeting capabilities.
 
+!!! warning "This is the design, not what the CDK deploys today"
+    The diagram below is the target design. What `infrastructure/cdk` deploys
+    today is the API on ECS Fargate behind one Application Load Balancer, with
+    Aurora PostgreSQL, ElastiCache Redis and DynamoDB tables; see
+    [AWS CDK Deployment](../self-hosting/cdk.md).
+
+    **The dashboard is not yet deployed by the CDK** (#69). No stack creates
+    CloudFront or API Gateway. In Docker Compose and in the `frontend/Dockerfile`
+    image the dashboard is a static Next.js export served by nginx, which also
+    proxies `/api/` to the API.
+
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────┐
 │                                  Client Applications                             │
@@ -13,15 +24,15 @@ The architecture is designed to provide high-performance experiment evaluation, 
                     │                                     │                     │
                     ▼                                     ▼                     ▼
 ┌───────────────────────────┐     ┌───────────────────────────┐     ┌─────────────────────────┐
-│    Amazon CloudFront      │     │    Application Load       │     │  Amazon API Gateway     │
-│    (Content Delivery)     │     │       Balancer            │     │  (API Management)       │
+│  Amazon CloudFront        │     │    Application Load       │     │  Amazon API Gateway     │
+│  (not created by the CDK) │     │       Balancer            │     │  (not created by CDK)   │
 └─────────────┬─────────────┘     └──────────────┬────────────┘     └────────────┬────────────┘
               │                                  │                                │
               │                                  │                                │
               ▼                                  ▼                                ▼
 ┌───────────────────────────┐     ┌───────────────────────────┐     ┌─────────────────────────┐
-│    Next.js Frontend       │     │   ECS/Fargate Containers  │     │   Lambda Functions      │
-│    (Web UI)               │     │   (Core Backend Services) │     │   (Real-time Services)  │
+│  Next.js dashboard        │     │   ECS/Fargate Containers  │     │   Lambda Functions      │
+│  (not deployed by CDK)    │     │   (Core Backend Services) │     │   (Real-time Services)  │
 └─────────────┬─────────────┘     └──────────────┬────────────┘     └────────────┬────────────┘
               │                                  │                                │
               │                                  │                                │
@@ -62,13 +73,13 @@ The architecture is designed to provide high-performance experiment evaluation, 
 
 ### 1. Client-Facing Layer
 
--   **Amazon CloudFront**: Global CDN for delivering static assets and caching API responses
--   **Application Load Balancer**: For routing traffic to backend services
--   **Amazon API Gateway**: Manages APIs for experiment evaluation, event tracking, and admin functions
+-   **Application Load Balancer**: For routing traffic to backend services. This is the only entry point the CDK creates: HTTPS, with HTTP redirected to HTTPS, in front of the API.
+-   **Amazon CloudFront** (design only, not created by the CDK): Global CDN for delivering static assets and caching API responses
+-   **Amazon API Gateway** (design only, not created by the CDK): Manages APIs for experiment evaluation, event tracking, and admin functions
 
 ### 2. Application Layer
 
--   **Next.js Frontend (ECS/Fargate)**: Web UI for experiment management, feature flag configuration, and dashboards
+-   **Next.js dashboard**: Web UI for experiment management, feature flag configuration, and dashboards. Not yet deployed by the CDK (#69); it runs as the nginx image built from `frontend/Dockerfile`, as in Docker Compose
 -   **Core Backend Services (ECS/Fargate)**:
     -   Experiment Management Service
     -   Feature Flag Service
