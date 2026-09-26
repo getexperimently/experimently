@@ -10,40 +10,38 @@ from aws_cdk import (
 )
 from constructs import Construct
 
+from stacks.names import ecs_cluster_name
+
 
 class ComputeStack(Stack):
-    def __init__(self, scope: Construct, construct_id: str, vpc, **kwargs) -> None:
+    def __init__(
+        self, scope: Construct, construct_id: str, vpc, env_name: str, **kwargs
+    ) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
-        # Environment determination
-        env_name = self.node.try_get_context("env") or "dev"
-
-        # Create an ECS cluster for the backend services
-        # Named, because two workflows address it by name and nothing made
-        # them agree. `deploy-prod.yml` sets `ECS_CLUSTER: experimentation-prod`
-        # and `rollback.yml` passes `--cluster experimentation-prod` three
-        # times; with no `cluster_name` CloudFormation generated
-        # `experimentation-compute-prod-ECSCluster<hash>-<random>`, so every
-        # `aws ecs` call in both would have failed with
-        # ClusterNotFoundException -- the rollback path included, which is the
-        # one that matters at 3am (#80).
+        # The environment is a required argument, from app.py's ENVIRONMENT.
+        # It used to be `self.node.try_get_context("env") or "dev"`: a CDK
+        # context key nothing sets, so every environment -- staging and prod
+        # included -- built a cluster named `experimentation-dev`, and the
+        # second environment deployed into an account failed on the name
+        # (#142). Required rather than defaulted so that a caller cannot fall
+        # back to dev silently again.
         #
-        # Everything else those workflows name already matched: the service and
-        # task-definition family (`experimentation-backend-<env>`), the
-        # migration family (`experimentation-migrate`), the CodeDeploy
-        # application (`experimentation-platform`) and deployment group
-        # (`experimentation-<env>`). This was the only one left implicit.
+        # Named, because the deploy workflows address it by name (#80). The
+        # name is `experimentation-<env>` (stacks/names.py).
         #
-        # Free to set now: nothing has ever been deployed from this repository
-        # (verified -- no experimentation-* stacks in us-west-2 or us-east-1,
-        # including deleted), so there is no cluster to replace. After a
-        # deployment this becomes a replacement, which is why it is worth
-        # fixing before the first one rather than after.
+        # Renaming the cluster REPLACES it, and the cluster's Ref is an export
+        # the fargate stack imports -- CloudFormation refuses to change an
+        # export that is in use. An environment deployed before this change is
+        # therefore moved by: destroy the fargate stack, deploy this one,
+        # deploy the fargate stack again (docs/self-hosting/cdk.md, "Moving an
+        # existing environment"). `test_environments_do_not_collide.py` derives
+        # that list from the synthesised import graph.
         self.ecs_cluster = ecs.Cluster(
             self,
             "ECSCluster",
             vpc=vpc,
-            cluster_name=f"experimentation-{env_name}",
+            cluster_name=ecs_cluster_name(env_name),
             container_insights=True,
         )
 

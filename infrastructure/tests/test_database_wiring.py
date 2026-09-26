@@ -79,7 +79,7 @@ class _Synth:
         # has no database; select the backend's by family.
         family = {
             "fargate": f"experimentation-backend-{self.env}",
-            "migrations": "experimentation-migrate",
+            "migrations": f"experimentation-migrate-{self.env}",
         }[kind]
         task_defs = [
             r

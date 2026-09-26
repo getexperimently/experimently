@@ -1,7 +1,6 @@
 """ECS task definition for running database migrations."""
 from aws_cdk import (
     Stack,
-    RemovalPolicy,
     CfnOutput,
     aws_ecs as ecs,
     aws_ecr as ecr,
@@ -12,7 +11,8 @@ from aws_cdk import (
 from constructs import Construct
 
 from stacks.database_access import require_database
-from stacks.names import BACKEND_ECR_REPOSITORY
+from stacks.environments import data_removal_policy
+from stacks.names import BACKEND_ECR_REPOSITORY, migration_task_family
 
 # --- The command the task runs -------------------------------------------
 # backend/Dockerfile sets WORKDIR /app and copies the repository layout under
@@ -94,7 +94,7 @@ class MigrationTaskStack(Stack):
     Usage in a deployment pipeline:
         aws ecs run-task \\
             --cluster <cluster-name> \\
-            --task-definition experimentation-migrate \\
+            --task-definition experimentation-migrate-<env> \\
             --launch-type FARGATE \\
             --network-configuration "awsvpcConfiguration={subnets=[...],securityGroups=[...],assignPublicIp=DISABLED}"
 
@@ -217,9 +217,10 @@ class MigrationTaskStack(Stack):
             "MigrationLogs",
             log_group_name=f"/ecs/experimentation-migrate-{env_name}",
             retention=logs.RetentionDays.ONE_MONTH,
-            # RETAIN so that migration history is preserved even if the stack
-            # is torn down and re-deployed.
-            removal_policy=RemovalPolicy.RETAIN,
+            # Migration history survives a teardown in prod. Elsewhere a
+            # retained, NAMED log group makes the next deploy of the same
+            # environment fail on the name (stacks/environments.py).
+            removal_policy=data_removal_policy(env_name),
         )
 
         # --- ECS Task Definition ---
@@ -228,9 +229,10 @@ class MigrationTaskStack(Stack):
         self.task_definition = ecs.FargateTaskDefinition(
             self,
             "MigrationTaskDef",
-            # family is shared across env so that the latest revision is always
-            # used without hard-coding a specific revision number in pipelines.
-            family="experimentation-migrate",
+            # One family per environment (#139). It was one family for all of
+            # them, so `run-task --task-definition experimentation-migrate`
+            # ran whichever environment had registered a revision last.
+            family=migration_task_family(env_name),
             cpu=512,            # 0.5 vCPU
             memory_limit_mib=1024,  # 1 GB
             execution_role=execution_role,

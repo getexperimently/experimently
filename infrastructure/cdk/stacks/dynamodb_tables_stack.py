@@ -1,6 +1,5 @@
 from aws_cdk import (
     Stack,
-    RemovalPolicy,
     Duration,
     CfnOutput,
     Tags,
@@ -9,6 +8,8 @@ from aws_cdk import (
     aws_iam as iam,
 )
 from constructs import Construct
+
+from stacks.environments import data_removal_policy
 
 
 class DynamoDBTablesStack(Stack):
@@ -37,11 +38,10 @@ class DynamoDBTablesStack(Stack):
             else dynamodb.BillingMode.PROVISIONED
         )
 
-        # Use different removal policies based on environment
-        # DESTROY is ok for dev (save costs), but RETAIN for production (data safety)
-        removal_policy = (
-            RemovalPolicy.DESTROY if environment == "dev" else RemovalPolicy.RETAIN
-        )
+        # RETAIN in prod only (stacks/environments.py). The tables are NAMED,
+        # so a table staging retained made the next staging deploy fail on the
+        # name; outside prod they now go with the stack.
+        removal_policy = data_removal_policy(environment)
 
         # Create tables
         self.assignments_table = self._create_assignments_table(
