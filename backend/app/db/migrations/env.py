@@ -317,7 +317,7 @@ def run_migrations_online() -> None:
     # that state on any database the previous build recorded at both
     # a7b8c9d0e1f2 and modules_0001_rbac (the branch used to be an alembic
     # base).  db/bootstrap.py has always pruned those rows; the CDK migration
-    # task, deploy-prod.yml, db-migrate.yml and docs/self-hosting/migrations.md
+    # task, deploy.yml, db-migrate.yml and docs/self-hosting/migrations.md
     # all run raw `alembic upgrade heads`, which died there.  Ahead of the
     # connection below because everything past it reads the version table; the
     # prune opens (and closes) its own.
@@ -347,7 +347,7 @@ def run_migrations_online() -> None:
         # build has no file for makes every alembic command fail before it
         # applies anything.  db/bootstrap.py has always handled that; raw
         # `alembic upgrade heads` -- what docs/self-hosting/migrations.md,
-        # deploy-prod.yml and the CDK migration task run -- died with
+        # deploy.yml and the CDK migration task run -- died with
         # "Can't locate revision identified by 'modules_0001_rbac'".  Same
         # decision, same message, whichever way alembic was launched.
         # `upgrade` only (_SKIPPABLE_COMMANDS): `downgrade` and `stamp` get

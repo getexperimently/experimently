@@ -5,6 +5,17 @@
 **Audience:** On-call Engineers
 **Time Target:** < 5 minutes from decision to rollback complete
 
+Every command below is written for either environment. Set this first, in the
+shell you will paste into:
+
+```bash
+export ENV=prod   # or staging
+```
+
+**Rehearse it.** Before prod is ever relied on, do it in staging: two gated
+deploys of two tags, then roll back to the first
+([deployment guide, section 2](deployment-guide.md#2-the-first-deploys-and-the-rollback-rehearsal)).
+
 ---
 
 ## Decision Tree: When to Rollback
@@ -58,7 +69,11 @@ Is any of the following true?
 
 ## Method 1: GitHub Actions Manual Rollback (Preferred — ~3 minutes)
 
-This is the preferred method for all non-emergency rollbacks. It is audited, sends Slack notifications, and runs smoke tests after rollback completes.
+This is the preferred method. It is audited and sends Slack notifications. It does **not** run smoke tests; Step 5 of Method 2 and the post-rollback checklist are by hand.
+
+The deploy that went wrong printed the target for you: its run summary ends
+with `Rollback: Actions → Rollback → environment=<env>, task_definition_arn=experimentation-backend-<env>:<n>`.
+Use that, and skip Step 1.
 
 ### Step 1: Find the Previous Task Definition ARN
 
@@ -73,15 +88,15 @@ This is the preferred method for all non-emergency rollbacks. It is audited, sen
 # the image each one carries, so a CloudFormation-registered revision is
 # visible rather than a number in a list.
 for arn in $(aws ecs list-task-definitions \
-      --family-prefix experimentation-backend-prod \
+      --family-prefix experimentation-backend-$ENV \
       --sort DESC --max-results 10 --query 'taskDefinitionArns' --output text); do
   image=$(aws ecs describe-task-definition --task-definition "$arn" \
     --query "taskDefinition.containerDefinitions[?name=='backend'].image" --output text)
   echo "$arn  $image"
 done
-# arn:...:experimentation-backend-prod:45  ...backend:bootstrap   <- CloudFormation; NOT a rollback target
-# arn:...:experimentation-backend-prod:44  ...backend:v1.4.2      <- current (bad)
-# arn:...:experimentation-backend-prod:43  ...backend:v1.4.1      <- target (good)
+# arn:...:experimentation-backend-$ENV:45  ...backend:bootstrap   <- CloudFormation; NOT a rollback target
+# arn:...:experimentation-backend-$ENV:44  ...backend@sha256:9f2c…   <- current (bad): a deploy registered it, by digest
+# arn:...:experimentation-backend-$ENV:43  ...backend@sha256:41ab…   <- target (good): the last known-good release
 
 # Option B: Ask which revision is actually serving traffic.
 # NOT `services[0].taskDefinition`: on a service with a CodeDeploy deployment
@@ -91,25 +106,27 @@ done
 # CloudFormation created when the stack was first deployed, for the life of the
 # service, and is never the running one. The PRIMARY task set is.
 aws ecs describe-services \
-  --cluster experimentation-prod \
-  --services experimentation-backend-prod \
+  --cluster "experimentation-$ENV" \
+  --services experimentation-backend-$ENV \
   --query "services[0].taskSets[?status=='PRIMARY'].taskDefinition" \
   --output text
-# Returns: arn:...:task-definition/experimentation-backend-prod:44
+# Returns: arn:...:task-definition/experimentation-backend-$ENV:44
 # Then use Option A to choose the released revision below it.
 
 # Option C: Review service events to identify what was running before this deployment
 aws ecs describe-services \
-  --cluster experimentation-prod \
-  --services experimentation-backend-prod \
+  --cluster "experimentation-$ENV" \
+  --services experimentation-backend-$ENV \
   --query 'services[0].events[:5]'
 ```
 
 ### Step 2: Trigger the Rollback Workflow
 
-1. Navigate to **GitHub → Actions → "Rollback Production"** (file: `rollback.yml`)
-2. Click **Run workflow**
+1. Navigate to **GitHub → Actions → "Rollback"** (file: `rollback.yml`)
+2. Click **Run workflow**, from `main` (any other ref is refused)
 3. Fill in the required inputs:
+   - **Environment:** `$ENV` (`staging` or `prod`). A revision of the other
+     environment's family is refused with "Re-run with environment=…"
    - **Reason for rollback:** Brief description, e.g., `"Error rate 8% after v1.2.3 deploy, p99 latency 5200ms"`
    - **Previous task definition ARN:** The ARN from Step 1 (the last known-good revision)
 4. Click **Run workflow**
@@ -142,12 +159,12 @@ Watch the GitHub Actions run. Simultaneously run:
 # here -- so it names the revision CloudFormation created and never changes.
 # Watching it during a rollback shows nothing happening and reads as a failure.
 watch -n 5 'aws ecs describe-services \
-  --cluster experimentation-prod \
-  --services experimentation-backend-prod \
+  --cluster "experimentation-$ENV" \
+  --services experimentation-backend-$ENV \
   --query "services[0].{Running:runningCount,Desired:desiredCount,Serving:taskSets[?status==\`PRIMARY\`].taskDefinition|[0]}"'
 ```
 
-Running task count should remain at 3 or above throughout. This is a
+Running task count should stay at the desired count throughout. This is a
 **blue/green** deployment, not a rolling update: a second (green) task set is
 provisioned alongside the current one and traffic moves to it in one shift, so
 `Serving` changes from the old revision to the new one at once rather than
@@ -161,15 +178,15 @@ Use this method when GitHub Actions is unavailable or you need to act faster tha
 
 ```bash
 # Step 1: Set the target task definition ARN (last known-good revision)
-PREV_TASK_DEF="arn:aws:ecs:us-west-2:ACCOUNT_ID:task-definition/experimentation-backend-prod:43"
+PREV_TASK_DEF="arn:aws:ecs:us-west-2:ACCOUNT_ID:task-definition/experimentation-backend-$ENV:43"
 
 # Step 2: Get the running task def if you need it dynamically.
 # Use the PRIMARY task set, not `services[0].taskDefinition` -- see the note in
 # Method 1 Step 1: on a CodeDeploy-controlled service that field never moves
 # off the revision CloudFormation created.
 CURRENT=$(aws ecs describe-services \
-  --cluster experimentation-prod \
-  --services experimentation-backend-prod \
+  --cluster "experimentation-$ENV" \
+  --services experimentation-backend-$ENV \
   --query "services[0].taskSets[?status=='PRIMARY'].taskDefinition" \
   --output text)
 echo "Running task def: $CURRENT"
@@ -202,8 +219,8 @@ APPSPEC=$(jq -cn --arg td "$PREV_TASK_DEF" '{
 # and the revision being replaced is the one hurting users -- a canary would
 # leave 90% of traffic on it for another five minutes.
 DEPLOYMENT_ID=$(aws deploy create-deployment \
-  --application-name experimentation-platform-prod \
-  --deployment-group-name experimentation-prod \
+  --application-name experimentation-platform-$ENV \
+  --deployment-group-name "experimentation-$ENV" \
   --deployment-config-name CodeDeployDefault.ECSAllAtOnce \
   --description "manual rollback" \
   --revision "$(jq -cn --arg c "$APPSPEC" '{revisionType:"AppSpecContent",appSpecContent:{content:$c}}')" \
@@ -233,8 +250,8 @@ aws deploy continue-deployment --deployment-id "$DEPLOYMENT_ID" \
 # took. Watch the PRIMARY task set instead: that is what moves, and it tells
 # you traffic has shifted without waiting for CodeDeploy to terminate the old
 # task set (the group keeps it for an hour).
-until [ "$(aws ecs describe-services --cluster experimentation-prod \
-             --services experimentation-backend-prod \
+until [ "$(aws ecs describe-services --cluster "experimentation-$ENV" \
+             --services experimentation-backend-$ENV \
              --query "services[0].taskSets[?status=='PRIMARY'].taskDefinition" \
              --output text)" = "$PREV_TASK_DEF" ]; do
   sleep 5
@@ -243,13 +260,13 @@ done
 # (the old, misleading form -- every line commented, because this block is
 #  meant to be pasted and two bare flag lines would run as a command)
 # aws ecs wait services-stable \
-#   --cluster experimentation-prod \
-#   --services experimentation-backend-prod
+#   --cluster "experimentation-$ENV" \
+#   --services experimentation-backend-$ENV
 
 echo "Rollback complete. Running verification..."
 
 # Step 5: Verify health
-curl -sf https://api.experimentation.example.com/health && echo "Health check PASSED" || echo "Health check FAILED"
+curl -sf "https://app.<domain>/health" && echo "Health check PASSED" || echo "Health check FAILED"
 ```
 
 After using Method 2, post an incident note in `#deployments` and open a follow-up task to capture it in the GitHub Actions audit log.
@@ -270,8 +287,8 @@ CodeDeploy is configured to automatically roll back when a deployment fails its 
 ```bash
 # Step 1: Get the active deployment ID
 aws deploy list-deployments \
-  --application-name experimentation-platform-prod \
-  --deployment-group-name experimentation-prod \
+  --application-name experimentation-platform-$ENV \
+  --deployment-group-name "experimentation-$ENV" \
   --include-only-statuses InProgress \
   --query 'deployments[0]' \
   --output text
@@ -306,20 +323,20 @@ Before touching the database, confirm all of the following:
 ```bash
 # Check migration logs from the ECS migration task
 aws logs filter-log-events \
-  --log-group-name /ecs/experimentation-migration-prod \
+  --log-group-name /ecs/experimentation-migrate-$ENV \
   --filter-pattern '"alembic"' \
   --start-time $(date -u -v-1H +%s000 2>/dev/null || date -u --date='1 hour ago' +%s000)
 
-# Check current alembic revision applied to production DB
-# (requires bastion or VPC access)
-python -m alembic -c backend/app/db/alembic.ini current
 ```
+
+The current revision is printed by the Database Migration workflow's
+"Show the current revision" step, which runs `alembic current` in the VPC.
 
 ### Step 2: Run Migration Downgrade via GitHub Actions
 
 1. Navigate to **GitHub → Actions → "Database Migration"** (file: `db-migrate.yml`)
 2. Fill in the required inputs:
-   - **Environment:** `production`
+   - **Environment:** `$ENV` (`staging` or `prod`)
    - **Direction:** `downgrade`
    - **Target:** `-1` (reverts the single most recent migration)
 3. Click **Run workflow**
@@ -336,18 +353,23 @@ Only take this path if:
 - The Engineering Lead has explicitly approved this path
 
 ```bash
-# Find the most recent pre-deployment snapshot (taken automatically before each deploy)
+# The cluster's identifier is generated by CloudFormation; the stack publishes it.
+CLUSTER=$(aws cloudformation describe-stacks --stack-name "experimentation-database-$ENV" \
+  --query "Stacks[0].Outputs[?OutputKey=='ClusterIdentifier'].OutputValue" --output text)
+
+# Find the most recent pre-deployment snapshot (a deploy takes one before
+# migrating: pre-deploy-<env>-<tag>-<time>; a manual migration: pre-migration-...)
 aws rds describe-db-cluster-snapshots \
-  --db-cluster-identifier experimentation-prod \
+  --db-cluster-identifier "$CLUSTER" \
   --query 'sort_by(DBClusterSnapshots, &SnapshotCreateTime)[-5:].{ID:DBClusterSnapshotIdentifier,Time:SnapshotCreateTime,Status:Status}'
 
 # Aurora supports point-in-time recovery (PITR) to any 5-minute window in the last 35 days.
 # Restore to a new cluster from the target snapshot (~30 min):
 aws rds restore-db-cluster-to-point-in-time \
-  --db-cluster-identifier experimentation-prod-restored \
-  --source-db-cluster-identifier experimentation-prod \
+  --db-cluster-identifier "$CLUSTER-restored" \
+  --source-db-cluster-identifier "$CLUSTER" \
   --restore-to-time "2026-03-01T14:25:00Z" \
-  --db-subnet-group-name experimentation-prod-subnet-group \
+  --db-subnet-group-name <the cluster's DB subnet group> \
   --vpc-security-group-ids <aurora-sg-id>
 
 # ---------------------------------------------------------------------------
@@ -362,7 +384,7 @@ aws rds restore-db-cluster-to-point-in-time \
 # cluster also keeps the master password of the snapshot, which is the one in
 # the secret only if it has not been rotated since.)
 #
-# So restoring to `experimentation-prod-restored` means one of:
+# So restoring to `$CLUSTER-restored` means one of:
 #
 #   - restore IN PLACE instead, so the endpoint the tasks already resolve does
 #     not change; or
@@ -381,8 +403,8 @@ aws rds restore-db-cluster-to-point-in-time \
 # is. Rather than find out during a restore, use the call that is correct for
 # this controller regardless.
 CURRENT=$(aws ecs describe-services \
-  --cluster experimentation-prod \
-  --services experimentation-backend-prod \
+  --cluster "experimentation-$ENV" \
+  --services experimentation-backend-$ENV \
   --query "services[0].taskSets[?status=='PRIMARY'].taskDefinition" \
   --output text)
 
@@ -398,8 +420,8 @@ APPSPEC=$(jq -cn --arg td "$CURRENT" '{
 }')
 
 aws deploy create-deployment \
-  --application-name experimentation-platform-prod \
-  --deployment-group-name experimentation-prod \
+  --application-name experimentation-platform-$ENV \
+  --deployment-group-name "experimentation-$ENV" \
   --description "restart after PITR restore" \
   --revision "$(jq -cn --arg c "$APPSPEC" '{revisionType:"AppSpecContent",appSpecContent:{content:$c}}')"
 ```
@@ -417,15 +439,15 @@ Complete every item before closing the incident. Do not declare the incident res
 - [ ] `GET /health` returns `{"status": "healthy"}` with HTTP 200
 - [ ] 5xx error rate returned to < 0.1% baseline
 - [ ] p99 API latency returned to < 500ms
-- [ ] ECS running task count equals desired count (minimum 3)
+- [ ] ECS running task count equals desired count (2 in staging, 3 in prod)
 - [ ] ECS deployment status is `PRIMARY` with a single active deployment
 
 ```bash
 # Quick health verification commands
-curl -sf https://api.experimentation.example.com/health | python3 -m json.tool
+curl -sf "https://app.<domain>/health" | python3 -m json.tool
 aws ecs describe-services \
-  --cluster experimentation-prod \
-  --services experimentation-backend-prod \
+  --cluster "experimentation-$ENV" \
+  --services experimentation-backend-$ENV \
   --query 'services[0].{Running:runningCount,Desired:desiredCount,Status:status}'
 ```
 
@@ -442,24 +464,22 @@ aws ecs describe-services \
   - Timeline: when issue started, when detected, when rollback triggered, when resolved
   - Impact: which endpoints were affected, estimated user impact
   - Root cause hypothesis (preliminary is fine)
-- [ ] Bad Docker image tagged to prevent accidental re-deploy:
+- [ ] Bad image tagged so nobody mistakes it for a good one (the deploy pushes
+      `:<tag>-<profile>`):
 
 ```bash
 aws ecr put-image \
   --repository-name experimentation-platform/backend \
-  --image-tag "bad-v1.2.3-do-not-deploy" \
+  --image-tag "bad-v1.2.3-full-do-not-deploy" \
   --image-manifest "$(aws ecr batch-get-image \
     --repository-name experimentation-platform/backend \
-    --image-ids imageTag=v1.2.3 \
+    --image-ids imageTag=v1.2.3-full \
     --query 'images[0].imageManifest' --output text)"
 ```
 
-- [ ] Git tag removed from rotation to prevent re-triggering this deployment:
-
-```bash
-git tag -d v1.2.3
-git push origin :refs/tags/v1.2.3
-```
+- [ ] The release notes of the bad release say so. **Do not delete the git
+      tag**: it is a published release, other environments and people may be
+      on it, and a deleted tag the next deploy cannot even refuse by name.
 
 - [ ] Postmortem scheduled within 5 business days
 - [ ] Investigation ticket opened in GitHub Issues with `P1` label and link to failed deployment

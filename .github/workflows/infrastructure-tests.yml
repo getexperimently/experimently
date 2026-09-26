@@ -67,4 +67,9 @@ jobs:
       - name: Run CDK stack tests
         run: |
           python -m pytest infrastructure/tests -v --tb=short \
-            -o addopts="" --import-mode=importlib
+            -o addopts="" --import-mode=importlib --junitxml=cdk-junit.xml
+
+      # A skipped CDK test is a renamed file its constant still names (QA 4d):
+      # the suite used to exit 0 with two of them skipped.
+      - name: No CDK test was skipped
+        run: python3 scripts/check_junit_skips.py cdk-junit.xml infrastructure/tests

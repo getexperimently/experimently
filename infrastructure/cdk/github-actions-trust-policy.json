@@ -9,13 +9,8 @@
       "Action": "sts:AssumeRoleWithWebIdentity",
       "Condition": {
         "StringEquals": {
-          "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
-        },
-        "StringLike": {
-          "token.actions.githubusercontent.com:sub": [
-            "repo:amarkanday/experimentation-platform:*",
-            "repo:getexperimently/experimently:*"
-          ]
+          "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
+          "token.actions.githubusercontent.com:sub": "repo:getexperimently@328439352/experimently@1367480368:environment:<ENVIRONMENT>"
         }
       }
     }

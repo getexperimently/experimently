@@ -16,13 +16,16 @@ This guide walks you through a 20-minute live demo of the Experimently experimen
 
 When complete, you'll see the "Ready!" box with URLs and credentials.
 
-### AWS (15–20 min for first deploy)
+### AWS
 
-```bash
-./demo/setup-aws.sh
-```
-
-Teardown: `./demo/setup-aws.sh --destroy`
+There is no one-command AWS demo. The script that claimed to be one could not
+work (it set neither of the two values the stacks refuse to synthesise
+without, and created no image, repository or secret), and it has been retired
+(#73). Deploying to AWS is the self-hosting path:
+[AWS CDK deployment](../docs/self-hosting/cdk.md), then the ordered first-deploy
+checklist in the [deployment guide](../docs/deployment/deployment-guide.md#1-before-the-first-deploy).
+Budget for it: two or more hours the first time, and real monthly cost
+(Aurora, NAT, the load balancer) -- `cdk.md` lists what a teardown leaves behind.
 
 ---
 
@@ -230,7 +233,7 @@ See `demo/streampulse/README.md`.
 > We have SDKs for Python, JavaScript/TypeScript, Java (Spring Boot auto-configuration), and React (with hooks and SSR support). The REST API means you can integrate from anything.
 
 **"How do we deploy? What's the infrastructure cost?"**
-> One command: `./demo/setup-aws.sh`. It uses CDK to deploy into your AWS account — ECS Fargate, Aurora PostgreSQL, ElastiCache Redis. You own all the infrastructure. The demo environment runs on t3.small instances (~$50/month).
+> Into your own AWS account with the AWS CDK — ECS Fargate, Aurora PostgreSQL, ElastiCache Redis — following docs/self-hosting/cdk.md, then dispatching the Deploy workflow for staging or prod. You own all the infrastructure. It is not one command, and the cost is real (Aurora, NAT gateways, a load balancer); cdk.md says what a teardown leaves behind.
 
 **"Can we run A/B tests across multiple products simultaneously?"**
 > Yes. Mutual Exclusion Groups ensure users are never in conflicting experiments. The Global Holdout group lets you measure the cumulative impact of all experiments combined.

@@ -103,8 +103,9 @@ CANONICAL_ENVIRONMENTS: tuple = ("development", "test", "staging", "production")
 _LEGACY_ENVIRONMENT_ALIASES: Dict[str, str] = {
     "dev": "development",
     "prod": "production",
-    # The AWS demo stack (demo/setup-aws.sh, infrastructure/cdk/app.py) runs
-    # with APP_ENV=demo: a public, seeded development-grade deployment.
+    # The AWS demo stack (`ENVIRONMENT=demo cdk deploy`, infrastructure/cdk/
+    # app.py) runs with APP_ENV=demo: a public, seeded development-grade
+    # deployment.
     "demo": "development",
 }
 

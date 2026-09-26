@@ -1,8 +1,8 @@
 """The pipeline owns the image the API service runs; CDK only bootstraps it.
 
-`.github/workflows/deploy-prod.yml` builds an image, rewrites the backend
-container in the task definition the service is **running**, registers that as
-a new revision and hands the revision ARN to CodeDeploy.  CloudFormation is not
+`.github/workflows/deploy.yml` builds an image, rewrites the backend container
+in the family's newest task definition to that image's DIGEST, registers that
+as a new revision and hands the revision ARN to CodeDeploy.  CloudFormation is not
 in that loop and cannot be: ECS refuses a task-definition change on a service
 with a ``CODE_DEPLOY`` deployment controller ("Unable to update task definition
 on services with a CODE_DEPLOY deployment controller").
@@ -16,10 +16,13 @@ deploy workflow had built most recently, including a build that failed
 verification or was rolled back.
 
 So the API service's tag must be one the pipeline never writes (#82).  The
-migration task's ``latest`` is the opposite case and stays: the deploy workflow
-pushes ``:latest`` and runs that task in the same job, where the tag means "the
-image being deployed".  Both directions are asserted here, so a sweep that
-unifies them fails with the reason attached.
+migration task used to be the exception, on purpose: the deploy pushed
+``:latest`` and ran the family by name, so ``latest`` meant "the image being
+deployed" -- until another environment or profile built after it, since one
+ECR repository serves them all and ECS resolves a tag at every task start
+(#71, #138).  Now the deploy registers a migration revision naming the image by
+DIGEST and runs that ARN, nothing pushes ``:latest``, and NO task definition
+the app synthesises may name it.
 """
 
 from __future__ import annotations
@@ -144,23 +147,40 @@ def test_the_api_service_does_not_run_a_mutable_tag(assembly):
     )
 
 
-@pytest.mark.regression
-def test_the_migration_task_still_runs_the_tag_the_deploy_pushes(assembly):
-    """The opposite of the rule above, and deliberate.
+#: Every task definition the app synthesises, by (stack prefix, container):
+#: the API, the migration task and the dashboard. Exact, so a scan that finds
+#: fewer -- a renamed stack, a moved container -- fails instead of passing.
+EXPECTED_CONTAINERS = {
+    ("experimentation-fargate", "backend"),
+    ("experimentation-fargate", "dashboard"),
+    ("experimentation-migrations", "backend"),
+}
 
-    `deploy-prod.yml` pushes `:latest` and runs `experimentation-migrate` in
-    the same job, so here the tag means "the image being deployed" -- which is
-    what keeps the migration on the same *profile* as the API.  See the comment
-    on ``IMAGE_TAG`` in ``migration_task_stack.py``.
+
+@pytest.mark.regression
+def test_no_task_definition_names_a_mutable_tag(assembly):
+    """#138: not the API, not the migration, not the dashboard.
+
+    This replaces a test that pinned the migration task TO `:latest`
+    (`test_the_migration_task_still_runs_the_tag_the_deploy_pushes`, added with
+    #209 -- see #71). Its premise was that the deploy pushed `:latest` in the
+    same job that ran the migration; but one ECR repository serves every
+    environment and profile, so `latest` was whatever built last anywhere.
     """
-    migration = {
-        key: image
-        for key, image in _container_images(assembly).items()
-        if "migration" in key[0] or "migrate" in key[0]
-    }
-    assert migration, "no migration task definition was synthesised"
-    assert all(f":{MUTABLE_TAG}" in image for image in migration.values()), (
-        f"the migration task no longer follows the deploy's :latest: {migration}"
+    images = _container_images(assembly)
+    found = {(stack.rsplit("-", 1)[0], container) for stack, _, container in images}
+    assert found == EXPECTED_CONTAINERS, (
+        f"the scan found {sorted(found)}; expected exactly "
+        f"{sorted(EXPECTED_CONTAINERS)}, so it may have examined the wrong things"
+    )
+    offenders = [
+        f"{stack}/{logical_id}/{container}  {image}"
+        for (stack, logical_id, container), image in images.items()
+        if f":{MUTABLE_TAG}" in image
+    ]
+    assert not offenders, (
+        "a task definition names `:latest`, a tag any build can move:\n"
+        + "\n".join(f"  {o}" for o in offenders)
     )
 
 
@@ -186,7 +206,7 @@ def test_the_bootstrap_tag_is_overridable(pinned_assembly):
 #: that this file never writes that tag, and it lives in a different tree
 #: from the stack that depends on it.
 DEPLOY_WORKFLOW = (
-    Path(__file__).resolve().parents[2] / ".github" / "workflows" / "deploy-prod.yml"
+    Path(__file__).resolve().parents[2] / ".github" / "workflows" / "deploy.yml"
 )
 
 BOOTSTRAP_TAG = "bootstrap"

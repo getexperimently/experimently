@@ -1,10 +1,22 @@
-name: Rollback Production
+name: Rollback
+run-name: Rollback ${{ inputs.environment }} to ${{ inputs.task_definition_arn }}
+
+# Puts a previous, released revision of the API back into service through
+# CodeDeploy, for either environment (DECISIONS D6). A deploy's run summary
+# prints the line to paste: environment=<env>, task_definition_arn=<family:n>.
+# docs/deployment/rollback-runbook.md is the procedure around it.
 
 on:
   workflow_dispatch:
     inputs:
+      environment:
+        description: 'Environment to roll back'
+        required: true
+        type: choice
+        default: staging
+        options: [staging, prod]
       task_definition_arn:
-        description: 'Previous ECS task definition to roll back to. An ARN, or family:revision (e.g. experimentation-backend-prod:42).'
+        description: 'Revision to roll back to: an ARN, or family:revision (e.g. experimentation-backend-<environment>:42). A deploy run summary prints it.'
         required: true
         type: string
       reason:
@@ -12,15 +24,18 @@ on:
         required: true
         type: string
 
+# Its own group, NOT the deploy's: a rollback must never wait behind -- or be
+# replaced in the queue by -- a deploy of the release it is undoing. It stops
+# any CodeDeploy deployment in flight itself (below).
+concurrency:
+  group: rollback-${{ inputs.environment }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
 env:
-  AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
-  ECS_CLUSTER: experimentation-prod
-  ECS_BACKEND_SERVICE: experimentation-backend-prod
-  # The task-definition FAMILY. It spells the same as the service today and is
-  # a different thing; #141 renames the deployed identifiers.
-  ECS_BACKEND_TASK_FAMILY: experimentation-backend-prod
-  CODEDEPLOY_APPLICATION: experimentation-platform
-  CODEDEPLOY_DEPLOYMENT_GROUP: experimentation-prod
+  AWS_REGION: us-west-2
   # An upper bound on the whole rollback, not an assertion about how long one
   # takes. The deployment group's own waits are 30 minutes for approval and an
   # hour before the blue task set is terminated (fargate_service_stack.py), so
@@ -32,26 +47,75 @@ env:
 
 jobs:
   rollback:
-    name: Rollback Production Deployment
+    name: Roll back ${{ inputs.environment }}
     runs-on: ubuntu-latest
-    if: (github.repository == 'amarkanday/experimentation-platform' || github.repository == 'getexperimently/experimently') && vars.AWS_ACCOUNT_ID != ''
-    environment: production
+    environment: ${{ inputs.environment }}
     permissions:
       id-token: write
       contents: read
+    env:
+      TARGET_ENV: ${{ inputs.environment }}
+      # The CDK's names; infrastructure/tests/test_workflow_names_exist.py
+      # checks each against a synth of that environment.
+      ECS_CLUSTER: experimentation-${{ inputs.environment }}
+      ECS_BACKEND_SERVICE: experimentation-backend-${{ inputs.environment }}
+      # The task-definition FAMILY. It spells the same as the service and is a
+      # different thing.
+      ECS_BACKEND_TASK_FAMILY: experimentation-backend-${{ inputs.environment }}
+      CODEDEPLOY_APPLICATION: experimentation-platform-${{ inputs.environment }}
+      CODEDEPLOY_DEPLOYMENT_GROUP: experimentation-${{ inputs.environment }}
     steps:
+      # FIRST, and the only place the account variable is read (PE v1 C9): an
+      # environment-scoped variable is invisible to a job-level `if:`, which
+      # used to skip this job green for a correctly configured environment.
+      - name: Refuse an environment that is not configured
+        env:
+          ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+          ROLE_ARN_SET: ${{ secrets.AWS_ROLE_ARN != '' }}
+        run: |
+          set -euo pipefail
+          if [ -z "$ACCOUNT_ID" ]; then
+            echo "::error title=Not configured::vars.AWS_ACCOUNT_ID is not set for the '${TARGET_ENV}' environment, so nothing was rolled back. Set it under Settings → Environments → ${TARGET_ENV} → Variables. See docs/deployment/README.md#before-the-first-deploy"
+            exit 1
+          fi
+          if [ "$ROLE_ARN_SET" != "true" ]; then
+            echo "::error title=Not configured::secrets.AWS_ROLE_ARN is not set for the '${TARGET_ENV}' environment, so nothing was rolled back. Set it under Settings → Environments → ${TARGET_ENV} → Secrets. See docs/deployment/README.md#before-the-first-deploy"
+            exit 1
+          fi
+          echo "EXPECTED_ACCOUNT_ID=$ACCOUNT_ID" >> "$GITHUB_ENV"
+
+      - name: Refuse a dispatch from any ref but main
+        env:
+          REF: ${{ github.ref }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [ "$REF" != "refs/heads/main" ]; then
+            echo "::error::Run this workflow from main (\"Use workflow from\"); you chose ${REF_NAME}. The revision to roll back to is the 'task_definition_arn' input."
+            exit 1
+          fi
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v6
         with:
-          role-to-assume: ${{ secrets.PROD_AWS_ROLE_ARN }}
-          aws-region: us-west-2
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Refuse the wrong AWS account
+        run: |
+          set -euo pipefail
+          actual="$(aws sts get-caller-identity --query Account --output text)"
+          if [ "$actual" != "$EXPECTED_ACCOUNT_ID" ]; then
+            echo "::error title=Wrong AWS account::environment=${TARGET_ENV} expects account ${EXPECTED_ACCOUNT_ID}; the assumed role is in ${actual}. Nothing has been rolled back."
+            exit 1
+          fi
 
       - name: Notify rollback started
         uses: slackapi/slack-github-action@v1.26.0
         with:
           channel-id: '#deployments'
           slack-message: |
-            :warning: *PRODUCTION ROLLBACK initiated*
+            *${{ inputs.environment }} ROLLBACK initiated* (warning)
             Reason: ${{ inputs.reason }}
             Rolling back to: `${{ inputs.task_definition_arn }}`
             Triggered by: ${{ github.actor }}
@@ -63,11 +127,9 @@ jobs:
       # service with a CODE_DEPLOY deployment controller -- "Unable to update
       # task definition on services with a CODE_DEPLOY deployment controller"
       # -- and `fargate_service_stack.py` creates this service with exactly
-      # that controller. So the whole of this job used to fail at its first
-      # step, during an incident, after the "ROLLBACK initiated" message had
-      # already gone out (#208). Rolling a CodeDeploy-controlled service back
-      # means creating a deployment that names the older revision, which is
-      # the same call `deploy-prod.yml` makes to go forward.
+      # that controller. Rolling a CodeDeploy-controlled service back means
+      # creating a deployment that names the older revision, which is the same
+      # call `deploy.yml` makes to go forward.
       - name: Check the target revision is one we can roll onto
         id: target
         env:
@@ -100,7 +162,12 @@ jobs:
 
           family="$(jq -r '.family' <<<"$TD")"
           if [ "$family" != "$ECS_BACKEND_TASK_FAMILY" ]; then
-            echo "::error::$ARN belongs to family $family, not $ECS_BACKEND_TASK_FAMILY."
+            other="${family#experimentation-backend-}"
+            if [ "$other" != "$family" ]; then
+              echo "::error::You chose environment=${TARGET_ENV} but ${ARN##*/} is a ${other} revision. Re-run with environment=${other}."
+            else
+              echo "::error::$ARN belongs to family $family, not $ECS_BACKEND_TASK_FAMILY."
+            fi
             exit 1
           fi
 
@@ -121,13 +188,10 @@ jobs:
           fi
           case "$image" in
             *:bootstrap)
-              echo "::error::$ARN runs $image -- that is a CloudFormation-registered revision, not a released one. Pick a revision whose image is a version tag; docs/deployment/rollback-runbook.md Step 1 lists them with their images."
+              echo "::error::$ARN runs $image -- that is a CloudFormation-registered revision, not a released one. Pick a revision a deploy registered (its image is a digest, repo@sha256:...); docs/deployment/rollback-runbook.md Step 1 lists them with their images."
               exit 1
               ;;
           esac
-          # A digest-pinned bootstrap image (repo@sha256:...) carries no tag and
-          # is not detectable here. Step 1 of the runbook prints the image for
-          # every candidate revision for exactly that reason.
           echo "rolling back to $ARN ($image)"
 
       # CodeDeploy refuses a second deployment for a deployment group while one
@@ -174,8 +238,8 @@ jobs:
           TARGET_ARN: ${{ steps.target.outputs.arn }}
           # Never interpolate an operator-supplied string into the script body:
           # `${{ inputs.reason }}` is substituted by Actions before bash parses
-          # the line, so `$(...)` inside it runs with this job's production AWS
-          # credentials. deploy-prod.yml states the same rule.
+          # the line, so `$(...)` inside it runs with this job's AWS
+          # credentials. deploy.yml and db-migrate.yml follow the same rule.
           REASON: ${{ inputs.reason }}
         run: |
           set -euo pipefail
@@ -194,10 +258,10 @@ jobs:
           # CodeDeployDefault.ECSAllAtOnce, not the group's configured
           # CANARY_10_PERCENT_5_MINUTES. The canary is right going forward, on
           # a revision nobody has run. Rolling back, the target was serving
-          # production minutes ago and the version being replaced is the one
-          # hurting users -- a canary would leave 90% of traffic on it for a
-          # further five minutes, against a runbook target of "under 5 minutes
-          # from decision to rollback complete".
+          # minutes ago and the version being replaced is the one hurting
+          # users -- a canary would leave 90% of traffic on it for a further
+          # five minutes, against a runbook target of "under 5 minutes from
+          # decision to rollback complete".
           DEPLOYMENT_ID="$(aws deploy create-deployment \
             --application-name "$CODEDEPLOY_APPLICATION" \
             --deployment-group-name "$CODEDEPLOY_DEPLOYMENT_GROUP" \
@@ -208,16 +272,12 @@ jobs:
           echo "deployment-id=$DEPLOYMENT_ID" >> "$GITHUB_OUTPUT"
           echo "CodeDeploy deployment: $DEPLOYMENT_ID"
 
-      # This is the step the previous version was missing entirely, and without
-      # it the rollback could not take. The deployment group sets
-      # `deployment_approval_wait_time=Duration.minutes(30)`, and the CDK
-      # docstring for it is explicit: "If the ContinueDeployment API is not
-      # called within the wait time period, CodeDeploy will stop the
-      # deployment." The group also sets `auto_rollback(stopped_deployment=True)`,
-      # so a stopped deployment reverts -- to the revision being rolled back
-      # from. `grep -rn continue-deployment` over this repository returned
-      # nothing. The old rollback therefore parked for thirty minutes and then
-      # put the broken version back.
+      # The deployment group sets `deployment_approval_wait_time=Duration.
+      # minutes(30)`: "If the ContinueDeployment API is not called within the
+      # wait time period, CodeDeploy will stop the deployment." The group also
+      # sets `auto_rollback(stopped_deployment=True)`, so a stopped deployment
+      # reverts -- to the revision being rolled back from. So this job approves
+      # the shift itself, as soon as the deployment is Ready.
       #
       # `aws deploy wait deployment-successful` is not used: it cannot approve,
       # so it could only ever time out here.
@@ -301,18 +361,37 @@ jobs:
             exit 1
           fi
 
+      - name: Run summary
+        if: always()
+        env:
+          TARGET_ARN: ${{ steps.target.outputs.arn }}
+          DEPLOYMENT_ID: ${{ steps.codedeploy.outputs.deployment-id }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          {
+            echo "## Rollback of ${TARGET_ENV}: ${JOB_STATUS}"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Environment | \`${TARGET_ENV}\` |"
+            echo "| Account / region | \`${EXPECTED_ACCOUNT_ID:-not checked}\` / \`${AWS_REGION}\` |"
+            echo "| Target revision | \`${TARGET_ARN:-not resolved}\` |"
+            echo "| CodeDeploy deployment | \`${DEPLOYMENT_ID:-not created}\` |"
+            echo ""
+            echo "Only the API was rolled back. A migration the bad release applied is still applied: docs/deployment/rollback-runbook.md, Database Rollback Procedure."
+          } >> "$GITHUB_STEP_SUMMARY"
+
       # `if: always()`. Without it every failure path above left #deployments
-      # holding the ":warning: ROLLBACK initiated" message and nothing after
-      # it, so responders reading Slack believed a rollback was in flight while
-      # the job had been dead for minutes -- the harm this workflow's own
-      # description calls out.
+      # holding the "ROLLBACK initiated" message and nothing after it, so
+      # responders reading Slack believed a rollback was in flight while the
+      # job had been dead for minutes.
       - name: Notify rollback result
         if: always()
         uses: slackapi/slack-github-action@v1.26.0
         with:
           channel-id: '#deployments'
           slack-message: |
-            ${{ job.status == 'success' && ':white_check_mark: *Production rollback complete*' || format(':rotating_light: *Production rollback FAILED ({0})* -- production is NOT rolled back; see the run', job.status) }}
+            ${{ job.status == 'success' && format('*{0} rollback complete* (success)', inputs.environment) || format('*{0} rollback FAILED ({1})* -- {0} is NOT rolled back; see the run', inputs.environment, job.status) }}
             Task definition: `${{ inputs.task_definition_arn }}`
             Triggered by: ${{ github.actor }}
             Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

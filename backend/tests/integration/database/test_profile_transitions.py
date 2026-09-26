@@ -24,7 +24,7 @@ commands in it, as a container would.
 
 Why the documented commands and not ``db/bootstrap.py``: review round 3 found
 that ``alembic upgrade heads`` -- what ``docs/self-hosting/migrations.md``,
-``deploy-prod.yml`` and ``infrastructure/cdk/stacks/migration_task_stack.py``
+``deploy.yml`` and ``infrastructure/cdk/stacks/migration_task_stack.py``
 all run -- completed transition 2 only half way (three of the twelve module
 tables created, both revisions stamped, nothing left to retry, and
 ``/workspaces``, ``/hipaa/*`` and ``/auth/sso/*`` answering 500 on
@@ -262,9 +262,10 @@ def test_a_pre_release_database_upgraded_with_heads(test_db, scratch_schema, ful
 def test_a_core_build_against_a_full_database_with_nothing_to_apply(
     test_db, scratch_schema, core_tree, full_tree
 ):
-    """``deploy-prod.yml`` builds ``--target core`` and tags it ``:latest``, and
-    ``migration_task_stack.py`` pulls ``latest`` -- so this is what the ECS
-    migration task does to a database a full deployment built.
+    """``deploy.yml`` runs the ECS migration task with the image it deploys, so
+    a ``profile=core`` deploy onto an environment a full release migrated
+    (its stacks redeployed from a core checkout) is what the migration task
+    does to a database a full deployment built.
 
     Raw alembic has no way to ignore a revision it cannot resolve: it read the
     ``modules_0001_rbac`` row and died with ``CommandError`` before applying

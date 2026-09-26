@@ -115,8 +115,8 @@ DASHBOARD_DESIRED_COUNT = {"dev": 1, "staging": 1, "prod": 2, "demo": 1}
 
 # Define CDK environment (account and region)
 # Account/region come from the environment only: CDK sets CDK_DEFAULT_ACCOUNT
-# from the active credentials; AWS_ACCOUNT_ID is what CI (vars.AWS_ACCOUNT_ID)
-# and demo/setup-aws.sh export. No account id is hard-coded in the repository.
+# from the active credentials; AWS_ACCOUNT_ID is the fallback an operator can
+# export. No account id is hard-coded in the repository.
 account = os.environ.get("CDK_DEFAULT_ACCOUNT") or os.environ.get("AWS_ACCOUNT_ID")
 region = os.environ.get("CDK_DEFAULT_REGION") or os.environ.get("AWS_REGION", "us-west-2")
 if not account:

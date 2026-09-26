@@ -174,7 +174,7 @@ class TestSettingsEnvironmentField:
         assert Settings(_env_file=None, ENVIRONMENT="staging").is_staging
 
     def test_demo_alias_maps_to_development(self):
-        """demo/setup-aws.sh and the CDK demo stack run with APP_ENV=demo."""
+        """The CDK demo stack (ENVIRONMENT=demo cdk deploy) runs with APP_ENV=demo."""
         with pytest.warns(DeprecationWarning):
             assert (
                 Settings(_env_file=None, ENVIRONMENT="demo").ENVIRONMENT

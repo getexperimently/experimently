@@ -23,7 +23,7 @@ The platform's AWS infrastructure is defined as code using **AWS CDK v2**, in **
 aws configure
 # AWS Access Key ID: your-access-key
 # AWS Secret Access Key: your-secret-key
-# Default region name: us-east-1
+# Default region name: us-west-2
 # Default output format: json
 ```
 
@@ -37,7 +37,7 @@ CDK bootstrap provisions the S3 bucket and IAM roles that CDK needs to deploy as
 cdk bootstrap aws://YOUR_ACCOUNT_ID/YOUR_REGION
 
 # Example
-cdk bootstrap aws://123456789012/us-east-1
+cdk bootstrap aws://123456789012/us-west-2
 ```
 
 You can find your account ID with:
@@ -50,17 +50,22 @@ aws sts get-caller-identity --query Account --output text
 
 ## Required Environment Variables
 
-`infrastructure/cdk/app.py` reads these from the environment. `cdk synth` and `cdk deploy` fail without the two marked required:
+`infrastructure/cdk/app.py` reads these from the environment. `cdk synth` and `cdk deploy` fail without the two marked required.
+
+**One region.** The Deploy, Rollback and Database Migration workflows act in
+`us-west-2` (`AWS_REGION` at the top of each), so deploy the stacks, the ECR
+repositories, the secrets and the certificate there too. To use another region,
+change it in all three workflows and use it everywhere below.
 
 ```bash
 export CDK_DEFAULT_ACCOUNT=123456789012
-export CDK_DEFAULT_REGION=us-east-1
+export CDK_DEFAULT_REGION=us-west-2
 
 # dev (the default), staging, prod or demo
 export ENVIRONMENT=prod
 
 # Required: the ACM certificate for the load balancer's HTTPS listeners
-export CERTIFICATE_ARN=arn:aws:acm:us-east-1:123456789012:certificate/your-certificate-id
+export CERTIFICATE_ARN=arn:aws:acm:us-west-2:123456789012:certificate/your-certificate-id
 
 # Required: the absolute https:// origin users reach the platform at (one host, app.<domain>)
 export PUBLIC_BASE_URL=https://app.example.com

@@ -203,7 +203,7 @@ def test_operator_input_never_reaches_the_shell():
     """`${{ inputs.* }}` in a `run:` body is command injection.
 
     Actions substitutes the expression textually before bash parses the line,
-    and this job holds the production OIDC role. `deploy-prod.yml` states the
+    and this job holds the production OIDC role. `deploy.yml` states the
     rule: values reach a script through `env:`, never through interpolation.
     """
     offenders = []

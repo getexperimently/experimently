@@ -105,6 +105,10 @@ DOCS_TESTS = (
     "backend/tests/smoke/test_version_sources.py",
     "backend/tests/unit/infrastructure/test_dashboard_image_docs.py",
     "backend/tests/unit/infrastructure/test_rollback_uses_codedeploy.py",
+    # The deploy docs' anchors, runbook and checklist (B3a), and the generated
+    # IAM table in docs/deployment/iam-permissions.md; yaml and stdlib only.
+    "backend/tests/unit/infrastructure/test_deploy_docs.py",
+    "backend/tests/unit/infrastructure/test_iam_actions.py",
     "backend/tests/unit/db/test_alembic_plan.py",
     # Reads docs/auth/sso.md and the SSO code through `ast`; imports no module
     # code, and passes with backend/requirements.txt alone (checked).

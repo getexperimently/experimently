@@ -23,7 +23,7 @@ recommendation before being caught:
   lines."* It installs `uv` and runs `uv pip compile`, which resolves without
   installing anything. The premise was false and the change was an order of
   magnitude larger.
-- *"`deploy-prod.yml` runs `cdk deploy`, so the value will reach the task
+- *"The deploy workflow runs `cdk deploy`, so the value will reach the task
   definition."* Both occurrences of that string are in comments, one of which
   says the opposite. A grep count is not a finding.
 - *"The root `package.json` is unused"* — four separate negative checks agreed,

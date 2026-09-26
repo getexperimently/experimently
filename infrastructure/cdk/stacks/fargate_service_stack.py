@@ -256,10 +256,10 @@ class FargateServiceStack(Stack):
 
         # --- The image this task definition carries ---------------------------
         # The pipeline owns what actually runs.
-        # `.github/workflows/deploy-prod.yml` reads the task definition the
-        # service is *currently running*, rewrites the backend container's
-        # image to the one it just built, registers that as a new revision and
-        # hands it to CodeDeploy. CloudFormation never gets to choose: ECS
+        # `.github/workflows/deploy.yml` reads this family's newest revision,
+        # rewrites the backend container's image to the one it just built (by
+        # digest), registers that as a new revision and hands it to
+        # CodeDeploy. CloudFormation never gets to choose: ECS
         # refuses a task-definition change on a service with a CODE_DEPLOY
         # controller outright -- "Unable to update task definition on services
         # with a CODE_DEPLOY deployment controller".
@@ -288,8 +288,8 @@ class FargateServiceStack(Stack):
         # the service to find "the current task definition" therefore lands
         # here.
         #
-        # `:latest` made that a live image: the deploy workflow moves the tag
-        # on every build, including builds that failed verification or were
+        # `:latest` made that a live image: the deploy workflow moved the tag
+        # on every build (it no longer pushes it at all, #71), including builds that failed verification or were
         # rolled back, so the revision everyone mistakes for current pointed
         # at an arbitrary later build. A tag the pipeline never writes cannot
         # drift, so the mistake becomes visible instead of plausible.
@@ -297,9 +297,8 @@ class FargateServiceStack(Stack):
         # `-c backend_image_tag=<tag>` overrides it, for pinning a `cdk deploy`
         # on a running environment to the image already in service.
         #
-        # migration_task_stack.py keeps `latest` deliberately, for the opposite
-        # reason: the deploy workflow pushes `:latest` and runs that task
-        # within the same job, so there it means "the image being deployed".
+        # migration_task_stack.py names `bootstrap` too: the deploy registers
+        # its own migration revision by digest, and nothing pushes `:latest`.
         image_tag = self.node.try_get_context("backend_image_tag")
         if image_tag is None:
             image_tag = "bootstrap"
@@ -314,8 +313,8 @@ class FargateServiceStack(Stack):
             )
         if image_tag == "latest":
             raise ValueError(
-                "backend_image_tag must not be `latest`: the deploy workflow "
-                "moves that tag on every build, which is #82"
+                "backend_image_tag must not be `latest`: any build can move "
+                "that tag, which is #82"
             )
         self.backend_image_tag = image_tag
 

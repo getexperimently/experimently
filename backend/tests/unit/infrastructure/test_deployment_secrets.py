@@ -216,7 +216,7 @@ def test_the_module_secrets_are_gated_on_the_profile(name: str):
     assert "include_modules" in stack.read_text()
 
 
-DEPLOY_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "deploy-prod.yml"
+DEPLOY_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "deploy.yml"
 
 
 def _stack_secret_names() -> set[str]:
