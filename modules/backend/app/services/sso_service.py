@@ -7,7 +7,8 @@ Provides helpers for:
   - OIDC/OAuth2 authorization-code exchange and user-info fetch
   - Just-In-Time (JIT) user provisioning
   - Role mapping from IdP groups to platform roles
-  - CSRF state token generation and verification
+  - The OIDC login's state: a signed cookie binding the callback to the
+    browser that started the login, carrying the PKCE verifier
 
 SAML operations degrade to stub implementations when the ``python3-saml``
 (onelogin) package is not installed, so the service remains importable in
@@ -20,17 +21,21 @@ else a missing library is an error and every SAML route answers 501
 
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
 import logging
 import re
 import secrets
-import threading
 import time
 import uuid
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlencode, urlparse
 
 # defusedxml guards against entity-expansion / external-entity attacks when
 # parsing IdP-supplied SAML responses (Bandit B314, Semgrep use-defused-xml).
+import jwt
 from defusedxml import ElementTree as ET
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
@@ -72,10 +77,6 @@ SAML_NOT_INSTALLED_DETAIL = (
     "cannot be validated. Install python3-saml (it needs the system xmlsec1 "
     "and libxml2 libraries) and restart the API."
 )
-
-# In-memory state token store: {token: expiry_timestamp}
-# In production this should be Redis-backed.
-_state_store: Dict[str, float] = {}
 
 
 def saml_stub_allowed() -> bool:
@@ -119,30 +120,6 @@ def _require_saml_support() -> None:
         status_code=status.HTTP_501_NOT_IMPLEMENTED,
         detail=SAML_NOT_INSTALLED_DETAIL,
     )
-
-
-_STATE_TTL_SECONDS = 600  # 10 minutes
-
-#: The most unredeemed state tokens the process will hold.
-#:
-#: `GET /api/v1/auth/sso/oidc/{provider}/login` is on the PUBLIC router -- no
-#: authentication dependency -- and every call minted an entry here. Expiry was
-#: consulted only on `pop`, so a token nobody ever redeemed was never removed
-#: by anything. An anonymous caller could therefore grow this dictionary
-#: without limit, one HTTP request at a time, until the container died.
-#:
-#: Evicting expired entries alone does not bound it: the live set is still
-#: "everything minted in the last ten minutes", which is unbounded in the rate
-#: of requests. Hence a hard cap as well.
-#:
-#: 10,000 is far beyond any real concurrent-login count for a self-hosted
-#: deployment and costs on the order of a megabyte.
-_STATE_STORE_MAX = 10_000
-
-#: The store is read-modify-written below (measure, evict, insert), which is
-#: not atomic the way a single dict assignment is. Uvicorn can run handlers on
-#: a thread-pool executor, so the compound operation takes a lock.
-_state_lock = threading.Lock()
 
 
 # ---------------------------------------------------------------------------
@@ -597,9 +574,15 @@ async def exchange_oidc_code(
     config: SSOConfig,
     code: str,
     redirect_uri: str,
+    *,
+    code_verifier: str,
     http_client: Any = None,
 ) -> Dict[str, Any]:
     """Exchange an OAuth2 authorization code for tokens.
+
+    ``code_verifier`` is the PKCE verifier from the login's state cookie; it
+    is sent on every branch, so a code intercepted on its way back to the
+    callback cannot be redeemed without it.
 
     ``http_client`` is an optional injected HTTP client (e.g. an
     ``httpx.AsyncClient`` mock) used in tests.  When ``None`` and authlib is
@@ -629,6 +612,7 @@ async def exchange_oidc_code(
         "redirect_uri": redirect_uri,
         "client_id": config.entity_id or "",
         "client_secret": config.client_secret or "",
+        "code_verifier": code_verifier,
     }
 
     try:
@@ -648,6 +632,7 @@ async def exchange_oidc_code(
                     token_url,
                     code=code,
                     redirect_uri=redirect_uri,
+                    code_verifier=code_verifier,
                 )
                 return dict(token)
 
@@ -854,89 +839,138 @@ def map_role(config: SSOConfig, groups: List[str]) -> str:
 
 
 # ---------------------------------------------------------------------------
-# State token helpers (CSRF protection for OIDC flows)
+# The OIDC login's state (#66)
 # ---------------------------------------------------------------------------
+#
+# The login route used to mint a random state and remember it in a
+# process-local dictionary. That state was bound to no browser -- any
+# callback carrying any unredeemed state was accepted, so an attacker could
+# complete a login with their own code in a victim's browser -- it did not
+# survive more than one API task, and the route that filled the dictionary is
+# unauthenticated.
+#
+# Now the server holds nothing. The login route sets a signed, short-lived
+# cookie in the browser that started the login; the callback accepts only a
+# `state` that matches the one inside that cookie. The cookie also carries the
+# PKCE verifier, so a code intercepted on its way back is useless without it,
+# and names the SSO configuration the login was started for.
+
+#: `__Host-`: the browser accepts it only with `Secure`, `Path=/` and no
+#: `Domain`, so no other host -- a sibling subdomain included -- can set or
+#: overwrite it.
+OIDC_STATE_COOKIE = "__Host-experimently_oidc"
+
+#: How long a started login stays redeemable.
+OIDC_STATE_TTL_SECONDS = 600
+
+#: Clock skew allowed on the cookie's `exp` and `iat`.
+_STATE_LEEWAY_SECONDS = 30
+
+_STATE_AUDIENCE = "experimently:oidc-state"
 
 
-def _drop_expired(now: float) -> int:
-    """Remove every entry whose TTL has passed. Caller holds ``_state_lock``."""
-    dead = [token for token, expiry in _state_store.items() if expiry <= now]
-    for token in dead:
-        _state_store.pop(token, None)
-    return len(dead)
+def _state_key() -> bytes:
+    """The cookie's signing key: derived from SECRET_KEY, used for nothing else.
 
-
-def generate_state_token() -> str:
-    """Generate a cryptographically-random URL-safe state token and store it.
-
-    Bounded, which it was not: this is reachable unauthenticated and nothing
-    removed a token that was never redeemed. See ``_STATE_STORE_MAX``.
-
-    What this does NOT do, deliberately: make the flow robust under abuse. A
-    flood still displaces pending logins, because nothing here can tell an
-    attacker's token from a user's -- the store is keyed by a value the server
-    invented and bound to nobody. Only the redesign tracked in #94 fixes that,
-    by holding no server state at all: a signed, short-TTL token over a value
-    in a ``__Host-`` cookie, verified by signature and cookie match. This
-    change is the memory bound, not that.
+    A token signed with this key can never pass for an access token, and an
+    access token can never pass for one of these, even though both are HS256
+    under the same secret.
     """
-    token = secrets.token_urlsafe(32)
-    now = time.time()
-    with _state_lock:
-        if len(_state_store) >= _STATE_STORE_MAX:
-            _drop_expired(now)
-            if len(_state_store) >= _STATE_STORE_MAX:
-                # Still full of live tokens: shed the oldest in one pass rather
-                # than one at a time, which would be quadratic exactly when the
-                # process is already under load.
-                batch = max(1, _STATE_STORE_MAX // 10)
-                for victim in sorted(_state_store, key=_state_store.__getitem__)[
-                    :batch
-                ]:
-                    _state_store.pop(victim, None)
-                logger.warning(
-                    "SSO state store hit its cap of %d live tokens; shed %d. "
-                    "The login route is unauthenticated, so this is as likely "
-                    "to be abuse as load.",
-                    _STATE_STORE_MAX,
-                    batch,
-                )
-        _state_store[token] = now + _STATE_TTL_SECONDS
-    return token
+    return hmac.new(
+        core_settings.SECRET_KEY.encode("utf-8"),
+        b"experimently:oidc-state:v1",
+        hashlib.sha256,
+    ).digest()
 
 
-def verify_state_token(token: str) -> bool:
-    """Verify a state token is valid and has not expired.
+def pkce_challenge(verifier: str) -> str:
+    """The S256 code challenge for *verifier* (RFC 7636 s.4.2)."""
+    digest = hashlib.sha256(verifier.encode("ascii")).digest()
+    return base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
 
-    Deletes the token from the store on success (single-use).
 
-    Returns:
-        True if valid.
+@dataclass(frozen=True)
+class OIDCLoginStart:
+    """What the login route needs: the URL's `state` and the cookie to set."""
 
-    Raises:
-        HTTPException 400 if the token is missing, expired, or unknown.
+    state: str
+    code_verifier: str
+    cookie_value: str
+
+
+@dataclass(frozen=True)
+class OIDCLoginState:
+    """What the callback gets back from a cookie that verified."""
+
+    config_id: uuid.UUID
+    provider: str
+    code_verifier: str
+
+
+def start_oidc_login(config: SSOConfig, provider: str) -> OIDCLoginStart:
+    """Mint the state, the PKCE verifier and the signed cookie that holds both."""
+    state = secrets.token_urlsafe(32)
+    # 64 random bytes -> 86 characters, inside RFC 7636's 43..128.
+    verifier = secrets.token_urlsafe(64)
+    now = int(time.time())
+    claims = {
+        "aud": _STATE_AUDIENCE,
+        "iat": now,
+        "exp": now + OIDC_STATE_TTL_SECONDS,
+        "st": state,
+        "cv": verifier,
+        "cfg": str(config.id),
+        "prv": provider,
+    }
+    cookie = jwt.encode(claims, _state_key(), algorithm="HS256")
+    return OIDCLoginStart(state=state, code_verifier=verifier, cookie_value=cookie)
+
+
+def _state_refusal(detail: str) -> HTTPException:
+    return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
+
+
+def redeem_oidc_state(
+    cookie_value: Optional[str], url_state: Optional[str]
+) -> OIDCLoginState:
+    """Accept a callback only from the browser that started this login.
+
+    Refuses, with a fixed 400: no cookie; a cookie that does not verify, has
+    expired or is not one of ours; and a URL `state` that is absent or is not
+    the one in the cookie. Single use is the identity provider's side of it:
+    an authorization code is redeemable once, and the callback expires the
+    cookie whatever the outcome.
     """
-    if not token:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="State token is required",
+    if not cookie_value:
+        raise _state_refusal(
+            "OIDC sign-in was not started in this browser, or its cookie was not sent"
         )
-
-    with _state_lock:
-        expiry = _state_store.pop(token, None)
-    if expiry is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid or unknown state token",
+    try:
+        claims = jwt.decode(
+            cookie_value,
+            _state_key(),
+            algorithms=["HS256"],
+            audience=_STATE_AUDIENCE,
+            leeway=_STATE_LEEWAY_SECONDS,
+            options={"require": ["aud", "iat", "exp", "st", "cv", "cfg", "prv"]},
         )
+    except jwt.ExpiredSignatureError:
+        raise _state_refusal("OIDC sign-in expired; start it again") from None
+    except jwt.PyJWTError:
+        raise _state_refusal("OIDC sign-in state is not valid") from None
 
-    if time.time() > expiry:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="State token has expired",
-        )
-
-    return True
+    expected = str(claims["st"]).encode("utf-8")
+    if not url_state or not hmac.compare_digest(url_state.encode("utf-8"), expected):
+        raise _state_refusal("OIDC state does not match this browser's sign-in")
+    try:
+        config_id = uuid.UUID(str(claims["cfg"]))
+    except ValueError:
+        raise _state_refusal("OIDC sign-in state is not valid") from None
+    return OIDCLoginState(
+        config_id=config_id,
+        provider=str(claims["prv"]),
+        code_verifier=str(claims["cv"]),
+    )
 
 
 def build_oidc_authorization_url(
@@ -944,8 +978,13 @@ def build_oidc_authorization_url(
     provider_key: str,
     redirect_uri: str,
     state: str,
+    code_verifier: str,
 ) -> str:
-    """Build the authorization URL to redirect the user to the OIDC provider."""
+    """Build the authorization URL to redirect the user to the OIDC provider.
+
+    Always with a PKCE S256 challenge (RFC 9700 s.2.1.1). A provider that does
+    not support PKCE ignores the parameters.
+    """
     meta = _OIDC_PROVIDERS.get(provider_key)
     if not meta:
         raise HTTPException(
@@ -963,5 +1002,7 @@ def build_oidc_authorization_url(
         "scope": meta.get("scope", "openid email profile"),
         "redirect_uri": redirect_uri,
         "state": state,
+        "code_challenge": pkce_challenge(code_verifier),
+        "code_challenge_method": "S256",
     }
     return f"{auth_url}?{urlencode(params)}"
