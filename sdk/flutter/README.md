@@ -23,7 +23,7 @@ dependencies:
   experimently:
     git:
       url: https://github.com/getexperimently/experimently
-      path: flutter
+      path: sdk/flutter
 ```
 
 ```bash

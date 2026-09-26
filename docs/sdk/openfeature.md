@@ -29,10 +29,19 @@ Verified against a live backend: **yes (2026-09-11)** — via
 
 ### Installation
 
+**Not yet published.** Neither `@getexperimently/js-sdk` nor `@getexperimently/openfeature-provider`
+is on npm yet, so the first line below fails today. Build both from a clone of this repository and
+install the two directories instead (`@openfeature/server-sdk` itself is on npm).
+
 ```bash
 npm install @openfeature/server-sdk @getexperimently/js-sdk @getexperimently/openfeature-provider
-# from this repository:
-npm install ./sdk/js ./sdk/openfeature
+# from a clone of this repository (the provider's build also builds sdk/js):
+git clone https://github.com/getexperimently/experimently.git
+npm --prefix experimently/sdk/js ci
+npm --prefix experimently/sdk/openfeature ci
+npm --prefix experimently/sdk/openfeature run build
+# then, in your app:
+npm install @openfeature/server-sdk /path/to/experimently/sdk/js /path/to/experimently/sdk/openfeature
 ```
 
 ### Quick start
@@ -170,6 +179,10 @@ user + flag. Flags are decided **by the server**; nothing is bucketed locally an
 definitions are downloaded. Requires Python 3.9+ and `openfeature-sdk >= 0.9.0`.
 
 ### Installation
+
+**Not yet published.** Neither `experimently` nor `experimently-openfeature` is on PyPI yet, so
+the first line below fails today. Install both from the root of a clone of this repository with
+the second line (`openfeature-sdk` itself is on PyPI and is installed as a dependency).
 
 ```bash
 pip install openfeature-sdk experimently experimently-openfeature   # once published

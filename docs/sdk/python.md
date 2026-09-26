@@ -15,6 +15,10 @@ client (see [openfeature.md](openfeature.md)).
 
 ## Installation
 
+**Not yet published.** The `experimently` package is not on PyPI yet, so the first line below
+fails today. Install from a clone of this repository with the second line, or without a clone
+with `pip install "experimently @ git+https://github.com/getexperimently/experimently.git#subdirectory=sdk/python"`.
+
 ```bash
 pip install experimently        # once published
 pip install -e sdk/python              # from this repository
