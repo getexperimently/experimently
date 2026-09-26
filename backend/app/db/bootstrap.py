@@ -48,7 +48,7 @@ here:
 
 Neither behaviour may be *this module's*, because this module is not the only
 documented way to migrate: ``docs/self-hosting/migrations.md``,
-``deploy-prod.yml`` and the CDK migration task all run ``alembic upgrade
+``deploy.yml`` and the CDK migration task all run ``alembic upgrade
 heads`` directly, and that path used to half-finish the first switch (nine
 module tables missing, both revisions stamped, nothing left to retry) and die
 on the second, and could not read a database recorded at both the branch point
@@ -467,10 +467,11 @@ def may_run_alembic(cfg: Config, recorded: set[str], schema: str) -> bool:
     profile switch.  ``alembic_version`` then holds ``modules_0001_rbac``,
     which a core tree has no file for, and raw alembic answers *every* command
     with ``CommandError: Can't locate revision identified by
-    'modules_0001_rbac'`` before applying anything.  ``deploy-prod.yml`` builds
-    ``--target core`` and tags it ``:latest``, and ``migration_task_stack.py``
-    pulls ``latest``, so that is the ECS migration task's failure mode and it
-    fails the deploy job.
+    'modules_0001_rbac'`` before applying anything.  ``deploy.yml`` runs the
+    migration task with the image it is deploying, so the first
+    ``profile=core`` deploy after an environment's stacks are redeployed from
+    a core checkout, onto a database a full release migrated, is exactly
+    this, and it fails the deploy job.
 
     This function is what makes every documented path answer the same way, so
     it is called from ``db/bootstrap.py`` *and* from ``migrations/env.py``, for

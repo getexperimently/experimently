@@ -1,6 +1,6 @@
 """The production deploy must choose its profile out loud.
 
-``deploy-prod.yml`` built the API image with a hard-coded ``--target core`` and
+The deploy workflow (``deploy.yml``; production-only before #138) built the API image with a hard-coded ``--target core`` and
 tagged it ``:latest``.  On main that was harmless -- the ``ce`` target still
 carried every module, and the registration installed ``AuditSigningService``
 unconditionally, so production *did* sign its compliance audit events.  On this
@@ -23,6 +23,7 @@ so they run in the ordinary unit job.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any, Dict
 
@@ -30,7 +31,7 @@ import pytest
 import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-WORKFLOW = REPO_ROOT / ".github" / "workflows" / "deploy-prod.yml"
+WORKFLOW = REPO_ROOT / ".github" / "workflows" / "deploy.yml"
 
 #: A distribution that does not ship the workflows has nothing here to check.
 pytestmark = pytest.mark.skipif(
@@ -107,10 +108,9 @@ class TestTheProfileIsAnExplicitInput:
             "the frontend ECR repository is referenced again"
         )
 
-        outputs = _workflow()["jobs"]["build-and-push"]["outputs"]
-        assert set(outputs) == {"backend-image"}, (
-            f"build-and-push should produce the API image and nothing else, "
-            f"got {sorted(outputs)}"
+        builds = re.findall(r"-f\s+(\S*Dockerfile)", runs)
+        assert builds == ["release/backend/Dockerfile"], (
+            f"the deploy should build the API image and nothing else, got {builds}"
         )
         # Vacuity guard: the assertions above all pass on an empty workflow.
         assert "backend/Dockerfile" in runs, (
@@ -126,7 +126,7 @@ class TestTheProfileIsAnExplicitInput:
         guard = next(
             (
                 step
-                for step in _steps("pre-deployment-checks")
+                for step in _steps("preflight")
                 if isinstance(step.get("run"), str)
                 and "accept_unsigned_audit_log" in yaml.dump(step.get("env", {}))
             ),
@@ -139,21 +139,30 @@ class TestTheProfileIsAnExplicitInput:
         assert "exit 1" in guard["run"], "the guard does not fail the deployment"
 
     def test_the_guard_runs_before_any_aws_credential_is_issued(self):
-        """A refused deployment should not have assumed the production role."""
-        steps = _steps("pre-deployment-checks")
-        names = [str(step.get("name", step.get("uses", ""))) for step in steps]
-        guard = next(
-            i
-            for i, step in enumerate(steps)
-            if isinstance(step.get("run"), str)
+        """A refused deployment should not have assumed the environment's role.
+
+        The guard is in `preflight`, a job that never assumes one, and the only
+        job that does needs `preflight` -- so a refusal ends the run before any
+        credential exists.
+        """
+        jobs = _workflow()["jobs"]
+        steps = _steps("preflight")
+        assert any(
+            isinstance(step.get("run"), str)
             and "accept_unsigned_audit_log" in yaml.dump(step.get("env", {}))
-        )
-        aws = next(
-            i
-            for i, step in enumerate(steps)
-            if "configure-aws-credentials" in str(step.get("uses", ""))
-        )
-        assert guard < aws, f"guard at {guard}, AWS credentials at {aws}: {names}"
+            for step in steps
+        ), "the profile guard is not in preflight"
+        assert "configure-aws-credentials" not in yaml.dump(jobs["preflight"])
+        assuming = [
+            name
+            for name, job in jobs.items()
+            if "configure-aws-credentials" in yaml.dump(job)
+        ]
+        assert assuming, "no job assumes a role, so this checked nothing"
+        for name in assuming:
+            assert "preflight" in str(jobs[name].get("needs", "")), (
+                f"job {name} assumes the role without waiting for the guard"
+            )
 
     def test_the_built_image_is_checked_against_the_requested_profile(self):
         """`--target` and the stage's own label must agree before the push."""

@@ -1,6 +1,11 @@
 # Deployment Documentation
 
-This directory contains all operational documentation for deploying and operating Experimently in production.
+Operational documentation for deploying and operating Experimently on AWS.
+There are two environments, **`staging`** and **`prod`**, and one path for
+both: the same stacks (`ENVIRONMENT=<env> cdk deploy`) and the same three
+workflows, each dispatched with `environment: staging` or `environment: prod`.
+Below, `<env>` is one of those two words, spelled exactly so -- the CDK, the
+GitHub environments and the secret paths all use it.
 
 ---
 
@@ -8,30 +13,72 @@ This directory contains all operational documentation for deploying and operatin
 
 | Document | Audience | Description |
 |----------|----------|-------------|
-| [Deployment Guide](deployment-guide.md) | DevOps / Engineers | Step-by-step guide for deploying to production |
-| [Rollback Runbook](rollback-runbook.md) | On-call Engineers | How to roll back a deployment in < 5 minutes |
+| [Deployment Guide](deployment-guide.md) | DevOps / Engineers | The ordered first-deploy checklist, then every deploy after it |
+| [IAM Permissions](iam-permissions.md) | Account administrators | The three identities, and the workflow role's generated policy |
+| [Rollback Runbook](rollback-runbook.md) | On-call Engineers | How to roll back a deployment |
 | [Disaster Recovery](disaster-recovery.md) | SRE / DevOps | DR scenarios, runbooks, and recovery procedures |
 | [Secrets Management](secrets-management.md) | DevOps / Security | How secrets are stored, injected, and rotated |
 
 ---
 
+## Before the first deploy
+
+Every workflow refuses -- a red run, not a skipped one -- an environment that is
+not configured. Per GitHub environment (**Settings → Environments →
+`<env>`**), in this order:
+
+1. **Protection first**: a required reviewer, and deployment branches limited
+   to `main`. Do this before adding anything else: dispatching a workflow for
+   an environment that does not exist creates it, unprotected.
+2. **Variables**: `AWS_ACCOUNT_ID` (that environment's account, 12 digits) and
+   `PUBLIC_BASE_URL` (the origin the stacks were deployed with, e.g.
+   `https://app.example.com` -- the smoke test calls it).
+3. **Secret**: `AWS_ROLE_ARN`, that environment's OIDC role
+   ([IAM Permissions](iam-permissions.md)).
+
+`SLACK_BOT_TOKEN` (repository secret, optional) posts to `#deployments`.
+
+The AWS side -- IAM, certificate, ECR, secrets, stacks -- is the ordered
+checklist in [the deployment guide](deployment-guide.md#1-before-the-first-deploy).
+
+---
+
 ## Quick Reference
 
-### Deploy to Production
+### Deploy
 
-1. Create and push a git tag: `git tag v1.2.3 && git push origin v1.2.3`
-2. Ensure **Release Gate** succeeded for the target commit/tag.
-3. Go to **GitHub Actions** → **"Deploy to Production"** → **Run workflow** → enter the tag
-   and pick the **profile** (see below)
-4. Approve the deployment in the GitHub environment gate
-5. Monitor progress in Slack `#deployments`
+1. A release tag: release-please cuts them (`vX.Y.Z`). **Release Gate** runs on
+   every push to `main`, so the tagged commit has a result; for a tag cut
+   before that, run it on the tag: `gh workflow run release-gate.yml --ref vX.Y.Z`.
+2. **Actions → Deploy → Run workflow**, from `main`: pick `environment`, type
+   the tag as `version`, pick the `profile` (below).
+3. Approve the run when the environment asks. There is one approval per
+   deploy, and nothing in AWS has changed before it.
+4. Read the run summary: it names what was built and deployed, and hands you
+   the rollback line.
+
+> **Until #143 lands, a deploy stops before the traffic shift -- red, on
+> purpose.** It builds and pushes the image, snapshots the database, runs the
+> migration, registers the new revision and creates the CodeDeploy
+> deployment, then stops: the step that approved the traffic shift could only
+> ever time out, and its timeout rolled back deployments that had succeeded.
+> Nothing shifts; the revision already serving keeps serving, and CodeDeploy
+> stops the unapproved deployment when its 30-minute approval wait ends. The
+> migration **has** been applied.
+
+**One at a time per environment.** Deploy and Database Migration share a
+concurrency group per environment and are never cancelled mid-run. GitHub keeps
+at most one run *waiting* in a group: a newer dispatch that queues behind a
+running deploy **replaces** an older one that was still waiting, which is then
+cancelled without running. Rollback has its own group, so it never waits behind
+a deploy.
 
 Full procedure: [deployment-guide.md](deployment-guide.md)
 
 #### Which profile?
 
-`Deploy to Production` asks for a `profile`, and the answer is a decision about
-what production *is*, not a build detail:
+`Deploy` asks for a `profile`, and the answer is a decision about what the
+environment *is*, not a build detail:
 
 | profile | image | compliance audit log |
 |---------|-------|----------------------|
@@ -42,47 +89,41 @@ Nothing at runtime flags the difference: `/health/ready` answers 200 either way
 (it reports `profile`, it does not judge it) and `abort_if_modules_broken()`
 only fires for a *broken* modules package, never for an absent one. So `core`
 also requires ticking **`accept_unsigned_audit_log`**; the workflow refuses the
-run otherwise, before it assumes the production AWS role.
+run otherwise, in its preflight, before anything assumes an AWS role.
 
-The profile is the **API image's** only; this workflow builds no dashboard
-image. It used to, and that step pushed to an ECR repository nothing creates,
-so it never succeeded. Production has no dashboard delivery path at all at the
-moment: the dashboard is not yet deployed by the CDK. That is tracked in #69.
-Until then, a core API deployed here is not paired with a dashboard build by
-anything, so nothing enforces that the two agree on a profile.
+The profile must also be the one the stacks were deployed with: a `full` image
+needs `AUDIT_HMAC_KEY`, which only a full checkout's stacks inject. The deploy
+reads both task-definition families and refuses a mismatch in either direction
+before it builds anything.
 
-`full` needs one secret `core` does not: **`/prod/experimentation/audit-hmac-key`**
+`full` needs one secret `core` does not: **`/<env>/experimentation/audit-hmac-key`**
 (→ `AUDIT_HMAC_KEY`). `modules.register(hooks)` builds the modules' settings as
 its very first step and their validator rejects the shipped dev default in
 staging and production, so a full image without it never registers the modules
 — `abort_if_modules_broken()` refuses to start the API and
 `require_modules_or_absent()` fails every `alembic` command, including the
-migration task. The workflow's **"Required secrets exist for this profile"**
-step checks for it (and for the four every profile needs) before it builds
-anything, so a missing secret is a red job, not a crash loop. Create it with
-[secrets-management.md](secrets-management.md).
+migration task. The deploy's **"Required secrets exist for this profile"**
+step checks for it (and for the two every profile needs) before it builds
+anything. Create it with [secrets-management.md](secrets-management.md).
 
 ---
 
-### Emergency Rollback (target: < 5 minutes)
+### Emergency Rollback
 
-**Method 1 — GitHub Actions (preferred):**
-Go to **GitHub Actions** → **"Rollback Production"** → enter the previous task definition ARN and reason
+**Method 1 — GitHub Actions (preferred):** **Actions → Rollback**, from `main`:
+`environment`, the `task_definition_arn` the deploy's run summary printed
+(`experimentation-backend-<env>:<n>`), and a reason.
 
 **Method 2 — AWS CLI:**
 
 > The service has a **CODE_DEPLOY** deployment controller
 > (`fargate_service_stack.py`), and ECS rejects a task-definition change
 > through `UpdateService` on such a service — *"Unable to update task
-> definition on services with a CODE_DEPLOY deployment controller"*. The
-> `aws ecs update-service --task-definition … --force-new-deployment` that
-> used to be here could not work, and neither could the
-> `aws ecs wait services-stable` after it: the old task set serves throughout a
-> blue/green deployment, so the waiter returns immediately whatever happens
-> (#208). Rolling back means creating a CodeDeploy deployment that names the
-> older revision — **and approving it**, because the deployment group parks for
-> 30 minutes waiting for `ContinueDeployment` and then stops, which
-> auto-rollback turns back into the revision you were rolling away from.
+> definition on services with a CODE_DEPLOY deployment controller"*. Rolling
+> back means creating a CodeDeploy deployment that names the older revision —
+> **and approving it**, because the deployment group parks for 30 minutes
+> waiting for `ContinueDeployment` and then stops, which auto-rollback turns
+> back into the revision you were rolling away from.
 >
 > That is three calls with an AppSpec in between, which is not something to
 > assemble by hand during an incident. **Use Method 1.** If the workflow itself
@@ -91,10 +132,13 @@ Go to **GitHub Actions** → **"Rollback Production"** → enter the previous ta
 
 How to find the previous task definition, **with its image** — the revision
 list alone is not enough, because CloudFormation also registers into this
-family with a `bootstrap` image that may not exist in ECR (#82):
+family with a `bootstrap` image that may not exist in ECR (#82). A revision a
+deploy registered names its image by digest (`…/backend@sha256:…`):
+
 ```bash
+ENV=prod   # or staging
 for arn in $(aws ecs list-task-definitions \
-               --family-prefix experimentation-backend-prod \
+               --family-prefix "experimentation-backend-$ENV" \
                --sort DESC --max-results 5 \
                --query 'taskDefinitionArns' --output text); do
   printf '%s  %s\n' "$arn" "$(aws ecs describe-task-definition \
@@ -110,72 +154,103 @@ Full rollback procedure: [rollback-runbook.md](rollback-runbook.md)
 
 ### Database Migration
 
-1. Go to **GitHub Actions** → **"Database Migration"**
-2. Select environment (`staging` or `production`), direction (`upgrade` or `downgrade`), and target (`head` or `-1`)
-3. Monitor the ECS migration task logs in CloudWatch log group `/ecs/experimentation-migration-prod`
+A deploy runs its own migration. **Actions → Database Migration** is for the
+rest -- chiefly undoing one:
+
+1. From `main`: `environment` (`staging` or `prod`), `direction` (`upgrade` or
+   `downgrade`), `target` (`heads` to upgrade; a revision id or `-1` to
+   downgrade -- never the singular `head`, which a full image refuses because it
+   has two).
+2. It runs with the image the API is **serving** (the PRIMARY task set), and
+   refuses when nothing is serving yet. It snapshots the database first.
+3. The task's log is printed in the run; it is also CloudWatch log group
+   `/ecs/experimentation-migrate-<env>`.
 
 ---
 
 ### Health Checks
 
 ```bash
-# API health
-curl https://api.experimentation.example.com/health
-# Expected: {"status": "healthy", "db": "ok", "redis": "ok", "version": "X.Y.Z"}
+# Through the public origin (PUBLIC_BASE_URL). /health is readiness: it runs
+# the database check, and it is what the load balancer probes.
+curl -s https://app.example.com/health
+# {"status": "...", "profile": "full", "version": "X.Y.Z", "environment": "...",
+#  "checks": {"database": {"status": "..."}, ...}}
 
-# ECS service status
-aws ecs describe-services \
-  --cluster experimentation-prod \
-  --services experimentation-backend-prod \
-  --query 'services[0].{Running:runningCount,Desired:desiredCount,Status:status}'
+# The smoke test the deploy runs: a real route, unauthenticated.
+curl -s https://app.example.com/api/v1/experiments/
+# 401 {"detail":"Not authenticated"}
 
-# Check recent ECS service events
+ENV=prod   # or staging
 aws ecs describe-services \
-  --cluster experimentation-prod \
-  --services experimentation-backend-prod \
-  --query 'services[0].events[:5]'
+  --cluster "experimentation-$ENV" \
+  --services "experimentation-backend-$ENV" \
+  --query "services[0].{Running:runningCount,Desired:desiredCount,Serving:taskSets[?status=='PRIMARY'].taskDefinition|[0]}"
 ```
 
 ---
 
-## Required GitHub Secrets
+## Names
 
-These secrets must be set in the GitHub repository under **Settings → Secrets and variables → Actions → Secrets** in the `production` environment before any deployment can succeed.
+Everything the workflows and the runbooks address, per environment. Where the
+CDK generates a name, the stack publishes it as an output and the workflows
+read it from there. `infrastructure/tests/test_workflow_names_exist.py` checks
+every row with a resource type against a synth of `staging` and `prod`.
 
-| Secret | Description |
-|--------|-------------|
-| `PROD_AWS_ROLE_ARN` | IAM role ARN assumed via GitHub OIDC for production deploy/rollback |
-| `STAGING_AWS_ROLE_ARN` | IAM role ARN assumed via GitHub OIDC for staging DB migrations |
-| `PROD_API_URL` | Production API base URL (e.g., `https://api.experimentation.example.com`) |
-| `PROD_SMOKE_TEST_API_KEY` | API key (`X-API-Key` header) used by automated smoke tests |
-| `PROD_SMOKE_TEST_TOKEN` | JWT Bearer token used by automated smoke tests |
-| `SLACK_BOT_TOKEN` | Slack bot OAuth token for `#deployments` notifications |
-| `PROD_PRIVATE_SUBNET_IDS` | Comma-separated private subnet IDs for migration task VPC configuration |
-| `PROD_ECS_SG_ID` | Security group ID attached to ECS tasks |
+| What | Name | Resource type |
+|------|------|---------------|
+| ECS cluster | `experimentation-<env>` | `AWS::ECS::Cluster` |
+| API service | `experimentation-backend-<env>` | `AWS::ECS::Service` |
+| API task definition family | `experimentation-backend-<env>` | `AWS::ECS::TaskDefinition` |
+| Migration task definition family | `experimentation-migrate-<env>` | `AWS::ECS::TaskDefinition` |
+| Dashboard service | `experimentation-dashboard-<env>` | `AWS::ECS::Service` |
+| API log group | `/ecs/experimentation-backend-<env>` | `AWS::Logs::LogGroup` |
+| Migration log group | `/ecs/experimentation-migrate-<env>` | `AWS::Logs::LogGroup` |
+| Dashboard log group | `/ecs/experimentation-dashboard-<env>` | `AWS::Logs::LogGroup` |
+| CodeDeploy application | `experimentation-platform-<env>` | `AWS::CodeDeploy::Application` |
+| CodeDeploy deployment group | `experimentation-<env>` | `AWS::CodeDeploy::DeploymentGroup` |
+| Redis replication group | `experimentation-redis-<env>-redis` | `AWS::ElastiCache::ReplicationGroup` |
+| Aurora credentials (generated) | `experimentation-database-<env>-aurora-credentials` | `AWS::SecretsManager::Secret` |
+| Fargate stack | `experimentation-fargate-<env>` | stack |
+| Database stack | `experimentation-database-<env>` | stack |
+| Migrations stack | `experimentation-migrations-<env>` | stack |
+| Aurora cluster identifier | generated: output `ClusterIdentifier` of `experimentation-database-<env>` | — |
+| Task subnets and security group | outputs `TaskSubnets`, `TaskSecurityGroup` of `experimentation-fargate-<env>` | — |
+| Secrets you create | `/<env>/experimentation/<name>` (Secrets Manager) | — |
+| Parameters the stacks write | `/experimentation/<env>/...` (SSM -- the other order, #67) | — |
+| API image | `experimentation-platform/backend:<tag>-<profile>`, run by digest; `:bootstrap` for `cdk deploy` | — |
+| Dashboard image | `experimentation-platform/web:bootstrap` | — |
+| GitHub environment | `staging`, `prod` | — |
+
+There is no `:latest` and no bare `:<tag>`: each release is pushed once per
+profile as `:<tag>-<profile>` (reused, not rebuilt, when another environment
+deploys the same release), and every task definition the workflows register
+names the image **by digest**, so a later push to a tag cannot change what a
+running environment starts.
 
 ---
 
 ## Required AWS Secrets Manager Secrets
 
-These secrets must be populated before the first deployment. See [secrets-management.md](secrets-management.md) for creation commands.
+These secrets must exist before the Fargate and migrations stacks are deployed.
+See [secrets-management.md](secrets-management.md) for creation commands.
 
 | Secret Path | Injected as | Description |
 |-------------|-------------|-------------|
-| `/prod/experimentation/jwt-secret` | `SECRET_KEY` | JWT signing secret (minimum 32 characters) |
-| `/prod/experimentation/first-superuser-password` | `FIRST_SUPERUSER_PASSWORD` | Password for the first administrator; the default `admin` is refused in production |
-| `/prod/experimentation/audit-hmac-key` | `AUDIT_HMAC_KEY` | **`profile: full` only** — signs the compliance audit log; the modules refuse to register without it |
-| `/prod/experimentation/cognito-config` | — | Cognito user pool ID and client ID (JSON) |
+| `/<env>/experimentation/jwt-secret` | `SECRET_KEY` | JWT signing secret (minimum 32 characters) |
+| `/<env>/experimentation/first-superuser-password` | `FIRST_SUPERUSER_PASSWORD` | Password for the first administrator; the default `admin` is refused in staging and production |
+| `/<env>/experimentation/audit-hmac-key` | `AUDIT_HMAC_KEY` | **`profile: full` only** — signs the compliance audit log; the modules refuse to register without it |
 
 The database credentials are not in this table: `POSTGRES_USER` and
 `POSTGRES_PASSWORD` come from the secret the database stack generates for
 Aurora (`experimentation-database-<env>-aurora-credentials`), and
 `POSTGRES_SERVER` from its writer endpoint. Nothing to create.
 
-Every row except `cognito-config` is injected by the ECS task definitions
+Every row is injected by the ECS task definitions
 (`infrastructure/cdk/stacks/fargate_service_stack.py` and
 `migration_task_stack.py`) and is one the application refuses to start without:
 the image ships no `.env` file, so the task definition is the only source.
-`Deploy to Production` fails in **Pre-deployment Checks** if one is missing.
+`Deploy` refuses the run if one is missing, before it builds anything.
 
 Redis is not in this table: the API task takes `REDIS_HOST` and `REDIS_PORT`
 from the Redis stack's primary endpoint and sets `REDIS_SSL=true`, because the
@@ -191,7 +266,6 @@ which also says how the staging rehearsal proves the tasks really reach it
 CDK stacks must be deployed in this order. Each stack depends on outputs from the previous.
 
 These are stack **ids** — what `cdk deploy` takes, and what `cdk list` prints.
-`<env>` is `dev`, `staging` or `prod`.
 
 1. `experimentation-auth-<env>` — Cognito user pool, client and groups
 2. `experimentation-vpc-<env>` — VPC, subnets, NAT gateways
@@ -200,46 +274,46 @@ These are stack **ids** — what `cdk deploy` takes, and what `cdk list` prints.
 5. `experimentation-redis-<env>` — ElastiCache Redis replication group
 6. `experimentation-compute-<env>` — ECS cluster, task security group, database-access Lambda
 7. `experimentation-monitoring-<env>` — CloudWatch dashboards, alarms, log groups
-8. `experimentation-fargate-<env>` — Fargate service, ALB, CodeDeploy blue/green
+8. `experimentation-fargate-<env>` — Fargate services, ALB, CodeDeploy blue/green
 9. `experimentation-migrations-<env>` — ECS task definition for Alembic (plural)
 
 With `modules/` present, three more: `experimentation-dynamodb-counters-<env>`,
 `experimentation-analytics-<env>` and `experimentation-glue-etl-<env>`.
 
-Deploy all at once (CDK handles ordering):
+Standing an environment up for the first time (CDK handles ordering):
 ```bash
 cd infrastructure/cdk
-cdk deploy --all --require-approval never
+ENVIRONMENT=staging cdk deploy --all --require-approval never
 ```
+
+On an environment that is already running, deploy the Fargate stack on its own
+with the pins the [deployment guide](deployment-guide.md) gives, never `--all`.
 
 ---
 
 ## Useful AWS CLI Commands
 
 ```bash
-# Watch ECS task replacement during deployment
-watch -n 5 'aws ecs describe-services \
-  --cluster experimentation-prod \
-  --services experimentation-backend-prod \
-  --query "services[0].{Running:runningCount,Desired:desiredCount,TaskDef:taskDefinition}"'
+ENV=prod   # or staging
 
-# Check recent application errors
+# Watch what is serving during a deployment: the PRIMARY task set moves,
+# services[0].taskDefinition does not (it is frozen at CreateService).
+watch -n 5 "aws ecs describe-services \
+  --cluster experimentation-$ENV \
+  --services experimentation-backend-$ENV \
+  --query 'services[0].{Running:runningCount,Desired:desiredCount,Serving:taskSets[?status==\`PRIMARY\`].taskDefinition|[0]}'"
+
+# Recent API errors
 aws logs filter-log-events \
-  --log-group-name /experimentation-platform/api \
+  --log-group-name "/ecs/experimentation-backend-$ENV" \
   --filter-pattern '"level":"ERROR"' \
-  --start-time $(date -u -d '15 minutes ago' +%s000)
+  --start-time $(( ($(date +%s) - 900) * 1000 ))
 
-# Check Aurora cluster status
-aws rds describe-db-clusters \
-  --db-cluster-identifier experimentation-prod \
+# Aurora cluster status (its identifier is generated: read it from the stack)
+CLUSTER=$(aws cloudformation describe-stacks --stack-name "experimentation-database-$ENV" \
+  --query "Stacks[0].Outputs[?OutputKey=='ClusterIdentifier'].OutputValue" --output text)
+aws rds describe-db-clusters --db-cluster-identifier "$CLUSTER" \
   --query 'DBClusters[0].{Status:Status,Endpoint:Endpoint,LatestRestorableTime:LatestRestorableTime}'
-
-# List recent task definitions (useful during rollback)
-aws ecs list-task-definitions \
-  --family-prefix experimentation-backend-prod \
-  --sort DESC \
-  --max-results 5 \
-  --query 'taskDefinitionArns'
 ```
 
 ---

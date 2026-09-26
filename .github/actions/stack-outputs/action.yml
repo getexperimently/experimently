@@ -1,0 +1,71 @@
+# Read a CloudFormation stack's outputs, and refuse when it or one of the
+# named outputs is not there.
+#
+# The deploy workflows address resources the CDK names by generating them --
+# the Aurora cluster identifier, the subnets and security group a one-off task
+# must run in, the CodeDeploy application and group. Those used to be retyped
+# into the workflows (`experimentation-prod`, which no stack creates) or asked
+# of the operator as repository secrets (`PROD_PRIVATE_SUBNET_IDS`, which
+# db-migrate.yml then read under a different name). The stacks publish them as
+# outputs (infrastructure/tests/test_environments_do_not_collide.py pins them);
+# this reads them. READ-ONLY: one `cloudformation describe-stacks`.
+#
+# Loaded from the workspace, so it is always the copy on the dispatch ref
+# (main) -- never a release tag's, which may predate it (PE v1 C6).
+name: Stack outputs
+description: >-
+  Read the outputs of one CloudFormation stack as JSON, refusing a missing
+  stack or a missing output by name.
+
+inputs:
+  stack:
+    description: Stack name, e.g. experimentation-fargate-staging.
+    required: true
+  keys:
+    description: Space-separated output keys that must be present.
+    required: true
+  environment:
+    description: staging or prod -- named in the refusal.
+    required: true
+
+outputs:
+  json:
+    description: 'Every output of the stack, as {"OutputKey": "OutputValue", ...}.'
+    value: ${{ steps.read.outputs.json }}
+
+runs:
+  using: composite
+  steps:
+    - id: read
+      shell: bash
+      env:
+        STACK: ${{ inputs.stack }}
+        KEYS: ${{ inputs.keys }}
+        TARGET_ENV: ${{ inputs.environment }}
+      run: |
+        set -euo pipefail
+        region="${AWS_REGION:-${AWS_DEFAULT_REGION:-}}"
+        if ! raw="$(aws cloudformation describe-stacks --stack-name "$STACK" \
+                      --query 'Stacks[0].Outputs' --output json 2>&1)"; then
+          case "$raw" in
+            *"does not exist"*)
+              echo "::error title=Stack not deployed::No CloudFormation stack $STACK in $region. Run ENVIRONMENT=$TARGET_ENV cdk deploy --all in this account and region first: docs/self-hosting/cdk.md"
+              ;;
+            *)
+              echo "::error::Could not describe $STACK in $region: $raw"
+              ;;
+          esac
+          exit 1
+        fi
+        json="$(jq -c '(. // []) | map({(.OutputKey): .OutputValue}) | add // {}' <<<"${raw:-null}")"
+        missing=()
+        for key in $KEYS; do
+          if [ -z "$(jq -r --arg k "$key" '.[$k] // empty' <<<"$json")" ]; then
+            missing+=("$key")
+          fi
+        done
+        if [ "${#missing[@]}" -gt 0 ]; then
+          echo "::error title=Stack out of date::$STACK has no output ${missing[*]}: it was deployed from an older checkout. Redeploy it (ENVIRONMENT=$TARGET_ENV cdk deploy $STACK) and re-run: docs/self-hosting/cdk.md"
+          exit 1
+        fi
+        echo "json=$json" >> "$GITHUB_OUTPUT"

@@ -82,7 +82,7 @@ class TestPublicBaseUrl:
         Making a new setting mandatory in a hardened environment is a separate
         decision with a deploy dependency attached -- the task definition has to
         carry the value before the application can demand it, and nothing in
-        `deploy-prod.yml` runs `cdk deploy`. That is why it is not bundled here.
+        `deploy.yml` runs `cdk deploy`. That is why it is not bundled here.
         """
         s = Settings(
             _env_file=None,

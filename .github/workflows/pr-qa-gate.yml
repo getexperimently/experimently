@@ -97,7 +97,13 @@ jobs:
           POSTGRES_DB: experimentation
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
-        run: python -m pytest backend/tests/unit/ -p no:cov -q --tb=short -x
+        run: python -m pytest backend/tests/unit/ -p no:cov -q --tb=short -x --junitxml=unit-junit.xml
+
+      # The workflow tests skip when the file they read is absent, so a
+      # renamed workflow used to turn 19 of them into green skips (QA 4d).
+      # On this full checkout nothing under this directory skips.
+      - name: No workflow test was skipped
+        run: python3 scripts/check_junit_skips.py unit-junit.xml backend/tests/unit/infrastructure
 
       # The Lambda functions (assignment, event processor, flag evaluation) carry
       # 301 tests of their own that ran nowhere in CI. Each function's tests/ dir

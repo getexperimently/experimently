@@ -339,7 +339,7 @@ def test_bootstrap_repairs_a_version_row_another_row_descends_from(
 
     :func:`prune_redundant_revisions` is the repair, and review round 4 found
     it was reachable only through ``db/bootstrap.py`` -- while
-    ``deploy-prod.yml``, ``db-migrate.yml``, the CDK migration task and
+    ``deploy.yml``, ``db-migrate.yml``, the CDK migration task and
     ``docs/self-hosting/migrations.md`` all run raw ``alembic upgrade heads``,
     which died there.  ``migrations/env.py`` calls it now, so both paths repair
     the row; this test asserts it once per path.

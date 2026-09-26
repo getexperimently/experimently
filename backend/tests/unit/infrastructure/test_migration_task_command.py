@@ -1,7 +1,7 @@
 """The production migration path, which no deploy has ever exercised.
 
 ``MigrationTaskStack`` bakes the command the one-off ECS migration task runs,
-and ``deploy-prod.yml`` overrides it with the same command by hand.  Three
+and ``deploy.yml`` overrides it with the same command by hand.  Three
 separate things have been wrong with it, each fatal on its own:
 
 1. ``-c app/db/alembic.ini``, which resolves to ``/app/app/db/alembic.ini``
@@ -46,9 +46,9 @@ STACK = REPO_ROOT / "infrastructure" / "cdk" / "stacks" / "migration_task_stack.
 ENTRYPOINT = REPO_ROOT / "backend" / "docker-entrypoint.sh"
 DOCKERFILE = REPO_ROOT / "backend" / "Dockerfile"
 #: The two workflows that run a migration, and they do NOT run the same thing:
-#: deploy-prod is the automatic path and must bootstrap, db-migrate is the
+#: deploy.yml is the automatic path and must bootstrap, db-migrate is the
 #: manual targeted path and must stay on raw alembic. A test each, below.
-DEPLOY_PROD = REPO_ROOT / ".github" / "workflows" / "deploy-prod.yml"
+DEPLOY = REPO_ROOT / ".github" / "workflows" / "deploy.yml"
 DB_MIGRATE = REPO_ROOT / ".github" / "workflows" / "db-migrate.yml"
 
 #: A distribution that ships neither the CDK stacks nor the workflows has
@@ -125,12 +125,19 @@ def _literal_environment() -> dict[str, str]:
 
 
 def _workflow_alembic_commands(path: Path) -> list[list[str]]:
-    """Every ``["python","-m","alembic",...]`` array in a workflow file."""
+    """Every ``["python","-m","alembic",...]`` array in a workflow file.
+
+    Both the JSON literal form and the jq form db-migrate.yml builds its
+    operator-driven command with (``["python", "-m", "alembic", ...,
+    $direction, $target]``); a jq variable is read as the placeholder
+    ``<name>``, since its value is the operator's.
+    """
     text = path.read_text().replace('\\"', '"')
-    return [
-        json.loads(match)
-        for match in re.findall(r'\["python","-m","alembic".*?\]', text)
-    ]
+    commands = []
+    for match in re.findall(r'\["python",\s*"-m",\s*"alembic".*?\]', text):
+        literal = re.sub(r"\$([a-z_]+)", r'"<\1>"', match)
+        commands.append(json.loads(literal))
+    return commands
 
 
 @pytest.mark.unit
@@ -163,9 +170,9 @@ def test_the_migration_task_bootstraps_rather_than_replaying_the_chain():
     already exists`, because the historical chain is not replayable from empty
     (which is why `db/bootstrap.py` exists at all).
 
-    `deploy-prod.yml`'s `deploy` job needs `run-migrations`, so this task runs
-    *before* anything that would have created the schema -- and the first
-    production deployment therefore meets an empty database. Bootstrap handles
+    `deploy.yml`'s deploy job runs this task before it creates the CodeDeploy
+    deployment, so it runs *before* anything that would have created the
+    schema -- and the first deployment therefore meets an empty database. Bootstrap handles
     both states: schema from the models plus stamped heads when empty,
     `alembic upgrade heads` when not.
     """
@@ -178,25 +185,26 @@ def test_the_migration_task_bootstraps_rather_than_replaying_the_chain():
 
 @pytest.mark.unit
 @pytest.mark.regression
-def test_deploy_prod_bootstraps_too():
+def test_the_deploy_bootstraps_too():
     """The automatic path agrees end to end.
 
     The override exists rather than inheriting the task definition's command
-    because nothing in `deploy-prod.yml` runs `cdk deploy`, so the registered
-    `experimentation-migrate` definition can be older than this repository. It
-    therefore has to be kept in step by hand, which is what this checks.
+    because nothing in `deploy.yml` runs `cdk deploy`, so the
+    `experimentation-migrate-<env>` revision it registers from can be older
+    than this repository. It therefore has to be kept in step by hand, which
+    is what this checks.
     """
-    workflow = DEPLOY_PROD
+    workflow = DEPLOY
     if not workflow.parent.is_dir():
         pytest.skip("this tree ships no GitHub workflows")
     command = list(_stack_constants()["MIGRATION_COMMAND"])
 
     assert json.dumps(command, separators=(",", ":")) in workflow.read_text(), (
-        "deploy-prod.yml's containerOverrides must run MIGRATION_COMMAND, "
+        "deploy.yml's containerOverrides must run MIGRATION_COMMAND, "
         f"which is {command}"
     )
     assert not _workflow_alembic_commands(workflow), (
-        "deploy-prod.yml still runs alembic directly; the historical chain "
+        "deploy.yml still runs alembic directly; the historical chain "
         "cannot be replayed from the empty database a first deploy meets"
     )
 
@@ -215,7 +223,11 @@ def test_db_migrate_keeps_raw_alembic_and_names_the_right_config():
         pytest.skip("this tree ships no GitHub workflows")
     config = _stack_constants()["ALEMBIC_CONFIG"]
     commands = _workflow_alembic_commands(workflow)
-    assert commands, "db-migrate.yml runs no alembic command"
+    # `current`, and the operator's `<direction> <target>`: if either form
+    # stopped being recognised, the checks below would pass on the other alone.
+    assert [c[5:] for c in commands] == [["current"], ["<direction>", "<target>"]], (
+        commands
+    )
 
     for command in commands:
         assert "-c" in command, command

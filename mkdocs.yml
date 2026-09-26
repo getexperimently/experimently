@@ -152,6 +152,7 @@ nav:
   - Quickstart: workspaces/quickstart.md
 - Operating in Production:
   - Deployment Guide: deployment/deployment-guide.md
+  - IAM Permissions: deployment/iam-permissions.md
   - Rollback Runbook: deployment/rollback-runbook.md
   - Disaster Recovery: deployment/disaster-recovery.md
   - Secrets Management: deployment/secrets-management.md

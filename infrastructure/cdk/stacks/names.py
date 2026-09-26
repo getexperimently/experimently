@@ -30,7 +30,7 @@ from __future__ import annotations
 #: Nothing in the CDK *creates* it. That was tried and reverted: a registry is
 #: account-scoped while these stacks are per-environment, so a fixed name in a
 #: per-environment stack means only one environment per account can deploy
-#: (`demo/setup-aws.sh` runs `ENVIRONMENT=demo cdk deploy --all`), and
+#: (a demo environment is `ENVIRONMENT=demo cdk deploy --all`), and
 #: `RemovalPolicy.RETAIN` plus an explicit name makes `cdk deploy` fail
 #: outright wherever the repository already exists -- including for the
 #: operator who hit #211 and created it by hand to unblock themselves.

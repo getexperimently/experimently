@@ -5,7 +5,7 @@
 deployment. Nothing used either name. Every producer and consumer says
 `experimentation-platform/backend`:
 
-    .github/workflows/deploy-prod.yml   ECR_BACKEND_REPO
+    .github/workflows/deploy.yml        ECR_BACKEND_REPO
     infrastructure/cdk/.../fargate_service_stack.py
     infrastructure/cdk/.../migration_task_stack.py
 
@@ -47,7 +47,7 @@ import pytest
 from .test_app_profiles import CDK_DIR, _app_environment
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DEPLOY_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "deploy-prod.yml"
+DEPLOY_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "deploy.yml"
 
 
 @pytest.fixture(scope="module")
@@ -151,13 +151,13 @@ def test_the_deploy_workflow_pushes_to_that_repository():
     """The half that lives in a different tree, and drifted.
 
     Compared against `stacks/names.py`, not against a synthesised app: the
-    app is synthesised for `dev` and this is the production workflow, so
+    app is synthesised for `dev` and this is the deploy workflow, so
     comparing the two would fail the moment anyone environment-scoped the
     name -- a gate pinning in the defect it was written to prevent.
     """
     text = DEPLOY_WORKFLOW.read_text(encoding="utf-8")
     match = re.search(r"^\s*ECR_BACKEND_REPO:\s*(\S+)\s*$", text, re.M)
-    assert match, "deploy-prod.yml no longer sets ECR_BACKEND_REPO"
+    assert match, "deploy.yml no longer sets ECR_BACKEND_REPO"
     # Strip a quoted scalar: `ECR_BACKEND_REPO: "experimentation-platform/backend"`
     # is the same YAML value and used to fail with a diff that showed two
     # identical-looking strings.

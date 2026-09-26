@@ -22,7 +22,7 @@ with both revisions stamped and both foreign keys gone, and nothing ever ran
 either of them again.  ``ON DELETE SET NULL`` was silently absent from then
 on.  (``db/bootstrap.py`` hid it, because ``reconcile_with_models`` adds the
 models' ``use_alter`` keys afterwards, but the production migration paths --
-the CDK migration task, ``deploy-prod.yml``, ``db-migrate.yml`` and
+the CDK migration task, ``deploy.yml``, ``db-migrate.yml`` and
 ``docs/self-hosting/migrations.md`` -- all run raw ``alembic upgrade heads``.)
 
 The edge cannot be a ``depends_on``: alembic removes the depended-on revision

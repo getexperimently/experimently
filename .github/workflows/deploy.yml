@@ -1,0 +1,697 @@
+name: Deploy
+run-name: Deploy ${{ inputs.version }} (${{ inputs.profile }}) to ${{ inputs.environment }}
+
+# One path for every environment (DECISIONS D6): staging and prod are the same
+# workflow with a different `environment`. Nothing here names either one
+# outside the choice list below; every AWS name is built from the input, the
+# way the CDK builds it (infrastructure/cdk/stacks/names.py), or read from a
+# stack output.
+#
+# Shape, and why:
+#
+#   preflight  holds NO AWS credential and no environment secret. It checks
+#              what can be checked from GitHub alone -- the dispatch ref, the
+#              profile acknowledgement, that `version` is a release tag on
+#              main, and that the Release Gate passed on its commit -- so a
+#              wrong dispatch is refused before anyone is asked to approve it.
+#   deploy     is the ONE job bound to `environment:`, so there is one approval
+#              per deploy (each environment-bound job asks its own), and it is
+#              given before anything in AWS changes. Its refusals come first,
+#              then the first mutation (the image push).
+#
+# Tooling -- local actions and scripts/ -- always comes from the dispatch ref,
+# which must be main. The release tag is checked out into ./release/ for the
+# image build ONLY: a tag cut before a script or action existed would
+# otherwise run without it, or with an older copy (PE v1 C6).
+#
+# Operator input never reaches a shell by `${{ }}` interpolation: Actions
+# substitutes the expression textually before bash parses the line, and the
+# deploy job holds the environment's AWS role. Everything reaches a script
+# through `env:` (PE v1 C11; backend/tests/unit/infrastructure/
+# test_deploy_workflows.py checks all three workflows).
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        type: choice
+        default: staging
+        options: [staging, prod]
+      version:
+        description: 'Release tag to deploy, e.g. v1.2.3 (branch names and commit SHAs are refused)'
+        required: true
+        type: string
+      profile:
+        # The profile a deployment gets is a decision, not a default. The image
+        # used to be built `--target core` with nothing saying so, which on this
+        # layout means an image with no modules/ directory at all: the modules'
+        # registration never runs, `hooks.audit_signer` stays `NullAuditSigner`,
+        # and every SOC 2 / ISO 27001 compliance audit event is written with
+        # hmac_signature = NULL -- which `NullAuditSigner.verify()` then reports
+        # as intact. Nothing else signals it (`/health/ready` is a cheerful 200
+        # with `profile: core`), so the choice is made here, in the open.
+        description: 'Image profile to build and deploy (full = modules included, signed compliance audit log)'
+        required: true
+        type: choice
+        default: full
+        options: [full, core]
+      accept_unsigned_audit_log:
+        # Required for `core` and only for `core`; see the guard in preflight.
+        # A tick-box is the cheapest way to make "unsigned" impossible to reach
+        # by accident while keeping it reachable on purpose (a core-licensed
+        # deployment that never wanted the modules).
+        description: 'core only: I accept an UNSIGNED compliance audit log (no HMAC, verify() reports unsigned rows as intact)'
+        required: false
+        type: boolean
+        default: false
+
+# One deploy (or manual migration) per environment at a time. Not cancelled:
+# a deploy stopped halfway has migrated a database and left a CodeDeploy
+# deployment behind. GitHub keeps at most ONE pending run per group, so a
+# newer dispatch that queues behind a running deploy REPLACES an older one
+# that was still waiting -- docs/deployment/README.md says so.
+concurrency:
+  group: deploy-${{ inputs.environment }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  # One region (docs/self-hosting/cdk.md deploys the stacks to the same one).
+  AWS_REGION: us-west-2
+  ECR_BACKEND_REPO: experimentation-platform/backend
+
+jobs:
+  preflight:
+    name: Preflight (no AWS credentials)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: read
+    outputs:
+      sha: ${{ steps.tag.outputs.sha }}
+    steps:
+      - name: Refuse a dispatch from any ref but main
+        env:
+          REF: ${{ github.ref }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [ "$REF" != "refs/heads/main" ]; then
+            echo "::error::Run this workflow from main (\"Use workflow from\"); you chose ${REF_NAME}. The release to deploy is the 'version' input."
+            exit 1
+          fi
+
+      # Before anything else, and before any AWS credential is issued: the
+      # profile decides whether this deployment signs its compliance audit log.
+      - name: Confirm the deployment profile
+        env:
+          PROFILE: ${{ inputs.profile }}
+          ACCEPTED: ${{ inputs.accept_unsigned_audit_log }}
+        run: |
+          set -euo pipefail
+          echo "Requested profile: ${PROFILE}"
+          UNSIGNED="profile=core builds an image with no modules/, so the compliance module never registers: every SOC 2 / ISO 27001 audit event is written with hmac_signature = NULL and NullAuditSigner.verify() reports those rows as intact."
+          if [ "${PROFILE}" = "core" ] && [ "${ACCEPTED}" != "true" ]; then
+            echo "::error::${UNSIGNED} Re-run with accept_unsigned_audit_log=true if that is what you want, or deploy profile=full."
+            exit 1
+          fi
+          {
+            echo "### Deployment profile: \`${PROFILE}\`"
+            echo ""
+            if [ "${PROFILE}" = "core" ]; then
+              echo "Warning: ${UNSIGNED}"
+              echo ""
+              echo "Acknowledged by @${GITHUB_ACTOR}."
+            else
+              echo "Modules included; compliance audit events are HMAC-signed."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "${PROFILE}" = "core" ]; then
+            echo "::warning::${UNSIGNED} Acknowledged by ${GITHUB_ACTOR}."
+          fi
+
+      # main, with its history and every tag: the ancestry check below needs
+      # both. This is also the only checkout in this job, so the gate script
+      # is main's.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: The version is a release tag on main
+        id: tag
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          # Printed back only with anything outside a tag's alphabet masked:
+          # the value is operator-supplied and a workflow command is a line.
+          shown="${VERSION//[^0-9A-Za-z._\/-]/?}"
+          not_a_tag="'${shown}' is not a tag in this repository. Deploy a release tag (git tag --list 'v*'); branch names and commit SHAs are refused."
+          if ! [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
+            echo "::error::${not_a_tag}"
+            exit 1
+          fi
+          if ! SHA="$(git rev-parse -q --verify "refs/tags/${VERSION}^{commit}")"; then
+            echo "::error::${not_a_tag}"
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$SHA" HEAD; then
+            echo "::error::${VERSION} (${SHA:0:7}) is not on main. Only a release cut from main can be deployed."
+            exit 1
+          fi
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "${VERSION} is ${SHA}, on main"
+
+      - name: The Release Gate passed on that commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ steps.tag.outputs.sha }}
+          VERSION: ${{ inputs.version }}
+        run: bash scripts/verify_release_gate.sh "$REPO" "$SHA" "$VERSION"
+
+  deploy:
+    name: Deploy ${{ inputs.version }} to ${{ inputs.environment }}
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    environment: ${{ inputs.environment }}
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      TARGET_ENV: ${{ inputs.environment }}
+      VERSION: ${{ inputs.version }}
+      PROFILE: ${{ inputs.profile }}
+      RELEASE_SHA: ${{ needs.preflight.outputs.sha }}
+      # The CDK's names (stacks/names.py, fargate_service_stack.py);
+      # infrastructure/tests/test_workflow_names_exist.py checks each one
+      # against a synth of that environment.
+      ECS_CLUSTER: experimentation-${{ inputs.environment }}
+      ECS_BACKEND_SERVICE: experimentation-backend-${{ inputs.environment }}
+      ECS_BACKEND_TASK_FAMILY: experimentation-backend-${{ inputs.environment }}
+      MIGRATE_TASK_FAMILY: experimentation-migrate-${{ inputs.environment }}
+      MIGRATE_LOG_GROUP: /ecs/experimentation-migrate-${{ inputs.environment }}
+      CODEDEPLOY_APPLICATION: experimentation-platform-${{ inputs.environment }}
+      CODEDEPLOY_DEPLOYMENT_GROUP: experimentation-${{ inputs.environment }}
+      FARGATE_STACK: experimentation-fargate-${{ inputs.environment }}
+      DATABASE_STACK: experimentation-database-${{ inputs.environment }}
+      SECRETS_PREFIX: /${{ inputs.environment }}/experimentation
+    steps:
+      # FIRST, and the only place the account variable is read (PE v1 C9).
+      # Environment-scoped variables are not visible to a job-level `if:`, so
+      # the old `if: vars.AWS_ACCOUNT_ID != ''` skipped every job green for an
+      # environment configured the recommended way -- a deploy that did
+      # nothing and said nothing. An unconfigured environment is a red run.
+      - name: Refuse an environment that is not configured
+        env:
+          ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+          ROLE_ARN_SET: ${{ secrets.AWS_ROLE_ARN != '' }}
+          PUBLIC_BASE_URL: ${{ vars.PUBLIC_BASE_URL }}
+        run: |
+          set -euo pipefail
+          if [ -z "$ACCOUNT_ID" ]; then
+            echo "::error title=Not configured::vars.AWS_ACCOUNT_ID is not set for the '${TARGET_ENV}' environment, so nothing was deployed. Set it under Settings → Environments → ${TARGET_ENV} → Variables. See docs/deployment/README.md#before-the-first-deploy"
+            exit 1
+          fi
+          if ! [[ "$ACCOUNT_ID" =~ ^[0-9]{12}$ ]]; then
+            echo "::error title=Not configured::vars.AWS_ACCOUNT_ID for the '${TARGET_ENV}' environment is not a 12-digit AWS account id, so nothing was deployed. See docs/deployment/README.md#before-the-first-deploy"
+            exit 1
+          fi
+          if [ "$ROLE_ARN_SET" != "true" ]; then
+            echo "::error title=Not configured::secrets.AWS_ROLE_ARN is not set for the '${TARGET_ENV}' environment, so nothing was deployed. Set it under Settings → Environments → ${TARGET_ENV} → Secrets. See docs/deployment/README.md#before-the-first-deploy"
+            exit 1
+          fi
+          if [ -z "$PUBLIC_BASE_URL" ]; then
+            echo "::error title=Not configured::vars.PUBLIC_BASE_URL is not set for the '${TARGET_ENV}' environment, so this deploy could not be smoke-tested; nothing was deployed. Set it to the origin the stacks were deployed with (PUBLIC_BASE_URL). See docs/deployment/README.md#before-the-first-deploy"
+            exit 1
+          fi
+          echo "EXPECTED_ACCOUNT_ID=$ACCOUNT_ID" >> "$GITHUB_ENV"
+
+      # The tooling: this workflow's scripts/ and .github/actions/, from main.
+      - name: Check out the deploy tooling (main)
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # The release, for the image build only. By the commit preflight
+      # resolved and gated, not by the tag name, which could have been moved
+      # since.
+      - name: Check out the release into ./release
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.preflight.outputs.sha }}
+          path: release
+          persist-credentials: false
+
+      - name: The release checkout is the commit the gate passed
+        run: |
+          set -euo pipefail
+          actual="$(git -C release rev-parse HEAD)"
+          if [ "$actual" != "$RELEASE_SHA" ]; then
+            echo "::error::./release is at $actual, but preflight gated $RELEASE_SHA for ${VERSION}. Nothing was deployed."
+            exit 1
+          fi
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # DECISIONS D7: each environment is its own account. A role ARN pasted
+      # into the wrong environment would otherwise deploy staging into prod.
+      - name: Refuse the wrong AWS account
+        run: |
+          set -euo pipefail
+          actual="$(aws sts get-caller-identity --query Account --output text)"
+          if [ "$actual" != "$EXPECTED_ACCOUNT_ID" ]; then
+            echo "::error title=Wrong AWS account::environment=${TARGET_ENV} expects account ${EXPECTED_ACCOUNT_ID}; the assumed role is in ${actual}. Nothing has been built or changed."
+            exit 1
+          fi
+          echo "account $actual, region $AWS_REGION"
+
+      - name: Refuse when the stacks are not deployed here
+        run: |
+          set -euo pipefail
+          active="$(aws ecs describe-clusters --clusters "$ECS_CLUSTER" \
+                      --query "clusters[?status=='ACTIVE'].clusterName" --output text)"
+          if [ "$active" != "$ECS_CLUSTER" ]; then
+            echo "::error::No ECS cluster ${ECS_CLUSTER} in ${AWS_REGION} (account ${EXPECTED_ACCOUNT_ID}). Run ENVIRONMENT=${TARGET_ENV} cdk deploy --all in this account and region first: docs/self-hosting/cdk.md"
+            exit 1
+          fi
+
+      # Where the migration task runs (the API's subnets and security group,
+      # the one admitted to Aurora) and which cluster to snapshot. The CDK
+      # generates these; the stacks publish them.
+      - name: Read the Fargate stack's outputs
+        id: fargate
+        uses: ./.github/actions/stack-outputs
+        with:
+          stack: ${{ env.FARGATE_STACK }}
+          keys: TaskSubnets TaskSecurityGroup
+          environment: ${{ inputs.environment }}
+
+      - name: Read the database stack's outputs
+        id: database
+        uses: ./.github/actions/stack-outputs
+        with:
+          stack: ${{ env.DATABASE_STACK }}
+          keys: ClusterIdentifier
+          environment: ${{ inputs.environment }}
+
+      # A full image under a core task definition cannot boot: the core stacks
+      # inject no AUDIT_HMAC_KEY, and the modules refuse to register without
+      # it -- found twenty minutes into a CodeDeploy deployment. The reverse
+      # boots, but runs a stack deployed for signed audit logs without them.
+      # Read-only; both families.
+      - name: Refuse a profile the stacks were not deployed for
+        run: |
+          set -euo pipefail
+          for family in "$ECS_BACKEND_TASK_FAMILY" "$MIGRATE_TASK_FAMILY"; do
+            if ! secrets="$(aws ecs describe-task-definition --task-definition "$family" \
+                  --query "taskDefinition.containerDefinitions[?name=='backend'].secrets[].name" \
+                  --output text)"; then
+              echo "::error::No task definition family ${family} in ${AWS_REGION}. Run ENVIRONMENT=${TARGET_ENV} cdk deploy --all in this account and region first: docs/self-hosting/cdk.md"
+              exit 1
+            fi
+            if [ "$PROFILE" = "full" ] && ! grep -qw AUDIT_HMAC_KEY <<<"$secrets"; then
+              echo "::error::profile=full, but task definition ${family} injects no AUDIT_HMAC_KEY: the stacks were deployed as core. Deploy profile=core, or redeploy the stacks from a full checkout."
+              exit 1
+            fi
+            if [ "$PROFILE" = "core" ] && grep -qw AUDIT_HMAC_KEY <<<"$secrets"; then
+              echo "::error::profile=core, but task definition ${family} injects AUDIT_HMAC_KEY: the stacks were deployed as full. Deploy profile=full, or redeploy the stacks from a core checkout."
+              exit 1
+            fi
+          done
+          echo "both task definition families were deployed for profile=${PROFILE}"
+
+      # The task definitions inject these (infrastructure/cdk/stacks/
+      # fargate_service_stack.py, migration_task_stack.py), and the image ships
+      # no .env file: they are the only way the container gets a real value for
+      # a setting whose default the production settings classes REFUSE. A
+      # missing one is not a degraded deployment, it is a container that exits
+      # before uvicorn binds. One describe-secret each turns that into a name.
+      - name: Required secrets exist for this profile
+        run: |
+          set -euo pipefail
+          # No db-password: the database credentials are the secret the
+          # database stack generated for Aurora, read by the task definitions
+          # directly (#78). No Redis secret: the API task takes
+          # REDIS_HOST/REDIS_PORT from the Redis stack (#147).
+          required=(jwt-secret first-superuser-password)
+          if [ "${PROFILE}" = "full" ]; then
+            # Only the modules read it, and modules.register(hooks) builds
+            # their settings first: without it the registration fails, the API
+            # refuses to start (abort_if_modules_broken) and every alembic
+            # command fails with it (require_modules_or_absent).
+            required+=(audit-hmac-key)
+          fi
+          missing=()
+          for name in "${required[@]}"; do
+            aws secretsmanager describe-secret \
+              --secret-id "${SECRETS_PREFIX}/${name}" >/dev/null 2>&1 \
+              || missing+=("${SECRETS_PREFIX}/${name}")
+          done
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "::error::profile=${PROFILE} needs these AWS Secrets Manager secrets and they do not exist: ${missing[*]}. Create them first: docs/deployment/secrets-management.md."
+            exit 1
+          fi
+          echo "profile=${PROFILE}: all ${#required[@]} required secrets exist"
+
+      # Nothing in the CDK creates this repository -- both stacks import it by
+      # name -- so it is created once per account by hand (deployment guide,
+      # section 1.3). Named here in seconds rather than as a `docker push`
+      # failure.
+      - name: ECR repository exists
+        run: |
+          set -euo pipefail
+          if ! aws ecr describe-repositories \
+                --repository-names "${ECR_BACKEND_REPO}" >/dev/null 2>&1; then
+            echo "::error::the ECR repository ${ECR_BACKEND_REPO} does not exist in ${AWS_REGION}. Nothing in the CDK creates it; create it once per account and region -- docs/deployment/deployment-guide.md section 1.3."
+            exit 1
+          fi
+
+      # For the rollback line in the summary: the revision serving BEFORE this
+      # deploy. The PRIMARY task set, not services[0].taskDefinition, which on
+      # a CODE_DEPLOY service is frozen at CreateService.
+      - name: Record what is serving now
+        id: previous
+        run: |
+          set -euo pipefail
+          serving="$(aws ecs describe-services --cluster "$ECS_CLUSTER" --services "$ECS_BACKEND_SERVICE" \
+                       --query "services[0].taskSets[?status=='PRIMARY'].taskDefinition | [0]" --output text)"
+          case "$serving" in None|null) serving="" ;; esac
+          echo "arn=$serving" >> "$GITHUB_OUTPUT"
+          echo "serving now: ${serving:-nothing (first deploy)}"
+
+      - name: Notify deployment started
+        uses: slackapi/slack-github-action@v1.26.0
+        with:
+          channel-id: '#deployments'
+          slack-message: |
+            *${{ inputs.environment }} deployment starting*
+            Version: `${{ inputs.version }}`
+            Profile: `${{ inputs.profile }}`${{ inputs.profile == 'core' && ' (warning: unsigned compliance audit log)' || '' }}
+            Triggered by: ${{ github.actor }}
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+        continue-on-error: true
+
+      # ---- Everything above only reads. Everything below changes AWS. ----
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # One tag per release and profile, `:<tag>-<profile>`, pushed once. No
+      # `:latest` and no bare `:<tag>`: both used to be pushed on every build,
+      # so a staging build of the core profile moved the tag prod's next
+      # scale-out would pull (#71, #138). If the tag already exists -- the same
+      # release deployed to another environment -- its image is reused, not
+      # rebuilt, so staging and prod run the same bytes. Either way what the
+      # task definitions name is the DIGEST.
+      - name: Build and push the image once, and resolve its digest
+        id: image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        run: |
+          set -euo pipefail
+          IMAGE_TAG="${VERSION}-${PROFILE}"
+          REF="$ECR_REGISTRY/$ECR_BACKEND_REPO:$IMAGE_TAG"
+          # The commit actually checked out, never the dispatch ref: the image
+          # labels itself with it (org.opencontainers.image.revision, #70).
+          RELEASE_COMMIT="$(git -C release rev-parse HEAD)"
+
+          check_labels() {
+            local ref="$1" built revision
+            built="$(docker inspect --format '{{index .Config.Labels "io.experimently.profile"}}' "$ref")"
+            revision="$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$ref")"
+            if [ "$built" != "$PROFILE" ]; then
+              echo "::error::requested profile '$PROFILE' but $ref is labelled '$built'"
+              exit 1
+            fi
+            if [ "$revision" != "$RELEASE_COMMIT" ]; then
+              echo "::error::$ref is labelled revision '$revision', but ${VERSION} is $RELEASE_COMMIT"
+              exit 1
+            fi
+          }
+
+          digest=""
+          if found="$(aws ecr describe-images --repository-name "$ECR_BACKEND_REPO" \
+                        --image-ids imageTag="$IMAGE_TAG" \
+                        --query 'imageDetails[0].imageDigest' --output text 2>&1)"; then
+            digest="$found"
+          else
+            case "$found" in
+              *ImageNotFoundException*) ;;
+              *) echo "::error::could not look up $REF: $found"; exit 1 ;;
+            esac
+          fi
+
+          if [ -n "$digest" ]; then
+            echo "$REF already exists ($digest): reusing it"
+            docker pull "$ECR_REGISTRY/$ECR_BACKEND_REPO@$digest"
+            check_labels "$ECR_REGISTRY/$ECR_BACKEND_REPO@$digest"
+            reused=true
+          else
+            # Build context is the release's repository root (the code imports
+            # backend.app.*). VERSION is what the image labels itself with
+            # (org.opencontainers.image.version).
+            docker build \
+              --build-arg BUILD_DATE="$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \
+              --build-arg GIT_COMMIT="$RELEASE_COMMIT" \
+              --build-arg VERSION="${VERSION#v}" \
+              --target "$PROFILE" \
+              -t "$REF" \
+              -f release/backend/Dockerfile \
+              release
+            check_labels "$REF"
+            docker push "$REF"
+            digest="$(aws ecr describe-images --repository-name "$ECR_BACKEND_REPO" \
+                        --image-ids imageTag="$IMAGE_TAG" \
+                        --query 'imageDetails[0].imageDigest' --output text)"
+            reused=false
+          fi
+
+          if ! [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::could not resolve a digest for $REF (got '$digest')"
+            exit 1
+          fi
+          {
+            echo "image=$ECR_REGISTRY/$ECR_BACKEND_REPO@$digest"
+            echo "digest=$digest"
+            echo "tag=$IMAGE_TAG"
+            echo "reused=$reused"
+          } >> "$GITHUB_OUTPUT"
+          echo "image: $ECR_REGISTRY/$ECR_BACKEND_REPO@$digest (tag $IMAGE_TAG, commit $RELEASE_COMMIT)"
+
+      # Always, before the migration. The check this replaces compared the
+      # CLI's `None` (its text for an empty result) with "NONE", so it never
+      # took a snapshot when there was no backup (QA SILENT 5). A snapshot per
+      # deploy is cheap and is what the rollback runbook restores from.
+      - name: Snapshot the database before migrating
+        id: snapshot
+        env:
+          DB_CLUSTER: ${{ fromJSON(steps.database.outputs.json).ClusterIdentifier }}
+        run: |
+          set -euo pipefail
+          # Letters, digits and single hyphens; starts with a letter; <= 63.
+          id="pre-deploy-${TARGET_ENV}-${VERSION}-$(date -u +%Y%m%d-%H%M%S)"
+          id="$(tr -c 'A-Za-z0-9\n' '-' <<<"$id" | tr -s '-' | cut -c1-63)"
+          id="${id%-}"
+          aws rds create-db-cluster-snapshot \
+            --db-cluster-identifier "$DB_CLUSTER" \
+            --db-cluster-snapshot-identifier "$id" >/dev/null
+          aws rds wait db-cluster-snapshot-available --db-cluster-snapshot-identifier "$id"
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+          echo "snapshot $id of $DB_CLUSTER is available"
+
+      # A revision of this environment's migration family naming THIS image,
+      # run by its ARN (#138, QA 1c). The CloudFormation-registered revision
+      # names the CDK's `bootstrap` image and is never what runs.
+      - name: Register the migration task definition with this image
+        id: migrate-td
+        env:
+          IMAGE: ${{ steps.image.outputs.image }}
+        run: |
+          set -euo pipefail
+          arn="$(bash scripts/register_task_definition.sh "$MIGRATE_TASK_FAMILY" "$IMAGE")"
+          echo "arn=$arn" >> "$GITHUB_OUTPUT"
+
+      # `backend.app.db.bootstrap`, not raw `alembic upgrade heads`: the
+      # historical chain cannot be replayed from an empty database, and a
+      # first deploy meets exactly that. It stays an override (the family's
+      # own command is the same) so a family registered by an older `cdk
+      # deploy` still runs this release's command.
+      - name: Run the migration
+        id: migrate
+        env:
+          TASK_DEFINITION: ${{ steps.migrate-td.outputs.arn }}
+          SUBNETS: ${{ fromJSON(steps.fargate.outputs.json).TaskSubnets }}
+          SECURITY_GROUP: ${{ fromJSON(steps.fargate.outputs.json).TaskSecurityGroup }}
+        run: |
+          set -euo pipefail
+          network="$(jq -cn --arg subnets "$SUBNETS" --arg sg "$SECURITY_GROUP" \
+            '{awsvpcConfiguration: {subnets: ($subnets | split(",")), securityGroups: [$sg], assignPublicIp: "DISABLED"}}')"
+          overrides='{"containerOverrides":[{"name":"backend","command":["python","-m","backend.app.db.bootstrap"]}]}'
+          bash scripts/run_migration_task.sh "$ECS_CLUSTER" "$TASK_DEFINITION" "$network" "$overrides" "$MIGRATE_LOG_GROUP"
+
+      - name: Register the API task definition with this image
+        id: api-td
+        env:
+          IMAGE: ${{ steps.image.outputs.image }}
+        run: |
+          set -euo pipefail
+          arn="$(bash scripts/register_task_definition.sh "$ECS_BACKEND_TASK_FAMILY" "$IMAGE")"
+          echo "arn=$arn" >> "$GITHUB_OUTPUT"
+
+      - name: Create the CodeDeploy deployment (blue/green)
+        id: codedeploy
+        env:
+          TASK_DEFINITION: ${{ steps.api-td.outputs.arn }}
+        run: |
+          set -euo pipefail
+          appspec="$(jq -cn --arg td "$TASK_DEFINITION" '{
+            version: 1,
+            Resources: [{
+              TargetService: {
+                Type: "AWS::ECS::Service",
+                Properties: {
+                  TaskDefinition: $td,
+                  LoadBalancerInfo: { ContainerName: "backend", ContainerPort: 8000 }
+                }
+              }
+            }]
+          }')"
+          id="$(aws deploy create-deployment \
+            --application-name "$CODEDEPLOY_APPLICATION" \
+            --deployment-group-name "$CODEDEPLOY_DEPLOYMENT_GROUP" \
+            --description "deploy ${VERSION} (${PROFILE})" \
+            --revision "$(jq -cn --arg c "$appspec" '{revisionType: "AppSpecContent", appSpecContent: {content: $c}}')" \
+            --query deploymentId --output text)"
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+          echo "CodeDeploy deployment: $id"
+
+      # ================= PLACEHOLDER -- replaced by #143 (B3b) =================
+      # The forward traffic shift is NOT implemented in this release, and this
+      # step stops the run here, red, on purpose.
+      #
+      # What stood here -- `timeout 1200 aws deploy wait deployment-successful`,
+      # then `stop-deployment --auto-rollback-enabled` on timeout -- could not
+      # work and was harmful: the deployment group waits up to 30 minutes for a
+      # ContinueDeployment nobody sent, and the waiter accepts only Succeeded,
+      # which arrives an hour after the traffic shift. So every deploy "timed
+      # out", and on a deploy that HAD shifted, the stop rolled a successful
+      # release back (#143).
+      #
+      # Until #143 lands: the green task set is provisioned and nothing
+      # approves it, so CodeDeploy stops the deployment when its approval wait
+      # ends and the revision serving before this run keeps serving. The
+      # migration above HAS been applied.
+      - name: Traffic shift is not automated yet (#143)
+        env:
+          DEPLOYMENT_ID: ${{ steps.codedeploy.outputs.id }}
+          TASK_DEFINITION: ${{ steps.api-td.outputs.arn }}
+          PREVIOUS: ${{ steps.previous.outputs.arn }}
+        run: |
+          echo "::error title=Stopped before the traffic shift (#143)::CodeDeploy deployment ${DEPLOYMENT_ID} for ${TASK_DEFINITION} was created, but this workflow does not approve the traffic shift yet: #143 adds that and the check that the new revision is serving. Nothing has shifted; ${PREVIOUS:-the current revision} keeps serving, and CodeDeploy stops the unapproved deployment when its 30-minute approval wait ends. The migration was applied."
+          exit 1
+
+      # Reached once #143 replaces the placeholder above. A real request, not a
+      # probe: /health answers 200 whatever the routes do, and the ALB already
+      # used it to pass the tasks. Through the public origin (vars.PUBLIC_BASE_URL),
+      # never the ALB's DNS name, which TrustedHost rejects (D14). No package is
+      # installed on this host: it holds the environment's AWS role.
+      - name: Smoke test through the public URL
+        env:
+          PUBLIC_BASE_URL: ${{ vars.PUBLIC_BASE_URL }}
+        run: |
+          set -euo pipefail
+          if [ -z "$PUBLIC_BASE_URL" ]; then
+            echo "::error title=No smoke test::vars.PUBLIC_BASE_URL is empty for the '${TARGET_ENV}' environment, so there is nothing to smoke-test."
+            exit 1
+          fi
+          # The trailing slash: without it the API answers 307 to the slashed
+          # path, which says nothing about the release.
+          url="${PUBLIC_BASE_URL%/}/api/v1/experiments/"
+          expected='{"detail":"Not authenticated"}'
+          code="" body=""
+          for attempt in 1 2 3 4 5; do
+            code="$(curl -sS -o smoke-body.txt -w '%{http_code}' --max-time 15 "$url")" || true
+            body="$(cat smoke-body.txt 2>/dev/null || true)"
+            if [ "$code" = "401" ] && [ "$body" = "$expected" ]; then
+              echo "smoke: GET $url -> 401 $body"
+              exit 0
+            fi
+            echo "attempt $attempt: HTTP ${code:-none}, body ${body:0:200}"
+            sleep 10
+          done
+          echo "::error title=Smoke test failed::GET $url answered HTTP ${code:-none} with '${body:0:200}'; expected 401 $expected. Nothing rolls back automatically: use the rollback line in this run's summary."
+          exit 1
+
+      - name: If the migration was applied and the deploy did not finish
+        if: failure() && steps.migrate.outcome == 'success'
+        env:
+          PREVIOUS: ${{ steps.previous.outputs.arn }}
+        run: |
+          echo "::warning title=Migrated, not deployed::The migration was applied; the deployment then failed. The database is at ${VERSION}'s heads; ${PREVIOUS:-the previous revision} is still serving. This is safe only if the migration is backward-compatible (docs/deployment/deployment-guide.md#backward-compatible-migrations)."
+
+      - name: Run summary
+        if: always()
+        env:
+          RELEASE_COMMIT: ${{ needs.preflight.outputs.sha }}
+          IMAGE: ${{ steps.image.outputs.image }}
+          IMAGE_TAG: ${{ steps.image.outputs.tag }}
+          REUSED: ${{ steps.image.outputs.reused }}
+          SNAPSHOT: ${{ steps.snapshot.outputs.id }}
+          MIGRATION: ${{ steps.migrate.outcome }}
+          NEW_REVISION: ${{ steps.api-td.outputs.arn }}
+          DEPLOYMENT_ID: ${{ steps.codedeploy.outputs.id }}
+          PREVIOUS: ${{ steps.previous.outputs.arn }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          image_line="${IMAGE:-not built}"
+          if [ -n "$IMAGE_TAG" ]; then
+            image_line="${image_line} (tag ${IMAGE_TAG}$([ "$REUSED" = true ] && echo ', reused'))"
+          fi
+          {
+            echo "## Deploy ${VERSION} to ${TARGET_ENV}: ${JOB_STATUS}"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Environment | \`${TARGET_ENV}\` |"
+            echo "| Account / region | \`${EXPECTED_ACCOUNT_ID:-not checked}\` / \`${AWS_REGION}\` |"
+            echo "| Release | \`${VERSION}\` at \`${RELEASE_COMMIT}\` |"
+            echo "| Profile | \`${PROFILE}\` |"
+            echo "| Image | \`${image_line}\` |"
+            echo "| Snapshot before migrating | \`${SNAPSHOT:-none taken}\` |"
+            echo "| Migration | ${MIGRATION:-not run} |"
+            echo "| New API revision | \`${NEW_REVISION:-not registered}\` |"
+            echo "| CodeDeploy deployment | \`${DEPLOYMENT_ID:-not created}\` |"
+            echo "| Serving before this run | \`${PREVIOUS:-nothing (first deploy)}\` |"
+            echo ""
+            if [ -n "$PREVIOUS" ]; then
+              echo "Rollback: Actions → Rollback → environment=${TARGET_ENV}, task_definition_arn=${PREVIOUS##*/}"
+            else
+              echo "Rollback: there was no revision serving before this run, so there is nothing to roll back to."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Notify deployment result
+        if: always()
+        uses: slackapi/slack-github-action@v1.26.0
+        with:
+          channel-id: '#deployments'
+          slack-message: |
+            *${{ inputs.environment }} deployment ${{ job.status }}*: `${{ inputs.version }}` (${{ inputs.profile }})
+            Deployed by: ${{ github.actor }}
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+        continue-on-error: true

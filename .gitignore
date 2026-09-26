@@ -114,7 +114,6 @@ confidential/
 proprietary/
 
 # Production deployment artifacts
-deploy-prod/
 production-deployment/
 *.production.tfstate
 *.production.tfvars

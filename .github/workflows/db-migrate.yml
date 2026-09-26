@@ -1,90 +1,254 @@
 name: Database Migration
+run-name: Database migration (${{ inputs.direction }} ${{ inputs.target }}) on ${{ inputs.environment }}
+
+# The MANUAL, targeted path: `alembic current`, then one `upgrade <target>` or
+# `downgrade <target>`, on a database that already exists. A deploy runs its
+# own migration (deploy.yml); this is for the cases a deploy does not cover,
+# chiefly undoing one (docs/deployment/rollback-runbook.md).
+#
+# It runs with the image that is SERVING -- the API's PRIMARY task set -- so
+# the migration scripts it can see are the ones the running code was built
+# with. It used to run the `experimentation-migrate` family by name, which
+# resolved to whatever any environment had registered last (#138).
 
 on:
   workflow_dispatch:
     inputs:
       environment:
-        description: 'Target environment'
+        description: 'Environment whose database to migrate'
         required: true
         type: choice
-        options: [staging, production]
+        default: staging
+        options: [staging, prod]
       direction:
         description: 'Migration direction'
         required: true
         type: choice
+        default: upgrade
         options: [upgrade, downgrade]
       target:
-        description: 'Target revision (head, base, -1, or specific revision ID)'
-        required: false
+        description: 'Alembic target: heads (upgrade), a revision id, or a relative step such as -1 (downgrade). Not "head": a full image has two heads.'
+        required: true
+        type: string
         default: 'heads'
 
+# Shares the deploy's group: a manual migration and a deploy's migration must
+# never run against one database at once.
+concurrency:
+  group: deploy-${{ inputs.environment }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
 env:
-  AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+  AWS_REGION: us-west-2
 
 jobs:
   migrate:
-    name: Run Database Migration (${{ inputs.environment }})
+    name: Migrate ${{ inputs.environment }} (${{ inputs.direction }} ${{ inputs.target }})
     runs-on: ubuntu-latest
-    if: (github.repository == 'amarkanday/experimentation-platform' || github.repository == 'getexperimently/experimently') && vars.AWS_ACCOUNT_ID != ''
+    timeout-minutes: 90
     environment: ${{ inputs.environment }}
     permissions:
       id-token: write
       contents: read
+    env:
+      TARGET_ENV: ${{ inputs.environment }}
+      DIRECTION: ${{ inputs.direction }}
+      TARGET: ${{ inputs.target }}
+      # The CDK's names; infrastructure/tests/test_workflow_names_exist.py
+      # checks each against a synth of that environment.
+      ECS_CLUSTER: experimentation-${{ inputs.environment }}
+      ECS_BACKEND_SERVICE: experimentation-backend-${{ inputs.environment }}
+      MIGRATE_TASK_FAMILY: experimentation-migrate-${{ inputs.environment }}
+      MIGRATE_LOG_GROUP: /ecs/experimentation-migrate-${{ inputs.environment }}
+      FARGATE_STACK: experimentation-fargate-${{ inputs.environment }}
+      DATABASE_STACK: experimentation-database-${{ inputs.environment }}
     steps:
-      - uses: actions/checkout@v7
+      # FIRST, and the only place the account variable is read (PE v1 C9).
+      - name: Refuse an environment that is not configured
+        env:
+          ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+          ROLE_ARN_SET: ${{ secrets.AWS_ROLE_ARN != '' }}
+        run: |
+          set -euo pipefail
+          if [ -z "$ACCOUNT_ID" ]; then
+            echo "::error title=Not configured::vars.AWS_ACCOUNT_ID is not set for the '${TARGET_ENV}' environment, so nothing was migrated. Set it under Settings → Environments → ${TARGET_ENV} → Variables. See docs/deployment/README.md#before-the-first-deploy"
+            exit 1
+          fi
+          if [ "$ROLE_ARN_SET" != "true" ]; then
+            echo "::error title=Not configured::secrets.AWS_ROLE_ARN is not set for the '${TARGET_ENV}' environment, so nothing was migrated. Set it under Settings → Environments → ${TARGET_ENV} → Secrets. See docs/deployment/README.md#before-the-first-deploy"
+            exit 1
+          fi
+          echo "EXPECTED_ACCOUNT_ID=$ACCOUNT_ID" >> "$GITHUB_ENV"
+
+      - name: Refuse a dispatch from any ref but main
+        env:
+          REF: ${{ github.ref }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [ "$REF" != "refs/heads/main" ]; then
+            echo "::error::Run this workflow from main (\"Use workflow from\"); you chose ${REF_NAME}."
+            exit 1
+          fi
+
+      - name: Refuse a target alembic cannot take
+        run: |
+          set -euo pipefail
+          if [ "$TARGET" = "head" ]; then
+            echo "::error::target=head is refused: a full-profile image has two heads (the core chain and the modules branch) and alembic rejects the singular. Use heads."
+            exit 1
+          fi
+          # A revision id, heads/base, or a relative step (-1, +2, rev@-1).
+          if ! [[ "$TARGET" =~ ^[A-Za-z0-9_@+-]{1,64}$ ]]; then
+            echo "::error::target must be heads, base, a revision id or a relative step such as -1; this one has other characters in it."
+            exit 1
+          fi
+          if [ "$DIRECTION" = "downgrade" ]; then
+            echo "::warning::DOWNGRADE of ${TARGET_ENV} to ${TARGET} requested by ${GITHUB_ACTOR}. A snapshot is taken first."
+          fi
+
+      - name: Check out the tooling (main)
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v6
         with:
-          role-to-assume: ${{ inputs.environment == 'production' && secrets.PROD_AWS_ROLE_ARN || secrets.STAGING_AWS_ROLE_ARN }}
-          aws-region: us-west-2
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
 
-      - name: Require approval for production downgrade
-        if: inputs.environment == 'production' && inputs.direction == 'downgrade'
+      - name: Refuse the wrong AWS account
         run: |
-          echo "::warning::PRODUCTION DOWNGRADE requested by ${{ github.actor }}"
-          echo "Proceeding with production downgrade to revision: ${{ inputs.target }}"
+          set -euo pipefail
+          actual="$(aws sts get-caller-identity --query Account --output text)"
+          if [ "$actual" != "$EXPECTED_ACCOUNT_ID" ]; then
+            echo "::error title=Wrong AWS account::environment=${TARGET_ENV} expects account ${EXPECTED_ACCOUNT_ID}; the assumed role is in ${actual}. Nothing has been changed."
+            exit 1
+          fi
 
-      - name: Take pre-migration snapshot
+      - name: Read the Fargate stack's outputs
+        id: fargate
+        uses: ./.github/actions/stack-outputs
+        with:
+          stack: ${{ env.FARGATE_STACK }}
+          keys: TaskSubnets TaskSecurityGroup
+          environment: ${{ inputs.environment }}
+
+      - name: Read the database stack's outputs
+        id: database
+        uses: ./.github/actions/stack-outputs
+        with:
+          stack: ${{ env.DATABASE_STACK }}
+          keys: ClusterIdentifier
+          environment: ${{ inputs.environment }}
+
+      # The PRIMARY task set is what serves traffic on a CODE_DEPLOY service;
+      # services[0].taskDefinition is frozen at CreateService.
+      - name: Find the image that is serving
+        id: serving
         run: |
-          DB_CLUSTER="experimentation-${{ inputs.environment }}"
-          SNAPSHOT_ID="pre-migration-$(date +%Y%m%d-%H%M%S)"
+          set -euo pipefail
+          td="$(aws ecs describe-services --cluster "$ECS_CLUSTER" --services "$ECS_BACKEND_SERVICE" \
+                  --query "services[0].taskSets[?status=='PRIMARY'].taskDefinition | [0]" --output text)"
+          case "$td" in
+            ""|None|null)
+              echo "::error::No release is serving in ${ECS_BACKEND_SERVICE} (it has no PRIMARY task set), so there is no image to migrate with. Deploy a release first: Actions → Deploy."
+              exit 1
+              ;;
+          esac
+          image="$(aws ecs describe-task-definition --task-definition "$td" \
+                     --query "taskDefinition.containerDefinitions[?name=='backend'].image | [0]" --output text)"
+          if [ -z "$image" ] || [ "$image" = "None" ]; then
+            echo "::error::$td, which is serving, has no container named 'backend'."
+            exit 1
+          fi
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+          echo "serving: $td ($image)"
+
+      - name: Take a snapshot first
+        id: snapshot
+        env:
+          DB_CLUSTER: ${{ fromJSON(steps.database.outputs.json).ClusterIdentifier }}
+        run: |
+          set -euo pipefail
+          id="pre-migration-${TARGET_ENV}-$(date -u +%Y%m%d-%H%M%S)"
           aws rds create-db-cluster-snapshot \
-            --db-cluster-identifier $DB_CLUSTER \
-            --db-cluster-snapshot-identifier $SNAPSHOT_ID
-          echo "Created snapshot: $SNAPSHOT_ID"
+            --db-cluster-identifier "$DB_CLUSTER" \
+            --db-cluster-snapshot-identifier "$id" >/dev/null
+          aws rds wait db-cluster-snapshot-available --db-cluster-snapshot-identifier "$id"
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+          echo "snapshot $id of $DB_CLUSTER is available"
 
-      - name: Show current migration state
+      # A revision of this environment's migration family naming the serving
+      # image, run by its ARN (QA 1c).
+      - name: Register the migration task definition with the serving image
+        id: migrate-td
+        env:
+          IMAGE: ${{ steps.serving.outputs.image }}
         run: |
-          echo "Running: alembic current && alembic heads"
-          # This runs in ECS to access the production database
-          aws ecs run-task \
-            --cluster experimentation-${{ inputs.environment }} \
-            --task-definition experimentation-migrate \
-            --launch-type FARGATE \
-            --network-configuration "awsvpcConfiguration={subnets=[${{ secrets.PRIVATE_SUBNET_IDS }}],securityGroups=[${{ secrets.ECS_SG_ID }}],assignPublicIp=DISABLED}" \
-            --overrides '{"containerOverrides":[{"name":"backend","command":["python","-m","alembic","-c","backend/app/db/alembic.ini","current"]}]}'
+          set -euo pipefail
+          # A deploy registers digests; a revision still on the CDK's bootstrap
+          # tag is migrated with that tag's image, as the service runs it.
+          case "$IMAGE" in
+            *@sha256:*) arn="$(bash scripts/register_task_definition.sh "$MIGRATE_TASK_FAMILY" "$IMAGE")" ;;
+            *)
+              echo "::error::The serving image $IMAGE is not pinned by digest, so which bytes it names can change under this migration. Deploy a release first: Actions → Deploy."
+              exit 1
+              ;;
+          esac
+          echo "arn=$arn" >> "$GITHUB_OUTPUT"
 
-      - name: Run migration
+      - name: Show the current revision
+        env:
+          TASK_DEFINITION: ${{ steps.migrate-td.outputs.arn }}
+          SUBNETS: ${{ fromJSON(steps.fargate.outputs.json).TaskSubnets }}
+          SECURITY_GROUP: ${{ fromJSON(steps.fargate.outputs.json).TaskSecurityGroup }}
         run: |
-          TASK_ARN=$(aws ecs run-task \
-            --cluster experimentation-${{ inputs.environment }} \
-            --task-definition experimentation-migrate \
-            --launch-type FARGATE \
-            --network-configuration "awsvpcConfiguration={subnets=[${{ secrets.PRIVATE_SUBNET_IDS }}],securityGroups=[${{ secrets.ECS_SG_ID }}],assignPublicIp=DISABLED}" \
-            --overrides "{\"containerOverrides\":[{\"name\":\"backend\",\"command\":[\"python\",\"-m\",\"alembic\",\"-c\",\"backend/app/db/alembic.ini\",\"${{ inputs.direction }}\",\"${{ inputs.target }}\"]}]}" \
-            --query 'tasks[0].taskArn' --output text)
+          set -euo pipefail
+          network="$(jq -cn --arg subnets "$SUBNETS" --arg sg "$SECURITY_GROUP" \
+            '{awsvpcConfiguration: {subnets: ($subnets | split(",")), securityGroups: [$sg], assignPublicIp: "DISABLED"}}')"
+          overrides='{"containerOverrides":[{"name":"backend","command":["python","-m","alembic","-c","backend/app/db/alembic.ini","current"]}]}'
+          bash scripts/run_migration_task.sh "$ECS_CLUSTER" "$TASK_DEFINITION" "$network" "$overrides" "$MIGRATE_LOG_GROUP"
 
-          echo "Migration task ARN: $TASK_ARN"
-          aws ecs wait tasks-stopped \
-            --cluster experimentation-${{ inputs.environment }} \
-            --tasks $TASK_ARN
+      - name: Run the migration
+        id: migrate
+        env:
+          TASK_DEFINITION: ${{ steps.migrate-td.outputs.arn }}
+          SUBNETS: ${{ fromJSON(steps.fargate.outputs.json).TaskSubnets }}
+          SECURITY_GROUP: ${{ fromJSON(steps.fargate.outputs.json).TaskSecurityGroup }}
+        run: |
+          set -euo pipefail
+          network="$(jq -cn --arg subnets "$SUBNETS" --arg sg "$SECURITY_GROUP" \
+            '{awsvpcConfiguration: {subnets: ($subnets | split(",")), securityGroups: [$sg], assignPublicIp: "DISABLED"}}')"
+          # The operator's values become JSON strings through jq --arg, never
+          # by splicing them into a JSON literal.
+          overrides="$(jq -cn --arg direction "$DIRECTION" --arg target "$TARGET" \
+            '{containerOverrides: [{name: "backend", command: ["python", "-m", "alembic", "-c", "backend/app/db/alembic.ini", $direction, $target]}]}')"
+          bash scripts/run_migration_task.sh "$ECS_CLUSTER" "$TASK_DEFINITION" "$network" "$overrides" "$MIGRATE_LOG_GROUP"
 
-          EXIT_CODE=$(aws ecs describe-tasks \
-            --cluster experimentation-${{ inputs.environment }} \
-            --tasks $TASK_ARN \
-            --query 'tasks[0].containers[0].exitCode' \
-            --output text)
-
-          echo "Migration exit code: $EXIT_CODE"
-          [ "$EXIT_CODE" = "0" ] || exit 1
+      - name: Run summary
+        if: always()
+        env:
+          IMAGE: ${{ steps.serving.outputs.image }}
+          SNAPSHOT: ${{ steps.snapshot.outputs.id }}
+          TASK_DEFINITION: ${{ steps.migrate-td.outputs.arn }}
+          MIGRATION: ${{ steps.migrate.outcome }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          {
+            echo "## Database migration on ${TARGET_ENV}: ${JOB_STATUS}"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Environment | \`${TARGET_ENV}\` |"
+            echo "| Account / region | \`${EXPECTED_ACCOUNT_ID:-not checked}\` / \`${AWS_REGION}\` |"
+            echo "| Command | \`alembic ${DIRECTION} ${TARGET}\` |"
+            echo "| Image (serving) | \`${IMAGE:-not found}\` |"
+            echo "| Task definition | \`${TASK_DEFINITION:-not registered}\` |"
+            echo "| Snapshot first | \`${SNAPSHOT:-none taken}\` |"
+            echo "| Result | ${MIGRATION:-not run} |"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -23,7 +23,7 @@ TOKEN = os.environ.get("SMOKE_TEST_TOKEN", "")
 # These tests need a deployed environment.  Without SMOKE_TEST_API_URL they
 # would try to reach a server that does not exist in unit/CI runs and fail,
 # so the whole module is skipped unless the target URL is provided
-# (deploy-prod.yml sets it after a release).
+# (nothing sets it in CI: run it by hand against a deployment).
 pytestmark = pytest.mark.skipif(
     not API_URL,
     reason="SMOKE_TEST_API_URL not set — production smoke tests only run against a deployed environment",

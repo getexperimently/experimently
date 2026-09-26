@@ -32,10 +32,10 @@ ALEMBIC_CONFIG = "backend/app/db/alembic.ini"
 #:     INFO  [alembic.runtime.migration] Running upgrade 84a772608a6e -> ba93ceb4d658
 #:     psycopg2.errors.DuplicateTable: relation "permissions" already exists
 #:
-#: `deploy-prod.yml` runs this task *before* the service (`deploy` needs
-#: `run-migrations`), so nothing has created the schema yet and the FIRST
-#: production deploy meets exactly that empty database.  No deployment has ever
-#: been made from this repository, so that is the next one.
+#: `deploy.yml` runs this task *before* the service's CodeDeploy deployment, so
+#: nothing has created the schema yet and the FIRST deploy of an environment
+#: meets exactly that empty database.  No deployment has ever been made from
+#: this repository, so that is the next one.
 #:
 #: ``bootstrap`` is what `backend/docker-entrypoint.sh` already runs, and it
 #: handles both states: schema from the models plus stamped heads on a fresh
@@ -50,23 +50,34 @@ ALEMBIC_CONFIG = "backend/app/db/alembic.ini"
 #: is still what that workflow passes to `-c`.
 #:
 #: backend/tests/unit/infrastructure/test_migration_task_command.py checks that
-#: this command, the db-migrate workflow and deploy-prod all still agree with
-#: the image layout.
+#: this command, the db-migrate workflow and the deploy workflow all still
+#: agree with the image layout.
 MIGRATION_COMMAND = [
     "python",
     "-m",
     "backend.app.db.bootstrap",
 ]
 
-# --- The image this task must run ----------------------------------------
-# The migration task and the API service have to be the same **profile**, and
-# `IMAGE_TAG` is how that is arranged: `.github/workflows/deploy-prod.yml`
-# builds `--target "$PROFILE"` and pushes that image to `:latest` as well as to
-# the version tags, so whichever profile was deployed is what this task pulls.
-# Changing this tag without changing what the deploy workflow pushes to it
-# breaks that, and the two profiles do not read the same `alembic_version`: a
-# core image cannot resolve the `modules_0001_rbac` row a full bootstrap
-# records, and alembic reads every row before it does anything.
+# --- The image this task definition carries ------------------------------
+# NOT the image a migration runs. Every migration runs a revision a workflow
+# registered for it: `.github/workflows/deploy.yml` registers a revision of
+# this family naming the image it just built, BY DIGEST, and runs that
+# revision's ARN; `db-migrate.yml` does the same with the image the API is
+# serving (`scripts/register_task_definition.sh`, #138). That is how the
+# migration and the API end up on the same build and the same **profile** --
+# which matters, because the two profiles do not read the same
+# `alembic_version`: a core image cannot resolve the `modules_0001_rbac` row a
+# full bootstrap records, and alembic reads every row before it does anything.
+#
+# This tag used to be `latest`, and the deploy pushed `:latest` so that the
+# family's newest revision would pull "the image being deployed". It pulled
+# whatever ANY environment or profile had built last: one ECR repository
+# serves them all, and ECS resolves a tag at every task start (#71, #138).
+# Nothing pushes `:latest` any more. The tag here is the CDK's `bootstrap`, the
+# same one the API service's CloudFormation revision names: a tag the pipeline
+# never writes, so this revision cannot silently follow a later build.
+# infrastructure/tests/test_pipeline_owns_the_image.py asserts that no task
+# definition the app synthesises names `latest`.
 #
 # When the pair *is* mismatched, `backend/app/db/migrations/env.py` answers the
 # way `db/bootstrap.py` always did rather than with a traceback: when there is
@@ -77,7 +88,7 @@ MIGRATION_COMMAND = [
 # taken -- to delete those rows from `<schema>.alembic_version`. Either way the
 # task never half-applies a chain it cannot plan, and the deploy job fails with
 # a sentence instead of "Can't locate revision identified by ...".
-IMAGE_TAG = "latest"
+IMAGE_TAG = "bootstrap"
 
 
 class MigrationTaskStack(Stack):
@@ -91,12 +102,12 @@ class MigrationTaskStack(Stack):
 
         python -m backend.app.db.bootstrap
 
-    Usage in a deployment pipeline:
-        aws ecs run-task \\
-            --cluster <cluster-name> \\
-            --task-definition experimentation-migrate-<env> \\
-            --launch-type FARGATE \\
-            --network-configuration "awsvpcConfiguration={subnets=[...],securityGroups=[...],assignPublicIp=DISABLED}"
+    Usage in a deployment pipeline: register a revision of
+    ``experimentation-migrate-<env>`` naming the image by digest
+    (``scripts/register_task_definition.sh``), then run THAT revision's ARN
+    (``scripts/run_migration_task.sh``) -- never the bare family, which
+    resolves to whatever registered last. The subnets and security group come
+    from the Fargate stack's ``TaskSubnets`` / ``TaskSecurityGroup`` outputs.
 
     The task exits (succeeds or fails) after the migration completes, making
     it easy to detect failures and gate subsequent deployment steps.
@@ -115,7 +126,7 @@ class MigrationTaskStack(Stack):
     ENTRYPOINT runs before it; ``RUN_MIGRATIONS=false`` in the environment is
     what stops that entry point from bootstrapping the schema on its way past.
     Callers that override the command (``.github/workflows/db-migrate.yml``,
-    ``deploy-prod.yml``) inherit that environment, which is why a *downgrade*
+    ``deploy.yml``) inherit that environment, which is why a *downgrade*
     override is now only a downgrade.
     """
 
