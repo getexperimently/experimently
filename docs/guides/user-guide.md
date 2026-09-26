@@ -287,7 +287,7 @@ From the Results page:
 
 ### Basic Rules
 
-```
+```text
 country IN [US, CA, GB]          → User's country is one of the list
 plan EQUALS premium              → Exact match
 age GREATER_THAN 18              → Numeric comparison
@@ -297,7 +297,7 @@ app_version SEMVER_GT 2.0.0     → Semantic version comparison
 
 ### Logical Operators
 
-```
+```text
 AND: all rules must match
 OR:  at least one rule must match
 NOT: rule must NOT match
@@ -306,7 +306,7 @@ NOT: rule must NOT match
 ### Complex Example
 
 Target US/EU premium users who are active:
-```
+```text
 AND:
   country IN [US, GB, DE, FR]
   plan IN [pro, enterprise]
@@ -314,7 +314,7 @@ AND:
 ```
 
 Target either new users OR power users (but not average users):
-```
+```text
 OR:
   account_age_days LESS_THAN 7
   AND:
@@ -372,7 +372,7 @@ Standard A/B tests require a fixed sample size decided upfront. Sequential testi
 **When to use it:** When you need results faster, or when you need to stop early if a variant is performing significantly worse.
 
 Access via the **Sequential** tab on any experiment results page, or via:
-```
+```text
 GET /api/v1/results/{experiment_id}/sequential
 ```
 
@@ -387,7 +387,7 @@ CUPED reduces result noise by adjusting for each user's pre-experiment behavior.
 **When to use it:** When you have historical metric data for your users (e.g., prior revenue, prior sessions). Works best when the covariate is strongly correlated with the outcome.
 
 Access via the **CUPED** tab on any experiment results page, or via:
-```
+```text
 GET /api/v1/results/{experiment_id}/cuped
 ```
 
@@ -402,7 +402,7 @@ After an experiment concludes, use dimensional analysis to understand whether th
 **Important:** Segment findings are always exploratory. Use them to generate hypotheses for follow-up experiments, not as final conclusions.
 
 Access via the **Breakdowns** tab on any experiment results page, or via:
-```
+```text
 GET /api/v1/experiments/{experiment_id}/segmented-results/{segment_by}?dimension=device
 ```
 
@@ -425,7 +425,7 @@ Set `optimization_type` to `thompson_sampling`, `ucb1`, or `epsilon_greedy` when
 When multiple experiments run simultaneously on overlapping user populations, they can distort each other's results. Run an interaction scan to check.
 
 Access via:
-```
+```text
 GET /api/v1/interactions/scan
 ```
 

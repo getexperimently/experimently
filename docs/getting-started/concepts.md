@@ -12,7 +12,7 @@ A feature flag (also called a feature toggle or feature switch) is a configurati
 
 The simplest type. A boolean value controls whether the feature is shown at all.
 
-```
+```text
 dark-mode: true   →  show dark theme
 dark-mode: false  →  show light theme
 ```
@@ -23,7 +23,7 @@ Common uses: gradual rollouts, kill switches, beta programs, maintenance mode.
 
 Instead of a boolean, the flag returns one of several string values. Each value maps to a different experience.
 
-```
+```text
 checkout-layout: "classic"
 checkout-layout: "simplified"
 checkout-layout: "one-page"
@@ -161,7 +161,7 @@ Targeting rules define which users are eligible for an experiment or feature fla
 
 Rules are evaluated against user attributes that your application passes to the platform at evaluation time.
 
-```
+```text
 country IN [US, CA, GB]
 plan EQUALS premium
 account_age_days GREATER_THAN 30
@@ -173,7 +173,7 @@ email ENDS_WITH @company.com
 
 Rules can be combined using AND (all must match), OR (at least one must match), and NOT (inverts the result).
 
-```
+```text
 AND:
   country IN [US, CA]
   plan EQUALS enterprise

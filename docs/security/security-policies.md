@@ -134,7 +134,7 @@ The following permissions are enforced by `backend/app/core/permissions.py`:
 2. **No secrets in logs.** The `LoggingMiddleware` must not log request bodies, headers containing `Authorization` or `X-API-Key`, or any field with names matching `password`, `secret`, `key`, or `token`.
 
 3. **Secrets Manager path convention:**
-   ```
+   ```text
    /experimentation-platform/{environment}/{secret-name}
    # e.g.
    /experimentation-platform/prod/postgres-password

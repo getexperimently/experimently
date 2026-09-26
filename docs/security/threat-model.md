@@ -33,7 +33,7 @@ Experimently is an AWS-hosted A/B testing and feature flag management service. I
 
 The platform has five distinct trust boundaries:
 
-```
+```text
 BOUNDARY 1: Internet — Untrusted
   Public internet, SDK clients, browsers, anonymous callers
 
@@ -168,7 +168,7 @@ BOUNDARY 5: Analytics Pipeline — Internal
 
 ## 4. Data Flow Diagram
 
-```
+```text
                            PUBLIC INTERNET
                                 |
                   ┌─────────────▼──────────────┐
@@ -286,7 +286,7 @@ Data flows carrying PII/sensitive data:
 
 ## 6. Top Threats — Likelihood × Impact Matrix
 
-```
+```text
          IMPACT
          Low    Medium   High   Critical
 L  High   [ ]    [T4]    [T5]    [T1,T2]

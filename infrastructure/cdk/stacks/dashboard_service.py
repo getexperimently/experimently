@@ -58,6 +58,12 @@ def dashboard_image_tag(scope: Construct) -> str:
     can supply a number, and either silently falling back to `bootstrap`
     would pin nothing while looking pinned. The same rules as
     `backend_image_tag` in `fargate_service_stack.py`.
+
+    A digest, `sha256:<hex>`, is accepted and synthesises `web@sha256:<hex>`
+    (`test_a_digest_pin_names_the_image_by_digest`). That is the pin a
+    `cdk deploy` of a running environment passes, as printed by
+    `scripts/check_dashboard_image.py`: without it the service is re-pointed
+    at `web:bootstrap` (docs/deployment/deployment-guide.md section 1.6).
     """
     tag = scope.node.try_get_context("dashboard_image_tag")
     if tag is None:
