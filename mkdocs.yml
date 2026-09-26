@@ -155,7 +155,6 @@ nav:
   - Rollback Runbook: deployment/rollback-runbook.md
   - Disaster Recovery: deployment/disaster-recovery.md
   - Secrets Management: deployment/secrets-management.md
-  - DNS & Route 53: deployment/AWS_ROUTE53_DEPLOYMENT.md
 - Monitoring:
   - Monitoring Guide: monitoring/monitoring-guide.md
   - Setting It Up: monitoring/setup-guide.md

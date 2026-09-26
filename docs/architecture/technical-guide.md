@@ -721,10 +721,14 @@ The safety monitor automatically sets `rollout_percentage=0` and creates a rollb
 | ElastiCache Redis | Caching layer |
 | Kinesis Data Streams | Event ingestion |
 | Lambda | Real-time assignment + evaluation |
-| CloudFront + S3 | Frontend static hosting |
 | Cognito | User authentication |
 | CloudWatch | Monitoring + alerting |
 | Secrets Manager | Credentials storage |
+
+The dashboard is not yet deployed by the CDK (#69): no stack hosts it, and
+nothing creates CloudFront or an S3 bucket for it. In Docker Compose and in the
+`frontend/Dockerfile` image it is served by nginx, which also proxies `/api/` to
+the API.
 
 ---
 

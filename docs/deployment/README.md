@@ -46,8 +46,8 @@ run otherwise, before it assumes the production AWS role.
 
 The profile is the **API image's** only; this workflow builds no dashboard
 image. It used to, and that step pushed to an ECR repository nothing creates,
-so it never succeeded (#195). Production has no dashboard delivery path at all
-at the moment — see #212, which is where the shape of one is being decided.
+so it never succeeded. Production has no dashboard delivery path at all at the
+moment: the dashboard is not yet deployed by the CDK. That is tracked in #69.
 Until then, a core API deployed here is not paired with a dashboard build by
 anything, so nothing enforces that the two agree on a profile.
 

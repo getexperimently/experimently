@@ -1,6 +1,8 @@
 # AWS CDK Deployment
 
-The entire platform infrastructure is defined as code using **AWS CDK v2** (TypeScript). A single `cdk deploy --all` command provisions everything needed to run the platform in your AWS account.
+The platform's AWS infrastructure is defined as code using **AWS CDK v2**, in **Python**: the app is `infrastructure/cdk/app.py`, and `infrastructure/cdk/cdk.json` runs it with `python3 app.py`. `cdk deploy --all` provisions the API and the data stores it needs in your AWS account.
+
+**The dashboard is not yet deployed by the CDK.** No stack builds, stores or serves it: the Fargate stack runs the API container alone, behind the one load balancer the CDK creates. Until that lands (#69), the dashboard runs where the `frontend/Dockerfile` image runs, such as the Docker Compose stack in the [Quick Start](../getting-started/quick-start.md).
 
 ---
 
@@ -9,7 +11,8 @@ The entire platform infrastructure is defined as code using **AWS CDK v2** (Type
 | Tool | Version | Install |
 |------|---------|---------|
 | AWS Account | Any | [Sign up](https://aws.amazon.com/) |
-| Node.js | 18+ | `node --version` |
+| Python | 3.11+ | The CDK app is Python |
+| Node.js | 18+ | Only for the CDK CLI: `node --version` |
 | AWS CDK | v2 | `npm install -g aws-cdk` |
 | Docker | 20+ | Required for building container images |
 | AWS CLI | v2 | [Install guide](https://docs.aws.amazon.com/cli/latest/userguide/install-cliv2.html) |
@@ -47,31 +50,37 @@ aws sts get-caller-identity --query Account --output text
 
 ## Required Environment Variables
 
-Set these before deploying. They are passed as CDK context variables or environment variables:
+`infrastructure/cdk/app.py` reads these from the environment. `cdk synth` and `cdk deploy` fail without the two marked required:
 
 ```bash
 export CDK_DEFAULT_ACCOUNT=123456789012
 export CDK_DEFAULT_REGION=us-east-1
 
-# Application configuration
-export POSTGRES_PASSWORD=your-secure-db-password
-export SECRET_KEY=your-32-char-minimum-secret-key
-export COGNITO_USER_POOL_ID=us-east-1_xxxxxxxxx
-export COGNITO_CLIENT_ID=your-cognito-client-id
+# dev (the default), staging, prod or demo
+export ENVIRONMENT=prod
 
-# Optional alerting
-export SLACK_BOT_TOKEN=xoxb-your-slack-token
-export SENDGRID_API_KEY=SG.your-sendgrid-key
-export ANTHROPIC_API_KEY=sk-ant-your-key
+# Required: the ACM certificate for the load balancer's HTTPS listeners
+export CERTIFICATE_ARN=arn:aws:acm:us-east-1:123456789012:certificate/your-certificate-id
+
+# Required: the absolute https:// origin users reach the platform at (one host, app.<domain>)
+export PUBLIC_BASE_URL=https://app.example.com
 ```
+
+The application's own secrets (database password, JWT secret and the rest) are
+not read from your shell. The task definition takes them from Secrets Manager
+under `/<env>/experimentation/`, and they must exist before the first deploy:
+see [Secrets Management](../deployment/secrets-management.md) and the list in
+the [Deployment README](../deployment/README.md). The API image is pulled from
+the ECR repository `experimentation-platform/backend`, which the CDK does not
+create.
 
 ---
 
 ## Deploy All Stacks
 
 ```bash
-cd infrastructure
-npm install
+cd infrastructure/cdk
+pip install -r requirements.txt
 cdk deploy --all
 ```
 
@@ -140,22 +149,22 @@ cdk deploy experimentation-monitoring-dev
 ### experimentation-vpc-<env>
 
 - VPC with public and private subnets across 2 availability zones
-- NAT Gateway for outbound internet access from private subnets
+- Two NAT Gateways (one per availability zone) for outbound internet access from private subnets
 - Security groups for ALB, ECS tasks, RDS, and ElastiCache
 
 ### experimentation-database-<env> and experimentation-redis-<env>
 
-- **Aurora PostgreSQL** cluster (writer + 1 reader instance, `db.r6g.large` by default)
-- **ElastiCache Redis** cluster (single node, `cache.t3.medium` by default)
+- **Aurora PostgreSQL** cluster: writer + 1 reader on `db.r5.large` for `prod`, writer + 1 reader on `db.t3.medium` for `staging`, a single `db.t3.medium` otherwise
+- **ElastiCache Redis** replication group: 3 nodes on `cache.r6g.large` for `prod`, 2 on `cache.m6g.large` for `staging`, a single `cache.t4g.medium` otherwise
 - Subnet groups and parameter groups
-- Automated backups (7-day retention)
+- Redis snapshots kept 7 days in `prod`, 3 in `staging`, 1 otherwise
 
 ### experimentation-compute-<env> and experimentation-fargate-<env>
 
 - **ECS Fargate** cluster
-- ECS task definition (2 vCPU, 4 GB memory, configurable)
-- ECS service with 2 minimum tasks, auto-scaling to 10
-- **Application Load Balancer** with HTTPS listener
+- ECS task definition for the API container (1 vCPU, 2 GB memory)
+- ECS service with 3 tasks (`desired_count=3`), auto-scaling between 3 and 10
+- **Application Load Balancer** with an HTTPS listener and an HTTP-to-HTTPS redirect, in front of the API only
 - AWS CodeDeploy deployment group for blue/green deployments
 - IAM task role with permissions for DynamoDB, Kinesis, Secrets Manager, and Cognito
 
@@ -181,6 +190,13 @@ cdk deploy experimentation-monitoring-dev
 - With the `etl` module: a Kinesis widget and an iterator-age alarm on that
   module's event stream. A core deployment gets neither, rather than an alarm
   on a stream that does not exist.
+
+### What is not deployed
+
+- **The dashboard.** The CDK does not deploy it today (#69); see the top of this page.
+- **CloudFront.** No stack creates a distribution. The split-URL module ships a
+  construct for one (`modules/infrastructure/constructs/split_url_distribution.py`),
+  but `app.py` does not use it; see [Split URL testing](../api/split-url.md).
 
 ---
 
@@ -248,19 +264,18 @@ The instance types below are what the CDK actually deploys with
 | Lambda invocations | 1M events/month | ~$5 |
 | Kinesis | 2 shards | ~$30 |
 | OpenSearch | `t3.medium.search` | ~$60 |
-| CloudFront + Lambda@Edge | traffic dependent | ~$20–50 |
 | ALB | one | ~$25 |
-| **Total estimate** | | **~$700–750/month** |
+| **Total estimate** | | **~$680/month** |
 
 Autoscaling is the figure to watch: Fargate is costed at the floor of three
 tasks. At the ceiling of ten it is roughly $370 rather than $110, so a
-sustained-load month lands nearer $960.
+sustained-load month lands nearer $940.
 
 For development/staging environments, you can significantly reduce costs by:
 - Non-prod environments already size down on their own: the CDK picks a
   smaller Aurora instance, `cache.t4g.medium` for dev/test
-  (`cache.m6g.large` for staging) and a single Aurora instance rather
-  than a writer/reader pair
+  (`cache.m6g.large` for staging) and, outside `prod` and `staging`, a
+  single Aurora instance rather than a writer/reader pair
 - Reducing Aurora to a single instance (disable the reader)
 - Using on-demand Lambda scaling instead of reserved capacity
 
@@ -275,10 +290,6 @@ If a stack was partially created, you may need to delete it from the AWS CloudFo
 ### Aurora takes too long / times out
 
 Aurora provisioning can take 15–20 minutes. If CDK times out, check the CloudFormation console for `experimentation-database-<env>` — the deployment may still be running.
-
-### Lambda@Edge deployment fails
-
-Lambda@Edge functions must be deployed to `us-east-1` regardless of your primary region. The CDK construct handles this automatically, but ensure your AWS CLI is not locked to a different region via environment variables.
 
 ### "Resource handler returned message" errors
 
