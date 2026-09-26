@@ -269,7 +269,14 @@ def check(aws: Runner, env: str, expect: str) -> str:
 
 def main(argv: Sequence[str] | None = None, aws: Runner = run_aws) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("--env", required=True, help="dev, staging, prod or demo")
+    # A closed set: a typo would otherwise reach the "stack does not exist"
+    # branch and report the default group as live.
+    parser.add_argument(
+        "--env",
+        required=True,
+        choices=["dev", "staging", "prod", "demo"],
+        help="the ENVIRONMENT the stack was deployed with",
+    )
     parser.add_argument(
         "--expect",
         choices=("blue", "green"),

@@ -306,3 +306,17 @@ def test_the_default_agrees_with_the_cdk():
     names = runpy.run_path(str(NAMES))
     assert guard.CONTEXT_KEY == names["API_LIVE_TARGET_GROUP_CONTEXT"]
     assert guard.DEFAULT_EXPECT == names["API_LIVE_TARGET_GROUP_DEFAULT"]
+
+
+@pytest.mark.parametrize("env", ["stagng", "production", "", "STAGING"])
+def test_an_unknown_environment_is_refused_before_any_call(env, capsys):
+    """A typo must not reach the "stack does not exist" branch, which reports
+    the default group as live."""
+
+    def no_calls(*_args, **_kwargs):
+        raise AssertionError("the guard called AWS for an unknown environment")
+
+    with pytest.raises(SystemExit) as exc_info:
+        guard.main(["--env", env], aws=no_calls)
+    assert exc_info.value.code == 2
+    assert "invalid choice" in capsys.readouterr().err
