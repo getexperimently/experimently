@@ -230,8 +230,8 @@ The email address must be one the identity provider has verified:
 
 | Provider | Where the email comes from | Required |
 |---|---|---|
-| Okta | the ID token's `email` | `email_verified` is `true` |
-| Google | the ID token's `email` | `email_verified` is `true`, and `hd` (the Google Workspace domain) equals the email's domain. A personal Google account has no `hd`, so it cannot sign in. |
+| Okta | the ID token's `email` | `email_verified` is `true` (the JSON boolean, or the string `"true"`) |
+| Google | the ID token's `email` | `email_verified` is `true` (the JSON boolean, or the string `"true"`), and `hd` (the Google Workspace domain) equals the email's domain. A personal Google account has no `hd`, so it cannot sign in. |
 | GitHub | `GET /user/emails` | a verified address in `org_domain`: the primary one if it is in the domain, otherwise the only one in the domain. The public profile email is not used. |
 
 An account already linked to the same identity under a different email address is not reused: that sign-in is refused, and an administrator resolves it.

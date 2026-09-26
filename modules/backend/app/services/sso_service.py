@@ -947,6 +947,15 @@ def _sso_email(user_info: Dict[str, Any], config: SSOConfig) -> str:
     return email
 
 
+def _is_verified_claim(value: Any) -> bool:
+    """``email_verified`` as providers send it: the JSON boolean, or the string.
+
+    Google's own example ID token carries ``"true"``. Exactly ``True`` or
+    ``"true"``; not ``1`` (which ``== True`` in Python), ``"True"`` or anything else.
+    """
+    return value is True or (isinstance(value, str) and value == "true")
+
+
 async def verified_email(
     config: SSOConfig,
     provider_key: str,
@@ -972,7 +981,7 @@ async def verified_email(
 
     For OpenID Connect providers the user info's ``sub`` must equal the ID
     token's (OIDC Core s.5.3.2). ``email_verified`` must be the boolean
-    ``true``; the string ``"true"`` is not accepted.
+    ``true`` or the exact string ``"true"`` (:func:`_is_verified_claim`).
     """
     checked = dict(user_info)
     if provider_key in ("okta", "google"):
@@ -983,7 +992,7 @@ async def verified_email(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=IDENTITY_MISMATCH_DETAIL,
             )
-        if id_claims.get("email_verified") is not True:
+        if not _is_verified_claim(id_claims.get("email_verified")):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN, detail=EMAIL_UNVERIFIED_DETAIL
             )
