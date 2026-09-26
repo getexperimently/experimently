@@ -265,9 +265,9 @@ class TestProfileBuildSteps:
         steps = {_key(s): s for s in gate["jobs"]["profile-build"]["steps"]}
         words = steps["Docs content tests"]["run"].split()
         assert words[:3] == ["python", "-m", "pytest"]
-        # Every path argument, not only backend/ ones: a modules/ test dropped
-        # from the step must fail here too.
-        assert tuple(w for w in words[3:] if not w.startswith("-")) == DOCS_TESTS
+        # Every path argument (option values like `no:cov` have no slash), not
+        # only backend/ ones: a modules/ test dropped from the step fails here.
+        assert tuple(w for w in words[3:] if "/" in w) == DOCS_TESTS
         install = steps["Install backend dependencies (docs tests)"]["run"]
         assert install.strip() == "pip install -r backend/requirements.txt"
 
