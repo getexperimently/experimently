@@ -247,6 +247,10 @@ The following attributes are populated from the IdP assertion or token:
 
 If no role mapping matches, a new user is provisioned with the `VIEWER` role.
 
+### Upgrading
+
+After upgrading from an earlier release, review the accounts created by SSO sign-in (accounts with no password set) and their roles, and remove any you do not recognise.
+
 ---
 
 ## Group-to-Role Mapping
