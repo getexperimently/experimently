@@ -112,5 +112,4 @@ jobs:
           # An empty refspec source is the remote's HEAD, not an error: an
           # empty BASE_SHA would silently compare against whatever main is.
           : "${BASE_SHA:?the pull_request event carries no base SHA}"
-          git fetch --no-tags origin "+${BASE_SHA}:refs/doc-demotion/base"
           python3 scripts/check_doc_demotions.py --base-ref refs/doc-demotion/base --labels "$LABELS"
