@@ -14,7 +14,28 @@ from aws_cdk import (
 )
 from constructs import Construct
 
-from stacks.names import BACKEND_ECR_REPOSITORY
+from stacks.dashboard_service import DashboardService
+from stacks.names import (
+    API_LIVE_TARGET_GROUP_CONTEXT,
+    API_LIVE_TARGET_GROUP_DEFAULT,
+    BACKEND_ECR_REPOSITORY,
+)
+
+#: HTTPS listener rules that send the API's paths to its live target group.
+#: Everything else falls to the listener's default action, the dashboard.
+#:
+#: The API's only routes outside `/api/v1` are `/health`, `/health/live`,
+#: `/health/ready` and `/metrics` (backend/app/core/health.py); WebSockets
+#: live under `/api/v1/ws`. ALB quotas: at most five condition values per
+#: rule and at most three match evaluations per condition, so the second rule
+#: is at the three-value limit. `/health*` is not a shorter spelling of it: it
+#: also matches `/healthz` (the dashboard's static liveness path) and anything
+#: else that merely starts with `/health`. ALB path patterns are
+#: case-sensitive.
+API_PATH_RULES = (
+    (10, ("/api/*",)),
+    (11, ("/health", "/health/*", "/metrics")),
+)
 
 
 class FargateServiceStack(Stack):
@@ -55,6 +76,8 @@ class FargateServiceStack(Stack):
         certificate_arn: str = None,
         public_base_url: str = None,
         include_modules: bool = False,
+        api_desired_count: int = 3,
+        dashboard_desired_count: int = 1,
         **kwargs,
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
@@ -399,10 +422,20 @@ class FargateServiceStack(Stack):
                 "cdk synth fails validation without one."
             )
 
+        # --- The dashboard (#69): the HTTPS listener's default action ---
+        self.dashboard = DashboardService(
+            self,
+            "Dashboard",
+            vpc=vpc,
+            cluster=ecs_cluster,
+            env_name=env_name,
+            desired_count=dashboard_desired_count,
+        )
+
         https_listener_kwargs = dict(
             port=443,
             protocol=elbv2.ApplicationProtocol.HTTPS,
-            default_target_groups=[self.blue_target_group],
+            default_target_groups=[self.dashboard.target_group],
             open=True,
         )
         if certificate_arn:
@@ -414,6 +447,44 @@ class FargateServiceStack(Stack):
             "HttpsListener",
             **https_listener_kwargs,
         )
+
+        # --- The API's paths, to the API's LIVE target group ---
+        # Which of blue and green is live is decided by CodeDeploy, outside
+        # CloudFormation, and swaps on every deployment. These rules therefore
+        # forward to the target group the `api_live_target_group` context
+        # names (default `blue`, right for a new environment), never to one
+        # hard-coded here. Writing them against the wrong one sends every API
+        # request to an empty target group while `/` and the dashboard's
+        # probes stay green -- so run scripts/check_live_target_group.py
+        # before every `cdk deploy` of this stack on a running environment;
+        # it reads the live one (read-only) and refuses a mismatch.
+        #
+        # Whether a CodeDeploy traffic shift rewrites these rules, or only the
+        # default action, is not documented by AWS (Stream C OPEN 1). It is a
+        # Stream I gate before production; ECS-native blue/green
+        # (productionListenerRule) or separate api./app. hosts (D14) are the
+        # fallbacks.
+        live = self.node.try_get_context(API_LIVE_TARGET_GROUP_CONTEXT)
+        if live is None:
+            live = API_LIVE_TARGET_GROUP_DEFAULT
+        live_target_groups = {
+            "blue": self.blue_target_group,
+            "green": self.green_target_group,
+        }
+        if live not in live_target_groups:
+            raise ValueError(
+                f"{API_LIVE_TARGET_GROUP_CONTEXT} context must be 'blue' or "
+                f"'green'; got {live!r}. scripts/check_live_target_group.py "
+                "prints the value to pass."
+            )
+        self.api_live_target_group_name = live
+        for priority, paths in API_PATH_RULES:
+            self.https_listener.add_target_groups(
+                f"ApiPaths{priority}",
+                priority=priority,
+                conditions=[elbv2.ListenerCondition.path_patterns(list(paths))],
+                target_groups=[live_target_groups[live]],
+            )
 
         # --- Test Listener (port 8443) ---
         # CodeDeploy uses this listener to route traffic to the green (new)
@@ -446,7 +517,8 @@ class FargateServiceStack(Stack):
             service_name=f"experimentation-backend-{env_name}",
             cluster=ecs_cluster,
             task_definition=self.task_definition,
-            desired_count=3,
+            # Per environment, from app.py (DECISIONS D13: staging runs 2).
+            desired_count=api_desired_count,
             min_healthy_percent=100,
             max_healthy_percent=200,
             # Imported immutably, and this is the whole fix for the dependency
@@ -567,11 +639,13 @@ class FargateServiceStack(Stack):
         )
 
         # --- Application Auto-Scaling ---
-        # Scale between 3 (minimum for high availability across 3 AZs) and 10
-        # tasks. Scale-out is aggressive (30 s cooldown) to respond quickly to
-        # traffic spikes; scale-in is conservative (60 s) to avoid thrashing.
+        # Scale between the environment's task count and 10. The floor IS the
+        # desired count: a fixed floor of 3 would make Application Auto
+        # Scaling hold staging at 3 whatever `desired_count` says. Scale-out
+        # is aggressive (30 s cooldown) to respond quickly to traffic spikes;
+        # scale-in is conservative (60 s) to avoid thrashing.
         scaling = self.fargate_service.auto_scale_task_count(
-            min_capacity=3,
+            min_capacity=api_desired_count,
             max_capacity=10,
         )
 

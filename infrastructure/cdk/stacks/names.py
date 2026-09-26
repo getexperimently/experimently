@@ -36,3 +36,24 @@ from __future__ import annotations
 #: operator who hit #211 and created it by hand to unblock themselves.
 #: Creating it belongs in a once-per-account stack, not here.
 BACKEND_ECR_REPOSITORY = "experimentation-platform/backend"
+
+#: The dashboard's repository (#69): `frontend/Dockerfile`'s static nginx
+#: image. Imported by name for the same reasons as the backend's, and created
+#: by hand once per account, with a `bootstrap` image pushed to it, before the
+#: first `cdk deploy` that includes the dashboard service
+#: (docs/deployment/deployment-guide.md section 1.3).
+DASHBOARD_ECR_REPOSITORY = "experimentation-platform/web"
+
+#: The CDK context key naming the API target group that is LIVE -- the one
+#: CodeDeploy's most recent deployment left serving traffic -- and its
+#: default. The HTTPS listener's API path rules forward to it.
+#:
+#: CloudFormation cannot know which of blue and green that is: CodeDeploy
+#: swaps them on every deployment, outside CloudFormation. After an odd number
+#: of deployments green is live and blue is empty, and a `cdk deploy` that
+#: wrote the rules against blue would send every API request to an empty
+#: target group. `scripts/check_live_target_group.py` reads the live one from
+#: the running environment (read-only) and refuses a mismatch with this value.
+#: The script carries its own copy of both; a unit test asserts they agree.
+API_LIVE_TARGET_GROUP_CONTEXT = "api_live_target_group"
+API_LIVE_TARGET_GROUP_DEFAULT = "blue"
