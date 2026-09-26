@@ -62,8 +62,8 @@ export ENVIRONMENT=prod
 # Required: the ACM certificate for the load balancer's HTTPS listeners
 export CERTIFICATE_ARN=arn:aws:acm:us-east-1:123456789012:certificate/your-certificate-id
 
-# Required: the absolute https:// origin users reach the API at
-export PUBLIC_BASE_URL=https://api.example.com
+# Required: the absolute https:// origin users reach the platform at (one host, app.<domain>)
+export PUBLIC_BASE_URL=https://app.example.com
 ```
 
 The application's own secrets (database password, JWT secret and the rest) are
