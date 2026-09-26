@@ -65,11 +65,11 @@ This directory contains documentation related to authentication and authorizatio
 
 4. **SSO (the `sso` module)**
    - [Okta SAML Setup](sso.md#okta-saml-20)
-   - [Azure AD Setup](sso.md#azure-active-directory-saml)
+   - [Azure AD (SAML) Setup](sso.md#azure-active-directory-saml)
    - [Google OIDC Setup](sso.md#google-workspace-oidc)
    - [GitHub OIDC Setup](sso.md#github-oidc)
+   - [Okta OIDC Setup](sso.md#okta-oidc)
    - [Role Mapping](sso.md#group-to-role-mapping)
-   - [Enforced SSO](sso.md#enforced-sso)
 
 ## Need Help?
 
