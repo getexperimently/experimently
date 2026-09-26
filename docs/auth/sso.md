@@ -289,6 +289,8 @@ Enforced SSO does not affect platform super-admin accounts, which can always log
 
 Starting an OIDC sign-in sets a signed, `HttpOnly`, `SameSite=Lax` cookie, `__Host-experimently_oidc`, in the browser that started it, and sends the provider a random `state` and a PKCE S256 challenge. The callback is accepted only with that cookie and the `state` inside it, so a callback link made in another browser -- an attacker's own login -- is refused before its code is exchanged. The cookie also carries the PKCE verifier, so an intercepted code cannot be redeemed without it. It expires after 10 minutes, and every callback expires it; the provider refuses a second use of a code. The API keeps no sign-in state of its own, so any API task can finish a sign-in another one started.
 
+The login also sends a `nonce`, and the ID token in the token endpoint's response must carry it, together with this client in `aud`, the provider's own `iss`, and an `exp` that has not passed. The ID token's signature is not checked. It comes straight from the token endpoint over TLS, which OpenID Connect Core §3.1.3.7 allows in place of a signature check. For the same reason, every provider endpoint must use `https`: an SSO configuration whose `sso_url` is `http://` is refused, in every environment except `test`. GitHub is OAuth 2, not OpenID Connect, and has no ID token.
+
 Because the cookie is `Secure`, serve the API over HTTPS. Browsers that treat `http://localhost` as a secure context (Chrome and Firefox do) also accept it there, for development.
 
 ### SAML Assertion Validation

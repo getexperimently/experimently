@@ -114,6 +114,17 @@ def _callback(
     )
 
 
+@pytest.fixture
+def skip_id_token_check():
+    """These tests mock the exchange; the ID-token checks have their own tests
+    (``test_sso_oidc_flow.py`` end to end, ``test_sso_service.py`` per claim)."""
+    with patch(
+        "modules.backend.app.services.sso_service.verify_id_token",
+        return_value={},
+    ):
+        yield
+
+
 def _make_saml_response_b64(name_id: str = "user@acme.com") -> str:
     xml = (
         '<?xml version="1.0"?>'
@@ -734,6 +745,7 @@ class TestOIDCLogin:
 
 @pytest.mark.integration
 @pytest.mark.requires_db
+@pytest.mark.usefixtures("skip_id_token_check")
 class TestOIDCCallback:
     def test_google_callback_issues_token(self, admin_client: TestClient):
         payload = _google_config_payload()
@@ -945,6 +957,7 @@ class TestDeactivatedSAMLProvider:
 
 @pytest.mark.integration
 @pytest.mark.requires_db
+@pytest.mark.usefixtures("skip_id_token_check")
 class TestOIDCCallbackStateIsMandatory:
     """`state` was `Query(None)` and the verification sat inside `if state:`,
     so *omitting the parameter* skipped `verify_state_token()` entirely and

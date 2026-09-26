@@ -11,6 +11,11 @@ flow test is about:
   client's credentials (Basic, as authlib sends them, or in the form, as the
   ``requests`` branch does). Anything else is ``400 invalid_grant``.
 * ``/v1/userinfo`` answers only for an access token it issued.
+* The token response carries an ID token with ``iss`` (its own base URL, as
+  an Okta custom authorization server's is its ``sso_url``), ``aud`` (the
+  client), ``exp`` and the ``nonce`` the authorize request carried -- unless
+  ``FAKE_OIDC_ID_TOKEN`` says to misbehave: ``wrong-nonce``, ``wrong-iss``,
+  ``wrong-aud``, ``expired`` or ``none``.
 
 Usage: ``python fake_oidc_provider.py <client_id> <client_secret> <email>``.
 Prints ``READY <port>`` once it is listening.
@@ -20,18 +25,52 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import hmac
 import http.server
 import json
+import os
 import secrets
 import sys
 import threading
+import time
 from urllib.parse import parse_qs, urlencode, urlparse
 
 CLIENT_ID, CLIENT_SECRET, EMAIL = sys.argv[1], sys.argv[2], sys.argv[3]
+ID_TOKEN_MODE = os.environ.get("FAKE_OIDC_ID_TOKEN", "good")
+ISSUER = ""  # set once the port is known
 
 _codes: dict[str, dict[str, str]] = {}
 _tokens: set[str] = set()
 _lock = threading.Lock()
+
+
+def _b64(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
+
+
+def _id_token(nonce: str) -> str:
+    """An HS256 JWT. The API does not check its signature, by design."""
+    claims = {
+        "iss": ISSUER,
+        "sub": f"sub-{EMAIL}",
+        "aud": CLIENT_ID,
+        "iat": int(time.time()),
+        "exp": int(time.time()) + 300,
+        "nonce": nonce,
+        "email": EMAIL,
+    }
+    if ID_TOKEN_MODE == "wrong-nonce":
+        claims["nonce"] = "not-this-logins-nonce"
+    elif ID_TOKEN_MODE == "wrong-iss":
+        claims["iss"] = "https://someone-else.example.com"
+    elif ID_TOKEN_MODE == "wrong-aud":
+        claims["aud"] = "another-client"
+    elif ID_TOKEN_MODE == "expired":
+        claims["exp"] = int(time.time()) - 3600
+    head = _b64(json.dumps({"alg": "HS256", "typ": "JWT"}).encode())
+    body = _b64(json.dumps(claims).encode())
+    sig = hmac.new(b"fake-provider-key", f"{head}.{body}".encode(), hashlib.sha256)
+    return f"{head}.{body}.{_b64(sig.digest())}"
 
 
 def _s256(verifier: str) -> str:
@@ -73,6 +112,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 _codes[code] = {
                     "challenge": query["code_challenge"],
                     "redirect_uri": query["redirect_uri"],
+                    "nonce": query.get("nonce", ""),
                 }
             target = (
                 query["redirect_uri"]
@@ -129,13 +169,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
         token = secrets.token_urlsafe(16)
         with _lock:
             _tokens.add(token)
-        return self._send(
-            200, {"access_token": token, "token_type": "Bearer", "expires_in": 3600}
-        )
+        body = {"access_token": token, "token_type": "Bearer", "expires_in": 3600}
+        if ID_TOKEN_MODE != "none":
+            body["id_token"] = _id_token(entry["nonce"])
+        return self._send(200, body)
 
 
 def main() -> None:
+    global ISSUER
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    ISSUER = f"http://127.0.0.1:{server.server_port}"
     print(f"READY {server.server_port}", flush=True)
     server.serve_forever()
 

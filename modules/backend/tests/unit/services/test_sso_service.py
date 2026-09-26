@@ -1128,3 +1128,199 @@ class TestBuildOIDCAuthorizationURL:
             cfg, "okta", "https://example.com/cb", "state", "v" * 43
         )
         assert "my-org.okta.com" in url
+
+
+# ---------------------------------------------------------------------------
+# verify_id_token / expected_issuers / https endpoints (C2n)
+# ---------------------------------------------------------------------------
+
+
+def _unsigned(claims: Dict[str, Any]) -> str:
+    """An ID token as the token endpoint returns it; the signature is not checked."""
+    import jwt
+
+    return jwt.encode(claims, "irrelevant-key", algorithm="HS256")
+
+
+def _oidc_config(provider: SSOProviderType, sso_url: str | None = None) -> MagicMock:
+    cfg = MagicMock(spec=SSOConfig)
+    cfg.id = uuid.uuid4()
+    cfg.provider_type = provider
+    cfg.entity_id = "client-1"
+    cfg.sso_url = sso_url
+    return cfg
+
+
+def _claims(**overrides) -> Dict[str, Any]:
+    claims = {
+        "iss": "https://accounts.google.com",
+        "aud": "client-1",
+        "exp": int(time.time()) + 300,
+        "nonce": "n-1",
+        "sub": "s",
+    }
+    claims.update(overrides)
+    return {k: v for k, v in claims.items() if v is not None}
+
+
+class TestVerifyIDToken:
+    google = staticmethod(lambda: _oidc_config(SSOProviderType.GOOGLE))
+
+    def test_a_good_token_is_accepted(self):
+        claims = sso_service.verify_id_token(
+            self.google(), "google", _unsigned(_claims()), "n-1"
+        )
+        assert claims["sub"] == "s"
+
+    @pytest.mark.regression
+    @pytest.mark.parametrize(
+        ("overrides", "nonce", "reason"),
+        [
+            ({"nonce": "someone-elses"}, "n-1", "nonce"),
+            ({"nonce": None}, "n-1", "nonce"),
+            ({"iss": "https://evil.example.com"}, "n-1", "iss"),
+            ({"aud": "another-client"}, "n-1", "aud"),
+            ({"aud": ["another-client"]}, "n-1", "aud"),
+            ({"aud": ["client-1", "another-client"]}, "n-1", "azp"),
+            ({"aud": ["client-1", "x"], "azp": "x"}, "n-1", "azp"),
+            ({"exp": int(time.time()) - 120}, "n-1", "exp"),
+            ({"exp": None}, "n-1", "exp"),
+        ],
+    )
+    def test_each_claim_is_checked(self, overrides, nonce, reason):
+        with pytest.raises(HTTPException) as exc_info:
+            sso_service.verify_id_token(
+                self.google(), "google", _unsigned(_claims(**overrides)), nonce
+            )
+        assert exc_info.value.status_code == 400
+        assert exc_info.value.detail == f"OIDC ID token was not accepted ({reason})"
+
+    def test_several_audiences_with_azp_this_client_is_accepted(self):
+        token = _unsigned(_claims(aud=["client-1", "x"], azp="client-1"))
+        sso_service.verify_id_token(self.google(), "google", token, "n-1")
+
+    def test_expiry_allows_a_minute_of_skew(self):
+        token = _unsigned(_claims(exp=int(time.time()) - 30))
+        sso_service.verify_id_token(self.google(), "google", token, "n-1")
+
+    @pytest.mark.parametrize("token", [None, "", "not-a-jwt", 42])
+    def test_a_missing_or_malformed_token_is_refused(self, token):
+        with pytest.raises(HTTPException) as exc_info:
+            sso_service.verify_id_token(self.google(), "google", token, "n-1")
+        assert exc_info.value.detail in (
+            "OIDC ID token was not accepted (missing)",
+            "OIDC ID token was not accepted (malformed)",
+        )
+
+    def test_the_refusal_names_no_claim_value(self):
+        token = _unsigned(_claims(iss="https://MARKER.example.com"))
+        with pytest.raises(HTTPException) as exc_info:
+            sso_service.verify_id_token(self.google(), "google", token, "n-1")
+        assert "MARKER" not in exc_info.value.detail
+
+
+class TestExpectedIssuers:
+    """The per-provider table in the C2n spec."""
+
+    def test_google_accepts_both_of_its_forms(self):
+        assert sso_service.expected_issuers(
+            _oidc_config(SSOProviderType.GOOGLE), "google", {}
+        ) == {"https://accounts.google.com", "accounts.google.com"}
+
+    @pytest.mark.parametrize("provider", ["microsoft", "azure_ad"])
+    def test_microsoft_is_per_tenant(self, provider):
+        tid = "9188040d-6c67-4c5b-b112-36a304b66dad"
+        assert sso_service.expected_issuers(
+            _oidc_config(SSOProviderType(provider)), provider, {"tid": tid}
+        ) == {f"https://login.microsoftonline.com/{tid}/v2.0"}
+
+    @pytest.mark.parametrize("tid", [None, "", "common", "../x", "9188040D-6C67"])
+    def test_microsoft_without_a_tenant_accepts_nothing(self, tid):
+        cfg = _oidc_config(SSOProviderType.MICROSOFT)
+        assert sso_service.expected_issuers(cfg, "microsoft", {"tid": tid}) == set()
+
+    def test_okta_custom_authorization_server_is_its_sso_url(self):
+        cfg = _oidc_config(SSOProviderType.OKTA, "https://org.okta.com/oauth2/default/")
+        assert sso_service.expected_issuers(cfg, "okta", {}) == {
+            "https://org.okta.com/oauth2/default"
+        }
+
+    def test_okta_org_authorization_server_is_the_org_url(self):
+        cfg = _oidc_config(SSOProviderType.OKTA, "https://org.okta.com/oauth2")
+        assert sso_service.expected_issuers(cfg, "okta", {}) == {"https://org.okta.com"}
+
+    def test_github_has_no_issuer_because_it_has_no_id_token(self):
+        assert not sso_service.uses_id_token("github")
+        assert sso_service.uses_id_token("google")
+        assert sso_service.uses_id_token("okta")
+
+
+class TestProviderEndpointsAreHttps:
+    @pytest.fixture
+    def outside_test(self, monkeypatch):
+        from backend.app.core.config import settings as core_settings
+
+        monkeypatch.setattr(core_settings, "ENVIRONMENT", "production")
+        assert not core_settings.is_test
+
+    @pytest.mark.regression
+    def test_an_http_okta_sso_url_is_refused_outside_test(self, outside_test):
+        cfg = _oidc_config(
+            SSOProviderType.OKTA, "http://org.okta.example/oauth2/default"
+        )
+        with pytest.raises(HTTPException) as exc_info:
+            build_oidc_authorization_url(cfg, "okta", "https://app/cb", "s", "v" * 43)
+        assert exc_info.value.status_code == 400
+        assert "https" in exc_info.value.detail
+
+    @pytest.mark.asyncio
+    async def test_the_exchange_refuses_it_too(self, outside_test):
+        cfg = _oidc_config(
+            SSOProviderType.OKTA, "http://org.okta.example/oauth2/default"
+        )
+        mock_client = AsyncMock()
+        with pytest.raises(HTTPException) as exc_info:
+            await exchange_oidc_code(
+                cfg,
+                "c",
+                "https://app/cb",
+                code_verifier="v" * 43,
+                http_client=mock_client,
+            )
+        assert "https" in exc_info.value.detail
+        mock_client.post.assert_not_awaited()
+
+    def test_an_https_okta_sso_url_is_accepted(self, outside_test):
+        cfg = _oidc_config(SSOProviderType.OKTA, "https://org.okta.com/oauth2/default")
+        url = build_oidc_authorization_url(cfg, "okta", "https://app/cb", "s", "v" * 43)
+        assert url.startswith("https://org.okta.com/oauth2/default/v1/authorize?")
+
+    def test_the_test_environment_allows_a_local_fake_provider(self):
+        cfg = _oidc_config(SSOProviderType.OKTA, "http://127.0.0.1:9")
+        url = build_oidc_authorization_url(cfg, "okta", "https://app/cb", "s", "v" * 43)
+        assert url.startswith("http://127.0.0.1:9/v1/authorize?")
+
+
+class TestNonceInTheAuthorizationURL:
+    def test_an_oidc_provider_gets_the_nonce(self):
+        cfg = _make_google_config()
+        url = build_oidc_authorization_url(
+            cfg, "google", "https://app/cb", "s", "v" * 43, "the-nonce"
+        )
+        assert "nonce=the-nonce" in url
+
+    def test_github_gets_none(self):
+        cfg = MagicMock(spec=SSOConfig)
+        cfg.provider_type = SSOProviderType.GITHUB
+        cfg.entity_id = "gh"
+        cfg.sso_url = None
+        url = build_oidc_authorization_url(
+            cfg, "github", "https://app/cb", "s", "v" * 43, "the-nonce"
+        )
+        assert "nonce" not in url
+
+    def test_each_login_carries_its_own_nonce_in_the_cookie(self):
+        cfg = _okta_config()
+        first, second = start_oidc_login(cfg, "okta"), start_oidc_login(cfg, "okta")
+        assert first.nonce != second.nonce
+        assert redeem_oidc_state(first.cookie_value, first.state).nonce == first.nonce
