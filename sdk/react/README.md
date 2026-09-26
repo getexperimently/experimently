@@ -6,11 +6,30 @@ answers per user + key and never buckets locally.
 
 ## Install
 
+**Not yet published.** `@getexperimently/react-sdk` is not on npm yet, so the command below fails
+today. Build it from a clone of this repository and install the packed tarball instead (the
+blocks below).
+
 ```bash
 npm install @getexperimently/react-sdk
 ```
 
 Its peer dependencies are `react` >= 17 and `react-dom` >= 17.
+
+To install from source, clone the repository and build a package; `npm pack` writes
+`getexperimently-react-sdk-1.1.0.tgz`:
+
+```bash
+git clone https://github.com/getexperimently/experimently.git
+cd experimently/sdk/react
+npm ci && npm run build && npm pack
+```
+
+Then install that file in your app:
+
+```bash
+npm install /path/to/experimently/sdk/react/getexperimently-react-sdk-1.1.0.tgz
+```
 
 Consuming from source (as the ShopLab demo does): alias `@getexperimently/react-sdk`
 to `sdk/react/src` in your bundler and tsconfig.

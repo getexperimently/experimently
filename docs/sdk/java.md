@@ -15,6 +15,10 @@ Source: `sdk/java` (`core/`, `spring-boot-starter/`).
 
 ## Installation
 
+**Not yet published.** `com.getexperimently:experimently-sdk` and the Spring Boot starter are not
+on Maven Central yet, so the dependencies below resolve only after you run `mvn install` in
+`sdk/java` of a clone of this repository, which installs both into your local `~/.m2`.
+
 ```xml
 <!-- core client -->
 <dependency>

@@ -72,12 +72,17 @@ The platform supports a range of statistical approaches:
 
 ### What SDKs are available?
 
+**Not yet published.** None of the packages below is on its registry yet, so installing them by
+name fails today. Each SDK's page ([JavaScript](../sdk/javascript.md), [Python](../sdk/python.md),
+[Java](../sdk/java.md), [React](../sdk/react.md)) says how to install it from this repository
+instead.
+
 | SDK | Package |
 |-----|---------|
-| JavaScript / TypeScript | `@experimently/js-sdk` (npm) |
-| Python | `experimently-sdk` (PyPI) |
-| Java / JVM | `com.experimently:experimently-sdk` (Maven/Gradle) |
-| React | `@experimently/react-sdk` (npm) |
+| JavaScript / TypeScript | `@getexperimently/js-sdk` (npm) |
+| Python | `experimently` (PyPI) |
+| Java / JVM | `com.getexperimently:experimently-sdk` (Maven/Gradle) |
+| React | `@getexperimently/react-sdk` (npm) |
 
 All SDKs support experiment variant assignment, feature flag evaluation, and event tracking. The Java SDK includes Spring Boot auto-configuration. The React SDK includes hooks, an HOC, and SSR support for Next.js.
 

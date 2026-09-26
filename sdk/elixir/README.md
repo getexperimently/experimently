@@ -19,12 +19,23 @@ the SDK caches the answer per user + key. Nothing is bucketed locally.
 
 ## Installation
 
-Add to your `mix.exs`:
+Add to your `mix.exs`.
+
+**Not yet published.** The `experimently` package is not on Hex yet, so the first block below
+fails today. Take it from this repository with the second block instead.
 
 ```elixir
 defp deps do
   [
     {:experimently, "~> 0.1.0"}
+  ]
+end
+```
+
+```elixir
+defp deps do
+  [
+    {:experimently, git: "https://github.com/getexperimently/experimently.git", sparse: "sdk/elixir"}
   ]
 end
 ```

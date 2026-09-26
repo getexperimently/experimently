@@ -18,10 +18,17 @@ Verified against a live backend: **yes (2026-09-11)** via the contract smoke bel
 
 ## Installation
 
+**Not yet published.** `@getexperimently/js-sdk` is not on npm yet, so the first line below fails
+today. Build it from a clone of this repository and install the packed tarball instead.
+
 ```bash
 npm install @getexperimently/js-sdk
-# or, from this repository:
-npm install ./sdk/js
+# or, from a clone of this repository:
+git clone https://github.com/getexperimently/experimently.git
+cd experimently/sdk/js
+npm ci && npm run build && npm pack      # writes getexperimently-js-sdk-1.0.0.tgz
+# then, in your app:
+npm install /path/to/experimently/sdk/js/getexperimently-js-sdk-1.0.0.tgz
 ```
 
 CommonJS build (`dist/index.js`) with type declarations; `import`/`require` both work.
