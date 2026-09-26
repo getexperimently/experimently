@@ -54,8 +54,14 @@ CLIENT_SECRET = "flow-secret"
 
 
 @pytest.fixture
-def email() -> str:
-    return f"oidc-flow-{uuid.uuid4().hex[:8]}@example.com"
+def domain() -> str:
+    """The configuration's domain; a sign-in must present an email in it."""
+    return f"flow-{uuid.uuid4().hex[:8]}.example.com"
+
+
+@pytest.fixture
+def email(domain) -> str:
+    return f"oidc-flow-{uuid.uuid4().hex[:8]}@{domain}"
 
 
 @pytest.fixture
@@ -95,10 +101,10 @@ def provider(email, id_token_mode) -> Iterator[str]:
 
 
 @pytest.fixture
-def config(db_session: Session, provider: str) -> SSOConfig:
+def config(db_session: Session, provider: str, domain: str) -> SSOConfig:
     cfg = SSOConfig(
         org_name="Flow Org",
-        org_domain=f"flow-{uuid.uuid4().hex[:8]}.example.com",
+        org_domain=domain,
         provider_type=SSOProviderType.OKTA,
         entity_id=CLIENT_ID,
         client_secret=CLIENT_SECRET,
