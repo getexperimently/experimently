@@ -43,17 +43,18 @@ BOUNDARY 1: Internet — Untrusted
          v
 
 BOUNDARY 2: Edge — Partially Trusted
-  [Application Load Balancer] → HTTPS listener (HTTP redirected to HTTPS),
-                                forwards to the API tasks on ECS. The only
-                                edge the CDK creates: there is no CloudFront,
+  [Application Load Balancer] → HTTPS listener (HTTP redirected to HTTPS).
+                                /api/*, /health, /health/* and /metrics go
+                                to the API tasks on ECS, everything else to
+                                the dashboard's ECS service. The only edge
+                                the CDK creates: there is no CloudFront,
                                 AWS WAF or API Gateway in front of it.
   [nginx web container]       → serves the dashboard (a static Next.js
-                                export), sets its CSP and security headers,
-                                and proxies /api/, /ws/ and /health to the
-                                API. This is what serves the dashboard in
-                                Docker Compose and in the frontend/Dockerfile
-                                image; the dashboard is not yet deployed by
-                                the CDK (#69).
+                                export) and sets its CSP and security
+                                headers. In AWS it sits behind the ALB and
+                                proxies nothing. In Docker Compose it is the
+                                edge and proxies /api/, /ws/ and /health to
+                                the API.
 
          |
          | VPC-internal HTTPS
@@ -132,7 +133,7 @@ BOUNDARY 5: Analytics Pipeline — Internal
 
 - **Motivation:** Data theft, service disruption, reconnaissance
 - **Capabilities:** Web scanning tools (Nuclei, ZAP), SQL injection frameworks (SQLMap), credential stuffing
-- **Access point:** Public internet → the Application Load Balancer (API), or the nginx web container (dashboard)
+- **Access point:** Public internet → the Application Load Balancer (the API and, behind it, the dashboard); in Docker Compose, the nginx web container
 - **Constraints:** No valid credentials; the API's per-IP rate limiter. No WAF is deployed, so nothing pattern-matches requests before the application sees them
 
 ### TA-2: Authenticated Malicious Insider / Compromised Account
@@ -170,15 +171,17 @@ BOUNDARY 5: Analytics Pipeline — Internal
 ```
                            PUBLIC INTERNET
                                 |
-          ┌─────────────────────┴────────────────────────┐
-          │                                              │
-┌─────────▼────────────────┐          ┌──────────────────▼─────────┐
-│ nginx web container      │          │ Application Load Balancer  │
-│ dashboard (static files) │          │ HTTPS; HTTP → HTTPS        │
-│ not deployed by the CDK  │          │ (the CDK's only edge)      │
-└─────────┬────────────────┘          └──────────────────┬─────────┘
-          │ /api/, /ws/, /health                         │
-          └─────────────────────┬────────────────────────┘
+                  ┌─────────────▼──────────────┐
+                  │ Application Load Balancer  │
+                  │ HTTPS; HTTP → HTTPS        │
+                  │ (the CDK's only edge)      │
+                  └─────────────┬─────────┬────┘
+   /api/*, /health, /health/*,  │         │  everything else
+                     /metrics   │  ┌──────▼───────────────────┐
+                                │  │ nginx web container      │
+                                │  │ dashboard (static files) │
+                                │  │ its own ECS service      │
+                                │  └──────────────────────────┘
                                 │
                        ┌────────▼───────┐
                        │ FastAPI (ECS)  │
@@ -204,7 +207,7 @@ BOUNDARY 5: Analytics Pipeline — Internal
                     └──────────────────────┘
 
 Data flows carrying PII/sensitive data:
-  [1] Browser/SDK → ALB (or nginx, for the dashboard): JWT/API key + user_id + event data (TLS at the ALB)
+  [1] Browser/SDK → ALB (nginx in Docker Compose): JWT/API key + user_id + event data (TLS at the ALB)
   [2] FastAPI → Aurora: user assignments, events, experiment state (TLS, VPC)
   [3] FastAPI → Redis: session tokens, rule cache (VPC, optional auth)
   [4] FastAPI → Kinesis: event records with user_id (VPC, IAM)
