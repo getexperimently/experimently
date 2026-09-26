@@ -1,17 +1,17 @@
 """
 AWS Secrets Manager integration for production secret loading.
 
-In production, sensitive configuration (database passwords, JWT secrets, API keys)
+In production, sensitive configuration (JWT secrets, API keys)
 are stored in AWS Secrets Manager and loaded at application startup.
 
 Secret naming convention:
   /{environment}/experimentation/{secret-name}
 
 Examples:
-  /prod/experimentation/db-password
+  /prod/experimentation/first-superuser-password
   /prod/experimentation/jwt-secret
   /prod/experimentation/redis-url
-  /staging/experimentation/db-password
+  /staging/experimentation/jwt-secret
 """
 
 import json
@@ -85,7 +85,7 @@ def build_secret_name(key: str, environment: Optional[str] = None) -> str:
     Build the standard secret name for this platform.
 
     Args:
-        key: Secret key (e.g. 'db-password', 'jwt-secret')
+        key: Secret key (e.g. 'jwt-secret', 'redis-url')
         environment: Override environment (defaults to APP_ENV env var)
 
     Returns:

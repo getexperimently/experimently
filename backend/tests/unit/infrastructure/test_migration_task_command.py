@@ -43,7 +43,6 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 STACK = REPO_ROOT / "infrastructure" / "cdk" / "stacks" / "migration_task_stack.py"
-CDK_APP = REPO_ROOT / "infrastructure" / "cdk" / "app.py"
 ENTRYPOINT = REPO_ROOT / "backend" / "docker-entrypoint.sh"
 DOCKERFILE = REPO_ROOT / "backend" / "Dockerfile"
 #: The two workflows that run a migration, and they do NOT run the same thing:
@@ -113,22 +112,6 @@ def _keyword(name: str) -> ast.AST:
         if keyword.arg == name:
             return keyword.value
     raise AssertionError(f"add_container(...) has no {name}= argument")
-
-
-def _declared_names(kwarg: str) -> set[str]:
-    """Every literal string key under ``kwarg``, nested dicts included.
-
-    ``environment=`` and ``secrets=`` both hold entries behind a ``**{...} if
-    ... else {}``, which is not a literal, so the dicts are walked rather than
-    evaluated.
-    """
-    return {
-        key.value
-        for mapping in ast.walk(_keyword(kwarg))
-        if isinstance(mapping, ast.Dict)
-        for key in mapping.keys
-        if isinstance(key, ast.Constant) and isinstance(key.value, str)
-    }
 
 
 def _literal_environment() -> dict[str, str]:
@@ -272,20 +255,9 @@ def test_the_task_does_not_run_the_entry_points_bootstrap_first():
     assert environment.get("SEED") == "", environment
 
 
-@pytest.mark.unit
-@pytest.mark.regression
-def test_the_task_is_told_where_the_database_is():
-    """No POSTGRES_SERVER meant localhost: a 120 s wait, then exit 1.
-
-    `pg_isready -h localhost` inside a Fargate task can never succeed, so the
-    entry point hit DB_WAIT_TIMEOUT and the task failed before alembic ran at
-    all; had it got past that, alembic's own URL would have pointed at the same
-    place.
-    """
-    assert "POSTGRES_SERVER" in _declared_names("environment"), (
-        "the migration container has no database host"
-    )
-    # ...and the app hands it the real endpoint rather than a literal.
-    assert re.search(r"^\s*db_host=", CDK_APP.read_text(), re.M), (
-        "infrastructure/cdk/app.py does not pass db_host= to MigrationTaskStack"
-    )
+# Where the database IS -- POSTGRES_SERVER, and the credentials that go with it
+# -- used to be checked here by reading this stack's source. That check passed
+# with `db_host=None` (the entry was conditional), so it was replaced by
+# infrastructure/tests/test_database_wiring.py, which synthesises the staging
+# and prod apps and resolves the imported value back to the Aurora writer
+# endpoint (#78). It needs aws-cdk-lib, so it runs in the CDK job, not here.
