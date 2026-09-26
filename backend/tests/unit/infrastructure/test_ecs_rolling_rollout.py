@@ -680,11 +680,27 @@ def test_the_script_never_uses_services_stable_or_forces_a_deployment():
     ],
 )
 def test_usage_errors_exit_2_and_call_nothing(tmp_path, args):
-    result = subprocess.run(
-        ["bash", str(ROLLOUT), *args],
-        env={**os.environ, "PATH": f"{tmp_path}{os.pathsep}{os.environ['PATH']}"},
-        capture_output=True,
-        text=True,
+    # An `aws` that records and fails, first on PATH, and no credential chain:
+    # a usage check that stopped firing must not reach a real account.
+    tripwire = tmp_path / "aws"
+    tripwire.write_text(f"#!/bin/sh\necho called >> {tmp_path / 'called'}\nexit 97\n")
+    tripwire.chmod(tripwire.stat().st_mode | stat.S_IEXEC)
+    env = {k: v for k, v in os.environ.items() if not k.startswith("AWS_")}
+    env.update(
+        AWS_CONFIG_FILE=str(tmp_path / "no-such-config"),
+        AWS_SHARED_CREDENTIALS_FILE=str(tmp_path / "no-such-credentials"),
+        PATH=f"{tmp_path}{os.pathsep}{os.environ['PATH']}",
     )
+    try:
+        result = subprocess.run(
+            ["bash", str(ROLLOUT), *args],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=SAFETY_NET_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        pytest.fail(f"usage error {args} did not exit within {SAFETY_NET_SECONDS}s")
     assert result.returncode == 2, result.stdout + result.stderr
     assert "usage" in result.stderr
+    assert not (tmp_path / "called").exists(), "aws was called on a usage error"
