@@ -240,7 +240,7 @@ Set `POSTGRES_HOST_PORT`, `REDIS_HOST_PORT`, `API_HOST_PORT` or `FRONTEND_HOST_P
 
 **Start from scratch**
 
-```{.bash exec}
+```{.bash skip reason="dev: tamper"}
 docker compose down -v
 ```
 
