@@ -10,7 +10,7 @@ This document provides a collection of useful CloudWatch Logs Insights queries f
 
 ### Find Most Frequent Errors
 
-```
+```text
 fields @timestamp, error_type, error_message
 | parse message "\"error_type\":\"*\"" as error_type
 | parse message "\"error_message\":\"*\"" as error_message
@@ -21,7 +21,7 @@ fields @timestamp, error_type, error_message
 
 ### Errors By Endpoint
 
-```
+```text
 fields @timestamp, @message
 | parse message "\"url\":\"*\"" as url
 | parse message "\"error_type\":\"*\"" as error_type
@@ -32,7 +32,7 @@ fields @timestamp, @message
 
 ### View Complete Error Details for Debugging
 
-```
+```text
 fields @timestamp, @message
 | parse message "\"error_type\":\"*\"" as error_type
 | filter error_type = "ValueError"
@@ -44,7 +44,7 @@ fields @timestamp, @message
 
 ### Errors by Time of Day
 
-```
+```text
 fields @timestamp
 | parse message "\"error_type\":\"*\"" as error_type
 | stats count(*) as error_count by bin(1h)
@@ -55,7 +55,7 @@ fields @timestamp
 
 ### High Latency Requests
 
-```
+```text
 fields @timestamp, @message
 | filter message like "Request metrics"
 | parse message "\"latency_ms\":*," as latency_ms
@@ -67,7 +67,7 @@ fields @timestamp, @message
 
 ### Average Latency by Endpoint
 
-```
+```text
 fields @timestamp, @message
 | filter message like "Request metrics"
 | parse message "\"latency_ms\":*," as latency_ms
@@ -78,7 +78,7 @@ fields @timestamp, @message
 
 ### CPU Usage Spikes
 
-```
+```text
 fields @timestamp, @message
 | filter message like "Request metrics"
 | parse message "\"cpu_percent\":*," as cpu_percent
@@ -89,7 +89,7 @@ fields @timestamp, @message
 
 ### Memory Usage Patterns
 
-```
+```text
 fields @timestamp, @message
 | filter message like "Request metrics"
 | parse message "\"memory_mb\":*," as memory_mb
@@ -101,7 +101,7 @@ fields @timestamp, @message
 
 ### Requests by Client IP
 
-```
+```text
 fields @timestamp, @message
 | parse message "\"host\":\"*\"" as client_ip
 | stats count(*) as request_count by client_ip
@@ -111,7 +111,7 @@ fields @timestamp, @message
 
 ### User Agent Analysis
 
-```
+```text
 fields @timestamp, @message
 | parse message "\"user-agent\":\"*\"" as user_agent
 | stats count(*) as request_count by user_agent
@@ -121,7 +121,7 @@ fields @timestamp, @message
 
 ### Request Volume by Time
 
-```
+```text
 fields @timestamp, @message
 | filter message like "Request metrics"
 | stats count(*) as request_count by bin(5m)
@@ -132,7 +132,7 @@ fields @timestamp, @message
 
 ### Correlation Between CPU and Latency
 
-```
+```text
 fields @timestamp, @message
 | filter message like "Request metrics"
 | parse message "\"latency_ms\":*," as latency_ms
@@ -144,7 +144,7 @@ fields @timestamp, @message
 
 ### Identifying Slow Endpoints with High Resource Usage
 
-```
+```text
 fields @timestamp, @message
 | filter message like "Request metrics"
 | parse message "\"latency_ms\":*," as latency_ms
