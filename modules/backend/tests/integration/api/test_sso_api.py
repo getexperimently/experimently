@@ -476,14 +476,14 @@ class TestSAMLACS:
         payload = _saml_config_payload()
         created = _create_config(admin_client, payload)
 
-        saml_b64 = _make_saml_response_b64("newuser@acme.com")
+        saml_b64 = _make_saml_response_b64(f"newuser@{payload['org_domain']}")
 
         # Mock parse_saml_response to bypass actual SAML validation
         with patch(
             "modules.backend.app.services.sso_service.parse_saml_response",
             return_value={
-                "email": "newuser@acme.com",
-                "name_id": "newuser@acme.com",
+                "email": f"newuser@{payload['org_domain']}",
+                "name_id": f"newuser@{payload['org_domain']}",
                 "groups": [],
                 "attributes": {},
                 "first_name": "New",
@@ -501,13 +501,13 @@ class TestSAMLACS:
     def test_acs_returns_user_email(self, admin_client: TestClient):
         payload = _saml_config_payload()
         created = _create_config(admin_client, payload)
-        saml_b64 = _make_saml_response_b64("acs_user@acme.com")
+        saml_b64 = _make_saml_response_b64(f"acs_user@{payload['org_domain']}")
 
         with patch(
             "modules.backend.app.services.sso_service.parse_saml_response",
             return_value={
-                "email": "acs_user@acme.com",
-                "name_id": "acs_user@acme.com",
+                "email": f"acs_user@{payload['org_domain']}",
+                "name_id": f"acs_user@{payload['org_domain']}",
                 "groups": [],
                 "attributes": {},
                 "first_name": None,
@@ -519,7 +519,7 @@ class TestSAMLACS:
                 data={"SAMLResponse": saml_b64},
             )
         assert resp.status_code == 200
-        assert resp.json()["email"] == "acs_user@acme.com"
+        assert resp.json()["email"] == f"acs_user@{payload['org_domain']}"
 
     def test_acs_missing_saml_response_returns_400(self, admin_client: TestClient):
         payload = _saml_config_payload()
@@ -549,13 +549,13 @@ class TestSAMLACS:
     def test_acs_response_contains_token_type(self, admin_client: TestClient):
         payload = _saml_config_payload()
         created = _create_config(admin_client, payload)
-        saml_b64 = _make_saml_response_b64("tokentype@acme.com")
+        saml_b64 = _make_saml_response_b64(f"tokentype@{payload['org_domain']}")
 
         with patch(
             "modules.backend.app.services.sso_service.parse_saml_response",
             return_value={
-                "email": "tokentype@acme.com",
-                "name_id": "tokentype@acme.com",
+                "email": f"tokentype@{payload['org_domain']}",
+                "name_id": f"tokentype@{payload['org_domain']}",
                 "groups": [],
                 "attributes": {},
                 "first_name": None,
@@ -626,14 +626,17 @@ class TestSAMLWithoutTheLibrary:
         """The other half of the gate: the stub is still the development
         convenience it was written to be, so the suite and a local `make dev`
         keep working without the optional dependency."""
-        created = _create_config(admin_client, _saml_config_payload())
+        payload = _saml_config_payload()
+        created = _create_config(admin_client, payload)
         environment("test")
+        # The admin's own mailbox name, at the configuration's domain.
+        email = f"{admin_user.email.split('@')[0]}@{payload['org_domain']}"
         resp = admin_client.post(
             f"{BASE}/saml/{created['id']}/acs",
-            data={"SAMLResponse": _make_saml_response_b64(admin_user.email)},
+            data={"SAMLResponse": _make_saml_response_b64(email)},
         )
         assert resp.status_code == 200, resp.text
-        assert resp.json()["email"] == admin_user.email
+        assert resp.json()["email"] == email
 
     @pytest.mark.parametrize("env", ["staging", "production"])
     def test_metadata_answers_501_outside_development(
@@ -720,7 +723,7 @@ class TestOIDCCallback:
                 "modules.backend.app.services.sso_service.get_oidc_user_info",
                 new_callable=AsyncMock,
                 return_value={
-                    "email": "alice@acme.com",
+                    "email": f"alice@{payload['org_domain']}",
                     "name": "Alice",
                     "sub": "google-sub-123",
                     "groups": [],
@@ -793,7 +796,7 @@ class TestOIDCCallback:
                 "modules.backend.app.services.sso_service.get_oidc_user_info",
                 new_callable=AsyncMock,
                 return_value={
-                    "email": "bob@acme.com",
+                    "email": f"bob@{payload['org_domain']}",
                     "name": "Bob",
                     "sub": "sub-456",
                     "groups": [],
@@ -810,7 +813,7 @@ class TestOIDCCallback:
                 },
             )
         assert resp.status_code == 200
-        assert resp.json()["email"] == "bob@acme.com"
+        assert resp.json()["email"] == f"bob@{payload['org_domain']}"
 
     def test_callback_returns_role(self, admin_client: TestClient):
         payload = _google_config_payload()
@@ -826,7 +829,7 @@ class TestOIDCCallback:
                 "modules.backend.app.services.sso_service.get_oidc_user_info",
                 new_callable=AsyncMock,
                 return_value={
-                    "email": f"role_user_{uuid.uuid4().hex[:4]}@acme.com",
+                    "email": f"role_user_{uuid.uuid4().hex[:4]}@{payload['org_domain']}",
                     "name": "Role User",
                     "sub": "sub-789",
                     "groups": [],
@@ -942,7 +945,7 @@ class TestOIDCCallbackStateIsMandatory:
     deployment."""
 
     @staticmethod
-    def _mocks():
+    def _mocks(domain: str = "acme.com"):
         return (
             patch(
                 "modules.backend.app.services.sso_service.exchange_oidc_code",
@@ -953,7 +956,7 @@ class TestOIDCCallbackStateIsMandatory:
                 "modules.backend.app.services.sso_service.get_oidc_user_info",
                 new_callable=AsyncMock,
                 return_value={
-                    "email": "csrf-victim@acme.com",
+                    "email": f"csrf-victim@{domain}",
                     "name": "Victim",
                     "sub": "google-sub-csrf",
                     "groups": [],
@@ -1007,7 +1010,7 @@ class TestOIDCCallbackStateIsMandatory:
         _create_config(admin_client, payload)
         state = _state()
 
-        exchange, user_info = self._mocks()
+        exchange, user_info = self._mocks(payload["org_domain"])
         with exchange, user_info:
             first = admin_client.get(
                 f"{BASE}/oidc/google/callback",

@@ -318,6 +318,7 @@ async def oidc_login(
     db: Session = Depends(deps.get_db),
 ) -> RedirectResponse:
     """Redirect the user to the OIDC provider's authorization endpoint."""
+    sso_service.require_supported_provider(provider)
     # Find config by provider type and optional org_domain
     configs = sso_service.list_sso_configs(db)
     config = None
@@ -358,6 +359,7 @@ async def oidc_callback(
     db: Session = Depends(deps.get_db),
 ) -> OIDCLoginResponse:
     """Handle the OIDC callback: exchange code for tokens, fetch user info, provision user."""
+    sso_service.require_supported_provider(provider)
     if error:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
