@@ -1,17 +1,15 @@
 # Runnable Documentation Examples
 
-The shell examples on an enrolled page are held to a contract: every shell block says
-whether it runs, a block that runs states what it prints, and the block renders as code
-on the site and on GitHub. `scripts/doc_examples.py` checks all of it on every pull
-request (the `doc-examples` workflow). A page fails when:
+The shell examples on an enrolled page are run in CI exactly as they're written, in one
+shell session per page, against a real stack. `scripts/doc_examples.py` does it on every
+pull request (the `doc-examples` workflow). A page fails when:
 
+- a command fails;
+- an example stops printing what the page says it prints;
 - a shell block is left untagged, or tagged in a form the site would break;
 - a block contains something a reader can't paste as written;
 - the counts of blocks and expectations stop matching the enrolment file;
 - a tagged block renders as a paragraph instead of code.
-
-Running the examples against a real stack is the next step and is not enabled yet; the
-parts of this page about running describe how it will work.
 
 ---
 
@@ -92,10 +90,13 @@ curl -s localhost:8000/health/ready | jq .status
 It prints `"healthy"`.
 ````
 
-When the examples run, `TEXT` will have to appear in what the block prints (stdout), in
-the order the lines are given, and a match can't start or end inside a word: `"active"`
-doesn't match `"inactive"`, and `1` doesn't match `10`. A block that prints something
-will need at least one `expect` line.
+`TEXT` has to appear in what the block prints (stdout), in the order the lines are
+given, and a match can't start or end inside a word: `"active"` doesn't match
+`"inactive"`, and `1` doesn't match `10`. A block that prints something needs at least
+one `expect` line. The one exception is the Quick Start's `docker compose up -d --wait`:
+when it has to build the images it prints the build log, and when they exist it prints
+nothing, so it's checked by its exit status (`--wait` fails unless every service is
+healthy) and by the next block's expectations.
 
 Choose a value that would be **different if the step had failed**. `curl -s` exits 0 on
 a `404` or a `422`, so an example that doesn't check its output passes when it's broken.
@@ -109,7 +110,8 @@ a `404` or a `422`, so an example that doesn't check its output passes when it's
 - **No placeholders.** A reader can't run `your-api-key` or `flag-uuid-here`. Capture the
   value in an earlier block (`KEY=$(curl … | jq -r .key)`), or mark the block `skip`.
 - **The page's blocks share one shell, top to bottom.** A variable set in one block is
-  there in the next. Nothing from your own environment will be.
+  there in the next. Nothing from your own environment is: each page runs with only
+  `PATH`, `HOME`, `USER`, `TMPDIR` and Docker's own settings.
 - **No `#` comments in a shell block.** macOS's default `zsh` doesn't treat `#` as a
   comment when you paste, so `jq .status   # "healthy"` fails with
   `Could not open file #`. Say the expected value in the prose instead. A `#` inside
@@ -122,7 +124,7 @@ a `404` or a `422`, so an example that doesn't check its output passes when it's
   export; and a last line ending in `\`, which would swallow what follows.
 - **Shapes that fail when the page is right**, under `set -euo pipefail`:
   `yes | head -1` and `… | grep -q x` (exit 141 when the pipe closes early).
-- **Shapes that will pass when the page is wrong:** a failure in the middle of `a && b`.
+- **Shapes that pass when the page is wrong:** a failure in the middle of `a && b`.
   An `expect` line catches it.
 
 Every block that runs must also pass `bash -n`.
@@ -131,7 +133,7 @@ Every block that runs must also pass `bash -n`.
 
 ## Environments
 
-| Environment | What will be true before the page runs |
+| Environment | What is true before the page runs |
 |---|---|
 | `bare` | Docker is available and nothing is running. The page starts its own stack. |
 | `stack` | The Quick Start's `docker compose up -d --wait` has already run. |
@@ -143,8 +145,7 @@ enrolled as `bare` and contain exactly one block that runs
 
 ### How a run will stay away from your own stack
 
-When pages run, each page will run under its own compose project
-(`COMPOSE_PROJECT_NAME=docex-…`), so both the runner's clean-up and a page's own
+Each page runs under its own compose project (`COMPOSE_PROJECT_NAME=docex-…`), so both the runner's clean-up and a page's own
 `docker compose down -v` can reach only that project's containers and volumes, never
 the `experimently` project a developer runs. That only holds while a page cannot reach
 past its project, so the check refuses a block that:
@@ -155,8 +156,11 @@ past its project, so the check refuses a block that:
 - removes Docker resources directly (`docker rm`, `docker volume rm`, `… prune`).
 
 A plain `docker compose down -v` is allowed: under the page's own project it removes only
-what the run created. The runner will also compare `docker volume ls` before and after
-a run and fail if any volume that existed before is gone. That is a detection, not a
+what the run created. After each page the runner removes the project and fails if any of
+its containers, volumes or networks remain; before a page it refuses, touching nothing,
+if a port the stack publishes is in use or a previous run left `docex-` resources behind.
+It also compares `docker volume ls` before and after the run and fails if any volume that
+existed before is gone. That is a detection, not a
 prevention: it reports a loss, it can't undo one. Running pages locally also rebuilds and
 retags the local `experimently-api:core` and `experimently-web:core` images from your
 working tree, so your next `docker compose up` recreates its containers from them.
@@ -167,6 +171,14 @@ working tree, so your next `docker compose up` recreates its containers from the
 
 ```{.bash skip reason="checks the documentation itself"}
 python scripts/doc_examples.py --check
+```
+
+To run the examples, stop anything that holds the stack's ports first (your own
+`docker compose stop` is enough; your volumes are left alone). `--env` moves a port if
+something else holds it, and `--only` runs one page:
+
+```{.bash skip reason="runs the documentation's examples"}
+python scripts/doc_examples.py --run --only docs/feature-flags/create.md
 ```
 
 For the render check, build the site with the site's own toolchain first:

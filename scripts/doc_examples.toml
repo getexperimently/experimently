@@ -18,7 +18,7 @@ expects = 11
 path = "docs/development/doc-examples.md"
 environment = "bare"
 exec = 0
-skip = 2
+skip = 3
 expects = 0
 
 [[document]]

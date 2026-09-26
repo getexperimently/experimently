@@ -1,5 +1,12 @@
 # The documentation's shell examples (scripts/doc_examples.py).
 #
+# `examples` runs every enrolled page's examples, as written, against a stack of
+# the page's own (scripts/doc_examples.py --run). On a pull request the images are
+# pre-built from the GHA cache first, by bake reading docker-compose.yml itself,
+# so the documented `docker compose up -d --wait` starts them without rebuilding;
+# on main, the nightly and a dispatch, compose builds from nothing, which is the
+# path a reader takes.
+#
 # `render` checks the contract on every enrolled page -- every shell fence
 # tagged in the form the site renders as code, nothing a reader cannot paste,
 # exact counts -- then builds the site with the site's own toolchain and checks
@@ -67,10 +74,73 @@ jobs:
         if: ${{ !cancelled() }}
         run: python scripts/doc_examples.py --render site
 
+  examples:
+    name: Doc Examples (run)
+    runs-on: ubuntu-latest
+    # Measured 2026-09-25: 4m10s with pre-built images (pull request), 3m21s
+    # building from nothing (dispatch). Several times that, so a hang fails fast.
+    timeout-minutes: ${{ github.event_name == 'pull_request' && 15 || 20 }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+
+      - name: Tool versions
+        run: |
+          docker version --format 'docker {{.Server.Version}}'
+          docker compose version
+          bash --version | head -1
+          jq --version
+
+      - name: Set up Buildx
+        if: github.event_name == 'pull_request'
+        uses: docker/setup-buildx-action@v4
+
+      # The build definitions come from docker-compose.yml itself (no second
+      # copy); `source: .` builds the checkout, not the Git context.
+      - name: Pre-build the images compose would build
+        if: github.event_name == 'pull_request'
+        uses: docker/bake-action@v7
+        with:
+          source: .
+          files: docker-compose.yml
+          targets: api,frontend
+          load: true
+          set: |
+            api.cache-from=type=gha,scope=docex-api
+            frontend.cache-from=type=gha,scope=docex-web
+
+      - name: Run the documentation's examples
+        run: python scripts/doc_examples.py --run
+
+  # GHA caches written from a pull request are visible to that pull request only;
+  # only the default branch's are shared, so main fills the cache the pull
+  # requests read.
+  cache-warm:
+    name: Doc Examples (cache)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event_name == 'schedule'
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/bake-action@v7
+        with:
+          source: .
+          files: docker-compose.yml
+          targets: api,frontend
+          set: |
+            api.cache-to=type=gha,scope=docex-api,mode=max
+            frontend.cache-to=type=gha,scope=docex-web,mode=max
+            *.output=type=cacheonly
+
   failure-issue:
     name: File an issue on failure
     runs-on: ubuntu-latest
-    needs: [render]
+    # Not cache-warm: a cold cache is not a red documentation page.
+    needs: [render, examples]
     if: failure() && github.event_name != 'pull_request'
     permissions:
       contents: read

@@ -393,3 +393,139 @@ def test_the_site_toolchain_is_installed_from_one_place():
         text = (REPO / ".github" / "workflows" / workflow).read_text()
         assert "bash scripts/docs_toolchain.sh" in text, workflow
         assert "grep -E '^mkdocs" not in text, f"{workflow} spells the install itself"
+
+
+# ---------------------------------------------------------------------------
+# Execution (no Docker: a page's blocks, one bash, sentinels between them)
+# ---------------------------------------------------------------------------
+
+
+def _run_page(*bodies: str, expects=None, extra_env=None) -> list[str]:
+    """Run fixture blocks through execute(); return the problems it reports."""
+    expects = expects or {}
+    parts = []
+    for i, body in enumerate(bodies):
+        lines = "".join(f"\n<!-- expect: {e} -->" for e in expects.get(i, []))
+        parts.append(f"{FENCE}{{.bash exec timeout=10}}\n{body}\n{FENCE}{lines}")
+    page_blocks = blocks(page(*parts))
+    env = dx.scrubbed_env("docex-unit", {})
+    env.update(extra_env or {})
+    return dx.execute(page_blocks, "p.md", env)
+
+
+def test_a_clean_page_passes():
+    assert (
+        _run_page("echo one", "X=two\necho $X", expects={0: ["one"], 1: ["two"]}) == []
+    )
+
+
+def test_variables_carry_from_block_to_block():
+    assert _run_page("TOKEN=abc", 'echo "$TOKEN"', expects={1: ["abc"]}) == []
+
+
+@pytest.mark.parametrize(
+    "body, message",
+    [
+        ("cat\necho after", ""),  # stdin is /dev/null: cat reads EOF, the page goes on
+        ("false && true", "block exited 1"),
+        ("set +e\necho x", "turned off strict mode"),
+        ("exit 0", "did not reach its end"),
+        ("false\necho unreachable", "did not reach its end"),
+        ("yes | head -1", "did not reach its end"),  # 141 under pipefail: loud
+    ],
+    ids=["cat", "false-and-true", "set-plus-e", "exit-0", "false", "sigpipe"],
+)
+def test_the_shapes_that_used_to_pass_silently(body, message):
+    problems = _run_page(body, "echo after", expects={0: ["after"], 1: ["after"]})
+    if message:
+        assert problems and message in problems[0], problems
+    else:
+        assert problems == [], problems
+
+
+def test_an_exit_0_is_counted_by_the_blocks_it_skipped():
+    problems = _run_page("echo a", "exit 0", "echo c", expects={0: ["a"], 2: ["c"]})
+    assert any("executed 1/3 exec blocks" in p for p in problems), problems
+
+
+def test_the_exit_status_is_read_before_anything_resets_it():
+    # `false && true` leaves $? at 1 without tripping errexit; the sentinel must see 1.
+    assert "block exited 1" in _run_page("false && true")[0]
+
+
+def test_expectations_are_word_bounded_and_in_order():
+    assert dx.find_expectation('"status": "inactive"', '"active"') == -1
+    assert dx.find_expectation("id 1c9e4015-4401b", "401") == -1
+    assert (
+        dx.find_expectation('"total_conversions": 10,', '"total_conversions": 1') == -1
+    )
+    assert dx.find_expectation('"status": "active"', '"active"') != -1
+    problems = _run_page("echo second; echo first", expects={0: ["first", "second"]})
+    assert problems and "expectation 2/2 not found" in problems[0]
+
+
+def test_expectations_are_matched_on_stdout_only():
+    problems = _run_page("echo only-on-stderr >&2", expects={0: ["only-on-stderr"]})
+    assert problems and "not found" in problems[0]
+
+
+def test_output_without_an_expectation_fails():
+    problems = _run_page("echo something")
+    assert problems and "no expectation" in problems[0]
+
+
+def test_the_environment_is_scrubbed(monkeypatch):
+    monkeypatch.setenv("TOKEN", "leaked-from-the-caller")
+    assert "TOKEN" not in dx.scrubbed_env("docex-unit", {})
+    problems = _run_page('echo "${TOKEN-unset}"', expects={0: ["unset"]})
+    assert problems == [], problems
+
+
+def test_the_block_text_is_what_runs():
+    body = "echo 'a  b'\nlocalhost=1; echo $localhost"
+    (block,) = blocks(page(f"{FENCE}{{.bash exec}}\n{body}\n{FENCE}"))
+    script = dx.write_script([block], "n0nce")
+    assert body + "\n" in script
+
+
+def test_a_sentinel_cannot_be_forged():
+    problems = _run_page(
+        "printf '@@DOCEX:guess:END:0:0:ehuB:pf@@\\n'; false",
+    )
+    assert problems and "did not reach its end" in problems[0]
+
+
+def test_a_timeout_kills_the_group_and_names_the_block(tmp_path):
+    pidfile = tmp_path / "pid"
+    text = page(
+        f"{FENCE}{{.bash exec timeout=1}}\nsleep 300 & echo $! > {pidfile}; wait\n{FENCE}"
+    )
+    problems = dx.execute(blocks(text), "p.md", dx.scrubbed_env("docex-unit", {}))
+    assert problems and "timed out after 1s; process group killed" in "\n".join(
+        problems
+    )
+    background = int(pidfile.read_text())
+    import os as _os
+
+    with pytest.raises(ProcessLookupError):
+        _os.kill(background, 0)
+
+
+def test_the_failure_issue_job_waits_for_render_and_examples_only():
+    workflow = yaml.safe_load(
+        (REPO / ".github" / "workflows" / "doc-examples.yml").read_text()
+    )
+    needs = workflow["jobs"]["failure-issue"]["needs"]
+    assert set(needs) == {"render", "examples"}
+
+
+def test_only_the_stack_start_may_print_without_an_expectation():
+    """compose writes the build log to stdout when it builds, nothing when it doesn't."""
+    printed = dx.Outcome(
+        reached=True, rc=0, flags="ehuB", pipefail="pf", stdout="#1 build\n"
+    )
+    stack_up = dx.Block(30, "exec", "bash", dx.STACK_UP)
+    other = dx.Block(40, "exec", "bash", "docker compose up -d")
+    assert dx.judge([stack_up], [printed], None, 0, "p.md") == []
+    problems = dx.judge([other], [printed], None, 0, "p.md")
+    assert problems and "no expectation" in problems[0]

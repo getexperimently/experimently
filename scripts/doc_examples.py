@@ -28,8 +28,13 @@ authors).  It checks, without running anything:
     after ``mkdocs build``: every enrolled page under ``docs/`` renders each of
     its fences as a code block, and no fence leaked into a paragraph.
 
-Running the examples is ``--run`` (not yet implemented; it arrives with the
-execution environments).  Standard library only.
+``--run``
+    runs each enrolled page's blocks, in order, in one ``bash`` session per page,
+    under a compose project of the page's own, and checks each block exited 0 and
+    printed its expectations.  Exit 0 all passed, 1 a page ran and failed, 2
+    refused before running anything.
+
+Standard library only.
 """
 
 from __future__ import annotations
@@ -37,10 +42,19 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import html.parser
+import json
+import os
 import pathlib
 import re
+import secrets
+import shutil
+import signal
+import socket
 import subprocess
 import sys
+import tempfile
+import threading
+import time
 import tomllib
 from typing import Optional
 
@@ -547,6 +561,499 @@ def render(site: pathlib.Path, path: pathlib.Path = ENROLMENT, out=sys.stdout) -
         raise Refused("\n".join(problems))
 
 
+# ---------------------------------------------------------------------------
+# Execution: one bash per document, blocks separated by sentinels
+# ---------------------------------------------------------------------------
+
+PASSED_ENV = (
+    "PATH",
+    "HOME",
+    "USER",
+    "TMPDIR",
+    "DOCKER_HOST",
+    "DOCKER_CONTEXT",
+    "DOCKER_CONFIG",
+    "DOCKER_CERT_PATH",
+    "DOCKER_TLS_VERIFY",
+)
+OVERRIDABLE = ("POSTGRES_HOST_PORT", "REDIS_HOST_PORT", "FRONTEND_HOST_PORT")
+OUTPUT_CAP = 4 * 1024 * 1024
+READER_JOIN_SECONDS = 5
+
+
+class Failed(Exception):
+    """A document ran and did not do what it says."""
+
+
+@dataclasses.dataclass
+class Outcome:
+    """What one block did."""
+
+    reached: bool = False
+    rc: Optional[int] = None
+    flags: str = ""
+    pipefail: str = ""
+    stdout: str = ""
+    stderr: str = ""
+
+
+def scrubbed_env(project: str, overrides: dict[str, str]) -> dict[str, str]:
+    """The only environment a document sees: nothing it did not set itself."""
+    env = {k: os.environ[k] for k in PASSED_ENV if k in os.environ}
+    env["COMPOSE_PROJECT_NAME"] = project
+    env["COMPOSE_DISABLE_ENV_FILE"] = "1"
+    env.update(overrides)
+    return env
+
+
+def bash_executable(env: dict[str, str]) -> str:
+    """The bash on the scrubbed PATH, refused below 4.4 (no inherit_errexit)."""
+    path = shutil.which("bash", path=env.get("PATH"))
+    if path is None:
+        raise Refused("no bash on PATH")
+    version = subprocess.run(
+        [
+            path,
+            "--noprofile",
+            "--norc",
+            "-c",
+            'echo "${BASH_VERSINFO[0]}.${BASH_VERSINFO[1]}"',
+        ],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    ).stdout.strip()
+    major, _, minor = version.partition(".")
+    if not (major.isdigit() and minor.isdigit()) or (int(major), int(minor)) < (4, 4):
+        raise Refused(f"{path} is bash {version or '?'}; the examples need bash >= 4.4")
+    return path
+
+
+def _sentinel(nonce: str, what: str) -> str:
+    return f"@@DOCEX:{nonce}:{what}@@"
+
+
+def write_script(blocks: list[Block], nonce: str) -> str:
+    """The document as one script; each block's text is copied byte for byte."""
+    parts = ["set -euo pipefail\n"]
+    for i, block in enumerate(blocks):
+        begin = _sentinel(nonce, f"BEGIN:{i}")
+        parts.append(f"printf '\\n{begin}\\n'; printf '\\n{begin}\\n' >&2\n")
+        parts.append(block.body if block.body.endswith("\n") else block.body + "\n")
+        end = _sentinel(nonce, f"END:{i}:%s:%s:%s")
+        # $? first, before anything else can reset it.
+        parts.append(
+            "__docex_rc=$?; "
+            f'printf \'\\n{end}\\n\' "$__docex_rc" "$-" '
+            '"$(shopt -qo pipefail && echo pf || echo nopf)"; '
+            f'printf \'\\n{end}\\n\' "$__docex_rc" "$-" '
+            '"$(shopt -qo pipefail && echo pf || echo nopf)" >&2\n'
+        )
+    return "".join(parts)
+
+
+def run_script(
+    script: str, blocks: list[Block], env: dict[str, str], bash: str, nonce: str
+) -> tuple[list[Outcome], Optional[str], int]:
+    """Run *script*; return each block's outcome, a problem if the run itself broke,
+    and bash's exit status."""
+    begin = re.compile(re.escape(f"@@DOCEX:{nonce}:BEGIN:") + r"(\d+)@@")
+    end = re.compile(
+        re.escape(f"@@DOCEX:{nonce}:END:") + r"(\d+):(\d+):([^:@]*):([a-z]*)@@"
+    )
+    outcomes = [Outcome() for _ in blocks]
+    state = {"current": None, "since": time.monotonic(), "size": 0}
+    lock = threading.Lock()
+
+    with tempfile.NamedTemporaryFile("w", suffix=".sh", delete=False) as handle:
+        handle.write(script)
+        script_path = handle.name
+    process = subprocess.Popen(
+        [bash, "--noprofile", "--norc", script_path],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        cwd=ROOT,
+        env=env,
+        start_new_session=True,
+        text=True,
+        errors="replace",
+    )
+
+    def read(stream, which):
+        current = None
+        for line in stream:
+            with lock:
+                state["size"] += len(line)
+            started = begin.search(line)
+            finished = end.search(line)
+            if started:
+                current = int(started.group(1))
+                if which == "stdout":
+                    with lock:
+                        state["current"], state["since"] = current, time.monotonic()
+                continue
+            if finished:
+                i = int(finished.group(1))
+                if which == "stdout":
+                    outcome = outcomes[i]
+                    outcome.reached = True
+                    outcome.rc = int(finished.group(2))
+                    outcome.flags = finished.group(3)
+                    outcome.pipefail = finished.group(4)
+                current = None
+                continue
+            if current is not None:
+                if which == "stdout":
+                    outcomes[current].stdout += line
+                else:
+                    outcomes[current].stderr += line
+
+    readers = [
+        threading.Thread(target=read, args=(process.stdout, "stdout"), daemon=True),
+        threading.Thread(target=read, args=(process.stderr, "stderr"), daemon=True),
+    ]
+    for reader in readers:
+        reader.start()
+
+    problem = None
+    while process.poll() is None:
+        time.sleep(0.2)
+        with lock:
+            current, since, size = state["current"], state["since"], state["size"]
+        if size > OUTPUT_CAP:
+            problem = f"output exceeded {OUTPUT_CAP} bytes; stopped"
+        elif current is not None and time.monotonic() - since > blocks[current].timeout:
+            problem = (
+                f"block {current}: timed out after {blocks[current].timeout}s; "
+                "process group killed"
+            )
+        if problem:
+            _kill_group(process.pid)
+            break
+    rc = process.wait()
+    _kill_group(process.pid)  # reap anything a block left running in the background
+    for reader in readers:
+        reader.join(READER_JOIN_SECONDS)
+    if any(reader.is_alive() for reader in readers) and problem is None:
+        problem = (
+            "a process a block started kept the output open after bash exited "
+            "(detached from the process group?)"
+        )
+    os.unlink(script_path)
+    return outcomes, problem, rc
+
+
+def _kill_group(pid: int) -> None:
+    try:
+        os.killpg(pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        pass
+
+
+_WORD = re.compile(r"[A-Za-z0-9_]")
+
+
+def find_expectation(text: str, expected: str, start: int = 0) -> int:
+    """End offset of the first acceptable match of *expected* in *text*, or -1.
+
+    A match may not begin or end inside a word: an edge of *expected* that is a
+    word character must not touch another word character in *text*.
+    """
+    i = text.find(expected, start)
+    while i != -1:
+        before = text[i - 1] if i > 0 else ""
+        after_at = i + len(expected)
+        after = text[after_at] if after_at < len(text) else ""
+        head_ok = not (_WORD.match(expected[0]) and before and _WORD.match(before))
+        tail_ok = not (_WORD.match(expected[-1]) and after and _WORD.match(after))
+        if head_ok and tail_ok:
+            return after_at
+        i = text.find(expected, i + 1)
+    return -1
+
+
+def judge(
+    blocks: list[Block],
+    outcomes: list[Outcome],
+    problem: Optional[str],
+    rc: int,
+    name: str,
+) -> list[str]:
+    """Every way the run fell short of the page."""
+    problems = []
+    for i, (block, outcome) in enumerate(zip(blocks, outcomes)):
+        where = f"{name}:{block.line}"
+        tail = "\n".join((outcome.stdout + outcome.stderr).strip().split("\n")[-50:])
+        if not outcome.reached:
+            reason = problem or f"bash exited {rc}"
+            problems.append(f"{where}: block did not reach its end ({reason})\n{tail}")
+            reached = sum(o.reached for o in outcomes)
+            problems.append(
+                f"{name}: executed {reached}/{len(blocks)} exec blocks; "
+                f"first not reached: {where}"
+            )
+            return problems
+        if outcome.rc != 0:
+            problems.append(f"{where}: block exited {outcome.rc}\n{tail}")
+            continue
+        if (
+            "e" not in outcome.flags
+            or "u" not in outcome.flags
+            or outcome.pipefail != "pf"
+        ):
+            problems.append(
+                f"{where}: block turned off strict mode ($-={outcome.flags}, {outcome.pipefail})"
+            )
+            continue
+        position = 0
+        for n, expected in enumerate(block.expects, 1):
+            found = find_expectation(outcome.stdout, expected, position)
+            if found == -1:
+                problems.append(
+                    f"{where}: expectation {n}/{len(block.expects)} not found: {expected}\n{tail}"
+                )
+                break
+            position = found
+        # The one block exempt: the Quick Start's stack start. When compose has to
+        # build, it writes BuildKit's progress to stdout (nothing when the images
+        # exist), so no expectation can hold on both paths; `--wait` failing unless
+        # every service is healthy, and the next block's expectations, verify it.
+        if (
+            outcome.stdout.strip()
+            and not block.expects
+            and block.body.strip() != STACK_UP
+        ):
+            printed = "\n".join(outcome.stdout.strip().split("\n")[:20])
+            problems.append(
+                f"{where}: block printed output but carries no expectation; "
+                f"its stdout began:\n{printed}"
+            )
+    if problem and not problems:
+        problems.append(f"{name}: {problem}")
+    if rc != 0 and not problems:
+        problems.append(f"{name}: bash exited {rc} after every block reported success")
+    return problems
+
+
+def execute(blocks: list[Block], name: str, env: dict[str, str]) -> list[str]:
+    """Run a document's exec blocks in one shell; no Docker involved."""
+    runnable = [b for b in blocks if b.kind == "exec"]
+    if not runnable:
+        return []
+    nonce = secrets.token_hex(8)
+    bash = bash_executable(env)
+    outcomes, problem, rc = run_script(
+        write_script(runnable, nonce), runnable, env, bash, nonce
+    )
+    return judge(runnable, outcomes, problem, rc, name)
+
+
+# ---------------------------------------------------------------------------
+# Docker: preflight, an isolated project per document, teardown, snapshot
+# ---------------------------------------------------------------------------
+
+
+def _docker(
+    *args: str, env: Optional[dict] = None, timeout: int = 120
+) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["docker", *args],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=ROOT,
+        timeout=timeout,
+        check=False,
+    )
+
+
+def _published_ports(env: dict[str, str]) -> list[int]:
+    config = _docker("compose", "config", "--format", "json", env=env)
+    if config.returncode != 0:
+        raise Refused(f"docker compose config failed: {config.stderr.strip()[:300]}")
+    ports = []
+    for service in json.loads(config.stdout).get("services", {}).values():
+        for port in service.get("ports", []):
+            published = str(port.get("published", "")) if isinstance(port, dict) else ""
+            if published.isdigit():
+                ports.append(int(published))
+    return sorted(set(ports))
+
+
+def _port_in_use(port: int) -> bool:
+    """Bound on either stack: a listener on ::1 only is invisible to 0.0.0.0."""
+    for family, address in ((socket.AF_INET, "0.0.0.0"), (socket.AF_INET6, "::")):
+        sock = socket.socket(family, socket.SOCK_STREAM)
+        try:
+            if family == socket.AF_INET6:
+                sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+            sock.bind((address, port))
+        except OSError:
+            return True
+        finally:
+            sock.close()
+    return False
+
+
+def _leftovers() -> dict[str, list[str]]:
+    """Resources a previous run of this script left behind, by compose project."""
+    label = '{{.Label "com.docker.compose.project"}}'
+    found: dict[str, list[str]] = {}
+    for what, args in (
+        ("container", ("ps", "-a", "--format", "{{.Names}} " + label)),
+        ("volume", ("volume", "ls", "--format", "{{.Name}} " + label)),
+        ("network", ("network", "ls", "--format", "{{.Name}} " + label)),
+    ):
+        for line in _docker(*args).stdout.splitlines():
+            name, _, project = line.partition(" ")
+            if project.startswith("docex-"):
+                found.setdefault(project, []).append(f"{what} {name}")
+    return found
+
+
+def preflight(env: dict[str, str]) -> None:
+    """Refuse, touching nothing, unless a document can start a stack of its own."""
+    for args in (("info",), ("compose", "version")):
+        if _docker(*args).returncode != 0:
+            raise Refused(f"`docker {' '.join(args)}` failed; is Docker running?")
+    busy = [p for p in _published_ports(env) if _port_in_use(p)]
+    if busy:
+        raise Refused(
+            f"port(s) {busy} are in use; the documents address the stack on those "
+            "ports. Stop what holds them (a developer stack: `docker compose stop`)."
+        )
+    left = _leftovers()
+    if left:
+        commands = "; ".join(f"docker compose -p {p} down -v" for p in sorted(left))
+        listed = ", ".join(r for resources in left.values() for r in resources)
+        raise Refused(
+            f"a previous run left {listed}; remove it with `{commands}` "
+            "(this script never deletes what it did not start)"
+        )
+
+
+def project_resources(project: str) -> list[str]:
+    label = f"label=com.docker.compose.project={project}"
+    found = []
+    for what, args in (
+        ("container", ("ps", "-a", "-q", "--filter", label)),
+        ("volume", ("volume", "ls", "-q", "--filter", label)),
+        ("network", ("network", "ls", "-q", "--filter", label)),
+    ):
+        found += [f"{what} {x}" for x in _docker(*args).stdout.split()]
+    return found
+
+
+def _volumes() -> set[str]:
+    return set(_docker("volume", "ls", "-q").stdout.split())
+
+
+def _report_dropped(out) -> None:
+    """Name (never show) what the caller had set that the documents will not see."""
+    compose_file = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+    interpolated = set(re.findall(r"\$\{([A-Z_][A-Z0-9_]*)", compose_file))
+    dropped = sorted(
+        k
+        for k in os.environ
+        if k not in PASSED_ENV
+        and (k in interpolated or k.startswith(("COMPOSE_", "EXPERIMENTLY_")))
+    )
+    if dropped:
+        print(f"not passed to the documents: {', '.join(dropped)}", file=out)
+    if (ROOT / ".env").exists():
+        print("ignoring .env (COMPOSE_DISABLE_ENV_FILE=1)", file=out)
+
+
+def run_document(
+    doc: dict,
+    blocks: list[Block],
+    index: int,
+    overrides: dict[str, str],
+    stack_up: Optional[Block],
+    out,
+) -> list[str]:
+    rel = doc["path"]
+    project = f"docex-{secrets.token_hex(4)}-{index}"
+    env = scrubbed_env(project, overrides)
+    preflight(env)
+    print(f"{rel}: running under compose project {project}", file=out)
+    problems: list[str] = []
+    try:
+        if doc["environment"] == "stack":
+            up = subprocess.run(
+                [bash_executable(env), "--noprofile", "--norc", "-c", STACK_UP],
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                cwd=ROOT,
+                env=env,
+                timeout=stack_up.timeout if stack_up else DEFAULT_TIMEOUT,
+                check=False,
+            )
+            if up.returncode != 0:
+                return [
+                    f"{rel}: the stack did not start ({STACK_UP}):\n{up.stderr[-2000:]}"
+                ]
+        problems = execute(blocks, rel, env)
+    finally:
+        _docker("compose", "down", "-v", "--remove-orphans", env=env, timeout=600)
+        left = project_resources(project)
+        if left:
+            problems.append(
+                f"{rel}: isolation: resources remain after teardown: {left}"
+            )
+    return problems
+
+
+def run(
+    path: pathlib.Path = ENROLMENT,
+    only: Optional[str] = None,
+    overrides: Optional[dict[str, str]] = None,
+    out=sys.stdout,
+) -> None:
+    overrides = overrides or {}
+    check(path, out=out)  # the static contract first; nothing runs if it fails
+    documents = load_enrolment(path)
+    if only and only not in {d["path"] for d in documents}:
+        raise Refused(f"{only} is not enrolled")
+    parsed = {d["path"]: blocks_of(d["path"]) for d in documents}
+    stack_up = (
+        next(
+            (
+                b
+                for b in parsed[STACK_DOC]
+                if b.kind == "exec" and b.body.strip() == STACK_UP
+            ),
+            None,
+        )
+        if STACK_DOC in parsed
+        else None
+    )
+    _report_dropped(out)
+    print(f"bash: {bash_executable(scrubbed_env('docex-probe', overrides))}", file=out)
+    before = _volumes()
+    problems = []
+    for index, doc in enumerate(documents):
+        if only and doc["path"] != only:
+            continue
+        if not any(b.kind == "exec" for b in parsed[doc["path"]]):
+            continue
+        found = run_document(doc, parsed[doc["path"]], index, overrides, stack_up, out)
+        executed = doc["exec"] if not found else "some"
+        print(
+            f"{doc['path']}: {'passed' if not found else 'FAILED'} ({executed} exec)",
+            file=out,
+        )
+        problems += found
+    lost = sorted(before - _volumes())
+    if lost:
+        problems.append(f"volumes that existed before the run are gone: {lost}")
+    if problems:
+        raise Failed("\n\n".join(problems))
+
+
 def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     mode = parser.add_mutually_exclusive_group(required=True)
@@ -554,21 +1061,39 @@ def main(argv: Optional[list[str]] = None) -> int:
     mode.add_argument(
         "--render", metavar="SITE_DIR", type=pathlib.Path, help="check a built site"
     )
-    mode.add_argument(
-        "--run", action="store_true", help="run the examples (not yet implemented)"
+    mode.add_argument("--run", action="store_true", help="run the examples in Docker")
+    parser.add_argument("--only", metavar="PATH", help="with --run: one enrolled page")
+    parser.add_argument(
+        "--env",
+        action="append",
+        default=[],
+        metavar="NAME=VALUE",
+        help=f"with --run: set one of {', '.join(OVERRIDABLE)} for the documents",
     )
     args = parser.parse_args(argv)
+    overrides = {}
+    for item in args.env:
+        name, _, value = item.partition("=")
+        if name not in OVERRIDABLE or not value:
+            print(
+                f"refused: --env accepts only {', '.join(OVERRIDABLE)}", file=sys.stderr
+            )
+            return 2
+        overrides[name] = value
+        print(f"override: {name}={value}")
     try:
         if args.check:
             check()
         elif args.render:
             render(args.render)
         else:
-            print("--run is not implemented yet", file=sys.stderr)
-            return 2
+            run(only=args.only, overrides=overrides)
     except Refused as refusal:
         print(f"refused: {refusal}", file=sys.stderr)
         return 2
+    except Failed as failure:
+        print(f"failed:\n{failure}", file=sys.stderr)
+        return 1
     return 0
 
 
