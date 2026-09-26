@@ -237,4 +237,7 @@ def create_experiment(db, name, description, hypothesis, owner_id, variants_data
         )
         variants.append(variant)
     
-    db.ad
+    db.add_all(variants)
+
+    return experiment
+```
