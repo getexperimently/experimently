@@ -10,7 +10,9 @@ This guide walks you through a 20-minute live demo of the Experimently experimen
 
 ### Local (recommended, ~2 min)
 
-```bash
+From the repository root:
+
+```{.bash skip reason="demo: runs the demo applications (Stream F)"}
 ./demo/setup-local.sh
 ```
 
@@ -44,7 +46,7 @@ Budget for it: two or more hours the first time, and real monthly cost
 
 ### Scene 0 — ShopLab storefront: experiments in a real app (4 min)
 
-ShopLab is a small e-commerce site (`demo/shoplab`, http://localhost:3200) that runs five live experiments through the
+ShopLab is a small e-commerce site (`demo/shoplab`, http://localhost:3200) that runs four live experiments and two feature flags through the
 React SDK and the public tracking API — the same path a customer's app would use. `setup-local.sh` seeds it, starts it,
 and runs a traffic simulator against it so the dashboards fill up while you talk.
 
@@ -207,7 +209,7 @@ See `demo/streampulse/README.md`.
   not yet enforced by the permission checks, so do not demo them (tracked in the launch plan, P5).
 
 **API / Integrations:**
-- Navigate to `/api/v1/docs` (Swagger UI)
+- Open http://localhost:8000/api/v1/docs (Swagger UI)
   - "Full REST API. Your team can automate everything — CI/CD can create and start experiments, and Slack/email
     alerts fire when tests complete."
 - Jira/Salesforce/GitHub integrations are configurable but their outbound delivery has only been exercised with
@@ -252,42 +254,46 @@ See `demo/streampulse/README.md`.
 | Home | http://localhost:3100 |
 | Feature Flags | http://localhost:3100/feature-flags |
 | Experiments | http://localhost:3100/experiments |
-| Results (Hero) | http://localhost:3100/results/homepage_hero_copy |
-| MAB | http://localhost:3100/experiments/recommendation_algorithm |
 | Audit | http://localhost:3100/admin/audit |
 | Users/RBAC | http://localhost:3100/admin/users |
-| API Docs | http://localhost:8000/docs |
+| API Docs | http://localhost:8000/api/v1/docs |
 | Health | http://localhost:8000/health |
+
+An experiment's own page and its results are addressed by the experiment's id, which the seed
+generates, so they have no fixed URL: open **Homepage Hero Copy Test** or **Recommendation
+Algorithm MAB** from the Experiments list.
 
 ---
 
 ## Stopping the Demo
 
-```bash
+```{.bash skip reason="demo: runs the demo applications (Stream F)"}
 ./demo/teardown-local.sh
 ```
 
-This stops all processes, shuts down Docker, and removes temporary files.
+This stops the processes `setup-local.sh` started, stops the Docker services with
+`docker-compose down` (the database volume is kept), and removes `demo/.logs`, `demo/.pids`
+and the demo API key file.
 
 ---
 
 ## Logs
 
-```bash
-# Live backend logs
+`setup-local.sh` writes one log per process to `demo/.logs/`:
+
+| Process | Log file |
+|---------|----------|
+| Backend API | `demo/.logs/backend.log` |
+| Live event simulator (its stats) | `demo/.logs/simulator.log` |
+| Dashboard | `demo/.logs/frontend.log` |
+| ShopLab storefront | `demo/.logs/shoplab.log` |
+| ShopLab traffic simulator | `demo/.logs/shoplab-simulator.log` |
+| StreamPulse | `demo/.logs/streampulse.log` |
+| StreamPulse device simulator | `demo/.logs/streampulse-simulator.log` |
+
+`tail -f` follows one of them until you press Ctrl-C, so run it for the log you want, for
+example the backend's:
+
+```{.bash skip reason="demo: runs the demo applications (Stream F)"}
 tail -f demo/.logs/backend.log
-
-# Live simulator stats
-tail -f demo/.logs/simulator.log
-
-# Frontend
-tail -f demo/.logs/frontend.log
-
-# ShopLab storefront and its traffic simulator
-tail -f demo/.logs/shoplab.log
-tail -f demo/.logs/shoplab-simulator.log
-
-# StreamPulse and its device simulator
-tail -f demo/.logs/streampulse.log
-tail -f demo/.logs/streampulse-simulator.log
 ```
