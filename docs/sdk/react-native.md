@@ -17,22 +17,35 @@ mocked `fetch`; there is no contract smoke for React Native.
 
 ## Installation
 
-**Not yet published.** `@getexperimently/react-native-sdk` is not on npm yet, so the two commands
-below fail today. Pack it from a clone of this repository (it ships TypeScript source, so there
-is no build step) and install the tarball instead; installing that tarball into a React Native app
-has not been tested.
+**Not yet published.** `@getexperimently/react-native-sdk` is not on npm yet, so both the npm
+and the Yarn command below fail today. Pack it from a clone of this repository (it ships TypeScript
+source, so there is no build step) and install the tarball instead; installing that tarball into a
+React Native app has not been tested.
+
+With npm:
 
 ```bash
 npm install @getexperimently/react-native-sdk @react-native-async-storage/async-storage md5
-# or
+```
+
+With Yarn:
+
+```bash
 yarn add @getexperimently/react-native-sdk @react-native-async-storage/async-storage md5
 ```
+
+From a clone of this repository instead, `npm pack` writes
+`getexperimently-react-native-sdk-0.1.0.tgz`:
 
 ```bash
 git clone https://github.com/getexperimently/experimently.git
 cd experimently/sdk/react-native
-npm pack      # writes getexperimently-react-native-sdk-0.1.0.tgz
-# then, in your app:
+npm pack
+```
+
+Then, in your app, install the tarball with the two peer dependencies:
+
+```bash
 npm install /path/to/experimently/sdk/react-native/getexperimently-react-native-sdk-0.1.0.tgz @react-native-async-storage/async-storage md5
 ```
 
@@ -329,11 +342,14 @@ test('useFlag reflects the server decision', async () => {
 
 ### Running the SDK's own tests
 
+`npx jest` runs the client, hook and hash tests, with `fetch` mocked. `npx tsc --noEmit`
+type-checks `src/`, and `npm run typecheck:tests` type-checks the tests too:
+
 ```bash
 cd sdk/react-native && npm install
-npx jest                     # 127 tests: client (79), hooks (32), hash (16); fetch is mocked
-npx tsc --noEmit             # type-check src
-npm run typecheck:tests      # type-check the tests too
+npx jest
+npx tsc --noEmit
+npm run typecheck:tests
 ```
 
 No contract smoke exists for React Native (it needs a device runtime); the endpoint contract is

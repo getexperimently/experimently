@@ -5,25 +5,16 @@ This directory contains the security compliance documentation for Experimently.
 | Document | Description |
 |----------|-------------|
 | [Threat Model](threat-model.md) | System threats and mitigations |
-| [Incident Response Plan](incident-response-plan.md) | How to respond to security incidents |
+| [Responding to an incident on your deployment](incident-response.md) | Where to report a vulnerability, and how to roll back |
 | [Security Policies](security-policies.md) | Access control and data policies |
 | [Hardening Changes](hardening-changes.md) | Security controls implemented |
 
 ## Quick Reference
 
-- Report a security issue: security@yourcompany.com
-- On-call for P0 incidents: See PagerDuty runbook
+- Report a security issue: privately, as [SECURITY.md](https://github.com/getexperimently/experimently/blob/main/SECURITY.md) describes
+- An incident on your deployment: [Responding to an incident on your deployment](incident-response.md)
 - Last audit date: March 2026
 - Next review: June 2026
-
-## Severity SLAs
-
-| Severity | Initial Response | Description |
-|----------|-----------------|-------------|
-| P0 — Critical | < 15 minutes | Data breach, compromised admin credentials, service down |
-| P1 — High | < 1 hour | Suspected unauthorized access, account takeover |
-| P2 — Medium | < 4 hours | Anomalous access patterns, expired credentials |
-| P3 — Low | < 24 hours | Informational findings, policy violations |
 
 ## Key Security Controls (Implemented)
 

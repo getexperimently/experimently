@@ -16,11 +16,40 @@ header comment is the reference for every variable and profile; this page summar
 | `pgadmin` | `dpage/pgadmin4` | 5050 | `tools` | database browser |
 | `localstack` | `localstack/localstack:3` | 4566 | `aws` | only for developing the optional AWS integrations |
 
-```bash
-docker compose up -d --wait                         # core stack
-docker compose --profile demo up -d                 # + demo apps
-docker compose --profile tools --profile aws up -d  # + pgAdmin and LocalStack
-docker compose down -v                              # stop and drop volumes
+Start the core stack, the four default services:
+
+```{.bash exec timeout=1200}
+docker compose up -d --wait
+```
+
+Check that those four are the ones running:
+
+```{.bash exec}
+docker compose ps --services --status running | sort
+```
+<!-- expect: api -->
+<!-- expect: frontend -->
+<!-- expect: postgres -->
+<!-- expect: redis -->
+
+It prints `api`, `frontend`, `postgres` and `redis`, one per line.
+
+Add the demo applications with the `demo` profile:
+
+```{.bash skip reason="demo: builds and starts the demo applications"}
+docker compose --profile demo up -d
+```
+
+Add pgAdmin and LocalStack with the `tools` and `aws` profiles:
+
+```{.bash skip reason="server: starts pgAdmin and LocalStack, which pull their own images"}
+docker compose --profile tools --profile aws up -d
+```
+
+Stop everything and drop the volumes, which deletes the database:
+
+```{.bash exec}
+docker compose down -v
 ```
 
 ## First start
@@ -63,6 +92,16 @@ does not pass them through.
 Start only the data services and follow "Running outside Docker" in the
 [Quick Start](quick-start.md):
 
-```bash
+```{.bash exec}
 docker compose up -d --wait postgres redis
 ```
+
+Then check that they are running:
+
+```{.bash exec}
+docker compose ps --services --status running | sort
+```
+<!-- expect: postgres -->
+<!-- expect: redis -->
+
+It prints `postgres` and `redis`.

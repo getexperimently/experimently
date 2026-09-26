@@ -118,7 +118,7 @@
 - [Threat Model](security/threat-model.md) — threat scenarios and countermeasures
 - [Security Policies](security/security-policies.md) — access control, data protection
 - [Hardening Changes](security/hardening-changes.md) — WAF, headers, rate limiting
-- [Incident Response](security/incident-response-plan.md) — severity levels, response process
+- [Incident Response](security/incident-response.md) — reporting a vulnerability, and rolling back your deployment
 
 ---
 
