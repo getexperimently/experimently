@@ -272,6 +272,59 @@ def test_the_dashboard_image_tag_refuses_latest_and_empty(value):
         _synth("dev", {"dashboard_image_tag": value})
 
 
+def _dashboard_image(resources: dict, environment: str = "dev") -> str:
+    (task,) = [
+        r
+        for r in _by_type(resources, "AWS::ECS::TaskDefinition").values()
+        if r["Properties"]["Family"] == f"experimentation-dashboard-{environment}"
+    ]
+    (container,) = task["Properties"]["ContainerDefinitions"]
+    return json.dumps(container["Image"])
+
+
+#: A digest of the shape `check_dashboard_image.py` prints.
+PINNED_DIGEST = "sha256:" + "0123456789abcdef" * 4
+
+
+@pytest.mark.regression
+def test_a_digest_pin_names_the_image_by_digest():
+    """`-c dashboard_image_tag=sha256:<hex>` is how a running dashboard is kept
+    across a `cdk deploy` (C4b; principal-engineer C7).
+
+    It must synthesise `web@sha256:<hex>`. Handled as a tag it would be
+    `web:sha256:<hex>`, a reference to a tag, not to the running image (and
+    not a tag ECR can hold: a tag cannot contain `:`).
+    """
+    image = _dashboard_image(
+        _fargate(_synth("dev", {"dashboard_image_tag": PINNED_DIGEST}))
+    )
+    assert f"/experimentation-platform/web@{PINNED_DIGEST}" in image, image
+    assert ":sha256:" not in image, image
+
+
+def test_the_check_script_names_this_stack_s_dashboard(dev):
+    """`check_dashboard_image.py` finds the service, container and repository by
+    name; each must be what the stack synthesises."""
+    check = runpy.run_path(str(REPO_ROOT / "scripts" / "check_dashboard_image.py"))
+    services = {
+        r["Properties"]["ServiceName"]
+        for r in _by_type(dev, "AWS::ECS::Service").values()
+    }
+    assert check["SERVICE"].format(env="dev") in services
+    (task,) = [
+        r
+        for r in _by_type(dev, "AWS::ECS::TaskDefinition").values()
+        if r["Properties"]["Family"] == "experimentation-dashboard-dev"
+    ]
+    assert [c["Name"] for c in task["Properties"]["ContainerDefinitions"]] == [
+        check["CONTAINER"]
+    ]
+    assert f"/{check['REPOSITORY']}:" in _dashboard_image(dev)
+    names = runpy.run_path(str(CDK_DIR / "stacks" / "names.py"))
+    assert check["CLUSTER"].format(env="dev") == names["ecs_cluster_name"]("dev")
+    assert check["REPOSITORY"] == names["DASHBOARD_ECR_REPOSITORY"]
+
+
 # --- the security-group path, both halves ---------------------------------------
 
 

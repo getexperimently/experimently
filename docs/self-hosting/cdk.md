@@ -147,6 +147,23 @@ cdk deploy experimentation-fargate-dev
 cdk deploy experimentation-monitoring-dev
 ```
 
+**Redeploying `experimentation-fargate-<env>` on a running environment** needs
+two pins, printed by two read-only checks run from the repository root:
+
+```bash
+python3 scripts/check_live_target_group.py --env <env>   # -> api_live_target_group
+python3 scripts/check_dashboard_image.py --env <env>     # -> dashboard_image_tag
+cdk deploy experimentation-fargate-<env> \
+  -c api_live_target_group=<blue|green> -c dashboard_image_tag=sha256:<hex>
+```
+
+Without them the deploy undoes what the release workflow did, and every probe
+stays green: the API's routes can point at the empty one of its blue and green
+target groups, and a change to the dashboard's task definition
+puts it back on the `web:bootstrap` placeholder image. The [Deployment Guide, section 1.6](../deployment/deployment-guide.md#16-the-stacks)
+has the full sequence, including `backend_image_tag` and what to do when the
+dashboard is still on `:bootstrap`.
+
 ---
 
 ## What Gets Deployed
