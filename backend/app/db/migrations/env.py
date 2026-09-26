@@ -22,6 +22,7 @@ if project_root not in sys.path:
 # default.  backend/app/db/schema.py explains what those two opinions used to
 # generate; db/bootstrap.py resolves with the same function.
 from backend.app.db.schema import export_schema_name, metadata_for_schema
+from backend.app.db.url import postgres_url as build_postgres_url
 
 schema = export_schema_name()
 
@@ -153,8 +154,19 @@ _db_user = os.environ.get("POSTGRES_USER", "postgres")
 _db_password = os.environ.get("POSTGRES_PASSWORD", "postgres")
 _db_host = os.environ.get("POSTGRES_SERVER") or os.environ.get("POSTGRES_HOST") or "localhost"
 _db_port = os.environ.get("POSTGRES_PORT", "5432")
-postgres_url = f"postgresql://{_db_user}:{_db_password}@{_db_host}:{_db_port}/{db_name}"
-config.set_main_option("sqlalchemy.url", postgres_url)
+# The password is percent-encoded (#146, backend/app/db/url.py), and the
+# result is then escaped once more for THIS path only: alembic's config is a
+# configparser, which reads `%` as interpolation, so an encoded `%23` would be
+# refused ("invalid interpolation syntax") and a literal `%` misread. `%%` is
+# configparser's own escape and is undone when the value is read back.
+postgres_url = build_postgres_url(
+    user=_db_user,
+    password=_db_password,
+    host=_db_host,
+    port=_db_port,
+    database=db_name,
+)
+config.set_main_option("sqlalchemy.url", postgres_url.replace("%", "%%"))
 
 # Interpret the config file for Python logging.
 # disable_existing_loggers=False: fileConfig() otherwise switches off every

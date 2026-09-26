@@ -245,6 +245,13 @@ fargate_stack = FargateServiceStack(
     include_modules=ENABLE_MODULE_STACKS,
     api_desired_count=API_DESIRED_COUNT[env_name],
     dashboard_desired_count=DASHBOARD_DESIRED_COUNT[env_name],
+    # Where Aurora is and how to log in to it (#78, #146): this environment's
+    # writer endpoint, and the secret Aurora generated its master credentials
+    # into -- not a hand-made copy that can drift from what the cluster has.
+    # The security group is so the stack can admit the tasks on 5432.
+    db_host=database_stack.writer_host,
+    db_credentials=database_stack.db_credentials,
+    db_security_group=database_stack.rds_security_group,
     env=env,
 )
 fargate_stack.add_dependency(compute_stack)
@@ -258,8 +265,12 @@ migration_stack = MigrationTaskStack(
     ecs_cluster=compute_stack.ecs_cluster,
     env_name=env_name,
     # The migration container connects to the same Aurora cluster the service
-    # does; it was given no host at all and so tried localhost.
-    db_host=database_stack.aurora_cluster.cluster_endpoint.hostname,
+    # does, with the same credentials; it was given no host at all and so
+    # tried localhost. It runs in the ECS tasks' security group, which is the
+    # one the fargate stack admits to Aurora.
+    db_host=database_stack.writer_host,
+    db_credentials=database_stack.db_credentials,
+    ecs_security_group=compute_stack.ecs_security_group,
     public_base_url=public_base_url,
     include_modules=ENABLE_MODULE_STACKS,
     env=env,

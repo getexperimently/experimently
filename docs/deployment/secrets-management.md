@@ -24,29 +24,46 @@ All production secrets are stored in AWS Secrets Manager. The application never 
 
 Create all of the following before running the first production deployment. These commands must be run by an IAM identity with `secretsmanager:CreateSecret` permission.
 
-### Database Password
+The secrets a human creates are:
+
+| Secret | Profile |
+|--------|---------|
+| `/<env>/experimentation/jwt-secret` | both |
+| `/<env>/experimentation/first-superuser-password` | both |
+| `/<env>/experimentation/audit-hmac-key` | `full` only |
+
+plus `/<env>/experimentation/redis-url`, which the API task definition still
+reads until the Redis connection is taken from the Redis stack (#147).
+
+### Database credentials: nothing to create
+
+There is no `db-password` secret any more (#78). The database stack generates
+Aurora's master credentials into its own secret,
+`experimentation-database-<env>-aurora-credentials` (JSON with `username` and
+`password` fields; the ARN is the stack's `SecretArn` output), and creates the
+cluster with them. Both backend task definitions read `POSTGRES_USER` and
+`POSTGRES_PASSWORD` from that secret's two fields, and `POSTGRES_SERVER` from
+the stack's writer endpoint, so the credentials the tasks present are by
+construction the ones the cluster has. A hand-made copy could only ever
+disagree with it.
+
+The generated password may contain any printable character except
+`" @ / \`. The application percent-encodes `POSTGRES_USER` and
+`POSTGRES_PASSWORD` when it builds the connection URL, so no escaping is needed
+there.
+
+**A `DATABASE_URI` supplied directly is used exactly as given, so it must
+already be percent-encoded.** If you set `DATABASE_URI` (or
+`SQLALCHEMY_DATABASE_URI`) yourself instead of the `POSTGRES_*` variables,
+encode the user and password first -- a `#`, `?`, `%`, `:`, `/`, `@` or space
+left raw either breaks the URL or silently sends a different password:
 
 ```bash
-# Generate a secure 32-character password
-DB_PASSWORD=$(openssl rand -base64 32)
-
-aws secretsmanager create-secret \
-  --name /prod/experimentation/db-password \
-  --description "Aurora PostgreSQL password for the experimentation application user" \
-  --secret-string "$DB_PASSWORD" \
-  --tags '[{"Key":"Environment","Value":"production"},{"Key":"Service","Value":"experimently"}]'
-
-# Verify it was created
-aws secretsmanager describe-secret --secret-id /prod/experimentation/db-password \
-  --query '{Name:Name,ARN:ARN,CreatedDate:CreatedDate}'
+python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$PASSWORD"
 ```
 
-Note: After creating the secret, you must also set this password on the Aurora database user:
-
-```sql
--- Connect to Aurora as the master user and run:
-ALTER USER experimentation_app WITH PASSWORD 'the-same-password-you-stored-in-secrets-manager';
-```
+(`quote`, not `quote_plus`: the driver decodes `+` literally, so a space
+encoded as `+` would come back as `+`.)
 
 ### JWT Signing Secret
 
@@ -146,10 +163,12 @@ aws secretsmanager list-secrets \
   --output table
 ```
 
-Expected output: 5 secrets — `db-password`, `jwt-secret`, `redis-url`,
-`cognito-config`, `first-superuser-password` — plus `audit-hmac-key` for the
-`full` profile. `Deploy to Production` checks for exactly this set before it
-builds anything ("Required secrets exist for this profile").
+`Deploy to Production` checks for `jwt-secret`, `redis-url` and
+`first-superuser-password`, plus `audit-hmac-key` for the `full` profile,
+before it builds anything ("Required secrets exist for this profile").
+`cognito-config` may also be listed; nothing in the deployment reads it. The
+database credentials are not under this prefix: they are the database stack's
+`experimentation-database-<env>-aurora-credentials`.
 
 ---
 
@@ -173,10 +192,12 @@ task_definition.add_container(
         "POSTGRES_SCHEMA": "experimentation",
     },
     secrets={
-        "DB_PASSWORD": ecs.Secret.from_secrets_manager(
-            secretsmanager.Secret.from_secret_name_v2(
-                stack, "DbPassword", "/prod/experimentation/db-password"
-            )
+        # The secret the database stack generated Aurora's credentials into.
+        "POSTGRES_USER": ecs.Secret.from_secrets_manager(
+            db_credentials, field="username"
+        ),
+        "POSTGRES_PASSWORD": ecs.Secret.from_secrets_manager(
+            db_credentials, field="password"
         ),
         "JWT_SECRET": ecs.Secret.from_secrets_manager(
             secretsmanager.Secret.from_secret_name_v2(
@@ -203,7 +224,7 @@ The application reads these as standard environment variables:
 # backend/app/core/config.py
 import os
 
-DB_PASSWORD = os.environ["DB_PASSWORD"]          # from /prod/experimentation/db-password
+POSTGRES_PASSWORD = os.environ["POSTGRES_PASSWORD"]  # from the Aurora-generated secret
 JWT_SECRET = os.environ["JWT_SECRET"]            # from /prod/experimentation/jwt-secret
 REDIS_URL = os.environ.get("REDIS_URL", "")      # from /prod/experimentation/redis-url
 ```
@@ -214,7 +235,7 @@ REDIS_URL = os.environ.get("REDIS_URL", "")      # from /prod/experimentation/re
 
 | Secret | Rotation Frequency | Method | Requires Restart |
 |--------|-------------------|--------|-----------------|
-| `/prod/experimentation/db-password` | 180 days | Secrets Manager Lambda rotation (dual-user strategy) | No (connection pool reconnects) |
+| `experimentation-database-prod-aurora-credentials` | 180 days | Secrets Manager Lambda rotation (single-user) | Yes: ECS injects it when a task starts |
 | `/prod/experimentation/jwt-secret` | 90 days | Manual rotation (see below) | Yes (force ECS restart) |
 | `/prod/experimentation/redis-url` (auth token) | 365 days | Manual (ElastiCache token rotation) | Yes |
 | `/prod/experimentation/cognito-config` | On Cognito pool change | Manual update | Yes |
@@ -225,17 +246,17 @@ REDIS_URL = os.environ.get("REDIS_URL", "")      # from /prod/experimentation/re
 ```bash
 # Enable automatic rotation (runs every 180 days via Lambda)
 aws secretsmanager rotate-secret \
-  --secret-id /prod/experimentation/db-password \
+  --secret-id experimentation-database-prod-aurora-credentials \
   --rotation-lambda-arn arn:aws:lambda:us-west-2:ACCOUNT:function:SecretsManagerRDSPostgreSQLRotationSingleUser \
   --rotation-rules AutomaticallyAfterDays=180
 
 # Verify rotation is enabled
 aws secretsmanager describe-secret \
-  --secret-id /prod/experimentation/db-password \
+  --secret-id experimentation-database-prod-aurora-credentials \
   --query '{RotationEnabled:RotationEnabled,RotationLambdaARN:RotationLambdaARN,LastRotatedDate:LastRotatedDate}'
 ```
 
-The Secrets Manager rotation Lambda uses the dual-user strategy: it creates a new password for the `experimentation_app_new` user, verifies connectivity, then updates the primary user — ensuring zero-downtime rotation.
+The rotation Lambda changes the master password on the cluster and in the secret together. Running tasks keep the value ECS injected when they started, so force a new deployment after a rotation.
 
 ---
 
@@ -273,19 +294,22 @@ echo "JWT secret rotated. All existing sessions are now invalid."
 
 ### Rotate Database Password Immediately
 
-```bash
-# Step 1: Generate new password
-NEW_DB_PASSWORD=$(openssl rand -base64 32)
+# Step 1: Generate new password. token_urlsafe uses only letters, digits, `-`
+# and `_`, none of which Aurora refuses in a master password.
+# master password, so use a URL-safe alphabet.
+NEW_DB_PASSWORD=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
 
-# Step 2: Update the database user password in Aurora FIRST
-# (Do this before updating Secrets Manager to avoid a gap)
-# Connect to Aurora as master user and run:
-# ALTER USER experimentation_app WITH PASSWORD 'new-password';
+# Step 2: Set it on the cluster FIRST
+aws rds modify-db-cluster \
+  --db-cluster-identifier <the cluster in experimentation-database-prod> \
+  --master-user-password "$NEW_DB_PASSWORD" \
+  --apply-immediately
 
-# Step 3: Update Secrets Manager with the new password
+# Step 3: Put the same password in the database stack's secret (the tasks read
+# its `username` and `password` fields)
 aws secretsmanager put-secret-value \
-  --secret-id /prod/experimentation/db-password \
-  --secret-string "$NEW_DB_PASSWORD"
+  --secret-id experimentation-database-prod-aurora-credentials \
+  --secret-string "$(python3 -c 'import json, sys; print(json.dumps({"username": "postgres", "password": sys.argv[1]}))' "$NEW_DB_PASSWORD")"
 
 # Step 4: Force ECS restart to reconnect with new credentials
 aws ecs update-service \
@@ -403,11 +427,8 @@ aws secretsmanager describe-secret \
 Staging uses separate secrets under `/staging/experimentation/` with the same structure. Staging secrets use weaker but non-production values and are safe to rotate independently.
 
 ```bash
-# Create staging secrets (same structure, different values)
-aws secretsmanager create-secret \
-  --name /staging/experimentation/db-password \
-  --secret-string "$(openssl rand -base64 24)"
-
+# Create staging secrets (same structure, different values). The database
+# credentials are generated by experimentation-database-staging.
 aws secretsmanager create-secret \
   --name /staging/experimentation/jwt-secret \
   --secret-string "$(openssl rand -base64 32)"

@@ -353,23 +353,22 @@ aws rds restore-db-cluster-to-point-in-time \
 # ---------------------------------------------------------------------------
 # STOP. A restore to a NEW cluster cannot be picked up by a redeploy today.
 #
-# The backend task definition injects no database host. `fargate_service_stack.py`
-# passes POSTGRES_DB / POSTGRES_SCHEMA / POSTGRES_PORT as environment and
-# POSTGRES_PASSWORD / SECRET_KEY / REDIS_URL / FIRST_SUPERUSER_PASSWORD as
-# secrets -- no POSTGRES_SERVER and no connection URL. (`grep -rn POSTGRES_SERVER
-# infrastructure/` hits only migration_task_stack.py; the application defaults
-# it to `localhost`.) So there is no "connection string in Secrets Manager" to
-# update, and a new deployment would bring the tasks back pointing at whatever
-# they pointed at before -- while this runbook reported success.
+# Both backend task definitions take POSTGRES_SERVER from the database STACK's
+# writer endpoint, and POSTGRES_USER / POSTGRES_PASSWORD from the stack's
+# generated secret, as CloudFormation imports (#78). A cluster restored beside
+# the stack is not that endpoint, so there is no "connection string in Secrets
+# Manager" to update, and a new deployment would bring the tasks back pointing
+# at the original cluster -- while this runbook reported success. (The restored
+# cluster also keeps the master password of the snapshot, which is the one in
+# the secret only if it has not been rotated since.)
 #
-# Until the task definition takes the host from a secret, restoring to
-# `experimentation-prod-restored` means one of:
+# So restoring to `experimentation-prod-restored` means one of:
 #
 #   - restore IN PLACE instead, so the endpoint the tasks already resolve does
 #     not change; or
 #   - repoint the DNS name the tasks use at the restored cluster; or
-#   - `cdk deploy` the Fargate stack against the restored cluster, which
-#     rewrites the task definition.
+#   - change the database stack to own the restored cluster and `cdk deploy`
+#     it and the Fargate stack, which rewrites the imported endpoint.
 #
 # Decide which BEFORE an incident. Tracked as a gap in the deploy path.
 # ---------------------------------------------------------------------------

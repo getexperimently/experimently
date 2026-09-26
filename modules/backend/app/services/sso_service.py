@@ -228,28 +228,53 @@ _OIDC_PROVIDERS: Dict[str, Dict[str, str]] = {
 # ---------------------------------------------------------------------------
 
 
+ORG_DOMAIN_REQUIRED_DETAIL = "org_domain is required"
+ORG_DOMAIN_TAKEN_DETAIL = "An SSO configuration already exists for this domain"
+
+
+def _stored_domain_normalised() -> Any:
+    """``SSOConfig.org_domain`` normalised in SQL, as :func:`normalise_domain` does.
+
+    Rows written before ``org_domain`` was normalised on write may carry
+    capitals, surrounding spaces or a leading ``@``; this makes them compare
+    as the domain they sign in for. SQL ``trim`` strips spaces only, where
+    ``str.strip`` strips all whitespace.
+    """
+    return func.ltrim(func.lower(func.trim(SSOConfig.org_domain)), "@")
+
+
+def _refuse_taken_domain(
+    db: Session, domain: str, exclude_id: Optional[uuid.UUID] = None
+) -> None:
+    """409 when another configuration's normalised ``org_domain`` is *domain*."""
+    query = db.query(SSOConfig).filter(_stored_domain_normalised() == domain)
+    if exclude_id is not None:
+        query = query.filter(SSOConfig.id != exclude_id)
+    if query.first() is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=ORG_DOMAIN_TAKEN_DETAIL,
+        )
+
+
 def create_sso_config(db: Session, config_data: Dict[str, Any]) -> SSOConfig:
-    """Create a new SSOConfig record.
+    """Create a new SSOConfig record, storing ``normalise_domain(org_domain)``.
 
     Raises:
-        HTTPException 409 if an SSOConfig already exists for ``org_domain``.
-        HTTPException 400 on validation failure.
+        HTTPException 400 if ``org_domain`` is empty once normalised.
+        HTTPException 409 if another configuration's ``org_domain``
+        normalises to the same domain.
     """
-    org_domain = config_data.get("org_domain", "")
+    org_domain = normalise_domain(config_data.get("org_domain"))
     if not org_domain:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="org_domain is required",
+            detail=ORG_DOMAIN_REQUIRED_DETAIL,
         )
 
-    existing = db.query(SSOConfig).filter(SSOConfig.org_domain == org_domain).first()
-    if existing:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"SSO config already exists for domain '{org_domain}'",
-        )
+    _refuse_taken_domain(db, org_domain)
 
-    sso_config = SSOConfig(**config_data)
+    sso_config = SSOConfig(**{**config_data, "org_domain": org_domain})
     db.add(sso_config)
     db.commit()
     db.refresh(sso_config)
@@ -280,7 +305,12 @@ def update_sso_config(
 
     Raises:
         HTTPException 404 if not found.
-        HTTPException 409 if the new org_domain conflicts with another record.
+        HTTPException 400 if a given ``org_domain`` is empty once normalised.
+        HTTPException 409 if a given ``org_domain`` normalises to another
+        configuration's.
+
+    An update that does not name ``org_domain`` leaves the stored value as it
+    is, normalised or not.
     """
     sso_config = get_sso_config_by_id(db, config_id)
     if not sso_config:
@@ -289,19 +319,18 @@ def update_sso_config(
             detail=f"SSO config '{config_id}' not found",
         )
 
-    # Check domain uniqueness if it is being changed
-    new_domain = data.get("org_domain")
-    if new_domain and new_domain != sso_config.org_domain:
-        conflict = (
-            db.query(SSOConfig)
-            .filter(SSOConfig.org_domain == new_domain, SSOConfig.id != config_id)
-            .first()
-        )
-        if conflict:
+    # Checked even when the normalised value equals this row's own: two
+    # legacy rows may differ only in case, and writing one's normalised form
+    # must not collide with the other.
+    if "org_domain" in data:
+        new_domain = normalise_domain(data["org_domain"])
+        if not new_domain:
             raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=f"SSO config already exists for domain '{new_domain}'",
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=ORG_DOMAIN_REQUIRED_DETAIL,
             )
+        _refuse_taken_domain(db, new_domain, exclude_id=config_id)
+        data = {**data, "org_domain": new_domain}
 
     for key, value in data.items():
         setattr(sso_config, key, value)
