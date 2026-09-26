@@ -455,6 +455,7 @@ jobs:
           set -euo pipefail
           deadline=$(( $(date +%s) + ROLLBACK_TIMEOUT_SECONDS ))
           continued=0
+          seen_ready=0
 
           while :; do
             status="$(aws deploy get-deployment --deployment-id "$DEPLOYMENT_ID" \
@@ -462,11 +463,25 @@ jobs:
 
             case "$status" in
               Ready)
+                seen_ready=1
                 if [ "$continued" -eq 0 ]; then
                   echo "deployment is Ready -- approving the traffic shift"
-                  aws deploy continue-deployment --deployment-id "$DEPLOYMENT_ID" \
-                    --deployment-wait-type READY_WAIT
-                  continued=1
+                  if aws deploy continue-deployment --deployment-id "$DEPLOYMENT_ID" \
+                       --deployment-wait-type READY_WAIT; then
+                    continued=1
+                  else
+                    # Someone may have approved it between the read above and
+                    # this call (an operator in the console). Read it again:
+                    # still Ready means this run could not approve it, which
+                    # is a failure; anything else is decided below.
+                    status="$(aws deploy get-deployment --deployment-id "$DEPLOYMENT_ID" \
+                                --query deploymentInfo.status --output text)"
+                    if [ "$status" = Ready ]; then
+                      echo "::error::this run could not approve rollback deployment $DEPLOYMENT_ID (the error is above), and it is still waiting for approval"
+                      exit 1
+                    fi
+                    echo "continue-deployment failed, and $DEPLOYMENT_ID has since left Ready ($status): it was approved, or ended, outside this run"
+                  fi
                 fi
                 ;;
               Failed|Stopped)
@@ -483,27 +498,47 @@ jobs:
             # needs to know traffic has moved, not that CodeDeploy has finished
             # tidying up.
             #
-            # But only once THIS run has approved its own deployment (#148).
-            # The target can be PRIMARY before that: the stop step's
+            # But only once this run's OWN deployment has been approved
+            # (#148). The target can be PRIMARY before that: the stop step's
             # auto-rollback of an in-flight deployment puts back the revision
             # it replaced, which is usually the target. Counting that as done
             # reported success on the first poll and left this run's
             # deployment waiting, unapproved, for 30 minutes, holding the
-            # group, until CodeDeploy stopped it. So the loop keeps polling
-            # until the deployment is Ready and approved, whatever PRIMARY is.
+            # group, until CodeDeploy stopped it.
+            #
+            # Approved is observed, not "sent by this run": the deployment was
+            # seen Ready and has since left Ready for InProgress, Baking or
+            # Succeeded, by this run's continue-deployment or anyone else's.
+            # A deployment never seen Ready never counts (CodeDeploy stops an
+            # unapproved one when its wait ends; it does not leave Ready
+            # otherwise).
+            approved=""
+            if [ "$continued" -eq 1 ]; then
+              approved="approved by this run"
+            elif [ "$seen_ready" -eq 1 ]; then
+              case "$status" in
+                InProgress|Baking|Succeeded) approved="approved outside this run: seen Ready, now $status" ;;
+              esac
+            fi
             serving="$(aws ecs describe-services \
               --cluster "$ECS_CLUSTER" --services "$ECS_BACKEND_SERVICE" \
               --query "services[0].taskSets[?status=='PRIMARY'].taskDefinition" \
               --output text)"
-            if [ "$continued" -eq 1 ] && [ "$serving" = "$TARGET_ARN" ]; then
-              echo "traffic is on $TARGET_ARN (deployment $DEPLOYMENT_ID $status, approved by this run)"
+            if [ -n "$approved" ] && [ "$serving" = "$TARGET_ARN" ]; then
+              echo "traffic is on $TARGET_ARN (deployment $DEPLOYMENT_ID $status, $approved)"
               break
             fi
 
             if [ "$(date +%s)" -ge "$deadline" ]; then
-              approved=no
-              [ "$continued" -eq 1 ] && approved=yes
-              echo "::error::rollback deployment $DEPLOYMENT_ID did not put $TARGET_ARN in service within ${ROLLBACK_TIMEOUT_SECONDS}s (status $status, serving $serving, approved by this run: $approved)"
+              if [ -z "$approved" ] && [ "$serving" = "$TARGET_ARN" ]; then
+                # The target serves, but not through this run's deployment:
+                # say exactly that, not "did not put it in service".
+                seen=no
+                [ "$seen_ready" -eq 1 ] && seen=yes
+                echo "::error::${TARGET_ARN##*/} is the PRIMARY task set, but this run never saw its own rollback deployment $DEPLOYMENT_ID approved within ${ROLLBACK_TIMEOUT_SECONDS}s (status $status; seen Ready by this run: $seen), so it does not count this as a rollback it did. If someone approved it before this run saw it Ready, check it with: aws deploy get-deployment --deployment-id $DEPLOYMENT_ID"
+              else
+                echo "::error::rollback deployment $DEPLOYMENT_ID did not put $TARGET_ARN in service within ${ROLLBACK_TIMEOUT_SECONDS}s (status $status, serving $serving, ${approved:-not approved})"
+              fi
               exit 1
             fi
             sleep 10
@@ -623,8 +658,11 @@ jobs:
             dash="The dashboard was left as it is. For the dashboard alone: docs/deployment/rollback-runbook.md Method 2."
           elif [ "$DASHBOARD_OUTCOME" = success ]; then
             dash="The dashboard half ran as asked: dashboard ${DASHBOARD_RESULT}."
+          elif [ "$DASHBOARD_OUTCOME" = failure ]; then
+            dash="The dashboard half ran as asked and did not succeed: ${DASHBOARD_RESULT:-no result}. Its step says why; for the dashboard alone: docs/deployment/rollback-runbook.md Method 2."
           else
-            dash="The dashboard half ran as asked and did not succeed: ${DASHBOARD_RESULT:-not reached}. Its step says why; for the dashboard alone: docs/deployment/rollback-runbook.md Method 2."
+            # Skipped: a step before it failed (the API verify step, say).
+            dash="The dashboard half did not run: an earlier step failed; see above. The dashboard was not changed; for the dashboard alone: docs/deployment/rollback-runbook.md Method 2."
           fi
           echo "::error title=Nothing to roll back::The API is already on ${TARGET_ARN##*/}, and no deployment was in flight, so there is nothing to roll back: this run created no CodeDeploy deployment and stopped nothing. ${dash}"
           exit 1

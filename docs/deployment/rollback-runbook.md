@@ -103,8 +103,11 @@ It refuses the API half, fails, and says why, in two cases:
   alone, use Method 2's dashboard block. The run also stops nothing when it
   cannot read an in-flight deployment's creator.
 
-A rollback is reported done only once the run has approved its own
-deployment and the target is the PRIMARY task set.
+A rollback is reported done only once the run's own deployment has been
+approved and the target is the PRIMARY task set. The run approves it itself;
+an approval from the console also counts, as long as the run saw the
+deployment waiting for approval first. A deployment the run never saw waiting
+for approval is not counted, and the run then fails and says so.
 
 **If the API went back and the dashboard did not**, the run says so (its Slack
 line reads "API rolled back to …; dashboard NOT rolled back (…)"), and the

@@ -72,6 +72,19 @@ def runner(tmp_path: Path) -> Runner:
     sleep = runner.bin / "sleep"
     sleep.write_text("#!/bin/sh\nexit 0\n")
     sleep.chmod(0o755)
+    # `date +%s` is a clock that advances one second per call, so a
+    # ROLLBACK_TIMEOUT_SECONDS of N bounds a loop to a few polls with no real
+    # waiting. Any other use of `date` fails the test loudly.
+    clock = runner.state / "clock"
+    date = runner.bin / "date"
+    date.write_text(
+        "#!/bin/sh\n"
+        '[ "$1" = "+%s" ] || { echo "fake date: unexpected $*" >&2; exit 99; }\n'
+        f'n=$(cat "{clock}" 2>/dev/null || echo 1000)\n'
+        f'echo $((n + 1)) > "{clock}"\n'
+        'echo "$n"\n'
+    )
+    date.chmod(0o755)
     return runner
 
 
@@ -288,6 +301,90 @@ def test_a_target_that_is_not_serving_is_rolled_back_as_before(runner):
     assert "API rolled back to experimentation-backend-staging:42" in _headline(summary)
 
 
+@pytest.mark.regression
+@pytest.mark.parametrize(
+    "predicate_rules, exit_code",
+    [
+        # The /api/* rule forwards to green alone while the target's task
+        # set is in blue: api_serving.py's WRONG.
+        (api_rules(BEFORE, RULES_GREEN), 3),
+        # An AWS read fails: api_serving.py's UNKNOWN.
+        (
+            [
+                rule(
+                    "cloudformation describe-stack-resources",
+                    answers=[{"error": "AccessDenied"}],
+                ),
+                *api_rules(BEFORE, RULES_BLUE),
+            ],
+            2,
+        ),
+    ],
+    ids=["wrong-3", "unknown-2"],
+)
+def test_a_predicate_that_cannot_confirm_serving_warns_and_rolls_back(
+    runner, predicate_rules, exit_code
+):
+    """Review finding 1. Exit 2 or 3 from scripts/api_serving.py is not "already
+    serving": the run warns and takes the normal path (create, then approve)."""
+    rules = [
+        *_nothing_in_flight(),
+        *_verify(),
+        *_primary(TARGET),
+        *_create_and_approve(["InProgress", "Ready", "InProgress"]),
+        *predicate_rules,
+    ]
+    outputs, results, summary = _run_from_stop(runner, rules)
+    code, log = results["Stop any deployment already in flight"]
+    assert code == 0, log
+    assert (
+        "::warning title=Could not tell what the API is serving::"
+        f"scripts/api_serving.py exited {exit_code}" in log
+    ), log
+    assert "already_serving" not in outputs["stop"]
+    ops = _ops(runner)
+    assert ops.count("deploy create-deployment") == 1, ops
+    assert ops.count("deploy continue-deployment") == 1, ops
+    assert "Refuse a rollback to the revision already serving" not in results
+    assert "API rolled back to experimentation-backend-staging:42" in _headline(summary)
+
+
+@pytest.mark.regression
+def test_a_failed_verify_in_the_already_serving_case_says_the_dashboard_did_not_run(
+    runner,
+):
+    """Review finding 3, end to end: already serving, a dashboard target, and
+    the API verify step fails (a task-count mismatch). The dashboard step's
+    outcome comes from its real `if:` (skipped), and the refusal says so,
+    not "ran as asked"."""
+    rules = [
+        *_nothing_in_flight(),
+        rule(
+            "ecs describe-services",
+            "runningCount, desiredCount",
+            answers=[f"{TARGET}\t1\t2"],
+        ),
+        *api_rules(BEFORE, RULES_BLUE),
+        *dashboard_rules([]),
+    ]
+    outputs, results, summary = _run_from_stop(
+        runner, rules, dashboard="experimentation-dashboard-staging:6"
+    )
+    assert outputs["stop"]["already_serving"] == "true"
+    assert outputs["api-verify"]["__outcome__"] == "failure"
+    assert outputs["dashboard-rollback"]["__outcome__"] == "skipped"
+    assert "ecs update-service" not in _ops(runner)
+    code, log = results["Refuse a rollback to the revision already serving"]
+    assert code == 1, log
+    assert (
+        "The dashboard half did not run: an earlier step failed; see above." in log
+    ), log
+    assert "ran as asked" not in log
+    headline = _headline(summary)
+    assert "API NOT rolled back: it was already on" in headline, headline
+    assert "dashboard NOT rolled back" in headline, headline
+
+
 # --- (b) the stop step's auto-rollback already put the target back -------------------
 
 
@@ -332,24 +429,128 @@ def test_success_waits_for_this_runs_own_approval_after_the_stop_reverted_the_ap
     assert "API rolled back to experimentation-backend-staging:42" in _headline(summary)
 
 
-def test_the_loop_reports_whether_it_approved_when_it_times_out(runner):
-    """Never Ready inside the deadline: a failure that says it never approved,
-    not a success because PRIMARY happened to be the target."""
-    runner.scenario(
-        [
-            *_primary(TARGET),
-            *_create_and_approve(["InProgress"]),
-        ]
-    )
+def _shift(runner: Runner, rules: list, timeout: str = "1800") -> tuple[int, str]:
+    """The wait loop alone. The fake clock advances a second per `date`
+    call, and the loop calls it once per poll, so `timeout` bounds the polls."""
+    runner.scenario(rules)
     step = _step(ROLLBACK, "Shift traffic and wait for it to land")
     code, log, _, _ = runner.run(
         ROLLBACK,
         step,
         {"target": {"arn": TARGET}, "codedeploy": {"deployment-id": ROLLBACK_ID}},
-        ROLLBACK_TIMEOUT_SECONDS="0",
+        ROLLBACK_TIMEOUT_SECONDS=timeout,
+    )
+    return code, log
+
+
+@pytest.mark.regression
+def test_an_approval_sent_outside_this_run_counts_once_observed(runner):
+    """Review finding 2. An operator approves in the console between this
+    run's read of Ready and its own continue-deployment, which then fails.
+    The deployment was seen Ready and has left Ready: it is approved, by
+    someone. Planted defect: the previous loop, where that failed call ended
+    the step (set -e) and the rollback was reported failed."""
+    code, log = _shift(
+        runner,
+        [
+            *_primary(TARGET),
+            rule("deploy create-deployment", answers=[ROLLBACK_ID]),
+            rule(
+                "deploy get-deployment",
+                ROLLBACK_ID,
+                "deploymentInfo.status",
+                answers=["InProgress", "Ready", "InProgress"],
+            ),
+            rule(
+                "deploy continue-deployment",
+                answers=[{"error": "DeploymentIsNotInReadyStateException"}],
+            ),
+        ],
+    )
+    assert code == 0, log
+    assert "approved outside this run: seen Ready, now InProgress" in log
+    assert "has since left Ready (InProgress)" in log
+
+
+def test_a_failed_approval_while_still_ready_fails_loudly(runner):
+    code, log = _shift(
+        runner,
+        [
+            *_primary(TARGET),
+            rule(
+                "deploy get-deployment",
+                ROLLBACK_ID,
+                "deploymentInfo.status",
+                answers=["Ready"],
+            ),
+            rule("deploy continue-deployment", answers=[{"error": "AccessDenied"}]),
+        ],
     )
     assert code == 1, log
-    assert "approved by this run: no" in log
+    assert "this run could not approve rollback deployment" in log
+    assert "traffic is on" not in log
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize(
+    "statuses",
+    [["InProgress"], ["Baking"], ["Succeeded"], ["InProgress", "Baking", "Succeeded"]],
+    ids=["InProgress", "Baking", "Succeeded", "never-Ready-sequence"],
+)
+def test_a_deployment_never_seen_ready_never_counts(runner, statuses):
+    """The T31 bake-case protection, in every never-Ready ordering: the
+    target is PRIMARY from the first poll (the stop's auto-rollback), and
+    this run's deployment is never seen Ready. That is not a rollback this
+    run did, and the timeout says so without contradicting itself."""
+    code, log = _shift(
+        runner, [*_primary(TARGET), *_create_and_approve(statuses)], timeout="5"
+    )
+    assert code == 1, log
+    assert "traffic is on" not in log
+    assert "deploy continue-deployment" not in _ops(runner)
+    assert (
+        "experimentation-backend-staging:42 is the PRIMARY task set, but this "
+        f"run never saw its own rollback deployment {ROLLBACK_ID} approved" in log
+    ), log
+    assert "seen Ready by this run: no" in log
+    assert "did not put" not in log
+    # It polled more than once before giving up: the clock bounds it.
+    polls = [c for c in runner.calls() if c[:2] == ["deploy", "get-deployment"]]
+    assert len(polls) > 1
+
+
+def test_ready_then_stopped_is_a_failure_not_an_approval(runner):
+    code, log = _shift(
+        runner,
+        [
+            *_primary(TARGET),
+            rule(
+                "deploy get-deployment",
+                ROLLBACK_ID,
+                "deploymentInfo.status",
+                answers=["Ready", "Stopped"],
+            ),
+            rule(
+                "deploy continue-deployment",
+                answers=[{"error": "DeploymentAlreadyCompletedException"}],
+            ),
+            rule("deploy get-deployment", "errorInformation", answers=["{}"]),
+        ],
+    )
+    assert code == 1, log
+    assert f"rollback deployment {ROLLBACK_ID} is Stopped" in log
+    assert "traffic is on" not in log
+
+
+def test_the_timeout_names_what_is_serving_when_it_is_not_the_target(runner):
+    code, log = _shift(
+        runner,
+        [*_primary(NEW), *_create_and_approve(["InProgress"])],
+        timeout="3",
+    )
+    assert code == 1, log
+    assert f"rollback deployment {ROLLBACK_ID} did not put {TARGET} in service" in log
+    assert f"serving {NEW}, not approved" in log
 
 
 # --- the stop step refuses CodeDeploy's own rollback (PE condition 3, UX W9) ----------
@@ -476,27 +677,25 @@ def test_the_evaluator_knows_every_if_in_the_api_half():
 def test_a_refused_run_with_a_dashboard_target_says_nothing_was_stopped(runner):
     """The dashboard half is not reached when the stop step refuses. The
     summary says the API half refused and stopped nothing, not "if the stop
-    step already reverted the API", which cannot be true here."""
-    runner.scenario(dashboard_rules([]))
-    outputs = {
-        "target": {"arn": TARGET},
-        "stop": {
-            "refused": "codeDeployRollback",
-            "refused_id": CD_ROLLBACK_ID,
-            "primary": "experimentation-backend-staging:43",
-            "__outcome__": "failure",
-        },
-        "codedeploy": {"__outcome__": "skipped"},
-        "dashboard-rollback": {"__outcome__": "skipped"},
-    }
-    inputs = {
-        "dashboard_task_definition_arn": "experimentation-dashboard-staging:6",
-        "job.status": "failure",
-    }
-    code, out, written, summary = runner.run(
-        ROLLBACK, _step(ROLLBACK, "Run summary"), outputs, inputs
+    step already reverted the API", which cannot be true here.
+
+    Every outcome here comes from the run, not from the test: the stop step
+    refuses, and the `if:` chain skips the rest (review suggestion 4)."""
+    rules = [
+        *_in_flight((CD_ROLLBACK_ID, f"codeDeployRollback\t{BAD_ID}")),
+        *dashboard_rules([]),
+    ]
+    outputs, results, summary = _run_from_stop(
+        runner, rules, dashboard="experimentation-dashboard-staging:6"
     )
+    assert outputs["stop"]["__outcome__"] == "failure"
+    for key in ("codedeploy", "api-verify", "dashboard-rollback"):
+        assert outputs[key]["__outcome__"] == "skipped", key
+    assert "Refuse a rollback to the revision already serving" not in results
+    code, out = results["Run summary"]
     assert code == 0, out
     assert "the API half refused, and nothing was stopped" in summary, summary
     assert "If the stop step already reverted the API" not in summary
-    assert written["slack"].endswith("dashboard NOT rolled back (not reached)")
+    assert outputs["summary"]["slack"].endswith(
+        "dashboard NOT rolled back (not reached)"
+    )
