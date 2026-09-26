@@ -1372,3 +1372,78 @@ def test_a_page_named_in_upper_case_is_in_the_universe(repo, tmp_path):
     found = problems_of(enrol(repo, GOOD))
     assert any(p.startswith("docs/SNEAKY.MD: a page") for p in found), found
     assert any(p.startswith("docs/SNEAKY.MD: 1 shell block") for p in found), found
+
+
+# ---------------------------------------------------------------------------
+# Fix round 2 (diff-of-diffs review): executed heredocs, URLs, CLAUDE.md case
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize(
+    "opener, body, message",
+    [
+        ("bash <<'EOF'", "aws s3 rm --recursive s3://x", "may not call 'aws'"),
+        ("sh <<EOF", "npm install left-pad", "may not run 'npm'"),
+        ("python3 <<'PY'", "pip install experimently", "may not run 'pip'"),
+        ("node <<'JS'", "npm install left-pad", "may not run 'npm'"),
+        ("/bin/bash -s <<EOF", "aws sts get-caller-identity", "may not call 'aws'"),
+        ("cat <<'EOF' | bash", "aws s3 ls", "may not call 'aws'"),
+        ("bash -c \"$(cat <<'EOF'", "npm install x", "may not run 'npm'"),
+        ("ssh host <<EOF", "aws s3 ls", "may not call 'aws'"),
+    ],
+)
+def test_a_here_document_that_is_executed_is_scanned(opener, body, message):
+    """Only cat/tee store a heredoc; every other receiver runs it (fail-closed)."""
+    terminator = opener.split("<<", 1)[1].strip("'\" ").split()[0].strip("'\"")
+    close = f'{terminator}\n)"' if opener.startswith('bash -c "$(') else terminator
+    text = page(f"{FENCE}{{.bash exec}}\n{opener}\n{body}\n{close}\n{FENCE}")
+    assert message in refused(text)
+
+
+@pytest.mark.parametrize(
+    "opener",
+    [
+        "cat <<'EOF' > setup.txt",
+        "cat > setup.txt <<EOF",
+        "tee setup.txt <<'EOF'",
+        "sudo tee /etc/setup.txt <<'EOF'",
+        "/bin/cat <<EOF",
+        "> setup.txt <<'EOF'",
+        "echo start && cat <<'EOF' > setup.txt",
+    ],
+)
+def test_a_here_document_stored_by_cat_or_tee_is_data(opener):
+    body = f"{opener}\nnpm install experimently\naws s3 ls\nEOF"
+    (block,) = blocks(page(f"{FENCE}{{.bash exec}}\n{body}\n{FENCE}"))
+    assert dx.block_problems(block, "p.md") == []
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize(
+    "body",
+    [
+        "curl -o out.json \\\n  https://example.com/download/aws",
+        "curl -sO \\\n  https://example.com/pip",
+        "echo https://example.com/pip",
+        "wget https://example.com/npm/aws",
+    ],
+)
+def test_a_url_is_never_a_command(body):
+    """An argument at the start of a continuation line, or a URL, is not a command."""
+    (block,) = blocks(page(f"{FENCE}{{.bash exec}}\n{body}\n{FENCE}"))
+    assert dx.block_problems(block, "p.md") == []
+
+
+def test_a_continued_line_still_finds_the_command():
+    text = page(
+        f"{FENCE}{{.bash exec}}\nFOO=1 \\\n  aws sts get-caller-identity\n{FENCE}"
+    )
+    assert "may not call 'aws'" in refused(text)
+
+
+def test_working_instructions_are_excluded_in_any_case(tmp_path):
+    for rel in ("CLAUDE.md", "docs/claude.md", "a/Claude.MD", "docs/real.md"):
+        write(tmp_path, rel, "# x\n")
+    assert dx.walk(tmp_path) == {"docs/real.md"}
+    assert "working instructions" in dx._path_problem("t", "docs/claude.md", "enrolled")

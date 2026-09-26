@@ -588,12 +588,12 @@ _ESCAPES = (
 # `cd sdk && npm ci` is.
 _COMMAND_AT = (
     r"(?:^|[;&|(`{]|\$\(|\b(?:then|do|else)\s)\s*"
-    r"(?:\\?(?:[^\s;&|()<>\"'`]*/)?(?:sudo|exec|time|command|env)\s+)*"
+    r"(?:\\?(?:[^\s;&|()<>\"'`:]*/)?(?:sudo|exec|time|command|env)\s+)*"
     r"(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*"
     # The command word itself is normalised: a leading backslash (`\aws`
     # bypasses an alias), surrounding quotes (`"aws"`) and any path prefix
     # (`/usr/local/bin/aws`, `./gradlew`) are all the same command.
-    r"\\?[\"']?(?:[^\s;&|()<>\"'`]*/)?"
+    r"\\?[\"']?(?:[^\s;&|()<>\"'`:]*/)?"
 )
 _WORD_END = r"[\"']?(?![\w.-])"
 # M6 (T29): until the package names are published (D8), no example that runs
@@ -611,23 +611,63 @@ _PACKAGE_MANAGER = re.compile(
 _CLOUD = re.compile(_COMMAND_AT + r"(?P<tool>aws|cdk|sam)" + _WORD_END, re.M)
 
 
+# Commands whose here-document is data they store, not code they run.  Any
+# other receiver (bash, sh, python3, node, ssh, ...) EXECUTES its body, so the
+# body is scanned like any other line.  Fail-closed: an unknown receiver scans.
+_DATA_SINKS = ("cat", "tee")
+_SEGMENT_START = re.compile(r"(?:;|&&|\|\||\||\(|\$\(|`|\b(?:then|do|else)\s)")
+_PREFIX_WORD = re.compile(
+    r"^(?:\\?(?:[^\s;&|()<>\"'`:]*/)?(?:sudo|exec|time|command|env)\s+"
+    r"|[A-Za-z_][A-Za-z0-9_]*=\S*\s+)"
+)
+
+
+def _heredoc_is_data(line: str, start: int) -> bool:
+    """Whether the here-document opened at *start* of *line* feeds a data sink.
+
+    True only for `cat`/`tee` (after the usual prefixes) or a bare redirection,
+    and only when their output is not piped on or substituted into another
+    command (`cat <<EOF | bash`, `bash -c "$(cat <<EOF`).
+    """
+    before, after = line[:start], line[start:]
+    if "|" in after.replace("||", ""):
+        return False
+    starts = [m.end() for m in _SEGMENT_START.finditer(before)]
+    cut = starts[-1] if starts else 0
+    if "$(" in before[:cut] or "`" in before[:cut]:
+        return False
+    segment = before[cut:].strip()
+    while True:
+        prefix = _PREFIX_WORD.match(segment)
+        if not prefix:
+            break
+        segment = segment[prefix.end() :]
+    if not segment or segment[0] in "<>":
+        return True  # a bare redirection: nothing runs the body
+    word = segment.split()[0].lstrip("\\").strip("\"'")
+    return word.rsplit("/", 1)[-1] in _DATA_SINKS
+
+
 def shell_text(body: str) -> str:
-    """*body* with here-document contents blanked: they are data, not commands
-    (the same rule ``comments`` applies)."""
-    kept, terminator = [], None
+    """*body* as the M6/AWS scans read it: `\\`-newline continuations joined,
+    and the contents of a here-document fed to `cat` or `tee` blanked (data).
+    Every other here-document body is left in place, because its receiver
+    runs it."""
+    kept, terminator, blank = [], None, False
     for line in body.split("\n"):
         if terminator is not None:
             if line.strip() == terminator:
                 terminator = None
                 kept.append(line)
             else:
-                kept.append("")
+                kept.append("" if blank else line)
             continue
         kept.append(line)
         heredoc = _HEREDOC.search(line)
         if heredoc:
             terminator = heredoc.group("word")
-    return "\n".join(kept)
+            blank = _heredoc_is_data(line, heredoc.start())
+    return re.sub(r"\\\n", " ", "\n".join(kept))
 
 
 def comments(body: str) -> list[tuple[int, str]]:
@@ -814,7 +854,7 @@ def walk(root: Optional[pathlib.Path] = None) -> set[str]:
             if d not in PRUNED_DIRS and (not d.startswith(".") or d in KEPT_DOT_DIRS)
         )
         for file in files:
-            if file.lower().endswith(".md") and file != "CLAUDE.md":
+            if file.lower().endswith(".md") and file.lower() != "claude.md":
                 found.add((pathlib.Path(directory) / file).relative_to(root).as_posix())
     return found
 
@@ -839,7 +879,9 @@ def _path_problem(name: str, rel, listed_as: str) -> Optional[str]:
         or not rel.lower().endswith(".md")
     ):
         return f"{name}: {rel} is not a markdown file in the repository"
-    if pathlib.PurePosixPath(rel).name == "CLAUDE.md" or rel.startswith(".claude/"):
+    if pathlib.PurePosixPath(rel).name.lower() == "claude.md" or rel.startswith(
+        ".claude/"
+    ):
         return f"{name}: {rel} is working instructions, not documentation (T1)"
     if _in_this_tree(rel) and not (ROOT / rel).is_file():
         return (
