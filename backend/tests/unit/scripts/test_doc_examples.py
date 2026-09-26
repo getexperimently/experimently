@@ -1427,6 +1427,12 @@ def test_a_here_document_stored_by_cat_or_tee_is_data(opener):
         "curl -sO \\\n  https://example.com/pip",
         "echo https://example.com/pip",
         "wget https://example.com/npm/aws",
+        # only the ':' exclusion keeps these two from matching at a line start
+        "https://example.com/pip",
+        "(https://example.com/download/aws)",
+        # only joining the continuation keeps these from matching at a line start
+        "curl -o out.json \\\n  /tmp/downloads/aws",
+        "tar -xzf bundle.tgz -C \\\n  ./vendor/pip",
     ],
 )
 def test_a_url_is_never_a_command(body):
