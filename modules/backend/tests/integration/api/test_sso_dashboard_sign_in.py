@@ -533,6 +533,7 @@ def test_a_code_within_its_sixty_seconds_is_not_single_use(browser, config, dash
         {"code": "x" * 2049, "secret": SECRET},
         {"code": "", "secret": SECRET},
         {"code": 7, "secret": SECRET},
+        {"code": "a.b.\u00e9", "secret": SECRET},
         {"code": "a.b.c", "secret": SECRET[:-1]},
         {"code": "a.b.c", "secret": SECRET + "A"},
         {"code": "a.b.c", "secret": SECRET[:-1] + "/"},
@@ -543,6 +544,23 @@ def test_a_code_within_its_sixty_seconds_is_not_single_use(browser, config, dash
 )
 def test_the_exchange_body_is_bounded(browser, body):
     resp = browser.post(EXCHANGE, json=body)
+    assert resp.status_code == 400, resp.text
+    assert resp.json()["detail"] == sso_service.HANDOFF_REFUSED_DETAIL
+
+
+@pytest.mark.regression
+def test_a_lone_surrogate_in_the_code_is_a_400_not_a_500(browser):
+    """JSON may escape a lone surrogate; the server then holds an unencodable str.
+
+    Sent as raw JSON text, the way an attacker would, because the test client
+    refuses to encode the surrogate itself.
+    """
+    body = '{"code": "a.b.\\ud800", "secret": "%s"}' % SECRET
+    resp = browser.post(
+        "/api/v1/auth/sso/exchange",
+        content=body.encode("ascii"),
+        headers={"content-type": "application/json"},
+    )
     assert resp.status_code == 400, resp.text
     assert resp.json()["detail"] == sso_service.HANDOFF_REFUSED_DETAIL
 

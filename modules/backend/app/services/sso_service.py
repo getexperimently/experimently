@@ -1475,7 +1475,14 @@ def redeem_handoff_code(code: Any, secret: Any) -> uuid.UUID:
     refused = HTTPException(
         status_code=status.HTTP_400_BAD_REQUEST, detail=HANDOFF_REFUSED_DETAIL
     )
-    if not isinstance(code, str) or not code or len(code) > MAX_HANDOFF_CODE_LENGTH:
+    # ASCII first: a JSON body can carry a lone surrogate ("\ud800"), and
+    # PyJWT's utf-8 encode of it raises UnicodeEncodeError, not PyJWTError.
+    if (
+        not isinstance(code, str)
+        or not code
+        or len(code) > MAX_HANDOFF_CODE_LENGTH
+        or not code.isascii()
+    ):
         raise refused
     if not is_handoff_value(secret):
         raise refused
