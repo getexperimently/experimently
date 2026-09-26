@@ -6,10 +6,13 @@ run-name: Rollback ${{ inputs.environment }} to ${{ inputs.task_definition_arn }
 # dashboard_task_definition_arn is given -- the dashboard's too, through its
 # own rolling deployment (#69). A deploy's run summary prints the line to
 # paste: environment=<env>, task_definition_arn=<family:n>[,
-# dashboard_task_definition_arn=<family:n>]. The API is always rolled back:
-# there is no dashboard-only path here, because the stop step below reverts
-# any in-flight API deployment (runbook Method 2 is the dashboard-only path).
-# docs/deployment/rollback-runbook.md is the procedure around it.
+# dashboard_task_definition_arn=<family:n>]. There is no dashboard-only path
+# here, because the stop step below reverts any in-flight API deployment
+# (runbook Method 2 is the dashboard-only path). The API half refuses, and the
+# run fails, in two cases (#148): the API is already on the target with
+# nothing in flight (nothing to roll back; the dashboard half still runs), and
+# an in-flight deployment is CodeDeploy's own rollback (nothing is stopped or
+# rolled). docs/deployment/rollback-runbook.md is the procedure around it.
 
 on:
   workflow_dispatch:
@@ -259,7 +262,26 @@ jobs:
       # 30-minute approval wait and an hour of termination wait it is still
       # running minutes later. Without this the rollback died at its first AWS
       # call, after the "ROLLBACK initiated" message had gone out.
+      #
+      # Before it writes anything, this step refuses in two cases (#148):
+      # - Nothing is in flight and the target is already serving: already the
+      #   PRIMARY task set, with the /api/* rule forwarding to its target group
+      #   (scripts/api_serving.py exits 0). There is nothing to roll back, and
+      #   a deployment created now would report success on its first poll and
+      #   then wait, unapproved, for 30 minutes. The step sets
+      #   `already_serving`: the CodeDeploy steps are skipped, the dashboard
+      #   half still runs, and "Refuse a rollback to the revision already
+      #   serving" fails the run.
+      # - An in-flight deployment is CodeDeploy's own rollback
+      #   (`creator == codeDeployRollback`). Stopping it with auto-rollback
+      #   would put back the release it is rolling away from. Every in-flight
+      #   deployment is classified by creator BEFORE any is stopped, and if
+      #   any is CodeDeploy's rollback, or any creator cannot be read, nothing
+      #   is stopped and the step fails.
       - name: Stop any deployment already in flight
+        id: stop
+        env:
+          TARGET_ARN: ${{ steps.target.outputs.arn }}
         run: |
           set -euo pipefail
           # Every non-final status, the same set as scripts/refuse_active_deployment.py's
@@ -276,9 +298,84 @@ jobs:
 
           if [ -z "$IN_FLIGHT" ] || [ "$IN_FLIGHT" = "None" ]; then
             echo "no deployment in flight"
+            serving=0
+            python3 scripts/api_serving.py "$ECS_CLUSTER" "$ECS_BACKEND_SERVICE" "$TARGET_ARN" || serving=$?
+            case "$serving" in
+              0)
+                echo "the API is already on ${TARGET_ARN##*/}: this run creates no deployment and stops nothing"
+                echo "already_serving=true" >> "$GITHUB_OUTPUT"
+                ;;
+              1) echo "the API is not on ${TARGET_ARN##*/}: rolling back" ;;
+              *) echo "::warning title=Could not tell what the API is serving::scripts/api_serving.py exited ${serving} (its reason is above). Rolling back as if the API were not on ${TARGET_ARN##*/}: this run succeeds only once it has approved its own deployment and ${TARGET_ARN##*/} is the PRIMARY task set." ;;
+            esac
             exit 0
           fi
 
+          # Classify every in-flight deployment before stopping any of them.
+          # One read per id: its creator and, for a CodeDeploy rollback, the
+          # deployment it is rolling back. A failed read leaves the line empty,
+          # and an empty or null creator is "could not tell", which stops
+          # nothing (fail closed).
+          unreadable=""
+          rollbacks=""
+          for id in $IN_FLIGHT; do
+            line=""
+            line="$(aws deploy get-deployment --deployment-id "$id" \
+                      --query 'deploymentInfo.[creator, rollbackInfo.rollbackTriggeringDeploymentId]' \
+                      --output text)" || line=""
+            read -r creator of <<<"$line" || true
+            case "${creator:-}" in
+              ""|None|null)
+                echo "::error title=Could not classify an in-flight deployment::The creator of CodeDeploy deployment ${id} could not be read, so this run cannot tell whether it is CodeDeploy's own rollback. It stopped nothing and rolled nothing back."
+                unreadable="$unreadable $id"
+                ;;
+              codeDeployRollback)
+                rollbacks="$rollbacks ${id}:${of:-None}"
+                ;;
+              *) echo "in-flight deployment $id was created by $creator" ;;
+            esac
+          done
+
+          if [ -n "$rollbacks" ]; then
+            primary="$(aws ecs describe-services \
+              --cluster "$ECS_CLUSTER" --services "$ECS_BACKEND_SERVICE" \
+              --query "services[0].taskSets[?status=='PRIMARY'].taskDefinition | [0]" \
+              --output text)" || primary=""
+            primary="${primary##*/}"
+            primary="${primary:-a revision this run could not read}"
+            ids=""
+            for pair in $rollbacks; do
+              id="${pair%%:*}"
+              of="${pair#*:}"
+              case "$of" in
+                ""|None|null) of="an earlier deployment" ;;
+              esac
+              ids="${ids:+$ids }$id"
+              echo "::error title=CodeDeploy is already rolling back::Deployment ${id} is CodeDeploy's own rollback of ${of} and is still active. Stopping it would put that release back, so this run stopped nothing and rolled nothing back. The API is on ${primary}. Rollback refuses while CodeDeploy's rollback is active, which can be up to an hour. For the dashboard alone: docs/deployment/rollback-runbook.md Method 2."
+            done
+            {
+              echo "refused=codeDeployRollback"
+              echo "refused_id=${ids}"
+              echo "primary=${primary}"
+            } >> "$GITHUB_OUTPUT"
+          elif [ -n "$unreadable" ]; then
+            {
+              echo "refused=unreadable"
+              echo "refused_id=${unreadable# }"
+            } >> "$GITHUB_OUTPUT"
+          fi
+          if [ -n "$unreadable$rollbacks" ]; then
+            exit 1
+          fi
+
+          # The check-then-stop race, accepted (#148 PE condition 3(e)): the
+          # classification above and the stops below are separate calls.
+          # - A listed deployment can end in between; stop-deployment on it
+          #   is then expected to fail, and set -e fails this step loudly.
+          # - CodeDeploy can start a rollback deployment of its own in
+          #   between. It is not in IN_FLIGHT, so nothing here stops it; the
+          #   create-deployment below then fails because the group is busy.
+          # Neither lets this step stop a codeDeployRollback deployment.
           for id in $IN_FLIGHT; do
             echo "stopping in-flight deployment $id"
             # --auto-rollback-enabled so stopping it reverts its own traffic
@@ -299,6 +396,9 @@ jobs:
 
       - name: Roll back via CodeDeploy
         id: codedeploy
+        # Skipped when the API is already on the target with nothing in
+        # flight: a deployment created then has nothing to do (#148).
+        if: steps.stop.outputs.already_serving != 'true'
         env:
           TARGET_ARN: ${{ steps.target.outputs.arn }}
           # Never interpolate an operator-supplied string into the script body:
@@ -347,6 +447,7 @@ jobs:
       # `aws deploy wait deployment-successful` is not used: it cannot approve,
       # so it could only ever time out here.
       - name: Shift traffic and wait for it to land
+        if: steps.stop.outputs.already_serving != 'true'
         env:
           DEPLOYMENT_ID: ${{ steps.codedeploy.outputs.deployment-id }}
           TARGET_ARN: ${{ steps.target.outputs.arn }}
@@ -381,17 +482,28 @@ jobs:
             # terminating the blue task set, and an operator in an incident
             # needs to know traffic has moved, not that CodeDeploy has finished
             # tidying up.
+            #
+            # But only once THIS run has approved its own deployment (#148).
+            # The target can be PRIMARY before that: the stop step's
+            # auto-rollback of an in-flight deployment puts back the revision
+            # it replaced, which is usually the target. Counting that as done
+            # reported success on the first poll and left this run's
+            # deployment waiting, unapproved, for 30 minutes, holding the
+            # group, until CodeDeploy stopped it. So the loop keeps polling
+            # until the deployment is Ready and approved, whatever PRIMARY is.
             serving="$(aws ecs describe-services \
               --cluster "$ECS_CLUSTER" --services "$ECS_BACKEND_SERVICE" \
               --query "services[0].taskSets[?status=='PRIMARY'].taskDefinition" \
               --output text)"
-            if [ "$serving" = "$TARGET_ARN" ]; then
-              echo "traffic is on $TARGET_ARN (deployment $status)"
+            if [ "$continued" -eq 1 ] && [ "$serving" = "$TARGET_ARN" ]; then
+              echo "traffic is on $TARGET_ARN (deployment $DEPLOYMENT_ID $status, approved by this run)"
               break
             fi
 
             if [ "$(date +%s)" -ge "$deadline" ]; then
-              echo "::error::rollback deployment $DEPLOYMENT_ID did not put $TARGET_ARN in service within ${ROLLBACK_TIMEOUT_SECONDS}s (status $status, serving $serving)"
+              approved=no
+              [ "$continued" -eq 1 ] && approved=yes
+              echo "::error::rollback deployment $DEPLOYMENT_ID did not put $TARGET_ARN in service within ${ROLLBACK_TIMEOUT_SECONDS}s (status $status, serving $serving, approved by this run: $approved)"
               exit 1
             fi
             sleep 10
@@ -470,8 +582,14 @@ jobs:
             else
               now="(this run could not read what the dashboard is serving)"
             fi
-            state="The API is on ${TARGET_ARN##*/} (CodeDeploy deployment ${DEPLOYMENT_ID}; any deployment in flight was stopped with auto-rollback first). The dashboard was not rolled back with it: ${now}. This is the newer-dashboard, older-API state until the dashboard is put back."
-            way_out="To put the dashboard back, use docs/deployment/rollback-runbook.md Method 2, the dashboard block. Do not dispatch Rollback again while CodeDeploy deployment ${DEPLOYMENT_ID} is active: its stop step would stop that deployment with auto-rollback and put the API back on the release you rolled back from."
+            if [ -n "$DEPLOYMENT_ID" ]; then
+              state="The API is on ${TARGET_ARN##*/} (CodeDeploy deployment ${DEPLOYMENT_ID}; any deployment in flight was stopped with auto-rollback first). The dashboard was not rolled back with it: ${now}. This is the newer-dashboard, older-API state until the dashboard is put back."
+              way_out="To put the dashboard back, use docs/deployment/rollback-runbook.md Method 2, the dashboard block. Do not dispatch Rollback again while CodeDeploy deployment ${DEPLOYMENT_ID} is active: its stop step would stop that deployment with auto-rollback and put the API back on the release you rolled back from."
+            else
+              # The API was already on the target (#148): no deployment.
+              state="The API is on ${TARGET_ARN##*/}; it already was, so this run created no CodeDeploy deployment and stopped nothing. The dashboard was not rolled back: ${now}."
+              way_out="To put the dashboard back, use docs/deployment/rollback-runbook.md Method 2, the dashboard block."
+            fi
             if grep -q 'which this run read earlier' dashboard-rollback.txt; then
               echo "::error title=Dashboard not rolled back::The dashboard changed after this run validated it (it is no longer ${DASHBOARD_EXPECT##*/}), so it was not touched. ${state} ${way_out}"
               echo "result=not changed: it changed after this run validated it" >> "$GITHUB_OUTPUT"
@@ -487,6 +605,29 @@ jobs:
             fi
             exit "$code"
           fi
+
+      # The API half's refusal when the API was already on the target (#148
+      # PE condition 2): the run fails, so nobody reads it as a rollback. It
+      # comes after the dashboard's step so that the dashboard half, if one
+      # was asked for, has run, and it says what that half did.
+      - name: Refuse a rollback to the revision already serving
+        if: ${{ !cancelled() && steps.stop.outputs.already_serving == 'true' }}
+        env:
+          TARGET_ARN: ${{ steps.target.outputs.arn }}
+          DASHBOARD_INPUT: ${{ inputs.dashboard_task_definition_arn }}
+          DASHBOARD_RESULT: ${{ steps.dashboard-rollback.outputs.result }}
+          DASHBOARD_OUTCOME: ${{ steps.dashboard-rollback.outcome }}
+        run: |
+          set -euo pipefail
+          if [ -z "$DASHBOARD_INPUT" ]; then
+            dash="The dashboard was left as it is. For the dashboard alone: docs/deployment/rollback-runbook.md Method 2."
+          elif [ "$DASHBOARD_OUTCOME" = success ]; then
+            dash="The dashboard half ran as asked: dashboard ${DASHBOARD_RESULT}."
+          else
+            dash="The dashboard half ran as asked and did not succeed: ${DASHBOARD_RESULT:-not reached}. Its step says why; for the dashboard alone: docs/deployment/rollback-runbook.md Method 2."
+          fi
+          echo "::error title=Nothing to roll back::The API is already on ${TARGET_ARN##*/}, and no deployment was in flight, so there is nothing to roll back: this run created no CodeDeploy deployment and stopped nothing. ${dash}"
+          exit 1
 
       # The outcome is keyed on the API's verify step and the dashboard's
       # step, never on job.status alone: when the API was rolled back and only
@@ -505,6 +646,10 @@ jobs:
           DASHBOARD_RESULT: ${{ steps.dashboard-rollback.outputs.result }}
           DASHBOARD_OUTCOME: ${{ steps.dashboard-rollback.outcome }}
           API_VERIFY: ${{ steps.api-verify.outcome }}
+          ALREADY_SERVING: ${{ steps.stop.outputs.already_serving }}
+          REFUSED: ${{ steps.stop.outputs.refused }}
+          REFUSED_ID: ${{ steps.stop.outputs.refused_id }}
+          REFUSED_PRIMARY: ${{ steps.stop.outputs.primary }}
           JOB_STATUS: ${{ job.status }}
         run: |
           target="${TARGET_ARN##*/}"
@@ -519,7 +664,33 @@ jobs:
               not_reached="this run could not read what it is serving"
             fi
           fi
-          if [ "$API_VERIFY" = success ]; then
+          if [ "$REFUSED" = codeDeployRollback ]; then
+            # Nothing was stopped or rolled (#148 W9).
+            api="API NOT rolled back: CodeDeploy's own rollback ${REFUSED_ID} is still active, so this run stopped nothing (the API is on ${REFUSED_PRIMARY:-a revision this run could not read})"
+            if [ -z "$DASHBOARD_INPUT" ]; then
+              dash="dashboard left as it is"
+            else
+              dash="dashboard NOT rolled back (not reached)"
+            fi
+          elif [ "$REFUSED" = unreadable ]; then
+            api="API NOT rolled back: the creator of in-flight deployment ${REFUSED_ID} could not be read, so this run stopped nothing"
+            if [ -z "$DASHBOARD_INPUT" ]; then
+              dash="dashboard left as it is"
+            else
+              dash="dashboard NOT rolled back (not reached)"
+            fi
+          elif [ "$ALREADY_SERVING" = true ]; then
+            # Refused (#148 PE condition 2): not a rollback, whatever the
+            # dashboard half did.
+            api="API NOT rolled back: it was already on ${target}, so there was nothing to roll back and no deployment was created"
+            if [ -z "$DASHBOARD_INPUT" ]; then
+              dash="dashboard left as it is"
+            elif [ "$DASHBOARD_OUTCOME" = success ]; then
+              dash="dashboard ${DASHBOARD_RESULT}"
+            else
+              dash="dashboard NOT rolled back (${DASHBOARD_RESULT:-not reached})"
+            fi
+          elif [ "$API_VERIFY" = success ]; then
             api="API rolled back to ${target}"
             if [ -z "$DASHBOARD_INPUT" ]; then
               dash="dashboard left as it is"
@@ -560,6 +731,8 @@ jobs:
               else
                 echo "Dashboard not rolled back, and this run could not read what it is serving."
               fi
+            elif [ -n "$not_reached" ] && [ -n "$REFUSED" ]; then
+              echo "Dashboard not rolled back (the API half refused, and nothing was stopped): ${not_reached}. To put the dashboard back alone, use docs/deployment/rollback-runbook.md Method 2, the dashboard block."
             elif [ -n "$not_reached" ]; then
               echo "Dashboard not rolled back (the API half failed): ${not_reached}. If the stop step already reverted the API, this is the newer-dashboard, older-API state: put the dashboard back with docs/deployment/rollback-runbook.md Method 2, the dashboard block."
             fi

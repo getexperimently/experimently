@@ -481,8 +481,11 @@ def test_every_rollback_refusal_comes_before_the_first_aws_mutation():
         )
     # Exactly these change AWS, in this order: the API first, then the
     # dashboard.
+    # The stop step also holds two refusals that come before its own first
+    # write (#148): the target already serving, and CodeDeploy's own
+    # rollback in flight. test_rollback_false_success.py drives both.
     assert [steps[i].get("id") or steps[i]["name"] for i in mutations] == [
-        "Stop any deployment already in flight",
+        "stop",
         "codedeploy",
         "Shift traffic and wait for it to land",
         "dashboard-rollback",

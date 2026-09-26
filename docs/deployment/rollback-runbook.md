@@ -88,6 +88,24 @@ first stops any CodeDeploy deployment in flight with auto-rollback, which
 reverts an API that shifted within the last hour. To put back the dashboard
 alone, use Method 2's dashboard block.
 
+It refuses the API half, fails, and says why, in two cases:
+
+- **The API is already on the target** and no deployment is in flight: the
+  target is the PRIMARY task set and the `/api/*` rule forwards to it. There
+  is nothing to roll back, so it creates no deployment and stops nothing. If
+  you gave a dashboard revision, the dashboard half still runs, and the run
+  says what it did.
+- **CodeDeploy is already rolling back**: an in-flight deployment was created
+  by CodeDeploy itself (`creator` is `codeDeployRollback`). Stopping it would
+  put back the release it is rolling away from, so the run stops nothing and
+  rolls nothing back, not even the dashboard. Rollback refuses for as long as
+  that deployment is active, which can be up to an hour. For the dashboard
+  alone, use Method 2's dashboard block. The run also stops nothing when it
+  cannot read an in-flight deployment's creator.
+
+A rollback is reported done only once the run has approved its own
+deployment and the target is the PRIMARY task set.
+
 **If the API went back and the dashboard did not**, the run says so (its Slack
 line reads "API rolled back to …; dashboard NOT rolled back (…)"), and the
 system is in the newer-dashboard, older-API state. Put the dashboard back with
@@ -191,8 +209,12 @@ aws ecs describe-services \
 The workflow will:
 - Check the target revision is ACTIVE, in the right family, has a container
   named `backend`, and is not a CloudFormation-registered `:bootstrap` revision
+- Refuse, creating nothing, if the API is already on that revision with no
+  deployment in flight (the dashboard half, if given, still runs)
 - Stop any CodeDeploy deployment still in flight (during an incident the bad
-  deploy usually is, and CodeDeploy refuses a second one)
+  deploy usually is, and CodeDeploy refuses a second one), after reading who
+  created each one; if any is CodeDeploy's own rollback, or its creator cannot
+  be read, it stops nothing and fails
 - Create a **CodeDeploy** deployment naming that revision, all-at-once rather
   than the canary the forward path uses
 - **Approve the traffic shift** (`aws deploy continue-deployment`) — without
