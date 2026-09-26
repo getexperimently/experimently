@@ -38,6 +38,11 @@ DEFAULT_CORS_ORIGINS = (
 
 _DEFAULT_PORTS = {"http": 80, "https": 443}
 
+#: The dashboard origins a *development* API accepts as an SSO `return_to`
+#: without configuration: `npm run dev` (3000) and the static export (3100).
+#: Never added in any other environment.
+DEVELOPMENT_DASHBOARD_ORIGINS = ("http://localhost:3000", "http://localhost:3100")
+
 
 def normalise_origin(value: Any) -> Optional[str]:
     """An origin as a browser sends it in ``Origin``, or ``None`` if it is not one.
@@ -353,6 +358,15 @@ class Settings(BaseSettings):
     # validator below receives it as-is.
     CORS_ORIGINS: Annotated[List[str], NoDecode] = []
 
+    # The dashboard's origin(s), when it is not served from PUBLIC_BASE_URL:
+    # where an SSO sign-in started from the dashboard may send the browser
+    # back to (`dashboard_origins`). Comma-separated or a JSON array; the
+    # first entry is the primary one. REQUIRED when PUBLIC_BASE_URL is the
+    # API's own origin rather than the dashboard's (an `api.` host), or every
+    # dashboard SSO sign-in is refused with 400. Not the CORS list: that one
+    # also names the demo apps and any site running an SDK.
+    DASHBOARD_ORIGINS: Annotated[List[str], NoDecode] = []
+
     # Database settings
     POSTGRES_SERVER: str = "localhost"
     POSTGRES_USER: str = "postgres"
@@ -521,6 +535,60 @@ class Settings(BaseSettings):
             if kept:
                 return kept
         return list(DEFAULT_CORS_ORIGINS)
+
+    def _configured_dashboard_origins(self) -> List[str]:
+        """`DASHBOARD_ORIGINS`, normalised; an entry that is not an origin is
+        dropped with an ERROR log, and so is `*` -- a wildcard here would let
+        a sign-in hand its result to any site."""
+        kept: List[str] = []
+        for entry in self.DASHBOARD_ORIGINS or []:
+            if entry is None or not str(entry).strip():
+                continue
+            origin = normalise_origin(entry)
+            if origin is None or origin == "*":
+                logger.error(
+                    "DASHBOARD_ORIGINS entry %r is not an origin (scheme://host[:port]); ignoring it",
+                    str(entry)[:200],
+                )
+            elif origin not in kept:
+                kept.append(origin)
+        return kept
+
+    @property
+    def dashboard_origins(self) -> List[str]:
+        """The origins an SSO sign-in may return the browser to, primary first.
+
+        `DASHBOARD_ORIGINS`, then `PUBLIC_BASE_URL`'s origin, then -- in
+        development only -- `DEVELOPMENT_DASHBOARD_ORIGINS`; each normalised by
+        `normalise_origin`, no duplicates. Deliberately not the CORS list.
+        """
+        origins = self._configured_dashboard_origins()
+        if self.PUBLIC_BASE_URL:
+            origin = normalise_origin(self.PUBLIC_BASE_URL)
+            if origin and origin != "*" and origin not in origins:
+                origins.append(origin)
+        if self.is_development:
+            for origin in DEVELOPMENT_DASHBOARD_ORIGINS:
+                if origin not in origins:
+                    origins.append(origin)
+        return origins
+
+    @property
+    def primary_dashboard_origin(self) -> Optional[str]:
+        """Where a sign-in that cannot say where it came from is sent back to.
+
+        The first `DASHBOARD_ORIGINS` entry if there is one, else
+        `PUBLIC_BASE_URL`'s origin, else `None` (a development API with
+        neither set; the development defaults are never primary).
+        """
+        configured = self._configured_dashboard_origins()
+        if configured:
+            return configured[0]
+        if self.PUBLIC_BASE_URL:
+            origin = normalise_origin(self.PUBLIC_BASE_URL)
+            if origin and origin != "*":
+                return origin
+        return None
 
     @property
     def effective_allowed_hosts(self) -> List[str]:
@@ -701,6 +769,43 @@ class Settings(BaseSettings):
             return v
         return []
 
+    @field_validator("DASHBOARD_ORIGINS", mode="before")
+    @classmethod
+    def assemble_dashboard_origins(cls, v: Union[str, List[str], None]) -> List[str]:
+        """Comma-separated or a JSON array; entries are checked by `dashboard_origins`.
+
+        Never raises: a malformed value logs an ERROR and is ignored, so it
+        cannot stop the API starting.
+        """
+        if isinstance(v, str) and v.strip().startswith("["):
+            import json
+
+            try:
+                v = json.loads(v)
+            except ValueError:
+                logger.error("DASHBOARD_ORIGINS is not valid JSON; ignoring it")
+                return []
+        if isinstance(v, str):
+            return [i.strip() for i in v.split(",") if i.strip()]
+        if isinstance(v, list):
+            return [str(i) for i in v]
+        return []
+
+    @model_validator(mode="after")
+    def warn_when_the_dashboard_origin_is_unknown(self) -> "Settings":
+        """WARNING at startup for the `api.` hedge with no DASHBOARD_ORIGINS.
+
+        A staging or production PUBLIC_BASE_URL on an `api.` host is the API's
+        own origin, not the dashboard's, and with DASHBOARD_ORIGINS empty no
+        dashboard origin is known: every SSO sign-in from the dashboard is
+        refused with 400. A warning, not a refusal to start -- password
+        sign-in still works, and the deployment may not use SSO at all.
+        """
+        message = dashboard_origins_warning(self)
+        if message:
+            logger.warning(message)
+        return self
+
     @model_validator(mode="after")
     def require_a_host_allow_list_when_hardened(self) -> "Settings":
         """Staging and production must know what hostname they answer on.
@@ -833,6 +938,27 @@ class Settings(BaseSettings):
         if password:
             return f"redis://:{password}@{host}:{port}"
         return f"redis://{host}:{port}"
+
+
+def dashboard_origins_warning(config: "Settings") -> Optional[str]:
+    """The startup warning `Settings` logs for an unknown dashboard origin, or None.
+
+    Only in staging/production, only with DASHBOARD_ORIGINS empty, and only
+    when PUBLIC_BASE_URL's host starts with `api.`.
+    """
+    if config.ENVIRONMENT not in HARDENED_ENVIRONMENTS:
+        return None
+    if config._configured_dashboard_origins() or not config.PUBLIC_BASE_URL:
+        return None
+    host = (urlparse(config.PUBLIC_BASE_URL).hostname or "").lower()
+    if not host.startswith("api."):
+        return None
+    return (
+        f"PUBLIC_BASE_URL={config.PUBLIC_BASE_URL} looks like the API's own origin "
+        "and DASHBOARD_ORIGINS is empty, so no dashboard origin is known: SSO "
+        "sign-in from the dashboard will be refused (400). Set DASHBOARD_ORIGINS "
+        "to the dashboard's origin, e.g. https://app.example.com."
+    )
 
 
 class DevSettings(Settings):

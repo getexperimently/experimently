@@ -4,6 +4,8 @@ SSO/SAML & OIDC authentication endpoints — EP-037.
 Endpoints:
   GET  /auth/sso/saml/{config_id}/metadata  — SP metadata XML
   POST /auth/sso/saml/{config_id}/acs        — SAML Assertion Consumer Service
+  GET  /auth/sso/login                       — Dashboard sign-in: to the domain's provider
+  POST /auth/sso/exchange                    — Dashboard hand-off code for a session
   GET  /auth/sso/oidc/{provider}/login       — Redirect to OIDC provider
   GET  /auth/sso/oidc/{provider}/callback    — OIDC callback / token issue
   GET  /auth/sso/configs                     — List SSO configs (admin)
@@ -18,9 +20,13 @@ endpoint paths below are relative to that prefix.
 
 from __future__ import annotations
 
+import hmac
+import logging
+import re
 import uuid
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlencode
 
 from fastapi import (
     APIRouter,
@@ -32,16 +38,23 @@ from fastapi import (
     Response,
     status,
 )
-from fastapi.responses import RedirectResponse
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from backend.app.api import deps
-from backend.app.core.config import settings
+from backend.app.api.v1.endpoints.auth import user_to_me
+from backend.app.core.config import normalise_origin, settings
+from backend.app.core.logger import get_log_context
 from backend.app.core.security import create_local_access_token
 from backend.app.models.user import User, UserRole
+from backend.app.schemas.auth import UserMe
 from modules.backend.app.models.sso_config import SSOConfig, SSOProviderType
 from modules.backend.app.services import sso_service
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -362,6 +375,16 @@ async def oidc_login(
         )
 
     started = sso_service.start_oidc_login(config, provider)
+    return _redirect_to_provider(request, config, provider, started)
+
+
+def _redirect_to_provider(
+    request: Request,
+    config: SSOConfig,
+    provider: str,
+    started: sso_service.OIDCLoginStart,
+) -> RedirectResponse:
+    """The 302 to the provider's authorization endpoint, setting the state cookie."""
     redirect_uri = _get_redirect_uri(request, provider)
     auth_url = sso_service.build_oidc_authorization_url(
         config,
@@ -374,9 +397,346 @@ async def oidc_login(
 
     response = RedirectResponse(url=auth_url, status_code=302)
     _set_state_cookie(
-        response, started.cookie_value, sso_service.OIDC_STATE_TTL_SECONDS
+        response, started.cookie_value, sso_service.OIDC_STATE_COOKIE_MAX_AGE
     )
     return response
+
+
+# ---------------------------------------------------------------------------
+# Sign-in from the dashboard (C2b): redirect mode and the hand-off
+# ---------------------------------------------------------------------------
+
+#: The shape a request id must have to be put in a redirect URL.
+_REQUEST_ID = re.compile(r"[A-Za-z0-9._:-]{1,128}")
+#: An OAuth `error` code as the dashboard may show it; anything else is dropped.
+_IDP_ERROR = re.compile(r"[a-z_]{1,64}")
+_PROVIDER_NAMES = frozenset(p.value for p in SSOProviderType)
+_DOMAIN = re.compile(r"[a-z0-9.-]{1,253}")
+
+RETURN_TO_REFUSED_DETAIL = "return_to is not a dashboard origin this API accepts"
+HANDOFF_PARAM_DETAIL = "handoff must be 43 base64url characters"
+DOMAIN_PARAM_DETAIL = "domain must be an email domain such as example.com"
+EXCHANGE_BODY_DETAIL = sso_service.HANDOFF_REFUSED_DETAIL
+
+
+def _request_id() -> Optional[str]:
+    """This request's id (the one on its `X-Request-ID`), if it is safe to show."""
+    value = get_log_context().get("request_id")
+    if isinstance(value, str) and _REQUEST_ID.fullmatch(value):
+        return value
+    return None
+
+
+def _login_error_url(
+    origin: str,
+    sso_error: str,
+    *,
+    provider: Optional[str] = None,
+    idp_error: Optional[str] = None,
+) -> str:
+    """`{origin}/login?sso_error=...`: the four parameters and nothing else."""
+    params: Dict[str, str] = {"sso_error": sso_error}
+    if provider in _PROVIDER_NAMES:
+        params["provider"] = str(provider)
+    if isinstance(idp_error, str) and _IDP_ERROR.fullmatch(idp_error):
+        params["idp_error"] = idp_error
+    request_id = _request_id()
+    if request_id:
+        params["request_id"] = request_id
+    return f"{origin}/login?{urlencode(params)}"
+
+
+def _redirect(url: str) -> RedirectResponse:
+    """A 302 that also expires the state cookie.
+
+    Built here and returned, so the `Set-Cookie` is on the response that is
+    sent: a cookie set on the injected `response` is dropped when the route
+    returns its own Response.
+    """
+    response = RedirectResponse(url=url, status_code=302)
+    _set_state_cookie(response, "", 0)
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+def _dashboard_origin_for(return_to: Optional[str]) -> Optional[str]:
+    """The `dashboard_origins` entry *return_to* names, verbatim; else None.
+
+    Refused before normalising: a backslash, an `@`, whitespace or a control
+    character anywhere. Then anything `normalise_origin` refuses (a path other
+    than `/`, a query, a fragment, userinfo, a port that does not parse), and
+    anything whose normalised form is not in the list.
+    """
+    if not isinstance(return_to, str) or not return_to:
+        return None
+    if any(c in "\\@" or ord(c) <= 0x20 or ord(c) == 0x7F for c in return_to):
+        return None
+    candidate = normalise_origin(return_to)
+    if candidate is None or candidate == "*":
+        return None
+    for entry in settings.dashboard_origins:
+        if entry == candidate:
+            return entry
+    return None
+
+
+def _log_refusal(where: str, exc: HTTPException, sso_error: str) -> None:
+    logger.warning(
+        "SSO sign-in refused at %s: sso_error=%s status=%s detail=%r request_id=%s",
+        where,
+        sso_error,
+        exc.status_code,
+        str(exc.detail)[:200],
+        _request_id(),
+    )
+
+
+@public_router.get(
+    "/login",
+    summary="Start single sign-on from the dashboard",
+    tags=["sso"],
+    status_code=302,
+    response_class=RedirectResponse,
+    responses={
+        302: {
+            "description": "To the identity provider, or back to the dashboard's "
+            "/login?sso_error=... when the domain cannot sign in with SSO"
+        },
+        400: {"description": "A parameter is missing or malformed (JSON)"},
+    },
+    openapi_extra={"x-stability": "beta"},
+)
+async def sso_login(
+    request: Request,
+    domain: Optional[str] = Query(None, description="The work email's domain"),
+    return_to: Optional[str] = Query(
+        None, description="The dashboard origin to come back to"
+    ),
+    handoff: Optional[str] = Query(
+        None, description="base64url(SHA-256(secret)), 43 characters"
+    ),
+    db: Session = Depends(deps.get_db),
+) -> RedirectResponse:
+    """Start a dashboard sign-in: find the domain's OIDC config, go to its provider.
+
+    Every parameter is required. A missing or malformed one is a 400 JSON
+    answer, never a redirect and never an unbound login.
+    """
+    origin = _dashboard_origin_for(return_to)
+    if origin is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, RETURN_TO_REFUSED_DETAIL)
+    if not sso_service.is_handoff_value(handoff):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, HANDOFF_PARAM_DETAIL)
+    wanted = domain.lower() if isinstance(domain, str) else ""
+    if not _DOMAIN.fullmatch(wanted):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, DOMAIN_PARAM_DETAIL)
+
+    active = (
+        db.query(SSOConfig)
+        .filter(
+            func.lower(func.trim(SSOConfig.org_domain)) == wanted,
+            SSOConfig.is_active.is_(True),
+        )
+        .all()
+    )
+    oidc = [c for c in active if c.provider_type != SSOProviderType.SAML]
+    if len(oidc) > 1:
+        logger.warning(
+            "More than one active OIDC SSO config matches domain %r (%s); refusing "
+            "the sign-in until an administrator removes the duplicates",
+            wanted,
+            ", ".join(sorted(str(c.id) for c in oidc)),
+        )
+        return _redirect(_login_error_url(origin, sso_service.SSO_NOT_CONFIGURED))
+    if not oidc:
+        code = (
+            sso_service.SSO_SAML_ONLY
+            if any(c.provider_type == SSOProviderType.SAML for c in active)
+            else sso_service.SSO_NOT_CONFIGURED
+        )
+        return _redirect(_login_error_url(origin, code))
+
+    config = oidc[0]
+    provider = config.provider_type.value
+    try:
+        sso_service.require_supported_provider(provider)
+        started = sso_service.start_oidc_login(
+            config, provider, return_to=origin, handoff=handoff
+        )
+        return _redirect_to_provider(request, config, provider, started)
+    except HTTPException as exc:
+        sso_error = getattr(exc, "sso_error", sso_service.SSO_FAILED)
+        _log_refusal("login", exc, sso_error)
+        return _redirect(_login_error_url(origin, sso_error, provider=provider))
+
+
+class SSOExchangeResponse(BaseModel):
+    """The session a hand-off code is exchanged for: what a password login returns."""
+
+    access_token: str
+    token_type: str = "bearer"
+    user: UserMe
+
+
+@public_router.post(
+    "/exchange",
+    response_model=SSOExchangeResponse,
+    summary="Exchange a dashboard sign-in's hand-off code for a session",
+    tags=["sso"],
+    responses={400: {"description": EXCHANGE_BODY_DETAIL}},
+    openapi_extra={
+        "x-stability": "beta",
+        "requestBody": {
+            "required": True,
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "required": ["code", "secret"],
+                        "properties": {
+                            "code": {
+                                "type": "string",
+                                "maxLength": sso_service.MAX_HANDOFF_CODE_LENGTH,
+                            },
+                            "secret": {
+                                "type": "string",
+                                "pattern": "^[A-Za-z0-9_-]{43}$",
+                            },
+                        },
+                    }
+                }
+            },
+        },
+    },
+)
+async def sso_exchange(
+    request: Request, db: Session = Depends(deps.get_db)
+) -> JSONResponse:
+    """`{code, secret}` -> `{access_token, token_type, user}`, or a fixed 400."""
+    try:
+        body = await request.json()
+    except Exception:
+        body = None
+    if not isinstance(body, dict):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, EXCHANGE_BODY_DETAIL)
+    user_id = sso_service.redeem_handoff_code(body.get("code"), body.get("secret"))
+    user = db.query(User).filter(User.id == user_id).first()
+    if user is None or not user.is_active:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, EXCHANGE_BODY_DETAIL)
+    result = SSOExchangeResponse(
+        # The same token a password login issues, so every auth path accepts it.
+        access_token=create_local_access_token(user),
+        user=user_to_me(user),
+    )
+    return JSONResponse(
+        content=jsonable_encoder(result), headers={"Cache-Control": "no-store"}
+    )
+
+
+async def _redirect_mode_callback(
+    provider: str,
+    request: Request,
+    code: Optional[str],
+    state: Optional[str],
+    error: Optional[str],
+    db: Session,
+    cookie: str,
+    peeked: Dict[str, Any],
+) -> RedirectResponse:
+    """The callback of a sign-in started from the dashboard; always a 302.
+
+    The order refusals are checked in decides which code the user is told:
+    `error=`, no code, state mismatch, expiry, the configuration, the exchange
+    and ID token, the email, the account, and anything else.
+    """
+    return_to = str(peeked["rt"])
+    try:
+        if error:
+            raise sso_service.SSORefusal(
+                status.HTTP_400_BAD_REQUEST,
+                "OIDC provider returned error",
+                sso_service.SSO_IDP_ERROR,
+                idp_error=error,
+            )
+        if not code:
+            raise sso_service.SSORefusal(
+                status.HTTP_400_BAD_REQUEST,
+                "Authorization code is required",
+                sso_service.SSO_FAILED,
+            )
+        expected = str(peeked.get("st") or "").encode("utf-8")
+        if not state or not hmac.compare_digest(state.encode("utf-8"), expected):
+            raise sso_service.SSORefusal(
+                status.HTTP_400_BAD_REQUEST,
+                "OIDC state does not match this browser's sign-in",
+                sso_service.SSO_STATE,
+            )
+        hh = peeked.get("hh")
+        if not sso_service.is_handoff_value(hh):
+            raise sso_service.SSORefusal(
+                status.HTTP_400_BAD_REQUEST,
+                "OIDC sign-in state is not valid",
+                sso_service.SSO_STATE,
+            )
+        # The state matched, so this refuses only an expired cookie.
+        login = sso_service.redeem_oidc_state(cookie, state)
+
+        config = sso_service.get_sso_config_by_id(db, login.config_id)
+        if (
+            config is None
+            or not config.is_active
+            or config.provider_type.value != provider
+            or login.provider != provider
+        ):
+            raise sso_service.SSORefusal(
+                status.HTTP_404_NOT_FOUND,
+                f"No active SSO config found for provider '{provider}'",
+                sso_service.SSO_NOT_CONFIGURED,
+            )
+        sso_service.require_supported_provider(provider)
+
+        redirect_uri = _get_redirect_uri(request, provider)
+        token_data = await sso_service.exchange_oidc_code(
+            config, code, redirect_uri, code_verifier=login.code_verifier
+        )
+        if sso_service.uses_id_token(provider):
+            id_claims = sso_service.verify_id_token(
+                config, provider, token_data.get("id_token"), login.nonce
+            )
+        else:
+            id_claims = {}
+        access_token = token_data.get("access_token", "")
+        user_info = await sso_service.get_oidc_user_info(config, access_token)
+        user_info = await sso_service.verified_email(
+            config, provider, id_claims, user_info, access_token
+        )
+        user = sso_service.provision_user(db, user_info, config)
+        if not user.is_active:
+            raise sso_service.SSORefusal(
+                status.HTTP_400_BAD_REQUEST, "Inactive user", sso_service.SSO_INACTIVE
+            )
+        handoff = sso_service.issue_handoff_code(user.id, str(hh))
+    except sso_service.SSORefusal as exc:
+        _log_refusal("callback", exc, exc.sso_error)
+        return _redirect(
+            _login_error_url(
+                return_to, exc.sso_error, provider=provider, idp_error=exc.idp_error
+            )
+        )
+    except HTTPException as exc:
+        _log_refusal("callback", exc, sso_service.SSO_FAILED)
+        return _redirect(
+            _login_error_url(return_to, sso_service.SSO_FAILED, provider=provider)
+        )
+    except Exception:
+        logger.exception(
+            "SSO sign-in failed with an unexpected error (request_id=%s)",
+            _request_id(),
+        )
+        return _redirect(
+            _login_error_url(return_to, sso_service.SSO_FAILED, provider=provider)
+        )
+    return _redirect(f"{return_to}/sso/complete#code={handoff}")
 
 
 @public_router.get(
@@ -393,12 +753,39 @@ async def oidc_callback(
     state: Optional[str] = Query(None),
     error: Optional[str] = Query(None),
     db: Session = Depends(deps.get_db),
-) -> OIDCLoginResponse:
+) -> Any:
     """Finish a login this browser started: redeem the code, provision the user.
 
     Every outcome expires the state cookie, so a login is redeemable once from
     this browser; the provider refuses a second use of the code.
     """
+    # (A comment, not the docstring: the docstring is this operation's
+    # published OpenAPI description, pinned by the stable snapshot.)
+    # A login started from the dashboard (its cookie carries `rt`) always ends
+    # in a 302: to `{rt}/sso/complete#code=<hand-off code>`, or to
+    # `{rt}/login?sso_error=<code>`. A callback with no cookie, or one that is
+    # not ours, cannot say where it came from, and goes to the primary
+    # dashboard origin's `/login?sso_error=sso_state` when one is configured.
+    # Otherwise -- a login started with `/oidc/{provider}/login` -- the answer
+    # is JSON, as it always was.
+    cookie = request.cookies.get(sso_service.OIDC_STATE_COOKIE)
+    peeked = sso_service.peek_oidc_state(cookie)
+    if peeked is not None and peeked.get("rt"):
+        return await _redirect_mode_callback(
+            provider, request, code, state, error, db, str(cookie), peeked
+        )
+    if peeked is None:
+        primary = settings.primary_dashboard_origin
+        if primary:
+            logger.warning(
+                "SSO callback with no state cookie, or one that is not ours; "
+                "sending the browser to %s/login (request_id=%s)",
+                primary,
+                _request_id(),
+            )
+            return _redirect(
+                _login_error_url(primary, sso_service.SSO_STATE, provider=provider)
+            )
     try:
         result = await _finish_oidc_login(provider, request, code, state, error, db)
     except HTTPException as exc:

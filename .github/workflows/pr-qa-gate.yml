@@ -502,7 +502,9 @@ jobs:
     if: needs.changes.outputs.docs_only != 'true'
     name: Browser E2E
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # 20 before C2b; the SSO steps add a second API, a `next dev` compile and
+    # the History gate's 61-second wait.
+    timeout-minutes: 30
     services:
       postgres:
         image: postgres:16
@@ -618,6 +620,115 @@ jobs:
           PLAYWRIGHT_API_URL: http://localhost:8000
         run: cd frontend && npx playwright test --project=journeys
 
+      # --- Sign in with SSO from the dashboard (C2b, launch-readiness
+      # stream-c/c2b/spec-v3.md §12). A second API process on :8001 with
+      # ENVIRONMENT=test and APP_ENV=test, so the fake provider may be plain
+      # http. What `test` changes there, against the :8000 API above: the rate
+      # limiter is off; all five background schedulers are off; TestSettings
+      # carries no CORS defaults, so main.py's localhost fallback applies; and
+      # http provider endpoints are allowed. Same database, same SECRET_KEY.
+      - name: Start the fake OIDC provider
+        run: |
+          python modules/backend/tests/integration/api/fake_oidc_provider.py \
+            e2e-client e2e-secret e2e-user@sso-e2e.example.com > fake-oidc.log 2>&1 &
+          for _ in $(seq 1 30); do
+            port=$(sed -n 's/^READY \([0-9]*\)$/\1/p' fake-oidc.log)
+            if [ -n "$port" ]; then
+              echo "SSO_FAKE_PROVIDER_URL=http://127.0.0.1:$port" >> "$GITHUB_ENV"
+              echo "fake OIDC provider: READY $port"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "the fake OIDC provider did not start"; cat fake-oidc.log; exit 1
+
+      - name: Start the SSO API (same origin, :8001)
+        env:
+          ENVIRONMENT: test
+          APP_ENV: test
+          LOG_LEVEL: INFO
+          PYTHONUNBUFFERED: '1'
+          # The static export is served on :3100, so that is the dashboard.
+          PUBLIC_BASE_URL: http://localhost:3100
+        run: |
+          python -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8001 \
+            --log-level info > sso-api.log 2>&1 &
+          echo $! > sso-api.pid
+          deadline=$((SECONDS + 90))
+          while [ "$SECONDS" -lt "$deadline" ]; do
+            curl -sf localhost:8001/health/ready >/dev/null && exit 0
+            sleep 1
+          done
+          echo "the SSO API did not become healthy"; tail -n 100 sso-api.log; exit 1
+
+      # After the provider, because the configuration names its address.
+      - name: Create the SSO configuration for the fake provider
+        run: |
+          token=$(curl -sf -X POST http://localhost:8001/api/v1/auth/login \
+            -H 'content-type: application/json' \
+            -d '{"email":"admin@demo.com","password":"Demo1234!"}' \
+            | python -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')
+          body=$(python -c 'import json,os; print(json.dumps({
+            "org_name": "SSO E2E", "org_domain": "sso-e2e.example.com",
+            "provider_type": "okta", "entity_id": "e2e-client",
+            "client_secret": "e2e-secret", "sso_url": os.environ["SSO_FAKE_PROVIDER_URL"],
+            "role_mapping": {}, "is_enforced": False, "is_active": True}))')
+          curl -sf -X POST http://localhost:8001/api/v1/auth/sso/configs \
+            -H "authorization: Bearer $token" -H 'content-type: application/json' \
+            -d "$body" > /dev/null
+
+      # The static export on :3100 again, its /api proxied to :8001: the
+      # journey, two error journeys, and the History-database gate.
+      - name: SSO sign-in, same origin (static export)
+        env:
+          PLAYWRIGHT_API_URL: http://127.0.0.1:8001
+          SSO_API_LOG: ${{ github.workspace }}/sso-api.log
+          SSO_EMAIL: e2e-user@sso-e2e.example.com
+        run: cd frontend && npx playwright test --project=sso
+
+      # The dashboard on another origin than the API, the api.-host shape of
+      # D14: PUBLIC_BASE_URL is the API's own origin (so the IdP returns to
+      # :8001 directly), and DASHBOARD_ORIGINS names the dashboard.
+      - name: Restart the SSO API for a dashboard on another origin
+        env:
+          ENVIRONMENT: test
+          APP_ENV: test
+          LOG_LEVEL: INFO
+          PYTHONUNBUFFERED: '1'
+          PUBLIC_BASE_URL: http://localhost:8001
+          DASHBOARD_ORIGINS: http://localhost:3000
+        run: |
+          kill "$(cat sso-api.pid)"
+          for _ in $(seq 1 30); do
+            curl -sf localhost:8001/health/live >/dev/null || break
+            sleep 1
+          done
+          python -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8001 \
+            --log-level info > sso-api-cross.log 2>&1 &
+          echo $! > sso-api.pid
+          deadline=$((SECONDS + 90))
+          while [ "$SECONDS" -lt "$deadline" ]; do
+            curl -sf localhost:8001/health/ready >/dev/null && exit 0
+            sleep 1
+          done
+          echo "the SSO API did not become healthy"; tail -n 100 sso-api-cross.log; exit 1
+
+      # `next dev` (React StrictMode mounts twice) on :3000 against :8001:
+      # the journey asserts exactly one exchange POST and prints the count.
+      - name: SSO sign-in, different origin (next dev)
+        env:
+          PLAYWRIGHT_WEB_SERVER: dev
+          PLAYWRIGHT_PORT: '3000'
+          NEXT_PUBLIC_API_URL: http://localhost:8001
+          NEXT_TELEMETRY_DISABLED: '1'
+          SSO_API_BASE: http://localhost:8001
+          SSO_API_LOG: ${{ github.workspace }}/sso-api-cross.log
+          SSO_EMAIL: e2e-user@sso-e2e.example.com
+        run: |
+          started=$SECONDS
+          cd frontend && npx playwright test --project=sso --grep @journey
+          echo "different-origin SSO journey under next dev: $((SECONDS - started)) s"
+
       - name: Upload the Playwright report and traces
         if: failure()
         uses: actions/upload-artifact@v7
@@ -631,7 +742,11 @@ jobs:
 
       - name: API log (on failure)
         if: failure()
-        run: tail -n 200 api.log
+        run: |
+          tail -n 200 api.log
+          for log in sso-api.log sso-api-cross.log fake-oidc.log; do
+            if [ -f "$log" ]; then echo "== $log"; tail -n 100 "$log"; fi
+          done
 
   # Builds both images and boots the compose stack exactly the way a
   # self-hoster does, then walks the golden path through the real containers:

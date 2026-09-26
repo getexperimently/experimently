@@ -175,6 +175,12 @@ RATE_LIMIT_CONFIG: Dict[str, Tuple[int, int]] = {
     "/api/v1/auth/signup": (5, 60),
     "/api/v1/auth/forgot-password": (5, 60),
     "/api/v1/auth/reset-password": (5, 60),
+    # SSO hand-off exchange (the modules' SSO routes): a public route that
+    # mints an access token, limited like the password login.
+    "/api/v1/auth/sso/exchange": (10, 60),
+    # SSO sign-in start: public; answers whether a domain has SSO, and mints a
+    # signed state cookie each time. One call per sign-in in real use.
+    "/api/v1/auth/sso/login": (30, 60),
 }
 
 # Default rate limit for all other endpoints
