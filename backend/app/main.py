@@ -179,19 +179,9 @@ app = FastAPI(
 
 # CORS origins — resolved here, registered LAST (below), because the
 # registration order is what decides the nesting.
-cors_origins = [str(origin) for origin in settings.BACKEND_CORS_ORIGINS]
-if not cors_origins:
-    # Plain comma-separated form (CORS_ORIGINS=http://a,http://b), see .env.example
-    cors_origins = [origin for origin in settings.CORS_ORIGINS if origin]
-if not cors_origins:
-    # Fall back to dev defaults
-    cors_origins = [
-        "http://localhost:3100",
-        "http://localhost:3000",
-        "http://localhost:3001",
-        "http://localhost:3200",  # ShopLab demo storefront
-        "http://localhost:3300",  # StreamPulse demo app
-    ]
+# BACKEND_CORS_ORIGINS, else CORS_ORIGINS, else the dev defaults; every entry
+# normalised to the form a browser's Origin header takes (#126).
+cors_origins = settings.cors_allowed_origins
 
 # An unhandled route exception becomes a 500 the browser can read (#72).
 # Registered FIRST, i.e. innermost of all the layers below, so its 500 passes
