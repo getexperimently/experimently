@@ -38,6 +38,7 @@ from sqlalchemy.orm import Session
 
 from backend.app.api import deps
 from backend.app.core.config import settings
+from backend.app.core.security import create_local_access_token
 from backend.app.models.user import User, UserRole
 from modules.backend.app.models.sso_config import SSOConfig, SSOProviderType
 from modules.backend.app.services import sso_service
@@ -306,6 +307,32 @@ def saml_acs(
 # ---------------------------------------------------------------------------
 
 
+def _set_state_cookie(response: Response, value: str, max_age: int) -> None:
+    """The login's state cookie; `max_age=0` with an empty value expires it.
+
+    `Secure` even on `http://localhost`: the `__Host-` prefix requires it, and
+    browsers treat localhost as a secure context. `SameSite=Lax`, because the
+    callback is a top-level GET arriving from the identity provider's site --
+    `Strict` would not send it.
+    """
+    response.set_cookie(
+        sso_service.OIDC_STATE_COOKIE,
+        value,
+        max_age=max_age,
+        path="/",
+        secure=True,
+        httponly=True,
+        samesite="lax",
+    )
+
+
+def _expiring_state_cookie_header() -> str:
+    """The `Set-Cookie` value that expires the state cookie, for an error response."""
+    scratch = Response()
+    _set_state_cookie(scratch, "", 0)
+    return scratch.headers["set-cookie"]
+
+
 @public_router.get(
     "/oidc/{provider}/login",
     summary="Initiate OIDC login",
@@ -317,7 +344,7 @@ async def oidc_login(
     org_domain: Optional[str] = Query(None, description="Org domain for config lookup"),
     db: Session = Depends(deps.get_db),
 ) -> RedirectResponse:
-    """Redirect the user to the OIDC provider's authorization endpoint."""
+    """Redirect the browser to the provider, holding the login's state in a cookie."""
     sso_service.require_supported_provider(provider)
     # Find config by provider type and optional org_domain
     configs = sso_service.list_sso_configs(db)
@@ -334,13 +361,22 @@ async def oidc_login(
             detail=f"No active SSO config found for provider '{provider}'",
         )
 
-    state = sso_service.generate_state_token()
+    started = sso_service.start_oidc_login(config, provider)
     redirect_uri = _get_redirect_uri(request, provider)
     auth_url = sso_service.build_oidc_authorization_url(
-        config, provider, redirect_uri, state
+        config,
+        provider,
+        redirect_uri,
+        started.state,
+        started.code_verifier,
+        started.nonce,
     )
 
-    return RedirectResponse(url=auth_url, status_code=302)
+    response = RedirectResponse(url=auth_url, status_code=302)
+    _set_state_cookie(
+        response, started.cookie_value, sso_service.OIDC_STATE_TTL_SECONDS
+    )
+    return response
 
 
 @public_router.get(
@@ -352,13 +388,37 @@ async def oidc_login(
 async def oidc_callback(
     provider: str,
     request: Request,
+    response: Response,
     code: Optional[str] = Query(None),
     state: Optional[str] = Query(None),
     error: Optional[str] = Query(None),
-    org_domain: Optional[str] = Query(None),
     db: Session = Depends(deps.get_db),
 ) -> OIDCLoginResponse:
-    """Handle the OIDC callback: exchange code for tokens, fetch user info, provision user."""
+    """Finish a login this browser started: redeem the code, provision the user.
+
+    Every outcome expires the state cookie, so a login is redeemable once from
+    this browser; the provider refuses a second use of the code.
+    """
+    try:
+        result = await _finish_oidc_login(provider, request, code, state, error, db)
+    except HTTPException as exc:
+        headers = dict(exc.headers or {})
+        headers["set-cookie"] = _expiring_state_cookie_header()
+        raise HTTPException(
+            status_code=exc.status_code, detail=exc.detail, headers=headers
+        ) from None
+    _set_state_cookie(response, "", 0)
+    return result
+
+
+async def _finish_oidc_login(
+    provider: str,
+    request: Request,
+    code: Optional[str],
+    state: Optional[str],
+    error: Optional[str],
+    db: Session,
+) -> OIDCLoginResponse:
     sso_service.require_supported_provider(provider)
     if error:
         raise HTTPException(
@@ -372,47 +432,55 @@ async def oidc_callback(
             detail="Authorization code is required",
         )
 
-    # The CSRF check is not optional.  It used to sit inside `if state:` while
-    # `state` was `Query(None)`, so a callback that simply omitted the
-    # parameter skipped verification altogether and went straight on to
-    # exchange the code, provision the user and mint a platform JWT --
-    # precisely the request an attacker controls.  OAuth 2.0 Security BCP
-    # (RFC 9700 s.4.7) requires the client to reject a callback whose state it
-    # did not issue, and an absent state is one it did not issue.  Raised here
-    # rather than declared `Query(...)` so a missing state reads as the same
-    # 400 as a missing code instead of a 422 validation envelope.
-    if not state:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="State token is required",
-        )
-    sso_service.verify_state_token(state)
+    # The state must be the one in the cookie this browser was given when it
+    # started the login (#66). A state alone proves nothing -- anyone can start
+    # a login and get one -- so a callback from any other browser, including
+    # one carrying an attacker's own code and state, is refused here.
+    login = sso_service.redeem_oidc_state(
+        request.cookies.get(sso_service.OIDC_STATE_COOKIE), state
+    )
 
-    # Find config
-    configs = sso_service.list_sso_configs(db)
-    config = None
-    for c in configs:
-        if c.provider_type.value == provider and c.is_active:
-            if not org_domain or c.org_domain == org_domain:
-                config = c
-                break
-
-    if not config:
+    # The configuration the login was started for, not whichever active one
+    # matches the provider name now.
+    config = sso_service.get_sso_config_by_id(db, login.config_id)
+    if (
+        config is None
+        or not config.is_active
+        or config.provider_type.value != provider
+        or login.provider != provider
+    ):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"No active SSO config found for provider '{provider}'",
         )
 
     redirect_uri = _get_redirect_uri(request, provider)
-    token_data = await sso_service.exchange_oidc_code(config, code, redirect_uri)
+    token_data = await sso_service.exchange_oidc_code(
+        config, code, redirect_uri, code_verifier=login.code_verifier
+    )
+    if sso_service.uses_id_token(provider):
+        # From this exchange's own response, never from the browser.
+        id_claims = sso_service.verify_id_token(
+            config, provider, token_data.get("id_token"), login.nonce
+        )
+    else:
+        id_claims = {}
     access_token = token_data.get("access_token", "")
 
     user_info = await sso_service.get_oidc_user_info(config, access_token)
+    # Only an email the provider verified, in this configuration's domain.
+    user_info = await sso_service.verified_email(
+        config, provider, id_claims, user_info, access_token
+    )
     user = sso_service.provision_user(db, user_info, config)
-    jwt_token = _issue_jwt(user)
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Inactive user"
+        )
 
     return OIDCLoginResponse(
-        access_token=jwt_token,
+        # The same token a password login issues, so every auth path accepts it.
+        access_token=create_local_access_token(user),
         user_id=str(user.id),
         email=user.email,
         role=user.role.value if user.role else "viewer",

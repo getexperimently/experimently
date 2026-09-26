@@ -13,7 +13,7 @@ Covers:
   - get_oidc_user_info: success (mocked HTTP)
   - provision_user: new user (JIT), existing user, role update
   - map_role: various group mappings, default, no mapping
-  - generate_state_token / verify_state_token: roundtrip, expired, invalid
+  - start_oidc_login / redeem_oidc_state: the signed state cookie
   - build_oidc_authorization_url: structure checks
 """
 
@@ -32,22 +32,22 @@ from backend.app.models.user import User, UserRole
 from modules.backend.app.models.sso_config import SSOConfig, SSOProviderType
 from modules.backend.app.services import sso_service
 from modules.backend.app.services.sso_service import (
-    _state_store,
     build_oidc_authorization_url,
     create_sso_config,
     delete_sso_config,
     exchange_oidc_code,
     generate_saml_metadata,
-    generate_state_token,
     get_oidc_user_info,
     get_sso_config,
     get_sso_config_by_id,
     list_sso_configs,
     map_role,
     parse_saml_response,
+    pkce_challenge,
     provision_user,
+    redeem_oidc_state,
+    start_oidc_login,
     update_sso_config,
-    verify_state_token,
 )
 
 # ---------------------------------------------------------------------------
@@ -592,7 +592,11 @@ class TestExchangeOIDCCode:
         mock_client.post = AsyncMock(return_value=mock_response)
 
         result = await exchange_oidc_code(
-            cfg, "auth-code", "https://example.com/callback", http_client=mock_client
+            cfg,
+            "auth-code",
+            "https://example.com/callback",
+            code_verifier="v" * 43,
+            http_client=mock_client,
         )
         assert result.get("access_token") == "google-token"
 
@@ -610,7 +614,11 @@ class TestExchangeOIDCCode:
         mock_client.post = AsyncMock(return_value=mock_response)
 
         result = await exchange_oidc_code(
-            cfg, "code", "https://example.com/callback", http_client=mock_client
+            cfg,
+            "code",
+            "https://example.com/callback",
+            code_verifier="v" * 43,
+            http_client=mock_client,
         )
         assert "access_token" in result
 
@@ -628,7 +636,11 @@ class TestExchangeOIDCCode:
         mock_client.post = AsyncMock(return_value=mock_response)
 
         result = await exchange_oidc_code(
-            cfg, "code", "https://example.com/callback", http_client=mock_client
+            cfg,
+            "code",
+            "https://example.com/callback",
+            code_verifier="v" * 43,
+            http_client=mock_client,
         )
         assert result.get("access_token") == "ms-token"
 
@@ -640,7 +652,9 @@ class TestExchangeOIDCCode:
         cfg.sso_url = None
 
         with pytest.raises(HTTPException) as exc_info:
-            await exchange_oidc_code(cfg, "code", "https://example.com/callback")
+            await exchange_oidc_code(
+                cfg, "code", "https://example.com/callback", code_verifier="v" * 43
+            )
         assert exc_info.value.status_code == 400
 
     @pytest.mark.asyncio
@@ -651,7 +665,11 @@ class TestExchangeOIDCCode:
 
         with pytest.raises(HTTPException) as exc_info:
             await exchange_oidc_code(
-                cfg, "code", "https://example.com/callback", http_client=mock_client
+                cfg,
+                "code",
+                "https://example.com/callback",
+                code_verifier="v" * 43,
+                http_client=mock_client,
             )
         assert exc_info.value.status_code == 400
 
@@ -909,73 +927,132 @@ class TestMapRole:
 
 
 # ---------------------------------------------------------------------------
-# generate_state_token / verify_state_token
+# start_oidc_login / redeem_oidc_state
 # ---------------------------------------------------------------------------
 
 
-class TestStateTokens:
-    def setup_method(self):
-        """Clear the state store before each test."""
-        _state_store.clear()
+def _okta_config(config_id: uuid.UUID | None = None) -> MagicMock:
+    cfg = MagicMock(spec=SSOConfig)
+    cfg.id = config_id or uuid.uuid4()
+    cfg.provider_type = SSOProviderType.OKTA
+    return cfg
 
-    def test_generate_returns_string(self):
-        token = generate_state_token()
-        assert isinstance(token, str)
-        assert len(token) > 10
 
-    def test_token_is_url_safe(self):
-        token = generate_state_token()
+class TestOIDCLoginState:
+    def test_a_started_login_redeems_with_its_own_state(self):
+        cfg = _okta_config()
+        started = start_oidc_login(cfg, "okta")
+        redeemed = redeem_oidc_state(started.cookie_value, started.state)
+        assert redeemed.config_id == cfg.id
+        assert redeemed.provider == "okta"
+        assert redeemed.code_verifier == started.code_verifier
+
+    def test_the_verifier_is_within_rfc_7636_bounds(self):
+        verifier = start_oidc_login(_okta_config(), "okta").code_verifier
+        assert 43 <= len(verifier) <= 128
         import re
 
-        # URL-safe base64 contains only alphanumeric, -, _
-        assert re.match(r"^[A-Za-z0-9_\-]+$", token)
+        assert re.fullmatch(r"[A-Za-z0-9\-._~]+", verifier)
 
-    def test_verify_valid_token_returns_true(self):
-        token = generate_state_token()
-        result = verify_state_token(token)
-        assert result is True
+    def test_each_login_gets_its_own_state_and_verifier(self):
+        cfg = _okta_config()
+        logins = [start_oidc_login(cfg, "okta") for _ in range(20)]
+        assert len({s.state for s in logins}) == 20
+        assert len({s.code_verifier for s in logins}) == 20
 
-    def test_verify_removes_token_from_store(self):
-        token = generate_state_token()
-        verify_state_token(token)
-        assert token not in _state_store
-
-    def test_verify_token_is_single_use(self):
-        token = generate_state_token()
-        verify_state_token(token)
+    def test_no_cookie_is_refused(self):
+        started = start_oidc_login(_okta_config(), "okta")
         with pytest.raises(HTTPException) as exc_info:
-            verify_state_token(token)
+            redeem_oidc_state(None, started.state)
         assert exc_info.value.status_code == 400
 
-    def test_verify_unknown_token_raises_400(self):
+    @pytest.mark.regression
+    def test_another_logins_cookie_is_refused(self):
+        """The login-CSRF case: the attacker's own state, the victim's cookie."""
+        cfg = _okta_config()
+        victims = start_oidc_login(cfg, "okta")
+        attackers = start_oidc_login(cfg, "okta")
         with pytest.raises(HTTPException) as exc_info:
-            verify_state_token("random-unknown-token")
+            redeem_oidc_state(victims.cookie_value, attackers.state)
+        assert exc_info.value.status_code == 400
+        assert "does not match" in exc_info.value.detail
+
+    def test_a_missing_url_state_is_refused(self):
+        started = start_oidc_login(_okta_config(), "okta")
+        for state in (None, ""):
+            with pytest.raises(HTTPException):
+                redeem_oidc_state(started.cookie_value, state)
+
+    def test_a_non_ascii_url_state_is_refused_not_a_500(self):
+        started = start_oidc_login(_okta_config(), "okta")
+        with pytest.raises(HTTPException) as exc_info:
+            redeem_oidc_state(started.cookie_value, "\u00e9t\u00e9")
         assert exc_info.value.status_code == 400
 
-    def test_verify_empty_token_raises_400(self):
+    def test_a_tampered_cookie_is_refused(self):
+        started = start_oidc_login(_okta_config(), "okta")
+        head, payload, sig = started.cookie_value.split(".")
+        forged = f"{head}.{payload}.{sig[:-2]}{'AA' if sig[-2:] != 'AA' else 'BB'}"
         with pytest.raises(HTTPException) as exc_info:
-            verify_state_token("")
-        assert exc_info.value.status_code == 400
+            redeem_oidc_state(forged, started.state)
+        assert "not valid" in exc_info.value.detail
 
-    def test_verify_expired_token_raises_400(self):
-        token = generate_state_token()
-        # Manually set expiry to the past
-        _state_store[token] = time.time() - 1
+    def test_a_cookie_signed_with_the_raw_secret_is_refused(self):
+        """The state key is derived, so an access-token-shaped forgery fails."""
+        import jwt
+
+        from backend.app.core.config import settings as core_settings
+
+        now = int(time.time())
+        forged = jwt.encode(
+            {
+                "aud": "experimently:oidc-state",
+                "iat": now,
+                "exp": now + 60,
+                "st": "s",
+                "cv": "v" * 43,
+                "cfg": str(uuid.uuid4()),
+                "prv": "okta",
+            },
+            core_settings.SECRET_KEY,
+            algorithm="HS256",
+        )
+        with pytest.raises(HTTPException):
+            redeem_oidc_state(forged, "s")
+
+    def test_an_access_token_is_not_a_state_cookie(self):
+        from backend.app.core.security import create_local_access_token
+
+        user = MagicMock(id=uuid.uuid4(), email="a@b.c", role=UserRole.ADMIN)
+        with pytest.raises(HTTPException):
+            redeem_oidc_state(create_local_access_token(user), "anything")
+
+    def test_an_expired_login_is_refused(self, monkeypatch):
+        """Started longer ago than the TTL plus the 30 s leeway."""
+        past = time.time() - sso_service.OIDC_STATE_TTL_SECONDS - 31
+        monkeypatch.setattr(sso_service.time, "time", lambda: past)
+        started = start_oidc_login(_okta_config(), "okta")
+        monkeypatch.undo()
         with pytest.raises(HTTPException) as exc_info:
-            verify_state_token(token)
-        assert exc_info.value.status_code == 400
+            redeem_oidc_state(started.cookie_value, started.state)
+        assert "expired" in exc_info.value.detail
 
-    def test_each_token_is_unique(self):
-        tokens = {generate_state_token() for _ in range(20)}
-        assert len(tokens) == 20
+    def test_the_leeway_is_thirty_seconds_not_more(self, monkeypatch):
+        """Inside the leeway still redeems; this is the boundary of the one above."""
+        past = time.time() - sso_service.OIDC_STATE_TTL_SECONDS - 20
+        monkeypatch.setattr(sso_service.time, "time", lambda: past)
+        started = start_oidc_login(_okta_config(), "okta")
+        monkeypatch.undo()
+        redeem_oidc_state(started.cookie_value, started.state)
 
-    def test_multiple_tokens_can_coexist(self):
-        t1 = generate_state_token()
-        t2 = generate_state_token()
-        t3 = generate_state_token()
-        assert verify_state_token(t1) is True
-        assert verify_state_token(t2) is True
-        assert verify_state_token(t3) is True
+    def test_the_process_holds_no_login_state(self):
+        """Nothing to fill from the unauthenticated login route (#94)."""
+        cfg = _okta_config()
+        before = {k: v for k, v in vars(sso_service).items() if isinstance(v, dict)}
+        sizes = {k: len(v) for k, v in before.items()}
+        for _ in range(100):
+            start_oidc_login(cfg, "okta")
+        assert {k: len(v) for k, v in before.items()} == sizes
 
 
 # ---------------------------------------------------------------------------
@@ -988,7 +1065,7 @@ class TestBuildOIDCAuthorizationURL:
         cfg = _make_google_config()
         state = "test-state-token"
         url = build_oidc_authorization_url(
-            cfg, "google", "https://example.com/callback", state
+            cfg, "google", "https://example.com/callback", state, "v" * 43
         )
         assert "accounts.google.com" in url
         assert "client_id=google-client-id" in url
@@ -1002,7 +1079,7 @@ class TestBuildOIDCAuthorizationURL:
         cfg.sso_url = None
 
         url = build_oidc_authorization_url(
-            cfg, "github", "https://example.com/cb", "state-abc"
+            cfg, "github", "https://example.com/cb", "state-abc", "v" * 43
         )
         assert "github.com" in url
         assert "gh-client-id" in url
@@ -1014,7 +1091,7 @@ class TestBuildOIDCAuthorizationURL:
         cfg.sso_url = None
 
         url = build_oidc_authorization_url(
-            cfg, "microsoft", "https://example.com/cb", "state-xyz"
+            cfg, "microsoft", "https://example.com/cb", "state-xyz", "v" * 43
         )
         assert "microsoftonline" in url
 
@@ -1022,20 +1099,22 @@ class TestBuildOIDCAuthorizationURL:
         cfg = _make_google_config()
         with pytest.raises(HTTPException) as exc_info:
             build_oidc_authorization_url(
-                cfg, "unknown_provider", "https://example.com/cb", "state"
+                cfg, "unknown_provider", "https://example.com/cb", "state", "v" * 43
             )
         assert exc_info.value.status_code == 400
 
     def test_redirect_uri_included(self):
         cfg = _make_google_config()
         redirect_uri = "https://myapp.com/callback"
-        url = build_oidc_authorization_url(cfg, "google", redirect_uri, "state-123")
+        url = build_oidc_authorization_url(
+            cfg, "google", redirect_uri, "state-123", "v" * 43
+        )
         assert "redirect_uri" in url
 
     def test_scope_included(self):
         cfg = _make_google_config()
         url = build_oidc_authorization_url(
-            cfg, "google", "https://example.com/cb", "st"
+            cfg, "google", "https://example.com/cb", "st", "v" * 43
         )
         assert "scope" in url
 
@@ -1046,6 +1125,373 @@ class TestBuildOIDCAuthorizationURL:
         cfg.sso_url = "https://my-org.okta.com"
 
         url = build_oidc_authorization_url(
-            cfg, "okta", "https://example.com/cb", "state"
+            cfg, "okta", "https://example.com/cb", "state", "v" * 43
         )
         assert "my-org.okta.com" in url
+
+
+# ---------------------------------------------------------------------------
+# verify_id_token / expected_issuers / https endpoints (C2n)
+# ---------------------------------------------------------------------------
+
+
+def _unsigned(claims: Dict[str, Any]) -> str:
+    """An ID token as the token endpoint returns it; the signature is not checked."""
+    import jwt
+
+    return jwt.encode(claims, "irrelevant-key", algorithm="HS256")
+
+
+def _oidc_config(provider: SSOProviderType, sso_url: str | None = None) -> MagicMock:
+    cfg = MagicMock(spec=SSOConfig)
+    cfg.id = uuid.uuid4()
+    cfg.provider_type = provider
+    cfg.entity_id = "client-1"
+    cfg.sso_url = sso_url
+    return cfg
+
+
+def _claims(**overrides) -> Dict[str, Any]:
+    claims = {
+        "iss": "https://accounts.google.com",
+        "aud": "client-1",
+        "exp": int(time.time()) + 300,
+        "nonce": "n-1",
+        "sub": "s",
+    }
+    claims.update(overrides)
+    return {k: v for k, v in claims.items() if v is not None}
+
+
+class TestVerifyIDToken:
+    google = staticmethod(lambda: _oidc_config(SSOProviderType.GOOGLE))
+
+    def test_a_good_token_is_accepted(self):
+        claims = sso_service.verify_id_token(
+            self.google(), "google", _unsigned(_claims()), "n-1"
+        )
+        assert claims["sub"] == "s"
+
+    @pytest.mark.regression
+    @pytest.mark.parametrize(
+        ("overrides", "nonce", "reason"),
+        [
+            ({"nonce": "someone-elses"}, "n-1", "nonce"),
+            ({"nonce": None}, "n-1", "nonce"),
+            ({"iss": "https://evil.example.com"}, "n-1", "iss"),
+            ({"aud": "another-client"}, "n-1", "aud"),
+            ({"aud": ["another-client"]}, "n-1", "aud"),
+            ({"aud": ["client-1", "another-client"]}, "n-1", "azp"),
+            ({"aud": ["client-1", "x"], "azp": "x"}, "n-1", "azp"),
+            ({"exp": int(time.time()) - 120}, "n-1", "exp"),
+            ({"exp": None}, "n-1", "exp"),
+        ],
+    )
+    def test_each_claim_is_checked(self, overrides, nonce, reason):
+        with pytest.raises(HTTPException) as exc_info:
+            sso_service.verify_id_token(
+                self.google(), "google", _unsigned(_claims(**overrides)), nonce
+            )
+        assert exc_info.value.status_code == 400
+        assert exc_info.value.detail == f"OIDC ID token was not accepted ({reason})"
+
+    def test_several_audiences_with_azp_this_client_is_accepted(self):
+        token = _unsigned(_claims(aud=["client-1", "x"], azp="client-1"))
+        sso_service.verify_id_token(self.google(), "google", token, "n-1")
+
+    def test_expiry_allows_a_minute_of_skew(self):
+        token = _unsigned(_claims(exp=int(time.time()) - 30))
+        sso_service.verify_id_token(self.google(), "google", token, "n-1")
+
+    @pytest.mark.parametrize("token", [None, "", "not-a-jwt", 42])
+    def test_a_missing_or_malformed_token_is_refused(self, token):
+        with pytest.raises(HTTPException) as exc_info:
+            sso_service.verify_id_token(self.google(), "google", token, "n-1")
+        assert exc_info.value.detail in (
+            "OIDC ID token was not accepted (missing)",
+            "OIDC ID token was not accepted (malformed)",
+        )
+
+    def test_the_refusal_names_no_claim_value(self):
+        token = _unsigned(_claims(iss="https://MARKER.example.com"))
+        with pytest.raises(HTTPException) as exc_info:
+            sso_service.verify_id_token(self.google(), "google", token, "n-1")
+        assert "MARKER" not in exc_info.value.detail
+
+
+class TestExpectedIssuers:
+    """The per-provider table in the C2n spec."""
+
+    def test_google_accepts_both_of_its_forms(self):
+        assert sso_service.expected_issuers(
+            _oidc_config(SSOProviderType.GOOGLE), "google", {}
+        ) == {"https://accounts.google.com", "accounts.google.com"}
+
+    @pytest.mark.parametrize("provider", ["microsoft", "azure_ad"])
+    def test_microsoft_is_per_tenant(self, provider):
+        tid = "9188040d-6c67-4c5b-b112-36a304b66dad"
+        assert sso_service.expected_issuers(
+            _oidc_config(SSOProviderType(provider)), provider, {"tid": tid}
+        ) == {f"https://login.microsoftonline.com/{tid}/v2.0"}
+
+    @pytest.mark.parametrize("tid", [None, "", "common", "../x", "9188040D-6C67"])
+    def test_microsoft_without_a_tenant_accepts_nothing(self, tid):
+        cfg = _oidc_config(SSOProviderType.MICROSOFT)
+        assert sso_service.expected_issuers(cfg, "microsoft", {"tid": tid}) == set()
+
+    def test_okta_custom_authorization_server_is_its_sso_url(self):
+        cfg = _oidc_config(SSOProviderType.OKTA, "https://org.okta.com/oauth2/default/")
+        assert sso_service.expected_issuers(cfg, "okta", {}) == {
+            "https://org.okta.com/oauth2/default"
+        }
+
+    def test_okta_org_authorization_server_is_the_org_url(self):
+        cfg = _oidc_config(SSOProviderType.OKTA, "https://org.okta.com/oauth2")
+        assert sso_service.expected_issuers(cfg, "okta", {}) == {"https://org.okta.com"}
+
+    def test_github_has_no_issuer_because_it_has_no_id_token(self):
+        assert not sso_service.uses_id_token("github")
+        assert sso_service.uses_id_token("google")
+        assert sso_service.uses_id_token("okta")
+
+
+class TestProviderEndpointsAreHttps:
+    @pytest.fixture
+    def outside_test(self, monkeypatch):
+        from backend.app.core.config import settings as core_settings
+
+        monkeypatch.setattr(core_settings, "ENVIRONMENT", "production")
+        assert not core_settings.is_test
+
+    @pytest.mark.regression
+    def test_an_http_okta_sso_url_is_refused_outside_test(self, outside_test):
+        cfg = _oidc_config(
+            SSOProviderType.OKTA, "http://org.okta.example/oauth2/default"
+        )
+        with pytest.raises(HTTPException) as exc_info:
+            build_oidc_authorization_url(cfg, "okta", "https://app/cb", "s", "v" * 43)
+        assert exc_info.value.status_code == 400
+        assert "https" in exc_info.value.detail
+
+    @pytest.mark.asyncio
+    async def test_the_exchange_refuses_it_too(self, outside_test):
+        cfg = _oidc_config(
+            SSOProviderType.OKTA, "http://org.okta.example/oauth2/default"
+        )
+        mock_client = AsyncMock()
+        with pytest.raises(HTTPException) as exc_info:
+            await exchange_oidc_code(
+                cfg,
+                "c",
+                "https://app/cb",
+                code_verifier="v" * 43,
+                http_client=mock_client,
+            )
+        assert "https" in exc_info.value.detail
+        mock_client.post.assert_not_awaited()
+
+    def test_an_https_okta_sso_url_is_accepted(self, outside_test):
+        cfg = _oidc_config(SSOProviderType.OKTA, "https://org.okta.com/oauth2/default")
+        url = build_oidc_authorization_url(cfg, "okta", "https://app/cb", "s", "v" * 43)
+        assert url.startswith("https://org.okta.com/oauth2/default/v1/authorize?")
+
+    def test_the_test_environment_allows_a_local_fake_provider(self):
+        cfg = _oidc_config(SSOProviderType.OKTA, "http://127.0.0.1:9")
+        url = build_oidc_authorization_url(cfg, "okta", "https://app/cb", "s", "v" * 43)
+        assert url.startswith("http://127.0.0.1:9/v1/authorize?")
+
+
+class TestNonceInTheAuthorizationURL:
+    def test_an_oidc_provider_gets_the_nonce(self):
+        cfg = _make_google_config()
+        url = build_oidc_authorization_url(
+            cfg, "google", "https://app/cb", "s", "v" * 43, "the-nonce"
+        )
+        assert "nonce=the-nonce" in url
+
+    def test_github_gets_none(self):
+        cfg = MagicMock(spec=SSOConfig)
+        cfg.provider_type = SSOProviderType.GITHUB
+        cfg.entity_id = "gh"
+        cfg.sso_url = None
+        url = build_oidc_authorization_url(
+            cfg, "github", "https://app/cb", "s", "v" * 43, "the-nonce"
+        )
+        assert "nonce" not in url
+
+    def test_each_login_carries_its_own_nonce_in_the_cookie(self):
+        cfg = _okta_config()
+        first, second = start_oidc_login(cfg, "okta"), start_oidc_login(cfg, "okta")
+        assert first.nonce != second.nonce
+        assert redeem_oidc_state(first.cookie_value, first.state).nonce == first.nonce
+
+
+# ---------------------------------------------------------------------------
+# verified_email (C2v V2) -- through the provider dispatch
+# ---------------------------------------------------------------------------
+
+
+def _v_config(provider: SSOProviderType, domain: str = "acme.com") -> MagicMock:
+    cfg = MagicMock(spec=SSOConfig)
+    cfg.id = uuid.uuid4()
+    cfg.provider_type = provider
+    cfg.org_domain = domain
+    return cfg
+
+
+def _id(**claims) -> Dict[str, Any]:
+    base = {"sub": "s-1", "email": "bob@acme.com", "email_verified": True}
+    base.update(claims)
+    return {k: v for k, v in base.items() if v is not None}
+
+
+class TestVerifiedEmail:
+    @pytest.mark.asyncio
+    async def test_okta_uses_the_id_tokens_verified_email(self):
+        info = await sso_service.verified_email(
+            _v_config(SSOProviderType.OKTA),
+            "okta",
+            _id(),
+            {"sub": "s-1", "email": "someone-else@acme.com"},
+            "at",
+        )
+        assert info["email"] == "bob@acme.com"
+        assert info["sub"] == "s-1"
+
+    @pytest.mark.regression
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("verified", [False, "true", None])
+    async def test_an_unverified_email_is_refused(self, verified):
+        with pytest.raises(HTTPException) as exc_info:
+            await sso_service.verified_email(
+                _v_config(SSOProviderType.OKTA),
+                "okta",
+                _id(email_verified=verified),
+                {"sub": "s-1"},
+                "at",
+            )
+        assert exc_info.value.status_code == 403
+        assert exc_info.value.detail == sso_service.EMAIL_UNVERIFIED_DETAIL
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("userinfo_sub", ["other", "", None])
+    async def test_user_info_must_name_the_id_tokens_subject(self, userinfo_sub):
+        with pytest.raises(HTTPException) as exc_info:
+            await sso_service.verified_email(
+                _v_config(SSOProviderType.OKTA),
+                "okta",
+                _id(),
+                {"sub": userinfo_sub},
+                "at",
+            )
+        assert exc_info.value.detail == sso_service.IDENTITY_MISMATCH_DETAIL
+
+    @pytest.mark.regression
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("hd", [None, "other.com", "eu.acme.com"])
+    async def test_google_requires_its_workspace_domain_to_be_the_emails(self, hd):
+        with pytest.raises(HTTPException) as exc_info:
+            await sso_service.verified_email(
+                _v_config(SSOProviderType.GOOGLE),
+                "google",
+                _id(hd=hd),
+                {"sub": "s-1"},
+                "at",
+            )
+        assert exc_info.value.status_code == 403
+        assert exc_info.value.detail == sso_service.EMAIL_DOMAIN_DETAIL
+
+    @pytest.mark.asyncio
+    async def test_google_with_its_workspace_domain_is_accepted(self):
+        info = await sso_service.verified_email(
+            _v_config(SSOProviderType.GOOGLE),
+            "google",
+            _id(hd="ACME.com"),
+            {"sub": "s-1"},
+            "at",
+        )
+        assert info["email"] == "bob@acme.com"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("provider", ["microsoft", "azure_ad", "onelogin", "saml"])
+    async def test_other_providers_are_refused(self, provider):
+        with pytest.raises(HTTPException) as exc_info:
+            await sso_service.verified_email(
+                _v_config(SSOProviderType.OKTA), provider, _id(), {"sub": "s-1"}, "at"
+            )
+        assert exc_info.value.detail == sso_service.UNSUPPORTED_PROVIDER_DETAIL
+
+
+def _github_client(entries) -> AsyncMock:
+    response = MagicMock()
+    response.json.return_value = entries
+    client = AsyncMock()
+    client.get = AsyncMock(return_value=response)
+    return client
+
+
+class TestGitHubVerifiedEmail:
+    async def _email(self, entries) -> str:
+        info = await sso_service.verified_email(
+            _v_config(SSOProviderType.GITHUB),
+            "github",
+            {},
+            {"sub": "12345", "email": "public@acme.com"},
+            "gh-token",
+            http_client=_github_client(entries),
+        )
+        return info["email"]
+
+    @pytest.mark.asyncio
+    async def test_the_primary_in_domain_address(self):
+        assert (
+            await self._email(
+                [
+                    {"email": "a@acme.com", "verified": True, "primary": False},
+                    {"email": "b@acme.com", "verified": True, "primary": True},
+                ]
+            )
+            == "b@acme.com"
+        )
+
+    @pytest.mark.asyncio
+    async def test_the_only_in_domain_address_when_the_primary_is_elsewhere(self):
+        assert (
+            await self._email(
+                [
+                    {"email": "me@gmail.com", "verified": True, "primary": True},
+                    {"email": "a@acme.com", "verified": True, "primary": False},
+                ]
+            )
+            == "a@acme.com"
+        )
+
+    @pytest.mark.regression
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "entries",
+        [
+            [{"email": "a@acme.com", "verified": False, "primary": True}],
+            [
+                {"email": "a@acme.com", "verified": True, "primary": False},
+                {"email": "b@acme.com", "verified": True, "primary": False},
+            ],
+            [{"email": "a@eu.acme.com", "verified": True, "primary": True}],
+            [],
+            "not-a-list",
+        ],
+        ids=["unverified", "two-non-primary", "subdomain", "none", "garbage"],
+    )
+    async def test_otherwise_refused(self, entries):
+        with pytest.raises(HTTPException) as exc_info:
+            await self._email(entries)
+        assert exc_info.value.status_code == 403
+        assert exc_info.value.detail == sso_service.EMAIL_UNVERIFIED_DETAIL
+
+    @pytest.mark.asyncio
+    async def test_the_public_profile_email_is_never_used(self):
+        """/user's `email` is whatever the user made public: not evidence."""
+        with pytest.raises(HTTPException):
+            await self._email(
+                [{"email": "public@acme.com", "verified": False, "primary": True}]
+            )
