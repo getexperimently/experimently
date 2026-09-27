@@ -278,6 +278,11 @@ On macOS, always use `localhost` (not `127.0.0.1`) for the database host when co
 - Include both `upgrade()` and `downgrade()` functions
 - Use descriptive migration names: `add_bayesian_config_to_experiments`
 - Commit migration files to version control alongside the model changes that require them
+- **Expand, then contract.** A migration in release N must not drop or rename
+  anything release N-1's code uses. Add the new column or table in one release,
+  move the code over, and drop the old one in a later release. During a
+  rolling upgrade, release N-1 keeps serving against release N's schema after
+  release N's migration has run.
 
 ### Do Not
 
@@ -348,3 +353,36 @@ python -m alembic -c backend/app/db/alembic.ini stamp --purge heads
 modules row goes and the core row stays. The module tables themselves are never
 dropped by switching down to core. They stay, unused, until the database goes
 back to the full profile.
+
+Use it only when the core chain is already at this release's head, which is
+the case where `upgrade heads` skips with a WARNING. `stamp` records revisions without
+running them, so after the refusal above it would mark this release's pending
+core migrations as applied when they are not. Run the full image of this
+release first, then stamp.
+
+---
+
+## An Older Image Against a Newer Database
+
+Rolling back to an older image after a release that carried a migration leaves
+the database recorded at a revision the older image has no file for. Both
+documented paths refuse, exit non-zero and leave the database untouched, with a
+message naming the revision and the image's version: *this database was
+migrated by a newer Experimently release*. The two ways out are the ones it
+names:
+
+- run the newer release that migrated the database, or
+- restore the backup taken before that upgrade, and run the older image
+  against the restored database.
+
+Do not edit `alembic_version` to make the older image start. Removing the
+newer revision's row leaves that release's schema changes in place while
+alembic no longer knows about them: the older image then re-runs migrations
+from the wrong position, and rolling forward again fails on a relation that
+already exists.
+
+The refusal is at start-up, so instances of the older image that were
+already running keep running. That, and the window in every rolling upgrade
+where the previous release still serves after the new release's migration has
+run, is why a migration must not drop or rename anything the previous
+release's code still uses (see *Migration Guidelines*).
