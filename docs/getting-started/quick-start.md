@@ -197,12 +197,15 @@ Evaluation returns `{key, enabled, config, reason}`. An inactive flag evaluates 
 docker compose up -d --wait postgres redis
 python3.11 -m venv venv && source venv/bin/activate
 pip install -r backend/requirements.txt
+export ENVIRONMENT=development
 python -m backend.app.db.bootstrap
 AUTH_PROVIDER=local uvicorn backend.app.main:app --reload --port 8000
 ```
 
 The first line starts only the database and cache. The bootstrap creates the schema and
-the first administrator, and is safe to run again. In a second terminal, start the
+the first administrator, and is safe to run again. `ENVIRONMENT` must be set: the API
+will not start without it, and the bootstrap will not create an administrator with the
+default password unless it says `development` or `test`. In a second terminal, start the
 dashboard on http://localhost:3000; it proxies `/api` to port 8000:
 
 ```{.bash skip reason="server: starts a long-running development server"}

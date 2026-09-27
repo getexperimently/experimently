@@ -569,18 +569,17 @@ class TestFailureDescriptionsCarryNoSecret:
     """`modules.register(hooks)` validates the settings first, so the likeliest
     failure here holds a rejected secret."""
 
-    def test_pydantic_puts_the_rejected_value_in_all_three_renderings(
-        self, monkeypatch
-    ):
-        """The premise. If pydantic ever stops doing this, the redaction below
-        is still correct but this test says the risk is gone."""
+    def test_the_settings_put_the_rejected_value_in_no_rendering(self, monkeypatch):
+        """pydantic puts the input in all three renderings unless the model sets
+        ``hide_input_in_errors``, which the settings now do. The redaction
+        below stays, for a model that does not."""
         import traceback
 
         monkeypatch.delenv("TESTING", raising=False)
         exc = _real_settings_validation_error()
-        assert _REJECTED_KEY in repr(exc)
-        assert _REJECTED_KEY in str(exc)
-        assert _REJECTED_KEY in "".join(
+        assert _REJECTED_KEY not in repr(exc)
+        assert _REJECTED_KEY not in str(exc)
+        assert _REJECTED_KEY not in "".join(
             traceback.format_exception(type(exc), exc, exc.__traceback__)
         )
 
@@ -673,7 +672,9 @@ class TestFailureDescriptionsCarryNoSecret:
                 _real_settings_validation_error()
             )
         except RuntimeError as wrapper:
-            assert _REJECTED_KEY in "".join(
+            # The settings hide their input now; the redaction is for a model
+            # that does not.
+            assert _REJECTED_KEY not in "".join(
                 traceback.format_exception(
                     type(wrapper), wrapper, wrapper.__traceback__
                 )

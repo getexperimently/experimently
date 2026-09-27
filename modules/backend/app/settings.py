@@ -115,7 +115,12 @@ class ModulesSettings(BaseSettings):
     OIDC_MICROSOFT_CLIENT_ID: str = ""
     OIDC_MICROSOFT_CLIENT_SECRET: str = ""
 
-    model_config = SettingsConfigDict(case_sensitive=True, extra="ignore")
+    model_config = SettingsConfigDict(
+        case_sensitive=True,
+        extra="ignore",
+        # A refused configuration names the setting, never its value.
+        hide_input_in_errors=True,
+    )
 
     @field_validator("ENVIRONMENT", mode="before")
     @classmethod
