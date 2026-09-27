@@ -53,8 +53,8 @@ does that.
 
 ### Changing Roles
 
-- An ADMIN (or OWNER) can change the role of any member. The last remaining
-  OWNER cannot be demoted or removed.
+- An ADMIN or OWNER can change a member's role among VIEWER, ANALYST,
+  DEVELOPER and ADMIN. The last remaining OWNER cannot be demoted or removed.
 - A member can remove themselves; an OWNER can do so only while there is at
   least one other OWNER.
 

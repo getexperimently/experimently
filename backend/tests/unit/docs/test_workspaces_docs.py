@@ -58,14 +58,15 @@ SWEPT: Tuple[Path, ...] = (
     REPO_ROOT / "frontend" / "src" / "pages" / "docs" / "index.tsx",
 )
 
-#: The workspace dashboard pages. Swept whenever `modules/` exists, and then
-#: required to exist, so a full tree cannot skip them.
+#: The workspace dashboard pages and the model's docstrings. Swept whenever
+#: `modules/` exists, and then required to exist, so a full tree cannot skip them.
 MODULE_PAGES = REPO_ROOT / "modules" / "frontend" / "src" / "pages" / "workspaces"
 if (REPO_ROOT / "modules").is_dir():
     SWEPT += (
         MODULE_PAGES / "index.tsx",
         MODULE_PAGES / "new.tsx",
         MODULE_PAGES / "[id]" / "index.tsx",
+        REPO_ROOT / "modules" / "backend" / "app" / "models" / "workspace.py",
     )
 
 #: (pattern, why it is false). Matched case-insensitively against the text
@@ -82,6 +83,11 @@ FALSE_CLAIMS: Tuple[Tuple[str, str], ...] = (
         "workspace keys are not accepted by the SDK routes",
     ),
     (r"independent namespace", "experiments and flags are not in a workspace"),
+    (r"provides workspace isolation", "workspaces do not limit access"),
+    (
+        r"change the role of any member",
+        "the docs do not state who may grant OWNER",
+    ),
     (r"multiple tenants on one instance", "one installation is one tenant"),
     (r"multi-tenant", "one installation is one tenant"),
     (r"without interfering with each other", "workspaces do not separate teams' data"),
