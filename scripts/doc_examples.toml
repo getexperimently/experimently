@@ -13,7 +13,7 @@
 
 [meta]
 documents = 32
-exec = 155
+exec = 156
 universe = [
     ".github/pull_request_template.md",
     "CHANGELOG.md",
@@ -188,7 +188,7 @@ expects = 11
 [[document]]
 path = "docs/development/doc-examples.md"
 environment = "bare"
-exec = 0
+exec = 156
 skip = 3
 expects = 0
 
@@ -209,7 +209,7 @@ expects = 1
 [[document]]
 path = "CONTRIBUTING.md"
 environment = "bare"
-exec = 0
+exec = 156
 skip = 9
 expects = 0
 
@@ -342,9 +342,9 @@ expects = 18
 [[document]]
 path = "docs/api/dimensional-analysis.md"
 environment = "stack"
-exec = 6
+exec = 7
 skip = 0
-expects = 11
+expects = 12
 
 [[document]]
 path = "docs/api/interaction-detection.md"
@@ -379,28 +379,28 @@ expects = 8
 [[document]]
 path = "demo/DEMO_GUIDE.md"
 environment = "bare"
-exec = 0
+exec = 156
 skip = 3
 expects = 0
 
 [[document]]
 path = "demo/shoplab/README.md"
 environment = "bare"
-exec = 0
+exec = 156
 skip = 6
 expects = 0
 
 [[document]]
 path = "demo/streampulse/README.md"
 environment = "bare"
-exec = 0
+exec = 156
 skip = 7
 expects = 0
 
 [[document]]
 path = "demo/streampulse/simulator/README.md"
 environment = "bare"
-exec = 0
+exec = 156
 skip = 7
 expects = 0
 

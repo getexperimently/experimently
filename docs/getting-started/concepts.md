@@ -211,7 +211,7 @@ Each environment has separate feature flag states and separate experiment assign
 
 ### Environment Variables
 
-Your SDK client is initialized with an API key that is scoped to a specific environment. Use separate API keys for staging and production to prevent accidental cross-environment leakage.
+Your SDK client is initialized with an API key, which is stored in the database of the deployment it was created on, so a key created on staging is unknown to a separate production deployment. Use separate API keys for staging and production to prevent accidental cross-environment leakage.
 
 ---
 

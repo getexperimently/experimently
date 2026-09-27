@@ -21,6 +21,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
 
 from backend.app.api import deps
+from backend.app.core.api_key_scopes import format_scopes, parse_scopes
 from backend.app.core.permissions import (
     Action,
     ResourceType,
@@ -50,7 +51,7 @@ def _may_act_on_others_keys(user: User, action: Action) -> bool:
 
 
 def _to_read(key: APIKey) -> APIKeyRead:
-    scopes = [s.strip() for s in (key.scopes or "").split(",") if s.strip()]
+    scopes = parse_scopes(key.scopes)
     return APIKeyRead(
         id=key.id,
         name=key.name,
@@ -106,7 +107,7 @@ def create_api_key(
     it securely.  ``prefix`` (the first characters of the key) is returned so
     the key can be recognised later.
     """
-    scopes = ",".join(body.scopes) if body.scopes else None
+    scopes = format_scopes(body.scopes)
     api_key, plaintext = APIKey.create_for_user(
         db,
         user_id=current_user.id,

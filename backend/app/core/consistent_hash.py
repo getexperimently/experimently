@@ -1,6 +1,43 @@
-"""The one consistent hash. Every bucketing decision in the platform uses it.
+"""The cross-SDK experiment-assignment hash.
 
-There were four of these, and they disagreed (#81).
+This is the hash ``tests/sdk-contract/golden-vectors.json`` pins and every SDK
+implements. The server uses it for experiment variant assignment and for the
+OpenFeature routes. It is NOT the feature-flag rollout function, and it is not
+the only bucketing hash in the platform.
+
+WHERE BUCKETING HAPPENS, and with what:
+
+    uses this module (first 4 bytes LE of MD5("{user}:{key}"), / 2^32)
+      assignment_service._hash_user_to_variant   key = experiment.key (UUID fallback), bucket_of
+      endpoints/openfeature.py _evaluate_flag     key = flag.key, hash_user
+
+    its own MD5("{user}:{flag.key}") read as the FULL 128-bit digest, % 100
+      feature_flag_service._evaluate_percentage_rollout
+          the flag rollout function: the flag's rollout_percentage and a
+          matched targeting rule's rollout_percentage both go through it.
+          int(md5(f"{user}:{key}").hexdigest(), 16) % 100 -- for
+          user-123 / my-flag that is bucket 79, where bucket_of gives 69.
+
+    other functions, each its own
+      global_holdout_service / mutual_exclusion_service
+          MD5("{user}:{salt}"), first 4 bytes LE, % 100 (holdout) or / 2^32 (MEG)
+      endpoints/tracking.py (bandit routing)
+          MD5("{user}:{experiment.id}:bandit"), full digest, % 10000
+      core/rules_engine.should_include_in_rollout
+          MD5("{user}:{rule.id}"), full digest, % 100
+      services/rules_evaluation_service (percentage_bucket operator)
+          MD5("{user}"), full digest, % 100
+      services/llm_experiment_service
+          MD5("{experiment_id}:{user}"), full digest, % 10000
+      modules: split_url_service
+          MD5("{user}:{experiment_key}"), first 8 hex digits / 0xFFFFFFFF
+      backend/lambda/shared/consistent_hash.py
+          its own salted hasher ("{key}_traffic", "{key}_variant")
+
+Changing any of these re-buckets users, so none is changed in passing; a site
+moves to this module only as a deliberate, stated change.
+
+HISTORY. There were four experiment/flag hashes, and they disagreed (#81).
 
     openfeature.py          MD5("{user}:{key}"), first 4 bytes LE, / 2^32
     assignment_service.py   MD5("{user}:{experiment.id}"), FULL digest, % 100
@@ -8,12 +45,13 @@ There were four of these, and they disagreed (#81).
     lambda/shared           MurmurHash3-ish of the user, salted "{key}_variant"
 
 The first is the contract: ``tests/sdk-contract/golden-vectors.json`` pins it
-and all fourteen SDKs implement it, so it is the only one a client can
-reproduce locally. The others were free to drift because nothing compared them.
+and all fourteen SDKs implement it. The others were free to drift because
+nothing compared them.
 
 They had drifted. For ``user-123`` / ``my-flag`` -- one input, one hash
 function -- the contract puts the user in bucket **69** and
-``assignment_service`` put them in bucket **79**, because reading the whole
+``assignment_service`` put them in bucket **79** (as the flag rollout function
+still does), because reading the whole
 128-bit digest modulo 100 is a different number from reading the first four
 bytes little-endian. And the two were not even hashing the same string: the
 contract uses the experiment's public ``key``, the assignment service used its

@@ -77,7 +77,7 @@ test.describe("Journey: admin panel", () => {
     const modal = adminPage.getByTestId("create-api-key-modal");
     await expect(modal).toBeVisible();
     await adminPage.getByTestId("api-key-name-input").fill(keyName);
-    await adminPage.getByTestId("api-key-scope-input").selectOption("write");
+    await adminPage.getByTestId("api-key-ruleset-scope").check();
     await adminPage.getByTestId("create-api-key-submit").click();
 
     // Shown once, at creation time only, in the page banner: closing the modal
@@ -94,7 +94,7 @@ test.describe("Journey: admin panel", () => {
     // …and it is in the list, active, with the scope we asked for.
     const row = table.locator("tr", { hasText: keyName });
     await expect(row).toHaveCount(1, { timeout: 15_000 });
-    await expect(row).toContainText("write");
+    await expect(row).toContainText("sdk:ruleset");
     const rowTestId = await row.getAttribute("data-testid");
     expect(rowTestId).toMatch(/^api-key-row-/);
     const keyId = rowTestId!.replace("api-key-row-", "");
