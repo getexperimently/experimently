@@ -24,6 +24,15 @@ reason why.
     very large Unicode repetitions such as `[\p{L}\p{N}]{1,300}`.
     - Values longer than 256 characters are not evaluated.
 
+    When a stored pattern is refused, or a value is longer than 256 characters
+    or cannot be encoded as UTF-8, the rules holding it are not applied: the
+    feature flag evaluates disabled with reason "error" (no fall-through to its
+    rollout percentage), the user is ineligible for the experiment and gets the
+    control variant, and the user is not a member of the segment.
+
+    After upgrading, run `python -m backend.scripts.check_regex_rules` to list
+    stored patterns that RE2 refuses or that use `\w`, `\d`, `\s`, `\b` or `$`.
+
 ### Bug Fixes
 
 * **api:** export endpoints share one limit of 10 requests a minute per client ([#261](https://github.com/getexperimently/experimently/issues/261)) ([00870e4](https://github.com/getexperimently/experimently/commit/00870e4870ff3e13e0a2ac2265f5ba5e4f8efb84))
