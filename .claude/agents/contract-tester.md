@@ -25,10 +25,14 @@ All SDKs MUST produce identical results for these inputs.
 
 ## SDK Test Runners
 
-| SDK | Test File | Command |
-|-----|-----------|---------|
-| Python | `tests/sdk-contract/test_python_sdk.py` | `source venv/bin/activate && python -m pytest tests/sdk-contract/test_python_sdk.py -v` |
-| JavaScript | `tests/sdk-contract/test_js_sdk.js` | `node tests/sdk-contract/test_js_sdk.js` |
+`tests/sdk-contract/hash_contract.py` runs each SDK's own exported hash function
+(through a thin harness in `tests/sdk-contract/harness/`) and does every comparison.
+
+| What | Command |
+|------|---------|
+| Which SDKs are checked, and why the rest are not | `python tests/sdk-contract/hash_contract.py --list` |
+| The comparison's own tests | `source venv/bin/activate && python -m pytest tests/sdk-contract -o addopts="" -v` |
+| One or more SDKs | `python tests/sdk-contract/hash_contract.py python js edge react-native go` |
 
 ## How to Work
 

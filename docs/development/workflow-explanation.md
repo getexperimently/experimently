@@ -83,7 +83,7 @@ source venv/bin/activate && export APP_ENV=test TESTING=true
 python -m pytest backend/tests/unit backend/tests/smoke -q -p no:cov     # Unit + Smoke
 python -m pytest backend/tests/integration -q -p no:cov                   # integration-tests
 cd frontend && npm test && npx tsc --noEmit && npm run build              # Frontend Tests
-python -m pytest tests/sdk-contract/test_python_sdk.py -o addopts="" && node tests/sdk-contract/test_js_sdk.js   # SDK Contract Tests
+make test-sdk                                                             # SDK Contract Tests (needs node and go)
 docker compose up -d --wait && curl -sf localhost:8000/health/ready       # Docker Smoke, first half
 ```
 
