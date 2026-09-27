@@ -343,6 +343,20 @@ class SafetyService:
             )
         return stats
 
+    def _error_window(self, feature_flag_id: UUID) -> Dict[str, Any]:
+        """The error and evaluation counts behind ``error_rate``, for the details.
+
+        ``error_rate`` reads 0.0 when a flag has errors but no recorded
+        evaluations (nothing to divide by), which is indistinguishable from a
+        healthy flag without these counts; the dashboard shows that state.
+        """
+        metrics = self.get_error_metrics(self.db, feature_flag_id)
+        return {
+            "error_count": metrics["error_count"],
+            "total_evaluations": metrics["total_evaluations"],
+            "timeframe_minutes": metrics["timeframe_minutes"],
+        }
+
     def _get_metric_value(
         self, feature_flag_id: UUID, metric_name: str
     ) -> Optional[float]:
@@ -476,6 +490,7 @@ class SafetyService:
         """
         feature_flag = self._require_flag(feature_flag_id)
         config = await self.get_feature_flag_safety_config(feature_flag_id)
+        window = self._error_window(feature_flag_id)
 
         if not config.enabled:
             return SafetyCheckResponse(
@@ -484,7 +499,8 @@ class SafetyService:
                 metrics=[],
                 last_checked=datetime.utcnow(),
                 details={
-                    "message": "Safety monitoring is disabled for this feature flag"
+                    "message": "Safety monitoring is disabled for this feature flag",
+                    **window,
                 },
             )
 
@@ -532,7 +548,7 @@ class SafetyService:
                 )
             )
 
-        details: Dict[str, Any] = {"feature_flag_key": feature_flag.key}
+        details: Dict[str, Any] = {"feature_flag_key": feature_flag.key, **window}
         if unavailable:
             details["unmeasured_metrics"] = unavailable
 

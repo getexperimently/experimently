@@ -45,7 +45,7 @@ class APIKey(Base, BaseModel):
     last_used_at = Column(DateTime, nullable=True)
 
     # Comma-separated scope names, read with backend.app.core.api_key_scopes.
-    # Scopes do not restrict a key today; sdk:ruleset is intended to be enforced.
+    # Only sdk:ruleset is enforced (backend/app/api/sdk_scope.py); other names are labels.
     scopes = Column(String(255), nullable=True)
 
     # User relationship

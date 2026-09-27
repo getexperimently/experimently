@@ -58,7 +58,7 @@ BRANCH_POINT = "a7b8c9d0e1f2"
 #: `alembic revision` would move what "the heads" means mid-test.
 #: `backend/tests/unit/db/test_alembic_plan.py` is where these are pinned
 #: against the files, with the whole apply order.
-CORE_HEAD = "b8c9d0e1f2a3"
+CORE_HEAD = "8fd44fb483a2"
 MODULES_HEAD = "modules_0001_rbac"
 CORE_HEADS = {CORE_HEAD}
 FULL_HEADS = {CORE_HEAD, MODULES_HEAD}

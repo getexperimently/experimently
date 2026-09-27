@@ -1231,6 +1231,12 @@
         "summary": "Report multiple client-side errors"
       }
     },
+    "/api/v1/tracking/evaluations": {
+      "post": {
+        "operationId": "report_flag_evaluations_api_v1_tracking_evaluations_post",
+        "summary": "Report flags evaluated locally by a server-side SDK (beta)"
+      }
+    },
     "/api/v1/tracking/events": {
       "post": {
         "operationId": "track_event_by_ids_api_v1_tracking_events_post",

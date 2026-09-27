@@ -24,6 +24,7 @@ from backend.app.api.v1.endpoints import (
     experiments,
     export,
     feature_flags,
+    flag_evaluations,
     global_holdout,
     interactions,
     llm_experiments,
@@ -75,6 +76,11 @@ def register_core_routers(router: APIRouter) -> APIRouter:
     # Client-side error reports (POST /tracking/errors, /tracking/errors/batch) feed
     # feature flag safety monitoring; same prefix and API-key auth as event tracking.
     router.include_router(client_errors.router, prefix="/tracking", tags=["Tracking"])
+    # Locally evaluated flag counts (POST /tracking/evaluations, beta): the safety
+    # denominator for SDKs that evaluate flags in-process; needs sdk:ruleset.
+    router.include_router(
+        flag_evaluations.router, prefix="/tracking", tags=["Tracking"]
+    )
     router.include_router(
         feature_flags.router, prefix="/feature-flags", tags=["Feature Flags"]
     )

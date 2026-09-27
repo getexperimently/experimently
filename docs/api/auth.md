@@ -134,10 +134,10 @@ It prints `eptk_`, the start of every key. The key is shown only in this respons
 it securely. If you lose it, create a new key and delete the old one. See
 [API Key Management](../security/api-keys.md) for listing, deleting and rotating keys.
 
-The request also accepts an optional `"scopes"` list. **Scopes do not limit what a key can do
-today:** any active key is accepted by every endpoint that takes an API key. The one scope
-intended to be enforced is `sdk:ruleset`, for server-side local evaluation; see
-[Scopes](../security/api-keys.md#scopes).
+The request also accepts an optional `"scopes"` list. The one scope that is enforced is
+`sdk:ruleset`, for server-side local evaluation: `POST /api/v1/tracking/evaluations` (beta)
+refuses a key without it. Every other endpoint that takes an API key accepts any active key,
+whatever its scopes; see [Scopes](../security/api-keys.md#scopes).
 
 ### Using an API Key
 

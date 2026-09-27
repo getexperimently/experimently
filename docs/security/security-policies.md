@@ -84,9 +84,9 @@ The following permissions are enforced by `backend/app/core/permissions.py`:
 - Keys use the format `eptk_<32 hex characters>` generated via `secrets.token_hex(16)` in `backend/app/models/api_key.py`
 - Every key must have a descriptive `name` field (e.g., `production-web-app`, `ci-pipeline`)
 - Every key must have an `expires_at` date set; keys without expiry are prohibited in production
-- Keys are not scoped today: any active key authenticates every API-key route (flag evaluation, tracking) as the user who created it, whatever its `scopes` field says. Issue one key per service so each can be revoked on its own, and keep every server-side key secret
+- Apart from `sdk:ruleset` (below), keys are not scoped: any active key authenticates every other API-key route (flag evaluation, tracking) as the user who created it, whatever its `scopes` field says. Issue one key per service so each can be revoked on its own, and keep every server-side key secret
 - A key shipped to a browser or a mobile app is visible to end users; use a dedicated key for that SDK traffic and nothing else
-- The `sdk:ruleset` scope is intended to be enforced when server-side local evaluation ships: it will allow downloading every flag's targeting rules, so grant it only to server-side keys
+- The `sdk:ruleset` scope is for server-side local evaluation. It is required by `POST /api/v1/tracking/evaluations` (beta) today, and is intended to allow downloading every flag's targeting rules once that endpoint ships, so grant it only to server-side keys
 
 **Usage:**
 - API keys are passed via `X-API-Key` header for all tracking and evaluation endpoints

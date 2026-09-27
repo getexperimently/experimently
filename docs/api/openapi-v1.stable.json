@@ -4989,6 +4989,141 @@
         "title": "FlagChangeHistoryResponse",
         "type": "object"
       },
+      "FlagEvaluationCount": {
+        "description": "How many times one flag was evaluated locally in one window.",
+        "properties": {
+          "count": {
+            "description": "Evaluations made",
+            "maximum": 1000000.0,
+            "minimum": 1.0,
+            "title": "Count",
+            "type": "integer"
+          },
+          "enabled_count": {
+            "description": "How many of them returned enabled",
+            "minimum": 0.0,
+            "title": "Enabled Count",
+            "type": "integer"
+          },
+          "flag_key": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Flag Key",
+            "type": "string"
+          },
+          "window_end": {
+            "description": "End of the counting window",
+            "format": "date-time",
+            "title": "Window End",
+            "type": "string"
+          },
+          "window_start": {
+            "description": "Start of the counting window",
+            "format": "date-time",
+            "title": "Window Start",
+            "type": "string"
+          }
+        },
+        "required": [
+          "flag_key",
+          "count",
+          "enabled_count",
+          "window_start",
+          "window_end"
+        ],
+        "title": "FlagEvaluationCount",
+        "type": "object"
+      },
+      "FlagEvaluationError": {
+        "description": "A flag whose count was not, or not fully, recorded.",
+        "properties": {
+          "accepted": {
+            "title": "Accepted",
+            "type": "integer"
+          },
+          "code": {
+            "enum": [
+              "unknown_flag",
+              "ceiling"
+            ],
+            "title": "Code",
+            "type": "string"
+          },
+          "flag_key": {
+            "title": "Flag Key",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "requested": {
+            "title": "Requested",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "flag_key",
+          "code",
+          "message",
+          "requested",
+          "accepted"
+        ],
+        "title": "FlagEvaluationError",
+        "type": "object"
+      },
+      "FlagEvaluationReport": {
+        "description": "A batch of per-flag evaluation counts.",
+        "example": {
+          "evaluations": [
+            {
+              "count": 1200,
+              "enabled_count": 300,
+              "flag_key": "new-checkout",
+              "window_end": "2026-09-27T12:01:00Z",
+              "window_start": "2026-09-27T12:00:00Z"
+            }
+          ]
+        },
+        "properties": {
+          "evaluations": {
+            "items": {
+              "$ref": "#/components/schemas/FlagEvaluationCount"
+            },
+            "maxItems": 1000,
+            "minItems": 1,
+            "title": "Evaluations",
+            "type": "array"
+          }
+        },
+        "required": [
+          "evaluations"
+        ],
+        "title": "FlagEvaluationReport",
+        "type": "object"
+      },
+      "FlagEvaluationReportResponse": {
+        "description": "What was recorded.",
+        "properties": {
+          "accepted": {
+            "description": "Evaluations recorded, over all flags",
+            "title": "Accepted",
+            "type": "integer"
+          },
+          "errors": {
+            "items": {
+              "$ref": "#/components/schemas/FlagEvaluationError"
+            },
+            "title": "Errors",
+            "type": "array"
+          }
+        },
+        "required": [
+          "accepted"
+        ],
+        "title": "FlagEvaluationReportResponse",
+        "type": "object"
+      },
       "FlagEvaluationRequest": {
         "description": "Body for ``POST /feature-flags/evaluate/{flag_key}``.",
         "example": {
@@ -23737,6 +23872,54 @@
         "tags": [
           "Tracking"
         ]
+      }
+    },
+    "/api/v1/tracking/evaluations": {
+      "post": {
+        "description": "Record per-flag evaluation counts from an SDK that evaluates flags locally.\n\nEach accepted count is stored as flag evaluations stamped with the time the\nserver received the report (the windows are kept as metadata), so safety\nmonitoring counts them towards the flag's error-rate denominator at once.\n\nCounts are capped per API key, flag and minute (100,000) and per flag and\nminute across all keys (1,000,000); the excess is not recorded and is\nlisted in ``errors`` with code ``ceiling``. Unknown flag keys are skipped\nand listed with code ``unknown_flag``. Entries for the same flag are merged.\n\n**Authentication**: an API key with the ``sdk:ruleset`` scope in the\nX-API-Key header.\n\nRaises:\n    HTTPException 401: If the API key is missing or invalid\n    HTTPException 403: If the API key does not have the ``sdk:ruleset`` scope\n    HTTPException 422: If the report is malformed",
+        "operationId": "report_flag_evaluations_api_v1_tracking_evaluations_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FlagEvaluationReport"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FlagEvaluationReportResponse"
+                }
+              }
+            },
+            "description": "How many evaluations were recorded, and any not recorded"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "summary": "Report flags evaluated locally by a server-side SDK (beta)",
+        "tags": [
+          "Tracking"
+        ],
+        "x-stability": "beta"
       }
     },
     "/api/v1/tracking/events": {
