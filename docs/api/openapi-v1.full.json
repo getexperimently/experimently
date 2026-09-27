@@ -15115,7 +15115,7 @@
   "info": {
     "description": "API for managing experiments and feature flags in test environment",
     "title": "Experimently",
-    "version": "0.5.0"
+    "version": "0.6.0"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -15927,7 +15927,7 @@
     },
     "/api/v1/audit-logs/": {
       "get": {
-        "description": "Retrieve audit logs with filtering and pagination.\n\nThis endpoint allows authorized users to query audit logs with various filters:\n- **user_id**: Filter by specific user\n- **entity_type**: Filter by entity type (feature_flag, experiment, user, etc.)\n- **entity_id**: Filter by specific entity\n- **action_type**: Filter by action type (toggle_enable, create, update, etc.)\n- **from_date**: Filter logs from this date\n- **to_date**: Filter logs until this date\n- **page**: Page number for pagination\n- **limit**: Number of records per page\n\nOnly users with appropriate permissions can access audit logs.\nRegular users can only see their own actions, while administrators\ncan see all audit logs.",
+        "description": "Retrieve audit logs with filtering and pagination.\n\nThis endpoint allows authorized users to query audit logs with various filters:\n- **user_id**: Filter by specific user\n- **entity_type**: Filter by entity type (feature_flag, experiment, user, etc.)\n- **entity_id**: Filter by specific entity\n- **action_type**: Filter by action type (toggle_enable, create, update, etc.)\n- **from_date**: Filter logs from this date\n- **to_date**: Filter logs until this date\n- **page**: Page number for pagination\n- **limit**: Number of records per page\n\nSuperusers, ADMIN and ANALYST see every entry. DEVELOPER and VIEWER\nsee only their own entries; a `user_id` filter naming anyone else is\nreplaced by their own id.",
         "operationId": "list_audit_logs_api_v1_audit_logs__get",
         "parameters": [
           {
@@ -16145,7 +16145,7 @@
     },
     "/api/v1/audit-logs/entity/{entity_type}/{entity_id}": {
       "get": {
-        "description": "Get audit history for a specific entity.\n\nThis endpoint returns the complete audit trail for a specific entity,\nsuch as a feature flag or experiment. The logs are ordered by timestamp\nwith the most recent first.\n\nOnly users with appropriate permissions can access entity audit history.",
+        "description": "Get audit history for a specific entity.\n\nThis endpoint returns the complete audit trail for a specific entity,\nsuch as a feature flag or experiment. The logs are ordered by timestamp\nwith the most recent first.\n\nSuperusers, ADMIN and ANALYST only; other roles receive 403.",
         "operationId": "get_entity_audit_history_api_v1_audit_logs_entity__entity_type___entity_id__get",
         "parameters": [
           {
@@ -16265,7 +16265,7 @@
     },
     "/api/v1/audit-logs/stats": {
       "get": {
-        "description": "Get audit log statistics.\n\nThis endpoint returns statistical information about audit logs,\nincluding counts by action type, entity type, and most active users.\n\nOnly administrators can access audit statistics.",
+        "description": "Get audit log statistics.\n\nThis endpoint returns statistical information about audit logs,\nincluding counts by action type, entity type, and most active users.\n\nSuperusers, ADMIN and ANALYST only; other roles receive 403.",
         "operationId": "get_audit_stats_api_v1_audit_logs_stats_get",
         "parameters": [
           {
@@ -16382,7 +16382,7 @@
     },
     "/api/v1/audit-logs/stream": {
       "get": {
-        "description": "Returns recent audit log entries as Server-Sent Events.\nUseful for real-time audit dashboards.\nStreams up to `limit` entries (default 50, max 100) then closes.",
+        "description": "Returns recent audit log entries as Server-Sent Events.\nUseful for real-time audit dashboards.\nStreams up to `limit` entries (default 50, max 100) then closes.\nSuperusers, ADMIN and ANALYST receive every entry; DEVELOPER and VIEWER\nreceive only their own.",
         "operationId": "stream_audit_logs_api_v1_audit_logs_stream_get",
         "parameters": [
           {
@@ -16447,7 +16447,7 @@
     },
     "/api/v1/audit-logs/user/{user_id}": {
       "get": {
-        "description": "Get audit logs for a specific user's activity.\n\nThis endpoint returns all audit logs for a specific user's actions.\nRegular users can only view their own activity, while administrators\ncan view any user's activity.",
+        "description": "Get audit logs for a specific user's activity.\n\nThis endpoint returns all audit logs for a specific user's actions.\nEvery user can view their own activity. Superusers, ADMIN and ANALYST\ncan view any user's activity; other roles receive 403 for anyone else.",
         "operationId": "get_user_activity_api_v1_audit_logs_user__user_id__get",
         "parameters": [
           {
@@ -22600,7 +22600,7 @@
     },
     "/api/v1/feature-flags/{flag_id}/history": {
       "get": {
-        "description": "Returns all audit log entries for a specific feature flag.\nOrdered by timestamp descending (most recent first).\nRequires authentication; ADMIN/ANALYST roles can view all history,\nother roles can view flags they have access to.",
+        "description": "Returns all audit log entries for a specific feature flag.\nOrdered by timestamp descending (most recent first).\nSuperusers, ADMIN and ANALYST see every entry; DEVELOPER and VIEWER see\nonly the entries they made, and `total_changes` counts only those.",
         "operationId": "get_flag_history_api_v1_feature_flags__flag_id__history_get",
         "parameters": [
           {

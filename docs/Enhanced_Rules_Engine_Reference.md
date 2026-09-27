@@ -247,7 +247,24 @@ Condition(
 ```
 
 #### MATCH_REGEX (`match_regex`)
-Tests if string matches regular expression.
+Tests if the value contains a match for the pattern (a search, not an anchored
+match: use `^` and `$` to anchor). Patterns use
+[RE2 syntax](https://github.com/google/re2/wiki/Syntax), which differs from
+Python's `re`:
+
+- `\w`, `\d`, `\s` and `\b` are ASCII-only; use `\p{L}`, `\p{N}` or
+  `[[:alpha:]]` for other scripts.
+- `$` matches only at the very end of the value, not before a final newline.
+- Lookahead, lookbehind, backreferences, `\Z`, `(?x)`, `(?u)`, `(?a)`,
+  `\N{...}`, a counted repetition over 1000, and very large Unicode repetitions
+  such as `[\p{L}\p{N}]{1,300}` are refused.
+- Values longer than 256 characters are not evaluated.
+
+When a pattern is refused or a value cannot be evaluated, the whole ruleset is
+not applied for that evaluation: a flag evaluates disabled with reason
+`error`, a user is not eligible for the experiment (control), and a user is
+not a member of the segment. `python -m backend.scripts.check_regex_rules`
+lists stored patterns that are refused or use the ASCII-only classes or `$`.
 
 ```python
 Condition(
