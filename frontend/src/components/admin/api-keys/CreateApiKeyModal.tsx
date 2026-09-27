@@ -26,12 +26,16 @@ interface CreateApiKeyModalProps {
   onSuccess: (keyValue: string) => void;
 }
 
-const SCOPES = ['read', 'write', 'admin'] as const;
-type Scope = typeof SCOPES[number];
+/**
+ * The one scope a key can carry. Only this scope is meant to be enforced: it
+ * will gate the server-side local-evaluation ruleset download. A key created
+ * without it carries no scope at all.
+ */
+export const SDK_RULESET_SCOPE = 'sdk:ruleset';
 
 export function CreateApiKeyModal({ isOpen, onClose, onSuccess }: CreateApiKeyModalProps) {
   const [name, setName] = useState('');
-  const [scope, setScope] = useState<Scope>('read');
+  const [rulesetScope, setRulesetScope] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [createdKey, setCreatedKey] = useState<CreatedApiKey | null>(null);
@@ -48,7 +52,9 @@ export function CreateApiKeyModal({ isOpen, onClose, onSuccess }: CreateApiKeyMo
     try {
       const data = await apiFetch<CreatedApiKey>('/api/v1/api-keys', {
         method: 'POST',
-        json: { name: name.trim(), scopes: [scope] },
+        json: rulesetScope
+          ? { name: name.trim(), scopes: [SDK_RULESET_SCOPE] }
+          : { name: name.trim() },
       });
       setCreatedKey(data);
       onSuccess(plaintextKey(data));
@@ -61,7 +67,7 @@ export function CreateApiKeyModal({ isOpen, onClose, onSuccess }: CreateApiKeyMo
 
   const handleClose = () => {
     setName('');
-    setScope('read');
+    setRulesetScope(false);
     setError(null);
     setCreatedKey(null);
     onClose();
@@ -136,27 +142,32 @@ export function CreateApiKeyModal({ isOpen, onClose, onSuccess }: CreateApiKeyMo
               />
             </div>
 
-            {/* Scope */}
+            {/* Scope: one checkbox, for the one scope that is meant to be enforced */}
             <div className="mb-4">
-              <label
-                htmlFor="api-key-scope"
-                className="block text-sm font-medium text-slate-700 mb-1"
+              <div className="flex items-start gap-2">
+                <input
+                  id="api-key-ruleset-scope"
+                  data-testid="api-key-ruleset-scope"
+                  type="checkbox"
+                  checked={rulesetScope}
+                  onChange={(e) => setRulesetScope(e.target.checked)}
+                  aria-describedby="api-key-ruleset-scope-help"
+                  className="mt-0.5 h-4 w-4 rounded border-slate-300 text-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <label
+                  htmlFor="api-key-ruleset-scope"
+                  className="text-sm font-medium text-slate-700"
+                >
+                  Server-side local evaluation (sdk:ruleset)
+                </label>
+              </div>
+              <p
+                id="api-key-ruleset-scope-help"
+                data-testid="api-key-ruleset-scope-help"
+                className="mt-1 ml-6 text-sm text-slate-600"
               >
-                Permission Scope
-              </label>
-              <select
-                id="api-key-scope"
-                data-testid="api-key-scope-input"
-                value={scope}
-                onChange={(e) => setScope(e.target.value as Scope)}
-                className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                {SCOPES.map((s) => (
-                  <option key={s} value={s}>
-                    {s}
-                  </option>
-                ))}
-              </select>
+                This key can download every flag&apos;s targeting rules. Keep it on a server.
+              </p>
             </div>
 
             {/* Error */}

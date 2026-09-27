@@ -25,8 +25,7 @@ curl -X POST http://localhost:8000/api/v1/api-keys \
   -H "Content-Type: application/json" \
   -d '{
     "name": "Production Checkout Service",
-    "description": "Used by the checkout microservice to evaluate feature flags",
-    "scopes": ["read", "write"]
+    "description": "Used by the checkout microservice to evaluate feature flags"
   }'
 ```
 
@@ -36,12 +35,10 @@ curl -X POST http://localhost:8000/api/v1/api-keys \
 {
   "id": "key-uuid-here",
   "name": "Production Checkout Service",
-  "description": "Used by the checkout microservice to evaluate feature flags",
-  "key": "sk-live-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
-  "scopes": ["read", "write"],
+  "key": "eptk_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+  "prefix": "eptk_xxxx",
   "created_at": "2026-03-02T10:00:00Z",
-  "last_used_at": null,
-  "is_active": true
+  "expires_at": null
 }
 ```
 
@@ -49,20 +46,26 @@ curl -X POST http://localhost:8000/api/v1/api-keys \
 
 ---
 
-## Available Scopes
+## Scopes
 
-| Scope | Permissions |
-|-------|-------------|
-| `read` | Read feature flags, experiments, results, and configurations |
-| `write` | Track events, update rollout percentages, submit assignments |
-| `admin` | Create/delete flags and experiments, manage users (use sparingly) |
+A key can carry a list of scope names (`"scopes"` in the create request). **Scopes do not limit
+what a key can do today.** Any active key authenticates every API-key route (flag evaluation,
+tracking, error reporting and the other `X-API-Key` routes) as the user who created it, whatever
+its scopes say. Names such as `read`, `write` or `admin` on existing keys are labels only; nothing
+checks them.
 
-Grant the minimum scopes required for the use case:
+One scope is intended to be enforced: **`sdk:ruleset`**. The server-side local-evaluation ruleset
+endpoint, once it ships, is intended to refuse any key that does not carry it. A key with
+`sdk:ruleset` will be able to download every feature flag's targeting rules, including the values
+in them, so keep such a key on a server and never ship it to a browser or a mobile app.
 
-- SDK tracking only: `write`
-- Read experiment results in a reporting script: `read`
-- Automated flag management: `read` + `write`
-- Full administrative automation: `read` + `write` + `admin`
+- In the dashboard (**Admin → API Keys → Create API Key**), tick **Server-side local evaluation
+  (sdk:ruleset)**. Leave it unticked for any other key; the key is then created with no scopes.
+- Through the API, send `"scopes": ["sdk:ruleset"]`.
+
+Scope names are matched exactly and case-sensitively: the stored list is split on commas and each
+entry is trimmed, so `"read, sdk:ruleset "` carries `sdk:ruleset`, while `SDK:RULESET`,
+`xsdk:ruleset` and `sdk:ruleset-ro` do not.
 
 ---
 
@@ -118,7 +121,7 @@ curl -X GET http://localhost:8000/api/v1/api-keys \
   {
     "id": "key-uuid-1",
     "name": "Production Checkout Service",
-    "scopes": ["read", "write"],
+    "scopes": ["sdk:ruleset"],
     "created_at": "2026-03-02T10:00:00Z",
     "last_used_at": "2026-03-10T14:22:00Z",
     "is_active": true
@@ -126,7 +129,7 @@ curl -X GET http://localhost:8000/api/v1/api-keys \
   {
     "id": "key-uuid-2",
     "name": "Old Staging Key",
-    "scopes": ["read"],
+    "scopes": [],
     "created_at": "2026-01-15T09:00:00Z",
     "last_used_at": "2026-02-01T11:30:00Z",
     "is_active": false
@@ -213,6 +216,9 @@ analytics-pipeline       → sk-live-cccc
 
 The `last_used_at` field on each key tells you when it was last used. Revoke keys that have not been used for more than 30 days. This reduces your attack surface and keeps the key inventory clean.
 
-### Use minimum required scopes
+### Grant `sdk:ruleset` only where it is needed
 
-Do not grant `admin` scope to a key that only needs to read experiments. Follow the principle of least privilege.
+Give the `sdk:ruleset` scope only to a server that will evaluate flags locally. Every other key,
+including any key used in a browser or a mobile app, should be created without it. Because scopes
+do not otherwise limit a key, a separate key per service is what lets you revoke one integration
+without touching the others.

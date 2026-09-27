@@ -148,7 +148,7 @@ BOUNDARY 5: Analytics Pipeline — Internal
 - **Motivation:** Inject fraudulent events, bias experiment results, enumerate user assignments
 - **Capabilities:** Valid `eptk_*` API key (possibly stolen or leaked), SDK knowledge
 - **Access point:** `/api/v1/tracking/*` and `/evaluate/*` endpoints
-- **Constraints:** API keys are scoped (comma-separated `scopes` column); cannot access admin APIs
+- **Constraints:** an API key authenticates only the API-key routes; it cannot call the JWT-authenticated admin APIs. A key's `scopes` column does not narrow what it can reach today
 
 ### TA-4: Compromised AWS Account / Infrastructure Attacker
 

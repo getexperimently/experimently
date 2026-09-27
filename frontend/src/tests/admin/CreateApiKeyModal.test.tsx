@@ -31,11 +31,36 @@ describe('CreateApiKeyModal', () => {
     expect(screen.getByTestId('api-key-name-input')).toBeInTheDocument();
   });
 
-  it('shows permission scope checkboxes or select', () => {
+  it('offers no scope select: the old read/write/admin choice was never enforced (regression)', () => {
     global.fetch = jest.fn();
     render(<CreateApiKeyModal {...defaultProps} />);
-    // Scope selection — should have at least one scope option
-    expect(screen.getByTestId('api-key-scope-input')).toBeInTheDocument();
+    expect(screen.queryByTestId('api-key-scope-input')).not.toBeInTheDocument();
+    expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
+    expect(screen.queryByText(/permission scope/i)).not.toBeInTheDocument();
+  });
+
+  it('offers one unchecked checkbox for the sdk:ruleset scope, described by its warning before submit', () => {
+    global.fetch = jest.fn();
+    render(<CreateApiKeyModal {...defaultProps} />);
+    const box = screen.getByRole('checkbox', {
+      name: 'Server-side local evaluation (sdk:ruleset)',
+    });
+    expect(box).not.toBeChecked();
+    expect(screen.getAllByRole('checkbox')).toHaveLength(1);
+
+    // The warning is visible before anything is submitted, and a screen
+    // reader hears it with the control.
+    const help = screen.getByTestId('api-key-ruleset-scope-help');
+    expect(help).toBeVisible();
+    expect(help).toHaveTextContent(
+      "This key can download every flag's targeting rules. Keep it on a server.",
+    );
+    expect(box).toHaveAccessibleDescription(
+      "This key can download every flag's targeting rules. Keep it on a server.",
+    );
+    // Contrast: slate-600 (#475569) on white is 7.6:1. slate-400 is about 2.6:1.
+    expect(help.className).toContain('text-slate-600');
+    expect(help.className).not.toMatch(/text-slate-(300|400)/);
   });
 
   it('submit disabled when name empty', () => {
@@ -75,7 +100,27 @@ describe('CreateApiKeyModal', () => {
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toContain('/api/v1/api-keys');
     expect(init.method).toBe('POST');
-    expect(JSON.parse(init.body)).toEqual({ name: 'Test Key', scopes: ['read'] });
+    // Unchecked: the key carries no scope at all.
+    expect(JSON.parse(init.body)).toEqual({ name: 'Test Key' });
+  });
+
+  it('sends scopes ["sdk:ruleset"] when the checkbox is ticked', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 201,
+      json: async () => ({ id: 'k', name: 'Server', key: 'eptk_x', prefix: 'eptk_x', created_at: '' }),
+    });
+    global.fetch = fetchMock;
+    render(<CreateApiKeyModal {...defaultProps} />);
+    fireEvent.change(screen.getByTestId('api-key-name-input'), { target: { value: 'Server' } });
+    fireEvent.click(screen.getByTestId('api-key-ruleset-scope'));
+    expect(screen.getByTestId('api-key-ruleset-scope')).toBeChecked();
+    fireEvent.click(screen.getByTestId('create-api-key-submit'));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
+      name: 'Server',
+      scopes: ['sdk:ruleset'],
+    });
   });
 
   it('still accepts the legacy key_value field', async () => {
