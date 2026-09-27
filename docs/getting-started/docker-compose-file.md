@@ -66,6 +66,13 @@ applies each seed listed in `SEED` once per database. Applied seeds are recorded
 | `shoplab`, `streampulse` | the demo applications' experiments, flags and API keys |
 | `sdk-contract` | the fixtures the SDK live-contract suite expects |
 
+The demo seeds (`demo`, `shoplab`, `streampulse`) are development-only. They run when
+`ENVIRONMENT` is `development` (the default) or `test`. With `ENVIRONMENT=staging` or
+`production` the container exits before it waits for Postgres, printing
+`SEED=<value> is for development and is refused when ENVIRONMENT=<env>. Remove SEED.`
+Set `SEED=` (empty) in `.env` there: an empty value applies no seeds, while leaving
+`SEED` out applies `demo`. The seed scripts make the same check when they are run by hand.
+
 ## Variables you should set before sharing the stack
 
 Put them in a `.env` file next to `docker-compose.yml`:

@@ -348,6 +348,12 @@ jobs:
             echo "::error::core bundle has no workspaces stub page (its description is in no chunk)"; exit 1
           fi
 
+  # Each SDK's OWN exported hash function against golden-vectors.json: the
+  # Python SDK's source, the JS and edge packages as built, the React Native
+  # source (which is what that package ships), the Go module. One step per SDK,
+  # so the failing SDK is the failing step. hash_contract.py does every
+  # comparison and asserts the exact number of vectors each SDK answered; its
+  # --list step names every sdk/ directory this job does not run, and why.
   sdk-contracts:
     needs: changes
     if: needs.changes.outputs.docs_only != 'true'
@@ -365,16 +371,44 @@ jobs:
         uses: actions/setup-node@v7
         with:
           node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            sdk/js/package-lock.json
+            sdk/edge/package-lock.json
+            sdk/react-native/package-lock.json
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          # go.mod declares go 1.21; the same toolchain as sdk-unit-tests.yml.
+          go-version: '1.22.x'
+          # The SDK and the harness are stdlib-only: no go.sum to key a cache on.
+          cache: false
 
       - name: Install pytest
         run: pip install pytest
 
-      # pytest.ini adds --cov flags; only pytest is installed here, so clear addopts.
-      - name: Run Python contracts
-        run: python -m pytest tests/sdk-contract/test_python_sdk.py -v -o addopts=""
+      - name: SDKs this job checks, and those it does not
+        run: python tests/sdk-contract/hash_contract.py --list
 
-      - name: Run JS contracts
-        run: node tests/sdk-contract/test_js_sdk.js
+      # pyproject.toml adds --cov flags; only pytest is installed here, so clear addopts.
+      - name: The comparison rejects a wrong answer (hash_contract.py self-tests)
+        run: python -m pytest tests/sdk-contract -v -o addopts=""
+
+      - name: Python SDK hash (sdk/python)
+        run: python tests/sdk-contract/hash_contract.py python
+
+      - name: JS SDK hash (sdk/js, built)
+        run: python tests/sdk-contract/hash_contract.py js
+
+      - name: Edge SDK hash (sdk/edge, built)
+        run: python tests/sdk-contract/hash_contract.py edge
+
+      - name: React Native SDK hash (sdk/react-native source)
+        run: python tests/sdk-contract/hash_contract.py react-native
+
+      - name: Go SDK hash (sdk/go)
+        run: python tests/sdk-contract/hash_contract.py go
 
   # Each profile must stand on its own. scripts/core_build.sh copies the
   # checkout and runs one sequence over the copy; `--profile core` deletes
@@ -832,12 +866,21 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
+      # The images are built with the version a release would pass, so the
+      # label step below runs the release's own check (scripts/
+      # check_image_labels.py) unchanged, rather than a weaker copy of it.
+      - name: Version
+        id: version
+        run: echo "version=$(cat VERSION)" >> "$GITHUB_OUTPUT"
+
       - name: Build API image
         uses: docker/build-push-action@v7
         with:
           context: .
           file: backend/Dockerfile
           target: core
+          build-args: |
+            VERSION=${{ steps.version.outputs.version }}
           load: true
           tags: experimently-api:core
           cache-from: type=gha,scope=api
@@ -857,6 +900,8 @@ jobs:
           context: .
           file: backend/Dockerfile
           target: full
+          build-args: |
+            VERSION=${{ steps.version.outputs.version }}
           load: true
           tags: experimently-api:full
           cache-from: |
@@ -984,10 +1029,32 @@ jobs:
           file: frontend/Dockerfile
           build-args: |
             EXPERIMENTLY_PROFILE=core
+            VERSION=${{ steps.version.outputs.version }}
           load: true
           tags: experimently-web:core
           cache-from: type=gha,scope=web
           cache-to: type=gha,scope=web,mode=max
+
+      # The check release.yml runs on every published image, run here on every
+      # pull request so a label regression is caught before a tag. It includes
+      # the source label: the dashboard's nginx base sets
+      # org.opencontainers.image.source to nginx's repository, and an image
+      # that does not override it says it came from there (#239).
+      - name: Images carry the labels a release asserts
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          for pair in experimently-api:core=core experimently-api:full=full \
+                      experimently-web:core=core; do
+            image="${pair%=*}"
+            profile="${pair#*=}"
+            docker image inspect "$image" > image.json
+            echo "== $image"
+            python3 scripts/check_image_labels.py \
+              --file image.json --version "$VERSION" --profile "$profile"
+          done
+          rm -f image.json
 
       - name: Start the stack
         run: docker compose -f docker-compose.yml up -d --wait --no-build postgres redis api frontend

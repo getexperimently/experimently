@@ -106,8 +106,8 @@ describe('the @modules/* alias — one rule, every toolchain', () => {
       // modules tree with "Specified module format (CommonJs) is not matching
       // the module format of the source code (EcmaScript Modules)" — a full
       // `next build` that could not compile a single module. Absent, Node's
-      // default is commonjs anyway, which is what the one root-level script
-      // (tests/sdk-contract/test_js_sdk.js) needs.
+      // default is commonjs anyway (the node scripts under
+      // tests/sdk-contract/harness/ name their format with .cjs / .mjs).
       const rootPackage = JSON.parse(
         fs.readFileSync(path.join(REPO_ROOT, 'package.json'), 'utf8'),
       );

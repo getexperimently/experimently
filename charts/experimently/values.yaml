@@ -1,0 +1,148 @@
+# Experimently Helm chart values.
+#
+# Two things are always yours to provide, and the render stops until they are:
+#   publicBaseUrl     the one origin people reach, e.g. https://experimently.example.com
+#   the secrets       either in an existing Secret (existingSecret), or under `secrets:`
+#
+# values.schema.json refuses unknown keys, so a typo fails the install instead
+# of being ignored.
+
+# -- The origin users and SDKs reach: scheme and host, no path, no trailing
+# slash. The Ingress host, PUBLIC_BASE_URL and the API's Host allow-list all
+# derive from it. With the Ingress enabled it must be a DNS name without a port.
+publicBaseUrl: ""
+
+# -- `core` or `full`. Selects the image tag (`<profile>-<appVersion>`); the
+# full profile also needs AUDIT_HMAC_KEY.
+profile: core
+
+# -- Extra hostnames the API answers on, besides publicBaseUrl's host:
+# `example.com` or `*.example.com`.
+allowedHosts: []
+
+# -- Email of the first administrator, created once when the users table is empty.
+firstSuperuser: ""
+
+image:
+  # -- Leave empty for `<profile>-<appVersion>`. An explicit tag must be a
+  # versioned one (`core-0.5.0`) whose prefix equals `profile`.
+  tag: ""
+  pullPolicy: IfNotPresent
+  api:
+    repository: ghcr.io/getexperimently/experimently
+    # -- `sha256:...`; when set it pins the image and the tag is informational.
+    digest: ""
+  web:
+    repository: ghcr.io/getexperimently/experimently-web
+    digest: ""
+
+imagePullSecrets: []
+
+nameOverride: ""
+fullnameOverride: ""
+
+# -- Name of an existing Secret holding the keys listed under `secrets`
+# (SECRET_KEY, FIRST_SUPERUSER_PASSWORD, POSTGRES_USER, POSTGRES_PASSWORD, and
+# AUDIT_HMAC_KEY for the full profile; REDIS_PASSWORD and METRICS_TOKEN are
+# optional). When set, the chart creates no Secret and `secrets` must be empty.
+existingSecret: ""
+
+# -- Used only when existingSecret is empty. Nothing here is ever generated:
+# a missing required value stops the render and names the key.
+secrets:
+  secretKey: ""
+  firstSuperuserPassword: ""
+  postgresUser: ""
+  postgresPassword: ""
+  auditHmacKey: ""
+  redisPassword: ""
+  metricsToken: ""
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+api:
+  replicaCount: 1
+  # -- Proxies whose X-Forwarded-* headers are trusted. Empty keeps the image
+  # default (loopback and the RFC 1918 ranges).
+  forwardedAllowIps: ""
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      memory: 1Gi
+  # -- Extra environment (SSO, SMTP, warehouse connectors). ENVIRONMENT,
+  # PUBLIC_BASE_URL, RUN_MIGRATIONS, SEED and SEED_FORCE are refused here.
+  extraEnv: []
+  # -- ConfigMaps/Secrets to add as environment. Variables the chart sets as explicit env (ENVIRONMENT, PUBLIC_BASE_URL, RUN_MIGRATIONS, SEED, SEED_FORCE) cannot be overridden through it.
+  extraEnvFrom: []
+  podAnnotations: {}
+  # -- The images are linux/amd64 only today.
+  nodeSelector:
+    kubernetes.io/arch: amd64
+  tolerations: []
+  affinity: {}
+
+web:
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 256Mi
+  podAnnotations: {}
+  nodeSelector:
+    kubernetes.io/arch: amd64
+  tolerations: []
+  affinity: {}
+
+ingress:
+  enabled: true
+  # -- Empty uses the cluster's default IngressClass.
+  className: ""
+  annotations: {}
+  tls:
+    # -- A TLS Secret for publicBaseUrl's host. The chart creates no certificate.
+    secretName: ""
+
+postgresql:
+  # -- true: a single-replica Postgres in this release, for evaluation and
+  # small installs (no backups, no HA). false: use host/port below.
+  bundled: true
+  image: postgres:16-alpine
+  host: ""
+  port: 5432
+  database: experimentation
+  schema: experimentation
+  # -- Sets PGSSLMODE for an external database; `require` is the supported value.
+  sslMode: ""
+  persistence:
+    size: 8Gi
+    storageClass: ""
+  resources: {}
+  nodeSelector: {}
+  tolerations: []
+
+redis:
+  # -- false runs without Redis; the rate limiter then keeps its counters per pod.
+  enabled: true
+  bundled: true
+  image: redis:7-alpine
+  host: ""
+  port: 6379
+  ssl: false
+  persistence:
+    size: 1Gi
+    storageClass: ""
+  resources: {}
+  nodeSelector: {}
+  tolerations: []
+
+# -- The `helm test` pod: /health/ready, then /api/v1/modules with the real
+# Host (200, matching profile) and a foreign one (400).
+tests:
+  enabled: true
