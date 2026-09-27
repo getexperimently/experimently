@@ -150,11 +150,20 @@ def _secret_is_placeholder(value: str) -> bool:
     return secret_is_placeholder(value)
 
 
+def _testing_flag_set() -> bool:
+    """True when the process environment sets ``TESTING`` (the test runner's flag)."""
+    return os.getenv("TESTING", "").strip().lower() in ("1", "true", "yes")
+
+
 def _hardening_required(info: ValidationInfo) -> bool:
-    """Secrets must be real in staging/production unless the test suite is running."""
+    """Secrets must be real in staging/production.
+
+    ``TESTING`` does not relax this: ``Settings`` refuses ``TESTING`` together
+    with a staging or production environment before any field is validated
+    (``refuse_testing_in_a_hardened_environment``).
+    """
     environment = (info.data or {}).get("ENVIRONMENT", "development")
-    is_testing = os.getenv("TESTING", "").lower() in ("1", "true", "yes")
-    return not is_testing and environment in HARDENED_ENVIRONMENTS
+    return environment in HARDENED_ENVIRONMENTS
 
 
 def canonical_environment(value: Any) -> Any:
@@ -649,6 +658,34 @@ class Settings(BaseSettings):
         """Accept legacy ``dev``/``prod`` spellings (with a deprecation warning)."""
         return canonical_environment(v)
 
+    @model_validator(mode="before")
+    @classmethod
+    def refuse_testing_in_a_hardened_environment(cls, data: Any) -> Any:
+        """``TESTING`` belongs to the test runner, never to staging or production.
+
+        The test suite sets ``TESTING=true`` (with ``APP_ENV=test``).  In a
+        staging or production process it is always a configuration mistake,
+        so it is refused outright rather than allowed to change what those
+        environments require.  A ``before`` validator so that this is the
+        message, not whichever setting it would otherwise have affected.
+        """
+        if not _testing_flag_set():
+            return data
+        environment: Any = None
+        if isinstance(data, dict):
+            environment = data.get("ENVIRONMENT")
+        if environment is None:
+            environment = cls.model_fields["ENVIRONMENT"].default
+        if isinstance(environment, str):
+            environment = canonical_environment_quiet(environment)
+        if environment in HARDENED_ENVIRONMENTS:
+            raise ValueError(
+                "TESTING is for the test runner and cannot be combined with "
+                f"ENVIRONMENT={environment}. Remove TESTING from this "
+                "deployment's configuration."
+            )
+        return data
+
     @model_validator(mode="after")
     def forbid_dev_auth_bypass_outside_dev(self) -> "Settings":
         """
@@ -799,8 +836,7 @@ class Settings(BaseSettings):
         the real settings against.
         """
         environment = getattr(self, "ENVIRONMENT", "development")
-        is_testing = os.getenv("TESTING", "").lower() in ("1", "true", "yes")
-        if is_testing or environment not in HARDENED_ENVIRONMENTS:
+        if environment not in HARDENED_ENVIRONMENTS:
             return self
         if "*" in self.ALLOWED_HOSTS:
             raise ValueError(

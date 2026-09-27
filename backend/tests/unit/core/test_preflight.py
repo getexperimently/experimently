@@ -205,16 +205,46 @@ def test_the_legacy_app_env_names_the_environment(app_env, hardened):
 def test_an_unknown_environment_name_is_refused(name):
     (message,) = check({"ENVIRONMENT": name})
     assert message.startswith("ENVIRONMENT=")
-    assert "development, test, staging, production" in message
+    assert message.endswith("Use one of: development, staging, production.")
 
 
-@pytest.mark.parametrize("environment", ["development", "test"])
-def test_development_and_test_need_nothing_else(environment):
+def test_development_needs_nothing_else():
     """Docker Smoke and the dev compose: placeholder secrets, SEED=demo."""
     assert (
-        check({"ENVIRONMENT": environment, "SECRET_KEY": "ci-only-x", "SEED": "demo"})
+        check({"ENVIRONMENT": "development", "SECRET_KEY": "ci-only-x", "SEED": "demo"})
         == []
     )
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize(
+    "environ, name",
+    [
+        ({"ENVIRONMENT": "test"}, "ENVIRONMENT"),
+        ({"ENVIRONMENT": " Test "}, "ENVIRONMENT"),
+        ({"APP_ENV": "test"}, "APP_ENV"),
+        # A good production set does not rescue it: the name alone decides.
+        (with_(ENVIRONMENT="test"), "ENVIRONMENT"),
+    ],
+)
+def test_the_test_environment_is_refused_in_one_line(environ, name):
+    """``test`` is the test runner's environment (pytest, from source). The
+    image used to start in it, with the test settings' placeholder secrets
+    and first-administrator password."""
+    problems = check(environ)
+    assert problems == [preflight.environment_is_test(name)]
+    text = preflight.render(problems)
+    assert text == (
+        f"[preflight] {name}=test is for the test runner, not this image: set "
+        "ENVIRONMENT=production (or staging; development only for a local trial)."
+    )
+    assert "\n" not in text
+
+
+@pytest.mark.regression
+def test_main_exits_78_for_the_test_environment(capsys):
+    assert preflight.main({"ENVIRONMENT": "test"}) == preflight.EX_CONFIG
+    assert "ENVIRONMENT=test is for the test runner" in capsys.readouterr().err
 
 
 def test_values_in_the_settings_dotenv_file_count(tmp_path):

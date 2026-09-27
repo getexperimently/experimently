@@ -37,6 +37,19 @@ from backend.app.core.config import (
 
 pytestmark = pytest.mark.unit
 
+
+@pytest.fixture(autouse=True)
+def _no_testing_flag(monkeypatch):
+    """The suite's ``TESTING=true`` is refused with staging/production.
+
+    ``backend/tests/conftest.py`` exports ``TESTING=true`` for the whole run,
+    and ``Settings`` refuses it together with a hardened environment, so every
+    test here that builds staging or production settings needs it gone. A test
+    about ``TESTING`` itself sets it again.
+    """
+    monkeypatch.delenv("TESTING", raising=False)
+
+
 REPO_ROOT = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "..", "..", "..")
 )
@@ -120,11 +133,13 @@ class TestSettingsEnvironmentField:
 
     @pytest.mark.parametrize("value", CANONICAL_ENVIRONMENTS)
     def test_accepts_every_canonical_value(self, value):
-        assert Settings(_env_file=None, ENVIRONMENT=value).ENVIRONMENT == value
+        assert (
+            Settings(_env_file=None, ENVIRONMENT=value, **_STRONG).ENVIRONMENT == value
+        )
 
     def test_legacy_prod_kwarg_is_canonicalised(self):
         with pytest.warns(DeprecationWarning):
-            s = Settings(_env_file=None, ENVIRONMENT="prod")
+            s = Settings(_env_file=None, ENVIRONMENT="prod", **_STRONG)
         assert s.ENVIRONMENT == "production"
         assert s.is_production is True
 
@@ -141,7 +156,7 @@ class TestSettingsEnvironmentField:
     def test_legacy_env_var_is_canonicalised(self):
         with patch.dict(os.environ, {"ENVIRONMENT": "prod"}):
             with pytest.warns(DeprecationWarning):
-                s = Settings(_env_file=None)
+                s = Settings(_env_file=None, **_STRONG)
         assert s.ENVIRONMENT == "production"
 
     def test_subclass_defaults_are_canonical(self):
@@ -154,6 +169,7 @@ class TestSettingsEnvironmentField:
                     _env_file=None,
                     SECRET_KEY="a" * 64,
                     FIRST_SUPERUSER_PASSWORD="StrongProd1!",
+                    PUBLIC_BASE_URL="https://experimently.example.com",
                 ).ENVIRONMENT
                 == "production"
             )
@@ -171,7 +187,7 @@ class TestSettingsEnvironmentField:
 
     def test_helper_properties(self):
         assert Settings(_env_file=None, ENVIRONMENT="test").is_test
-        assert Settings(_env_file=None, ENVIRONMENT="staging").is_staging
+        assert Settings(_env_file=None, ENVIRONMENT="staging", **_STRONG).is_staging
 
     def test_demo_alias_maps_to_development(self):
         """The CDK demo stack (ENVIRONMENT=demo cdk deploy) runs with APP_ENV=demo."""
@@ -245,11 +261,51 @@ class TestHardenedSecrets:
         monkeypatch.delenv("TESTING", raising=False)
         assert Settings(_env_file=None, ENVIRONMENT=env).ENVIRONMENT == env
 
-    def test_testing_flag_relaxes_but_never_the_bypass_rule(self, monkeypatch):
+    @pytest.mark.regression
+    @pytest.mark.parametrize("env", ["staging", "production", "prod"])
+    @pytest.mark.parametrize("flag", ["true", "1", "yes", "TRUE"])
+    def test_testing_flag_is_refused_in_hardened_environments(
+        self, env, flag, monkeypatch
+    ):
+        """``TESTING`` is the test runner's flag. With staging or production it
+        used to relax the secret and host checks; now it is refused outright,
+        and the message says so rather than naming some other setting."""
+        monkeypatch.setenv("TESTING", flag)
+        canonical = "production" if env == "prod" else env
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            with pytest.raises(ValidationError) as excinfo:
+                Settings(_env_file=None, ENVIRONMENT=env, **_STRONG)
+        assert (
+            "TESTING is for the test runner and cannot be combined with "
+            f"ENVIRONMENT={canonical}"
+        ) in str(excinfo.value)
+
+    @pytest.mark.regression
+    @pytest.mark.parametrize("cls", [ProdSettings, Settings])
+    def test_testing_flag_is_refused_when_the_class_default_is_hardened(
+        self, cls, monkeypatch
+    ):
+        """No ENVIRONMENT passed: the class default decides (production)."""
         monkeypatch.setenv("TESTING", "true")
-        Settings(_env_file=None, ENVIRONMENT="production")  # placeholders tolerated
-        with pytest.raises(ValidationError, match="DEV_AUTH_BYPASS"):
-            Settings(_env_file=None, ENVIRONMENT="production", DEV_AUTH_BYPASS=True)
+        monkeypatch.setenv("ENVIRONMENT", "production")
+        with pytest.raises(ValidationError, match="TESTING is for the test runner"):
+            cls(_env_file=None, **_STRONG)
+        monkeypatch.delenv("ENVIRONMENT")
+        with pytest.raises(ValidationError, match="TESTING is for the test runner"):
+            ProdSettings(_env_file=None, **_STRONG)
+
+    @pytest.mark.parametrize("env", ["development", "test"])
+    def test_testing_flag_is_fine_outside_hardened_environments(self, env, monkeypatch):
+        monkeypatch.setenv("TESTING", "true")
+        assert Settings(_env_file=None, ENVIRONMENT=env).ENVIRONMENT == env
+
+    def test_a_blank_testing_flag_is_not_set(self, monkeypatch):
+        """``TESTING=`` (as in the issue #91 command line) is not the flag."""
+        monkeypatch.setenv("TESTING", "")
+        assert Settings(
+            _env_file=None, ENVIRONMENT="production", **_STRONG
+        ).is_production
 
     @pytest.mark.regression
     def test_a_core_production_start_needs_no_module_secret(self, monkeypatch):
@@ -326,16 +382,15 @@ class TestDevFallbacksAllowed:
         assert Settings(_env_file=None, ENVIRONMENT=env).dev_fallbacks_allowed is True
 
     @pytest.mark.parametrize("env", ["staging", "production"])
-    def test_refused_in_staging_and_production(self, env, monkeypatch):
-        monkeypatch.setenv("TESTING", "true")  # placeholders tolerated, not the gate
-        assert Settings(_env_file=None, ENVIRONMENT=env).dev_fallbacks_allowed is False
+    def test_refused_in_staging_and_production(self, env):
+        settings = Settings(_env_file=None, ENVIRONMENT=env, **_STRONG)
+        assert settings.dev_fallbacks_allowed is False
 
-    def test_staging_is_hardened_like_production(self, monkeypatch):
+    def test_staging_is_hardened_like_production(self):
         """An ``ENVIRONMENT == "production"`` test at a call site would have
         left staging wide open; the allow-list is why these read the property
         instead."""
-        monkeypatch.setenv("TESTING", "true")
-        staging = Settings(_env_file=None, ENVIRONMENT="staging")
+        staging = Settings(_env_file=None, ENVIRONMENT="staging", **_STRONG)
         assert staging.is_production is False
         assert staging.dev_fallbacks_allowed is False
 
@@ -343,7 +398,7 @@ class TestDevFallbacksAllowed:
         """One list, so a new hardened environment hardens both at once."""
         assert set(BYPASS_ALLOWED_ENVIRONMENTS) == {"development", "test"}
         assert all(
-            Settings(_env_file=None, ENVIRONMENT=env).dev_fallbacks_allowed
+            Settings(_env_file=None, ENVIRONMENT=env, **_STRONG).dev_fallbacks_allowed
             is (env in BYPASS_ALLOWED_ENVIRONMENTS)
             for env in CANONICAL_ENVIRONMENTS
         )
@@ -434,12 +489,12 @@ class TestModuleImportSelection:
     )
 
     def test_app_env_production_selects_prod_settings(self):
-        proc = _run(self.CODE, APP_ENV="production", TESTING="true")
+        proc = _run(self.CODE, APP_ENV="production", **_STRONG)
         assert proc.returncode == 0, proc.stderr
         assert proc.stdout.split() == ["ProdSettings", "production", "production"]
 
     def test_app_env_prod_legacy_alias(self):
-        proc = _run(self.CODE, APP_ENV="prod", TESTING="true")
+        proc = _run(self.CODE, APP_ENV="prod", **_STRONG)
         assert proc.returncode == 0, proc.stderr
         assert proc.stdout.split()[:2] == ["ProdSettings", "production"]
 
@@ -459,7 +514,7 @@ class TestModuleImportSelection:
         assert proc.stdout.split() == ["DevSettings", "development", "dev"]
 
     def test_environment_staging_uses_prod_settings_but_keeps_name(self):
-        proc = _run(self.CODE, ENVIRONMENT="staging", TESTING="true")
+        proc = _run(self.CODE, ENVIRONMENT="staging", **_STRONG)
         assert proc.returncode == 0, proc.stderr
         assert proc.stdout.split()[:2] == ["ProdSettings", "staging"]
 
@@ -478,12 +533,28 @@ class TestModuleImportSelection:
             "import backend.app.core.config",
             ENVIRONMENT="production",
             DEV_AUTH_BYPASS="true",
-            TESTING="true",  # disable the other prod validators: the bypass guard must fire on its own
+            # Every other production setting good: the bypass guard must fire on its own.
+            **_STRONG,
         )
         assert proc.returncode != 0
-        assert "DEV_AUTH_BYPASS" in proc.stderr
+        assert "DEV_AUTH_BYPASS=true is not permitted" in proc.stderr
 
-    def test_bypass_in_production_refuses_without_testing_too(self):
+    @pytest.mark.regression
+    def test_testing_with_production_refuses_to_import(self):
+        """What an operator would see: the import fails, naming TESTING."""
+        proc = _run(
+            "import backend.app.core.config",
+            ENVIRONMENT="production",
+            TESTING="true",
+            **_STRONG,
+        )
+        assert proc.returncode != 0
+        assert (
+            "TESTING is for the test runner and cannot be combined with "
+            "ENVIRONMENT=production"
+        ) in proc.stderr
+
+    def test_bypass_in_production_refuses_with_default_secrets_too(self):
         proc = _run(
             "import backend.app.core.config",
             ENVIRONMENT="production",
@@ -563,24 +634,18 @@ class TestAuthSettings:
         assert s.dev_auth_bypass_active is True
 
     @pytest.mark.parametrize("env", ["staging", "production"])
-    def test_bypass_rejected_in_staging_and_production(self, env, monkeypatch):
-        # TESTING=true must NOT relax this guard.
-        monkeypatch.setenv("TESTING", "true")
-        with pytest.raises(ValidationError, match="DEV_AUTH_BYPASS"):
-            Settings(
-                _env_file=None,
-                ENVIRONMENT=env,
-                DEV_AUTH_BYPASS=True,
-                SECRET_KEY="a" * 64,
-            )
+    def test_bypass_rejected_in_staging_and_production(self, env):
+        with pytest.raises(
+            ValidationError, match="DEV_AUTH_BYPASS=true is not permitted"
+        ):
+            Settings(_env_file=None, ENVIRONMENT=env, DEV_AUTH_BYPASS=True, **_STRONG)
 
     def test_bypass_false_in_production_is_fine(self):
         s = Settings(
             _env_file=None,
             ENVIRONMENT="production",
             DEV_AUTH_BYPASS=False,
-            SECRET_KEY="a" * 64,
-            FIRST_SUPERUSER_PASSWORD="StrongProd1!",
+            **_STRONG,
         )
         assert s.dev_auth_bypass_active is False
 
