@@ -50,6 +50,11 @@ import json
 import subprocess
 import sys
 from collections.abc import Callable, Sequence
+from pathlib import Path
+
+# The sibling module, from the same checkout (as api_serving.py imports this).
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from public_text import redact, short_arn
 
 #: The CDK context key and its default. `infrastructure/cdk/stacks/names.py`
 #: holds the same two values; a unit test asserts they agree.
@@ -171,7 +176,7 @@ def _name(arn: str, groups: dict[str, str], where: str) -> str:
         if arn == group_arn:
             return name
     raise Refused(
-        f"{where} forwards to {arn}, which is neither the blue nor the green "
+        f"{where} forwards to {short_arn(arn)}, which is neither the blue nor the green "
         "target group of this stack"
     )
 
@@ -243,7 +248,9 @@ def live_from_ecs(aws: Runner, service_arn: str, groups: dict[str, str]) -> str:
     # arn:aws:ecs:<region>:<account>:service/<cluster>/<service>
     parts = service_arn.split(":", 5)[-1].split("/")
     if len(parts) != 3 or parts[0] != "service":
-        raise Unknown(f"cannot read the cluster from service ARN {service_arn}")
+        raise Unknown(
+            f"cannot read the cluster from service ARN {short_arn(service_arn)}"
+        )
     services = aws(
         ["ecs", "describe-services", "--cluster", parts[1], "--services", service_arn]
     ).get("services", [])
@@ -316,13 +323,16 @@ def main(argv: Sequence[str] | None = None, aws: Runner = run_aws) -> int:
     try:
         live = check(aws, args.env, args.expect)
     except Refused as exc:
-        print(f"REFUSED: {exc}", file=sys.stderr)
+        print(f"REFUSED: {redact(exc)}", file=sys.stderr)
         return REFUSED
     except (Unknown, AwsError) as exc:
-        print(f"UNKNOWN: {exc}", file=sys.stderr)
+        print(f"UNKNOWN: {redact(exc)}", file=sys.stderr)
         return UNKNOWN
     except Exception as exc:  # any crash is "could not tell", never "refused"
-        print(f"UNKNOWN: could not tell: {type(exc).__name__}: {exc}", file=sys.stderr)
+        print(
+            f"UNKNOWN: could not tell: {type(exc).__name__}: {redact(exc)}",
+            file=sys.stderr,
+        )
         return UNKNOWN
     print(f"ok: {live} is live; deploy with -c {CONTEXT_KEY}={live}")
     return OK

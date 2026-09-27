@@ -125,8 +125,17 @@ For each environment, **protection first**, then configuration:
    `gh api repos/<owner>/<repo>/environments/<env> --jq '.protection_rules, .deployment_branch_policy'`.
    A workflow dispatched for an environment that does not exist creates it,
    unprotected -- which is why this comes before anything that names it.
-2. Variables `AWS_ACCOUNT_ID` and `PUBLIC_BASE_URL`; secret `AWS_ROLE_ARN`.
-   Setting them arms the workflows for that environment.
+2. Secrets `AWS_ACCOUNT_ID` and `AWS_ROLE_ARN`; variable `PUBLIC_BASE_URL`.
+   Setting them arms the workflows for that environment:
+   `gh secret set AWS_ACCOUNT_ID --env <env>` (12 digits; it prompts for the
+   value), `gh secret set AWS_ROLE_ARN --env <env>`, and
+   `gh variable set PUBLIC_BASE_URL --env <env> --body https://app.<domain>`.
+   The account ID is a **secret**, not a variable, because workflow logs are
+   public: a step's log header prints its variables before anything can mask
+   them. The workflows read `secrets.AWS_ACCOUNT_ID` only, so an
+   `AWS_ACCOUNT_ID` variable left over from an older setup is ignored (and the
+   run refuses as "not configured") -- move it to a secret, then delete the
+   variable: `gh variable delete AWS_ACCOUNT_ID --env <env>`.
 
 ### 1.6 The stacks
 

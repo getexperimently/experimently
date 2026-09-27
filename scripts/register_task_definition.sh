@@ -26,7 +26,9 @@
 # what the next scale-out, or the migration, actually ran. A digest cannot
 # move.
 #
-# Messages go to stderr; stdout is the ARN and nothing else.
+# Messages go to stderr; stdout is the ARN and nothing else. The messages name
+# the revision as family:revision and the image without its registry host, so
+# none of them carries the account ID (the workflows' logs are public).
 # Exit status: 0 registered; 1 refused or failed; 2 usage.
 set -euo pipefail
 
@@ -45,7 +47,7 @@ if ! [[ "$CONTAINER" =~ ^[A-Za-z0-9_-]+$ ]]; then
 fi
 
 if ! [[ "$IMAGE" =~ ^[^@[:space:]]+@sha256:[0-9a-f]{64}$ ]]; then
-  echo "::error::Refusing to register $FAMILY with '$IMAGE': not an image digest (repo@sha256:...). A tag can be moved by another build after the revision is registered." >&2
+  echo "::error::Refusing to register $FAMILY with '${IMAGE#*/}': not an image digest (repo@sha256:...). A tag can be moved by another build after the revision is registered." >&2
   exit 1
 fi
 
@@ -77,9 +79,9 @@ REGISTERED="$(aws ecs describe-task-definition --task-definition "$ARN" \
                 --query "taskDefinition.containerDefinitions[?name=='$CONTAINER'].image | [0]" \
                 --output text)"
 if [ "$REGISTERED" != "$IMAGE" ]; then
-  echo "::error::$ARN was registered with '$REGISTERED', not $IMAGE." >&2
+  echo "::error::${ARN##*/} was registered with '${REGISTERED#*/}', not ${IMAGE#*/}." >&2
   exit 1
 fi
 
-echo "registered $ARN with $IMAGE" >&2
+echo "registered ${ARN##*/} with ${IMAGE#*/}" >&2
 echo "$ARN"

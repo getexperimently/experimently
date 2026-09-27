@@ -30,11 +30,13 @@ not configured. Per GitHub environment (**Settings → Environments →
 1. **Protection first**: a required reviewer, and deployment branches limited
    to `main`. Do this before adding anything else: dispatching a workflow for
    an environment that does not exist creates it, unprotected.
-2. **Variables**: `AWS_ACCOUNT_ID` (that environment's account, 12 digits) and
-   `PUBLIC_BASE_URL` (the origin the stacks were deployed with, e.g.
-   `https://app.example.com` -- the smoke test calls it).
-3. **Secret**: `AWS_ROLE_ARN`, that environment's OIDC role
-   ([IAM Permissions](iam-permissions.md)).
+2. **Secrets**: `AWS_ACCOUNT_ID` (that environment's account, 12 digits:
+   `gh secret set AWS_ACCOUNT_ID --env <env>`) and `AWS_ROLE_ARN`, that
+   environment's OIDC role ([IAM Permissions](iam-permissions.md)). The
+   account ID is a secret, not a variable, because the workflow logs are
+   public; a variable of that name is not read.
+3. **Variable**: `PUBLIC_BASE_URL` (the origin the stacks were deployed with,
+   e.g. `https://app.example.com` -- the smoke test calls it).
 
 `SLACK_BOT_TOKEN` (repository secret, optional) posts to `#deployments`.
 

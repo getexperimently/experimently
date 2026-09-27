@@ -404,7 +404,7 @@ def test_never_listed_by_the_deadline_is_not_a_success(rollout):
 def test_r7_serving_before_is_the_primary_deployment(rollout):
     code, _, err, _ = rollout([IN_PROGRESS, DONE])
     assert code == 0
-    assert f"{SERVICE}: serving before this run: {OLD}" in err
+    assert f"{SERVICE}: serving before this run: {OLD.rsplit('/', 1)[-1]}" in err
 
 
 # --- R8: the deployment's counts, not the service's -------------------------------
@@ -637,7 +637,9 @@ def test_an_older_revisions_stopped_task_is_not_reported(rollout):
     code, out, _, _ = rollout([IN_PROGRESS, rolled_back], stopped=stopped)
     assert code == 1
     assert "OutOfMemoryError" not in out
-    assert f"{TASK}/ours\tEssential container in task exited" in out
+    # The task's ARN is printed with its account ID replaced: the log is public.
+    shown = TASK.replace("123456789012", "<account>")
+    assert f"{shown}/ours\tEssential container in task exited" in out
 
     code, out, _, _ = rollout([], stopped=stopped[:1])
     assert "OutOfMemoryError" not in out

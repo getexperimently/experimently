@@ -1,5 +1,7 @@
 name: Rollback
-run-name: Rollback ${{ inputs.environment }} to ${{ inputs.task_definition_arn }}
+# No revision in the run name: an ARN names the account, and a run name is
+# public and is never masked. The run's summary names the revision.
+run-name: Rollback ${{ inputs.environment }}
 
 # Puts a previous, released revision of the API back into service through
 # CodeDeploy, for either environment (DECISIONS D6), and -- when
@@ -88,17 +90,23 @@ jobs:
       CODEDEPLOY_APPLICATION: experimentation-platform-${{ inputs.environment }}
       CODEDEPLOY_DEPLOYMENT_GROUP: experimentation-${{ inputs.environment }}
     steps:
-      # FIRST, and the only place the account variable is read (PE v1 C9): an
-      # environment-scoped variable is invisible to a job-level `if:`, which
-      # used to skip this job green for a correctly configured environment.
+      # FIRST, and the only place the account ID is read (PE v1 C9). It is an
+      # environment SECRET, never a variable: a step's log header prints its
+      # evaluated `env:` before the step runs, so a variable's value would be
+      # public before anything could mask it; a secret is masked from the
+      # start of the job.
       - name: Refuse an environment that is not configured
         env:
-          ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+          ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
           ROLE_ARN_SET: ${{ secrets.AWS_ROLE_ARN != '' }}
         run: |
           set -euo pipefail
           if [ -z "$ACCOUNT_ID" ]; then
-            echo "::error title=Not configured::vars.AWS_ACCOUNT_ID is not set for the '${TARGET_ENV}' environment, so nothing was rolled back. Set it under Settings → Environments → ${TARGET_ENV} → Variables. See docs/deployment/README.md#before-the-first-deploy"
+            echo "::error title=Not configured::secrets.AWS_ACCOUNT_ID is not set for the '${TARGET_ENV}' environment, so nothing was rolled back. Set it as an environment secret under Settings → Environments → ${TARGET_ENV} → Environment secrets (gh secret set AWS_ACCOUNT_ID --env ${TARGET_ENV}); a variable of that name is not read. See docs/deployment/README.md#before-the-first-deploy"
+            exit 1
+          fi
+          if ! [[ "$ACCOUNT_ID" =~ ^[0-9]{12}$ ]]; then
+            echo "::error title=Not configured::secrets.AWS_ACCOUNT_ID for the '${TARGET_ENV}' environment is not a 12-digit AWS account id, so nothing was rolled back. See docs/deployment/README.md#before-the-first-deploy"
             exit 1
           fi
           if [ "$ROLE_ARN_SET" != "true" ]; then
@@ -133,13 +141,18 @@ jobs:
           # timeout-minutes x 60 <= this <= the role's MaxSessionDuration (10800);
           # test_aws_session_duration.py. The default, 3600, expires mid-job.
           role-duration-seconds: 5400
+          # The ASSUMED account, which the wrong-account check below may find
+          # is not the configured one; the configured one is a secret already.
+          mask-aws-account-id: true
 
+      # Neither account ID is printed: the log is public.
       - name: Refuse the wrong AWS account
+        id: account
         run: |
           set -euo pipefail
           actual="$(aws sts get-caller-identity --query Account --output text)"
           if [ "$actual" != "$EXPECTED_ACCOUNT_ID" ]; then
-            echo "::error title=Wrong AWS account::environment=${TARGET_ENV} expects account ${EXPECTED_ACCOUNT_ID}; the assumed role is in ${actual}. Nothing has been rolled back."
+            echo "::error title=Wrong AWS account::environment=${TARGET_ENV}: the assumed role is not in the account in this environment's AWS_ACCOUNT_ID secret. Check that its AWS_ROLE_ARN secret names a role in that account. Nothing has been rolled back."
             exit 1
           fi
 
@@ -171,6 +184,8 @@ jobs:
         run: |
           set -euo pipefail
 
+          # The input may be a full ARN: what this step prints is its last part.
+          shown_target="${TARGET##*/}"
           TD="$(aws ecs describe-task-definition --task-definition "$TARGET" \
                   --query taskDefinition --output json)"
 
@@ -184,13 +199,13 @@ jobs:
           ARN="$(jq -r '.taskDefinitionArn' <<<"$TD")"
           case "$TARGET" in
             *:[0-9]*) ;;
-            *) echo "::error::$TARGET names a family with no revision. It would resolve to the newest ACTIVE revision, which during an incident may be the one you are rolling back from. Pass ${ARN##*/} instead." ; exit 1 ;;
+            *) echo "::error::$shown_target names a family with no revision. It would resolve to the newest ACTIVE revision, which during an incident may be the one you are rolling back from. Pass ${ARN##*/} instead." ; exit 1 ;;
           esac
           echo "arn=$ARN" >> "$GITHUB_OUTPUT"
 
           status="$(jq -r '.status' <<<"$TD")"
           if [ "$status" != "ACTIVE" ]; then
-            echo "::error::$ARN is $status, not ACTIVE. A deregistered revision cannot be deployed."
+            echo "::error::${ARN##*/} is $status, not ACTIVE. A deregistered revision cannot be deployed."
             exit 1
           fi
 
@@ -205,7 +220,7 @@ jobs:
             elif [ "$other" != "$family" ]; then
               echo "::error::You chose environment=${TARGET_ENV} but ${ARN##*/} is a ${other} revision. Re-run with environment=${other}."
             else
-              echo "::error::$ARN belongs to family $family, not $ECS_BACKEND_TASK_FAMILY."
+              echo "::error::${ARN##*/} belongs to family $family, not $ECS_BACKEND_TASK_FAMILY."
             fi
             exit 1
           fi
@@ -222,16 +237,16 @@ jobs:
           # this guard has said the target is fine.
           image="$(jq -r '.containerDefinitions[] | select(.name=="backend") | .image' <<<"$TD")"
           if [ -z "$image" ]; then
-            echo "::error::$ARN has no container named 'backend' (it has: $(jq -r '[.containerDefinitions[].name] | join(", ")' <<<"$TD")). The AppSpec this job builds names that container."
+            echo "::error::${ARN##*/} has no container named 'backend' (it has: $(jq -r '[.containerDefinitions[].name] | join(", ")' <<<"$TD")). The AppSpec this job builds names that container."
             exit 1
           fi
           case "$image" in
             *:bootstrap)
-              echo "::error::$ARN runs $image -- that is a CloudFormation-registered revision, not a released one. Pick a revision a deploy registered (its image is a digest, repo@sha256:...); docs/deployment/rollback-runbook.md Step 1 lists them with their images."
+              echo "::error::${ARN##*/} runs ${image#*/} -- that is a CloudFormation-registered revision, not a released one. Pick a revision a deploy registered (its image is a digest, repo@sha256:...); docs/deployment/rollback-runbook.md Step 1 lists them with their images."
               exit 1
               ;;
           esac
-          echo "rolling back to $ARN ($image)"
+          echo "rolling back to ${ARN##*/} (${image#*/})"
 
       # The dashboard's half, validated before anything changes, by the same
       # predicate the deploy summary used to print it: a release is a digest
@@ -409,6 +424,7 @@ jobs:
                 last_error="$(<"$aws_errors")"
                 last_error="${last_error//$'\n'/ }"
                 last_error="${last_error:0:200}"
+                last_error="$(sed -E 's/(^|[^0-9A-Za-z])[0-9]{12}([^0-9A-Za-z]|$)/\1<account>\2/g' <<<"$last_error")"
                 echo "could not read from AWS (${last_error:-no error text}); reading again on the next poll"
                 if [ "$read_failures" -ge "$READ_FAILURE_LIMIT" ]; then
                   echo "::error title=Rollback could not read AWS::${read_failures} reads in a row of deployment ${id} failed after this run stopped it with auto-rollback, so this run created no rollback deployment. The last AWS error: ${last_error:-no error text}. Check it by hand: aws deploy get-deployment --deployment-id ${id}"
@@ -514,6 +530,7 @@ jobs:
               last_error="$(<"$aws_errors")"
               last_error="${last_error//$'\n'/ }"
               last_error="${last_error:0:200}"
+              last_error="$(sed -E 's/(^|[^0-9A-Za-z])[0-9]{12}([^0-9A-Za-z]|$)/\1<account>\2/g' <<<"$last_error")"
               echo "could not read from AWS (${last_error:-no error text}); reading again on the next poll"
             fi
           }
@@ -558,7 +575,7 @@ jobs:
                 if [ "$code" = ALARM_ACTIVE ]; then
                   # This run overrides the group's alarms, so an alarm should
                   # not be able to stop it (#148 M5c). Say so, not "is Stopped".
-                  echo "::error title=Rollback stopped by an alarm::rollback deployment $DEPLOYMENT_ID is $status for an alarm (ALARM_ACTIVE), although this run created it with the group's alarms overridden. What is serving now: python3 scripts/api_serving.py ${ECS_CLUSTER} ${ECS_BACKEND_SERVICE} ${TARGET_ARN} (exit 0 = the target). docs/deployment/rollback-runbook.md#an-alarm-rolled-the-api-back"
+                  echo "::error title=Rollback stopped by an alarm::rollback deployment $DEPLOYMENT_ID is $status for an alarm (ALARM_ACTIVE), although this run created it with the group's alarms overridden. What is serving now: python3 scripts/api_serving.py ${ECS_CLUSTER} ${ECS_BACKEND_SERVICE} ${TARGET_ARN##*/} (exit 0 = the target). docs/deployment/rollback-runbook.md#an-alarm-rolled-the-api-back"
                 else
                   echo "::error::rollback deployment $DEPLOYMENT_ID is $status"
                 fi
@@ -602,7 +619,7 @@ jobs:
               --query "services[0].taskSets[?status=='PRIMARY'].taskDefinition" \
               --output text
             if [ -n "$approved" ] && [ "$serving" = "$TARGET_ARN" ]; then
-              echo "traffic is on $TARGET_ARN (deployment $DEPLOYMENT_ID $status, $approved)"
+              echo "traffic is on ${TARGET_ARN##*/} (deployment $DEPLOYMENT_ID $status, $approved)"
               break
             fi
 
@@ -629,7 +646,7 @@ jobs:
                 [ "$seen_ready" -eq 1 ] && seen=yes
                 echo "::error::${TARGET_ARN##*/} is the PRIMARY task set, but this run never saw its own rollback deployment $DEPLOYMENT_ID approved within ${ROLLBACK_TIMEOUT_SECONDS}s (status $status; seen Ready by this run: $seen), so it does not count this as a rollback it did. If someone approved it before this run saw it Ready, check it with: aws deploy get-deployment --deployment-id $DEPLOYMENT_ID"
               else
-                echo "::error::rollback deployment $DEPLOYMENT_ID did not put $TARGET_ARN in service within ${ROLLBACK_TIMEOUT_SECONDS}s (status $status, serving $serving, ${approved:-not approved})"
+                echo "::error::rollback deployment $DEPLOYMENT_ID did not put ${TARGET_ARN##*/} in service within ${ROLLBACK_TIMEOUT_SECONDS}s (status $status, serving ${serving##*/}, ${approved:-not approved})"
               fi
               exit 1
             fi
@@ -652,17 +669,17 @@ jobs:
             --cluster "$ECS_CLUSTER" --services "$ECS_BACKEND_SERVICE" \
             --query "services[0].[taskSets[?status=='PRIMARY'].taskDefinition | [0], runningCount, desiredCount]" \
             --output text)"
-          echo "serving: $SERVING  ($RUNNING/$DESIRED tasks running)"
+          echo "serving: ${SERVING##*/}  ($RUNNING/$DESIRED tasks running)"
 
           if [ "$SERVING" != "$TARGET_ARN" ]; then
-            echo "::error::expected $TARGET_ARN to be serving, got $SERVING"
+            echo "::error::expected ${TARGET_ARN##*/} to be serving, got ${SERVING##*/}"
             exit 1
           fi
           # A rollback that lands the right revision with one of three tasks
           # healthy is not a finished rollback, and was previously reported as
           # a clean success because this count was printed and never compared.
           if [ "$RUNNING" != "$DESIRED" ]; then
-            echo "::error::$RUNNING of $DESIRED tasks are running on $TARGET_ARN"
+            echo "::error::$RUNNING of $DESIRED tasks are running on ${TARGET_ARN##*/}"
             exit 1
           fi
 
@@ -781,7 +798,17 @@ jobs:
           REFUSED_ID: ${{ steps.stop.outputs.refused_id }}
           REFUSED_PRIMARY: ${{ steps.stop.outputs.primary }}
           JOB_STATUS: ${{ job.status }}
+          ACCOUNT_CHECK: ${{ steps.account.outcome }}
         run: |
+          # No account ID, no registry host, no full ARN: the summary is public.
+          case "$ACCOUNT_CHECK" in
+            success) account_cell="matches the environment's AWS_ACCOUNT_ID secret" ;;
+            failure) account_cell="does NOT match the environment's AWS_ACCOUNT_ID secret" ;;
+            *) account_cell="not checked" ;;
+          esac
+          target_cell="${TARGET_ARN##*/}"
+          dashboard_target="${DASHBOARD_TARGET_ARN##*/}"
+          dashboard_serving_image="${DASHBOARD_SERVING_IMAGE#*/}"
           target="${TARGET_ARN##*/}"
           target="${target:-the target (not resolved)}"
           # The dashboard's half was given but never ran: read what it is
@@ -845,11 +872,11 @@ jobs:
             echo "| | |"
             echo "|---|---|"
             echo "| Environment | \`${TARGET_ENV}\` |"
-            echo "| Account / region | \`${EXPECTED_ACCOUNT_ID:-not checked}\` / \`${AWS_REGION}\` |"
-            echo "| Target revision | \`${TARGET_ARN:-not resolved}\` |"
+            echo "| Account / region | ${account_cell} / \`${AWS_REGION}\` |"
+            echo "| Target revision | \`${target_cell:-not resolved}\` |"
             echo "| CodeDeploy deployment | \`${DEPLOYMENT_ID:-not created}\` |"
             if [ -n "$DASHBOARD_INPUT" ]; then
-              echo "| Dashboard target | \`${DASHBOARD_TARGET_ARN:-not resolved}\` |"
+              echo "| Dashboard target | \`${dashboard_target:-not resolved}\` |"
               echo "| Dashboard result | ${DASHBOARD_RESULT:-not reached} |"
             fi
             echo ""
@@ -857,7 +884,7 @@ jobs:
               # An API-only rollback leaves the dashboard as it was: say what
               # that is, so a new dashboard on an old API is visible.
               if [ -n "$DASHBOARD_SERVING_ARN" ]; then
-                echo "Dashboard not rolled back: it is serving ${DASHBOARD_SERVING_ARN##*/} (${DASHBOARD_SERVING_IMAGE})."
+                echo "Dashboard not rolled back: it is serving ${DASHBOARD_SERVING_ARN##*/} (${dashboard_serving_image})."
               else
                 echo "Dashboard not rolled back, and this run could not read what it is serving."
               fi
