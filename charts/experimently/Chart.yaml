@@ -1,0 +1,21 @@
+apiVersion: v2
+name: experimently
+description: >-
+  Experimently, the open-source experimentation and feature-flag platform:
+  the API, the dashboard, and optionally an evaluation-grade Postgres and Redis.
+type: application
+# The chart version IS the platform version: `--version X` installs images X.
+# Both lines equal the repository's VERSION file; the chart CI job asserts it
+# (backend/tests/unit/chart/test_chart_render.py).
+version: 0.5.0
+appVersion: "0.5.0"
+kubeVersion: ">=1.27.0-0"
+home: https://github.com/getexperimently/experimently
+sources:
+  - https://github.com/getexperimently/experimently
+keywords:
+  - experimentation
+  - feature-flags
+  - ab-testing
+annotations:
+  licenses: Apache-2.0

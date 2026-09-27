@@ -1,0 +1,141 @@
+name: Chart
+
+# The Helm chart (charts/experimently), checked without a cluster:
+#   helm lint --strict      both CI values files, against values.schema.json
+#   kubeconform -strict     every rendered manifest against the Kubernetes
+#                           schemas, with the exact resource count pinned
+#   test_chart_render.py    the render contract and the schema refusals
+#                           (backend/tests/unit/chart), with zero skips
+#
+# Why all three: `helm lint` and `helm template` never validate a manifest
+# against the Kubernetes API -- a Deployment with `contianers:` passes both --
+# and kubeconform reports success on empty input or a file it did not
+# recognise. So kubeconform reads stdin under pipefail, and the summary must
+# equal a pinned count exactly.
+#
+# It runs on every pull request, with no path filter, so that it always
+# reports and can become a required check without blocking unrelated work.
+# Installing a cluster (kind) is a separate job.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: chart-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  HELM_VERSION: '3.19.0'
+  # sha256 of helm-v3.19.0-linux-amd64.tar.gz, as published at
+  # https://get.helm.sh/helm-v3.19.0-linux-amd64.tar.gz.sha256sum
+  HELM_SHA256: 'a7f81ce08007091b86d8bd696eb4d86b8d0f2e1b9f6c714be62f82f96a594496'
+  KUBECONFORM_VERSION: '0.7.0'
+  # sha256 of kubeconform-linux-amd64.tar.gz, from the v0.7.0 release's CHECKSUMS
+  KUBECONFORM_SHA256: 'c31518ddd122663b3f3aa874cfe8178cb0988de944f29c74a0b9260920d115d3'
+
+jobs:
+  chart:
+    name: chart
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      # The runner image ships its own helm; the pinned one goes first on PATH
+      # and the version is asserted, so the job never runs the runner's.
+      - name: Install helm and kubeconform (pinned, checksum-verified)
+        run: |
+          set -euo pipefail
+          bin="$RUNNER_TEMP/bin"
+          mkdir -p "$bin"
+          curl -fsSL -o "$RUNNER_TEMP/helm.tgz" \
+            "https://get.helm.sh/helm-v${HELM_VERSION}-linux-amd64.tar.gz"
+          echo "${HELM_SHA256}  $RUNNER_TEMP/helm.tgz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/helm.tgz" -C "$RUNNER_TEMP" linux-amd64/helm
+          install -m 0755 "$RUNNER_TEMP/linux-amd64/helm" "$bin/helm"
+          curl -fsSL -o "$RUNNER_TEMP/kubeconform.tgz" \
+            "https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"
+          echo "${KUBECONFORM_SHA256}  $RUNNER_TEMP/kubeconform.tgz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/kubeconform.tgz" -C "$bin" kubeconform
+          echo "$bin" >> "$GITHUB_PATH"
+          echo "HELM=$bin/helm" >> "$GITHUB_ENV"
+
+      - name: Tool versions
+        run: |
+          set -euo pipefail
+          test "$(helm version --template '{{.Version}}')" = "v${HELM_VERSION}"
+          test "$(command -v helm)" = "$HELM"
+          test "$(kubeconform -v)" = "v${KUBECONFORM_VERSION}"
+          echo "helm v${HELM_VERSION}, kubeconform v${KUBECONFORM_VERSION}"
+
+      - name: helm lint --strict
+        run: |
+          set -euo pipefail
+          for values in charts/experimently/ci/values-core.yaml charts/experimently/ci/values-full.yaml; do
+            helm lint --strict charts/experimently -f "$values"
+          done
+
+      # The exact count per values file is the point: a deleted or
+      # conditionally-empty template, or input kubeconform silently skipped,
+      # changes it. Update a count only together with the template change that
+      # moves it, and say which resource in the pull request.
+      #   core: ServiceAccount, Secret, ConfigMap, api/web/postgres/redis
+      #         Services, redis PVC, api/web/redis Deployments, postgres
+      #         StatefulSet, Ingress, helm-test Pod                      = 14
+      #   full: ServiceAccount, ConfigMap, api/web Services and
+      #         Deployments, Ingress, PodDisruptionBudget, helm-test Pod =  9
+      - name: kubeconform -strict, exact resource counts
+        run: |
+          set -euo pipefail
+          check() {
+            local values=$1 expected=$2 k8s=$3 summary want
+            # pipefail: a failed render fails here, not as kubeconform's
+            # "0 resources found" on empty input.
+            if ! summary=$(helm template exp charts/experimently -f "$values" \
+                | kubeconform -strict -summary -kubernetes-version "$k8s" -); then
+              echo "::error::$values on Kubernetes $k8s: render or validation failed"
+              echo "$summary"
+              return 1
+            fi
+            want="Summary: ${expected} resources found parsing stdin - Valid: ${expected}, Invalid: 0, Errors: 0, Skipped: 0"
+            if [ "$summary" != "$want" ]; then
+              echo "::error::$values on Kubernetes $k8s"
+              echo "  got:  $summary"
+              echo "  want: $want"
+              return 1
+            fi
+            echo "$values on Kubernetes $k8s: $summary"
+          }
+          # The chart's kubeVersion floor, and a current release.
+          for k8s in 1.27.0 1.33.0; do
+            check charts/experimently/ci/values-core.yaml 14 "$k8s"
+            check charts/experimently/ci/values-full.yaml 9 "$k8s"
+          done
+
+      - name: Install test dependencies
+        run: pip install -r backend/requirements.txt
+
+      - name: Render contract, schema refusals, environment drift
+        env:
+          APP_ENV: test
+          TESTING: 'true'
+        run: |
+          python -m pytest backend/tests/unit/chart -p no:cov -q --tb=short \
+            --junitxml=chart-junit.xml
+
+      # The module skips without helm. Here helm is installed, so a skip means
+      # something it reads moved; it must not pass for green.
+      - name: No chart test was skipped
+        run: python3 scripts/check_junit_skips.py chart-junit.xml backend/tests/unit/chart
