@@ -34,7 +34,11 @@ def _make_segment_data(
 ) -> Dict[str, Dict[str, Any]]:
     """Build a single-segment dict matching the service API."""
     return {
-        CONTROL_ID: {"total": control_total, "conversions": control_conversions},
+        CONTROL_ID: {
+            "total": control_total,
+            "conversions": control_conversions,
+            "is_control": True,
+        },
         TREATMENT_ID: {"total": treatment_total, "conversions": treatment_conversions},
     }
 
@@ -289,3 +293,43 @@ class TestDetectHTE:
         )
         result = service.detect_hte(segment_results)
         assert isinstance(result, bool)
+
+
+# ---------------------------------------------------------------------------
+# Tests — the control is the flagged variant, never guessed (#218)
+# ---------------------------------------------------------------------------
+
+
+class TestControlIsNeverGuessed:
+    """The control comes from ``is_control``; ids say nothing about it."""
+
+    SMALL_ID = "00000000-0000-4000-8000-000000000001"
+    LARGE_ID = "ffffffff-0000-4000-8000-000000000002"
+
+    @pytest.mark.regression
+    def test_flagged_control_with_the_larger_id_is_the_control(self, service):
+        segments = {
+            "ios": {
+                self.SMALL_ID: {"total": 200, "conversions": 40, "is_control": False},
+                self.LARGE_ID: {"total": 200, "conversions": 20, "is_control": True},
+            }
+        }
+        (seg,) = service.compute_segment_results(segments, base_alpha=0.05)
+        by_id = {v.variant_id: v for v in seg.variants}
+        assert by_id[self.LARGE_ID].is_control is True
+        assert by_id[self.SMALL_ID].is_control is False
+        assert by_id[self.LARGE_ID].p_value is None
+        assert by_id[self.SMALL_ID].p_value is not None
+
+    @pytest.mark.regression
+    def test_no_flagged_control_means_no_control_and_no_p_values(self, service):
+        segments = {
+            "ios": {
+                self.SMALL_ID: {"total": 200, "conversions": 40},
+                "variant-control": {"total": 200, "conversions": 20},
+            }
+        }
+        (seg,) = service.compute_segment_results(segments, base_alpha=0.05)
+        assert [v.is_control for v in seg.variants] == [False, False]
+        assert [v.p_value for v in seg.variants] == [None, None]
+        assert not any(v.is_significant for v in seg.variants)
