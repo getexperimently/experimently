@@ -171,7 +171,7 @@ curl -s localhost:8000/api/v1/results/$EXP_ID/bayesian \
   ],
   "seed": 1873460932,
   "n_samples": 100000,
-  "engine_version": "1.0.0"
+  "engine_version": "1.1.0"
 }
 ```
 

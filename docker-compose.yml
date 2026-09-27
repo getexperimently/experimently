@@ -96,7 +96,7 @@ services:
       POSTGRES_SCHEMA: ${POSTGRES_SCHEMA:-experimentation}
       RUN_MIGRATIONS: ${RUN_MIGRATIONS:-true}
       # --- seeds: comma list of demo, shoplab, streampulse, sdk-contract ---
-      SEED: ${SEED:-demo}
+      SEED: ${SEED-demo}                    # an explicit empty SEED= applies none
       SEED_FORCE: ${SEED_FORCE:-false}
       # --- redis ---
       REDIS_HOST: redis

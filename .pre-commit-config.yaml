@@ -3,6 +3,9 @@ repos:
     rev: v4.4.0
     hooks:
       - id: check-yaml
+        # Helm templates are Go templates that render to YAML, not YAML. The
+        # chart CI job renders them and validates the output (kubeconform).
+        exclude: '^charts/[^/]+/templates/'
       - id: check-json
         # tsconfig files are JSONC: TypeScript reads `//` comments in them, and
         # tsconfig.core.json documents why the core type-check exists at all.

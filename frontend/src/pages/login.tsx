@@ -15,9 +15,30 @@ type FormState = 'idle' | 'submitting';
 /** C1b's copy for a rate-limited sign-in; the SSO exchange's 429 shows it too. */
 export const RATE_LIMITED_MESSAGE = 'Too many attempts. Please wait a moment and try again.';
 
+/** The API's terse 400 when the request's Host is not one it answers on. */
+export const INVALID_HOST_DETAIL = 'Invalid host header';
+
+/**
+ * The copy for that 400: the API rejected the address this dashboard was
+ * opened on, so name that address and the settings that fix it. ALLOWED_HOSTS,
+ * when set, replaces the hosts derived from PUBLIC_BASE_URL, so both are named.
+ * Plain text, not links -- a link to this host is exactly what does not work.
+ */
+export function wrongHostMessage(): string {
+  const loc = typeof window !== 'undefined' ? window.location : undefined;
+  const host = loc?.host || 'this address';
+  const origin = loc?.origin || 'the URL people open';
+  return (
+    `This Experimently server isn't configured for the address you used (${host}). ` +
+    `An administrator needs to set PUBLIC_BASE_URL to ${origin} ` +
+    `(or add ${host} to ALLOWED_HOSTS, if that is set).`
+  );
+}
+
 /** Map an API failure to the copy shown in the alert box. */
 export function loginErrorMessage(err: unknown): string {
   if (err instanceof ApiError) {
+    if (err.status === 400 && err.detail === INVALID_HOST_DETAIL) return wrongHostMessage();
     if (err.status === 401) return 'Email or password is incorrect.';
     if (err.status === 423) {
       return typeof err.detail === 'string' && err.detail

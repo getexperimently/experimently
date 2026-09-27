@@ -2,6 +2,11 @@
 # =========================================================================
 # Experimently API container entrypoint.
 #
+#   0. python -m backend.app.core.preflight: the settings check. Every problem
+#      it finds is printed in one list and the container exits 78 (EX_CONFIG)
+#      before anything else runs. It always requires ENVIRONMENT (or the
+#      legacy APP_ENV); in staging/production it also requires the secrets,
+#      PUBLIC_BASE_URL and POSTGRES_SERVER, and refuses DATABASE_URL/_URI.
 #   1. Wait for PostgreSQL (POSTGRES_SERVER/POSTGRES_PORT) to accept connections.
 #   2. RUN_MIGRATIONS=true (default)  ->  python -m backend.app.db.bootstrap
 #      (creates the schema on a fresh database, `alembic upgrade heads` otherwise).
@@ -9,11 +14,13 @@
 #      matching backend/scripts/seed_*.py once. Completed seeds are recorded in
 #      the `seed_markers` table (backend/scripts/seed_markers.py) so a restart
 #      of the container does not re-seed. SEED_FORCE=true re-runs them.
+#      demo, shoplab and streampulse are development-only: they are refused,
+#      before step 1, unless ENVIRONMENT is development or test.
 #   4. exec "$@" — by default uvicorn; `--workers ${WEB_CONCURRENCY:-1}` and the
 #      proxy flags are appended when the command is uvicorn and the caller did
 #      not pass them explicitly.
 #
-# Every step can be skipped: RUN_MIGRATIONS=false, SEED= (empty),
+# Steps 1-3 can be skipped (step 0 cannot): RUN_MIGRATIONS=false, SEED= (empty),
 # WAIT_FOR_DB=false. The script runs with `set -euo pipefail`: a failed
 # bootstrap or seed stops the container instead of starting a half-initialised
 # API.
@@ -22,7 +29,48 @@ set -euo pipefail
 
 log() { printf '[entrypoint] %s\n' "$*" >&2; }
 
+# -------------------------------------------------------------------------
+# Demo seeds are development-only
+#
+# SEED=demo, shoplab and streampulse load the sample data for the demo apps.
+# They run when ENVIRONMENT is development or test (the legacy spellings dev
+# and demo mean development) and are refused everywhere else, before anything
+# else happens. sdk-contract is not a demo seed and is allowed everywhere.
+# The seed scripts make the same check (backend/scripts/seed_guard.py).
+# -------------------------------------------------------------------------
+refuse_demo_seeds_outside_development() {
+    local seed_list="${SEED:-}"
+    [ -z "$seed_list" ] && return 0
+    local env_raw="${ENVIRONMENT:-${APP_ENV:-development}}"
+    local env_name
+    env_name="$(printf '%s' "$env_raw" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+    case "$env_name" in
+        development|dev|demo|test) return 0 ;;
+    esac
+    local names=() raw name
+    IFS=',' read -r -a names <<< "$seed_list"
+    for raw in ${names[@]+"${names[@]}"}; do
+        name="$(printf '%s' "$raw" | tr -d '[:space:]')"
+        case "$name" in
+            demo|shoplab|streampulse)
+                log "SEED=${seed_list} is for development and is refused when ENVIRONMENT=${env_raw}. Remove SEED."
+                exit 78
+                ;;
+        esac
+    done
+}
+refuse_demo_seeds_outside_development
+
 cd /app
+
+# -------------------------------------------------------------------------
+# 0. Settings preflight -- first, and before the database wait, so that a
+#    misconfigured deployment is told everything that is wrong in one go
+#    instead of one refusal per restart (or a long wait on localhost).
+#    Exits 78 (EX_CONFIG) with the list; `set -e` makes that the
+#    container's exit status.
+# -------------------------------------------------------------------------
+python -m backend.app.core.preflight
 
 : "${POSTGRES_SERVER:=${POSTGRES_HOST:-localhost}}"
 : "${POSTGRES_PORT:=5432}"
