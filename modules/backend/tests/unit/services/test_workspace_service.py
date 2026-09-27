@@ -677,15 +677,29 @@ class TestRevokeAPIKey:
         workspace: Workspace,
     ):
         key_obj, _ = svc.create_api_key(db_session, workspace.id, "Revoke Me")
-        svc.revoke_api_key(db_session, key_obj.id)
+        svc.revoke_api_key(db_session, workspace.id, key_obj.id)
         db_session.refresh(key_obj)
         assert key_obj.is_active is False
 
     def test_revoke_nonexistent_key_raises(
-        self, db_session: Session, svc: WorkspaceService
+        self, db_session: Session, svc: WorkspaceService, workspace: Workspace
     ):
         with pytest.raises(APIKeyNotFound):
-            svc.revoke_api_key(db_session, uuid.uuid4())
+            svc.revoke_api_key(db_session, workspace.id, uuid.uuid4())
+
+    @pytest.mark.regression
+    def test_revoke_key_of_another_workspace_raises(
+        self, db_session: Session, svc: WorkspaceService, workspace: Workspace
+    ):
+        key_obj, _ = svc.create_api_key(db_session, workspace.id, "Theirs")
+        uid = _make_user(db_session).id
+        other = svc.create_workspace(
+            db_session, "Other", f"other-{uuid.uuid4().hex[:8]}", uid
+        )
+        with pytest.raises(APIKeyNotFound):
+            svc.revoke_api_key(db_session, other.id, key_obj.id)
+        db_session.refresh(key_obj)
+        assert key_obj.is_active is True
 
 
 class TestRotateAPIKey:
@@ -696,7 +710,7 @@ class TestRotateAPIKey:
         workspace: Workspace,
     ):
         old_obj, old_plain = svc.create_api_key(db_session, workspace.id, "Rotate Me")
-        new_obj, new_plain = svc.rotate_api_key(db_session, old_obj.id)
+        new_obj, new_plain = svc.rotate_api_key(db_session, workspace.id, old_obj.id)
         db_session.refresh(old_obj)
         assert old_obj.is_active is False
         assert new_plain != old_plain
@@ -708,15 +722,30 @@ class TestRotateAPIKey:
         workspace: Workspace,
     ):
         old_obj, _ = svc.create_api_key(db_session, workspace.id, "Rotate Valid")
-        new_obj, new_plain = svc.rotate_api_key(db_session, old_obj.id)
+        new_obj, new_plain = svc.rotate_api_key(db_session, workspace.id, old_obj.id)
         assert new_obj.is_active is True
         assert new_obj.key_hash == _hash_key(new_plain)
 
     def test_rotate_nonexistent_key_raises(
-        self, db_session: Session, svc: WorkspaceService
+        self, db_session: Session, svc: WorkspaceService, workspace: Workspace
     ):
         with pytest.raises(APIKeyNotFound):
-            svc.rotate_api_key(db_session, uuid.uuid4())
+            svc.rotate_api_key(db_session, workspace.id, uuid.uuid4())
+
+    @pytest.mark.regression
+    def test_rotate_key_of_another_workspace_raises(
+        self, db_session: Session, svc: WorkspaceService, workspace: Workspace
+    ):
+        key_obj, _ = svc.create_api_key(db_session, workspace.id, "Theirs")
+        uid = _make_user(db_session).id
+        other = svc.create_workspace(
+            db_session, "Other", f"other-{uuid.uuid4().hex[:8]}", uid
+        )
+        with pytest.raises(APIKeyNotFound):
+            svc.rotate_api_key(db_session, other.id, key_obj.id)
+        db_session.refresh(key_obj)
+        assert key_obj.is_active is True
+        assert svc.list_api_keys(db_session, workspace.id) == [key_obj]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
