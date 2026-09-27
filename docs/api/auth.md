@@ -120,7 +120,7 @@ Every user is assigned one of four built-in roles. The role determines which API
 | View experiments and results | Read-only | Read-only | Read-only | Full |
 | Create/update experiments | — | — | Own | All |
 | Create/update feature flags | — | — | Own | All |
-| View audit logs | — | Yes | Yes | Yes |
+| View audit logs | Own | All | Own | All |
 | Export compliance reports | — | — | — | Yes |
 | Manage users and roles | — | — | — | Yes |
 | View RBAC permissions | Own | Own | Own | All |
