@@ -95,6 +95,7 @@ from sqlalchemy import ForeignKeyConstraint, create_engine, inspect, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.schema import AddConstraint, CreateSchema
 
+from backend.app.core.version import get_version
 from backend.app.db.autogenerate_filters import MODULE_TABLES
 from backend.app.db.schema import (
     metadata_for_schema,
@@ -460,18 +461,85 @@ def _unresolvable(cfg: Config, recorded: set[str]) -> tuple[set[str], bool]:
     return recorded - known, heads <= recorded
 
 
+#: Every revision of the modules branch is named ``modules_<n>_<slug>``
+#: (``modules/backend/app/db/migrations/versions``), and no core revision is.
+#: That prefix is how a build tells a row from the other profile from a row
+#: written by a newer release, without a file for either.
+MODULES_REVISION_PREFIX = "modules_"
+
+
+def _is_core_build(cfg: Config) -> bool:
+    """Whether this build has no modules branch (``modules/`` is absent)."""
+    script = ScriptDirectory.from_config(cfg)
+    return not any(
+        rev.revision.startswith(MODULES_REVISION_PREFIX)
+        for rev in script.walk_revisions()
+    )
+
+
+def _from_the_other_profile(cfg: Config, foreign: set[str]) -> bool:
+    """Whether every unresolvable row is a modules revision met by a core build.
+
+    That is the one case with an innocent explanation: a database the full
+    profile built, opened by a core image.  Anything else -- a core-chain id
+    this build has never seen, or a modules revision a *full* build has no
+    file for -- was written by a newer release than this one.
+    """
+    return _is_core_build(cfg) and all(
+        rev.startswith(MODULES_REVISION_PREFIX) for rev in foreign
+    )
+
+
+def unresolvable_revisions_message(cfg: Config, foreign: set[str], schema: str) -> str:
+    """The refusal for rows this build cannot resolve, with work of its own pending.
+
+    Two diagnoses, and neither tells the reader to edit ``alembic_version``.
+    The old message advised deleting the unresolvable rows "with a backup
+    taken"; on a database a newer release migrated, that leaves the newer
+    schema in place while alembic no longer knows it is there, so the next run
+    re-applies migrations over it and the next upgrade fails on a relation
+    that already exists (#238).
+    """
+    revisions = ", ".join(sorted(foreign))
+    version = get_version()
+    if _from_the_other_profile(cfg, foreign):
+        return (
+            f"Schema {schema} records migration(s) this build has no file "
+            f"for ({revisions}) and this build's own migrations are not all "
+            "applied, so alembic cannot run at all. This is a database built "
+            "by the full profile being opened by a core build (Experimently "
+            f"{version}). Run the full image of this release against it; it "
+            "applies these migrations as well. Leave alembic_version as it is."
+        )
+    return (
+        f"Schema {schema} records migration(s) this build has no file for "
+        f"({revisions}): this database was migrated by a newer Experimently "
+        f"release than this image ({version}), so this image cannot run "
+        "against it. Run the newer release that migrated it, or restore the "
+        "backup taken before that upgrade and run this image against the "
+        "restored database. Leave alembic_version as it is: the newer "
+        "release's schema changes stay in the database whatever it records."
+    )
+
+
 def may_run_alembic(cfg: Config, recorded: set[str], schema: str) -> bool:
     """Whether alembic may be run against a schema recorded at *recorded*.
 
-    The guard for a **full database opened by a core build** -- the reverse
-    profile switch.  ``alembic_version`` then holds ``modules_0001_rbac``,
-    which a core tree has no file for, and raw alembic answers *every* command
-    with ``CommandError: Can't locate revision identified by
-    'modules_0001_rbac'`` before applying anything.  ``deploy.yml`` runs the
-    migration task with the image it is deploying, so the first
-    ``profile=core`` deploy after an environment's stacks are redeployed from
-    a core checkout, onto a database a full release migrated, is exactly
-    this, and it fails the deploy job.
+    The guard for a database recorded at a revision this build has no file
+    for.  Two ways to get there:
+
+    * a **full database opened by a core build** -- the reverse profile
+      switch.  ``alembic_version`` then holds ``modules_0001_rbac``, which a
+      core tree has no file for.  ``deploy.yml`` runs the migration task with
+      the image it is deploying, so the first ``profile=core`` deploy after an
+      environment's stacks are redeployed from a core checkout, onto a
+      database a full release migrated, is exactly this;
+    * a **newer database opened by an older build** -- a rollback to an older
+      image after a release that added a migration.
+
+    Raw alembic answers *every* command there with ``CommandError: Can't
+    locate revision identified by ...`` before applying anything, and it fails
+    the deploy job.
 
     This function is what makes every documented path answer the same way, so
     it is called from ``db/bootstrap.py`` *and* from ``migrations/env.py``, for
@@ -483,11 +551,12 @@ def may_run_alembic(cfg: Config, recorded: set[str], schema: str) -> bool:
 
     * nothing foreign recorded -> ``True``, run normally;
     * foreign rows but this build's own heads are all applied -> log a WARNING,
-      return ``False``, leave the rows alone.  There is nothing to do, and the
-      rows belong to the other profile, so "succeed having done nothing" is the
-      honest answer -- not a traceback that stops a container;
+      return ``False``, leave the rows alone.  There is nothing to do, so
+      "succeed having done nothing" is the honest answer -- not a traceback
+      that stops a container;
     * foreign rows *and* this build has migrations of its own to apply ->
-      ``RuntimeError`` naming the revisions and the two ways out.  Refusing is
+      ``RuntimeError`` naming the revisions, which of the two cases this is,
+      and the way out (:func:`unresolvable_revisions_message`).  Refusing is
       the only safe answer: alembic cannot plan a path from a revision it
       cannot resolve.
     """
@@ -495,20 +564,14 @@ def may_run_alembic(cfg: Config, recorded: set[str], schema: str) -> bool:
     if not foreign:
         return True
     if not nothing_pending:
-        raise RuntimeError(
-            f"Schema {schema} records migration(s) this build has no file "
-            f"for ({', '.join(sorted(foreign))}) and this build's own "
-            "migrations are not all applied, so alembic cannot run at all. "
-            "This is a database built by the full profile being opened by a "
-            "core build. Run the full image against it, or -- with a backup "
-            "taken -- delete those rows from "
-            f'"{schema}".alembic_version.'
-        )
+        raise RuntimeError(unresolvable_revisions_message(cfg, foreign, schema))
     logger.warning(
-        "Schema %s records migration(s) from another profile (%s); this "
-        "build has nothing to apply, so alembic is skipped and the rows "
-        "are left untouched",
+        "Schema %s records migration(s) from %s (%s); this build has nothing "
+        "to apply, so alembic is skipped and the rows are left untouched",
         schema,
+        "another profile"
+        if _from_the_other_profile(cfg, foreign)
+        else "another profile or a newer release",
         ", ".join(sorted(foreign)),
     )
     return False

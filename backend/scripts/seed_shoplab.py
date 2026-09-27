@@ -87,6 +87,7 @@ from backend.scripts.seed_demo_data import (
     now_utc,
     seed_users,
 )
+from backend.scripts.seed_guard import require_development_environment
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -1047,6 +1048,7 @@ def print_summary(
 
 
 def main(argv: Optional[List[str]] = None) -> int:
+    require_development_environment("shoplab")
     parser = argparse.ArgumentParser(description="Seed the ShopLab demo catalogue")
     parser.add_argument(
         "--no-history",

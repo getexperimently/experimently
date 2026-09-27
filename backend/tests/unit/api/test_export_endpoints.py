@@ -367,45 +367,96 @@ class TestPlatformOverviewEndpoint:
 # ---------------------------------------------------------------------------
 
 
+def _report_rows(exp_id: str):
+    """The (experiment rows, variant rows) the service returns for one report."""
+    from backend.app.schemas.export import ExperimentExportRow, VariantExportRow
+
+    experiment = ExperimentExportRow(
+        experiment_id=exp_id,
+        experiment_name="My Test",
+        status="completed",
+        experiment_type="a_b",
+        start_date=None,
+        end_date=None,
+        duration_days=None,
+        total_assignments=10,
+        total_events=3,
+        winner_variant=None,
+        recommendation="CONTINUE_TESTING",
+    )
+    variant = VariantExportRow(
+        experiment_id=exp_id,
+        experiment_name="My Test",
+        variant_id="bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+        variant_name="control",
+        is_control=True,
+        assignments=10,
+        conversions=3,
+        conversion_rate=0.3,
+        p_value=None,
+        is_significant=False,
+        relative_improvement_pct=None,
+    )
+    return [experiment], [variant]
+
+
 class TestExperimentReportEndpoint:
-    def test_experiment_report_returns_200(self, client, admin_token):
-        """GET /export/reports/experiments/{id} returns 200"""
-        exp_id = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+    EXP_ID = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+
+    def test_experiment_report_returns_json_body(self, client, admin_token):
+        """format=json (the default) returns the experiment and variant rows."""
         with patch("backend.app.api.v1.endpoints.export.ExportService") as mock_svc:
-            mock_svc.return_value.export_experiments.return_value = (
-                '[{"experiment_id":"' + exp_id + '"}]',
-                "application/json",
-            )
-            mock_svc.return_value.export_variants.return_value = (
-                "[]",
-                "application/json",
+            mock_svc.return_value.experiment_report_rows.return_value = _report_rows(
+                self.EXP_ID
             )
             response = client.get(
-                f"/api/v1/export/reports/experiments/{exp_id}",
+                f"/api/v1/export/reports/experiments/{self.EXP_ID}",
                 headers={"Authorization": f"Bearer {admin_token}"},
             )
         assert response.status_code == 200
+        data = response.json()
+        assert data["experiment_id"] == self.EXP_ID
+        assert data["experiments"][0]["experiment_name"] == "My Test"
+        assert data["variants"][0]["variant_name"] == "control"
 
-    def test_experiment_report_returns_json_body(self, client, admin_token):
-        """Experiment report returns a JSON object body"""
-        exp_id = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+    @pytest.mark.regression
+    def test_experiment_report_format_csv_returns_csv(self, client, admin_token):
+        """format=csv returns text/csv, not JSON (#220)."""
         with patch("backend.app.api.v1.endpoints.export.ExportService") as mock_svc:
-            mock_svc.return_value.export_experiments.return_value = (
-                '[{"experiment_id":"'
-                + exp_id
-                + '","experiment_name":"My Test","status":"completed"}]',
-                "application/json",
+            mock_svc.return_value.experiment_report_rows.return_value = _report_rows(
+                self.EXP_ID
             )
-            mock_svc.return_value.export_variants.return_value = (
-                "[]",
-                "application/json",
-            )
+            mock_svc.return_value.variants_to_csv.return_value = "variant_id\r\nb\r\n"
             response = client.get(
-                f"/api/v1/export/reports/experiments/{exp_id}",
+                f"/api/v1/export/reports/experiments/{self.EXP_ID}?format=csv",
                 headers={"Authorization": f"Bearer {admin_token}"},
             )
-        data = response.json()
-        assert "experiment_id" in data or isinstance(data, list)
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/csv")
+        assert "attachment" in response.headers["content-disposition"]
+        assert response.text == "variant_id\r\nb\r\n"
+
+    @pytest.mark.regression
+    def test_unknown_experiment_returns_404(self, client, admin_token):
+        """An id no experiment has answers 404, not 200 with empty lists (#220)."""
+        with patch("backend.app.api.v1.endpoints.export.ExportService") as mock_svc:
+            mock_svc.return_value.experiment_report_rows.return_value = None
+            response = client.get(
+                f"/api/v1/export/reports/experiments/{self.EXP_ID}",
+                headers={"Authorization": f"Bearer {admin_token}"},
+            )
+        assert response.status_code == 404
+
+    @pytest.mark.regression
+    def test_non_uuid_experiment_id_returns_422(self, client, admin_token):
+        """An id that is not a UUID is a validation error, not a server error."""
+        with patch("backend.app.api.v1.endpoints.export.ExportService") as mock_svc:
+            response = client.get(
+                "/api/v1/export/reports/experiments/not-a-uuid",
+                headers={"Authorization": f"Bearer {admin_token}"},
+            )
+            mock_svc.assert_not_called()
+        assert response.status_code == 422
 
 
 # ---------------------------------------------------------------------------
@@ -443,6 +494,22 @@ class TestQueryParameters:
                 headers={"Authorization": f"Bearer {admin_token}"},
             )
         assert response.status_code == 200
+
+    @pytest.mark.regression
+    @pytest.mark.parametrize("route", ["experiments", "variants"])
+    @pytest.mark.parametrize("scope", ["events", "assignments"])
+    def test_scope_other_than_summary_returns_422(
+        self, client, admin_token, route, scope
+    ):
+        """Only scope=summary is available; the others are refused, not ignored (#220)."""
+        with patch("backend.app.api.v1.endpoints.export.ExportService") as mock_svc:
+            response = client.get(
+                f"/api/v1/export/{route}?scope={scope}",
+                headers={"Authorization": f"Bearer {admin_token}"},
+            )
+            mock_svc.assert_not_called()
+        assert response.status_code == 422
+        assert f"scope={scope} is not supported" in response.json()["detail"]
 
     def test_invalid_format_returns_422(self, client, admin_token):
         """Invalid format query parameter returns 422 Unprocessable Entity"""

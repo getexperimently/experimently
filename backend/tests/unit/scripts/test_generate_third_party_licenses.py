@@ -309,3 +309,19 @@ class TestFirstPartyPackagesAreNotThirdParties:
             "the two gates must cover the same packages, or one of them is "
             "silently not covering a published SDK"
         )
+
+
+class TestComponentsCompiledIntoWheels:
+    """pip-licenses reports a wheel's own licence, not what is built into it."""
+
+    def test_the_re2_wheel_lists_abseil_and_pybind11(self, script):
+        table = script.bundled_table([("google-re2", "1.1.20251105", "BSD")])
+        assert "| `abseil-cpp` | `google-re2` 1.1.20251105 | Apache-2.0 |" in table
+        assert "| `pybind11` | `google-re2` 1.1.20251105 | BSD-3-Clause |" in table
+
+    def test_nothing_is_listed_for_a_package_that_is_not_shipped(self, script):
+        assert script.bundled_table([("fastapi", "0.141.1", "MIT")]) == ""
+
+    def test_the_name_is_compared_canonically(self, script):
+        table = script.bundled_table([("Google_RE2", "1.1.20251105", "BSD")])
+        assert "abseil-cpp" in table

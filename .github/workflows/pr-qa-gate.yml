@@ -866,12 +866,21 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
+      # The images are built with the version a release would pass, so the
+      # label step below runs the release's own check (scripts/
+      # check_image_labels.py) unchanged, rather than a weaker copy of it.
+      - name: Version
+        id: version
+        run: echo "version=$(cat VERSION)" >> "$GITHUB_OUTPUT"
+
       - name: Build API image
         uses: docker/build-push-action@v7
         with:
           context: .
           file: backend/Dockerfile
           target: core
+          build-args: |
+            VERSION=${{ steps.version.outputs.version }}
           load: true
           tags: experimently-api:core
           cache-from: type=gha,scope=api
@@ -891,6 +900,8 @@ jobs:
           context: .
           file: backend/Dockerfile
           target: full
+          build-args: |
+            VERSION=${{ steps.version.outputs.version }}
           load: true
           tags: experimently-api:full
           cache-from: |
@@ -1018,10 +1029,32 @@ jobs:
           file: frontend/Dockerfile
           build-args: |
             EXPERIMENTLY_PROFILE=core
+            VERSION=${{ steps.version.outputs.version }}
           load: true
           tags: experimently-web:core
           cache-from: type=gha,scope=web
           cache-to: type=gha,scope=web,mode=max
+
+      # The check release.yml runs on every published image, run here on every
+      # pull request so a label regression is caught before a tag. It includes
+      # the source label: the dashboard's nginx base sets
+      # org.opencontainers.image.source to nginx's repository, and an image
+      # that does not override it says it came from there (#239).
+      - name: Images carry the labels a release asserts
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          for pair in experimently-api:core=core experimently-api:full=full \
+                      experimently-web:core=core; do
+            image="${pair%=*}"
+            profile="${pair#*=}"
+            docker image inspect "$image" > image.json
+            echo "== $image"
+            python3 scripts/check_image_labels.py \
+              --file image.json --version "$VERSION" --profile "$profile"
+          done
+          rm -f image.json
 
       - name: Start the stack
         run: docker compose -f docker-compose.yml up -d --wait --no-build postgres redis api frontend

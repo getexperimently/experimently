@@ -634,14 +634,10 @@ def test_a_rollback_during_the_rollout_turns_the_run_red(runner):
     )
     assert status == "failure", [(k, c) for k, c, _, _ in log]
     assert outputs["api-recheck"]["api"] == "1"
-    (summary,) = [s for k, _, _, s in log if k == "Run summary"]
+    (summary,) = [s for k, _, _, s in log if k == "summary"]
     assert "| Dashboard rollout | completed |" in summary
     assert "API changed: after this run's traffic shift" in summary
-    (i,) = [
-        o
-        for k, _, o, _ in log
-        if k == "If the API was deployed and the dashboard was not"
-    ]
+    (i,) = [o for k, _, o, _ in log if k == "after-shift"]
     assert "The API is serving" not in i
     assert "no longer serving this run's revision" in i
 
@@ -666,7 +662,7 @@ def test_a_whole_successful_tail_is_green_and_says_so(runner):
         runner, api_rules() + dashboard_rules([IN_PROGRESS, DONE])
     )
     assert status == "success", [(k, c, o[-400:]) for k, c, o, _ in log if c]
-    (summary,) = [s for k, _, _, s in log if k == "Run summary"]
+    (summary,) = [s for k, _, _, s in log if k == "summary"]
     assert "| Dashboard rollout | completed |" in summary
     assert f"| New dashboard revision | `{DASH_NEW}` |" in summary
     assert (

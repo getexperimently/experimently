@@ -194,6 +194,13 @@ Values typed in the dashboard are strings; they are compared leniently against t
 context values (`"true"` matches `true`, `"17"` matches `17`, `"beta, internal"` is a list
 for `in`/`not_in`, `"17.4"` is padded to `17.4.0` for `semver_*`).
 
+`regex` patterns use [RE2 syntax](https://github.com/google/re2/wiki/Syntax): `\w`, `\d`,
+`\s` are ASCII-only, `$` matches only at the very end of the value, lookaround and
+backreferences are refused, and values longer than 256 characters are not evaluated. A flag
+whose rules hold a refused pattern, or whose context value cannot be evaluated, evaluates
+disabled with reason `error` rather than falling through to the rollout; see the
+[rules engine reference](../Enhanced_Rules_Engine_Reference.md#match_regex-match_regex).
+
 Users who match a rule are bucketed with the rule's `rollout_percentage` (100 unless set on
 the rules object); users who match no rule fall through to the flag's global
 `rollout_percentage`. The native Enhanced Rules Engine shape (`{"rules": [...]}`) is accepted
