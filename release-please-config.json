@@ -21,6 +21,10 @@
           "type": "json",
           "path": "frontend/src/tests/fixtures/openapi.json",
           "jsonpath": "$.info.version"
+        },
+        {
+          "type": "generic",
+          "path": "deploy/compose/compose.yml"
         }
       ],
       "changelog-path": "CHANGELOG.md",

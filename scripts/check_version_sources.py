@@ -22,6 +22,10 @@ them can drift *silently*:
   pass.
 * ``settings.VERSION`` -- what ``/health`` and ``GET /api/v1/modules`` report,
   and so what an operator reads off a running deployment.
+* the two published-image lines of ``deploy/compose/compose.yml`` -- what a
+  self-hoster who downloads that file at a tag actually runs.  release-please
+  rewrites them (``x-release-please-version``); a line it missed would start
+  the previous release with no error anywhere.
 * the git tag, when run with ``--expect`` (the release workflow passes the tag
   it is building, so a tag that does not match the tree never becomes images).
 
@@ -146,6 +150,64 @@ def read_settings_version() -> str:
     return result.stdout.strip()
 
 
+#: The production compose file names the published images with a literal
+#: version, which release-please moves (the ``x-release-please-version``
+#: marker, ``type: generic`` in ``release-please-config.json``). A release that
+#: left it behind would have every self-hoster who downloads the file at the
+#: new tag run the previous release -- nothing errors, it simply starts.
+PRODUCTION_COMPOSE = "deploy/compose/compose.yml"
+
+#: The images the compose file must name, one line each, and the one shape
+#: those lines may take: the published repository, the profile variable, and a
+#: literal version followed by the marker.
+COMPOSE_IMAGES = {
+    "api": "ghcr.io/getexperimently/experimently",
+    "web": "ghcr.io/getexperimently/experimently-web",
+}
+COMPOSE_IMAGE_LINE_RE = re.compile(
+    r"^\s*image:\s*(?P<repo>ghcr\.io/getexperimently/experimently(?:-web)?)"
+    r":\$\{EXPERIMENTLY_PROFILE:-core\}-(?P<version>[^\s#]+)"
+    r"\s+# x-release-please-version\s*$"
+)
+
+
+def read_compose_image_versions() -> dict[str, str]:
+    """The version on each published-image line of the production compose file.
+
+    Every line that names a ``ghcr.io/getexperimently/`` image, and every line
+    carrying the release-please marker, must be the one shape above: a line
+    release-please would not rewrite (no marker), or a marker on a line it
+    would rewrite wrongly, is as stale as a wrong number.
+    """
+    path = ROOT / PRODUCTION_COMPOSE
+    found: dict[str, list[str]] = {repo: [] for repo in COMPOSE_IMAGES.values()}
+    for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        if "ghcr.io/getexperimently/" not in line and (
+            "x-release-please-version" not in line
+        ):
+            continue
+        if line.lstrip().startswith("#"):
+            continue
+        match = COMPOSE_IMAGE_LINE_RE.match(line)
+        if not match or match["repo"] not in found:
+            raise AssertionError(
+                f"{PRODUCTION_COMPOSE}:{number} is not "
+                "`image: ghcr.io/getexperimently/experimently[-web]:"
+                "${EXPERIMENTLY_PROFILE:-core}-X.Y.Z # x-release-please-version`: "
+                f"{line.strip()!r}"
+            )
+        found[match["repo"]].append(match["version"])
+    versions: dict[str, str] = {}
+    for service, repo in COMPOSE_IMAGES.items():
+        if len(found[repo]) != 1:
+            raise AssertionError(
+                f"{PRODUCTION_COMPOSE} names {repo} on {len(found[repo])} "
+                "image lines; expected exactly one"
+            )
+        versions[service] = found[repo][0]
+    return versions
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -163,6 +225,12 @@ def main() -> int:
         ".release-please-manifest.json": read_release_please_manifest,
         "built distribution metadata": read_distribution_metadata_version,
         "settings.VERSION": read_settings_version,
+        f"{PRODUCTION_COMPOSE} (api image)": lambda: read_compose_image_versions()[
+            "api"
+        ],
+        f"{PRODUCTION_COMPOSE} (web image)": lambda: read_compose_image_versions()[
+            "web"
+        ],
     }
 
     found: dict[str, str] = {}
@@ -176,7 +244,7 @@ def main() -> int:
             )
 
     for name, value in found.items():
-        print(f"  {name:34} {value}")
+        print(f"  {name:40} {value}")
 
     if failures:
         for failure in failures:
@@ -203,6 +271,18 @@ def main() -> int:
     # The canonical string is VERSION's own, not the normalised one: it is what
     # the tag and the image tag have to be spelled as.
     version = found["VERSION"]
+
+    # The compose lines are image tags, so they must be VERSION's own
+    # spelling, not merely an equal PEP 440 version: `core-0.1.0rc1` is not
+    # the tag the release pushed for 0.1.0-rc.1.
+    for name, value in found.items():
+        if name.startswith(PRODUCTION_COMPOSE) and value != version:
+            print(
+                f"error: {name} is {value!r}; the image tag must be spelled "
+                f"exactly as VERSION ({version!r}).",
+                file=sys.stderr,
+            )
+            return 1
 
     if (
         version in PLACEHOLDER_VERSIONS
