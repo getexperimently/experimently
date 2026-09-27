@@ -232,8 +232,20 @@ class DimensionalAnalysisService:
         treat_conv = np.array([d[3] for d in segment_data], dtype=float)
         treat_total = np.array([d[2] for d in segment_data], dtype=float)
 
-        ctrl_rate = np.where(ctrl_total > 0, ctrl_conv / ctrl_total, 0.0)
-        treat_rate = np.where(treat_total > 0, treat_conv / treat_total, 0.0)
+        # A variant can have no users in a segment (every variant is listed),
+        # so divide only where the total is positive; the rate is 0 elsewhere.
+        ctrl_rate = np.divide(
+            ctrl_conv,
+            ctrl_total,
+            out=np.zeros_like(ctrl_conv, dtype=float),
+            where=ctrl_total > 0,
+        )
+        treat_rate = np.divide(
+            treat_conv,
+            treat_total,
+            out=np.zeros_like(treat_conv, dtype=float),
+            where=treat_total > 0,
+        )
         lift = treat_rate - ctrl_rate
 
         # Chi-squared test on treatment conversion counts across segments

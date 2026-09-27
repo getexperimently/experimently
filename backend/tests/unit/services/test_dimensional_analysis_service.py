@@ -6,6 +6,7 @@ They define the expected behavior of compute_segment_breakdown,
 detect_hte, and get_adjusted_alpha.
 """
 
+import warnings
 from typing import Any, Dict, List
 
 import pytest
@@ -333,3 +334,21 @@ class TestControlIsNeverGuessed:
         assert [v.is_control for v in seg.variants] == [False, False]
         assert [v.p_value for v in seg.variants] == [None, None]
         assert not any(v.is_significant for v in seg.variants)
+
+    def test_hte_with_a_zero_row_variant_divides_nothing_by_zero(self, service):
+        """Every variant is listed in every segment, so a control with no users
+        in one segment is ordinary traffic; detect_hte must not warn on it."""
+        segments = {
+            "desktop": {
+                self.LARGE_ID: {"total": 300, "conversions": 30, "is_control": True},
+                self.SMALL_ID: {"total": 300, "conversions": 45, "is_control": False},
+            },
+            "tablet": {
+                self.LARGE_ID: {"total": 0, "conversions": 0, "is_control": True},
+                self.SMALL_ID: {"total": 10, "conversions": 2, "is_control": False},
+            },
+        }
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            results = service.compute_segment_results(segments, base_alpha=0.05)
+            assert isinstance(service.detect_hte(results), bool)
