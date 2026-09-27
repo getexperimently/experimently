@@ -221,20 +221,36 @@ In **staging**, before prod is ever deployed (DECISIONS D6):
 5. Record, for the plan's open questions: whether CodeDeploy rewrites the API
    listener rules; when the PRIMARY task set flips relative to the canary; the
    deployment's status during the hour-long termination wait.
-6. Tear down, and compare what is left with
+6. **Force an alarm during a canary.** Deploy tag B again once tag A's hour has
+   passed, and while its canary runs set the green or blue alarm (whichever
+   watches the new task set's target group) to ALARM by hand. Record what
+   `aws deploy get-deployment` says after the stop: `status`, `errorInformation`
+   and `rollbackInfo`, whether a separate `codeDeployRollback` deployment
+   appears and for how long it stays active, and what the run and its summary
+   said. Do the same once in the hour after a shift. The state set by hand
+   lasts until the alarm's next evaluation, about a minute:
+
+    ```{.bash skip reason="aws: forces a real alarm into ALARM in the staging account"}
+    aws cloudwatch set-alarm-state --alarm-name experimentation-api-5xx-green-staging --state-value ALARM --state-reason "rehearsal: forced during the canary"
+    ```
+
+7. Tear down, and compare what is left with
    [what `cdk destroy` leaves behind](../self-hosting/cdk.md#what-cdk-destroy-leaves-behind-and-bills).
 
 Tag B cannot be deployed within the hour after tag A's traffic shift: tag A's
 CodeDeploy deployment is still active while the old task set is kept, and the
 deploy refuses until it is not (section 3).
 
-Prod: the same checklist, with a reviewer who did not dispatch the run. The
-canary is timed only: no alarm watches it, and nothing rolls back
-automatically on application errors. The response to a bad release is the
-Rollback workflow, within the hour the old task set is kept. **Before the first
-production deploy**, alarm-based rollback
-([#148](https://github.com/getexperimently/experimently/issues/148)) is in
-place, or the founder has waived it in writing.
+Prod: the same checklist, with a reviewer who did not dispatch the run.
+Alarms watch the API's canary and the hour after it
+([#148](https://github.com/getexperimently/experimently/issues/148)): while
+either of the deployment group's two 5xx alarms is in ALARM, CodeDeploy stops
+the deployment and rolls the API back by itself (section 3). That is expected
+behaviour, not yet observed: the forced alarm in step 6 is where it is first
+seen. A rollback in the hour after the shift comes after the run has gone
+green, and it is not announced in #deployments: the run summary gives the
+time the alarms stop watching and the command that shows whether it happened.
+After that hour, the response to a bad release is the Rollback workflow.
 
 ---
 
@@ -280,10 +296,15 @@ place, or the founder has waived it in writing.
    rule forwards to that task set's target group (`scripts/api_serving.py`).
    A rule still split between blue and green means the shift is in progress,
    and the step waits. It gives up after `CODEDEPLOY_DEADLINE_SECONDS` (30
-   minutes) and **never stops the deployment**.
+   minutes) and **never stops the deployment**. CodeDeploy does, if one of
+   the deployment group's alarms goes into ALARM: it stops the deployment and
+   rolls the API back by itself, and the step ends "Rolled back by an alarm"
+   (`result=alarm`), naming the alarm. There is nothing to roll back then; read
+   [An alarm rolled the API back](rollback-runbook.md#an-alarm-rolled-the-api-back).
 7. **The smoke request** (`GET ${PUBLIC_BASE_URL}/api/v1/experiments/` →
    `401 {"detail":"Not authenticated"}`). A failed smoke test does **not**
-   roll back. The run summary gives the line:
+   roll back; the alarms may, while the deployment is active. If the API is
+   still on the new release, the run summary gives the line:
    `Rollback: Actions → Rollback → environment=<env>, task_definition_arn=experimentation-backend-<env>:<n>`.
 8. **The dashboard**, only after the API answered. The run registers the
    dashboard's task definition with the new image's digest, checks again that
@@ -305,11 +326,39 @@ The deploy job's timeout is 150 minutes: every wait in it is a named bound
 (snapshot, migration, traffic shift, dashboard rollout, the two smoke tests)
 and the sum leaves room for two uncached image builds.
 
-**The canary is timed only.** No alarm is attached to the deployment group
-(DECISIONS T21). So a release that passes `/health` and fails everywhere else
-reaches 100% of traffic five minutes after the approval, and nothing rolls it
-back. What protects you is the smoke request, your own monitoring, and the
-**Rollback** workflow within the hour CodeDeploy keeps the previous task set.
+**Alarms watch the API until the deployment ends.** The deployment group has
+two alarms, `experimentation-api-5xx-blue-<env>` and
+`experimentation-api-5xx-green-<env>`, one per target group, because
+CodeDeploy swaps the two on every deployment. Both are polled for the whole
+deployment: before the approval, in the canary, and in the hour after the
+shift while CodeDeploy keeps the previous task set. While either is in ALARM,
+CodeDeploy stops the deployment and rolls the API back to the previous
+revision by itself. That is the expected behaviour, not yet observed: the
+first staging deploy's forced alarm (section 2) is where it is seen, in
+particular whether the hour after the shift and the time before the approval
+are watched. An alarm fires on a minute with at least 5 target 5xx
+**and** at least 5% of that target group's requests, for 2 minutes of 3; a
+minute with no requests counts as fine. These are starting values, to be
+measured against real traffic. What they do not catch:
+
+- a release that answers wrongly with a 2xx, or with fewer errors than that;
+- the load balancer's own 502 and 504 (a task that crashed or timed out): they
+  have no target-group dimension, so the alarms cannot watch them;
+- the dashboard: an alarm rolls back the API only, and a rollback in the hour
+  after the shift leaves the dashboard on the new release;
+- anything after that hour, when the response is the **Rollback** workflow.
+
+Two more things follow from the alarms watching both target groups. A live
+release already answering 5xx at the threshold (its own bug, or a failing
+dependency) stops every new deploy too, the fix included: see
+[Fix forward while an alarm is firing](rollback-runbook.md#fix-forward-while-an-alarm-is-firing).
+And every 5xx the API answers counts, its deliberate ones included: `501` on a
+module's route under the core profile, and `503` from `/health/ready` for a
+caller other than the load balancer. Staging traffic may be too low to reach
+the threshold at all, so a quiet staging deploy proves nothing about the
+alarms. A rollback in the hour after the shift is not announced in
+#deployments; the run summary gives the time the alarms stop watching and the
+command that shows whether one happened.
 
 **One deploy per environment per hour.** For an hour after the shift,
 CodeDeploy keeps the previous task set, and the deployment stays active that
@@ -322,7 +371,10 @@ stops a deployment itself. Rollback does, on purpose.
 **Shipping a fix within that hour means Rollback first.** A fix-forward deploy is
 refused while the bad release's deployment is active. Run **Rollback**, which
 stops that deployment and puts the previous revision back, and deploy the fix
-afterwards. Rollback's own CodeDeploy deployment is then the active one, and
+afterwards. If an alarm already rolled the release back, do not run Rollback
+for it: the API is already going back, and Rollback refuses while CodeDeploy's
+own rollback is active
+([An alarm rolled the API back](rollback-runbook.md#an-alarm-rolled-the-api-back)). Rollback's own CodeDeploy deployment is then the active one, and
 the next forward deploy is refused until it is no longer active. That is
 expected to be about another hour, because the 60-minute termination wait is a
 setting of the deployment group (the synthesised template's
@@ -407,9 +459,11 @@ Actions → Deploy (from main; environment = staging | prod)
                 build :<tag>-<profile> from ./release (or reuse it)
                 snapshot  →  migration (by digest)  →  API revision (by digest)
                 CodeDeploy blue/green  →  healthy targets  →  approve  →
-                canary (timed only)  →  PRIMARY + /api/* rule  →  smoke  →
+                canary (alarms watched)  →  PRIMARY + /api/* rule  →  smoke  →
                 API check  →  dashboard rollout (by digest)  →  dashboard smoke  →
                 API check  →  summary
+              then, after the run has ended:
+                the hour CodeDeploy keeps the old task set (alarms watched)
       |
       v
 ECS cluster experimentation-<env>
@@ -450,6 +504,20 @@ the deploy never sent. The refusal names it and estimates how long it has
 left. Wait and re-run. If the release it deployed is bad, run **Rollback**,
 which stops it and puts the older revision back. Do not stop it by hand with
 `--auto-rollback-enabled` unless rolling that release back is what you want.
+If the refusal says it is CodeDeploy's own rollback of an earlier deployment,
+an alarm (or a failed deployment) is already putting the API back: wait for
+it, and do not use Rollback, which refuses while it is active.
+
+### "Rolled back by an alarm"
+
+One of the deployment group's two 5xx alarms went into ALARM, and CodeDeploy
+stopped the deployment and rolled the API back by itself. The run names the
+alarm and says whether the previous revision is serving again. Read
+`errorInformation` first, then follow
+[An alarm rolled the API back](rollback-runbook.md#an-alarm-rolled-the-api-back).
+If it says "Stopped by an alarm" instead, the alarm was already firing before
+the traffic shift and nothing shifted:
+[Fix forward while an alarm is firing](rollback-runbook.md#fix-forward-while-an-alarm-is-firing).
 
 ### "Traffic shift not approved"
 
@@ -480,6 +548,14 @@ default action. The first staging deploy is where it is first seen.
 
 Until then the old task set keeps answering through the rule, so users see
 the *previous* release, not the new one.
+
+First check `aws deploy get-deployment --deployment-id <id>`. If it is
+`Stopped` with `ALARM_ACTIVE`, this is not that question: an alarm stopped the
+deployment and CodeDeploy is already rolling the API back, putting the rule
+back first. Do not dispatch Rollback; read
+[An alarm rolled the API back](rollback-runbook.md#an-alarm-rolled-the-api-back).
+The deploy re-reads the deployment for about a minute before it reports this,
+for that reason. Otherwise:
 
 1. Roll back within the hour, with the rollback line in the run summary.
    Rollback is expected to leave the previous revision on the group the rule
@@ -529,8 +605,20 @@ The titles, and what each means:
   section 5).
 - **"API deployed, dashboard not confirmed"** -- the summary line of all of the
   above: it says whether the API check passed, and what the dashboard is on.
+- **"API rolled back by an alarm, dashboard not"** -- the exception to the three
+  points above. An API check failed because an alarm stopped the deployment
+  after its shift, and CodeDeploy is moving the API back by itself. The
+  deployment is stopped, so a re-run is not refused for the hour, and there is
+  nothing to roll back for the API: do not use the rollback line. If the
+  dashboard is on this run's revision, put it back to match with Method 2's
+  dashboard block, and read
+  [An alarm rolled the API back](rollback-runbook.md#an-alarm-rolled-the-api-back).
 
 ### "Smoke test failing after deployment"
 
-Nothing rolls back automatically. Decide, and use the rollback line in the run
-summary. The API's log is `/ecs/experimentation-backend-<env>`.
+The smoke test rolls nothing back. The API's alarms may, while the run's
+CodeDeploy deployment is active: if the API is already back on the previous
+revision, read
+[An alarm rolled the API back](rollback-runbook.md#an-alarm-rolled-the-api-back).
+Otherwise decide, and use the rollback line in the run summary. The API's log
+is `/ecs/experimentation-backend-<env>`.
