@@ -44,6 +44,10 @@ jobs:
   cdk-python-tests:
     name: CDK Stack Tests (Python)
     runs-on: ubuntu-latest
+    # No id-token: nothing in this job can assume an AWS role. The CLI check
+    # below depends on that.
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v7
 
@@ -61,6 +65,20 @@ jobs:
 
       - name: Install dependencies
         run: pip install -r backend/requirements.txt
+
+      # The runner's own AWS CLI, with no credential of any kind: rollback.yml's
+      # and deploy.yml's exact create-deployment flags, the alarm override
+      # included, must validate with --generate-cli-skeleton (no service call),
+      # and `enabled=nope` must be refused with 252 in the same run (#148 EM
+      # condition 13). The script refuses to start if a key is set.
+      - name: The runner's AWS CLI accepts the create-deployment flags
+        env:
+          AWS_CONFIG_FILE: /dev/null
+          AWS_SHARED_CREDENTIALS_FILE: /dev/null
+          AWS_EC2_METADATA_DISABLED: 'true'
+        run: |
+          aws --version
+          python3 scripts/check_create_deployment_cli.py
 
       # --import-mode=importlib keeps the local `infrastructure/constructs`
       # directory from shadowing the `constructs` package that aws-cdk-lib needs.

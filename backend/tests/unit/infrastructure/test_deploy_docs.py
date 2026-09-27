@@ -51,6 +51,15 @@ def test_every_doc_anchor_a_workflow_prints_exists():
         "docs/deployment/deployment-guide.md",
         "the-api-route-and-the-primary-task-set-disagree",
     ) in links
+    # The alarm copy's two runbook sections (#148, UX C5).
+    assert (
+        "docs/deployment/rollback-runbook.md",
+        "an-alarm-rolled-the-api-back",
+    ) in links
+    assert (
+        "docs/deployment/rollback-runbook.md",
+        "fix-forward-while-an-alarm-is-firing",
+    ) in links
     assert len(links) >= 2, f"found only {links}: the scan is not reading"
     for doc, anchor in sorted(links):
         path = REPO_ROOT / doc
@@ -120,8 +129,12 @@ CANARY_DOCS = [
 ]
 
 #: Claims that the canary judges a release, or that CodeDeploy undoes a bad
-#: one by itself. No alarm is attached to the deployment group (DECISIONS
-#: T21), so each is false: a release that passes /health reaches 100%.
+#: one by itself. Written when no alarm was attached to the deployment group
+#: (DECISIONS T21), and all seven stay after #148 (PE condition 10): the
+#: alarms watch the API's target 5xx only, while a deployment is active, so a
+#: release that answers wrongly with a 2xx still reaches 100%, the dashboard is
+#: never rolled back, and nothing acts after the hour. The docs say "rolls the
+#: API back by itself", with those limits beside it.
 FALSE_CANARY_CLAIMS = [
     r"canary\s+is\s+the\s+gate",
     r"canary\s+(?:acts\s+as|is)\s+(?:a|the)\s+(?:gate|safety\s+net|check)",
@@ -136,7 +149,9 @@ FALSE_CANARY_CLAIMS = [
 @pytest.mark.regression
 @pytest.mark.parametrize("path", CANARY_DOCS, ids=lambda p: p.name)
 def test_no_document_says_the_canary_judges_a_release(path):
-    """EM C5: the canary is timed only, and rollback.yml is the response."""
+    """EM C5: the canary judges nothing; since #148 the alarms act on target
+    5xx only, in the deployment's window, and rollback.yml is the response
+    to everything else."""
     text = " ".join(path.read_text().split())
     hits = [
         m.group(0)
@@ -146,16 +161,133 @@ def test_no_document_says_the_canary_judges_a_release(path):
     assert not hits, f"{path.relative_to(REPO_ROOT)} claims: {hits}"
 
 
+def test_all_seven_false_canary_claims_are_kept():
+    """PE condition 10: #148 inverts the timed-only wording and drops no ban."""
+    assert len(FALSE_CANARY_CLAIMS) == 7
+    joined = " | ".join(FALSE_CANARY_CLAIMS)
+    for kept in (
+        "no\\s+manual\\s+action",
+        "canary\\s+is\\s+the\\s+gate",
+        "automatically",
+    ):
+        assert kept in joined, kept
+
+
 @pytest.mark.regression
 @pytest.mark.parametrize(
     "path", [DOCS / "deployment" / "README.md", GUIDE, RUNBOOK], ids=lambda p: p.name
 )
-def test_the_deploy_docs_say_the_canary_is_timed_only(path):
+def test_the_deploy_docs_say_what_the_alarms_watch(path):
+    """Inverted, not deleted (#148 PE condition 10), from
+    test_the_deploy_docs_say_the_canary_is_timed_only (T21, EM C5/C6).
+
+    That test required "the canary is timed only" and, for the guide and the
+    runbook, that alarm-based rollback (#148) was the founder-waivable
+    prerequisite for production. With the alarms in place each page must say
+    what they watch and, as plainly, what they do not: the 2xx case, the
+    dashboard, and the load balancer's own 502/504. The waiver sentence goes,
+    and the "not yet run against a real AWS account" caveat stays.
+    """
     text = " ".join(path.read_text().split())
-    assert re.search(r"canary is timed only", text, re.I), path.name
-    # EM C6: alarm-based rollback is the prod prerequisite, founder-waivable.
-    if path != DOCS / "deployment" / "README.md":
-        assert "issues/148" in text and "founder" in text, path.name
+    assert not re.search(r"canary is timed only", text, re.I), path.name
+    assert re.search(r"Alarms watch the API", text), path.name
+    assert "experimentation-api-5xx-blue-" in text, path.name
+    assert "experimentation-api-5xx-green-" in text, path.name
+    assert "2xx" in text, path.name
+    assert "502" in text and "504" in text, path.name
+    assert "dashboard" in text, path.name
+    assert "issues/148" in text, path.name
+    assert "rollback-runbook.md#an-alarm-rolled-the-api-back" in text or (
+        path == RUNBOOK and "(#an-alarm-rolled-the-api-back)" in text
+    ), path.name
+    # EM condition 14: the waiver sentence goes only with the caveat kept.
+    assert "waived it in writing" not in text, path.name
+    assert "unless the founder waives it" not in text, path.name
+    if path != RUNBOOK:
+        assert "Not yet run against a real AWS account" in text, path.name
+
+
+def _runbook_section(heading: str) -> str:
+    text = RUNBOOK.read_text()
+    start = text.index(f"\n## {heading}\n")
+    end = text.find("\n## ", start + 1)
+    return text[start : end if end >= 0 else len(text)]
+
+
+@pytest.mark.regression
+def test_the_break_glass_is_explained_in_one_place():
+    """EM condition 4(f)/(g): only the runbook's "Fix forward while an alarm is
+    firing" names the input, and it says when to use it, what it gives up, that
+    the next deploy is watched again, and that the CloudWatch tricks do not
+    unblock a deploy (unverified until the first staging rehearsal)."""
+    section = _runbook_section("Fix forward while an alarm is firing")
+    flat = " ".join(section.split())
+    assert "`override_alarms`" in flat and "`override_alarms_reason`" in flat
+    assert "the bug is in the release you would roll back to as well" in flat
+    assert "a dependency outage holds the alarm in ALARM" in flat
+    assert "no alarm watches that deployment" in flat
+    assert "nothing rolls it back by itself" in flat
+    assert "the next deploy is watched again with no action from anyone" in flat
+    assert "`aws cloudwatch disable-alarm-actions`" in flat
+    assert "`aws cloudwatch set-alarm-state`" in flat
+    assert "do not unblock a deploy" in flat
+    assert "not yet verified" in flat
+    assert "ALARMS OVERRIDDEN" in flat
+    # Nowhere else under docs/ names the input.
+    others = [
+        str(p.relative_to(REPO_ROOT))
+        for p in sorted(DOCS.rglob("*.md"))
+        if "override_alarms" in p.read_text().replace(section, "")
+    ]
+    assert not others, others
+
+
+@pytest.mark.regression
+def test_the_alarm_section_says_what_to_do_and_not_do():
+    """UX's runbook section, in its order: confirm, history, the API, the
+    dashboard, no Rollback while CodeDeploy's is active, the migration, no
+    redeploy of the tag, and the false alarm."""
+    flat = " ".join(_runbook_section("An alarm rolled the API back").split())
+    order = [
+        "Confirm it.",
+        "See what the alarm saw.",
+        "Check the API is back",
+        "The dashboard.",
+        "Do not dispatch Rollback while CodeDeploy's rollback is active.",
+        "The migration stays applied.",
+        "Do not redeploy the same tag.",
+        "A false alarm",
+    ]
+    positions = [flat.index(step) for step in order]
+    assert positions == sorted(positions), order
+    assert "Method 2's dashboard block" in flat
+    assert "`codeDeployRollback`" in flat
+
+
+#: C9, as a test (PE condition 10): the old wording, anywhere an operator reads.
+_TIMED_ONLY = re.compile(r"timed only|nothing rolls back", re.I)
+
+
+@pytest.mark.regression
+def test_no_timed_only_wording_is_left():
+    """`git grep -i -E 'timed only|nothing rolls back' -- docs .github scripts`
+    is empty -- walked in Python, so it also holds in a tree with no .git."""
+    roots = [DOCS, REPO_ROOT / ".github", REPO_ROOT / "scripts"]
+    files = [
+        p
+        for root in roots
+        for p in sorted(root.rglob("*"))
+        if p.is_file() and p.suffix in {".md", ".yml", ".yaml", ".py", ".sh", ".txt"}
+    ]
+    assert any(p.name == "deploy.yml" for p in files), "the walk is not reading"
+    assert GUIDE in files and RUNBOOK in files
+    hits = [
+        f"{p.relative_to(REPO_ROOT)}:{n}: {line.strip()[:120]}"
+        for p in files
+        for n, line in enumerate(p.read_text(errors="replace").splitlines(), 1)
+        if _TIMED_ONLY.search(line)
+    ]
+    assert not hits, hits
 
 
 @pytest.mark.regression
@@ -205,6 +337,18 @@ def test_the_policy_upgrade_step_is_written_down():
         assert action in text, action
     assert "Could not tell whether the API is serving" in text
     assert "Nothing shifts" in text
+    # #148 PE condition 12: the alarm override's permission, why it is not
+    # narrower, and the re-apply before the first cdk deploy with the alarms.
+    assert "`codedeploy:UpdateDeploymentGroup`" in text
+    assert "--override-alarm-configuration enabled=false" in text
+    assert "there is no narrower action" in text
+    assert "`iam:PassRole` is granted only to ECS tasks" in text
+    assert (
+        "Roles created from a policy before the alarms lack "
+        "`codedeploy:UpdateDeploymentGroup`; re-apply this policy in every "
+        "account before the first `cdk deploy` that adds the alarms." in text
+    )
+    assert "`AccessDenied` in the middle of an incident" in text
 
 
 def test_the_guide_has_the_ordered_checklist():
