@@ -150,6 +150,7 @@ class CupedService:
         treatment_Y: np.ndarray,
         treatment_X: np.ndarray,
         alpha: float = 0.05,
+        adjust: bool = True,
     ) -> CupedEffect:
         """Run the full CUPED pipeline and return a CupedEffect result.
 
@@ -168,6 +169,9 @@ class CupedService:
             treatment_Y: Outcome metric observations for the treatment group.
             treatment_X: Pre-experiment covariate for treatment users.
             alpha: Significance level for confidence interval construction.
+            adjust: ``False`` for the method ``none``: no adjustment at all, so
+                θ is exactly 0.0, the "adjusted" statistics are the unadjusted
+                ones and ``variance_reduction_pct`` is exactly 0.0.
 
         Returns:
             CupedEffect dataclass with all adjusted statistics.
@@ -180,15 +184,21 @@ class CupedService:
         n_c = len(control_Y)
         n_t = len(treatment_Y)
 
-        # Step 1: Estimate theta from control group
-        theta = CupedService.compute_theta(control_Y, control_X)
+        # Step 1: Estimate theta from control group (none: no adjustment)
+        theta = CupedService.compute_theta(control_Y, control_X) if adjust else 0.0
 
         # Step 2: E[X] from pooled covariate
         E_X = np.concatenate([control_X, treatment_X]).mean()
 
-        # Step 3: Adjust both groups
-        control_Y_adj = CupedService.apply_cuped(control_Y, control_X, theta, E_X)
-        treatment_Y_adj = CupedService.apply_cuped(treatment_Y, treatment_X, theta, E_X)
+        # Step 3: Adjust both groups (none: the raw observations, untouched)
+        if adjust:
+            control_Y_adj = CupedService.apply_cuped(control_Y, control_X, theta, E_X)
+            treatment_Y_adj = CupedService.apply_cuped(
+                treatment_Y, treatment_X, theta, E_X
+            )
+        else:
+            control_Y_adj = control_Y
+            treatment_Y_adj = treatment_Y
 
         # Step 4: Adjusted means and effect
         adj_control_mean = float(control_Y_adj.mean())
@@ -212,7 +222,7 @@ class CupedService:
 
         # Step 7: Variance reduction percentage (control group)
         var_original = float(np.var(control_Y, ddof=1)) if n_c > 1 else 0.0
-        if var_original > 0.0:
+        if adjust and var_original > 0.0:
             var_adj = float(np.var(control_Y_adj, ddof=1))
             reduction_pct = (1.0 - var_adj / var_original) * 100.0
         else:

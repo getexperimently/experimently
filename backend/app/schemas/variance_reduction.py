@@ -10,6 +10,8 @@ from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from backend.app.core import analysis_status as analysis_table
+from backend.app.core.analysis_status import AnalysisStatusValue
 from backend.app.core.stats_engine import ENGINE_VERSION
 
 # ---------------------------------------------------------------------------
@@ -174,4 +176,19 @@ class CupedResultsResponse(BaseModel):
     engine_version: str = Field(
         ENGINE_VERSION,
         description="Statistics engine version that produced these results.",
+    )
+    analysis_status: AnalysisStatusValue = Field(
+        default_factory=lambda: analysis_table.analysis_status("cuped"),
+        description=(
+            "'ga' when these numbers are what their names say; 'beta' when part "
+            "of the analysis is not computed as described yet (see "
+            "analysis_notice).  About the numbers, not the response shape."
+        ),
+    )
+    analysis_notice: Optional[str] = Field(
+        default_factory=lambda: analysis_table.analysis_notice("cuped"),
+        description=(
+            "Present exactly when analysis_status is 'beta': what is not "
+            "computed yet, with the issue that tracks it."
+        ),
     )
