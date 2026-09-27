@@ -1,15 +1,19 @@
 # CUPED Variance Reduction
 
-CUPED (Controlled-experiment Using Pre-Experiment Data) reduces the variance of your metric estimates by adjusting for pre-experiment behavior. Lower variance means you reach statistical significance with fewer users — typically 20–40% fewer, depending on how predictive the covariate is.
-
-Reference: Deng, Xu, Kohavi & Walker — *Improving the sensitivity of online controlled experiments by utilizing pre-experiment data* (WSDM 2013).
-
-**Not yet a pre-experiment covariate.** In this release the endpoint below uses each
+**Beta: not yet a pre-experiment covariate.** In this release the endpoint uses each
 user's position in the order of assignment as the covariate, not a pre-experiment metric,
 so it removes almost no variance: `variance_reduction_pct` is close to 0 and `cuped`
-gives the same numbers as `winsorization`
-([#217](https://github.com/getexperimently/experimently/issues/217)). The method below
-describes what CUPED does; the response shape is the one the API returns today.
+gives the same numbers as `winsorization`. Responses say so in `analysis_status` and
+`analysis_notice`, and the route is marked `x-stability: beta` in the OpenAPI document
+([#217](https://github.com/getexperimently/experimently/issues/217)). The method `none`
+applies no adjustment at all: `theta` is `0` and the estimate is the unadjusted one.
+
+CUPED (Controlled-experiment Using Pre-Experiment Data) reduces the variance of metric
+estimates by adjusting for each user's pre-experiment behaviour. How much it removes
+depends on how well the covariate predicts the outcome. The method below describes what
+CUPED does; the response shape is the one the API returns today.
+
+Reference: Deng, Xu, Kohavi & Walker — *Improving the sensitivity of online controlled experiments by utilizing pre-experiment data* (WSDM 2013).
 
 ---
 
@@ -97,13 +101,14 @@ answers `404`.
 ```{.bash exec}
 curl -s localhost:8000/api/v1/results/$EXP_ID/cuped \
   -H "Authorization: Bearer $TOKEN" \
-  | jq '{method, metrics: [.metrics[] | {metric_name, method, adjusted_effect, adjusted_p_value}]}'
+  | jq '{analysis_status, method, metrics: [.metrics[] | {metric_name, method, adjusted_effect, adjusted_p_value}]}'
 ```
+<!-- expect: "analysis_status": "beta" -->
 <!-- expect: "method": "winsorization" -->
 <!-- expect: "metric_name": "Checkout Completion" -->
 
-It prints `"method": "winsorization"` and the adjusted effect on the experiment's
-`Checkout Completion` metric. The full response:
+It prints `"analysis_status": "beta"`, `"method": "winsorization"` and the adjusted
+effect on the experiment's `Checkout Completion` metric. The full response:
 
 ```json
 {
@@ -128,7 +133,9 @@ It prints `"method": "winsorization"` and the adjusted effect on the experiment'
   "computed_at": "2026-09-26T22:54:12.480010+00:00",
   "seed": null,
   "n_samples": null,
-  "engine_version": "1.0.0"
+  "engine_version": "1.1.0",
+  "analysis_status": "beta",
+  "analysis_notice": "Beta: the covariate is not yet a pre-experiment metric, so variance_reduction_pct is close to 0 and the adjusted estimate is close to the unadjusted one. https://github.com/getexperimently/experimently/issues/217"
 }
 ```
 
@@ -140,7 +147,9 @@ It prints `"method": "winsorization"` and the adjusted effect on the experiment'
 | `adjusted_p_value` | Two-tailed p-value from a z-test on the adjusted effect |
 | `adjusted_ci_lower`, `adjusted_ci_upper` | 95% confidence interval for the adjusted effect |
 | `variance_reduction_pct` | % of control variance removed by the adjustment. Higher = more sensitive test |
-| `theta` | OLS coefficient. Values near 0 mean the covariate is a poor predictor |
+| `theta` | OLS coefficient. Values near 0 mean the covariate is a poor predictor; exactly `0` for the method `none` |
+| `analysis_status` | `beta` in this release: the covariate is not yet a pre-experiment metric. `ga` once it is |
+| `analysis_notice` | Present exactly when `analysis_status` is `beta`: what is not computed as described yet, with the issue |
 
 ---
 

@@ -341,16 +341,16 @@ aws ecs wait services-stable \
 For application-level API keys managed by the platform itself:
 
 ```bash
-# Step 1: Revoke the compromised key immediately via direct DB update
-# (Do not wait for the API — the key may be actively abused)
-# Connect to Aurora and run:
-# UPDATE experimentation.api_keys SET is_active = false WHERE key = 'eptk_XXXXXXXXXXXX';
+# Step 1: Revoke the compromised key. Only its SHA-256 hash is stored, so hash the leaked key first
+KEY_HASH=$(printf '%s' "$LEAKED_KEY" | shasum -a 256 | cut -d' ' -f1)
+# Then, connected to Aurora, deactivate that row (every request with the key then gets 401):
+# UPDATE experimentation.api_keys SET is_active = false WHERE key = '<KEY_HASH>' RETURNING id, name, user_id;
 
 # Step 2: Issue a new key to the legitimate owner via the API
 curl -X POST \
   -H "Authorization: Bearer $ADMIN_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"name": "Replacement key for owner X", "scopes": ["tracking:write"]}' \
+  -d '{"name": "Replacement key for owner X"}' \
   https://api.experimentation.example.com/api/v1/api-keys
 
 # Step 3: Notify the owner of the new key via secure channel (not Slack or email)
@@ -361,6 +361,8 @@ aws logs filter-log-events \
   --filter-pattern '"api_key_prefix":"eptk_XXXXX"' \
   --start-time $(date -u -d '7 days ago' +%s000)
 ```
+
+The key's owner, or an ADMIN, can instead delete it through the API with `DELETE /api/v1/api-keys/{id}`, or from **Admin → API Keys** in the dashboard. Neither the plaintext nor its `eptk_xxxx` prefix is stored, so identify the key by its name, or get its `id` from the `RETURNING` clause above. `KEY_HASH` is the hex SHA-256 of the key, which is what the platform stores (`hash_api_key` in `backend/app/core/security.py`).
 
 If the key may have been exposed through a vulnerability in Experimently itself, report it privately as [SECURITY.md](https://github.com/getexperimently/experimently/blob/main/SECURITY.md) describes; see [Responding to an incident on your deployment](../security/incident-response.md).
 

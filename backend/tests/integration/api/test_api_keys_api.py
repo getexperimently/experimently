@@ -209,6 +209,25 @@ class TestList:
             "write",
         ]
 
+    def test_unnormalised_stored_scopes_are_listed_by_the_shared_parser(
+        self, client, db_session, developer
+    ):
+        # Seed scripts write the column directly, without normalising. The list
+        # endpoint reads it through api_key_scopes.parse_scopes, the same rule
+        # the ruleset scope check will use.
+        row, _plaintext = APIKey.create_for_user(
+            db_session,
+            user_id=developer.id,
+            name="seed-style",
+            scopes=",, read, sdk:ruleset ,,SDK:RULESET",
+        )
+        items = client.get(URL, headers=_auth(developer)).json()
+        assert next(i for i in items if i["id"] == str(row.id))["scopes"] == [
+            "read",
+            "sdk:ruleset",
+            "SDK:RULESET",
+        ]
+
     def test_all_requires_admin(self, client, developer):
         resp = client.get(f"{URL}?all=true", headers=_auth(developer))
         assert resp.status_code == 403

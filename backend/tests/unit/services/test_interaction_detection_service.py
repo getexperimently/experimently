@@ -323,8 +323,8 @@ class TestInteractionService:
             )
         assert result is None
 
-    def test_analyze_experiment_pair_aggregates_sub_results(self):
-        """analyze_experiment_pair aggregates overlap, interaction, novelty, SUTVA."""
+    def test_analyze_experiment_pair_reports_overlap_and_no_sub_results(self):
+        """Only the overlap is measured: the sub-results are None (#219)."""
         service = InteractionDetectionService()
         mock_db = self._make_mock_db()
 
@@ -339,9 +339,12 @@ class TestInteractionService:
             )
         assert result is not None
         assert isinstance(result, InteractionAnalysis)
-        assert hasattr(result, "overlap_coefficient")
-        assert hasattr(result, "overall_risk")
-        assert hasattr(result, "recommendations")
+        assert result.overlap_coefficient == 0.5
+        assert result.interaction_result is None
+        assert result.novelty_result is None
+        assert result.sutva_result is None
+        assert result.overall_risk == "medium"
+        assert result.recommendations
 
     def test_scan_active_experiments_returns_list(self):
         """scan_active_experiments returns a list of InteractionAnalysis objects."""

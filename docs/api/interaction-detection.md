@@ -1,24 +1,28 @@
 # Experiment Interaction Detection
 
-When multiple experiments run simultaneously and share users, they can interfere with each other. Interaction detection identifies experiment pairs with significant user overlap and tests whether the simultaneous exposure is distorting results.
-
 **Only the overlap is measured yet.** The overlap between two experiments' users is
-computed from their assignments. The interaction, novelty and SUTVA results beside it are
-not yet computed from what the users did: the interaction test uses user counts, novelty
-is always `false`, and the contamination rate is the overlap itself, so any pair above the
-overlap threshold reads as high risk
+computed from their assignments. The interaction, novelty and SUTVA analyses are not
+implemented yet, so the response returns them as `null`, and `overall_risk` reflects the
+overlap alone. The pairwise and novelty routes are beta: their responses carry
+`"analysis_status": "beta"` and an `analysis_notice`, and they are marked
+`x-stability: beta` in the OpenAPI document
 ([#219](https://github.com/getexperimently/experimently/issues/219)).
+
+When multiple experiments run simultaneously and share users, they can interfere with
+each other. Interaction detection finds the experiment pairs with a significant user
+overlap; testing whether the simultaneous exposure distorts results is the part not built
+yet.
 
 ---
 
 ## What Gets Detected
 
-| Issue | Description |
-|-------|-------------|
-| **User overlap** | Users assigned to both experiments; can contaminate effect estimates |
-| **Statistical interaction** | The treatment effect of experiment A changes depending on which variant of experiment B a user is in |
-| **Novelty effects** | An early spike in effect that decays as users habituate — indicates the result may not hold long-term |
-| **SUTVA violations** | Stable Unit Treatment Value Assumption violations — users in different variants are influencing each other (e.g. social features, shared resources) |
+| Issue | Description | In this release |
+|-------|-------------|-----------------|
+| **User overlap** | Users assigned to both experiments; can contaminate effect estimates | Measured |
+| **Statistical interaction** | The treatment effect of experiment A changes depending on which variant of experiment B a user is in | Not computed (`null`) |
+| **Novelty effects** | An early spike in effect that decays as users habituate — indicates the result may not hold long-term | Not computed (`null`) |
+| **SUTVA violations** | Stable Unit Treatment Value Assumption violations — users in different variants are influencing each other (e.g. social features, shared resources) | Not computed (`null`) |
 
 ---
 
@@ -118,26 +122,32 @@ curl -s localhost:8000/api/v1/interactions/scan \
 
 It prints four active experiments (the two new ones and the demo data's two running
 ones), and one pair above the threshold, with an overlap of `1.0`: the two new
-experiments. Each entry in `analyses` is a full pairwise analysis, as below.
+experiments. Each entry in `analyses` has the pairwise analysis's fields, as below,
+without `analysis_status` and `analysis_notice`: the interaction, novelty and SUTVA
+results are `null` there too, and `high_risk_pairs` counts the pairs whose overlap is
+above 0.6.
 
 ---
 
 ### GET /api/v1/interactions/{exp_a_id}/{exp_b_id}
 
-The pairwise analysis of two experiments. A pair with an overlap of 0.3 or less answers
-with the overlap set to `0.0`, no sub-results, `"overall_risk": "low"` and a
-recommendation that no analysis is needed:
+The pairwise analysis of two experiments (beta). A pair with an overlap of 0.3 or less
+answers with the overlap set to `0.0`, `"overall_risk": "low"` and a recommendation that
+no analysis is needed:
 
 ```{.bash exec}
 curl -s localhost:8000/api/v1/interactions/$PRICING_ID/$ONBOARDING_ID \
   -H "Authorization: Bearer $TOKEN" \
-  | jq '{overlap_coefficient, has_significant_overlap}'
+  | jq '{overlap_coefficient, has_significant_overlap, interaction_result, overall_risk, analysis_status}'
 ```
 <!-- expect: "overlap_coefficient": 1 -->
 <!-- expect: "has_significant_overlap": true -->
+<!-- expect: "interaction_result": null -->
+<!-- expect: "overall_risk": "high" -->
+<!-- expect: "analysis_status": "beta" -->
 
-It prints an overlap of `1.0`: every user of one experiment is in the other. The full
-response:
+It prints an overlap of `1.0`: every user of one experiment is in the other, so the
+overlap alone makes the pair high risk. The full response:
 
 ```json
 {
@@ -145,41 +155,38 @@ response:
   "experiment_b_id": "0ee2eb89-1aba-4e46-bbc6-7ee027e6f0e4",
   "overlap_coefficient": 1.0,
   "has_significant_overlap": true,
-  "interaction_result": {
-    "has_interaction": true,
-    "p_value": 1.522292196256315e-10,
-    "interaction_effect_size": 0.0238,
-    "warning_message": "Significant interaction detected between experiments. Results may be confounded."
-  },
-  "novelty_result": {
-    "has_novelty": false,
-    "decline_rate": 0.0,
-    "recommendation": "Novelty analysis requires time-series data."
-  },
-  "sutva_result": {
-    "has_violation": true,
-    "contamination_rate": 1.0,
-    "warning_message": "Contamination rate of 100.0% exceeds acceptable threshold. Some control users have been exposed to the treatment, which may bias the experiment results."
-  },
+  "interaction_result": null,
+  "novelty_result": null,
+  "sutva_result": null,
   "overall_risk": "high",
   "recommendations": [
-    "Significant interaction detected between experiments. Results may be confounded.",
-    "Contamination rate of 100.0% exceeds acceptable threshold. Some control users have been exposed to the treatment, which may bias the experiment results."
-  ]
+    "The two experiments share users (overlap 1.00). Each one's results include users exposed to the other; consider a mutual exclusion group for future experiments on the same surface."
+  ],
+  "analysis_status": "beta",
+  "analysis_notice": "Beta: only the overlap between the two experiments' users is measured. The interaction, novelty and SUTVA analyses are not computed yet, so interaction_result, novelty_result and sutva_result are null and overall_risk reflects the overlap alone. https://github.com/getexperimently/experimently/issues/219"
 }
 ```
 
-The interaction, novelty and SUTVA results here come from the user counts, not from any
-event: these users did nothing but enter both experiments
-([#219](https://github.com/getexperimently/experimently/issues/219)).
+`null` here means *not computed*, not *nothing found*.
 
 ---
 
 ### GET /api/v1/interactions/{exp_a_id}/{exp_b_id}/novelty
 
-The novelty part of the pairwise analysis on its own:
-`{"has_novelty", "decline_rate", "recommendation"}`. In this release it is always
-`"has_novelty": false`.
+The novelty part of the pairwise analysis on its own (beta). Novelty is not computed yet,
+so it always answers `"computed": false` with `has_novelty` and `decline_rate` set to
+`null` — never `"has_novelty": false`, which would read as "no novelty found":
+
+```{.bash exec}
+curl -s localhost:8000/api/v1/interactions/$PRICING_ID/$ONBOARDING_ID/novelty \
+  -H "Authorization: Bearer $TOKEN" \
+  | jq '{computed, has_novelty, analysis_status}'
+```
+<!-- expect: "computed": false -->
+<!-- expect: "has_novelty": null -->
+<!-- expect: "analysis_status": "beta" -->
+
+It prints `"computed": false`, `"has_novelty": null` and `"analysis_status": "beta"`.
 
 ---
 
@@ -202,11 +209,13 @@ overlap = |users_in_A ∩ users_in_B| / |users_in_A ∪ users_in_B|
 
 ## Risk Levels
 
-| Level | Meaning |
+In this release `overall_risk` comes from the overlap alone (#219):
+
+| Level | Overlap |
 |-------|---------|
-| `low` | Minimal overlap, no interaction detected |
-| `medium` | Moderate overlap or weak interaction signal |
-| `high` | Significant overlap AND interaction, SUTVA violation, or strong novelty effect |
+| `low` | 0.3 or less |
+| `medium` | above 0.3, up to 0.6 |
+| `high` | above 0.6 |
 
 ---
 
@@ -223,8 +232,9 @@ A VIEWER gets `403` on every interaction endpoint.
 ## Recommended Workflow
 
 1. Run `/scan` weekly or when launching a new experiment
-2. For any pair with `overall_risk: high`, run the full pairwise analysis
-3. If `has_interaction: true`, consider:
+2. For any pair with `overall_risk: high`, the two experiments share most of their users.
+   Consider:
    - Pausing one experiment and re-running sequentially
    - Using [Mutual Exclusion Groups](./mutual-exclusion-groups.md) to prevent overlap in future
-4. If `has_novelty: true`, extend the experiment window before making a ship/no-ship decision
+3. The interaction and novelty results are not computed yet (#219): until they are, judge
+   an overlapping pair from each experiment's own results, not from this endpoint

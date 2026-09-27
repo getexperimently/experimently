@@ -139,7 +139,7 @@ export default function HomePage() {
                 },
                 {
                   title: 'Statistics beyond a p-value',
-                  body: 'Frequentist and Bayesian analysis, sequential testing with mSPRT for early stopping, CUPED variance reduction, multi-armed bandits, and dimensional breakdowns with multiple-comparison correction.',
+                  body: 'Frequentist and Bayesian analysis, sequential testing with mSPRT for early stopping, CUPED variance reduction (beta), multi-armed bandits, and dimensional breakdowns with multiple-comparison correction.',
                 },
                 {
                   title: 'SDKs for the stack you have',
