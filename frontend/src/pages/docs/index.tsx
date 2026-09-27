@@ -33,7 +33,7 @@ const sections = [
     links: [
       { label: 'Running Experiments', href: docsUrl('guides/user-guide'), desc: 'End-to-end experiment lifecycle' },
       { label: 'Statistical Methods', href: docsUrl('api/sequential-testing'), desc: 'Frequentist, Bayesian, sequential testing' },
-      { label: 'CUPED Variance Reduction', href: docsUrl('api/cuped'), desc: 'Reduce variance with pre-experiment covariates' },
+      { label: 'CUPED Variance Reduction', href: docsUrl('api/cuped'), desc: 'Beta: variance reduction; the covariate is not yet a pre-experiment metric' },
       { label: 'Multi-Armed Bandits', href: docsUrl('api/multi-armed-bandit'), desc: 'Thompson Sampling, UCB1, Epsilon-Greedy' },
       { label: 'Split URL Testing', href: docsUrl('api/split-url'), desc: 'Server-side URL splitting via Lambda@Edge' },
       { label: 'Mutual Exclusion Groups', href: docsUrl('api/mutual-exclusion-groups'), desc: 'Prevent cross-experiment contamination' },
@@ -136,7 +136,7 @@ const sections = [
       { label: 'Bayesian Experimentation', href: docsUrl('api/bayesian'), desc: 'Beta-Binomial posteriors and stopping rules' },
       { label: 'Warehouse-Native Analytics', href: docsUrl('api/warehouse-analytics'), desc: 'Query Snowflake/BigQuery directly' },
       { label: 'Guided Experiment Builder', href: docsUrl('guides/experiment-wizard'), desc: '5-step draft-and-submit API' },
-      { label: 'Interaction Detection', href: docsUrl('api/interaction-detection'), desc: 'Detect and handle experiment interactions' },
+      { label: 'Interaction Detection', href: docsUrl('api/interaction-detection'), desc: 'Beta: find experiments that share users' },
     ],
   },
   {
