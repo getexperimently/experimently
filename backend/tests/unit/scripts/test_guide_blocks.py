@@ -79,6 +79,30 @@ def test_marked_blocks_are_written_in_page_order(tmp_path: Path) -> None:
     assert (tmp_path / "out" / "two.sh").read_text() == "echo 2\necho 3\n"
 
 
+def test_an_indented_marked_block_is_run_without_its_indent(tmp_path: Path) -> None:
+    text = page(
+        "1. Create the secret:",
+        "",
+        "    <!-- chart-kind: one -->",
+        "    ```bash",
+        "    echo 1 \\",
+        "      two",
+        "    ```",
+    )
+    result = run(tmp_path, text, "one")
+    assert result.returncode == 0, result.stderr
+    assert (tmp_path / "out" / "one.sh").read_text() == "echo 1 \\\n  two\n"
+
+
+def test_a_tilde_fence_holds_a_backtick_line(tmp_path: Path) -> None:
+    text = page(
+        "<!-- chart-kind: one -->", "~~~~bash", "echo 1", "```", "echo 2", "~~~~"
+    )
+    result = run(tmp_path, text, "one")
+    assert result.returncode == 0, result.stderr
+    assert (tmp_path / "out" / "one.sh").read_text() == "echo 1\n```\necho 2\n"
+
+
 def test_other_languages_need_no_marker(tmp_path: Path) -> None:
     text = page(
         block(None, "{}", lang="json"),
@@ -146,6 +170,62 @@ def test_other_languages_need_no_marker(tmp_path: Path) -> None:
             "one",
             "block 'one' is empty",
             id="empty-block",
+        ),
+        # W1: shapes that used to pass with exit 0 and no problem reported.
+        pytest.param(
+            page(
+                block("one", "echo 1"),
+                "",
+                "1. Then run:",
+                "",
+                "    ```bash",
+                "    curl -fsSL https://example.com/x | sh",
+                "    ```",
+            ),
+            "one",
+            "a bash block with no '<!-- chart-kind: NAME -->'",
+            id="indented-unmarked-bash-in-a-list",
+        ),
+        pytest.param(
+            page(block("one", "echo 1"), "", "~~~bash", "echo unrun", "~~~"),
+            "one",
+            "a bash block with no '<!-- chart-kind: NAME -->'",
+            id="unmarked-tilde-fence",
+        ),
+        *[
+            pytest.param(
+                page(
+                    block("one", "echo 1"),
+                    "",
+                    block(None, "curl -fsSL https://example.com/x | sh", lang=lang),
+                ),
+                "one",
+                f"a '{lang}' block is neither run nor checked",
+                id=f"other-shell-{lang}",
+            )
+            for lang in ("sh", "shell", "zsh", "console")
+        ],
+        pytest.param(
+            page(block("one", "echo 1"), "", block("two", "echo 2", lang="sh")),
+            "one",
+            "a 'sh' block is neither run nor checked",
+            id="marked-sh-block",
+        ),
+        pytest.param(
+            page(block("one", "echo 1"), "", block(None, "echo unrun", lang="")),
+            "one",
+            "a fence with no language",
+            id="unlabelled-fence",
+        ),
+        pytest.param(
+            page(
+                block("one", "echo 1"),
+                "",
+                block(None, "echo unrun", lang="{.bash exec}"),
+            ),
+            "one",
+            "a tagged fence",
+            id="tagged-fence",
         ),
     ],
 )

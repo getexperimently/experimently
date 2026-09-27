@@ -19,7 +19,11 @@ Usage::
 writes ``DIR/<name>.sh`` for every marked block and exits 0 only when:
 
 * every ``bash`` fence on the page is marked, so a block cannot be added to the
-  page without the job either running it or failing;
+  page without the job either running it or failing. Fences are found at any
+  indentation (a list item's) and with backticks or tildes;
+* no fence is unlabelled, tagged (``{.bash ...}``) or in another shell dialect
+  (``sh``, ``shell``, ``zsh``, ``console``, ...): each of those would be a
+  command on the page that nothing runs;
 * every marker sits directly above a ``bash`` fence, and names a block once;
 * the marked names, in page order, equal ``--expect`` exactly -- the job's own
   list of what it runs, so a block that is renamed or dropped fails here
@@ -36,14 +40,46 @@ import re
 import sys
 from typing import List, Tuple
 
-MARKER = re.compile(r"^<!-- chart-kind: ([a-z][a-z0-9-]*) -->$")
+MARKER = re.compile(r"^[ \t]*<!-- chart-kind: ([a-z][a-z0-9-]*) -->[ \t]*$")
 LOOSE_MARKER = re.compile(r"chart-kind:")
-FENCE_OPEN = re.compile(r"^```(\S*)")
-FENCE_CLOSE = re.compile(r"^```\s*$")
+# A fence at any indentation (inside a list item it is indented), of backticks
+# or tildes, three or more. The closing fence is the same character, at least
+# as long, with nothing after it.
+FENCE_OPEN = re.compile(r"^([ \t]*)(`{3,}|~{3,})[ \t]*(.*?)[ \t]*$")
+# Shell dialects other than bash: a block in one of them would be neither run
+# nor marked, so they are refused on this page; write `bash`, with a marker.
+OTHER_SHELLS = frozenset(
+    {
+        "sh",
+        "shell",
+        "zsh",
+        "console",
+        "shell-session",
+        "sh-session",
+        "shellsession",
+        "ksh",
+        "fish",
+        "powershell",
+        "ps1",
+        "pwsh",
+        "bat",
+        "cmd",
+    }
+)
+
+
+def _closes(line: str, fence: str) -> bool:
+    stripped = line.strip()
+    return len(stripped) >= len(fence) and set(stripped) == {fence[0]}
 
 
 def extract(text: str, page: str) -> Tuple[List[Tuple[str, str]], List[str]]:
-    """Return ``([(name, body), ...], problems)`` for one page's text."""
+    """Return ``([(name, body), ...], problems)`` for one page's text.
+
+    Every fence names a language. ``bash`` needs a marker; other shell
+    dialects and an unlabelled fence are refused (use ``text`` for output);
+    any other language (``text``, ``json``, ``yaml``, ...) is left alone.
+    """
     lines = text.splitlines()
     blocks: List[Tuple[str, str]] = []
     problems: List[str] = []
@@ -53,14 +89,35 @@ def extract(text: str, page: str) -> Tuple[List[Tuple[str, str]], List[str]]:
         line = lines[i]
         opened = FENCE_OPEN.match(line)
         if opened:
-            info = opened.group(1)
+            indent, fence, info_string = opened.groups()
+            info = info_string.split()[0] if info_string else ""
             body: List[str] = []
             j = i + 1
-            while j < len(lines) and not FENCE_CLOSE.match(lines[j]):
-                body.append(lines[j])
+            while j < len(lines) and not _closes(lines[j], fence):
+                body_line = lines[j]
+                body.append(
+                    body_line[len(indent) :]
+                    if body_line.startswith(indent)
+                    else body_line
+                )
                 j += 1
             if j == len(lines):
                 problems.append(f"{page}:{i + 1}: a fence that never closes")
+            if not info:
+                problems.append(
+                    f"{page}:{i + 1}: a fence with no language; name one "
+                    "(`bash` with a marker to run it, `text` for output)"
+                )
+            elif info.startswith("{"):
+                problems.append(
+                    f"{page}:{i + 1}: a tagged fence '{info_string}'; this page's blocks "
+                    "are plain `bash` with a '<!-- chart-kind: NAME -->' marker"
+                )
+            elif info.lower() in OTHER_SHELLS:
+                problems.append(
+                    f"{page}:{i + 1}: a '{info}' block is neither run nor checked; "
+                    "write it as `bash` with a '<!-- chart-kind: NAME -->' marker"
+                )
             if info == "bash":
                 if pending is None:
                     problems.append(

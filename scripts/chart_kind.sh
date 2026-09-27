@@ -128,10 +128,12 @@ do_load() {
     docker tag "$API_IMAGE" "$API_REPO:$tag"
     docker tag "$WEB_IMAGE" "$WEB_REPO:$tag"
     kind load docker-image --name "$CLUSTER" "$API_REPO:$tag" "$WEB_REPO:$tag"
-    {
-        echo "api=$(docker image inspect --format '{{.Id}}' "$API_REPO:$tag")"
-        echo "web=$(docker image inspect --format '{{.Id}}' "$WEB_REPO:$tag")"
-    } >"$WORK/images.txt"
+    # Assigned first: `echo "x=$(cmd)"` succeeds when cmd fails.
+    local api web
+    api=$(docker image inspect --format '{{.Id}}' "$API_REPO:$tag")
+    web=$(docker image inspect --format '{{.Id}}' "$WEB_REPO:$tag")
+    : "${api:?no image id for $API_REPO:$tag}" "${web:?no image id for $WEB_REPO:$tag}"
+    printf 'api=%s\nweb=%s\n' "$api" "$web" >"$WORK/images.txt"
     cat "$WORK/images.txt"
 }
 
@@ -265,13 +267,15 @@ assert_migrations() {
 }
 
 assert_no_restarts() {
-    local ns=$1 restarts
+    local ns=$1 counts restarts
     kubectl get pods -n "$ns" -o wide
-    restarts=$(kubectl get pods -n "$ns" \
-        -o jsonpath='{range .items[*]}{range .status.initContainerStatuses[*]}{.restartCount}{"\n"}{end}{range .status.containerStatuses[*]}{.restartCount}{"\n"}{end}{end}' |
-        awk '{s += $1} END {print s + 0}')
+    counts=$(kubectl get pods -n "$ns" \
+        -o jsonpath='{range .items[*]}{range .status.initContainerStatuses[*]}{.restartCount}{"\n"}{end}{range .status.containerStatuses[*]}{.restartCount}{"\n"}{end}{end}')
+    # An empty namespace sums to 0 too; that is not "no restarts".
+    [ -n "$counts" ] || fail "$ns: no pods or container statuses to check for restarts"
+    restarts=$(printf '%s\n' "$counts" | awk '{s += $1} END {print s + 0}')
     [ "$restarts" -eq 0 ] || fail "$ns: $restarts container restart(s)"
-    say "$ns: 0 restarts"
+    say "$ns: 0 restarts in $(printf '%s\n' "$counts" | grep -c .) containers"
 }
 
 secret_state() {
