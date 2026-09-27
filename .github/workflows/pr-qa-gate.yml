@@ -920,6 +920,40 @@ jobs:
           echo "full image: no tests, no CDK, no dashboard code"
           '
 
+      # The LLM features import their provider SDKs inside functions, so an
+      # image without them boots, reports healthy, and fails every LLM call at
+      # request time -- which is how both images shipped with neither
+      # `anthropic` nor `openai` (#196), under a unit suite that mocked them.
+      # The list is DERIVED from the four files that make a real provider call
+      # (scripts/llm_sdk_imports.py walks every import, function-local ones
+      # included), the same list backend/tests/unit/scripts/test_llm_sdk_imports.py
+      # checks in the test venv. Here it is checked in the images, which
+      # install runtime.lock rather than backend/requirements.txt: a pin added
+      # to one and not the other passes the unit test and fails this.
+      # `import`, not find_spec, so an SDK whose own dependency is missing
+      # fails too. google.* is excluded by the script (the Gemini provider is
+      # separate work) and printed, so the exclusion is never silent.
+      - name: LLM call paths import in both images
+        run: |
+          set -euo pipefail
+          LLM_IMPORTS="$(python3 scripts/llm_sdk_imports.py --oneline)"
+          echo "LLM call-path imports: $LLM_IMPORTS"
+          for image in experimently-api:core experimently-api:full; do
+            docker run --rm -e LLM_IMPORTS="$LLM_IMPORTS" --entrypoint python "$image" -c '
+          import importlib, os
+          names = os.environ["LLM_IMPORTS"].split()
+          assert {"anthropic", "openai"} <= set(names), names
+          failed = []
+          for name in names:
+              try:
+                  importlib.import_module(name)
+              except Exception as exc:
+                  failed.append("%s: %s: %s" % (name, type(exc).__name__, exc))
+          assert not failed, "missing from the image:\n  " + "\n  ".join(failed)
+          print("%d LLM call-path imports load" % len(names))
+          '
+          done
+
       # Every job here runs ENVIRONMENT=development, where the hardening
       # validators are all off -- so nothing ever ran this image the way a
       # deployment does. `modules.register(hooks)` builds the modules' settings
@@ -1049,6 +1083,21 @@ jobs:
           curl -sf localhost:3000/health/ready >/dev/null
           test "$(curl -sL -o /dev/null -w '%{http_code}' localhost:3000/api/v1/experiments/)" = "401"
 
+      # The step above proves the SDKs import; this proves they WORK in the
+      # image: a POST /complete per provider goes through the real SDK -- client
+      # construction from ANTHROPIC_* / OPENAI_*, request, response parsing --
+      # to tests/llm/stub_provider.py on the compose network, and must come
+      # back 200 with the stub's text. The placeholder keys are set on the
+      # re-created api container by the override file only; no job in this
+      # repository sets a real LLM key, so nothing here can reach a provider.
+      # The ALB step below re-creates the api again without them.
+      - name: LLM proxy through the real SDKs (stub provider)
+        run: |
+          set -euo pipefail
+          docker compose -f docker-compose.yml -f tests/llm/docker-compose.llm-stub.yml \
+            up -d --wait --no-build api llm-stub
+          bash tests/llm/smoke.sh
+
       # The steps above run with the API's Host check OFF (development, no
       # PUBLIC_BASE_URL), so their 401 says nothing about the deployed shape,
       # where a Host the API does not serve is refused with 400 on every
@@ -1077,8 +1126,8 @@ jobs:
 
       - name: Container logs (on failure)
         if: failure()
-        run: docker compose -f docker-compose.yml -f tests/alb/docker-compose.alb.yml logs --no-color --tail=200
+        run: docker compose -f docker-compose.yml -f tests/alb/docker-compose.alb.yml -f tests/llm/docker-compose.llm-stub.yml logs --no-color --tail=200
 
       - name: Tear down
         if: always()
-        run: docker compose -f docker-compose.yml -f tests/alb/docker-compose.alb.yml down -v --remove-orphans
+        run: docker compose -f docker-compose.yml -f tests/alb/docker-compose.alb.yml -f tests/llm/docker-compose.llm-stub.yml down -v --remove-orphans

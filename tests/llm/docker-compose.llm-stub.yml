@@ -1,0 +1,39 @@
+# tests/llm/docker-compose.llm-stub.yml -- the API with its LLM providers
+# pointed at a local stub.
+#
+# An override for the repository's docker-compose.yml, used by the Docker
+# Smoke job (.github/workflows/pr-qa-gate.yml, "LLM proxy through the real
+# SDKs"):
+#
+#   docker compose -f docker-compose.yml -f tests/llm/docker-compose.llm-stub.yml \
+#     up -d --wait --no-build api llm-stub
+#   bash tests/llm/smoke.sh
+#
+# The keys are placeholders: the stub accepts any non-empty credential, and
+# with the base URLs pointing at it nothing leaves the compose network. They
+# are set only on this re-created api container, never in the workflow's
+# environment.
+
+services:
+  llm-stub:
+    # The API image's own python: no extra image to pull, and nothing here
+    # depends on the image under test beyond the interpreter.
+    image: experimently-api:${EXPERIMENTLY_IMAGE_TAG:-${EXPERIMENTLY_PROFILE:-core}}
+    entrypoint: ["python", "/stub/stub_provider.py", "8080"]
+    volumes:
+      - ./tests/llm/stub_provider.py:/stub/stub_provider.py:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz')"]
+      interval: 2s
+      timeout: 5s
+      retries: 15
+
+  api:
+    environment:
+      ANTHROPIC_BASE_URL: http://llm-stub:8080
+      ANTHROPIC_API_KEY: stub-not-a-key
+      OPENAI_BASE_URL: http://llm-stub:8080/v1
+      OPENAI_API_KEY: stub-not-a-key
+    depends_on:
+      llm-stub:
+        condition: service_healthy
