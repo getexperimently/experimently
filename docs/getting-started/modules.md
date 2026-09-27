@@ -57,7 +57,7 @@ the dashboard checks:
 | SSO / SAML / OIDC | `sso` | External identity providers with just-in-time provisioning and role mapping |
 | HIPAA | `hipaa` | PHI encryption, six-year PHI audit retention, BAA records |
 | Compliance reporting | `compliance` | SOC 2 / ISO 27001 reports, signed audit exports |
-| Warehouse-native analytics | `warehouse` | Query Snowflake, BigQuery, Redshift, Databricks, ClickHouse or MySQL in place |
+| Warehouse analytics | `warehouse` | Being rebuilt (#312): no endpoints today, only the `warehouse_connections` table |
 | Third-party integrations | `integrations` | Jira, Salesforce and GitHub |
 | Real-time counters | `counters` | DynamoDB-backed live assignment and conversion counters |
 | ETL | `etl` | Glue crawlers, Athena partitions and scheduled jobs |
@@ -110,11 +110,10 @@ checkout and proves it builds, boots and passes its tests. `GET
 the presence of `modules/` does.
 
 The modules also have dependencies of their own, in `modules/requirements.txt`
-(locked in `modules/requirements.lock`): SAML/OIDC and the warehouse drivers,
-which `backend/requirements.txt` deliberately does not carry. Every one of
-those imports is guarded, so a full profile without them starts and serves
-every route, and then refuses the SAML flow and blocks on warehouse retries —
-install them alongside the backend pins:
+(locked in `modules/requirements.lock`): SAML/OIDC, which
+`backend/requirements.txt` deliberately does not carry. A full profile without
+them starts and serves every route, and then refuses the SAML flow — install
+them alongside the backend pins:
 
 ```{.bash skip reason="dev: installs the backend's and the modules' Python dependencies into a development checkout"}
 pip install -r backend/requirements.txt -r modules/requirements.txt

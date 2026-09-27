@@ -5,9 +5,7 @@ Tests cover:
 - ETLJobRequest date format validation
 - ETLJobType enum values
 - GlueJobStatus enum values
-- AthenaQueryRequest length constraints
 - ETLJobResponse field handling
-- AthenaQueryResult defaults
 - PartitionInfo structure
 - GlueCrawlerStatus structure
 """
@@ -16,8 +14,6 @@ import pytest
 from pydantic import ValidationError
 
 from modules.backend.app.schemas.etl import (
-    AthenaQueryRequest,
-    AthenaQueryResult,
     ETLJobRequest,
     ETLJobResponse,
     ETLJobType,
@@ -196,84 +192,6 @@ class TestETLJobResponse:
         )
         assert resp.status == GlueJobStatus.FAILED
         assert "OutOfMemoryError" in resp.error_message
-
-
-# ---------------------------------------------------------------------------
-# AthenaQueryRequest tests
-# ---------------------------------------------------------------------------
-
-
-class TestAthenaQueryRequest:
-    def test_valid_query(self):
-        """A valid SQL query is accepted."""
-        req = AthenaQueryRequest(sql="SELECT * FROM raw_events LIMIT 10")
-        assert req.database == "experimentation"
-        assert req.output_location is None
-
-    def test_sql_too_short(self):
-        """SQL shorter than 10 characters is rejected."""
-        with pytest.raises(ValidationError):
-            AthenaQueryRequest(sql="SELECT 1")  # 8 chars
-
-    def test_sql_too_long(self):
-        """SQL longer than 10000 characters is rejected."""
-        with pytest.raises(ValidationError):
-            AthenaQueryRequest(sql="SELECT " + "x" * 9994)  # > 10000
-
-    def test_sql_exactly_min_length(self):
-        """SQL of exactly 10 characters is accepted."""
-        req = AthenaQueryRequest(sql="SELECT 1=1")
-        assert len(req.sql) == 10
-
-    def test_custom_database(self):
-        """Custom database name overrides the default."""
-        req = AthenaQueryRequest(
-            sql="SELECT COUNT(*) FROM events",
-            database="analytics_db",
-        )
-        assert req.database == "analytics_db"
-
-    def test_custom_output_location(self):
-        """Custom S3 output location is accepted."""
-        req = AthenaQueryRequest(
-            sql="SELECT COUNT(*) FROM events",
-            output_location="s3://my-bucket/athena-results/",
-        )
-        assert req.output_location == "s3://my-bucket/athena-results/"
-
-
-# ---------------------------------------------------------------------------
-# AthenaQueryResult tests
-# ---------------------------------------------------------------------------
-
-
-class TestAthenaQueryResult:
-    def test_defaults(self):
-        """AthenaQueryResult has sensible defaults."""
-        result = AthenaQueryResult(
-            query_execution_id="qe-abc",
-            status="SUCCEEDED",
-        )
-        assert result.rows == []
-        assert result.column_names == []
-        assert result.rows_returned == 0
-        assert result.execution_time_ms is None
-        assert result.data_scanned_bytes is None
-
-    def test_with_rows(self):
-        """AthenaQueryResult stores rows and column names."""
-        result = AthenaQueryResult(
-            query_execution_id="qe-xyz",
-            status="SUCCEEDED",
-            rows=[{"col1": "val1"}, {"col1": "val2"}],
-            column_names=["col1"],
-            rows_returned=2,
-            execution_time_ms=1234,
-            data_scanned_bytes=8192,
-        )
-        assert result.rows_returned == 2
-        assert len(result.rows) == 2
-        assert result.execution_time_ms == 1234
 
 
 # ---------------------------------------------------------------------------
