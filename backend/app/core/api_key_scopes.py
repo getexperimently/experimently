@@ -16,13 +16,13 @@ entries: ``"sdk:ruleset"`` is granted by ``"read, sdk:ruleset "`` but not by
 prefix, wildcard or substring matching.
 
 This module only parses. Whether a route requires a scope is decided where the
-route is declared.
+route is declared (``backend/app/api/sdk_scope.py`` for ``sdk:ruleset``).
 """
 
 from typing import Iterable, List, Optional
 
-# The one scope name the platform intends to enforce: it will gate the
-# server-side local-evaluation ruleset download.
+# The one scope name the platform enforces: it gates the server-side
+# local-evaluation ruleset download (GET /api/v1/sdk/ruleset).
 SDK_RULESET_SCOPE = "sdk:ruleset"
 
 

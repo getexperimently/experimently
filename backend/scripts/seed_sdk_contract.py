@@ -7,8 +7,14 @@ Creates (idempotently):
 - an ACTIVE A/B experiment with public key ``sdk_contract_ab`` (variants
   ``control`` / ``treatment`` at 50/50, primary metric ``purchase``),
 - an ACTIVE feature flag ``sdk_contract_flag`` at 100% rollout,
-- an API key named ``sdk-contract-smoke`` whose plaintext is written to
-  ``tests/sdk-contract/live/.api_key`` (0600, gitignored).
+- an API key named ``sdk-contract-smoke``, with no ``sdk:ruleset`` scope,
+  whose plaintext is written to ``tests/sdk-contract/live/.api_key``;
+- a second key of the same user, ``sdk-contract-local``, with the
+  ``sdk:ruleset`` scope (server-side local evaluation), written to
+  ``tests/sdk-contract/live/.api_key_local``.
+
+Both files are 0600 and gitignored. Two keys, so the live contract can show
+the ruleset endpoint refusing the first and serving the second.
 
 Then run ``python tests/sdk-contract/live/run_live_contract.py`` against a
 backend pointed at the same database.
@@ -18,8 +24,9 @@ Usage:
     python backend/scripts/seed_sdk_contract.py [--reset]
 
 Environment: the same POSTGRES_* variables as the other seed scripts.
-``SDK_CONTRACT_API_KEY`` fixes the plaintext key (otherwise one is generated);
-``SDK_CONTRACT_KEY_DIR`` redirects the ``.api_key`` file (containers).
+``SDK_CONTRACT_API_KEY`` and ``SDK_CONTRACT_LOCAL_API_KEY`` fix the plaintext
+keys (otherwise they are generated); ``SDK_CONTRACT_KEY_DIR`` redirects the key
+files (containers).
 """
 
 from __future__ import annotations
@@ -65,13 +72,17 @@ from backend.scripts.seed_demo_data import (
 EXPERIMENT_KEY = "sdk_contract_ab"
 FLAG_KEY = "sdk_contract_flag"
 API_KEY_NAME = "sdk-contract-smoke"
+LOCAL_API_KEY_NAME = "sdk-contract-local"
+LOCAL_API_KEY_SCOPES = "sdk:ruleset"
 # SDK_CONTRACT_KEY_DIR lets containers (docker-compose SEED=...,sdk-contract)
-# redirect the generated key away from the read-only source tree.
-KEY_FILE = (
-    Path(os.environ["SDK_CONTRACT_KEY_DIR"]) / ".api_key"
+# redirect the generated keys away from the read-only source tree.
+KEY_DIR = (
+    Path(os.environ["SDK_CONTRACT_KEY_DIR"])
     if os.environ.get("SDK_CONTRACT_KEY_DIR")
-    else PROJECT_ROOT / "tests" / "sdk-contract" / "live" / ".api_key"
+    else PROJECT_ROOT / "tests" / "sdk-contract" / "live"
 )
+KEY_FILE = KEY_DIR / ".api_key"
+LOCAL_KEY_FILE = KEY_DIR / ".api_key_local"
 
 
 def seed_experiment(db, admin_user) -> Experiment:
@@ -153,39 +164,67 @@ def seed_flag(db, admin_user) -> FeatureFlag:
     return flag
 
 
-def seed_api_key(db, admin_user) -> str:
+def seed_api_key(
+    db,
+    admin_user,
+    name: str = API_KEY_NAME,
+    key_file: Path = KEY_FILE,
+    scopes: Optional[str] = "read,write",
+    env_var: str = "SDK_CONTRACT_API_KEY",
+) -> str:
+    """Create (or keep) the named key and write its plaintext to *key_file*.
+
+    An existing key is kept only when the file still holds its plaintext and
+    its scopes are the ones asked for; otherwise it is replaced.
+    """
     existing = (
         db.query(APIKey)
-        .filter(APIKey.name == API_KEY_NAME, APIKey.user_id == admin_user.id)
+        .filter(APIKey.name == name, APIKey.user_id == admin_user.id)
         .first()
     )
-    if existing is not None and KEY_FILE.exists():
-        plaintext = KEY_FILE.read_text().strip()
-        if plaintext and hash_api_key(plaintext) == existing.key:
-            print(f"  API key kept ({_display(KEY_FILE)}).")
+    if existing is not None and key_file.exists():
+        plaintext = key_file.read_text().strip()
+        if (
+            plaintext
+            and hash_api_key(plaintext) == existing.key
+            and existing.scopes == scopes
+        ):
+            print(f"  API key '{name}' kept ({_display(key_file)}).")
             return plaintext
-        print("  Key file does not match the stored hash; rotating.")
+        print(f"  API key '{name}' does not match its file or scopes; rotating.")
     if existing is not None:
         db.delete(existing)
         db.commit()
 
-    plaintext = os.environ.get("SDK_CONTRACT_API_KEY") or generate_api_key()
+    plaintext = os.environ.get(env_var) or generate_api_key()
     db.add(
         APIKey(
             user_id=admin_user.id,
             key=hash_api_key(plaintext),
-            name=API_KEY_NAME,
+            name=name,
             description="Live SDK contract tests",
-            scopes="read,write",
+            scopes=scopes,
             is_active=True,
         )
     )
     db.commit()
-    KEY_FILE.parent.mkdir(parents=True, exist_ok=True)
-    KEY_FILE.write_text(plaintext + "\n")
-    os.chmod(KEY_FILE, 0o600)
-    print(f"  Created API key, written to {_display(KEY_FILE)}.")
+    key_file.parent.mkdir(parents=True, exist_ok=True)
+    key_file.write_text(plaintext + "\n")
+    os.chmod(key_file, 0o600)
+    print(f"  Created API key '{name}', written to {_display(key_file)}.")
     return plaintext
+
+
+def seed_local_api_key(db, admin_user) -> str:
+    """The second key, scoped for the local-evaluation ruleset."""
+    return seed_api_key(
+        db,
+        admin_user,
+        name=LOCAL_API_KEY_NAME,
+        key_file=LOCAL_KEY_FILE,
+        scopes=LOCAL_API_KEY_SCOPES,
+        env_var="SDK_CONTRACT_LOCAL_API_KEY",
+    )
 
 
 def _display(path: Path) -> str:
@@ -207,11 +246,14 @@ def reset(db) -> None:
     if flag:
         db.query(Event).filter(Event.feature_flag_id == flag.id).delete()
         db.delete(flag)
-    db.query(APIKey).filter(APIKey.name == API_KEY_NAME).delete()
+    db.query(APIKey).filter(APIKey.name.in_([API_KEY_NAME, LOCAL_API_KEY_NAME])).delete(
+        synchronize_session=False
+    )
     db.commit()
-    if KEY_FILE.exists():
-        KEY_FILE.unlink()
-    print("  Removed the SDK contract experiment, flag, API key and key file.")
+    for key_file in (KEY_FILE, LOCAL_KEY_FILE):
+        if key_file.exists():
+            key_file.unlink()
+    print("  Removed the SDK contract experiment, flag, API keys and key files.")
 
 
 def main(argv: Optional[list[str]] = None) -> int:
@@ -234,6 +276,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         seed_experiment(db, admin)
         seed_flag(db, admin)
         seed_api_key(db, admin)
+        seed_local_api_key(db, admin)
     print("Done. Run: python tests/sdk-contract/live/run_live_contract.py")
     return 0
 

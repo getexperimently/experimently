@@ -175,10 +175,13 @@ DEFAULT_RATE_LIMIT: Tuple[int, int] = (300, 60)  # 300 req/min
 # a minute from a single IP, so these get a much higher per-IP ceiling
 # (``settings.SDK_RATE_LIMIT_PER_MINUTE``, default 6000).  Prefix matching is
 # needed because flag evaluation carries the flag key in the path.
+# ``/api/v1/sdk/`` is the server-side SDKs' own surface (the local-evaluation
+# ruleset): a fleet of servers behind one NAT polls it from one address.
 SDK_PATH_PREFIXES: Tuple[str, ...] = (
     "/api/v1/tracking/",
     "/api/v1/feature-flags/evaluate/",
     "/api/v1/feature-flags/user/",
+    "/api/v1/sdk/",
 )
 DEFAULT_SDK_RATE_LIMIT_PER_MINUTE = 6000
 
