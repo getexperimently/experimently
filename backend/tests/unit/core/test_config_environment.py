@@ -263,7 +263,25 @@ class TestHardenedSecrets:
 
     @pytest.mark.regression
     @pytest.mark.parametrize("env", ["staging", "production", "prod"])
-    @pytest.mark.parametrize("flag", ["true", "1", "yes", "TRUE"])
+    @pytest.mark.parametrize(
+        "flag",
+        # Every spelling pydantic's bool reads as True, and (failing closed)
+        # values it cannot read at all.
+        [
+            "true",
+            "1",
+            "yes",
+            "TRUE",
+            "on",
+            "t",
+            "y",
+            "On",
+            "T",
+            "Y",
+            " true",
+            "enabled",
+        ],
+    )
     def test_testing_flag_is_refused_in_hardened_environments(
         self, env, flag, monkeypatch
     ):
@@ -300,9 +318,11 @@ class TestHardenedSecrets:
         monkeypatch.setenv("TESTING", "true")
         assert Settings(_env_file=None, ENVIRONMENT=env).ENVIRONMENT == env
 
-    def test_a_blank_testing_flag_is_not_set(self, monkeypatch):
-        """``TESTING=`` (as in the issue #91 command line) is not the flag."""
-        monkeypatch.setenv("TESTING", "")
+    @pytest.mark.parametrize("flag", ["", "false", "0", "off", "N", "No"])
+    def test_an_empty_or_false_testing_flag_is_not_set(self, flag, monkeypatch):
+        """``TESTING=`` (as in the issue #91 command line) is not the flag, and
+        neither is anything pydantic's bool reads as False."""
+        monkeypatch.setenv("TESTING", flag)
         assert Settings(
             _env_file=None, ENVIRONMENT="production", **_STRONG
         ).is_production

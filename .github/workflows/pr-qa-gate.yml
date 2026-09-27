@@ -1055,6 +1055,12 @@ jobs:
           expect_refusal experimently-api:full testenv.log -e ENVIRONMENT=test
           grep -qxF "[preflight] ENVIRONMENT=test is for the test runner, not this image: set ENVIRONMENT=production (or staging; development only for a local trial)." testenv.log
 
+          # TESTING with production: refused in one line, even with every other
+          # setting good (the settings would otherwise refuse it only at import,
+          # after the database wait and the migrations).
+          expect_refusal experimently-api:full testing.log "${good[@]}" -e TESTING=true
+          grep -qxF "[preflight] TESTING is for the test runner and cannot be combined with ENVIRONMENT=production. Remove TESTING from this deployment's configuration." testing.log
+
           # The good set passes the check (`true` stands in for the server;
           # no database, so no wait and no bootstrap).
           docker run --rm "${good[@]}" -e WAIT_FOR_DB=false -e RUN_MIGRATIONS=false \
@@ -1063,7 +1069,7 @@ jobs:
           # definitions set instead of ENVIRONMENT.
           docker run --rm -e APP_ENV=dev -e WAIT_FOR_DB=false -e RUN_MIGRATIONS=false \
             experimently-api:core true
-          rm -f full.log core.log url.log noenv.log testenv.log
+          rm -f full.log core.log url.log noenv.log testenv.log testing.log
           echo "start-up check: every refusal fired, and a good set starts"
 
       - name: Build dashboard image

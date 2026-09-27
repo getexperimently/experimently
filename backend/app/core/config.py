@@ -34,6 +34,7 @@ from backend.app.core.settings_rules import (
     public_base_url_error,
     secret_is_placeholder,
     superuser_password_is_weak,
+    testing_refusal,
 )
 from backend.app.core.settings_rules import (
     canonical_environment_quiet as _canonical_environment_quiet,
@@ -148,11 +149,6 @@ DEFAULT_ENV_FILE: str = ENV_FILES["development"]
 def _secret_is_placeholder(value: str) -> bool:
     """True when *value* is a committed/well-known placeholder secret."""
     return secret_is_placeholder(value)
-
-
-def _testing_flag_set() -> bool:
-    """True when the process environment sets ``TESTING`` (the test runner's flag)."""
-    return os.getenv("TESTING", "").strip().lower() in ("1", "true", "yes")
 
 
 def _hardening_required(info: ValidationInfo) -> bool:
@@ -669,8 +665,6 @@ class Settings(BaseSettings):
         environments require.  A ``before`` validator so that this is the
         message, not whichever setting it would otherwise have affected.
         """
-        if not _testing_flag_set():
-            return data
         environment: Any = None
         if isinstance(data, dict):
             environment = data.get("ENVIRONMENT")
@@ -678,12 +672,11 @@ class Settings(BaseSettings):
             environment = cls.model_fields["ENVIRONMENT"].default
         if isinstance(environment, str):
             environment = canonical_environment_quiet(environment)
-        if environment in HARDENED_ENVIRONMENTS:
-            raise ValueError(
-                "TESTING is for the test runner and cannot be combined with "
-                f"ENVIRONMENT={environment}. Remove TESTING from this "
-                "deployment's configuration."
-            )
+        # The rule and its message are settings_rules', which the container's
+        # start-up check applies too.
+        refusal = testing_refusal(environment, os.environ.get("TESTING"))
+        if refusal:
+            raise ValueError(refusal)
         return data
 
     @model_validator(mode="after")

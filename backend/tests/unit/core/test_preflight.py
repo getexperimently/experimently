@@ -241,6 +241,55 @@ def test_the_test_environment_is_refused_in_one_line(environ, name):
     assert "\n" not in text
 
 
+_TESTING_REFUSAL = (
+    "TESTING is for the test runner and cannot be combined with "
+    "ENVIRONMENT={}. Remove TESTING from this deployment's configuration."
+)
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("environment", ["production", "staging"])
+@pytest.mark.parametrize("flag", ["true", "1", "on", "T", "Y", "yes", "enabled"])
+def test_testing_with_a_hardened_environment_is_refused_in_one_line(environment, flag):
+    """The settings refuse TESTING with staging/production at import. The
+    check must refuse it first, before the database wait and the migrations,
+    even when every other setting is good."""
+    problems = check(with_(ENVIRONMENT=environment, TESTING=flag))
+    expected = _TESTING_REFUSAL.format(environment)
+    assert problems == [expected]
+    assert preflight.render(problems) == f"[preflight] {expected}"
+
+
+def test_testing_through_the_legacy_app_env_is_refused_too():
+    problems = check(with_(ENVIRONMENT=None, APP_ENV="prod", TESTING="true"))
+    assert problems == [_TESTING_REFUSAL.format("production")]
+
+
+@pytest.mark.parametrize("flag", ["", "false", "0", "off", "N"])
+def test_an_empty_or_false_testing_flag_is_not_refused(flag):
+    assert check(with_(TESTING=flag)) == []
+
+
+def test_testing_in_development_is_not_refused():
+    assert check({"ENVIRONMENT": "development", "TESTING": "true"}) == []
+
+
+@pytest.mark.regression
+def test_main_exits_78_for_testing_in_production(capsys):
+    assert preflight.main(with_(TESTING="true")) == preflight.EX_CONFIG
+    err = capsys.readouterr().err
+    assert err == f"[preflight] {_TESTING_REFUSAL.format('production')}\n"
+
+
+@pytest.mark.regression
+def test_what_the_check_refuses_for_testing_the_settings_refuse_too():
+    env = with_(TESTING="on")
+    assert check(env)
+    result = _settings_build(env)
+    assert result.returncode != 0, result.stdout
+    assert "TESTING is for the test runner" in result.stderr, result.stderr[-2000:]
+
+
 @pytest.mark.regression
 def test_main_exits_78_for_the_test_environment(capsys):
     assert preflight.main({"ENVIRONMENT": "test"}) == preflight.EX_CONFIG

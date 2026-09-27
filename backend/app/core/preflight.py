@@ -17,7 +17,9 @@ What it refuses:
   runner's environment and not one the image runs in.  The image requires
   ENVIRONMENT to be set.  Also an ``ALLOWED_HOSTS`` entry that can never match
   (``*example.com``), which the settings refuse in every environment.
-* in staging and production -- ``SECRET_KEY``, ``FIRST_SUPERUSER_PASSWORD``
+* in staging and production -- ``TESTING`` set (the test runner's flag; one
+  line, and nothing else is listed, as the settings refuse it outright);
+  ``SECRET_KEY``, ``FIRST_SUPERUSER_PASSWORD``
   and (full profile) ``AUDIT_HMAC_KEY`` missing, too short or a published
   placeholder; ``PUBLIC_BASE_URL`` missing (unless ``ALLOWED_HOSTS`` names the
   hosts) or malformed; ``ALLOWED_HOSTS=*``; ``POSTGRES_SERVER`` (or
@@ -54,6 +56,7 @@ from backend.app.core.settings_rules import (
     public_base_url_error,
     secret_is_weak,
     superuser_password_is_weak,
+    testing_refusal,
 )
 
 #: ``EX_CONFIG`` from sysexits.h: "something was found in an unconfigured or
@@ -90,6 +93,7 @@ _ONE_LINE_REFUSALS = (
     ENVIRONMENT_UNSET,
     environment_is_test("ENVIRONMENT"),
     environment_is_test("APP_ENV"),
+    *(testing_refusal(environment, "true") for environment in HARDENED_ENVIRONMENTS),
 )
 
 _POSTGRES_SETTINGS = (
@@ -157,6 +161,12 @@ def check(
             f"{name}={_truncate(raw_environment or legacy)!r} is not an environment "
             f"this image knows. Use one of: {', '.join(IMAGE_ENVIRONMENTS)}."
         ]
+    # TESTING with staging/production: the settings refuse it outright
+    # (settings_rules.testing_refusal, the process environment only, as the
+    # settings read it), so nothing else is worth listing.
+    refusal = testing_refusal(environment, environ.get("TESTING"))
+    if refusal:
+        return [refusal]
     from_file = _dotenv(environment, root if root is not None else Path.cwd())
 
     def value(key: str) -> str:
