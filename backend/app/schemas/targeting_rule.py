@@ -4,10 +4,15 @@ Targeting rule schema models for validation and serialization.
 This module defines Pydantic models for targeting rule-related data structures.
 """
 
+import re
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+# Semantic version 2.0.0, from semver.org. A module constant, so the regex
+# call-site test (backend/tests/unit/core/test_regex_call_sites.py) accepts it.
+_SEMVER_PATTERN = r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$"
 
 
 class LogicalOperator(str, Enum):
@@ -152,10 +157,7 @@ class Condition(BaseModel):
 
         # Validate semantic version format
         if operator == OperatorType.SEMANTIC_VERSION:
-            import re
-
-            semver_pattern = r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$"
-            if not isinstance(value, str) or not re.match(semver_pattern, value):
+            if not isinstance(value, str) or not re.match(_SEMVER_PATTERN, value):
                 raise ValueError(
                     "SEMANTIC_VERSION operator requires value in semantic version format (e.g., '1.2.3')"
                 )
