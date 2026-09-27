@@ -386,6 +386,7 @@ class AuditService:
         flag_id: UUID,
         limit: int = 50,
         offset: int = 0,
+        user_id: Optional[UUID] = None,
     ) -> Tuple[List[AuditLog], int]:
         """
         Get all audit log entries for a specific feature flag, ordered by
@@ -396,11 +397,15 @@ class AuditService:
             flag_id: UUID of the feature flag
             limit: Maximum number of records to return
             offset: Number of records to skip (for pagination)
+            user_id: If given, only entries made by this user (the total
+                count is then of those entries only)
 
         Returns:
             Tuple[List[AuditLog], int]: (audit logs, total count)
         """
         query = db.query(AuditLog).filter(AuditLog.entity_id == flag_id)
+        if user_id is not None:
+            query = query.filter(AuditLog.user_id == user_id)
 
         total_count = query.count()
 

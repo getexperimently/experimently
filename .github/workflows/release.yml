@@ -55,6 +55,14 @@ concurrency:
 
 env:
   REGISTRY: ghcr.io
+  # The platforms each image family is built for -- the ONE place they are
+  # written. The build steps read these and so does the release-notes step, so
+  # the notes cannot describe a platform that was not built (#239: they said
+  # arm64 for a release after the arm64 variant was dropped). Comma-separated,
+  # as docker/build-push-action takes them. Adding a platform here is not
+  # enough on its own: see the header and #181 first.
+  API_PLATFORMS: linux/amd64
+  WEB_PLATFORMS: linux/amd64
 
 jobs:
   # ---------------------------------------------------------------------------
@@ -217,7 +225,7 @@ jobs:
           # See #181. Publishing it meant an arm64 host pulling `:core` got an
           # image that dies at import with nothing to explain why; without it,
           # Docker falls back to amd64 under emulation, which works.
-          platforms: linux/amd64
+          platforms: ${{ env.API_PLATFORMS }}
           push: true
           tags: ${{ steps.tags.outputs.tags }}
           build-args: |
@@ -260,15 +268,13 @@ jobs:
           DIGEST: ${{ steps.build.outputs.digest }}
         run: cosign sign --yes "${IMAGE}@${DIGEST}"
 
-      # NOTE, and it is stated in the release notes and the docs rather than
-      # glossed: syft is handed the multi-architecture index with no platform,
-      # so it resolves the runner's -- amd64 -- and one SBOM is attested
-      # against the whole index. An arm64 user's `cosign verify-attestation`
-      # therefore *succeeds* while listing amd64 packages. The two variants
-      # come from one Dockerfile and one hashed lock, so the contents are the
-      # same set of Python distributions, but the OS package layer is not
-      # identical and this should be per-platform. Tracked as a follow-up
-      # rather than claimed to be solved.
+      # NOTE: syft is handed the image with no platform, so it resolves the
+      # runner's -- amd64. With one platform in API_PLATFORMS that is the whole
+      # image. If a second is ever added, one SBOM would be attested against
+      # the whole multi-architecture index and the other variant's
+      # `cosign verify-attestation` would *succeed* while listing amd64
+      # packages; the release notes then say so (see `publish`), and the fix
+      # is a per-platform SBOM, not the note.
       - name: Generate the SBOM
         uses: anchore/sbom-action@v0
         with:
@@ -352,7 +358,7 @@ jobs:
         with:
           context: .
           file: frontend/Dockerfile
-          platforms: linux/amd64
+          platforms: ${{ env.WEB_PLATFORMS }}
           push: true
           tags: ${{ steps.tags.outputs.tags }}
           build-args: |
@@ -534,6 +540,35 @@ jobs:
           REPOSITORY: ${{ github.repository }}
         run: |
           set -euo pipefail
+          # The platform text is built from API_PLATFORMS / WEB_PLATFORMS, the
+          # values the build steps used, never typed here (#239).
+          code_list() {
+            local out="" p
+            IFS=',' read -ra ps <<< "$1"
+            for p in "${ps[@]}"; do
+              p="$(echo "$p" | tr -d '[:space:]')"
+              [ -n "$p" ] && out="${out:+$out, }\`$p\`"
+            done
+            echo "$out"
+          }
+          api_platforms="$(code_list "$API_PLATFORMS")"
+          web_platforms="$(code_list "$WEB_PLATFORMS")"
+          # Two statements, not `test -n a && test -n b`: under `set -e` a
+          # failure on the left of && does not stop the script.
+          if [ -z "$api_platforms" ] || [ -z "$web_platforms" ]; then
+            echo "::error::API_PLATFORMS or WEB_PLATFORMS is empty"
+            exit 1
+          fi
+          sbom_note="The same SBOMs are attached below."
+          if [[ "$API_PLATFORMS" == *,* ]]; then
+            sbom_note="$sbom_note Note that the API images' SBOM is generated
+          for the runner's platform and attested against the whole
+          multi-architecture index, so verifying any other variant succeeds
+          against that platform's package list. The variants are built from
+          one Dockerfile and one hashed dependency lock, so the Python
+          distributions are identical; the base OS package layer is not
+          separately described."
+          fi
           cat > notes.md <<EOF
           ## Images
 
@@ -544,8 +579,9 @@ jobs:
           docker pull ${WEB_IMAGE}:full-${VERSION}  # dashboard, full profile
           \`\`\`
 
-          API images are \`linux/amd64\` and \`linux/arm64\`; dashboard images are
-          \`linux/amd64\` (their payload is a static export, identical either way).
+          API images are built for ${api_platforms}; dashboard images for
+          ${web_platforms}. A host on any other architecture runs them under
+          emulation.
 
           ## Verifying
 
@@ -562,13 +598,7 @@ jobs:
             --certificate-oidc-issuer https://token.actions.githubusercontent.com
           \`\`\`
 
-          The same SBOMs are attached below. Note that the API images' SBOM is
-          generated for \`linux/amd64\`: it is attested against the whole
-          multi-architecture index, so verification of the \`arm64\` variant
-          succeeds against the \`amd64\` package list. The two are built from
-          one Dockerfile and one hashed dependency lock, so the Python
-          distributions are identical; the base OS package layer is not
-          separately described.
+          ${sbom_note}
           EOF
           cat notes.md
 

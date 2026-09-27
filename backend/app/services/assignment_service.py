@@ -754,6 +754,7 @@ class AssignmentService:
                 user_context=user_context,
                 validate_attributes=validate_attributes,
                 track_metrics=True,
+                owner=f"experiment:{getattr(experiment, 'id', None)}",
             )
 
             if matched_rule:

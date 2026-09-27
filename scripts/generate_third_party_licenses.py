@@ -232,6 +232,18 @@ _COPYLEFT_PATTERNS = [
     (re.compile(pattern, re.IGNORECASE), why) for pattern, why in COPYLEFT_FLAGS
 ]
 
+#: Third-party code compiled INTO a wheel, which pip-licenses cannot see: it
+#: reports the wheel's own licence only. Keyed by the canonical package name;
+#: rendered only while that package is in the shipped closure. Read from the
+#: wheel, not assumed: the google-re2 extension module carries abseil's symbols
+#: (statically linked, no shared-library dependency) and is built with pybind11.
+BUNDLED_COMPONENTS: dict[str, list[tuple[str, str]]] = {
+    "google-re2": [
+        ("abseil-cpp", "Apache-2.0"),
+        ("pybind11", "BSD-3-Clause"),
+    ],
+}
+
 
 def _require(executable: str, hint: str) -> None:
     """Fail with a sentence, not a traceback, when a resolver is absent.
@@ -656,6 +668,32 @@ def flags_for(lic: str) -> str | None:
     return None
 
 
+def bundled_table(rows: list[tuple[str, str, str]]) -> str:
+    """The BUNDLED_COMPONENTS of every package in *rows*, or "" when none applies."""
+    present = {_canonical(name): (name, version) for name, version, _ in rows}
+    lines = []
+    for package in sorted(BUNDLED_COMPONENTS):
+        if package not in present:
+            continue
+        name, version = present[package]
+        for component, lic in BUNDLED_COMPONENTS[package]:
+            flag = flags_for(lic)
+            suffix = f" ⚠️ {flag}" if flag else ""
+            lines.append(f"| `{component}` | `{name}` {version} | {lic}{suffix} |")
+    if not lines:
+        return ""
+    header = [
+        "#### Compiled into the wheels above",
+        "",
+        "Not separate packages: these are built into another package's "
+        "binary wheel, so its licence row does not cover them.",
+        "",
+        "| Component | Inside | Licence |",
+        "|---|---|---|",
+    ]
+    return "\n".join(header + lines) + "\n"
+
+
 def grouped_table(rows: list[tuple[str, str, str]]) -> str:
     by_lic: dict[str, list[tuple[str, str]]] = defaultdict(list)
     for name, version, lic in rows:
@@ -725,7 +763,11 @@ and weak copyleft (LGPL, MPL, EPL, CDDL), which is fine to link unmodified.
         "`scripts/audit_dependencies.py` against "
         "`security/dependency-audit.toml`.\n"
     )
-    parts.append(grouped_table(python_rows()))
+    py_rows = python_rows()
+    parts.append(grouped_table(py_rows))
+    bundled = bundled_table(py_rows)
+    if bundled:
+        parts.append(bundled)
 
     for pkg_dir, label in NODE_PACKAGES:
         parts.append(f"## Node — {label} (`{pkg_dir}`)\n")
