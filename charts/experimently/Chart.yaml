@@ -1,0 +1,23 @@
+apiVersion: v2
+name: experimently
+description: >-
+  Experimently, the open-source experimentation and feature-flag platform:
+  the API, the dashboard, and optionally an evaluation-grade Postgres and Redis.
+type: application
+# The chart version IS the platform version: `--version X` installs images X.
+# Both lines equal the repository's VERSION file. release-please rewrites them
+# through the markers (a `generic` extra-file: the `yaml` updater would strip
+# every comment here), and scripts/check_version_sources.py fails when either
+# drifts.
+version: 0.7.0 # x-release-please-version
+appVersion: "0.7.0" # x-release-please-version
+kubeVersion: ">=1.27.0-0"
+home: https://github.com/getexperimently/experimently
+sources:
+  - https://github.com/getexperimently/experimently
+keywords:
+  - experimentation
+  - feature-flags
+  - ab-testing
+annotations:
+  licenses: Apache-2.0

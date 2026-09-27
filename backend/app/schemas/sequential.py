@@ -10,7 +10,7 @@ from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from backend.app.core.analysis_status import AnalysisStatus
+from backend.app.core.analysis_status import AnalysisStatusValue
 
 # ---------------------------------------------------------------------------
 # Enumerations
@@ -238,7 +238,7 @@ class SequentialTestingResponse(BaseModel):
             "not evidence of no effect."
         ),
     )
-    analysis_status: Optional[AnalysisStatus] = Field(
+    analysis_status: Optional[AnalysisStatusValue] = Field(
         None,
         description=(
             "'ga' when these numbers are established, 'beta' when part of the "

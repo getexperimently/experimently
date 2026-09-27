@@ -1,0 +1,69 @@
+{{- /*
+`helm test <release>`: the API answers on the public Host and refuses a
+foreign one. The probes cannot show this -- they are exempt from the Host
+check -- so an install whose publicBaseUrl is wrong is green everywhere else.
+It talks to the API Service directly; it does not exercise the Ingress.
+*/ -}}
+{{- if .Values.tests.enabled }}
+{{- $fullname := include "experimently.fullname" . }}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ $fullname }}-smoke
+  labels:
+    {{- include "experimently.labels" . | nindent 4 }}
+    app.kubernetes.io/component: test
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  restartPolicy: Never
+  serviceAccountName: {{ include "experimently.serviceAccountName" . }}
+  automountServiceAccountToken: false
+  {{- with .Values.imagePullSecrets }}
+  imagePullSecrets:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  securityContext:
+    {{- include "experimently.podSecurity" (dict "uid" 1001 "gid" 1001) | nindent 4 }}
+  containers:
+    - name: smoke
+      image: {{ include "experimently.image" (dict "ctx" . "image" .Values.image.api) }}
+      imagePullPolicy: {{ .Values.image.pullPolicy }}
+      command: ["/bin/sh", "-c"]
+      env:
+        - name: BASE
+          value: http://{{ $fullname }}-api:8000
+        - name: PUBLIC_HOST
+          value: {{ include "experimently.publicHost" . | quote }}
+        - name: PROFILE
+          value: {{ .Values.profile | quote }}
+      args:
+        - |
+          set -eu
+          curl -fsS -o /dev/null "$BASE/health/ready"
+          echo "ready: 200"
+          code=$(curl -sS -o /tmp/modules.json -w '%{http_code}' -H "Host: $PUBLIC_HOST" "$BASE/api/v1/modules")
+          [ "$code" = 200 ] || { echo "Host $PUBLIC_HOST: expected 200, got $code"; cat /tmp/modules.json; exit 1; }
+          python -c 'import json, os, sys; p = json.load(open("/tmp/modules.json"))["profile"]; sys.exit(0 if p == os.environ["PROFILE"] else "profile %s, expected %s" % (p, os.environ["PROFILE"]))'
+          echo "Host $PUBLIC_HOST: 200, profile $PROFILE"
+          code=$(curl -sS -o /dev/null -w '%{http_code}' -H "Host: not-$PUBLIC_HOST" "$BASE/api/v1/modules")
+          [ "$code" = 400 ] || { echo "Host not-$PUBLIC_HOST: expected 400, got $code (the Host check is off)"; exit 1; }
+          echo "Host not-$PUBLIC_HOST: 400"
+      securityContext:
+        {{- include "experimently.containerSecurity" . | nindent 8 }}
+      volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+  volumes:
+    - name: tmp
+      emptyDir: {}
+  {{- with .Values.api.nodeSelector }}
+  nodeSelector:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.api.tolerations }}
+  tolerations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+{{- end }}

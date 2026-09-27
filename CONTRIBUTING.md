@@ -97,6 +97,14 @@ an empty database — the historical migration chain cannot replay from nothing.
 core chain. Do not merge them; a new revision names the head it extends
 (`alembic revision --autogenerate --head modules@head -m "..."`).
 
+**Expand, then contract.** A migration in release N must not drop or rename
+anything release N-1's code uses; do it in two releases. Add the new column or
+table and move the code over in one release, and drop the old one in a later
+release. During a rolling upgrade release N-1 keeps serving against release N's
+schema after N's migration has run, and an older image that meets a newer
+database refuses to start rather than guess (see "An Older Image Against a
+Newer Database" in `docs/self-hosting/migrations.md`).
+
 Other useful targets — `make help` lists them all:
 
 | Target | What it does |

@@ -63,6 +63,19 @@ Use beta for a route whose request or response is still being shaped by real
 use — a new analysis endpoint, a first cut of a bulk operation — and take it
 off once a released SDK or the dashboard depends on it.
 
+### `x-stability` and `analysis_status` are different promises
+
+`x-stability` is about the **shape** of a route. An analysis response's
+`analysis_status` field (`ga` or `beta`, with an `analysis_notice` exactly when
+it is `beta`) is about its **numbers**: `beta` there means part of the analysis
+is not yet computed as its fields describe, and the notice says which part and
+links the issue. The values come from one table,
+`backend/app/core/analysis_status.py`. A route whose numbers are beta is also
+marked `x-stability: beta` (the CUPED, interaction-pair and novelty routes,
+#217 and #219), because fixing the numbers will change its response;
+`/interactions/scan` stays stable, and its items keep their shape with the
+not-computed sub-results `null`.
+
 ## Changing a stable route
 
 Do not. Add a new route (mark it beta while it settles) or bump the API
@@ -74,14 +87,11 @@ differing keys.
 
 ## Beta numbers on a stable route
 
-`x-stability` is about the *shape* of a request or response. Whether an
-analysis's *numbers* are established is a different promise, and a response
-states it itself: `analysis_status` is `"ga"` or `"beta"`, and
-`analysis_notice` says what is beta and why, present exactly when the status
-is `"beta"`. A stable route can return beta numbers; its shape still does not
-change. The sequential analysis (`GET /api/v1/results/{id}/sequential`) is the
-first to carry the two fields, and one table in the code
-(`backend/app/core/analysis_status.py`) sets each analysis's status.
+One route carries `analysis_status: "beta"` while staying `x-stability:
+stable`: the sequential analysis (`GET /api/v1/results/{id}/sequential`).
+Its shape is settled (dashboards read it) and the fix to its numbers
+(#231) changes values, not fields, so the two fields were added to it
+optionally. Its entry is in the same table.
 
 ## Profiles
 

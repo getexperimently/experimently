@@ -379,5 +379,6 @@ function WorkspaceOverviewPage() {
 export default withModule(WorkspaceOverviewPage, {
   title: 'Workspaces',
   module: MODULES.WORKSPACES,
-  description: 'Isolated project namespaces with their own members, invites and API keys.',
+  description:
+    'Group members into teams with workspace roles and invites. Access to experiments and flags is by platform role.',
 });

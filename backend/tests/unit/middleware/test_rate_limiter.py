@@ -155,7 +155,7 @@ class TestRedisRateLimiter:
             "backend.app.middleware.rate_limiter.RedisRateLimiter._get_redis",
             return_value=None,
         ):
-            limiter = RedisRateLimiter(redis_host="nonexistent")
+            limiter = RedisRateLimiter()
             limiter._redis_available = False
 
             allowed, remaining = limiter.is_allowed("key1", limit=5, window_seconds=60)

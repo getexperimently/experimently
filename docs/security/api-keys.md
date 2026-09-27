@@ -50,8 +50,7 @@ CREATED=$(curl -s -X POST localhost:8000/api/v1/api-keys \
   -H 'content-type: application/json' \
   -d '{
     "name": "Production Checkout Service",
-    "description": "Used by the checkout microservice to evaluate feature flags",
-    "scopes": ["read", "write"]
+    "description": "Used by the checkout microservice to evaluate feature flags"
   }')
 KEY=$(jq -r .key <<<"$CREATED")
 KEY_ID=$(jq -r .id <<<"$CREATED")
@@ -78,13 +77,31 @@ repository). If you lose it, create a new key.
 The request takes:
 - `name` (required, up to 100 characters);
 - `description`;
-- `scopes`, a list of names;
+- `scopes`, a list of names (see [Scopes](#scopes));
 - `expires_at`, an ISO 8601 time after which the key stops working. Leave it out for a
   key that doesn't expire.
 
-**Scopes are recorded but not enforced in this release.** They are stored with the key and
-returned when you list keys, so you can label what a key is for. A key can call every
-endpoint that accepts an API key, whatever its scopes.
+### Scopes
+
+**Scopes do not limit what a key can do today.** They are stored with the key and returned
+when you list keys. A key can call every endpoint that accepts an API key (tracking, flag
+evaluation, OpenFeature and edge bootstrap), whatever its scopes. Names such as `read`,
+`write` or `admin` on existing keys are labels only; nothing checks them.
+
+One scope is intended to be enforced: **`sdk:ruleset`**. The server-side local-evaluation
+ruleset endpoint, once it ships, is intended to refuse any key that does not carry it. A key
+with `sdk:ruleset` will be able to download every feature flag's targeting rules, including
+the values in them, so keep such a key on a server and never ship it to a browser or a
+mobile app.
+
+- In the dashboard (**Admin → API Keys → Create API Key**), tick **Server-side local
+  evaluation (sdk:ruleset)**. Leave it unticked for any other key; the key is then created
+  with no scopes.
+- Through the API, send `"scopes": ["sdk:ruleset"]`.
+
+Scope names are matched exactly and case-sensitively: the stored list is split on commas and
+each entry is trimmed, so `"read, sdk:ruleset "` carries `sdk:ruleset`, while `SDK:RULESET`,
+`xsdk:ruleset` and `sdk:ruleset-ro` do not.
 
 ---
 
@@ -159,10 +176,7 @@ It prints each of your keys, including the one created above:
 ```json
 {
   "name": "Production Checkout Service",
-  "scopes": [
-    "read",
-    "write"
-  ],
+  "scopes": [],
   "is_active": true
 }
 ```
@@ -266,6 +280,13 @@ checkout-service-prod    → eptk_aaaa…
 recommendations-prod     → eptk_bbbb…
 analytics-pipeline       → eptk_cccc…
 ```
+
+### Grant `sdk:ruleset` only where it is needed
+
+Give the `sdk:ruleset` scope only to a server that will evaluate flags locally. Every other
+key, including any key used in a browser or a mobile app, should be created without it.
+Because scopes do not otherwise limit a key, a separate key per service is what lets you
+revoke one integration without touching the others.
 
 ### Remember that a key acts as its owner
 

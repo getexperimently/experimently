@@ -1,0 +1,196 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "title": "Experimently chart values",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["publicBaseUrl", "profile", "image", "secrets", "api", "web", "ingress", "postgresql", "redis"],
+  "properties": {
+    "publicBaseUrl": {
+      "description": "Scheme and host, no path, no trailing slash, no wildcard.",
+      "type": "string",
+      "pattern": "^https?://[^/*\\s]+$"
+    },
+    "profile": {"type": "string", "enum": ["core", "full"]},
+    "allowedHosts": {
+      "type": "array",
+      "items": {
+        "description": "example.com or *.example.com; `*` and `*example.com` match nothing useful and are refused.",
+        "type": "string",
+        "pattern": "^(\\*\\.)?[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)*$"
+      }
+    },
+    "firstSuperuser": {
+      "type": "string",
+      "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$"
+    },
+    "image": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "tag": {
+          "description": "Empty, or a versioned `<profile>-X.Y.Z[-pre]`; floating tags are refused.",
+          "type": "string",
+          "pattern": "^$|^(core|full)-[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?$"
+        },
+        "pullPolicy": {"type": "string", "enum": ["IfNotPresent", "Always", "Never"]},
+        "api": {"$ref": "#/definitions/imageRef"},
+        "web": {"$ref": "#/definitions/imageRef"}
+      }
+    },
+    "imagePullSecrets": {"type": "array", "items": {"type": "object"}},
+    "nameOverride": {"type": "string"},
+    "fullnameOverride": {"type": "string"},
+    "existingSecret": {"type": "string"},
+    "secrets": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "secretKey": {"type": "string"},
+        "firstSuperuserPassword": {"type": "string"},
+        "postgresUser": {"type": "string"},
+        "postgresPassword": {"type": "string"},
+        "auditHmacKey": {"type": "string"},
+        "redisPassword": {"type": "string"},
+        "metricsToken": {"type": "string"}
+      }
+    },
+    "serviceAccount": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "create": {"type": "boolean"},
+        "name": {"type": "string"},
+        "annotations": {"type": "object"}
+      }
+    },
+    "api": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "replicaCount": {"type": "integer", "minimum": 1},
+        "forwardedAllowIps": {"type": "string"},
+        "resources": {"type": "object"},
+        "extraEnv": {"type": "array", "items": {"type": "object"}},
+        "extraEnvFrom": {"type": "array", "items": {"type": "object"}},
+        "podAnnotations": {"type": "object"},
+        "nodeSelector": {"type": "object"},
+        "tolerations": {"type": "array"},
+        "affinity": {"type": "object"}
+      }
+    },
+    "web": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "replicaCount": {"type": "integer", "minimum": 1},
+        "resources": {"type": "object"},
+        "podAnnotations": {"type": "object"},
+        "nodeSelector": {"type": "object"},
+        "tolerations": {"type": "array"},
+        "affinity": {"type": "object"}
+      }
+    },
+    "ingress": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled"],
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "className": {"type": "string"},
+        "annotations": {"type": "object"},
+        "tls": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {"secretName": {"type": "string"}}
+        }
+      }
+    },
+    "postgresql": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "bundled": {"type": "boolean"},
+        "image": {"type": "string", "minLength": 1},
+        "host": {"type": "string"},
+        "port": {"type": "integer", "minimum": 1, "maximum": 65535},
+        "database": {"type": "string", "minLength": 1},
+        "schema": {"type": "string", "minLength": 1},
+        "sslMode": {"type": "string", "enum": ["", "disable", "prefer", "require"]},
+        "persistence": {"$ref": "#/definitions/persistence"},
+        "resources": {"type": "object"},
+        "nodeSelector": {"type": "object"},
+        "tolerations": {"type": "array"}
+      }
+    },
+    "redis": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "bundled": {"type": "boolean"},
+        "image": {"type": "string", "minLength": 1},
+        "host": {"type": "string"},
+        "port": {"type": "integer", "minimum": 1, "maximum": 65535},
+        "ssl": {"type": "boolean"},
+        "persistence": {"$ref": "#/definitions/persistence"},
+        "resources": {"type": "object"},
+        "nodeSelector": {"type": "object"},
+        "tolerations": {"type": "array"}
+      }
+    },
+    "tests": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {"enabled": {"type": "boolean"}}
+    }
+  },
+  "allOf": [
+    {
+      "description": "An explicit image tag's profile prefix must equal `profile`: a core image under profile=full ignores AUDIT_HMAC_KEY and serves no modules.",
+      "if": {"properties": {"profile": {"const": "core"}}},
+      "then": {"properties": {"image": {"properties": {"tag": {"pattern": "^$|^core-"}}}}},
+      "else": {"properties": {"image": {"properties": {"tag": {"pattern": "^$|^full-"}}}}}
+    },
+    {
+      "description": "Kubernetes refuses an Ingress host that is an IP address or carries a port. With the Ingress enabled, publicBaseUrl must be a DNS name without a port; otherwise set ingress.enabled=false and route to the Services yourself.",
+      "if": {"properties": {"ingress": {"properties": {"enabled": {"const": true}}}}},
+      "then": {
+        "properties": {
+          "publicBaseUrl": {
+            "$comment": "No colon (port), no brackets (IPv6), and at least one letter (a DNS name; an IPv4 literal has none).",
+            "pattern": "^https?://[^/:*\\s\\[\\]]*[A-Za-z][^/:*\\s\\[\\]]*$"
+          }
+        }
+      }
+    },
+    {
+      "description": "With existingSecret set, the chart creates no Secret, so an inline secret value would be silently ignored: refused instead.",
+      "if": {"properties": {"existingSecret": {"minLength": 1}}, "required": ["existingSecret"]},
+      "then": {
+        "properties": {
+          "secrets": {
+            "additionalProperties": {"type": "string", "maxLength": 0}
+          }
+        }
+      }
+    }
+  ],
+  "definitions": {
+    "imageRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "repository": {"type": "string", "minLength": 1},
+        "digest": {"type": "string", "pattern": "^$|^sha256:[a-f0-9]{64}$"}
+      }
+    },
+    "persistence": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "size": {"type": "string", "minLength": 1},
+        "storageClass": {"type": "string"}
+      }
+    }
+  }
+}

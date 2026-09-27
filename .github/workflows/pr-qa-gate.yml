@@ -348,6 +348,12 @@ jobs:
             echo "::error::core bundle has no workspaces stub page (its description is in no chunk)"; exit 1
           fi
 
+  # Each SDK's OWN exported hash function against golden-vectors.json: the
+  # Python SDK's source, the JS and edge packages as built, the React Native
+  # source (which is what that package ships), the Go module. One step per SDK,
+  # so the failing SDK is the failing step. hash_contract.py does every
+  # comparison and asserts the exact number of vectors each SDK answered; its
+  # --list step names every sdk/ directory this job does not run, and why.
   sdk-contracts:
     needs: changes
     if: needs.changes.outputs.docs_only != 'true'
@@ -365,16 +371,44 @@ jobs:
         uses: actions/setup-node@v7
         with:
           node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            sdk/js/package-lock.json
+            sdk/edge/package-lock.json
+            sdk/react-native/package-lock.json
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          # go.mod declares go 1.21; the same toolchain as sdk-unit-tests.yml.
+          go-version: '1.22.x'
+          # The SDK and the harness are stdlib-only: no go.sum to key a cache on.
+          cache: false
 
       - name: Install pytest
         run: pip install pytest
 
-      # pytest.ini adds --cov flags; only pytest is installed here, so clear addopts.
-      - name: Run Python contracts
-        run: python -m pytest tests/sdk-contract/test_python_sdk.py -v -o addopts=""
+      - name: SDKs this job checks, and those it does not
+        run: python tests/sdk-contract/hash_contract.py --list
 
-      - name: Run JS contracts
-        run: node tests/sdk-contract/test_js_sdk.js
+      # pyproject.toml adds --cov flags; only pytest is installed here, so clear addopts.
+      - name: The comparison rejects a wrong answer (hash_contract.py self-tests)
+        run: python -m pytest tests/sdk-contract -v -o addopts=""
+
+      - name: Python SDK hash (sdk/python)
+        run: python tests/sdk-contract/hash_contract.py python
+
+      - name: JS SDK hash (sdk/js, built)
+        run: python tests/sdk-contract/hash_contract.py js
+
+      - name: Edge SDK hash (sdk/edge, built)
+        run: python tests/sdk-contract/hash_contract.py edge
+
+      - name: React Native SDK hash (sdk/react-native source)
+        run: python tests/sdk-contract/hash_contract.py react-native
+
+      - name: Go SDK hash (sdk/go)
+        run: python tests/sdk-contract/hash_contract.py go
 
   # Each profile must stand on its own. scripts/core_build.sh copies the
   # checkout and runs one sequence over the copy; `--profile core` deletes
@@ -832,12 +866,21 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
+      # The images are built with the version a release would pass, so the
+      # label step below runs the release's own check (scripts/
+      # check_image_labels.py) unchanged, rather than a weaker copy of it.
+      - name: Version
+        id: version
+        run: echo "version=$(cat VERSION)" >> "$GITHUB_OUTPUT"
+
       - name: Build API image
         uses: docker/build-push-action@v7
         with:
           context: .
           file: backend/Dockerfile
           target: core
+          build-args: |
+            VERSION=${{ steps.version.outputs.version }}
           load: true
           tags: experimently-api:core
           cache-from: type=gha,scope=api
@@ -857,6 +900,8 @@ jobs:
           context: .
           file: backend/Dockerfile
           target: full
+          build-args: |
+            VERSION=${{ steps.version.outputs.version }}
           load: true
           tags: experimently-api:full
           cache-from: |
@@ -920,6 +965,40 @@ jobs:
           echo "full image: no tests, no CDK, no dashboard code"
           '
 
+      # The LLM features import their provider SDKs inside functions, so an
+      # image without them boots, reports healthy, and fails every LLM call at
+      # request time -- which is how both images shipped with neither
+      # `anthropic` nor `openai` (#196), under a unit suite that mocked them.
+      # The list is DERIVED from the four files that make a real provider call
+      # (scripts/llm_sdk_imports.py walks every import, function-local ones
+      # included), the same list backend/tests/unit/scripts/test_llm_sdk_imports.py
+      # checks in the test venv. Here it is checked in the images, which
+      # install runtime.lock rather than backend/requirements.txt: a pin added
+      # to one and not the other passes the unit test and fails this.
+      # `import`, not find_spec, so an SDK whose own dependency is missing
+      # fails too. google.* is excluded by the script (the Gemini provider is
+      # separate work) and printed, so the exclusion is never silent.
+      - name: LLM call paths import in both images
+        run: |
+          set -euo pipefail
+          LLM_IMPORTS="$(python3 scripts/llm_sdk_imports.py --oneline)"
+          echo "LLM call-path imports: $LLM_IMPORTS"
+          for image in experimently-api:core experimently-api:full; do
+            docker run --rm -e LLM_IMPORTS="$LLM_IMPORTS" --entrypoint python "$image" -c '
+          import importlib, os
+          names = os.environ["LLM_IMPORTS"].split()
+          assert {"anthropic", "openai"} <= set(names), names
+          failed = []
+          for name in names:
+              try:
+                  importlib.import_module(name)
+              except Exception as exc:
+                  failed.append("%s: %s: %s" % (name, type(exc).__name__, exc))
+          assert not failed, "missing from the image:\n  " + "\n  ".join(failed)
+          print("%d LLM call-path imports load" % len(names))
+          '
+          done
+
       # Every job here runs ENVIRONMENT=development, where the hardening
       # validators are all off -- so nothing ever ran this image the way a
       # deployment does. `modules.register(hooks)` builds the modules' settings
@@ -936,6 +1015,12 @@ jobs:
       # whose unit tests were green. If you add a variable the application
       # demands in production, it belongs in three places -- both CDK stacks
       # and this list.
+      #
+      # `--entrypoint python` bypasses backend/docker-entrypoint.sh, so the
+      # start-up check (backend/app/core/preflight.py) does NOT run here, and
+      # no POSTGRES_SERVER is needed: this step is about what the settings and
+      # the module registration accept at import. The check itself is the next
+      # step, through the real entrypoint.
       - name: Full image boots with production settings
         run: |
           set -euo pipefail
@@ -952,7 +1037,7 @@ jobs:
             # A production start must know what hostname it answers on: the
             # Host header is attacker-controlled and ALLOWED_HOSTS derives from
             # this (#220). Never resolved here -- the import opens no socket.
-            -e PUBLIC_BASE_URL=https://api.example.com
+            -e PUBLIC_BASE_URL=https://experimently.example.com
           )
           # Importing main.py runs the registration and the abort check; it
           # opens no connection, so no database or Redis is needed here.
@@ -977,6 +1062,85 @@ jobs:
           echo "full image with no AUDIT_HMAC_KEY: refused, and the message names it"
           rm -f refused.log
 
+      # The entrypoint's start-up check (#237), through the real entrypoint:
+      # every missing setting in one list, exit 78, before the database wait.
+      # Each refusal is a planted defect against an otherwise good set; the
+      # unit tests (backend/tests/unit/core/test_preflight.py) cover the rest.
+      - name: Production start-up lists every missing setting at once
+        run: |
+          set -euo pipefail
+          # <image> <log> [docker run args...]: must exit 78, without waiting
+          # for a database. `timeout` because a check that fell through to the
+          # wait would otherwise sit there for DB_WAIT_TIMEOUT.
+          expect_refusal() {
+            local image=$1 log=$2 status=0
+            shift 2
+            timeout 60 docker run --rm "$@" "$image" >"$log" 2>&1 || status=$?
+            cat "$log"
+            if [ "$status" != 78 ]; then
+              echo "::error::expected exit 78 from the start-up check, got $status"
+              exit 1
+            fi
+            if grep -q "waiting for PostgreSQL" "$log"; then
+              echo "::error::the start-up check let the container reach the database wait"
+              exit 1
+            fi
+          }
+          # `if grep` rather than `! grep`: a negated command never trips -e.
+          refuse_text() {
+            if grep -qF -- "$1" "$2"; then
+              echo "::error::$2 contains '$1'"
+              exit 1
+            fi
+          }
+
+          # Full image, ENVIRONMENT=production and nothing else: one list.
+          expect_refusal experimently-api:full full.log -e ENVIRONMENT=production
+          grep -qF "Experimently cannot start: 5 settings need attention." full.log
+          for s in SECRET_KEY FIRST_SUPERUSER_PASSWORD PUBLIC_BASE_URL AUDIT_HMAC_KEY POSTGRES_SERVER; do
+            grep -qE "^  - $s " full.log || { echo "::error::$s is not in the list"; exit 1; }
+          done
+          grep -qF "https://experimently.example.com" full.log
+          refuse_text "continuing on the core profile" full.log
+          refuse_text "<value>" full.log
+          refuse_text "api.example.com" full.log
+
+          # Core image: the same, without the full profile's audit key.
+          expect_refusal experimently-api:core core.log -e ENVIRONMENT=production
+          grep -qF "Experimently cannot start: 4 settings need attention." core.log
+          refuse_text AUDIT_HMAC_KEY core.log
+
+          KEY=$(python3 -c 'import secrets; print(secrets.token_hex(32))')
+          good=(
+            -e ENVIRONMENT=production
+            -e SECRET_KEY="$KEY"
+            -e FIRST_SUPERUSER_PASSWORD="$KEY"
+            -e PUBLIC_BASE_URL=https://experimently.example.com
+            -e AUDIT_HMAC_KEY="$KEY"
+            -e POSTGRES_SERVER=db.invalid
+          )
+          # A connection string the image does not read.
+          expect_refusal experimently-api:full url.log "${good[@]}" \
+            -e DATABASE_URL=postgresql://user:pw@db.invalid/experimentation
+          grep -qF "DATABASE_URL is set but this image does not connect with it" url.log
+          grep -qF "cannot start: 1 setting needs attention." url.log
+          refuse_text "user:pw@" url.log
+
+          # No environment named at all: one line.
+          expect_refusal experimently-api:full noenv.log
+          grep -qxF "[preflight] ENVIRONMENT is not set. This image requires it: set ENVIRONMENT=production (or staging; development only for a local trial)." noenv.log
+
+          # The good set passes the check (`true` stands in for the server;
+          # no database, so no wait and no bootstrap).
+          docker run --rm "${good[@]}" -e WAIT_FOR_DB=false -e RUN_MIGRATIONS=false \
+            experimently-api:full true
+          # ...and so does APP_ENV alone, which is what the CDK task
+          # definitions set instead of ENVIRONMENT.
+          docker run --rm -e APP_ENV=dev -e WAIT_FOR_DB=false -e RUN_MIGRATIONS=false \
+            experimently-api:core true
+          rm -f full.log core.log url.log noenv.log
+          echo "start-up check: every refusal fired, and a good set starts"
+
       - name: Build dashboard image
         uses: docker/build-push-action@v7
         with:
@@ -984,13 +1148,45 @@ jobs:
           file: frontend/Dockerfile
           build-args: |
             EXPERIMENTLY_PROFILE=core
+            VERSION=${{ steps.version.outputs.version }}
           load: true
           tags: experimently-web:core
           cache-from: type=gha,scope=web
           cache-to: type=gha,scope=web,mode=max
 
+      # The check release.yml runs on every published image, run here on every
+      # pull request so a label regression is caught before a tag. It includes
+      # the source label: the dashboard's nginx base sets
+      # org.opencontainers.image.source to nginx's repository, and an image
+      # that does not override it says it came from there (#239).
+      - name: Images carry the labels a release asserts
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          for pair in experimently-api:core=core experimently-api:full=full \
+                      experimently-web:core=core; do
+            image="${pair%=*}"
+            profile="${pair#*=}"
+            docker image inspect "$image" > image.json
+            echo "== $image"
+            python3 scripts/check_image_labels.py \
+              --file image.json --version "$VERSION" --profile "$profile"
+          done
+          rm -f image.json
+
       - name: Start the stack
         run: docker compose -f docker-compose.yml up -d --wait --no-build postgres redis api frontend
+
+      # The first start creates FIRST_SUPERUSER and says so (#237). The ALB
+      # step below re-creates the api container on the same database, and
+      # checks the other half: a later start says FIRST_SUPERUSER is ignored.
+      - name: The first start announces the first administrator
+        run: |
+          set -euo pipefail
+          docker compose -f docker-compose.yml logs --no-color api >api-first.log
+          grep -qF "created the first administrator admin@demo.com (role ADMIN)" api-first.log \
+            || { cat api-first.log; echo "::error::no first-administrator line"; exit 1; }
 
       - name: API readiness and auth gate
         run: |
@@ -1049,6 +1245,24 @@ jobs:
           curl -sf localhost:3000/health/ready >/dev/null
           test "$(curl -sL -o /dev/null -w '%{http_code}' localhost:3000/api/v1/experiments/)" = "401"
 
+      # The step above proves the SDKs import; this proves they WORK in the
+      # image: a POST /complete per provider goes through the real SDK -- client
+      # construction from ANTHROPIC_* / OPENAI_*, request, response parsing --
+      # to tests/llm/stub_provider.py on the compose network, and must come
+      # back 200 with the stub's text. The placeholder keys are set on the
+      # re-created api container by the override file only; no job in this
+      # repository sets a real LLM key, so nothing here can reach a provider.
+      # The ALB step below re-creates the api again without them. smoke.sh
+      # refuses to run without CI=true, which Actions sets for every step and
+      # nothing in this job overrides, so a local run cannot repoint a
+      # developer's stack by accident.
+      - name: LLM proxy through the real SDKs (stub provider)
+        run: |
+          set -euo pipefail
+          docker compose -f docker-compose.yml -f tests/llm/docker-compose.llm-stub.yml \
+            up -d --wait --no-build api llm-stub
+          bash tests/llm/smoke.sh
+
       # The steps above run with the API's Host check OFF (development, no
       # PUBLIC_BASE_URL), so their 401 says nothing about the deployed shape,
       # where a Host the API does not serve is refused with 400 on every
@@ -1074,11 +1288,15 @@ jobs:
           docker compose -f docker-compose.yml -f tests/alb/docker-compose.alb.yml \
             up -d --wait --no-build postgres redis api frontend alb
           bash tests/alb/rehearse.sh
+          docker compose -f docker-compose.yml -f tests/alb/docker-compose.alb.yml \
+            logs --no-color api >api-second.log
+          grep -qF "users exist; FIRST_SUPERUSER settings ignored" api-second.log \
+            || { cat api-second.log; echo "::error::a later start did not say FIRST_SUPERUSER is ignored"; exit 1; }
 
       - name: Container logs (on failure)
         if: failure()
-        run: docker compose -f docker-compose.yml -f tests/alb/docker-compose.alb.yml logs --no-color --tail=200
+        run: docker compose -f docker-compose.yml -f tests/alb/docker-compose.alb.yml -f tests/llm/docker-compose.llm-stub.yml logs --no-color --tail=200
 
       - name: Tear down
         if: always()
-        run: docker compose -f docker-compose.yml -f tests/alb/docker-compose.alb.yml down -v --remove-orphans
+        run: docker compose -f docker-compose.yml -f tests/alb/docker-compose.alb.yml -f tests/llm/docker-compose.llm-stub.yml down -v --remove-orphans

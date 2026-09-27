@@ -62,11 +62,11 @@ The platform supports a range of statistical approaches:
 | Sequential testing (mSPRT) | Continuous monitoring with valid p-values at any sample size |
 | Always-valid confidence intervals | Confidence sequences that are valid at every look |
 | Alpha spending (O'Brien-Fleming, Pocock) | Not computed yet: the response's `alpha_spending` is empty; use the mSPRT, which is valid under continuous monitoring |
-| CUPED | Variance reduction using pre-experiment covariates (typically 20–40% sample size reduction) |
+| CUPED (beta) | Variance reduction; the covariate is not yet a pre-experiment metric, so it reduces almost no variance today (#217) |
 | Bayesian (Beta-Binomial) | Posterior credible intervals, Bayes factors, probability of superiority, ROPE |
 | Multi-armed bandit | Thompson Sampling, UCB1, and Epsilon-Greedy adaptive traffic allocation |
 | Dimensional analysis | Segment-level breakdowns with Bonferroni correction and heterogeneous treatment effect detection |
-| Interaction detection | Jaccard overlap, chi-squared interaction tests, novelty effect analysis, SUTVA checks |
+| Interaction detection (beta) | Jaccard overlap between experiments; the interaction, novelty and SUTVA analyses are not computed yet (#219) |
 
 ---
 
@@ -129,9 +129,9 @@ See the [Warehouse-Native Analytics API](../api/warehouse-analytics.md) for setu
 
 CUPED (Controlled-experiment Using Pre-Experiment Data) reduces result noise by adjusting each user's observed metric by a term proportional to their pre-experiment behavior. The adjustment is computed using an OLS regression coefficient (`theta`) estimated from the control group.
 
-In practice, CUPED typically reduces the variance of your metric estimates by 20–40%, meaning you can reach statistical significance with significantly fewer users — or equivalently, detect smaller effects with the same sample size.
+With a covariate that predicts the outcome, lower variance means you reach statistical significance with fewer users, or detect smaller effects with the same sample size.
 
-To use CUPED, call `GET /api/v1/results/{experiment_id}/cuped`. The covariate (pre-experiment metric) must be available for your users. See [CUPED documentation](../api/cuped.md) for covariate selection guidance.
+**Beta:** `GET /api/v1/results/{experiment_id}/cuped` does not yet use a pre-experiment metric as the covariate, so in this release it removes almost no variance, and its responses say so in `analysis_status` ([#217](https://github.com/getexperimently/experimently/issues/217)). See [CUPED documentation](../api/cuped.md).
 
 ---
 
@@ -217,8 +217,8 @@ See [RBAC API Reference](../api/rbac.md) for the full role and permission manage
 
 ### How do API keys work?
 
-API keys are used for SDK authentication and server-to-server calls. Unlike JWT tokens (which are user-session credentials), API keys are long-lived and scoped to specific operations.
+API keys are used for SDK authentication and server-to-server calls. Unlike JWT tokens (which are user-session credentials), API keys are long-lived. Any active key authenticates every API-key route (flag evaluation, tracking) as the user who created it; its `scopes` do not narrow that today.
 
-Create an API key via `POST /api/v1/api-keys` with a name and desired scopes (`read`, `write`, `admin`). The full key value is shown only once at creation time — store it securely. To use it, pass the key in the `X-API-Key: <key>` header on all SDK requests.
+Create an API key via `POST /api/v1/api-keys` with a name. The full key value is shown only once at creation time — store it securely. To use it, pass the key in the `X-API-Key: <key>` header on all SDK requests.
 
 Keys can be listed (without exposing the secret) and revoked at any time. See [API Key Management](../security/api-keys.md) for best practices.

@@ -15,7 +15,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, joinedload
 
 from backend.app.api.deps import get_current_active_user, get_current_superuser, get_db
-from backend.app.core.analysis_status import analysis_posture
+from backend.app.core.analysis_status import analysis_notice, analysis_status
+from backend.app.core.stats_engine import ENGINE_VERSION
 from backend.app.models.analysis_snapshot import AnalysisKind
 from backend.app.models.experiment import Experiment
 from backend.app.models.user import User
@@ -102,21 +103,34 @@ def _get_cache_service() -> CacheService:
     connection errors explicitly.
     """
     try:
-        import redis as redis_lib
+        from backend.app.core.redis_client import create_redis_client
 
-        from backend.app.core.config import settings
-
-        r = redis_lib.Redis(
-            host=settings.REDIS_HOST,
-            port=int(settings.REDIS_PORT),
-            db=0,
-            ssl=bool(settings.REDIS_SSL),
-        )
+        r = create_redis_client()
         # Quick ping to verify the connection is alive.
         r.ping()
         return CacheService(redis_client=r)
     except Exception:
         return CacheService(redis_client=None)
+
+
+def _results_cache_key(
+    experiment_id: UUID,
+    confidence_level: float,
+    correction_method: str,
+    breakdown: Optional[str],
+) -> str:
+    """
+    The Redis key for one ``GET /results/{experiment_id}`` answer.
+
+    It starts with ``results:{experiment_id}:``, the prefix
+    ``invalidate-cache`` clears, and then names the statistics engine version,
+    so an answer cached by an engine that computed different numbers is never
+    served after an upgrade: the new engine simply misses it.
+    """
+    return (
+        f"results:{experiment_id}:{ENGINE_VERSION}:"
+        f"{confidence_level}:{correction_method}:{breakdown or ''}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -150,8 +164,21 @@ def _compute_dimensional_breakdown(
     # Conversions are the events named after the experiment's primary metric
     # (see services/event_matching.py); fall back to the legacy
     # event_type = 'conversion' convention when no metric row exists.
-    from backend.app.models.experiment import Metric
+    from backend.app.models.experiment import Metric, Variant
     from backend.app.services.event_matching import CONVERSION_SQL_PREDICATE
+
+    # Every variant of the experiment, with its real name and control flag
+    # (#218).  Each segment is seeded from this list, so a variant with no
+    # rows in a segment still appears with zero counts, and the control is the
+    # variant the experiment says it is -- never guessed from its id.
+    # Listed control first, then by name, so the order is stable.
+    experiment_variants = sorted(
+        (
+            (str(v.id), v.name, bool(v.is_control))
+            for v in db.query(Variant).filter(Variant.experiment_id == experiment_id)
+        ),
+        key=lambda row: (not row[2], row[1], row[0]),
+    )
 
     primary_metric = (
         db.query(Metric)
@@ -241,14 +268,25 @@ def _compute_dimensional_breakdown(
                 },
             ).fetchall()
 
-            # Build variant_map for this segment
-            variant_map: Dict[str, Any] = {}
+            # Build variant_map for this segment, seeded with every variant
+            variant_map: Dict[str, Any] = {
+                vid: {
+                    "variant_name": name,
+                    "is_control": is_control,
+                    "total": 0,
+                    "conversions": 0,
+                }
+                for vid, name, is_control in experiment_variants
+            }
             for vid, total in asgn_rows:
-                variant_map[vid] = {"total": int(total), "conversions": 0}
+                variant_map.setdefault(
+                    vid,
+                    {"variant_name": vid, "is_control": False, "conversions": 0},
+                )["total"] = int(total)
             for vid, conv in conv_rows:
-                if vid not in variant_map:
-                    variant_map[vid] = {"total": 0, "conversions": 0}
-                variant_map[vid]["conversions"] = int(conv)
+                variant_map.setdefault(
+                    vid, {"variant_name": vid, "is_control": False, "total": 0}
+                )["conversions"] = int(conv)
 
             if variant_map:
                 segments[seg_val] = variant_map
@@ -358,7 +396,9 @@ def get_experiment_results(
     present in event metadata is accepted.  Breakdowns are always marked
     exploratory and use Bonferroni-corrected significance thresholds.
     """
-    cache_key = f"results:{experiment_id}:{confidence_level}:{correction_method}:{breakdown or ''}"
+    cache_key = _results_cache_key(
+        experiment_id, confidence_level, correction_method, breakdown
+    )
 
     # --- Cache read ---
     if use_cache:
@@ -778,16 +818,9 @@ def invalidate_results_cache(
     Cache invalidation is best-effort: a failure here does not raise an error.
     """
     try:
-        import redis as redis_lib
+        from backend.app.core.redis_client import create_redis_client
 
-        from backend.app.core.config import settings
-
-        r = redis_lib.Redis(
-            host=settings.REDIS_HOST,
-            port=int(settings.REDIS_PORT),
-            db=0,
-            ssl=bool(settings.REDIS_SSL),
-        )
+        r = create_redis_client()
         cache = CacheService(redis_client=r)
         cache.clear(pattern=f"results:{experiment_id}:*")
     except Exception:
@@ -956,13 +989,19 @@ def get_sequential_results(
         )
 
     # Extract config
-    config = experiment.sequential_testing_config or {}
+    config: Dict[str, Any] = dict(experiment.sequential_testing_config or {})
     tau_squared = config.get("tau_squared", 0.001)
     notices: List[str] = []
+    effective_alpha: float
     if alpha is None:
-        alpha, alpha_notice = _stored_sequential_alpha(config)
+        effective_alpha, alpha_notice = _stored_sequential_alpha(config)
         if alpha_notice:
             notices.append(alpha_notice)
+    else:
+        effective_alpha = alpha
+    # The sequential_testing_method column is not written by the experiments
+    # API today (only the config's "method" is); the column is read in case it
+    # was set some other way.
     if "always_valid" in (
         config.get("method"),
         getattr(experiment, "sequential_testing_method", None),
@@ -994,7 +1033,7 @@ def get_sequential_results(
         treatment_total=treatment_t,
         config={
             "tau_squared": tau_squared,
-            "alpha": alpha,
+            "alpha": effective_alpha,
             "actual_days": actual_days,
             "expected_days": config.get("expected_duration_days", 30),
             "required_sample_size": config.get("required_sample_size", 10000),
@@ -1041,9 +1080,12 @@ def get_sequential_results(
             "recommendation": analysis.long_running_risk.recommendation,
         }
 
-    status, notice = analysis_posture("sequential")
+    status = analysis_status("sequential")
+    notice = analysis_notice("sequential")
     if notices:
-        notice = " ".join([notice or "", *notices]).strip()
+        # Appended to the table's notice, so only while the analysis is beta:
+        # a ga label carries no notice, and these sentences must not create one.
+        notice = " ".join([notice, *notices]) if notice else None
 
     response = SequentialTestingResponse(
         method=analysis.method.value,
@@ -1144,6 +1186,7 @@ def get_cuped_results_data(
         try:
             from backend.app.models.assignment import Assignment
             from backend.app.models.event import Event
+            from backend.app.services.event_matching import conversion_event_filter
 
             def _get_outcomes(variant_id):
                 """Return (Y, X) arrays for CUPED — Y=converted, X=assignment index."""
@@ -1162,14 +1205,16 @@ def get_cuped_results_data(
                 # X = assignment order (proxy pre-experiment covariate)
                 X = np.arange(n, dtype=float)
 
-                # Y = 1 if user converted, 0 otherwise
+                # Y = 1 if user converted, 0 otherwise.  Conversions are
+                # matched like every other analysis path (event_matching.py):
+                # on the metric's event name, never counting an exposure row.
                 converted_ids = {
                     str(e.user_id)
                     for e in db.query(Event)
                     .filter(
                         Event.experiment_id == experiment.id,
                         Event.variant_id == variant_id,
-                        Event.event_name == metric_def.event_name,
+                        conversion_event_filter(metric_def.event_name),
                     )
                     .all()
                 }
@@ -1203,8 +1248,15 @@ def get_cuped_results_data(
                         Y_t, percentile=winsorization_pct
                     )
 
-            # Compute CUPED effect
-            cuped_effect = CupedService.compute_cuped_effect(Y_c, X_c, Y_t, X_t)
+            # Compute the effect.  ``none`` applies no adjustment at all:
+            # θ is 0 and the estimate is the unadjusted one (#217).
+            cuped_effect = CupedService.compute_cuped_effect(
+                Y_c,
+                X_c,
+                Y_t,
+                X_t,
+                adjust=method != VarianceReductionMethod.NONE,
+            )
             applied_method = (
                 method
                 if method != VarianceReductionMethod.NONE
@@ -1247,6 +1299,10 @@ def get_cuped_results_data(
 @router.get(
     "/{experiment_id}/cuped",
     response_model=CupedResultsResponse,
+    summary="Beta: CUPED variance-reduced results",
+    # Beta (#217): the covariate is not yet a pre-experiment metric.  The
+    # response says so in analysis_status/analysis_notice.
+    openapi_extra={"x-stability": "beta"},
 )
 def get_cuped_results(
     experiment_id: UUID,
@@ -1256,14 +1312,16 @@ def get_cuped_results(
     """
     Get CUPED variance-reduced results for an experiment (Issue #21).
 
-    Returns CUPED-adjusted per-metric effect estimates with lower variance
-    than the standard analysis, enabling faster detection of true effects.
+    Beta (#217): the covariate is each user's position in the order of
+    assignment, not a pre-experiment metric, so it removes almost no variance.
+    The response carries ``analysis_status: "beta"`` and an
+    ``analysis_notice`` saying so.
 
     The variance-reduction method is read from the experiment's
     ``variance_reduction_config`` JSONB field:
 
-    - ``none``         — No adjustment (returns unadjusted effect, θ=0).
-    - ``cuped``        — CUPED adjustment using pre-experiment covariate.
+    - ``none``         — No adjustment: the unadjusted effect, θ exactly 0.
+    - ``cuped``        — CUPED adjustment (covariate: assignment order, #217).
     - ``cuped_plus``   — CUPED++ with delta-method ratio adjustment.
     - ``winsorization`` — Winsorization only (no CUPED).
 

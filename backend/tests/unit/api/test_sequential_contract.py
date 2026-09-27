@@ -30,7 +30,7 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from backend.app.api.deps import get_current_user, get_db
-from backend.app.core.analysis_status import ANALYSIS_STATUS
+from backend.app.core.analysis_status import GA, AnalysisLabel, analysis_label
 from backend.app.main import app
 from backend.app.models.user import User
 from backend.app.schemas.experiment import SequentialTestingConfigInput
@@ -300,15 +300,33 @@ def test_recommended_action_set_is_the_dashboard_type():
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("analysis", sorted(ANALYSIS_STATUS))
-def test_notice_is_present_exactly_when_beta(analysis):
-    status, notice = ANALYSIS_STATUS[analysis]
-    assert status in ("ga", "beta")
-    assert (notice is not None) == (status == "beta")
+# The table itself (statuses, notice iff beta) is pinned in
+# backend/tests/unit/core/test_analysis_status.py.
 
 
-def test_sequential_response_carries_the_table_posture(client):
-    status, notice = ANALYSIS_STATUS["sequential"]
+def test_sequential_response_carries_the_table_label(client):
+    label = analysis_label("sequential")
     body = _get(client, _experiment(_stored({"method": "msprt"}))).json()
-    assert body["analysis_status"] == status
-    assert body["analysis_notice"] == notice
+    assert body["analysis_status"] == label.status
+    assert body["analysis_notice"] == label.notice
+
+
+def test_route_reads_the_table_when_it_answers(client):
+    """Flip the table entry to ga: the response follows, and the alias and
+    bad-alpha sentences do not invent a notice on a ga label."""
+    config = {"method": "always_valid", "alpha": 0.5}
+    with patch.dict(
+        "backend.app.core.analysis_status.ANALYSIS_STATUS",
+        {"sequential": AnalysisLabel(GA)},
+    ):
+        body = _get(client, _experiment(config)).json()
+    assert body["analysis_status"] == "ga"
+    assert body["analysis_notice"] is None
+
+
+def test_appended_sentences_follow_the_base_notice(client):
+    base = analysis_label("sequential").notice
+    body = _get(client, _experiment({"method": "always_valid", "alpha": 0.5})).json()
+    assert body["analysis_notice"].startswith(base + " ")
+    assert "The stored alpha 0.5" in body["analysis_notice"]
+    assert "'always_valid' is an alias of 'msprt'" in body["analysis_notice"]

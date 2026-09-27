@@ -382,11 +382,13 @@ The platform uses **mSPRT** (mixture Sequential Probability Ratio Test). When `r
 
 ### CUPED — Reach Significance Faster
 
-CUPED reduces result noise by adjusting for each user's pre-experiment behavior. This typically cuts the required sample size by 20–40%.
+**Beta: not yet a pre-experiment covariate.** The CUPED endpoint does not yet use a pre-experiment metric as the covariate, so in this release it removes almost no variance ([#217](https://github.com/getexperimently/experimently/issues/217)).
+
+CUPED reduces result noise by adjusting for each user's pre-experiment behavior; how much depends on how well that behavior predicts the outcome.
 
 **When to use it:** When you have historical metric data for your users (e.g., prior revenue, prior sessions). Works best when the covariate is strongly correlated with the outcome.
 
-Access via the **CUPED** tab on any experiment results page, or via:
+The dashboard has no CUPED tab; it is available through the API:
 ```text
 GET /api/v1/results/{experiment_id}/cuped
 ```
@@ -422,7 +424,7 @@ Set `optimization_type` to `thompson_sampling`, `ucb1`, or `epsilon_greedy` when
 
 ### Interaction Detection — Are Your Experiments Interfering?
 
-When multiple experiments run simultaneously on overlapping user populations, they can distort each other's results. Run an interaction scan to check.
+When multiple experiments run simultaneously on overlapping user populations, they can distort each other's results. Run an interaction scan to find the pairs that share users. Only the overlap is measured yet: the interaction, novelty and SUTVA results are `null` ([#219](https://github.com/getexperimently/experimently/issues/219)).
 
 Access via:
 ```text
