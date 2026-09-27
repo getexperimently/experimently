@@ -250,12 +250,26 @@ _RERUN = re.compile(r"re-?run(ning)? (the )?rollback|rollback again", re.I)
 def test_no_copy_advises_running_rollback_again():
     """EM ruling C3: a second Rollback inside the hour stops the first one's
     deployment with auto-rollback and puts the bad API release back. The only
-    mention allowed is the warning against it."""
+    mention allowed is the warning against it.
+
+    The scan covers every script (their ::error:: copy is operator copy too:
+    shift_traffic.py, refuse_active_deployment.py) and every page under
+    docs/deployment/, not only the three files the ban was first written for
+    (#148 PE condition 8)."""
     texts = {
         "rollback.yml": (WORKFLOWS / "rollback.yml").read_text(),
         "deploy.yml": (WORKFLOWS / "deploy.yml").read_text(),
         "runbook": RUNBOOK.read_text(),
     }
+    scripts = sorted((REPO_ROOT / "scripts").glob("*.py"))
+    scripts += sorted((REPO_ROOT / "scripts").glob("*.sh"))
+    pages = sorted((DOCS / "deployment").rglob("*.md"))
+    # A glob that matches nothing makes this scan vacuous; say so instead.
+    assert any(p.name == "shift_traffic.py" for p in scripts), scripts
+    assert any(p.name == "refuse_active_deployment.py" for p in scripts), scripts
+    assert RUNBOOK in pages and GUIDE in pages, pages
+    for path in scripts + pages:
+        texts.setdefault(str(path.relative_to(REPO_ROOT)), path.read_text())
     for where, text in texts.items():
         flat = " ".join(text.split())
         for match in _RERUN.finditer(flat):

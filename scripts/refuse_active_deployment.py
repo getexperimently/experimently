@@ -15,7 +15,9 @@ back the release that just succeeded.
 
 So the deploy asks first, before it changes anything, and refuses with the
 deployment's id and roughly how long it may stay active. It never stops the
-deployment. Rollback is the workflow that stops one.
+deployment. Rollback is the workflow that stops one, except CodeDeploy's own
+rollback (`creator == codeDeployRollback`), which Rollback refuses to stop:
+for that one the refusal says to wait, not to use Rollback (#148).
 
 READ-ONLY: `OPERATIONS` is the whole allow-list, and it holds only
 `list-deployments` and `get-deployment`.
@@ -45,7 +47,7 @@ OPERATIONS = frozenset(
 #: Every non-final status in botocore's DeploymentStatus enum. `Baking` is
 #: here because nobody has observed whether a deployment reports `InProgress`
 #: or `Baking` during the termination wait (PE v2 finding 6). rollback.yml's
-#: filter leaves it out.
+#: in-flight filter lists the same five (a test pins them equal).
 ACTIVE = ("Created", "Queued", "InProgress", "Baking", "Ready")
 
 #: The deployment group's own waits (fargate_service_stack.py), used when a
@@ -142,12 +144,22 @@ def describe(info: dict, now: float) -> str:
     )
 
 
+def rollback_of(info: dict) -> str | None:
+    """For CodeDeploy's own rollback (`creator == codeDeployRollback`), the id
+    of the deployment it rolls back, or a phrase when that is not reported.
+    None for any other deployment."""
+    if info.get("creator") != "codeDeployRollback":
+        return None
+    rolled_back = (info.get("rollbackInfo") or {}).get("rollbackTriggeringDeploymentId")
+    return str(rolled_back) if rolled_back else "an earlier deployment"
+
+
 def check(
     aws: Callable[[Sequence[str]], dict],
     application: str,
     group: str,
     now: float,
-) -> tuple[int, list[str]]:
+) -> tuple[int, list[tuple[str | None, str]]]:
     # AWS CLI v2 pages list-deployments itself (botocore's paginator, result
     # key `deployments`) and prints the pages merged, unless --max-items,
     # --page-size or --no-paginate is passed. None is, so this is every active
@@ -171,7 +183,7 @@ def check(
         )
         # Listed as active a moment ago; it may have finished since.
         if info.get("status") in ACTIVE:
-            sentences.append(describe(info, now))
+            sentences.append((rollback_of(info), describe(info, now)))
     return (REFUSED if sentences else OK), sentences
 
 
@@ -199,7 +211,20 @@ def main(
     if status == OK:
         print(f"no deployment is active in {application}/{group}")
         return OK
-    for sentence in sentences:
+    for rolled_back, sentence in sentences:
+        if rolled_back is not None:
+            # CodeDeploy's own rollback (#148 M6, UX W8). Rollback refuses
+            # while one is active, so the copy must not send anyone there.
+            print(
+                "::error title=CodeDeploy is rolling back::"
+                f"{sentence} It is CodeDeploy's own rollback of {rolled_back}. "
+                "Nothing has been built or changed. Re-run this deploy once it "
+                "is no longer active. Do not use Rollback while it is active: "
+                "Rollback refuses while CodeDeploy's own rollback is active, "
+                "because stopping it would put back the release it is rolling "
+                "away from."
+            )
+            continue
         print(
             "::error title=A deployment is still active::"
             f"{sentence} Nothing has been built or changed. Re-run this deploy "
