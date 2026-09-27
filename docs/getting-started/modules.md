@@ -52,7 +52,7 @@ the dashboard checks:
 
 | Module | Name | What it adds |
 | --- | --- | --- |
-| Team workspaces | `workspaces` | Multiple tenants on one instance: members, invites and workspace-scoped API keys |
+| Team workspaces | `workspaces` | Group users into teams, with workspace roles and email invites. Grouping only: access to experiments and flags is by platform role |
 | Custom roles | `rbac` | Roles beyond the built-in four, and permissions granted directly to a user |
 | SSO / SAML / OIDC | `sso` | External identity providers with just-in-time provisioning and role mapping |
 | HIPAA | `hipaa` | PHI encryption, six-year PHI audit retention, BAA records |
