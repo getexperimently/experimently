@@ -415,6 +415,15 @@ It prints `"crash"`, the stored row's `error_type`.
 `experiment_key` is required; unknown keys return `404` (single) or are listed per item
 (batch).
 
+What is stored for each report, on both endpoints:
+
+| Field | Stored as |
+|-------|-----------|
+| `timestamp` | The time the server received the report, for the stored row and for the `timestamp` in the `POST /api/v1/tracking/errors` response. A `timestamp` you send is kept in the row's metadata as `client_timestamp` (ISO 8601). |
+| `message` | The first 1000 characters. |
+| `stack_trace` | At most 8 KB (8192 bytes, UTF-8); anything longer is cut off at a character boundary. |
+| `metadata` | Stored as sent when its compact JSON is at most 8 KB (8192 bytes, UTF-8). Larger metadata is replaced by `{"metadata_truncated": true, "metadata_bytes": <size>}`. `client_timestamp` is added after this check. |
+
 ---
 
 ## Next Steps
