@@ -29,6 +29,8 @@ from backend.app.core.settings_rules import (
     LEGACY_ENVIRONMENT_ALIASES,
     MIN_SECRET_KEY_LENGTH,
     PUBLIC_BASE_URL_EXAMPLE,
+    allowed_host_pattern_error,
+    parse_allowed_hosts,
     public_base_url_error,
     secret_is_placeholder,
     superuser_password_is_weak,
@@ -702,15 +704,7 @@ class Settings(BaseSettings):
     @classmethod
     def assemble_allowed_hosts(cls, v: Union[str, List[str]]) -> List[str]:
         """Comma-separated or JSON, the two spellings CORS_ORIGINS also takes."""
-        if isinstance(v, str) and v.strip().startswith("["):
-            import json
-
-            v = json.loads(v)
-        if isinstance(v, str) and v:
-            return [i.strip() for i in v.split(",") if i.strip()]
-        if isinstance(v, list):
-            return [str(i).strip() for i in v if str(i).strip()]
-        return []
+        return parse_allowed_hosts(v)
 
     @field_validator("ALLOWED_HOSTS")
     @classmethod
@@ -725,23 +719,15 @@ class Settings(BaseSettings):
         monitoring calls fine is the most expensive kind, so the typo is
         refused here rather than at 3am.
 
-        Accepted: `example.com`, `*.example.com`. Nothing else.
+        Accepted: `example.com`, `*.example.com`. Nothing else. `*` passes
+        here and is refused in staging/production below. The rule is
+        settings_rules.allowed_host_pattern_error, which the container's
+        start-up check applies too.
         """
         for pattern in v:
-            if pattern == "*":
-                continue  # meaningful ("allow anything"); refused separately below
-            if pattern.startswith("*."):
-                rest = pattern[2:]
-                if rest and "*" not in rest:
-                    continue
-            elif "*" not in pattern and not pattern.startswith("."):
-                continue
-            raise ValueError(
-                f"ALLOWED_HOSTS entry {pattern!r} is not a hostname or a `*.` "
-                "wildcard and would match nothing, refusing every request while "
-                "the health probes -- which are exempt -- stayed green. Write "
-                "`example.com` or `*.example.com`."
-            )
+            error = allowed_host_pattern_error(pattern)
+            if error:
+                raise ValueError(error)
         return v
 
     @field_validator("CORS_ORIGINS", mode="before")

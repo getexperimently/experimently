@@ -276,6 +276,94 @@ def test_what_the_check_refuses_the_core_settings_refuse_too(changes):
 
 
 # ---------------------------------------------------------------------------
+# ALLOWED_HOSTS: the check and the settings apply one rule, in every environment
+# ---------------------------------------------------------------------------
+
+#: (value, refused). `*example.com` is the silent-outage typo (a literal host
+#: with an asterisk: matches nothing). `http://example.com` and a blank entry
+#: are what the settings accept today -- the scheme'd one as a literal host
+#: that no Host header will equal, the blank one dropped by the parser -- and
+#: the check must agree with them, not be stricter.
+HOST_CASES = [
+    ("*example.com", True),
+    ("example.*", True),
+    (".example.com", True),
+    ('["*example.com"]', True),
+    ("[not json", True),
+    ("http://example.com", False),
+    ("a.example.com,,b.example.com", False),
+    ("*.example.com", False),
+    ('["a.example.com", "*.b.example.com"]', False),
+]
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("environment", ["production", "development"])
+@pytest.mark.parametrize("hosts, refused", HOST_CASES)
+def test_allowed_hosts_patterns_are_judged_as_the_settings_judge_them(
+    hosts, refused, environment
+):
+    """#277 review: `*example.com` passed the check, then the process died on
+    a pydantic traceback after the database wait."""
+    env = with_(ENVIRONMENT=environment, ALLOWED_HOSTS=hosts)
+    problems = check(env)
+    assert bool(problems) is refused, problems
+    if refused:
+        assert all(p.startswith("ALLOWED_HOSTS") for p in problems), problems
+    result = _settings_build(env)
+    assert (result.returncode != 0) is refused, result.stderr[-2000:]
+    if refused:
+        assert "ALLOWED_HOSTS" in result.stderr or "JSON" in result.stderr
+
+
+# ---------------------------------------------------------------------------
+# AUDIT_HMAC_KEY: the check and the modules' settings builder agree (full)
+# ---------------------------------------------------------------------------
+
+_BUILD_MODULE_SETTINGS = (
+    _BUILD_SETTINGS
+    + """
+from modules.backend.app.settings import build_modules_settings
+build_modules_settings()
+print("modules settings built")
+"""
+)
+
+_HAS_MODULES = (REPO_ROOT / "modules" / "backend" / "app" / "settings.py").is_file()
+
+
+@pytest.mark.regression
+@pytest.mark.skipif(not _HAS_MODULES, reason="core checkout: no modules package")
+@pytest.mark.parametrize(
+    "audit_key, refused",
+    [
+        (_KEY[::-1], False),
+        (None, True),
+        ("too-short-audit-key", True),
+        ("dev-audit-key-change-in-production", True),
+        ("dev-audit-" + "x" * 40, True),
+    ],
+)
+def test_the_audit_key_is_judged_as_the_modules_settings_judge_it(audit_key, refused):
+    env = with_(AUDIT_HMAC_KEY=audit_key)
+    problems = check(env, full_profile=True)
+    assert bool(problems) is refused, problems
+    result = subprocess.run(
+        [sys.executable, "-c", _BUILD_MODULE_SETTINGS],
+        cwd=REPO_ROOT,
+        env={"PATH": os.environ.get("PATH", ""), "PYTHONPATH": str(REPO_ROOT), **env},
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert (result.returncode != 0) is refused, result.stderr[-2000:]
+    if refused:
+        assert "AUDIT_HMAC_KEY" in result.stderr
+    else:
+        assert "modules settings built" in result.stdout
+
+
+# ---------------------------------------------------------------------------
 # The entrypoint runs it first
 # ---------------------------------------------------------------------------
 

@@ -317,7 +317,7 @@ The ECS task role and Lambda execution roles need the following permissions:
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `POSTGRES_SERVER` | Yes | Aurora endpoint; with `POSTGRES_PORT`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`. `DATABASE_URL` is not read, and staging/production refuse to start with it set |
+| `POSTGRES_SERVER` | Yes | Aurora endpoint; with `POSTGRES_PORT`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`. `DATABASE_URL` is not read; in staging and production the container's start-up check refuses to start with it set |
 | `REDIS_HOST` | Yes | ElastiCache primary endpoint (`localhost` if unset) |
 | `REDIS_PORT` | No | ElastiCache port (default `6379`) |
 | `REDIS_SSL` | Yes, on AWS | `true` to connect over TLS (default `false`) |

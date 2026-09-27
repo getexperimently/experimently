@@ -15,7 +15,8 @@ decided whether the environment is fit to start.
 
 from __future__ import annotations
 
-from typing import Dict, Optional
+import json
+from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
 #: Minimum length of SECRET_KEY and AUDIT_HMAC_KEY in staging/production.
@@ -133,3 +134,47 @@ def public_base_url_error(value: str) -> Optional[str]:
             f"service is reached at -- got {value!r}"
         )
     return None
+
+
+def parse_allowed_hosts(value: Any) -> List[str]:
+    """ALLOWED_HOSTS as a list: comma-separated or a JSON array.
+
+    The spelling CORS_ORIGINS also takes. Blank entries are dropped. Raises
+    ``ValueError`` (``json.JSONDecodeError``) on a value that starts like a
+    JSON array but is not one.
+    """
+    if isinstance(value, str) and value.strip().startswith("["):
+        value = json.loads(value)
+    if isinstance(value, str) and value:
+        return [i.strip() for i in value.split(",") if i.strip()]
+    if isinstance(value, list):
+        return [str(i).strip() for i in value if str(i).strip()]
+    return []
+
+
+def allowed_host_pattern_error(pattern: str) -> Optional[str]:
+    """Why an ALLOWED_HOSTS entry can never match, or ``None`` if it can.
+
+    A wildcard written `*example.com` (no dot) is not a wildcard: it is a
+    literal hostname containing an asterisk, it matches nothing, and a
+    deployment configured with it refuses every request while every health
+    check stays green -- because the probes are exempt.
+
+    Accepted: `example.com`, `*.example.com`, and `*` (meaningful, "allow
+    anything"; staging and production refuse it separately). Refused in every
+    environment: any other `*`, and a leading dot.
+    """
+    if pattern == "*":
+        return None
+    if pattern.startswith("*."):
+        rest = pattern[2:]
+        if rest and "*" not in rest:
+            return None
+    elif "*" not in pattern and not pattern.startswith("."):
+        return None
+    return (
+        f"ALLOWED_HOSTS entry {pattern[:200]!r} is not a hostname or a `*.` "
+        "wildcard and would match nothing, refusing every request while "
+        "the health probes -- which are exempt -- stayed green. Write "
+        "`example.com` or `*.example.com`."
+    )

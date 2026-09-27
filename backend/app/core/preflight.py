@@ -14,7 +14,8 @@ What it refuses:
 
 * always -- neither ``ENVIRONMENT`` nor the legacy ``APP_ENV`` set, or an
   environment name the settings do not know.  The image requires ENVIRONMENT
-  to be set.
+  to be set.  Also an ``ALLOWED_HOSTS`` entry that can never match
+  (``*example.com``), which the settings refuse in every environment.
 * in staging and production -- ``SECRET_KEY``, ``FIRST_SUPERUSER_PASSWORD``
   and (full profile) ``AUDIT_HMAC_KEY`` missing, too short or a published
   placeholder; ``PUBLIC_BASE_URL`` missing (unless ``ALLOWED_HOSTS`` names the
@@ -46,7 +47,9 @@ from backend.app.core.settings_rules import (
     MIN_SECRET_KEY_LENGTH,
     MIN_SUPERUSER_PASSWORD_LENGTH,
     PUBLIC_BASE_URL_EXAMPLE,
+    allowed_host_pattern_error,
     canonical_environment_quiet,
+    parse_allowed_hosts,
     public_base_url_error,
     secret_is_weak,
     superuser_password_is_weak,
@@ -130,11 +133,6 @@ def check(
             f"{name}={_truncate(raw_environment or legacy)!r} is not an environment "
             f"this image knows. Use one of: {', '.join(CANONICAL_ENVIRONMENTS)}."
         ]
-    if environment not in HARDENED_ENVIRONMENTS:
-        return []
-
-    if full_profile is None:
-        full_profile = _modules_present()
     from_file = _dotenv(environment, root if root is not None else Path.cwd())
 
     def value(key: str) -> str:
@@ -143,6 +141,28 @@ def check(
         return from_file.get(key, "")
 
     problems: List[str] = []
+
+    # ALLOWED_HOSTS entries the settings refuse in EVERY environment: a
+    # pattern that parses but can never match (`*example.com`).
+    raw_hosts = value("ALLOWED_HOSTS")
+    try:
+        hosts = parse_allowed_hosts(raw_hosts)
+    except ValueError:
+        hosts = []
+        problems.append(
+            "ALLOWED_HOSTS starts with '[' but is not a JSON array. Write it "
+            'comma-separated (a.example.com,b.example.com) or as ["a.example.com"].'
+        )
+    for pattern in hosts:
+        error = allowed_host_pattern_error(pattern)
+        if error:
+            problems.append(error)
+
+    if environment not in HARDENED_ENVIRONMENTS:
+        return problems
+
+    if full_profile is None:
+        full_profile = _modules_present()
 
     def secret(
         key: str, missing: str, weak: Callable[[str], bool], rule: str, how: str
@@ -169,19 +189,17 @@ def check(
     )
 
     public_base_url = value("PUBLIC_BASE_URL").strip()
-    allowed_hosts = value("ALLOWED_HOSTS").strip()
     if public_base_url:
         error = public_base_url_error(public_base_url)
         if error:
             problems.append(_truncate(error, 400))
-    elif not allowed_hosts or allowed_hosts == "*":
+    elif not hosts or hosts == ["*"]:
         problems.append(
             "PUBLIC_BASE_URL is not set. Set it to the URL people type to open the "
             f"dashboard, e.g. {PUBLIC_BASE_URL_EXAMPLE} (the API is served under "
             "/api on the same origin)."
         )
-    hosts = allowed_hosts.strip("[]").replace('"', "").replace("'", "")
-    if "*" in [h.strip() for h in hosts.split(",")]:
+    if "*" in hosts:
         problems.append(
             "ALLOWED_HOSTS=* is refused in staging and production. Name the "
             "hostnames, or remove ALLOWED_HOSTS and let PUBLIC_BASE_URL decide."
