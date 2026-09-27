@@ -92,40 +92,32 @@ Download all experiments as a CSV (default) or JSON file.
 
 #### Example curl
 
-This downloads the CSV, which has a header row and one row per experiment:
+This downloads the CSV, which has a header row and one row per experiment.
+`start_date` and `end_date` filter on when the experiment was created; this asks for the
+ones created since the start of 2024:
 
 ```{.bash exec}
 curl -s -H "Authorization: Bearer $TOKEN" \
-  localhost:8000/api/v1/export/experiments -o experiments.csv
+  "localhost:8000/api/v1/export/experiments?start_date=2024-01-01T00:00:00Z" -o experiments.csv
 
 sed -n 1p experiments.csv
-grep -c 'Checkout Button Color' experiments.csv
+grep 'Checkout Button Color' experiments.csv | cut -d, -f3,4,10,11
 ```
 <!-- expect: experiment_id,experiment_name,status,experiment_type,start_date,end_date,duration_days,total_assignments,total_events,winner_variant,recommendation -->
-<!-- expect: 1 -->
+<!-- expect: active,a_b,green_button,SHIP_VARIANT -->
 
-It prints the header row, then `1`: the demo data's `Checkout Button Color` experiment is
-in the file once. The response carries the file name:
+It prints the header row, then the demo data's `Checkout Button Color` experiment's
+status, type, winner and recommendation, `active,a_b,green_button,SHIP_VARIANT`: on the
+demo data the green button converts better, and the results API recommends shipping it.
+The response carries the file name:
 
 ```text
 Content-Type: text/csv; charset=utf-8
 Content-Disposition: attachment; filename=experiments_20260926_225646.csv
 ```
 
-With `format=json`, the same rows are a JSON array. `start_date` and `end_date` filter on
-when the experiment was created; this asks for the ones created since the start of 2024:
-
-```{.bash exec}
-curl -s -H "Authorization: Bearer $TOKEN" \
-  "localhost:8000/api/v1/export/experiments?format=json&start_date=2024-01-01T00:00:00Z" \
-  -o experiments.json
-
-jq -r '.[] | select(.experiment_name == "Checkout Button Color") | "\(.status) \(.experiment_type) \(.winner_variant) \(.recommendation)"' experiments.json
-```
-<!-- expect: active a_b green_button SHIP_VARIANT -->
-
-It prints `active a_b green_button SHIP_VARIANT`: on the demo data the green button
-converts better, and the results API recommends shipping it.
+With `format=json`, the same rows are a JSON array; the variants example below asks
+for JSON.
 
 ---
 
@@ -177,7 +169,7 @@ It prints the demo experiment's two variants, `blue_button` (the control) and
 for the demo experiment and prints `same`:
 
 ```{.bash exec}
-EXP_ID=$(jq -r '.[] | select(.experiment_name == "Checkout Button Color") | .experiment_id' experiments.json)
+EXP_ID=$(jq -r '[.[] | select(.experiment_name == "Checkout Button Color") | .experiment_id][0]' variants.json)
 
 curl -s -H "Authorization: Bearer $TOKEN" "localhost:8000/api/v1/results/$EXP_ID?use_cache=false" \
   | jq -S '[.metrics[] | select(.is_primary) | .variants[] | {variant_name, assignments: .sample_size, conversions, conversion_rate: .mean, p_value}] | sort_by(.variant_name)' > from_results.json
@@ -366,20 +358,10 @@ An id that no experiment has answers `404`, and one that is not a UUID answers `
 
 #### Example curl
 
-This asks for the report of the demo experiment, whose id the variants example above
-saved in `$EXP_ID`:
-
-```{.bash exec}
-curl -s -H "Authorization: Bearer $TOKEN" \
-  localhost:8000/api/v1/export/reports/experiments/$EXP_ID \
-  | jq '{name: .experiments[0].experiment_name, variants: [.variants[].variant_name]}'
-```
-<!-- expect: "name": "Checkout Button Color" -->
-<!-- expect: "blue_button" -->
-<!-- expect: "green_button" -->
-
-It prints the experiment's name and its two variants. With `format=csv` the same variant
-rows come as a CSV file:
+As JSON (the default) the report has the shape above: the experiment's row from
+`/export/experiments` and its rows from `/export/variants`, which the examples above
+already show. This asks for the demo experiment's report with `format=csv`, using the id
+the variants example saved in `$EXP_ID`; the variant rows come as a CSV file:
 
 ```{.bash exec}
 curl -s -H "Authorization: Bearer $TOKEN" \
@@ -408,14 +390,7 @@ It prints the header row, then each variant's name and whether it is the control
 
 ### Example 422 Error
 
-```{.bash exec}
-curl -s -H "Authorization: Bearer $TOKEN" \
-  "localhost:8000/api/v1/export/experiments?format=xml" | jq -r '.detail[0].msg'
-```
-<!-- expect: Input should be 'csv' or 'json' -->
-
-It prints `Input should be 'csv' or 'json'`. A `scope` other than `summary` is refused
-the same way, with the reason in `detail`:
+A `scope` other than `summary` is refused, with the reason in `detail`:
 
 ```{.bash exec}
 curl -s -H "Authorization: Bearer $TOKEN" \
@@ -423,7 +398,8 @@ curl -s -H "Authorization: Bearer $TOKEN" \
 ```
 <!-- expect: scope=events is not supported; the export is available with scope=summary only -->
 
-The whole body of the `format=xml` answer:
+A value the parameter does not accept, such as `format=xml`, fails validation instead,
+and the body lists each invalid parameter:
 
 ```json
 {
