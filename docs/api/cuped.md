@@ -128,7 +128,7 @@ It prints `"method": "winsorization"` and the adjusted effect on the experiment'
   "computed_at": "2026-09-26T22:54:12.480010+00:00",
   "seed": null,
   "n_samples": null,
-  "engine_version": "1.0.0"
+  "engine_version": "1.1.0"
 }
 ```
 

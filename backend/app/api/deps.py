@@ -78,13 +78,9 @@ async def get_redis_pool():
 
     if _redis_pool is None:
         try:
-            _redis_pool = redis.Redis(
-                host=settings.REDIS_HOST,
-                port=settings.REDIS_PORT,
-                db=settings.REDIS_DB,
-                ssl=bool(settings.REDIS_SSL),
-                decode_responses=True,
-            )
+            from backend.app.core.redis_client import create_async_redis_client
+
+            _redis_pool = create_async_redis_client(decode_responses=True)
         except Exception as e:
             logger.error(f"Redis connection error: {e}")
             return None

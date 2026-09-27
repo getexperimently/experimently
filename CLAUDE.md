@@ -321,6 +321,12 @@ alembic stamp heads
   - **Always** check the generated file for accuracy, especially for complex changes
   - **Verify** that `down_revision` points to the correct previous migration ID
   - **Always use revision IDs, not migration names**, in the `down_revision` field
+  - **Expand, then contract.** A migration in release N must not drop or rename anything
+    release N-1's code uses; do it in two releases (add and move over in one, drop in a
+    later one). During a rolling upgrade N-1 keeps serving against N's schema, and an
+    older image meeting a newer database refuses to start (`may_run_alembic`,
+    `backend/tests/integration/database/test_newer_database_rollback.py`). Neither its
+    message nor anything else may tell an operator to delete `alembic_version` rows (#238).
 - Running migrations:
   - Use `python -m alembic -c backend/app/db/alembic.ini upgrade heads` to apply migrations
   - Use `python -m alembic -c backend/app/db/alembic.ini history` to view migration history

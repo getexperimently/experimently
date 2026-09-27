@@ -61,6 +61,7 @@ from backend.app.models.rollout_schedule import (
 )
 from backend.app.models.safety import FeatureFlagSafetyConfig, SafetySettings
 from backend.app.models.user import User, UserRole
+from backend.scripts.seed_guard import require_development_environment
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -972,6 +973,7 @@ def _bulk_insert(db, objects, batch_size=500):
 
 
 def main():
+    require_development_environment("demo")
     parser = argparse.ArgumentParser(
         description="Seed demo data for Experimently platform"
     )

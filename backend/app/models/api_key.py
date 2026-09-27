@@ -44,8 +44,9 @@ class APIKey(Base, BaseModel):
     expires_at = Column(DateTime, nullable=True)
     last_used_at = Column(DateTime, nullable=True)
 
-    # Scopes for granular API access control
-    scopes = Column(String(255), nullable=True)  # Comma-separated list of scopes
+    # Comma-separated scope names, read with backend.app.core.api_key_scopes.
+    # Scopes do not restrict a key today; sdk:ruleset is intended to be enforced.
+    scopes = Column(String(255), nullable=True)
 
     # User relationship
     user_id = Column(

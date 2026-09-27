@@ -69,9 +69,9 @@ class DimensionalAnalysisService:
             "<variant_id>": {
                 "total":       int,   # assignments / exposures
                 "conversions": int,   # conversion events
+                "is_control":   bool,  # the control is never guessed
                 # optional:
                 "variant_name": str,  # human-readable name
-                "is_control":   bool,
             },
             ...
         },
@@ -128,11 +128,11 @@ class DimensionalAnalysisService:
             # Normalise missing/None keys to "unknown"
             seg_val = segment_value if segment_value else "unknown"
 
-            # Identify control variant (first one flagged is_control=True,
-            # or fall back to the first key alphabetically)
+            # The control is the variant flagged is_control=True; with none
+            # flagged there is nothing to test against.
             control_id = self._find_control_id(variant_map)
 
-            control_data = variant_map.get(control_id, {})
+            control_data = variant_map.get(control_id, {}) if control_id else {}
             control_total = control_data.get("total", 0)
             control_conversions = control_data.get("conversions", 0)
 
@@ -148,7 +148,7 @@ class DimensionalAnalysisService:
                 v_ci = self._wilson_ci(v_conversions, v_total, adjusted_alpha)
                 is_ctrl = variant_id == control_id
 
-                if is_ctrl:
+                if is_ctrl or control_id is None:
                     p_value = None
                     is_significant = False
                 else:
@@ -232,8 +232,20 @@ class DimensionalAnalysisService:
         treat_conv = np.array([d[3] for d in segment_data], dtype=float)
         treat_total = np.array([d[2] for d in segment_data], dtype=float)
 
-        ctrl_rate = np.where(ctrl_total > 0, ctrl_conv / ctrl_total, 0.0)
-        treat_rate = np.where(treat_total > 0, treat_conv / treat_total, 0.0)
+        # A variant can have no users in a segment (every variant is listed),
+        # so divide only where the total is positive; the rate is 0 elsewhere.
+        ctrl_rate = np.divide(
+            ctrl_conv,
+            ctrl_total,
+            out=np.zeros_like(ctrl_conv, dtype=float),
+            where=ctrl_total > 0,
+        )
+        treat_rate = np.divide(
+            treat_conv,
+            treat_total,
+            out=np.zeros_like(treat_conv, dtype=float),
+            where=treat_total > 0,
+        )
         lift = treat_rate - ctrl_rate
 
         # Chi-squared test on treatment conversion counts across segments
@@ -278,22 +290,19 @@ class DimensionalAnalysisService:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _find_control_id(variant_map: Dict[str, Any]) -> str:
+    def _find_control_id(variant_map: Dict[str, Any]) -> Optional[str]:
         """
-        Determine which variant_id represents the control group.
+        Return the variant_id the caller flagged ``is_control``, or ``None``.
 
-        Checks for is_control=True flag, then falls back to the variant
-        with the alphabetically smallest id.
+        The control is never guessed from an id (#218): an id sorts by chance,
+        and a guessed control turns every p-value in the segment into a
+        comparison against the wrong arm.  With no flagged variant, no
+        variant is a control and no p-value is computed.
         """
         for vid, vdata in variant_map.items():
             if vdata.get("is_control", False):
                 return vid
-        # Fallback: use key containing "ctrl" or "control" case-insensitively
-        for vid in variant_map:
-            if "ctrl" in vid.lower() or "control" in vid.lower():
-                return vid
-        # Last resort: alphabetically first
-        return sorted(variant_map.keys())[0]
+        return None
 
     @staticmethod
     def _wilson_ci(

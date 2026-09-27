@@ -21,7 +21,7 @@ The platform uses **AWS CodeDeploy** for zero-downtime blue/green deployments:
 1. A new task definition is registered with the updated container image
 2. CodeDeploy starts the new tasks in the idle target group; the Deploy workflow approves the shift once every one is healthy
 3. The canary shifts 10% of traffic, waits 5 minutes, then shifts the rest
-4. The canary is timed only: nothing rolls back automatically on application errors. CodeDeploy rolls back only a deployment that fails or is stopped, and the [Rollback workflow](../deployment/rollback-runbook.md) is the response to a bad release
+4. Two 5xx alarms, one per target group, watch the API through the canary and the hour after it: while either is in ALARM, CodeDeploy stops the deployment and rolls the API back by itself. They watch the API's target 5xx only, so a release that answers wrongly with a 2xx is not caught, and after that hour the [Rollback workflow](../deployment/rollback-runbook.md) is the response to a bad release
 
 To deploy a new version, run **Actions → Deploy** with a release tag
 ([deployment guide, section 3](../deployment/deployment-guide.md#3-every-deploy)).

@@ -734,8 +734,9 @@ class AssignmentService:
                 }
 
             # Parse targeting rules (native TargetingRules or dashboard shape)
+            owner = f"experiment:{getattr(experiment, 'id', None)}"
             targeting_rules, skip_reason = self._coerce_targeting_rules(
-                experiment.targeting_rules
+                experiment.targeting_rules, owner=owner
             )
             if targeting_rules is None:
                 return {
@@ -754,7 +755,7 @@ class AssignmentService:
                 user_context=user_context,
                 validate_attributes=validate_attributes,
                 track_metrics=True,
-                owner=f"experiment:{getattr(experiment, 'id', None)}",
+                owner=owner,
             )
 
             if matched_rule:
@@ -785,7 +786,7 @@ class AssignmentService:
 
     @staticmethod
     def _coerce_targeting_rules(
-        raw: Any,
+        raw: Any, owner: str = "targeting rules"
     ) -> Tuple[Optional[TargetingRules], Optional[str]]:
         """
         Turn the stored ``targeting_rules`` value into a ``TargetingRules``.
@@ -793,7 +794,8 @@ class AssignmentService:
         Accepts a JSON string, the native ``TargetingRules`` dict (has ``rules``),
         the dashboard editor shape (``{"logical_operator", "groups": [...]}``,
         converted by ``targeting_adapter.normalise_targeting_rules``) or an
-        existing ``TargetingRules`` instance.
+        existing ``TargetingRules`` instance. ``owner`` names the rules in
+        the adapter's warning when dashboard rules cannot be converted.
 
         Returns:
             ``(rules, None)`` when there is something to evaluate, or
@@ -812,7 +814,7 @@ class AssignmentService:
                 if _is_dashboard_rules_shape(raw):
                     # The adapter returns None for dashboard rules it cannot
                     # convert (and logs why); that means "no rules", not "nobody".
-                    rules = normalise_targeting_rules(raw)
+                    rules = normalise_targeting_rules(raw, owner=owner)
                     if rules is None:
                         return None, no_rules
                 else:

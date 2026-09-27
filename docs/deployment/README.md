@@ -60,7 +60,8 @@ checklist in [the deployment guide](deployment-guide.md#1-before-the-first-deplo
 
 > **Not yet run against a real AWS account.** The CodeDeploy forward deploy
 > and the Rollback workflow are tested against a simulated `aws` only.
-> The first staging deploy is the first time either runs against AWS.
+> The first staging deploy is the first time either runs against AWS, and the
+> first time an alarm rolls a deployment back.
 
 **How the traffic moves.** The deploy creates a CodeDeploy blue/green
 deployment. When CodeDeploy reports it `Ready`, the deploy checks that every
@@ -85,12 +86,20 @@ re-run for about an hour after the shift, and the rollback line reverts the API
 too, so the dashboard alone goes back with
 [rollback-runbook.md](rollback-runbook.md) Method 2.
 
-> **The canary is timed only.** No alarm watches it, so nothing rolls back
-> automatically on application errors. A release that answers `/health` and
-> fails everywhere else still reaches 100% after five minutes. The response is
-> **Rollback**, within the hour CodeDeploy keeps the previous task set. Alarm
-> based rollback is tracked in #148 and is a prerequisite for the first
-> production deploy, unless the founder waives it.
+> **Alarms watch the API's canary and the hour after it.** The deployment
+> group has two alarms, `experimentation-api-5xx-blue-<env>` and
+> `experimentation-api-5xx-green-<env>`, one per target group
+> ([#148](https://github.com/getexperimently/experimently/issues/148)). While
+> either is in ALARM, CodeDeploy stops the deployment and rolls the API back
+> to the previous revision by itself. That can happen after the run has gone
+> green, in the hour CodeDeploy keeps the previous task set, and nothing
+> announces it in #deployments: the run summary says until when, and how to
+> check. The alarms watch the API's target 5xx only (at least 5 in a minute
+> and at least 5% of that target group's requests, for 2 minutes of 3). A
+> release that answers wrongly with a 2xx is not caught, nor are the load
+> balancer's own 502 and 504, and an alarm does not roll back the dashboard.
+> Staging traffic may be too low to reach the threshold at all. After that
+> hour, the response to a bad release is **Rollback**.
 
 **One deploy per environment per hour.** After the shift, CodeDeploy keeps
 the previous task set for an hour, and the deployment stays active that whole
@@ -98,7 +107,11 @@ time. CodeDeploy accepts no second deployment meanwhile, so a deploy
 dispatched within the hour is refused before it changes anything. The
 refusal names the deployment and roughly how long it has left. The deploy never
 stops that deployment: stopping one whose traffic has shifted rolls back a
-release that succeeded. Rollback does stop it, deliberately.
+release that succeeded. Rollback does stop it, deliberately. When an alarm
+stopped it instead, CodeDeploy's own rollback may be active for up to an hour:
+do not use Rollback for that release, which refuses while CodeDeploy's rollback
+is active; see
+[An alarm rolled the API back](rollback-runbook.md#an-alarm-rolled-the-api-back).
 
 **One at a time per environment.** Deploy and Database Migration share a
 concurrency group per environment and are never cancelled mid-run. GitHub keeps

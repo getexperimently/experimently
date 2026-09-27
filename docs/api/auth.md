@@ -134,6 +134,11 @@ It prints `eptk_`, the start of every key. The key is shown only in this respons
 it securely. If you lose it, create a new key and delete the old one. See
 [API Key Management](../security/api-keys.md) for listing, deleting and rotating keys.
 
+The request also accepts an optional `"scopes"` list. **Scopes do not limit what a key can do
+today:** any active key is accepted by every endpoint that takes an API key. The one scope
+intended to be enforced is `sdk:ruleset`, for server-side local evaluation; see
+[Scopes](../security/api-keys.md#scopes).
+
 ### Using an API Key
 
 Pass the key in the `X-API-Key` header on every request. This tracks a purchase in the demo

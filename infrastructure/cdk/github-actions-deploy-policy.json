@@ -14,6 +14,7 @@
         "codedeploy:ListDeployments",
         "codedeploy:RegisterApplicationRevision",
         "codedeploy:StopDeployment",
+        "codedeploy:UpdateDeploymentGroup",
         "ecr:BatchCheckLayerAvailability",
         "ecr:BatchGetImage",
         "ecr:CompleteLayerUpload",

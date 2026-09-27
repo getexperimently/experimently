@@ -271,8 +271,10 @@ consistentHash('user-123', 'my-flag') ≈ 0.6927449859
 
 ## Browser vs Node.js
 
-The SDK is isomorphic. In the browser the API key is visible to end users: use a key scoped to SDK
-evaluation/tracking only. Server-side, lower `timeoutMs` if the SDK sits on a request path:
+The SDK is isomorphic. In the browser the API key is visible to end users, and keys are not scoped
+for browser use: every active key, including one shipped to a browser, can evaluate flags and track
+events as the user who created it. Use a dedicated key for browser traffic so it can be revoked on its
+own. Server-side, lower `timeoutMs` if the SDK sits on a request path:
 
 ```typescript
 const client = new ExperimentationClient({

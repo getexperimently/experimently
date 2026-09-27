@@ -16,6 +16,7 @@ deployment rather than leaked anything:
 from __future__ import annotations
 
 import json
+import logging
 import os
 
 import pytest
@@ -206,3 +207,74 @@ print(json.dumps({
     assert got["probe"] != 400, (
         f"the real application refused a health probe carrying the task IP: {got}"
     )
+
+
+class _Lines(logging.Handler):
+    def __init__(self):
+        super().__init__(logging.WARNING)
+        self.lines = []
+
+    def emit(self, record):
+        self.lines.append(record.getMessage())
+
+
+@pytest.fixture
+def rejections(monkeypatch):
+    """The middleware's warnings, as formatted lines.
+
+    A private `logging.Logger` rather than `caplog`: the unit conftest patches
+    `logging.getLogger`, which `caplog.set_level` goes through, so caplog's
+    teardown fails in this package.
+    """
+    from backend.app.middleware import trusted_host_middleware
+
+    lines = _Lines()
+    # Not getLogger: the unit conftest replaces it with a mock.
+    private = logging.Logger("trusted-host-under-test", logging.WARNING)  # noqa: LOG001
+    private.addHandler(lines)
+    monkeypatch.setattr(trusted_host_middleware, "logger", private)
+    return lines.lines
+
+
+@pytest.mark.unit
+@pytest.mark.regression
+def test_the_rejection_log_names_the_host_and_the_setting_that_fixes_it(rejections):
+    """A wrong Host is a silent outage: /api/* answers 400, the probes stay 200.
+
+    The log line is where an operator finds out why, so it has to say what was
+    refused, what this deployment answers on, and which setting to change. The
+    response body stays the terse `Invalid host header` -- no contract change.
+    """
+    r = _app(ALLOWED).get("/anything", headers={"Host": "10.0.0.5:8000"})
+
+    assert r.status_code == 400
+    assert r.json() == {"detail": "Invalid host header"}
+    [line] = rejections
+    assert "Host '10.0.0.5:8000'" in line, line
+    assert "this deployment answers on api.example.com, *.example.net" in line, line
+    assert "Set PUBLIC_BASE_URL (or ALLOWED_HOSTS" in line, line
+
+
+@pytest.mark.unit
+@pytest.mark.regression
+def test_the_logged_host_is_truncated_and_escaped(rejections):
+    """The Host is attacker-sized and attacker-shaped.
+
+    A 10,000-character value must reach the log cut to MAX_LOGGED_HOST, and a
+    control character must arrive escaped, never raw: a raw control character
+    in a log line lets the header author shape what the log shows.
+    """
+    from backend.app.middleware.trusted_host_middleware import MAX_LOGGED_HOST
+
+    app = _app(ALLOWED)
+
+    assert app.get("/anything", headers={"Host": "a" * 10_000}).status_code == 400
+    # A tab is a header-value character the HTTP stack lets through; it stands
+    # in for the control characters the repr escapes.
+    assert app.get("/anything", headers={"Host": "x\tforged.evil"}).status_code == 400
+
+    long_line, ctrl_line = rejections
+    assert MAX_LOGGED_HOST == 200
+    assert f"Host '{'a' * MAX_LOGGED_HOST}';" in long_line, long_line[:300]
+    assert "a" * (MAX_LOGGED_HOST + 1) not in long_line
+    assert "\t" not in ctrl_line and "\\t" in ctrl_line, ctrl_line
