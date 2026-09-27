@@ -1,8 +1,9 @@
-# Exact findings gitleaks' generic-api-key rule raises on ordinary flag keys in the
-# generated SDK contract vectors (for example "key":"str-ends_with-0"). Each line is
-# one commit:file:rule:line fingerprint, so any other finding, including a new one in
-# the same file, still fails the scan.
+# Exact findings of gitleaks' generic-api-key rule on ordinary generated flag keys in the SDK
+# contract vectors, plus the one it raised on an earlier version of this file's comment.
+# Each line is one commit:file:rule:line fingerprint, so any other finding, including a
+# new one in the same file, still fails the scan.
 9079a52e66e4b746166f7082d50aba9586e7f068:tests/sdk-contract/ruleset-vectors.json:generic-api-key:148
 9079a52e66e4b746166f7082d50aba9586e7f068:tests/sdk-contract/ruleset-vectors.json:generic-api-key:149
 9079a52e66e4b746166f7082d50aba9586e7f068:tests/sdk-contract/ruleset-vectors.json:generic-api-key:294
 9079a52e66e4b746166f7082d50aba9586e7f068:tests/sdk-contract/ruleset-vectors.json:generic-api-key:295
+22dee9ea90f2ce16c8351551caa4b74a5720a9cc:.gitleaksignore:generic-api-key:2
