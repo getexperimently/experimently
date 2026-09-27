@@ -21,6 +21,11 @@ wording of the same claim is not caught; review is. When the code changes -- a
 workspace key accepted by the SDK routes, or experiments scoped to a
 workspace -- change the docs and this test together.
 
+The dashboard's copy is swept too: the docs index card
+(`frontend/src/pages/docs/index.tsx`) always, and the workspace pages'
+module-page descriptions (`modules/frontend/src/pages/workspaces/`) whenever
+`modules/` is present -- a core tree has no such pages to sweep.
+
 Reads only files; no git and no `modules` import, so it runs the same in
 `scripts/core_build.sh`'s copy (no `.git`, no `modules/`). It is in the
 docs-only gate's "Docs content tests" through its directory,
@@ -50,7 +55,18 @@ SWEPT: Tuple[Path, ...] = (
     REPO_ROOT / "README.md",
     REPO_ROOT / "docs" / "getting-started" / "modules.md",
     REPO_ROOT / "docs" / "api" / "openapi-v1.full.json",
+    REPO_ROOT / "frontend" / "src" / "pages" / "docs" / "index.tsx",
 )
+
+#: The workspace dashboard pages. Swept whenever `modules/` exists, and then
+#: required to exist, so a full tree cannot skip them.
+MODULE_PAGES = REPO_ROOT / "modules" / "frontend" / "src" / "pages" / "workspaces"
+if (REPO_ROOT / "modules").is_dir():
+    SWEPT += (
+        MODULE_PAGES / "index.tsx",
+        MODULE_PAGES / "new.tsx",
+        MODULE_PAGES / "[id]" / "index.tsx",
+    )
 
 #: (pattern, why it is false). Matched case-insensitively against the text
 #: with markup dropped and whitespace collapsed, so a wrapped line still matches.
@@ -58,6 +74,13 @@ FALSE_CLAIMS: Tuple[Tuple[str, str], ...] = (
     (r"isolation boundary", "workspaces do not limit access to experiments or flags"),
     (r"invisible to (users|anyone|members)", "platform roles decide visibility"),
     (r"isolated (project )?namespace", "experiments and flags are not in a workspace"),
+    (r"isolate experiments", "workspaces do not separate experiments or flags"),
+    # "a workspace-scoped API key" (a key that belongs to a workspace) is true;
+    # "generate a scoped API key" as the SDK credential is not.
+    (
+        r"(?<!workspace-)scoped api key",
+        "workspace keys are not accepted by the SDK routes",
+    ),
     (r"independent namespace", "experiments and flags are not in a workspace"),
     (r"multiple tenants on one instance", "one installation is one tenant"),
     (r"multi-tenant", "one installation is one tenant"),
