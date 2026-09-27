@@ -101,6 +101,7 @@ from backend.scripts.seed_demo_data import (
     now_utc,
     seed_users,
 )
+from backend.scripts.seed_guard import require_development_environment
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -1337,6 +1338,7 @@ def print_summary(
 
 
 def main(argv: Optional[List[str]] = None) -> int:
+    require_development_environment("streampulse")
     parser = argparse.ArgumentParser(description="Seed the StreamPulse demo catalogue")
     parser.add_argument(
         "--no-history",

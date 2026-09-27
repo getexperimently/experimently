@@ -8,6 +8,7 @@ from aws_cdk import (
     aws_iam as iam,
     aws_elasticloadbalancingv2 as elbv2,
     aws_codedeploy as codedeploy,
+    aws_cloudwatch as cloudwatch,
     aws_secretsmanager as secretsmanager,
     aws_logs as logs,
 )
@@ -19,10 +20,28 @@ from stacks.environments import data_removal_policy
 from stacks.names import (
     API_LIVE_TARGET_GROUP_CONTEXT,
     API_LIVE_TARGET_GROUP_DEFAULT,
+    API_TARGET_GROUP_COLOURS,
     BACKEND_ECR_REPOSITORY,
+    api_5xx_alarm_name,
     codedeploy_application_name,
     glue_names,
 )
+
+#: The API 5xx alarms' metric math (#148). `e` is HTTPCode_Target_5XX_Count
+#: and `r` is RequestCount, one-minute sums on one target group. The value is
+#: the error rate once there are at least 5 errors, and 0 below that; the alarm
+#: fires at a rate of 5% or more. Each target 5xx is also a request, so `r` is
+#: at least 5 whenever the division happens.
+#:
+#: Nothing offline validates this string: CDK only warns about an identifier
+#: it does not know (infrastructure/tests/test_codedeploy_alarms.py fails on
+#: that warning), and CloudWatch checks it at the first PutMetricAlarm, i.e.
+#: the first `cdk deploy`. If CloudWatch rejects it, the fallback is
+#: count-only: API_5XX_FALLBACK_EXPRESSION with API_5XX_FALLBACK_THRESHOLD.
+API_5XX_EXPRESSION = "IF(FILL(e,0) >= 5, FILL(e,0)/r, 0)"
+API_5XX_RATE_THRESHOLD = 0.05
+API_5XX_FALLBACK_EXPRESSION = "FILL(e,0)"
+API_5XX_FALLBACK_THRESHOLD = 5
 
 #: HTTPS listener rules that send the API's paths to its live target group.
 #: Everything else falls to the listener's default action, the dashboard.
@@ -355,7 +374,7 @@ class FargateServiceStack(Stack):
                 # replication group has in-transit encryption on and refuses a
                 # plaintext connection, so every client the application builds
                 # must speak TLS: REDIS_SSL is passed as `ssl=` to all of them
-                # (backend/tests/unit/core/test_redis_tls.py).
+                # (backend/tests/unit/core/test_redis_connection.py).
                 "REDIS_HOST": redis_host,
                 "REDIS_PORT": redis_port,
                 "REDIS_SSL": "true",
@@ -674,6 +693,94 @@ class FargateServiceStack(Stack):
                 )
             ],
         )
+        # CodeDeploy reads the deployment group's alarms on every poll. The
+        # managed policy above is not relied on for that: its contents are not
+        # pinned here. A failed read stops the deployment, because
+        # `ignore_poll_alarms_failure` stays False below (#148).
+        codedeploy_role.add_to_policy(
+            iam.PolicyStatement(
+                actions=["cloudwatch:DescribeAlarms"],
+                resources=["*"],
+            )
+        )
+
+        # --- The API's 5xx alarms (#148) ---
+        # One per target group, because CodeDeploy swaps blue and green on
+        # every deployment: an alarm on one group would watch the wrong one
+        # half the time. Both are attached to the deployment group below, so
+        # both are polled for the whole deployment, the ORIGINAL target
+        # group's included: a live release already answering 5xx at the
+        # threshold stops (and rolls back) a new deploy too. The runbook's
+        # "Fix forward while an alarm is firing" is the way through that.
+        #
+        # The metrics are built by hand, not with `tg.metrics.*`: those need
+        # the target group attached to a load balancer, and the group that is
+        # not live is attached to none (synth raises
+        # TargetGroupNeedsAttachedLoad when api_live_target_group=green).
+        #
+        # Target 5xx only: HTTPCode_Target_5XX_Count has a TargetGroup
+        # dimension, and the load balancer's own 502/503/504 do not, so a
+        # crashed or timed-out task is NOT covered. Every 5xx the application
+        # answers counts, its deliberate ones included: 501 on a module route
+        # under the core profile, and 503 from /health/ready for a caller that
+        # is not the load balancer's health check. Health checks are not
+        # requests and do not count.
+        #
+        # A breaching minute needs at least 5 target 5xx AND at least 5% of
+        # that group's requests (API_5XX_EXPRESSION). A minute with no data is
+        # NOT_BREACHING, so an idle target group never alarms. Two breaching
+        # minutes of three. These are starting values, to be measured against
+        # real traffic.
+        self.api_5xx_alarms = []
+        for colour, target_group in zip(
+            API_TARGET_GROUP_COLOURS,
+            (self.blue_target_group, self.green_target_group),
+        ):
+            dimensions = {
+                "LoadBalancer": self.alb.load_balancer_full_name,
+                "TargetGroup": target_group.target_group_full_name,
+            }
+            errors = cloudwatch.Metric(
+                namespace="AWS/ApplicationELB",
+                metric_name="HTTPCode_Target_5XX_Count",
+                dimensions_map=dimensions,
+                statistic="Sum",
+                period=Duration.seconds(60),
+            )
+            requests = cloudwatch.Metric(
+                namespace="AWS/ApplicationELB",
+                metric_name="RequestCount",
+                dimensions_map=dimensions,
+                statistic="Sum",
+                period=Duration.seconds(60),
+            )
+            self.api_5xx_alarms.append(
+                cloudwatch.Alarm(
+                    self,
+                    f"Api5xx{colour.capitalize()}",
+                    alarm_name=api_5xx_alarm_name(env_name, colour),
+                    alarm_description=(
+                        f"The API's {colour} target group answers 5xx: at least "
+                        "5 target 5xx and at least 5% of its requests in a "
+                        "minute, for 2 of 3 minutes. While this is in ALARM, "
+                        "CodeDeploy stops and rolls back any API deployment "
+                        "(docs/deployment/rollback-runbook.md)."
+                    ),
+                    metric=cloudwatch.MathExpression(
+                        expression=API_5XX_EXPRESSION,
+                        using_metrics={"e": errors, "r": requests},
+                        period=Duration.seconds(60),
+                        label=f"{colour} target 5xx rate",
+                    ),
+                    threshold=API_5XX_RATE_THRESHOLD,
+                    comparison_operator=(
+                        cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD
+                    ),
+                    evaluation_periods=3,
+                    datapoints_to_alarm=2,
+                    treat_missing_data=cloudwatch.TreatMissingData.NOT_BREACHING,
+                )
+            )
 
         # --- CodeDeploy Application ---
         self.codedeploy_app = codedeploy.EcsApplication(
@@ -684,9 +791,21 @@ class FargateServiceStack(Stack):
         )
 
         # --- CodeDeploy Deployment Group ---
-        # Uses CANARY_10_PERCENT_5_MINUTES: routes 10 % of traffic to green,
-        # waits 5 minutes for alarms/health checks, then shifts the remaining
-        # 90 % if all checks pass.
+        # Uses CANARY_10_PERCENT_5_MINUTES: once the shift is approved, 10% of
+        # the API's traffic goes to the replacement target group for 5
+        # minutes, then the rest. Both 5xx alarms above, blue's and green's,
+        # are in the group's AlarmConfiguration, which applies to the whole
+        # deployment, not to a phase of it (the synth tests pin both). CDK's
+        # documentation says the hour after the shift (termination_wait_time)
+        # is monitored too; that, and what happens to an alarm already in
+        # ALARM before the approval, is not yet observed in a real account.
+        # While either is in ALARM, CodeDeploy stops the deployment
+        # (STOP_ON_ALARM, from `deployment_in_alarm`) and rolls it back
+        # (`stopped_deployment`). Nothing else judges the canary: a release
+        # that answers wrongly with a 2xx, or with fewer errors than the alarm
+        # needs, goes to 100%. The alarms need 2 of 3 one-minute periods plus
+        # the metric delay, so a broken release is often caught after the
+        # shift rather than in the 5 minutes.
         self.deployment_group = codedeploy.EcsDeploymentGroup(
             self,
             "DeploymentGroup",
@@ -715,9 +834,17 @@ class FargateServiceStack(Stack):
             ),
             deployment_config=codedeploy.EcsDeploymentConfig.CANARY_10_PERCENT_5_MINUTES,
             role=codedeploy_role,
+            # Both colours, for the reason given above the alarms. A failed
+            # alarm read stops the deployment (fail closed); never ignored.
+            alarms=self.api_5xx_alarms,
+            ignore_poll_alarms_failure=False,
             auto_rollback=codedeploy.AutoRollbackConfig(
                 failed_deployment=True,
                 stopped_deployment=True,
+                # Explicit, not left to the default: CDK turns it on when
+                # alarms exist, and False would leave an alarm stopping a
+                # deployment without rolling it back -- a half-shifted group.
+                deployment_in_alarm=True,
             ),
         )
 

@@ -7,12 +7,14 @@ This module provides functions for evaluating targeting rules against user conte
 import hashlib
 import logging
 import math
-import re
 from datetime import datetime
 from datetime import time as datetime_time
 from typing import Any, Dict, Optional
 
 import semver
+
+from backend.app.core import pattern_match
+from backend.app.core.log_once import EVALUATION_NOTES
 
 try:
     import pytz
@@ -34,6 +36,25 @@ logger = logging.getLogger(__name__)
 
 # Type alias for user context
 UserContext = Dict[str, Any]
+
+# Logging on the evaluation path. A user's attribute values are never logged,
+# at any level, and neither is the text of an exception raised while handling
+# one (a parse error repeats its input). Only type names, operators and fixed
+# strings are. A value that does not suit an operator is logged at DEBUG; a
+# problem in the rule itself goes through _note_rule_problem, which logs one
+# WARNING per (operator, reason) rather than one per evaluation.
+# backend/tests/unit/core/test_evaluation_log_arguments.py enforces this.
+
+
+def _note_rule_problem(operator: Any, reason: str) -> None:
+    """Warn, once per ``(operator, reason)``, that a condition's definition is unusable."""
+    if EVALUATION_NOTES.first(operator, reason):
+        logger.warning(
+            "A %s condition in a targeting rule cannot be evaluated: %s. "
+            "It does not match; this is logged once.",
+            operator,
+            reason,
+        )
 
 
 def evaluate_targeting_rules(
@@ -130,7 +151,7 @@ def evaluate_rule_group(rule_group: RuleGroup, user_context: UserContext) -> boo
             return not all(all_results)
 
     # Default fallback
-    logger.warning(f"Unknown logical operator: {operator}")
+    _note_rule_problem(operator, "unknown logical operator")
     return False
 
 
@@ -151,7 +172,7 @@ def evaluate_condition(condition: Condition, user_context: UserContext) -> bool:
 
     # Get actual value from user context
     if attribute not in user_context:
-        logger.debug(f"Attribute {attribute} not found in user context")
+        logger.debug("Attribute not found in user context (operator=%s)", operator)
         # Presence operators are the one case where a missing attribute is
         # meaningful: "is empty" holds, "is not empty" does not.
         if operator == OperatorType.IS_NULL:
@@ -259,16 +280,12 @@ def apply_operator(
     elif operator == OperatorType.IN:
         # Check if actual_value is in expected_value (which should be a collection)
         if not isinstance(expected_value, (list, tuple, set)):
-            logger.warning(
-                f"Expected value for IN operator should be a collection, got {type(expected_value)}"
-            )
+            _note_rule_problem(operator, "the value is not a list")
             return False
         return any(_values_equal(actual_value, item) for item in expected_value)
     elif operator == OperatorType.NOT_IN:
         if not isinstance(expected_value, (list, tuple, set)):
-            logger.warning(
-                f"Expected value for NOT_IN operator should be a collection, got {type(expected_value)}"
-            )
+            _note_rule_problem(operator, "the value is not a list")
             return False
         return not any(_values_equal(actual_value, item) for item in expected_value)
 
@@ -300,39 +317,56 @@ def apply_operator(
             expected_value = str(expected_value)
         return actual_value.endswith(expected_value)
     elif operator == OperatorType.MATCH_REGEX:
-        if not isinstance(actual_value, str):
-            actual_value = str(actual_value)
-        try:
-            pattern = re.compile(expected_value)
-            return bool(pattern.search(actual_value))
-        except (re.error, TypeError):
-            logger.warning(f"Invalid regex pattern: {expected_value}")
-            return False
+        # RE2 syntax. Raises PatternUnevaluable when the pattern is refused or
+        # the value cannot be evaluated; it is deliberately not turned into
+        # False here, where an enclosing NOT would make the rule match. The
+        # caller that owns the whole ruleset catches it.
+        return pattern_match.search(expected_value, actual_value)
 
     # Numeric comparison operators
     elif operator == OperatorType.GREATER_THAN:
         try:
             return float(actual_value) > float(expected_value)
         except (ValueError, TypeError):
-            logger.warning(f"Failed to compare {actual_value} > {expected_value}")
+            logger.debug(
+                "%s: cannot compare %s with %s as numbers",
+                operator,
+                type(actual_value).__name__,
+                type(expected_value).__name__,
+            )
             return False
     elif operator == OperatorType.GREATER_THAN_OR_EQUAL:
         try:
             return float(actual_value) >= float(expected_value)
         except (ValueError, TypeError):
-            logger.warning(f"Failed to compare {actual_value} >= {expected_value}")
+            logger.debug(
+                "%s: cannot compare %s with %s as numbers",
+                operator,
+                type(actual_value).__name__,
+                type(expected_value).__name__,
+            )
             return False
     elif operator == OperatorType.LESS_THAN:
         try:
             return float(actual_value) < float(expected_value)
         except (ValueError, TypeError):
-            logger.warning(f"Failed to compare {actual_value} < {expected_value}")
+            logger.debug(
+                "%s: cannot compare %s with %s as numbers",
+                operator,
+                type(actual_value).__name__,
+                type(expected_value).__name__,
+            )
             return False
     elif operator == OperatorType.LESS_THAN_OR_EQUAL:
         try:
             return float(actual_value) <= float(expected_value)
         except (ValueError, TypeError):
-            logger.warning(f"Failed to compare {actual_value} <= {expected_value}")
+            logger.debug(
+                "%s: cannot compare %s with %s as numbers",
+                operator,
+                type(actual_value).__name__,
+                type(expected_value).__name__,
+            )
             return False
 
     # Date comparison operators
@@ -348,8 +382,10 @@ def apply_operator(
             elif isinstance(actual_value, datetime):
                 actual_date = actual_value
             else:
-                logger.warning(
-                    f"Unsupported date format for actual value: {actual_value}"
+                logger.debug(
+                    "%s: a %s is not a date",
+                    operator,
+                    type(actual_value).__name__,
                 )
                 return False
 
@@ -362,9 +398,7 @@ def apply_operator(
             elif isinstance(expected_value, datetime):
                 expected_date = expected_value
             else:
-                logger.warning(
-                    f"Unsupported date format for expected value: {expected_value}"
-                )
+                _note_rule_problem(operator, "the value is not a date")
                 return False
 
             if operator == OperatorType.BEFORE:
@@ -373,8 +407,11 @@ def apply_operator(
                 return actual_date > expected_date
 
         except (ValueError, TypeError):
-            logger.warning(
-                f"Failed to compare dates: {actual_value} and {expected_value}"
+            logger.debug(
+                "%s: cannot compare %s with %s as dates",
+                operator,
+                type(actual_value).__name__,
+                type(expected_value).__name__,
             )
             return False
 
@@ -382,7 +419,7 @@ def apply_operator(
     elif operator == OperatorType.BETWEEN:
         # Check if value is between expected_value and additional_value
         if additional_value is None:
-            logger.warning("BETWEEN operator requires additional_value")
+            _note_rule_problem(operator, "no upper bound (additional_value)")
             return False
 
         try:
@@ -407,8 +444,10 @@ def apply_operator(
             elif isinstance(actual_value, (int, float)):
                 actual_date = datetime.fromtimestamp(actual_value)
             else:
-                logger.warning(
-                    f"Unsupported format for BETWEEN operator: {actual_value}"
+                logger.debug(
+                    "%s: a %s is neither a number nor a date",
+                    operator,
+                    type(actual_value).__name__,
                 )
                 return False
 
@@ -421,9 +460,7 @@ def apply_operator(
             elif isinstance(expected_value, (int, float)):
                 lower_date = datetime.fromtimestamp(expected_value)
             else:
-                logger.warning(
-                    f"Unsupported format for BETWEEN lower bound: {expected_value}"
-                )
+                _note_rule_problem(operator, "the lower bound is not a date")
                 return False
 
             if isinstance(additional_value, datetime):
@@ -435,16 +472,18 @@ def apply_operator(
             elif isinstance(additional_value, (int, float)):
                 upper_date = datetime.fromtimestamp(additional_value)
             else:
-                logger.warning(
-                    f"Unsupported format for BETWEEN upper bound: {additional_value}"
-                )
+                _note_rule_problem(operator, "the upper bound is not a date")
                 return False
 
             return lower_date <= actual_date <= upper_date
 
         except (ValueError, TypeError):
-            logger.warning(
-                f"Failed to evaluate BETWEEN operator with {actual_value}, {expected_value}, {additional_value}"
+            logger.debug(
+                "%s: cannot compare %s with bounds %s and %s",
+                operator,
+                type(actual_value).__name__,
+                type(expected_value).__name__,
+                type(additional_value).__name__,
             )
             return False
 
@@ -452,17 +491,15 @@ def apply_operator(
     elif operator == OperatorType.CONTAINS_ALL:
         # Check if actual_value contains all elements in expected_value
         if not isinstance(expected_value, (list, tuple, set)):
-            logger.warning(
-                f"Expected value for CONTAINS_ALL should be a collection, got {type(expected_value)}"
-            )
+            _note_rule_problem(operator, "the value is not a list")
             return False
 
         if not isinstance(actual_value, (list, tuple, set)):
             if isinstance(actual_value, str):
                 # Handle special case for strings
                 return all(item in actual_value for item in expected_value)
-            logger.warning(
-                f"Actual value for CONTAINS_ALL should be a collection, got {type(actual_value)}"
+            logger.debug(
+                "%s: a %s is not a list", operator, type(actual_value).__name__
             )
             return False
 
@@ -471,17 +508,15 @@ def apply_operator(
     elif operator == OperatorType.CONTAINS_ANY:
         # Check if actual_value contains any elements in expected_value
         if not isinstance(expected_value, (list, tuple, set)):
-            logger.warning(
-                f"Expected value for CONTAINS_ANY should be a collection, got {type(expected_value)}"
-            )
+            _note_rule_problem(operator, "the value is not a list")
             return False
 
         if not isinstance(actual_value, (list, tuple, set)):
             if isinstance(actual_value, str):
                 # Handle special case for strings
                 return any(item in actual_value for item in expected_value)
-            logger.warning(
-                f"Actual value for CONTAINS_ANY should be a collection, got {type(actual_value)}"
+            logger.debug(
+                "%s: a %s is not a list", operator, type(actual_value).__name__
             )
             return False
 
@@ -492,21 +527,31 @@ def apply_operator(
         try:
             # Parse the versions
             if not isinstance(actual_value, str) or not isinstance(expected_value, str):
-                logger.warning(
-                    f"Semantic version requires string values, got {type(actual_value)} and {type(expected_value)}"
-                )
+                if isinstance(actual_value, str):
+                    _note_rule_problem(operator, "the version is not a string")
+                else:
+                    logger.debug(
+                        "%s: a %s is not a version string",
+                        operator,
+                        type(actual_value).__name__,
+                    )
                 return False
 
             # Remove leading 'v' if present (be lenient)
             actual_clean = actual_value.lstrip("v")
             expected_clean = expected_value.lstrip("v")
 
-            # Validate format
+            # Validate format. The parse error repeats its input, so it is not
+            # logged; the user's version is parsed first, as before.
             try:
                 actual_ver = semver.Version.parse(actual_clean)
+            except ValueError:
+                logger.debug("%s: the value is not a semantic version", operator)
+                return False
+            try:
                 expected_ver = semver.Version.parse(expected_clean)
-            except ValueError as e:
-                logger.warning(f"Invalid semantic version format: {e}")
+            except ValueError:
+                _note_rule_problem(operator, "the version is not a semantic version")
                 return False
 
             # Determine comparison type from additional_value
@@ -531,13 +576,11 @@ def apply_operator(
             elif comparison_type == "lte":
                 return actual_ver <= expected_ver
             else:
-                logger.warning(
-                    f"Unknown semantic version comparison type: {comparison_type}"
-                )
+                _note_rule_problem(operator, "unknown comparison")
                 return False
 
         except Exception as e:
-            logger.warning(f"Error comparing semantic versions: {e}")
+            logger.debug("%s: comparison failed (%s)", operator, type(e).__name__)
             return False
 
     # Array length operator
@@ -548,7 +591,9 @@ def apply_operator(
                 actual_length = len(actual_value)
             except TypeError:
                 # Value doesn't have length (e.g., int, float, None)
-                logger.debug(f"Value {actual_value} does not have length")
+                logger.debug(
+                    "%s: a %s has no length", operator, type(actual_value).__name__
+                )
                 return False
 
             # Determine comparison type from additional_value
@@ -559,77 +604,61 @@ def apply_operator(
                 try:
                     return actual_length == int(expected_value)
                 except (ValueError, TypeError):
-                    logger.warning(
-                        f"Expected value for array length must be numeric, got {expected_value}"
-                    )
+                    _note_rule_problem(operator, "the length is not a number")
                     return False
 
             elif comparison_type == "gt":
                 try:
                     return actual_length > int(expected_value)
                 except (ValueError, TypeError):
-                    logger.warning(
-                        f"Expected value for array length must be numeric, got {expected_value}"
-                    )
+                    _note_rule_problem(operator, "the length is not a number")
                     return False
 
             elif comparison_type == "lt":
                 try:
                     return actual_length < int(expected_value)
                 except (ValueError, TypeError):
-                    logger.warning(
-                        f"Expected value for array length must be numeric, got {expected_value}"
-                    )
+                    _note_rule_problem(operator, "the length is not a number")
                     return False
 
             elif comparison_type == "gte":
                 try:
                     return actual_length >= int(expected_value)
                 except (ValueError, TypeError):
-                    logger.warning(
-                        f"Expected value for array length must be numeric, got {expected_value}"
-                    )
+                    _note_rule_problem(operator, "the length is not a number")
                     return False
 
             elif comparison_type == "lte":
                 try:
                     return actual_length <= int(expected_value)
                 except (ValueError, TypeError):
-                    logger.warning(
-                        f"Expected value for array length must be numeric, got {expected_value}"
-                    )
+                    _note_rule_problem(operator, "the length is not a number")
                     return False
 
             elif comparison_type == "between":
                 # Expected value should be a dict with min and max
                 if not isinstance(expected_value, dict):
-                    logger.warning(
-                        f"BETWEEN operator for array length requires dict with 'min' and 'max', got {type(expected_value)}"
-                    )
+                    _note_rule_problem(operator, "between needs {'min', 'max'}")
                     return False
 
                 if "min" not in expected_value or "max" not in expected_value:
-                    logger.warning(
-                        "BETWEEN operator for array length requires 'min' and 'max' keys"
-                    )
+                    _note_rule_problem(operator, "between needs {'min', 'max'}")
                     return False
 
                 try:
                     min_val = int(expected_value["min"])
                     max_val = int(expected_value["max"])
                     return min_val <= actual_length <= max_val
-                except (ValueError, TypeError, KeyError) as e:
-                    logger.warning(f"Invalid min/max values for BETWEEN operator: {e}")
+                except (ValueError, TypeError, KeyError):
+                    _note_rule_problem(operator, "between bounds are not numbers")
                     return False
 
             else:
-                logger.warning(
-                    f"Unknown array length comparison type: {comparison_type}"
-                )
+                _note_rule_problem(operator, "unknown comparison")
                 return False
 
         except Exception as e:
-            logger.warning(f"Error evaluating array length operator: {e}")
+            logger.debug("%s: evaluation failed (%s)", operator, type(e).__name__)
             return False
 
     # Geographic distance operator
@@ -652,43 +681,41 @@ def apply_operator(
             actual_coords = _extract_coordinates(actual_value)
             if not actual_coords:
                 logger.debug(
-                    f"Failed to extract coordinates from actual value: {actual_value}"
+                    "%s: no coordinates in a %s",
+                    operator,
+                    type(actual_value).__name__,
                 )
                 return False
 
             # Extract coordinates from expected_value
             expected_coords = _extract_coordinates(expected_value)
             if not expected_coords:
-                logger.debug(
-                    f"Failed to extract coordinates from expected value: {expected_value}"
-                )
+                _note_rule_problem(operator, "the value has no coordinates")
                 return False
 
             # Validate coordinates
             if not _validate_coordinates(actual_coords):
-                logger.warning(f"Invalid actual coordinates: {actual_coords}")
+                logger.debug("%s: coordinates out of range", operator)
                 return False
 
             if not _validate_coordinates(expected_coords):
-                logger.warning(f"Invalid expected coordinates: {expected_coords}")
+                _note_rule_problem(operator, "the coordinates are out of range")
                 return False
 
             # Extract radius from expected_value
             if not isinstance(expected_value, dict) or "radius" not in expected_value:
-                logger.warning(
-                    "GEO_DISTANCE operator requires 'radius' in expected_value"
-                )
+                _note_rule_problem(operator, "no radius")
                 return False
 
             try:
                 radius = float(expected_value["radius"])
             except (ValueError, TypeError):
-                logger.warning(f"Invalid radius value: {expected_value.get('radius')}")
+                _note_rule_problem(operator, "the radius is not a number")
                 return False
 
             # Validate radius (must be non-negative)
             if radius < 0:
-                logger.warning(f"Radius must be non-negative, got: {radius}")
+                _note_rule_problem(operator, "the radius is negative")
                 return False
 
             # Get unit (default to km)
@@ -706,7 +733,7 @@ def apply_operator(
             )
 
             if distance is None:
-                logger.warning("Failed to calculate distance")
+                logger.debug("%s: distance could not be calculated", operator)
                 return False
 
             # Get comparison type (default to within radius, i.e., <=)
@@ -726,13 +753,11 @@ def apply_operator(
                 epsilon = 0.01  # 10 meters tolerance
                 return abs(distance - radius) < epsilon
             else:
-                logger.warning(
-                    f"Unknown comparison type for GEO_DISTANCE: {comparison}"
-                )
+                _note_rule_problem(operator, "unknown comparison")
                 return False
 
         except Exception as e:
-            logger.warning(f"Error evaluating GEO_DISTANCE operator: {e}")
+            logger.debug("%s: evaluation failed (%s)", operator, type(e).__name__)
             return False
 
     # Time window operator
@@ -743,14 +768,16 @@ def apply_operator(
 
             # If a value was provided but couldn't be parsed, it's invalid
             if actual_value is not None and dt is None:
-                logger.warning(f"TIME_WINDOW: invalid datetime value: {actual_value!r}")
+                logger.debug(
+                    "%s: a %s is not a date and time",
+                    operator,
+                    type(actual_value).__name__,
+                )
                 return False
 
             # Validate expected_value is a dict
             if not isinstance(expected_value, dict):
-                logger.warning(
-                    f"TIME_WINDOW operator requires dict configuration, got {type(expected_value)}"
-                )
+                _note_rule_problem(operator, "the value is not an object")
                 return False
 
             # Empty config matches everything
@@ -774,10 +801,14 @@ def apply_operator(
                         # Timezone-aware datetime, convert to specified timezone
                         dt = dt.astimezone(tz)
                 except Exception as e:
-                    logger.warning(f"Invalid timezone or conversion error: {e}")
+                    logger.debug(
+                        "%s: timezone conversion failed (%s)",
+                        operator,
+                        type(e).__name__,
+                    )
                     return False
             elif timezone_str and not HAS_PYTZ:
-                logger.warning("Timezone specified but pytz not available")
+                _note_rule_problem(operator, "a timezone needs pytz, not installed")
                 return False
             else:
                 # No timezone specified
@@ -787,19 +818,19 @@ def apply_operator(
 
             # Safety check: ensure dt is not None
             if dt is None:
-                logger.warning("Failed to parse datetime value")
+                logger.debug("%s: no date and time to compare", operator)
                 return False
 
             # Check day of week if specified
             if "days" in expected_value:
                 days = expected_value["days"]
                 if not isinstance(days, list):
-                    logger.warning(f"Days must be a list, got {type(days)}")
+                    _note_rule_problem(operator, "days is not a list")
                     return False
 
                 # Validate day numbers (0-6)
                 if not all(isinstance(d, int) and 0 <= d <= 6 for d in days):
-                    logger.warning(f"Invalid day numbers in {days}")
+                    _note_rule_problem(operator, "days must be 0-6")
                     return False
 
                 # Check if current day matches
@@ -813,16 +844,14 @@ def apply_operator(
                     "start_time" not in expected_value
                     or "end_time" not in expected_value
                 ):
-                    logger.warning(
-                        "Both start_time and end_time must be specified together"
-                    )
+                    _note_rule_problem(operator, "start_time without end_time")
                     return False
 
                 start_time = _parse_time(expected_value["start_time"])
                 end_time = _parse_time(expected_value["end_time"])
 
                 if start_time is None or end_time is None:
-                    logger.warning("Failed to parse start_time or end_time")
+                    _note_rule_problem(operator, "start_time or end_time is not HH:MM")
                     return False
 
                 current_time = dt.time()
@@ -859,23 +888,21 @@ def apply_operator(
                     "start_date" not in expected_value
                     or "end_date" not in expected_value
                 ):
-                    logger.warning(
-                        "Both start_date and end_date must be specified together"
-                    )
+                    _note_rule_problem(operator, "start_date without end_date")
                     return False
 
                 start_date = _parse_date(expected_value["start_date"])
                 end_date = _parse_date(expected_value["end_date"])
 
                 if start_date is None or end_date is None:
-                    logger.warning("Failed to parse start_date or end_date")
+                    _note_rule_problem(
+                        operator, "start_date or end_date is not YYYY-MM-DD"
+                    )
                     return False
 
                 # Validate date range (start must be before or equal to end)
                 if start_date > end_date:
-                    logger.warning(
-                        f"Invalid date range: start_date {start_date} after end_date {end_date}"
-                    )
+                    _note_rule_problem(operator, "start_date is after end_date")
                     return False
 
                 # Check if current date is in range (date only, ignore time)
@@ -887,18 +914,18 @@ def apply_operator(
             return True
 
         except Exception as e:
-            logger.warning(f"Error evaluating TIME_WINDOW operator: {e}")
+            logger.debug("%s: evaluation failed (%s)", operator, type(e).__name__)
             return False
 
     # Enhanced operators - delegate to evaluation service if available
     elif operator in ["percentage_bucket", "json_path"]:
         # For backward compatibility, these will be handled by the evaluation service
         # Fall back to False for now if not handled by evaluation service
-        logger.warning(f"Enhanced operator {operator} requires RulesEvaluationService")
+        _note_rule_problem(operator, "not implemented for feature flags")
         return False
 
     # Unknown operator
-    logger.warning(f"Unknown operator: {operator}")
+    _note_rule_problem(operator, "unknown operator")
     return False
 
 
@@ -933,7 +960,7 @@ def _parse_datetime(value: Any) -> Optional[datetime]:
                 # Try parsing ISO format
                 return datetime.fromisoformat(value.replace("Z", "+00:00"))
             except ValueError:
-                logger.debug(f"Failed to parse datetime string: {value}")
+                logger.debug("A string is not an ISO date and time")
                 return None
 
         # Unix timestamp (seconds since epoch)
@@ -941,13 +968,13 @@ def _parse_datetime(value: Any) -> Optional[datetime]:
             try:
                 return datetime.fromtimestamp(value)
             except (ValueError, OSError):
-                logger.debug(f"Failed to parse timestamp: {value}")
+                logger.debug("A %s is not a timestamp", type(value).__name__)
                 return None
 
         return None
 
     except Exception as e:
-        logger.debug(f"Error parsing datetime: {e}")
+        logger.debug("Date and time parsing failed (%s)", type(e).__name__)
         return None
 
 
@@ -1120,11 +1147,11 @@ def _haversine_distance(
         elif unit in ("meters", "metres", "m"):
             return distance_km * 1000  # km to meters
         else:
-            logger.warning(f"Unknown distance unit: {unit}")
+            _note_rule_problem(OperatorType.GEO_DISTANCE, "unknown distance unit")
             return None
 
     except (ValueError, TypeError) as e:
-        logger.warning(f"Error calculating Haversine distance: {e}")
+        logger.debug("Distance calculation failed (%s)", type(e).__name__)
         return None
 
 

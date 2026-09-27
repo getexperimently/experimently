@@ -37,6 +37,7 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import ValidationError
 
+from backend.app.core.log_once import EVALUATION_NOTES
 from backend.app.core.rules_engine import evaluate_rule
 from backend.app.schemas.targeting_rule import (
     Condition,
@@ -119,9 +120,16 @@ class TargetingRuleShapeError(ValueError):
 # ---------------------------------------------------------------------------
 
 
-def normalise_targeting_rules(raw: Any) -> Optional[TargetingRules]:
+def normalise_targeting_rules(
+    raw: Any, owner: str = "targeting rules"
+) -> Optional[TargetingRules]:
     """
     Convert stored ``targeting_rules`` JSON into engine ``TargetingRules``.
+
+    ``owner`` names the rules in the warning logged when they cannot be
+    converted (``flag:<key>``, ``experiment:<id>``). That warning is logged
+    once per owner and shape, not on every evaluation, and names only the
+    exception type: its text can repeat the rule's content.
 
     Returns:
         ``TargetingRules`` for the native shape (has ``rules``) and for the
@@ -144,19 +152,26 @@ def normalise_targeting_rules(raw: Any) -> Optional[TargetingRules]:
         try:
             return _from_dashboard(raw)
         except (TargetingRuleShapeError, ValidationError, TypeError) as exc:
-            logger.warning(
-                "Ignoring dashboard targeting rules that could not be converted: %s",
-                exc,
-            )
+            if EVALUATION_NOTES.first(owner, "dashboard rules not converted"):
+                logger.warning(
+                    "Ignoring dashboard targeting rules for %s that could not be "
+                    "converted (%s); logged once.",
+                    owner,
+                    type(exc).__name__,
+                )
             return None
 
     if "rules" in raw:
         try:
             return TargetingRules.model_validate(raw)
         except ValidationError as exc:
-            logger.warning(
-                "Ignoring native targeting rules that failed validation: %s", exc
-            )
+            if EVALUATION_NOTES.first(owner, "native rules failed validation"):
+                logger.warning(
+                    "Ignoring native targeting rules for %s that failed validation "
+                    "(%s); logged once.",
+                    owner,
+                    type(exc).__name__,
+                )
             return None
 
     return None
@@ -214,6 +229,10 @@ def match_targeting_rule(
     user itself (the flag service hashes ``user_id:flag.key`` so a rule at N%
     selects the same users as the global rollout at N%). When nothing matches
     the ``default_rule`` is returned, mirroring the engine.
+
+    :class:`backend.app.core.pattern_match.PatternUnevaluable` propagates
+    unchanged: when a pattern condition cannot be evaluated the caller abandons
+    the whole ruleset, and neither a later rule nor ``default_rule`` applies.
     """
     if rules is None:
         return None

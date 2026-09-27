@@ -385,3 +385,82 @@ class TestKeyAuthenticatesSdkTraffic:
             headers=_auth(developer),
         )
         assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Issue #198: last_used_at records use, at most once a minute
+# ---------------------------------------------------------------------------
+
+
+def _row(db_session, key_id):
+    db_session.expire_all()
+    return db_session.query(APIKey).filter(APIKey.id == uuid.UUID(key_id)).one()
+
+
+def _set_last_used(db_session, key_id, value):
+    row = _row(db_session, key_id)
+    row.last_used_at = value
+    db_session.commit()
+
+
+@pytest.mark.regression
+class TestLastUsedAt:
+    def test_using_a_key_sets_last_used_at(self, client, db_session, developer):
+        created = _create(client, developer).json()
+        items = client.get(URL, headers=_auth(developer)).json()
+        assert (
+            next(i for i in items if i["id"] == created["id"])["last_used_at"] is None
+        )
+        updated_at_before = _row(db_session, created["id"]).updated_at
+
+        before = datetime.utcnow() - timedelta(seconds=5)
+        resp = client.get(
+            "/api/v1/edge/bootstrap", headers={"X-API-Key": created["key"]}
+        )
+        assert resp.status_code == 200, resp.text
+
+        items = client.get(URL, headers=_auth(developer)).json()
+        listed = next(i for i in items if i["id"] == created["id"])
+        assert listed["last_used_at"] is not None
+
+        row = _row(db_session, created["id"])
+        assert row.last_used_at >= before
+        # Using a key is not editing it.
+        assert row.updated_at == updated_at_before
+
+    def test_a_recent_value_is_not_rewritten(self, client, db_session, developer):
+        created = _create(client, developer).json()
+        recent = datetime.utcnow() - timedelta(seconds=10)
+        _set_last_used(db_session, created["id"], recent)
+
+        resp = client.get(
+            "/api/v1/edge/bootstrap", headers={"X-API-Key": created["key"]}
+        )
+        assert resp.status_code == 200, resp.text
+        assert _row(db_session, created["id"]).last_used_at == recent
+
+    def test_a_stale_value_is_advanced(self, client, db_session, developer):
+        created = _create(client, developer).json()
+        stale = datetime.utcnow() - timedelta(minutes=5)
+        _set_last_used(db_session, created["id"], stale)
+
+        resp = client.get(
+            "/api/v1/edge/bootstrap", headers={"X-API-Key": created["key"]}
+        )
+        assert resp.status_code == 200, resp.text
+        assert _row(db_session, created["id"]).last_used_at > stale + timedelta(
+            minutes=4
+        )
+
+    def test_a_rejected_key_records_nothing(self, client, db_session, developer):
+        created = _create(client, developer).json()
+        _set_last_used(db_session, created["id"], None)
+        row = _row(db_session, created["id"])
+        row.is_active = False
+        db_session.commit()
+
+        resp = client.get(
+            "/api/v1/edge/bootstrap", headers={"X-API-Key": created["key"]}
+        )
+        assert resp.status_code == 401
+        assert _row(db_session, created["id"]).last_used_at is None

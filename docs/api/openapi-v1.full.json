@@ -436,7 +436,7 @@
           },
           "look_number": {
             "description": "Interim analysis number.",
-            "minimum": 1.0,
+            "minimum": 1,
             "title": "Look Number",
             "type": "integer"
           }
@@ -1100,7 +1100,7 @@
           "n_samples": {
             "anyOf": [
               {
-                "minimum": 1.0,
+                "minimum": 1,
                 "type": "integer"
               },
               {
@@ -1130,7 +1130,7 @@
           "seed": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -1142,7 +1142,7 @@
           },
           "total_pulls": {
             "description": "Total pulls across all variants",
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Total Pulls",
             "type": "integer"
           }
@@ -1164,7 +1164,7 @@
             "additionalProperties": {
               "type": "number"
             },
-            "description": "Mapping of variant_id \u2192 allocation weight; must sum to ~1.0",
+            "description": "Mapping of variant_id → allocation weight; must sum to ~1.0",
             "title": "Weights",
             "type": "object"
           }
@@ -1180,27 +1180,27 @@
         "properties": {
           "conversion_rate": {
             "description": "Empirical conversion rate (successes / pulls)",
-            "maximum": 1.0,
-            "minimum": 0.0,
+            "maximum": 1,
+            "minimum": 0,
             "title": "Conversion Rate",
             "type": "number"
           },
           "current_weight": {
             "description": "Current traffic allocation weight [0.0, 1.0]",
-            "maximum": 1.0,
-            "minimum": 0.0,
+            "maximum": 1,
+            "minimum": 0,
             "title": "Current Weight",
             "type": "number"
           },
           "pulls": {
             "description": "Total impressions / pulls for this variant",
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Pulls",
             "type": "integer"
           },
           "successes": {
             "description": "Cumulative success / conversion count",
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Successes",
             "type": "integer"
           },
@@ -1230,31 +1230,31 @@
         "description": "Configuration for the Bayesian analysis engine.\n\nAttributes:\n    prior_family: Conjugate prior family (beta, normal, or gamma).\n    alpha: Alpha hyperparameter for the prior (must be > 0).\n    beta: Beta hyperparameter for the prior (must be > 0).\n    loss_threshold: Expected loss threshold below which we stop (must be > 0).\n    rope: Region of Practical Equivalence as [lower, upper]; if the\n        posterior difference falls inside ROPE, the experiment is deemed\n        equivalent and stopped.\n    credible_level: HDI credible interval level in (0, 1), default 0.95.",
         "properties": {
           "alpha": {
-            "default": 1.0,
+            "default": 1,
             "description": "Prior alpha hyperparameter (> 0)",
-            "exclusiveMinimum": 0.0,
+            "exclusiveMinimum": 0,
             "title": "Alpha",
             "type": "number"
           },
           "beta": {
-            "default": 1.0,
+            "default": 1,
             "description": "Prior beta hyperparameter (> 0)",
-            "exclusiveMinimum": 0.0,
+            "exclusiveMinimum": 0,
             "title": "Beta",
             "type": "number"
           },
           "credible_level": {
             "default": 0.95,
             "description": "Credible interval level in (0, 1)",
-            "exclusiveMaximum": 1.0,
-            "exclusiveMinimum": 0.0,
+            "exclusiveMaximum": 1,
+            "exclusiveMinimum": 0,
             "title": "Credible Level",
             "type": "number"
           },
           "loss_threshold": {
             "default": 0.001,
             "description": "Expected loss threshold for stopping",
-            "exclusiveMinimum": 0.0,
+            "exclusiveMinimum": 0,
             "title": "Loss Threshold",
             "type": "number"
           },
@@ -1352,7 +1352,7 @@
           "n_samples": {
             "anyOf": [
               {
-                "minimum": 1.0,
+                "minimum": 1,
                 "type": "integer"
               },
               {
@@ -1365,7 +1365,7 @@
           "seed": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -2207,7 +2207,7 @@
           },
           "sample_size": {
             "description": "Sample size at which CI was computed.",
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Sample Size",
             "type": "integer"
           },
@@ -2680,7 +2680,7 @@
             "type": "string"
           },
           "theta": {
-            "description": "OLS coefficient \u03b8 = Cov(Y,X) / Var(X) used for adjustment.",
+            "description": "OLS coefficient θ = Cov(Y,X) / Var(X) used for adjustment.",
             "title": "Theta",
             "type": "number"
           },
@@ -3053,7 +3053,7 @@
         "description": "Request body for POST /ai/design.",
         "properties": {
           "description": {
-            "description": "Natural language description of the experiment goal (10\u20131000 chars).",
+            "description": "Natural language description of the experiment goal (10–1000 chars).",
             "maxLength": 1000,
             "minLength": 10,
             "title": "Description",
@@ -3206,8 +3206,8 @@
         "properties": {
           "adjusted_alpha": {
             "description": "Bonferroni-corrected significance threshold: base_alpha / num_segments. Used when evaluating is_significant within each segment.",
-            "exclusiveMinimum": 0.0,
-            "maximum": 1.0,
+            "exclusiveMinimum": 0,
+            "maximum": 1,
             "title": "Adjusted Alpha",
             "type": "number"
           },
@@ -4294,7 +4294,7 @@
           },
           "sample_size": {
             "description": "Cumulative sample size at this look.",
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Sample Size",
             "type": "integer"
           }
@@ -5080,7 +5080,7 @@
                 "type": "null"
               }
             ],
-            "description": "Sample-ratio-mismatch chi-square test of assignment counts against the variants' traffic allocation. Null when the experiment has fewer than two allocated variants, has no assignments yet, or allocates traffic adaptively (optimization_type other than 'fixed'), where the bandit's own weights \u2014 not traffic_allocation \u2014 decide the split."
+            "description": "Sample-ratio-mismatch chi-square test of assignment counts against the variants' traffic allocation. Null when the experiment has fewer than two allocated variants, has no assignments yet, or allocates traffic adaptively (optimization_type other than 'fixed'), where the bandit's own weights — not traffic_allocation — decide the split."
           },
           "start_date": {
             "anyOf": [
@@ -5460,13 +5460,13 @@
         "type": "string"
       },
       "FDRCorrectionRequest": {
-        "description": "Request body for the BH FDR correction endpoint.\n\nAttributes:\n    p_values: Mapping of metric_name \u2192 raw p-value. All values must be\n        in [0, 1]. Must be non-empty.\n    fdr_threshold: Desired FDR control level (\u03b1). Defaults to 0.05.",
+        "description": "Request body for the BH FDR correction endpoint.\n\nAttributes:\n    p_values: Mapping of metric_name → raw p-value. All values must be\n        in [0, 1]. Must be non-empty.\n    fdr_threshold: Desired FDR control level (α). Defaults to 0.05.",
         "properties": {
           "fdr_threshold": {
             "default": 0.05,
-            "description": "FDR control level \u03b1 (0\u20131, inclusive). Default 0.05.",
-            "maximum": 1.0,
-            "minimum": 0.0,
+            "description": "FDR control level α (0–1, inclusive). Default 0.05.",
+            "maximum": 1,
+            "minimum": 0,
             "title": "Fdr Threshold",
             "type": "number"
           },
@@ -5474,7 +5474,7 @@
             "additionalProperties": {
               "type": "number"
             },
-            "description": "Mapping of metric_name \u2192 raw p-value. All values must be in [0, 1]. Must be non-empty.",
+            "description": "Mapping of metric_name → raw p-value. All values must be in [0, 1]. Must be non-empty.",
             "minProperties": 1,
             "title": "P Values",
             "type": "object"
@@ -5564,8 +5564,8 @@
           "rollout_percentage": {
             "anyOf": [
               {
-                "maximum": 100.0,
-                "minimum": 0.0,
+                "maximum": 100,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -5782,8 +5782,8 @@
           "rollout_percentage": {
             "anyOf": [
               {
-                "maximum": 100.0,
-                "minimum": 0.0,
+                "maximum": 100,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -6015,8 +6015,8 @@
           "rollout_percentage": {
             "anyOf": [
               {
-                "maximum": 100.0,
-                "minimum": 0.0,
+                "maximum": 100,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -6217,8 +6217,8 @@
           "holdout_percentage": {
             "default": 10,
             "description": "Percentage of users to hold out (1-20%).",
-            "maximum": 20.0,
-            "minimum": 1.0,
+            "maximum": 20,
+            "minimum": 1,
             "title": "Holdout Percentage",
             "type": "integer"
           },
@@ -6348,8 +6348,8 @@
           "holdout_percentage": {
             "anyOf": [
               {
-                "maximum": 20.0,
-                "minimum": 1.0,
+                "maximum": 20,
+                "minimum": 1,
                 "type": "integer"
               },
               {
@@ -6578,8 +6578,8 @@
         "properties": {
           "bucket": {
             "description": "User's holdout bucket (0-99).",
-            "maximum": 99.0,
-            "minimum": 0.0,
+            "maximum": 99,
+            "minimum": 0,
             "title": "Bucket",
             "type": "integer"
           },
@@ -6613,8 +6613,8 @@
         "properties": {
           "amount": {
             "default": 1,
-            "maximum": 1000.0,
-            "minimum": 1.0,
+            "maximum": 1000,
+            "minimum": 1,
             "title": "Amount",
             "type": "integer"
           },
@@ -6856,8 +6856,8 @@
             "$ref": "#/components/schemas/RiskLevel"
           },
           "overlap_coefficient": {
-            "maximum": 1.0,
-            "minimum": 0.0,
+            "maximum": 1,
+            "minimum": 0,
             "title": "Overlap Coefficient",
             "type": "number"
           },
@@ -6890,7 +6890,7 @@
         "type": "object"
       },
       "InteractionResultSchema": {
-        "description": "Schema for the result of a 2\u00d72 chi-squared interaction test.",
+        "description": "Schema for the result of a 2×2 chi-squared interaction test.",
         "properties": {
           "has_interaction": {
             "title": "Has Interaction",
@@ -7495,13 +7495,13 @@
         "properties": {
           "actual_duration_days": {
             "description": "Actual duration so far in days.",
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Actual Duration Days",
             "type": "integer"
           },
           "expected_duration_days": {
             "description": "Expected duration in days.",
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Expected Duration Days",
             "type": "integer"
           },
@@ -7590,35 +7590,35 @@
             "default": 0.05,
             "description": "Type I error rate. Must be in (0, 0.5).",
             "exclusiveMaximum": 0.5,
-            "exclusiveMinimum": 0.0,
+            "exclusiveMinimum": 0,
             "title": "Alpha",
             "type": "number"
           },
           "baseline_rate": {
-            "description": "Current baseline conversion/success rate (exclusive 0\u20131).",
-            "exclusiveMaximum": 1.0,
-            "exclusiveMinimum": 0.0,
+            "description": "Current baseline conversion/success rate (exclusive 0–1).",
+            "exclusiveMaximum": 1,
+            "exclusiveMinimum": 0,
             "title": "Baseline Rate",
             "type": "number"
           },
           "n_variants": {
             "default": 2,
             "description": "Number of variants including control.",
-            "minimum": 2.0,
+            "minimum": 2,
             "title": "N Variants",
             "type": "integer"
           },
           "power": {
             "default": 0.8,
             "description": "Desired statistical power. Must be in (0, 1).",
-            "exclusiveMaximum": 1.0,
-            "exclusiveMinimum": 0.0,
+            "exclusiveMaximum": 1,
+            "exclusiveMinimum": 0,
             "title": "Power",
             "type": "number"
           },
           "sample_size_per_variant": {
             "description": "Fixed sample size per variant.",
-            "exclusiveMinimum": 0.0,
+            "exclusiveMinimum": 0,
             "title": "Sample Size Per Variant",
             "type": "integer"
           },
@@ -7809,7 +7809,7 @@
           "minimum_sample_size": {
             "default": 100,
             "description": "Minimum sample size for statistical significance",
-            "minimum": 10.0,
+            "minimum": 10,
             "title": "Minimum Sample Size",
             "type": "integer"
           },
@@ -8226,10 +8226,10 @@
             "type": "string"
           },
           "traffic_allocation": {
-            "default": 1.0,
+            "default": 1,
             "description": "Fraction of traffic eligible for experiments in this group (0.0-1.0).",
-            "maximum": 1.0,
-            "minimum": 0.0,
+            "maximum": 1,
+            "minimum": 0,
             "title": "Traffic Allocation",
             "type": "number"
           }
@@ -8388,8 +8388,8 @@
           "traffic_allocation": {
             "anyOf": [
               {
-                "maximum": 1.0,
-                "minimum": 0.0,
+                "maximum": 1,
+                "minimum": 0,
                 "type": "number"
               },
               {
@@ -9100,9 +9100,9 @@
         "description": "Request body for POST /power/plan (AI planning advice).",
         "properties": {
           "baseline_rate": {
-            "description": "Baseline metric rate (0\u20131).",
-            "exclusiveMaximum": 1.0,
-            "exclusiveMinimum": 0.0,
+            "description": "Baseline metric rate (0–1).",
+            "exclusiveMaximum": 1,
+            "exclusiveMinimum": 0,
             "title": "Baseline Rate",
             "type": "number"
           },
@@ -9122,8 +9122,8 @@
           },
           "mde": {
             "description": "Minimum detectable effect (relative, e.g. 0.10 = 10%).",
-            "exclusiveMaximum": 1.0,
-            "exclusiveMinimum": 0.0,
+            "exclusiveMaximum": 1,
+            "exclusiveMinimum": 0,
             "title": "Mde",
             "type": "number"
           },
@@ -9136,7 +9136,7 @@
           },
           "runtime_days": {
             "description": "Estimated runtime in days.",
-            "exclusiveMinimum": 0.0,
+            "exclusiveMinimum": 0,
             "title": "Runtime Days",
             "type": "number"
           }
@@ -9249,7 +9249,7 @@
             "additionalProperties": {
               "type": "integer"
             },
-            "description": "Mapping of stratum label \u2192 total count across both groups.",
+            "description": "Mapping of stratum label → total count across both groups.",
             "title": "Strata Sizes",
             "type": "object"
           },
@@ -9281,13 +9281,13 @@
         "type": "object"
       },
       "PostStratificationRequest": {
-        "description": "Request body for the post-stratification endpoint.\n\nAttributes:\n    stratum_cols: Column names in the experiment data that define strata\n        (e.g. [\"country\", \"device_type\"]). Must be non-empty.\n    metric_col: Name of the numeric outcome column in the data.\n        Defaults to \"metric_value\".\n    alpha: Significance level for confidence interval construction (0\u20131).\n        Defaults to 0.05.",
+        "description": "Request body for the post-stratification endpoint.\n\nAttributes:\n    stratum_cols: Column names in the experiment data that define strata\n        (e.g. [\"country\", \"device_type\"]). Must be non-empty.\n    metric_col: Name of the numeric outcome column in the data.\n        Defaults to \"metric_value\".\n    alpha: Significance level for confidence interval construction (0–1).\n        Defaults to 0.05.",
         "properties": {
           "alpha": {
             "default": 0.05,
-            "description": "Significance level for confidence interval construction (exclusive: 0\u20131).",
-            "exclusiveMaximum": 1.0,
-            "exclusiveMinimum": 0.0,
+            "description": "Significance level for confidence interval construction (exclusive: 0–1).",
+            "exclusiveMaximum": 1,
+            "exclusiveMinimum": 0,
             "title": "Alpha",
             "type": "number"
           },
@@ -9633,8 +9633,8 @@
           "max_percentage": {
             "default": 100,
             "description": "Maximum rollout percentage",
-            "maximum": 100.0,
-            "minimum": 0.0,
+            "maximum": 100,
+            "minimum": 0,
             "title": "Max Percentage",
             "type": "integer"
           },
@@ -9811,8 +9811,8 @@
           "max_percentage": {
             "default": 100,
             "description": "Maximum rollout percentage",
-            "maximum": 100.0,
-            "minimum": 0.0,
+            "maximum": 100,
+            "minimum": 0,
             "title": "Max Percentage",
             "type": "integer"
           },
@@ -9945,8 +9945,8 @@
           "max_percentage": {
             "anyOf": [
               {
-                "maximum": 100.0,
-                "minimum": 0.0,
+                "maximum": 100,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -10061,7 +10061,7 @@
           },
           "stage_order": {
             "description": "Order of the stage in the schedule",
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Stage Order",
             "type": "integer"
           },
@@ -10080,8 +10080,8 @@
           },
           "target_percentage": {
             "description": "Target rollout percentage",
-            "maximum": 100.0,
-            "minimum": 0.0,
+            "maximum": 100,
+            "minimum": 0,
             "title": "Target Percentage",
             "type": "integer"
           },
@@ -10175,7 +10175,7 @@
           },
           "stage_order": {
             "description": "Order of the stage in the schedule",
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Stage Order",
             "type": "integer"
           },
@@ -10197,8 +10197,8 @@
           },
           "target_percentage": {
             "description": "Target rollout percentage",
-            "maximum": 100.0,
-            "minimum": 0.0,
+            "maximum": 100,
+            "minimum": 0,
             "title": "Target Percentage",
             "type": "integer"
           },
@@ -10282,7 +10282,7 @@
           "stage_order": {
             "anyOf": [
               {
-                "minimum": 0.0,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -10308,8 +10308,8 @@
           "target_percentage": {
             "anyOf": [
               {
-                "maximum": 100.0,
-                "minimum": 0.0,
+                "maximum": 100,
+                "minimum": 0,
                 "type": "integer"
               },
               {
@@ -10352,27 +10352,27 @@
         "properties": {
           "daily_traffic": {
             "description": "Total daily users exposed to the experiment.",
-            "exclusiveMinimum": 0.0,
+            "exclusiveMinimum": 0,
             "title": "Daily Traffic",
             "type": "integer"
           },
           "n_variants": {
             "default": 2,
             "description": "Number of variants including control.",
-            "minimum": 2.0,
+            "minimum": 2,
             "title": "N Variants",
             "type": "integer"
           },
           "required_sample_size": {
             "description": "Required sample size per variant.",
-            "exclusiveMinimum": 0.0,
+            "exclusiveMinimum": 0,
             "title": "Required Sample Size",
             "type": "integer"
           },
           "traffic_allocation": {
-            "description": "Fraction of traffic in the experiment (0\u20131].",
-            "exclusiveMinimum": 0.0,
-            "maximum": 1.0,
+            "description": "Fraction of traffic in the experiment (0–1].",
+            "exclusiveMinimum": 0,
+            "maximum": 1,
             "title": "Traffic Allocation",
             "type": "number"
           }
@@ -10464,7 +10464,7 @@
         "properties": {
           "chi2": {
             "description": "Pearson chi-square statistic.",
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Chi2",
             "type": "number"
           },
@@ -10486,8 +10486,8 @@
           },
           "p_value": {
             "description": "Upper-tail probability with (variants - 1) degrees of freedom.",
-            "maximum": 1.0,
-            "minimum": 0.0,
+            "maximum": 1,
+            "minimum": 0,
             "title": "P Value",
             "type": "number"
           },
@@ -11111,7 +11111,7 @@
           },
           "required_sample_size_per_variant": {
             "description": "Minimum number of users required per variant to achieve the target power at the configured MDE and confidence level.",
-            "minimum": 1.0,
+            "minimum": 1,
             "title": "Required Sample Size Per Variant",
             "type": "integer"
           }
@@ -11338,7 +11338,7 @@
         "properties": {
           "sample_size": {
             "description": "Total number of users across all variants in this segment.",
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Sample Size",
             "type": "integer"
           },
@@ -11725,7 +11725,7 @@
           },
           "sample_size": {
             "description": "Number of users in this variant within the segment.",
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Sample Size",
             "type": "integer"
           },
@@ -11764,8 +11764,8 @@
           "planned_looks": {
             "default": 10,
             "description": "Number of planned interim analyses.",
-            "maximum": 100.0,
-            "minimum": 1.0,
+            "maximum": 100,
+            "minimum": 1,
             "title": "Planned Looks",
             "type": "integer"
           },
@@ -11779,8 +11779,8 @@
           "tau_squared": {
             "default": 0.001,
             "description": "mSPRT mixing parameter.",
-            "exclusiveMinimum": 0.0,
-            "maximum": 1.0,
+            "exclusiveMinimum": 0,
+            "maximum": 1,
             "title": "Tau Squared",
             "type": "number"
           }
@@ -12051,7 +12051,7 @@
         "description": "Request body for triggering a warehouse sync for a specific experiment.\n\nThe service will use the provided table names to generate dialect-aware SQL\nand execute it against the registered warehouse connection.",
         "properties": {
           "assignments_table": {
-            "description": "Warehouse table containing user\u2192variant assignments",
+            "description": "Warehouse table containing user→variant assignments",
             "title": "Assignments Table",
             "type": "string"
           },
@@ -12899,13 +12899,13 @@
         "type": "object"
       },
       "VarianceReductionConfig": {
-        "description": "Configuration for variance reduction on an experiment.\n\nThis config is stored as JSONB in the experiments table and controls\nwhich variance-reduction method is applied when computing results.\n\nAttributes:\n    method: Which variance-reduction method to use.\n    covariate_metric_id: ID of the pre-experiment metric to use as covariate\n        (required for CUPED and CUPED_PLUS methods).\n    covariate_lookback_days: Number of days of pre-experiment data to use\n        when building the covariate (1\u201390, default 7).\n    winsorization_percentile: Upper percentile for Winsorization clipping\n        (50\u2013100, default 99.0).",
+        "description": "Configuration for variance reduction on an experiment.\n\nThis config is stored as JSONB in the experiments table and controls\nwhich variance-reduction method is applied when computing results.\n\nAttributes:\n    method: Which variance-reduction method to use.\n    covariate_metric_id: ID of the pre-experiment metric to use as covariate\n        (required for CUPED and CUPED_PLUS methods).\n    covariate_lookback_days: Number of days of pre-experiment data to use\n        when building the covariate (1–90, default 7).\n    winsorization_percentile: Upper percentile for Winsorization clipping\n        (50–100, default 99.0).",
         "properties": {
           "covariate_lookback_days": {
             "default": 7,
             "description": "Number of days of pre-experiment history to use when building the covariate. Must be between 1 and 90.",
-            "maximum": 90.0,
-            "minimum": 1.0,
+            "maximum": 90,
+            "minimum": 1,
             "title": "Covariate Lookback Days",
             "type": "integer"
           },
@@ -12927,10 +12927,10 @@
             "description": "Variance-reduction method to apply."
           },
           "winsorization_percentile": {
-            "default": 99.0,
-            "description": "Upper percentile threshold for Winsorization (50\u2013100). Values above this percentile are clipped to the threshold value.",
-            "maximum": 100.0,
-            "minimum": 50.0,
+            "default": 99,
+            "description": "Upper percentile threshold for Winsorization (50–100). Values above this percentile are clipped to the threshold value.",
+            "maximum": 100,
+            "minimum": 50,
             "title": "Winsorization Percentile",
             "type": "number"
           }
@@ -13073,8 +13073,8 @@
           "traffic_allocation": {
             "default": 50,
             "description": "Percentage of traffic to allocate to this variant",
-            "maximum": 100.0,
-            "minimum": 0.0,
+            "maximum": 100,
+            "minimum": 0,
             "title": "Traffic Allocation",
             "type": "integer"
           }
@@ -13094,7 +13094,7 @@
             "type": "integer"
           },
           "conversion_rate": {
-            "default": 0.0,
+            "default": 0,
             "title": "Conversion Rate",
             "type": "number"
           },
@@ -13318,7 +13318,7 @@
           },
           "sample_size": {
             "description": "Number of unique users assigned to this variant.",
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Sample Size",
             "type": "integer"
           },
@@ -13625,7 +13625,7 @@
         "type": "object"
       },
       "WarehouseConnectionCreate": {
-        "description": "Payload for creating a new warehouse connection.\n\nCredential fields (``password``) are accepted on input but are never\nreturned in any response \u2014 they are stored encrypted server-side.",
+        "description": "Payload for creating a new warehouse connection.\n\nCredential fields (``password``) are accepted on input but are never\nreturned in any response — they are stored encrypted server-side.",
         "properties": {
           "database": {
             "anyOf": [
@@ -14364,8 +14364,8 @@
         "properties": {
           "baseline_rate": {
             "description": "Baseline conversion rate (0-1)",
-            "maximum": 1.0,
-            "minimum": 0.0,
+            "maximum": 1,
+            "minimum": 0,
             "title": "Baseline Rate",
             "type": "number"
           },
@@ -14377,7 +14377,7 @@
           },
           "minimum_detectable_effect": {
             "description": "Minimum detectable effect (relative change, e.g. 0.1 for 10%)",
-            "exclusiveMinimum": 0.0,
+            "exclusiveMinimum": 0,
             "title": "Minimum Detectable Effect",
             "type": "number"
           },
@@ -14530,21 +14530,21 @@
             "default": 0.05,
             "description": "Type I error rate (significance level). Must be in (0, 0.5).",
             "exclusiveMaximum": 0.5,
-            "exclusiveMinimum": 0.0,
+            "exclusiveMinimum": 0,
             "title": "Alpha",
             "type": "number"
           },
           "baseline_rate": {
-            "description": "Current baseline conversion/success rate (exclusive 0\u20131).",
-            "exclusiveMaximum": 1.0,
-            "exclusiveMinimum": 0.0,
+            "description": "Current baseline conversion/success rate (exclusive 0–1).",
+            "exclusiveMaximum": 1,
+            "exclusiveMinimum": 0,
             "title": "Baseline Rate",
             "type": "number"
           },
           "baseline_std": {
             "anyOf": [
               {
-                "exclusiveMinimum": 0.0,
+                "exclusiveMinimum": 0,
                 "type": "number"
               },
               {
@@ -14557,7 +14557,7 @@
           "daily_traffic": {
             "anyOf": [
               {
-                "exclusiveMinimum": 0.0,
+                "exclusiveMinimum": 0,
                 "type": "integer"
               },
               {
@@ -14575,30 +14575,30 @@
           },
           "minimum_detectable_effect": {
             "description": "Minimum detectable effect as a relative lift (e.g. 0.10 = 10%).",
-            "exclusiveMinimum": 0.0,
+            "exclusiveMinimum": 0,
             "title": "Minimum Detectable Effect",
             "type": "number"
           },
           "n_variants": {
             "default": 2,
             "description": "Number of variants including control (minimum 2).",
-            "minimum": 2.0,
+            "minimum": 2,
             "title": "N Variants",
             "type": "integer"
           },
           "power": {
             "default": 0.8,
             "description": "Desired statistical power (1 - Type II error rate). Must be in (0, 1).",
-            "exclusiveMaximum": 1.0,
-            "exclusiveMinimum": 0.0,
+            "exclusiveMaximum": 1,
+            "exclusiveMinimum": 0,
             "title": "Power",
             "type": "number"
           },
           "traffic_allocation": {
-            "default": 1.0,
-            "description": "Fraction of total traffic assigned to the experiment (0\u20131].",
-            "exclusiveMinimum": 0.0,
-            "maximum": 1.0,
+            "default": 1,
+            "description": "Fraction of total traffic assigned to the experiment (0–1].",
+            "exclusiveMinimum": 0,
+            "maximum": 1,
             "title": "Traffic Allocation",
             "type": "number"
           },
@@ -15249,7 +15249,7 @@
   "info": {
     "description": "API for managing experiments and feature flags in test environment",
     "title": "Experimently",
-    "version": "0.5.0"
+    "version": "0.7.0"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -15680,23 +15680,23 @@
         "operationId": "estimate_sample_size_api_v1_ai_sample_size_get",
         "parameters": [
           {
-            "description": "Current baseline conversion rate (0\u20131)",
+            "description": "Current baseline conversion rate (0–1)",
             "in": "query",
             "name": "baseline_rate",
             "required": true,
             "schema": {
-              "description": "Current baseline conversion rate (0\u20131)",
+              "description": "Current baseline conversion rate (0–1)",
               "title": "Baseline Rate",
               "type": "number"
             }
           },
           {
-            "description": "Minimum detectable effect \u2014 absolute change (0\u20131)",
+            "description": "Minimum detectable effect — absolute change (0–1)",
             "in": "query",
             "name": "mde",
             "required": true,
             "schema": {
-              "description": "Minimum detectable effect \u2014 absolute change (0\u20131)",
+              "description": "Minimum detectable effect — absolute change (0–1)",
               "title": "Mde",
               "type": "number"
             }
@@ -16061,7 +16061,7 @@
     },
     "/api/v1/audit-logs/": {
       "get": {
-        "description": "Retrieve audit logs with filtering and pagination.\n\nThis endpoint allows authorized users to query audit logs with various filters:\n- **user_id**: Filter by specific user\n- **entity_type**: Filter by entity type (feature_flag, experiment, user, etc.)\n- **entity_id**: Filter by specific entity\n- **action_type**: Filter by action type (toggle_enable, create, update, etc.)\n- **from_date**: Filter logs from this date\n- **to_date**: Filter logs until this date\n- **page**: Page number for pagination\n- **limit**: Number of records per page\n\nOnly users with appropriate permissions can access audit logs.\nRegular users can only see their own actions, while administrators\ncan see all audit logs.",
+        "description": "Retrieve audit logs with filtering and pagination.\n\nThis endpoint allows authorized users to query audit logs with various filters:\n- **user_id**: Filter by specific user\n- **entity_type**: Filter by entity type (feature_flag, experiment, user, etc.)\n- **entity_id**: Filter by specific entity\n- **action_type**: Filter by action type (toggle_enable, create, update, etc.)\n- **from_date**: Filter logs from this date\n- **to_date**: Filter logs until this date\n- **page**: Page number for pagination\n- **limit**: Number of records per page\n\nSuperusers, ADMIN and ANALYST see every entry. DEVELOPER and VIEWER\nsee only their own entries; a `user_id` filter naming anyone else is\nreplaced by their own id.",
         "operationId": "list_audit_logs_api_v1_audit_logs__get",
         "parameters": [
           {
@@ -16279,7 +16279,7 @@
     },
     "/api/v1/audit-logs/entity/{entity_type}/{entity_id}": {
       "get": {
-        "description": "Get audit history for a specific entity.\n\nThis endpoint returns the complete audit trail for a specific entity,\nsuch as a feature flag or experiment. The logs are ordered by timestamp\nwith the most recent first.\n\nOnly users with appropriate permissions can access entity audit history.",
+        "description": "Get audit history for a specific entity.\n\nThis endpoint returns the complete audit trail for a specific entity,\nsuch as a feature flag or experiment. The logs are ordered by timestamp\nwith the most recent first.\n\nSuperusers, ADMIN and ANALYST only; other roles receive 403.",
         "operationId": "get_entity_audit_history_api_v1_audit_logs_entity__entity_type___entity_id__get",
         "parameters": [
           {
@@ -16399,7 +16399,7 @@
     },
     "/api/v1/audit-logs/stats": {
       "get": {
-        "description": "Get audit log statistics.\n\nThis endpoint returns statistical information about audit logs,\nincluding counts by action type, entity type, and most active users.\n\nOnly administrators can access audit statistics.",
+        "description": "Get audit log statistics.\n\nThis endpoint returns statistical information about audit logs,\nincluding counts by action type, entity type, and most active users.\n\nSuperusers, ADMIN and ANALYST only; other roles receive 403.",
         "operationId": "get_audit_stats_api_v1_audit_logs_stats_get",
         "parameters": [
           {
@@ -16516,7 +16516,7 @@
     },
     "/api/v1/audit-logs/stream": {
       "get": {
-        "description": "Returns recent audit log entries as Server-Sent Events.\nUseful for real-time audit dashboards.\nStreams up to `limit` entries (default 50, max 100) then closes.",
+        "description": "Returns recent audit log entries as Server-Sent Events.\nUseful for real-time audit dashboards.\nStreams up to `limit` entries (default 50, max 100) then closes.\nSuperusers, ADMIN and ANALYST receive every entry; DEVELOPER and VIEWER\nreceive only their own.",
         "operationId": "stream_audit_logs_api_v1_audit_logs_stream_get",
         "parameters": [
           {
@@ -16581,7 +16581,7 @@
     },
     "/api/v1/audit-logs/user/{user_id}": {
       "get": {
-        "description": "Get audit logs for a specific user's activity.\n\nThis endpoint returns all audit logs for a specific user's actions.\nRegular users can only view their own activity, while administrators\ncan view any user's activity.",
+        "description": "Get audit logs for a specific user's activity.\n\nThis endpoint returns all audit logs for a specific user's actions.\nEvery user can view their own activity. Superusers, ADMIN and ANALYST\ncan view any user's activity; other roles receive 403 for anyone else.",
         "operationId": "get_user_activity_api_v1_audit_logs_user__user_id__get",
         "parameters": [
           {
@@ -16875,7 +16875,7 @@
     },
     "/api/v1/auth/me": {
       "get": {
-        "description": "Get current user information.\n\n* ``AUTH_PROVIDER=local`` (or the dev-auth bypass): the ``UserMe`` profile\n  of the bearer's user \u2014 ``{id, email, username, full_name, role,\n  is_superuser, is_active, auth_provider}``.\n* ``AUTH_PROVIDER=cognito``: the Cognito ``{username, attributes}`` record.",
+        "description": "Get current user information.\n\n* ``AUTH_PROVIDER=local`` (or the dev-auth bypass): the ``UserMe`` profile\n  of the bearer's user — ``{id, email, username, full_name, role,\n  is_superuser, is_active, auth_provider}``.\n* ``AUTH_PROVIDER=cognito``: the Cognito ``{username, attributes}`` record.",
         "operationId": "get_user_info_api_v1_auth_me_get",
         "responses": {
           "200": {
@@ -17892,7 +17892,7 @@
             }
           },
           {
-            "description": "Filter by action (CREATE, UPDATE, DELETE, LOGIN, \u2026)",
+            "description": "Filter by action (CREATE, UPDATE, DELETE, LOGIN, …)",
             "in": "query",
             "name": "action",
             "required": false,
@@ -17905,7 +17905,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Filter by action (CREATE, UPDATE, DELETE, LOGIN, \u2026)",
+              "description": "Filter by action (CREATE, UPDATE, DELETE, LOGIN, …)",
               "title": "Action"
             }
           },
@@ -18013,7 +18013,7 @@
     },
     "/api/v1/compliance/export": {
       "get": {
-        "description": "Export all audit events for chain-of-custody review.\n\n**Access control**: Requires ADMIN role only (stricter than report\ngeneration \u2014 this is a full data dump).\n\n**Module**: compliance. Builds without it answer 501.",
+        "description": "Export all audit events for chain-of-custody review.\n\n**Access control**: Requires ADMIN role only (stricter than report\ngeneration — this is a full data dump).\n\n**Module**: compliance. Builds without it answer 501.",
         "operationId": "export_audit_events_api_v1_compliance_export_get",
         "parameters": [
           {
@@ -18107,7 +18107,7 @@
     },
     "/api/v1/compliance/reports/{standard}": {
       "get": {
-        "description": "Generate an on-demand compliance report.\n\nSupported standards:\n- **soc2**: SOC 2 Type 2 \u2014 default look-back is 365 days.\n- **iso27001**: ISO 27001 \u2014 default look-back is 730 days.\n\n**Access control**: Requires ADMIN or ANALYST role.\n\n**Module**: compliance. Builds without it answer 501.",
+        "description": "Generate an on-demand compliance report.\n\nSupported standards:\n- **soc2**: SOC 2 Type 2 — default look-back is 365 days.\n- **iso27001**: ISO 27001 — default look-back is 730 days.\n\n**Access control**: Requires ADMIN or ANALYST role.\n\n**Module**: compliance. Builds without it answer 501.",
         "operationId": "generate_compliance_report_api_v1_compliance_reports__standard__get",
         "parameters": [
           {
@@ -18204,7 +18204,7 @@
     },
     "/api/v1/counters/bulk": {
       "post": {
-        "description": "Increment multiple counters in a single API call.\n\nAccepts up to 100 increment requests, each naming its own experiment.\nPartial failures are collected and reported in the response \u2014 the\noperation does not abort on first error.\nRequires ``experiment: update`` (ADMIN or DEVELOPER).\n\n**This route has no ``{experiment_id}``**, and used to. Fixing the single\nwrite routes to honour their path (#95) put this one in an impossible\nposition: ``BulkIncrementRequest.increments`` is a list whose every entry\ncarries its own ``experiment_id``, precisely so a collector can flush one\nbuffer spanning several experiments. Requiring them all to equal a path\nsegment would make that required field single-valued and turn a\n100-increment flush into a 400, while the promise two lines up \u2014\n\"does not abort on first error\" \u2014 became false.\n\nA batch has no one experiment to name, so it no longer claims to. The\nper-entry ``experiment_id`` is the only thing that decides where each\nincrement lands, and nothing in the URL can now disagree with it.",
+        "description": "Increment multiple counters in a single API call.\n\nAccepts up to 100 increment requests, each naming its own experiment.\nPartial failures are collected and reported in the response — the\noperation does not abort on first error.\nRequires ``experiment: update`` (ADMIN or DEVELOPER).\n\n**This route has no ``{experiment_id}``**, and used to. Fixing the single\nwrite routes to honour their path (#95) put this one in an impossible\nposition: ``BulkIncrementRequest.increments`` is a list whose every entry\ncarries its own ``experiment_id``, precisely so a collector can flush one\nbuffer spanning several experiments. Requiring them all to equal a path\nsegment would make that required field single-valued and turn a\n100-increment flush into a 400, while the promise two lines up —\n\"does not abort on first error\" — became false.\n\nA batch has no one experiment to name, so it no longer claims to. The\nper-entry ``experiment_id`` is the only thing that decides where each\nincrement lands, and nothing in the URL can now disagree with it.",
         "operationId": "bulk_increment_api_v1_counters_bulk_post",
         "requestBody": {
           "content": {
@@ -18302,7 +18302,7 @@
     },
     "/api/v1/counters/{experiment_id}/increment": {
       "post": {
-        "description": "Atomically increment a counter (assignment, event, or conversion) for a\nspecific experiment variant.\n\nUses DynamoDB's ADD update expression \u2014 safe under concurrent writes.\nRequires ``experiment: update`` (ADMIN or DEVELOPER).",
+        "description": "Atomically increment a counter (assignment, event, or conversion) for a\nspecific experiment variant.\n\nUses DynamoDB's ADD update expression — safe under concurrent writes.\nRequires ``experiment: update`` (ADMIN or DEVELOPER).",
         "operationId": "increment_counter_api_v1_counters__experiment_id__increment_post",
         "parameters": [
           {
@@ -18448,7 +18448,7 @@
             "APIKeyHeader": []
           }
         ],
-        "summary": "Edge SDK bootstrap \u2014 all flags and experiments in one call",
+        "summary": "Edge SDK bootstrap — all flags and experiments in one call",
         "tags": [
           "Edge",
           "Edge"
@@ -20946,14 +20946,14 @@
             }
           },
           {
-            "description": "Data scope",
+            "description": "Data scope. Only `summary` is available: `events` and `assignments` answer 422.",
             "in": "query",
             "name": "scope",
             "required": false,
             "schema": {
               "$ref": "#/components/schemas/ExportScope",
               "default": "summary",
-              "description": "Data scope"
+              "description": "Data scope. Only `summary` is available: `events` and `assignments` answer 422."
             }
           },
           {
@@ -21000,6 +21000,11 @@
             "content": {
               "application/json": {
                 "schema": {}
+              },
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
               }
             },
             "description": "Successful Response"
@@ -21087,6 +21092,11 @@
             "content": {
               "application/json": {
                 "schema": {}
+              },
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
               }
             },
             "description": "Successful Response"
@@ -21116,7 +21126,7 @@
     },
     "/api/v1/export/reports/experiments/{experiment_id}": {
       "get": {
-        "description": "Returns a JSON report for a single experiment, including all variant data and summary statistics.",
+        "description": "Returns a report for a single experiment: with `format=json` (the default) its experiment row and variant rows, with `format=csv` its variant rows as CSV, in the columns of GET /api/v1/export/variants.",
         "operationId": "get_experiment_report_api_v1_export_reports_experiments__experiment_id__get",
         "parameters": [
           {
@@ -21124,6 +21134,7 @@
             "name": "experiment_id",
             "required": true,
             "schema": {
+              "format": "uuid",
               "title": "Experiment Id",
               "type": "string"
             }
@@ -21145,9 +21156,17 @@
             "content": {
               "application/json": {
                 "schema": {}
+              },
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
               }
             },
             "description": "Successful Response"
+          },
+          "404": {
+            "description": "No experiment has this id."
           },
           "422": {
             "content": {
@@ -21250,7 +21269,7 @@
     },
     "/api/v1/export/variants": {
       "get": {
-        "description": "Download per-variant results for all (or filtered) experiments. Requires authentication.",
+        "description": "Download per-variant results for all (or filtered) experiments. Each variant's numbers are its primary-metric result, as GET /api/v1/results/{experiment_id} reports it. Requires authentication.",
         "operationId": "export_variants_api_v1_export_variants_get",
         "parameters": [
           {
@@ -21265,14 +21284,14 @@
             }
           },
           {
-            "description": "Data scope",
+            "description": "Data scope. Only `summary` is available: `events` and `assignments` answer 422.",
             "in": "query",
             "name": "scope",
             "required": false,
             "schema": {
               "$ref": "#/components/schemas/ExportScope",
               "default": "summary",
-              "description": "Data scope"
+              "description": "Data scope. Only `summary` is available: `events` and `assignments` answer 422."
             }
           },
           {
@@ -21319,6 +21338,11 @@
             "content": {
               "application/json": {
                 "schema": {}
+              },
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
               }
             },
             "description": "Successful Response"
@@ -22710,7 +22734,7 @@
     },
     "/api/v1/feature-flags/{flag_id}/history": {
       "get": {
-        "description": "Returns all audit log entries for a specific feature flag.\nOrdered by timestamp descending (most recent first).\nRequires authentication; ADMIN/ANALYST roles can view all history,\nother roles can view flags they have access to.",
+        "description": "Returns all audit log entries for a specific feature flag.\nOrdered by timestamp descending (most recent first).\nSuperusers, ADMIN and ANALYST see every entry; DEVELOPER and VIEWER see\nonly the entries they made, and `total_changes` counts only those.",
         "operationId": "get_flag_history_api_v1_feature_flags__flag_id__history_get",
         "parameters": [
           {
@@ -22782,7 +22806,7 @@
     },
     "/api/v1/feature-flags/{flag_id}/toggle": {
       "post": {
-        "description": "Toggle a feature flag between enabled and disabled states.\n\nThis endpoint provides a unified way to toggle feature flags, automatically\ndetermining whether to activate or deactivate based on the current status.\n\nThe toggle operation includes:\n- Status change (ACTIVE \u2194 INACTIVE)\n- Complete audit logging with user information and optional reason\n- Cache invalidation\n- Response with new status and audit log ID\n\n**Authentication**: Requires valid user authentication.\n**Permissions**: User must own the feature flag or be a superuser.\n\nReturns:\n    ToggleResponse: Updated feature flag details with audit log ID\n\nRaises:\n    HTTPException 403: If user doesn't have permission to toggle this feature flag\n    HTTPException 404: If feature flag doesn't exist\n    HTTPException 500: If toggle operation fails",
+        "description": "Toggle a feature flag between enabled and disabled states.\n\nThis endpoint provides a unified way to toggle feature flags, automatically\ndetermining whether to activate or deactivate based on the current status.\n\nThe toggle operation includes:\n- Status change (ACTIVE ↔ INACTIVE)\n- Complete audit logging with user information and optional reason\n- Cache invalidation\n- Response with new status and audit log ID\n\n**Authentication**: Requires valid user authentication.\n**Permissions**: User must own the feature flag or be a superuser.\n\nReturns:\n    ToggleResponse: Updated feature flag details with audit log ID\n\nRaises:\n    HTTPException 403: If user doesn't have permission to toggle this feature flag\n    HTTPException 404: If feature flag doesn't exist\n    HTTPException 500: If toggle operation fails",
         "operationId": "toggle_feature_flag_api_v1_feature_flags__flag_id__toggle_post",
         "parameters": [
           {
@@ -23833,7 +23857,7 @@
     },
     "/api/v1/integrations/webhooks/github": {
       "post": {
-        "description": "Receive and process GitHub webhook events.\n\nGitHub signs every delivery, so the ``X-Hub-Signature-256`` HMAC-SHA256 of\nthe raw body is *required*: a missing, malformed or wrong signature \u2014 and a\nconfig with no ``webhook_secret`` to check it against \u2014 is 401.  A verified\ndelivery is parsed and handed to ``GitHubService.parse_webhook_event``;\nfailures there are logged and still answered 200.",
+        "description": "Receive and process GitHub webhook events.\n\nGitHub signs every delivery, so the ``X-Hub-Signature-256`` HMAC-SHA256 of\nthe raw body is *required*: a missing, malformed or wrong signature — and a\nconfig with no ``webhook_secret`` to check it against — is 401.  A verified\ndelivery is parsed and handed to ``GitHubService.parse_webhook_event``;\nfailures there are logged and still answered 200.",
         "operationId": "github_webhook_api_v1_integrations_webhooks_github_post",
         "responses": {
           "200": {
@@ -23856,7 +23880,7 @@
     },
     "/api/v1/integrations/webhooks/jira": {
       "post": {
-        "description": "Receive and process Jira webhook events.\n\nAuthenticates the sender against the Jira integration's ``webhook_secret``\n\u2014 Jira Cloud's ``X-Hub-Signature`` over the raw body, or the secret itself\nin ``X-Experimently-Webhook-Secret`` \u2014 and answers 401 when that fails.\nOnce the sender is known, delegates to ``JiraService.parse_webhook_event``\nand returns 200 even if that raises: Jira delivery failures must not be\nsurfaced to the caller.",
+        "description": "Receive and process Jira webhook events.\n\nAuthenticates the sender against the Jira integration's ``webhook_secret``\n— Jira Cloud's ``X-Hub-Signature`` over the raw body, or the secret itself\nin ``X-Experimently-Webhook-Secret`` — and answers 401 when that fails.\nOnce the sender is known, delegates to ``JiraService.parse_webhook_event``\nand returns 200 even if that raises: Jira delivery failures must not be\nsurfaced to the caller.",
         "operationId": "jira_webhook_api_v1_integrations_webhooks_jira_post",
         "responses": {
           "200": {
@@ -23879,7 +23903,7 @@
     },
     "/api/v1/integrations/webhooks/salesforce": {
       "post": {
-        "description": "Receive and process a Salesforce outbound message webhook.\n\nAuthenticates the sender against the Salesforce integration's\n``webhook_secret`` \u2014 the secret in ``X-Experimently-Webhook-Secret``, which\nis all an outbound message can send, or an ``X-Hub-Signature-256`` from a\ncallout that can sign \u2014 and answers 401 when that fails.  Beyond that,\nalways 200: Salesforce failures must not be surfaced.",
+        "description": "Receive and process a Salesforce outbound message webhook.\n\nAuthenticates the sender against the Salesforce integration's\n``webhook_secret`` — the secret in ``X-Experimently-Webhook-Secret``, which\nis all an outbound message can send, or an ``X-Hub-Signature-256`` from a\ncallout that can sign — and answers 401 when that fails.  Beyond that,\nalways 200: Salesforce failures must not be surfaced.",
         "operationId": "salesforce_webhook_api_v1_integrations_webhooks_salesforce_post",
         "responses": {
           "200": {
@@ -24556,7 +24580,7 @@
     },
     "/api/v1/llm-experiments/{experiment_id}/judge": {
       "post": {
-        "description": "Use a judge LLM (default: Claude 3.5 Sonnet) to score all responses in\nthis experiment on the specified criteria (e.g. 'helpfulness', 'accuracy').\n\nReturns a list of LLMJudgeResult objects with scores 0\u20131.",
+        "description": "Use a judge LLM (default: Claude 3.5 Sonnet) to score all responses in\nthis experiment on the specified criteria (e.g. 'helpfulness', 'accuracy').\n\nReturns a list of LLMJudgeResult objects with scores 0–1.",
         "operationId": "run_judge_api_v1_llm_experiments__experiment_id__judge_post",
         "parameters": [
           {
@@ -26298,12 +26322,12 @@
         "operationId": "get_power_curve_api_v1_power_curve_get",
         "parameters": [
           {
-            "description": "Baseline conversion/success rate (0\u20131, exclusive).",
+            "description": "Baseline conversion/success rate (0–1, exclusive).",
             "in": "query",
             "name": "baseline",
             "required": true,
             "schema": {
-              "description": "Baseline conversion/success rate (0\u20131, exclusive).",
+              "description": "Baseline conversion/success rate (0–1, exclusive).",
               "exclusiveMaximum": 1,
               "exclusiveMinimum": 0,
               "title": "Baseline",
@@ -27197,7 +27221,7 @@
     },
     "/api/v1/results/{experiment_id}/cuped": {
       "get": {
-        "description": "Get CUPED variance-reduced results for an experiment (Issue #21).\n\nReturns CUPED-adjusted per-metric effect estimates with lower variance\nthan the standard analysis, enabling faster detection of true effects.\n\nThe variance-reduction method is read from the experiment's\n``variance_reduction_config`` JSONB field:\n\n- ``none``         \u2014 No adjustment (returns unadjusted effect, \u03b8=0).\n- ``cuped``        \u2014 CUPED adjustment using pre-experiment covariate.\n- ``cuped_plus``   \u2014 CUPED++ with delta-method ratio adjustment.\n- ``winsorization`` \u2014 Winsorization only (no CUPED).\n\nReturns 404 if the experiment does not exist.",
+        "description": "Get CUPED variance-reduced results for an experiment (Issue #21).\n\nReturns CUPED-adjusted per-metric effect estimates with lower variance\nthan the standard analysis, enabling faster detection of true effects.\n\nThe variance-reduction method is read from the experiment's\n``variance_reduction_config`` JSONB field:\n\n- ``none``         — No adjustment (returns unadjusted effect, θ=0).\n- ``cuped``        — CUPED adjustment using pre-experiment covariate.\n- ``cuped_plus``   — CUPED++ with delta-method ratio adjustment.\n- ``winsorization`` — Winsorization only (no CUPED).\n\nReturns 404 if the experiment does not exist.",
         "operationId": "get_cuped_results_api_v1_results__experiment_id__cuped_get",
         "parameters": [
           {
@@ -27348,7 +27372,7 @@
     },
     "/api/v1/results/{experiment_id}/fdr-correction": {
       "post": {
-        "description": "Apply the Benjamini-Hochberg (1995) step-up procedure to control the False Discovery Rate (FDR) across multiple per-metric p-values. Less conservative than Bonferroni for \u22655 metrics.",
+        "description": "Apply the Benjamini-Hochberg (1995) step-up procedure to control the False Discovery Rate (FDR) across multiple per-metric p-values. Less conservative than Bonferroni for ≥5 metrics.",
         "operationId": "compute_fdr_correction_api_v1_results__experiment_id__fdr_correction_post",
         "parameters": [
           {
@@ -27542,8 +27566,8 @@
             "required": false,
             "schema": {
               "default": 0.1,
-              "exclusiveMaximum": 1.0,
-              "exclusiveMinimum": 0.0,
+              "exclusiveMaximum": 1,
+              "exclusiveMinimum": 0,
               "title": "Baseline Conversion Rate",
               "type": "number"
             }
@@ -27554,8 +27578,8 @@
             "required": false,
             "schema": {
               "default": 0.05,
-              "exclusiveMaximum": 1.0,
-              "exclusiveMinimum": 0.0,
+              "exclusiveMaximum": 1,
+              "exclusiveMinimum": 0,
               "title": "Mde",
               "type": "number"
             }
@@ -30512,7 +30536,7 @@
     },
     "/api/v1/warehouse/connections/test": {
       "post": {
-        "description": "Verify that the provided warehouse credentials are reachable. Credentials are NOT persisted \u2014 this endpoint is purely for validation. Requires DEVELOPER or ADMIN role.",
+        "description": "Verify that the provided warehouse credentials are reachable. Credentials are NOT persisted — this endpoint is purely for validation. Requires DEVELOPER or ADMIN role.",
         "operationId": "test_connection_api_v1_warehouse_connections_test_post",
         "requestBody": {
           "content": {
@@ -31815,7 +31839,7 @@
     },
     "/api/v1/workspaces/invites/{token}": {
       "get": {
-        "description": "Get invite info by token. Public endpoint \u2014 no auth required.",
+        "description": "Get invite info by token. Public endpoint — no auth required.",
         "operationId": "get_invite_api_v1_workspaces_invites__token__get",
         "parameters": [
           {
@@ -32561,7 +32585,7 @@
     },
     "/api/v1/ws/active-experiments": {
       "get": {
-        "description": "Return the list of experiment IDs that currently have active WebSocket subscribers.\n\nNo authentication required \u2014 informational endpoint.",
+        "description": "Return the list of experiment IDs that currently have active WebSocket subscribers.\n\nNo authentication required — informational endpoint.",
         "operationId": "get_active_experiments_api_v1_ws_active_experiments_get",
         "responses": {
           "200": {
@@ -32585,7 +32609,7 @@
     },
     "/api/v1/ws/experiments/{experiment_id}/results/subscribers": {
       "get": {
-        "description": "Return the number of active WebSocket subscribers for an experiment.\n\nNo authentication required \u2014 informational endpoint.",
+        "description": "Return the number of active WebSocket subscribers for an experiment.\n\nNo authentication required — informational endpoint.",
         "operationId": "get_subscriber_count_api_v1_ws_experiments__experiment_id__results_subscribers_get",
         "parameters": [
           {
@@ -32727,7 +32751,7 @@
       "name": "AI Design"
     },
     {
-      "description": "Model Context Protocol server \u2014 exposes platform APIs to AI coding assistants and agents",
+      "description": "Model Context Protocol server — exposes platform APIs to AI coding assistants and agents",
       "name": "MCP"
     },
     {
@@ -32763,11 +32787,11 @@
       "name": "SSO"
     },
     {
-      "description": "EP-057: Multi-Tenant Team Workspaces \u2014 create isolated project namespaces, manage team memberships with role-based access (OWNER/ADMIN/DEVELOPER/ANALYST/VIEWER), send and accept email invites, and issue scoped workspace API keys.",
+      "description": "EP-057: Team Workspaces — group users into teams with workspace roles (OWNER/ADMIN/DEVELOPER/ANALYST/VIEWER) and send and accept email invites. Workspaces do not limit access to experiments or feature flags, which is by platform role. Workspace API keys are not yet accepted by the SDK or tracking endpoints; use a platform API key.",
       "name": "Workspaces"
     },
     {
-      "description": "EP-050: HIPAA Compliance \u2014 PHI audit logging, Business Associate Agreement (BAA) management, PHI field encryption/decryption, data residency validation, and HIPAA readiness status reporting. All endpoints require ADMIN role.",
+      "description": "EP-050: HIPAA Compliance — PHI audit logging, Business Associate Agreement (BAA) management, PHI field encryption/decryption, data residency validation, and HIPAA readiness status reporting. All endpoints require ADMIN role.",
       "name": "HIPAA"
     }
   ]

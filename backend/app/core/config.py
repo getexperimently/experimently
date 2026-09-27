@@ -22,6 +22,22 @@ from pydantic import (
 )
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
+from backend.app.core.settings_rules import (
+    CANONICAL_ENVIRONMENTS,
+    ENV_FILES,
+    HARDENED_ENVIRONMENTS,
+    LEGACY_ENVIRONMENT_ALIASES,
+    MIN_SECRET_KEY_LENGTH,
+    PUBLIC_BASE_URL_EXAMPLE,
+    allowed_host_pattern_error,
+    parse_allowed_hosts,
+    public_base_url_error,
+    secret_is_placeholder,
+    superuser_password_is_weak,
+)
+from backend.app.core.settings_rules import (
+    canonical_environment_quiet as _canonical_environment_quiet,
+)
 from backend.app.core.version import get_version
 from backend.app.db.url import postgres_url
 
@@ -84,8 +100,9 @@ def normalise_origin(value: Any) -> Optional[str]:
     return f"{scheme}://{host}"
 
 
-# Minimum acceptable length for SECRET_KEY in non-test environments
-_MIN_SECRET_KEY_LENGTH = 32
+# Minimum acceptable length for SECRET_KEY in non-test environments (the rule
+# itself lives in settings_rules, which the container's start-up check shares).
+_MIN_SECRET_KEY_LENGTH = MIN_SECRET_KEY_LENGTH
 
 # ---------------------------------------------------------------------------
 # Environment name canonicalisation
@@ -97,17 +114,9 @@ _MIN_SECRET_KEY_LENGTH = 32
 
 EnvironmentName = Literal["development", "test", "staging", "production"]
 
-CANONICAL_ENVIRONMENTS: tuple = ("development", "test", "staging", "production")
-
-# Legacy spelling -> canonical spelling.
-_LEGACY_ENVIRONMENT_ALIASES: Dict[str, str] = {
-    "dev": "development",
-    "prod": "production",
-    # The AWS demo stack (`ENVIRONMENT=demo cdk deploy`, infrastructure/cdk/
-    # app.py) runs with APP_ENV=demo: a public, seeded development-grade
-    # deployment.
-    "demo": "development",
-}
+# Legacy spelling -> canonical spelling (CANONICAL_ENVIRONMENTS and this table
+# are defined in settings_rules).
+_LEGACY_ENVIRONMENT_ALIASES: Dict[str, str] = LEGACY_ENVIRONMENT_ALIASES
 
 # Canonical spelling -> legacy ``APP_ENV`` spelling (mirrored back into the
 # process environment for the handful of modules that still read APP_ENV).
@@ -121,57 +130,24 @@ _CANONICAL_TO_APP_ENV: Dict[str, str] = {
 # Environments in which the dev-admin auth bypass may run at all.
 BYPASS_ALLOWED_ENVIRONMENTS: tuple = ("development", "test")
 
-# Environments that must not run with placeholder secrets or demo passwords.
-HARDENED_ENVIRONMENTS: tuple = ("staging", "production")
+# Environments that must not run with placeholder secrets or demo passwords:
+# HARDENED_ENVIRONMENTS, from settings_rules.
 
 # The dotenv file each environment's settings class reads.  One table: the
 # three ``model_config`` blocks below and ``env_file_for_environment()`` (which
 # the modules' settings call, so that a setting that moved off the core class
-# is still read from the same file) all take their answer from here.
-ENV_FILES: Dict[str, str] = {
-    "development": ".env.dev",
-    "test": ".env.test",
-    "staging": ".env.prod",
-    "production": ".env.prod",
-}
+# is still read from the same file) all take their answer from ENV_FILES, which
+# settings_rules defines so that the container's start-up check reads the same
+# file.
 
 #: The file an unrecognised environment name falls back to.  Never a hardened
 #: environment's file: an unknown name must not pick up production secrets.
 DEFAULT_ENV_FILE: str = ENV_FILES["development"]
 
-# Placeholder secrets that ship in the repository (class defaults,
-# docker-compose.yml, .env.example) or are otherwise well known.  Any secret
-# equal to one of these, or starting with one of the prefixes, is refused in
-# HARDENED_ENVIRONMENTS regardless of its length.
-_PLACEHOLDER_SECRETS: frozenset = frozenset(
-    {
-        "",
-        "secret",
-        "changeme",
-        "change-me",
-        "password",
-        "supersecret",
-        "default-secret-key-for-testing",
-        "development_secret_key_change_in_production",
-        "dev-audit-key-change-in-production",
-    }
-)
-_PLACEHOLDER_SECRET_PREFIXES: tuple = (
-    "dev-only-",
-    "dev-audit-",
-    "development_secret",
-    "default-secret",
-    "ci-only-",
-    "test-",
-)
-
 
 def _secret_is_placeholder(value: str) -> bool:
     """True when *value* is a committed/well-known placeholder secret."""
-    normalised = (value or "").strip().lower()
-    if normalised in _PLACEHOLDER_SECRETS:
-        return True
-    return any(normalised.startswith(prefix) for prefix in _PLACEHOLDER_SECRET_PREFIXES)
+    return secret_is_placeholder(value)
 
 
 def _hardening_required(info: ValidationInfo) -> bool:
@@ -204,8 +180,7 @@ def canonical_environment(value: Any) -> Any:
 
 def canonical_environment_quiet(value: str) -> str:
     """Like :func:`canonical_environment` but never warns (for comparisons)."""
-    normalised = value.strip().lower()
-    return _LEGACY_ENVIRONMENT_ALIASES.get(normalised, normalised)
+    return _canonical_environment_quiet(value)
 
 
 def env_file_for_environment(environment: Any) -> str:
@@ -403,9 +378,10 @@ class Settings(BaseSettings):
     # Connect to Redis over TLS. The deployed ElastiCache replication group has
     # in-transit encryption on, so it refuses a plaintext connection; the ECS
     # task sets this to true (#147). Off by default, for the local and CI
-    # `redis:7` containers, which speak plaintext only. Every Redis client the
-    # application builds passes it as `ssl=`, and
-    # backend/tests/unit/core/test_redis_tls.py fails on one that does not.
+    # `redis:7` containers, which speak plaintext only. Every Redis client is
+    # built by backend/app/core/redis_client.py, which passes REDIS_HOST, _PORT,
+    # _PASSWORD, _DB and _SSL; backend/tests/unit/core/test_redis_connection.py
+    # fails on a client built anywhere else (#236).
     REDIS_SSL: bool = False
     REDIS_URI: Optional[RedisDsn] = None
 
@@ -720,33 +696,16 @@ class Settings(BaseSettings):
         """
         if v is None or not v.strip():
             return None
-        candidate = v.strip().rstrip("/")
-        parsed = urlparse(candidate)
-        if parsed.scheme not in ("http", "https") or not parsed.netloc:
-            raise ValueError(
-                "PUBLIC_BASE_URL must be an absolute http(s) URL with a host, "
-                f"e.g. https://api.example.com -- got {v!r}"
-            )
-        if parsed.path:
-            raise ValueError(
-                "PUBLIC_BASE_URL must not carry a path; it is the origin the "
-                f"service is reached at -- got {v!r}"
-            )
-        return candidate
+        error = public_base_url_error(v)
+        if error:
+            raise ValueError(error)
+        return v.strip().rstrip("/")
 
     @field_validator("ALLOWED_HOSTS", mode="before")
     @classmethod
     def assemble_allowed_hosts(cls, v: Union[str, List[str]]) -> List[str]:
         """Comma-separated or JSON, the two spellings CORS_ORIGINS also takes."""
-        if isinstance(v, str) and v.strip().startswith("["):
-            import json
-
-            v = json.loads(v)
-        if isinstance(v, str) and v:
-            return [i.strip() for i in v.split(",") if i.strip()]
-        if isinstance(v, list):
-            return [str(i).strip() for i in v if str(i).strip()]
-        return []
+        return parse_allowed_hosts(v)
 
     @field_validator("ALLOWED_HOSTS")
     @classmethod
@@ -761,23 +720,15 @@ class Settings(BaseSettings):
         monitoring calls fine is the most expensive kind, so the typo is
         refused here rather than at 3am.
 
-        Accepted: `example.com`, `*.example.com`. Nothing else.
+        Accepted: `example.com`, `*.example.com`. Nothing else. `*` passes
+        here and is refused in staging/production below. The rule is
+        settings_rules.allowed_host_pattern_error, which the container's
+        start-up check applies too.
         """
         for pattern in v:
-            if pattern == "*":
-                continue  # meaningful ("allow anything"); refused separately below
-            if pattern.startswith("*."):
-                rest = pattern[2:]
-                if rest and "*" not in rest:
-                    continue
-            elif "*" not in pattern and not pattern.startswith("."):
-                continue
-            raise ValueError(
-                f"ALLOWED_HOSTS entry {pattern!r} is not a hostname or a `*.` "
-                "wildcard and would match nothing, refusing every request while "
-                "the health probes -- which are exempt -- stayed green. Write "
-                "`example.com` or `*.example.com`."
-            )
+            error = allowed_host_pattern_error(pattern)
+            if error:
+                raise ValueError(error)
         return v
 
     @field_validator("CORS_ORIGINS", mode="before")
@@ -860,11 +811,12 @@ class Settings(BaseSettings):
             )
         if not self.effective_allowed_hosts:
             raise ValueError(
-                "This deployment does not know what hostname it answers on, and "
-                "the Host header is attacker-controlled. Set PUBLIC_BASE_URL "
-                "(e.g. https://api.example.com) -- which a production "
-                "deployment needs anyway for the OIDC callback -- or set "
-                "ALLOWED_HOSTS explicitly if the service answers on several."
+                "PUBLIC_BASE_URL is not set, so this deployment does not know "
+                "what hostname it answers on, and the Host header is "
+                "attacker-controlled. Set it to the URL people type to open the "
+                f"dashboard, e.g. {PUBLIC_BASE_URL_EXAMPLE} (the API is served "
+                "under /api on the same origin) -- or set ALLOWED_HOSTS "
+                "explicitly if the service answers on several names."
             )
         return self
 
@@ -894,16 +846,9 @@ class Settings(BaseSettings):
         if _hardening_required(info):
             # ``Demo1234!`` is the seeded demo password and appears in the
             # public docs and docker-compose.yml; it is never acceptable
-            # for a real deployment's first administrator.
-            weak_defaults = {
-                "admin",
-                "password",
-                "changeme",
-                "admin123",
-                "",
-                "demo1234!",
-            }
-            if v.lower() in weak_defaults or len(v) < 8:
+            # for a real deployment's first administrator
+            # (settings_rules.WEAK_SUPERUSER_PASSWORDS).
+            if superuser_password_is_weak(v):
                 raise ValueError(
                     "FIRST_SUPERUSER_PASSWORD must be at least 8 characters "
                     "and must not be a well-known or demo default in staging/production."

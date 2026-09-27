@@ -15,16 +15,28 @@ This is rollback.yml's polling loop, applied to the forward deploy.
   polling. Then it sends `continue-deployment --deployment-wait-type
   READY_WAIT`, once. `READY_WAIT` is passed explicitly and never
   `TERMINATION_WAIT` (PE v2 C7).
-* `Failed` and `Stopped` end the run red. `Baking` is not terminal.
+* `Failed` and `Stopped` end the run red. `Baking` is not terminal. When
+  CodeDeploy stopped it for an alarm (`errorInformation.code ==
+  ALARM_ACTIVE`, whichever of the two the status is), the result is `alarm`
+  and the copy names the alarm. It says the API is going back only when
+  CodeDeploy reports a rollback (`rollbackInfo`), and it never advises
+  Rollback: CodeDeploy's own rollback is already doing that (#148).
 * SUCCESS is `scripts/api_serving.py`'s verdict, checked after every poll:
   the PRIMARY task set is this revision, and check_live_target_group.py
   confirms that the `/api/*` rule forwards to that task set's target group
   (PE v2 C8). A split rule means the shift is still going, so it retries until
-  the deadline. An unsplit rule to the other group ends the run red, and so
-  does "could not tell".
+  the deadline. "Could not tell" ends the run red. An unsplit rule to the
+  other group ends it red too, but only after a bounded grace once the shift
+  is approved: an alarm rollback can put the rule back a little before the
+  deployment's status says Stopped, and that must end as `alarm`, not
+  `wrong-route` (#148 PE condition 5). The grace is `--wrong-route-grace-polls`
+  consecutive polls at the usual interval, and the deadline still applies.
 * It does not wait for `Succeeded`. After the shift, the deployment group
-  keeps the old task set for an hour and the deployment stays active. That
-  hour is the window in which Rollback can act (DECISIONS T21).
+  keeps the old task set for an hour and the deployment stays active. In that
+  hour the deployment group's alarms still watch the API, and CodeDeploy
+  rolls it back by itself if one goes into ALARM; this run has ended by then,
+  so it cannot report that. It is also the window in which Rollback can act
+  (DECISIONS T21).
 
 It NEVER stops a deployment. The only CodeDeploy write it can make is
 `continue-deployment`. Two allow-lists cover every AWS call it makes:
@@ -44,8 +56,11 @@ reason on stdout as a workflow `::error`. An exception it does not expect (a
 missing `aws` binary, a malformed rule) is `result=unknown` with its type and
 message, not an uncaught traceback with no `result`. When `GITHUB_OUTPUT` is set it
 writes `approved=true` as soon as it approves the shift, `result` (serving |
-failed | unhealthy | timeout | wrong-route | unknown), and, on success,
-`live_target_group`.
+failed | alarm | unhealthy | timeout | wrong-route | unknown), on success
+`live_target_group`, `shifted_at` (UTC, when the API was first seen serving)
+and `bake_end` (`shifted_at` plus `--bake-minutes`, "YYYY-MM-DD HH:MM" UTC:
+roughly when the deployment group stops watching), and on `alarm` the alarm's
+name(s) as `alarms` (never empty).
 """
 
 from __future__ import annotations
@@ -58,6 +73,7 @@ import sys
 import time
 from collections import Counter
 from collections.abc import Callable, Sequence
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -79,8 +95,27 @@ OPERATIONS = frozenset(
 #: test that checks every printed anchor exists can see it.
 WRONG_ROUTE_DOC = "docs/deployment/deployment-guide.md#the-api-route-and-the-primary-task-set-disagree"
 
+#: Where the alarm copy sends the operator: what to do once CodeDeploy has
+#: rolled the API back, and what to do when an alarm is blocking a deploy.
+ALARM_DOC = "docs/deployment/rollback-runbook.md#an-alarm-rolled-the-api-back"
+ALARM_FIRING_DOC = (
+    "docs/deployment/rollback-runbook.md#fix-forward-while-an-alarm-is-firing"
+)
+
 #: The statuses after which this deployment will not shift any further.
 TERMINAL_FAILURES = ("Failed", "Stopped")
+
+#: errorInformation.code when CodeDeploy stopped a deployment for an alarm.
+ALARM_ACTIVE = "ALARM_ACTIVE"
+
+#: Consecutive WRONG verdicts, after the approval, before the run says
+#: `wrong-route` (PE condition 5). At the deploy's 10-second interval this is
+#: about a minute for the deployment's status to catch up with a rule an alarm
+#: rollback has already put back.
+WRONG_ROUTE_GRACE_POLLS = 6
+
+#: How much of CodeDeploy's error message the copy quotes.
+MESSAGE_LIMIT = 200
 
 
 class AwsError(Exception):
@@ -143,10 +178,88 @@ def _output(**values: str) -> None:
                 handle.write(f"{key}={value}\n")
 
 
-def _fail(result: str, title: str, message: str) -> int:
+def _fail(result: str, title: str, message: str, **outputs: str) -> int:
     print(f"::error title={title}::{message}")
-    _output(result=result)
+    _output(result=result, **outputs)
     return 1
+
+
+def _one_line(text: str) -> str:
+    """Truncated first, then flattened: a workflow command and an output are lines."""
+    return " ".join(str(text)[:MESSAGE_LIMIT].split())
+
+
+def alarm_names(message: str, configured: Sequence[str]) -> str:
+    """The alarm(s) CodeDeploy's message names, or a fallback; never empty.
+
+    The message's format is not documented, so it is not parsed: a configured
+    name is reported when it appears in it. When none does, the copy says it
+    was one of the group's alarms and lists them, rather than print an empty
+    name.
+    """
+    found = [name for name in configured if name and name in message]
+    if found:
+        return ", ".join(found)
+    if configured:
+        return "one of the deployment group's alarms (" + ", ".join(configured) + ")"
+    return "one of the deployment group's alarms"
+
+
+def _alarm(
+    info: dict,
+    *,
+    deployment_id: str,
+    status: str,
+    continued: bool,
+    alarms: Sequence[str],
+    cluster: str,
+    service: str,
+    arn: str,
+) -> int:
+    """CodeDeploy stopped this deployment for an alarm (#148 W1)."""
+    error = info.get("errorInformation") or {}
+    message = _one_line(error.get("message") or "")
+    names = alarm_names(message, alarms)
+    said = f" CodeDeploy said: {message}" if message else ""
+    rollback = info.get("rollbackInfo") or {}
+    rollback_id = rollback.get("rollbackDeploymentId")
+    if not continued:
+        return _fail(
+            "alarm",
+            "Stopped by an alarm",
+            f"CodeDeploy stopped deployment {deployment_id} ({status}) before any "
+            f"traffic shifted, because {names} is in ALARM. Nothing shifted: the "
+            "previous revision keeps serving. While an alarm of this deployment "
+            "group is in ALARM, CodeDeploy stops every deployment to it, so find "
+            "out why before deploying again: "
+            f"{ALARM_FIRING_DOC}.{said}",
+            alarms=names,
+        )
+    if rollback_id or rollback.get("rollbackMessage"):
+        going_back = (
+            "and its auto-rollback is moving the API back to the previous "
+            f"revision (rollback deployment {rollback_id or 'not named'}). "
+            "This run stopped nothing. Do not dispatch Rollback for this: "
+            "the API is already going back, and Rollback refuses while "
+            "CodeDeploy's rollback is active."
+        )
+    else:
+        # No rollback is claimed without CodeDeploy reporting one (P9d).
+        going_back = (
+            "but CodeDeploy reports no rollback for it (no rollbackInfo), so this "
+            "run cannot say the API is going back. This run stopped nothing. "
+            "Check what is serving before anything else: python3 "
+            f"scripts/api_serving.py {cluster} {service} {arn} (exit 1: this "
+            "revision is not serving)."
+        )
+    return _fail(
+        "alarm",
+        "Rolled back by an alarm",
+        f"CodeDeploy stopped deployment {deployment_id} ({status}) during its "
+        f"traffic shift, because {names} went into ALARM, {going_back} "
+        f"Next: {ALARM_DOC}.{said}",
+        alarms=names,
+    )
 
 
 def shift(
@@ -161,6 +274,10 @@ def shift(
     serving: Callable[[str, str, str], tuple[int, str, str | None]] | None = None,
     clock: Callable[[], float] = time.monotonic,
     sleep: Callable[[float], None] = time.sleep,
+    alarms: Sequence[str] = (),
+    wrong_route_grace_polls: int = WRONG_ROUTE_GRACE_POLLS,
+    bake_minutes: float = 60,
+    wall: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
 ) -> int:
     if serving is None:
 
@@ -171,12 +288,28 @@ def shift(
     continued = False
     last_health = ""
     status = "unknown"
+    wrong_polls = 0
     try:
         while True:
             info = aws(
                 ["deploy", "get-deployment", "--deployment-id", deployment_id]
             ).get("deploymentInfo", {})
             status = info.get("status", "unknown")
+
+            if (
+                status in TERMINAL_FAILURES
+                and (info.get("errorInformation") or {}).get("code") == ALARM_ACTIVE
+            ):
+                return _alarm(
+                    info,
+                    deployment_id=deployment_id,
+                    status=status,
+                    continued=continued,
+                    alarms=alarms,
+                    cluster=cluster,
+                    service=service,
+                    arn=arn,
+                )
 
             if status in TERMINAL_FAILURES:
                 error = json.dumps(info.get("errorInformation") or {})
@@ -220,16 +353,46 @@ def shift(
             sentence = sentence.rstrip(".")
             if code == api_serving.SERVING:
                 print(f"serving: {sentence} (deployment {status})")
-                _output(result="serving", live_target_group=str(colour))
+                shifted = wall()
+                _output(
+                    result="serving",
+                    live_target_group=str(colour),
+                    shifted_at=shifted.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    bake_end=(shifted + timedelta(minutes=bake_minutes)).strftime(
+                        "%Y-%m-%d %H:%M"
+                    ),
+                )
                 return 0
             if code == api_serving.WRONG:
+                wrong_polls += 1
+                # An alarm rollback may have put the rule back before the
+                # status says so: keep reading the deployment for a bounded
+                # grace, and let a terminal status decide (PE condition 5).
+                if (
+                    continued
+                    and wrong_polls < wrong_route_grace_polls
+                    and clock() < deadline
+                ):
+                    print(
+                        f"{sentence}; deployment {deployment_id} is {status}: "
+                        f"reading it again ({wrong_polls} of "
+                        f"{wrong_route_grace_polls - 1} before this counts as a "
+                        "wrong route)"
+                    )
+                    sleep(interval_seconds)
+                    continue
                 return _fail(
                     "wrong-route",
                     "API route is not on the new revision",
-                    f"{sentence}. The deployment was not stopped. Roll back with "
-                    "the line in this run's summary, and read "
-                    f"{WRONG_ROUTE_DOC} before the next cdk deploy.",
+                    f"{sentence}. The deployment was not stopped. First check "
+                    f"aws deploy get-deployment --deployment-id {deployment_id}: "
+                    "if it is Stopped with ALARM_ACTIVE, CodeDeploy is already "
+                    "rolling the API back, so do not dispatch Rollback; read "
+                    f"{ALARM_DOC}. Otherwise, roll back with the line in this "
+                    f"run's summary, and read {WRONG_ROUTE_DOC} before the next "
+                    "cdk deploy.",
                 )
+            wrong_polls = 0
             if code == api_serving.UNKNOWN:
                 return _fail(
                     "unknown",
@@ -291,7 +454,24 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--task-definition", required=True)
     parser.add_argument("--deadline-seconds", type=float, required=True)
     parser.add_argument("--interval-seconds", type=float, required=True)
+    parser.add_argument(
+        "--alarm",
+        action="append",
+        default=[],
+        help="an alarm of the deployment group, for the copy (repeatable)",
+    )
+    parser.add_argument(
+        "--wrong-route-grace-polls", type=int, default=WRONG_ROUTE_GRACE_POLLS
+    )
+    parser.add_argument(
+        "--bake-minutes",
+        type=float,
+        default=60,
+        help="the group's termination wait, for the `bake_end` output",
+    )
     args = parser.parse_args(argv)
+    if args.wrong_route_grace_polls < 1:
+        parser.error("--wrong-route-grace-polls must be at least 1")
     return shift(
         deployment_id=args.deployment_id,
         cluster=args.cluster,
@@ -299,6 +479,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         arn=args.task_definition,
         deadline_seconds=args.deadline_seconds,
         interval_seconds=args.interval_seconds,
+        alarms=args.alarm,
+        wrong_route_grace_polls=args.wrong_route_grace_polls,
+        bake_minutes=args.bake_minutes,
     )
 
 

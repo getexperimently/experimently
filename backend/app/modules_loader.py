@@ -102,6 +102,9 @@ def _validation_errors(exc: BaseException) -> Optional[list]:
         return []
 
 
+_PYDANTIC_VALUE_ERROR = "Value error, "
+
+
 def describe_exception(exc: BaseException) -> str:
     """A short description of *exc* that names the problem but no secret.
 
@@ -120,8 +123,16 @@ def describe_exception(exc: BaseException) -> str:
         return f"{type(exc).__name__}: {text}" if text else type(exc).__name__
     fields = []
     for error in errors:
-        loc = ".".join(str(part) for part in error.get("loc", ())) or "<value>"
-        fields.append(f"{loc}: {error.get('msg', 'invalid')}")
+        message = str(error.get("msg", "invalid"))
+        # pydantic prefixes a validator's own ValueError with this; the rest is
+        # the validator's sentence, which names the setting.
+        if message.startswith(_PYDANTIC_VALUE_ERROR):
+            message = message[len(_PYDANTIC_VALUE_ERROR) :]
+        loc = ".".join(str(part) for part in error.get("loc", ()))
+        # A model-level validator (the PUBLIC_BASE_URL/ALLOWED_HOSTS check)
+        # has no field location; its message starts with the setting's name,
+        # so it is given without a label rather than under a placeholder one.
+        fields.append(f"{loc}: {message}" if loc else message)
     joined = "; ".join(fields) or "invalid settings"
     return f"{type(exc).__name__}: {joined}"
 
@@ -580,14 +591,27 @@ def _load(with_routers: bool = True, keep_registration: bool = False) -> bool:
                 exc_info=_traceback_is_safe(exc),
             )
             return False
-        logger.error(
-            "%s.register(hooks) failed; continuing on the core profile. "
-            "The modules' routes will answer 404/501 until this is fixed. "
-            "Cause: %s",
-            origin,
-            describe_exception(exc),
-            exc_info=_traceback_is_safe(exc),
-        )
+        if _validation_errors(exc) is not None:
+            # A refused setting. What happens next depends on the environment
+            # -- abort_if_modules_broken() refuses to start outside development
+            # and test -- so this line says only what is certain: which
+            # setting, and that the modules are not installed.
+            logger.error(
+                "%s.register(hooks) did not install the modules: a setting was "
+                "refused. %s",
+                origin,
+                describe_exception(exc),
+                exc_info=_traceback_is_safe(exc),
+            )
+        else:
+            logger.error(
+                "%s.register(hooks) failed; continuing on the core profile. "
+                "The modules' routes will answer 404/501 until this is fixed. "
+                "Cause: %s",
+                origin,
+                describe_exception(exc),
+                exc_info=_traceback_is_safe(exc),
+            )
         # Clear the registries so no router is served against tables that do
         # not exist.  This cannot un-import a model module that was imported
         # before the failing one -- Python has no such thing -- so

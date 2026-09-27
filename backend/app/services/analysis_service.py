@@ -65,12 +65,17 @@ class AnalysisService:
         experiment_id: Union[str, UUID],
         confidence_level: float = 0.95,
         correction_method: str = "none",
+        include_bayesian: bool = True,
     ) -> Dict[str, Any]:
         """
         Get comprehensive results for an experiment.
 
         Args:
             experiment_id: ID of the experiment
+            include_bayesian: Compute ``bayesian_results`` when the experiment
+                has Bayesian analysis enabled. The data export passes False: it
+                reads only the frequentist ``metrics`` and ``summary``, which
+                do not depend on it.
 
         Returns:
             Dictionary containing experiment results data
@@ -101,7 +106,7 @@ class AnalysisService:
 
         # EP-035 Batch 2: Compute Bayesian results if enabled
         bayesian_results = None
-        if self.is_bayesian_enabled(experiment):
+        if include_bayesian and self.is_bayesian_enabled(experiment):
             try:
                 bayesian_results = self.compute_bayesian_results(experiment)
             except Exception as exc:

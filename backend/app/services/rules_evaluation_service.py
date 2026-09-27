@@ -22,6 +22,8 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 from backend.app.core.evaluation_cache import EvaluationCache
+from backend.app.core.log_once import EVALUATION_NOTES
+from backend.app.core.pattern_match import PatternUnevaluable, report_unevaluable
 from backend.app.core.rule_compiler import RuleCompiler
 from backend.app.core.rules_engine import (
     UserContext,
@@ -40,6 +42,15 @@ from backend.app.schemas.targeting_rule import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Logging here follows backend/app/core/rules_engine.py: never a user's
+# attribute value or an exception's text, at any level; only type names,
+# operators, caller-owned identifiers and fixed strings
+# (backend/tests/unit/core/test_evaluation_log_arguments.py).
+
+# Semantic version 2.0.0, from semver.org. A module constant, so the regex
+# call-site test (backend/tests/unit/core/test_regex_call_sites.py) accepts it.
+_SEMVER_PATTERN = r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$"
 
 
 @dataclass
@@ -144,10 +155,8 @@ class RulesEvaluationService:
         self.enable_metrics = enable_metrics
         self.metrics = EvaluationMetrics()
 
-        logger.info(
-            f"RulesEvaluationService initialized: "
-            f"cache_size={cache_max_size}, ttl={cache_ttl}s, metrics={enable_metrics}"
-        )
+        # Constructed per request by AssignmentService, so DEBUG.
+        logger.debug("RulesEvaluationService initialized")
 
     def evaluate_rules_with_validation(
         self,
@@ -155,6 +164,7 @@ class RulesEvaluationService:
         user_context: UserContext,
         validate_attributes: bool = True,
         track_metrics: bool = True,
+        owner: str = "experiment",
     ) -> Tuple[Optional[TargetingRule], Optional[RuleEvaluationMetrics]]:
         """
         Evaluate targeting rules with enhanced validation and monitoring.
@@ -164,6 +174,8 @@ class RulesEvaluationService:
             user_context: User context for evaluation
             validate_attributes: Whether to validate attributes
             track_metrics: Whether to track evaluation metrics
+            owner: Names the ruleset in the warning logged when a pattern
+                condition cannot be evaluated (``experiment:<id>``).
 
         Returns:
             Tuple of (matched_rule, evaluation_metrics)
@@ -179,9 +191,8 @@ class RulesEvaluationService:
                     user_context, targeting_rules
                 )
                 if not validation_result.is_valid:
-                    logger.warning(
-                        f"User context validation failed: {validation_result.error_message}"
-                    )
+                    # A property of this user's context, not of the rules.
+                    logger.debug("User context validation failed for %s", owner)
                     if track_metrics:
                         metrics = RuleEvaluationMetrics(
                             rule_id="validation_failed",
@@ -212,8 +223,25 @@ class RulesEvaluationService:
                 self.evaluation_metrics.append(metrics)
                 self.performance_stats["evaluation_time"].append(evaluation_time)
 
+        except PatternUnevaluable as exc:
+            # A pattern condition could not be evaluated: the whole ruleset is
+            # abandoned (no rule and no default_rule), so the user is not
+            # eligible. Caught here, above the recursive group evaluator, so an
+            # enclosing NOT can never turn it into a match.
+            matched_rule = None
+            report_unevaluable(exc, owner)
+            if track_metrics:
+                metrics = RuleEvaluationMetrics(
+                    rule_id="error",
+                    evaluation_time_ms=(time.time() - start_time) * 1000,
+                    matched=False,
+                    error=str(exc),
+                )
+
         except Exception as e:
-            logger.error(f"Error evaluating rules: {e!s}")
+            logger.error(
+                "Error evaluating targeting rules for %s (%s)", owner, type(e).__name__
+            )
             self.error_counts["evaluation_error"] += 1
 
             if track_metrics:
@@ -349,8 +377,7 @@ class RulesEvaluationService:
                         is_valid=False,
                         error_message=f"Attribute '{attr_name}' must be a semantic version string",
                     )
-                semver_pattern = r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$"
-                if not re.match(semver_pattern, attr_value):
+                if not re.match(_SEMVER_PATTERN, attr_value):
                     return AttributeValidationResult(
                         is_valid=False,
                         error_message=f"Attribute '{attr_name}' must be a valid semantic version (e.g., 1.2.3)",
@@ -431,7 +458,11 @@ class RulesEvaluationService:
                 return not all(all_results)
 
         # Default fallback
-        logger.warning(f"Unknown logical operator: {operator}")
+        if EVALUATION_NOTES.first(operator, "unknown logical operator"):
+            logger.warning(
+                "Unknown logical operator %s in targeting rules; logged once.",
+                operator,
+            )
         return False
 
     def _evaluate_condition_enhanced(
@@ -451,7 +482,7 @@ class RulesEvaluationService:
                 return True
             if operator == OperatorType.IS_NOT_NULL:
                 return False
-            logger.debug(f"Attribute {attribute} not found in user context")
+            logger.debug("Attribute not found in user context (operator=%s)", operator)
             return False
 
         actual_value = user_context[attribute]
@@ -509,8 +540,10 @@ class RulesEvaluationService:
 
             return actual_parts >= expected_parts
         except (ValueError, TypeError):
-            logger.warning(
-                f"Failed to compare semantic versions: {actual_version} and {expected_version}"
+            logger.debug(
+                "Cannot compare %s with %s as semantic versions",
+                type(actual_version).__name__,
+                type(expected_version).__name__,
             )
             return False
 
@@ -546,7 +579,7 @@ class RulesEvaluationService:
             return distance <= max_dist
 
         except (ValueError, TypeError):
-            logger.warning("Failed to evaluate geo distance")
+            logger.debug("Failed to evaluate geo distance")
             return False
 
     def _evaluate_time_window(self, actual_time: Any, time_window: Any) -> bool:
@@ -581,7 +614,7 @@ class RulesEvaluationService:
             return start_dt <= actual_dt <= end_dt
 
         except (ValueError, TypeError):
-            logger.warning("Failed to evaluate time window")
+            logger.debug("Failed to evaluate time window")
             return False
 
     def _evaluate_percentage_bucket(self, user_id: Any, percentage: Any) -> bool:
@@ -597,7 +630,7 @@ class RulesEvaluationService:
             return bucket < float(percentage)
 
         except (ValueError, TypeError):
-            logger.warning("Failed to evaluate percentage bucket")
+            logger.debug("Failed to evaluate percentage bucket")
             return False
 
     def _evaluate_json_path(
@@ -631,7 +664,7 @@ class RulesEvaluationService:
             return current == expected_value
 
         except (ValueError, TypeError, json.JSONDecodeError, IndexError, KeyError):
-            logger.warning(f"Failed to evaluate JSON path: {json_path}")
+            logger.debug("Failed to evaluate JSON path")
             return False
 
     def _evaluate_array_length(self, array_value: Any, expected_length: Any) -> bool:
@@ -643,7 +676,7 @@ class RulesEvaluationService:
             return len(array_value) == int(expected_length)
 
         except (ValueError, TypeError):
-            logger.warning("Failed to evaluate array length")
+            logger.debug("Failed to evaluate array length")
             return False
 
     def _extract_required_attributes(
@@ -781,8 +814,18 @@ class RulesEvaluationService:
 
             return result
 
+        except PatternUnevaluable as exc:
+            # Same ruleset-level abandonment as evaluate_rules_with_validation.
+            report_unevaluable(exc, "targeting rules")
+            return EvaluationResult(
+                matched=False,
+                error=str(exc),
+                evaluation_time_ms=(time.time() - start_time) * 1000,
+            )
+
         except Exception as e:
-            logger.error(f"Error evaluating rules: {e}", exc_info=True)
+            # No traceback: its last line is the exception's text.
+            logger.error("Error evaluating targeting rules (%s)", type(e).__name__)
 
             if self.enable_metrics:
                 self.metrics.total_errors += 1
@@ -830,7 +873,7 @@ class RulesEvaluationService:
             rule_id: The rule ID to invalidate
         """
         self.evaluation_cache.invalidate_rule(rule_id)
-        logger.info(f"Invalidated cache for rule: {rule_id}")
+        logger.info("Invalidated cached evaluations for rule %s", rule_id)
 
     def invalidate_user_cache(self, user_id: str):
         """
@@ -840,7 +883,7 @@ class RulesEvaluationService:
             user_id: The user ID to invalidate
         """
         self.evaluation_cache.invalidate_user(user_id)
-        logger.info(f"Invalidated cache for user: {user_id}")
+        logger.info("Invalidated cached evaluations for one user")
 
     def get_metrics(self) -> EvaluationMetrics:
         """
@@ -919,7 +962,13 @@ class RulesEvaluationService:
                 compiled_rule = self.rule_compiler.compile(rule)
                 compiled.append(compiled_rule)
             except Exception as e:
-                logger.warning(f"Failed to compile rule {rule.id}: {e}")
+                # Compiled on every evaluate() call: warn once per rule.
+                if EVALUATION_NOTES.first(rule.id, "rule failed to compile"):
+                    logger.warning(
+                        "Targeting rule %s failed to compile (%s); logged once.",
+                        rule.id,
+                        type(e).__name__,
+                    )
                 # Continue with other rules
 
         return compiled
