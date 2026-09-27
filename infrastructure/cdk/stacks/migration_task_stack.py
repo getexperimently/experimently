@@ -83,9 +83,11 @@ MIGRATION_COMMAND = [
 # way `db/bootstrap.py` always did rather than with a traceback: when there is
 # nothing for this build to apply it logs a WARNING naming the foreign
 # revisions, leaves the rows alone and exits 0; when this build's own
-# migrations are *not* all applied it refuses with a message telling the
-# operator to run the full image against the database, or -- with a backup
-# taken -- to delete those rows from `<schema>.alembic_version`. Either way the
+# migrations are *not* all applied it refuses with a message that says which
+# case it is -- a full database met by a core image (run the full image of
+# that release), or a database a newer release migrated (run that release, or
+# restore the pre-upgrade backup) -- and never tells the operator to edit
+# `<schema>.alembic_version` (#238). Either way the
 # task never half-applies a chain it cannot plan, and the deploy job fails with
 # a sentence instead of "Can't locate revision identified by ...".
 IMAGE_TAG = "bootstrap"
