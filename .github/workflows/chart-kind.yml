@@ -1,0 +1,182 @@
+name: Chart (kind)
+
+# The Helm chart installed on a real cluster: kind, behind ingress-nginx, from
+# this pull request's own images, by the blocks of
+# docs/self-hosting/kubernetes.md -- extracted from the page and run as a
+# reader pastes them, never a copy. The phases, and what each asserts, are in
+# scripts/chart_kind.sh; the `chart` workflow checks the chart without a
+# cluster.
+#
+# Profiles: both, on every run, as parallel jobs. Measured on the first runs
+# (2026-09-27): core about 4 minutes, full about 5.5, most of the difference
+# the full dashboard image's build. If full grows past the budget, the plan's
+# fallback is to run it nightly only.
+#
+# Not a required check. It has a path filter, so it does not report on a pull
+# request that touches none of those paths, and a required check that never
+# reports blocks the merge. Making it required is a later, human step: measure
+# its runtime over five or more runs, make it always report (a `changes` job
+# that skips the work, the way pr-qa-gate's docs-only gate does), then add
+# `chart-kind (core)` and `chart-kind (full)` to branch protection.
+
+on:
+  pull_request:
+    paths:
+      - 'backend/**'
+      - 'frontend/**'
+      - 'modules/**'
+      - 'charts/**'
+      - 'VERSION'
+      - 'docs/self-hosting/kubernetes.md'
+      - 'scripts/chart_kind.sh'
+      - 'scripts/guide_blocks.py'
+      - '.github/workflows/chart-kind.yml'
+  push:
+    branches: [main]
+  schedule:
+    - cron: '30 3 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: chart-kind-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  HELM_VERSION: '3.19.0'
+  # sha256 of helm-v3.19.0-linux-amd64.tar.gz (the same pin as chart.yml)
+  HELM_SHA256: 'a7f81ce08007091b86d8bd696eb4d86b8d0f2e1b9f6c714be62f82f96a594496'
+  KIND_VERSION: '0.30.0'
+  # the v0.30.0 release's kind-linux-amd64.sha256sum
+  KIND_SHA256: '517ab7fc89ddeed5fa65abf71530d90648d9638ef0c4cde22c2c11f8097b8889'
+  # kind v0.30.0's default node image, as its release notes pin it
+  KIND_NODE_IMAGE: 'kindest/node:v1.34.0@sha256:7416a61b42b1662ca6ca89f02028ac133a309a2a30ba309614e8ec94d976dc5a'
+  KUBECTL_VERSION: '1.34.0'
+  # https://dl.k8s.io/release/v1.34.0/bin/linux/amd64/kubectl.sha256
+  KUBECTL_SHA256: 'cfda68cba5848bc3b6c6135ae2f20ba2c78de20059f68789c090166d6abc3e2c'
+  # ingress-nginx's kind provider manifest; its images are pinned by digest inside it
+  INGRESS_NGINX_MANIFEST_URL: 'https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.15.1/deploy/static/provider/kind/deploy.yaml'
+  INGRESS_NGINX_MANIFEST_SHA256: '2a3ae008c8786431115502644e77ab398fdebfb721a5d1195ed3089cde3299df'
+  # publicBaseUrl's host; /etc/hosts points it at the kind node's port 80
+  KIND_HOST: experimently.kind.test
+
+jobs:
+  chart-kind:
+    name: chart-kind (${{ matrix.profile }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [core, full]
+    env:
+      PROFILE: ${{ matrix.profile }}
+      API_IMAGE: chart-kind-api:${{ matrix.profile }}
+      WEB_IMAGE: chart-kind-web:${{ matrix.profile }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Start the clock
+        run: echo "BUILD_START=$(date +%s)" >> "$GITHUB_ENV"
+
+      # The runner image ships its own helm and kubectl; the pinned ones go
+      # first on PATH and are asserted.
+      - name: Install helm, kind and kubectl (pinned, checksum-verified)
+        run: |
+          set -euo pipefail
+          bin="$RUNNER_TEMP/bin"
+          mkdir -p "$bin"
+          curl -fsSL -o "$RUNNER_TEMP/helm.tgz" \
+            "https://get.helm.sh/helm-v${HELM_VERSION}-linux-amd64.tar.gz"
+          echo "${HELM_SHA256}  $RUNNER_TEMP/helm.tgz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/helm.tgz" -C "$RUNNER_TEMP" linux-amd64/helm
+          install -m 0755 "$RUNNER_TEMP/linux-amd64/helm" "$bin/helm"
+          curl -fsSL -o "$bin/kind" \
+            "https://github.com/kubernetes-sigs/kind/releases/download/v${KIND_VERSION}/kind-linux-amd64"
+          echo "${KIND_SHA256}  $bin/kind" | sha256sum -c -
+          chmod 0755 "$bin/kind"
+          curl -fsSL -o "$bin/kubectl" \
+            "https://dl.k8s.io/release/v${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
+          echo "${KUBECTL_SHA256}  $bin/kubectl" | sha256sum -c -
+          chmod 0755 "$bin/kubectl"
+          echo "$bin" >> "$GITHUB_PATH"
+
+      - name: Tool versions
+        run: |
+          set -euo pipefail
+          test "$(helm version --template '{{.Version}}')" = "v${HELM_VERSION}"
+          test "$(command -v helm)" = "$RUNNER_TEMP/bin/helm"
+          kind version | grep -F "v${KIND_VERSION} "
+          test "$(command -v kubectl)" = "$RUNNER_TEMP/bin/kubectl"
+          kubectl version --client | grep -F "v${KUBECTL_VERSION}"
+          jq --version
+          openssl version
+
+      - name: Point the public host at the kind node
+        run: echo "127.0.0.1 ${KIND_HOST}" | sudo tee -a /etc/hosts
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Version
+        id: version
+        run: echo "version=$(cat VERSION)" >> "$GITHUB_OUTPUT"
+
+      # Read-only use of the caches Docker Smoke writes (pr-qa-gate.yml); the
+      # full dashboard image has no cache there, so it keeps its own.
+      - name: Build API image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: backend/Dockerfile
+          target: ${{ matrix.profile }}
+          build-args: |
+            VERSION=${{ steps.version.outputs.version }}
+          load: true
+          tags: ${{ env.API_IMAGE }}
+          cache-from: |
+            type=gha,scope=api
+            type=gha,scope=api-full
+
+      - name: Build dashboard image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: frontend/Dockerfile
+          build-args: |
+            EXPERIMENTLY_PROFILE=${{ matrix.profile }}
+            VERSION=${{ steps.version.outputs.version }}
+          load: true
+          tags: ${{ env.WEB_IMAGE }}
+          cache-from: |
+            type=gha,scope=web
+            type=gha,scope=web-full-kind
+          cache-to: ${{ matrix.profile == 'full' && 'type=gha,scope=web-full-kind,mode=max' || '' }}
+
+      - name: Record the tools and image build time
+        run: bash scripts/chart_kind.sh time tools-and-images "$BUILD_START"
+
+      - name: kind cluster and ingress-nginx
+        run: bash scripts/chart_kind.sh cluster
+
+      - name: Load this pull request's images
+        run: bash scripts/chart_kind.sh load
+
+      - name: Server-side dry run of the rendered chart
+        run: bash scripts/chart_kind.sh dry-run
+
+      - name: The guide's blocks (docs/self-hosting/kubernetes.md)
+        run: bash scripts/chart_kind.sh guide
+
+      - name: Fresh install with two API replicas
+        run: bash scripts/chart_kind.sh replicas
+
+      - name: Diagnostics
+        if: failure()
+        run: bash scripts/chart_kind.sh diagnose
+
+      - name: Per-phase timings
+        if: always()
+        run: bash scripts/chart_kind.sh summary

@@ -85,6 +85,14 @@ and say in the pull request which stable operations changed and why; the
 smoke test's failure message lists them by method and path, with the first
 differing keys.
 
+## Beta numbers on a stable route
+
+One route carries `analysis_status: "beta"` while staying `x-stability:
+stable`: the sequential analysis (`GET /api/v1/results/{id}/sequential`).
+Its shape is settled (dashboards read it) and the fix to its numbers
+(#231) changes values, not fields, so the two fields were added to it
+optionally. Its entry is in the same table.
+
 ## Profiles
 
 The core snapshot is the public promise: it must not change with the set of

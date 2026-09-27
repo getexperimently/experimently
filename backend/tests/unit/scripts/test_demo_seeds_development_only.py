@@ -147,11 +147,17 @@ def test_script_run_as_a_program_refuses_production(module_name, seed, tmp_path)
         key: value
         for key, value in os.environ.items()
         if not key.startswith(("AWS_", "POSTGRES_"))
-        and key not in ("ENVIRONMENT", "APP_ENV")
+        # TESTING: the settings refuse it with a production environment.
+        and key not in ("ENVIRONMENT", "APP_ENV", "TESTING")
     }
     env.update(
         ENVIRONMENT="production",
-        TESTING="true",  # placeholder secrets are fine here; this is not a deployment
+        # What a production start needs, so that the seed's own guard is what
+        # refuses. Not real values: this is not a deployment.
+        SECRET_KEY="s" * 64,
+        FIRST_SUPERUSER_PASSWORD="Str0ng-first-admin",
+        PUBLIC_BASE_URL="https://experimently.example.com",
+        AUDIT_HMAC_KEY="h" * 64,
         POSTGRES_SERVER="127.0.0.1",
         POSTGRES_PORT="1",
         AWS_CONFIG_FILE=os.devnull,

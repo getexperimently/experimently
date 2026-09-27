@@ -6,7 +6,10 @@ Tests cover:
 - AnalysisService._compute_bayesian_results() called when bayesian_enabled=True
 - BayesianService receives correct conversions/totals from experiment metrics
 - BayesianDecision is stored back to experiment.bayesian_decision
-- ExperimentScheduler stops ACTIVE experiments when bayesian_decision=STOP_WINNER/FUTILE
+
+The decision is a recommendation: the scheduler no longer stops an experiment on
+it (#216).  That is pinned against a real database by
+backend/tests/integration/api/test_experiment_bayesian_config_api.py.
 """
 
 import uuid
@@ -371,106 +374,4 @@ class TestGetExperimentResultsBayesian:
         assert experiment.bayesian_decision == BayesianDecision.STOP_WINNER.value, (
             f"bayesian_decision must be stored back, "
             f"got {experiment.bayesian_decision!r}"
-        )
-
-
-# ---------------------------------------------------------------------------
-# Tests: ExperimentScheduler stops ACTIVE experiments when bayesian_decision
-#         is STOP_WINNER or STOP_FUTILE
-# ---------------------------------------------------------------------------
-
-
-class TestExperimentSchedulerBayesianStopping:
-    """Tests for ExperimentScheduler Bayesian stopping rule."""
-
-    @pytest.mark.unit
-    def test_scheduler_has_bayesian_stop_method_or_logic(self):
-        """
-        ExperimentScheduler must have a mechanism to stop experiments
-        based on bayesian_decision.  This test verifies either:
-        - A dedicated method (e.g. process_bayesian_stops), OR
-        - The logic is included in process_scheduled_experiments.
-        """
-        from backend.app.core.scheduler import ExperimentScheduler
-
-        scheduler = ExperimentScheduler()
-        has_method = hasattr(scheduler, "process_bayesian_stops") or hasattr(
-            scheduler, "process_scheduled_experiments"
-        )
-        assert has_method, "ExperimentScheduler must have bayesian stop logic"
-
-    @pytest.mark.unit
-    @pytest.mark.asyncio
-    async def test_scheduler_stops_experiment_with_stop_winner_decision(self):
-        """
-        An ACTIVE experiment with bayesian_decision=STOP_WINNER must be
-        transitioned to COMPLETED by the scheduler.
-        """
-        from backend.app.core.scheduler import ExperimentScheduler
-        from backend.app.db.session import SessionLocal
-
-        scheduler = ExperimentScheduler()
-
-        exp = MagicMock(spec=Experiment)
-        exp.id = uuid.uuid4()
-        exp.name = "Test Bayesian Stop"
-        exp.status = ExperimentStatus.ACTIVE
-        exp.bayesian_decision = BayesianDecision.STOP_WINNER.value
-        exp.start_date = datetime(2026, 1, 1, tzinfo=timezone.utc)
-        exp.end_date = None  # No scheduled end date
-
-        mock_db = MagicMock()
-
-        # Simulate: no time-based completions; only the bayesian-stop experiment
-        def mock_query_side_effect(*args, **kwargs):
-            q = MagicMock()
-            q.options.return_value = q
-            q.filter.return_value = q
-            q.all.return_value = []  # Empty for time-based queries
-            q.first.return_value = None
-            return q
-
-        mock_db.query.side_effect = mock_query_side_effect
-
-        with patch(
-            "backend.app.core.scheduler.SessionLocal",
-            return_value=mock_db,
-        ):
-            with patch.object(
-                scheduler, "_stop_bayesian_experiments", create=True
-            ) as mock_stop:
-                # If the method exists, call process_scheduled_experiments
-                try:
-                    await scheduler.process_scheduled_experiments()
-                except Exception:
-                    pass  # DB interaction may fail in unit test context
-
-    @pytest.mark.unit
-    def test_bayesian_stop_winner_value_matches_decision_enum(self):
-        """STOP_WINNER string value must match what is stored in DB."""
-        assert BayesianDecision.STOP_WINNER.value == "STOP_WINNER"
-
-    @pytest.mark.unit
-    def test_bayesian_stop_futile_value_matches_decision_enum(self):
-        """STOP_FUTILE string value must match what is stored in DB."""
-        assert BayesianDecision.STOP_FUTILE.value == "STOP_FUTILE"
-
-    @pytest.mark.unit
-    def test_scheduler_process_includes_bayesian_check(self):
-        """
-        The process_scheduled_experiments code path must include
-        a check for bayesian_decision IN (STOP_WINNER, STOP_FUTILE).
-        This is verified by inspecting the source or by checking
-        that bayesian stop experiments are processed.
-        """
-        import inspect
-
-        from backend.app.core.scheduler import ExperimentScheduler
-
-        source = inspect.getsource(ExperimentScheduler.process_scheduled_experiments)
-        # The scheduler must reference bayesian_decision in its completion logic
-        assert "bayesian_decision" in source or "bayesian" in source.lower(), (
-            "process_scheduled_experiments must handle bayesian_decision stopping rule. "
-            "Add a query that transitions ACTIVE experiments with bayesian_decision in "
-            "('STOP_WINNER', 'STOP_FUTILE') to COMPLETED."
         )

@@ -54,6 +54,7 @@ from backend.app.schemas.results import ExperimentResultsResponse
 from backend.app.services.analysis_service import AnalysisService
 from backend.app.services.audit_log_service import AuditLogService
 from backend.app.services.experiment_service import (
+    AnalysisConfigError,
     ExperimentService,
     resolve_experiment_status,
 )
@@ -563,10 +564,23 @@ async def update_experiment(
         # Create experiment service
         experiment_service = ExperimentService(db)
 
-        # Update experiment
-        updated_experiment = experiment_service.update_experiment(
-            experiment, update_data
-        )
+        # Update experiment.  A refused analysis config is a 422 naming the
+        # field, in the same shape as a request-validation error.
+        try:
+            updated_experiment = experiment_service.update_experiment(
+                experiment, update_data
+            )
+        except AnalysisConfigError as err:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=[
+                    {
+                        "loc": ["body", err.field],
+                        "msg": err.message,
+                        "type": "value_error",
+                    }
+                ],
+            )
 
         # Compliance audit logging (non-fatal)
         try:
