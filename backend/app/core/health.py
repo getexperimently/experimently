@@ -187,18 +187,10 @@ def check_database() -> Dict[str, Any]:
 def check_redis() -> Dict[str, Any]:
     """``PING`` Redis using the connection settings."""
     try:
-        import redis as redis_lib
+        from backend.app.core.redis_client import create_redis_client
 
         t0 = time.perf_counter()
-        client = redis_lib.Redis(
-            host=str(settings.REDIS_HOST),
-            port=int(settings.REDIS_PORT),
-            password=settings.REDIS_PASSWORD or None,
-            db=int(settings.REDIS_DB or 0),
-            ssl=bool(settings.REDIS_SSL),
-            socket_connect_timeout=1,
-            socket_timeout=1,
-        )
+        client = create_redis_client(socket_connect_timeout=1, socket_timeout=1)
         try:
             client.ping()
         finally:

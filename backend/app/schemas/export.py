@@ -62,16 +62,24 @@ class ExperimentExportRow(BaseModel):
 
 
 class VariantExportRow(BaseModel):
+    """
+    One variant of one experiment, with its primary-metric result.
+
+    The result columns come from the results API's computation; they are None
+    when the experiment's results cannot be computed (no control variant, or
+    no metric).
+    """
+
     experiment_id: str
     experiment_name: str
     variant_id: str
     variant_name: str
     is_control: bool
-    assignments: int
+    assignments: Optional[int]
     conversions: Optional[int]
     conversion_rate: Optional[float]
     p_value: Optional[float]
-    is_significant: bool
+    is_significant: Optional[bool]
     relative_improvement_pct: Optional[float]
 
 

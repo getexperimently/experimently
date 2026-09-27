@@ -1,5 +1,5 @@
 name: Deploy
-run-name: Deploy ${{ inputs.version }} (${{ inputs.profile }}) to ${{ inputs.environment }}
+run-name: Deploy ${{ inputs.version }} (${{ inputs.profile }}) to ${{ inputs.environment }}${{ inputs.override_alarms && ' -- ALARMS OVERRIDDEN' || '' }}
 
 # One path for every environment (DECISIONS D6): staging and prod are the same
 # workflow with a different `environment`. Nothing here names either one
@@ -66,6 +66,25 @@ on:
         required: false
         type: boolean
         default: false
+      override_alarms:
+        # The break-glass for fixing forward while the API's 5xx alarm is in
+        # ALARM (#148, EM condition 4): CodeDeploy stops every deployment to
+        # the group while one is, including a fix. This deployment ONLY is
+        # created with the alarms overridden, so NOTHING watches it: no alarm
+        # rolls it back. The next deploy is watched again with no action.
+        # docs/deployment/rollback-runbook.md#fix-forward-while-an-alarm-is-firing
+        # is the one place that explains when to use it. The run name says
+        # "ALARMS OVERRIDDEN", so the environment's reviewer sees it at the
+        # approval.
+        description: 'Break-glass: deploy with the API alarms OVERRIDDEN. No alarm watches or rolls back this deployment. Read the runbook section "Fix forward while an alarm is firing" first.'
+        required: false
+        type: boolean
+        default: false
+      override_alarms_reason:
+        description: 'Required with the alarm override, and only with it: why this deployment may go unwatched.'
+        required: false
+        type: string
+        default: ''
 
 # One deploy (or manual migration) per environment at a time. Not cancelled:
 # a deploy stopped halfway has migrated a database and left a CodeDeploy
@@ -95,6 +114,11 @@ env:
   # deployment, which is harmless.
   CODEDEPLOY_DEADLINE_SECONDS: '1800'
   CODEDEPLOY_POLL_SECONDS: '10'
+  # How long the deployment group keeps the old task set after the shift (its
+  # termination_wait_time; infrastructure/tests/test_codedeploy_alarms.py
+  # checks they agree). The summary's "alarms watch the API until about ..."
+  # is the shift's time plus this. Not a wait: this run has ended by then.
+  BAKE_MINUTES: '60'
   # Every other wait the deploy job can sit through, named so a unit test
   # (test_dashboard_deploy_wiring.py) sums them against timeout-minutes. Each
   # is a bound, not an estimate:
@@ -162,6 +186,35 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           if [ "${PROFILE}" = "core" ]; then
             echo "::warning::${UNSIGNED} Acknowledged by ${GITHUB_ACTOR}."
+          fi
+
+      # Before any AWS credential too: the break-glass (#148, EM condition 4).
+      # Ticked, it needs a reason; a reason without the tick-box is refused as
+      # well, because it reads as if the alarms were overridden when they are
+      # not. The reason reaches the shell only through `env:`.
+      - name: Confirm the alarm override
+        env:
+          OVERRIDE_ALARMS: ${{ inputs.override_alarms }}
+          OVERRIDE_REASON: ${{ inputs.override_alarms_reason }}
+        run: |
+          set -euo pipefail
+          reason="${OVERRIDE_REASON//[$'\r\n']/ }"
+          trimmed="${reason//[[:space:]]/}"
+          if [ "$OVERRIDE_ALARMS" = "true" ] && [ -z "$trimmed" ]; then
+            echo "::error title=No reason for the alarm override::The alarm override was ticked with no reason. A deployment with its alarms overridden is watched by nothing, so it needs one. Nothing was deployed."
+            exit 1
+          fi
+          if [ "$OVERRIDE_ALARMS" != "true" ] && [ -n "$trimmed" ]; then
+            echo "::error title=A reason with no alarm override::A reason for overriding the alarms was given, but the override was not ticked. Tick it, or clear the reason. Nothing was deployed."
+            exit 1
+          fi
+          if [ "$OVERRIDE_ALARMS" = "true" ]; then
+            echo "::warning title=ALARMS OVERRIDDEN::This deployment will be created with the API's alarms overridden: no alarm watches it or rolls it back. Reason: ${reason}"
+            {
+              echo "### ALARMS OVERRIDDEN"
+              echo ""
+              echo "This deployment is created with the API's alarms overridden, so no alarm watches it and nothing rolls it back by itself. Requested by @${GITHUB_ACTOR}. Reason: ${reason}"
+            } >> "$GITHUB_STEP_SUMMARY"
           fi
 
       # main, with its history and every tag: the ancestry check below needs
@@ -235,6 +288,11 @@ jobs:
       MIGRATE_LOG_GROUP: /ecs/experimentation-migrate-${{ inputs.environment }}
       CODEDEPLOY_APPLICATION: experimentation-platform-${{ inputs.environment }}
       CODEDEPLOY_DEPLOYMENT_GROUP: experimentation-${{ inputs.environment }}
+      # The deployment group's two 5xx alarms, one per target group (#148;
+      # stacks/names.py api_5xx_alarm_name). Named in the copy only: this
+      # workflow never reads or changes them.
+      API_ALARM_BLUE: experimentation-api-5xx-blue-${{ inputs.environment }}
+      API_ALARM_GREEN: experimentation-api-5xx-green-${{ inputs.environment }}
       FARGATE_STACK: experimentation-fargate-${{ inputs.environment }}
       DATABASE_STACK: experimentation-database-${{ inputs.environment }}
       SECRETS_PREFIX: /${{ inputs.environment }}/experimentation
@@ -460,7 +518,7 @@ jobs:
         with:
           channel-id: '#deployments'
           slack-message: |
-            *${{ inputs.environment }} deployment starting*
+            *${{ inputs.environment }} deployment starting${{ inputs.override_alarms && ' -- ALARMS OVERRIDDEN, unwatched' || '' }}*
             Version: `${{ inputs.version }}`
             Profile: `${{ inputs.profile }}`${{ inputs.profile == 'core' && ' (warning: unsigned compliance audit log)' || '' }}
             Triggered by: ${{ github.actor }}
@@ -699,12 +757,23 @@ jobs:
           arn="$(bash scripts/register_task_definition.sh "$ECS_BACKEND_TASK_FAMILY" "$IMAGE")"
           echo "arn=$arn" >> "$GITHUB_OUTPUT"
 
+      # The deployment group's 5xx alarms watch this deployment (#148), unless
+      # the break-glass input is set: then, and only then, THIS deployment is
+      # created with the alarms overridden. The override is on this one
+      # CreateDeployment call and changes nothing about the group, so the next
+      # deploy is watched again. It is the only place deploy.yml passes it.
       - name: Create the CodeDeploy deployment (blue/green)
         id: codedeploy
         env:
           TASK_DEFINITION: ${{ steps.api-td.outputs.arn }}
+          OVERRIDE_ALARMS: ${{ inputs.override_alarms }}
         run: |
           set -euo pipefail
+          override=()
+          if [ "$OVERRIDE_ALARMS" = "true" ]; then
+            override=(--override-alarm-configuration enabled=false)
+            echo "::warning title=ALARMS OVERRIDDEN::deployment created with the API's alarms overridden: no alarm watches it or rolls it back"
+          fi
           appspec="$(jq -cn --arg td "$TASK_DEFINITION" '{
             version: 1,
             Resources: [{
@@ -721,6 +790,7 @@ jobs:
             --application-name "$CODEDEPLOY_APPLICATION" \
             --deployment-group-name "$CODEDEPLOY_DEPLOYMENT_GROUP" \
             --description "deploy ${VERSION} (${PROFILE})" \
+            ${override[@]+"${override[@]}"} \
             --revision "$(jq -cn --arg c "$appspec" '{revisionType: "AppSpecContent", appSpecContent: {content: $c}}')" \
             --query deploymentId --output text)"
           echo "id=$id" >> "$GITHUB_OUTPUT"
@@ -735,13 +805,17 @@ jobs:
       # check_live_target_group.py confirms the /api/* rule forwards to that
       # task set's target group. It never stops a deployment.
       #
-      # The canary is TIMED ONLY (DECISIONS T21): no alarm is attached to the
-      # deployment group, so a release that passes /health and fails elsewhere
-      # reaches 100%. The response is Rollback, within the hour CodeDeploy
-      # keeps the old task set.
+      # The deployment group's 5xx alarms (one per target group, #148) watch
+      # this deployment: while either is in ALARM, CodeDeploy stops it and
+      # rolls it back by itself. The script reports that as `result=alarm`
+      # and never advises Rollback for it. The alarms watch target 5xx only,
+      # so a release that answers wrongly with a 2xx still reaches 100%, and
+      # after this step succeeds they keep watching for the hour CodeDeploy
+      # keeps the old task set (BAKE_MINUTES), when this run has ended.
       #
       # `id: api-serving` is stable: later steps read its outputs, and its
-      # success is what "the API is serving this run's revision" means.
+      # success is what "the API is serving this run's revision" means. On
+      # success it also writes `shifted_at` and `bake_end`.
       - name: Shift traffic and confirm the API serves this revision
         id: api-serving
         env:
@@ -755,7 +829,10 @@ jobs:
             --service "$ECS_BACKEND_SERVICE" \
             --task-definition "$TASK_DEFINITION" \
             --deadline-seconds "$CODEDEPLOY_DEADLINE_SECONDS" \
-            --interval-seconds "$CODEDEPLOY_POLL_SECONDS"
+            --interval-seconds "$CODEDEPLOY_POLL_SECONDS" \
+            --bake-minutes "$BAKE_MINUTES" \
+            --alarm "$API_ALARM_BLUE" \
+            --alarm "$API_ALARM_GREEN"
 
       # A real request, not a probe: /health answers 200 whatever the routes
       # do, and the ALB already used it to pass the tasks. Through the public
@@ -765,6 +842,8 @@ jobs:
       - name: Smoke test through the public URL
         env:
           PUBLIC_BASE_URL: ${{ vars.PUBLIC_BASE_URL }}
+          DEPLOYMENT_ID: ${{ steps.codedeploy.outputs.id }}
+          OVERRIDE_ALARMS: ${{ inputs.override_alarms }}
         run: |
           set -euo pipefail
           if [ -z "$PUBLIC_BASE_URL" ]; then
@@ -786,7 +865,12 @@ jobs:
             echo "attempt $attempt: HTTP ${code:-none}, body ${body:0:200}"
             sleep "$SMOKE_SLEEP_SECONDS"
           done
-          echo "::error title=Smoke test failed::GET $url answered HTTP ${code:-none} with '${body:0:200}'; expected 401 $expected. The dashboard was not rolled out. Nothing rolls back automatically: use the rollback line in this run's summary."
+          if [ "$OVERRIDE_ALARMS" = "true" ]; then
+            after="The smoke test rolls nothing back, and no alarm watches this deployment (its alarms were overridden): use the rollback line in this run's summary."
+          else
+            after="The smoke test rolls nothing back. The API's alarms may, while CodeDeploy deployment ${DEPLOYMENT_ID} is active: if the API is already back, read docs/deployment/rollback-runbook.md#an-alarm-rolled-the-api-back; otherwise use the rollback line in this run's summary."
+          fi
+          echo "::error title=Smoke test failed::GET $url answered HTTP ${code:-none} with '${body:0:200}'; expected 401 $expected. The dashboard was not rolled out. ${after}"
           exit 1
 
       # ---- The dashboard (#69): only once the API is serving and answering. ----
@@ -823,6 +907,7 @@ jobs:
           API_TD_ARN: ${{ steps.api-td.outputs.arn }}
           DASHBOARD_TD: ${{ steps.dashboard-td.outputs.arn }}
           PREVIOUS_DASHBOARD_TD: ${{ steps.previous-dashboard.outputs.arn }}
+          DEPLOYMENT_ID: ${{ steps.codedeploy.outputs.id }}
         run: |
           set -euo pipefail
           if api="$(python3 scripts/api_serving.py "$ECS_CLUSTER" "$ECS_BACKEND_SERVICE" "$API_TD_ARN" 2>&1)"; then
@@ -841,7 +926,7 @@ jobs:
               3) why="the API's route and its tasks disagree: ${API_TD_ARN##*/} is the PRIMARY task set but the /api/* rule forwards to the other group (the line above)" ;;
               *) why="could not tell whether the API is serving ${API_TD_ARN##*/}: an AWS call failed or the check crashed (exit $code; the line above)" ;;
             esac
-            echo "::error title=Dashboard not rolled out::${why}. The dashboard was not changed: it is still on ${PREVIOUS_DASHBOARD_TD##*/}."
+            echo "::error title=Dashboard not rolled out::${why}. The dashboard was not changed: it is still on ${PREVIOUS_DASHBOARD_TD##*/}. If CodeDeploy stopped deployment ${DEPLOYMENT_ID} for an alarm, read docs/deployment/rollback-runbook.md#an-alarm-rolled-the-api-back."
             exit 1
           fi
           if bash scripts/ecs_rolling_rollout.sh \
@@ -890,7 +975,7 @@ jobs:
             echo "attempt $attempt: HTTP ${code:-none} (${type:-no content type})"
             sleep "$SMOKE_SLEEP_SECONDS"
           done
-          echo "::error title=Dashboard smoke test failed::GET $url answered HTTP ${code:-none} (${type:-no content type}); expected 200 with the dashboard page. ECS reports ${DASHBOARD_TD##*/} serving, so the load balancer's default action may not reach it: check the HTTPS listener of ${FARGATE_STACK}. Nothing rolls back automatically. The rollback line in this run's summary puts back the API and the dashboard; for the dashboard alone, docs/deployment/rollback-runbook.md Method 2."
+          echo "::error title=Dashboard smoke test failed::GET $url answered HTTP ${code:-none} (${type:-no content type}); expected 200 with the dashboard page. ECS reports ${DASHBOARD_TD##*/} serving, so the load balancer's default action may not reach it: check the HTTPS listener of ${FARGATE_STACK}. Nothing rolls the dashboard back by itself: the alarms watch the API only. The rollback line in this run's summary puts back the API and the dashboard; for the dashboard alone, docs/deployment/rollback-runbook.md Method 2."
           exit 1
 
       # The LAST assertion before the job can succeed: the API check again,
@@ -902,6 +987,7 @@ jobs:
         id: api-recheck
         env:
           API_TD_ARN: ${{ steps.api-td.outputs.arn }}
+          DEPLOYMENT_ID: ${{ steps.codedeploy.outputs.id }}
         run: |
           set -euo pipefail
           if api="$(python3 scripts/api_serving.py "$ECS_CLUSTER" "$ECS_BACKEND_SERVICE" "$API_TD_ARN" 2>&1)"; then
@@ -920,7 +1006,7 @@ jobs:
               3) why="the API's route and its tasks disagree: ${API_TD_ARN##*/} is the PRIMARY task set but the /api/* rule forwards to the other group (the line above)" ;;
               *) why="could not tell whether the API is serving ${API_TD_ARN##*/}: an AWS call failed or the check crashed (exit $code; the line above)" ;;
             esac
-            echo "::error title=API changed after the dashboard rolled out::After the dashboard rolled out, ${why}. The dashboard is on this run's revision. Check both before anything else: python3 scripts/api_serving.py ${ECS_CLUSTER} ${ECS_BACKEND_SERVICE} ${API_TD_ARN}"
+            echo "::error title=API changed after the dashboard rolled out::After the dashboard rolled out, ${why}. The dashboard is on this run's revision. Check both before anything else: python3 scripts/api_serving.py ${ECS_CLUSTER} ${ECS_BACKEND_SERVICE} ${API_TD_ARN}. If CodeDeploy stopped deployment ${DEPLOYMENT_ID} for an alarm, read docs/deployment/rollback-runbook.md#an-alarm-rolled-the-api-back."
             exit 1
           fi
 
@@ -934,12 +1020,79 @@ jobs:
         run: |
           echo "::warning title=Migrated, not deployed::The migration was applied; the deployment then failed before any traffic shifted. The database is at ${VERSION}'s heads; ${PREVIOUS:-the previous revision} is still serving, and the dashboard is unchanged (${PREVIOUS_DASHBOARD:-not read}). This is safe only if the migration is backward-compatible (docs/deployment/deployment-guide.md#backward-compatible-migrations)."
 
+      # Not when an alarm stopped the deployment (#148 PE condition 7): then
+      # CodeDeploy is moving the API back by itself, and "use the rollback
+      # line" would be a second rollback. The alarm step below says what
+      # happened, the migration included. The warning above is kept for the
+      # alarm case: an alarm before the approval leaves exactly its state.
       - name: If the migration was applied and the shift was approved
-        if: failure() && steps.migrate.outcome == 'success' && steps.api-serving.outputs.approved == 'true' && steps.api-serving.outcome != 'success'
+        if: failure() && steps.migrate.outcome == 'success' && steps.api-serving.outputs.approved == 'true' && steps.api-serving.outcome != 'success' && steps.api-serving.outputs.result != 'alarm'
         env:
           NEW_REVISION: ${{ steps.api-td.outputs.arn }}
         run: |
           echo "::warning title=Migrated, shift approved, run failed::The migration was applied and the traffic shift was approved, so ${NEW_REVISION} may be serving some or all traffic. Check with: python3 scripts/api_serving.py ${ECS_CLUSTER} ${ECS_BACKEND_SERVICE} ${NEW_REVISION} (exit 0 = serving). If this release is bad, use the rollback line in this run's summary."
+
+      # CodeDeploy stopped this run's deployment for an alarm (#148 UX W2).
+      # Read-only: whether the revision serving before this run is serving
+      # again, by the one predicate (scripts/api_serving.py), on each of its
+      # exits (PE condition 6). Nothing here advises Rollback: after an alarm,
+      # CodeDeploy's own rollback is doing that, and Rollback refuses while it
+      # is active. Exclusive with the approved warning above (it excludes
+      # `alarm`) and with step (i) (which needs the shift step to succeed).
+      - name: If an alarm rolled the API back
+        id: alarm
+        if: failure() && steps.api-serving.outputs.result == 'alarm'
+        env:
+          PREVIOUS: ${{ steps.previous.outputs.arn }}
+          PREVIOUS_DASHBOARD: ${{ steps.previous-dashboard.outputs.arn }}
+          DEPLOYMENT_ID: ${{ steps.codedeploy.outputs.id }}
+          ALARMS: ${{ steps.api-serving.outputs.alarms }}
+          APPROVED: ${{ steps.api-serving.outputs.approved }}
+          MIGRATION: ${{ steps.migrate.outcome }}
+        run: |
+          set -euo pipefail
+          alarm="${ALARMS:-}"
+          if [ -z "$alarm" ]; then
+            alarm="one of the deployment group alarms (${API_ALARM_BLUE}, ${API_ALARM_GREEN})"
+          fi
+          migration=""
+          if [ "$MIGRATION" = success ]; then
+            migration=" The migration stays applied: the database is at ${VERSION}'s heads (docs/deployment/deployment-guide.md#backward-compatible-migrations)."
+          fi
+          dashboard="The dashboard was not changed: it is on ${PREVIOUS_DASHBOARD:-the revision it was on (not read)}."
+          next="Next: docs/deployment/rollback-runbook.md#an-alarm-rolled-the-api-back"
+          if [ "$APPROVED" != "true" ]; then
+            echo "api_back=nothing shifted" >> "$GITHUB_OUTPUT"
+            echo "::error title=Stopped by an alarm::${alarm} was in ALARM before ${VERSION}'s traffic shift, so CodeDeploy stopped deployment ${DEPLOYMENT_ID} and nothing shifted: ${PREVIOUS:-the previous revision} keeps serving. ${dashboard}${migration} Every deployment to this group is stopped while an alarm is in ALARM: docs/deployment/rollback-runbook.md#fix-forward-while-an-alarm-is-firing"
+            exit 0
+          fi
+          if [ -z "$PREVIOUS" ]; then
+            echo "api_back=nothing to go back to" >> "$GITHUB_OUTPUT"
+            echo "::error title=Rolled back by an alarm::${alarm} fired during the traffic shift of ${VERSION}, and CodeDeploy stopped deployment ${DEPLOYMENT_ID}. No revision was serving before this run, so there is nothing for it to go back to. ${dashboard}${migration} ${next}"
+            exit 0
+          fi
+          serving=0
+          line="$(python3 scripts/api_serving.py "$ECS_CLUSTER" "$ECS_BACKEND_SERVICE" "$PREVIOUS" 2>&1)" || serving=$?
+          echo "$line"
+          line="$(tail -n 1 <<<"$line")"
+          case "$serving" in
+            0)
+              echo "api_back=confirmed" >> "$GITHUB_OUTPUT"
+              echo "::error title=Rolled back by an alarm::${alarm} fired during the traffic shift of ${VERSION}. CodeDeploy put the API back: ${PREVIOUS##*/} is serving (checked just now). ${dashboard}${migration} The API is already back, so the rollback line is not needed. Do not redeploy ${VERSION}: it will meet the same alarm. ${next}"
+              ;;
+            1)
+              echo "api_back=not confirmed yet" >> "$GITHUB_OUTPUT"
+              echo "::error title=Rolled back by an alarm::${alarm} fired during the traffic shift of ${VERSION}, and CodeDeploy is putting the API back to ${PREVIOUS##*/}, which is not confirmed serving yet (${line}). ${dashboard}${migration} Watch it: aws deploy get-deployment --deployment-id ${DEPLOYMENT_ID}, then python3 scripts/api_serving.py ${ECS_CLUSTER} ${ECS_BACKEND_SERVICE} ${PREVIOUS} (exit 0 = back). Do not redeploy ${VERSION}. ${next}"
+              ;;
+            3)
+              echo "api_back=route disagrees" >> "$GITHUB_OUTPUT"
+              echo "::error title=Rolled back by an alarm; the API route disagrees::${alarm} fired during the traffic shift of ${VERSION}, and CodeDeploy stopped deployment ${DEPLOYMENT_ID}. ${PREVIOUS##*/} is the PRIMARY task set again, but the /api/* rule forwards to the other target group (${line}). Read docs/deployment/deployment-guide.md#the-api-route-and-the-primary-task-set-disagree before anything else. ${dashboard}${migration}"
+              ;;
+            *)
+              echo "api_back=could not tell" >> "$GITHUB_OUTPUT"
+              echo "::error title=Rolled back by an alarm::${alarm} fired during the traffic shift of ${VERSION}, and CodeDeploy stopped deployment ${DEPLOYMENT_ID}. Whether ${PREVIOUS##*/} is serving again could not be told (exit ${serving}: ${line}). Check it: python3 scripts/api_serving.py ${ECS_CLUSTER} ${ECS_BACKEND_SERVICE} ${PREVIOUS} (exit 0 = back). ${dashboard}${migration} ${next}"
+              ;;
+          esac
 
       # The API's shift succeeded and something after it failed: the API
       # smoke, the dashboard's registration, rollout or smoke, or an API check.
@@ -947,9 +1100,11 @@ jobs:
       # rollout passed and the one after did not fail. Exclusive with the two
       # warnings above, which require the shift step to have failed.
       - name: If the API was deployed and the dashboard was not
+        id: after-shift
         if: failure() && steps.api-serving.outcome == 'success'
         env:
           NEW_REVISION: ${{ steps.api-td.outputs.arn }}
+          PREVIOUS: ${{ steps.previous.outputs.arn }}
           DEPLOYMENT_ID: ${{ steps.codedeploy.outputs.id }}
           PREVIOUS_DASHBOARD: ${{ steps.previous-dashboard.outputs.arn }}
           GUARD: ${{ steps.dashboard-rollout.outputs.api_guard }}
@@ -980,9 +1135,27 @@ jobs:
             completed) dashboard="The dashboard is on this run's revision." ;;
             *) dashboard="The dashboard's rollout: ${ROLLOUT}." ;;
           esac
+          # When an API check failed, whether an alarm is why (#148 PE
+          # condition 7): an alarm in the hour after the shift stops the
+          # deployment and CodeDeploy moves the API back by itself. Then the
+          # deployment is Stopped, so a re-run is not refused for the hour,
+          # and the rollback line would be a second rollback: neither is said.
+          # Read-only; a failed read is "not an alarm", i.e. the copy below.
+          error_code=""
+          if [ -n "$code" ] && [ -n "$DEPLOYMENT_ID" ]; then
+            error_code="$(aws deploy get-deployment --deployment-id "$DEPLOYMENT_ID" \
+                            --query 'deploymentInfo.errorInformation.code' --output text 2>/dev/null)" || error_code=""
+          fi
+          if [ "$error_code" = ALARM_ACTIVE ]; then
+            echo "alarm=true" >> "$GITHUB_OUTPUT"
+            previous="${PREVIOUS##*/}"
+            echo "::error title=API rolled back by an alarm, dashboard not::CodeDeploy stopped deployment ${DEPLOYMENT_ID} for an alarm (ALARM_ACTIVE) after its traffic shift, and its auto-rollback moves the API back to ${previous:-the revision serving before this run} by itself. ${api} ${dashboard} There is nothing to roll back for the API. If the dashboard is on this run's revision, put it back to match the API with docs/deployment/rollback-runbook.md Method 2 (the dashboard block), using \"Dashboard serving before this run\" from this run's summary. Next: docs/deployment/rollback-runbook.md#an-alarm-rolled-the-api-back"
+            exit 0
+          fi
           echo "::error title=API deployed, dashboard not confirmed::${api} ${dashboard} Deploy refuses a re-run until CodeDeploy deployment ${DEPLOYMENT_ID} is no longer active (about an hour after its traffic shift). The rollback line in this run's summary puts back the API as well as the dashboard. To put back or retry the dashboard alone inside that hour, use docs/deployment/rollback-runbook.md Method 2."
 
       - name: Run summary
+        id: summary
         if: always()
         env:
           RELEASE_COMMIT: ${{ needs.preflight.outputs.sha }}
@@ -1011,6 +1184,14 @@ jobs:
           RECHECK: ${{ steps.api-recheck.outputs.api }}
           RECHECK_LINE: ${{ steps.api-recheck.outputs.api_line }}
           DASHBOARD_TD_OUTCOME: ${{ steps.dashboard-td.outcome }}
+          APPROVED: ${{ steps.api-serving.outputs.approved }}
+          ALARMS: ${{ steps.api-serving.outputs.alarms }}
+          ALARM_BACK: ${{ steps.alarm.outputs.api_back }}
+          ALARM_AFTER_SHIFT: ${{ steps.after-shift.outputs.alarm }}
+          SHIFTED_AT: ${{ steps.api-serving.outputs.shifted_at }}
+          BAKE_END: ${{ steps.api-serving.outputs.bake_end }}
+          OVERRIDE_ALARMS: ${{ inputs.override_alarms }}
+          OVERRIDE_REASON: ${{ inputs.override_alarms_reason }}
           JOB_STATUS: ${{ job.status }}
         run: |
           # Not `$([ "$REUSED" = true ] && echo ...)`: under the runner's `bash
@@ -1057,6 +1238,60 @@ jobs:
             completed) running="$DASHBOARD_DIGEST" ;;
             ""|"rolled back by ECS"*) running="$PREVIOUS_DASHBOARD_DIGEST" ;;
           esac
+          # What watches the API now, and the rollback line (#148). Exactly one
+          # case applies; each also gives Slack its API line.
+          previous="${PREVIOUS##*/}"
+          previous="${previous:-the revision serving before this run}"
+          reason="${OVERRIDE_REASON//[$'\r\n']/ }"
+          alarms="${ALARMS:-}"
+          if [ -z "$alarms" ]; then
+            alarms="one of the API alarms (${API_ALARM_BLUE}, ${API_ALARM_GREEN})"
+          fi
+          watch=""
+          api_slack=""
+          rollback_line=""
+          if [ -n "$DEPLOYMENT_ID" ] && [ "$OVERRIDE_ALARMS" = true ]; then
+            # EM condition 4(e): said plainly, in place of the alarm window.
+            watch="No alarm watched this deployment: it was created with the API's alarms overridden (reason: ${reason}). Nothing rolls it back by itself, in the canary or in the hour after its traffic shift. If this release misbehaves, roll back with the line below within that hour, while CodeDeploy keeps the previous task set. The next deploy is watched again. Until deployment ${DEPLOYMENT_ID} is no longer active (about an hour after its traffic shift), the next deploy to ${TARGET_ENV} is refused."
+            api_slack="ALARMS OVERRIDDEN: no alarm watched this deployment, and nothing rolls it back by itself; within the hour, use the rollback line in the run summary if it misbehaves. Reason: ${reason}"
+          elif [ "$SHIFT_RESULT" = alarm ] && [ "$APPROVED" = true ]; then
+            watch="Rolled back by an alarm: ${alarms} fired during the traffic shift, and CodeDeploy is moving the API back to ${previous} by itself (${ALARM_BACK:-not checked}). The dashboard was not changed. Do not redeploy ${VERSION}: it will meet the same alarm. docs/deployment/rollback-runbook.md#an-alarm-rolled-the-api-back"
+            rollback_line="Rollback: not needed for the API. CodeDeploy moved it back to ${previous} after alarm ${alarms} (${ALARM_BACK:-not checked}). The dashboard was not changed."
+            api_slack="rolled back by alarm ${alarms}; serving ${previous} (${ALARM_BACK:-not checked})"
+          elif [ "$SHIFT_RESULT" = alarm ]; then
+            watch="Stopped by an alarm: ${alarms} was in ALARM before the traffic shift, so nothing shifted and ${previous} keeps serving. Every deployment to this group is stopped while an alarm is in ALARM: docs/deployment/rollback-runbook.md#fix-forward-while-an-alarm-is-firing"
+            rollback_line="Rollback: not needed. Nothing shifted: ${previous} is still serving, and the dashboard was not changed."
+            api_slack="stopped by alarm ${alarms} before any traffic shifted; ${previous} still serving"
+          elif [ "$ALARM_AFTER_SHIFT" = true ]; then
+            watch="Rolled back by an alarm after the traffic shift: CodeDeploy stopped deployment ${DEPLOYMENT_ID} (ALARM_ACTIVE) and is moving the API back to ${previous} by itself. If the dashboard is on this run's revision, put it back to match with docs/deployment/rollback-runbook.md Method 2 (the dashboard block). docs/deployment/rollback-runbook.md#an-alarm-rolled-the-api-back"
+            rollback_line="Rollback: not needed for the API, which CodeDeploy is moving back by itself. For the dashboard alone: docs/deployment/rollback-runbook.md Method 2."
+            api_slack="rolled back by an alarm after the traffic shift; moving back to ${previous}; the dashboard may be ahead of it"
+          elif [ -n "$SHIFTED_AT" ]; then
+            # UX W3a. Without a bake-hour notification (founder item O6), say
+            # plainly that a later rollback is not announced.
+            watch="Alarms watch the API until CodeDeploy deployment ${DEPLOYMENT_ID} ends, about an hour after its traffic shift (until about ${BAKE_END} UTC): ${API_ALARM_BLUE}, ${API_ALARM_GREEN}. If one goes into ALARM before then, CodeDeploy moves the API back to ${previous} by itself; the dashboard stays on this run's revision. The alarms watch the API's target 5xx only: a release that answers wrongly with a 2xx, a broken dashboard, and the load balancer's own 502 and 504 are not caught. After that hour, no alarm rolls the API back. A rollback by an alarm after this run ends is not announced in #deployments: check with aws deploy get-deployment --deployment-id ${DEPLOYMENT_ID} (Stopped with ALARM_ACTIVE means the API went back: docs/deployment/rollback-runbook.md#an-alarm-rolled-the-api-back). Until ${DEPLOYMENT_ID} is no longer active, the next deploy to ${TARGET_ENV} is refused."
+            api_slack="Alarms watch the API until about ${BAKE_END} UTC. A rollback by an alarm after this run ends is not announced here: check deployment ${DEPLOYMENT_ID}."
+          elif [ -n "$DEPLOYMENT_ID" ]; then
+            watch="Until deployment ${DEPLOYMENT_ID} is no longer active (about an hour after its traffic shift, or when CodeDeploy stops an unapproved one), the next deploy to ${TARGET_ENV} is refused."
+          fi
+          if [ -z "$rollback_line" ]; then
+            if [ -n "$PREVIOUS" ]; then
+              rollback_line="Rollback: Actions → Rollback → environment=${TARGET_ENV}, task_definition_arn=${PREVIOUS##*/}${dashboard_param}"
+            else
+              rollback_line="Rollback: there was no revision serving before this run, so there is nothing to roll back to."
+            fi
+          fi
+          shift_cell="${SHIFT_RESULT:-not reached}"
+          if [ "$SHIFT_RESULT" = alarm ]; then
+            shift_cell="rolled back by alarm ${alarms}"
+            if [ "$APPROVED" != true ]; then
+              shift_cell="stopped by alarm ${alarms} before any traffic shifted"
+            fi
+          fi
+          if [ "$OVERRIDE_ALARMS" = true ] && [ -n "$DEPLOYMENT_ID" ]; then
+            shift_cell="${shift_cell} (ALARMS OVERRIDDEN)"
+          fi
+          echo "api_slack=${api_slack:-see the run summary}" >> "$GITHUB_OUTPUT"
           {
             echo "## Deploy ${VERSION} to ${TARGET_ENV}: ${JOB_STATUS}"
             echo ""
@@ -1072,7 +1307,7 @@ jobs:
             echo "| New API revision | \`${NEW_REVISION:-not registered}\` |"
             echo "| CodeDeploy deployment | \`${DEPLOYMENT_ID:-not created}\` |"
             echo "| API serving before this run | \`${PREVIOUS:-nothing (first deploy)}\` |"
-            echo "| Traffic shift | ${SHIFT_RESULT:-not reached} |"
+            echo "| Traffic shift | ${shift_cell} |"
             echo "| Live API target group | \`${LIVE_GROUP:-not confirmed}\` |"
             echo "| Dashboard image | \`${dashboard_image_line}\` |"
             echo "| New dashboard revision | \`${NEW_DASHBOARD:-not registered}\` |"
@@ -1094,18 +1329,14 @@ jobs:
               echo "Dashboard image not confirmed: run \`python3 scripts/check_dashboard_image.py --env ${TARGET_ENV}\` before any \`cdk deploy\` of \`${FARGATE_STACK}\`, and pass the \`-c dashboard_image_tag\` it prints."
             fi
             echo ""
-            if [ -n "$DEPLOYMENT_ID" ]; then
-              echo "The canary is timed only: no alarm watches it, and nothing rolls back automatically on application errors. If this release misbehaves, roll back within the hour CodeDeploy keeps the previous task set. Until deployment ${DEPLOYMENT_ID} is no longer active (about an hour after its traffic shift, or when CodeDeploy stops an unapproved one), the next deploy to ${TARGET_ENV} is refused."
+            if [ -n "$watch" ]; then
+              echo "$watch"
               echo ""
             fi
-            if [ -n "$PREVIOUS" ]; then
-              echo "Rollback: Actions → Rollback → environment=${TARGET_ENV}, task_definition_arn=${PREVIOUS##*/}${dashboard_param}"
-              if [ -z "$dashboard_param" ] && [ -n "$PREVIOUS_DASHBOARD" ]; then
-                echo ""
-                echo "The dashboard was on ${PREVIOUS_DASHBOARD_IMAGE:-an image this run could not read} before this run, not a release: there is no released dashboard to roll back to."
-              fi
-            else
-              echo "Rollback: there was no revision serving before this run, so there is nothing to roll back to."
+            echo "$rollback_line"
+            if [ -n "$PREVIOUS" ] && [ -z "$dashboard_param" ] && [ -n "$PREVIOUS_DASHBOARD" ]; then
+              echo ""
+              echo "The dashboard was on ${PREVIOUS_DASHBOARD_IMAGE:-an image this run could not read} before this run, not a release: there is no released dashboard to roll back to."
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -1115,7 +1346,8 @@ jobs:
         with:
           channel-id: '#deployments'
           slack-message: |
-            *${{ inputs.environment }} deployment ${{ job.status }}*: `${{ inputs.version }}` (${{ inputs.profile }})
+            *${{ inputs.environment }} deployment ${{ job.status }}${{ inputs.override_alarms && ' -- ALARMS OVERRIDDEN, unwatched' || '' }}*: `${{ inputs.version }}` (${{ inputs.profile }})
+            API: ${{ steps.summary.outputs.api_slack || 'see the run summary' }}
             Dashboard: ${{ steps.dashboard-rollout.outputs.outcome || 'not rolled out' }}
             Deployed by: ${{ github.actor }}
             Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

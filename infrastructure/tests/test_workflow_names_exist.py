@@ -46,6 +46,10 @@ RESOURCE_NAMES = {
         "AWS::CodeDeploy::DeploymentGroup",
         "DeploymentGroupName",
     ),
+    # The deployment group's 5xx alarms, which deploy.yml names in its copy
+    # (#148).
+    "API_ALARM_BLUE": ("AWS::CloudWatch::Alarm", "AlarmName"),
+    "API_ALARM_GREEN": ("AWS::CloudWatch::Alarm", "AlarmName"),
 }
 #: Job env vars naming a stack.
 STACK_NAMES = {"FARGATE_STACK", "DATABASE_STACK"}
@@ -126,7 +130,7 @@ def test_workflow_names_exist_in_that_environment(synths, workflow, env):
 
 
 #: How many environment-built names each workflow's bound job carries.
-NAMES_CHECKED = {"deploy.yml": 12, "rollback.yml": 7, "db-migrate.yml": 6}
+NAMES_CHECKED = {"deploy.yml": 14, "rollback.yml": 7, "db-migrate.yml": 6}
 
 
 README = REPO_ROOT / "docs" / "deployment" / "README.md"

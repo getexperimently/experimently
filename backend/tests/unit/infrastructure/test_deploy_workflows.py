@@ -870,10 +870,14 @@ def test_the_migrated_warning_is_true_of_the_case_it_runs_in():
         "steps.api-serving.outputs.approved != 'true' && "
         "steps.api-serving.outcome != 'success'"
     )
+    # #148 PE condition 7: only the approved warning excludes an alarm, whose
+    # "use the rollback line" would be a second rollback. The not-approved one
+    # stays true in the alarm case: nothing shifted.
     assert after["if"] == (
         "failure() && steps.migrate.outcome == 'success' && "
         "steps.api-serving.outputs.approved == 'true' && "
-        "steps.api-serving.outcome != 'success'"
+        "steps.api-serving.outcome != 'success' && "
+        "steps.api-serving.outputs.result != 'alarm'"
     )
     assert "is still serving" not in _run_of(after)
     assert "may be serving" in _run_of(after)
@@ -1006,8 +1010,15 @@ def test_the_summary_hands_over_the_rollback_line():
 
 
 @pytest.mark.regression
-def test_the_summary_prints_the_live_group_and_says_the_canary_is_timed_only():
-    """PE v2 C8 and EM C5: the live group and the next cdk value; T21's honesty."""
+def test_the_summary_prints_the_live_group_and_says_what_the_alarms_watch():
+    """PE v2 C8 and EM C5: the live group and the next cdk value; T21's honesty.
+
+    Inverted, not deleted (#148 PE condition 10), from
+    test_the_summary_prints_the_live_group_and_says_the_canary_is_timed_only:
+    the summary said the canary was timed only; with the alarms it says until
+    when they watch (BAKE_END, from the shift step's output, UX W3a), what they
+    do not catch, and that a rollback after the run ends is not announced
+    (founder item O6 is open)."""
     steps = _steps(_deploy_job())
     (summary,) = [s for s in steps if s.get("name") == "Run summary"]
     code = _run_of(summary)
@@ -1015,10 +1026,21 @@ def test_the_summary_prints_the_live_group_and_says_the_canary_is_timed_only():
         "${{ steps.api-serving.outputs.live_target_group }}"
     )
     assert summary["env"]["SHIFT_RESULT"] == "${{ steps.api-serving.outputs.result }}"
+    assert summary["env"]["BAKE_END"] == "${{ steps.api-serving.outputs.bake_end }}"
+    assert summary["env"]["SHIFTED_AT"] == (
+        "${{ steps.api-serving.outputs.shifted_at }}"
+    )
     assert "| Live API target group |" in code
     assert "-c api_live_target_group=${LIVE_GROUP}" in code
-    assert "The canary is timed only" in code
-    assert "nothing rolls back automatically on application errors" in code
+    assert "The canary is timed only" not in code
+    assert "nothing rolls back automatically" not in code
+    assert "Alarms watch the API until CodeDeploy deployment ${DEPLOYMENT_ID}" in code
+    assert "(until about ${BAKE_END} UTC)" in code
+    assert "a release that answers wrongly with a 2xx" in code
+    assert (
+        "A rollback by an alarm after this run ends is not announced in "
+        "#deployments" in code
+    )
 
 
 @pytest.mark.regression
