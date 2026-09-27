@@ -1,9 +1,12 @@
 """
 Experiment Interaction Detection Service.
 
-Detects statistical interactions, novelty effects, and SUTVA violations
-when multiple experiments run simultaneously on the same user population.
-Provides cross-experiment analysis for the dashboard API.
+Measures the user overlap between experiments that run at the same time.
+
+The statistical helpers below (``detect_interaction``, ``detect_novelty_effect``,
+``check_sutva``) are not yet fed from outcomes, so the pair analysis returns
+their results as None -- not computed -- and derives the risk level from the
+overlap alone (#219).
 """
 
 from dataclasses import dataclass, field
@@ -69,6 +72,7 @@ class InteractionDetectionService:
     """Service for detecting interactions between simultaneously running experiments."""
 
     OVERLAP_THRESHOLD = 0.30  # Flag pairs with > 30 % shared users
+    HIGH_OVERLAP_THRESHOLD = 0.60  # Above this the overlap alone is high risk
     NOVELTY_SLOPE_THRESHOLD = -0.05  # Negative slope threshold to flag novelty
 
     # ------------------------------------------------------------------
@@ -294,47 +298,21 @@ class InteractionDetectionService:
         if not significant:
             return None
 
-        # Basic interaction result using rough user counts as proxy for 2×2 table
-        n_a = len(users_a)
-        n_b = len(users_b)
-        n_both = len(users_a & users_b)
-        n_control = max(1, n_a + n_b - 2 * n_both)
-
-        interaction_result = self.detect_interaction(
-            control_only=n_control,
-            treatment_a_only=n_a - n_both,
-            treatment_b_only=n_b - n_both,
-            both_treatments=n_both,
-        )
-
-        # No daily data available from the DB stub — return a neutral result
-        novelty_result = NoveltyResult(
-            has_novelty=False,
-            decline_rate=0.0,
-            recommendation="Novelty analysis requires time-series data.",
-        )
-
-        # SUTVA: flag contamination equal to the overlap count / treatment size
-        contamination = n_both / n_a if n_a > 0 else 0.0
-        sutva_result = self.check_sutva(
-            treatment_size=n_a,
-            control_size=n_b,
-            network_feature=False,
-            contamination_rate=contamination,
-        )
-
+        # Only the overlap is measured (#219).  The interaction, novelty and
+        # SUTVA analyses need outcomes by variant (and, for novelty, by day),
+        # which this service does not read yet, so they are left as None --
+        # "not computed" -- rather than filled from user counts.
         analysis = InteractionAnalysis(
             experiment_a_id=experiment_a_id,
             experiment_b_id=experiment_b_id,
             overlap_coefficient=overlap,
             has_significant_overlap=significant,
-            interaction_result=interaction_result,
-            novelty_result=novelty_result,
-            sutva_result=sutva_result,
-            overall_risk="",  # computed below
+            interaction_result=None,
+            novelty_result=None,
+            sutva_result=None,
+            overall_risk=self.risk_from_overlap(overlap),
             recommendations=[],
         )
-        analysis.overall_risk = self._compute_overall_risk(analysis)
         analysis.recommendations = self._build_recommendations(analysis)
         return analysis
 
@@ -358,27 +336,31 @@ class InteractionDetectionService:
     # Risk aggregation
     # ------------------------------------------------------------------
 
-    def _compute_overall_risk(self, analysis: InteractionAnalysis) -> str:
-        """Aggregate risk level from interaction, novelty, and SUTVA signals."""
-        risk_score = 0
+    @classmethod
+    def risk_from_overlap(cls, overlap: float) -> str:
+        """Risk level from the overlap alone, the one input that is measured.
 
-        if analysis.interaction_result and analysis.interaction_result.has_interaction:
-            risk_score += 2
-        if analysis.novelty_result and analysis.novelty_result.has_novelty:
-            risk_score += 1
-        if analysis.sutva_result and analysis.sutva_result.has_violation:
-            risk_score += 2
-
-        if risk_score >= 3:
+        At or below ``OVERLAP_THRESHOLD`` (0.3) the pair is ``low``; up to
+        ``HIGH_OVERLAP_THRESHOLD`` (0.6) it is ``medium``; above that ``high``.
+        These are the bands in docs/api/interaction-detection.md.
+        """
+        if overlap > cls.HIGH_OVERLAP_THRESHOLD:
             return "high"
-        if risk_score >= 1:
+        if overlap > cls.OVERLAP_THRESHOLD:
             return "medium"
         return "low"
 
     def _build_recommendations(self, analysis: InteractionAnalysis) -> List[str]:
-        """Build a list of actionable recommendations from sub-results."""
+        """Recommendations from the overlap, plus any sub-result that exists."""
         recs: List[str] = []
 
+        if analysis.has_significant_overlap:
+            recs.append(
+                f"The two experiments share users (overlap "
+                f"{analysis.overlap_coefficient:.2f}). Each one's results include "
+                "users exposed to the other; consider a mutual exclusion group "
+                "for future experiments on the same surface."
+            )
         if analysis.interaction_result and analysis.interaction_result.warning_message:
             recs.append(analysis.interaction_result.warning_message)
         if analysis.novelty_result and analysis.novelty_result.has_novelty:

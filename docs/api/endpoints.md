@@ -1353,9 +1353,9 @@ See [CUPED Guide](cuped.md) for full documentation.
 ```
 GET /api/v1/results/{experiment_id}/cuped
 ```
-Returns CUPED-adjusted effect estimates and variance reduction percentage.
+Returns CUPED-adjusted effect estimates and variance reduction percentage. Beta: the covariate is not yet a pre-experiment metric, so the reduction is close to 0 (#217).
 
-**Query params:** `winsorize` (bool), `lower_pct` (default `0.01`), `upper_pct` (default `0.99`)
+It takes no query parameters: the method comes from the experiment's `variance_reduction_config`.
 
 ---
 
@@ -1390,8 +1390,8 @@ See [Interaction Detection Guide](interaction-detection.md) for full documentati
 
 ```
 GET /api/v1/interactions/scan                          — Scan all active experiments
-GET /api/v1/interactions/{exp_a_id}/{exp_b_id}         — Full pairwise analysis
-GET /api/v1/interactions/{exp_a_id}/{exp_b_id}/novelty — Novelty-effect sub-analysis
+GET /api/v1/interactions/{exp_a_id}/{exp_b_id}         — Pairwise analysis (beta: overlap only, #219)
+GET /api/v1/interactions/{exp_a_id}/{exp_b_id}/novelty — Novelty sub-analysis (beta: not computed, #219)
 ```
 
 Access: DEVELOPER and above (VIEWER returns 403).

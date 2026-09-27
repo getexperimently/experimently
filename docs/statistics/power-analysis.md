@@ -120,7 +120,7 @@ If your estimated runtime is too long, you have several options:
 
 2. **Increase the MDE**: Accept a larger minimum effect. If a 5% lift is enough to launch, you do not need to detect a 2% lift.
 
-3. **Apply CUPED variance reduction**: Use pre-experiment covariate data to reduce metric variance. This can reduce required sample size by 20-40%. See the [CUPED guide](../api/cuped.md).
+3. **Apply CUPED variance reduction**: Use pre-experiment covariate data to reduce metric variance; how much it saves depends on how well the covariate predicts the outcome. The platform's CUPED endpoint is beta and does not yet use a pre-experiment covariate, so it does not reduce the sample size today (see the [CUPED guide](../api/cuped.md), #217).
 
 4. **Use sequential testing (mSPRT)**: Instead of a fixed sample, check results continuously with a valid stopping rule. You may stop early when significance is reached, potentially cutting runtime in half. See [Statistical Methods](../api/sequential-testing.md).
 
@@ -340,7 +340,7 @@ print(f"Estimated runtime: {result['runtime_days']:.1f} days")
 
 ## Further Reading
 
-- [CUPED Variance Reduction](../api/cuped.md) — reduce required sample size by 20-40%
+- [CUPED Variance Reduction](../api/cuped.md) — beta: the covariate is not yet a pre-experiment metric (#217)
 - [Sequential Testing](../api/sequential-testing.md) — stop experiments early when significance is reached
 - [Post-Stratification](post-stratification.md) — another variance reduction technique
 - [Multi-Armed Bandits](../api/multi-armed-bandit.md) — when to use exploration instead of hypothesis testing
