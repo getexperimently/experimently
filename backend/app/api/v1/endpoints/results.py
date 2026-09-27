@@ -102,16 +102,9 @@ def _get_cache_service() -> CacheService:
     connection errors explicitly.
     """
     try:
-        import redis as redis_lib
+        from backend.app.core.redis_client import create_redis_client
 
-        from backend.app.core.config import settings
-
-        r = redis_lib.Redis(
-            host=settings.REDIS_HOST,
-            port=int(settings.REDIS_PORT),
-            db=0,
-            ssl=bool(settings.REDIS_SSL),
-        )
+        r = create_redis_client()
         # Quick ping to verify the connection is alive.
         r.ping()
         return CacheService(redis_client=r)
@@ -824,16 +817,9 @@ def invalidate_results_cache(
     Cache invalidation is best-effort: a failure here does not raise an error.
     """
     try:
-        import redis as redis_lib
+        from backend.app.core.redis_client import create_redis_client
 
-        from backend.app.core.config import settings
-
-        r = redis_lib.Redis(
-            host=settings.REDIS_HOST,
-            port=int(settings.REDIS_PORT),
-            db=0,
-            ssl=bool(settings.REDIS_SSL),
-        )
+        r = create_redis_client()
         cache = CacheService(redis_client=r)
         cache.clear(pattern=f"results:{experiment_id}:*")
     except Exception:

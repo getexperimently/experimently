@@ -166,6 +166,23 @@ describe('LoginPage', () => {
     await waitFor(() => expect(mockReplace).toHaveBeenCalledWith('/experiments'));
   });
 
+  it('explains a wrong-Host 400 in the alert box, naming this address and the setting', async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse(400, { detail: 'Invalid host header' }));
+    renderLogin();
+    await fillAndSubmit();
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(
+      `This Experimently server isn't configured for the address you used (${window.location.host}). ` +
+        `An administrator needs to set PUBLIC_BASE_URL to ${window.location.origin} ` +
+        `(or add ${window.location.host} to ALLOWED_HOSTS, if that is set).`,
+    );
+    expect(alert).not.toHaveTextContent(/^Invalid host header$/);
+    // Plain text: a link to this host is the thing that does not work.
+    expect(alert.querySelector('a')).toBeNull();
+    expect(mockReplace).not.toHaveBeenCalled();
+  });
+
   it('shows the invalid-credentials message in a role="alert" box and refocuses email', async () => {
     mockFetch.mockResolvedValueOnce(jsonResponse(401, { detail: 'Invalid email or password' }));
     renderLogin();
@@ -289,6 +306,13 @@ describe('loginErrorMessage', () => {
     );
     expect(loginErrorMessage(new ApiError({ status: 429 }))).toContain('Too many attempts');
     expect(loginErrorMessage(new ApiError({ status: 500, detail: 'boom' }))).toBe('boom');
+    expect(loginErrorMessage(new ApiError({ status: 400, detail: 'Invalid host header' }))).toBe(
+      `This Experimently server isn't configured for the address you used (${window.location.host}). ` +
+        `An administrator needs to set PUBLIC_BASE_URL to ${window.location.origin} ` +
+        `(or add ${window.location.host} to ALLOWED_HOSTS, if that is set).`,
+    );
+    // Only that exact 400: any other 400 keeps its own detail.
+    expect(loginErrorMessage(new ApiError({ status: 400, detail: 'Bad email' }))).toBe('Bad email');
     expect(loginErrorMessage(new Error('plain'))).toBe('plain');
     expect(loginErrorMessage('???')).toBe('Something went wrong. Please try again.');
   });

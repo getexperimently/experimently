@@ -59,7 +59,7 @@ _REALISTIC = {
     "POSTGRES_SERVER": "aurora.example.internal",
     # Not a secret and not a random string: the settings validator requires an
     # absolute http(s) origin with no path, and ALLOWED_HOSTS derives its host.
-    "PUBLIC_BASE_URL": "https://api.example.com",
+    "PUBLIC_BASE_URL": "https://experimently.example.com",
 }
 
 pytestmark = pytest.mark.skipif(
@@ -275,3 +275,43 @@ def test_without_the_audit_key_the_modules_refuse_to_register():
     assert "AUDIT_HMAC_KEY" in result.stderr, result.stderr[-2000:]
     # ...while the core profile itself is perfectly happy with that same set.
     assert _run(environment, _CORE_SETTINGS).returncode == 0
+
+
+# ---------------------------------------------------------------------------
+# The container's start-up check (#237) passes both task definitions
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+@pytest.mark.regression
+@pytest.mark.parametrize("profile", ["core", "full"])
+@pytest.mark.parametrize("name", sorted(STACKS))
+def test_the_start_up_check_passes_the_task_definition(name: str, profile: str):
+    """`backend/docker-entrypoint.sh` runs the preflight before anything else,
+    in the API service and the migration task alike. Either one refused would
+    be a deployment whose tasks exit 78 on start."""
+    from backend.app.core import preflight
+
+    environment = container_environment(STACKS[name], profile=profile)
+    problems = preflight.check(
+        environment, full_profile=profile == "full", root=STACKS_DIR / "no-dotenv-here"
+    )
+    assert problems == [], (
+        f"{STACKS[name].name} ({profile}) gives the container {sorted(environment)}, "
+        f"and the start-up check refuses it:\n" + preflight.render(problems)
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.regression
+@pytest.mark.parametrize("name", sorted(STACKS))
+def test_without_the_database_host_the_start_up_check_refuses_the_task(name: str):
+    """The negative control: the check is not passing vacuously."""
+    from backend.app.core import preflight
+
+    environment = container_environment(STACKS[name], profile="full")
+    environment.pop("POSTGRES_SERVER")
+    problems = preflight.check(
+        environment, full_profile=True, root=STACKS_DIR / "no-dotenv-here"
+    )
+    assert [p.split(" ", 1)[0] for p in problems] == ["POSTGRES_SERVER"]

@@ -38,7 +38,8 @@ class UserEvent:
     variant_name: str
     event_name: str
     value: float
-    timestamp: datetime
+    # None: the server stamps the event with its own clock.
+    timestamp: Optional[datetime]
     properties: dict[str, Any] = field(default_factory=dict)
 
 
@@ -371,8 +372,27 @@ class DataScenario:
 # ---------------------------------------------------------------------------
 
 
+class SeedingError(RuntimeError):
+    """The platform refused a seeding call; nothing after it was sent."""
+
+
 class PlatformSeeder:
-    """Seeds a running platform instance with scenario data via REST API."""
+    """Seeds a running platform instance with scenario data via REST API.
+
+    Every call must succeed: any non-2xx response raises :class:`SeedingError`
+    naming the call and the status, so a missing ``--api-key`` (401) stops the
+    run instead of reporting events that were never stored.
+
+    For each user the seeder first calls ``POST /api/v1/tracking/assign`` and
+    only then sends that user's events, under the variant the *server*
+    assigned (the variant the results engine counts the user in). Events carry
+    their generated ``timestamp`` when it is set, so pre-period events can be
+    seeded.
+
+    The counts returned are what the platform confirmed -- an assignment
+    answered with ``assigned: true``, an event answered with a stored ``id`` --
+    never the number of attempts.
+    """
 
     def __init__(self, api_url: str, token: str, api_key: Optional[str] = None):
         self.api_url = api_url.rstrip("/")
@@ -383,26 +403,90 @@ class PlatformSeeder:
         )
 
     def seed_scenario(self, result: ScenarioResult) -> dict[str, Any]:
-        """Create an experiment and seed all events for the scenario."""
+        """Create and start an experiment, assign every user, then seed events."""
         exp_key = f"realistic-{result.scenario_name}-{uuid.uuid4().hex[:6]}"
         experiment = self._create_experiment(result, exp_key)
         exp_id = experiment["id"]
+        self._start_experiment(exp_id)
 
-        variant_map = {v["name"]: v["id"] for v in experiment.get("variants", [])}
-        seeded_events = 0
+        events_by_user: dict[str, list[UserEvent]] = {}
         for event in result.events:
-            variant_id = variant_map.get(event.variant_name)
-            if not variant_id:
+            events_by_user.setdefault(event.user_id, []).append(event)
+
+        generated_variant: dict[str, str] = {}
+        for user in result.users:
+            # A user listed twice (the multi_assignment edge case) is assigned
+            # once: assignment is sticky, so a second call would only return
+            # the first.
+            generated_variant.setdefault(user.user_id, user.variant_name)
+
+        users_assigned = 0
+        users_not_assigned = 0
+        variant_mismatches = 0
+        events_seeded = 0
+        events_skipped_unassigned = 0
+        for user_id, intended in generated_variant.items():
+            assignment = self._assign_user(exp_key, user_id)
+            user_events = events_by_user.pop(user_id, [])
+            if not assignment.get("assigned", False):
+                # Holdout / exclusion / targeting: the platform records no
+                # assignment, so their events would be conversions with no
+                # assigned user behind them. They are not sent.
+                users_not_assigned += 1
+                events_skipped_unassigned += len(user_events)
                 continue
-            self._track_event(event, exp_id, variant_id)
-            seeded_events += 1
+            users_assigned += 1
+            if assignment.get("variant_name") != intended:
+                variant_mismatches += 1
+            for event in user_events:
+                self._track_event(event, exp_id, assignment["variant_id"])
+                events_seeded += 1
+
+        # Events for a user the scenario never listed have no assignment.
+        events_skipped_unassigned += sum(len(v) for v in events_by_user.values())
 
         return {
             "experiment_id": exp_id,
             "experiment_key": exp_key,
-            "users_seeded": len(result.users),
-            "events_seeded": seeded_events,
+            "users_generated": len(generated_variant),
+            "users_seeded": users_assigned,
+            "users_not_assigned": users_not_assigned,
+            "variant_mismatches": variant_mismatches,
+            "events_generated": len(result.events),
+            "events_seeded": events_seeded,
+            "events_skipped_unassigned": events_skipped_unassigned,
         }
+
+    # -- HTTP -----------------------------------------------------------------
+
+    def _post(
+        self,
+        what: str,
+        path: str,
+        payload: Optional[dict[str, Any]] = None,
+        headers: Optional[dict[str, str]] = None,
+    ) -> Any:
+        """POST and return the JSON body; raise on anything but 2xx."""
+        resp = self.session.post(
+            f"{self.api_url}{path}", json=payload, headers=headers or {}
+        )
+        if not 200 <= resp.status_code < 300:
+            hint = (
+                " -- the tracking endpoints need --api-key (X-API-Key header)"
+                if resp.status_code in (401, 403)
+                and path.startswith("/api/v1/tracking")
+                else ""
+            )
+            raise SeedingError(
+                f"{what} failed: POST {path} returned HTTP {resp.status_code}"
+                f"{hint}: {resp.text[:500]}"
+            )
+        if resp.status_code == 204 or not resp.content:
+            return {}
+        return resp.json()
+
+    def _tracking_headers(self) -> dict[str, str]:
+        return {"X-API-Key": self.api_key} if self.api_key else {}
 
     def _create_experiment(self, result: ScenarioResult, key: str) -> dict[str, Any]:
         payload = {
@@ -424,41 +508,47 @@ class PlatformSeeder:
                 }
             ],
         }
-        resp = self.session.post(f"{self.api_url}/api/v1/experiments", json=payload)
-        resp.raise_for_status()
-        return resp.json()
+        experiment = self._post("create experiment", "/api/v1/experiments", payload)
+        if not isinstance(experiment, dict) or "id" not in experiment:
+            raise SeedingError(f"create experiment returned no id: {experiment!r}")
+        return experiment
+
+    def _start_experiment(self, exp_id: str) -> None:
+        # /tracking/assign only assigns into an ACTIVE experiment.
+        self._post("start experiment", f"/api/v1/experiments/{exp_id}/start")
+
+    def _assign_user(self, exp_key: str, user_id: str) -> dict[str, Any]:
+        body = self._post(
+            f"assign {user_id}",
+            "/api/v1/tracking/assign",
+            {"experiment_key": exp_key, "user_id": user_id},
+            self._tracking_headers(),
+        )
+        if not isinstance(body, dict) or "variant_id" not in body:
+            raise SeedingError(f"assign {user_id} returned no variant_id: {body!r}")
+        return body
 
     def _track_event(self, event: UserEvent, exp_id: str, variant_id: str) -> None:
-        payload = {
+        payload: dict[str, Any] = {
             "event_type": "track",
             "event_name": event.event_name,
             "user_id": event.user_id,
             "value": event.value,
             "experiment_id": exp_id,
             "variant_id": variant_id,
-            "properties": json.dumps(event.properties),
+            "properties": event.properties,
         }
-        headers: dict[str, str] = {}
-        if self.api_key:
-            headers["X-API-Key"] = self.api_key
-        resp = self.session.post(
-            f"{self.api_url}/api/v1/tracking/events", json=payload, headers=headers
+        if event.timestamp is not None:
+            payload["timestamp"] = event.timestamp.isoformat()
+        body = self._post(
+            f"track event for {event.user_id}",
+            "/api/v1/tracking/events",
+            payload,
+            self._tracking_headers(),
         )
-        # Non-fatal: log and continue
-        if resp.status_code in (401, 403):
-            print(
-                f"  Warning: tracking endpoint auth failed for {event.user_id} "
-                f"(status {resp.status_code}) — skipping. "
-                "Provide --api-key to authenticate."
-            )
-        elif resp.status_code == 422:
-            print(
-                f"  Warning: validation error seeding event for {event.user_id}: "
-                f"{resp.text}"
-            )
-        elif not resp.ok:
-            print(
-                f"  Warning: failed to seed event for {event.user_id}: {resp.status_code}"
+        if not isinstance(body, dict) or not body.get("id"):
+            raise SeedingError(
+                f"track event for {event.user_id} returned no stored id: {body!r}"
             )
 
 
@@ -611,8 +701,9 @@ def main() -> None:
         "--api-key",
         default=None,
         help=(
-            "API key for the tracking endpoint (X-API-Key header). "
-            "Required for POST /api/v1/tracking/events."
+            "API key for the tracking endpoints (X-API-Key header). "
+            "Required: /tracking/assign and /tracking/events answer 401 without it, "
+            "and the seeder stops on the first non-2xx response."
         ),
     )
     parser.add_argument(
