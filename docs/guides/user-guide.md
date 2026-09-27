@@ -376,7 +376,7 @@ Access via the **Sequential** tab on any experiment results page, or via:
 GET /api/v1/results/{experiment_id}/sequential
 ```
 
-The platform uses **mSPRT** (mixture Sequential Probability Ratio Test). When `recommended_action` is `stop_for_effect` or `stop_for_futility`, it is safe to stop. See the [Sequential Testing Guide](../api/sequential-testing.md) for details.
+The platform uses **mSPRT** (mixture Sequential Probability Ratio Test). When `recommended_action` is `stop_for_effect`, it is safe to stop. An experiment running well past its expected duration is flagged `at_risk`; that is advisory, not a reason to conclude there is no effect. See the [Sequential Testing Guide](../api/sequential-testing.md) for details.
 
 ---
 

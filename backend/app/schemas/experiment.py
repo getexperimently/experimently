@@ -210,7 +210,19 @@ class SequentialTestingConfigInput(BaseModel):
     method: str = Field(
         default="msprt",
         pattern="^(msprt|always_valid)$",
-        description="Sequential testing method: 'msprt' or 'always_valid'.",
+        description=(
+            "Sequential testing method: 'msprt'. 'always_valid' is accepted as "
+            "an alias of it; the analysis reports 'msprt'."
+        ),
+    )
+    alpha: float = Field(
+        default=0.05,
+        gt=0.0,
+        le=0.2,
+        description=(
+            "Significance level of the mSPRT, above 0 and at most 0.2; the "
+            "stopping boundary is 1/alpha."
+        ),
     )
     tau_squared: float = Field(
         default=0.001,
@@ -221,13 +233,19 @@ class SequentialTestingConfigInput(BaseModel):
     spending_function: str = Field(
         default="obrien_fleming",
         pattern="^(obrien_fleming|pocock)$",
-        description="Alpha spending function.",
+        description=(
+            "Alpha spending function. Accepted and stored, but no "
+            "alpha-spending table is computed yet."
+        ),
     )
     planned_looks: int = Field(
         default=10,
         ge=1,
         le=100,
-        description="Number of planned interim analyses.",
+        description=(
+            "Number of planned interim analyses. Accepted and stored, but no "
+            "alpha-spending table is computed yet."
+        ),
     )
 
 

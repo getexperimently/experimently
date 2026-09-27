@@ -519,6 +519,7 @@ jobs:
         run: >-
           python -m pytest -p no:cov -q --tb=short
           backend/tests/unit/scripts/test_doc_examples.py
+          backend/tests/unit/scripts/test_guide_blocks.py
           backend/tests/unit/docs/
           backend/tests/smoke/test_openapi_snapshot.py
           backend/tests/smoke/test_version_sources.py
@@ -976,8 +977,8 @@ jobs:
       # install runtime.lock rather than backend/requirements.txt: a pin added
       # to one and not the other passes the unit test and fails this.
       # `import`, not find_spec, so an SDK whose own dependency is missing
-      # fails too. google.* is excluded by the script (the Gemini provider is
-      # separate work) and printed, so the exclusion is never silent.
+      # fails too. Nothing is excluded: the Gemini provider imports no
+      # google.* package (#275), so one appearing fails here.
       - name: LLM call paths import in both images
         run: |
           set -euo pipefail
