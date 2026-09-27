@@ -13,6 +13,13 @@ rely on. So a script that prints a resource names it without the account:
   removed;
 * ``redact``: free text from AWS -- an error message, a stopped task's
   reason -- with every run of exactly twelve digits replaced.
+
+``redact`` replaces a run of twelve digits only when no letter or digit
+touches it on either side. An account ID written directly against other
+digits (``1234567890123``, or twelve digits inside a longer number) is NOT
+redacted, and neither is one glued to letters (``abc123456789012``). ARNs,
+registry hosts and AWS error messages separate the account ID with ``:``,
+``.``, ``/`` or a space, which is what this covers.
 """
 
 from __future__ import annotations

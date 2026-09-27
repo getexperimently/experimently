@@ -532,6 +532,146 @@ def test_no_run_name_or_job_name_interpolates_an_arn_or_an_image():
     assert not offenders, offenders
 
 
+#: In a `uses:` step's `with:` value -- which the step's log header prints,
+#: resolved -- an expression that yields an ARN, an image or the account: an
+#: input named for one, a step output that holds one, or an `env.` name that
+#: is sensitive by name. Secrets are masked by the runner and not listed.
+WITH_SENSITIVE = re.compile(
+    r"\binputs\.[A-Za-z0-9_-]*(?:arn|image)[A-Za-z0-9_-]*"
+    r"|\bsteps\.[A-Za-z0-9_-]+\.outputs\."
+    r"(?:arn|image|release_arn|serving_arn|serving_image|registry|expect)\b",
+    re.IGNORECASE,
+)
+
+
+def _env_sensitive(name: str, env: dict[str, Any]) -> bool:
+    """`env.NAME` yields an ARN, an image or the account.
+
+    Judged by its definition where the workflow gives one (`REGISTRY:
+    ghcr.io` is a literal, not an account's registry), and by its name where
+    it does not (a GITHUB_ENV export).
+    """
+    if name not in env:
+        return _sensitive_name(name)
+    value = str(env[name])
+    if SENSITIVE_SOURCE.search(value):
+        return True
+    return _sensitive_name(name) and "${{" in value
+
+
+def with_leaks(step: dict[str, Any], env: dict[str, Any] | None = None) -> list[str]:
+    """The `with:` values of a `uses:` step that interpolate an ARN or image."""
+    env = {**(env or {}), **(step.get("env") or {})}
+    found = []
+    for key, value in (step.get("with") or {}).items():
+        for expression in re.findall(r"\$\{\{(.*?)\}\}", str(value), re.DOTALL):
+            names = [
+                n
+                for n in re.findall(r"\benv\.([A-Za-z0-9_]+)", expression)
+                if _env_sensitive(n, env)
+            ]
+            if WITH_SENSITIVE.search(expression) or names:
+                found.append(f"{key}: ${{{{{expression.strip()}}}}}")
+    return found
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize(
+    "path", _workflow_files() + _action_files(), ids=lambda p: p.name
+)
+def test_no_uses_step_passes_an_arn_or_an_image_in_its_with_block(path):
+    """A `uses:` step's log header prints its resolved `with:` values."""
+    workflow_env = _load(path).get("env") or {}
+    offenders = [
+        f"{path.name} / {job} / {step.get('name', step.get('uses'))}: {leak}"
+        for job, job_def, step in _steps_of(path)
+        if "uses" in step
+        for leak in with_leaks(step, {**workflow_env, **(job_def.get("env") or {})})
+    ]
+    assert not offenders, (
+        "pass family:revision from an earlier step's output instead\n"
+        + "\n".join(offenders)
+    )
+
+
+@pytest.mark.parametrize(
+    "with_block, leaks_expected",
+    [
+        ({"slack-message": "to `${{ inputs.task_definition_arn }}`"}, True),
+        (
+            {"slack-message": "`${{ inputs.dashboard_task_definition_arn || 'x' }}`"},
+            True,
+        ),
+        ({"slack-message": "`${{ steps.target.outputs.arn }}`"}, True),
+        ({"slack-message": "`${{ steps.web-image.outputs.image }}`"}, True),
+        ({"image": "${{ env.DASHBOARD_IMAGE }}"}, True),
+        ({"slack-message": "`${{ steps.shown.outputs.target }}`"}, False),
+        ({"role-to-assume": "${{ secrets.AWS_ROLE_ARN }}"}, False),
+        (
+            {
+                "stack": "${{ env.FARGATE_STACK }}",
+                "environment": "${{ inputs.environment }}",
+            },
+            False,
+        ),
+    ],
+)
+def test_the_with_check_itself(with_block, leaks_expected):
+    assert bool(with_leaks({"uses": "x/y@v1", "with": with_block})) is leaks_expected
+
+
+@pytest.mark.regression
+def test_the_slack_steps_get_family_revision_from_a_full_arn(tmp_path):
+    """The step the Slack blocks read: a full ARN in, family:revision out."""
+    arn = f"arn:aws:ecs:us-west-2:{ACCOUNT}:task-definition/experimentation-backend-staging:41"
+    dash = f"arn:aws:ecs:us-west-2:{ACCOUNT}:task-definition/experimentation-dashboard-staging:7"
+    code, log, _ = run_step(
+        tmp_path,
+        ROLLBACK,
+        "Name the revisions without the account",
+        TARGET=arn,
+        DASHBOARD_TARGET=dash,
+    )
+    assert code == 0, log
+    output = (tmp_path / "output").read_text()
+    assert "target=experimentation-backend-staging:41\n" in output
+    assert "dashboard=experimentation-dashboard-staging:7\n" in output
+    assert ACCOUNT not in output + log
+    slack = [
+        step
+        for step in _environment_job(ROLLBACK)["steps"]
+        if str(step.get("uses", "")).startswith("slackapi/")
+    ]
+    assert len(slack) == 2
+    assert all(
+        "steps.shown.outputs.target" in step["with"]["slack-message"] for step in slack
+    )
+
+
+@pytest.mark.regression
+def test_the_rollback_error_dump_is_scrubbed(tmp_path):
+    """The Failed/Stopped branch prints get-deployment's JSON through `scrub`."""
+    step = _step(ROLLBACK, "Shift traffic and wait for it to land")
+    assert "--output json" in step["run"]
+    assert (
+        '|| echo "(its error information could not be read)"; } | scrub' in step["run"]
+    )
+    assert step["run"].count('last_error="$(scrub <<<"$last_error")"') == 1
+    stop = _step(ROLLBACK, "Stop any deployment already in flight")
+    assert stop["run"].count('last_error="$(scrub <<<"$last_error")"') == 1
+    # And run it: a Failed deployment whose error names the account.
+    code, log, _ = run_step(
+        tmp_path,
+        ROLLBACK,
+        "Shift traffic and wait for it to land",
+        DEPLOYMENT_ID="d-TEST",
+        ROLLBACK_TIMEOUT_SECONDS="30",
+    )
+    assert code == 1, log
+    assert "is not authorized" in log and "<account>" in log, log
+    assert ACCOUNT not in log, log
+
+
 # --- the behavioural half: run the printing steps with a fake account -------------
 
 _EXPR = re.compile(r"\$\{\{\s*(.*?)\s*\}\}")
@@ -588,9 +728,15 @@ def _step(path: Path, name: str) -> dict[str, Any]:
 
 
 FAKE_AWS = f"""#!/bin/sh
-# Only get-caller-identity is answered: the assumed role is in another account.
+# get-caller-identity: the assumed role is in another account. get-deployment:
+# a Failed deployment whose error names a role ARN.
 case "$*" in
   *get-caller-identity*) echo "${{FAKE_CALLER:-{OTHER_ACCOUNT}}}"; exit 0 ;;
+  *"deploy get-deployment"*"deploymentInfo.status "*) echo Failed; exit 0 ;;
+  *"deploy get-deployment"*"errorInformation.code"*) echo HEALTH_CONSTRAINTS; exit 0 ;;
+  *"deploy get-deployment"*"status:status"*)
+    echo '{{"status": "Failed", "error": {{"message": "User: arn:aws:sts::{ACCOUNT}:assumed-role/deploy/x is not authorized"}}}}'
+    exit 0 ;;
 esac
 echo "fake aws: unexpected call $*" >&2
 exit 99

@@ -638,6 +638,8 @@ def test_the_expected_colour_is_derived_not_defaulted(aws):
         # the PRIMARY's own revision is serving, another one is not.
         (AFTER, RULES_GREEN, "experimentation-backend-staging:43", 0),
         (AFTER, RULES_GREEN, "experimentation-backend-staging:42", 1),
+        # The same revision number in another family is not this revision.
+        (AFTER, RULES_GREEN, "experimentation-dashboard-staging:43", 1),
         (AFTER, RULES_GREEN, "experimentation-backend-staging", 2),  # no revision
     ],
     ids=[
@@ -646,7 +648,8 @@ def test_the_expected_colour_is_derived_not_defaulted(aws):
         "wrong-group",
         "other-arn",
         "family-revision",
-        "other-family-revision",
+        "same-family-other-revision",
+        "other-family-same-revision",
         "family-not-arn",
     ],
 )

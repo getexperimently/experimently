@@ -156,6 +156,25 @@ jobs:
             exit 1
           fi
 
+      # The revisions as family:revision, for the Slack steps below. A `uses:`
+      # step's log header prints its resolved `with:` values, and a full ARN --
+      # a valid input -- names the account. `always()`: the result
+      # notification reads these even when an earlier step failed.
+      - name: Name the revisions without the account
+        id: shown
+        if: always()
+        env:
+          TARGET: ${{ inputs.task_definition_arn }}
+          DASHBOARD_TARGET: ${{ inputs.dashboard_task_definition_arn }}
+        run: |
+          set -euo pipefail
+          target="${TARGET##*/}"
+          dashboard="${DASHBOARD_TARGET##*/}"
+          {
+            echo "target=${target//[$'\r\n']/ }"
+            echo "dashboard=${dashboard//[$'\r\n']/ }"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Notify rollback started
         uses: slackapi/slack-github-action@v1.26.0
         with:
@@ -163,8 +182,8 @@ jobs:
           slack-message: |
             *${{ inputs.environment }} ROLLBACK initiated* (warning)
             Reason: ${{ inputs.reason }}
-            Rolling back to: `${{ inputs.task_definition_arn }}`
-            Dashboard: `${{ inputs.dashboard_task_definition_arn || 'left as it is' }}`
+            Rolling back to: `${{ steps.shown.outputs.target }}`
+            Dashboard: `${{ steps.shown.outputs.dashboard || 'left as it is' }}`
             Triggered by: ${{ github.actor }}
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
@@ -410,6 +429,11 @@ jobs:
           # minute) fails the step, labelled, before anything is created.
           READ_FAILURE_LIMIT=12
           aws_errors="$(mktemp)"
+          # Free text from AWS (an AccessDenied names the role's ARN) loses
+          # every run of twelve digits before it is printed: the log is public.
+          scrub() {
+            sed -E 's/(^|[^0-9A-Za-z])[0-9]{12}([^0-9A-Za-z]|$)/\1<account>\2/g'
+          }
           for id in $IN_FLIGHT; do
             read_failures=0
             for _ in $(seq 1 60); do
@@ -424,7 +448,7 @@ jobs:
                 last_error="$(<"$aws_errors")"
                 last_error="${last_error//$'\n'/ }"
                 last_error="${last_error:0:200}"
-                last_error="$(sed -E 's/(^|[^0-9A-Za-z])[0-9]{12}([^0-9A-Za-z]|$)/\1<account>\2/g' <<<"$last_error")"
+                last_error="$(scrub <<<"$last_error")"
                 echo "could not read from AWS (${last_error:-no error text}); reading again on the next poll"
                 if [ "$read_failures" -ge "$READ_FAILURE_LIMIT" ]; then
                   echo "::error title=Rollback could not read AWS::${read_failures} reads in a row of deployment ${id} failed after this run stopped it with auto-rollback, so this run created no rollback deployment. The last AWS error: ${last_error:-no error text}. Check it by hand: aws deploy get-deployment --deployment-id ${id}"
@@ -520,6 +544,11 @@ jobs:
           read_failures=0
           last_error=""
           aws_errors="$(mktemp)"
+          # Free text from AWS (an AccessDenied names the role's ARN) loses
+          # every run of twelve digits before it is printed: the log is public.
+          scrub() {
+            sed -E 's/(^|[^0-9A-Za-z])[0-9]{12}([^0-9A-Za-z]|$)/\1<account>\2/g'
+          }
           # aws_read VAR <aws arguments>: sets VAR only when the call succeeds.
           aws_read() {
             local out
@@ -530,7 +559,7 @@ jobs:
               last_error="$(<"$aws_errors")"
               last_error="${last_error//$'\n'/ }"
               last_error="${last_error:0:200}"
-              last_error="$(sed -E 's/(^|[^0-9A-Za-z])[0-9]{12}([^0-9A-Za-z]|$)/\1<account>\2/g' <<<"$last_error")"
+              last_error="$(scrub <<<"$last_error")"
               echo "could not read from AWS (${last_error:-no error text}); reading again on the next poll"
             fi
           }
@@ -579,9 +608,9 @@ jobs:
                 else
                   echo "::error::rollback deployment $DEPLOYMENT_ID is $status"
                 fi
-                aws deploy get-deployment --deployment-id "$DEPLOYMENT_ID" \
-                  --query 'deploymentInfo.{status:status,error:errorInformation}' --output json \
-                  || echo "(its error information could not be read)"
+                { aws deploy get-deployment --deployment-id "$DEPLOYMENT_ID" \
+                    --query 'deploymentInfo.{status:status,error:errorInformation}' --output json \
+                    || echo "(its error information could not be read)"; } | scrub
                 exit 1
                 ;;
             esac
@@ -909,7 +938,7 @@ jobs:
           channel-id: '#deployments'
           slack-message: |
             *Rollback of ${{ steps.summary.outputs.slack || format('{0}: outcome unknown ({1}); see the run', inputs.environment, job.status) }}*
-            Task definition: `${{ inputs.task_definition_arn }}`
+            Task definition: `${{ steps.shown.outputs.target || 'not read' }}`
             Triggered by: ${{ github.actor }}
             Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         env:
