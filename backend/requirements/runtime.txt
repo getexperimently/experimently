@@ -58,6 +58,7 @@ statsmodels==0.15.0
 python-dateutil==2.9.0.post0
 pytz==2026.3.post1
 semver==3.1.0
+google-re2==1.1.20251105   # core/pattern_match.py: regex conditions (RE2)
 loguru==0.7.3
 cryptography==50.0.1
 # No `defusedxml`: its only importer is

@@ -5,13 +5,14 @@ GET  /api/v1/export/experiments           — Download all experiments as CSV/JS
 GET  /api/v1/export/variants              — Download variant results as CSV/JSON
 GET  /api/v1/export/feature-flags         — Download feature flag data as CSV/JSON
 GET  /api/v1/export/reports/overview      — Platform overview report (JSON)
-GET  /api/v1/export/reports/experiments/{id} — Full single-experiment report (JSON)
+GET  /api/v1/export/reports/experiments/{id} — Single-experiment report (JSON or CSV)
 """
 
 from datetime import datetime
-from typing import Optional
+from typing import Any, Dict, Optional, Union
+from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -22,6 +23,27 @@ from backend.app.schemas.export import ExportFormat, ExportRequest, ExportScope
 from backend.app.services.export_service import ExportService
 
 router = APIRouter()
+
+# The 200 of a route that can answer CSV: FastAPI documents application/json
+# by default, and this adds the text/csv the route also returns.
+_CSV_OR_JSON: Dict[Union[int, str], Dict[str, Any]] = {
+    200: {"content": {"text/csv": {"schema": {"type": "string"}}}}
+}
+_SCOPE_DESCRIPTION = (
+    "Data scope. Only `summary` is available: `events` and `assignments` answer 422."
+)
+
+
+def _require_summary_scope(scope: ExportScope) -> None:
+    """Refuse a scope other than ``summary``: no other scope is available."""
+    if scope != ExportScope.SUMMARY:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"scope={scope.value} is not supported; "
+                "the export is available with scope=summary only"
+            ),
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -37,12 +59,13 @@ router = APIRouter()
         "Requires authentication. Available to all roles."
     ),
     tags=["Export"],
+    responses=_CSV_OR_JSON,
 )
 def export_experiments(
     format: ExportFormat = Query(
         ExportFormat.CSV, description="Output format: csv or json"
     ),
-    scope: ExportScope = Query(ExportScope.SUMMARY, description="Data scope"),
+    scope: ExportScope = Query(ExportScope.SUMMARY, description=_SCOPE_DESCRIPTION),
     start_date: Optional[datetime] = Query(
         None, description="Filter by created_at >= start_date (inclusive)"
     ),
@@ -58,6 +81,7 @@ def export_experiments(
     Supports optional date filtering using `start_date` and `end_date`.
     The file is streamed as an attachment.
     """
+    _require_summary_scope(scope)
     request = ExportRequest(
         format=format,
         scope=scope,
@@ -87,15 +111,18 @@ def export_experiments(
     summary="Export variant results to CSV or JSON",
     description=(
         "Download per-variant results for all (or filtered) experiments. "
+        "Each variant's numbers are its primary-metric result, as "
+        "GET /api/v1/results/{experiment_id} reports it. "
         "Requires authentication."
     ),
     tags=["Export"],
+    responses=_CSV_OR_JSON,
 )
 def export_variants(
     format: ExportFormat = Query(
         ExportFormat.CSV, description="Output format: csv or json"
     ),
-    scope: ExportScope = Query(ExportScope.SUMMARY, description="Data scope"),
+    scope: ExportScope = Query(ExportScope.SUMMARY, description=_SCOPE_DESCRIPTION),
     start_date: Optional[datetime] = Query(
         None, description="Filter experiments created at or after this date"
     ),
@@ -111,6 +138,7 @@ def export_variants(
     Each row represents one variant within one experiment, with aggregated
     metrics such as assignments, conversions, p-value and statistical significance.
     """
+    _require_summary_scope(scope)
     request = ExportRequest(
         format=format,
         scope=scope,
@@ -143,6 +171,7 @@ def export_variants(
         "Requires authentication."
     ),
     tags=["Export"],
+    responses=_CSV_OR_JSON,
 )
 def export_feature_flags(
     format: ExportFormat = Query(
@@ -229,54 +258,49 @@ def get_overview_report(
     "/reports/experiments/{experiment_id}",
     summary="Full experiment report",
     description=(
-        "Returns a JSON report for a single experiment, including all variant "
-        "data and summary statistics."
+        "Returns a report for a single experiment: with `format=json` (the "
+        "default) its experiment row and variant rows, with `format=csv` its "
+        "variant rows as CSV, in the columns of GET /api/v1/export/variants."
     ),
     tags=["Reports"],
+    responses={
+        **_CSV_OR_JSON,
+        404: {"description": "No experiment has this id."},
+    },
 )
 def get_experiment_report(
-    experiment_id: str,
+    experiment_id: UUID,
     format: ExportFormat = Query(
         ExportFormat.JSON, description="Output format: csv or json"
     ),
     db: Session = Depends(get_db),
     current_user: User = Depends(deps.get_current_active_user),
-) -> JSONResponse:
+) -> Response:
     """
     Generate a detailed report for a single experiment.
 
-    Exports both experiment-level and variant-level data for the requested
-    experiment.
+    JSON carries the experiment row and its variant rows; CSV carries the
+    variant rows, with the same columns as ``/export/variants``.
     """
-    # Always use JSON format internally so the report can be composed into one response
-    json_request = ExportRequest(format=ExportFormat.JSON, scope=ExportScope.SUMMARY)
     service = ExportService(db)
+    rows = service.experiment_report_rows(experiment_id)
+    if rows is None:
+        raise HTTPException(status_code=404, detail="Experiment not found")
+    experiment_rows, variant_rows = rows
 
-    import json as _json
+    if format == ExportFormat.CSV:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"experiment_report_{experiment_id}_{timestamp}.csv"
+        return Response(
+            content=service.variants_to_csv(variant_rows),
+            media_type="text/csv",
+            headers={"Content-Disposition": f"attachment; filename={filename}"},
+        )
 
-    # Fetch experiment rows filtered to this specific ID
-    exp_result = service.export_experiments(
-        json_request, experiment_ids=[experiment_id]
+    return JSONResponse(
+        content={
+            "experiment_id": str(experiment_id),
+            "experiments": [row.model_dump() for row in experiment_rows],
+            "variants": [row.model_dump() for row in variant_rows],
+        }
     )
-    exp_content: str = (
-        exp_result[0] if isinstance(exp_result, tuple) else str(exp_result)
-    )
-    experiments = _json.loads(exp_content) if exp_content else []
-
-    # Fetch variant rows for this experiment
-    var_result = service.export_variants(json_request, experiment_ids=[experiment_id])
-    var_content: str = (
-        var_result[0] if isinstance(var_result, tuple) else str(var_result)
-    )
-    variants = _json.loads(var_content) if var_content else []
-
-    report: dict = {
-        "experiment_id": experiment_id,
-        "experiments": experiments,
-        "variants": variants,
-    }
-
-    if experiments and isinstance(experiments, list) and experiments:
-        report["experiment_id"] = experiments[0].get("experiment_id", experiment_id)
-
-    return JSONResponse(content=report)

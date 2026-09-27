@@ -252,6 +252,17 @@ It prints `"total_changes": 1` and the bulk toggle's entry: `toggle_disable`, fr
 
 ## Permissions
 
-| Action | Who |
-|--------|-----|
-| Bulk toggle feature flags | ADMIN or DEVELOPER |
+ADMIN and ANALYST (and superusers) read every audit entry. DEVELOPER and
+VIEWER read only the entries they made themselves.
+
+| Route | ADMIN, ANALYST | DEVELOPER, VIEWER |
+|-------|----------------|-------------------|
+| `GET /audit-logs/` | Every entry; `user_id` filters by any user | Own entries only; a `user_id` naming anyone else is replaced by their own |
+| `GET /audit-logs/user/{user_id}` | Any user | Their own id only; any other id is 403 |
+| `GET /audit-logs/entity/{entity_type}/{entity_id}` | Every entry | 403 |
+| `GET /audit-logs/stats` | Every entry | 403 |
+| `GET /audit-logs/stream` | Every entry | Own entries only |
+| `GET /feature-flags/{flag_id}/history` | Every entry | Own entries only; `total_changes` counts only those |
+
+`POST /feature-flags/bulk-toggle` changes flags, so it follows the flag rule:
+ADMIN and DEVELOPER may use it, ANALYST and VIEWER may not.

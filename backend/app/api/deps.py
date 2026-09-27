@@ -7,6 +7,7 @@ from fastapi.security import (
 )
 from loguru import logger
 from pydantic import BaseModel
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from backend.app.core.cognito import map_cognito_groups_to_role, should_be_superuser
@@ -77,13 +78,9 @@ async def get_redis_pool():
 
     if _redis_pool is None:
         try:
-            _redis_pool = redis.Redis(
-                host=settings.REDIS_HOST,
-                port=settings.REDIS_PORT,
-                db=settings.REDIS_DB,
-                ssl=bool(settings.REDIS_SSL),
-                decode_responses=True,
-            )
+            from backend.app.core.redis_client import create_async_redis_client
+
+            _redis_pool = create_async_redis_client(decode_responses=True)
         except Exception as e:
             logger.error(f"Redis connection error: {e}")
             return None
@@ -483,6 +480,14 @@ def get_api_key(
             detail="Invalid API Key",
             headers={"WWW-Authenticate": "APIKey"},
         )
+
+    # Issue #198: record the use, throttled inside update_last_used. A failure
+    # here is bookkeeping, not authentication, so it never fails the request.
+    try:
+        api_key.update_last_used(db)
+    except SQLAlchemyError as exc:
+        db.rollback()
+        logger.warning(f"Could not record API key use for key {api_key.id}: {exc}")
 
     return user
 

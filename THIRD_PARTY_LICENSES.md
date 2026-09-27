@@ -59,6 +59,25 @@ Development-only dependencies — what `backend/requirements.txt` adds for test 
 | `urllib3` | 2.7.0 |
 | `xmlsec` | 1.3.17 |
 
+#### BSD (14)
+
+| Package | Version |
+|---|---|
+| `Authlib` | 1.8.0 |
+| `google-re2` | 1.1.20251105 |
+| `httpx` | 0.28.1 |
+| `isodate` | 0.7.2 |
+| `joserfc` | 1.7.5 |
+| `lz4` | 4.4.5 |
+| `numpy` | 1.26.4 |
+| `pandas` | 2.3.3 |
+| `patsy` | 1.0.3 |
+| `psutil` | 5.9.8 |
+| `pybreaker` | 1.4.1 |
+| `scipy` | 1.17.1 |
+| `semver` | 3.1.0 |
+| `websockets` | 15.0.1 |
+
 #### BSD-3-Clause (14)
 
 | Package | Version |
@@ -95,24 +114,6 @@ Development-only dependencies — what `backend/requirements.txt` adds for test 
 | `thrift` | 0.24.0 |
 | `tzdata` | 2026.4 |
 | `watchtower` | 3.4.0 |
-
-#### BSD (13)
-
-| Package | Version |
-|---|---|
-| `Authlib` | 1.8.0 |
-| `httpx` | 0.28.1 |
-| `isodate` | 0.7.2 |
-| `joserfc` | 1.7.5 |
-| `lz4` | 4.4.5 |
-| `numpy` | 1.26.4 |
-| `pandas` | 2.3.3 |
-| `patsy` | 1.0.3 |
-| `psutil` | 5.9.8 |
-| `pybreaker` | 1.4.1 |
-| `scipy` | 1.17.1 |
-| `semver` | 3.1.0 |
-| `websockets` | 15.0.1 |
 
 #### PSF-2.0 (3)
 
@@ -200,6 +201,15 @@ Development-only dependencies — what `backend/requirements.txt` adds for test 
 | Package | Version |
 |---|---|
 | `email-validator` | 2.3.0 |
+
+#### Compiled into the wheels above
+
+Not separate packages: these are built into another package's binary wheel, so its licence row does not cover them.
+
+| Component | Inside | Licence |
+|---|---|---|
+| `abseil-cpp` | `google-re2` 1.1.20251105 | Apache-2.0 |
+| `pybind11` | `google-re2` 1.1.20251105 | BSD-3-Clause |
 
 ## Node — Dashboard (Next.js) (`frontend`)
 
