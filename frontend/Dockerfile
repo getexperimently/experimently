@@ -140,12 +140,17 @@ ARG EXPERIMENTLY_PROFILE
 # backend/Dockerfile. The default is the unreleasable placeholder, so an image
 # built by hand never claims a version it does not have.
 ARG VERSION=0.0.0+unknown
+# source and url are set explicitly because the base image sets both to its own
+# repository, and a LABEL is inherited unless overridden: without these two
+# lines the dashboard image names nginx's repository as where it came from.
 LABEL org.opencontainers.image.title="Experimently Dashboard" \
       org.opencontainers.image.description="Static Next.js dashboard served by nginx, proxying /api to the Experimently API" \
       org.opencontainers.image.licenses="Apache-2.0" \
       org.opencontainers.image.created="${BUILD_DATE}" \
       org.opencontainers.image.revision="${GIT_COMMIT}" \
       org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.source="https://github.com/getexperimently/experimently" \
+      org.opencontainers.image.url="https://github.com/getexperimently/experimently" \
       io.experimently.profile="${EXPERIMENTLY_PROFILE}"
 
 ENV API_UPSTREAM=http://api:8000

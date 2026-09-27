@@ -17,7 +17,11 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from backend.app.api import deps
-from backend.app.core.permissions import Action, can_act_on_feature_flag
+from backend.app.core.permissions import (
+    Action,
+    can_act_on_feature_flag,
+    can_read_all_audit_logs,
+)
 from backend.app.models.audit_log import ActionType
 from backend.app.models.feature_flag import FeatureFlag, FeatureFlagStatus
 from backend.app.models.user import User
@@ -180,14 +184,20 @@ def get_flag_history(
     """
     Returns all audit log entries for a specific feature flag.
     Ordered by timestamp descending (most recent first).
-    Requires authentication; ADMIN/ANALYST roles can view all history,
-    other roles can view flags they have access to.
+    Superusers, ADMIN and ANALYST see every entry; DEVELOPER and VIEWER see
+    only the entries they made, and `total_changes` counts only those.
     """
     flag = db.query(FeatureFlag).filter(FeatureFlag.id == flag_id).first()
     if not flag:
         raise HTTPException(status_code=404, detail="Feature flag not found")
 
-    logs, total = AuditService.get_flag_change_history(db, flag_id, limit, offset)
+    logs, total = AuditService.get_flag_change_history(
+        db,
+        flag_id,
+        limit,
+        offset,
+        user_id=None if can_read_all_audit_logs(current_user) else current_user.id,
+    )
 
     return FlagChangeHistoryResponse(
         flag_id=str(flag.id),
@@ -227,7 +237,12 @@ async def stream_audit_logs(
     Returns recent audit log entries as Server-Sent Events.
     Useful for real-time audit dashboards.
     Streams up to `limit` entries (default 50, max 100) then closes.
+    Superusers, ADMIN and ANALYST receive every entry; DEVELOPER and VIEWER
+    receive only their own.
     """
+    # Resolved in the handler, before the response starts, not inside the
+    # generator.
+    own_only = None if can_read_all_audit_logs(current_user) else current_user.id
 
     async def event_generator():
         from backend.app.models.audit_log import EntityType as EntityTypeEnum
@@ -242,6 +257,7 @@ async def stream_audit_logs(
         # get_audit_logs uses page (1-based) rather than offset
         logs, _ = AuditService.get_audit_logs(
             db,
+            user_id=own_only,
             limit=limit,
             entity_type=entity_type_enum,
             page=1,

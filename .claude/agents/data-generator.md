@@ -37,8 +37,15 @@ source venv/bin/activate
 python backend/tests/realistic/data_generator.py \
   --scenario <name> \
   --api-url http://localhost:8000 \
-  --token <JWT_TOKEN>
+  --token <JWT_TOKEN> \
+  --api-key <API_KEY>
 ```
+
+The seeder stops on the first non-2xx response (a missing `--api-key` is a
+401 from `/tracking/assign`). It starts the experiment, assigns every user with
+`POST /api/v1/tracking/assign` before sending that user's events, and sends each
+event under the variant the server assigned. `variant_mismatches` counts users
+the server put in a different variant from the generated one.
 
 ## How to Get a JWT Token
 
@@ -66,7 +73,8 @@ curl -s -X POST http://localhost:8000/api/v1/auth/login \
 4. **Seed into platform** (if running):
    - Obtain token
    - Call seeder with the token
-   - Report: experiment_id, experiment_key, users_seeded, events_seeded
+   - Report: experiment_id, experiment_key, users_seeded, events_seeded,
+     variant_mismatches (the counts are what the platform confirmed, not attempts)
 
 5. **Return a summary**:
    ```

@@ -79,14 +79,12 @@ the workflow's OIDC identity and recorded in Rekor, so there is no key to
 leak — and carries an SPDX SBOM as a Sigstore attestation. The same SBOMs are
 attached to the GitHub release.
 
-!!! note "The API images' SBOM describes `linux/amd64`"
+!!! note "The SBOMs describe `linux/amd64`"
 
-    It is generated on an `amd64` runner and attested against the whole
-    multi-architecture index, so verifying the `arm64` variant succeeds and
-    returns the `amd64` package list. Both variants come from one Dockerfile
-    and one hashed dependency lock, so the Python distributions are the same;
-    the base OS layer is not separately described. Per-platform SBOMs are a
-    known gap, not a claim this page is making.
+    That is the only platform published, so each SBOM describes the whole
+    image. If a second platform is ever added, one SBOM would be attested
+    against the multi-architecture index and the release notes say so;
+    per-platform SBOMs would be needed first.
 
 ```bash
 IMAGE=ghcr.io/<owner>/<repo>:core-X.Y.Z
