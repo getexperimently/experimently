@@ -166,7 +166,8 @@ export function CreateApiKeyModal({ isOpen, onClose, onSuccess }: CreateApiKeyMo
                 data-testid="api-key-ruleset-scope-help"
                 className="mt-1 ml-6 text-sm text-slate-600"
               >
-                This key can download every flag&apos;s targeting rules. Keep it on a server.
+                For server-side SDKs that evaluate flags locally. A key with this scope will be
+                able to download every flag&apos;s targeting rules, so keep it on a server.
               </p>
             </div>
 

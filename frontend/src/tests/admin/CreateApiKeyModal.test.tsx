@@ -6,6 +6,9 @@ beforeEach(() => {
   jest.clearAllMocks();
 });
 
+const HELP_TEXT =
+  "For server-side SDKs that evaluate flags locally. A key with this scope will be able to download every flag's targeting rules, so keep it on a server.";
+
 const defaultProps = {
   isOpen: true,
   onClose: jest.fn(),
@@ -53,10 +56,10 @@ describe('CreateApiKeyModal', () => {
     const help = screen.getByTestId('api-key-ruleset-scope-help');
     expect(help).toBeVisible();
     expect(help).toHaveTextContent(
-      "This key can download every flag's targeting rules. Keep it on a server.",
+      HELP_TEXT,
     );
     expect(box).toHaveAccessibleDescription(
-      "This key can download every flag's targeting rules. Keep it on a server.",
+      HELP_TEXT,
     );
     // Contrast: slate-600 (#475569) on white is 7.6:1. slate-400 is about 2.6:1.
     expect(help.className).toContain('text-slate-600');
