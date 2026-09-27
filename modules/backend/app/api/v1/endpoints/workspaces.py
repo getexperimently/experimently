@@ -16,6 +16,7 @@ from backend.app.models.user import User
 from modules.backend.app.models.workspace import (
     Workspace,
     WorkspaceMember,
+    WorkspaceMemberRole,
 )
 from modules.backend.app.schemas.workspaces import (
     AddMemberRequest,
@@ -93,6 +94,26 @@ def _require_role(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"Requires {minimum_role} role or above.",
+        )
+
+
+def _require_owner_for_owner_role(
+    db: Session,
+    workspace_id: uuid.UUID,
+    user_id: uuid.UUID,
+) -> None:
+    """Raise 403 unless the user is an OWNER of the workspace.
+
+    Called before any change that grants the OWNER role, or that changes or
+    removes the membership of a member who holds it: per the role table, only
+    an OWNER may do those.
+    """
+    if not workspace_service.check_member_permission(
+        db, workspace_id, user_id, "OWNER"
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only an OWNER can grant the OWNER role or change an OWNER's membership.",
         )
 
 
@@ -293,6 +314,8 @@ def add_member(
     """Add an existing user as a workspace member. Requires ADMIN role."""
     _get_workspace_or_404(db, workspace_id)
     _require_role(db, workspace_id, current_user.id, "ADMIN")
+    if payload.role == "OWNER":
+        _require_owner_for_owner_role(db, workspace_id, current_user.id)
 
     try:
         user_uuid = uuid.UUID(payload.user_id)
@@ -334,6 +357,12 @@ def update_member_role(
     """Change a member's role. Requires ADMIN role."""
     _get_workspace_or_404(db, workspace_id)
     _require_role(db, workspace_id, current_user.id, "ADMIN")
+    # Granting OWNER, or changing the role of a member who holds it, is for
+    # an OWNER only.
+    target = workspace_service.get_member(db, workspace_id, user_id)
+    target_is_owner = target is not None and target.role == WorkspaceMemberRole.OWNER
+    if payload.role == "OWNER" or target_is_owner:
+        _require_owner_for_owner_role(db, workspace_id, current_user.id)
 
     try:
         member = workspace_service.update_member_role(
@@ -371,6 +400,11 @@ def remove_member(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Requires ADMIN role or above to remove other members.",
         )
+    # Removing an OWNER other than yourself is for an OWNER only.
+    if not is_self:
+        target = workspace_service.get_member(db, workspace_id, user_id)
+        if target is not None and target.role == WorkspaceMemberRole.OWNER:
+            _require_owner_for_owner_role(db, workspace_id, current_user.id)
 
     try:
         workspace_service.remove_member(db, workspace_id, user_id)
@@ -556,7 +590,7 @@ def revoke_api_key(
     _require_role(db, workspace_id, current_user.id, "ADMIN")
 
     try:
-        workspace_service.revoke_api_key(db, key_id)
+        workspace_service.revoke_api_key(db, workspace_id, key_id)
     except APIKeyNotFound as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
 
@@ -577,7 +611,7 @@ def rotate_api_key(
     _require_role(db, workspace_id, current_user.id, "ADMIN")
 
     try:
-        new_key, plaintext = workspace_service.rotate_api_key(db, key_id)
+        new_key, plaintext = workspace_service.rotate_api_key(db, workspace_id, key_id)
     except APIKeyNotFound as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
 

@@ -98,9 +98,11 @@ MODULE_TAGS: list[dict[str, str]] = [
     {
         "name": "Workspaces",
         "description": (
-            "EP-057: Multi-Tenant Team Workspaces — create isolated project namespaces, "
-            "manage team memberships with role-based access (OWNER/ADMIN/DEVELOPER/ANALYST/VIEWER), "
-            "send and accept email invites, and issue scoped workspace API keys."
+            "EP-057: Team Workspaces — group users into teams with workspace roles "
+            "(OWNER/ADMIN/DEVELOPER/ANALYST/VIEWER) and send and accept email invites. "
+            "Workspaces do not limit access to experiments or feature flags, which is "
+            "by platform role. Workspace API keys are not yet accepted by the SDK or "
+            "tracking endpoints; use a platform API key."
         ),
     },
     {

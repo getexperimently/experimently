@@ -378,9 +378,10 @@ class Settings(BaseSettings):
     # Connect to Redis over TLS. The deployed ElastiCache replication group has
     # in-transit encryption on, so it refuses a plaintext connection; the ECS
     # task sets this to true (#147). Off by default, for the local and CI
-    # `redis:7` containers, which speak plaintext only. Every Redis client the
-    # application builds passes it as `ssl=`, and
-    # backend/tests/unit/core/test_redis_tls.py fails on one that does not.
+    # `redis:7` containers, which speak plaintext only. Every Redis client is
+    # built by backend/app/core/redis_client.py, which passes REDIS_HOST, _PORT,
+    # _PASSWORD, _DB and _SSL; backend/tests/unit/core/test_redis_connection.py
+    # fails on a client built anywhere else (#236).
     REDIS_SSL: bool = False
     REDIS_URI: Optional[RedisDsn] = None
 

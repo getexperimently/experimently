@@ -76,7 +76,9 @@ LABEL org.opencontainers.image.title="Experimently API" \
       org.opencontainers.image.licenses="Apache-2.0" \
       org.opencontainers.image.created="${BUILD_DATE}" \
       org.opencontainers.image.revision="${GIT_COMMIT}" \
-      org.opencontainers.image.version="${VERSION}"
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.source="https://github.com/getexperimently/experimently" \
+      org.opencontainers.image.url="https://github.com/getexperimently/experimently"
 
 # The profile is NOT a build argument: it is the target you build. `core` and
 # `full` below each set EXPERIMENTLY_PROFILE and the profile label for

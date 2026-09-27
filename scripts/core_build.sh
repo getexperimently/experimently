@@ -49,7 +49,8 @@
 #   frontend     EXPERIMENTLY_PROFILE=core npm run build, then the bundle must
 #                carry no module route and must carry the workspaces stub page
 #                — the same check the frontend-tests CI job runs
-#   vectors      the cross-SDK golden vectors (`make test-sdk`)
+#   vectors      the cross-SDK golden vectors, against the Python and JS SDKs'
+#                own hash functions (the node/python part of `make test-sdk`)
 #   licences     every Python package the API image ships (the closure of
 #                backend/requirements/runtime.txt, modules/requirements.txt too
 #                for --profile full when it exists) carries an allow-listed
@@ -697,9 +698,12 @@ step_frontend() {
 # -------------------------------------------------------------------------
 # vectors — the cross-SDK golden vectors (make test-sdk)
 # -------------------------------------------------------------------------
+# The Python and JS SDKs only: the JS one builds sdk/js (npm ci + tsc) in the
+# copy. Go, edge and React Native run in the SDK Contract Tests job, which sets
+# up their toolchains; the SDKs are the same in every profile.
 step_vectors() {
-    (cd "$COPY" && "$PYTHON" -m pytest tests/sdk-contract/test_python_sdk.py -p no:cov -q -o addopts="")
-    (cd "$COPY" && node tests/sdk-contract/test_js_sdk.js)
+    (cd "$COPY" && "$PYTHON" -m pytest tests/sdk-contract -p no:cov -q -o addopts="")
+    (cd "$COPY" && "$PYTHON" tests/sdk-contract/hash_contract.py python js)
 }
 
 # -------------------------------------------------------------------------
