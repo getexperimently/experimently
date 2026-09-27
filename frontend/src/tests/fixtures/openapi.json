@@ -296,7 +296,7 @@
     "/api/v1/edge/bootstrap": {
       "get": {
         "operationId": "get_edge_bootstrap_api_v1_edge_bootstrap_get",
-        "summary": "Edge SDK bootstrap — all flags and experiments in one call"
+        "summary": "Edge SDK bootstrap \u2014 all flags and experiments in one call"
       }
     },
     "/api/v1/etl/crawler/run": {

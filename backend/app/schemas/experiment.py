@@ -19,6 +19,7 @@ from pydantic import (
 )
 
 from backend.app.schemas.bandit import OptimizationType
+from backend.app.schemas.bayesian import BayesianConfig
 from backend.app.schemas.split_url_config import SplitUrlConfig
 from backend.app.schemas.variance_reduction import VarianceReductionConfig
 
@@ -256,6 +257,19 @@ class ExperimentCreate(ExperimentBase):
         description="CUPED / Winsorization variance-reduction configuration.",
     )
 
+    # EP-035: Bayesian analysis (#216)
+    bayesian_enabled: bool = Field(
+        default=False,
+        description=(
+            "Compute Bayesian results for this experiment. When true and "
+            "bayesian_config is omitted, the default BayesianConfig is stored."
+        ),
+    )
+    bayesian_config: Optional[BayesianConfig] = Field(
+        default=None,
+        description="Bayesian analysis configuration (priors, loss threshold, ROPE).",
+    )
+
     # Issue #22: MAB optimization type
     optimization_type: OptimizationType = Field(
         default=OptimizationType.FIXED,
@@ -319,6 +333,13 @@ class ExperimentCreate(ExperimentBase):
     )
 
     @model_validator(mode="after")
+    def default_bayesian_config(self):
+        """Turning Bayesian analysis on without a config stores the defaults."""
+        if self.bayesian_enabled and self.bayesian_config is None:
+            self.bayesian_config = BayesianConfig()
+        return self
+
+    @model_validator(mode="after")
     def validate_variants(self):
         """Validate that there is at least one control variant."""
         if not any(variant.is_control for variant in self.variants):
@@ -375,6 +396,20 @@ class ExperimentUpdate(BaseModel):
     variance_reduction_config: Optional[VarianceReductionConfig] = Field(
         default=None,
         description="CUPED / Winsorization variance-reduction configuration.",
+    )
+
+    # EP-035: Bayesian analysis (#216). bayesian_decision is not accepted:
+    # it is computed by the analysis, never set by a client.
+    bayesian_enabled: Optional[bool] = Field(
+        default=None,
+        description=(
+            "Turn Bayesian analysis on or off. Turning it on with no stored or "
+            "supplied bayesian_config stores the default BayesianConfig."
+        ),
+    )
+    bayesian_config: Optional[BayesianConfig] = Field(
+        default=None,
+        description="Bayesian analysis configuration (priors, loss threshold, ROPE).",
     )
 
     # Issue #22: MAB optimization type
@@ -487,6 +522,18 @@ class ExperimentResponse(BaseModel):
 
     # Issue #21: CUPED variance reduction
     variance_reduction_config: Optional[Dict[str, Any]] = None
+
+    # EP-035: Bayesian analysis (#216)
+    bayesian_enabled: bool = False
+    bayesian_config: Optional[Dict[str, Any]] = None
+    bayesian_decision: Optional[str] = Field(
+        None,
+        description=(
+            "The latest Bayesian stopping recommendation (CONTINUE, STOP_WINNER, "
+            "STOP_EQUIVALENT or STOP_FUTILE), computed by the analysis. Read-only: "
+            "nothing stops the experiment on it."
+        ),
+    )
 
     # Issue #22: MAB optimization type
     optimization_type: OptimizationType = OptimizationType.FIXED

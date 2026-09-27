@@ -4,13 +4,6 @@ When an experiment has Bayesian analysis turned on, its results carry a Bayesian
 beside the frequentist statistics: a posterior for each variant, the probability that
 each is best, the expected loss of choosing it, and a stopping recommendation.
 
-**Not yet working: turning it on.** The API does not accept `bayesian_enabled` or
-`bayesian_config` when it creates or updates an experiment: it answers `201` or `200`
-and drops them, so every experiment reports `"is_enabled": false`
-([#216](https://github.com/getexperimently/experimently/issues/216)). The two examples
-that need an enabled experiment are marked so on this page, and aren't run by our
-documentation checks.
-
 ---
 
 ## Overview
@@ -81,12 +74,13 @@ demo experiment hasn't turned Bayesian analysis on.
 
 ## Turning Bayesian analysis on
 
-The experiment's `bayesian_enabled` must be `true` and its `bayesian_config` set. The
-intended request adds both to `POST /api/v1/experiments/` or
-`PUT /api/v1/experiments/{experiment_id}`; in this release both are dropped:
+Set `bayesian_enabled` to `true` on `POST /api/v1/experiments/` or
+`PUT /api/v1/experiments/{experiment_id}`, and optionally a `bayesian_config`. Turning it on
+without a config stores the defaults in the table below. This creates an experiment with
+Bayesian analysis on, prints the stored settings, and saves its id in `$BAYES_ID`:
 
-```{.bash skip reason="bug #216: the API drops bayesian_enabled and bayesian_config"}
-curl -s -X POST localhost:8000/api/v1/experiments/ \
+```{.bash exec}
+BAYES=$(curl -s -X POST localhost:8000/api/v1/experiments/ \
   -H "Authorization: Bearer $TOKEN" \
   -H 'content-type: application/json' \
   -d '{
@@ -108,8 +102,19 @@ curl -s -X POST localhost:8000/api/v1/experiments/ \
     "metrics": [
       {"name": "Checkout", "event_name": "checkout_completed", "is_primary": true}
     ]
-  }'
+  }')
+BAYES_ID=$(echo "$BAYES" | jq -r .id)
+
+echo "$BAYES" | jq '{bayesian_enabled, bayesian_config, bayesian_decision}'
 ```
+<!-- expect: "bayesian_enabled": true -->
+<!-- expect: "loss_threshold": 0.001 -->
+<!-- expect: "bayesian_decision": null -->
+
+It prints `"bayesian_enabled": true`, the stored config with `"loss_threshold": 0.001`,
+and `"bayesian_decision": null`, because nothing has been analysed yet. The experiment
+response carries all three fields. `bayesian_decision` is read-only: a request that sends
+it is answered as if it had not.
 
 **`bayesian_config` Object**
 
@@ -122,20 +127,28 @@ curl -s -X POST localhost:8000/api/v1/experiments/ \
 | `rope` | `[float, float]` | `null` | Region of Practical Equivalence, `[lower, upper]` with `lower < upper`, on the difference in conversion rate |
 | `credible_level` | `float` | `0.95` | Credible interval level, between 0 and 1 |
 
-A config that fails these checks is replaced by the defaults when the results are computed.
+A config that fails these checks is refused with `422`, and the error's `loc` names the
+field, for example `["body", "bayesian_config", "alpha"]`.
 
 ---
 
 ## An enabled experiment's results
 
 For an experiment with Bayesian analysis on, the endpoint answers with a result per
-variant. This example needs an enabled experiment, so it isn't run, and the numbers in the
-response below are illustrative:
+variant. This reads the one just created:
 
-```{.bash skip reason="bug #216: no experiment can have Bayesian analysis enabled through the API"}
-curl -s localhost:8000/api/v1/results/$EXP_ID/bayesian \
-  -H "Authorization: Bearer $TOKEN"
+```{.bash exec}
+curl -s localhost:8000/api/v1/results/$BAYES_ID/bayesian \
+  -H "Authorization: Bearer $TOKEN" \
+  | jq '{is_enabled, variants: [.variant_results[].variant_key]}'
 ```
+<!-- expect: "is_enabled": true -->
+<!-- expect: "control" -->
+<!-- expect: "treatment" -->
+
+It prints `"is_enabled": true` and one result for each variant, `"control"` and
+`"treatment"`. The new experiment has no traffic yet, so each posterior is still the
+prior. With traffic, the full response looks like this; the numbers are illustrative:
 
 ```json
 {
