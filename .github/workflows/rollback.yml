@@ -427,11 +427,20 @@ jobs:
           # users -- a canary would leave 90% of traffic on it for a further
           # five minutes, against a runbook target of "under 5 minutes from
           # decision to rollback complete".
+          #
+          # --override-alarm-configuration enabled=false, always (#148): the
+          # release being rolled back is usually what holds the deployment
+          # group's 5xx alarm in ALARM, and CodeDeploy stops every deployment
+          # to the group while one is -- this one included. The override
+          # lasts for this deployment only; the group's alarms are unchanged
+          # and watch the next deploy. It needs codedeploy:UpdateDeploymentGroup
+          # on the workflow role (docs/deployment/iam-permissions.md).
           DEPLOYMENT_ID="$(aws deploy create-deployment \
             --application-name "$CODEDEPLOY_APPLICATION" \
             --deployment-group-name "$CODEDEPLOY_DEPLOYMENT_GROUP" \
             --deployment-config-name CodeDeployDefault.ECSAllAtOnce \
             --description "rollback: $REASON" \
+            --override-alarm-configuration enabled=false \
             --revision "$(jq -cn --arg c "$APPSPEC" '{revisionType:"AppSpecContent",appSpecContent:{content:$c}}')" \
             --query deploymentId --output text)"
           echo "deployment-id=$DEPLOYMENT_ID" >> "$GITHUB_OUTPUT"
@@ -485,7 +494,15 @@ jobs:
                 fi
                 ;;
               Failed|Stopped)
-                echo "::error::rollback deployment $DEPLOYMENT_ID is $status"
+                code="$(aws deploy get-deployment --deployment-id "$DEPLOYMENT_ID" \
+                          --query 'deploymentInfo.errorInformation.code' --output text)" || code=""
+                if [ "$code" = ALARM_ACTIVE ]; then
+                  # This run overrides the group's alarms, so an alarm should
+                  # not be able to stop it (#148 M5c). Say so, not "is Stopped".
+                  echo "::error title=Rollback stopped by an alarm::rollback deployment $DEPLOYMENT_ID is $status for an alarm (ALARM_ACTIVE), although this run created it with the group's alarms overridden. What is serving now: python3 scripts/api_serving.py ${ECS_CLUSTER} ${ECS_BACKEND_SERVICE} ${TARGET_ARN} (exit 0 = the target). docs/deployment/rollback-runbook.md#an-alarm-rolled-the-api-back"
+                else
+                  echo "::error::rollback deployment $DEPLOYMENT_ID is $status"
+                fi
                 aws deploy get-deployment --deployment-id "$DEPLOYMENT_ID" \
                   --query 'deploymentInfo.{status:status,error:errorInformation}' --output json
                 exit 1

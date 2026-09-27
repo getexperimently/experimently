@@ -122,6 +122,15 @@ NOT_DOCS_TESTS = {
     "backend/tests/unit/scripts/test_makefile_guards.py": "docs/api only",
     # Hands the classifier path STRINGS such as "docs/a.py"; opens no file.
     "backend/tests/unit/scripts/test_classify_changes.py": "fixture strings only",
+    # Assert that the scripts' and workflow's printed copy CONTAINS a
+    # docs/...#anchor string; they open no file under docs/. Whether the
+    # anchors exist is test_deploy_docs.py's, which is in DOCS_TESTS.
+    "backend/tests/unit/infrastructure/test_shift_traffic_alarm.py": (
+        "printed link strings only"
+    ),
+    "backend/tests/unit/infrastructure/test_deploy_alarm_wiring.py": (
+        "printed link strings only"
+    ),
 }
 # docs-links.test.ts (Jest) runs on a docs-only change as its pinned Python
 # twin, backend/tests/unit/docs/test_dashboard_docs_links.py.

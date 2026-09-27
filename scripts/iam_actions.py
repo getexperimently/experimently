@@ -11,7 +11,10 @@ and `STAGED_SCRIPTS` (scripts the role will run that no workflow names yet).
 Each `aws <service> <verb>` in them becomes an IAM
 action; `docker push`/`docker pull` and the ECR login action add the registry
 actions they need; `register-task-definition` and `run-task` add
-`iam:PassRole` (scoped to ECS tasks in the policy).
+`iam:PassRole` (scoped to ECS tasks in the policy); and a flag in
+`FLAG_IMPLIED`, in the same `run:` block or script as its call, adds the
+action that flag needs (`create-deployment --override-alarm-configuration`
+needs `codedeploy:UpdateDeploymentGroup`).
 
 Two committed copies are generated, never hand-edited:
 
@@ -90,6 +93,20 @@ IMPLIED = {
     ("deploy", "create-deployment"): [
         "codedeploy:GetDeploymentConfig",
         "codedeploy:RegisterApplicationRevision",
+    ],
+}
+
+#: What a call needs because of a FLAG it is given (#148). The generator used
+#: to read verbs only, so adding a flag with its own permission kept the gate
+#: green while the role lacked it. A flag counts when it is in the same `run:`
+#: block (or script) as the call, not only on the same line: deploy.yml adds
+#: the alarm override to its create-deployment through an array, under the
+#: break-glass input.
+FLAG_IMPLIED = {
+    # "To override alarm configurations, you need the UpdateDeploymentGroup
+    # IAM permission when calling CreateDeployment" (the CLI's own help).
+    ("deploy", "create-deployment", "--override-alarm-configuration"): [
+        "codedeploy:UpdateDeploymentGroup"
     ],
 }
 
@@ -197,6 +214,18 @@ def _join_continuations(text: str) -> str:
     return re.sub(r"\\[ \t]*\r?\n[ \t]*", " ", text)
 
 
+def _flag_implied(block: str, where: str, found: dict[str, set[str]]) -> None:
+    """Add FLAG_IMPLIED's actions for each (call, flag) that share `block`."""
+    block = _join_continuations(block)
+    called = {(s, re.sub(r"\s+", " ", v)) for s, v in _AWS.findall(block)}
+    for (service, verb, flag), actions in FLAG_IMPLIED.items():
+        if (service, verb) in called and re.search(
+            rf"(?<![\w-]){re.escape(flag)}(?![\w-])", block
+        ):
+            for action in actions:
+                found[action].add(f"{where}: aws {service} {verb} {flag}")
+
+
 def calls(paths: list[Path] | None = None) -> dict[str, set[str]]:
     """IAM action -> the places (file: call) that need it."""
     found: dict[str, set[str]] = defaultdict(set)
@@ -207,6 +236,9 @@ def calls(paths: list[Path] | None = None) -> dict[str, set[str]]:
             where = str(path)
         if path.suffix == ".yml":
             steps = _yaml_steps(path)
+            for step in steps:
+                if "run" in step:
+                    _flag_implied(_code(step["run"]), where, found)
             text = "\n".join(_code(s["run"]) for s in steps if "run" in s)
             for step in steps:
                 uses = str(step.get("uses", "")).split("@")[0]
@@ -214,6 +246,7 @@ def calls(paths: list[Path] | None = None) -> dict[str, set[str]]:
                     found[action].add(f"{where}: uses {uses}")
         else:
             text = _code(path.read_text(encoding="utf-8"))
+            _flag_implied(text, where, found)
             if path.suffix == ".py":
                 for service, verb in _PY_OPERATION.findall(text):
                     if service in SERVICES:
