@@ -153,10 +153,10 @@ turn that into their safe default.
 An `Assignment` also carries `assigned` and `reason`. `assigned: false` means the server did not
 enrol the user (`reason` is `'holdout'`, `'mutual_exclusion'` or `'targeting'`) and returned the
 control variant so you render the default experience; no exposure was recorded. **When you export
-exposures to a warehouse, log only assignments with `assigned: true`**; the others were never in
-the experiment. A server that predates the fields sends neither, and the SDK leaves both
-`undefined`, never `false`: such a server cannot tell you, so decide deliberately what to do with
-those rows rather than dropping or keeping them by accident.
+exposures to a warehouse, exclude assignments with `assigned: false`**: the user was not enrolled,
+and `reason` says why. A server that predates the fields sends neither, so `assigned` is
+`undefined` (never `false`). Decide deliberately how to treat those rows rather than dropping them
+with an `assigned === true` filter.
 
 `TrackOptions`: `value?` (number), `properties?` (sent as `metadata`), `experimentKey?`,
 `featureFlagKey?`, `eventType?` (defaults to the event name), `timestamp?` (`Date` or string, sent as

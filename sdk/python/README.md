@@ -82,10 +82,10 @@ user's attributes.
 An `Assignment` also carries `assigned` and `reason`. `assigned is False` means the server did not
 enrol the user (`reason` is `"holdout"`, `"mutual_exclusion"` or `"targeting"`) and returned the
 control variant so you render the default experience; no exposure was recorded. **When you export
-exposures to a warehouse, log only assignments with `assigned is True`**; the others were never in
-the experiment. A server that predates the fields sends neither, and the SDK leaves both `None`,
-never `False`: such a server cannot tell you, so decide deliberately what to do with those rows
-rather than dropping or keeping them by accident.
+exposures to a warehouse, exclude assignments with `assigned is False`**: the user was not enrolled,
+and `reason` says why. A server that predates the fields sends neither, so `assigned` is `None`
+(never `False`). Decide deliberately how to treat those rows rather than dropping them with an
+`assigned is True` filter.
 
 ## Tracking fan-out rule
 
