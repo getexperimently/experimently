@@ -167,6 +167,25 @@ def check_permission(user: Any, resource: ResourceType, action: Action) -> bool:
     return has_permission(role, resource, action)
 
 
+# Roles that read every audit log entry. Everyone else reads only the entries
+# they made themselves. This is a standalone predicate rather than a
+# ResourceType in ROLE_PERMISSIONS: a new ResourceType member would also be
+# picked up by the custom-role seeding in the RBAC module.
+AUDIT_LOG_READ_ALL_ROLES = frozenset({UserRole.ADMIN, UserRole.ANALYST})
+
+
+def can_read_all_audit_logs(user: Any) -> bool:
+    """Return True if *user* may read audit log entries made by other users.
+
+    Superusers, ADMIN and ANALYST read every entry. DEVELOPER and VIEWER read
+    only their own entries, and are refused the per-entity history and the
+    statistics, which aggregate across users.
+    """
+    if getattr(user, "is_superuser", False):
+        return True
+    return getattr(user, "role", None) in AUDIT_LOG_READ_ALL_ROLES
+
+
 def check_ownership(user: Any, resource_obj: Any) -> bool:
     """
     Check if a user owns a resource.
