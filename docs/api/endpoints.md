@@ -1340,9 +1340,9 @@ See [Sequential Testing Guide](sequential-testing.md) for full documentation.
 ```
 GET /api/v1/results/{experiment_id}/sequential
 ```
-Returns mSPRT analysis, always-valid confidence intervals, alpha spending schedule, and early stopping recommendation.
+Returns mSPRT analysis, always-valid confidence intervals, an early stopping recommendation and the advisory `at_risk` flag. `alpha_spending` is always empty: no planned-looks table is computed yet.
 
-**Query params:** `method` (`msprt`|`always_valid`), `alpha` (default `0.05`), `spending_function`, `num_looks`
+**Query params:** `alpha` (above 0 and at most 0.2; overrides the experiment's stored `sequential_testing_config.alpha`, default `0.05`)
 
 ---
 

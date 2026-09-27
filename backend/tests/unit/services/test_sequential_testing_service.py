@@ -18,7 +18,6 @@ import numpy as np
 import pytest
 
 from backend.app.services.sequential_testing_service import (
-    AlphaSpendingBoundary,
     ConfidenceSequence,
     EvidencePoint,
     EvidenceStrength,
@@ -269,85 +268,12 @@ class TestAlwaysValidCI:
 
 
 # ---------------------------------------------------------------------------
-# TestAlphaSpending — 6 tests
+# Alpha spending: removed (#232)
 # ---------------------------------------------------------------------------
-
-
-class TestAlphaSpending:
-    """Tests for alpha spending functions."""
-
-    def test_obf_boundaries_decrease_over_time(self):
-        """O'Brien-Fleming z-boundaries should decrease as looks increase."""
-        service = _make_service()
-        boundaries = service.compute_alpha_spending(
-            current_look=5,
-            planned_looks=5,
-            alpha=0.05,
-            spending_function=SpendingFunction.OBRIEN_FLEMING,
-        )
-        z_values = [b.boundary_z for b in boundaries]
-        # OBF: z-boundaries decrease over time
-        for i in range(len(z_values) - 1):
-            assert z_values[i] > z_values[i + 1]
-
-    def test_pocock_boundaries_are_constant(self):
-        """Pocock boundaries should be the same at every look."""
-        service = _make_service()
-        boundaries = service.compute_alpha_spending(
-            current_look=5,
-            planned_looks=5,
-            alpha=0.05,
-            spending_function=SpendingFunction.POCOCK,
-        )
-        z_values = [b.boundary_z for b in boundaries]
-        for z in z_values:
-            assert z == pytest.approx(z_values[0], rel=1e-6)
-
-    def test_obf_cumulative_alpha_sums_to_alpha(self):
-        """The last OBF boundary's cumulative_alpha should be close to alpha."""
-        service = _make_service()
-        boundaries = service.compute_alpha_spending(
-            current_look=5,
-            planned_looks=5,
-            alpha=0.05,
-            spending_function=SpendingFunction.OBRIEN_FLEMING,
-        )
-        # The cumulative alpha at the final look should be the total alpha
-        assert boundaries[-1].cumulative_alpha == pytest.approx(0.05, abs=0.01)
-
-    def test_pocock_cumulative_alpha_sums_to_alpha(self):
-        """The last Pocock boundary's cumulative_alpha should be close to alpha."""
-        service = _make_service()
-        boundaries = service.compute_alpha_spending(
-            current_look=5,
-            planned_looks=5,
-            alpha=0.05,
-            spending_function=SpendingFunction.POCOCK,
-        )
-        assert boundaries[-1].cumulative_alpha == pytest.approx(0.05, abs=0.01)
-
-    def test_correct_number_of_boundaries(self):
-        """Number of boundaries should match current_look."""
-        service = _make_service()
-        boundaries = service.compute_alpha_spending(
-            current_look=3,
-            planned_looks=10,
-            alpha=0.05,
-            spending_function=SpendingFunction.OBRIEN_FLEMING,
-        )
-        assert len(boundaries) == 3
-
-    def test_boundary_p_values_are_valid(self):
-        """All boundary p-values should lie in (0, 1)."""
-        service = _make_service()
-        boundaries = service.compute_alpha_spending(
-            current_look=5,
-            planned_looks=5,
-            alpha=0.05,
-            spending_function=SpendingFunction.OBRIEN_FLEMING,
-        )
-        for b in boundaries:
-            assert 0.0 < b.boundary_p < 1.0
+# Contract change: compute_alpha_spending and its O'Brien-Fleming / Pocock
+# boundaries were removed because they did not hold their stated significance
+# level (#232).  The analysis reports alpha_spending == [] instead; see
+# backend/tests/unit/api/test_sequential_contract.py.
 
 
 # ---------------------------------------------------------------------------
@@ -555,7 +481,10 @@ class TestIntegration:
         assert result.recommended_action == "continue"
 
     def test_full_analysis_with_pocock_spending(self):
-        """Full analysis should work with Pocock spending function too."""
+        """A stored Pocock spending function is accepted and computes no table.
+
+        Contract change (#232): this used to assert four boundaries.
+        """
         service = _make_service()
         config = {
             "tau_squared": 0.001,
@@ -575,6 +504,6 @@ class TestIntegration:
             config=config,
         )
         assert isinstance(result, SequentialAnalysis)
-        assert len(result.alpha_spending) == 4
-        # Equal proportions — should continue or declare futility
-        assert result.recommended_action in ("continue", "stop_for_futility")
+        assert result.alpha_spending == []
+        # Equal proportions, on schedule: no evidence either way
+        assert result.recommended_action == "continue"

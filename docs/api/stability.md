@@ -72,6 +72,17 @@ and say in the pull request which stable operations changed and why; the
 smoke test's failure message lists them by method and path, with the first
 differing keys.
 
+## Beta numbers on a stable route
+
+`x-stability` is about the *shape* of a request or response. Whether an
+analysis's *numbers* are established is a different promise, and a response
+states it itself: `analysis_status` is `"ga"` or `"beta"`, and
+`analysis_notice` says what is beta and why, present exactly when the status
+is `"beta"`. A stable route can return beta numbers; its shape still does not
+change. The sequential analysis (`GET /api/v1/results/{id}/sequential`) is the
+first to carry the two fields, and one table in the code
+(`backend/app/core/analysis_status.py`) sets each analysis's status.
+
 ## Profiles
 
 The core snapshot is the public promise: it must not change with the set of

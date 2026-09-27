@@ -61,7 +61,7 @@ The platform supports a range of statistical approaches:
 | Frequentist (z-test) | Standard two-sample proportion and mean comparison |
 | Sequential testing (mSPRT) | Continuous monitoring with valid p-values at any sample size |
 | Always-valid confidence intervals | Confidence sequences that are valid at every look |
-| Alpha spending (O'Brien-Fleming, Pocock) | Planned interim analyses with controlled false positive rate |
+| Alpha spending (O'Brien-Fleming, Pocock) | Not computed yet: the response's `alpha_spending` is empty; use the mSPRT, which is valid under continuous monitoring |
 | CUPED | Variance reduction using pre-experiment covariates (typically 20–40% sample size reduction) |
 | Bayesian (Beta-Binomial) | Posterior credible intervals, Bayes factors, probability of superiority, ROPE |
 | Multi-armed bandit | Thompson Sampling, UCB1, and Epsilon-Greedy adaptive traffic allocation |

@@ -11620,16 +11620,24 @@
       "SequentialTestingConfigInput": {
         "description": "Configuration for enabling sequential testing on an experiment.",
         "properties": {
+          "alpha": {
+            "default": 0.05,
+            "description": "Significance level of the mSPRT, above 0 and at most 0.2; the stopping boundary is 1/alpha.",
+            "exclusiveMinimum": 0,
+            "maximum": 0.2,
+            "title": "Alpha",
+            "type": "number"
+          },
           "method": {
             "default": "msprt",
-            "description": "Sequential testing method: 'msprt' or 'always_valid'.",
+            "description": "Sequential testing method: 'msprt'. 'always_valid' is accepted as an alias of it; the analysis reports 'msprt'.",
             "pattern": "^(msprt|always_valid)$",
             "title": "Method",
             "type": "string"
           },
           "planned_looks": {
             "default": 10,
-            "description": "Number of planned interim analyses.",
+            "description": "Number of planned interim analyses. Accepted and stored, but no alpha-spending table is computed yet.",
             "maximum": 100,
             "minimum": 1,
             "title": "Planned Looks",
@@ -11637,7 +11645,7 @@
           },
           "spending_function": {
             "default": "obrien_fleming",
-            "description": "Alpha spending function.",
+            "description": "Alpha spending function. Accepted and stored, but no alpha-spending table is computed yet.",
             "pattern": "^(obrien_fleming|pocock)$",
             "title": "Spending Function",
             "type": "string"
@@ -11667,12 +11675,52 @@
         "description": "Full sequential testing analysis returned alongside experiment results.",
         "properties": {
           "alpha_spending": {
-            "description": "Alpha spending boundaries at each planned look.",
+            "description": "Always empty: the planned-looks (alpha-spending) table is not computed yet. See analysis_notice.",
             "items": {
               "$ref": "#/components/schemas/AlphaSpendingBoundaryResponse"
             },
             "title": "Alpha Spending",
             "type": "array"
+          },
+          "analysis_notice": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What is beta and why; present exactly when analysis_status is 'beta'.",
+            "title": "Analysis Notice"
+          },
+          "analysis_status": {
+            "anyOf": [
+              {
+                "enum": [
+                  "ga",
+                  "beta"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "'ga' when these numbers are established, 'beta' when part of the analysis is still being corrected or is not computed.",
+            "title": "Analysis Status"
+          },
+          "at_risk": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Advisory: the experiment is running well past its expected duration or collecting samples slowly. Not a stopping rule and not evidence of no effect.",
+            "title": "At Risk"
           },
           "confidence_sequence": {
             "anyOf": [
@@ -11706,7 +11754,7 @@
           },
           "method": {
             "$ref": "#/components/schemas/SequentialTestingMethod",
-            "description": "Sequential testing method used."
+            "description": "Sequential testing method used. Always 'msprt': a stored 'always_valid' is an alias of it and is echoed as 'msprt'."
           },
           "msprt_result": {
             "anyOf": [
@@ -11720,7 +11768,7 @@
             "description": "mSPRT result (when method is msprt)."
           },
           "recommended_action": {
-            "description": "Recommended action: 'stop_for_effect', 'stop_for_futility', or 'continue'.",
+            "description": "Recommended action: 'stop_for_effect', 'stop_for_futility', or 'continue'. The mSPRT decides; an experiment that runs long is reported in at_risk, not as 'stop_for_futility'.",
             "title": "Recommended Action",
             "type": "string"
           }
@@ -27510,7 +27558,7 @@
     },
     "/api/v1/results/{experiment_id}/sequential": {
       "get": {
-        "description": "Get sequential testing analysis for an experiment (EP-021).\n\nReturns mSPRT evidence ratio, always-valid confidence intervals,\nevidence trajectory for charting, alpha spending boundaries,\nand a recommended action (stop/continue).\n\nOnly available for experiments with sequential_testing_enabled=True.",
+        "description": "Get sequential testing analysis for an experiment (EP-021).\n\nReturns the mSPRT evidence ratio, an always-valid confidence interval,\nthe evidence trajectory for charting, a recommended action\n(stop_for_effect or continue) and the advisory ``at_risk`` flag.\n``alpha_spending`` is always empty: no planned-looks table is computed.\n\nThe significance level is the ``alpha`` query parameter, else the stored\n``sequential_testing_config.alpha``, else 0.05.\n\nOnly available for experiments with sequential_testing_enabled=True.",
         "operationId": "get_sequential_results_api_v1_results__experiment_id__sequential_get",
         "parameters": [
           {
@@ -27521,6 +27569,26 @@
               "format": "uuid",
               "title": "Experiment Id",
               "type": "string"
+            }
+          },
+          {
+            "description": "Significance level for this request, above 0 and at most 0.2. Overrides the experiment's stored sequential_testing_config.alpha (default 0.05). The mSPRT boundary is 1/alpha.",
+            "in": "query",
+            "name": "alpha",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "exclusiveMinimum": 0,
+                  "maximum": 0.2,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Significance level for this request, above 0 and at most 0.2. Overrides the experiment's stored sequential_testing_config.alpha (default 0.05). The mSPRT boundary is 1/alpha.",
+              "title": "Alpha"
             }
           }
         ],
