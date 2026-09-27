@@ -20,11 +20,14 @@ Sequential testing lets you continuously monitor experiment results and stop as 
 
 ### mSPRT (mixture Sequential Probability Ratio Test)
 
-The default method. Computes a likelihood ratio (`lambda_ratio`) that accumulates evidence for or against an effect:
+The method the analysis uses. Computes a likelihood ratio (`lambda_ratio`) that accumulates evidence for an effect:
 
-- `lambda_ratio > 1/alpha` → strong evidence for an effect, safe to stop
-- `lambda_ratio < alpha` → strong evidence for the null, safe to stop for futility
-- Otherwise → continue collecting data
+- `lambda_ratio >= 1/alpha` → strong evidence for an effect, safe to stop (`stop_for_effect`)
+- Otherwise → continue collecting data (`continue`)
+
+The mSPRT has no futility boundary, so the analysis never tells you to stop for
+futility. An experiment that is running well past its expected duration is flagged
+with the advisory `at_risk`, which is not evidence that there is no effect.
 
 The `always_valid_p_value` can be interpreted like a standard p-value at any point without inflating Type I error.
 
@@ -32,12 +35,16 @@ The `always_valid_p_value` can be interpreted like a standard p-value at any poi
 
 A confidence sequence is a confidence interval that is valid at every sample size simultaneously. The interval shrinks as more data is collected. Use this when you want a continuous view of the effect size range, not just a stop/continue decision.
 
-### Alpha Spending (O'Brien-Fleming / Pocock)
+### Alpha Spending (not computed yet)
 
-For experiments with planned interim analyses, alpha spending functions control how much of the significance budget is used at each look:
-
-- **O'Brien-Fleming**: Conservative early on, uses most alpha at the end. Recommended for most experiments.
-- **Pocock**: Equal boundaries at every look. Easier to explain but requires more total sample size.
+A group-sequential design with planned interim analyses (O'Brien-Fleming or Pocock
+alpha spending) is not implemented. The boundaries the analysis used to report did
+not hold their stated significance level
+([#232](https://github.com/getexperimently/experimently/issues/232)), and nothing
+counted the looks they were indexed by, so they were removed: `alpha_spending` is
+always an empty list. `spending_function` and `planned_looks` are still accepted and
+stored. The mSPRT above stays valid however often you read the results, so no
+planned-looks table is needed to use it.
 
 ---
 
@@ -49,12 +56,11 @@ Sequential testing is set on the experiment, when you create it
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `sequential_testing_enabled` | bool | `false` | Turns the analysis on |
-| `sequential_testing_config.method` | `msprt` \| `always_valid` | `msprt` | Accepted, but has no effect yet: the analysis is always mSPRT with a confidence sequence ([#222](https://github.com/getexperimently/experimently/issues/222)) |
+| `sequential_testing_config.method` | `msprt` \| `always_valid` | `msprt` | `always_valid` is an alias of `msprt`: the analysis is mSPRT with a confidence sequence, reports `"method": "msprt"`, and says so in `analysis_notice` |
+| `sequential_testing_config.alpha` | float | `0.05` | The significance level, above 0 and at most 0.2. The stopping boundary is 1/alpha. A value outside the range is refused with `422` |
 | `sequential_testing_config.tau_squared` | float | `0.001` | The mSPRT mixing parameter, above 0 and at most 1 |
-| `sequential_testing_config.spending_function` | `obrien_fleming` \| `pocock` | `obrien_fleming` | Alpha spending function |
-| `sequential_testing_config.planned_looks` | int | `10` | Number of planned interim analyses, 1–100 |
-
-The significance level is 0.05; it can't be changed yet (#222).
+| `sequential_testing_config.spending_function` | `obrien_fleming` \| `pocock` | `obrien_fleming` | Accepted and stored; no alpha-spending table is computed yet |
+| `sequential_testing_config.planned_looks` | int | `10` | Accepted and stored (1–100); no alpha-spending table is computed yet |
 
 Run the commands on this page in one terminal, in order, against the stack from the
 [Quick Start](../getting-started/quick-start.md). Each uses the shell variables set by the
@@ -100,24 +106,34 @@ the results endpoint below is the one to read.
 ### GET /api/v1/results/{experiment_id}/sequential
 
 Returns the full sequential analysis for an experiment, on its primary metric. It takes
-no query parameters. Any logged-in user can read it. It answers `404` with
+one optional query parameter, `alpha`: the significance level for this request, above 0
+and at most 0.2, which overrides the stored `sequential_testing_config.alpha` (default
+`0.05`); a value outside the range answers `422`. Any logged-in user can read it. It answers `404` with
 `"Sequential testing is not enabled for this experiment"` when it is off, and
 `"Experiment not found"` when there is no such experiment.
 
 ```{.bash exec}
 curl -s localhost:8000/api/v1/results/$EXP_ID/sequential \
   -H "Authorization: Bearer $TOKEN" \
-  | jq '{method, boundary: .msprt_result.boundary, evidence_strength: .msprt_result.evidence_strength, recommended_action}'
+  | jq '{method, boundary: .msprt_result.boundary, evidence_strength: .msprt_result.evidence_strength, recommended_action, at_risk, alpha_spending, analysis_status}'
+
+curl -s "localhost:8000/api/v1/results/$EXP_ID/sequential?alpha=0.01" \
+  -H "Authorization: Bearer $TOKEN" \
+  | jq '{boundary_at_alpha_001: .msprt_result.boundary}'
 ```
 <!-- expect: "method": "msprt" -->
 <!-- expect: "boundary": 20 -->
 <!-- expect: "evidence_strength": -->
 <!-- expect: "recommended_action": -->
+<!-- expect: "at_risk": -->
+<!-- expect: "alpha_spending": [] -->
+<!-- expect: "analysis_status": "beta" -->
+<!-- expect: "boundary_at_alpha_001": 100 -->
 
-It prints `"method": "msprt"`, the boundary `20.0` (that is 1/α), the strength of the
-evidence so far and the recommended action. `alpha_spending` gives the boundary for the
-first of the `planned_looks`; the endpoint doesn't count looks yet, so every request is
-treated as the first. A full response, abridged:
+It prints `"method": "msprt"`, the boundary `20.0` (that is 1/α at the default α of
+0.05), the strength of the evidence so far, the recommended action, the advisory
+`at_risk`, an empty `alpha_spending` and `"analysis_status": "beta"`. The second request
+asks for α = 0.01, so its boundary is `100.0`. A full response, abridged:
 
 ```json
 {
@@ -138,9 +154,7 @@ treated as the first. A full response, abridged:
   "evidence_trajectory": [
     {"sample_size": 30000, "lambda_ratio": 5.59, "always_valid_p_value": 0.179, "can_stop": false}
   ],
-  "alpha_spending": [
-    {"look_number": 1, "cumulative_alpha": 5.7e-10, "boundary_z": 6.198, "boundary_p": 5.7e-10}
-  ],
+  "alpha_spending": [],
   "long_running_risk": {
     "is_at_risk": false,
     "expected_duration_days": 30,
@@ -148,9 +162,17 @@ treated as the first. A full response, abridged:
     "risk_ratio": 0.467,
     "recommendation": "Experiment is on track. No action needed."
   },
-  "recommended_action": "continue"
+  "recommended_action": "continue",
+  "at_risk": false,
+  "analysis_status": "beta",
+  "analysis_notice": "Beta: the stop/continue decision is mSPRT alone, at the significance level shown by the boundary (1/alpha). alpha_spending is always empty: the planned-looks (alpha-spending) table is not computed yet. The confidence sequence is being corrected (#231)."
 }
 ```
+
+`analysis_status` is `"beta"` while part of the analysis is still being corrected, and
+`analysis_notice` then says what; when the status is `"ga"` the notice is `null`. If the
+experiment's method is stored as `always_valid`, the notice adds that it is an alias of
+`msprt`.
 
 **Evidence Strength Values**
 
@@ -160,15 +182,15 @@ treated as the first. A full response, abridged:
 | `moderate_for_effect` | Trending positive — consider continuing for confirmation |
 | `inconclusive` | Not enough data yet — continue |
 | `moderate_for_null` | Trending toward no effect |
-| `strong_for_null` | No effect detected — safe to stop for futility |
+| `strong_for_null` | Evidence leans strongly toward no effect. Not a stopping rule |
 
 **Recommended Actions**
 
 | Value | Meaning |
 |-------|---------|
-| `stop_for_effect` | Stop the experiment; treatment wins |
-| `stop_for_futility` | Stop the experiment; no meaningful effect |
+| `stop_for_effect` | The mSPRT crossed its boundary (1/alpha): stop, there is an effect |
 | `continue` | Keep running — not enough evidence yet |
+| `stop_for_futility` | Kept in the value set, but not returned by the current analysis: the mSPRT has no futility boundary. A long-running experiment is flagged with `at_risk` instead |
 
 ---
 
@@ -187,4 +209,4 @@ created.
 
 **Don't change the configuration mid-experiment.** Fix your parameters before launch.
 
-**Long-running risk is informational only.** An experiment flagged as `is_at_risk` may still be producing valid results — it just indicates the experiment is taking longer than expected given the observed effect size.
+**Long-running risk is informational only.** An experiment flagged `at_risk` (the same value as `long_running_risk.is_at_risk`) may still be producing valid results. It means the experiment is running well past its expected duration or collecting samples slowly, not that there is no effect.

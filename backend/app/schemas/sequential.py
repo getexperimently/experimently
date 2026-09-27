@@ -10,6 +10,8 @@ from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from backend.app.core.analysis_status import AnalysisStatusValue
+
 # ---------------------------------------------------------------------------
 # Enumerations
 # ---------------------------------------------------------------------------
@@ -180,6 +182,13 @@ class LongRunningRiskResponse(BaseModel):
 # Top-level Sequential Testing Response
 # ---------------------------------------------------------------------------
 
+#: The recommended_action value set.  The dashboard's ``RecommendedAction``
+#: type (frontend/src/types/sequential.ts) is this exact set, and a test pins
+#: the two together.  ``stop_for_futility`` stays in it although the analysis
+#: no longer emits it: removing a value a stored snapshot or a client may hold
+#: is not an additive change.
+RECOMMENDED_ACTIONS = frozenset({"stop_for_effect", "stop_for_futility", "continue"})
+
 
 class SequentialTestingResponse(BaseModel):
     """Full sequential testing analysis returned alongside experiment results."""
@@ -187,7 +196,11 @@ class SequentialTestingResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     method: SequentialTestingMethod = Field(
-        ..., description="Sequential testing method used."
+        ...,
+        description=(
+            "Sequential testing method used. Always 'msprt': a stored "
+            "'always_valid' is an alias of it and is echoed as 'msprt'."
+        ),
     )
     msprt_result: Optional[MSPRTResultResponse] = Field(
         None, description="mSPRT result (when method is msprt)."
@@ -201,7 +214,10 @@ class SequentialTestingResponse(BaseModel):
     )
     alpha_spending: List[AlphaSpendingBoundaryResponse] = Field(
         default_factory=list,
-        description="Alpha spending boundaries at each planned look.",
+        description=(
+            "Always empty: the planned-looks (alpha-spending) table is not "
+            "computed yet. See analysis_notice."
+        ),
     )
     long_running_risk: Optional[LongRunningRiskResponse] = Field(
         None, description="Long-running risk assessment."
@@ -209,14 +225,37 @@ class SequentialTestingResponse(BaseModel):
     recommended_action: str = Field(
         ...,
         description=(
-            "Recommended action: 'stop_for_effect', 'stop_for_futility', or 'continue'."
+            "Recommended action: 'stop_for_effect', 'stop_for_futility', or "
+            "'continue'. The mSPRT decides; an experiment that runs long is "
+            "reported in at_risk, not as 'stop_for_futility'."
         ),
+    )
+    at_risk: Optional[bool] = Field(
+        None,
+        description=(
+            "Advisory: the experiment is running well past its expected "
+            "duration or collecting samples slowly. Not a stopping rule and "
+            "not evidence of no effect."
+        ),
+    )
+    analysis_status: Optional[AnalysisStatusValue] = Field(
+        None,
+        description=(
+            "'ga' when these numbers are established, 'beta' when part of the "
+            "analysis is still being corrected or is not computed."
+        ),
+    )
+    analysis_notice: Optional[str] = Field(
+        None,
+        description="What is beta and why; present exactly when analysis_status is 'beta'.",
     )
 
     @field_validator("recommended_action", mode="before")
     @classmethod
     def validate_recommended_action(cls, v: str) -> str:
-        allowed = {"stop_for_effect", "stop_for_futility", "continue"}
-        if v not in allowed:
-            raise ValueError(f"recommended_action must be one of {allowed}, got {v!r}")
+        if v not in RECOMMENDED_ACTIONS:
+            raise ValueError(
+                f"recommended_action must be one of {sorted(RECOMMENDED_ACTIONS)}, "
+                f"got {v!r}"
+            )
         return v

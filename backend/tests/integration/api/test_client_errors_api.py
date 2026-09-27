@@ -7,11 +7,16 @@ persist ``ErrorLog`` rows that safety monitoring reads. Every test removes the
 rows it created (same cleanup pattern as ``test_tracking_api.py``).
 """
 
+import json
 import uuid
 from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from backend.app.api.v1.endpoints.client_errors import (
+    METADATA_MAX_BYTES,
+    STACK_TRACE_MAX_BYTES,
+)
 from backend.app.models.experiment import Experiment, ExperimentStatus
 from backend.app.models.feature_flag import FeatureFlag, FeatureFlagStatus
 from backend.app.models.metrics.metric import ErrorLog
@@ -102,9 +107,7 @@ class TestReportError:
         # defaulted to "now" (naive UTC column)
         assert abs((datetime.utcnow() - row.timestamp).total_seconds()) < 60
 
-    def test_client_timestamp_is_stored_as_naive_utc(
-        self, admin_client, db_session, flag
-    ):
+    def test_client_timestamp_is_kept_in_metadata(self, admin_client, db_session, flag):
         when = datetime(2026, 3, 1, 10, 30, tzinfo=timezone(timedelta(hours=2)))
         resp = admin_client.post(
             "/api/v1/tracking/errors",
@@ -112,13 +115,16 @@ class TestReportError:
                 "feature_flag_key": flag.key,
                 "error_type": "crash",
                 "message": "boom",
+                "metadata": {"os": "Android"},
                 "timestamp": when.isoformat(),
             },
         )
         assert resp.status_code == 201, resp.text
         db_session.expire_all()
         row = _rows(db_session, flag)[0]
-        assert row.timestamp == datetime(2026, 3, 1, 8, 30)
+        assert row.meta_data["os"] == "Android"
+        assert datetime.fromisoformat(row.meta_data["client_timestamp"]) == when
+        assert abs((datetime.utcnow() - row.timestamp).total_seconds()) < 60
 
     def test_experiment_key_is_resolved_into_request_data(
         self, admin_client, db_session, flag, experiment
@@ -309,3 +315,123 @@ class TestReportErrorsBatch:
             },
         )
         assert resp.status_code == 413, resp.text
+
+
+def _post_one(client, path, report):
+    if path.endswith("/batch"):
+        resp = client.post(path, json={"errors": [report]})
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["success_count"] == 1, resp.text
+    else:
+        resp = client.post(path, json=report)
+        assert resp.status_code == 201, resp.text
+    return resp
+
+
+_PATHS = ["/api/v1/tracking/errors", "/api/v1/tracking/errors/batch"]
+
+
+@pytest.mark.regression
+class TestStoredErrorReports:
+    """What is stored for a report: the receive time and bounded sizes."""
+
+    @pytest.mark.parametrize("path", _PATHS)
+    def test_stored_timestamp_is_the_receive_time(
+        self, admin_client, db_session, flag, path
+    ):
+        """A client-sent timestamp is kept in metadata; the row is timed on receipt."""
+        sent = datetime.now(timezone.utc) + timedelta(days=3)
+        before = datetime.utcnow()
+        resp = _post_one(
+            admin_client,
+            path,
+            {
+                "feature_flag_key": flag.key,
+                "error_type": "crash",
+                "message": "boom",
+                "timestamp": sent.isoformat(),
+            },
+        )
+        after = datetime.utcnow()
+
+        db_session.expire_all()
+        row = _rows(db_session, flag)[0]
+        assert (
+            before - timedelta(seconds=5)
+            <= row.timestamp
+            <= after + timedelta(seconds=5)
+        )
+        assert datetime.fromisoformat(row.meta_data["client_timestamp"]) == sent
+        if not path.endswith("/batch"):
+            assert datetime.fromisoformat(resp.json()["timestamp"]) == row.timestamp
+
+    @pytest.mark.parametrize("path", _PATHS)
+    def test_stack_trace_is_cut_to_the_byte_limit(
+        self, admin_client, db_session, flag, path
+    ):
+        """An oversized stack trace is stored as a prefix within the byte limit."""
+        # Three bytes per character in UTF-8, so the character count alone
+        # would pass a character limit of the same number.
+        stack_trace = "\u20ac" * STACK_TRACE_MAX_BYTES
+        _post_one(
+            admin_client,
+            path,
+            {
+                "feature_flag_key": flag.key,
+                "error_type": "crash",
+                "message": "boom",
+                "stack_trace": stack_trace,
+            },
+        )
+
+        db_session.expire_all()
+        stored = _rows(db_session, flag)[0].stack_trace
+        size = len(stored.encode("utf-8"))
+        assert STACK_TRACE_MAX_BYTES - 3 < size <= STACK_TRACE_MAX_BYTES
+        assert stack_trace.startswith(stored)
+
+    def test_stack_trace_within_the_limit_is_unchanged(
+        self, admin_client, db_session, flag
+    ):
+        """A stack trace within the limit is stored as sent."""
+        stack_trace = "at PlayerV2Fragment.onCreate(PlayerV2Fragment.kt:42)\n" * 10
+        _post_one(
+            admin_client,
+            "/api/v1/tracking/errors",
+            {
+                "feature_flag_key": flag.key,
+                "error_type": "crash",
+                "message": "boom",
+                "stack_trace": stack_trace,
+            },
+        )
+        db_session.expire_all()
+        assert _rows(db_session, flag)[0].stack_trace == stack_trace
+
+    @pytest.mark.parametrize("path", _PATHS)
+    def test_oversized_metadata_is_replaced_by_a_marker(
+        self, admin_client, db_session, flag, path
+    ):
+        """Metadata over the byte limit is stored as a marker with its size."""
+        metadata = {"os": "Android", "dump": "\u00e9" * (METADATA_MAX_BYTES // 2 + 64)}
+        sent = datetime.now(timezone.utc)
+        _post_one(
+            admin_client,
+            path,
+            {
+                "feature_flag_key": flag.key,
+                "error_type": "crash",
+                "message": "boom",
+                "metadata": metadata,
+                "timestamp": sent.isoformat(),
+            },
+        )
+
+        db_session.expire_all()
+        stored = _rows(db_session, flag)[0].meta_data
+        assert stored["metadata_truncated"] is True
+        assert stored["metadata_bytes"] > METADATA_MAX_BYTES
+        assert "dump" not in stored
+        assert datetime.fromisoformat(stored["client_timestamp"]) == sent
+        encoded = json.dumps(stored, separators=(",", ":"), ensure_ascii=False)
+        assert len(encoded.encode("utf-8")) <= METADATA_MAX_BYTES

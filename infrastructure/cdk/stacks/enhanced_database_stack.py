@@ -16,6 +16,15 @@ from stacks.environments import (
     database_removal_policy,
 )
 
+# The one Aurora PostgreSQL engine version every environment's cluster and both
+# parameter groups use. It must be a version RDS still offers for new clusters:
+# 15.3 is deprecated and no longer orderable, so no environment could
+# be created. 15.17 is the highest 15.x constant in the pinned aws-cdk-lib and,
+# when checked in us-west-2, was orderable for db.t3.medium and db.r5.large; the
+# parameter group family is unchanged (aurora-postgresql15). Pinned by
+# infrastructure/tests/test_aurora_engine.py.
+AURORA_POSTGRES_VERSION = rds.AuroraPostgresEngineVersion.VER_15_17
+
 
 class EnhancedDatabaseStack(Stack):
     def __init__(
@@ -75,7 +84,7 @@ class EnhancedDatabaseStack(Stack):
             self,
             "ClusterParameterGroup",
             engine=rds.DatabaseClusterEngine.aurora_postgres(
-                version=rds.AuroraPostgresEngineVersion.VER_15_3
+                version=AURORA_POSTGRES_VERSION
             ),
             description=f"Parameter group for {construct_id} Aurora PostgreSQL cluster",
             parameters={
@@ -90,15 +99,18 @@ class EnhancedDatabaseStack(Stack):
             self,
             "InstanceParameterGroup",
             engine=rds.DatabaseClusterEngine.aurora_postgres(
-                version=rds.AuroraPostgresEngineVersion.VER_15_3
+                version=AURORA_POSTGRES_VERSION
             ),
             description=f"Parameter group for {construct_id} Aurora PostgreSQL instances",
             parameters={
-                # Performance tuning
-                "shared_buffers": self._get_shared_buffers_for_env(environment),
+                # Performance tuning. shared_buffers and effective_cache_size
+                # are deliberately left at Aurora's defaults, which scale with
+                # the instance class. Both are in 8 kB pages, and the values
+                # that used to be here were written as kB: shared_buffers came
+                # to more than the instance's whole memory (16 GiB on a 4 GiB
+                # staging instance, 32 GiB on a 16 GiB prod one).
                 "work_mem": self._get_work_mem_for_env(environment),
                 "maintenance_work_mem": "65536",
-                "effective_cache_size": self._get_effective_cache_for_env(environment),
                 "random_page_cost": "1.1",  # Optimized for SSD storage
                 # Logging settings
                 "log_statement": "ddl",  # Log DDL statements
@@ -176,7 +188,7 @@ class EnhancedDatabaseStack(Stack):
             self,
             "AuroraCluster",
             engine=rds.DatabaseClusterEngine.aurora_postgres(
-                version=rds.AuroraPostgresEngineVersion.VER_15_3
+                version=AURORA_POSTGRES_VERSION
             ),
             credentials=rds.Credentials.from_secret(db_credentials),
             default_database_name="experimentation",
@@ -283,14 +295,6 @@ class EnhancedDatabaseStack(Stack):
         )
 
     # HELPER METHODS
-    def _get_shared_buffers_for_env(self, environment):
-        if environment == "prod":
-            return "4194304"  # 4GB in KB
-        elif environment == "staging":
-            return "2097152"  # 2GB in KB
-        else:
-            return "262144"  # 256MB in KB
-
     def _get_work_mem_for_env(self, environment):
         if environment == "prod":
             return "16384"  # 16MB in KB
@@ -298,12 +302,3 @@ class EnhancedDatabaseStack(Stack):
             return "8192"  # 8MB in KB
         else:
             return "4096"  # 4MB in KB
-
-    def _get_effective_cache_for_env(self, environment):
-        """Return appropriate effective_cache_size setting based on environment"""
-        if environment == "prod":
-            return "12582912"
-        elif environment == "staging":
-            return "6291456"
-        else:
-            return "786432"

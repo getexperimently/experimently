@@ -52,6 +52,9 @@ logger = get_logger(__name__)
 # the defaults from the global settings are used instead.
 DEFAULT_CONFIG_ID = UUID("00000000-0000-0000-0000-000000000000")
 
+#: Most error types listed in ``get_error_metrics()["error_types"]``.
+ERROR_TYPE_BREAKDOWN_LIMIT = 100
+
 # Metric names understood by check_feature_flag_safety(). Anything else is
 # reported as "no data source" and treated as healthy.
 _ERROR_METRICS = {"error_rate", "error_count", "total_evaluations"}
@@ -257,21 +260,40 @@ class SafetyService:
     def get_error_metrics(
         self, db: Session, feature_flag_id: UUID, timeframe_minutes: int = 15
     ) -> Dict[str, Any]:
-        """Error counts and error rate for a flag over the last ``timeframe_minutes``."""
+        """Error counts and error rate for a flag over the last ``timeframe_minutes``.
+
+        The count and the per-type breakdown are computed by the database
+        (``COUNT`` and ``COUNT ... GROUP BY error_type``, filtered on
+        ``feature_flag_id`` and ``timestamp``, the columns of the composite
+        ``error_logs`` index); no ``ErrorLog`` row is loaded.
+        ``error_types`` lists at most ``ERROR_TYPE_BREAKDOWN_LIMIT`` types, the
+        most frequent first; ``error_count`` always counts every error.
+        """
         end_time = datetime.utcnow()
         start_time = end_time - timedelta(minutes=timeframe_minutes)
 
         if not db.query(FeatureFlag).filter(FeatureFlag.id == feature_flag_id).first():
             raise ValueError(f"Feature flag {feature_flag_id} does not exist")
 
-        error_logs = (
-            db.query(ErrorLog)
-            .filter(
-                ErrorLog.feature_flag_id == feature_flag_id,
-                ErrorLog.timestamp.between(start_time, end_time),
-            )
-            .all()
+        in_window = (
+            ErrorLog.feature_flag_id == feature_flag_id,
+            ErrorLog.timestamp.between(start_time, end_time),
         )
+        error_count = int(
+            db.query(func.count(ErrorLog.id)).filter(*in_window).scalar() or 0
+        )
+
+        per_type = func.count(ErrorLog.id)
+        error_types: Dict[str, int] = {}
+        if error_count:
+            error_types = {
+                error_type: int(count)
+                for error_type, count in db.query(ErrorLog.error_type, per_type)
+                .filter(*in_window)
+                .group_by(ErrorLog.error_type)
+                .order_by(per_type.desc(), ErrorLog.error_type)
+                .limit(ERROR_TYPE_BREAKDOWN_LIMIT)
+            }
 
         total_evaluations = (
             db.query(func.coalesce(func.sum(RawMetric.count), 0))
@@ -284,11 +306,6 @@ class SafetyService:
             or 0
         )
 
-        error_types: Dict[str, int] = {}
-        for log in error_logs:
-            error_types[log.error_type] = error_types.get(log.error_type, 0) + 1
-
-        error_count = len(error_logs)
         error_rate = 0.0 if total_evaluations == 0 else error_count / total_evaluations
 
         return {

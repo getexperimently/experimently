@@ -152,6 +152,10 @@ Pydantic validates these limits before any database interaction occurs.
 
    This prevents the application from starting in production with a weak key.
 
+   Later, `TESTING` stopped being an exception: the settings now refuse
+   `TESTING` together with `ENVIRONMENT=staging` or `production` outright, so
+   the check applies in every staging and production start.
+
 3. Added `model_validator` import (was missing after adding the new validator).
 
 ### Why it matters

@@ -9,10 +9,16 @@ the flag, which is exactly what safety monitoring divides by the flag's
 evaluation count to compute ``error_rate`` — so client-side errors can trigger
 the same automatic rollback as server-side evaluation failures.
 
+Stored rows are timed by the server on receipt; a ``timestamp`` sent by the
+client is kept in the row's metadata as ``client_timestamp``. ``stack_trace``
+and ``metadata`` are bounded in UTF-8 bytes (``STACK_TRACE_MAX_BYTES``,
+``METADATA_MAX_BYTES``) before they are stored.
+
 The router is mounted under the ``/tracking`` prefix next to the event
 tracking endpoints (see ``backend/app/api/api.py``).
 """
 
+import json
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import UUID
@@ -36,6 +42,14 @@ MAX_BATCH_SIZE = 100
 # Column limits on ``error_logs`` (see ErrorLog model).
 _ERROR_TYPE_MAX = 100
 _MESSAGE_MAX = 1000
+
+#: Most bytes (UTF-8) of ``stack_trace`` stored; the rest is cut off.
+STACK_TRACE_MAX_BYTES = 8 * 1024
+#: Most bytes (UTF-8, compact JSON) of ``metadata`` stored. Larger metadata is
+#: replaced by ``{"metadata_truncated": true, "metadata_bytes": <size>}``.
+METADATA_MAX_BYTES = 8 * 1024
+#: ``metadata`` key under which the client-sent ``timestamp`` is kept.
+CLIENT_TIMESTAMP_KEY = "client_timestamp"
 
 
 # ---------------------------------------------------------------------------
@@ -159,13 +173,39 @@ def _resolve_targets(
     return feature_flag_id, experiment_id
 
 
-def _naive_utc(value: Optional[datetime]) -> datetime:
-    """``error_logs.timestamp`` is a naive UTC column; normalise client timestamps to it."""
+def _truncate_utf8(value: Optional[str], limit: int) -> Optional[str]:
+    """``value`` cut to at most ``limit`` UTF-8 bytes, never mid-character."""
     if value is None:
-        return datetime.utcnow()
-    if value.tzinfo is not None:
-        return value.astimezone(timezone.utc).replace(tzinfo=None)
-    return value
+        return None
+    # A character is at least one byte, so slicing characters first bounds the
+    # work before encoding.
+    head = value[:limit]
+    encoded = head.encode("utf-8", "replace")
+    if len(encoded) <= limit:
+        return head
+    return encoded[:limit].decode("utf-8", "ignore")
+
+
+def _stored_metadata(report: ClientErrorRequest) -> Optional[Dict[str, Any]]:
+    """The ``meta_data`` JSON stored with the row.
+
+    Client metadata larger than ``METADATA_MAX_BYTES`` is replaced by a marker
+    carrying its size. A client-sent ``timestamp`` is kept under
+    ``CLIENT_TIMESTAMP_KEY``; the row itself is timed on receipt.
+    """
+    metadata: Optional[Dict[str, Any]] = report.metadata
+    if metadata is not None:
+        size = len(
+            json.dumps(
+                metadata, separators=(",", ":"), ensure_ascii=False, default=str
+            ).encode("utf-8", "replace")
+        )
+        if size > METADATA_MAX_BYTES:
+            metadata = {"metadata_truncated": True, "metadata_bytes": size}
+    if report.timestamp is not None:
+        metadata = dict(metadata or {})
+        metadata[CLIENT_TIMESTAMP_KEY] = report.timestamp.isoformat()
+    return metadata
 
 
 def _request_data(
@@ -192,10 +232,11 @@ def _to_error_log_create(
         feature_flag_id=feature_flag_id,
         user_id=report.user_id,
         message=report.message[:_MESSAGE_MAX],
-        stack_trace=report.stack_trace,
+        stack_trace=_truncate_utf8(report.stack_trace, STACK_TRACE_MAX_BYTES),
         request_data=_request_data(report, experiment_id),
-        metadata=report.metadata,
-        timestamp=_naive_utc(report.timestamp),
+        metadata=_stored_metadata(report),
+        # Server receive time (naive UTC, like the column).
+        timestamp=datetime.now(timezone.utc).replace(tzinfo=None),
     )
 
 

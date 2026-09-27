@@ -100,6 +100,8 @@ PLATFORM_STEPS: Dict[str, str] = {
 #: changes docs/ alone. On any other change unit-tests / smoke-tests run them.
 DOCS_TESTS = (
     "backend/tests/unit/scripts/test_doc_examples.py",
+    # docs/self-hosting/kubernetes.md against chart_kind.sh; stdlib only.
+    "backend/tests/unit/scripts/test_guide_blocks.py",
     "backend/tests/unit/docs/",
     "backend/tests/smoke/test_openapi_snapshot.py",
     "backend/tests/smoke/test_version_sources.py",
