@@ -118,11 +118,41 @@ existingSecret stops the pod with CreateContainerConfigError naming it.
 {{- end }}
 {{- end }}
 
-{{/* extraEnv may not reintroduce what the chart pins. */}}
+{{/*
+The variables the chart pins, as explicit `env:` entries on both API
+containers. Explicit `env` takes precedence over every `envFrom` source, so a
+ConfigMap or Secret named in api.extraEnvFrom cannot override these. (A later
+`envFrom` source DOES override an earlier one, which is why ENVIRONMENT and
+PUBLIC_BASE_URL are here and not in the chart's own ConfigMap.)
+pass (dict "ctx" $ "runMigrations" "true"|"false")
+*/}}
+{{- define "experimently.pinnedEnvNames" -}}
+{{- list "ENVIRONMENT" "PUBLIC_BASE_URL" "RUN_MIGRATIONS" "SEED" "SEED_FORCE" | toJson }}
+{{- end }}
+
+{{- define "experimently.pinnedEnv" -}}
+- name: ENVIRONMENT
+  value: production
+- name: PUBLIC_BASE_URL
+  value: {{ .ctx.Values.publicBaseUrl | quote }}
+- name: RUN_MIGRATIONS
+  value: {{ .runMigrations | quote }}
+# Demo seeds are never run through this chart.
+- name: SEED
+  value: ""
+- name: SEED_FORCE
+  value: ""
+{{- end }}
+
+{{/*
+extraEnv may not reintroduce what the chart pins: in `env`, a later duplicate
+name wins, and extraEnv is rendered after the pinned entries.
+*/}}
 {{- define "experimently.extraEnv" -}}
+{{- $pinned := include "experimently.pinnedEnvNames" . | fromJsonArray }}
 {{- range .Values.api.extraEnv }}
-{{- if has .name (list "RUN_MIGRATIONS" "SEED" "SEED_FORCE") }}
-{{- fail (printf "api.extraEnv may not set %s: migrations run once in the migrate init container, and demo seeds are not available through this chart" .name) }}
+{{- if has .name $pinned }}
+{{- fail (printf "api.extraEnv may not set %s: the chart pins it (migrations run once in the migrate init container, demo seeds are not available through this chart, and ENVIRONMENT/PUBLIC_BASE_URL come from the chart's values)" .name) }}
 {{- end }}
 {{- end }}
 {{- with .Values.api.extraEnv }}

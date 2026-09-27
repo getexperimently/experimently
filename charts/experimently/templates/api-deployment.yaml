@@ -56,8 +56,7 @@ spec:
             {{- end }}
           env:
             {{- include "experimently.secretEnv" . | trim | nindent 12 }}
-            - name: RUN_MIGRATIONS
-              value: "true"
+            {{- include "experimently.pinnedEnv" (dict "ctx" . "runMigrations" "true") | nindent 12 }}
             {{- with (include "experimently.extraEnv" . | trim) }}
             {{- . | nindent 12 }}
             {{- end }}
@@ -84,8 +83,7 @@ spec:
             {{- end }}
           env:
             {{- include "experimently.secretEnv" . | trim | nindent 12 }}
-            - name: RUN_MIGRATIONS
-              value: "false"
+            {{- include "experimently.pinnedEnv" (dict "ctx" . "runMigrations" "false") | nindent 12 }}
             {{- with (include "experimently.extraEnv" . | trim) }}
             {{- . | nindent 12 }}
             {{- end }}

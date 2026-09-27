@@ -5,8 +5,9 @@ metadata:
   labels:
     {{- include "experimently.labels" . | nindent 4 }}
 data:
-  ENVIRONMENT: production
-  PUBLIC_BASE_URL: {{ .Values.publicBaseUrl | quote }}
+  # ENVIRONMENT and PUBLIC_BASE_URL are explicit `env` on the API containers
+  # (templates/_helpers.tpl, experimently.pinnedEnv), not here: a ConfigMap
+  # named in api.extraEnvFrom would override a value from this one.
   {{- with .Values.allowedHosts }}
   # ALLOWED_HOSTS replaces the host derived from PUBLIC_BASE_URL, so it
   # carries that host as well as the extra names.

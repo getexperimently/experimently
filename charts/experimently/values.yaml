@@ -74,9 +74,10 @@ api:
       memory: 512Mi
     limits:
       memory: 1Gi
-  # -- Extra environment (SSO, SMTP, warehouse connectors). RUN_MIGRATIONS,
-  # SEED and SEED_FORCE are refused here.
+  # -- Extra environment (SSO, SMTP, warehouse connectors). ENVIRONMENT,
+  # PUBLIC_BASE_URL, RUN_MIGRATIONS, SEED and SEED_FORCE are refused here.
   extraEnv: []
+  # -- ConfigMaps/Secrets to add as environment. Variables the chart sets as explicit env (ENVIRONMENT, PUBLIC_BASE_URL, RUN_MIGRATIONS, SEED, SEED_FORCE) cannot be overridden through it.
   extraEnvFrom: []
   podAnnotations: {}
   # -- The images are linux/amd64 only today.

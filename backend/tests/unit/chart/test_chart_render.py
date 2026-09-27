@@ -294,19 +294,58 @@ def test_migrations_run_in_the_init_container_only(docs):
     assert env_of(container(deployment, "api"))["RUN_MIGRATIONS"]["value"] == "false"
 
 
-def test_seed_appears_nowhere(docs):
+#: What the chart sets as explicit `env` on BOTH API containers. Explicit env
+#: wins over every envFrom source, so api.extraEnvFrom cannot override these;
+#: a value arriving through the chart's own ConfigMap could be (a later
+#: envFrom source overrides an earlier one).
+PINNED_ENV = {
+    "ENVIRONMENT": "production",
+    "PUBLIC_BASE_URL": PUBLIC_BASE_URL,
+    "SEED": "",
+    "SEED_FORCE": "",
+}
+
+
+@pytest.mark.parametrize("with_extra_env_from", [False, True])
+def test_pinned_env_is_explicit_on_both_api_containers(profile, with_extra_env_from):
+    extra = (
+        ["--set-string", "api.extraEnvFrom[0].configMapRef.name=operator-env"]
+        if with_extra_env_from
+        else []
+    )
+    docs = render(profile, *extra)
+    deployment = one(docs, "Deployment", f"{FULLNAME}-api")
+    for name in ("migrate", "api"):
+        entries = env_of(container(deployment, name))
+        for key, value in PINNED_ENV.items():
+            assert key in entries, f"{name} has no explicit {key} entry"
+            assert entries[key].get("value") == value, (name, key, entries[key])
+            assert "valueFrom" not in entries[key], (name, key)
+        if with_extra_env_from:
+            sources = container(deployment, name)["envFrom"]
+            assert {"configMapRef": {"name": "operator-env"}} in sources, sources
+    for config_map in (d for d in docs if d["kind"] == "ConfigMap"):
+        assert not set(PINNED_ENV) & set(config_map["data"]), (
+            f"ConfigMap {config_map['metadata']['name']} carries a pinned variable; "
+            "an extraEnvFrom source listed after it would override it"
+        )
+
+
+def test_seed_is_set_by_nothing_else(docs):
+    # Only the two API containers mention SEED at all, and only as "".
     for workload in workloads(docs):
         for c in containers(workload):
-            names = set(env_of(c))
-            assert not names & {"SEED", "SEED_FORCE"}, (
+            if workload["metadata"]["name"] == f"{FULLNAME}-api":
+                continue
+            assert not {"SEED", "SEED_FORCE"} & set(env_of(c)), (
                 workload["metadata"]["name"],
                 c["name"],
             )
-    for config_map in (d for d in docs if d["kind"] == "ConfigMap"):
-        assert not {"SEED", "SEED_FORCE"} & set(config_map["data"])
 
 
-@pytest.mark.parametrize("name", ["SEED", "SEED_FORCE", "RUN_MIGRATIONS"])
+@pytest.mark.parametrize(
+    "name", ["SEED", "SEED_FORCE", "RUN_MIGRATIONS", "ENVIRONMENT", "PUBLIC_BASE_URL"]
+)
 def test_extra_env_cannot_reintroduce_what_the_chart_pins(name):
     error = refused(
         "core",
@@ -358,8 +397,8 @@ def test_the_ingress_host_is_the_public_base_url_hostname(url):
         "/health": ("Prefix", f"{FULLNAME}-api"),
         "/": ("Prefix", f"{FULLNAME}-web"),
     }
+    assert api_environment(docs)["PUBLIC_BASE_URL"] == url
     config = one(docs, "ConfigMap", f"{FULLNAME}-config")["data"]
-    assert config["PUBLIC_BASE_URL"] == url
     assert "ALLOWED_HOSTS" not in config, (
         "the API derives its allow-list from PUBLIC_BASE_URL"
     )
@@ -439,12 +478,31 @@ def test_pods_run_as_numeric_non_root_users_on_a_read_only_root(name, uid):
     assert spec["securityContext"]["runAsUser"] == uid
     assert spec["securityContext"]["runAsNonRoot"] is True
     assert spec["automountServiceAccountToken"] is False
+    pod_seccomp = (spec["securityContext"].get("seccompProfile") or {}).get("type")
     for c in containers(workload):
-        assert c["securityContext"]["readOnlyRootFilesystem"] is True, (name, c["name"])
-        assert c["securityContext"]["allowPrivilegeEscalation"] is False, (
+        context = c["securityContext"]
+        assert context["readOnlyRootFilesystem"] is True, (name, c["name"])
+        assert context["allowPrivilegeEscalation"] is False, (name, c["name"])
+        assert context.get("capabilities", {}).get("drop") == ["ALL"], (
             name,
             c["name"],
+            context.get("capabilities"),
         )
+        # Set on the pod or on the container; the container's wins.
+        seccomp = (context.get("seccompProfile") or {}).get("type", pod_seccomp)
+        assert seccomp == "RuntimeDefault", (name, c["name"], seccomp)
+
+
+def test_every_pod_is_covered_by_the_security_test():
+    # The parametrised list above must name every workload the chart renders.
+    covered = {
+        f"{FULLNAME}-api",
+        f"{FULLNAME}-web",
+        f"{FULLNAME}-postgres",
+        f"{FULLNAME}-redis",
+        f"{FULLNAME}-smoke",
+    }
+    assert {w["metadata"]["name"] for w in workloads(render("core"))} == covered
 
 
 def test_service_account_token_is_not_mounted(docs):
