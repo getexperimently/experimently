@@ -35,7 +35,7 @@ The ECS task reads configuration from AWS Secrets Manager at startup. Set the fo
 
 | Variable | Description |
 |----------|-------------|
-| `DATABASE_URL` | Aurora PostgreSQL connection string |
+| `POSTGRES_SERVER` / `POSTGRES_PORT` / `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | Aurora PostgreSQL connection (the image does not read `DATABASE_URL`) |
 | `REDIS_HOST` / `REDIS_PORT` | ElastiCache primary endpoint and port (from the Redis stack) |
 | `REDIS_SSL` | `true` on AWS: the replication group requires TLS |
 | `SECRET_KEY` | Application secret key (min 32 chars) |
@@ -52,8 +52,12 @@ The ECS task reads configuration from AWS Secrets Manager at startup. Set the fo
 ### Connection Configuration
 
 ```bash
-# Environment variable format
-DATABASE_URL=postgresql://username:password@aurora-cluster.cluster-xxxx.region.rds.amazonaws.com:5432/experimentation
+# The API connects with the POSTGRES_* variables, not a DATABASE_URL
+POSTGRES_SERVER=aurora-cluster.cluster-xxxx.region.rds.amazonaws.com
+POSTGRES_PORT=5432
+POSTGRES_USER=username
+POSTGRES_PASSWORD=password
+POSTGRES_DB=experimentation
 ```
 
 ### Read Replicas
@@ -313,7 +317,7 @@ The ECS task role and Lambda execution roles need the following permissions:
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `DATABASE_URL` | Yes | Aurora PostgreSQL connection string |
+| `POSTGRES_SERVER` | Yes | Aurora endpoint; with `POSTGRES_PORT`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`. `DATABASE_URL` is not read; in staging and production the container's start-up check refuses to start with it set |
 | `REDIS_HOST` | Yes | ElastiCache primary endpoint (`localhost` if unset) |
 | `REDIS_PORT` | No | ElastiCache port (default `6379`) |
 | `REDIS_SSL` | Yes, on AWS | `true` to connect over TLS (default `false`) |

@@ -311,7 +311,9 @@ def test_a_core_build_refuses_a_full_database_it_has_migrations_for(
     for result in (upgrade, bootstrapped):
         assert result.returncode != 0, result.stdout[-2000:]
         assert MODULES_HEAD in result.stderr
-        assert "Run the full image against it" in result.stderr
+        assert "Run the full image of this release against it" in result.stderr
+        # Never the old "delete those rows" advice (#238).
+        assert "delete" not in result.stderr[result.stderr.rindex("RuntimeError") :]
     # Nothing applied, nothing stamped, nothing dropped.
     assert _rows(test_db, scratch_schema) == {BRANCH_POINT, MODULES_HEAD}
     assert len(_module_tables(test_db, scratch_schema)) == 12

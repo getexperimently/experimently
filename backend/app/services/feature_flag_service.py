@@ -438,7 +438,7 @@ class FeatureFlagService:
             return None
 
         # Dashboard / native shapes — Enhanced Rules Engine.
-        native_rules = normalise_targeting_rules(rules)
+        native_rules = normalise_targeting_rules(rules, owner=f"flag:{flag.key}")
         if native_rules is None:
             return None
         matched = match_targeting_rule(native_rules, expand_context(context))
