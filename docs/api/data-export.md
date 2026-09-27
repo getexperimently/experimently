@@ -12,8 +12,12 @@ them. Without a token they answer `401 Unauthorized`.
 
 The result columns (each variant's assignments, conversions, rate, p-value and
 significance, and each experiment's winner and recommendation) are the numbers
-`GET /api/v1/results/{experiment_id}` reports for the experiment's primary metric, at its
-default 95% confidence level.
+`GET /api/v1/results/{experiment_id}` reports for the experiment's primary metric with its
+defaults: 95% confidence (`confidence_level=0.95`) and no multiple-testing correction
+(`correction_method=none`). The export takes no such parameters. Asked with
+`correction_method=bonferroni` or `benjamini_hochberg`, or another confidence level,
+`/results` can report a different `is_significant`, winner and recommendation than the
+export; the counts, rates and unadjusted p-values are the same.
 
 **Empty in this release:** `experiments_with_winners` in the overview is `0`
 ([#244](https://github.com/getexperimently/experimently/issues/244)).
@@ -153,6 +157,9 @@ Same as `/export/experiments` (`format`, `scope`, `start_date`, `end_date`).
 | `p_value`                   | float   | p-value against control; empty for the control      |
 | `is_significant`            | boolean | Whether the result is statistically significant     |
 | `relative_improvement_pct`  | float   | Relative improvement over control (%); empty for the control |
+
+Every result column (`assignments` to `relative_improvement_pct`) is empty for all of an
+experiment's variants when its results cannot be computed (it has no control variant).
 
 #### Example curl
 
