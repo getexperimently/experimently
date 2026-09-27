@@ -5,13 +5,29 @@ Two layers keep the SDKs honest.
 ## 1. Golden vectors (offline)
 
 `golden-vectors.json` fixes the MD5 consistent-hash function every SDK exports
-(`{userId}:{flagKey}` → first 4 bytes little-endian ÷ 2^32). `test_python_sdk.py` and
-`test_js_sdk.js` check the reference implementations; each SDK's own unit tests check its port.
-These run in the `SDK Contract Tests` job of the PR gate and need no backend.
+(`{userId}:{flagKey}` → first 4 bytes little-endian ÷ 2^32). `hash_contract.py` runs each SDK's
+**own** exported function against it -- not a copy of the algorithm -- through a thin harness per
+SDK in `harness/`, and does every comparison itself: the hash (within 1e-10, less than one bucket),
+the MD5 digest where the SDK exports one, the rollout inclusions, and exactly 9 hash vectors and
+2 rollout vectors answered by each SDK.
+
+| SDK | What runs | Needs |
+| --- | --- | --- |
+| `python` | `experimentation.consistent_hash` / `md5_hex` from `sdk/python` | python |
+| `js` | `consistentHash` / `md5Hex` from the built package (`npm ci && npm run build` in `sdk/js`) | node |
+| `edge` | `hashUser` / `md5Hex` from the built package (`sdk/edge`) | node |
+| `react-native` | `hashUser` from `src/hash.ts`, loaded with node's type stripping (the package ships source) | node 22 |
+| `go` | `ConsistentHash`, compiled from `sdk/go` through a `replace` directive | go |
+
+`--list` names every other `sdk/` directory and why this job does not run it (iOS needs
+CommonCrypto, Android a Kotlin build; their own hash tests run in `sdk-unit-tests.yml`), and fails
+on a directory it does not classify. These run in the `SDK Contract Tests` job of the PR gate, one
+step per SDK, and need no backend. The pytest run is the comparison's own tests.
 
 ```bash
-python -m pytest tests/sdk-contract/test_python_sdk.py -q -o addopts=""
-node tests/sdk-contract/test_js_sdk.js
+python tests/sdk-contract/hash_contract.py --list
+python -m pytest tests/sdk-contract -q -o addopts=""
+python tests/sdk-contract/hash_contract.py python js edge react-native go
 ```
 
 The hash is a utility only. Since the September 2026 SDK rewiring no SDK buckets users locally: assignment and flag

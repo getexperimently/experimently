@@ -1,8 +1,9 @@
 """
-Workspace models for EP-057: Multi-Tenant Team Workspaces.
+Workspace models for EP-057: Team Workspaces.
 
-Provides workspace isolation so multiple teams can use the platform
-safely within one instance.
+A workspace groups members and their workspace roles, with invites and
+workspace API keys. It does not limit access to experiments or feature
+flags, which is decided by the platform role.
 """
 
 import enum
@@ -53,7 +54,7 @@ ROLE_HIERARCHY = ["VIEWER", "ANALYST", "DEVELOPER", "ADMIN", "OWNER"]
 
 
 class Workspace(Base, BaseModel):
-    """Workspace model — top-level isolation boundary for team resources."""
+    """Workspace model — a team: its members, roles, invites and API keys."""
 
     __tablename__ = "workspaces"
 
@@ -205,7 +206,7 @@ class WorkspaceInvite(Base, BaseModel):
 
 
 class WorkspaceAPIKey(Base, BaseModel):
-    """Scoped API key attached to a workspace (not a user)."""
+    """API key attached to a workspace (not a user), with a list of scopes."""
 
     __tablename__ = "workspace_api_keys"
 

@@ -95,6 +95,30 @@ jobs:
           DATABASE_URI: "postgresql://postgres:postgres@localhost:5432/experimentation_test"
         run: python -m backend.app.db.bootstrap
 
+      # A second Redis that requires a password, for
+      # backend/tests/integration/test_redis_password_auth.py (#236). The
+      # `redis` service above is plaintext and passwordless, and a service
+      # container takes no command, so this one is started here. The password
+      # is generated per run and handed to the tests through GITHUB_ENV.
+      - name: Start a password-protected Redis
+        run: |
+          password="$(openssl rand -hex 16)"
+          echo "::add-mask::${password}"
+          docker run -d --name redis-auth -p 6380:6379 redis:7-alpine \
+            redis-server --requirepass "${password}"
+          for _ in $(seq 1 30); do
+            if docker exec redis-auth redis-cli --no-auth-warning -a "${password}" ping | grep -q PONG; then
+              {
+                echo "REDIS_AUTH_TEST_PORT=6380"
+                echo "REDIS_AUTH_TEST_PASSWORD=${password}"
+              } >> "$GITHUB_ENV"
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs redis-auth
+          exit 1
+
       - name: Run integration tests
         env:
           APP_ENV: test
@@ -107,6 +131,8 @@ jobs:
           POSTGRES_SCHEMA: test_experimentation
           DATABASE_URI: "postgresql://postgres:postgres@localhost:5432/experimentation_test"
           EXPERIMENTLY_REQUIRE_EDITABLE: "1"
+          # The password-protected Redis must be there: a skip is a failure.
+          EXPERIMENTLY_REQUIRE_REDIS_AUTH: "1"
         run: |
           # No marker filter: 30 of the integration files carry no marker and were
           # silently deselected (570 of 1462 tests, including every regression test

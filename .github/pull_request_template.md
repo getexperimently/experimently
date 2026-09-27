@@ -28,3 +28,6 @@
 
 <!-- Anything that touches auth, migrations, the SDK contract or a public API:
      say what breaks if this is wrong and how to undo it. -->
+
+- [ ] No migration, or every migration here is expand-only: it drops or renames
+      nothing the previous release's code uses (that waits for a later release)

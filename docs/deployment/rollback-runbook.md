@@ -27,6 +27,19 @@ Use this tree to decide your response within the first 2 minutes of an issue. Wh
 Post-deployment issue detected
           |
           v
+Did CodeDeploy already roll the API back?
+  (the run ended "Rolled back by an alarm", or get-deployment shows
+   Stopped with ALARM_ACTIVE)
+          |
+    YES --+--→ AN ALARM ROLLED THE API BACK (that section below; no Rollback)
+          |
+    NO    v
+Is CodeDeploy rolling back right now?
+  (an active deployment's creator is codeDeployRollback)
+          |
+    YES --+--→ WAIT for it; Rollback refuses while it is active
+          |
+    NO    v
 Is any of the following true?
   - Health check /health returning non-200
   - 5xx error rate > 5% (vs. pre-deploy baseline)
@@ -61,10 +74,16 @@ Is any of the following true?
 
 **Rollback triggers — no deliberation required:**
 
+While a deploy's CodeDeploy deployment is active (its canary, and the hour
+after its traffic shift), the deployment group's two 5xx alarms act on the
+5xx row by themselves: at least 5 target 5xx and at least 5% of a target
+group's requests in a minute, for 2 minutes of 3, and CodeDeploy rolls the API
+back. The rest of the table, and everything after that hour, is yours.
+
 | Condition | Threshold | Action |
 |-----------|-----------|--------|
 | Health check failure | `/health` returning non-200 | Immediate rollback |
-| 5xx error rate spike | > 5% of requests over 2 min | Immediate rollback |
+| 5xx error rate spike | > 5% of requests over 2 min | Immediate rollback (during a deployment, the alarms do it first) |
 | p99 API latency | > 5000ms sustained for 2 min | Immediate rollback |
 | Data corruption | Any confirmed case | Immediate rollback + escalate |
 | ECS tasks crash-looping | Tasks not stabilizing after 5 min | Immediate rollback |
@@ -102,6 +121,15 @@ It refuses the API half, fails, and says why, in two cases:
   that deployment is active, which can be up to an hour. For the dashboard
   alone, use Method 2's dashboard block. The run also stops nothing when it
   cannot read an in-flight deployment's creator.
+
+It creates its CodeDeploy deployment with the deployment group's alarms
+overridden (`--override-alarm-configuration enabled=false`), always: the
+release being rolled back is usually what holds a 5xx alarm in ALARM, and
+CodeDeploy stops every deployment to the group while one is. The override is
+for that one deployment; the alarms watch the next deploy as before. It needs
+`codedeploy:UpdateDeploymentGroup` on the workflow role
+([IAM permissions](iam-permissions.md)); a role without it fails the rollback
+with `AccessDenied`.
 
 A rollback is reported done only once the run's own deployment has been
 approved and the target is the PRIMARY task set. The run approves it itself;
@@ -422,15 +450,29 @@ After using Method 2, post an incident note in `#deployments` and open a follow-
 
 ---
 
-## Method 3: What CodeDeploy rolls back by itself (little)
+## Method 3: What CodeDeploy rolls back by itself, and when
 
-**The canary is timed only.** The deployment group has no alarms
-(DECISIONS T21). CodeDeploy's own rollback covers only a deployment that
-*fails* or is *stopped*, for example a new task set whose tasks never become
-healthy. A release that passes `/health` and returns errors everywhere else
-passes the canary and reaches 100% of traffic. Nothing rolls it back.
-**Method 1 is the response**, within the hour CodeDeploy keeps the previous
-task set.
+**Alarms watch the API while a deployment is active.** The deployment group
+has two alarms, `experimentation-api-5xx-blue-$ENV` and
+`experimentation-api-5xx-green-$ENV`, one per target group
+([#148](https://github.com/getexperimently/experimently/issues/148)). While
+either is in ALARM during a deployment -- its canary, and the hour after its
+traffic shift -- CodeDeploy stops the deployment and rolls the API back to the
+previous revision by itself: see
+[An alarm rolled the API back](#an-alarm-rolled-the-api-back). A minute counts
+against the API when its target group answers at least 5 target 5xx and at
+least 5% of its requests with a 5xx; two such minutes of three fire the alarm.
+This is expected behaviour, not yet observed in a real account; the first
+staging deploy's forced alarm is where it is first seen.
+
+What the alarms do not cover, so **Method 1 is the response**:
+
+- a release that answers wrongly with a 2xx, or with fewer errors than that;
+- the load balancer's own 502 and 504 (a crashed or timed-out task): they have
+  no target-group dimension, so no alarm watches them;
+- the dashboard: an alarm rolls back the API only;
+- anything after the hour CodeDeploy keeps the previous task set, when the
+  deployment is no longer active and no alarm acts on it.
 
 **Rollback before a fix-forward.** Within the hour after a deploy's traffic
 shift, the deploy workflow refuses a new release while that deployment is
@@ -442,12 +484,8 @@ deployment in the group, Rollback's included. This is expected behaviour, to be
 observed on the first staging deploy
 ([deployment guide, section 3](deployment-guide.md#3-every-deploy)).
 
-**Before the first production deploy**, alarm-based rollback
-([#148](https://github.com/getexperimently/experimently/issues/148)) is in
-place, or the founder has waived it in writing. Until then this section
-describes the whole of the automatic protection.
-
 **When CodeDeploy does roll back by itself:**
+- one of the two 5xx alarms is in ALARM while the deployment is active (above);
 - the new task set's tasks never become healthy, so the deployment fails
   before any traffic moves (the deploy workflow also refuses to approve the
   shift until every target is healthy);
@@ -477,6 +515,94 @@ aws deploy get-deployment \
 ```
 
 This immediately reverts traffic to the previous (blue) target group. The green tasks are terminated and the old task definition remains active.
+
+---
+
+## An alarm rolled the API back
+
+The deploy run ended **"Rolled back by an alarm"** (or, after the run went
+green, `get-deployment` shows the deployment `Stopped` with `ALARM_ACTIVE`).
+CodeDeploy has stopped the deployment and is moving the API back to the
+revision that served before it. There is nothing to roll back for the API.
+
+1. **Confirm it.** The status, who created the deployment, why it stopped, and
+   CodeDeploy's rollback deployment:
+
+    ```{.bash skip reason="aws: reads a real CodeDeploy deployment"}
+    aws deploy get-deployment --deployment-id d-XXXXXXXXX --query 'deploymentInfo.{status:status,creator:creator,error:errorInformation,rollback:rollbackInfo}'
+    ```
+
+2. **See what the alarm saw.** Its history, then the API's log
+   (`/ecs/experimentation-backend-$ENV`) for the same minutes:
+
+    ```{.bash skip reason="aws: reads the real alarms' history"}
+    aws cloudwatch describe-alarm-history --alarm-name "experimentation-api-5xx-green-$ENV" --history-item-type StateUpdate --max-records 10
+    ```
+
+    The blue alarm is `experimentation-api-5xx-blue-$ENV`; the run named the
+    one that fired.
+
+3. **Check the API is back**: the revision serving before the deploy is the
+   PRIMARY task set again (Step 1, Option B), or, with the run summary's
+   "API serving before this run" value:
+   `python3 scripts/api_serving.py experimentation-$ENV experimentation-backend-$ENV <that ARN>`
+   exits 0.
+4. **The dashboard.** If the alarm fired in the canary, the run stopped before
+   the dashboard and it was not changed. If it fired in the hour after the
+   shift, the dashboard is on the new release in front of the old API: put it
+   back with Method 2's dashboard block, using the summary's "Dashboard serving
+   before this run" value.
+5. **Do not dispatch Rollback while CodeDeploy's rollback is active.** Its
+   deployment's `creator` is `codeDeployRollback`. Rollback refuses while it is
+   active, which can be up to an hour, and would have nothing to do for the API
+   anyway.
+6. **The migration stays applied.** The database is at the new release's
+   heads, with the previous revision serving on it. That is safe only for a
+   [backward-compatible migration](deployment-guide.md#backward-compatible-migrations);
+   otherwise see the Database Rollback Procedure below.
+7. **Do not redeploy the same tag.** It will meet the same alarm. Fix it and
+   cut a new release, and note the bad release in the incident record.
+8. **A false alarm** -- a good release rolled back -- is possible: the alarm
+   also watches the release that was serving before (it is on the other target
+   group), and it counts every 5xx the API answers, including a failing
+   dependency's. Compare the alarm's timeline with the release's and the
+   dependency's, write down what you find, and change the alarm (in
+   `infrastructure/cdk/stacks/fargate_service_stack.py`) before redeploying.
+
+## Fix forward while an alarm is firing
+
+CodeDeploy stops **every** deployment to the group while either 5xx alarm is
+in ALARM, a fix included. That is right when the release being replaced is the
+one failing, and Rollback (Method 1) handles it: Rollback always overrides the
+alarms for its own deployment. It is wrong in two cases:
+
+- the bug is in the release you would roll back to as well, so rolling back
+  does not help and only a new release fixes it;
+- a dependency outage holds the alarm in ALARM, and the fix is a configuration
+  change that has to ship during it.
+
+For those, Deploy has a break-glass: tick **`override_alarms`** and give
+**`override_alarms_reason`**. The run's name then ends in `ALARMS OVERRIDDEN`,
+which is what the environment's reviewer sees when asked to approve it: the
+reviewer is the check. Deploy refuses the tick-box without a reason, and a
+reason without the tick-box.
+
+What it gives up: **no alarm watches that deployment**, in its canary or in
+the hour after its shift, and nothing rolls it back by itself. The run summary
+and the Slack message say so, with the reason. If the fix is bad, roll back
+with Method 1 within that hour. The override is on that one deployment only,
+so the next deploy is watched again with no action from anyone.
+
+`aws cloudwatch disable-alarm-actions` and `aws cloudwatch set-alarm-state` do
+not unblock a deploy. CodeDeploy reads the alarms' state, not their actions,
+and a state set by hand lasts only until the next evaluation, about a minute.
+This is expected, not yet verified: the first staging rehearsal checks it.
+
+To see which alarm is firing, and since when:
+
+```{.bash skip reason="aws: reads the real alarms' state"}
+aws cloudwatch describe-alarms --alarm-names "experimentation-api-5xx-blue-$ENV" "experimentation-api-5xx-green-$ENV" --query 'MetricAlarms[].{name:AlarmName,state:StateValue,since:StateUpdatedTimestamp,reason:StateReason}'
+```
 
 ---
 
