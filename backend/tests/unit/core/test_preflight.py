@@ -10,6 +10,7 @@ setting wrong in an otherwise good environment, and the check must name it.
 
 from __future__ import annotations
 
+import base64
 import os
 import subprocess
 import sys
@@ -438,6 +439,68 @@ def test_the_audit_key_is_judged_as_the_modules_settings_judge_it(audit_key, ref
     assert (result.returncode != 0) is refused, result.stderr[-2000:]
     if refused:
         assert "AUDIT_HMAC_KEY" in result.stderr
+    else:
+        assert "modules settings built" in result.stdout
+
+
+# ---------------------------------------------------------------------------
+# WAREHOUSE_CREDENTIALS_KEYS: optional, but usable when set (full profile)
+# ---------------------------------------------------------------------------
+
+_FERNET_A = base64.urlsafe_b64encode(b"a" * 32).decode()
+_FERNET_B = base64.urlsafe_b64encode(b"b" * 32).decode()
+
+_CREDENTIAL_KEYS_CASES = [
+    (None, False),
+    ("", False),
+    (_FERNET_A, False),
+    (f"{_FERNET_B},{_FERNET_A}", False),
+    ("not-a-fernet-key", True),
+    (base64.urlsafe_b64encode(b"a" * 31).decode(), True),
+    (f"{_FERNET_A},", True),
+    (f"{_FERNET_A},changeme", True),
+    ("changeme", True),
+    ("test-credentials-key", True),
+]
+
+
+@pytest.mark.parametrize("keys, refused", _CREDENTIAL_KEYS_CASES)
+def test_credential_keys_are_checked_in_the_full_profile(keys, refused):
+    problems = check(with_(WAREHOUSE_CREDENTIALS_KEYS=keys), full_profile=True)
+    if refused:
+        only_problem(problems, "WAREHOUSE_CREDENTIALS_KEYS")
+        assert keys not in problems[0]
+    else:
+        assert problems == []
+
+
+def test_credential_keys_are_not_checked_in_the_core_profile():
+    env = with_(AUDIT_HMAC_KEY=None, WAREHOUSE_CREDENTIALS_KEYS="not-a-fernet-key")
+    assert check(env, full_profile=False) == []
+
+
+def test_credential_keys_are_not_checked_in_development():
+    env = {"ENVIRONMENT": "development", "WAREHOUSE_CREDENTIALS_KEYS": "junk"}
+    assert check(env, full_profile=True) == []
+
+
+@pytest.mark.regression
+@pytest.mark.skipif(not _HAS_MODULES, reason="core checkout: no modules package")
+@pytest.mark.parametrize("keys, refused", _CREDENTIAL_KEYS_CASES)
+def test_credential_keys_are_judged_as_the_modules_settings_judge_them(keys, refused):
+    env = with_(WAREHOUSE_CREDENTIALS_KEYS=keys)
+    assert bool(check(env, full_profile=True)) is refused
+    result = subprocess.run(
+        [sys.executable, "-c", _BUILD_MODULE_SETTINGS],
+        cwd=REPO_ROOT,
+        env={"PATH": os.environ.get("PATH", ""), "PYTHONPATH": str(REPO_ROOT), **env},
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert (result.returncode != 0) is refused, result.stderr[-2000:]
+    if refused:
+        assert "WAREHOUSE_CREDENTIALS_KEYS" in result.stderr
     else:
         assert "modules settings built" in result.stdout
 
