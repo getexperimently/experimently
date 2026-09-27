@@ -27,7 +27,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import func, text
 from sqlalchemy.orm import sessionmaker
 
-from backend.app.api import deps
+from backend.app.api import deps, sdk_scope
 from backend.app.api.v1.endpoints import flag_evaluations
 from backend.app.core.config import settings
 from backend.app.core.safety_scheduler import SafetyScheduler
@@ -285,6 +285,98 @@ class TestScope:
         flag = flags()
 
         resp = _post(client, unscoped["key"], _entry(flag.key, 5))
+
+        assert resp.status_code == 403, resp.text
+        assert _recorded(db_session, flag) == 0
+
+
+# ---------------------------------------------------------------------------
+# The owner's role: the scope takes effect only while its owner can change flags
+# ---------------------------------------------------------------------------
+
+
+def _make_actor(db_session, role, is_superuser=False):
+    suffix = uuid.uuid4().hex[:8]
+    user = User(
+        username=f"evals_{role.value}_{suffix}",
+        email=f"evals_{role.value}_{suffix}@evals.test",
+        full_name="Evaluations Actor",
+        hashed_password=get_password_hash("Demo1234!"),
+        is_active=True,
+        is_superuser=is_superuser,
+        role=role,
+    )
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+    return user
+
+
+def _stored_scoped_key(client, db_session, user) -> dict:
+    """A key created through the API, its scope written the way a 0.7.0 database
+    could hold it (0.7.0 let any role create an ``sdk:ruleset`` key)."""
+    created = _create_key(client, user)
+    db_session.query(APIKey).filter(APIKey.id == uuid.UUID(created["id"])).update(
+        {"scopes": "sdk:ruleset"}, synchronize_session=False
+    )
+    db_session.commit()
+    return created
+
+
+class TestOwnerRole:
+    @pytest.mark.parametrize(
+        ("role", "is_superuser", "expected"),
+        [
+            (UserRole.VIEWER, True, 201),
+            (UserRole.ADMIN, False, 201),
+            (UserRole.DEVELOPER, False, 201),
+            (UserRole.ANALYST, False, 403),
+            (UserRole.VIEWER, False, 403),
+        ],
+        ids=["superuser", "admin", "developer", "analyst", "viewer"],
+    )
+    def test_each_actor(self, client, db_session, flags, role, is_superuser, expected):
+        owner = _make_actor(db_session, role, is_superuser=is_superuser)
+        key = _stored_scoped_key(client, db_session, owner)
+        flag = flags()
+
+        resp = _post(client, key["key"], _entry(flag.key, 5))
+
+        assert resp.status_code == expected, resp.text
+        if expected == 403:
+            assert resp.json()["detail"] == sdk_scope.OWNER_ROLE_DETAIL
+            assert _recorded(db_session, flag) == 0
+        else:
+            assert _recorded(db_session, flag) == 5
+
+    @pytest.mark.regression
+    def test_a_developer_key_stops_working_when_its_owner_is_demoted(
+        self, client, db_session, flags
+    ):
+        owner = _make_actor(db_session, UserRole.DEVELOPER)
+        key = _create_key(client, owner, scopes=["sdk:ruleset"])
+        flag = flags()
+        assert _post(client, key["key"], _entry(flag.key, 5)).status_code == 201
+
+        db_session.query(User).filter(User.id == owner.id).update(
+            {"role": UserRole.VIEWER}, synchronize_session=False
+        )
+        db_session.commit()
+
+        resp = _post(client, key["key"], _entry(flag.key, 5))
+        assert resp.status_code == 403, resp.text
+        assert resp.json()["detail"] == sdk_scope.OWNER_ROLE_DETAIL
+        assert _recorded(db_session, flag) == 5
+
+    @pytest.mark.regression
+    def test_a_stored_scope_on_a_viewers_key_is_refused(
+        self, client, db_session, flags
+    ):
+        owner = _make_actor(db_session, UserRole.VIEWER)
+        key = _stored_scoped_key(client, db_session, owner)
+        flag = flags()
+
+        resp = _post(client, key["key"], _entry(flag.key, 5))
 
         assert resp.status_code == 403, resp.text
         assert _recorded(db_session, flag) == 0
