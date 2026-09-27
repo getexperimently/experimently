@@ -236,6 +236,14 @@ assert_migrations() {
         -o jsonpath='{.items[*].metadata.name}')
     for pod in $pods; do
         n=$((n + 1))
+        # A bootstrap that failed and was retried leaves only the retry's log
+        # behind, so the counts below cannot see it; its restart can.
+        c=$(kubectl get pod -n "$ns" "$pod" \
+            -o jsonpath='{.status.initContainerStatuses[?(@.name=="migrate")].restartCount}')
+        if [ "${c:-0}" -ne 0 ]; then
+            kubectl logs -n "$ns" "$pod" -c migrate --previous --tail=40 || true
+            fail "$pod: the migrate container restarted $c time(s): a bootstrap failed and was retried"
+        fi
         kubectl logs -n "$ns" "$pod" -c migrate >"$WORK/$pod.migrate.log"
         kubectl logs -n "$ns" "$pod" -c api >"$WORK/$pod.api.log"
         c=$(grep -c 'Database bootstrap complete (created)' "$WORK/$pod.migrate.log" || true)

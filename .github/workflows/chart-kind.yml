@@ -7,16 +7,17 @@ name: Chart (kind)
 # scripts/chart_kind.sh; the `chart` workflow checks the chart without a
 # cluster.
 #
-# Profiles: `core` on every run. `full` on main, nightly and by hand, not on
-# pull requests: it adds a second pair of image builds and a second cluster
-# run to every pull request's bill.
+# Profiles: both, on every run, as parallel jobs. Measured on the first runs
+# (2026-09-27): core about 4 minutes, full about 5.5, most of the difference
+# the full dashboard image's build. If full grows past the budget, the plan's
+# fallback is to run it nightly only.
 #
 # Not a required check. It has a path filter, so it does not report on a pull
 # request that touches none of those paths, and a required check that never
 # reports blocks the merge. Making it required is a later, human step: measure
 # its runtime over five or more runs, make it always report (a `changes` job
 # that skips the work, the way pr-qa-gate's docs-only gate does), then add
-# `chart-kind (core)` to branch protection.
+# `chart-kind (core)` and `chart-kind (full)` to branch protection.
 
 on:
   pull_request:
@@ -62,31 +63,14 @@ env:
   KIND_HOST: experimently.kind.test
 
 jobs:
-  profiles:
-    name: profiles
-    runs-on: ubuntu-latest
-    outputs:
-      profiles: ${{ steps.pick.outputs.profiles }}
-    steps:
-      - id: pick
-        env:
-          EVENT: ${{ github.event_name }}
-        run: |
-          if [ "$EVENT" = pull_request ]; then
-            echo 'profiles=["core"]' >> "$GITHUB_OUTPUT"
-          else
-            echo 'profiles=["core","full"]' >> "$GITHUB_OUTPUT"
-          fi
-
   chart-kind:
     name: chart-kind (${{ matrix.profile }})
-    needs: profiles
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        profile: ${{ fromJSON(needs.profiles.outputs.profiles) }}
+        profile: [core, full]
     env:
       PROFILE: ${{ matrix.profile }}
       API_IMAGE: chart-kind-api:${{ matrix.profile }}
