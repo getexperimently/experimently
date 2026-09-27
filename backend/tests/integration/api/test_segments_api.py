@@ -800,3 +800,56 @@ class TestPreviewAudience:
         assert data["estimated_percentage"] >= 0
         assert data["sample_size"] >= 0
         assert data["matched"] >= 0
+
+    @pytest.mark.regression
+    def test_preview_refuses_eleven_match_regex_conditions(self, admin_client):
+        """More than 10 match_regex conditions is a 422 on rules, not a preview."""
+        seg = _create_segment(admin_client, "Regex Limit Segment")
+        conditions = [
+            {"attribute": "email", "operator": "match_regex", "value": f"^u{i}"}
+            for i in range(11)
+        ]
+        response = admin_client.post(
+            f"/api/v1/segments/{seg['id']}/preview?sample_size=10",
+            json={"name": seg["name"], "rules": {"conditions": conditions}},
+        )
+        assert response.status_code == 422, response.text
+        [error] = response.json()["detail"]
+        assert error["loc"] == ["body", "rules"]
+        assert error["type"] == "value_error"
+
+    @pytest.mark.regression
+    def test_preview_accepts_ten_match_regex_conditions_at_sample_size_50(
+        self, admin_client
+    ):
+        """10 match_regex conditions x sample_size 50 is at the limit and previews."""
+        seg = _create_segment(admin_client, "Regex At Limit Segment")
+        conditions = [
+            {"attribute": "email", "operator": "match_regex", "value": f"^u{i}"}
+            for i in range(10)
+        ]
+        response = admin_client.post(
+            f"/api/v1/segments/{seg['id']}/preview?sample_size=50",
+            json={"name": seg["name"], "rules": {"conditions": conditions}},
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["sample_size"] <= 50
+
+    @pytest.mark.regression
+    def test_preview_refuses_a_sample_size_the_match_regex_conditions_exceed(
+        self, admin_client
+    ):
+        """One match_regex condition at the default sample_size (1000) is a 422."""
+        seg = _create_segment(admin_client, "Regex Sample Segment")
+        rules = {
+            "conditions": [
+                {"attribute": "email", "operator": "match_regex", "value": "x"}
+            ]
+        }
+        response = admin_client.post(
+            f"/api/v1/segments/{seg['id']}/preview",
+            json={"name": seg["name"], "rules": rules},
+        )
+        assert response.status_code == 422, response.text
+        [error] = response.json()["detail"]
+        assert error["loc"] == ["query", "sample_size"]
