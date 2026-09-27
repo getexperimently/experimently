@@ -221,7 +221,7 @@ SDK clients and server-to-server integrations use **API keys** instead of JWT to
 
 - Created by admins via `POST /api/v1/api-keys`
 - Passed in the `X-API-Key: <key>` header
-- Scoped to specific operations (read, write, or admin)
+- Not limited by their `scopes` today: any active key authenticates every API-key route as the user who created it (see [API Key Management](../security/api-keys.md#scopes))
 - Revocable without affecting user accounts
 
 ### Role-Based Access Control
