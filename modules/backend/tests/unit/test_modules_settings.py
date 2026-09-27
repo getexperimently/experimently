@@ -246,6 +246,34 @@ class TestRegistrationValidates:
             monkeypatch.undo()
             modules_settings.load_modules_settings(force=True)
 
+    @pytest.mark.regression
+    def test_malformed_credential_keys_in_production_fail_the_registration(
+        self, fresh_hooks, monkeypatch
+    ):
+        """``WAREHOUSE_CREDENTIALS_KEYS`` is optional, but a value that is not
+        a list of Fernet keys stops a production full profile: the
+        registration fails, naming the setting and not the value, and the
+        bootstrap's ``require_modules_or_absent`` then refuses to start."""
+        from backend.app.core.config import settings as core
+
+        rejected = "SENTINEL-not-a-fernet-key-4b1d"
+        monkeypatch.delenv("TESTING", raising=False)
+        monkeypatch.setenv("AUDIT_HMAC_KEY", "c" * 64)
+        monkeypatch.setenv("WAREHOUSE_CREDENTIALS_KEYS", rejected)
+        monkeypatch.setattr(core, "ENVIRONMENT", "production")
+        monkeypatch.setattr(modules_settings, "_instance", None)
+        try:
+            assert modules_loader.load_modules(force=True) is False
+            failure = modules_loader.modules_failure() or ""
+            assert "WAREHOUSE_CREDENTIALS_KEYS" in failure, failure
+            assert rejected not in failure
+            with pytest.raises(RuntimeError) as excinfo:
+                modules_loader.require_modules_or_absent()
+            assert rejected not in str(excinfo.value)
+        finally:
+            monkeypatch.undo()
+            modules_settings.load_modules_settings(force=True)
+
     def test_registration_succeeds_under_test_settings(self, fresh_hooks):
         assert modules_loader.load_modules(force=True) is True
         assert modules_loader.modules_failure() is None

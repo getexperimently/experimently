@@ -311,6 +311,10 @@ modules/backend/tests/smoke/test_module_route_table.py
 modules/backend/tests/unit/services/test_bandit_scheduler_counters.py
 modules/backend/tests/unit/db/test_autogenerate_filters_names.py
 modules/backend/tests/unit/test_modules_settings.py
+# The helper that encrypts stored credentials with the operator's
+# WAREHOUSE_CREDENTIALS_KEYS, for any module that stores one.
+modules/backend/app/core/credential_crypto.py
+modules/backend/tests/unit/core/test_credential_crypto.py
 
 # (Every entry in this file must exist -- test_every_manifest_path_exists
 # checks. There is no gate between the profiles: an installed module is
