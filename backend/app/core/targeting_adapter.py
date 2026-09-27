@@ -214,6 +214,10 @@ def match_targeting_rule(
     user itself (the flag service hashes ``user_id:flag.key`` so a rule at N%
     selects the same users as the global rollout at N%). When nothing matches
     the ``default_rule`` is returned, mirroring the engine.
+
+    :class:`backend.app.core.pattern_match.PatternUnevaluable` propagates
+    unchanged: when a pattern condition cannot be evaluated the caller abandons
+    the whole ruleset, and neither a later rule nor ``default_rule`` applies.
     """
     if rules is None:
         return None

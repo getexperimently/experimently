@@ -20,6 +20,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from backend.app.api import deps
+from backend.app.core.permissions import can_read_all_audit_logs
 from backend.app.main import app
 from backend.app.models.audit_log import ActionType, AuditLog, EntityType
 from backend.app.models.user import User, UserRole
@@ -29,15 +30,19 @@ from backend.app.services.audit_service import AuditService
 class TestAuditLogsAPI:
     """Test cases for audit logs API endpoints."""
 
-    def setup_test_user(self, role: UserRole = UserRole.ADMIN):
-        """Setup a test user with specified role."""
+    def setup_test_user(
+        self, role: UserRole = UserRole.ADMIN, is_superuser: bool = False
+    ):
+        """A user with *role*. Not a superuser unless asked, so the role
+        itself decides what the endpoints return; nothing here patches the
+        permission rule."""
         return User(
             id=uuid4(),
             username="testuser",
             email="test@example.com",
             hashed_password="$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW",
             role=role,
-            is_superuser=(role == UserRole.ADMIN),
+            is_superuser=is_superuser,
         )
 
     @contextmanager
@@ -90,11 +95,15 @@ class TestAuditLogsAPI:
 
         return user, audit_logs
 
-    def test_list_audit_logs_success(self):
+    @pytest.mark.parametrize(
+        "role,superuser",
+        [(UserRole.ADMIN, False), (UserRole.ANALYST, False), (UserRole.VIEWER, True)],
+    )
+    def test_list_audit_logs_success(self, role, superuser):
         """Test successful audit logs listing."""
         # Setup mocks
         mock_db = Mock(spec=Session)
-        mock_user = self.setup_test_user(UserRole.ADMIN)
+        mock_user = self.setup_test_user(role, is_superuser=superuser)
 
         # Mock audit service response
         mock_audit_logs = [
@@ -120,15 +129,11 @@ class TestAuditLogsAPI:
             with patch.object(
                 AuditService, "get_audit_logs", return_value=(mock_audit_logs, 1)
             ):
-                with patch(
-                    "backend.app.api.v1.endpoints.audit_logs.check_permission",
-                    return_value=True,
-                ):
-                    client = TestClient(app)
-                    response = client.get(
-                        "/api/v1/audit-logs/",
-                        headers={"Authorization": "Bearer test-token"},
-                    )
+                client = TestClient(app)
+                response = client.get(
+                    "/api/v1/audit-logs/",
+                    headers={"Authorization": "Bearer test-token"},
+                )
 
         assert response.status_code == 200
         data = response.json()
@@ -145,56 +150,52 @@ class TestAuditLogsAPI:
         # Setup mocks
         mock_db = Mock(spec=Session)
         mock_user = self.setup_test_user(UserRole.ADMIN)
+        other_user_id = uuid4()
 
         with self.override_deps(mock_user, mock_db):
             with patch.object(
                 AuditService, "get_audit_logs", return_value=([], 0)
             ) as mock_get_logs:
-                with patch(
-                    "backend.app.api.v1.endpoints.audit_logs.check_permission",
-                    return_value=True,
-                ):
-                    client = TestClient(app)
-                    response = client.get(
-                        "/api/v1/audit-logs/",
-                        params={
-                            "user_id": str(uuid4()),
-                            "entity_type": "feature_flag",
-                            "action_type": "toggle_enable",
-                            "page": 2,
-                            "limit": 25,
-                        },
-                        headers={"Authorization": "Bearer test-token"},
-                    )
+                client = TestClient(app)
+                response = client.get(
+                    "/api/v1/audit-logs/",
+                    params={
+                        "user_id": str(other_user_id),
+                        "entity_type": "feature_flag",
+                        "action_type": "toggle_enable",
+                        "page": 2,
+                        "limit": 25,
+                    },
+                    headers={"Authorization": "Bearer test-token"},
+                )
 
         assert response.status_code == 200
         # Verify the service was called with correct parameters
         mock_get_logs.assert_called_once()
         call_args = mock_get_logs.call_args
+        assert call_args.kwargs["user_id"] == other_user_id
         assert call_args.kwargs["page"] == 2
         assert call_args.kwargs["limit"] == 25
         assert call_args.kwargs["entity_type"] == EntityType.FEATURE_FLAG
         assert call_args.kwargs["action_type"] == ActionType.TOGGLE_ENABLE
 
-    def test_list_audit_logs_permission_restricted(self):
-        """Test that regular users can only see their own logs."""
-        # Setup mocks
+    @pytest.mark.parametrize("role", [UserRole.DEVELOPER, UserRole.VIEWER])
+    def test_list_audit_logs_permission_restricted(self, role):
+        """DEVELOPER and VIEWER list only their own entries, even when they
+        ask for another user's."""
         mock_db = Mock(spec=Session)
-        mock_user = self.setup_test_user(UserRole.VIEWER)
+        mock_user = self.setup_test_user(role)
 
         with self.override_deps(mock_user, mock_db):
             with patch.object(
                 AuditService, "get_audit_logs", return_value=([], 0)
             ) as mock_get_logs:
-                with patch(
-                    "backend.app.api.v1.endpoints.audit_logs.check_permission",
-                    return_value=False,
-                ):
-                    client = TestClient(app)
-                    response = client.get(
-                        "/api/v1/audit-logs/",
-                        headers={"Authorization": "Bearer test-token"},
-                    )
+                client = TestClient(app)
+                response = client.get(
+                    "/api/v1/audit-logs/",
+                    params={"user_id": str(uuid4())},
+                    headers={"Authorization": "Bearer test-token"},
+                )
 
         assert response.status_code == 200
         # Verify the service was called with user's ID restriction
@@ -208,16 +209,12 @@ class TestAuditLogsAPI:
         mock_user = self.setup_test_user(UserRole.ADMIN)
 
         with self.override_deps(mock_user, mock_db):
-            with patch(
-                "backend.app.api.v1.endpoints.audit_logs.check_permission",
-                return_value=True,
-            ):
-                client = TestClient(app)
-                response = client.get(
-                    "/api/v1/audit-logs/",
-                    params={"entity_type": "invalid_entity_type"},
-                    headers={"Authorization": "Bearer test-token"},
-                )
+            client = TestClient(app)
+            response = client.get(
+                "/api/v1/audit-logs/",
+                params={"entity_type": "invalid_entity_type"},
+                headers={"Authorization": "Bearer test-token"},
+            )
 
         assert response.status_code == 400
         assert "Invalid entity type" in response.json()["detail"]
@@ -232,28 +229,28 @@ class TestAuditLogsAPI:
         to_date = from_date - timedelta(days=1)  # Invalid: to_date before from_date
 
         with self.override_deps(mock_user, mock_db):
-            with patch(
-                "backend.app.api.v1.endpoints.audit_logs.check_permission",
-                return_value=True,
-            ):
-                client = TestClient(app)
-                response = client.get(
-                    "/api/v1/audit-logs/",
-                    params={
-                        "from_date": from_date.isoformat(),
-                        "to_date": to_date.isoformat(),
-                    },
-                    headers={"Authorization": "Bearer test-token"},
-                )
+            client = TestClient(app)
+            response = client.get(
+                "/api/v1/audit-logs/",
+                params={
+                    "from_date": from_date.isoformat(),
+                    "to_date": to_date.isoformat(),
+                },
+                headers={"Authorization": "Bearer test-token"},
+            )
 
         assert response.status_code == 400
         assert "to_date must be after from_date" in response.json()["detail"]
 
-    def test_get_entity_audit_history_success(self):
+    @pytest.mark.parametrize(
+        "role,superuser",
+        [(UserRole.ADMIN, False), (UserRole.ANALYST, False), (UserRole.VIEWER, True)],
+    )
+    def test_get_entity_audit_history_success(self, role, superuser):
         """Test successful entity audit history retrieval."""
         # Setup mocks
         mock_db = Mock(spec=Session)
-        mock_user = self.setup_test_user(UserRole.ADMIN)
+        mock_user = self.setup_test_user(role, is_superuser=superuser)
 
         entity_id = uuid4()
         mock_audit_logs = [
@@ -279,48 +276,44 @@ class TestAuditLogsAPI:
             with patch.object(
                 AuditService, "get_entity_audit_history", return_value=mock_audit_logs
             ):
-                with patch(
-                    "backend.app.api.v1.endpoints.audit_logs.check_permission",
-                    return_value=True,
-                ):
-                    client = TestClient(app)
-                    response = client.get(
-                        f"/api/v1/audit-logs/entity/feature_flag/{entity_id}",
-                        headers={"Authorization": "Bearer test-token"},
-                    )
-
-        assert response.status_code == 200
-        data = response.json()
-        assert isinstance(data, list)
-        assert len(data) == 1
-
-    def test_get_entity_audit_history_permission_denied(self):
-        """Test permission denial for entity audit history."""
-        # Setup mocks
-        mock_db = Mock(spec=Session)
-        mock_user = self.setup_test_user(UserRole.VIEWER)
-
-        entity_id = uuid4()
-
-        with self.override_deps(mock_user, mock_db):
-            with patch(
-                "backend.app.api.v1.endpoints.audit_logs.check_permission",
-                return_value=False,
-            ):
                 client = TestClient(app)
                 response = client.get(
                     f"/api/v1/audit-logs/entity/feature_flag/{entity_id}",
                     headers={"Authorization": "Bearer test-token"},
                 )
 
+        assert response.status_code == 200
+        data = response.json()
+        assert isinstance(data, list)
+        assert len(data) == 1
+
+    @pytest.mark.parametrize("role", [UserRole.DEVELOPER, UserRole.VIEWER])
+    def test_get_entity_audit_history_permission_denied(self, role):
+        """DEVELOPER and VIEWER are refused the per-entity history."""
+        mock_db = Mock(spec=Session)
+        mock_user = self.setup_test_user(role)
+
+        entity_id = uuid4()
+
+        with self.override_deps(mock_user, mock_db):
+            client = TestClient(app)
+            response = client.get(
+                f"/api/v1/audit-logs/entity/feature_flag/{entity_id}",
+                headers={"Authorization": "Bearer test-token"},
+            )
+
         assert response.status_code == 403
         assert "Not enough permissions" in response.json()["detail"]
 
-    def test_get_user_activity_success(self):
+    @pytest.mark.parametrize(
+        "role,superuser",
+        [(UserRole.ADMIN, False), (UserRole.ANALYST, False), (UserRole.VIEWER, True)],
+    )
+    def test_get_user_activity_success(self, role, superuser):
         """Test successful user activity retrieval."""
         # Setup mocks
         mock_db = Mock(spec=Session)
-        mock_user = self.setup_test_user(UserRole.ADMIN)
+        mock_user = self.setup_test_user(role, is_superuser=superuser)
 
         target_user_id = uuid4()
         mock_audit_logs = [
@@ -346,26 +339,22 @@ class TestAuditLogsAPI:
             with patch.object(
                 AuditService, "get_user_activity", return_value=mock_audit_logs
             ):
-                with patch(
-                    "backend.app.api.v1.endpoints.audit_logs.check_permission",
-                    return_value=True,
-                ):
-                    client = TestClient(app)
-                    response = client.get(
-                        f"/api/v1/audit-logs/user/{target_user_id}",
-                        headers={"Authorization": "Bearer test-token"},
-                    )
+                client = TestClient(app)
+                response = client.get(
+                    f"/api/v1/audit-logs/user/{target_user_id}",
+                    headers={"Authorization": "Bearer test-token"},
+                )
 
         assert response.status_code == 200
         data = response.json()
         assert isinstance(data, list)
         assert len(data) == 1
 
-    def test_get_user_activity_own_data(self):
-        """Test that users can access their own activity."""
-        # Setup mocks
+    @pytest.mark.parametrize("role", [UserRole.DEVELOPER, UserRole.VIEWER])
+    def test_get_user_activity_own_data(self, role):
+        """Every role can read its own activity."""
         mock_db = Mock(spec=Session)
-        mock_user = self.setup_test_user(UserRole.VIEWER)
+        mock_user = self.setup_test_user(role)
 
         mock_audit_logs = []
 
@@ -373,45 +362,41 @@ class TestAuditLogsAPI:
             with patch.object(
                 AuditService, "get_user_activity", return_value=mock_audit_logs
             ):
-                with patch(
-                    "backend.app.api.v1.endpoints.audit_logs.check_permission",
-                    return_value=False,
-                ):
-                    client = TestClient(app)
-                    response = client.get(
-                        f"/api/v1/audit-logs/user/{mock_user.id}",
-                        headers={"Authorization": "Bearer test-token"},
-                    )
+                client = TestClient(app)
+                response = client.get(
+                    f"/api/v1/audit-logs/user/{mock_user.id}",
+                    headers={"Authorization": "Bearer test-token"},
+                )
 
         assert response.status_code == 200
 
-    def test_get_user_activity_permission_denied(self):
-        """Test permission denial for other user's activity."""
-        # Setup mocks
+    @pytest.mark.parametrize("role", [UserRole.DEVELOPER, UserRole.VIEWER])
+    def test_get_user_activity_permission_denied(self, role):
+        """DEVELOPER and VIEWER are refused another user's activity."""
         mock_db = Mock(spec=Session)
-        mock_user = self.setup_test_user(UserRole.VIEWER)
+        mock_user = self.setup_test_user(role)
 
         other_user_id = uuid4()
 
         with self.override_deps(mock_user, mock_db):
-            with patch(
-                "backend.app.api.v1.endpoints.audit_logs.check_permission",
-                return_value=False,
-            ):
-                client = TestClient(app)
-                response = client.get(
-                    f"/api/v1/audit-logs/user/{other_user_id}",
-                    headers={"Authorization": "Bearer test-token"},
-                )
+            client = TestClient(app)
+            response = client.get(
+                f"/api/v1/audit-logs/user/{other_user_id}",
+                headers={"Authorization": "Bearer test-token"},
+            )
 
         assert response.status_code == 403
         assert "Not enough permissions" in response.json()["detail"]
 
-    def test_get_audit_stats_success(self):
+    @pytest.mark.parametrize(
+        "role,superuser",
+        [(UserRole.ADMIN, False), (UserRole.ANALYST, False), (UserRole.VIEWER, True)],
+    )
+    def test_get_audit_stats_success(self, role, superuser):
         """Test successful audit statistics retrieval."""
         # Setup mocks
         mock_db = Mock(spec=Session)
-        mock_user = self.setup_test_user(UserRole.ADMIN)
+        mock_user = self.setup_test_user(role, is_superuser=superuser)
 
         mock_stats = {
             "total_logs": 100,
@@ -436,15 +421,11 @@ class TestAuditLogsAPI:
 
         with self.override_deps(mock_user, mock_db):
             with patch.object(AuditService, "get_audit_stats", return_value=mock_stats):
-                with patch(
-                    "backend.app.api.v1.endpoints.audit_logs.check_permission",
-                    return_value=True,
-                ):
-                    client = TestClient(app)
-                    response = client.get(
-                        "/api/v1/audit-logs/stats",
-                        headers={"Authorization": "Bearer test-token"},
-                    )
+                client = TestClient(app)
+                response = client.get(
+                    "/api/v1/audit-logs/stats",
+                    headers={"Authorization": "Bearer test-token"},
+                )
 
         assert response.status_code == 200
         data = response.json()
@@ -453,22 +434,18 @@ class TestAuditLogsAPI:
         assert "entity_counts" in data
         assert "most_active_users" in data
 
-    def test_get_audit_stats_permission_denied(self):
-        """Test permission denial for audit statistics."""
-        # Setup mocks
+    @pytest.mark.parametrize("role", [UserRole.DEVELOPER, UserRole.VIEWER])
+    def test_get_audit_stats_permission_denied(self, role):
+        """DEVELOPER and VIEWER are refused the statistics."""
         mock_db = Mock(spec=Session)
-        mock_user = self.setup_test_user(UserRole.VIEWER)
+        mock_user = self.setup_test_user(role)
 
         with self.override_deps(mock_user, mock_db):
-            with patch(
-                "backend.app.api.v1.endpoints.audit_logs.check_permission",
-                return_value=False,
-            ):
-                client = TestClient(app)
-                response = client.get(
-                    "/api/v1/audit-logs/stats",
-                    headers={"Authorization": "Bearer test-token"},
-                )
+            client = TestClient(app)
+            response = client.get(
+                "/api/v1/audit-logs/stats",
+                headers={"Authorization": "Bearer test-token"},
+            )
 
         assert response.status_code == 403
         assert "Not enough permissions" in response.json()["detail"]
@@ -483,15 +460,11 @@ class TestAuditLogsAPI:
             with patch.object(
                 AuditService, "get_audit_logs", side_effect=Exception("Service error")
             ):
-                with patch(
-                    "backend.app.api.v1.endpoints.audit_logs.check_permission",
-                    return_value=True,
-                ):
-                    client = TestClient(app)
-                    response = client.get(
-                        "/api/v1/audit-logs/",
-                        headers={"Authorization": "Bearer test-token"},
-                    )
+                client = TestClient(app)
+                response = client.get(
+                    "/api/v1/audit-logs/",
+                    headers={"Authorization": "Bearer test-token"},
+                )
 
         assert response.status_code == 500
         assert "Failed to retrieve audit logs" in response.json()["detail"]
@@ -508,15 +481,11 @@ class TestAuditLogsAPI:
                 "get_audit_logs",
                 side_effect=ValueError("Invalid parameter"),
             ):
-                with patch(
-                    "backend.app.api.v1.endpoints.audit_logs.check_permission",
-                    return_value=True,
-                ):
-                    client = TestClient(app)
-                    response = client.get(
-                        "/api/v1/audit-logs/",
-                        headers={"Authorization": "Bearer test-token"},
-                    )
+                client = TestClient(app)
+                response = client.get(
+                    "/api/v1/audit-logs/",
+                    headers={"Authorization": "Bearer test-token"},
+                )
 
         assert response.status_code == 400
         assert "Invalid parameter" in response.json()["detail"]
@@ -535,3 +504,18 @@ class TestAuditLogsAPI:
         )
         # This would depend on your authentication implementation
         # but should result in 401 or 403
+
+
+@pytest.mark.parametrize(
+    "role,superuser,expected",
+    [
+        (UserRole.ADMIN, False, True),
+        (UserRole.ANALYST, False, True),
+        (UserRole.DEVELOPER, False, False),
+        (UserRole.VIEWER, False, False),
+        (UserRole.VIEWER, True, True),
+    ],
+)
+def test_can_read_all_audit_logs_follows_role_table(role, superuser, expected):
+    user = User(id=uuid4(), role=role, is_superuser=superuser)
+    assert can_read_all_audit_logs(user) is expected
