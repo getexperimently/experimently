@@ -355,7 +355,7 @@ class FargateServiceStack(Stack):
                 # replication group has in-transit encryption on and refuses a
                 # plaintext connection, so every client the application builds
                 # must speak TLS: REDIS_SSL is passed as `ssl=` to all of them
-                # (backend/tests/unit/core/test_redis_tls.py).
+                # (backend/tests/unit/core/test_redis_connection.py).
                 "REDIS_HOST": redis_host,
                 "REDIS_PORT": redis_port,
                 "REDIS_SSL": "true",

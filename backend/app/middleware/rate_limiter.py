@@ -80,19 +80,9 @@ class RedisRateLimiter:
     keeps serving traffic even when Redis is temporarily unreachable.
     """
 
-    def __init__(
-        self,
-        redis_host: str = "localhost",
-        redis_port: int = 6379,
-        redis_password: Optional[str] = None,
-        redis_db: int = 0,
-        redis_ssl: bool = False,
-    ) -> None:
-        self._redis_host = redis_host
-        self._redis_port = redis_port
-        self._redis_password = redis_password
-        self._redis_db = redis_db
-        self._redis_ssl = redis_ssl
+    def __init__(self) -> None:
+        # The connection parameters (REDIS_HOST/PORT/PASSWORD/DB/SSL) are read
+        # from the settings by create_redis_client on first use.
         self._redis_client: Optional[object] = None
         self._redis_available: bool = True
         self._fallback = SlidingWindowRateLimiter()
@@ -101,14 +91,9 @@ class RedisRateLimiter:
         """Lazy-connect to Redis on first call."""
         if self._redis_client is None and self._redis_available:
             try:
-                import redis as redis_lib
+                from backend.app.core.redis_client import create_redis_client
 
-                self._redis_client = redis_lib.Redis(
-                    host=self._redis_host,
-                    port=self._redis_port,
-                    password=self._redis_password or None,
-                    db=self._redis_db,
-                    ssl=self._redis_ssl,
+                self._redis_client = create_redis_client(
                     socket_connect_timeout=2,
                     socket_timeout=1,
                     decode_responses=True,
@@ -116,11 +101,7 @@ class RedisRateLimiter:
                 # Test connectivity
                 self._redis_client.ping()
                 self._redis_available = True
-                logger.info(
-                    "Rate limiter connected to Redis at %s:%s",
-                    self._redis_host,
-                    self._redis_port,
-                )
+                logger.info("Rate limiter connected to Redis")
             except Exception as exc:
                 logger.warning(
                     "Rate limiter Redis unavailable, using in-memory fallback: %s", exc
@@ -282,13 +263,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                     DEFAULT_SDK_RATE_LIMIT_PER_MINUTE,
                 )
             )
-            self._limiter: object = RedisRateLimiter(
-                redis_host=settings.REDIS_HOST,
-                redis_port=int(settings.REDIS_PORT),
-                redis_password=settings.REDIS_PASSWORD,
-                redis_db=settings.REDIS_DB,
-                redis_ssl=bool(settings.REDIS_SSL),
-            )
+            self._limiter: object = RedisRateLimiter()
         else:
             self._limiter = SlidingWindowRateLimiter()
 
