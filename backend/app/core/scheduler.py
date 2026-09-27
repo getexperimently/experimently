@@ -92,8 +92,9 @@ class ExperimentScheduler:
         This checks for:
         1. Experiments in DRAFT or PAUSED status that should be activated
         2. Experiments in ACTIVE status that should be completed (time-based)
-        3. Experiments in ACTIVE status that should be stopped due to
-           bayesian_decision being STOP_WINNER or STOP_FUTILE (EP-035 Batch 2)
+
+        An experiment's ``bayesian_decision`` is a recommendation only: nothing
+        here stops an experiment on it (see docs/api/bayesian.md).
 
         Returns ``{"items_processed": n, "items_failed": m}`` for the run record.
         """
@@ -101,7 +102,6 @@ class ExperimentScheduler:
 
         activated_count = 0
         completed_count = 0
-        bayesian_stopped_count = 0
         failed_count = 0
 
         # Use a new database session for this task
@@ -189,59 +189,11 @@ class ExperimentScheduler:
             if completed_count > 0:
                 db.commit()
 
-            # EP-035 Batch 2: Stop ACTIVE experiments where bayesian_decision
-            # is STOP_WINNER or STOP_FUTILE (Bayesian stopping rules triggered).
-            try:
-                _bayesian_stop_decisions = ("STOP_WINNER", "STOP_FUTILE")
-                experiments_to_bayesian_stop = (
-                    db.query(Experiment)
-                    .filter(
-                        and_(
-                            Experiment.status == ExperimentStatus.ACTIVE,
-                            Experiment.bayesian_decision.in_(_bayesian_stop_decisions),
-                        )
-                    )
-                    .all()
-                )
-
-                for experiment in experiments_to_bayesian_stop:
-                    try:
-                        experiment.status = ExperimentStatus.COMPLETED
-                        experiment.updated_at = current_time
-                        db.add(experiment)
-                        bayesian_stopped_count += 1
-                        logger.info(
-                            f"Bayesian stopping experiment: {experiment.id} - "
-                            f"{experiment.name} "
-                            f"(bayesian_decision: {experiment.bayesian_decision})"
-                        )
-                        try:
-                            self._notification_service.notify_experiment_ended(
-                                experiment_id=str(experiment.id),
-                                experiment_name=experiment.name,
-                            )
-                        except Exception as exc:
-                            logger.warning(
-                                "Notification failed (non-critical): %s", exc
-                            )
-                    except Exception as e:
-                        failed_count += 1
-                        logger.error(
-                            f"Error bayesian-stopping experiment {experiment.id}: {e!s}"
-                        )
-
-                if bayesian_stopped_count > 0:
-                    db.commit()
-            except Exception as e:
-                logger.error(f"Error processing bayesian stopping rules: {e!s}")
-
             # Log the results
-            total_completed = completed_count + bayesian_stopped_count
-            if activated_count > 0 or total_completed > 0:
+            if activated_count > 0 or completed_count > 0:
                 logger.info(
                     f"Updated {activated_count} experiments to ACTIVE, "
-                    f"{completed_count} to COMPLETED (time-based), "
-                    f"{bayesian_stopped_count} to COMPLETED (bayesian stopping)"
+                    f"{completed_count} to COMPLETED"
                 )
             else:
                 logger.info("No experiments required scheduling updates")
@@ -256,14 +208,11 @@ class ExperimentScheduler:
             db.close()
 
         return {
-            "items_processed": activated_count
-            + completed_count
-            + bayesian_stopped_count,
+            "items_processed": activated_count + completed_count,
             "items_failed": failed_count,
             "metadata": {
                 "activated": activated_count,
                 "completed": completed_count,
-                "bayesian_stopped": bayesian_stopped_count,
             },
         }
 

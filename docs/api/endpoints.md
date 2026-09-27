@@ -1662,27 +1662,19 @@ Supported `IntegrationType` values: `JIRA`, `SALESFORCE`, `GITHUB`.
 
 See [Bayesian API Reference](bayesian.md) for full documentation.
 
-Bayesian analysis is enabled per-experiment by adding fields to the standard experiment create/update request body:
+Bayesian analysis is enabled per experiment with two fields on the standard experiment
+create/update request body. The experiment response carries both, plus `bayesian_decision`:
 
 | Field | Type | Description |
 |---|---|---|
-| `bayesian_enabled` | `boolean` | Enables Bayesian posterior computation for this experiment |
-| `bayesian_config.prior_alpha` | `float` | Alpha parameter of the Beta prior (must be > 0) |
-| `bayesian_config.prior_beta` | `float` | Beta parameter of the Beta prior (must be > 0) |
-| `bayesian_config.rope_low` | `float` | Lower bound of the Region of Practical Equivalence |
-| `bayesian_config.rope_high` | `float` | Upper bound of the Region of Practical Equivalence |
-| `bayesian_config.minimum_bayes_factor` | `float` | BF10 threshold that triggers the stopping rule |
-| `bayesian_config.credible_interval_width` | `float` | Credible interval width (e.g., `0.95` for 95% HDI) |
+| `bayesian_enabled` | `boolean` | Computes Bayesian results for this experiment. Turning it on without a config stores the defaults |
+| `bayesian_config` | `object` | `prior_family`, `alpha`, `beta`, `loss_threshold`, `rope`, `credible_level`; see [the `bayesian_config` object](bayesian.md#turning-bayesian-analysis-on). An invalid value is refused with `422` |
+| `bayesian_decision` | `string` | Response only: the latest recommendation, `CONTINUE`, `STOP_WINNER`, `STOP_EQUIVALENT` or `STOP_FUTILE`. Nothing stops the experiment on it |
 
-When `bayesian_enabled` is `true`, the existing results endpoint returns an additional `bayesian_results` block:
-
-```
-GET /api/v1/results/{experiment_id}    — Augmented with bayesian_results block
-```
-
-The `bayesian_results` block includes: `posterior_alpha`, `posterior_beta`, `posterior_mean`, `credible_interval`, `bayes_factor`, `probability_of_superiority`, `decision` (`BayesianDecision` enum), and `stopped_early`.
-
-`BayesianDecision` values: `ACCEPT_NULL`, `ACCEPT_ALTERNATIVE`, `INCONCLUSIVE`, `ROPE_ACCEPT`.
+When `bayesian_enabled` is `true`, `GET /api/v1/results/{experiment_id}` embeds a
+`bayesian_results` block, and `GET /api/v1/results/{experiment_id}/bayesian` returns it on
+its own: a posterior, credible interval, probability to be best and expected loss for each
+variant, and the decision.
 
 ---
 

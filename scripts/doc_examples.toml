@@ -13,7 +13,7 @@
 
 [meta]
 documents = 32
-exec = 155
+exec = 157
 universe = [
     ".github/pull_request_template.md",
     "CHANGELOG.md",
@@ -322,9 +322,9 @@ expects = 18
 [[document]]
 path = "docs/api/bayesian.md"
 environment = "stack"
-exec = 2
-skip = 2
-expects = 3
+exec = 4
+skip = 0
+expects = 9
 
 [[document]]
 path = "docs/api/cuped.md"
@@ -415,7 +415,7 @@ reason = "run on a kind cluster by the chart-kind workflow (scripts/chart_kind.s
 "backend/lambda/README.md" = { comments = 0, unlabelled = 1, syntax = 0 }
 "backend/lambda/event_processor/README.md" = { comments = 5, unlabelled = 1, syntax = 0 }
 "docs/api/compliance.md" = { comments = 2, unlabelled = 5, syntax = 0 }
-"docs/api/endpoints.md" = { comments = 24, unlabelled = 24, syntax = 1 }
+"docs/api/endpoints.md" = { comments = 24, unlabelled = 23, syntax = 1 }
 "docs/api/integrations.md" = { comments = 0, unlabelled = 8, syntax = 0 }
 "docs/api/rbac.md" = { comments = 5, unlabelled = 12, syntax = 0 }
 "docs/api/split-url.md" = { comments = 0, unlabelled = 3, syntax = 0 }
