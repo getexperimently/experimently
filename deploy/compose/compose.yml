@@ -1,0 +1,142 @@
+# =============================================================================
+# Experimently -- production compose file (self-hosting on one Docker host).
+#
+# This file runs the PUBLISHED images. It never builds, it ships no demo
+# services and no seeded demo users, and it starts nothing that listens on the
+# host except the dashboard. For a development stack built from a checkout,
+# use the repository's docker-compose.yml instead.
+#
+#   ./generate-env.sh              # writes .env with generated secrets, once
+#   docker compose up -d --wait    # postgres + redis + api + web
+#   docker compose logs -f api     # first start creates the schema and admin
+#
+# Settings come from the `.env` file next to this file. The five marked
+# REQUIRED have no default: compose refuses to start (and `docker compose
+# config` exits non-zero) naming the first one that is unset or empty.
+#
+#   SECRET_KEY                 REQUIRED  signs sessions and tokens
+#   FIRST_SUPERUSER            REQUIRED  email of the first administrator
+#   FIRST_SUPERUSER_PASSWORD   REQUIRED  used only while the users table is empty
+#   POSTGRES_PASSWORD          REQUIRED  the database password
+#   PUBLIC_BASE_URL            REQUIRED  the URL people open, e.g.
+#                                        https://experimently.example.com; the
+#                                        API answers only for this host name
+#   AUDIT_HMAC_KEY             full profile only: signs audit events
+#   EXPERIMENTLY_PROFILE       core (default) or full
+#   HTTP_BIND / HTTP_PORT      where the dashboard listens (127.0.0.1:8080);
+#                              put your TLS reverse proxy in front of it
+#   POSTGRES_SERVER            an external database host instead of the bundled
+#                              one; then start only `docker compose up -d api web`
+#
+# The image versions below are literal and move with each release (the
+# `x-release-please-version` markers); there are no floating tags.
+# =============================================================================
+
+# Not `experimently`: that is the project name the development compose file
+# gets from a checkout directory of that name, and sharing it would make this
+# file recreate those containers and adopt their volumes. Fixed rather than
+# taken from the directory, so the volume names (experimently-selfhost_
+# postgres_data, ..._redis_data) are the same on every host.
+name: experimently-selfhost
+
+services:
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-experimently}
+      # Applied only when the data volume is first initialised. Changing it
+      # later does not change the database's password.
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?required: generate with openssl rand -hex 32}"
+      POSTGRES_DB: ${POSTGRES_DB:-experimentation}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      # $$: the container's own variables, read when the check runs.
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  api:
+    image: ghcr.io/getexperimently/experimently:${EXPERIMENTLY_PROFILE:-core}-0.7.0 # x-release-please-version
+    environment:
+      ENVIRONMENT: production
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_FORMAT: json
+      WEB_CONCURRENCY: ${WEB_CONCURRENCY:-1}
+      AUTH_PROVIDER: local
+      DEV_AUTH_BYPASS: "false"
+      PUBLIC_BASE_URL: "${PUBLIC_BASE_URL:?required: the URL people open, e.g. https://experimently.example.com}"
+      SECRET_KEY: "${SECRET_KEY:?required: generate with openssl rand -hex 32}"
+      FIRST_SUPERUSER: "${FIRST_SUPERUSER:?required: the first administrator's email address}"
+      FIRST_SUPERUSER_PASSWORD: "${FIRST_SUPERUSER_PASSWORD:?required: generate with openssl rand -base64 18}"
+      # The full profile refuses to start without it; the core profile ignores it.
+      AUDIT_HMAC_KEY: ${AUDIT_HMAC_KEY:-}
+      METRICS_TOKEN: ${METRICS_TOKEN:-}
+      POSTGRES_SERVER: ${POSTGRES_SERVER:-postgres}
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_USER: ${POSTGRES_USER:-experimently}
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?required: generate with openssl rand -hex 32}"
+      POSTGRES_DB: ${POSTGRES_DB:-experimentation}
+      POSTGRES_SCHEMA: experimentation
+      # The container waits for the database (up to 120 s), then creates or
+      # upgrades the schema and the first administrator before serving.
+      RUN_MIGRATIONS: "true"
+      # No seeds in production: the demo seed creates a user with a published
+      # password.
+      SEED: ""
+      REDIS_HOST: ${REDIS_HOST:-redis}
+      REDIS_PORT: ${REDIS_PORT:-6379}
+      REDIS_REQUIRED: "false"
+    # Deliberately no depends_on: with POSTGRES_SERVER pointing elsewhere the
+    # bundled postgres is not started, and the entrypoint's own wait covers
+    # the start-up order when it is.
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 300s
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  web:
+    image: ghcr.io/getexperimently/experimently-web:${EXPERIMENTLY_PROFILE:-core}-0.7.0 # x-release-please-version
+    environment:
+      # The dashboard serves the static app and proxies /api, /ws and /health
+      # to the api service: one origin, PUBLIC_BASE_URL.
+      API_UPSTREAM: http://api:8000
+    # The only published port. Bound to loopback by default: put a TLS reverse
+    # proxy in front and forward the Host header unchanged.
+    ports:
+      - "${HTTP_BIND:-127.0.0.1}:${HTTP_PORT:-8080}:8080"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:

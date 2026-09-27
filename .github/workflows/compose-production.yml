@@ -1,0 +1,179 @@
+name: Compose Production
+
+# Boots deploy/compose/compose.yml -- the file a self-hoster downloads -- the
+# way they do: published image names, a generated .env, ENVIRONMENT=production,
+# no build. Then checks it through the dashboard's published port with the Host
+# check on (tests/alb/rehearse.sh, TOPOLOGY=compose).
+#
+# On a pull request the images are THIS change's core builds, retagged to the
+# published names the compose file resolves to. That proves the file's shape
+# and the images' behaviour under it, not the published bytes: nothing here
+# pulls from ghcr.io (`--pull never`), and the packages are private until D19.
+#
+# Not a required check (yet): it is path-filtered, and a required check that
+# does not report blocks a pull request for ever.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - deploy/compose/**
+      - backend/**
+      - frontend/**
+      - tests/alb/rehearse.sh
+      - scripts/check_compose_config.py
+      - VERSION
+      - .github/workflows/compose-production.yml
+  push:
+    branches: [main]
+    paths:
+      - deploy/compose/**
+      - backend/**
+      - frontend/**
+      - tests/alb/rehearse.sh
+      - scripts/check_compose_config.py
+      - VERSION
+      - .github/workflows/compose-production.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: compose-production-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+env:
+  # Not COMPOSE_FILE: set in the environment, compose reads .env from the
+  # working directory instead of the compose file's own, and misses it.
+  PROD_COMPOSE: deploy/compose/compose.yml
+  DOCKER_BUILDKIT: "1"
+
+jobs:
+  compose-production:
+    name: Compose Production
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      # UX C11: the generator writes .env once and refuses a second time,
+      # leaving the file byte-for-byte as it was. A rerun that rotated the
+      # secrets would lock the administrator out of an existing install.
+      - name: Generate .env, twice
+        run: |
+          set -euo pipefail
+          ./deploy/compose/generate-env.sh
+          before=$(sha256sum deploy/compose/.env)
+          if ./deploy/compose/generate-env.sh 2>second.err; then
+            echo "::error::generate-env.sh overwrote an existing .env"
+            exit 1
+          fi
+          grep -q "not overwriting" second.err
+          test "$(sha256sum deploy/compose/.env)" = "$before"
+          test "$(stat -c %a deploy/compose/.env)" = "600"
+          echo "second run refused; .env unchanged and private"
+
+      # Real interpolation: no build key, only the published names at VERSION
+      # plus the pinned postgres/redis, only `web` publishes a port, and each
+      # required setting unset or empty is refused BY NAME.
+      - name: docker compose config
+        run: python3 scripts/check_compose_config.py --env-file deploy/compose/.env
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      # The same builds as Docker Smoke (pr-qa-gate.yml), reading its cache.
+      # No cache-to: Docker Smoke owns those scopes.
+      - name: Build API image (core)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: backend/Dockerfile
+          target: core
+          load: true
+          tags: experimently-api:core
+          cache-from: type=gha,scope=api
+
+      - name: Build dashboard image (core)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: frontend/Dockerfile
+          build-args: |
+            EXPERIMENTLY_PROFILE=core
+          load: true
+          tags: experimently-web:core
+          cache-from: type=gha,scope=web
+
+      # Tag the builds with whatever names the compose file resolves to, so the
+      # stack below can only start if the file names what was built -- and the
+      # config check above has already pinned those names to the published ones.
+      - name: Retag to the published names
+        run: |
+          set -euo pipefail
+          docker compose -f "$PROD_COMPOSE" config --format json > resolved.json
+          api_image=$(jq -er .services.api.image resolved.json)
+          web_image=$(jq -er .services.web.image resolved.json)
+          docker tag experimently-api:core "$api_image"
+          docker tag experimently-web:core "$web_image"
+          echo "api: $api_image"
+          echo "web: $web_image"
+
+      - name: Pull postgres and redis
+        run: docker compose -f "$PROD_COMPOSE" pull postgres redis
+
+      - name: Start the stack (no build, no pull)
+        run: docker compose -f "$PROD_COMPOSE" up -d --wait --no-build --pull never
+
+      - name: Rehearse through the dashboard port
+        run: |
+          set -euo pipefail
+          set -a
+          # shellcheck disable=SC1091
+          . deploy/compose/.env
+          set +a
+          host=$(python3 -c 'import sys, urllib.parse; print(urllib.parse.urlparse(sys.argv[1]).hostname)' "$PUBLIC_BASE_URL")
+          TOPOLOGY=compose \
+          ALB_URL="http://127.0.0.1:${HTTP_PORT:-8080}" \
+          PUBLIC_HOST="$host" \
+          ADMIN_EMAIL="$FIRST_SUPERUSER" \
+          ADMIN_PASSWORD="$FIRST_SUPERUSER_PASSWORD" \
+            bash tests/alb/rehearse.sh
+
+      - name: Production facts
+        run: |
+          set -euo pipefail
+          set -a
+          # shellcheck disable=SC1091
+          . deploy/compose/.env
+          set +a
+          host=$(python3 -c 'import sys, urllib.parse; print(urllib.parse.urlparse(sys.argv[1]).hostname)' "$PUBLIC_BASE_URL")
+          base="http://127.0.0.1:${HTTP_PORT:-8080}"
+          # No demo seed ran: the published demo login does not exist.
+          code=$(curl -s -o demo.json -w '%{http_code}' -H "Host: $host" \
+            -H 'content-type: application/json' \
+            -d '{"email":"admin@demo.com","password":"Demo1234!"}' \
+            "$base/api/v1/auth/login")
+          test "$code" = "401" || { echo "::error::the demo login answered $code, expected 401"; exit 1; }
+          echo "ok  demo login refused: 401"
+          # The running API reports the profile and the version the file names.
+          curl -sf -H "Host: $host" "$base/api/v1/modules" -o modules.json
+          jq -e --arg v "$(cat VERSION)" '.profile == "core" and .version == $v' modules.json
+          echo "ok  /api/v1/modules: core $(cat VERSION)"
+          # Postgres and Redis publish nothing on the host.
+          for svc in postgres:5432 redis:6379 api:8000; do
+            if docker compose -f "$PROD_COMPOSE" port "${svc%%:*}" "${svc##*:}" >port.out 2>&1 && [ -s port.out ] && ! grep -q '^:0$' port.out; then
+              echo "::error::${svc%%:*} publishes $(cat port.out)"
+              exit 1
+            fi
+          done
+          echo "ok  postgres, redis and api publish no host port"
+
+      - name: Container logs (on failure)
+        if: failure()
+        run: docker compose -f "$PROD_COMPOSE" logs --no-color --tail=200
+
+      - name: Tear down
+        if: always()
+        run: docker compose -f "$PROD_COMPOSE" down -v --remove-orphans
