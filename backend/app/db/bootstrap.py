@@ -248,6 +248,10 @@ def ensure_first_superuser(engine: Engine, schema: str) -> bool:
         search_path = text(search_path_sql)  # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text  # fmt: skip
         session.execute(search_path)
         if session.query(User.id).first() is not None:
+            # Said on every later start: FIRST_SUPERUSER and its password are
+            # read only while `users` is empty, so changing them afterwards
+            # does nothing, and nothing else would say so.
+            logger.info("users exist; FIRST_SUPERUSER settings ignored")
             return False
 
         email = str(settings.FIRST_SUPERUSER).strip().lower()
@@ -263,7 +267,7 @@ def ensure_first_superuser(engine: Engine, schema: str) -> bool:
         )
         session.add(user)
         session.commit()
-        logger.info("Created first superuser %s (role ADMIN)", email)
+        logger.info("created the first administrator %s (role ADMIN)", email)
         return True
     finally:
         session.close()
@@ -627,6 +631,12 @@ def bootstrap(engine: Engine | None = None, schema: str | None = None) -> str:
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+    # Alembic's env.py applies alembic.ini's logging, whose root level is WARN,
+    # the first time a command runs -- after which every INFO line this module
+    # logs was dropped, among them the one saying the first administrator was
+    # created (#237). This module's own level survives that (env.py passes
+    # disable_existing_loggers=False), so pin it.
+    logger.setLevel(logging.INFO)
     result = bootstrap()
     print(
         f"Database bootstrap complete ({result}) — schema '{schema_name()}' at {database_url().split('@')[-1]}"

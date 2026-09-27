@@ -93,3 +93,31 @@ def test_concurrent_bootstraps_on_a_fresh_schema_do_not_race(test_db):
     finally:
         with engine.begin() as conn:
             conn.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
+
+
+@pytest.mark.integration
+@pytest.mark.regression
+def test_the_bootstrap_says_whether_it_created_the_first_administrator(test_db):
+    """#237: the first start never said it had created an administrator, and a
+    later start never said FIRST_SUPERUSER* were being ignored -- so a changed
+    FIRST_SUPERUSER_PASSWORD silently did nothing."""
+    engine = test_db
+    schema = f"boot_admin_{uuid.uuid4().hex[:8]}"
+    try:
+        first = _run_bootstrap(schema)
+        assert first.returncode == 0, first.stderr[-2000:]
+        assert (
+            "created the first administrator race@example.com (role ADMIN)"
+            in first.stderr
+        ), first.stderr[-2000:]
+        assert "FIRST_SUPERUSER settings ignored" not in first.stderr
+
+        second = _run_bootstrap(schema)
+        assert second.returncode == 0, second.stderr[-2000:]
+        assert "users exist; FIRST_SUPERUSER settings ignored" in second.stderr, (
+            second.stderr[-2000:]
+        )
+        assert "created the first administrator" not in second.stderr
+    finally:
+        with engine.begin() as conn:
+            conn.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
