@@ -62,11 +62,11 @@ The platform supports a range of statistical approaches:
 | Sequential testing (mSPRT) | Continuous monitoring with valid p-values at any sample size |
 | Always-valid confidence intervals | Confidence sequences that are valid at every look |
 | Alpha spending (O'Brien-Fleming, Pocock) | Planned interim analyses with controlled false positive rate |
-| CUPED | Variance reduction using pre-experiment covariates (typically 20–40% sample size reduction) |
+| CUPED (beta) | Variance reduction; the covariate is not yet a pre-experiment metric, so it reduces almost no variance today (#217) |
 | Bayesian (Beta-Binomial) | Posterior credible intervals, Bayes factors, probability of superiority, ROPE |
 | Multi-armed bandit | Thompson Sampling, UCB1, and Epsilon-Greedy adaptive traffic allocation |
 | Dimensional analysis | Segment-level breakdowns with Bonferroni correction and heterogeneous treatment effect detection |
-| Interaction detection | Jaccard overlap, chi-squared interaction tests, novelty effect analysis, SUTVA checks |
+| Interaction detection (beta) | Jaccard overlap between experiments; the interaction, novelty and SUTVA analyses are not computed yet (#219) |
 
 ---
 
@@ -129,9 +129,9 @@ See the [Warehouse-Native Analytics API](../api/warehouse-analytics.md) for setu
 
 CUPED (Controlled-experiment Using Pre-Experiment Data) reduces result noise by adjusting each user's observed metric by a term proportional to their pre-experiment behavior. The adjustment is computed using an OLS regression coefficient (`theta`) estimated from the control group.
 
-In practice, CUPED typically reduces the variance of your metric estimates by 20–40%, meaning you can reach statistical significance with significantly fewer users — or equivalently, detect smaller effects with the same sample size.
+With a covariate that predicts the outcome, lower variance means you reach statistical significance with fewer users, or detect smaller effects with the same sample size.
 
-To use CUPED, call `GET /api/v1/results/{experiment_id}/cuped`. The covariate (pre-experiment metric) must be available for your users. See [CUPED documentation](../api/cuped.md) for covariate selection guidance.
+**Beta:** `GET /api/v1/results/{experiment_id}/cuped` does not yet use a pre-experiment metric as the covariate, so in this release it removes almost no variance, and its responses say so in `analysis_status` ([#217](https://github.com/getexperimently/experimently/issues/217)). See [CUPED documentation](../api/cuped.md).
 
 ---
 
