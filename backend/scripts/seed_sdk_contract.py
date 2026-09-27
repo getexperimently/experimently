@@ -48,6 +48,7 @@ os.environ.setdefault("POSTGRES_PASSWORD", "postgres")
 os.environ.setdefault("POSTGRES_DB", "experimentation")
 os.environ.setdefault("POSTGRES_SCHEMA", "experimentation")
 
+from backend.app.core.permissions import Action, ResourceType, check_permission
 from backend.app.core.security import hash_api_key
 from backend.app.db.session import SessionLocal
 from backend.app.models.api_key import APIKey, generate_api_key
@@ -216,7 +217,16 @@ def seed_api_key(
 
 
 def seed_local_api_key(db, admin_user) -> str:
-    """The second key, scoped for the local-evaluation ruleset."""
+    """The second key, scoped for the local-evaluation ruleset.
+
+    The scope works only while the key's owner can change feature flags, so
+    the seed refuses an owner who cannot rather than mint a key that 403s.
+    """
+    if not check_permission(admin_user, ResourceType.FEATURE_FLAG, Action.UPDATE):
+        raise SystemExit(
+            f"{admin_user.email} cannot change feature flags, so an sdk:ruleset "
+            "key it owns would be refused; seed it as an ADMIN or DEVELOPER."
+        )
     return seed_api_key(
         db,
         admin_user,

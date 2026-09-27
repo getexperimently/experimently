@@ -24,7 +24,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker
 
 from backend.app.api import deps
-from backend.app.api.sdk_scope import MISSING_SCOPE_DETAIL
+from backend.app.api.sdk_scope import MISSING_SCOPE_DETAIL, OWNER_ROLE_DETAIL
 from backend.app.core.config import settings
 from backend.app.core.security import create_local_access_token, get_password_hash
 from backend.app.main import app
@@ -196,11 +196,53 @@ class TestScope:
         finally:
             app.dependency_overrides.pop(deps.get_api_key, None)
 
-    @pytest.mark.parametrize("role", list(UserRole), ids=lambda r: r.value)
-    def test_any_role_may_hold_a_scoped_key(self, client, db_session, role):
-        user = _make_user(db_session, role)
+
+class TestOwnerRole:
+    """A key with sdk:ruleset works only while its owner can change feature flags.
+
+    Real keys, real roles, no dependency override: the owner is re-read on
+    every request, so a demotion takes effect on the next poll.
+    """
+
+    @pytest.mark.parametrize(
+        "role, superuser, expected",
+        [
+            (UserRole.VIEWER, True, 200),
+            (UserRole.ADMIN, False, 200),
+            (UserRole.DEVELOPER, False, 200),
+            (UserRole.ANALYST, False, 403),
+            (UserRole.VIEWER, False, 403),
+        ],
+        ids=["superuser", "admin", "developer", "analyst", "viewer"],
+    )
+    def test_only_an_owner_who_can_change_flags_is_served(
+        self, client, db_session, role, superuser, expected
+    ):
+        user = _make_user(db_session, role, is_superuser=superuser)
         key = _key(client, user, ["sdk:ruleset"])["key"]
+        response = _get(client, key)
+        assert response.status_code == expected
+        if expected == 403:
+            assert response.json()["detail"] == OWNER_ROLE_DETAIL
+
+    def test_a_demoted_owners_key_stops_working(self, client, db_session, developer):
+        key = _key(client, developer, ["sdk:ruleset"])["key"]
         assert _get(client, key).status_code == 200
+        developer.role = UserRole.VIEWER
+        db_session.commit()
+        response = _get(client, key)
+        assert response.status_code == 403
+        assert response.json()["detail"] == OWNER_ROLE_DETAIL
+
+    def test_a_stored_scope_on_a_viewers_key_is_refused(self, client, db_session):
+        viewer = _make_user(db_session, UserRole.VIEWER)
+        created = _key(client, viewer)
+        row = db_session.query(APIKey).filter(APIKey.id == created["id"]).one()
+        row.scopes = "sdk:ruleset"
+        db_session.commit()
+        response = _get(client, created["key"])
+        assert response.status_code == 403
+        assert response.json()["detail"] == OWNER_ROLE_DETAIL
 
 
 # ---------------------------------------------------------------------------
@@ -375,6 +417,11 @@ class TestContractSeed:
         assert (tmp_path / ".api_key_local").read_text().strip() == scoped
         assert _get(client, plain).status_code == 403
         assert _get(client, scoped).status_code == 200
+
+        # The scoped key's owner must be able to change flags (a VIEWER is refused).
+        viewer = _make_user(db_session, UserRole.VIEWER)
+        with pytest.raises(SystemExit):
+            seed.seed_local_api_key(db_session, viewer)
 
         # Idempotent: a second run keeps both keys.
         assert seed.seed_local_api_key(db_session, developer) == scoped

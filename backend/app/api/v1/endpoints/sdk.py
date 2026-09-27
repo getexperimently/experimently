@@ -156,6 +156,7 @@ def if_none_match_hits(header: Optional[str], version: str) -> bool:
 
 @router.get(
     "/ruleset",
+    # Documentation only: the route returns a Response, so this is never validated.
     response_model=SdkRuleset,
     summary="Flag ruleset for server-side local evaluation (beta)",
     response_description="Every feature flag, normalised for local evaluation",
