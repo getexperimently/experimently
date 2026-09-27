@@ -210,3 +210,70 @@ def test_the_real_forward_deploy_scripts_are_scanned():
         "scripts/check_live_target_group.py",
     ):
         assert script in places, script
+
+
+# --- flags that need an action of their own (#148) --------------------------------
+
+
+def _probe(tmp_path, suffix: str, script: str) -> Path:
+    source = tmp_path / f"probe{suffix}"
+    if suffix == ".yml":
+        source.write_text(yaml.safe_dump({"jobs": {"j": {"steps": [{"run": script}]}}}))
+    else:
+        source.write_text(script)
+    return source
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("suffix", [".sh", ".yml"])
+@pytest.mark.parametrize(
+    "script",
+    [
+        # rollback.yml's form: the flag on the call itself, line-continued.
+        "aws deploy create-deployment \\\n"
+        "  --application-name a --deployment-group-name g \\\n"
+        "  --override-alarm-configuration enabled=false \\\n"
+        "  --query deploymentId --output text\n",
+        # deploy.yml's break-glass form: the flag in an array the call expands.
+        "override=()\n"
+        'if [ "$OVERRIDE" = true ]; then\n'
+        "  override=(--override-alarm-configuration enabled=false)\n"
+        "fi\n"
+        'aws deploy create-deployment --application-name a "${override[@]}"\n',
+    ],
+    ids=["on-the-call", "through-an-array"],
+)
+def test_an_alarm_override_implies_update_deployment_group(tmp_path, suffix, script):
+    """QA P7b: the generator read verbs, not flags. With the override added to a
+    create-deployment it stayed at "35 actions ... current" while the role
+    lacked the permission CreateDeployment then needs (executed on main)."""
+    found = _module().calls([_probe(tmp_path, suffix, script)])
+    assert "codedeploy:CreateDeployment" in found, dict(found)
+    assert "codedeploy:UpdateDeploymentGroup" in found, dict(found)
+
+
+@pytest.mark.parametrize(
+    "script",
+    [
+        "aws deploy create-deployment --application-name a\n",
+        # The flag with no create-deployment in the block implies nothing.
+        "echo --override-alarm-configuration\n",
+        # Neither does a different flag that merely starts the same way.
+        "aws deploy create-deployment --override-alarm-configuration-x y\n",
+    ],
+    ids=["no-flag", "no-call", "other-flag"],
+)
+def test_no_override_implies_no_update_deployment_group(tmp_path, script):
+    found = _module().calls([_probe(tmp_path, ".sh", script)])
+    assert "codedeploy:UpdateDeploymentGroup" not in found, dict(found)
+
+
+@pytest.mark.regression
+def test_the_real_override_is_granted_and_attributed():
+    """Both workflows that pass the override are what grants it."""
+    found = _module().calls()
+    assert "codedeploy:UpdateDeploymentGroup" in found
+    assert {p.split(":")[0] for p in found["codedeploy:UpdateDeploymentGroup"]} == {
+        ".github/workflows/deploy.yml",
+        ".github/workflows/rollback.yml",
+    }, found["codedeploy:UpdateDeploymentGroup"]
