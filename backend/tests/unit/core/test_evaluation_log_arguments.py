@@ -22,6 +22,8 @@ level must be ``logger.<level>`` with:
 An allowed name is only as good as what it is bound to: where one is used, it
 must be a parameter of the enclosing function and never rebound there, or --
 ``operator`` only -- be bound there only from an ``<x>.operator`` attribute.
+``rule.id`` is allowed only where ``rule`` is bound, in the enclosing
+function, solely as the loop variable of ``for rule in <x>.rules``.
 Only the once-helpers may take a ``reason`` parameter, and every call of them
 is checked: ``EVALUATION_NOTES.first(owner, reason)`` and
 ``_note_rule_problem(operator, reason)`` take an allowed owner and a
@@ -196,6 +198,41 @@ def _bound_names(scope: ast.AST) -> Iterator[Tuple[str, ast.AST, int]]:
                     yield name.id, value, name.lineno
 
 
+def _rule_id_violations(call: ast.Call, function, filename: str) -> List[str]:
+    """
+    ``rule.id`` is allowed only where ``rule`` is the loop variable of a
+    ``for rule in <x>.rules`` in the enclosing function, and bound nowhere else
+    there (not a parameter, not assigned).
+    """
+    uses = [arg for arg in call.args if _attribute_chain(arg) == ("rule", "id")]
+    if not uses:
+        return []
+    where = f"{filename}:{call.lineno}"
+    if function is None:
+        return [f"{where}: `rule.id` used outside a function"]
+    params = {
+        a.arg
+        for a in function.args.posonlyargs
+        + function.args.args
+        + function.args.kwonlyargs
+    }
+    if "rule" in params:
+        return [f"{where}: `rule` in `rule.id` is a parameter of {function.name}"]
+    bindings = [v for n, v, _ in _bound_names(function) if n == "rule"]
+    loops_over_rules = [
+        v
+        for v in bindings
+        if isinstance(v, (ast.For, ast.AsyncFor))
+        and isinstance(v.iter, ast.Attribute)
+        and v.iter.attr == "rules"
+    ]
+    if not bindings or len(loops_over_rules) != len(bindings):
+        return [
+            f"{where}: `rule` in `rule.id` is not bound only by `for rule in <x>.rules`"
+        ]
+    return []
+
+
 def _binding_violations(tree: ast.AST, filename: str) -> List[str]:
     """
     An allowed name used in a checked call must be a parameter of the enclosing
@@ -211,6 +248,7 @@ def _binding_violations(tree: ast.AST, filename: str) -> List[str]:
 
     checked = list(_level_calls(tree)) + list(_once_calls(tree))
     for call in checked:
+        found.extend(_rule_id_violations(call, enclosing.get(id(call)), filename))
         names = {
             arg.id
             for arg in call.args
@@ -271,7 +309,7 @@ def test_evaluation_logs_carry_only_allowed_arguments(module):
 
 
 # -- the gate fires -----------------------------------------------------------
-# Each planted line below is the shape of a real call site this change removed.
+# Each planted source below is a shape the gate must refuse.
 
 #: planted source -> the fragment the refusal must contain (so each fires for
 #: the reason it names, not a side effect).
@@ -340,6 +378,26 @@ PLANTED = {
         '    logger.debug("%s", operator)',
         "`operator` is bound to something other than <x>.operator",
     ),
+    "rule.id of a rebound value": (
+        "def f(actual_value):\n    rule = actual_value\n"
+        '    logger.warning("problem: %s", rule.id)',
+        "`rule` in `rule.id` is not bound only by `for rule in <x>.rules`",
+    ),
+    "rule.id of a parameter": (
+        'def f(rule):\n    logger.warning("problem: %s", rule.id)',
+        "`rule` in `rule.id` is a parameter of f",
+    ),
+    "rule.id rebound inside the loop": (
+        "def f(rules, actual_value):\n    for rule in rules.rules:\n"
+        "        rule = actual_value\n"
+        '        logger.warning("problem: %s", rule.id)',
+        "`rule` in `rule.id` is not bound only by `for rule in <x>.rules`",
+    ),
+    "rule.id as a once owner": (
+        "def f(actual_value):\n    rule = actual_value\n"
+        '    EVALUATION_NOTES.first(rule.id, "why")',
+        "`rule` in `rule.id` is not bound only by `for rule in <x>.rules`",
+    ),
     "reason parameter elsewhere": (
         'def f(reason):\n    logger.warning("%s", reason)',
         "a `reason` parameter outside",
@@ -360,7 +418,9 @@ def test_a_planted_call_is_refused(source, fragment):
         '    logger.debug("%s: a %s", operator, type(actual_value).__name__)',
         'def f(owner, e):\n    logger.warning("Rules for %s (%s)", owner, type(e).__name__)',
         'def f(rule_id):\n    logger.info("Invalidated rule %s", rule_id)',
-        'def f(rule):\n    EVALUATION_NOTES.first(rule.id, "rule failed to compile")',
+        "def f(rules):\n    for rule in rules.rules:\n"
+        '        EVALUATION_NOTES.first(rule.id, "rule failed to compile")\n'
+        '        logger.warning("Rule %s failed", rule.id)',
         '_note_rule_problem(OperatorType.GEO_DISTANCE, "unknown distance unit")',
         "def f(condition):\n    operator = condition.operator\n"
         '    logger.debug("%s", operator)',
