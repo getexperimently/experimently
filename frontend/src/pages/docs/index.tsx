@@ -152,10 +152,10 @@ const sections = [
   {
     category: 'Team Workspaces',
     icon: 'W',
-    description: 'Isolate experiments and feature flags per team, project, or product area with role-based access control.',
+    description: 'Group members into teams, projects or product areas with workspace roles. Workspaces do not limit access to experiments or flags; that is by platform role.',
     links: [
-      { label: 'Workspace Overview', href: docsUrl('workspaces/overview'), desc: 'Role hierarchy (OWNER → VIEWER), plan limits, scoped API keys' },
-      { label: 'Quickstart', href: docsUrl('workspaces/quickstart'), desc: 'Create a workspace, invite your team, and generate a scoped API key' },
+      { label: 'Workspace Overview', href: docsUrl('workspaces/overview'), desc: 'What workspaces do and do not do, workspace roles, plan limits' },
+      { label: 'Quickstart', href: docsUrl('workspaces/quickstart'), desc: 'Create a workspace, invite your team, and connect an SDK' },
     ],
   },
 ];
