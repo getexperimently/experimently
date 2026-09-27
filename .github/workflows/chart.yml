@@ -127,15 +127,21 @@ jobs:
       - name: Install test dependencies
         run: pip install -r backend/requirements.txt
 
+      # The module runs only with EXPERIMENTLY_CHART_TESTS=1, so the required
+      # Unit Tests job (which collects the same directory with the runner's own
+      # helm) skips it. Dropping the variable here makes every case skip, and
+      # the next step fails.
       - name: Render contract, schema refusals, environment drift
         env:
           APP_ENV: test
           TESTING: 'true'
+          EXPERIMENTLY_CHART_TESTS: '1'
         run: |
           python -m pytest backend/tests/unit/chart -p no:cov -q --tb=short \
             --junitxml=chart-junit.xml
 
-      # The module skips without helm. Here helm is installed, so a skip means
-      # something it reads moved; it must not pass for green.
+      # The module skips without EXPERIMENTLY_CHART_TESTS=1 or without helm.
+      # Here both are set, so a skip means one was lost or something the tests
+      # read moved; it must not pass for green.
       - name: No chart test was skipped
         run: python3 scripts/check_junit_skips.py chart-junit.xml backend/tests/unit/chart

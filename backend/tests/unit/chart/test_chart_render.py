@@ -17,9 +17,16 @@ assert on the parsed manifests:
   start in production -- derived from the settings validators themselves and
   from the Docker Smoke production list, not from a third list typed here.
 
-The module skips when no ``helm`` binary is found (``$HELM`` or ``PATH``). The
-``chart`` workflow installs a pinned helm and fails on any skip here
-(``scripts/check_junit_skips.py``), so a skip there cannot pass for green.
+The module runs only with ``EXPERIMENTLY_CHART_TESTS=1``, which only the
+``chart`` workflow sets, next to the helm it pins. Elsewhere it skips: the
+Unit Tests job collects this directory too, and would otherwise assert on
+whatever helm the runner image ships (its error wording, its schema engine),
+coupling every unrelated pull request to a runner upgrade. The ``chart`` job
+fails on any skip here (``scripts/check_junit_skips.py``), so a lost variable
+or a missing helm cannot pass for green there.
+
+Locally: ``EXPERIMENTLY_CHART_TESTS=1 HELM=/path/to/helm-3.19.0 pytest
+backend/tests/unit/chart``.
 """
 
 from __future__ import annotations
@@ -63,9 +70,15 @@ SECRET_NAMES = {
 }
 
 HELM = os.environ.get("HELM") or shutil.which("helm")
+ENABLED = os.environ.get("EXPERIMENTLY_CHART_TESTS") == "1"
 
 pytestmark = [
     pytest.mark.unit,
+    pytest.mark.skipif(
+        not ENABLED,
+        reason="EXPERIMENTLY_CHART_TESTS is not 1; these run in the chart job "
+        "against its pinned helm",
+    ),
     pytest.mark.skipif(HELM is None, reason="no helm binary ($HELM or PATH)"),
     pytest.mark.skipif(
         not CHART.is_dir(), reason="this tree has no charts/experimently"

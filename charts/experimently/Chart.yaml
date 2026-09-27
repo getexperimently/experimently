@@ -5,10 +5,12 @@ description: >-
   the API, the dashboard, and optionally an evaluation-grade Postgres and Redis.
 type: application
 # The chart version IS the platform version: `--version X` installs images X.
-# Both lines equal the repository's VERSION file; the chart CI job asserts it
-# (backend/tests/unit/chart/test_chart_render.py).
-version: 0.5.0
-appVersion: "0.5.0"
+# Both lines equal the repository's VERSION file. release-please rewrites them
+# through the markers (a `generic` extra-file: the `yaml` updater would strip
+# every comment here), and scripts/check_version_sources.py fails when either
+# drifts.
+version: 0.5.0 # x-release-please-version
+appVersion: "0.5.0" # x-release-please-version
 kubeVersion: ">=1.27.0-0"
 home: https://github.com/getexperimently/experimently
 sources:
