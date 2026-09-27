@@ -2,6 +2,11 @@
 # =========================================================================
 # Experimently API container entrypoint.
 #
+#   0. python -m backend.app.core.preflight: the settings check. Every problem
+#      it finds is printed in one list and the container exits 78 (EX_CONFIG)
+#      before anything else runs. It always requires ENVIRONMENT (or the
+#      legacy APP_ENV); in staging/production it also requires the secrets,
+#      PUBLIC_BASE_URL and POSTGRES_SERVER, and refuses DATABASE_URL/_URI.
 #   1. Wait for PostgreSQL (POSTGRES_SERVER/POSTGRES_PORT) to accept connections.
 #   2. RUN_MIGRATIONS=true (default)  ->  python -m backend.app.db.bootstrap
 #      (creates the schema on a fresh database, `alembic upgrade heads` otherwise).
@@ -15,7 +20,7 @@
 #      proxy flags are appended when the command is uvicorn and the caller did
 #      not pass them explicitly.
 #
-# Every step can be skipped: RUN_MIGRATIONS=false, SEED= (empty),
+# Steps 1-3 can be skipped (step 0 cannot): RUN_MIGRATIONS=false, SEED= (empty),
 # WAIT_FOR_DB=false. The script runs with `set -euo pipefail`: a failed
 # bootstrap or seed stops the container instead of starting a half-initialised
 # API.
@@ -57,6 +62,15 @@ refuse_demo_seeds_outside_development() {
 refuse_demo_seeds_outside_development
 
 cd /app
+
+# -------------------------------------------------------------------------
+# 0. Settings preflight -- first, and before the database wait, so that a
+#    misconfigured deployment is told everything that is wrong in one go
+#    instead of one refusal per restart (or a long wait on localhost).
+#    Exits 78 (EX_CONFIG) with the list; `set -e` makes that the
+#    container's exit status.
+# -------------------------------------------------------------------------
+python -m backend.app.core.preflight
 
 : "${POSTGRES_SERVER:=${POSTGRES_HOST:-localhost}}"
 : "${POSTGRES_PORT:=5432}"
