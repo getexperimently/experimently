@@ -32,8 +32,9 @@ The platform handles all of this automatically: it tracks latency, estimates cos
 | **Mistral** | mistral-large-latest, mistral-small-latest | EU-hosted option |
 | **Local** | Any Ollama-compatible model | Privacy / cost-free option |
 
-Configure API keys via environment variables:
-```bash
+Configure API keys in the API's environment:
+
+```dotenv
 LLM_ANTHROPIC_API_KEY=sk-ant-...
 LLM_OPENAI_API_KEY=sk-...
 LLM_GOOGLE_API_KEY=...
@@ -85,7 +86,7 @@ The hash key is `"{experiment_id}:{user_id}"`, mapped to a bucket in [0, 1) and 
 
 The platform supports automated quality evaluation using a judge LLM. The default is `settings.LLM_DEFAULT_JUDGE_MODEL` (`claude-sonnet-5`), overridable per request and by the `LLM_DEFAULT_JUDGE_MODEL` environment variable. The judge is prompted:
 
-```
+```text
 Rate the following AI response on '{criteria}' using a score from 0 (terrible)
 to 1 (excellent).
 
@@ -103,7 +104,7 @@ Judge scores are stored as `auto_eval_score` on each evaluation record and inclu
 
 The platform automatically estimates the cost of each LLM call using a built-in cost table:
 
-```
+```text
 claude-opus-5:   $0.005/1k input + $0.025/1k output
 claude-sonnet-5: $0.002/1k input + $0.010/1k output
 claude-haiku-4-5:$0.001/1k input + $0.005/1k output

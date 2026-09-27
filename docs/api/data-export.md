@@ -6,27 +6,55 @@ This document describes the data export and reporting endpoints available under 
 
 ## Authentication
 
-All export endpoints require a valid Bearer token obtained via the `/api/v1/auth/token` endpoint.
+Every export endpoint takes a user's access token, from `POST /api/v1/auth/login`, in the
+`Authorization: Bearer` header. Every role (ADMIN, DEVELOPER, ANALYST, VIEWER) may use
+them. Without a token they answer `401 Unauthorized`.
 
+**Empty in this release:** the per-variant results (`assignments` is `0`, and
+`conversions`, `conversion_rate`, `p_value` and `relative_improvement_pct` are empty), each
+experiment's `winner_variant` and `recommendation`, and `experiments_with_winners` in the
+overview. The experiment report also ignores `format=csv`
+([#220](https://github.com/getexperimently/experimently/issues/220)). The columns are
+listed below as they are meant to be filled.
+
+Run the commands on this page in one terminal, in order, against the stack from the
+[Quick Start](../getting-started/quick-start.md). Each uses the shell variables set by the
+ones before it. Log in first:
+
+```{.bash exec}
+TOKEN=$(curl -s -X POST localhost:8000/api/v1/auth/login \
+  -H 'content-type: application/json' \
+  -d '{"email":"admin@demo.com","password":"Demo1234!"}' | jq -r .access_token)
+
+curl -s localhost:8000/api/v1/auth/me -H "Authorization: Bearer $TOKEN" | jq .role
 ```
-Authorization: Bearer <access_token>
+<!-- expect: "ADMIN" -->
+
+It prints `"ADMIN"`. The downloads below are written to the current directory, so this
+moves to a new, empty one first:
+
+```{.bash exec}
+cd "$(mktemp -d)"
+ls | wc -l
 ```
+<!-- expect: 0 -->
 
-All authenticated roles (ADMIN, DEVELOPER, ANALYST, VIEWER) may access these endpoints.
-
-Unauthenticated requests return `401 Unauthorized`.
+It prints `0`.
 
 ---
 
 ## Rate Limiting
 
-Export endpoints are subject to the platform-wide rate limiter configured in `RateLimitMiddleware`.
-Bursting large CSV exports repeatedly in a short window will trigger `429 Too Many Requests`.
+Export endpoints share the API's general limit of 300 requests a minute per client
+address; above it they answer `429 Too Many Requests`.
 For bulk data pipelines, consider exporting once and caching the result.
 
 ---
 
 ## Export Endpoints
+
+The export URLs have no trailing slash: with one, the API answers `307`, which `curl`
+doesn't follow.
 
 ### GET /api/v1/export/experiments
 
@@ -48,7 +76,7 @@ Download all experiments as a CSV (default) or JSON file.
 | `experiment_id`         | string    | UUID of the experiment                   |
 | `experiment_name`       | string    | Human-readable experiment name           |
 | `status`                | string    | Current status (draft, active, completed, etc.) |
-| `experiment_type`       | string    | Type: a_b, mv, split_url, bandit         |
+| `experiment_type`       | string    | Type: `a_b`, `mv`, `split_url`, `bandit` |
 | `start_date`            | string    | ISO 8601 start date, or empty            |
 | `end_date`              | string    | ISO 8601 end date, or empty              |
 | `duration_days`         | float     | Days between start and end, or empty     |
@@ -59,24 +87,39 @@ Download all experiments as a CSV (default) or JSON file.
 
 #### Example curl
 
-```bash
-# CSV (default)
-curl -H "Authorization: Bearer $TOKEN" \
-  "https://api.example.com/api/v1/export/experiments" \
-  -o experiments.csv
+This downloads the CSV, which has a header row and one row per experiment:
 
-# JSON with date filter
-curl -H "Authorization: Bearer $TOKEN" \
-  "https://api.example.com/api/v1/export/experiments?format=json&start_date=2024-01-01T00:00:00Z&end_date=2024-06-30T23:59:59Z" \
+```{.bash exec}
+curl -s -H "Authorization: Bearer $TOKEN" \
+  localhost:8000/api/v1/export/experiments -o experiments.csv
+
+sed -n 1p experiments.csv
+grep -c 'Checkout Button Color' experiments.csv
+```
+<!-- expect: experiment_id,experiment_name,status,experiment_type,start_date,end_date,duration_days,total_assignments,total_events,winner_variant,recommendation -->
+<!-- expect: 1 -->
+
+It prints the header row, then `1`: the demo data's `Checkout Button Color` experiment is
+in the file once. The response carries the file name:
+
+```text
+Content-Type: text/csv; charset=utf-8
+Content-Disposition: attachment; filename=experiments_20260926_225646.csv
+```
+
+With `format=json`, the same rows are a JSON array. `start_date` and `end_date` filter on
+when the experiment was created; this asks for the ones created since the start of 2024:
+
+```{.bash exec}
+curl -s -H "Authorization: Bearer $TOKEN" \
+  "localhost:8000/api/v1/export/experiments?format=json&start_date=2024-01-01T00:00:00Z" \
   -o experiments.json
-```
 
-#### Response Headers
+jq -r '.[] | select(.experiment_name == "Checkout Button Color") | "\(.status) \(.experiment_type)"' experiments.json
+```
+<!-- expect: active a_b -->
 
-```
-Content-Type: text/csv
-Content-Disposition: attachment; filename=experiments_20240315_143000.csv
-```
+It prints `active a_b`.
 
 ---
 
@@ -108,17 +151,17 @@ Same as `/export/experiments` (`format`, `scope`, `start_date`, `end_date`).
 
 #### Example curl
 
-```bash
-# All variants as CSV
-curl -H "Authorization: Bearer $TOKEN" \
-  "https://api.example.com/api/v1/export/variants" \
-  -o variants.csv
+```{.bash exec}
+curl -s -H "Authorization: Bearer $TOKEN" \
+  "localhost:8000/api/v1/export/variants?format=json" -o variants.json
 
-# Specific date range as JSON
-curl -H "Authorization: Bearer $TOKEN" \
-  "https://api.example.com/api/v1/export/variants?format=json&start_date=2024-01-01T00:00:00Z" \
-  -o variants.json
+jq -r '.[] | select(.experiment_name == "Checkout Button Color") | "\(.variant_name) \(.is_control)"' variants.json
 ```
+<!-- expect: blue_button true -->
+<!-- expect: green_button false -->
+
+It prints the demo experiment's two variants, `blue_button` (the control) and
+`green_button`. Their result columns are empty in this release (#220).
 
 ---
 
@@ -151,17 +194,18 @@ Download feature flag usage data.
 
 #### Example curl
 
-```bash
-# Feature flags as CSV
-curl -H "Authorization: Bearer $TOKEN" \
-  "https://api.example.com/api/v1/export/feature-flags" \
-  -o feature_flags.csv
+```{.bash exec}
+curl -s -H "Authorization: Bearer $TOKEN" \
+  localhost:8000/api/v1/export/feature-flags -o feature_flags.csv
 
-# Active flags only — use start_date to narrow results in combination with your own filtering
-curl -H "Authorization: Bearer $TOKEN" \
-  "https://api.example.com/api/v1/export/feature-flags?format=json" \
-  -o feature_flags.json
+cut -d, -f2,4,5 feature_flags.csv | sort
 ```
+<!-- expect: beta_features,ACTIVE,100 -->
+<!-- expect: flag_key,status,rollout_percentage -->
+
+It prints each flag's key, status and rollout percentage, among them the demo data's
+`beta_features`, `ACTIVE` at `100`. There is no status filter: to keep only the active
+flags, filter the file yourself.
 
 ---
 
@@ -214,14 +258,28 @@ Returns a JSON summary of platform-wide activity. Always returns `application/js
 
 #### Example curl
 
-```bash
-curl -H "Authorization: Bearer $TOKEN" \
-  "https://api.example.com/api/v1/export/reports/overview" | jq .
-
-# With date filter
-curl -H "Authorization: Bearer $TOKEN" \
-  "https://api.example.com/api/v1/export/reports/overview?start_date=2024-01-01T00:00:00Z&end_date=2024-03-31T23:59:59Z" | jq .
+```{.bash exec}
+curl -s -H "Authorization: Bearer $TOKEN" \
+  localhost:8000/api/v1/export/reports/overview \
+  | jq '{total_experiments, active_experiments, completed_experiments}'
 ```
+<!-- expect: "total_experiments": 3 -->
+<!-- expect: "active_experiments": 2 -->
+<!-- expect: "completed_experiments": 1 -->
+
+On the Quick Start's demo data it prints three experiments, two of them active and one
+completed. With a period, only what was created in it is counted; nothing was created in
+the first quarter of 2024:
+
+```{.bash exec}
+curl -s -H "Authorization: Bearer $TOKEN" \
+  "localhost:8000/api/v1/export/reports/overview?start_date=2024-01-01T00:00:00Z&end_date=2024-03-31T23:59:59Z" \
+  | jq '{period_start, total_experiments}'
+```
+<!-- expect: "period_start": "2024-01-01T00:00:00+00:00" -->
+<!-- expect: "total_experiments": 0 -->
+
+It prints the period's start and `"total_experiments": 0`.
 
 ---
 
@@ -239,7 +297,7 @@ Returns a combined JSON report for a single experiment, including experiment met
 
 | Parameter | Type     | Default | Description                   |
 |-----------|----------|---------|-------------------------------|
-| `format`  | `string` | `json`  | Output format (`csv` or `json`) |
+| `format`  | `string` | `json`  | Accepted, but the report is always JSON (#220) |
 
 #### JSON Response Schema
 
@@ -281,10 +339,21 @@ Returns a combined JSON report for a single experiment, including experiment met
 
 #### Example curl
 
-```bash
-curl -H "Authorization: Bearer $TOKEN" \
-  "https://api.example.com/api/v1/export/reports/experiments/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa" | jq .
+This saves the demo experiment's id in `$EXP_ID` (from the JSON export above), then asks
+for its report:
+
+```{.bash exec}
+EXP_ID=$(jq -r '.[] | select(.experiment_name == "Checkout Button Color") | .experiment_id' experiments.json)
+
+curl -s -H "Authorization: Bearer $TOKEN" \
+  localhost:8000/api/v1/export/reports/experiments/$EXP_ID \
+  | jq '{name: .experiments[0].experiment_name, variants: [.variants[].variant_name]}'
 ```
+<!-- expect: "name": "Checkout Button Color" -->
+<!-- expect: "blue_button" -->
+<!-- expect: "green_button" -->
+
+It prints the experiment's name and its two variants.
 
 ---
 
@@ -293,20 +362,29 @@ curl -H "Authorization: Bearer $TOKEN" \
 | Status Code | Description                                              |
 |-------------|----------------------------------------------------------|
 | `401`       | Missing or invalid Bearer token                          |
-| `403`       | Authenticated but insufficient permissions               |
 | `422`       | Invalid query parameter (e.g. `format=xml`)              |
 | `429`       | Rate limit exceeded                                      |
 | `500`       | Internal server error (check application logs)           |
 
 ### Example 422 Error
 
+```{.bash exec}
+curl -s -H "Authorization: Bearer $TOKEN" \
+  "localhost:8000/api/v1/export/experiments?format=xml" | jq -r '.detail[0].msg'
+```
+<!-- expect: Input should be 'csv' or 'json' -->
+
+It prints `Input should be 'csv' or 'json'`. The whole body:
+
 ```json
 {
   "detail": [
     {
+      "type": "enum",
       "loc": ["query", "format"],
-      "msg": "value is not a valid enumeration member; permitted: 'csv', 'json'",
-      "type": "type_error.enum"
+      "msg": "Input should be 'csv' or 'json'",
+      "input": "xml",
+      "ctx": {"expected": "'csv' or 'json'"}
     }
   ]
 }
@@ -321,4 +399,4 @@ curl -H "Authorization: Bearer $TOKEN" \
 - Date filtering is **inclusive on both ends** (`created_at >= start_date AND created_at <= end_date`).
 - CSV exports use Python's `csv.DictWriter` with `\r\n` line endings (RFC 4180).
 - For large datasets, exports are **streamed** (`StreamingResponse`) to keep memory usage constant.
-- The `scope` parameter is accepted for all experiment/variant endpoints but is not currently used to change the column set — it is reserved for future expansion (e.g. `events` scope will include raw event columns).
+- The `scope` parameter is accepted for the experiment and variant exports but does not change the columns yet; it is reserved for future expansion (e.g. `events` scope will include raw event columns).
