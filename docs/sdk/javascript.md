@@ -136,7 +136,7 @@ turn that into their safe default.
 
 | Method | Signature | Returns | On failure |
 |--------|-----------|---------|------------|
-| `getAssignment` | `(experimentKey, user: UserContext) => Promise<Assignment>` | `{ experimentKey, userId, variantId, variantName, isControl, configuration }` | Rejects with `ExperimentationError` (404 when the experiment is not ACTIVE) |
+| `getAssignment` | `(experimentKey, user: UserContext) => Promise<Assignment>` | `{ experimentKey, userId, variantId, variantName, isControl, configuration, assigned?, reason? }` | Rejects with `ExperimentationError` (404 when the experiment is not ACTIVE) |
 | `getVariant` | `(experimentKey, user) => Promise<string>` | `assignment.variantName` | `defaultVariant` (`'control'`); never rejects |
 | `evaluateFlag` | `(flagKey, user) => Promise<FlagEvaluation>` | `{ key, enabled, config, reason? }` (`user.attributes` sent as `context`) | Rejects with `ExperimentationError` (off with `reason: "inactive"` when the flag exists but is not ACTIVE; 404 only for an unknown key) |
 | `isFeatureEnabled` | `(flagKey, user) => Promise<boolean>` | `evaluation.enabled` | `false`; never rejects |
@@ -147,6 +147,16 @@ turn that into their safe default.
 | `getAssignments` | `(userId) => Assignment[]` | Cached, unexpired assignments in assignment order (no network) | — |
 | `getEvaluatedFlags` | `(userId) => string[]` | Keys of cached, successfully evaluated flags (no network) | — |
 | `clearCache` | `() => void` | Drops both caches | — |
+
+### Enrolment: `assigned` and `reason`
+
+An `Assignment` also carries `assigned` and `reason`. `assigned: false` means the server did not
+enrol the user (`reason` is `'holdout'`, `'mutual_exclusion'` or `'targeting'`) and returned the
+control variant so you render the default experience; no exposure was recorded. **When you export
+exposures to a warehouse, log only assignments with `assigned: true`**; the others were never in
+the experiment. A server that predates the fields sends neither, and the SDK leaves both
+`undefined`, never `false`: such a server cannot tell you, so decide deliberately what to do with
+those rows rather than dropping or keeping them by accident.
 
 `TrackOptions`: `value?` (number), `properties?` (sent as `metadata`), `experimentKey?`,
 `featureFlagKey?`, `eventType?` (defaults to the event name), `timestamp?` (`Date` or string, sent as

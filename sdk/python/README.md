@@ -54,7 +54,7 @@ default_variant="control", transport=None)`. Instances are thread-safe.
 
 | Method | Returns | Failure behaviour |
 |---|---|---|
-| `get_assignment(experiment_key, user_id, user_attributes=None)` | `Assignment(experiment_key, user_id, variant_id, variant_name, is_control, configuration)` | raises `ExperimentationError` (`status == 404` when the experiment is not ACTIVE) |
+| `get_assignment(experiment_key, user_id, user_attributes=None)` | `Assignment(experiment_key, user_id, variant_id, variant_name, is_control, configuration, assigned, reason)` | raises `ExperimentationError` (`status == 404` when the experiment is not ACTIVE) |
 | `get_variant(experiment_key, user_id, user_attributes=None)` | `str` variant name | returns `default_variant` |
 | `get_feature_flag(flag_key, user_id, user_attributes=None)` | `FlagEvaluation(key, enabled, config, reason)` | raises `ExperimentationError` (`status == 404` when the flag is not ACTIVE) |
 | `is_feature_enabled(flag_key, user_id, user_attributes=None)` | `bool` | returns `False` |
@@ -76,6 +76,16 @@ retried once after `Retry-After` seconds (capped at 5 s).
 `FlagEvaluation.reason` (`targeting_rule` / `rollout` / `inactive` / `error`, or `None`) says why
 the server decided. Caches are keyed by user + key only — call `clear_cache()` after changing a
 user's attributes.
+
+### Enrolment: `assigned` and `reason`
+
+An `Assignment` also carries `assigned` and `reason`. `assigned is False` means the server did not
+enrol the user (`reason` is `"holdout"`, `"mutual_exclusion"` or `"targeting"`) and returned the
+control variant so you render the default experience; no exposure was recorded. **When you export
+exposures to a warehouse, log only assignments with `assigned is True`**; the others were never in
+the experiment. A server that predates the fields sends neither, and the SDK leaves both `None`,
+never `False`: such a server cannot tell you, so decide deliberately what to do with those rows
+rather than dropping or keeping them by accident.
 
 ## Tracking fan-out rule
 

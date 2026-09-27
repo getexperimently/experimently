@@ -163,6 +163,11 @@ function HeroBanner() {
 | `configuration` | `Record<string, unknown> \| null` | The variant's `configuration` JSON from the experiment definition |
 | `loading` | `boolean` | `true` until the first response |
 | `error` | `Error \| null` | Set when assignment failed (404 when the experiment is not ACTIVE) |
+| `assigned` | `boolean \| undefined` | `false` when the server did not enrol the user and returned the control variant (no exposure recorded); `true` for a real assignment and for servers that predate the field; `undefined` while loading or on error |
+| `reason` | `string \| undefined` | `'assigned'`, `'holdout'`, `'mutual_exclusion'` or `'targeting'`; `undefined` while loading, on error, or when the server does not send one |
+
+When you export exposures to a warehouse, log only assignments with `assigned: true`; the others
+were never in the experiment.
 
 ### `useTrackEvent(): (eventName, properties?, options?) => void`
 
