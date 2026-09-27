@@ -21,7 +21,8 @@ This document summarizes the implementation of Aurora PostgreSQL database resour
 
 - **Performance Optimization**
   - Custom parameter groups tailored to workload
-  - Environment-specific memory allocations
+  - Environment-specific `work_mem`; `shared_buffers` and `effective_cache_size` are left at Aurora's defaults, which scale with the instance class
+  - One engine version for every environment: `AURORA_POSTGRES_VERSION` (Aurora PostgreSQL 15.17) in `infrastructure/cdk/stacks/enhanced_database_stack.py`
   - Performance Insights enabled
   - Enhanced monitoring (60-second intervals)
 
@@ -38,7 +39,7 @@ self.aurora_cluster = rds.DatabaseCluster(
     self,
     "AuroraCluster",
     engine=rds.DatabaseClusterEngine.aurora_postgres(
-        version=rds.AuroraPostgresEngineVersion.VER_15_3
+        version=AURORA_POSTGRES_VERSION  # VER_15_17, one module constant
     ),
     credentials=rds.Credentials.from_secret(db_credentials),
     instances=instance_count,
