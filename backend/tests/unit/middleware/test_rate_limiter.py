@@ -18,6 +18,8 @@ from fastapi.testclient import TestClient
 
 from backend.app.middleware.rate_limiter import (
     DEFAULT_RATE_LIMIT,
+    DEFAULT_SDK_RATE_LIMIT_PER_MINUTE,
+    EXPORT_RATE_LIMIT,
     RATE_LIMIT_CONFIG,
     RateLimitMiddleware,
     RedisRateLimiter,
@@ -361,3 +363,95 @@ class TestRateLimitConfig:
         limit, window = DEFAULT_RATE_LIMIT
         assert limit == 300
         assert window == 60
+
+
+# ---------------------------------------------------------------------------
+# Export endpoints: one shared limit per client address
+# ---------------------------------------------------------------------------
+
+_EXPORT_PATHS = [
+    "/api/v1/export/experiments",
+    "/api/v1/export/variants",
+    "/api/v1/export/feature-flags",
+    "/api/v1/export/reports/overview",
+    "/api/v1/export/reports/experiments/3f2b8c1e-9d4a-4e6f-8a7b-1c2d3e4f5a6b",
+]
+
+
+@pytest.mark.regression
+class TestExportRateLimit:
+    """Every path under /api/v1/export/ shares 10 requests a minute per client."""
+
+    def test_the_constant_is_ten_a_minute(self):
+        assert EXPORT_RATE_LIMIT == (10, 60)
+
+    @pytest.mark.parametrize("path", _EXPORT_PATHS)
+    def test_every_export_path_resolves_to_the_export_limit(self, path):
+        assert resolve_rate_limit(path) == (10, 60)
+
+    def test_neighbouring_paths_keep_their_limits(self):
+        assert resolve_rate_limit("/api/v1/experiments/") == (300, 60)
+        assert resolve_rate_limit("/api/v1/tracking/track") == (
+            DEFAULT_SDK_RATE_LIMIT_PER_MINUTE,
+            60,
+        )
+
+    def test_export_paths_share_one_counter_across_routes_and_ids(self):
+        """10 requests spread over routes and ids succeed; the 11th is refused."""
+        test_app = FastAPI()
+
+        @test_app.get("/api/v1/export/experiments")
+        async def export_experiments():
+            return {"ok": True}
+
+        @test_app.get("/api/v1/export/variants")
+        async def export_variants():
+            return {"ok": True}
+
+        @test_app.get("/api/v1/export/feature-flags")
+        async def export_flags():
+            return {"ok": True}
+
+        @test_app.get("/api/v1/export/reports/experiments/{experiment_id}")
+        async def export_report(experiment_id: str):
+            return {"ok": True}
+
+        @test_app.get("/api/v1/experiments/")
+        async def experiments():
+            return {"ok": True}
+
+        middleware = RateLimitMiddleware(test_app, enabled=True)
+        middleware._limiter = SlidingWindowRateLimiter()
+        client = TestClient(middleware)
+
+        first_id = "11111111-1111-4111-8111-111111111111"
+        second_id = "22222222-2222-4222-8222-222222222222"
+        spread = [
+            "/api/v1/export/experiments",
+            "/api/v1/export/variants",
+            f"/api/v1/export/reports/experiments/{first_id}",
+            f"/api/v1/export/reports/experiments/{second_id}",
+        ]
+        for i in range(10):
+            resp = client.get(spread[i % len(spread)])
+            assert resp.status_code == 200, (i, resp.status_code)
+            assert resp.headers["X-RateLimit-Limit"] == "10"
+            assert resp.headers["X-RateLimit-Remaining"] == str(10 - i - 1)
+
+        # The 11th is refused whichever export path it goes to -- including a
+        # route and an id not used above.
+        third_id = "33333333-3333-4333-8333-333333333333"
+        for path in [
+            "/api/v1/export/feature-flags",
+            "/api/v1/export/experiments",
+            f"/api/v1/export/reports/experiments/{third_id}",
+        ]:
+            refused = client.get(path)
+            assert refused.status_code == 429, path
+            assert refused.headers["Retry-After"] == "60"
+            assert refused.headers["X-RateLimit-Limit"] == "10"
+            assert refused.headers["X-RateLimit-Remaining"] == "0"
+            assert "Too Many Requests" in refused.json()["detail"]
+
+        # Other routes keep their own budget.
+        assert client.get("/api/v1/experiments/").status_code == 200

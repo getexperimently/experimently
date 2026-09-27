@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 
 from backend.app.api import deps
 from backend.app.core.permissions import Action, ResourceType, check_permission
+from backend.app.core.segment_preview_limits import preview_ruleset_violations
 from backend.app.models.user import User
 from backend.app.schemas.segment import (
     AudiencePreviewResponse,
@@ -305,8 +306,16 @@ def preview_audience_size(
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_active_user),
 ) -> AudiencePreviewResponse:
-    """Estimate the audience size for a set of rules."""
+    """Estimate the audience size for a set of rules.
+
+    The ruleset and ``sample_size`` are checked against the limits in
+    ``backend.app.core.segment_preview_limits`` before any database query; a
+    request over any of them is answered 422.
+    """
     _require_permission(current_user, Action.READ)
+    violations = preview_ruleset_violations(data.rules, sample_size)
+    if violations:
+        raise HTTPException(status_code=422, detail=violations)
     # Verify segment exists (informational, rules come from request body)
     try:
         AudienceService.get_segment(db, segment_id)
