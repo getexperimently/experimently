@@ -125,9 +125,10 @@ test-coverage: ## Backend tests with a coverage report
 		--cov=backend.app --cov-report=term-missing
 
 .PHONY: test-sdk
-test-sdk: ## Cross-SDK golden-vector contract tests
-	$(PYTEST) tests/sdk-contract/test_python_sdk.py -q
-	node tests/sdk-contract/test_js_sdk.js
+test-sdk: ## Each SDK's own hash function against the cross-SDK golden vectors
+	$(PYTEST) tests/sdk-contract -q -o addopts=""
+	$(VENV)/bin/python tests/sdk-contract/hash_contract.py --list
+	$(VENV)/bin/python tests/sdk-contract/hash_contract.py python js edge react-native go
 
 .PHONY: core-build
 core-build: $(VENV)/bin/pip-licenses $(VENV)/bin/reuse ## Prove the core profile stands alone: copy the tree, delete modules/, rebuild and test it

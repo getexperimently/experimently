@@ -1,0 +1,7 @@
+# The CI values files are for the chart job, not for the packaged chart.
+ci/
+.DS_Store
+*.swp
+*.bak
+*.tmp
+*.orig

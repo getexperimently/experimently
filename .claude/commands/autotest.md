@@ -101,8 +101,7 @@ Launch these four agents simultaneously:
 - Return: APPROVED / APPROVED WITH SUGGESTIONS / CHANGES REQUESTED
 
 **Agent 3: contract-tester**
-- Run Python SDK contract tests: `source venv/bin/activate && python -m pytest tests/sdk-contract/ -v`
-- Run JS SDK contract tests: `node tests/sdk-contract/test_js_sdk.js`
+- Run the SDK contract tests: `source venv/bin/activate && make test-sdk` (each SDK's own hash function against the golden vectors)
 - Verify cross-SDK hash parity
 - Return: per-SDK pass/fail, any divergences
 

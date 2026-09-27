@@ -34,11 +34,11 @@
  * explicit `"type": "commonjs"` there failed every file in the modules tree
  * with "Specified module format (CommonJs) is not matching the module format
  * of the source code (EcmaScript Modules)". Absent, the field defaults to
- * commonjs for Node exactly as before (the one root-level script,
- * tests/sdk-contract/test_js_sdk.js, is `require`-based), and Turbopack stops
- * treating the declaration as an instruction. The dashboard image never hit
- * this because it copies `frontend/` and `modules/frontend/` into `/app` with
- * no package.json between them. src/tests/modules-alias.test.ts pins it.
+ * commonjs for Node exactly as before (the node scripts under
+ * tests/sdk-contract/harness/ name their format with .cjs / .mjs), and
+ * Turbopack stops treating the declaration as an instruction. The dashboard
+ * image never hit this because it copies `frontend/` and `modules/frontend/`
+ * into `/app` with no package.json between them. src/tests/modules-alias.test.ts pins it.
  */
 const fs = require('fs');
 const path = require('path');

@@ -32,12 +32,13 @@ from __future__ import annotations
 import functools
 import hashlib
 import logging
-import threading
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Iterator, Optional, Tuple, Union
 
 import re2
+
+from backend.app.core.log_once import OnceLog
 
 logger = logging.getLogger(__name__)
 
@@ -230,8 +231,9 @@ def search(pattern: Any, value: Any) -> bool:
 # ---------------------------------------------------------------------------
 
 _REPORTED_LIMIT = 4096
-_reported: set = set()
-_reported_lock = threading.Lock()
+_once = OnceLog(limit=_REPORTED_LIMIT)
+#: The keys already reported (the same set object as ``_once.seen``).
+_reported = _once.seen
 
 
 def report_unevaluable(exc: PatternUnevaluable, where: str) -> None:
@@ -242,13 +244,8 @@ def report_unevaluable(exc: PatternUnevaluable, where: str) -> None:
     ``segment:<id>``). The pattern and the value are never logged; the digest
     matches the upgrade check's output.
     """
-    key = (exc.digest, exc.reason.value, where)
-    with _reported_lock:
-        if key in _reported:
-            return
-        if len(_reported) >= _REPORTED_LIMIT:
-            _reported.clear()
-        _reported.add(key)
+    if not _once.first(where, (exc.digest, exc.reason.value)):
+        return
     logger.warning(
         "Targeting rules for %s were not applied: a pattern condition could not "
         "be evaluated (reason=%s, pattern=%s). Run "

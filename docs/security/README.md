@@ -21,7 +21,7 @@ This directory contains the security compliance documentation for Experimently.
 - Security headers: HSTS (1yr + preload), CSP (`default-src 'none'`), X-Frame-Options: DENY — `backend/app/middleware/security_middleware.py`
 - RBAC enforcement: 4 roles (ADMIN, DEVELOPER, ANALYST, VIEWER) — `backend/app/core/permissions.py`
 - bcrypt password hashing — `backend/app/core/security.py`
-- API key scoping and expiry — `backend/app/models/api_key.py`
+- API key expiry and revocation (an expired or revoked key is refused) — `backend/app/models/api_key.py`, `backend/app/api/deps.py`
 - Audit logging for all CRUD operations — `backend/app/models/audit_log.py`
 - Safety auto-rollback for feature flags — `backend/app/core/safety_scheduler.py`
 - Structured logging with error sanitization — `backend/app/middleware/`
@@ -30,7 +30,7 @@ This directory contains the security compliance documentation for Experimently.
 
 1. Replace `decode_token` stub with real Cognito JWT validation (`backend/app/core/security.py`)
 2. Override weak default credentials (`FIRST_SUPERUSER_PASSWORD = "admin"` in `config.py`)
-3. Hash API keys at rest (currently stored in plaintext in `api_keys.key`)
+3. ~~Hash API keys at rest~~ Done: `api_keys.key` holds only the SHA-256 hash of each key (`hash_api_key` in `backend/app/core/security.py`); the plaintext is shown once, at creation
 4. Add rate limiting to `/api/v1/auth/token` login endpoint
 5. Reduce JWT expiry from 8 days to 1 hour with refresh token rotation
 6. Enable AWS WAF with OWASP Core Rule Set

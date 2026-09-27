@@ -573,26 +573,39 @@ class WorkspaceService:
         db.refresh(api_key)
         return api_key, plaintext
 
-    def revoke_api_key(self, db: Session, api_key_id: uuid.UUID) -> None:
-        """Deactivate a workspace API key."""
-        key = db.query(WorkspaceAPIKey).filter(WorkspaceAPIKey.id == api_key_id).first()
+    def _get_workspace_api_key(
+        self, db: Session, workspace_id: uuid.UUID, api_key_id: uuid.UUID
+    ) -> Optional[WorkspaceAPIKey]:
+        """Return the key with this id in this workspace, or None."""
+        return (
+            db.query(WorkspaceAPIKey)
+            .filter(
+                WorkspaceAPIKey.id == api_key_id,
+                WorkspaceAPIKey.workspace_id == workspace_id,
+            )
+            .first()
+        )
+
+    def revoke_api_key(
+        self, db: Session, workspace_id: uuid.UUID, api_key_id: uuid.UUID
+    ) -> None:
+        """Deactivate a workspace API key belonging to ``workspace_id``."""
+        key = self._get_workspace_api_key(db, workspace_id, api_key_id)
         if not key:
             raise APIKeyNotFound(f"API key {api_key_id} not found.")
         key.is_active = False
         db.commit()
 
     def rotate_api_key(
-        self, db: Session, api_key_id: uuid.UUID
+        self, db: Session, workspace_id: uuid.UUID, api_key_id: uuid.UUID
     ) -> Tuple[WorkspaceAPIKey, str]:
         """
-        Rotate a workspace API key.
+        Rotate a workspace API key belonging to ``workspace_id``.
 
         The old key is deactivated and a new one with the same name/scopes is
         created. Returns (new_WorkspaceAPIKey, new_plaintext_key).
         """
-        old_key = (
-            db.query(WorkspaceAPIKey).filter(WorkspaceAPIKey.id == api_key_id).first()
-        )
+        old_key = self._get_workspace_api_key(db, workspace_id, api_key_id)
         if not old_key:
             raise APIKeyNotFound(f"API key {api_key_id} not found.")
 

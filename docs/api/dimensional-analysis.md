@@ -134,8 +134,20 @@ curl -s "localhost:8000/api/v1/results/$EXP_ID?breakdown=device" \
 
 It prints the dimension, `"is_exploratory": true`, the corrected threshold and the
 segments: `desktop`, `mobile`, and `unknown` for the users' assignment events, which carry
-no `device`. With three segments the threshold is 0.05 / 3, about `0.0167`. One segment in
-full:
+no `device`. With three segments the threshold is 0.05 / 3, about `0.0167`.
+
+Every segment lists every variant of the experiment by name, with zero counts where the
+segment has none of its users, and `is_control` is the flag the experiment gives the
+variant. The control comes first:
+
+```{.bash exec}
+curl -s "localhost:8000/api/v1/results/$EXP_ID?breakdown=device" \
+  -H "Authorization: Bearer $TOKEN" \
+  | jq -c '.breakdown.segments[] | select(.segment_value == "desktop") | [.variants[] | {variant_name, is_control}]'
+```
+<!-- expect: [{"variant_name":"blue_button","is_control":true},{"variant_name":"green_button","is_control":false}] -->
+
+It prints `blue_button`, the control, then `green_button`. One segment in full:
 
 ```json
 {
@@ -144,7 +156,7 @@ full:
   "variants": [
     {
       "variant_id": "34852c9e-05db-4168-b164-d1e8332503d5",
-      "variant_name": "34852c9e-05db-4168-b164-d1e8332503d5",
+      "variant_name": "blue_button",
       "is_control": true,
       "sample_size": 1,
       "conversions": 1,
@@ -155,7 +167,7 @@ full:
     },
     {
       "variant_id": "f180194d-b5d7-40bc-abd8-a6b155772845",
-      "variant_name": "f180194d-b5d7-40bc-abd8-a6b155772845",
+      "variant_name": "green_button",
       "is_control": false,
       "sample_size": 3,
       "conversions": 3,
@@ -168,9 +180,8 @@ full:
 }
 ```
 
-`variant_name` is the variant's id in this release, not its name
-([#218](https://github.com/getexperimently/experimently/issues/218)); match variants by
-`variant_id`. The breakdown also carries `has_heterogeneous_effects` and `hte_warning`.
+The control's `p_value` is `null`; every other variant's is its test against the control in
+the same segment. The breakdown also carries `has_heterogeneous_effects` and `hte_warning`.
 
 ### GET /api/v1/experiments/{experiment_id}/segmented-results/{segment_by}
 

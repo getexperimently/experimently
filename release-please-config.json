@@ -21,6 +21,10 @@
           "type": "json",
           "path": "frontend/src/tests/fixtures/openapi.json",
           "jsonpath": "$.info.version"
+        },
+        {
+          "type": "generic",
+          "path": "charts/experimently/Chart.yaml"
         }
       ],
       "changelog-path": "CHANGELOG.md",
