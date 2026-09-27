@@ -41,9 +41,11 @@ import copy
 import importlib.util
 import json
 import os
+import re
 import stat
 import subprocess
 import sys
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -286,6 +288,15 @@ def test_a_deploy_is_approved_on_healthy_targets_and_succeeds_when_serving(aws):
     assert ops.index("elbv2 describe-target-health") < ops.index(
         "deploy continue-deployment"
     )
+    # When the API was first seen serving, and that plus the group's hour: the
+    # summary's "alarms watch the API until about ..." (#148 UX W3a).
+    shifted_at = outputs.pop("shifted_at")
+    bake_end = outputs.pop("bake_end")
+    assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", shifted_at), shifted_at
+    assert re.fullmatch(r"\d{4}-\d\d-\d\d \d\d:\d\d", bake_end), bake_end
+    assert datetime.strptime(bake_end, "%Y-%m-%d %H:%M") - datetime.strptime(
+        shifted_at[:16], "%Y-%m-%dT%H:%M"
+    ) == timedelta(minutes=60)
     assert outputs == {
         "approved": "true",
         "result": "serving",
@@ -542,7 +553,8 @@ def test_an_unsplit_rule_on_the_other_group_after_the_flip_is_red(aws):
     )
     assert code == 1
     assert outputs == {"approved": "true", "result": "wrong-route"}
-    assert "Roll back with the line in this run's summary" in out
+    # After #148's grace: check for an alarm rollback first, then the line.
+    assert "Otherwise, roll back with the line in this run's summary" in out
     assert "The deployment was not stopped" in out
 
 

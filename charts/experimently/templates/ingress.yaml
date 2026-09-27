@@ -1,0 +1,50 @@
+{{- if .Values.ingress.enabled }}
+{{- $fullname := include "experimently.fullname" . }}
+{{- $host := include "experimently.publicHost" . }}
+{{- if or (regexMatch "^[0-9.]+$" $host) (contains ":" (urlParse .Values.publicBaseUrl).host) }}
+{{- fail (printf "publicBaseUrl %q: an Ingress host must be a DNS name without a port. Use a DNS name, or set ingress.enabled=false and route to the Services yourself." .Values.publicBaseUrl) }}
+{{- end }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $fullname }}
+  labels:
+    {{- include "experimently.labels" . | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  {{- with .Values.ingress.tls.secretName }}
+  tls:
+    - hosts:
+        - {{ $host | quote }}
+      secretName: {{ . }}
+  {{- end }}
+  rules:
+    # The host is publicBaseUrl's: the API's Host allow-list derives from the
+    # same value, so the two cannot disagree. `Prefix` matches whole path
+    # elements, so /health does not take the dashboard's /healthz.
+    - host: {{ $host | quote }}
+      http:
+        paths:
+          {{- range list "/api" "/ws" "/health" }}
+          - path: {{ . }}
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $fullname }}-api
+                port:
+                  name: http
+          {{- end }}
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $fullname }}-web
+                port:
+                  name: http
+{{- end }}
