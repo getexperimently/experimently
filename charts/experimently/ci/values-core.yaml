@@ -1,0 +1,11 @@
+# The chart job's core case: the defaults a first install uses -- inline
+# secrets, bundled Postgres and Redis, one API replica, the Ingress on.
+# The secret values are render-only placeholders, never deployed.
+publicBaseUrl: https://experimently.example.com
+profile: core
+firstSuperuser: admin@example.com
+secrets:
+  secretKey: render-only-placeholder-secret-key-value
+  firstSuperuserPassword: render-only-placeholder-password
+  postgresUser: experimently
+  postgresPassword: render-only-placeholder-db-password
