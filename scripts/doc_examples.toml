@@ -359,7 +359,7 @@ path = "docs/api/sequential-testing.md"
 environment = "stack"
 exec = 3
 skip = 0
-expects = 6
+expects = 10
 
 [[document]]
 path = "docs/statistics/fdr-correction.md"

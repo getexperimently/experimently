@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, joinedload
 
 from backend.app.api.deps import get_current_active_user, get_current_superuser, get_db
+from backend.app.core.analysis_status import analysis_notice, analysis_status
 from backend.app.core.stats_engine import ENGINE_VERSION
 from backend.app.models.analysis_snapshot import AnalysisKind
 from backend.app.models.experiment import Experiment
@@ -908,6 +909,38 @@ def _get_sequential_data(
     return (control_successes, control_total, treatment_successes, treatment_total)
 
 
+#: The significance levels the sequential analysis accepts: (0, MAX].
+SEQUENTIAL_ALPHA_DEFAULT = 0.05
+SEQUENTIAL_ALPHA_MAX = 0.2
+
+ALWAYS_VALID_ALIAS_NOTICE = (
+    "The configured method 'always_valid' is an alias of 'msprt'; this is the "
+    "mSPRT analysis."
+)
+
+
+def _stored_sequential_alpha(config: Dict[str, Any]) -> Tuple[float, Optional[str]]:
+    """The significance level stored in *config*, with a notice if it is unusable.
+
+    The experiments API validates ``alpha`` on the way in, so a stored value
+    outside (0, 0.2] can only have been written some other way.  It is not
+    used silently: the default is used and the notice says so.
+    """
+    stored = config.get("alpha")
+    if stored is None:
+        return SEQUENTIAL_ALPHA_DEFAULT, None
+    if (
+        isinstance(stored, (int, float))
+        and not isinstance(stored, bool)
+        and 0.0 < stored <= SEQUENTIAL_ALPHA_MAX
+    ):
+        return float(stored), None
+    return SEQUENTIAL_ALPHA_DEFAULT, (
+        f"The stored alpha {stored!r} is outside (0, {SEQUENTIAL_ALPHA_MAX}]; "
+        f"{SEQUENTIAL_ALPHA_DEFAULT} was used."
+    )
+
+
 # ---------------------------------------------------------------------------
 # Endpoint 5 — GET /{experiment_id}/sequential (EP-021)
 # ---------------------------------------------------------------------------
@@ -919,15 +952,29 @@ def _get_sequential_data(
 )
 def get_sequential_results(
     experiment_id: UUID,
+    alpha: Optional[float] = Query(
+        default=None,
+        gt=0.0,
+        le=SEQUENTIAL_ALPHA_MAX,
+        description=(
+            "Significance level for this request, above 0 and at most 0.2. "
+            "Overrides the experiment's stored sequential_testing_config.alpha "
+            "(default 0.05). The mSPRT boundary is 1/alpha."
+        ),
+    ),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ) -> SequentialTestingResponse:
     """
     Get sequential testing analysis for an experiment (EP-021).
 
-    Returns mSPRT evidence ratio, always-valid confidence intervals,
-    evidence trajectory for charting, alpha spending boundaries,
-    and a recommended action (stop/continue).
+    Returns the mSPRT evidence ratio, an always-valid confidence interval,
+    the evidence trajectory for charting, a recommended action
+    (stop_for_effect or continue) and the advisory ``at_risk`` flag.
+    ``alpha_spending`` is always empty: no planned-looks table is computed.
+
+    The significance level is the ``alpha`` query parameter, else the stored
+    ``sequential_testing_config.alpha``, else 0.05.
 
     Only available for experiments with sequential_testing_enabled=True.
     """
@@ -942,11 +989,24 @@ def get_sequential_results(
         )
 
     # Extract config
-    config = experiment.sequential_testing_config or {}
+    config: Dict[str, Any] = dict(experiment.sequential_testing_config or {})
     tau_squared = config.get("tau_squared", 0.001)
-    spending_function = config.get("spending_function", "obrien_fleming")
-    planned_looks = config.get("planned_looks", 10)
-    alpha = config.get("alpha", 0.05)
+    notices: List[str] = []
+    effective_alpha: float
+    if alpha is None:
+        effective_alpha, alpha_notice = _stored_sequential_alpha(config)
+        if alpha_notice:
+            notices.append(alpha_notice)
+    else:
+        effective_alpha = alpha
+    # The sequential_testing_method column is not written by the experiments
+    # API today (only the config's "method" is); the column is read in case it
+    # was set some other way.
+    if "always_valid" in (
+        config.get("method"),
+        getattr(experiment, "sequential_testing_method", None),
+    ):
+        notices.append(ALWAYS_VALID_ALIAS_NOTICE)
 
     # Get conversion data
     control_s, control_t, treatment_s, treatment_t = _get_sequential_data(
@@ -973,9 +1033,7 @@ def get_sequential_results(
         treatment_total=treatment_t,
         config={
             "tau_squared": tau_squared,
-            "spending_function": spending_function,
-            "planned_looks": planned_looks,
-            "alpha": alpha,
+            "alpha": effective_alpha,
             "actual_days": actual_days,
             "expected_days": config.get("expected_duration_days", 30),
             "required_sample_size": config.get("required_sample_size", 10000),
@@ -1012,16 +1070,6 @@ def get_sequential_results(
         for pt in analysis.evidence_trajectory
     ]
 
-    spending_data = [
-        {
-            "look_number": b.look_number,
-            "cumulative_alpha": b.cumulative_alpha,
-            "boundary_z": b.boundary_z,
-            "boundary_p": b.boundary_p,
-        }
-        for b in analysis.alpha_spending
-    ]
-
     risk_data = None
     if analysis.long_running_risk:
         risk_data = {
@@ -1032,14 +1080,26 @@ def get_sequential_results(
             "recommendation": analysis.long_running_risk.recommendation,
         }
 
+    status = analysis_status("sequential")
+    notice = analysis_notice("sequential")
+    if notices:
+        # Appended to the table's notice, so only while the analysis is beta:
+        # a ga label carries no notice, and these sentences must not create one.
+        notice = " ".join([notice, *notices]) if notice else None
+
     response = SequentialTestingResponse(
         method=analysis.method.value,
         msprt_result=msprt_data,
         confidence_sequence=cs_data,
         evidence_trajectory=trajectory_data,
-        alpha_spending=spending_data,
+        # No planned-looks table is computed (#232); the field stays in the
+        # stable response shape and is always empty.
+        alpha_spending=[],
         long_running_risk=risk_data,
         recommended_action=analysis.recommended_action,
+        at_risk=risk_data["is_at_risk"] if risk_data else None,
+        analysis_status=status,
+        analysis_notice=notice,
     )
 
     # Audit snapshot (best-effort; mSPRT is closed-form, so no seed).
