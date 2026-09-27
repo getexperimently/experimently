@@ -77,6 +77,24 @@ def resolve_experiment_type(value: Any) -> Optional[ExperimentType]:
     return _resolve_enum_member(ExperimentType, value)
 
 
+class AnalysisConfigError(ValueError):
+    """A create/update would leave an analysis config in a state it refuses.
+
+    ``field`` is the request field at fault; the API answers 422 naming it.
+    """
+
+    def __init__(self, field: str, message: str) -> None:
+        super().__init__(message)
+        self.field = field
+        self.message = message
+
+
+BAYESIAN_CONFIG_CLEAR_MESSAGE = (
+    "bayesian_config cannot be cleared while bayesian_enabled is true; "
+    "send bayesian_enabled: false to disable"
+)
+
+
 # The JSONB analysis-configuration columns and the schema each one holds.
 _ANALYSIS_CONFIG_SCHEMAS: Dict[str, type] = {
     "bayesian_config": BayesianConfig,
@@ -97,6 +115,15 @@ def _normalise_analysis_configs(
     analysis only runs for an experiment that has both.  An explicit
     ``bayesian_enabled: null`` on an update is dropped rather than written to a
     non-nullable column.
+
+    On an update (*experiment* given), an explicit ``bayesian_config: null``
+    while Bayesian analysis stays on raises :class:`AnalysisConfigError`
+    rather than silently replacing the stored config with the defaults.
+    Clearing it together with ``bayesian_enabled: false`` is allowed.
+
+    Raises:
+        AnalysisConfigError: the update would clear the config of an enabled
+            experiment.
     """
     for field, schema in _ANALYSIS_CONFIG_SCHEMAS.items():
         value = data.get(field)
@@ -117,6 +144,9 @@ def _normalise_analysis_configs(
         if "bayesian_config" in data
         else getattr(experiment, "bayesian_config", None)
     )
+    clears_config = "bayesian_config" in data and data["bayesian_config"] is None
+    if enabled and clears_config and experiment is not None:
+        raise AnalysisConfigError("bayesian_config", BAYESIAN_CONFIG_CLEAR_MESSAGE)
     if enabled and not config:
         data["bayesian_config"] = BayesianConfig().model_dump(mode="json")
     return data

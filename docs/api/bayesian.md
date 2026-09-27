@@ -128,7 +128,9 @@ it is answered as if it had not.
 | `credible_level` | `float` | `0.95` | Credible interval level, between 0 and 1 |
 
 A config that fails these checks is refused with `422`, and the error's `loc` names the
-field, for example `["body", "bayesian_config", "alpha"]`.
+field, for example `["body", "bayesian_config", "alpha"]`. So is a `PUT` that sends
+`"bayesian_config": null` while Bayesian analysis stays on; to turn it off and clear the
+config, send `"bayesian_enabled": false` with it.
 
 ---
 

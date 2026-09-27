@@ -303,3 +303,91 @@ class TestSchedulerDoesNotStopOnDecision:
         stored = _stored(db_session, experiment_id)
         assert stored.status == ExperimentStatus.ACTIVE
         assert stored.bayesian_decision == decision
+
+
+class TestClearingTheConfig:
+    """An explicit ``bayesian_config: null`` must not silently reset the config.
+
+    With Bayesian already on and ``bayesian_enabled`` absent from the PUT, a
+    null config used to fall through to the "enabled with no config" fallback
+    and replace a custom config with the defaults, answering 200.
+    """
+
+    def test_null_config_while_enabled_is_refused(
+        self, admin_client: TestClient, db_session: Session
+    ):
+        body = _create(
+            admin_client,
+            "Clear while enabled",
+            bayesian_enabled=True,
+            bayesian_config=CUSTOM_CONFIG,
+        )
+        response = admin_client.put(
+            f"/api/v1/experiments/{body['id']}", json={"bayesian_config": None}
+        )
+        assert response.status_code == 422, response.text
+        detail = response.json()["detail"]
+        assert [err["loc"] for err in detail] == [["body", "bayesian_config"]]
+        assert "bayesian_enabled: false" in detail[0]["msg"]
+
+        stored = _stored(db_session, body["id"])
+        assert stored.bayesian_enabled is True
+        assert stored.bayesian_config == CUSTOM_CONFIG
+
+    def test_null_config_with_enabled_true_is_refused(
+        self, admin_client: TestClient, db_session: Session
+    ):
+        body = _create(
+            admin_client,
+            "Clear and enable",
+            bayesian_enabled=True,
+            bayesian_config=CUSTOM_CONFIG,
+        )
+        response = admin_client.put(
+            f"/api/v1/experiments/{body['id']}",
+            json={"bayesian_enabled": True, "bayesian_config": None},
+        )
+        assert response.status_code == 422, response.text
+        assert _stored(db_session, body["id"]).bayesian_config == CUSTOM_CONFIG
+
+    def test_disable_and_null_together_clears(
+        self, admin_client: TestClient, db_session: Session
+    ):
+        body = _create(
+            admin_client,
+            "Disable and clear",
+            bayesian_enabled=True,
+            bayesian_config=CUSTOM_CONFIG,
+        )
+        response = admin_client.put(
+            f"/api/v1/experiments/{body['id']}",
+            json={"bayesian_enabled": False, "bayesian_config": None},
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["bayesian_enabled"] is False
+        assert response.json()["bayesian_config"] is None
+
+        stored = _stored(db_session, body["id"])
+        assert stored.bayesian_enabled is False
+        assert stored.bayesian_config is None
+        assert _bayesian(admin_client, body["id"])["is_enabled"] is False
+
+    def test_update_touching_neither_field_keeps_the_config(
+        self, admin_client: TestClient, db_session: Session
+    ):
+        body = _create(
+            admin_client,
+            "Untouched config",
+            bayesian_enabled=True,
+            bayesian_config=CUSTOM_CONFIG,
+        )
+        response = admin_client.put(
+            f"/api/v1/experiments/{body['id']}",
+            json={"description": "renamed only"},
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["bayesian_config"] == CUSTOM_CONFIG
+
+        stored = _stored(db_session, body["id"])
+        assert stored.bayesian_enabled is True
+        assert stored.bayesian_config == CUSTOM_CONFIG
