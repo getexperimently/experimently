@@ -19,7 +19,7 @@ Everything the images install: `backend/requirements/runtime.lock` (the core pro
 
 Development-only dependencies — what `backend/requirements.txt` adds for test jobs and developer environments, and `infrastructure/cdk/requirements.txt` for the deployment toolchain — are **not** listed. They are not redistributed: nobody receives them from this project, they are fetched from PyPI when you build from source. They are audited for advisories separately, by `scripts/audit_dependencies.py` against `security/dependency-audit.toml`.
 
-#### MIT (31)
+#### MIT (35)
 
 | Package | Version |
 |---|---|
@@ -30,13 +30,16 @@ Development-only dependencies — what `backend/requirements.txt` adds for test 
 | `alembic` | 1.20.0 |
 | `annotated-doc` | 0.0.5 |
 | `annotated-types` | 0.8.0 |
+| `anthropic` | 1.8.0 |
 | `anyio` | 4.15.1 |
 | `charset-normalizer` | 3.5.1 |
+| `docstring_parser` | 0.18.0 |
 | `et_xmlfile` | 2.0.0 |
 | `fastapi` | 0.141.1 |
 | `formulaic` | 1.2.2 |
 | `h11` | 0.16.0 |
 | `interface_meta` | 2.0.1 |
+| `jiter` | 0.17.0 |
 | `jmespath` | 1.1.0 |
 | `loguru` | 0.7.3 |
 | `narwhals` | 2.26.0 |
@@ -51,6 +54,7 @@ Development-only dependencies — what `backend/requirements.txt` adds for test 
 | `sendgrid` | 6.12.5 |
 | `six` | 1.17.0 |
 | `slack_sdk` | 3.44.1 |
+| `truststore` | 0.10.4 |
 | `typing-inspection` | 0.4.4 |
 | `urllib3` | 2.7.0 |
 | `xmlsec` | 1.3.17 |
@@ -74,24 +78,7 @@ Development-only dependencies — what `backend/requirements.txt` adds for test 
 | `semver` | 3.1.0 |
 | `websockets` | 15.0.1 |
 
-#### Apache-2.0 (12)
-
-| Package | Version |
-|---|---|
-| `bcrypt` | 5.0.0 |
-| `boto3` | 1.43.99 |
-| `botocore` | 1.43.99 |
-| `clickhouse-connect` | 1.8.0 |
-| `databricks-sql-connector` | 4.5.0 |
-| `pyarrow` | 25.0.1 |
-| `python-multipart` | 0.0.32 |
-| `requests` | 2.34.2 |
-| `s3transfer` | 0.19.2 |
-| `thrift` | 0.24.0 |
-| `tzdata` | 2026.4 |
-| `watchtower` | 3.4.0 |
-
-#### BSD-3-Clause (12)
+#### BSD-3-Clause (14)
 
 | Package | Version |
 |---|---|
@@ -99,6 +86,8 @@ Development-only dependencies — what `backend/requirements.txt` adds for test 
 | `Werkzeug` | 3.1.8 |
 | `click` | 8.5.0 |
 | `httpcore` | 1.0.9 |
+| `httpcore2` | 2.13.1 |
+| `httpx2` | 2.13.1 |
 | `idna` | 3.19 |
 | `lxml` | 6.1.3 |
 | `oauthlib` | 3.3.1 |
@@ -107,6 +96,24 @@ Development-only dependencies — what `backend/requirements.txt` adds for test 
 | `starlette` | 1.6.0 |
 | `statsmodels` | 0.15.0 |
 | `uvicorn` | 0.53.0 |
+
+#### Apache-2.0 (13)
+
+| Package | Version |
+|---|---|
+| `bcrypt` | 5.0.0 |
+| `boto3` | 1.43.99 |
+| `botocore` | 1.43.99 |
+| `clickhouse-connect` | 1.8.0 |
+| `databricks-sql-connector` | 4.5.0 |
+| `openai` | 3.19.2 |
+| `pyarrow` | 25.0.1 |
+| `python-multipart` | 0.0.32 |
+| `requests` | 2.34.2 |
+| `s3transfer` | 0.19.2 |
+| `thrift` | 0.24.0 |
+| `tzdata` | 2026.4 |
+| `watchtower` | 3.4.0 |
 
 #### PSF-2.0 (3)
 
@@ -146,6 +153,12 @@ Development-only dependencies — what `backend/requirements.txt` adds for test 
 | Package | Version |
 |---|---|
 | `cryptography` | 50.0.1 |
+
+#### Apache-2.0 OR MIT (1)
+
+| Package | Version |
+|---|---|
+| `sniffio` | 1.3.1 |
 
 #### ISC (1)
 
