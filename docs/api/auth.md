@@ -38,8 +38,7 @@ curl -X POST http://localhost:8000/api/v1/api-keys \
   -H "Content-Type: application/json" \
   -d '{
     "name": "Production App Key",
-    "description": "Used by the checkout service",
-    "scopes": ["read", "write"]
+    "description": "Used by the checkout service"
   }'
 ```
 
@@ -49,13 +48,16 @@ curl -X POST http://localhost:8000/api/v1/api-keys \
 {
   "id": "key-uuid",
   "name": "Production App Key",
-  "key": "sk-live-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
-  "scopes": ["read", "write"],
-  "created_at": "2026-03-02T10:00:00Z"
+  "key": "eptk_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+  "prefix": "eptk_xxxx",
+  "created_at": "2026-03-02T10:00:00Z",
+  "expires_at": null
 }
 ```
 
 The `key` value is shown only once. Store it securely. If you lose it, you must create a new key and revoke the old one.
+
+The request also accepts an optional `"scopes"` list. **Scopes do not limit what a key can do today:** any active key authenticates every API-key route as the user who created it. The one scope intended to be enforced is `sdk:ruleset`, for server-side local evaluation; see [API Key Management](../security/api-keys.md#scopes).
 
 ---
 

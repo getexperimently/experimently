@@ -327,8 +327,7 @@ D
 | CORS allowlist | `main.py` + `settings.BACKEND_CORS_ORIGINS` | Only configured origins may make credentialed requests |
 | RBAC enforcement | `backend/app/core/permissions.py` | Role matrix applied to all endpoints via `check_permission()` |
 | bcrypt password hashing | `backend/app/core/security.py` | `CryptContext(schemes=["bcrypt"])` with auto-deprecation |
-| API key scopes | `backend/app/models/api_key.py` | `scopes` column limits what each key can do |
-| API key expiry | `backend/app/models/api_key.py` | `expires_at` column + `is_valid` property check |
+| API key expiry and revocation | `backend/app/models/api_key.py`, `backend/app/api/deps.py` | `expires_at` and `is_active`, checked by `is_valid` on every API-key request. The `scopes` column does not limit a key today |
 | Audit logging | `backend/app/models/audit_log.py` | All CRUD actions on experiments, feature flags, users, permissions recorded |
 | Structured error responses | `backend/app/middleware/error_middleware.py` | No stack traces in production responses |
 | Server header removal | `backend/app/middleware/security_middleware.py` | `server` and `x-powered-by` headers stripped |

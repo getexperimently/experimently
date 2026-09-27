@@ -21,7 +21,7 @@ This directory contains the security compliance documentation for Experimently.
 - Security headers: HSTS (1yr + preload), CSP (`default-src 'none'`), X-Frame-Options: DENY — `backend/app/middleware/security_middleware.py`
 - RBAC enforcement: 4 roles (ADMIN, DEVELOPER, ANALYST, VIEWER) — `backend/app/core/permissions.py`
 - bcrypt password hashing — `backend/app/core/security.py`
-- API key scoping and expiry — `backend/app/models/api_key.py`
+- API key expiry and revocation (an expired or revoked key is refused) — `backend/app/models/api_key.py`, `backend/app/api/deps.py`
 - Audit logging for all CRUD operations — `backend/app/models/audit_log.py`
 - Safety auto-rollback for feature flags — `backend/app/core/safety_scheduler.py`
 - Structured logging with error sanitization — `backend/app/middleware/`

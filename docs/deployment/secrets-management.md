@@ -350,7 +350,7 @@ For application-level API keys managed by the platform itself:
 curl -X POST \
   -H "Authorization: Bearer $ADMIN_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"name": "Replacement key for owner X", "scopes": ["tracking:write"]}' \
+  -d '{"name": "Replacement key for owner X"}' \
   https://api.experimentation.example.com/api/v1/api-keys
 
 # Step 3: Notify the owner of the new key via secure channel (not Slack or email)

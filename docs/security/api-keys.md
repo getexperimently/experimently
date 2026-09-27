@@ -75,14 +75,14 @@ Pass the API key in the `X-API-Key` header on every request:
 
 ```bash
 # Evaluate a feature flag
-curl -X POST http://localhost:8000/api/v1/feature-flags/dark-mode/evaluate \
-  -H "X-API-Key: sk-live-xxxx" \
+curl -X POST http://localhost:8000/api/v1/feature-flags/evaluate/dark-mode \
+  -H "X-API-Key: eptk_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" \
   -H "Content-Type: application/json" \
-  -d '{"user_id": "user-123", "attributes": {"plan": "pro"}}'
+  -d '{"user_id": "user-123", "context": {"plan": "pro"}}'
 
 # Track a conversion event
 curl -X POST http://localhost:8000/api/v1/tracking/track \
-  -H "X-API-Key: sk-live-xxxx" \
+  -H "X-API-Key: eptk_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" \
   -H "Content-Type: application/json" \
   -d '{"user_id": "user-123", "event_type": "purchase", "value": 49.99}'
 ```
@@ -188,7 +188,7 @@ API keys in source code can be inadvertently exposed in logs, error messages, or
 
 ```bash
 # Bad — hardcoded in code
-apiKey: "sk-live-xxxxxxxx"
+apiKey: "eptk_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 
 # Good — loaded from environment
 apiKey: process.env.EXPERIMENTATION_API_KEY
@@ -207,9 +207,9 @@ Store production API keys in a dedicated secrets manager:
 Use one API key per service or application. This limits the blast radius of a compromised key — you can revoke the specific service's key without affecting other services.
 
 ```
-checkout-service-prod    → sk-live-aaaa
-recommendations-prod     → sk-live-bbbb
-analytics-pipeline       → sk-live-cccc
+checkout-service-prod    → eptk_aaaa…
+recommendations-prod     → eptk_bbbb…
+analytics-pipeline       → eptk_cccc…
 ```
 
 ### Audit key usage
