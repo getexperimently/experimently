@@ -167,6 +167,92 @@ class TestCreate:
 
 
 # ---------------------------------------------------------------------------
+# Creating a key with the sdk:ruleset scope needs a role that can change flags
+# ---------------------------------------------------------------------------
+
+# (role, is_superuser, expected status). A non-superuser of every role, plus a
+# superuser whose role on its own would be refused, so the superuser case is
+# decided by is_superuser and not by the role.
+_ACTORS = [
+    ("admin", UserRole.ADMIN, False, 201),
+    ("developer", UserRole.DEVELOPER, False, 201),
+    ("analyst", UserRole.ANALYST, False, 403),
+    ("viewer", UserRole.VIEWER, False, 403),
+    ("superuser", UserRole.VIEWER, True, 201),
+]
+RULESET_ACTORS = [pytest.param(r, su, code, id=i) for i, r, su, code in _ACTORS]
+ALL_ACTORS = [pytest.param(r, su, id=i) for i, r, su, _ in _ACTORS]
+
+
+def _key_rows(db_session, user):
+    db_session.expire_all()
+    return db_session.query(APIKey).filter(APIKey.user_id == user.id).all()
+
+
+@pytest.mark.regression
+class TestRulesetScopeNeedsFlagChangeRole:
+    @pytest.mark.parametrize("role,is_superuser,expected", RULESET_ACTORS)
+    def test_ruleset_scope_by_role(
+        self, client, db_session, role, is_superuser, expected
+    ):
+        user = _make_user(db_session, role, is_superuser=is_superuser)
+        resp = _create(client, user, scopes=["sdk:ruleset"])
+        assert resp.status_code == expected, resp.text
+        rows = _key_rows(db_session, user)
+        if expected == 201:
+            assert [r.scopes for r in rows] == ["sdk:ruleset"]
+        else:
+            detail = resp.json()["detail"]
+            assert "ADMIN" in detail and "DEVELOPER" in detail
+            assert "superuser" in detail and "sdk:ruleset" in detail
+            assert "key" not in resp.json()
+            assert rows == []  # nothing is written on a refusal
+
+    @pytest.mark.parametrize("role,is_superuser", ALL_ACTORS)
+    def test_keys_without_the_scope_are_unchanged(
+        self, client, db_session, role, is_superuser
+    ):
+        user = _make_user(db_session, role, is_superuser=is_superuser)
+        assert _create(client, user).status_code == 201
+        assert _create(client, user, scopes=[]).status_code == 201
+        resp = _create(client, user, scopes=["read", "track"])
+        assert resp.status_code == 201, resp.text
+        assert sorted(r.scopes or "" for r in _key_rows(db_session, user)) == [
+            "",
+            "",
+            "read,track",
+        ]
+
+    @pytest.mark.parametrize(
+        "scopes",
+        [
+            pytest.param(["read", "sdk:ruleset", "track"], id="mixed-list"),
+            pytest.param([" sdk:ruleset "], id="padded"),
+            pytest.param("read, sdk:ruleset", id="comma-string"),
+        ],
+    )
+    @pytest.mark.parametrize("role", [UserRole.ANALYST, UserRole.VIEWER])
+    def test_any_list_carrying_the_scope_is_refused(
+        self, client, db_session, role, scopes
+    ):
+        user = _make_user(db_session, role)
+        resp = _create(client, user, scopes=scopes)
+        assert resp.status_code == 403, resp.text
+        assert _key_rows(db_session, user) == []
+
+    @pytest.mark.parametrize(
+        "scopes", [["SDK:RULESET"], ["xsdk:ruleset"], ["sdk:ruleset-ro"]]
+    )
+    def test_near_misses_are_labels_not_the_scope(self, client, db_session, scopes):
+        # Scope matching is exact and case-sensitive (api_key_scopes.has_scope),
+        # so these are stored as labels and do not need the role.
+        user = _make_user(db_session, UserRole.VIEWER)
+        resp = _create(client, user, scopes=scopes)
+        assert resp.status_code == 201, resp.text
+        assert [r.scopes for r in _key_rows(db_session, user)] == scopes
+
+
+# ---------------------------------------------------------------------------
 # List
 # ---------------------------------------------------------------------------
 
