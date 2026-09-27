@@ -6,25 +6,27 @@ request body against up to ``sample_size`` stored user contexts. The endpoint
 calls :func:`preview_ruleset_violations` before it touches the database and
 answers 422 with the returned errors when there are any.
 
-All four limits are computed from the request alone, counting every condition
-in the ruleset recursively (nested ``groups`` included):
+Every limit is computed from the request alone, counting every condition and
+every group in the ruleset recursively (nested ``groups`` included):
 
 (a) at most ``MAX_PREVIEW_CONDITIONS`` conditions in total, any operator;
+(a') at most ``MAX_PREVIEW_GROUPS`` groups in total (the top-level ruleset
+    itself is not counted);
 (b) at most ``MAX_PREVIEW_REGEX_CONDITIONS`` ``match_regex`` conditions;
 (c) at most ``MAX_PREVIEW_LIST_ELEMENTS`` list elements in total across all
     condition values;
 (d) ``match_regex`` conditions multiplied by the *requested* ``sample_size``
     at most ``MAX_PREVIEW_REGEX_EVALUATIONS``. One pattern allows a sample of
     500, ten patterns a sample of 50. The minimum ``sample_size`` of 10 never
-    reaches (d) before (b) does.
+    reaches (d) before (b) does;
+(e) conditions plus groups multiplied by the *requested* ``sample_size`` at
+    most ``MAX_PREVIEW_NODE_EVALUATIONS``. The default sample of 1,000 allows
+    50 conditions and groups together; a sample of 10,000 allows 5.
 
-How (d) is derived. It bounds the number of pattern searches a single preview
-performs. The rules engine's ``MAX_REGEX_INPUT`` (256 characters) is the most
-of an attribute value one search reads; the slowest pattern measured at that
-length took about 4.4 ms per search, so 500 searches keep the matching in one
-preview to about 2 seconds. (a) and (c) bound the work of the other operators
-in the same request. **If ``MAX_REGEX_INPUT`` changes, re-derive (d) in the
-same change**: at 1,024 characters it is about 100.
+The limits bound the work one preview request performs: at most 50,000
+condition and group evaluations and 500 pattern searches. If the rules
+engine's ``MAX_REGEX_INPUT`` or an operator's implementation changes,
+re-measure and re-derive (d) and (e) before changing either.
 
 This module deliberately does not import the rules engine: the counting is a
 pure function of the request body, so it can run before anything else.
@@ -35,6 +37,9 @@ from typing import Any, Dict, List
 #: (a) Conditions in the whole ruleset, nested groups included.
 MAX_PREVIEW_CONDITIONS = 50
 
+#: (a') Groups in the whole ruleset, at any depth; the top level is not one.
+MAX_PREVIEW_GROUPS = 20
+
 #: (b) ``match_regex`` conditions in the whole ruleset.
 MAX_PREVIEW_REGEX_CONDITIONS = 10
 
@@ -43,6 +48,9 @@ MAX_PREVIEW_LIST_ELEMENTS = 1000
 
 #: (d) ``match_regex`` conditions x the requested ``sample_size``.
 MAX_PREVIEW_REGEX_EVALUATIONS = 500
+
+#: (e) (conditions + groups) x the requested ``sample_size``.
+MAX_PREVIEW_NODE_EVALUATIONS = 50_000
 
 #: The endpoint's own ``sample_size`` minimum (``ge=10``), used only to word advice.
 MIN_PREVIEW_SAMPLE_SIZE = 10
@@ -75,13 +83,15 @@ def _is_regex_operator(operator: Any) -> bool:
 
 def count_ruleset(rules: Any) -> Dict[str, int]:
     """
-    Count conditions, ``match_regex`` conditions and list elements in ``rules``.
+    Count conditions, groups, ``match_regex`` conditions and list elements.
 
-    Every item of a ``conditions`` list counts as a condition, whatever its
-    shape, and every dict in a ``groups`` list is walked the same way. The walk
-    is iterative, so nesting depth does not matter.
+    Every item of a ``conditions`` list counts as a condition and every item
+    of a ``groups`` list as a group, whatever its shape; each dict among the
+    groups is walked the same way. The walk is iterative, so nesting depth
+    does not matter.
     """
     conditions = 0
+    groups = 0
     regex_conditions = 0
     list_elements = 0
 
@@ -104,10 +114,12 @@ def count_ruleset(rules: Any) -> Dict[str, int]:
 
         nested_groups = group.get("groups")
         if isinstance(nested_groups, list):
+            groups += len(nested_groups)
             stack.extend(nested_groups)
 
     return {
         "conditions": conditions,
+        "groups": groups,
         "regex_conditions": regex_conditions,
         "list_elements": list_elements,
     }
@@ -131,6 +143,18 @@ def preview_ruleset_violations(rules: Any, sample_size: int) -> List[Dict[str, A
                 "msg": (
                     f"The ruleset has {counts['conditions']} conditions; "
                     f"a preview accepts at most {MAX_PREVIEW_CONDITIONS}."
+                ),
+                "type": "value_error",
+            }
+        )
+
+    if counts["groups"] > MAX_PREVIEW_GROUPS:
+        errors.append(
+            {
+                "loc": _RULES_LOC,
+                "msg": (
+                    f"The ruleset has {counts['groups']} groups; "
+                    f"a preview accepts at most {MAX_PREVIEW_GROUPS}."
                 ),
                 "type": "value_error",
             }
@@ -178,6 +202,28 @@ def preview_ruleset_violations(rules: Any, sample_size: int) -> List[Dict[str, A
                     f"{counts['regex_conditions']} match_regex conditions x "
                     f"sample_size {sample_size} = {regex_evaluations}; a preview "
                     f"accepts at most {MAX_PREVIEW_REGEX_EVALUATIONS}.{advice}"
+                ),
+                "type": "value_error",
+            }
+        )
+
+    nodes = counts["conditions"] + counts["groups"]
+    node_evaluations = nodes * sample_size
+    if node_evaluations > MAX_PREVIEW_NODE_EVALUATIONS:
+        largest_sample = MAX_PREVIEW_NODE_EVALUATIONS // nodes
+        advice = (
+            f" Use a sample_size of {largest_sample} or less, or fewer "
+            f"conditions and groups."
+            if largest_sample >= MIN_PREVIEW_SAMPLE_SIZE
+            else " Use fewer conditions and groups."
+        )
+        errors.append(
+            {
+                "loc": _SAMPLE_SIZE_LOC,
+                "msg": (
+                    f"{nodes} conditions and groups x sample_size {sample_size} "
+                    f"= {node_evaluations}; a preview accepts at most "
+                    f"{MAX_PREVIEW_NODE_EVALUATIONS}.{advice}"
                 ),
                 "type": "value_error",
             }

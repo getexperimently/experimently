@@ -8,7 +8,9 @@ over nested groups, has
 (a) more than 50 conditions,
 (b) more than 10 ``match_regex`` conditions,
 (c) more than 1,000 list elements across condition values, or
-(d) ``match_regex`` conditions x the requested ``sample_size`` above 500.
+(d) ``match_regex`` conditions x the requested ``sample_size`` above 500,
+(a') more than 20 groups, or
+(e) conditions plus groups x the requested ``sample_size`` above 50,000.
 
 The endpoint tests run the real endpoint and the real
 ``AudienceService.preview_audience_size`` against a ``MagicMock`` session whose
@@ -29,7 +31,9 @@ from fastapi.testclient import TestClient
 from backend.app.api import deps
 from backend.app.core.segment_preview_limits import (
     MAX_PREVIEW_CONDITIONS,
+    MAX_PREVIEW_GROUPS,
     MAX_PREVIEW_LIST_ELEMENTS,
+    MAX_PREVIEW_NODE_EVALUATIONS,
     MAX_PREVIEW_REGEX_CONDITIONS,
     MAX_PREVIEW_REGEX_EVALUATIONS,
     count_ruleset,
@@ -99,6 +103,22 @@ def _nested_conditions(total: int) -> dict:
 
 def _flat(conditions: list) -> dict:
     return {"operator": "and", "conditions": conditions}
+
+
+def _with_groups(conditions: int, groups: int) -> dict:
+    """``conditions`` eq conditions at the top and ``groups`` empty groups."""
+    return {
+        "operator": "and",
+        "conditions": [_eq(i) for i in range(conditions)],
+        "groups": [{"operator": "and", "conditions": []} for _ in range(groups)],
+    }
+
+
+def _every_limit() -> dict:
+    """A ruleset over (a), (a'), (b) and (c); at sample 1000 also (d) and (e)."""
+    rules = {**_nested_conditions(60), "conditions": [_in(1001)] + [_regex()] * 11}
+    rules["groups"] = rules["groups"] + [{} for _ in range(MAX_PREVIEW_GROUPS)]
+    return rules
 
 
 def _viewer() -> User:
@@ -195,7 +215,8 @@ def test_51_conditions_split_across_nested_groups_are_refused(preview):
 
 @pytest.mark.regression
 def test_50_conditions_split_across_nested_groups_are_previewed(preview):
-    response, _ = preview(_nested_conditions(MAX_PREVIEW_CONDITIONS))
+    # 50 conditions + 2 groups = 52 nodes; at sample_size 961, 49,972 (e).
+    response, _ = preview(_nested_conditions(MAX_PREVIEW_CONDITIONS), 961)
     _assert_previewed(response)
 
 
@@ -259,6 +280,83 @@ def test_the_default_sample_size_counts_for_d(preview):
 
 
 # ---------------------------------------------------------------------------
+# (a') groups in total
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.regression
+def test_21_empty_groups_are_refused(preview):
+    response, _ = preview(_with_groups(0, MAX_PREVIEW_GROUPS + 1))
+    detail = _assert_refused(response, ["body", "rules"])
+    assert len(detail) == 1
+    assert "21 groups" in detail[0]["msg"]
+    assert "at most 20" in detail[0]["msg"]
+
+
+@pytest.mark.regression
+def test_20_empty_groups_are_previewed(preview):
+    response, _ = preview(_with_groups(0, MAX_PREVIEW_GROUPS))
+    _assert_previewed(response)
+
+
+@pytest.mark.regression
+def test_21_groups_nested_one_inside_another_are_refused(preview):
+    rules: dict = {"conditions": [_eq()]}
+    for _ in range(MAX_PREVIEW_GROUPS + 1):
+        rules = {"groups": [rules]}
+    response, _ = preview(rules)
+    _assert_refused(response, ["body", "rules"])
+
+
+# ---------------------------------------------------------------------------
+# (e) conditions plus groups x the requested sample_size
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize(
+    "conditions,groups,sample_size",
+    # 1 + 6 = 7 nodes x 7143 = 50,001; 10 + 20 = 30 nodes x 1667 = 50,010.
+    [(1, 6, 7143), (10, 20, 1667)],
+)
+def test_nodes_times_sample_size_over_50000_are_refused(
+    preview, conditions, groups, sample_size
+):
+    nodes = conditions + groups
+    assert nodes * sample_size > MAX_PREVIEW_NODE_EVALUATIONS
+    # Conditions alone stay inside the limit: only counting the groups as
+    # well refuses these.
+    assert conditions * sample_size <= MAX_PREVIEW_NODE_EVALUATIONS
+    response, _ = preview(_with_groups(conditions, groups), sample_size)
+    detail = _assert_refused(response, ["query", "sample_size"])
+    assert len(detail) == 1
+    assert f"= {nodes * sample_size}" in detail[0]["msg"]
+    largest = MAX_PREVIEW_NODE_EVALUATIONS // nodes
+    assert f"sample_size of {largest} or less" in detail[0]["msg"]
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize(
+    "conditions,groups,sample_size",
+    # 5 + 20 = 25 x 2000; 50 + 0 at the default 1000; 5 + 0 x 10,000.
+    [(5, 20, 2000), (50, 0, None), (5, 0, 10000)],
+)
+def test_nodes_times_sample_size_of_50000_are_previewed(
+    preview, conditions, groups, sample_size
+):
+    response, _ = preview(_with_groups(conditions, groups), sample_size)
+    _assert_previewed(response)
+
+
+def test_no_node_sample_size_suggestion_below_the_endpoint_minimum():
+    errors = preview_ruleset_violations(_with_groups(6000, 0), 10)
+    node_error = errors[-1]
+    assert node_error["loc"] == ["query", "sample_size"]
+    assert "sample_size of" not in node_error["msg"]
+    assert "fewer conditions and groups" in node_error["msg"]
+
+
+# ---------------------------------------------------------------------------
 # (v) a refusal issues no database query
 # ---------------------------------------------------------------------------
 
@@ -271,8 +369,10 @@ def test_the_default_sample_size_counts_for_d(preview):
         (_nested_conditions(51), None),
         (_flat([_in(1001)]), None),
         (_flat([_regex()]), 501),
+        (_with_groups(0, 21), None),
+        (_with_groups(1, 6), 7143),
     ],
-    ids=["b-regex", "a-conditions", "c-list", "d-sample"],
+    ids=["b-regex", "a-conditions", "c-list", "d-sample", "a2-groups", "e-nodes"],
 )
 def test_a_refusal_issues_no_database_query(preview, rules, sample_size):
     response, session = preview(rules, sample_size)
@@ -309,10 +409,20 @@ def _http_validation_error_schema() -> dict:
         (_nested_conditions(51), None),
         (_flat([_in(1001)]), None),
         (_flat([_regex()]), 501),
+        (_with_groups(0, 21), None),
+        (_with_groups(1, 6), 7143),
         # Every limit at once.
-        ({**_nested_conditions(60), "conditions": [_in(1001)] + [_regex()] * 11}, 50),
+        (_every_limit(), 1000),
     ],
-    ids=["b-regex", "a-conditions", "c-list", "d-sample", "all"],
+    ids=[
+        "b-regex",
+        "a-conditions",
+        "c-list",
+        "d-sample",
+        "a2-groups",
+        "e-nodes",
+        "all",
+    ],
 )
 def test_the_refusal_matches_the_snapshot_and_echoes_no_request_content(
     preview, rules, sample_size
@@ -328,14 +438,15 @@ def test_the_refusal_matches_the_snapshot_and_echoes_no_request_content(
 
 
 def test_every_limit_is_reported_at_once(preview):
-    rules = {**_nested_conditions(60), "conditions": [_in(1001)] + [_regex()] * 11}
-    response, _ = preview(rules, sample_size=50)
+    response, _ = preview(_every_limit(), sample_size=1000)
     detail = _assert_refused(response, ["body", "rules"])
     assert [item["loc"] for item in detail] == [
-        ["body", "rules"],
-        ["body", "rules"],
-        ["body", "rules"],
-        ["query", "sample_size"],
+        ["body", "rules"],  # (a) conditions
+        ["body", "rules"],  # (a') groups
+        ["body", "rules"],  # (b) match_regex
+        ["body", "rules"],  # (c) list elements
+        ["query", "sample_size"],  # (d)
+        ["query", "sample_size"],  # (e)
     ]
 
 
@@ -360,6 +471,7 @@ def test_counts_the_dashboard_shape_and_the_regex_alias():
     }
     assert count_ruleset(rules) == {
         "conditions": 3,
+        "groups": 1,
         "regex_conditions": 2,
         "list_elements": 2,
     }
@@ -379,6 +491,7 @@ def test_malformed_items_still_count_as_conditions():
     rules = {"conditions": ["x", 1, None, {"operator": 5}], "groups": ["y", None]}
     assert count_ruleset(rules) == {
         "conditions": 4,
+        "groups": 2,
         "regex_conditions": 0,
         "list_elements": 0,
     }
