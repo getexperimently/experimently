@@ -386,3 +386,7 @@ already running keep running. That, and the window in every rolling upgrade
 where the previous release still serves after the new release's migration has
 run, is why a migration must not drop or rename anything the previous
 release's code still uses (see *Migration Guidelines*).
+
+### Rolling back to 0.7.0 after upgrading to a release that adds tables
+
+The release that carries this change adds two tables and changes nothing that 0.7.0 uses. An 0.7.0 image started against the upgraded database refuses at start-up, because the database records a revision 0.7.0 has no file for. The message printed by 0.7.0 and earlier at that point suggests deleting rows from `alembic_version`: do not follow it. Instead, run the 0.7.0 API with `RUN_MIGRATIONS=false`; it then starts without running migrations and works against the upgraded schema. Do not run 0.7.0's migration task against it. On ECS this means registering a revision of the 0.7.0 API task definition with `RUN_MIGRATIONS=false` in its environment and rolling back to that revision; an existing 0.7.0 revision runs migrations on start and will refuse. To upgrade again, deploy the newer release as usual.
