@@ -27,6 +27,7 @@ from fastapi.testclient import TestClient
 
 from backend.app.main import app
 from backend.tests.integration.conftest import make_client_for_user
+from backend.tests.integration.helpers import list_all_segment_ids
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -173,11 +174,7 @@ class TestListSegments:
         seg = _create_segment(admin_client, "Visible Segment")
         seg_id = seg["id"]
 
-        response = admin_client.get("/api/v1/segments/")
-        assert response.status_code == 200, response.text
-
-        ids = [item["id"] for item in response.json()]
-        assert seg_id in ids
+        assert seg_id in list_all_segment_ids(admin_client)
 
     def test_filter_by_status_active(self, admin_client):
         """Filtering by status=active returns only active segments."""
@@ -222,11 +219,8 @@ class TestListSegments:
         delete_response = admin_client.delete(f"/api/v1/segments/{seg_id}")
         assert delete_response.status_code == 204, delete_response.text
 
-        # Check it's not in the active list
-        response = admin_client.get("/api/v1/segments/?status=active")
-        assert response.status_code == 200, response.text
-        ids = [item["id"] for item in response.json()]
-        assert seg_id not in ids
+        # Check it's not in the active list, on any page
+        assert seg_id not in list_all_segment_ids(admin_client, status="active")
 
     def test_analyst_can_list_segments(self, analyst_client):
         """Analyst has LIST permission on segments (EXPERIMENT resource)."""
@@ -445,10 +439,8 @@ class TestArchiveSegment:
 
         admin_client.delete(f"/api/v1/segments/{seg['id']}")
 
-        response = admin_client.get("/api/v1/segments/?status=active")
-        assert response.status_code == 200, response.text
-        ids = [item["id"] for item in response.json()]
-        assert seg["id"] not in ids
+        active_ids = list_all_segment_ids(admin_client, status="active")
+        assert seg["id"] not in active_ids
 
 
 # ---------------------------------------------------------------------------
