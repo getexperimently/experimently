@@ -348,6 +348,12 @@ jobs:
             echo "::error::core bundle has no workspaces stub page (its description is in no chunk)"; exit 1
           fi
 
+  # Each SDK's OWN exported hash function against golden-vectors.json: the
+  # Python SDK's source, the JS and edge packages as built, the React Native
+  # source (which is what that package ships), the Go module. One step per SDK,
+  # so the failing SDK is the failing step. hash_contract.py does every
+  # comparison and asserts the exact number of vectors each SDK answered; its
+  # --list step names every sdk/ directory this job does not run, and why.
   sdk-contracts:
     needs: changes
     if: needs.changes.outputs.docs_only != 'true'
@@ -365,16 +371,44 @@ jobs:
         uses: actions/setup-node@v7
         with:
           node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            sdk/js/package-lock.json
+            sdk/edge/package-lock.json
+            sdk/react-native/package-lock.json
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          # go.mod declares go 1.21; the same toolchain as sdk-unit-tests.yml.
+          go-version: '1.22.x'
+          # The SDK and the harness are stdlib-only: no go.sum to key a cache on.
+          cache: false
 
       - name: Install pytest
         run: pip install pytest
 
-      # pytest.ini adds --cov flags; only pytest is installed here, so clear addopts.
-      - name: Run Python contracts
-        run: python -m pytest tests/sdk-contract/test_python_sdk.py -v -o addopts=""
+      - name: SDKs this job checks, and those it does not
+        run: python tests/sdk-contract/hash_contract.py --list
 
-      - name: Run JS contracts
-        run: node tests/sdk-contract/test_js_sdk.js
+      # pyproject.toml adds --cov flags; only pytest is installed here, so clear addopts.
+      - name: The comparison rejects a wrong answer (hash_contract.py self-tests)
+        run: python -m pytest tests/sdk-contract -v -o addopts=""
+
+      - name: Python SDK hash (sdk/python)
+        run: python tests/sdk-contract/hash_contract.py python
+
+      - name: JS SDK hash (sdk/js, built)
+        run: python tests/sdk-contract/hash_contract.py js
+
+      - name: Edge SDK hash (sdk/edge, built)
+        run: python tests/sdk-contract/hash_contract.py edge
+
+      - name: React Native SDK hash (sdk/react-native source)
+        run: python tests/sdk-contract/hash_contract.py react-native
+
+      - name: Go SDK hash (sdk/go)
+        run: python tests/sdk-contract/hash_contract.py go
 
   # Each profile must stand on its own. scripts/core_build.sh copies the
   # checkout and runs one sequence over the copy; `--profile core` deletes
@@ -981,6 +1015,12 @@ jobs:
       # whose unit tests were green. If you add a variable the application
       # demands in production, it belongs in three places -- both CDK stacks
       # and this list.
+      #
+      # `--entrypoint python` bypasses backend/docker-entrypoint.sh, so the
+      # start-up check (backend/app/core/preflight.py) does NOT run here, and
+      # no POSTGRES_SERVER is needed: this step is about what the settings and
+      # the module registration accept at import. The check itself is the next
+      # step, through the real entrypoint.
       - name: Full image boots with production settings
         run: |
           set -euo pipefail
@@ -997,7 +1037,7 @@ jobs:
             # A production start must know what hostname it answers on: the
             # Host header is attacker-controlled and ALLOWED_HOSTS derives from
             # this (#220). Never resolved here -- the import opens no socket.
-            -e PUBLIC_BASE_URL=https://api.example.com
+            -e PUBLIC_BASE_URL=https://experimently.example.com
           )
           # Importing main.py runs the registration and the abort check; it
           # opens no connection, so no database or Redis is needed here.
@@ -1021,6 +1061,85 @@ jobs:
           grep -q AUDIT_HMAC_KEY refused.log
           echo "full image with no AUDIT_HMAC_KEY: refused, and the message names it"
           rm -f refused.log
+
+      # The entrypoint's start-up check (#237), through the real entrypoint:
+      # every missing setting in one list, exit 78, before the database wait.
+      # Each refusal is a planted defect against an otherwise good set; the
+      # unit tests (backend/tests/unit/core/test_preflight.py) cover the rest.
+      - name: Production start-up lists every missing setting at once
+        run: |
+          set -euo pipefail
+          # <image> <log> [docker run args...]: must exit 78, without waiting
+          # for a database. `timeout` because a check that fell through to the
+          # wait would otherwise sit there for DB_WAIT_TIMEOUT.
+          expect_refusal() {
+            local image=$1 log=$2 status=0
+            shift 2
+            timeout 60 docker run --rm "$@" "$image" >"$log" 2>&1 || status=$?
+            cat "$log"
+            if [ "$status" != 78 ]; then
+              echo "::error::expected exit 78 from the start-up check, got $status"
+              exit 1
+            fi
+            if grep -q "waiting for PostgreSQL" "$log"; then
+              echo "::error::the start-up check let the container reach the database wait"
+              exit 1
+            fi
+          }
+          # `if grep` rather than `! grep`: a negated command never trips -e.
+          refuse_text() {
+            if grep -qF -- "$1" "$2"; then
+              echo "::error::$2 contains '$1'"
+              exit 1
+            fi
+          }
+
+          # Full image, ENVIRONMENT=production and nothing else: one list.
+          expect_refusal experimently-api:full full.log -e ENVIRONMENT=production
+          grep -qF "Experimently cannot start: 5 settings need attention." full.log
+          for s in SECRET_KEY FIRST_SUPERUSER_PASSWORD PUBLIC_BASE_URL AUDIT_HMAC_KEY POSTGRES_SERVER; do
+            grep -qE "^  - $s " full.log || { echo "::error::$s is not in the list"; exit 1; }
+          done
+          grep -qF "https://experimently.example.com" full.log
+          refuse_text "continuing on the core profile" full.log
+          refuse_text "<value>" full.log
+          refuse_text "api.example.com" full.log
+
+          # Core image: the same, without the full profile's audit key.
+          expect_refusal experimently-api:core core.log -e ENVIRONMENT=production
+          grep -qF "Experimently cannot start: 4 settings need attention." core.log
+          refuse_text AUDIT_HMAC_KEY core.log
+
+          KEY=$(python3 -c 'import secrets; print(secrets.token_hex(32))')
+          good=(
+            -e ENVIRONMENT=production
+            -e SECRET_KEY="$KEY"
+            -e FIRST_SUPERUSER_PASSWORD="$KEY"
+            -e PUBLIC_BASE_URL=https://experimently.example.com
+            -e AUDIT_HMAC_KEY="$KEY"
+            -e POSTGRES_SERVER=db.invalid
+          )
+          # A connection string the image does not read.
+          expect_refusal experimently-api:full url.log "${good[@]}" \
+            -e DATABASE_URL=postgresql://user:pw@db.invalid/experimentation
+          grep -qF "DATABASE_URL is set but this image does not connect with it" url.log
+          grep -qF "cannot start: 1 setting needs attention." url.log
+          refuse_text "user:pw@" url.log
+
+          # No environment named at all: one line.
+          expect_refusal experimently-api:full noenv.log
+          grep -qxF "[preflight] ENVIRONMENT is not set. This image requires it: set ENVIRONMENT=production (or staging; development only for a local trial)." noenv.log
+
+          # The good set passes the check (`true` stands in for the server;
+          # no database, so no wait and no bootstrap).
+          docker run --rm "${good[@]}" -e WAIT_FOR_DB=false -e RUN_MIGRATIONS=false \
+            experimently-api:full true
+          # ...and so does APP_ENV alone, which is what the CDK task
+          # definitions set instead of ENVIRONMENT.
+          docker run --rm -e APP_ENV=dev -e WAIT_FOR_DB=false -e RUN_MIGRATIONS=false \
+            experimently-api:core true
+          rm -f full.log core.log url.log noenv.log
+          echo "start-up check: every refusal fired, and a good set starts"
 
       - name: Build dashboard image
         uses: docker/build-push-action@v7
@@ -1058,6 +1177,16 @@ jobs:
 
       - name: Start the stack
         run: docker compose -f docker-compose.yml up -d --wait --no-build postgres redis api frontend
+
+      # The first start creates FIRST_SUPERUSER and says so (#237). The ALB
+      # step below re-creates the api container on the same database, and
+      # checks the other half: a later start says FIRST_SUPERUSER is ignored.
+      - name: The first start announces the first administrator
+        run: |
+          set -euo pipefail
+          docker compose -f docker-compose.yml logs --no-color api >api-first.log
+          grep -qF "created the first administrator admin@demo.com (role ADMIN)" api-first.log \
+            || { cat api-first.log; echo "::error::no first-administrator line"; exit 1; }
 
       - name: API readiness and auth gate
         run: |
@@ -1159,6 +1288,10 @@ jobs:
           docker compose -f docker-compose.yml -f tests/alb/docker-compose.alb.yml \
             up -d --wait --no-build postgres redis api frontend alb
           bash tests/alb/rehearse.sh
+          docker compose -f docker-compose.yml -f tests/alb/docker-compose.alb.yml \
+            logs --no-color api >api-second.log
+          grep -qF "users exist; FIRST_SUPERUSER settings ignored" api-second.log \
+            || { cat api-second.log; echo "::error::a later start did not say FIRST_SUPERUSER is ignored"; exit 1; }
 
       - name: Container logs (on failure)
         if: failure()

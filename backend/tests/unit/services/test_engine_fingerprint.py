@@ -1,0 +1,196 @@
+"""
+The statistics engine's output fingerprint, pinned per ``ENGINE_VERSION``.
+
+``ENGINE_VERSION`` is stamped on persisted snapshots, bandit state and every
+Bayesian/CUPED response, and it is part of the ``/results`` cache key.  It only
+means something if it moves whenever the numbers move.  This test runs a fixed
+dataset through every analysis path, hashes the outputs, and compares the hash
+with the one pinned for the current version.
+
+When this test fails, the engine's output changed.  Then:
+
+* if the current ``ENGINE_VERSION`` has **not** shipped in a release, replace
+  its hash below with the new one (the change is part of that version);
+* if it **has** shipped, bump ``ENGINE_VERSION`` in
+  ``backend/app/core/stats_engine.py`` (and ``test_stats_determinism.py`` and
+  both OpenAPI snapshots, whose ``engine_version`` defaults follow it), and add
+  the new version's hash here, keeping the old entries.
+
+Never edit the hash of a released version.
+"""
+
+import dataclasses
+import enum
+import hashlib
+import json
+import math
+from typing import Any, Dict
+from unittest.mock import MagicMock
+
+import numpy as np
+import pytest
+
+from backend.app.core.stats_engine import ENGINE_VERSION
+from backend.app.services.analysis_service import AnalysisService
+from backend.app.services.bayesian_service import BayesianService
+from backend.app.services.cuped_service import CupedService
+from backend.app.services.dimensional_analysis_service import (
+    DimensionalAnalysisService,
+)
+from backend.app.services.sequential_testing_service import SequentialTestingService
+
+pytestmark = pytest.mark.unit
+
+#: sha256 of the canonical outputs below, per engine version.  1.0.0 was never
+#: fingerprinted; 1.1.0 is the first version this test pins.
+ENGINE_FINGERPRINTS: Dict[str, str] = {
+    "1.1.0": "d9ee924c1e98f1cf4020a07a5c10391ebf1b16a9aa630d45ee1ddb7438326014",
+}
+
+# Two ids where the control sorts AFTER the treatment, so an engine that
+# guesses the control from the smaller id produces a different fingerprint.
+_CONTROL = "ffffffff-0000-4000-8000-000000000002"
+_TREATMENT = "00000000-0000-4000-8000-000000000001"
+
+
+def _canonical(value: Any) -> Any:
+    """Reduce an output to JSON with floats at 10 significant digits.
+
+    The rounding absorbs last-bit differences between BLAS/libm builds (the
+    developer's laptop and the CI runner), and nothing an operator would see.
+    """
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        return _canonical(dataclasses.asdict(value))
+    if isinstance(value, enum.Enum):
+        return _canonical(value.value)
+    if isinstance(value, dict):
+        return {str(k): _canonical(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_canonical(v) for v in value]
+    if isinstance(value, np.ndarray):
+        return [_canonical(v) for v in value.tolist()]
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
+    if isinstance(value, (int, np.integer)):
+        return int(value)
+    if isinstance(value, (float, np.floating)):
+        f = float(value)
+        if math.isnan(f) or math.isinf(f):
+            return repr(f)
+        return float(f"{f:.10g}")
+    return value
+
+
+def _engine_outputs() -> Dict[str, Any]:
+    """Run the fixed dataset through each analysis path."""
+    outputs: Dict[str, Any] = {}
+
+    # Frequentist helpers behind /results.
+    analysis = AnalysisService(MagicMock())
+    outputs["frequentist"] = {
+        "z_test": analysis.z_test_proportions(120, 1000, 150, 1000),
+        "welch": analysis.welch_t_test(
+            [1.0, 2.5, 3.1, 4.8, 2.2, 3.3], [2.0, 3.5, 4.1, 5.2, 3.9, 4.4]
+        ),
+        "cohens_h": analysis.cohens_h(0.12, 0.15),
+        "cohens_d": analysis.cohens_d(
+            [1.0, 2.5, 3.1, 4.8, 2.2, 3.3], [2.0, 3.5, 4.1, 5.2, 3.9, 4.4]
+        ),
+        "wilson": analysis.wilson_confidence_interval(120, 1000, 0.95),
+        "bonferroni": analysis.apply_bonferroni_correction(0.02, 3),
+        "required_n": analysis.calculate_required_sample_size(0.12, 0.02),
+        "bh": AnalysisService._adjusted_p_values(
+            [0.01, 0.04, None, 0.03], "benjamini_hochberg"
+        ),
+    }
+
+    # Dimensional breakdown (?breakdown=), control flagged on the larger id.
+    dim = DimensionalAnalysisService()
+    segments = {
+        "desktop": {
+            _TREATMENT: {
+                "variant_name": "treatment",
+                "is_control": False,
+                "total": 400,
+                "conversions": 70,
+            },
+            _CONTROL: {
+                "variant_name": "control",
+                "is_control": True,
+                "total": 410,
+                "conversions": 50,
+            },
+        },
+        "mobile": {
+            _TREATMENT: {
+                "variant_name": "treatment",
+                "is_control": False,
+                "total": 300,
+                "conversions": 30,
+            },
+            _CONTROL: {
+                "variant_name": "control",
+                "is_control": True,
+                "total": 290,
+                "conversions": 33,
+            },
+        },
+    }
+    segment_results = dim.compute_segment_results(segments, base_alpha=0.05)
+    outputs["breakdown"] = {
+        "segments": segment_results,
+        "has_hte": dim.detect_hte(segment_results),
+    }
+
+    # Bayesian (/results bayesian_results, /bayesian), fixed seed.
+    bayes = BayesianService().analyze(
+        [{"conversions": 120, "total": 1000}, {"conversions": 150, "total": 1000}],
+        n_samples=20_000,
+        seed=20260926,
+    )
+    bayes.pop("engine_version", None)
+    outputs["bayesian"] = bayes
+
+    # Sequential (/sequential).
+    seq = SequentialTestingService()
+    outputs["sequential"] = {
+        "msprt": seq.compute_msprt(120, 1000, 150, 1000),
+        "cs": seq.compute_always_valid_ci(120, 1000, 150, 1000),
+        "alpha_spending": seq.compute_alpha_spending(2, 4),
+    }
+
+    # CUPED (/cuped), deterministic covariates.
+    rng = np.random.default_rng(7)
+    cx = rng.normal(10.0, 2.0, 200)
+    tx = rng.normal(10.0, 2.0, 200)
+    cy = 0.8 * cx + rng.normal(0.0, 1.0, 200)
+    ty = 0.8 * tx + 0.3 + rng.normal(0.0, 1.0, 200)
+    outputs["cuped"] = CupedService.compute_cuped_effect(cy, cx, ty, tx)
+
+    return outputs
+
+
+def engine_fingerprint() -> str:
+    """sha256 of the canonical JSON of every analysis output."""
+    payload = json.dumps(
+        _canonical(_engine_outputs()), sort_keys=True, separators=(",", ":")
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def test_engine_output_matches_the_fingerprint_for_this_version():
+    assert ENGINE_VERSION in ENGINE_FINGERPRINTS, (
+        f"ENGINE_VERSION {ENGINE_VERSION} has no pinned fingerprint; add "
+        f"{engine_fingerprint()!r} for it (see this module's docstring)."
+    )
+    actual = engine_fingerprint()
+    assert actual == ENGINE_FINGERPRINTS[ENGINE_VERSION], (
+        f"The statistics engine's output changed under ENGINE_VERSION "
+        f"{ENGINE_VERSION} (fingerprint {actual}). Bump ENGINE_VERSION if "
+        f"{ENGINE_VERSION} has shipped; otherwise update its fingerprint. "
+        "See this module's docstring."
+    )
+
+
+def test_fingerprint_is_stable_within_a_process():
+    assert engine_fingerprint() == engine_fingerprint()

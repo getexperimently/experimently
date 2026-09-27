@@ -11,6 +11,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from backend.app.core.api_key_scopes import normalise_scope_list, parse_scopes
+
 # Length of the visible prefix (``eptk_`` + first 4 hex chars) shown in lists.
 KEY_PREFIX_LENGTH = 9
 
@@ -36,8 +38,8 @@ class APIKeyCreate(BaseModel):
         if v is None:
             return None
         if isinstance(v, str):
-            v = list(v.split(","))
-        cleaned = [str(s).strip() for s in v if str(s).strip()]
+            return parse_scopes(v)
+        cleaned = normalise_scope_list(v)
         for scope in cleaned:
             if "," in scope:
                 raise ValueError("scope names may not contain commas")

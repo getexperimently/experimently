@@ -592,6 +592,58 @@ class TestFailureDescriptionsCarryNoSecret:
         assert "ValidationError" in described
         assert "at least" in described
 
+    @pytest.mark.regression
+    def test_a_model_level_refusal_is_named_by_its_setting_not_a_placeholder(
+        self, monkeypatch
+    ):
+        """#237: the PUBLIC_BASE_URL/ALLOWED_HOSTS check is a model validator,
+        so pydantic gives it no field location, and it was reported as
+        ``<value>: Value error, This deployment does not know ...``."""
+        from pydantic import ValidationError
+
+        from backend.app.core.config import Settings
+
+        monkeypatch.delenv("TESTING", raising=False)
+        with pytest.raises(ValidationError) as caught:
+            Settings(
+                _env_file=None,
+                ENVIRONMENT="production",
+                SECRET_KEY="k" * 64,
+                FIRST_SUPERUSER_PASSWORD="a-long-enough-password",
+            )
+        described = modules_loader.describe_exception(caught.value)
+        assert "<value>" not in described
+        assert "Value error," not in described
+        assert described.startswith("ValidationError: PUBLIC_BASE_URL is not set")
+        assert "https://experimently.example.com" in described
+        assert "api.example.com" not in described
+
+    @pytest.mark.regression
+    def test_a_refused_setting_is_not_reported_as_continuing_on_the_core_profile(
+        self, fresh_hooks, monkeypatch
+    ):
+        """#237: a refused secret was logged as "register(hooks) failed;
+        continuing on the core profile" -- false on a production full image,
+        which refuses to start straight after."""
+        monkeypatch.delenv("TESTING", raising=False)
+        error = _real_settings_validation_error()
+
+        def refuses(h):
+            raise error
+
+        with (
+            patch.object(modules_loader, "_find_register", return_value=(refuses, "x")),
+            patch.object(modules_loader.logger, "error") as log,
+        ):
+            assert modules_loader.load_modules(force=True) is False
+        (call,) = log.call_args_list
+        line = call.args[0] % call.args[1:]
+        assert "continuing on the core profile" not in line
+        assert "SECRET_KEY" in line
+        assert _REJECTED_KEY not in line
+        assert not call.kwargs.get("exc_info")
+        assert "SECRET_KEY" in (modules_loader.modules_failure() or "")
+
     def test_describe_exception_keeps_ordinary_exceptions_readable(self):
         described = modules_loader.describe_exception(ImportError("no module 'xmlsec'"))
         assert described == "ImportError: no module 'xmlsec'"
