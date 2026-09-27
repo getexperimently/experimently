@@ -10,6 +10,7 @@ from uuid import UUID
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from backend.app.core.pattern_match import PatternUnevaluable, report_unevaluable
 from backend.app.core.targeting_adapter import (
     expand_context,
     match_targeting_rule,
@@ -26,7 +27,8 @@ logger = logging.getLogger(__name__)
 #   targeting_rule - a targeting rule matched; its rollout % decided
 #   rollout        - no rule matched (or none defined); the global rollout % decided
 #   inactive       - the flag is not ACTIVE
-#   error          - evaluation raised; the flag defaulted to off
+#   error          - evaluation raised, or a pattern condition could not be
+#                    evaluated; the flag defaulted to off
 REASON_TARGETING_RULE = "targeting_rule"
 REASON_ROLLOUT = "rollout"
 REASON_INACTIVE = "inactive"
@@ -307,6 +309,13 @@ class FeatureFlagService:
         When no rule matches (or the rules cannot be interpreted) the flag's
         global ``rollout_percentage`` decides.
 
+        When a pattern (``regex``) condition anywhere in the rules cannot be
+        evaluated (RE2 refuses the pattern, or the value is too long or not
+        encodable), the whole ruleset is abandoned: the flag is disabled with
+        reason ``error``. Neither the global rollout nor a ``default_rule`` is
+        consulted, and no error-log row is written, so the safety monitor does
+        not count it.
+
         Args:
             flag: Feature flag model object
             user_id: ID of the user
@@ -348,6 +357,14 @@ class FeatureFlagService:
                     # No rules, no match, or an uninterpretable shape: global rollout
                     reason = REASON_ROLLOUT
                     result = self._evaluate_percentage_rollout(flag, user_id)
+
+        except PatternUnevaluable as exc:
+            # Abandon the whole ruleset: falling through to the global rollout
+            # would serve the flag to users a rule was written to leave out.
+            report_unevaluable(exc, f"flag:{flag.key}")
+            targeting_rule_id = None
+            result = False
+            reason = REASON_ERROR
 
         except Exception as e:
             # Log and record the error

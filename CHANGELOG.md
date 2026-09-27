@@ -10,6 +10,63 @@ longer applies and release-please can generate this file directly. Until it
 does, entries below 0.2.2 are hand-written and the links in them are the
 reason why.
 
+## [0.7.0](https://github.com/getexperimently/experimently/compare/v0.6.0...v0.7.0) (2026-09-27)
+
+
+### ⚠ BREAKING CHANGES
+
+* **rules:** regex targeting conditions (`regex` in the dashboard, `match_regex` in the rules engine) now use RE2 syntax (https://github.com/google/re2/wiki/Syntax), which differs from Python's:
+    - `\w`, `\d`, `\s` and `\b` match ASCII only.
+    - `$` matches only at the very end of the value, not before a final
+    newline.
+    - These are refused: lookahead and lookbehind, backreferences, `\Z`,
+    `(?x)`, `(?u)`, `(?a)`, `\N{...}`, counted repetitions over 1000, and
+    very large Unicode repetitions such as `[\p{L}\p{N}]{1,300}`.
+    - Values longer than 256 characters are not evaluated.
+
+    When a stored pattern is refused, or a value is longer than 256 characters
+    or cannot be encoded as UTF-8, the rules holding it are not applied: the
+    feature flag evaluates disabled with reason "error" (no fall-through to its
+    rollout percentage), the user is ineligible for the experiment and gets the
+    control variant, and the user is not a member of the segment.
+
+    After upgrading, run `python -m backend.scripts.check_regex_rules` to list
+    stored patterns that RE2 refuses or that use `\w`, `\d`, `\s`, `\b` or `$`.
+
+### Bug Fixes
+
+* **api:** export endpoints share one limit of 10 requests a minute per client ([#261](https://github.com/getexperimently/experimently/issues/261)) ([00870e4](https://github.com/getexperimently/experimently/commit/00870e4870ff3e13e0a2ac2265f5ba5e4f8efb84))
+* **api:** exports carry the same results as the results API, and the report honours format=csv ([#259](https://github.com/getexperimently/experimently/issues/259)) ([c11a4a0](https://github.com/getexperimently/experimently/commit/c11a4a04415a4d23f50dec796f1ac757e27b8648))
+* **rules:** regex conditions use RE2 syntax ([#260](https://github.com/getexperimently/experimently/issues/260)) ([5a3c940](https://github.com/getexperimently/experimently/commit/5a3c940dae073e377fe994bcd628c6436220e435))
+* **segments:** audience preview rejects oversized rulesets ([#268](https://github.com/getexperimently/experimently/issues/268)) ([b654656](https://github.com/getexperimently/experimently/commit/b6546563856cf511173c292d751ce8247b5d2c1b))
+
+## [0.6.0](https://github.com/getexperimently/experimently/compare/v0.5.0...v0.6.0) (2026-09-27)
+
+
+### Features
+
+* **deploy:** an ECS rolling rollout script that cannot mistake a circuit-breaker rollback for success ([#69](https://github.com/getexperimently/experimently/issues/69)) ([#172](https://github.com/getexperimently/experimently/issues/172)) ([38e8d14](https://github.com/getexperimently/experimently/commit/38e8d14e11990a6969157f2a2bb7e46570270fe2))
+* **docs:** every documentation page with a shell example is under the runner's contract (E0a-1) ([#179](https://github.com/getexperimently/experimently/issues/179)) ([b16c2ab](https://github.com/getexperimently/experimently/commit/b16c2ab4d5dc646df3b87b800d1c709d0c270d0b))
+
+
+### Bug Fixes
+
+* **api:** audit log reads follow the role table ([#258](https://github.com/getexperimently/experimently/issues/258)) ([c1f559a](https://github.com/getexperimently/experimently/commit/c1f559a3572a49b332786b050968671ae6b3ef11))
+* **api:** experiments report their bandit optimization type ([#197](https://github.com/getexperimently/experimently/issues/197)) ([#204](https://github.com/getexperimently/experimently/issues/204)) ([5ef8513](https://github.com/getexperimently/experimently/commit/5ef851324a8f347975cd2c38a3fdb27f5268ed6f))
+* **api:** record when an API key was last used ([#198](https://github.com/getexperimently/experimently/issues/198)) ([#206](https://github.com/getexperimently/experimently/issues/206)) ([14d42ec](https://github.com/getexperimently/experimently/commit/14d42ec182c1b150744fb34c19b4e029769399fe))
+* **deploy:** a crash in the serving check reads as "could not tell", not "not yet" ([#182](https://github.com/getexperimently/experimently/issues/182)) ([827671c](https://github.com/getexperimently/experimently/commit/827671ca12709ff8418ccd8b1118bbfb4e8ff88a))
+* **deploy:** Rollback never reports success it did not achieve, and never stops CodeDeploy's own rollback ([#148](https://github.com/getexperimently/experimently/issues/148) PR-1) ([#214](https://github.com/getexperimently/experimently/issues/214)) ([18cf907](https://github.com/getexperimently/experimently/commit/18cf907559054e4357202c00713d067e16483869))
+
+
+### Documentation
+
+* deployment examples that do the wrong thing when pasted into zsh ([#98](https://github.com/getexperimently/experimently/issues/98), part) ([#187](https://github.com/getexperimently/experimently/issues/187)) ([ce5e7ad](https://github.com/getexperimently/experimently/commit/ce5e7ad63e66a5e15f8ff60c74314b197406ddbe))
+* more API pages run their examples (Stream E batch 4) ([#223](https://github.com/getexperimently/experimently/issues/223)) ([dbad65e](https://github.com/getexperimently/experimently/commit/dbad65e59a02cf50541c7b27f53caef033156ff3))
+* replace the internal incident-response plan with a short page for self-hosters ([#189](https://github.com/getexperimently/experimently/issues/189)) ([bf8ea56](https://github.com/getexperimently/experimently/commit/bf8ea560fe7ea7d8536bc7fea716ccb11a948ac3))
+* the demo READMEs are under the documentation checks (Stream E batch 2) ([#194](https://github.com/getexperimently/experimently/issues/194)) ([4ca6b79](https://github.com/getexperimently/experimently/commit/4ca6b799f13036ea30b2690cb1b5055277e01fbf))
+* the first integration pages run their examples (Stream E batch 3) ([#199](https://github.com/getexperimently/experimently/issues/199)) ([3b63f03](https://github.com/getexperimently/experimently/commit/3b63f033fd32f2787ee756b5a0d7644ac1d16af2))
+* the front-door pages run their examples (Stream E batch 1) ([#188](https://github.com/getexperimently/experimently/issues/188)) ([29d2a8c](https://github.com/getexperimently/experimently/commit/29d2a8cd29c665b767241e27810edc9d27ba39b1))
+
 ## [0.5.0](https://github.com/getexperimently/experimently/compare/v0.4.0...v0.5.0) (2026-09-26)
 
 
