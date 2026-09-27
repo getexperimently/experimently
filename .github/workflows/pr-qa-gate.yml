@@ -519,6 +519,7 @@ jobs:
         run: >-
           python -m pytest -p no:cov -q --tb=short
           backend/tests/unit/scripts/test_doc_examples.py
+          backend/tests/unit/scripts/test_guide_blocks.py
           backend/tests/unit/docs/
           backend/tests/smoke/test_openapi_snapshot.py
           backend/tests/smoke/test_version_sources.py
