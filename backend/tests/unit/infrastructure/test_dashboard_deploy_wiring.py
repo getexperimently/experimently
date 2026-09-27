@@ -1237,18 +1237,21 @@ def test_the_dashboard_input_is_optional_and_the_api_input_still_required():
 
 @pytest.mark.regression
 def test_rollback_validates_both_before_it_stops_anything_and_stops_unconditionally():
-    """EM v1 condition 1: no dashboard-only path; the stop step always runs."""
+    """EM v1 condition 1: no dashboard-only path; the stop step always runs.
+
+    The two CodeDeploy steps are skipped on exactly one condition: the stop
+    step found the API already on the target with nothing in flight (#148),
+    when there is nothing for a deployment to do. Pinned exactly."""
     stop = _index(ROLLBACK, "Stop any deployment already in flight")
     assert _index(ROLLBACK, "target") < stop
     assert _index(ROLLBACK, "dashboard-target") < stop
     assert "if" not in _step(ROLLBACK, "Stop any deployment already in flight")
     assert "if" not in _step(ROLLBACK, "dashboard-target")
-    for key in (
-        "codedeploy",
-        "Shift traffic and wait for it to land",
-        "Verify what is serving traffic",
-    ):
-        assert "if" not in _step(ROLLBACK, key), key
+    for key in ("codedeploy", "Shift traffic and wait for it to land"):
+        assert _step(ROLLBACK, key)["if"] == (
+            "steps.stop.outputs.already_serving != 'true'"
+        ), key
+    assert "if" not in _step(ROLLBACK, "Verify what is serving traffic")
     assert _index(ROLLBACK, "Verify what is serving traffic") < _index(
         ROLLBACK, "dashboard-rollback"
     )

@@ -17,9 +17,13 @@ deployment answers is whether the `modules/` package is present.
 `GET /api/v1/modules` reports the answer, unauthenticated, with exactly three
 keys:
 
-```bash
+```{.bash exec}
 curl -s http://localhost:8000/api/v1/modules
 ```
+<!-- expect: "profile":"full" -->
+<!-- expect: "rbac" -->
+
+A full deployment prints something like:
 
 ```json
 {"profile": "full", "modules": ["workspaces", "hipaa", "compliance", "sso", "rbac", "warehouse", "integrations", "counters", "etl", "split_url"], "version": "1.0.0"}
@@ -112,16 +116,18 @@ those imports is guarded, so a full profile without them starts and serves
 every route, and then refuses the SAML flow and blocks on warehouse retries —
 install them alongside the backend pins:
 
-```bash
+```{.bash skip reason="dev: installs the backend's and the modules' Python dependencies into a development checkout"}
 pip install -r backend/requirements.txt -r modules/requirements.txt
 ```
 
-The dashboard follows `EXPERIMENTLY_PROFILE`:
+The dashboard follows `EXPERIMENTLY_PROFILE`. A plain `npm run build` is the full
+profile, where `@modules/*` resolves to `../modules/frontend/src`; with
+`EXPERIMENTLY_PROFILE=core` it resolves to `src/modules-stub` instead:
 
-```bash
+```{.bash skip reason="dev: builds the dashboard in a development checkout, once per profile"}
 cd frontend
-npm run build                             # full: @modules/* resolves to ../modules/frontend/src
-EXPERIMENTLY_PROFILE=core npm run build   # core: @modules/* resolves to src/modules-stub
+npm run build
+EXPERIMENTLY_PROFILE=core npm run build
 ```
 
 `EXPERIMENTLY_PROFILE=core` forces the core resolution on a complete
@@ -129,21 +135,25 @@ checkout, which is how the seam is tested without deleting anything:
 `EXPERIMENTLY_PROFILE=core npm test`, `EXPERIMENTLY_PROFILE=core npm run build`
 and `npx tsc --noEmit -p tsconfig.core.json` (from `frontend/`).
 
-The container images select the profile by build target and build argument:
+The container images select the profile by build target and build argument.
 
-```bash
-# API: the `core` target is the default. `full` additionally copies
-# modules/backend/ and installs modules/requirements.lock, so it needs a
-# complete checkout: built from a core tree it does not fail, it produces an
-# image with an empty /app/modules, which abort_if_modules_broken() refuses
-# to start outside development.
+For the API, the `core` target is the default. `full` additionally copies
+`modules/backend/` and installs `modules/requirements.lock`, so it needs a
+complete checkout: built from a core tree it does not fail, it produces an
+image with an empty `/app/modules`, which `abort_if_modules_broken()` refuses
+to start outside development:
+
+```{.bash skip reason="dev: builds both API images from a development checkout, several minutes each"}
 docker build -f backend/Dockerfile -t experimently-api:core .
 docker build -f backend/Dockerfile --target full -t experimently-api:full .
+```
 
-# Dashboard: EXPERIMENTLY_PROFILE=core is the default, like the API's `core`
-# target, so a plain `docker build` of either produces a matching pair. `full`
-# copies modules/frontend/, so it too needs a complete checkout: built from a
-# core tree the build stops at its own profile assertion.
+For the dashboard, `EXPERIMENTLY_PROFILE=core` is the default, like the API's
+`core` target, so a plain `docker build` of either produces a matching pair.
+`full` copies `modules/frontend/`, so it too needs a complete checkout: built
+from a core tree the build stops at its own profile assertion:
+
+```{.bash skip reason="dev: builds both dashboard images from a development checkout, several minutes each"}
 docker build -f frontend/Dockerfile -t experimently-web:core .
 docker build -f frontend/Dockerfile -t experimently-web:full --build-arg EXPERIMENTLY_PROFILE=full .
 ```
@@ -156,10 +166,12 @@ selects, as well as under BuildKit. Both images refuse to carry a bundle that
 does not match the profile (a core image carries no chunk naming a module
 route; a full image carries them).
 
-`docker compose` takes the same variable for both images:
+`docker compose` takes the same variable for both images, and without it starts
+the core profile. This starts the full one and waits until every service is
+healthy:
 
-```bash
-EXPERIMENTLY_PROFILE=full docker compose up -d   # default: core
+```{.bash exec timeout=1200}
+EXPERIMENTLY_PROFILE=full docker compose up -d --wait
 ```
 
 ## Where the code lives

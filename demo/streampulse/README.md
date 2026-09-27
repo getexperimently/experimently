@@ -47,41 +47,74 @@ and a live readout of `streampulse_player_v2` for the current device.
 ## Running it
 
 Prerequisites: the Experimently backend on `http://localhost:8000`, the dashboard on
-`http://localhost:3100`, Node 18+, and the repo's Python venv.
+`http://localhost:3100`, Node 20.9 or later (Next.js 16 refuses older versions), and the
+repo's Python venv.
 
-In step 2, `cp -n` copies `.env.example` only if `.env.local` does not exist yet.
+`demo/setup-local.sh` does steps 1 to 4 for you, with steady traffic only (set `STREAMPULSE=0`
+to skip StreamPulse). It does not run the crash incident or the rollout story.
 
-```bash
-# 1. Seed the StreamPulse catalogue (from the repo root). Idempotent; writes the API key to
-#    demo/streampulse/.api_key and NEXT_PUBLIC_EXPERIMENTLY_API_KEY into demo/streampulse/.env.local.
-#    --no-history skips the 7-day backfill, --reset removes everything it created,
-#    STREAMPULSE_DEMO_DIR overrides where the key files go.
+**1. Seed** the StreamPulse catalogue, from the repository root. It is idempotent, and writes
+the API key to `demo/streampulse/.api_key` and the `NEXT_PUBLIC_EXPERIMENTLY_API_KEY` line into
+`demo/streampulse/.env.local`. `--no-history` skips the 7-day backfill, `--reset` removes
+everything it created, and the `STREAMPULSE_DEMO_DIR` environment variable changes where the
+key files go.
+
+```{.bash skip reason="demo: runs the demo applications (Stream F)"}
 source venv/bin/activate
 python backend/scripts/seed_streampulse.py
-
-# 2. Environment (the seed already wrote the key line into .env.local)
-cd demo/streampulse
-cp -n .env.example .env.local
-#   NEXT_PUBLIC_EXPERIMENTLY_API_URL        default http://localhost:8000
-#   NEXT_PUBLIC_EXPERIMENTLY_API_KEY        plaintext key for `streampulse-app`
-#   NEXT_PUBLIC_EXPERIMENTLY_DASHBOARD_URL  default http://localhost:3100
-
-# 3. Run the app
-npm install
-npm run dev                                     # http://localhost:3300
-
-# 4. Device simulator (another terminal, repo root, venv active) — keeps the dashboard moving
-python demo/streampulse/simulator/traffic.py --rate 3 --duration 600
-python demo/streampulse/simulator/traffic.py --rate 5 --incident android12   # the crash incident
-
-# 5. The rollout story (another terminal)
-python demo/streampulse/simulator/rollout_story.py --auto        # all 7 steps, paced
-python demo/streampulse/simulator/rollout_story.py --step 3      # one step
 ```
 
-`demo/setup-local.sh` does all of this for you (set `STREAMPULSE=0` to skip it).
+**2. Environment.** `cp -n` copies `.env.example` only if `.env.local` does not exist yet.
+After step 1 it usually does, holding only the key line, so this changes nothing and the two
+URLs take their defaults:
 
-Other scripts: `npm test` (jest + Testing Library, SDK mocked — 44 tests), `npm run lint`,
+```{.bash skip reason="demo: runs the demo applications (Stream F)"}
+cd demo/streampulse
+cp -n .env.example .env.local
+```
+
+| Setting | Value |
+|---|---|
+| `NEXT_PUBLIC_EXPERIMENTLY_API_URL` | defaults to `http://localhost:8000` |
+| `NEXT_PUBLIC_EXPERIMENTLY_API_KEY` | the plaintext key for `streampulse-app`, written by the seed |
+| `NEXT_PUBLIC_EXPERIMENTLY_DASHBOARD_URL` | defaults to `http://localhost:3100` |
+
+**3. Run the app**, still in `demo/streampulse`. It is at http://localhost:3300.
+
+```{.bash skip reason="demo: runs the demo applications (Stream F)"}
+npm install
+npm run dev
+```
+
+**4. Device simulator.** In another terminal, from the repository root with the venv active,
+this keeps the dashboard moving for ten minutes:
+
+```{.bash skip reason="demo: runs the demo applications (Stream F)"}
+python demo/streampulse/simulator/traffic.py --rate 3 --duration 600
+```
+
+The crash incident is the same simulator with `--incident android12`:
+
+```{.bash skip reason="demo: runs the demo applications (Stream F)"}
+python demo/streampulse/simulator/traffic.py --rate 5 --incident android12
+```
+
+**5. The rollout story**, in another terminal. It calls the dashboard API, so it needs a bearer
+token, passed with `--token`; [the simulator's README](simulator/README.md#rollout-story) says
+when the default works and how to get one when it does not. `--auto` runs all seven steps,
+paced:
+
+```{.bash skip reason="demo: runs the demo applications (Stream F)"}
+python demo/streampulse/simulator/rollout_story.py --auto
+```
+
+`--step 3` (any of 1 to 7) runs one step instead:
+
+```{.bash skip reason="demo: runs the demo applications (Stream F)"}
+python demo/streampulse/simulator/rollout_story.py --step 3
+```
+
+Other scripts: `npm test` (jest + Testing Library, SDK mocked), `npm run lint`,
 `npm run typecheck` (type-checks against the SDK *source*), `npm run build`, `npm start`.
 
 The React SDK is consumed straight from `../../sdk/react/src` (tsconfig `paths` + webpack alias +
@@ -136,10 +169,10 @@ per-experiment), so it can differ after `--reset`; the holdout bucket does not.
 | Yellow banner "NEXT_PUBLIC_EXPERIMENTLY_API_KEY is not set"; panel shows `error: API error: 401` everywhere | The key is missing or wrong. Run `python backend/scripts/seed_streampulse.py` (it rewrites `.env.local` and `.api_key`), then restart `npm run dev` — Next reads env vars at startup. |
 | **401** in the network tab although `.env.local` has a key | The key was revoked or belongs to another environment/database. Re-seed. |
 | **404** on `/tracking/assign` or `/feature-flags/evaluate/streampulse_...` | The StreamPulse flags/experiments are not seeded or not ACTIVE (`--reset` removes them). Run the seed script. |
-| Browser console: **CORS** error from `localhost:3300` | Port 3300 is not in the backend's CORS allow-list. The dev fallback in `backend/app/main.py` and `DevSettings.CORS_ORIGINS` include it; if you set `CORS_ORIGINS` yourself, add `http://localhost:3300` and restart the API. |
-| Every flag `off`, every experiment `error`, nothing loads | Backend not running on `NEXT_PUBLIC_EXPERIMENTLY_API_URL`. Start it: `uvicorn app.main:app --reload` from `backend/`. |
+| Browser console: **CORS** error from `localhost:3300` | Port 3300 is not in the backend's CORS allow-list. The development defaults (`DEFAULT_CORS_ORIGINS` in `backend/app/core/config.py`) include it; if you set `CORS_ORIGINS` or `BACKEND_CORS_ORIGINS` yourself, add `http://localhost:3300` and restart the API. |
+| Every flag `off`, every experiment `error`, nothing loads | Backend not running on `NEXT_PUBLIC_EXPERIMENTLY_API_URL`. Start it from the repository root: `uvicorn backend.app.main:app --reload`. |
 | AI search never turns on | The rule needs `os = iOS`, `os_version ≥ 17.0.0`, `region = US`, `tier = premium` and the flag's own rollout is 0 %. Check the custom fields; the panel reason tells you whether a rule matched. |
-| Player v2 does not change after the story rolls back / advances | The SDK caches for 5 s — wait or press *Refresh now*. If the schedulers are involved (auto-rollback, time-based stages), they run every `SAFETY_CHECK_INTERVAL_MINUTES` / `ROLLOUT_CHECK_INTERVAL_MINUTES` (default 5 / 15) — set both to `1` in the backend `.env` for the demo. |
+| Player v2 does not change after the story rolls back / advances | The SDK caches for 5 s — wait or press *Refresh now*. If the schedulers are involved (auto-rollback, time-based stages), they run every `SAFETY_CHECK_INTERVAL_MINUTES` / `ROLLOUT_CHECK_INTERVAL_MINUTES` (default 5 / 15) — set both to `1` in the backend `.env` for the demo (`setup-local.sh` sets both to `1` unless they are already set). |
 | A preset shows "not enrolled … holdout" for every experiment | That id hashes into the 2 % holdout. The shipped preset ids do not; if you changed one, pick another id (or use it to demonstrate the holdout). |
 | "Invalid hook call" in the browser | Two React copies. `next.config.js` aliases `react`/`react-dom` to this app's `node_modules`; run `npm install` inside `demo/streampulse`. |
 | Simulator exits with code 2 / 3 / 4 | 2 = API key rejected or missing, 3 = catalogue not seeded (404), 4 = backend unreachable. |
