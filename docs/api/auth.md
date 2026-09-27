@@ -190,6 +190,7 @@ Every user has one of four built-in roles. The role decides which operations are
 | Create and change experiments | — | — | Yes | Yes |
 | Create and change feature flags | — | — | Yes | Yes |
 | Create their own API keys | Yes | Yes | Yes | Yes |
+| View audit logs | Own | All | Own | All |
 | Manage users | — | — | — | Yes |
 
 Access to a feature flag is by role, not by who created it: a DEVELOPER can change any flag,
