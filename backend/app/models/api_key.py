@@ -1,5 +1,6 @@
 import secrets
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
+from typing import Optional
 
 from sqlalchemy import (
     Boolean,
@@ -8,15 +9,19 @@ from sqlalchemy import (
     ForeignKey,
     String,
     Text,
+    or_,
+    update,
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.ext.declarative import declared_attr
 from sqlalchemy.orm import relationship
-from sqlalchemy.sql import func
 
 from backend.app.core.database_config import get_schema_name
 
 from .base import Base, BaseModel
+
+# last_used_at is written at most once per this window per key (issue #198).
+LAST_USED_RESOLUTION = timedelta(seconds=60)
 
 
 def generate_api_key() -> str:
@@ -71,11 +76,43 @@ class APIKey(Base, BaseModel):
         """Check if the API key is valid (active and not expired)."""
         return self.is_active and not self.is_expired
 
-    def update_last_used(self, db_session) -> None:
-        """Update the last_used_at timestamp."""
-        self.last_used_at = func.now()
-        db_session.add(self)
+    def update_last_used(self, db_session, now: Optional[datetime] = None) -> bool:
+        """Record that the key was just used, at most once per resolution window.
+
+        ``get_api_key`` calls this on every authenticated SDK request, which is
+        the hot path (``SDK_RATE_LIMIT_PER_MINUTE`` defaults to 6000 per IP).
+        Writing on every request would turn a read path into a write path and
+        make concurrent requests on one key queue on its row lock. So the write
+        happens only when the stored value is null or older than
+        ``LAST_USED_RESOLUTION``: at most about one UPDATE per key per minute,
+        which is still precise enough for what the field is for -- finding
+        unused keys and confirming a rotation.
+
+        The UPDATE repeats the staleness test in its WHERE clause, so workers
+        that race past the in-memory check change nothing. It pins
+        ``updated_at`` to itself: using a key is not editing it.
+
+        Returns True when a row was written. The caller owns error handling.
+        """
+        if now is None:
+            # Naive UTC, like expires_at and is_expired.
+            now = datetime.now(timezone.utc).replace(tzinfo=None)
+        cutoff = now - LAST_USED_RESOLUTION
+        if self.last_used_at is not None and self.last_used_at > cutoff:
+            return False
+
+        cls = type(self)
+        result = db_session.execute(
+            update(cls)
+            .where(
+                cls.id == self.id,
+                or_(cls.last_used_at.is_(None), cls.last_used_at <= cutoff),
+            )
+            .values(last_used_at=now, updated_at=cls.updated_at)
+            .execution_options(synchronize_session=False)
+        )
         db_session.commit()
+        return bool(result.rowcount)
 
     @classmethod
     def create_for_user(
