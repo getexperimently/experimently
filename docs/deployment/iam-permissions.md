@@ -83,7 +83,11 @@ assumes the role.
 from the API, not from a token. Before the first staging deploy, run a
 throwaway job bound to the `staging` environment that prints only the
 *payload* of its OIDC token's `sub` claim, and the trust policy is written
-from what it printed. A `sub` that does not match fails `AssumeRoleWithWebIdentity`
+from what it printed. The **OIDC subject probe** workflow
+(`.github/workflows/oidc-sub-probe.yml`; Actions → OIDC subject probe → Run
+workflow, from `main`) is that job: it prints `sub`, `aud` and `environment`
+and never the token. Protect the environment first (see
+[GitHub side](#github-side)). A `sub` that does not match fails `AssumeRoleWithWebIdentity`
 with "Not authorized", which is the safe direction.
 
 The account also needs the GitHub OIDC provider
