@@ -21,7 +21,7 @@ from fastapi import (
 from sqlalchemy.orm import Session
 
 from backend.app.api import deps
-from backend.app.core.permissions import Action, ResourceType, check_permission
+from backend.app.core.permissions import can_read_all_audit_logs
 from backend.app.models.audit_log import ActionType, EntityType
 from backend.app.models.user import User
 from backend.app.schemas.audit_log import (
@@ -114,18 +114,12 @@ async def list_audit_logs(
     - **page**: Page number for pagination
     - **limit**: Number of records per page
 
-    Only users with appropriate permissions can access audit logs.
-    Regular users can only see their own actions, while administrators
-    can see all audit logs.
+    Superusers, ADMIN and ANALYST see every entry. DEVELOPER and VIEWER
+    see only their own entries; a `user_id` filter naming anyone else is
+    replaced by their own id.
     """
-    # Check if user has permission to view audit logs
-    # ADMIN and ANALYST roles can view all audit logs
-    # DEVELOPER and VIEWER roles can only view their own audit logs
-    can_view_all = check_permission(current_user, ResourceType.USER, Action.READ)
-
-    # If user doesn't have permission to view all logs, restrict to their own actions
-    # Override any user_id parameter they might have passed
-    if not can_view_all and not current_user.is_superuser:
+    # ADMIN and ANALYST read all entries; DEVELOPER and VIEWER read their own.
+    if not can_read_all_audit_logs(current_user):
         user_id = current_user.id
 
     # Validate and convert enum parameters
@@ -223,15 +217,9 @@ async def get_entity_audit_history(
     such as a feature flag or experiment. The logs are ordered by timestamp
     with the most recent first.
 
-    Only users with appropriate permissions can access entity audit history.
+    Superusers, ADMIN and ANALYST only; other roles receive 403.
     """
-    # Check if user has permission to view audit logs
-    can_view_all = check_permission(current_user, ResourceType.USER, Action.READ)
-
-    if not can_view_all and not current_user.is_superuser:
-        # For regular users, check if they own the entity
-        # This would need to be expanded based on entity type
-        # For now, allow access only to superusers and users with READ permission
+    if not can_read_all_audit_logs(current_user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not enough permissions to view entity audit history",
@@ -290,17 +278,11 @@ async def get_user_activity(
     Get audit logs for a specific user's activity.
 
     This endpoint returns all audit logs for a specific user's actions.
-    Regular users can only view their own activity, while administrators
-    can view any user's activity.
+    Every user can view their own activity. Superusers, ADMIN and ANALYST
+    can view any user's activity; other roles receive 403 for anyone else.
     """
-    # Check if user has permission to view all user activity
-    can_view_all = check_permission(current_user, ResourceType.USER, Action.READ)
-
-    # Users can view their own activity, superusers and those with READ permission can view any user's activity
-    if (
-        not can_view_all
-        and not current_user.is_superuser
-        and str(current_user.id) != str(user_id)
+    if not can_read_all_audit_logs(current_user) and str(current_user.id) != str(
+        user_id
     ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -357,13 +339,9 @@ async def get_audit_stats(
     This endpoint returns statistical information about audit logs,
     including counts by action type, entity type, and most active users.
 
-    Only administrators can access audit statistics.
+    Superusers, ADMIN and ANALYST only; other roles receive 403.
     """
-    # Check if user has permission to view audit statistics
-    # Only ADMIN role can view audit statistics
-    if not current_user.is_superuser and not check_permission(
-        current_user, ResourceType.USER, Action.READ
-    ):
+    if not can_read_all_audit_logs(current_user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not enough permissions to view audit statistics",

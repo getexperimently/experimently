@@ -237,10 +237,18 @@ deploy:
 4. The canary sends 10% of traffic to the new tasks, waits 5 minutes, then sends the rest
 5. The old tasks are kept for an hour, so Rollback can put them back, and then terminated
 
-The canary is timed only: no alarm watches it, so nothing rolls back
-automatically on application errors. CodeDeploy rolls back only a deployment
-that fails (new tasks that never become healthy) or is stopped. See the
-[rollback runbook](../deployment/rollback-runbook.md).
+Alarms watch the API's canary and the hour after it. The Fargate stack creates
+two CloudWatch alarms, `experimentation-api-5xx-blue-<env>` and
+`experimentation-api-5xx-green-<env>`, one per target group, and attaches both
+to the deployment group. While either is in ALARM, CodeDeploy stops the
+deployment and rolls the API back by itself; it also rolls back a deployment
+that fails (new tasks that never become healthy) or is stopped. The alarms
+watch the API's target 5xx only: a release that answers wrongly with a 2xx,
+the load balancer's own 502 and 504, and the dashboard are not covered. The
+first `cdk deploy` that adds them changes the deployment group in place, and
+it needs the deploy workflow's role re-applied first
+([IAM permissions](../deployment/iam-permissions.md)). See the
+[rollback runbook](../deployment/rollback-runbook.md#method-3-what-codedeploy-rolls-back-by-itself-and-when).
 
 ---
 

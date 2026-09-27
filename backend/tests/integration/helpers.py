@@ -3,6 +3,7 @@ Utility helpers for integration tests.
 """
 
 import uuid
+from typing import List, Optional
 
 from sqlalchemy.orm import Session
 
@@ -66,3 +67,34 @@ def unique_email(prefix: str = "user") -> str:
 def unique_flag_key(prefix: str = "flag") -> str:
     """Generate a unique feature flag key."""
     return f"{prefix}-{uuid.uuid4().hex[:8]}"
+
+
+#: The list endpoint's largest page (``limit`` has ``le=200``).
+SEGMENT_PAGE_SIZE = 200
+#: Pages fetched before giving up: 100 x 200 = 20,000 segments.
+SEGMENT_MAX_PAGES = 100
+
+
+def list_all_segment_ids(client, status: Optional[str] = None) -> List[str]:
+    """Every segment id ``GET /api/v1/segments`` returns, across all pages.
+
+    The integration database is shared by the whole run, so a segment a test
+    just created need not be on the first page. This pages with ``limit`` and
+    ``offset`` until a short page, so both "is listed" and "is not listed"
+    assertions see the whole list rather than whatever fits on page one.
+    """
+    ids: List[str] = []
+    for page in range(SEGMENT_MAX_PAGES):
+        params = {"limit": SEGMENT_PAGE_SIZE, "offset": page * SEGMENT_PAGE_SIZE}
+        if status is not None:
+            params["status"] = status
+        response = client.get("/api/v1/segments", params=params)
+        assert response.status_code == 200, response.text
+        batch = [item["id"] for item in response.json()]
+        ids.extend(batch)
+        if len(batch) < SEGMENT_PAGE_SIZE:
+            return ids
+    raise AssertionError(
+        f"GET /api/v1/segments still returned full pages after "
+        f"{SEGMENT_MAX_PAGES * SEGMENT_PAGE_SIZE} segments"
+    )

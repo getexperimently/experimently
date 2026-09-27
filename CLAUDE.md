@@ -215,7 +215,7 @@ source venv/bin/activate && pytest -m "unit" -v
 - `/tracking/assign` routes new users by `BanditState.variant_weights` for `optimization_type != "fixed"`; existing assignments are always kept.
 
 #### Rate limits and CORS
-- SDK paths (`/api/v1/tracking/*`, `/feature-flags/evaluate/*`, `/feature-flags/user/*`) share `SDK_RATE_LIMIT_PER_MINUTE` (default 6000/min per IP); auth endpoints stay strict; everything else 300/min. Limits resolve via `resolve_rate_limit()` in `backend/app/middleware/rate_limiter.py`.
+- SDK paths (`/api/v1/tracking/*`, `/feature-flags/evaluate/*`, `/feature-flags/user/*`) share `SDK_RATE_LIMIT_PER_MINUTE` (default 6000/min per IP); auth endpoints stay strict; every `/api/v1/export/*` path shares ONE counter of 10/min per IP (`EXPORT_RATE_LIMIT`, keyed on the prefix by `rate_limit_key()`); everything else 300/min. Limits resolve via `resolve_rate_limit()` in `backend/app/middleware/rate_limiter.py`.
 - `CORS_ORIGINS` is a plain comma-separated list (annotated `NoDecode`); `BACKEND_CORS_ORIGINS` must be a JSON array. Dev defaults include ports 3000, 3001, 3100, 3200, 8000.
 
 #### Demo applications

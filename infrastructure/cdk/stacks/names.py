@@ -109,3 +109,20 @@ def glue_names(env_name: str) -> dict[str, str]:
         "GLUE_DATABASE": f"experimentation_{env_name}",
         "GLUE_CRAWLER_NAME": f"experimentation-crawler-{env_name}",
     }
+
+
+#: The target groups the API's CodeDeploy deployment group swaps between, in
+#: the order the stack builds its 5xx alarms (#148).
+API_TARGET_GROUP_COLOURS = ("blue", "green")
+
+
+def api_5xx_alarm_name(env_name: str, colour: str) -> str:
+    """The API's 5xx alarm on one target group, ``experimentation-api-5xx-<colour>-<env>``.
+
+    The deployment group names both (#148), and ``deploy.yml`` names them in
+    its summary and copy; ``test_workflow_names_exist.py`` looks each up in a
+    synth. Account-scoped, so it carries the environment.
+    """
+    if colour not in API_TARGET_GROUP_COLOURS:
+        raise ValueError(f"colour must be one of {API_TARGET_GROUP_COLOURS}: {colour!r}")
+    return f"experimentation-api-5xx-{colour}-{env_name}"

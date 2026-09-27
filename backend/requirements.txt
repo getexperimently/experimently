@@ -80,6 +80,7 @@ structlog==23.3.0
 orjson==3.12.0
 ujson==6.0.0
 semver==3.1.0          # core/rules_engine.py semantic-version operators
+google-re2==1.1.20251105  # core/pattern_match.py regex conditions (RE2)
 loguru==0.7.3          # api/deps.py
 requests==2.34.2       # tests only: tests/smoke/test_production.py and
                        # tests/realistic/*.  Deliberately NOT in

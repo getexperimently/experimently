@@ -7,12 +7,13 @@ This module provides functions for evaluating targeting rules against user conte
 import hashlib
 import logging
 import math
-import re
 from datetime import datetime
 from datetime import time as datetime_time
 from typing import Any, Dict, Optional
 
 import semver
+
+from backend.app.core import pattern_match
 
 try:
     import pytz
@@ -300,14 +301,11 @@ def apply_operator(
             expected_value = str(expected_value)
         return actual_value.endswith(expected_value)
     elif operator == OperatorType.MATCH_REGEX:
-        if not isinstance(actual_value, str):
-            actual_value = str(actual_value)
-        try:
-            pattern = re.compile(expected_value)
-            return bool(pattern.search(actual_value))
-        except (re.error, TypeError):
-            logger.warning(f"Invalid regex pattern: {expected_value}")
-            return False
+        # RE2 syntax. Raises PatternUnevaluable when the pattern is refused or
+        # the value cannot be evaluated; it is deliberately not turned into
+        # False here, where an enclosing NOT would make the rule match. The
+        # caller that owns the whole ruleset catches it.
+        return pattern_match.search(expected_value, actual_value)
 
     # Numeric comparison operators
     elif operator == OperatorType.GREATER_THAN:
