@@ -164,6 +164,12 @@ def mount_routers(router: Any) -> None:
         tags=["ETL"],
         dependencies=_authenticated(),
     )
+    router.include_router(
+        etl.router,
+        prefix="/warehouse",
+        tags=["Warehouse"],
+        dependencies=_authenticated(),
+    )
     # Warehouse analysis has no routes while it is rebuilt (#312); the
     # warehouse module keeps only its model and table.
 
