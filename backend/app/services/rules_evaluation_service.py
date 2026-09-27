@@ -22,6 +22,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 from backend.app.core.evaluation_cache import EvaluationCache
+from backend.app.core.pattern_match import PatternUnevaluable
 from backend.app.core.rule_compiler import RuleCompiler
 from backend.app.core.rules_engine import (
     UserContext,
@@ -40,6 +41,10 @@ from backend.app.schemas.targeting_rule import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Semantic version 2.0.0, from semver.org. A module constant, so the regex
+# call-site test (backend/tests/unit/core/test_regex_call_sites.py) accepts it.
+_SEMVER_PATTERN = r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$"
 
 
 @dataclass
@@ -212,6 +217,21 @@ class RulesEvaluationService:
                 self.evaluation_metrics.append(metrics)
                 self.performance_stats["evaluation_time"].append(evaluation_time)
 
+        except PatternUnevaluable as exc:
+            # A pattern condition could not be evaluated: the whole ruleset is
+            # abandoned (no rule and no default_rule), so the user is not
+            # eligible. Caught here, above the recursive group evaluator, so an
+            # enclosing NOT can never turn it into a match.
+            matched_rule = None
+            logger.debug("Targeting rules abandoned: %s", exc.reason.value)
+            if track_metrics:
+                metrics = RuleEvaluationMetrics(
+                    rule_id="error",
+                    evaluation_time_ms=(time.time() - start_time) * 1000,
+                    matched=False,
+                    error=str(exc),
+                )
+
         except Exception as e:
             logger.error(f"Error evaluating rules: {e!s}")
             self.error_counts["evaluation_error"] += 1
@@ -349,8 +369,7 @@ class RulesEvaluationService:
                         is_valid=False,
                         error_message=f"Attribute '{attr_name}' must be a semantic version string",
                     )
-                semver_pattern = r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$"
-                if not re.match(semver_pattern, attr_value):
+                if not re.match(_SEMVER_PATTERN, attr_value):
                     return AttributeValidationResult(
                         is_valid=False,
                         error_message=f"Attribute '{attr_name}' must be a valid semantic version (e.g., 1.2.3)",
@@ -780,6 +799,15 @@ class RulesEvaluationService:
                 self.metrics.record_latency(result.evaluation_time_ms)
 
             return result
+
+        except PatternUnevaluable as exc:
+            # Same ruleset-level abandonment as evaluate_rules_with_validation.
+            logger.debug("Targeting rules abandoned: %s", exc.reason.value)
+            return EvaluationResult(
+                matched=False,
+                error=str(exc),
+                evaluation_time_ms=(time.time() - start_time) * 1000,
+            )
 
         except Exception as e:
             logger.error(f"Error evaluating rules: {e}", exc_info=True)

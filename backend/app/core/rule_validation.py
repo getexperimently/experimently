@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import List, Optional, Tuple
 
+from backend.app.core import pattern_match
 from backend.app.schemas.targeting_rule import (
     Condition,
     LogicalOperator,
@@ -24,6 +25,10 @@ from backend.app.schemas.targeting_rule import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Semantic version 2.0.0, from semver.org. A module constant, so the regex
+# call-site test (backend/tests/unit/core/test_regex_call_sites.py) accepts it.
+_SEMVER_PATTERN = r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$"
 
 
 class ValidationSeverity(str, Enum):
@@ -412,13 +417,12 @@ class RuleValidator:
 
             # Regex validation
             if operator == OperatorType.MATCH_REGEX:
-                try:
-                    re.compile(value)
-                except re.error as e:
+                refusal = pattern_match.compile_error(value)
+                if refusal is not None:
                     issues.append(
                         ValidationIssue(
                             severity=ValidationSeverity.ERROR,
-                            message=f"Invalid regex pattern: {e}",
+                            message=f"Invalid regex pattern (RE2 syntax): {refusal}",
                             rule_id=rule_id,
                             condition_path=path,
                         )
@@ -426,8 +430,7 @@ class RuleValidator:
 
             # Semantic version validation
             if operator == OperatorType.SEMANTIC_VERSION:
-                semver_pattern = r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$"
-                if not isinstance(value, str) or not re.match(semver_pattern, value):
+                if not isinstance(value, str) or not re.match(_SEMVER_PATTERN, value):
                     issues.append(
                         ValidationIssue(
                             severity=ValidationSeverity.ERROR,
