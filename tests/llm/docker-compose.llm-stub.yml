@@ -9,6 +9,12 @@
 #     up -d --wait --no-build api llm-stub
 #   bash tests/llm/smoke.sh
 #
+# NOT FOR A DEVELOPMENT STACK: applying this re-creates the api container of
+# the CURRENT compose project (by default the one your dev stack uses) with
+# its LLM providers pointed at the stub. tests/llm/smoke.sh refuses to run
+# unless CI=true or EXPERIMENTLY_LLM_SMOKE=1; by hand, use a throwaway
+# COMPOSE_PROJECT_NAME and spare *_HOST_PORTs.
+#
 # The keys are placeholders: the stub accepts any non-empty credential, and
 # with the base URLs pointing at it nothing leaves the compose network. They
 # are set only on this re-created api container, never in the workflow's

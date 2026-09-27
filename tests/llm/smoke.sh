@@ -7,6 +7,14 @@
 #     up -d --wait --no-build api llm-stub
 # and runnable by hand against the same stack.
 #
+# NOT FOR A DEVELOPMENT STACK. The override this goes with re-creates the api
+# container of the CURRENT compose project (by default the directory name,
+# i.e. the same project `docker compose up` gave your dev stack) with its LLM
+# providers pointed at the stub, and this script creates an LLM experiment in
+# that project's database. So it refuses to run unless CI=true (GitHub Actions
+# sets it for every step) or EXPERIMENTLY_LLM_SMOKE=1 is set. By hand, use a
+# throwaway project: COMPOSE_PROJECT_NAME=llmsmoke plus spare *_HOST_PORTs.
+#
 # What a pass means: the image imports `anthropic` and `openai` at request
 # time, builds a client from ANTHROPIC_* / OPENAI_*, sends a request the stub
 # recognises, and parses the stub's answer into a 200 carrying the stub's text.
@@ -19,6 +27,11 @@
 # Responses go to files, never into a pipe, for the reason tests/alb/rehearse.sh
 # gives.
 set -euo pipefail
+
+if [ "${CI:-}" != "true" ] && [ "${EXPERIMENTLY_LLM_SMOKE:-}" != "1" ]; then
+    echo "refusing: this re-creates the api container of the current compose project (${COMPOSE_PROJECT_NAME:-default}) with stub LLM provider settings; set CI=true or EXPERIMENTLY_LLM_SMOKE=1 to run it" >&2
+    exit 2
+fi
 
 API_URL="${API_URL:-http://localhost:8000}"
 ADMIN_EMAIL="${ADMIN_EMAIL:-admin@demo.com}"
