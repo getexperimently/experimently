@@ -41,4 +41,7 @@ stopwords = [
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9", "eyJjdHkiOiJKV1Q", "eyJraWQiOiJ",
   "eyJ0eXAiOiJKV1Q", "eyJhbGciOiJSUzI1NiIs",
   "num_buckets", "FLAG_KEYS", "default_variant",
+  # RFC 6455 section 1.3's published sample Sec-WebSocket-Key (base64 of
+  # "the sample nonce"), used by docs/websocket-streaming.md's handshake.
+  "dGhlIHNhbXBsZSBub25jZQ==",
 ]

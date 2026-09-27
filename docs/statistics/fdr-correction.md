@@ -79,7 +79,9 @@ A metric is significant when $p_{\text{adj,mono}}(k) < \alpha$.
 
 ### POST `/api/v1/results/{experiment_id}/fdr-correction`
 
-Apply Benjamini-Hochberg FDR correction to per-metric p-values.
+Apply Benjamini-Hochberg FDR correction to per-metric p-values. The p-values are the
+ones you send: the experiment in the path must exist, but its own data isn't read. Any
+logged-in user can call it.
 
 **Request body:**
 
@@ -145,6 +147,52 @@ Apply Benjamini-Hochberg FDR correction to per-metric p-values.
 
 The response is sorted by rank ascending (smallest raw p-value first).
 
+Run the commands on this page in one terminal, in order, against the stack from the
+[Quick Start](../getting-started/quick-start.md). Each uses the shell variables set by the
+ones before it. Log in first:
+
+```{.bash exec}
+TOKEN=$(curl -s -X POST localhost:8000/api/v1/auth/login \
+  -H 'content-type: application/json' \
+  -d '{"email":"admin@demo.com","password":"Demo1234!"}' | jq -r .access_token)
+
+curl -s localhost:8000/api/v1/auth/me -H "Authorization: Bearer $TOKEN" | jq .role
+```
+<!-- expect: "ADMIN" -->
+
+It prints `"ADMIN"`. This saves the id of the demo data's `checkout_button_color`
+experiment in `$EXP_ID`, then corrects the five p-values above. The collection URL ends
+with a slash, `/api/v1/experiments/`; without it the API answers `307`, which `curl`
+doesn't follow:
+
+```{.bash exec}
+EXP_ID=$(curl -s localhost:8000/api/v1/experiments/ \
+  -H "Authorization: Bearer $TOKEN" \
+  | jq -r '.items[] | select(.key == "checkout_button_color") | .id')
+
+curl -s -X POST localhost:8000/api/v1/results/$EXP_ID/fdr-correction \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'content-type: application/json' \
+  -d '{
+    "p_values": {
+      "revenue": 0.001,
+      "click_through_rate": 0.032,
+      "session_duration": 0.08,
+      "churn_rate": 0.41,
+      "engagement_score": 0.015
+    },
+    "fdr_threshold": 0.05
+  }' | jq -r '.[] | "\(.rank) \(.metric_name) \(.is_significant)"'
+```
+<!-- expect: 1 revenue true -->
+<!-- expect: 2 engagement_score true -->
+<!-- expect: 3 click_through_rate false -->
+<!-- expect: 4 session_duration false -->
+<!-- expect: 5 churn_rate false -->
+
+It prints each metric's rank, name and whether it is significant: `revenue` and
+`engagement_score` are, the other three are not, as in the response above.
+
 **Error codes:**
 
 | Status | Condition |
@@ -179,7 +227,8 @@ for r in results:
 ```
 
 Output:
-```
+
+```text
 Rank  1: revenue              p=0.0010  adj_p=0.0050  SIGNIFICANT
 Rank  2: engagement           p=0.0150  adj_p=0.0375  SIGNIFICANT
 Rank  3: ctr                  p=0.0320  adj_p=0.0533  not significant
@@ -190,14 +239,19 @@ Rank  5: churn                p=0.4100  adj_p=0.4100  not significant
 ## Integration with the Existing Results API
 
 The `GET /api/v1/results/{experiment_id}` endpoint already accepts a
-`correction_method` query parameter:
+`correction_method` query parameter, `none` (the default), `bonferroni` or
+`benjamini_hochberg`. It applies the correction to the p-values in the main results
+response, and each variant then carries an `adjusted_p_value`:
 
-```bash
-GET /api/v1/results/{experiment_id}?correction_method=benjamini_hochberg
+```{.bash exec}
+curl -s "localhost:8000/api/v1/results/$EXP_ID?correction_method=benjamini_hochberg" \
+  -H "Authorization: Bearer $TOKEN" \
+  | jq '{correction_method, metric: .metrics[0].metric_name}'
 ```
+<!-- expect: "correction_method": "benjamini_hochberg" -->
+<!-- expect: "metric": "Checkout Completion" -->
 
-This applies BH correction to per-metric p-values returned in the main results
-response when multiple metrics are defined.
+It prints the correction applied and the experiment's metric, `Checkout Completion`.
 
 The `POST /api/v1/results/{experiment_id}/fdr-correction` endpoint provides finer
 control: you supply any set of p-values (from post-stratification, CUPED, or raw
