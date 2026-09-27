@@ -44,7 +44,7 @@ pytestmark = pytest.mark.unit
 #: sha256 of the canonical outputs below, per engine version.  1.0.0 was never
 #: fingerprinted; 1.1.0 is the first version this test pins.
 ENGINE_FINGERPRINTS: Dict[str, str] = {
-    "1.1.0": "d9ee924c1e98f1cf4020a07a5c10391ebf1b16a9aa630d45ee1ddb7438326014",
+    "1.1.0": "2feed80e7e305c3c8d0b183e1f2905799e8af73b34aa674cd358fa5948d2f089",
 }
 
 # Two ids where the control sorts AFTER the treatment, so an engine that
@@ -156,7 +156,21 @@ def _engine_outputs() -> Dict[str, Any]:
     outputs["sequential"] = {
         "msprt": seq.compute_msprt(120, 1000, 150, 1000),
         "cs": seq.compute_always_valid_ci(120, 1000, 150, 1000),
-        "alpha_spending": seq.compute_alpha_spending(2, 4),
+        # The full analysis at a non-default alpha, 45 days into a 14-day
+        # plan: pins the 1/alpha boundary, the empty alpha_spending (#232)
+        # and the time-based case answering "continue", not futility.
+        "analysis": seq.run_sequential_analysis(
+            120,
+            1000,
+            150,
+            1000,
+            {
+                "alpha": 0.01,
+                "actual_days": 45,
+                "expected_days": 14,
+                "required_sample_size": 10000,
+            },
+        ),
     }
 
     # CUPED (/cuped), deterministic covariates.
