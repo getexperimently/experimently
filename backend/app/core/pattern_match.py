@@ -49,7 +49,10 @@ MAX_REGEX_INPUT = 256
 PATTERN_MEMORY_BYTES = 2 << 20
 
 #: Compiled patterns (and refusals) kept in memory, least recently used first
-#: out. Worst case resident: MAX_COMPILED_PATTERNS * PATTERN_MEMORY_BYTES.
+#: out. google-re2 keeps its own functools.lru_cache (128 entries) inside
+#: re2.compile, and the two caches can hold different patterns, so up to
+#: 2 * MAX_COMPILED_PATTERNS compiled objects can be alive at once: a
+#: theoretical resident ceiling of 256 * PATTERN_MEMORY_BYTES (512 MiB).
 MAX_COMPILED_PATTERNS = 128
 
 #: The operator names a stored condition uses for a pattern, in any shape:

@@ -281,3 +281,34 @@ def test_segment_preview_does_not_count_the_user():
     preview = AudienceService.preview_audience_size(db, SEGMENT_NESTED_NOT, 10)
     assert preview.sample_size == 1
     assert preview.matched == 0
+
+
+@pytest.mark.regression
+def test_experiment_abandonment_is_reported_with_the_experiment_id(monkeypatch):
+    from backend.app.services import rules_evaluation_service as res
+
+    seen = []
+    monkeypatch.setattr(
+        res, "report_unevaluable", lambda exc, where: seen.append((str(exc), where))
+    )
+    outcome = AssignmentService(MagicMock())._evaluate_experiment_targeting(
+        SimpleNamespace(id="exp-42", targeting_rules=nested_not(UNPARSEABLE)),
+        COMPETITOR,
+        validate_attributes=False,
+    )
+    assert outcome["eligible"] is False
+    assert seen == [("pattern condition could not be evaluated", "experiment:exp-42")]
+
+
+def test_cached_evaluation_abandonment_is_reported(monkeypatch):
+    from backend.app.services import rules_evaluation_service as res
+
+    seen = []
+    monkeypatch.setattr(
+        res, "report_unevaluable", lambda exc, where: seen.append(where)
+    )
+    result = RulesEvaluationService().evaluate(
+        _native(nested_not(UNPARSEABLE)), COMPETITOR, skip_cache=True
+    )
+    assert result.matched is False
+    assert seen == ["targeting rules"]

@@ -22,7 +22,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 from backend.app.core.evaluation_cache import EvaluationCache
-from backend.app.core.pattern_match import PatternUnevaluable
+from backend.app.core.pattern_match import PatternUnevaluable, report_unevaluable
 from backend.app.core.rule_compiler import RuleCompiler
 from backend.app.core.rules_engine import (
     UserContext,
@@ -160,6 +160,7 @@ class RulesEvaluationService:
         user_context: UserContext,
         validate_attributes: bool = True,
         track_metrics: bool = True,
+        owner: str = "experiment",
     ) -> Tuple[Optional[TargetingRule], Optional[RuleEvaluationMetrics]]:
         """
         Evaluate targeting rules with enhanced validation and monitoring.
@@ -169,6 +170,8 @@ class RulesEvaluationService:
             user_context: User context for evaluation
             validate_attributes: Whether to validate attributes
             track_metrics: Whether to track evaluation metrics
+            owner: Names the ruleset in the warning logged when a pattern
+                condition cannot be evaluated (``experiment:<id>``).
 
         Returns:
             Tuple of (matched_rule, evaluation_metrics)
@@ -223,7 +226,7 @@ class RulesEvaluationService:
             # eligible. Caught here, above the recursive group evaluator, so an
             # enclosing NOT can never turn it into a match.
             matched_rule = None
-            logger.debug("Targeting rules abandoned: %s", exc.reason.value)
+            report_unevaluable(exc, owner)
             if track_metrics:
                 metrics = RuleEvaluationMetrics(
                     rule_id="error",
@@ -802,7 +805,7 @@ class RulesEvaluationService:
 
         except PatternUnevaluable as exc:
             # Same ruleset-level abandonment as evaluate_rules_with_validation.
-            logger.debug("Targeting rules abandoned: %s", exc.reason.value)
+            report_unevaluable(exc, "targeting rules")
             return EvaluationResult(
                 matched=False,
                 error=str(exc),
