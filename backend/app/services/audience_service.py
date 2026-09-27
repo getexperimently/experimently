@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
+from backend.app.core.pattern_match import PatternUnevaluable, report_unevaluable
 from backend.app.core.rules_engine import evaluate_rule_group
 from backend.app.models.experiment import Experiment
 from backend.app.models.feature_flag import FeatureFlag
@@ -305,6 +306,11 @@ class AudienceService:
                 is_member = evaluate_rule_group(rule_group, user_context)
                 if is_member:
                     matched_rules = _collect_matched_rules(rules, user_context)
+            except PatternUnevaluable as exc:
+                # A pattern condition could not be evaluated: not a member.
+                report_unevaluable(exc, f"segment:{segment_id}")
+                is_member = False
+                matched_rules = []
             except Exception as exc:
                 logger.error("Error evaluating segment %s rules: %s", segment_id, exc)
                 is_member = False
@@ -484,6 +490,9 @@ class AudienceService:
                     try:
                         if evaluate_rule_group(rule_group, user_context):
                             matched += 1
+                    except PatternUnevaluable:
+                        # Not counted, like any user the rules do not match.
+                        pass
                     except Exception:
                         pass
 

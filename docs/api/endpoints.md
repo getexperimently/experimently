@@ -1484,15 +1484,19 @@ POST   /api/v1/rollout-schedules/stages/{stage_id}/advance — Manual advance
 See [Audit Logging Guide](audit-logging.md) for full documentation.
 
 ```
-GET  /api/v1/audit-logs/                  — Query audit logs (ANALYST+)
+GET  /api/v1/audit-logs/                  — Query audit logs
 GET  /api/v1/audit-logs/entity/{entity_type}/{entity_id}
-                                          — Entries for one entity (ANALYST+)
-GET  /api/v1/audit-logs/user/{user_id}    — Entries for one actor (ANALYST+)
-GET  /api/v1/audit-logs/stats             — Aggregate stats (ANALYST+)
-GET  /api/v1/audit-logs/stream            — SSE real-time stream (ANALYST+)
+                                          — Entries for one entity (ADMIN, ANALYST)
+GET  /api/v1/audit-logs/user/{user_id}    — Entries for one actor
+GET  /api/v1/audit-logs/stats             — Aggregate stats (ADMIN, ANALYST)
+GET  /api/v1/audit-logs/stream            — SSE real-time stream
 POST /api/v1/feature-flags/bulk-toggle    — Bulk enable/disable/archive (DEVELOPER+)
-GET  /api/v1/feature-flags/{id}/history   — Flag change history (ANALYST+)
+GET  /api/v1/feature-flags/{id}/history   — Flag change history
 ```
+
+ADMIN and ANALYST read every audit entry; DEVELOPER and VIEWER read only their
+own entries on the list, user, stream and history routes. See
+[Permissions](audit-logging.md#permissions).
 
 ---
 

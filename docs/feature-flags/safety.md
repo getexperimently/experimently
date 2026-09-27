@@ -22,7 +22,7 @@ The safety monitor runs every 5 minutes (`SAFETY_CHECK_INTERVAL_MINUTES`; the ro
 3. Compares each value with the metric's `critical_threshold` using its `comparison_type`. A breach marks the
    flag unhealthy; a `warning_threshold` breach is only reported.
 4. If the flag is unhealthy **and** the global setting `enable_automatic_rollbacks` is on, rolls the flag back:
-   sets `rollout_percentage` to `0` (the flag stays `ACTIVE`, so its configuration is preserved), records a
+   sets `rollout_percentage` to the configuration's `rollback_percentage` (default `0`; the flag stays `ACTIVE`, so its configuration is preserved), records a
    `SafetyRollbackRecord`, and sends the configured Slack/email notification.
 
 You can run the same check on demand with `GET /api/v1/safety/feature-flags/{flag_id}/check`.
@@ -54,14 +54,71 @@ Metric names outside this list are accepted but have no data source; they are re
 
 ## Configuring Per-Flag Safety
 
+Run the commands on the rest of this page in one terminal, in order, against the stack from
+the [Quick Start](../getting-started/quick-start.md). Each uses the shell variables set by
+the ones before it.
+
+### Log in and create a flag
+
+Changing safety settings takes a superuser, such as the demo administrator:
+
+```{.bash exec}
+TOKEN=$(curl -s -X POST localhost:8000/api/v1/auth/login \
+  -H 'content-type: application/json' \
+  -d '{"email":"admin@demo.com","password":"Demo1234!"}' | jq -r .access_token)
+
+curl -s localhost:8000/api/v1/auth/me -H "Authorization: Bearer $TOKEN" | jq .is_superuser
+```
+<!-- expect: true -->
+
+It prints `true`.
+
+The examples watch a flag that is on for half of all users. This creates it and saves its id
+in `$FLAG_ID` (see [Creating Feature Flags](create.md)):
+
+```{.bash exec}
+FLAG_ID=$(curl -s -X POST localhost:8000/api/v1/feature-flags/ \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'content-type: application/json' \
+  -d '{"key": "new-checkout-flow", "name": "New Checkout Flow", "rollout_percentage": 50, "is_active": true}' \
+  | jq -r .id)
+
+curl -s localhost:8000/api/v1/feature-flags/$FLAG_ID \
+  -H "Authorization: Bearer $TOKEN" | jq '{status, rollout_percentage}'
+```
+<!-- expect: "status": "active" -->
+<!-- expect: "rollout_percentage": 50 -->
+
+It prints `"status": "active"` and `"rollout_percentage": 50`.
+
+### A flag without a configuration
+
+`GET /api/v1/safety/feature-flags/{flag_id}/config` never answers `404` for a flag without a
+configuration. It returns a default built from the global settings, with the nil UUID as
+`id`. Nothing is written until you `POST`:
+
+```{.bash exec}
+curl -s localhost:8000/api/v1/safety/feature-flags/$FLAG_ID/config \
+  -H "Authorization: Bearer $TOKEN" | jq '{id, enabled}'
+```
+<!-- expect: "id": "00000000-0000-0000-0000-000000000000" -->
+<!-- expect: "enabled": true -->
+
+```json
+{
+  "id": "00000000-0000-0000-0000-000000000000",
+  "enabled": true
+}
+```
+
 ### Create or Update a Flag's Configuration
 
-Requires a superuser. The call creates the configuration or replaces the fields you send.
+Requires a superuser. The call creates the configuration, or replaces the fields you send:
 
-```bash
-curl -X POST http://localhost:8000/api/v1/safety/feature-flags/flag-uuid-here/config \
+```{.bash exec}
+curl -s -X POST localhost:8000/api/v1/safety/feature-flags/$FLAG_ID/config \
   -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
+  -H 'content-type: application/json' \
   -d '{
     "enabled": true,
     "metrics": {
@@ -69,7 +126,15 @@ curl -X POST http://localhost:8000/api/v1/safety/feature-flags/flag-uuid-here/co
       "p95_latency": {"warning_threshold": 300,  "critical_threshold": 500,  "comparison_type": "greater_than"}
     },
     "rollback_percentage": 0
-  }'
+  }' | jq -c '.metrics'
+```
+<!-- expect: "error_rate":{"warning_threshold":0.02,"critical_threshold":0.05,"comparison_type":"greater_than"} -->
+<!-- expect: "p95_latency":{"warning_threshold":300.0,"critical_threshold":500.0,"comparison_type":"greater_than"} -->
+
+It prints the stored thresholds:
+
+```json
+{"error_rate":{"warning_threshold":0.02,"critical_threshold":0.05,"comparison_type":"greater_than"},"p95_latency":{"warning_threshold":300.0,"critical_threshold":500.0,"comparison_type":"greater_than"}}
 ```
 
 **Request Fields**
@@ -80,26 +145,8 @@ curl -X POST http://localhost:8000/api/v1/safety/feature-flags/flag-uuid-here/co
 | `metrics` | object | No | Map of metric name → threshold (see above). An empty map means nothing is checked |
 | `rollback_percentage` | int | No | Percentage the automatic rollback sets the flag to (default `0`, i.e. fully off). Set it to e.g. `5` to fall back to an internal/canary slice instead of turning the flag off; manual rollbacks take the percentage as a query parameter |
 
-**Response** (same shape for `GET .../config`):
-
-```json
-{
-  "id": "0f3c1c6e-...",
-  "feature_flag_id": "flag-uuid-here",
-  "enabled": true,
-  "metrics": {
-    "error_rate": {"warning_threshold": 0.02, "critical_threshold": 0.05, "comparison_type": "greater_than"},
-    "p95_latency": {"warning_threshold": 300.0, "critical_threshold": 500.0, "comparison_type": "greater_than"}
-  },
-  "rollback_percentage": 0,
-  "created_at": "2026-09-11T16:32:13Z",
-  "updated_at": "2026-09-11T16:32:13Z"
-}
-```
-
-`GET /api/v1/safety/feature-flags/{flag_id}/config` never returns 404 for a flag without a configuration: it
-returns a default built from the global settings (`enabled: true`, `metrics` = the global `default_metrics`)
-with the nil UUID `00000000-0000-0000-0000-000000000000` as `id`. Nothing is written until you `POST`.
+The response (the same shape as `GET .../config`) also carries the configuration's `id`,
+`feature_flag_id`, `enabled`, `rollback_percentage`, `created_at` and `updated_at`.
 
 ### Example: Checkout Flag with Tight Thresholds
 
@@ -136,42 +183,42 @@ no configuration of their own.
 
 ### View Global Settings
 
-Any authenticated user.
+Any logged-in user can read them:
 
-```bash
-curl -X GET http://localhost:8000/api/v1/safety/settings \
-  -H "Authorization: Bearer $TOKEN"
+```{.bash exec}
+curl -s localhost:8000/api/v1/safety/settings \
+  -H "Authorization: Bearer $TOKEN" | jq .enable_automatic_rollbacks
 ```
+<!-- expect: true -->
 
-```json
-{
-  "id": "5c1d...",
-  "enable_automatic_rollbacks": true,
-  "default_metrics": {
-    "error_rate": {"warning_threshold": 0.05, "critical_threshold": 0.10, "comparison_type": "greater_than"}
-  },
-  "created_at": "2026-09-11T16:32:13Z",
-  "updated_at": "2026-09-11T16:32:13Z"
-}
-```
+It prints `true`: the Quick Start's demo data turns automatic rollbacks on. The response also
+carries `default_metrics`, `id`, `created_at` and `updated_at`.
 
-When nothing has been stored yet the response has `enable_automatic_rollbacks: false` and no defaults, i.e.
-**automatic rollbacks are off until an administrator turns them on**.
+On a database where no settings have been stored, the first read creates them with
+`enable_automatic_rollbacks: false` and no defaults. **Automatic rollbacks are then off until
+an administrator turns them on.**
 
 ### Update Global Settings
 
-Requires a superuser.
+Requires a superuser:
 
-```bash
-curl -X POST http://localhost:8000/api/v1/safety/settings \
+```{.bash exec}
+curl -s -X POST localhost:8000/api/v1/safety/settings \
   -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
+  -H 'content-type: application/json' \
   -d '{
     "enable_automatic_rollbacks": true,
     "default_metrics": {
       "error_rate": {"warning_threshold": 0.05, "critical_threshold": 0.10, "comparison_type": "greater_than"}
     }
-  }'
+  }' | jq -c .default_metrics
+```
+<!-- expect: {"error_rate":{"warning_threshold":0.05,"critical_threshold":0.1,"comparison_type":"greater_than"}} -->
+
+It prints the stored defaults:
+
+```json
+{"error_rate":{"warning_threshold":0.05,"critical_threshold":0.1,"comparison_type":"greater_than"}}
 ```
 
 Per-flag configurations always take precedence over the defaults.
@@ -180,28 +227,40 @@ Per-flag configurations always take precedence over the defaults.
 
 ## Running a Check
 
-```bash
-curl -X GET http://localhost:8000/api/v1/safety/feature-flags/flag-uuid-here/check \
-  -H "Authorization: Bearer $TOKEN"
+```{.bash exec}
+curl -s localhost:8000/api/v1/safety/feature-flags/$FLAG_ID/check \
+  -H "Authorization: Bearer $TOKEN" \
+  | jq '{is_healthy, metrics: [.metrics[] | {name, current_value, threshold, is_healthy}]}'
 ```
+<!-- expect: "is_healthy": true -->
+<!-- expect: "name": "error_rate" -->
+
+The new flag has no traffic, so every value is `0.0` and the flag is healthy:
 
 ```json
 {
-  "feature_flag_id": "flag-uuid-here",
-  "is_healthy": false,
+  "is_healthy": true,
   "metrics": [
     {
       "name": "error_rate",
-      "current_value": 0.082,
+      "current_value": 0.0,
       "threshold": 0.05,
-      "is_healthy": false,
-      "details": {"warning_threshold": 0.02, "critical_threshold": 0.05, "warning": true, "comparison_type": "greater_than"}
+      "is_healthy": true
+    },
+    {
+      "name": "p95_latency",
+      "current_value": 0.0,
+      "threshold": 500.0,
+      "is_healthy": true
     }
-  ],
-  "last_checked": "2026-09-11T16:40:00Z",
-  "details": null
+  ]
 }
 ```
+
+Each metric's `details` holds its `warning_threshold`, `critical_threshold`, `comparison_type`
+and `warning` (whether the warning threshold is breached). The response also carries
+`feature_flag_id` and `last_checked`. When a metric breaches its critical threshold, that
+metric and the whole response read `"is_healthy": false`.
 
 ---
 
@@ -245,41 +304,47 @@ record's id as `rollback_record_id`. There is no list endpoint yet; query the ta
 
 ## Manual Rollback
 
-Requires a superuser. Roll a flag down to a percentage (default `0`) with a reason:
+Requires a superuser. Roll a flag down to a percentage (default `0`), with a reason. The
+reason is a query parameter, so its spaces are written `%20`:
 
-```bash
-curl -X POST "http://localhost:8000/api/v1/safety/feature-flags/flag-uuid-here/rollback?percentage=0&reason=Checkout%20errors%20observed%20in%20Datadog" \
-  -H "Authorization: Bearer $TOKEN"
+```{.bash exec}
+curl -s -X POST "localhost:8000/api/v1/safety/feature-flags/$FLAG_ID/rollback?percentage=0&reason=Checkout%20errors%20observed%20in%20Datadog" \
+  -H "Authorization: Bearer $TOKEN" \
+  | jq '{success, message, previous_percentage, new_percentage}'
 ```
+<!-- expect: "success": true -->
+<!-- expect: "message": "Feature flag 'new-checkout-flow' rolled back from 50% to 0%" -->
 
 ```json
 {
   "success": true,
-  "feature_flag_id": "flag-uuid-here",
-  "message": "Feature flag rolled back from 50% to 0%",
-  "trigger_type": "manual",
+  "message": "Feature flag 'new-checkout-flow' rolled back from 50% to 0%",
   "previous_percentage": 50,
-  "new_percentage": 0,
-  "rollback_record_id": "9a4f...",
-  "timestamp": "2026-09-11T16:41:00Z"
+  "new_percentage": 0
 }
 ```
 
-A flag that is not `ACTIVE` or is already at `0%` returns `success: false` with an explanatory message.
+The response also carries `feature_flag_id`, `trigger_type` (`manual`), `rollback_record_id`,
+`timestamp` and `details` (the reason). A flag that is not `ACTIVE`, or is already at `0%`,
+returns `success: false` with an explanatory message.
 
 ---
 
 ## Re-Enabling After Rollback
 
-After investigating and resolving the root cause, raise the rollout again — the flag is still `ACTIVE`, so only
-the percentage changes:
+After investigating and resolving the root cause, raise the rollout again. The flag is still
+`ACTIVE`, so only the percentage changes:
 
-```bash
-curl -X PUT http://localhost:8000/api/v1/feature-flags/flag-uuid-here \
+```{.bash exec}
+curl -s -X PUT localhost:8000/api/v1/feature-flags/$FLAG_ID \
   -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"rollout_percentage": 5}'
+  -H 'content-type: application/json' \
+  -d '{"rollout_percentage": 5}' | jq '{status, rollout_percentage}'
 ```
+<!-- expect: "status": "active" -->
+<!-- expect: "rollout_percentage": 5 -->
+
+It prints `"status": "active"` and `"rollout_percentage": 5`.
 
 Watch the safety check for at least one full 15-minute window before expanding further. If the root cause was
 not fixed, the monitor will roll the flag back again on its next pass.
