@@ -10,6 +10,43 @@ longer applies and release-please can generate this file directly. Until it
 does, entries below 0.2.2 are hand-written and the links in them are the
 reason why.
 
+## [0.8.0](https://github.com/getexperimently/experimently/compare/v0.7.0...v0.8.0) (2026-09-27)
+
+
+### Features
+
+* **chart:** a Helm chart for self-hosting, with render-time checks ([#257](https://github.com/getexperimently/experimently/issues/257)) ([70a5db3](https://github.com/getexperimently/experimently/commit/70a5db39b92f8edc454fec53fc704e05e0092b9c))
+* **deploy:** a production compose file that runs the published images ([#252](https://github.com/getexperimently/experimently/issues/252)) ([634da12](https://github.com/getexperimently/experimently/commit/634da12ad9c828498db9fb25f1b73fda0f6298f8))
+
+
+### Bug Fixes
+
+* **api-keys:** one scope parser, and the dashboard stops offering scopes nothing enforces ([#243](https://github.com/getexperimently/experimently/issues/243)) ([8f4e507](https://github.com/getexperimently/experimently/commit/8f4e507af196866e5fc4c916ced7698b099bf2bb))
+* **api:** a rejected Host names the setting that fixes it, and the dashboard explains it ([#274](https://github.com/getexperimently/experimently/issues/274)) ([1eaf65c](https://github.com/getexperimently/experimently/commit/1eaf65c973232d399e8cbba6c6ff5e993713e0e3))
+* **api:** Bayesian analysis can be enabled through the experiments API ([#254](https://github.com/getexperimently/experimently/issues/254)) ([24b6215](https://github.com/getexperimently/experimently/commit/24b621580676f2c57d4754479fd3afaba6a9255e))
+* **api:** CUPED and interaction analysis say what they compute, and are marked beta ([#280](https://github.com/getexperimently/experimently/issues/280)) ([bc770f0](https://github.com/getexperimently/experimently/commit/bc770f0855296f9a6303252aaf50cdbf006ea000))
+* **api:** production start-up lists every missing setting at once ([#277](https://github.com/getexperimently/experimently/issues/277)) ([74371a0](https://github.com/getexperimently/experimently/commit/74371a0f2f6fe13c95f2b52866ed95ed9c10aaad))
+* **api:** results breakdowns name each variant and know which is the control ([#276](https://github.com/getexperimently/experimently/issues/276)) ([4b3643e](https://github.com/getexperimently/experimently/commit/4b3643e7e515cb7eeffc2141ef7895543dd8a1a4))
+* **api:** sequential analysis honours alpha and stops returning a planned-looks table it does not compute ([#282](https://github.com/getexperimently/experimently/issues/282)) ([860d891](https://github.com/getexperimently/experimently/commit/860d891da7621840eddd02747e6dd4e3f24f9af3))
+* **config:** TESTING cannot be combined with a staging or production environment, and the image refuses ENVIRONMENT=test ([#284](https://github.com/getexperimently/experimently/issues/284)) ([c885f02](https://github.com/getexperimently/experimently/commit/c885f023fbba1d9c7f2c7a7a63b8c08078465a38))
+* **db:** an older image meeting a newer database says so, and never advises deleting alembic_version rows ([#250](https://github.com/getexperimently/experimently/issues/250)) ([2232cc2](https://github.com/getexperimently/experimently/commit/2232cc29b33528e03d602257cb695ecbc2722ff2))
+* **deploy:** a transient AWS error no longer ends a rollback mid-wait ([#215](https://github.com/getexperimently/experimently/issues/215)) ([#224](https://github.com/getexperimently/experimently/issues/224)) ([5944322](https://github.com/getexperimently/experimently/commit/5944322b2b40b272973bb59aa1c15c94d72c202d))
+* **deps:** the API image includes the Anthropic and OpenAI SDKs its LLM features import ([#253](https://github.com/getexperimently/experimently/issues/253)) ([8059755](https://github.com/getexperimently/experimently/commit/80597554d95c8538a57aeb900d142a16881f7fec))
+* **infra:** Aurora uses an orderable engine version and valid memory settings ([#300](https://github.com/getexperimently/experimently/issues/300)) ([71932b4](https://github.com/getexperimently/experimently/commit/71932b40c17078778a652e8411ca88f98996f2cb))
+* **llm:** the Gemini provider calls the REST API instead of a package the image does not ship ([#275](https://github.com/getexperimently/experimently/issues/275)) ([b1db69f](https://github.com/getexperimently/experimently/commit/b1db69fdad1ffe761448d7f5e6d559a8ba9f5057))
+* **redis:** every Redis client uses REDIS_PASSWORD ([#248](https://github.com/getexperimently/experimently/issues/248)) ([76cca1a](https://github.com/getexperimently/experimently/commit/76cca1ad8aa40442f56f22ed611bfe04977a709f))
+* **release:** release notes and image labels describe what is actually published ([#246](https://github.com/getexperimently/experimently/issues/246)) ([eb6cc53](https://github.com/getexperimently/experimently/commit/eb6cc5362c83a95d24b831e34b20a9d5a323e12c))
+* **rules:** evaluation no longer logs user attribute values ([#273](https://github.com/getexperimently/experimently/issues/273)) ([5e687d8](https://github.com/getexperimently/experimently/commit/5e687d8be2b14edbadd8e42e7ac68af60a68ed67))
+* **safety:** count errors in the database, and time and size-bound client error reports ([#306](https://github.com/getexperimently/experimently/issues/306)) ([fd9c419](https://github.com/getexperimently/experimently/commit/fd9c419ecdc7c14e21b52527ac251d4f736b65f0))
+* **seed:** demo seeds run only in development and test ([#249](https://github.com/getexperimently/experimently/issues/249)) ([c8ecdc3](https://github.com/getexperimently/experimently/commit/c8ecdc3bab8acfb2a512cafb65fe7e7437e0fd72))
+* **test:** the data seeder fails loudly and reports what the platform stored ([#245](https://github.com/getexperimently/experimently/issues/245)) ([6df9e10](https://github.com/getexperimently/experimently/commit/6df9e1017df462298379464423742954f9889a9f))
+* **workspaces:** enforce owner-only role changes and scope key operations to their workspace ([#266](https://github.com/getexperimently/experimently/issues/266)) ([9454dde](https://github.com/getexperimently/experimently/commit/9454ddee827da51fd94918bcf183ea9ebf0f8691))
+
+
+### Documentation
+
+* **workspaces:** describe workspaces as grouping, not an access boundary ([#262](https://github.com/getexperimently/experimently/issues/262)) ([a350ba2](https://github.com/getexperimently/experimently/commit/a350ba20e429ba453895f1ca6cfeb236eb46d77f))
+
 ## [0.7.0](https://github.com/getexperimently/experimently/compare/v0.6.0...v0.7.0) (2026-09-27)
 
 
