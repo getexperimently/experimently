@@ -45,8 +45,12 @@ It prints `0`.
 
 ## Rate Limiting
 
-Export endpoints share the API's general limit of 300 requests a minute per client
-address; above it they answer `429 Too Many Requests`.
+Export endpoints allow 10 requests a minute per client address, shared by all export
+endpoints, because each export computes results for every experiment it covers. The
+count is shared: 4 calls to `/experiments`, 3 to `/variants` and 3 to
+`/reports/experiments/{id}` (for any ids) use up the minute. Above it every export
+endpoint answers `429 Too Many Requests` with a `Retry-After: 60` header; the rest of
+the API keeps its own limits.
 For bulk data pipelines, consider exporting once and caching the result.
 
 ---
