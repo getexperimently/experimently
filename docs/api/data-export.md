@@ -10,12 +10,13 @@ Every export endpoint takes a user's access token, from `POST /api/v1/auth/login
 `Authorization: Bearer` header. Every role (ADMIN, DEVELOPER, ANALYST, VIEWER) may use
 them. Without a token they answer `401 Unauthorized`.
 
-**Empty in this release:** the per-variant results (`assignments` is `0`, and
-`conversions`, `conversion_rate`, `p_value` and `relative_improvement_pct` are empty), each
-experiment's `winner_variant` and `recommendation`, and `experiments_with_winners` in the
-overview. The experiment report also ignores `format=csv`
-([#220](https://github.com/getexperimently/experimently/issues/220)). The columns are
-listed below as they are meant to be filled.
+The result columns (each variant's assignments, conversions, rate, p-value and
+significance, and each experiment's winner and recommendation) are the numbers
+`GET /api/v1/results/{experiment_id}` reports for the experiment's primary metric, at its
+default 95% confidence level.
+
+**Empty in this release:** `experiments_with_winners` in the overview is `0`
+([#244](https://github.com/getexperimently/experimently/issues/244)).
 
 Run the commands on this page in one terminal, in order, against the stack from the
 [Quick Start](../getting-started/quick-start.md). Each uses the shell variables set by the
@@ -65,7 +66,7 @@ Download all experiments as a CSV (default) or JSON file.
 | Parameter    | Type     | Default     | Description                                                  |
 |--------------|----------|-------------|--------------------------------------------------------------|
 | `format`     | `string` | `csv`       | Output format. Accepted values: `csv`, `json`                |
-| `scope`      | `string` | `summary`   | Data scope. Accepted values: `summary`, `events`, `assignments` |
+| `scope`      | `string` | `summary`   | Data scope. Only `summary` is available: `events` and `assignments` answer `422` |
 | `start_date` | `datetime` | `null`    | Inclusive start filter on `created_at` (ISO 8601, UTC)       |
 | `end_date`   | `datetime` | `null`    | Inclusive end filter on `created_at` (ISO 8601, UTC)         |
 
@@ -82,8 +83,8 @@ Download all experiments as a CSV (default) or JSON file.
 | `duration_days`         | float     | Days between start and end, or empty     |
 | `total_assignments`     | integer   | Total user assignments to this experiment |
 | `total_events`          | integer   | Total events tracked for this experiment |
-| `winner_variant`        | string    | Name of winning variant, or empty        |
-| `recommendation`        | string    | SHIP_VARIANT / CONTINUE_TESTING / etc.   |
+| `winner_variant`        | string    | Name of the winning variant, as `/results` reports it, or empty |
+| `recommendation`        | string    | `SHIP_VARIANT`, `KEEP_CONTROL` or `CONTINUE_TESTING`, as `/results` reports it; empty when the experiment's results cannot be computed (it has no control variant) |
 
 #### Example curl
 
@@ -115,11 +116,12 @@ curl -s -H "Authorization: Bearer $TOKEN" \
   "localhost:8000/api/v1/export/experiments?format=json&start_date=2024-01-01T00:00:00Z" \
   -o experiments.json
 
-jq -r '.[] | select(.experiment_name == "Checkout Button Color") | "\(.status) \(.experiment_type)"' experiments.json
+jq -r '.[] | select(.experiment_name == "Checkout Button Color") | "\(.status) \(.experiment_type) \(.winner_variant) \(.recommendation)"' experiments.json
 ```
-<!-- expect: active a_b -->
+<!-- expect: active a_b green_button SHIP_VARIANT -->
 
-It prints `active a_b`.
+It prints `active a_b green_button SHIP_VARIANT`: on the demo data the green button
+converts better, and the results API recommends shipping it.
 
 ---
 
@@ -127,7 +129,10 @@ It prints `active a_b`.
 
 Download per-variant results for all (or filtered) experiments.
 
-Each row represents one variant within one experiment.
+Each row represents one variant within one experiment. Its numbers are the variant's
+result on the experiment's primary metric, as `GET /api/v1/results/{experiment_id}`
+reports it. An experiment whose results cannot be computed (it has no control variant)
+keeps its rows, with the result columns empty.
 
 #### Query Parameters
 
@@ -142,12 +147,12 @@ Same as `/export/experiments` (`format`, `scope`, `start_date`, `end_date`).
 | `variant_id`                | string  | UUID of the variant                                 |
 | `variant_name`              | string  | Variant name                                        |
 | `is_control`                | boolean | Whether this is the control variant                 |
-| `assignments`               | integer | Number of users assigned to this variant            |
-| `conversions`               | integer | Number of conversion events, or empty               |
-| `conversion_rate`           | float   | Conversion rate [0, 1], or empty                    |
-| `p_value`                   | float   | Statistical p-value vs control, or empty            |
-| `is_significant`            | boolean | Whether result is statistically significant         |
-| `relative_improvement_pct`  | float   | Relative improvement over control (%), or empty     |
+| `assignments`               | integer | Number of users assigned to this variant (`sample_size` in `/results`) |
+| `conversions`               | integer | Number of conversion events on the primary metric   |
+| `conversion_rate`           | float   | Conversion rate [0, 1] (`mean` in `/results`)       |
+| `p_value`                   | float   | p-value against control; empty for the control      |
+| `is_significant`            | boolean | Whether the result is statistically significant     |
+| `relative_improvement_pct`  | float   | Relative improvement over control (%); empty for the control |
 
 #### Example curl
 
@@ -161,7 +166,19 @@ jq -r '.[] | select(.experiment_name == "Checkout Button Color") | "\(.variant_n
 <!-- expect: green_button false -->
 
 It prints the demo experiment's two variants, `blue_button` (the control) and
-`green_button`. Their result columns are empty in this release (#220).
+`green_button`. Their numbers are the ones the results API gives; this compares the two
+for the demo experiment and prints `same`:
+
+```{.bash exec}
+EXP_ID=$(jq -r '.[] | select(.experiment_name == "Checkout Button Color") | .experiment_id' experiments.json)
+
+curl -s -H "Authorization: Bearer $TOKEN" "localhost:8000/api/v1/results/$EXP_ID?use_cache=false" \
+  | jq -S '[.metrics[] | select(.is_primary) | .variants[] | {variant_name, assignments: .sample_size, conversions, conversion_rate: .mean, p_value}] | sort_by(.variant_name)' > from_results.json
+jq -S --arg id "$EXP_ID" '[.[] | select(.experiment_id == $id) | {variant_name, assignments, conversions, conversion_rate, p_value}] | sort_by(.variant_name)' variants.json > from_export.json
+
+cmp -s from_results.json from_export.json && echo same
+```
+<!-- expect: same -->
 
 ---
 
@@ -285,7 +302,10 @@ It prints the period's start and `"total_experiments": 0`.
 
 ### GET /api/v1/export/reports/experiments/{experiment_id}
 
-Returns a combined JSON report for a single experiment, including experiment metadata and per-variant breakdown.
+Returns a report for a single experiment. As JSON (the default) it has the experiment's
+row from `/export/experiments` and its variant rows from `/export/variants`; with
+`format=csv` it is the variant rows as CSV, with the same columns as `/export/variants`.
+An id that no experiment has answers `404`, and one that is not a UUID answers `422`.
 
 #### Path Parameters
 
@@ -297,7 +317,7 @@ Returns a combined JSON report for a single experiment, including experiment met
 
 | Parameter | Type     | Default | Description                   |
 |-----------|----------|---------|-------------------------------|
-| `format`  | `string` | `json`  | Accepted, but the report is always JSON (#220) |
+| `format`  | `string` | `json`  | `json`, or `csv` for the variant rows as a CSV file |
 
 #### JSON Response Schema
 
@@ -339,12 +359,10 @@ Returns a combined JSON report for a single experiment, including experiment met
 
 #### Example curl
 
-This saves the demo experiment's id in `$EXP_ID` (from the JSON export above), then asks
-for its report:
+This asks for the report of the demo experiment, whose id the variants example above
+saved in `$EXP_ID`:
 
 ```{.bash exec}
-EXP_ID=$(jq -r '.[] | select(.experiment_name == "Checkout Button Color") | .experiment_id' experiments.json)
-
 curl -s -H "Authorization: Bearer $TOKEN" \
   localhost:8000/api/v1/export/reports/experiments/$EXP_ID \
   | jq '{name: .experiments[0].experiment_name, variants: [.variants[].variant_name]}'
@@ -353,7 +371,21 @@ curl -s -H "Authorization: Bearer $TOKEN" \
 <!-- expect: "blue_button" -->
 <!-- expect: "green_button" -->
 
-It prints the experiment's name and its two variants.
+It prints the experiment's name and its two variants. With `format=csv` the same variant
+rows come as a CSV file:
+
+```{.bash exec}
+curl -s -H "Authorization: Bearer $TOKEN" \
+  "localhost:8000/api/v1/export/reports/experiments/$EXP_ID?format=csv" -o report.csv
+
+sed -n 1p report.csv
+cut -d, -f4,5 report.csv | sed 1d
+```
+<!-- expect: experiment_id,experiment_name,variant_id,variant_name,is_control,assignments,conversions,conversion_rate,p_value,is_significant,relative_improvement_pct -->
+<!-- expect: blue_button,True -->
+<!-- expect: green_button,False -->
+
+It prints the header row, then each variant's name and whether it is the control.
 
 ---
 
@@ -362,7 +394,8 @@ It prints the experiment's name and its two variants.
 | Status Code | Description                                              |
 |-------------|----------------------------------------------------------|
 | `401`       | Missing or invalid Bearer token                          |
-| `422`       | Invalid query parameter (e.g. `format=xml`)              |
+| `404`       | The report's experiment does not exist                   |
+| `422`       | Invalid query parameter (e.g. `format=xml`), a `scope` other than `summary`, or a report id that is not a UUID |
 | `429`       | Rate limit exceeded                                      |
 | `500`       | Internal server error (check application logs)           |
 
@@ -374,7 +407,16 @@ curl -s -H "Authorization: Bearer $TOKEN" \
 ```
 <!-- expect: Input should be 'csv' or 'json' -->
 
-It prints `Input should be 'csv' or 'json'`. The whole body:
+It prints `Input should be 'csv' or 'json'`. A `scope` other than `summary` is refused
+the same way, with the reason in `detail`:
+
+```{.bash exec}
+curl -s -H "Authorization: Bearer $TOKEN" \
+  "localhost:8000/api/v1/export/experiments?scope=events" | jq -r .detail
+```
+<!-- expect: scope=events is not supported; the export is available with scope=summary only -->
+
+The whole body of the `format=xml` answer:
 
 ```json
 {
@@ -398,5 +440,10 @@ It prints `Input should be 'csv' or 'json'`. The whole body:
 - UUIDs are included in exports as plain strings (not resolved to names where the ID is already paired with a human-readable name in an adjacent column).
 - Date filtering is **inclusive on both ends** (`created_at >= start_date AND created_at <= end_date`).
 - CSV exports use Python's `csv.DictWriter` with `\r\n` line endings (RFC 4180).
+- CSV cells are written spreadsheet-safe: a text value that begins with `=`, `+`, `-`,
+  `@`, a tab or a carriage return is written with a single quote (`'`) in front of it, so
+  a spreadsheet shows it as text. Numbers, and every value in the JSON exports, are
+  written as they are.
 - For large datasets, exports are **streamed** (`StreamingResponse`) to keep memory usage constant.
-- The `scope` parameter is accepted for the experiment and variant exports but does not change the columns yet; it is reserved for future expansion (e.g. `events` scope will include raw event columns).
+- The `scope` parameter of the experiment and variant exports takes only `summary`;
+  `events` and `assignments` are reserved and answer `422`.
