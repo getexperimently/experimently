@@ -694,13 +694,13 @@
     "/api/v1/interactions/{exp_a_id}/{exp_b_id}": {
       "get": {
         "operationId": "analyze_pair_api_v1_interactions__exp_a_id___exp_b_id__get",
-        "summary": "Analyze Pair"
+        "summary": "Beta: interaction analysis of two experiments (overlap only)"
       }
     },
     "/api/v1/interactions/{exp_a_id}/{exp_b_id}/novelty": {
       "get": {
         "operationId": "analyze_novelty_api_v1_interactions__exp_a_id___exp_b_id__novelty_get",
-        "summary": "Analyze Novelty"
+        "summary": "Beta: novelty sub-analysis (not computed yet)"
       }
     },
     "/api/v1/llm-experiments/": {
@@ -988,7 +988,7 @@
     "/api/v1/results/{experiment_id}/cuped": {
       "get": {
         "operationId": "get_cuped_results_api_v1_results__experiment_id__cuped_get",
-        "summary": "Get Cuped Results"
+        "summary": "Beta: CUPED variance-reduced results"
       }
     },
     "/api/v1/results/{experiment_id}/daily": {

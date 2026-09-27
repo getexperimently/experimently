@@ -1126,6 +1126,7 @@ def get_cuped_results_data(
         try:
             from backend.app.models.assignment import Assignment
             from backend.app.models.event import Event
+            from backend.app.services.event_matching import conversion_event_filter
 
             def _get_outcomes(variant_id):
                 """Return (Y, X) arrays for CUPED — Y=converted, X=assignment index."""
@@ -1144,14 +1145,16 @@ def get_cuped_results_data(
                 # X = assignment order (proxy pre-experiment covariate)
                 X = np.arange(n, dtype=float)
 
-                # Y = 1 if user converted, 0 otherwise
+                # Y = 1 if user converted, 0 otherwise.  Conversions are
+                # matched like every other analysis path (event_matching.py):
+                # on the metric's event name, never counting an exposure row.
                 converted_ids = {
                     str(e.user_id)
                     for e in db.query(Event)
                     .filter(
                         Event.experiment_id == experiment.id,
                         Event.variant_id == variant_id,
-                        Event.event_name == metric_def.event_name,
+                        conversion_event_filter(metric_def.event_name),
                     )
                     .all()
                 }
@@ -1185,8 +1188,15 @@ def get_cuped_results_data(
                         Y_t, percentile=winsorization_pct
                     )
 
-            # Compute CUPED effect
-            cuped_effect = CupedService.compute_cuped_effect(Y_c, X_c, Y_t, X_t)
+            # Compute the effect.  ``none`` applies no adjustment at all:
+            # θ is 0 and the estimate is the unadjusted one (#217).
+            cuped_effect = CupedService.compute_cuped_effect(
+                Y_c,
+                X_c,
+                Y_t,
+                X_t,
+                adjust=method != VarianceReductionMethod.NONE,
+            )
             applied_method = (
                 method
                 if method != VarianceReductionMethod.NONE
@@ -1229,6 +1239,10 @@ def get_cuped_results_data(
 @router.get(
     "/{experiment_id}/cuped",
     response_model=CupedResultsResponse,
+    summary="Beta: CUPED variance-reduced results",
+    # Beta (#217): the covariate is not yet a pre-experiment metric.  The
+    # response says so in analysis_status/analysis_notice.
+    openapi_extra={"x-stability": "beta"},
 )
 def get_cuped_results(
     experiment_id: UUID,
@@ -1238,14 +1252,16 @@ def get_cuped_results(
     """
     Get CUPED variance-reduced results for an experiment (Issue #21).
 
-    Returns CUPED-adjusted per-metric effect estimates with lower variance
-    than the standard analysis, enabling faster detection of true effects.
+    Beta (#217): the covariate is each user's position in the order of
+    assignment, not a pre-experiment metric, so it removes almost no variance.
+    The response carries ``analysis_status: "beta"`` and an
+    ``analysis_notice`` saying so.
 
     The variance-reduction method is read from the experiment's
     ``variance_reduction_config`` JSONB field:
 
-    - ``none``         — No adjustment (returns unadjusted effect, θ=0).
-    - ``cuped``        — CUPED adjustment using pre-experiment covariate.
+    - ``none``         — No adjustment: the unadjusted effect, θ exactly 0.
+    - ``cuped``        — CUPED adjustment (covariate: assignment order, #217).
     - ``cuped_plus``   — CUPED++ with delta-method ratio adjustment.
     - ``winsorization`` — Winsorization only (no CUPED).
 

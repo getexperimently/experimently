@@ -19,7 +19,7 @@ After seeding data with a known CVR difference:
 
 ### 2. CUPED Variance Reduction
 After a CUPED scenario:
-- Variance reduction should be 20–40% (typical for a correlated covariate)
+- `/cuped` is beta (#217): its covariate is not yet a pre-experiment metric, so expect `analysis_status: "beta"` and a `variance_reduction_pct` close to 0. Once it is fixed, the reduction should match rho^2 of the scenario's covariate (for example about 64% at rho = 0.8)
 - `adjusted_p_value ≤ raw_p_value` (CUPED never increases variance)
 - `cuped_theta` coefficient has the right sign and magnitude
 
@@ -118,8 +118,8 @@ Statistical Significance
   Actual p-value: 0.019 ✓
 
 CUPED Variance Reduction
-  Expected: 20–40% reduction
-  Actual: 31.2% reduction ✓
+  Expected: close to 0 while analysis_status is beta (#217)
+  Actual: 0.0002% reduction, analysis_status beta ✓
 
 MAB Traffic Allocation
   Expected: winning variant > 50%

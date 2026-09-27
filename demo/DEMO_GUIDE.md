@@ -59,7 +59,7 @@ and runs a traffic simulator against it so the dashboards fill up while you talk
 - On **/products** change nothing — explain the sort order is a **multi-armed bandit** (`shoplab_plp_sort`): Thompson Sampling
   moves traffic toward the algorithm with the best click rate. Click a product.
 - On the product page the **buy button** is one of four multivariate treatments (`shoplab_pdp_buy_button`). Add to cart.
-- **/checkout** is a 3-step vs one-page A/B test with CUPED enabled. Place the order → `purchase` with the order value.
+- **/checkout** is a 3-step vs one-page A/B test (configured for CUPED, which is beta, #217). Place the order → `purchase` with the order value.
 - **/search** shows a gradual-rollout flag (`shoplab_new_search`, 10% → 50% → 100%) — press **New visitor** in the panel a
   few times to land in the 10% and see the "New search ✨" engine.
 - Switch to the dashboard (http://localhost:3100/experiments): open **shoplab_hero_banner** — results are moving because
@@ -67,7 +67,7 @@ and runs a traffic simulator against it so the dashboards fill up while you talk
 
 **Key talking points:**
 - One SDK call per experiment, one call per event; no client-side bucketing to keep consistent
-- Bandit, multivariate, sequential, CUPED and Bayesian all running on the same storefront at once
+- Bandit, multivariate and sequential all running on the same storefront at once
 - Gradual rollout + kill switch (`shoplab_free_shipping_banner`) without a deploy
 
 Run pieces by hand: `python backend/scripts/seed_shoplab.py` (seeds experiments, flags, API key, 14 days of history),
@@ -158,16 +158,16 @@ See `demo/streampulse/README.md`.
   - 12% relative lift in signup conversion (7.5% → 8.4%)
   - Confidence interval doesn't cross zero
   - "The platform made the decision: Ship It. No analyst needed to interpret this."
-- Click the **CUPED** tab
-  - "CUPED reduces variance by 20–40% using pre-experiment data. That means we reach significance with fewer users and can ship faster."
-- Click the **Sequential Testing** tab
+- Click the **Sequential** tab (it appears when the experiment has a sequential analysis)
   - "mSPRT lets us peek at results without inflating false positives. No more waiting for a fixed sample size."
-- Show the **Bayesian** probability of superiority
-  - "98.7% probability that new_copy is better. For decision-makers who don't speak p-values."
+- The dashboard has no Bayesian or CUPED tab. The Bayesian analysis is in the API
+  (`GET /api/v1/results/{id}/bayesian`, see `docs/api/bayesian.md`); show it from http://localhost:8000/docs if
+  the audience asks.
+  - Do not present CUPED as a variance reduction: it is beta, and its covariate is not yet a pre-experiment metric,
+    so it removes almost no variance (#217).
 
 **Key talking points:**
-- Multiple statistical methods in one platform (frequentist + Bayesian + sequential)
-- CUPED for variance reduction
+- Multiple statistical methods in one platform (frequentist + sequential in the dashboard, Bayesian in the API)
 - Platform-generated decision ("Ship It") — removes analyst bottleneck
 
 ---
