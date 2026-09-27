@@ -732,6 +732,48 @@ def test_an_active_deployment_is_refused_by_name_and_never_stopped(aws, status):
     assert set(_ops(calls)) == {"deploy list-deployments", "deploy get-deployment"}
 
 
+@pytest.mark.regression
+@pytest.mark.parametrize(
+    "rollback_info, of",
+    [
+        ({"rollbackTriggeringDeploymentId": "d-BAD"}, "d-BAD"),
+        (None, "an earlier deployment"),
+    ],
+)
+def test_codedeploys_own_rollback_is_named_and_rollback_is_not_advised(
+    aws, rollback_info, of
+):
+    """#148 M6, UX W8 as amended by the EM: Rollback REFUSES while
+    CodeDeploy's own rollback is active, so the copy must not send the
+    operator there. Planted defect: main's "use Rollback instead" copy."""
+    extra = {"creator": "codeDeployRollback"}
+    if rollback_info is not None:
+        extra["rollbackInfo"] = rollback_info
+    code, out, calls, _ = _refuse(
+        aws, ["d-PRIOR"], {"d-PRIOR": _info("InProgress", **extra)}
+    )
+    assert code == 1, out
+    assert "::error title=CodeDeploy is rolling back::" in out
+    assert f"It is CodeDeploy's own rollback of {of}." in out
+    assert "Nothing has been built or changed" in out
+    assert "Re-run this deploy once it is no longer active" in out
+    assert "Do not use Rollback while it is active" in out
+    assert "Rollback refuses while CodeDeploy's own rollback is active" in out
+    assert "use Rollback instead" not in out
+    assert "Rollback stops it" not in out
+    assert set(_ops(calls)) == {"deploy list-deployments", "deploy get-deployment"}
+
+
+def test_a_user_deployment_still_points_at_rollback(aws):
+    code, out, _, _ = _refuse(
+        aws, ["d-PRIOR"], {"d-PRIOR": _info("InProgress", creator="user")}
+    )
+    assert code == 1, out
+    assert "::error title=A deployment is still active::" in out
+    assert "use Rollback instead: Rollback stops it" in out
+    assert "CodeDeploy's own rollback" not in out
+
+
 #: Flags that stop AWS CLI v2 from following nextToken and merging the pages.
 PAGE_LIMITING_FLAGS = (
     "--max-items",
