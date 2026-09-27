@@ -34,13 +34,38 @@ This directory contains the API documentation for Experimently.
 
 ## Quick Start
 
-1. Get your API key from the platform's Settings page
-2. Use the key in your requests:
-   ```bash
-   curl -H "Authorization: Bearer YOUR_API_KEY" https://api.experimently.example.com/v1/experiments
-   ```
-3. Check the [API Reference](endpoints.md) for detailed usage examples
-4. Refer to the [API Specification](specs.md) for complete endpoint documentation
+The management API (experiments, flags, results) takes a user's access token; the SDK
+endpoints (`/tracking/*`, flag evaluation) take an API key instead, in the `X-API-Key`
+header. See [Authentication](auth.md) for both.
+
+These commands run as written against the stack from the
+[Quick Start](../getting-started/quick-start.md). On your own deployment, use its URL
+wherever they say `localhost:8000`. Log in first; this saves the access token in
+`$TOKEN` for the command after it:
+
+```{.bash exec}
+TOKEN=$(curl -s -X POST localhost:8000/api/v1/auth/login \
+  -H 'content-type: application/json' \
+  -d '{"email":"admin@demo.com","password":"Demo1234!"}' | jq -r .access_token)
+
+curl -s localhost:8000/api/v1/auth/me -H "Authorization: Bearer $TOKEN" | jq .role
+```
+<!-- expect: "ADMIN" -->
+
+It prints `"ADMIN"`. Then send the token as a bearer token. This lists the experiments'
+names; the collection URL ends with a slash, `/api/v1/experiments/`, because without it
+the API answers `307`, which `curl` doesn't follow:
+
+```{.bash exec}
+curl -s localhost:8000/api/v1/experiments/ \
+  -H "Authorization: Bearer $TOKEN" | jq -r '.items[].name'
+```
+<!-- expect: Checkout Button Color -->
+
+It prints the demo data's experiments, among them `Checkout Button Color`.
+
+Then check the [API Reference](endpoints.md) for detailed usage examples, and the
+[API Specification](specs.md) for complete endpoint documentation.
 
 ## Common Tasks
 

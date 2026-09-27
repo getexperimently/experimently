@@ -19,6 +19,8 @@ import uuid
 import pytest
 from fastapi.testclient import TestClient
 
+from backend.tests.integration.helpers import list_all_segment_ids
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -154,10 +156,7 @@ class TestSegmentLifecycleWorkflow:
         assert archive_resp.status_code == 204, f"Archive failed: {archive_resp.text}"
 
         # Step 6: Verify it doesn't appear in 'active' list
-        list_resp = admin_client.get("/api/v1/segments?status=active")
-        assert list_resp.status_code == 200, list_resp.text
-        active_segments = list_resp.json()
-        active_ids = [s["id"] for s in active_segments]
+        active_ids = list_all_segment_ids(admin_client, status="active")
         assert segment_id not in active_ids, (
             f"Archived segment {segment_id} should not appear in active list"
         )
@@ -174,9 +173,7 @@ class TestSegmentLifecycleWorkflow:
         admin_client.delete(f"/api/v1/segments/{segment_id}")
 
         # Verify in archived list
-        archived_resp = admin_client.get("/api/v1/segments?status=archived")
-        assert archived_resp.status_code == 200, archived_resp.text
-        archived_ids = [s["id"] for s in archived_resp.json()]
+        archived_ids = list_all_segment_ids(admin_client, status="archived")
         assert segment_id in archived_ids, (
             f"Archived segment {segment_id} should appear in archived list"
         )
@@ -403,10 +400,10 @@ class TestSegmentCRUDWorkflow:
         segment = _create_segment(admin_client, name="Listable Segment E2E")
         segment_id = segment["id"]
 
-        list_resp = admin_client.get("/api/v1/segments")
-        assert list_resp.status_code == 200, list_resp.text
-        all_ids = [s["id"] for s in list_resp.json()]
-        assert segment_id in all_ids, f"Segment {segment_id} not in list: {all_ids}"
+        all_ids = list_all_segment_ids(admin_client)
+        assert segment_id in all_ids, (
+            f"Segment {segment_id} not among the {len(all_ids)} listed segments"
+        )
 
     def test_segment_update_persists(self, admin_client):
         """PUT update to segment description is reflected in subsequent GET."""
@@ -441,9 +438,7 @@ class TestSegmentCRUDWorkflow:
         admin_client.delete(f"/api/v1/segments/{seg2['id']}")
 
         # List only active segments
-        active_resp = admin_client.get("/api/v1/segments?status=active")
-        assert active_resp.status_code == 200
-        active_ids = [s["id"] for s in active_resp.json()]
+        active_ids = list_all_segment_ids(admin_client, status="active")
 
         assert seg1["id"] in active_ids, "Active seg1 should appear in active list"
         assert seg2["id"] not in active_ids, (

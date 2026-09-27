@@ -6,13 +6,19 @@ EP-020: Data Export & Reporting
 import csv
 import io
 import json
+import logging
 from datetime import datetime, timezone
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
+from uuid import UUID
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from backend.app.models.assignment import Assignment
+from backend.app.models.event import Event
 from backend.app.models.experiment import Experiment, ExperimentStatus
 from backend.app.models.feature_flag import FeatureFlag, FeatureFlagStatus
+from backend.app.models.metrics.metric import RawMetric
 from backend.app.schemas.export import (
     ExperimentExportRow,
     ExportFormat,
@@ -21,6 +27,25 @@ from backend.app.schemas.export import (
     PlatformOverviewReport,
     VariantExportRow,
 )
+from backend.app.services.analysis_service import AnalysisService
+
+logger = logging.getLogger(__name__)
+
+# A CSV cell whose text begins with one of these is written with a leading
+# single quote, so that a spreadsheet opening the file shows it as text.
+_SPREADSHEET_LEADING_CHARS = ("=", "+", "-", "@", "\t", "\r")
+
+
+def spreadsheet_safe(value: Any) -> Any:
+    """Return ``value`` as it is written to a CSV cell.
+
+    A string beginning with ``=``, ``+``, ``-``, ``@``, a tab or a carriage
+    return gets a single quote in front of it; every other value, including
+    numbers, is unchanged.
+    """
+    if isinstance(value, str) and value.startswith(_SPREADSHEET_LEADING_CHARS):
+        return "'" + value
+    return value
 
 
 class ExportService:
@@ -34,6 +59,9 @@ class ExportService:
     def __init__(self, db: Session) -> None:
         """Initialize with a database session."""
         self.db = db
+        # get_experiment_results() output per experiment id, so that a report
+        # that builds both experiment and variant rows computes it once.
+        self._results: Dict[str, Optional[Dict[str, Any]]] = {}
 
     # ------------------------------------------------------------------
     # Public export methods
@@ -105,6 +133,30 @@ class ExportService:
             json.dumps([r.model_dump() for r in rows], default=str),
             "application/json",
         )
+
+    def experiment_report_rows(
+        self, experiment_id: Union[str, UUID]
+    ) -> Optional[Tuple[List[ExperimentExportRow], List[VariantExportRow]]]:
+        """
+        The experiment and variant rows of one experiment's report.
+
+        Returns:
+            ``(experiment_rows, variant_rows)``, or None when no experiment
+            has this id.
+        """
+        experiment = (
+            self.db.query(Experiment).filter(Experiment.id == experiment_id).first()
+        )
+        if experiment is None:
+            return None
+        return (
+            self._experiments_to_rows([experiment]),
+            self._variants_to_rows([experiment]),
+        )
+
+    def variants_to_csv(self, rows: List[VariantExportRow]) -> str:
+        """CSV of variant rows, with the same columns as ``/export/variants``."""
+        return self._to_csv(rows, VariantExportRow)
 
     def generate_platform_overview(
         self,
@@ -199,7 +251,7 @@ class ExportService:
         if request.end_date:
             query = query.filter(Experiment.created_at <= request.end_date)
         experiments = query.all()
-        return [self._experiment_to_row(exp) for exp in experiments]
+        return self._experiments_to_rows(experiments)
 
     def _build_variant_rows(
         self,
@@ -215,28 +267,7 @@ class ExportService:
         if request.end_date:
             query = query.filter(Experiment.created_at <= request.end_date)
         experiments = query.all()
-
-        rows: List[VariantExportRow] = []
-        for exp in experiments:
-            exp_id = str(exp.id)
-            exp_name = str(exp.name)
-            for variant in getattr(exp, "variants", []):
-                rows.append(
-                    VariantExportRow(
-                        experiment_id=exp_id,
-                        experiment_name=exp_name,
-                        variant_id=str(variant.id),
-                        variant_name=str(variant.name),
-                        is_control=bool(getattr(variant, "is_control", False)),
-                        assignments=0,
-                        conversions=None,
-                        conversion_rate=None,
-                        p_value=None,
-                        is_significant=False,
-                        relative_improvement_pct=None,
-                    )
-                )
-        return rows
+        return self._variants_to_rows(experiments)
 
     def _build_feature_flag_rows(
         self,
@@ -249,14 +280,126 @@ class ExportService:
         if request.end_date:
             query = query.filter(FeatureFlag.created_at <= request.end_date)
         flags = query.all()
-        return [self._feature_flag_to_row(ff) for ff in flags]
+        evaluations = self._count_by(RawMetric.feature_flag_id, [ff.id for ff in flags])
+        return [
+            self._feature_flag_to_row(ff, evaluations.get(ff.id, 0)) for ff in flags
+        ]
+
+    # ------------------------------------------------------------------
+    # Results and counts shared by the row builders
+    # ------------------------------------------------------------------
+
+    def _experiments_to_rows(
+        self, experiments: Sequence[Experiment]
+    ) -> List[ExperimentExportRow]:
+        """Experiment rows, with the assignment and event totals counted in SQL."""
+        ids = [exp.id for exp in experiments]
+        assignments = self._count_by(Assignment.experiment_id, ids)
+        events = self._count_by(Event.experiment_id, ids)
+        return [
+            self._experiment_to_row(
+                exp,
+                total_assignments=assignments.get(exp.id, 0),
+                total_events=events.get(exp.id, 0),
+                results=self._results_for(exp),
+            )
+            for exp in experiments
+        ]
+
+    def _variants_to_rows(
+        self, experiments: Sequence[Experiment]
+    ) -> List[VariantExportRow]:
+        """
+        One row per variant, with the primary metric's numbers from the results API.
+
+        Each value is read from ``AnalysisService.get_experiment_results`` --
+        the computation behind ``GET /api/v1/results/{id}`` -- so the export
+        and the results API agree. An experiment whose results cannot be
+        computed (it has no control variant, for example) keeps its variant
+        rows with the result columns empty.
+        """
+        rows: List[VariantExportRow] = []
+        for exp in experiments:
+            primary = self._primary_metric(self._results_for(exp))
+            by_variant: Dict[str, Dict[str, Any]] = (
+                {str(v["variant_id"]): v for v in primary["variants"]}
+                if primary
+                else {}
+            )
+            for variant in getattr(exp, "variants", []):
+                result = by_variant.get(str(variant.id))
+                rows.append(
+                    VariantExportRow(
+                        experiment_id=str(exp.id),
+                        experiment_name=str(exp.name),
+                        variant_id=str(variant.id),
+                        variant_name=str(variant.name),
+                        is_control=bool(getattr(variant, "is_control", False)),
+                        assignments=result["sample_size"] if result else None,
+                        conversions=result["conversions"] if result else None,
+                        conversion_rate=result["mean"] if result else None,
+                        p_value=result["p_value"] if result else None,
+                        is_significant=result["is_significant"] if result else None,
+                        relative_improvement_pct=(
+                            result["relative_improvement_pct"] if result else None
+                        ),
+                    )
+                )
+        return rows
+
+    def _results_for(self, exp: Experiment) -> Optional[Dict[str, Any]]:
+        """``get_experiment_results`` for one experiment, or None if it has none."""
+        key = str(exp.id)
+        if key not in self._results:
+            try:
+                self._results[key] = AnalysisService(self.db).get_experiment_results(
+                    exp.id, include_bayesian=False
+                )
+            except ValueError as exc:
+                logger.info("Export: no results for experiment %s: %s", key, exc)
+                self._results[key] = None
+        return self._results[key]
+
+    @staticmethod
+    def _primary_metric(
+        results: Optional[Dict[str, Any]],
+    ) -> Optional[Dict[str, Any]]:
+        """The primary metric's result, chosen as the results summary chooses it."""
+        metrics = (results or {}).get("metrics") or []
+        if not metrics:
+            return None
+        return next((m for m in metrics if m.get("is_primary")), metrics[0])
+
+    def _count_by(self, column: Any, ids: Sequence[Any]) -> Dict[Any, int]:
+        """``{id: row count}`` for the rows whose ``column`` is in ``ids``, in one query."""
+        if not ids:
+            return {}
+        rows = (
+            self.db.query(column, func.count())
+            .filter(column.in_(ids))
+            .group_by(column)
+            .all()
+        )
+        return {key: int(count) for key, count in rows}
 
     # ------------------------------------------------------------------
     # Internal model-to-row mappers
     # ------------------------------------------------------------------
 
-    def _experiment_to_row(self, exp: Experiment) -> ExperimentExportRow:
-        """Map an Experiment model instance to ExperimentExportRow."""
+    def _experiment_to_row(
+        self,
+        exp: Experiment,
+        total_assignments: int = 0,
+        total_events: int = 0,
+        results: Optional[Dict[str, Any]] = None,
+    ) -> ExperimentExportRow:
+        """
+        Map an Experiment model instance to ExperimentExportRow.
+
+        ``total_assignments`` and ``total_events`` are counted by the caller;
+        ``results`` is the experiment's ``get_experiment_results`` output (None
+        leaves the winner and recommendation empty).
+        """
         # Resolve status value — handle both enum and plain string
         status_val: str
         if hasattr(exp.status, "value"):
@@ -281,21 +424,18 @@ class ExportService:
             delta = exp.end_date - exp.start_date
             duration = round(delta.total_seconds() / 86400, 2)
 
-        # Count assignments through relationship if available
-        assignments_count: int = 0
-        if hasattr(exp, "assignments") and exp.assignments is not None:
-            try:
-                assignments_count = len(exp.assignments)
-            except TypeError:
-                assignments_count = 0
-
-        # Count events through relationship if available
-        events_count: int = 0
-        if hasattr(exp, "events") and exp.events is not None:
-            try:
-                events_count = len(exp.events)
-            except TypeError:
-                events_count = 0
+        summary = (results or {}).get("summary") or {}
+        winner_id = summary.get("winning_variant_id")
+        winner_name: Optional[str] = None
+        if winner_id:
+            winner_name = next(
+                (
+                    str(v.name)
+                    for v in getattr(exp, "variants", [])
+                    if str(v.id) == str(winner_id)
+                ),
+                None,
+            )
 
         return ExperimentExportRow(
             experiment_id=str(exp.id),
@@ -305,31 +445,31 @@ class ExportService:
             start_date=start_str,
             end_date=end_str,
             duration_days=duration,
-            total_assignments=assignments_count,
-            total_events=events_count,
-            winner_variant=None,
-            recommendation=None,
+            total_assignments=total_assignments,
+            total_events=total_events,
+            winner_variant=winner_name,
+            recommendation=summary.get("recommendation"),
         )
 
-    def _feature_flag_to_row(self, ff: FeatureFlag) -> FeatureFlagExportRow:
-        """Map a FeatureFlag model instance to FeatureFlagExportRow."""
+    def _feature_flag_to_row(
+        self, ff: FeatureFlag, total_evaluations: int = 0
+    ) -> FeatureFlagExportRow:
+        """
+        Map a FeatureFlag model instance to FeatureFlagExportRow.
+
+        ``total_evaluations`` is the flag's ``raw_metrics`` row count, counted
+        by the caller.
+        """
         status_val: str
         if hasattr(ff.status, "value"):
             status_val = ff.status.value
         else:
             status_val = str(ff.status)
 
-        # Derive evaluation stats from raw_metrics if available
-        total_evals: int = 0
+        total_evals: int = total_evaluations
+        # No raw_metrics column records whether an evaluation returned
+        # enabled, so this has always been 0; it is kept as it was.
         enabled_evals: int = 0
-        if hasattr(ff, "raw_metrics") and ff.raw_metrics:
-            try:
-                total_evals = len(ff.raw_metrics)
-                enabled_evals = sum(
-                    1 for m in ff.raw_metrics if getattr(m, "flag_enabled", False)
-                )
-            except TypeError:
-                pass
 
         enabled_rate: float = (
             round(enabled_evals / total_evals, 4) if total_evals > 0 else 0.0
@@ -367,6 +507,8 @@ class ExportService:
         """
         Generic CSV serializer using schema field names as headers.
 
+        Every text cell is written spreadsheet-safe (see ``spreadsheet_safe``).
+
         Args:
             rows: List of Pydantic model instances.
             schema_class: The Pydantic model class (used for headers).
@@ -381,7 +523,12 @@ class ExportService:
         writer = csv.DictWriter(output, fieldnames=fields)
         writer.writeheader()
         for row in rows:
-            writer.writerow(row.model_dump())
+            writer.writerow(
+                {
+                    key: spreadsheet_safe(value)
+                    for key, value in row.model_dump().items()
+                }
+            )
         return output.getvalue()
 
     # ------------------------------------------------------------------

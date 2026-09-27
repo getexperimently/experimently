@@ -383,13 +383,31 @@ jobs:
             aws deploy stop-deployment --deployment-id "$id" --auto-rollback-enabled
           done
 
+          # A failed read is "could not read, read again on the next poll"
+          # (#215), never a status; READ_FAILURE_LIMIT in a row (about a
+          # minute) fails the step, labelled, before anything is created.
+          READ_FAILURE_LIMIT=12
+          aws_errors="$(mktemp)"
           for id in $IN_FLIGHT; do
+            read_failures=0
             for _ in $(seq 1 60); do
-              st="$(aws deploy get-deployment --deployment-id "$id" \
-                      --query deploymentInfo.status --output text)"
-              case "$st" in
-                Stopped|Succeeded|Failed) echo "$id is $st"; break ;;
-              esac
+              if st="$(aws deploy get-deployment --deployment-id "$id" \
+                         --query deploymentInfo.status --output text 2>"$aws_errors")"; then
+                read_failures=0
+                case "$st" in
+                  Stopped|Succeeded|Failed) echo "$id is $st"; break ;;
+                esac
+              else
+                read_failures=$(( read_failures + 1 ))
+                last_error="$(<"$aws_errors")"
+                last_error="${last_error//$'\n'/ }"
+                last_error="${last_error:0:200}"
+                echo "could not read from AWS (${last_error:-no error text}); reading again on the next poll"
+                if [ "$read_failures" -ge "$READ_FAILURE_LIMIT" ]; then
+                  echo "::error title=Rollback could not read AWS::${read_failures} reads in a row of deployment ${id} failed after this run stopped it with auto-rollback, so this run created no rollback deployment. The last AWS error: ${last_error:-no error text}. Check it by hand: aws deploy get-deployment --deployment-id ${id}"
+                  exit 1
+                fi
+              fi
               sleep 5
             done
           done
@@ -466,9 +484,39 @@ jobs:
           continued=0
           seen_ready=0
 
+          # A read that fails -- a ThrottlingException, say -- is "could not
+          # read": the value stays UNREAD, which is no status and no revision,
+          # so it can never approve, fail or finish anything, and the next
+          # poll reads again (#215). Before, a plain assignment under set -e
+          # ended the rollback with a bare exit 254 mid-incident. After
+          # READ_FAILURE_LIMIT polls in a row with a failed read (about a
+          # minute) the step stops waiting and says so. The same rule as
+          # scripts/ecs_rolling_rollout.sh's READ_FAILS.
+          UNREAD="(could not be read)"
+          READ_FAILURE_LIMIT=6
+          read_failures=0
+          last_error=""
+          aws_errors="$(mktemp)"
+          # aws_read VAR <aws arguments>: sets VAR only when the call succeeds.
+          aws_read() {
+            local out
+            if out="$(aws "${@:2}" 2>"$aws_errors")"; then
+              printf -v "$1" '%s' "$out"
+            else
+              read_failed=1
+              last_error="$(<"$aws_errors")"
+              last_error="${last_error//$'\n'/ }"
+              last_error="${last_error:0:200}"
+              echo "could not read from AWS (${last_error:-no error text}); reading again on the next poll"
+            fi
+          }
+
           while :; do
-            status="$(aws deploy get-deployment --deployment-id "$DEPLOYMENT_ID" \
-                        --query deploymentInfo.status --output text)"
+            read_failed=0
+            status="$UNREAD"
+            serving="$UNREAD"
+            aws_read status deploy get-deployment --deployment-id "$DEPLOYMENT_ID" \
+              --query deploymentInfo.status --output text
 
             case "$status" in
               Ready)
@@ -483,13 +531,17 @@ jobs:
                     # this call (an operator in the console). Read it again:
                     # still Ready means this run could not approve it, which
                     # is a failure; anything else is decided below.
-                    status="$(aws deploy get-deployment --deployment-id "$DEPLOYMENT_ID" \
-                                --query deploymentInfo.status --output text)"
-                    if [ "$status" = Ready ]; then
-                      echo "::error::this run could not approve rollback deployment $DEPLOYMENT_ID (the error is above), and it is still waiting for approval"
-                      exit 1
-                    fi
-                    echo "continue-deployment failed, and $DEPLOYMENT_ID has since left Ready ($status): it was approved, or ended, outside this run"
+                    status="$UNREAD"
+                    aws_read status deploy get-deployment --deployment-id "$DEPLOYMENT_ID" \
+                      --query deploymentInfo.status --output text
+                    case "$status" in
+                      Ready)
+                        echo "::error::this run could not approve rollback deployment $DEPLOYMENT_ID (the error is above), and it is still waiting for approval"
+                        exit 1
+                        ;;
+                      "$UNREAD") echo "continue-deployment failed, and $DEPLOYMENT_ID's status could not be read again: the next poll decides" ;;
+                      *) echo "continue-deployment failed, and $DEPLOYMENT_ID has since left Ready ($status): it was approved, or ended, outside this run" ;;
+                    esac
                   fi
                 fi
                 ;;
@@ -504,7 +556,8 @@ jobs:
                   echo "::error::rollback deployment $DEPLOYMENT_ID is $status"
                 fi
                 aws deploy get-deployment --deployment-id "$DEPLOYMENT_ID" \
-                  --query 'deploymentInfo.{status:status,error:errorInformation}' --output json
+                  --query 'deploymentInfo.{status:status,error:errorInformation}' --output json \
+                  || echo "(its error information could not be read)"
                 exit 1
                 ;;
             esac
@@ -537,13 +590,28 @@ jobs:
                 InProgress|Baking|Succeeded) approved="approved outside this run: seen Ready, now $status" ;;
               esac
             fi
-            serving="$(aws ecs describe-services \
+            aws_read serving ecs describe-services \
               --cluster "$ECS_CLUSTER" --services "$ECS_BACKEND_SERVICE" \
               --query "services[0].taskSets[?status=='PRIMARY'].taskDefinition" \
-              --output text)"
+              --output text
             if [ -n "$approved" ] && [ "$serving" = "$TARGET_ARN" ]; then
               echo "traffic is on $TARGET_ARN (deployment $DEPLOYMENT_ID $status, $approved)"
               break
+            fi
+
+            if [ "$read_failed" -eq 0 ]; then
+              read_failures=0
+            else
+              read_failures=$(( read_failures + 1 ))
+              if [ "$read_failures" -ge "$READ_FAILURE_LIMIT" ]; then
+                if [ -n "$approved" ]; then
+                  shift_state="The traffic shift was ${approved}."
+                else
+                  shift_state="This run had not seen the traffic shift approved; CodeDeploy stops an unapproved deployment when its 30-minute approval wait ends."
+                fi
+                echo "::error title=Rollback could not read AWS::${read_failures} polls in a row could not read rollback deployment ${DEPLOYMENT_ID} or what the API is serving, so this run stopped waiting. It did not stop the deployment and cannot tell whether traffic moved to ${TARGET_ARN##*/}. ${shift_state} The last AWS error: ${last_error:-no error text}. Check it by hand: aws deploy get-deployment --deployment-id ${DEPLOYMENT_ID}"
+                exit 1
+              fi
             fi
 
             if [ "$(date +%s)" -ge "$deadline" ]; then
