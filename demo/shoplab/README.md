@@ -13,10 +13,10 @@ made-up products with gradient artwork.
 
 | Page | Experiment / flag | Platform feature shown |
 |---|---|---|
-| **Homepage** `/` | `shoplab_hero_banner` — image hero vs. CSS-animated "video" hero | Classic A/B test, sequential testing (mSPRT) + Bayesian results, variant configuration driving copy |
+| **Homepage** `/` | `shoplab_hero_banner` — image hero vs. CSS-animated "video" hero | Classic A/B test, sequential testing (mSPRT), Bayesian results (API only), variant configuration driving copy |
 | **Product list** `/products` | `shoplab_plp_sort` — relevance vs. price vs. "ML personalised" ordering | **Multi-armed bandit** (Thompson sampling): traffic shifts toward the winning sort |
 | **Product detail** `/products/[id]` | `shoplab_pdp_buy_button` — button colour × CTA text (4 cells) | **Multivariate** test, sequential testing, `value` on `add_to_cart` |
-| **Checkout** `/checkout` | `shoplab_checkout_flow` — 3-step stepper vs. one-page form | **CUPED** variance reduction, Bayesian analysis, revenue metric from `purchase` value |
+| **Checkout** `/checkout` | `shoplab_checkout_flow` — 3-step stepper vs. one-page form | **CUPED** (beta, API only: the covariate is not yet a pre-experiment metric, #217), revenue metric from `purchase` value |
 | **Search** `/search` | `shoplab_new_search` flag — exact name match vs. fuzzy engine with highlights | **Feature-flag gradual rollout** (10% → 50% → 100%), safety config, flag-attributed events |
 | Header (every page) | `shoplab_free_shipping_banner` flag | **Kill switch**: turn the banner off in the dashboard, reload the storefront |
 
@@ -118,18 +118,20 @@ source venv/bin/activate && python -m pytest demo/shoplab/simulator/test_traffic
 
 ## Demo script — what to show in the dashboard
 
-1. **Hero banner** (`shoplab_hero_banner`): open Results. Point at the sequential-testing panel
-   (mSPRT boundary, "can stop early?") and the Bayesian tab (probability video beats control,
-   expected loss). Reload the storefront with "New visitor" until you land in `video_hero`.
+1. **Hero banner** (`shoplab_hero_banner`): open Results. Point at the **Sequential** tab (mSPRT
+   boundary, "can stop early?"). The dashboard has no Bayesian tab: the probability that video beats
+   control and the expected loss are in the API (`GET /api/v1/results/{id}/bayesian`). Reload the
+   storefront with "New visitor" until you land in `video_hero`.
 2. **Product sort** (`shoplab_plp_sort`): open the Bandit view. Traffic allocation drifts toward
    `ml_personalized` (true click rate 28% vs 22% / 19%). Show the allocation history chart, then
    go to `/products` and note "Sorted by Recommended for you".
 3. **Buy button** (`shoplab_pdp_buy_button`): four cells. `orange_buy_now` wins on add-to-cart;
    show the multivariate breakdown and the sequential-testing status. On a product page, switch
    visitors to see colour and text change.
-4. **Checkout flow** (`shoplab_checkout_flow`): show the CUPED toggle — variance drops, the
-   confidence interval on `purchase` tightens, and the revenue metric (`order_value`) appears as a
-   secondary. Walk through the 3-step vs. one-page form in the storefront.
+4. **Checkout flow** (`shoplab_checkout_flow`): open Results and show the `purchase` conversion
+   and the revenue metric (`order_value`) as a secondary. There is no CUPED toggle in the dashboard,
+   and CUPED is beta: its covariate is not yet a pre-experiment metric, so it does not narrow the
+   interval (#217). Walk through the 3-step vs. one-page form in the storefront.
 5. **New search** (`shoplab_new_search`): open the flag → Rollout schedule (10% in progress → 50%
    → 100%) and the safety config (error-rate thresholds). Search "rain jaket" as a visitor with the
    flag on (fuzzy, highlighted, "New search ✨") vs. off (0 results).

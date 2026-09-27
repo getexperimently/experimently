@@ -32,13 +32,25 @@ The platform handles all of this automatically: it tracks latency, estimates cos
 | **Mistral** | mistral-large-latest, mistral-small-latest | EU-hosted option |
 | **Local** | Any Ollama-compatible model | Privacy / cost-free option |
 
-Configure API keys in the API's environment:
+Configure API keys in the API's environment. The provider SDKs read their own
+standard variables; the platform passes nothing to them:
 
 ```dotenv
-LLM_ANTHROPIC_API_KEY=sk-ant-...
-LLM_OPENAI_API_KEY=sk-...
-LLM_GOOGLE_API_KEY=...
+ANTHROPIC_API_KEY=sk-ant-...
+OPENAI_API_KEY=sk-...
 ```
+
+- `ANTHROPIC_API_KEY` enables Anthropic variants in `POST /llm-experiments/{id}/complete`,
+  the LLM-as-judge (`POST /llm-experiments/{id}/judge`), and the platform's own AI
+  features (`POST /ai/design`, `POST /ai/interpret/{id}` and `POST /power/plan`).
+- `OPENAI_API_KEY` enables OpenAI variants in `/complete`.
+- With neither set, no provider is called: `/complete` answers 502 for that variant,
+  the judge records its fallback score of 0.5, and the AI features use their templates.
+
+`ANTHROPIC_BASE_URL` and `OPENAI_BASE_URL` point the SDKs at a proxy or gateway.
+The `LLM_ANTHROPIC_API_KEY`, `LLM_OPENAI_API_KEY` and `LLM_GOOGLE_API_KEY` settings
+that earlier versions of this page listed are not read by any provider call.
+The Google provider's SDK is not yet included in the API image.
 
 ---
 

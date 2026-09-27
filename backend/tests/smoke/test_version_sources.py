@@ -127,6 +127,20 @@ def test_checker_rejects_a_mismatched_expectation() -> None:
     assert "99.99.99" in result.stderr
 
 
+COMPOSE = "deploy/compose/compose.yml"
+
+
+def _checkable_copy(tmp_path: Path) -> Path:
+    """A copy of everything the checker reads, verified to pass untouched."""
+    copy = _checker_tree(tmp_path)
+    baseline = run_checker(tree=copy)
+    assert baseline.returncode == 0, (
+        "the copy does not pass before tampering, so a failure after tampering "
+        f"would prove nothing:\n{baseline.stdout}\n{baseline.stderr}"
+    )
+    return copy
+
+
 def test_checker_rejects_a_drifting_manifest(tmp_path: Path) -> None:
     """Break the invariant in a copy of the tree; the gate must notice.
 
@@ -140,13 +154,7 @@ def test_checker_rejects_a_drifting_manifest(tmp_path: Path) -> None:
     listed below (2.6 MB, well under a second); anything it needs that is not
     here shows up as the baseline assertion failing, not as a false pass.
     """
-    copy = _checker_tree(tmp_path)
-
-    baseline = run_checker(tree=copy)
-    assert baseline.returncode == 0, (
-        "the copy does not pass before tampering, so a failure after tampering "
-        f"would prove nothing:\n{baseline.stdout}\n{baseline.stderr}"
-    )
+    copy = _checkable_copy(tmp_path)
 
     (copy / ".release-please-manifest.json").write_text(
         json.dumps({".": "42.0.0"}, indent=2) + "\n", encoding="utf-8"
@@ -216,6 +224,7 @@ def _checker_tree(tmp_path: Path) -> Path:
     """Everything check_version_sources.py reads, copied out of the tree."""
     copy = tmp_path / "tree"
     (copy / "scripts").mkdir(parents=True)
+    (copy / "deploy" / "compose").mkdir(parents=True)
 
     for name in (
         "VERSION",
@@ -226,6 +235,7 @@ def _checker_tree(tmp_path: Path) -> Path:
         # missing one fails the metadata build rather than the comparison.
         "LICENSE",
         "NOTICE",
+        COMPOSE,
     ):
         shutil.copy2(ROOT / name, copy / name)
     shutil.copy2(
@@ -247,6 +257,87 @@ def _checker_tree(tmp_path: Path) -> Path:
         copy / "charts" / "experimently" / "Chart.yaml",
     )
     return copy
+
+
+def _image_line(text: str, repo: str) -> str:
+    (line,) = [line for line in text.splitlines() if f"image: {repo}:" in line.strip()]
+    return line
+
+
+@pytest.mark.parametrize(
+    "repo",
+    [
+        "ghcr.io/getexperimently/experimently",
+        "ghcr.io/getexperimently/experimently-web",
+    ],
+)
+def test_checker_rejects_a_stale_compose_image_line(tmp_path: Path, repo: str) -> None:
+    """One image line of the production compose file left at an old version.
+
+    That is what a release whose release-please config missed the file looks
+    like: the new tag's compose.yml starts the previous release, silently.
+    """
+    copy = _checkable_copy(tmp_path)
+    path = copy / COMPOSE
+    text = path.read_text(encoding="utf-8")
+    line = _image_line(text, repo)
+    version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
+    path.write_text(
+        text.replace(line, line.replace(f"-{version} ", "-0.0.1 ")),
+        encoding="utf-8",
+    )
+    assert "-0.0.1 " in path.read_text(encoding="utf-8"), "the tamper did not apply"
+
+    tampered = run_checker(tree=copy)
+    assert tampered.returncode != 0, (
+        f"the gate passed with {repo} at 0.0.1 in {COMPOSE}:\n" + tampered.stdout
+    )
+    assert "disagree" in tampered.stderr
+    assert COMPOSE in tampered.stderr
+
+
+@pytest.mark.parametrize(
+    ("description", "edit"),
+    [
+        (
+            "the release-please marker removed",
+            lambda line: line.replace(" # x-release-please-version", ""),
+        ),
+        (
+            "a floating tag",
+            lambda line: line.split(":${")[0] + ":latest # x-release-please-version",
+        ),
+        (
+            "a v-prefixed version, equal under PEP 440 but not a tag",
+            lambda line: line.replace("-core}-", "-core}-v"),
+        ),
+    ],
+)
+def test_checker_rejects_a_malformed_compose_image_line(
+    tmp_path: Path, description: str, edit
+) -> None:
+    """A line release-please would not rewrite is stale from the next release on."""
+    copy = _checkable_copy(tmp_path)
+    path = copy / COMPOSE
+    text = path.read_text(encoding="utf-8")
+    line = _image_line(text, "ghcr.io/getexperimently/experimently")
+    path.write_text(text.replace(line, edit(line)), encoding="utf-8")
+    assert path.read_text(encoding="utf-8") != text, "the tamper did not apply"
+
+    tampered = run_checker(tree=copy)
+    assert tampered.returncode != 0, (
+        f"the gate passed with {description} in {COMPOSE}:\n" + tampered.stdout
+    )
+    assert COMPOSE in tampered.stderr
+
+
+def test_release_please_rewrites_the_compose_image_lines() -> None:
+    """The markers do nothing unless release-please is told to read the file."""
+    config = json.loads(
+        (ROOT / "release-please-config.json").read_text(encoding="utf-8")
+    )
+    extra = config["packages"]["."]["extra-files"]
+    assert {"type": "generic", "path": COMPOSE} in extra, extra
 
 
 def test_the_sdist_carries_the_version_file() -> None:

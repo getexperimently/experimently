@@ -26,10 +26,10 @@
 | Doc | Description |
 |-----|-------------|
 | [Sequential Testing](api/sequential-testing.md) | mSPRT early stopping, always-valid confidence intervals |
-| [CUPED](api/cuped.md) | Variance reduction using pre-experiment covariates |
+| [CUPED](api/cuped.md) | Variance reduction (beta: the covariate is not yet a pre-experiment metric) |
 | [Multi-Armed Bandit](api/multi-armed-bandit.md) | Thompson Sampling, UCB1, Epsilon-Greedy algorithms |
 | [Dimensional Analysis](api/dimensional-analysis.md) | Segment breakdowns with Bonferroni correction |
-| [Interaction Detection](api/interaction-detection.md) | Cross-experiment overlap and interference detection |
+| [Interaction Detection](api/interaction-detection.md) | Cross-experiment user overlap (beta: interaction and novelty are not computed yet) |
 
 ### Platform Capabilities
 | Doc | Description |

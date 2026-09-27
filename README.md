@@ -31,7 +31,9 @@ production deployment we cannot show you:
   several times slower and made it flaky, so the number is reproducible
   locally, not enforced on every merge
 - **Statistical engine**: sequential testing (mSPRT), CUPED, Bayesian and multi-armed bandits, each
-  with a DB-backed test that drives the public API
+  with a DB-backed test that drives the public API. CUPED is beta: its covariate is not yet a
+  pre-experiment metric, so it reduces almost no variance today
+  ([#217](https://github.com/getexperimently/experimently/issues/217))
 - **5,400+ backend tests, 640+ dashboard tests, 15 SDKs** verified against a live backend in CI
 
 ---
@@ -248,8 +250,9 @@ For questions and issues:
 One codebase, two profiles. The **core profile** is `backend/` and `frontend/`: experiments and
 feature flags end to end, targeting with 20+ operators, gradual rollouts, safety monitoring with
 automatic rollback, scheduling, the full statistics (frequentist and Bayesian, sequential testing,
-CUPED, multi-armed bandits, mutual exclusion groups and global holdouts, dimensional breakdowns,
-interaction detection, live results), the four built-in roles, audit logging, API keys, alerting
+CUPED (beta), multi-armed bandits, mutual exclusion groups and global holdouts, dimensional
+breakdowns, experiment overlap detection (beta: interaction and novelty are not computed yet),
+live results), the four built-in roles, audit logging, API keys, alerting
 and every SDK. The **full profile** adds the optional modules under `modules/`, which plug into
 the core through the registration hooks in `backend/app/core/`:
 

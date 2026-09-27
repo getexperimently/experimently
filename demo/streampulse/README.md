@@ -150,8 +150,8 @@ Keep `traffic.py` running in a terminal throughout so the numbers move.
    streampulse-profile (control shown)`. In `wrapped_2026` the Wrapped card fires `wrapped_view` on
    mount; *Share* fires `share`. In `badges`, tap a badge.
 6. **Onboarding — Bayesian** (`streampulse_onboarding_steps`). Walk the 3- or 5-step flow, finish,
-   press *Play your first track*. Dashboard → Results → Bayesian tab: probability `three_step` beats
-   `five_step`, expected loss, the stopping rule.
+   press *Play your first track*. The dashboard has no Bayesian tab: the probability `three_step`
+   beats `five_step` and the expected loss are in the API, `GET /api/v1/results/{id}/bayesian`.
 7. **Payments — audit trail** (`streampulse_upsell_modal`). *Go Premium* → classic vs value modal →
    *Subscribe*. Dashboard → Admin → Audit log: the seed wrote create/start entries for this
    experiment; every later change is logged too.
