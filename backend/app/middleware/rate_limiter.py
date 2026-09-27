@@ -201,6 +201,14 @@ SDK_PATH_PREFIXES: Tuple[str, ...] = (
 )
 DEFAULT_SDK_RATE_LIMIT_PER_MINUTE = 6000
 
+# Data export: every path under this prefix shares ONE limit per client
+# address, because each export computes results for every experiment it
+# covers. The counter is keyed on the prefix rather than the path (see
+# ``rate_limit_key``), so the five export routes -- and every experiment id
+# under ``/reports/experiments/`` -- draw on the same budget.
+EXPORT_PATH_PREFIX = "/api/v1/export/"
+EXPORT_RATE_LIMIT: Tuple[int, int] = (10, 60)  # 10 req/min, all exports together
+
 
 def resolve_rate_limit(
     path: str, sdk_limit_per_minute: int = DEFAULT_SDK_RATE_LIMIT_PER_MINUTE
@@ -208,15 +216,30 @@ def resolve_rate_limit(
     """
     Return ``(max_requests, window_seconds)`` for a request path.
 
-    Exact entries in ``RATE_LIMIT_CONFIG`` win, then SDK path prefixes, then
-    ``DEFAULT_RATE_LIMIT``.
+    Exact entries in ``RATE_LIMIT_CONFIG`` win, then the export prefix, then
+    SDK path prefixes, then ``DEFAULT_RATE_LIMIT``.
     """
     exact = RATE_LIMIT_CONFIG.get(path)
     if exact is not None:
         return exact
+    if path.startswith(EXPORT_PATH_PREFIX):
+        return EXPORT_RATE_LIMIT
     if any(path.startswith(prefix) for prefix in SDK_PATH_PREFIXES):
         return (int(sdk_limit_per_minute), 60)
     return DEFAULT_RATE_LIMIT
+
+
+def rate_limit_key(client_ip: str, path: str) -> str:
+    """
+    The counter a request is charged to.
+
+    ``client_ip:path`` for every route, except that all export paths share
+    ``client_ip:/api/v1/export/`` -- one budget across the export routes and
+    across the experiment ids in their paths.
+    """
+    if path.startswith(EXPORT_PATH_PREFIX) and path not in RATE_LIMIT_CONFIG:
+        return f"{client_ip}:{EXPORT_PATH_PREFIX}"
+    return f"{client_ip}:{path}"
 
 
 # ---------------------------------------------------------------------------
@@ -261,8 +284,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     """
     Middleware that enforces per-IP, per-route rate limits.
 
-    Rate limits are defined in ``RATE_LIMIT_CONFIG`` for sensitive routes
-    and fall back to ``DEFAULT_RATE_LIMIT`` for everything else.
+    Rate limits are defined in ``RATE_LIMIT_CONFIG`` for sensitive routes,
+    ``EXPORT_RATE_LIMIT`` for the export routes (one counter shared by all of
+    them), the SDK limit for SDK routes, and ``DEFAULT_RATE_LIMIT`` for
+    everything else.
     Responses include standard ``X-RateLimit-*`` headers so clients can
     implement back-off without guessing.
     """
@@ -323,7 +348,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         # Determine the applicable limit for this path
         limit, window = resolve_rate_limit(path, self._sdk_limit)
 
-        rate_key = f"{client_ip}:{path}"
+        rate_key = rate_limit_key(client_ip, path)
         allowed, remaining = self._limiter.is_allowed(rate_key, limit, window)
 
         # Record Prometheus metrics
