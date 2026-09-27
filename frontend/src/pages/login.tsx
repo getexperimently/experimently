@@ -20,8 +20,9 @@ export const INVALID_HOST_DETAIL = 'Invalid host header';
 
 /**
  * The copy for that 400: the API rejected the address this dashboard was
- * opened on, so name that address and the setting that fixes it. Plain text,
- * not links -- a link to this host is exactly what does not work.
+ * opened on, so name that address and the settings that fix it. ALLOWED_HOSTS,
+ * when set, replaces the hosts derived from PUBLIC_BASE_URL, so both are named.
+ * Plain text, not links -- a link to this host is exactly what does not work.
  */
 export function wrongHostMessage(): string {
   const loc = typeof window !== 'undefined' ? window.location : undefined;
@@ -29,7 +30,8 @@ export function wrongHostMessage(): string {
   const origin = loc?.origin || 'the URL people open';
   return (
     `This Experimently server isn't configured for the address you used (${host}). ` +
-    `An administrator needs to set PUBLIC_BASE_URL to ${origin}.`
+    `An administrator needs to set PUBLIC_BASE_URL to ${origin} ` +
+    `(or add ${host} to ALLOWED_HOSTS, if that is set).`
   );
 }
 

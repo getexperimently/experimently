@@ -174,7 +174,8 @@ describe('LoginPage', () => {
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent(
       `This Experimently server isn't configured for the address you used (${window.location.host}). ` +
-        `An administrator needs to set PUBLIC_BASE_URL to ${window.location.origin}.`,
+        `An administrator needs to set PUBLIC_BASE_URL to ${window.location.origin} ` +
+        `(or add ${window.location.host} to ALLOWED_HOSTS, if that is set).`,
     );
     expect(alert).not.toHaveTextContent(/^Invalid host header$/);
     // Plain text: a link to this host is the thing that does not work.
@@ -307,7 +308,8 @@ describe('loginErrorMessage', () => {
     expect(loginErrorMessage(new ApiError({ status: 500, detail: 'boom' }))).toBe('boom');
     expect(loginErrorMessage(new ApiError({ status: 400, detail: 'Invalid host header' }))).toBe(
       `This Experimently server isn't configured for the address you used (${window.location.host}). ` +
-        `An administrator needs to set PUBLIC_BASE_URL to ${window.location.origin}.`,
+        `An administrator needs to set PUBLIC_BASE_URL to ${window.location.origin} ` +
+        `(or add ${window.location.host} to ALLOWED_HOSTS, if that is set).`,
     );
     // Only that exact 400: any other 400 keeps its own detail.
     expect(loginErrorMessage(new ApiError({ status: 400, detail: 'Bad email' }))).toBe('Bad email');
