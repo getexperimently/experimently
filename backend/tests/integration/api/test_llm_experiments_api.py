@@ -608,6 +608,29 @@ class TestGeminiComplete:
             "detail": "LLM provider error: GEMINI_API_KEY is not set"
         }
 
+    def test_unreadable_usage_is_a_502_not_a_400(self, admin_client, monkeypatch):
+        body = {
+            "candidates": [{"content": {"parts": [{"text": "Paris"}]}}],
+            "usageMetadata": {"promptTokenCount": "abc"},
+        }
+        response = self._run(admin_client, monkeypatch, "Gemini bad usage", 200, body)
+        assert response.status_code == 502, response.text
+        assert response.json()["detail"].startswith("LLM provider error: Gemini")
+
+    def test_safety_refusal_is_a_502_naming_the_reason(self, admin_client, monkeypatch):
+        body = {"candidates": [{"finishReason": "SAFETY"}]}
+        response = self._run(admin_client, monkeypatch, "Gemini refusal", 200, body)
+        assert response.status_code == 502, response.text
+        assert "finishReason=SAFETY" in response.json()["detail"]
+
+    def test_max_tokens_with_no_text_is_an_empty_completion(
+        self, admin_client, monkeypatch
+    ):
+        body = {"candidates": [{"finishReason": "MAX_TOKENS"}]}
+        response = self._run(admin_client, monkeypatch, "Gemini max", 200, body)
+        assert response.status_code == 200, response.text
+        assert response.json()["response"] == ""
+
     def test_server_error_is_a_502_provider_error(self, admin_client, monkeypatch):
         body = {"error": {"code": 500, "message": "Internal error."}}
         response = self._run(admin_client, monkeypatch, "Gemini 500", 500, body)

@@ -165,6 +165,16 @@ GEMINI_DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com"
 #: The longest provider error message copied into our own error, so an
 #: unexpected body cannot make the 502 detail (or a log line) arbitrarily long.
 _GEMINI_ERROR_DETAIL_MAX = 300
+#: Finish reasons after which a candidate with no text is an empty completion.
+#: ``None`` is a candidate that carries no finishReason at all.
+_GEMINI_ORDINARY_FINISH = frozenset(
+    {None, "STOP", "MAX_TOKENS", "FINISH_REASON_UNSPECIFIED"}
+)
+
+
+def _bounded(value: Any) -> str:
+    """A provider-supplied value, as text no longer than the error bound."""
+    return str(value)[:_GEMINI_ERROR_DETAIL_MAX]
 
 
 class GoogleProvider(BaseProvider):
@@ -224,6 +234,23 @@ class GoogleProvider(BaseProvider):
 
     @staticmethod
     def _parse(data: Any) -> ProviderResponse:
+        """Map a generateContent body to a ProviderResponse.
+
+        Anything unexpected -- including a ValueError or TypeError from a
+        field of the wrong type -- becomes a GeminiError, so ``/complete``
+        answers its 502 rather than the 400 it gives a ValueError.
+        """
+        try:
+            return GoogleProvider._parse_unchecked(data)
+        except GeminiError:
+            raise
+        except (ValueError, TypeError, AttributeError, KeyError) as exc:
+            raise GeminiError(
+                f"Gemini returned a response we cannot read ({type(exc).__name__})"
+            ) from exc
+
+    @staticmethod
+    def _parse_unchecked(data: Any) -> ProviderResponse:
         if not isinstance(data, dict):
             raise GeminiError("Gemini returned a response body that is not an object")
         candidates = data.get("candidates")
@@ -232,11 +259,8 @@ class GoogleProvider(BaseProvider):
             reason = feedback.get("blockReason") if isinstance(feedback, dict) else None
             raise GeminiError(
                 "Gemini returned no candidates"
-                + (f" (blockReason={reason})" if reason else "")
+                + (f" (blockReason={_bounded(reason)})" if reason else "")
             )
-        # A candidate with no content (finishReason MAX_TOKENS before any
-        # text, say) is an empty completion, not an error; a content whose
-        # shape is not the documented one is.
         candidate = candidates[0] if isinstance(candidates, list) else None
         content = candidate.get("content", {}) if isinstance(candidate, dict) else None
         parts = content.get("parts", []) if isinstance(content, dict) else None
@@ -245,6 +269,17 @@ class GoogleProvider(BaseProvider):
         text = "".join(
             str(p["text"]) for p in parts if isinstance(p, dict) and "text" in p
         )
+        # No text is an empty completion only when the model stopped for an
+        # ordinary reason (MAX_TOKENS before any text, say). Any other finish
+        # reason with no text -- SAFETY, RECITATION, BLOCKLIST,
+        # PROHIBITED_CONTENT, SPII, OTHER, or a value added after this was
+        # written -- is a refusal, and reported as one rather than recorded
+        # as an empty answer.
+        finish = candidate.get("finishReason") if isinstance(candidate, dict) else None
+        if not text and finish not in _GEMINI_ORDINARY_FINISH:
+            raise GeminiError(
+                f"Gemini returned no text (finishReason={_bounded(finish)})"
+            )
         usage = data.get("usageMetadata") or {}
         if not isinstance(usage, dict):
             usage = {}

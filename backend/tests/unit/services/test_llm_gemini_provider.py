@@ -202,9 +202,68 @@ async def test_a_candidate_with_no_content_is_an_empty_completion():
     assert (result.text, result.input_tokens, result.output_tokens) == ("", 0, 0)
 
 
+async def test_a_candidate_with_no_finish_reason_and_no_content_is_empty():
+    body = {"candidates": [{}]}
+    result = await _provider(200, body).complete("gemini-1.5-flash", MESSAGES)
+    assert result.text == ""
+
+
+@pytest.mark.parametrize(
+    "reason",
+    ["SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII", "OTHER"],
+)
+async def test_a_refusal_with_no_content_raises_naming_the_reason(reason):
+    """A refusal must be distinguishable from an empty answer."""
+    body = {"candidates": [{"finishReason": reason}]}
+    with pytest.raises(GeminiError, match=f"finishReason={reason}"):
+        await _provider(200, body).complete("gemini-1.5-flash", MESSAGES)
+
+
+async def test_a_refusal_after_partial_text_keeps_the_text():
+    body = {
+        "candidates": [
+            {"content": {"parts": [{"text": "Par"}]}, "finishReason": "SAFETY"}
+        ]
+    }
+    result = await _provider(200, body).complete("gemini-1.5-flash", MESSAGES)
+    assert result.text == "Par"
+
+
 async def test_blocked_prompt_names_the_reason():
     body = {"promptFeedback": {"blockReason": "SAFETY"}}
     with pytest.raises(GeminiError, match="blockReason=SAFETY"):
+        await _provider(200, body).complete("gemini-1.5-flash", MESSAGES)
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"promptFeedback": {"blockReason": "B" * 5000}},
+        {"candidates": [{"finishReason": "F" * 5000}]},
+    ],
+    ids=["blockReason", "finishReason"],
+)
+async def test_provider_reason_text_is_bounded(body):
+    with pytest.raises(GeminiError) as info:
+        await _provider(200, body).complete("gemini-1.5-flash", MESSAGES)
+    assert len(str(info.value)) < 400
+
+
+@pytest.mark.parametrize(
+    "usage",
+    [
+        {"promptTokenCount": "abc"},
+        {"candidatesTokenCount": "1.5x"},
+        {"promptTokenCount": [1]},
+        {"promptTokenCount": {"n": 1}},
+    ],
+    ids=["non-numeric", "bad-float", "list", "dict"],
+)
+async def test_unreadable_usage_is_a_provider_error_not_a_value_error(usage):
+    """A bare ValueError would reach /complete's ``except ValueError`` and
+    answer 400 as if the caller had sent a bad request."""
+    body = {**RECORDED_OK, "usageMetadata": usage}
+    with pytest.raises(GeminiError, match="cannot read"):
         await _provider(200, body).complete("gemini-1.5-flash", MESSAGES)
 
 
