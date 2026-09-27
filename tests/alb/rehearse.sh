@@ -12,6 +12,12 @@
 #   PUBLIC_HOST  the host PUBLIC_BASE_URL names  (default app.example.test)
 #   ADMIN_EMAIL / ADMIN_PASSWORD  the seeded demo admin (docker-compose.yml's
 #                FIRST_SUPERUSER defaults)
+#   TOPOLOGY     alb (default) or compose. `compose` is the production compose
+#                file (deploy/compose/compose.yml), run by the compose-production
+#                workflow with ALB_URL pointed at the dashboard's published
+#                port: there the dashboard proxies /api, so check 4 asserts
+#                instead that the api container is not reachable at API_URL
+#                (default http://localhost:8000). Every other check is the same.
 #
 # Responses go to files, never into a pipe: `curl | grep -q` makes curl exit
 # 23 (SIGPIPE) on a large page, and a pipe hides curl's own status.
@@ -22,6 +28,16 @@ WEB_URL="${WEB_URL:-http://localhost:3000}"
 PUBLIC_HOST="${PUBLIC_HOST:-app.example.test}"
 ADMIN_EMAIL="${ADMIN_EMAIL:-admin@demo.com}"
 ADMIN_PASSWORD="${ADMIN_PASSWORD:-Demo1234!}"
+TOPOLOGY="${TOPOLOGY:-alb}"
+API_URL="${API_URL:-http://localhost:8000}"
+
+case "$TOPOLOGY" in
+    alb | compose) ;;
+    *)
+        echo "TOPOLOGY must be alb or compose, got '$TOPOLOGY'" >&2
+        exit 2
+        ;;
+esac
 
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
@@ -62,11 +78,20 @@ code="$(status "$work/foreign.json" -H "Host: not-$PUBLIC_HOST" "$ALB_URL/api/v1
 test "$code" = "400" || fail "expected 400 for a Host the API does not serve, got $code: the Host check is off"
 echo "ok  /api/v1/experiments/ with Host: not-$PUBLIC_HOST: 400 (Host check on)"
 
-# 4. The dashboard's nginx does not proxy /api (API_UPSTREAM is unreachable, as
-#    in AWS), so check 2 cannot have been answered through it.
-code="$(status "$work/web-api.txt" "$WEB_URL/api/v1/experiments/")"
-test "$code" = "502" || fail "expected 502 from the dashboard container's /api (it must not proxy), got $code"
-echo "ok  the dashboard container does not proxy /api: 502"
+if [ "$TOPOLOGY" = "alb" ]; then
+    # 4. The dashboard's nginx does not proxy /api (API_UPSTREAM is unreachable,
+    #    as in AWS), so check 2 cannot have been answered through it.
+    code="$(status "$work/web-api.txt" "$WEB_URL/api/v1/experiments/")"
+    test "$code" = "502" || fail "expected 502 from the dashboard container's /api (it must not proxy), got $code"
+    echo "ok  the dashboard container does not proxy /api: 502"
+else
+    # 4. compose: the dashboard IS the front door and proxies /api, so the API
+    #    container must not be reachable any other way. curl reports 000 when
+    #    nothing listens; any HTTP status means the port is published.
+    code="$(status "$work/api-direct.txt" "$API_URL/health/live")"
+    test "$code" = "000" || fail "the api container answers directly on $API_URL (got $code); only the dashboard may publish a port"
+    echo "ok  the api container is not published on $API_URL"
+fi
 
 # 5. The default action serves the dashboard: the static export's HTML, with
 #    the dashboard nginx's CSP.
