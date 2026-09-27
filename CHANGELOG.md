@@ -10,6 +10,27 @@ longer applies and release-please can generate this file directly. Until it
 does, entries below 0.2.2 are hand-written and the links in them are the
 reason why.
 
+## [0.7.0](https://github.com/getexperimently/experimently/compare/v0.6.0...v0.7.0) (2026-09-27)
+
+
+### ⚠ BREAKING CHANGES
+
+* **rules:** regex targeting conditions (`regex` in the dashboard, `match_regex` in the rules engine) now use RE2 syntax (https://github.com/google/re2/wiki/Syntax), which differs from Python's:
+    - `\w`, `\d`, `\s` and `\b` match ASCII only.
+    - `$` matches only at the very end of the value, not before a final
+    newline.
+    - These are refused: lookahead and lookbehind, backreferences, `\Z`,
+    `(?x)`, `(?u)`, `(?a)`, `\N{...}`, counted repetitions over 1000, and
+    very large Unicode repetitions such as `[\p{L}\p{N}]{1,300}`.
+    - Values longer than 256 characters are not evaluated.
+
+### Bug Fixes
+
+* **api:** export endpoints share one limit of 10 requests a minute per client ([#261](https://github.com/getexperimently/experimently/issues/261)) ([00870e4](https://github.com/getexperimently/experimently/commit/00870e4870ff3e13e0a2ac2265f5ba5e4f8efb84))
+* **api:** exports carry the same results as the results API, and the report honours format=csv ([#259](https://github.com/getexperimently/experimently/issues/259)) ([c11a4a0](https://github.com/getexperimently/experimently/commit/c11a4a04415a4d23f50dec796f1ac757e27b8648))
+* **rules:** regex conditions use RE2 syntax ([#260](https://github.com/getexperimently/experimently/issues/260)) ([5a3c940](https://github.com/getexperimently/experimently/commit/5a3c940dae073e377fe994bcd628c6436220e435))
+* **segments:** audience preview rejects oversized rulesets ([#268](https://github.com/getexperimently/experimently/issues/268)) ([b654656](https://github.com/getexperimently/experimently/commit/b6546563856cf511173c292d751ce8247b5d2c1b))
+
 ## [0.6.0](https://github.com/getexperimently/experimently/compare/v0.5.0...v0.6.0) (2026-09-27)
 
 
