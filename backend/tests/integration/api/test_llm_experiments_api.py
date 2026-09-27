@@ -532,6 +532,89 @@ class TestLLMComplete:
         assert response.status_code == 200
 
 
+def _gemini_payload(name: str) -> dict:
+    payload = _base_payload(name)
+    for variant in payload["variants"]:
+        variant["provider"] = "google"
+        variant["model_name"] = "gemini-1.5-flash"
+    return payload
+
+
+@pytest.mark.integration
+@pytest.mark.requires_db
+@pytest.mark.regression
+class TestGeminiComplete:
+    """``/complete`` through the real Gemini provider, against a recorded
+    response on ``httpx.MockTransport`` -- only the transport is replaced (#196).
+
+    Before the REST port the provider imported ``google.generativeai``, which
+    the image does not ship, so every Gemini variant answered 502 with
+    ``No module named 'google'``.
+    """
+
+    KEY = "test-gemini-key-not-real"
+
+    def _run(self, client, monkeypatch, name: str, status: int, body: dict, key=KEY):
+        import httpx
+
+        from backend.app.services import llm_proxy_service
+
+        if key is None:
+            monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+        else:
+            monkeypatch.setenv("GEMINI_API_KEY", key)
+        monkeypatch.delenv("GEMINI_BASE_URL", raising=False)
+        provider = llm_proxy_service.GoogleProvider(
+            transport=httpx.MockTransport(
+                lambda request: httpx.Response(status, json=body)
+            )
+        )
+        monkeypatch.setitem(llm_proxy_service.PROVIDERS, "google", provider)
+
+        exp_id = client.post(
+            "/api/v1/llm-experiments/", json=_gemini_payload(name)
+        ).json()["id"]
+        client.post(f"/api/v1/llm-experiments/{exp_id}/start")
+        return client.post(
+            f"/api/v1/llm-experiments/{exp_id}/complete",
+            json={"user_id": "user-1", "input_variables": {"question": "Capital?"}},
+        )
+
+    def test_success_returns_the_completion(self, admin_client, monkeypatch):
+        body = {
+            "candidates": [{"content": {"parts": [{"text": "Paris"}]}}],
+            "usageMetadata": {"promptTokenCount": 7, "candidatesTokenCount": 1},
+        }
+        response = self._run(admin_client, monkeypatch, "Gemini OK", 200, body)
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert data["provider"] == "google"
+        assert data["response"] == "Paris"
+
+    def test_auth_error_is_a_502_provider_error(self, admin_client, monkeypatch):
+        body = {"error": {"code": 400, "message": "API key not valid."}}
+        response = self._run(admin_client, monkeypatch, "Gemini 400", 400, body)
+        assert response.status_code == 502, response.text
+        detail = response.json()["detail"]
+        assert detail.startswith("LLM provider error: Gemini API returned HTTP 400")
+        assert self.KEY not in response.text
+
+    def test_missing_key_is_the_documented_502(self, admin_client, monkeypatch):
+        response = self._run(
+            admin_client, monkeypatch, "Gemini no key", 200, {}, key=None
+        )
+        assert response.status_code == 502, response.text
+        assert response.json() == {
+            "detail": "LLM provider error: GEMINI_API_KEY is not set"
+        }
+
+    def test_server_error_is_a_502_provider_error(self, admin_client, monkeypatch):
+        body = {"error": {"code": 500, "message": "Internal error."}}
+        response = self._run(admin_client, monkeypatch, "Gemini 500", 500, body)
+        assert response.status_code == 502, response.text
+        assert "HTTP 500" in response.json()["detail"]
+
+
 # ---------------------------------------------------------------------------
 # Evaluation / rating tests
 # ---------------------------------------------------------------------------

@@ -145,7 +145,10 @@ The response names the variant and the model, and carries the model's reply with
 ```
 
 The provider keys are the API's environment variables, such as `OPENAI_API_KEY` and
-`ANTHROPIC_API_KEY`.
+`ANTHROPIC_API_KEY`. A `google` variant calls the Gemini REST API with the key in
+`GEMINI_API_KEY`; `GEMINI_BASE_URL` (default `https://generativelanguage.googleapis.com`)
+points it at a proxy or gateway instead. With no `GEMINI_API_KEY`, a Gemini variant's
+completion answers `502 {"detail":"LLM provider error: GEMINI_API_KEY is not set"}`.
 
 ---
 

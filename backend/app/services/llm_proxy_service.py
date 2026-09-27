@@ -6,11 +6,14 @@ estimates cost, and stores LLMEvaluation records.
 """
 
 import logging
+import os
 import re
 import time
 from typing import Any, Dict, Optional
+from urllib.parse import quote
 from uuid import UUID
 
+import httpx
 from sqlalchemy.orm import Session
 
 from backend.app.core.anthropic_compat import drop_unsupported_sampling, first_text
@@ -145,8 +148,111 @@ class OpenAIProvider(BaseProvider):
             raise
 
 
+class GeminiError(RuntimeError):
+    """A Gemini API call failed: no key, an HTTP error, or a body we cannot read.
+
+    Raised rather than returned so the ``/complete`` endpoint maps it to the
+    same ``502 LLM provider error`` as every other provider's failure.
+    """
+
+
+#: The API key, sent as the ``x-goog-api-key`` header. The name is the one
+#: Google's Gemini API documentation uses.
+GEMINI_API_KEY_ENV = "GEMINI_API_KEY"
+#: Overrides the API's origin -- a proxy, a gateway, or a stub in tests.
+GEMINI_BASE_URL_ENV = "GEMINI_BASE_URL"
+GEMINI_DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com"
+#: The longest provider error message copied into our own error, so an
+#: unexpected body cannot make the 502 detail (or a log line) arbitrarily long.
+_GEMINI_ERROR_DETAIL_MAX = 300
+
+
 class GoogleProvider(BaseProvider):
-    """Google Gemini provider."""
+    """Google Gemini provider, over the Gemini REST API.
+
+    ``POST {GEMINI_BASE_URL}/v1beta/models/{model}:generateContent`` with the
+    key from ``GEMINI_API_KEY``. It uses the ``httpx`` the API already pins:
+    the ``google-generativeai`` SDK this used to import was never installed in
+    the image, so every Gemini variant failed (#196).
+
+    ``transport`` is for tests (``httpx.MockTransport``); production passes none.
+    """
+
+    def __init__(self, transport: Optional[Any] = None):
+        self._transport = transport
+
+    @staticmethod
+    def _request_body(
+        messages: list, temperature: float, max_tokens: int, extra: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        system_parts = []
+        contents = []
+        for msg in messages:
+            role = msg.get("role")
+            text = str(msg.get("content", ""))
+            if role == "system":
+                system_parts.append({"text": text})
+            else:
+                # Gemini calls the assistant turn "model".
+                contents.append(
+                    {
+                        "role": "model" if role == "assistant" else "user",
+                        "parts": [{"text": text}],
+                    }
+                )
+        body: Dict[str, Any] = {
+            "contents": contents,
+            # The variant's free-form additional_params go into the generation
+            # config, where Gemini's sampling settings (topP, topK, ...) live.
+            "generationConfig": {
+                "temperature": temperature,
+                "maxOutputTokens": max_tokens,
+                **extra,
+            },
+        }
+        if system_parts:
+            body["systemInstruction"] = {"parts": system_parts}
+        return body
+
+    @staticmethod
+    def _error_detail(response: Any) -> str:
+        try:
+            message = response.json()["error"]["message"]
+        except Exception:
+            message = response.text
+        return str(message)[:_GEMINI_ERROR_DETAIL_MAX]
+
+    @staticmethod
+    def _parse(data: Any) -> ProviderResponse:
+        if not isinstance(data, dict):
+            raise GeminiError("Gemini returned a response body that is not an object")
+        candidates = data.get("candidates")
+        if not candidates:
+            feedback = data.get("promptFeedback") or {}
+            reason = feedback.get("blockReason") if isinstance(feedback, dict) else None
+            raise GeminiError(
+                "Gemini returned no candidates"
+                + (f" (blockReason={reason})" if reason else "")
+            )
+        # A candidate with no content (finishReason MAX_TOKENS before any
+        # text, say) is an empty completion, not an error; a content whose
+        # shape is not the documented one is.
+        candidate = candidates[0] if isinstance(candidates, list) else None
+        content = candidate.get("content", {}) if isinstance(candidate, dict) else None
+        parts = content.get("parts", []) if isinstance(content, dict) else None
+        if not isinstance(parts, list):
+            raise GeminiError("Gemini returned a candidate we cannot read")
+        text = "".join(
+            str(p["text"]) for p in parts if isinstance(p, dict) and "text" in p
+        )
+        usage = data.get("usageMetadata") or {}
+        if not isinstance(usage, dict):
+            usage = {}
+        return ProviderResponse(
+            text=text,
+            input_tokens=int(usage.get("promptTokenCount") or 0),
+            output_tokens=int(usage.get("candidatesTokenCount") or 0),
+        )
 
     async def complete(
         self,
@@ -157,27 +263,44 @@ class GoogleProvider(BaseProvider):
         **kwargs: Any,
     ) -> ProviderResponse:
         try:
-            import google.generativeai as genai  # type: ignore
+            api_key = os.environ.get(GEMINI_API_KEY_ENV, "")
+            if not api_key:
+                raise GeminiError(f"{GEMINI_API_KEY_ENV} is not set")
+            base_url = (
+                os.environ.get(GEMINI_BASE_URL_ENV) or GEMINI_DEFAULT_BASE_URL
+            ).rstrip("/")
+            # Quoted whole, so a model name cannot add path segments or a
+            # query to the request; "models/gemini-x" and "gemini-x" both work.
+            model_id = quote(model.removeprefix("models/"), safe="")
+            url = f"{base_url}/v1beta/models/{model_id}:generateContent"
+            body = self._request_body(messages, temperature, max_tokens, kwargs)
 
-            # Combine messages into a single prompt for simplicity
-            prompt = "\n".join(
-                m.get("content", "") for m in messages if m.get("role") != "system"
-            )
-            model_obj = genai.GenerativeModel(model)
-            response = await model_obj.generate_content_async(
-                prompt,
-                generation_config={
-                    "temperature": temperature,
-                    "max_output_tokens": max_tokens,
-                },
-            )
-            text = response.text if response.text else ""
-            # Gemini doesn't always expose token counts — approximate
-            input_tok = len(prompt.split())
-            output_tok = len(text.split())
-            return ProviderResponse(
-                text=text, input_tokens=input_tok, output_tokens=output_tok
-            )
+            try:
+                async with httpx.AsyncClient(
+                    transport=self._transport, timeout=60
+                ) as client:
+                    response = await client.post(
+                        url, json=body, headers={"x-goog-api-key": api_key}
+                    )
+            except httpx.HTTPError as exc:
+                # The key travels in a header, never the URL, so the message
+                # of a transport error does not carry it.
+                raise GeminiError(
+                    f"Gemini request failed: {type(exc).__name__}"
+                ) from exc
+
+            if response.status_code >= 400:
+                raise GeminiError(
+                    f"Gemini API returned HTTP {response.status_code}: "
+                    f"{self._error_detail(response)}"
+                )
+            try:
+                data = response.json()
+            except ValueError as exc:
+                raise GeminiError(
+                    "Gemini returned a response that is not JSON"
+                ) from exc
+            return self._parse(data)
         except Exception as exc:
             logger.error(f"Google completion failed: {exc}")
             raise
