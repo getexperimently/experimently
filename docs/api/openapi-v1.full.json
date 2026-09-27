@@ -15115,7 +15115,7 @@
   "info": {
     "description": "API for managing experiments and feature flags in test environment",
     "title": "Experimently",
-    "version": "0.6.0"
+    "version": "0.7.0"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -20812,14 +20812,14 @@
             }
           },
           {
-            "description": "Data scope",
+            "description": "Data scope. Only `summary` is available: `events` and `assignments` answer 422.",
             "in": "query",
             "name": "scope",
             "required": false,
             "schema": {
               "$ref": "#/components/schemas/ExportScope",
               "default": "summary",
-              "description": "Data scope"
+              "description": "Data scope. Only `summary` is available: `events` and `assignments` answer 422."
             }
           },
           {
@@ -20866,6 +20866,11 @@
             "content": {
               "application/json": {
                 "schema": {}
+              },
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
               }
             },
             "description": "Successful Response"
@@ -20953,6 +20958,11 @@
             "content": {
               "application/json": {
                 "schema": {}
+              },
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
               }
             },
             "description": "Successful Response"
@@ -20982,7 +20992,7 @@
     },
     "/api/v1/export/reports/experiments/{experiment_id}": {
       "get": {
-        "description": "Returns a JSON report for a single experiment, including all variant data and summary statistics.",
+        "description": "Returns a report for a single experiment: with `format=json` (the default) its experiment row and variant rows, with `format=csv` its variant rows as CSV, in the columns of GET /api/v1/export/variants.",
         "operationId": "get_experiment_report_api_v1_export_reports_experiments__experiment_id__get",
         "parameters": [
           {
@@ -20990,6 +21000,7 @@
             "name": "experiment_id",
             "required": true,
             "schema": {
+              "format": "uuid",
               "title": "Experiment Id",
               "type": "string"
             }
@@ -21011,9 +21022,17 @@
             "content": {
               "application/json": {
                 "schema": {}
+              },
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
               }
             },
             "description": "Successful Response"
+          },
+          "404": {
+            "description": "No experiment has this id."
           },
           "422": {
             "content": {
@@ -21116,7 +21135,7 @@
     },
     "/api/v1/export/variants": {
       "get": {
-        "description": "Download per-variant results for all (or filtered) experiments. Requires authentication.",
+        "description": "Download per-variant results for all (or filtered) experiments. Each variant's numbers are its primary-metric result, as GET /api/v1/results/{experiment_id} reports it. Requires authentication.",
         "operationId": "export_variants_api_v1_export_variants_get",
         "parameters": [
           {
@@ -21131,14 +21150,14 @@
             }
           },
           {
-            "description": "Data scope",
+            "description": "Data scope. Only `summary` is available: `events` and `assignments` answer 422.",
             "in": "query",
             "name": "scope",
             "required": false,
             "schema": {
               "$ref": "#/components/schemas/ExportScope",
               "default": "summary",
-              "description": "Data scope"
+              "description": "Data scope. Only `summary` is available: `events` and `assignments` answer 422."
             }
           },
           {
@@ -21185,6 +21204,11 @@
             "content": {
               "application/json": {
                 "schema": {}
+              },
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
               }
             },
             "description": "Successful Response"
@@ -32629,7 +32653,7 @@
       "name": "SSO"
     },
     {
-      "description": "EP-057: Multi-Tenant Team Workspaces — create isolated project namespaces, manage team memberships with role-based access (OWNER/ADMIN/DEVELOPER/ANALYST/VIEWER), send and accept email invites, and issue scoped workspace API keys.",
+      "description": "EP-057: Team Workspaces — group users into teams with workspace roles (OWNER/ADMIN/DEVELOPER/ANALYST/VIEWER) and send and accept email invites. Workspaces do not limit access to experiments or feature flags, which is by platform role. Workspace API keys are not yet accepted by the SDK or tracking endpoints; use a platform API key.",
       "name": "Workspaces"
     },
     {

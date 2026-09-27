@@ -44,6 +44,11 @@ PROBE_PATHS: frozenset = frozenset(
     {"/health", "/health/live", "/health/ready", "/metrics"}
 )
 
+# How much of a refused ``Host`` reaches the log. The value is attacker-sized,
+# so it is cut here; a longer one is only shortened in the log, it is refused
+# the same way.
+MAX_LOGGED_HOST = 200
+
 
 def _host_matches(host: str, pattern: str) -> bool:
     """``host`` against one allow-list entry, with a leading ``*.`` wildcard.
@@ -98,10 +103,19 @@ class TrustedHostMiddleware(BaseHTTPMiddleware):
         if any(_host_matches(host, p) for p in self.allowed_hosts):
             return await call_next(request)
 
-        # Log the rejected value, not the allow-list: the allow-list is
-        # configuration and the value is the evidence. Truncated because it is
-        # attacker-controlled and unbounded.
-        logger.warning("rejected a request with an untrusted Host: %r", raw[:128])
+        # The line an operator reads when every /api/* call fails while the
+        # exempt probes stay green: it names the refused value, what this
+        # deployment answers on, and the setting that changes it. The Host is
+        # client-controlled and unbounded, so it is truncated BEFORE it is
+        # formatted, and logged as a repr so any control character arrives
+        # escaped. The allow-list is our own configuration, not request data.
+        logger.warning(
+            "rejected a request with Host %r; this deployment answers on %s. "
+            "Set PUBLIC_BASE_URL (or ALLOWED_HOSTS, which takes precedence "
+            "when set) to the URL clients use.",
+            raw[:MAX_LOGGED_HOST],
+            ", ".join(self.allowed_hosts),
+        )
         return JSONResponse(
             status_code=400,
             content={"detail": "Invalid host header"},

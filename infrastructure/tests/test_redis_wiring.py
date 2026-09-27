@@ -9,7 +9,7 @@ back to per-task memory and the caches were skipped, with nothing reporting it.
 
 And even with the right host they would have failed: the replication group has
 in-transit encryption on, so it refuses a plaintext client. ``REDIS_SSL`` is
-what makes every client speak TLS (``backend/tests/unit/core/test_redis_tls.py``
+what makes every client speak TLS (``backend/tests/unit/core/test_redis_connection.py``
 proves each one honours it); this file proves the task sets it.
 
 Everything is asserted on a real ``app.synth()``: the value each variable
