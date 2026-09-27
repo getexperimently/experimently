@@ -199,5 +199,5 @@ Verified against a live backend: **yes (2026-09-11)** — fixtures seeded with
 ```bash
 source venv/bin/activate
 python -m pytest sdk/python/tests -q -o addopts="" -p no:cacheprovider   # 97 tests, HTTP is faked
-python -m pytest tests/sdk-contract/test_python_sdk.py -q               # cross-SDK hash golden vectors
+python tests/sdk-contract/hash_contract.py python                      # this SDK's hash vs the golden vectors
 ```

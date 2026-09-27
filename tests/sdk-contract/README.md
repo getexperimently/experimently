@@ -22,11 +22,11 @@ the MD5 digest where the SDK exports one, the rollout inclusions, and exactly 9 
 `--list` names every other `sdk/` directory and why this job does not run it (iOS needs
 CommonCrypto, Android a Kotlin build; their own hash tests run in `sdk-unit-tests.yml`), and fails
 on a directory it does not classify. These run in the `SDK Contract Tests` job of the PR gate, one
-step per SDK, and need no backend.
+step per SDK, and need no backend. The pytest run is the comparison's own tests.
 
 ```bash
 python tests/sdk-contract/hash_contract.py --list
-python -m pytest tests/sdk-contract -q -o addopts=""     # the comparison's own tests
+python -m pytest tests/sdk-contract -q -o addopts=""
 python tests/sdk-contract/hash_contract.py python js edge react-native go
 ```
 
