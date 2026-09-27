@@ -132,6 +132,96 @@ COMPOSE = "deploy/compose/compose.yml"
 
 def _checkable_copy(tmp_path: Path) -> Path:
     """A copy of everything the checker reads, verified to pass untouched."""
+    copy = _checker_tree(tmp_path)
+    baseline = run_checker(tree=copy)
+    assert baseline.returncode == 0, (
+        "the copy does not pass before tampering, so a failure after tampering "
+        f"would prove nothing:\n{baseline.stdout}\n{baseline.stderr}"
+    )
+    return copy
+
+
+def test_checker_rejects_a_drifting_manifest(tmp_path: Path) -> None:
+    """Break the invariant in a copy of the tree; the gate must notice.
+
+    A copy rather than the real tree: a gate test that edits the files it
+    guards leaves the repository broken when it fails half way.
+
+    The copy is assembled file by file rather than taken with ``git worktree``,
+    which is how this was written first and which ``make core-build`` promptly
+    failed -- the core build's tree is a deliberate *non*-repository copy, so
+    ``git worktree add`` exits 128 there. Everything the checker reads is
+    listed below (2.6 MB, well under a second); anything it needs that is not
+    here shows up as the baseline assertion failing, not as a false pass.
+    """
+    copy = _checkable_copy(tmp_path)
+
+    (copy / ".release-please-manifest.json").write_text(
+        json.dumps({".": "42.0.0"}, indent=2) + "\n", encoding="utf-8"
+    )
+    tampered = run_checker(tree=copy)
+    assert tampered.returncode != 0, (
+        "the gate passed with the manifest at 42.0.0 and VERSION elsewhere:\n"
+        + tampered.stdout
+    )
+    assert "disagree" in tampered.stderr
+
+
+@pytest.mark.parametrize("field", ["version", "appVersion"])
+def test_checker_rejects_a_stale_chart_line(tmp_path: Path, field: str) -> None:
+    """One Chart.yaml line left behind by a release must fail the gate.
+
+    release-please's `generic` updater rewrites a line only if it carries the
+    `x-release-please-version` marker, and says nothing when a line has none --
+    and the release pull request runs no checks. This is where that shows up.
+    """
+    copy = _checker_tree(tmp_path)
+    chart = copy / "charts" / "experimently" / "Chart.yaml"
+    text = chart.read_text(encoding="utf-8")
+    line = re.compile(rf'^({field}:\s*"?)([^"\s#]+)', re.M)
+    assert line.search(text), f"Chart.yaml has no {field}: line"
+    chart.write_text(line.sub(r"\g<1>0.0.1", text, count=1), encoding="utf-8")
+
+    tampered = run_checker(tree=copy)
+    assert tampered.returncode != 0, (
+        f"the gate passed with Chart.yaml {field} at 0.0.1:\n" + tampered.stdout
+    )
+    assert "disagree" in tampered.stderr
+    assert f"Chart.yaml {field}: 0.0.1" in tampered.stderr
+
+
+def test_checker_refuses_a_missing_chart(tmp_path: Path) -> None:
+    """No Chart.yaml is a failure, not a skipped source."""
+    copy = _checker_tree(tmp_path)
+    (copy / "charts" / "experimently" / "Chart.yaml").unlink()
+    result = run_checker(tree=copy)
+    assert result.returncode != 0, result.stdout
+    assert "Chart.yaml version: could not be read" in result.stderr
+
+
+def test_release_please_rewrites_the_chart_through_its_markers() -> None:
+    """Chart.yaml is a `generic` extra-file, and both lines carry the marker.
+
+    Never `type: yaml`: that updater round-trips the file through js-yaml and
+    drops every comment in it, the markers included.
+    """
+    config = json.loads(
+        (ROOT / "release-please-config.json").read_text(encoding="utf-8")
+    )
+    entries = [
+        e
+        for e in config["packages"]["."]["extra-files"]
+        if isinstance(e, dict) and e.get("path") == "charts/experimently/Chart.yaml"
+    ]
+    assert entries == [{"type": "generic", "path": "charts/experimently/Chart.yaml"}]
+    lines = (ROOT / "charts" / "experimently" / "Chart.yaml").read_text().splitlines()
+    for field in ("version", "appVersion"):
+        (line,) = [x for x in lines if x.startswith(f"{field}:")]
+        assert line.rstrip().endswith("# x-release-please-version"), line
+
+
+def _checker_tree(tmp_path: Path) -> Path:
+    """Everything check_version_sources.py reads, copied out of the tree."""
     copy = tmp_path / "tree"
     (copy / "scripts").mkdir(parents=True)
     (copy / "deploy" / "compose").mkdir(parents=True)
@@ -160,11 +250,11 @@ def _checkable_copy(tmp_path: Path) -> Path:
         ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
     )
     (copy / "backend" / "__init__.py").touch()
-
-    baseline = run_checker(tree=copy)
-    assert baseline.returncode == 0, (
-        "the copy does not pass before tampering, so a failure after tampering "
-        f"would prove nothing:\n{baseline.stdout}\n{baseline.stderr}"
+    # The Helm chart's version and appVersion are sources too.
+    (copy / "charts" / "experimently").mkdir(parents=True)
+    shutil.copy2(
+        ROOT / "charts" / "experimently" / "Chart.yaml",
+        copy / "charts" / "experimently" / "Chart.yaml",
     )
     return copy
 
@@ -172,32 +262,6 @@ def _checkable_copy(tmp_path: Path) -> Path:
 def _image_line(text: str, repo: str) -> str:
     (line,) = [line for line in text.splitlines() if f"image: {repo}:" in line.strip()]
     return line
-
-
-def test_checker_rejects_a_drifting_manifest(tmp_path: Path) -> None:
-    """Break the invariant in a copy of the tree; the gate must notice.
-
-    A copy rather than the real tree: a gate test that edits the files it
-    guards leaves the repository broken when it fails half way.
-
-    The copy is assembled file by file rather than taken with ``git worktree``,
-    which is how this was written first and which ``make core-build`` promptly
-    failed -- the core build's tree is a deliberate *non*-repository copy, so
-    ``git worktree add`` exits 128 there. Everything the checker reads is
-    listed below (2.6 MB, well under a second); anything it needs that is not
-    here shows up as the baseline assertion failing, not as a false pass.
-    """
-    copy = _checkable_copy(tmp_path)
-
-    (copy / ".release-please-manifest.json").write_text(
-        json.dumps({".": "42.0.0"}, indent=2) + "\n", encoding="utf-8"
-    )
-    tampered = run_checker(tree=copy)
-    assert tampered.returncode != 0, (
-        "the gate passed with the manifest at 42.0.0 and VERSION elsewhere:\n"
-        + tampered.stdout
-    )
-    assert "disagree" in tampered.stderr
 
 
 @pytest.mark.parametrize(

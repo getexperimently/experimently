@@ -1,10 +1,15 @@
-# Multi-Tenant Team Workspaces — Quickstart
+# Team Workspaces — Quickstart
 
 !!! info "Part of the `workspaces` module"
     Team workspaces is one of the optional modules -- present in the **full profile**, absent from the core one. A core deployment does not serve these routes. See [Modules and profiles](../getting-started/modules.md) for what each profile includes and how to run the full one.
 
-This guide shows you how to create a workspace, invite your team, generate a
-scoped API key, and start using the workspace-scoped API in the SDK.
+This guide shows you how to create a workspace, add your team to it, and manage
+its API keys.
+
+A workspace groups members and their workspace roles. It does not limit which
+experiments, feature flags or API keys anyone can see or change: that is decided
+by each user's platform role across the whole installation. See the
+[Workspace Overview](./overview.md#what-workspaces-do-not-do).
 
 ---
 
@@ -86,7 +91,12 @@ Content-Type: application/json
 
 ---
 
-## 3. Generate a Scoped API Key
+## 3. Create a Workspace API Key
+
+!!! warning "Not yet accepted by the SDK or tracking endpoints"
+    Workspace API keys are not yet accepted by the SDK, tracking or flag
+    evaluation endpoints; a request that sends one is answered `401`. To connect
+    an SDK, use a platform API key (step 4).
 
 ```http
 POST /api/v1/workspaces/{workspace_id}/api-keys
@@ -116,51 +126,16 @@ Content-Type: application/json
 
 ---
 
-## 4. Use the Workspace-Scoped API in the SDK
+## 4. Connect an SDK with a Platform API Key
 
-### JavaScript SDK
-
-```javascript
-import { ExperimentationClient } from '@experimentation/sdk';
-
-const client = new ExperimentationClient({
-  apiKey: 'ep_live_a1b2c3d4e5f6...',
-  baseUrl: 'https://your-platform.example.com'
-});
-
-// Evaluate a feature flag
-const enabled = await client.isEnabled('my-feature-flag', { userId: 'user-123' });
-
-// Get experiment assignment
-const variant = await client.getVariant('checkout-experiment', { userId: 'user-123' });
-
-// Track an event
-await client.track('purchase', { userId: 'user-123', value: 49.99 });
-```
-
-### Python SDK
-
-```python
-from experimentation import ExperimentationClient
-
-client = ExperimentationClient(
-    api_key="ep_live_a1b2c3d4e5f6...",
-    base_url="https://your-platform.example.com"
-)
-
-# Evaluate a feature flag
-enabled = client.is_enabled("my-feature-flag", user_id="user-123")
-
-# Get experiment assignment
-variant = client.get_variant("checkout-experiment", user_id="user-123")
-
-# Track an event
-client.track("purchase", user_id="user-123", properties={"value": 49.99})
-```
+The SDKs authenticate with a **platform API key**, created with
+`POST /api/v1/api-keys` -- not with a workspace key. See
+[API Key Management](../security/api-keys.md) for how to create one, and the
+[SDK guide](../sdk-guide.md) for how to pass it to each SDK.
 
 ---
 
-## 5. Manage API Keys
+## 5. Manage Workspace API Keys
 
 ### List all API keys
 
@@ -183,8 +158,8 @@ POST /api/v1/workspaces/{workspace_id}/api-keys/{key_id}/rotate
 Authorization: Bearer <admin-token>
 ```
 
-The old key is immediately invalidated.  The response contains the new plaintext
-key (shown once only).
+The old key is marked inactive. The response contains the new plaintext key
+(shown once only).
 
 ---
 

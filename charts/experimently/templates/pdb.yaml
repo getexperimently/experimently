@@ -1,0 +1,14 @@
+{{- if gt (int .Values.api.replicaCount) 1 }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "experimently.fullname" . }}-api
+  labels:
+    {{- include "experimently.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      {{- include "experimently.selectorLabels" (dict "ctx" . "component" "api") | nindent 6 }}
+{{- end }}

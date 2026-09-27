@@ -339,8 +339,9 @@ class TestWorkspaceInvites:
         # so we verify the accept endpoint returns 422 with the correct detail.
         token = create_resp.json()["token"]
         resp = admin_client.post(f"/api/v1/workspaces/invites/{token}/accept")
-        # Admin is already a member — expect 422 (AlreadyMember → PlanLimitExceeded path)
-        assert resp.status_code in (201, 422), resp.text
+        # Admin is already a member: AlreadyMember is answered with 422
+        assert resp.status_code == 422, resp.text
+        assert "already a member" in resp.json()["detail"], resp.text
 
     def test_accept_expired_invite_returns_400(
         self, admin_client, developer_client, db_session
@@ -447,3 +448,255 @@ class TestWorkspaceAPIKeys:
         resp = admin_client.get(f"/api/v1/workspaces/{ws['id']}/api-keys")
         assert resp.status_code == 200, resp.text
         assert len(resp.json()) >= 1
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Role table: OWNER is granted, changed and removed only by an OWNER; key
+# operations act only on keys of the workspace in the path
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _platform_user(db_session: Session, name: str, role: UserRole) -> User:
+    """A committed, non-superuser platform user."""
+    suffix = uuid.uuid4().hex[:8]
+    user = User(
+        username=f"{name}_{suffix}",
+        email=f"{name}_{suffix}@int.test",
+        hashed_password=HASHED_PASSWORD,
+        is_active=True,
+        is_superuser=False,
+        role=role,
+    )
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+    return user
+
+
+@pytest.fixture
+def ws_people(db_session: Session) -> dict:
+    """Two owners, a workspace ADMIN, an outsider and a bystander.
+
+    None is a platform superuser, and the workspace ADMIN and the outsider are
+    platform VIEWERs, so no platform role can stand in for a workspace role.
+    """
+    return {
+        "owner": _platform_user(db_session, "ws_owner", UserRole.DEVELOPER),
+        "owner2": _platform_user(db_session, "ws_owner2", UserRole.DEVELOPER),
+        "wsadmin": _platform_user(db_session, "ws_admin", UserRole.VIEWER),
+        "outsider": _platform_user(db_session, "ws_outsider", UserRole.VIEWER),
+        "bystander": _platform_user(db_session, "ws_bystander", UserRole.VIEWER),
+    }
+
+
+@pytest.fixture
+def as_user(db_session: Session, ws_people: dict):
+    """Call the API as any of ``ws_people``: ``as_user(user, method, url, ...)``.
+
+    The per-role client fixtures each replace the app-wide auth override, so
+    two of them cannot be used in one test. This keys the override on a
+    request header instead, over the per-request sessions that
+    ``make_client_for_user`` installs.
+    """
+    from fastapi import Request
+
+    from backend.app.api import deps
+    from backend.app.main import app
+    from backend.tests.integration.conftest import make_client_for_user
+
+    client = make_client_for_user(db_session, ws_people["owner"])
+    by_id = {str(u.id): u for u in ws_people.values()}
+
+    def current(request: Request) -> User:
+        return by_id[request.headers["x-test-user"]]
+
+    async def current_async(request: Request) -> User:
+        return current(request)
+
+    app.dependency_overrides[deps.get_current_active_user] = current
+    app.dependency_overrides[deps.get_current_user] = current_async
+
+    def call(user: User, method: str, url: str, **kwargs):
+        return client.request(
+            method, url, headers={"x-test-user": str(user.id)}, **kwargs
+        )
+
+    yield call
+    app.dependency_overrides.clear()
+
+
+def _new_workspace(as_user, user: User, label: str) -> str:
+    suffix = uuid.uuid4().hex[:8]
+    resp = as_user(
+        user,
+        "POST",
+        "/api/v1/workspaces/",
+        json={"name": f"{label} {suffix}", "slug": f"{label}-{suffix}"},
+    )
+    assert resp.status_code == 201, resp.text
+    return resp.json()["id"]
+
+
+def _workspace_with_owners_and_admin(as_user, p: dict) -> str:
+    """Owned by ``owner`` and ``owner2``, with ``wsadmin`` as ADMIN."""
+    ws_id = _new_workspace(as_user, p["owner"], "roles")
+    for user, role in ((p["owner2"], "OWNER"), (p["wsadmin"], "ADMIN")):
+        resp = as_user(
+            p["owner"],
+            "POST",
+            f"/api/v1/workspaces/{ws_id}/members",
+            json={"user_id": str(user.id), "role": role},
+        )
+        assert resp.status_code == 201, resp.text
+    return ws_id
+
+
+def _roles(as_user, p: dict, ws_id: str) -> dict:
+    resp = as_user(p["owner"], "GET", f"/api/v1/workspaces/{ws_id}/members")
+    assert resp.status_code == 200, resp.text
+    return {m["user_id"]: m["role"] for m in resp.json()}
+
+
+@pytest.mark.integration
+class TestOwnerRoleChanges:
+    @pytest.mark.regression
+    def test_admin_cannot_promote_self_to_owner(self, as_user, ws_people):
+        p = ws_people
+        ws_id = _workspace_with_owners_and_admin(as_user, p)
+        resp = as_user(
+            p["wsadmin"],
+            "PUT",
+            f"/api/v1/workspaces/{ws_id}/members/{p['wsadmin'].id}",
+            json={"role": "OWNER"},
+        )
+        assert resp.status_code == 403, resp.text
+        assert _roles(as_user, p, ws_id)[str(p["wsadmin"].id)] == "ADMIN"
+
+    @pytest.mark.regression
+    def test_admin_cannot_demote_an_owner(self, as_user, ws_people):
+        p = ws_people
+        ws_id = _workspace_with_owners_and_admin(as_user, p)
+        resp = as_user(
+            p["wsadmin"],
+            "PUT",
+            f"/api/v1/workspaces/{ws_id}/members/{p['owner2'].id}",
+            json={"role": "VIEWER"},
+        )
+        assert resp.status_code == 403, resp.text
+        assert _roles(as_user, p, ws_id)[str(p["owner2"].id)] == "OWNER"
+
+    @pytest.mark.regression
+    def test_admin_cannot_add_a_member_as_owner(self, as_user, ws_people):
+        p = ws_people
+        ws_id = _workspace_with_owners_and_admin(as_user, p)
+        resp = as_user(
+            p["wsadmin"],
+            "POST",
+            f"/api/v1/workspaces/{ws_id}/members",
+            json={"user_id": str(p["bystander"].id), "role": "owner"},
+        )
+        assert resp.status_code == 403, resp.text
+        assert str(p["bystander"].id) not in _roles(as_user, p, ws_id)
+
+    @pytest.mark.regression
+    def test_admin_cannot_remove_an_owner(self, as_user, ws_people):
+        p = ws_people
+        ws_id = _workspace_with_owners_and_admin(as_user, p)
+        resp = as_user(
+            p["wsadmin"],
+            "DELETE",
+            f"/api/v1/workspaces/{ws_id}/members/{p['owner2'].id}",
+        )
+        assert resp.status_code == 403, resp.text
+        assert _roles(as_user, p, ws_id)[str(p["owner2"].id)] == "OWNER"
+
+    def test_admin_still_manages_other_roles(self, as_user, ws_people):
+        p = ws_people
+        ws_id = _workspace_with_owners_and_admin(as_user, p)
+        base = f"/api/v1/workspaces/{ws_id}/members"
+        member = {"user_id": str(p["bystander"].id), "role": "VIEWER"}
+        resp = as_user(p["wsadmin"], "POST", base, json=member)
+        assert resp.status_code == 201, resp.text
+        resp = as_user(
+            p["wsadmin"], "PUT", f"{base}/{p['bystander'].id}", json={"role": "ADMIN"}
+        )
+        assert resp.status_code == 200, resp.text
+        resp = as_user(p["wsadmin"], "DELETE", f"{base}/{p['bystander'].id}")
+        assert resp.status_code == 204, resp.text
+
+    def test_owner_grants_changes_and_removes_owner(self, as_user, ws_people):
+        p = ws_people
+        ws_id = _workspace_with_owners_and_admin(as_user, p)
+        base = f"/api/v1/workspaces/{ws_id}/members"
+        member = {"user_id": str(p["bystander"].id), "role": "OWNER"}
+        resp = as_user(p["owner"], "POST", base, json=member)
+        assert resp.status_code == 201, resp.text
+        resp = as_user(
+            p["owner"], "PUT", f"{base}/{p['wsadmin'].id}", json={"role": "OWNER"}
+        )
+        assert resp.status_code == 200, resp.text
+        resp = as_user(
+            p["owner"], "PUT", f"{base}/{p['owner2'].id}", json={"role": "DEVELOPER"}
+        )
+        assert resp.status_code == 200, resp.text
+        resp = as_user(p["owner"], "DELETE", f"{base}/{p['bystander'].id}")
+        assert resp.status_code == 204, resp.text
+        roles = _roles(as_user, p, ws_id)
+        assert roles[str(p["wsadmin"].id)] == "OWNER"
+        assert roles[str(p["owner2"].id)] == "DEVELOPER"
+        assert str(p["bystander"].id) not in roles
+
+    def test_last_owner_still_cannot_step_down(self, as_user, ws_people):
+        p = ws_people
+        ws_id = _new_workspace(as_user, p["owner"], "solo")
+        me = f"/api/v1/workspaces/{ws_id}/members/{p['owner'].id}"
+        resp = as_user(p["owner"], "PUT", me, json={"role": "ADMIN"})
+        assert resp.status_code == 422, resp.text
+        resp = as_user(p["owner"], "DELETE", me)
+        assert resp.status_code == 422, resp.text
+
+
+@pytest.mark.integration
+class TestAPIKeyOperationsStayInTheirWorkspace:
+    @staticmethod
+    def _setup(as_user, p: dict):
+        """``owner``'s workspace holds one key; ``outsider`` owns another workspace."""
+        home = _new_workspace(as_user, p["owner"], "home")
+        resp = as_user(
+            p["owner"],
+            "POST",
+            f"/api/v1/workspaces/{home}/api-keys",
+            json={"name": "prod"},
+        )
+        assert resp.status_code == 201, resp.text
+        other = _new_workspace(as_user, p["outsider"], "other")
+        return home, resp.json()["id"], other
+
+    @staticmethod
+    def _keys(as_user, user: User, ws_id: str) -> list:
+        resp = as_user(user, "GET", f"/api/v1/workspaces/{ws_id}/api-keys")
+        assert resp.status_code == 200, resp.text
+        return [(k["id"], k["is_active"]) for k in resp.json()]
+
+    @pytest.mark.regression
+    def test_rotate_through_another_workspace_is_404(self, as_user, ws_people):
+        p = ws_people
+        home, key_id, other = self._setup(as_user, p)
+        resp = as_user(
+            p["outsider"],
+            "POST",
+            f"/api/v1/workspaces/{other}/api-keys/{key_id}/rotate",
+        )
+        assert resp.status_code == 404, resp.text
+        assert self._keys(as_user, p["owner"], home) == [(key_id, True)]
+        assert self._keys(as_user, p["outsider"], other) == []
+
+    @pytest.mark.regression
+    def test_revoke_through_another_workspace_is_404(self, as_user, ws_people):
+        p = ws_people
+        home, key_id, other = self._setup(as_user, p)
+        resp = as_user(
+            p["outsider"], "DELETE", f"/api/v1/workspaces/{other}/api-keys/{key_id}"
+        )
+        assert resp.status_code == 404, resp.text
+        assert self._keys(as_user, p["owner"], home) == [(key_id, True)]

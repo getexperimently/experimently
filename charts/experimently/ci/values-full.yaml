@@ -1,0 +1,22 @@
+# The chart job's full case: everything the core case leaves at its default --
+# the full profile, an existing Secret, an external Postgres over TLS, no
+# Redis, two API replicas (so a PodDisruptionBudget), an extra host, TLS.
+publicBaseUrl: https://experimently.example.com
+profile: full
+firstSuperuser: admin@example.com
+allowedHosts:
+  - "*.internal.example.com"
+existingSecret: experimently-secrets
+api:
+  replicaCount: 2
+  forwardedAllowIps: 10.0.0.0/8
+postgresql:
+  bundled: false
+  host: postgres.example.internal
+  sslMode: require
+redis:
+  enabled: false
+ingress:
+  className: nginx
+  tls:
+    secretName: experimently-tls

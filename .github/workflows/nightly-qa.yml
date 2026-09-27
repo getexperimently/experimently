@@ -188,14 +188,25 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
 
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: '1.22.x'
+          cache: false
+
       - name: Install pytest
         run: pip install pytest
 
-      - name: Run Python SDK contract tests
-        run: python -m pytest tests/sdk-contract/test_python_sdk.py -v
+      # The same checks as the PR gate's SDK Contract Tests job: each SDK's own
+      # hash function against golden-vectors.json (see hash_contract.py).
+      - name: SDKs this job checks, and those it does not
+        run: python tests/sdk-contract/hash_contract.py --list
 
-      - name: Run JavaScript SDK contract tests
-        run: node tests/sdk-contract/test_js_sdk.js
+      - name: The comparison rejects a wrong answer (hash_contract.py self-tests)
+        run: python -m pytest tests/sdk-contract -v -o addopts=""
+
+      - name: SDK hashes (python, js, edge, react-native, go)
+        run: python tests/sdk-contract/hash_contract.py python js edge react-native go
 
   frontend-tests:
     name: Frontend Unit Tests

@@ -255,7 +255,7 @@ the core through the registration hooks in `backend/app/core/`:
 
 | Module | What it adds |
 |---|---|
-| `workspaces` | Multiple tenants on one instance: members, invites and workspace-scoped API keys |
+| `workspaces` | Group users into teams, with workspace roles and email invites. Grouping only: access to experiments and flags is by platform role |
 | `rbac` | Roles beyond the built-in four, and permissions granted directly to a user |
 | `sso` | SAML 2.0 and OIDC identity providers with just-in-time provisioning and role mapping |
 | `hipaa` | PHI encryption, six-year PHI audit retention, BAA records |

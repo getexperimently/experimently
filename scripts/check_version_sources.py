@@ -22,6 +22,11 @@ them can drift *silently*:
   pass.
 * ``settings.VERSION`` -- what ``/health`` and ``GET /api/v1/modules`` report,
   and so what an operator reads off a running deployment.
+* ``charts/experimently/Chart.yaml`` ``version`` and ``appVersion`` -- the Helm
+  chart's version is the platform's, and its default image tag is
+  ``<profile>-<appVersion>``.  release-please updates both lines only because
+  each carries an ``x-release-please-version`` marker; a lost marker is a
+  silent no-op on its side, so it is caught here.
 * the two published-image lines of ``deploy/compose/compose.yml`` -- what a
   self-hoster who downloads that file at a tag actually runs.  release-please
   rewrites them (``x-release-please-version``); a line it missed would start
@@ -83,6 +88,42 @@ def read_release_please_manifest() -> str:
     )
     # One package, the repository root; release-please keys it by path.
     return str(manifest["."])
+
+
+#: The Helm chart. Its version IS the platform version (`--version X` installs
+#: images X), and release-please rewrites both lines through their
+#: `# x-release-please-version` markers. A line that loses its marker is left
+#: behind silently by release-please; this is what notices.
+CHART_YAML = ROOT / "charts" / "experimently" / "Chart.yaml"
+
+
+def _read_chart_field(field: str) -> str:
+    """One top-level scalar of Chart.yaml, read as text.
+
+    Plain text on purpose: the checker runs where PyYAML may be absent, and the
+    two lines have a fixed shape. The file missing, or the line missing, is a
+    failure -- never a skip.
+    """
+    pattern = re.compile(rf'^{field}:\s*"?([^"\s#]+)"?\s*(?:#.*)?$')
+    matches = [
+        m.group(1)
+        for line in CHART_YAML.read_text(encoding="utf-8").splitlines()
+        if (m := pattern.match(line))
+    ]
+    if len(matches) != 1:
+        raise AssertionError(
+            f"expected exactly one top-level `{field}:` line in "
+            f"{CHART_YAML.relative_to(ROOT)}, found {len(matches)}"
+        )
+    return matches[0]
+
+
+def read_chart_version() -> str:
+    return _read_chart_field("version")
+
+
+def read_chart_app_version() -> str:
+    return _read_chart_field("appVersion")
 
 
 def read_distribution_metadata_version() -> str:
@@ -225,6 +266,8 @@ def main() -> int:
         ".release-please-manifest.json": read_release_please_manifest,
         "built distribution metadata": read_distribution_metadata_version,
         "settings.VERSION": read_settings_version,
+        "Chart.yaml version": read_chart_version,
+        "Chart.yaml appVersion": read_chart_app_version,
         f"{PRODUCTION_COMPOSE} (api image)": lambda: read_compose_image_versions()[
             "api"
         ],

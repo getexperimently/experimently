@@ -24,6 +24,10 @@
         },
         {
           "type": "generic",
+          "path": "charts/experimently/Chart.yaml"
+        },
+        {
+          "type": "generic",
           "path": "deploy/compose/compose.yml"
         }
       ],
