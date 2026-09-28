@@ -26,8 +26,11 @@ from backend.app.schemas.bayesian import (
 from backend.app.services.bayesian_service import DEFAULT_N_SAMPLES, BayesianService
 from backend.app.services.event_matching import (
     CONVERSION_SQL_PREDICATE,
-    any_conversion_event_filter,
-    conversion_event_filter,
+    CONVERTING_USERS_JOIN,
+    CONVERTING_USERS_SQL,
+    count_converting_users,
+    count_converting_users_any,
+    first_conversion_times,
 )
 
 logger = logging.getLogger(__name__)
@@ -431,20 +434,13 @@ class AnalysisService:
             )
             assignments[variant_id] = count
 
-        # Get conversion counts per variant
+        # Converting users per variant (event_matching.py): a user with
+        # several conversion events counts once, so conversions <= assignments.
         conversions = {}
         for variant_id in variant_ids:
-            count = (
-                self.db.query(func.count(Event.id))
-                .filter(
-                    Event.experiment_id == experiment.id,
-                    Event.variant_id == variant_id,
-                    conversion_event_filter(metric.event_name),
-                )
-                .scalar()
-                or 0
+            conversions[variant_id] = count_converting_users(
+                self.db, experiment.id, variant_id, metric.event_name
             )
-            conversions[variant_id] = count
 
         # Calculate conversion rates
         rates = {}
@@ -591,17 +587,11 @@ class AnalysisService:
             or 0
         )
 
-        # Get total conversions
-        total_conversions = (
-            self.db.query(func.count(Event.id))
-            .filter(
-                Event.experiment_id == experiment.id,
-                any_conversion_event_filter(
-                    m.event_name for m in (experiment.metric_definitions or [])
-                ),
-            )
-            .scalar()
-            or 0
+        # Converting users across every metric (each user once)
+        total_conversions = count_converting_users_any(
+            self.db,
+            experiment.id,
+            (m.event_name for m in (experiment.metric_definitions or [])),
         )
 
         # Return formatted summary
@@ -668,7 +658,7 @@ class AnalysisService:
             if not metric_id or str(m.id) == str(metric_id)
         ]
 
-        if not metrics:
+        if not metrics or not dates:
             return []
 
         # Get daily assignments (can be optimized with a single query)
@@ -699,6 +689,23 @@ class AnalysisService:
 
             daily_assignments[date] = daily_variant_assignments
 
+        # The day (YYYY-MM-DD) of each converting user's first conversion,
+        # per metric and variant.  A day's conversions are the users who
+        # converted for the first time that day, so the running sum over days
+        # is the converting-user count that /results reports.  A first
+        # conversion before the first day or after the last one is clamped
+        # into that day, so the series still ends at the /results count.
+        first_conversion_days = {
+            (str(metric.id), str(variant.id)): [
+                min(max(first[:10], dates[0]), dates[-1])
+                for first in first_conversion_times(
+                    self.db, experiment.id, variant.id, metric.event_name
+                )
+            ]
+            for metric in metrics
+            for variant in experiment.variants
+        }
+
         # Get daily conversions by metric and variant
         results = []
         for date in dates:
@@ -712,23 +719,10 @@ class AnalysisService:
                 }
 
                 for variant in experiment.variants:
-                    # Convert date string to datetime range
-                    date_start = datetime.fromisoformat(f"{date}T00:00:00+00:00")
-                    date_end = datetime.fromisoformat(f"{date}T23:59:59+00:00")
-
-                    # Query conversions for this variant and metric on this date
-                    conversions = (
-                        self.db.query(func.count(Event.id))
-                        .filter(
-                            Event.experiment_id == experiment.id,
-                            Event.variant_id == variant.id,
-                            conversion_event_filter(metric.event_name),
-                            Event.created_at >= date_start.isoformat(),
-                            Event.created_at <= date_end.isoformat(),
-                        )
-                        .scalar()
-                        or 0
-                    )
+                    # Users whose first conversion falls on this date
+                    conversions = first_conversion_days[
+                        (str(metric.id), str(variant.id))
+                    ].count(date)
 
                     # Calculate conversion rate
                     assignments = daily_assignments[date][str(variant.id)]
@@ -824,15 +818,8 @@ class AnalysisService:
                 or 0
             )
             if primary_metric:
-                convs = (
-                    self.db.query(func.count(Event.id))
-                    .filter(
-                        Event.experiment_id == experiment.id,
-                        Event.variant_id == variant.id,
-                        conversion_event_filter(primary_metric.event_name),
-                    )
-                    .scalar()
-                    or 0
+                convs = count_converting_users(
+                    self.db, experiment.id, variant.id, primary_metric.event_name
                 )
             else:
                 convs = 0
@@ -1297,13 +1284,14 @@ class AnalysisService:
                     # Get conversions for this variant and segment
                     segment_conversions_query = text(  # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text
                         f"""
-                        SELECT COUNT(*)
-                        FROM {schema}.events
-                        WHERE experiment_id = :experiment_id
-                        AND variant_id = :variant_id
+                        SELECT {CONVERTING_USERS_SQL}
+                        FROM {schema}.events e
+                        JOIN {schema}.assignments a ON {CONVERTING_USERS_JOIN}
+                        WHERE e.experiment_id = :experiment_id
+                        AND e.variant_id = :variant_id
                         AND {CONVERSION_SQL_PREDICATE}
-                        AND event_metadata ? :segment_key
-                        AND jsonb_extract_path_text(event_metadata, :segment_key) = :segment_value
+                        AND e.event_metadata ? :segment_key
+                        AND jsonb_extract_path_text(e.event_metadata, :segment_key) = :segment_value
                     """  # nosec B608 - schema is a fixed config identifier, not user input
                     )
 

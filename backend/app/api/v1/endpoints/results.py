@@ -165,7 +165,11 @@ def _compute_dimensional_breakdown(
     # (see services/event_matching.py); fall back to the legacy
     # event_type = 'conversion' convention when no metric row exists.
     from backend.app.models.experiment import Metric, Variant
-    from backend.app.services.event_matching import CONVERSION_SQL_PREDICATE
+    from backend.app.services.event_matching import (
+        CONVERSION_SQL_PREDICATE,
+        CONVERTING_USERS_JOIN,
+        CONVERTING_USERS_SQL,
+    )
 
     # Every variant of the experiment, with its real name and control flag
     # (#218).  Each segment is seeded from this list, so a variant with no
@@ -243,19 +247,22 @@ def _compute_dimensional_breakdown(
                 },
             ).fetchall()
 
-            # Count conversions per variant for this segment
+            # Converting users per variant for this segment: assigned users
+            # with a conversion event in the segment, each counted once
+            # (event_matching.py), as /results counts them.
             conv_q = text(  # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text
                 f"""
-                SELECT variant_id::text, COUNT(*) AS conversions
-                FROM {schema}.events
-                WHERE experiment_id = :exp_id
+                SELECT e.variant_id::text, {CONVERTING_USERS_SQL} AS conversions
+                FROM {schema}.events e
+                JOIN {schema}.assignments a ON {CONVERTING_USERS_JOIN}
+                WHERE e.experiment_id = :exp_id
                   AND {conversion_predicate}
-                  AND event_metadata IS NOT NULL
+                  AND e.event_metadata IS NOT NULL
                   AND COALESCE(
-                      jsonb_extract_path_text(event_metadata, :dim_key),
+                      jsonb_extract_path_text(e.event_metadata, :dim_key),
                       'unknown'
                   ) = :seg_val
-                GROUP BY variant_id
+                GROUP BY e.variant_id
                 """  # nosec B608 - schema is a fixed config identifier, not user input
             )
             conv_rows = db.execute(
@@ -860,7 +867,6 @@ def _get_sequential_data(
     from sqlalchemy import func
 
     from backend.app.models.assignment import Assignment
-    from backend.app.models.event import Event
 
     control_variant = next((v for v in experiment.variants if v.is_control), None)
     treatment_variant = next((v for v in experiment.variants if not v.is_control), None)
@@ -886,19 +892,13 @@ def _get_sequential_data(
         )
 
     def _count_conversions(variant_id):
+        """Converting users, as /results counts them (event_matching.py)."""
         if not primary_metric:
             return 0
-        from backend.app.services.event_matching import conversion_event_filter
+        from backend.app.services.event_matching import count_converting_users
 
-        return (
-            db.query(func.count(Event.id))
-            .filter(
-                Event.experiment_id == experiment.id,
-                Event.variant_id == variant_id,
-                conversion_event_filter(primary_metric.event_name),
-            )
-            .scalar()
-            or 0
+        return count_converting_users(
+            db, experiment.id, variant_id, primary_metric.event_name
         )
 
     control_total = _count_assignments(control_variant.id)
