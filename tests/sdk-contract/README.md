@@ -33,18 +33,59 @@ python tests/sdk-contract/hash_contract.py python js edge react-native go
 The hash is a utility only. Since the September 2026 SDK rewiring no SDK buckets users locally: assignment and flag
 evaluation are decided by the backend.
 
+## Ruleset vectors (server-side local evaluation, #226)
+
+`ruleset-vectors.json` is the differential corpus for SDKs that evaluate flags locally from
+`GET /api/v1/sdk/ruleset` (beta). It is **generated from the server**, never written by hand:
+`backend/scripts/generate_ruleset_vectors.py` builds each corpus flag's ruleset entry with the
+server's ruleset builder and runs the server's own flag evaluator for every case. The first
+command rewrites the file; the second exits 1 if it is stale.
+
+```bash
+python -m backend.scripts.generate_ruleset_vectors
+python -m backend.scripts.generate_ruleset_vectors --check
+```
+
+What it holds:
+
+- `ruleset`: a complete ruleset document, as the endpoint serves it, for the corpus flags;
+- `local_operators`: the one list of operators an SDK may evaluate itself (every other operator,
+  and the legacy list shape, makes a flag `"evaluation": "remote"`); each SDK checks its own list
+  against this one;
+- `max_safe_integer` and `whitespace_code_points`: the numeric and whitespace limits of the local
+  domain (a number of greater magnitude, or `is_null` on a string containing one of those code
+  points, is answered by the server);
+- `cases`: `(flag, user_id, context) → expected {enabled, reason}`, each marked `must_local` or
+  not, and `counts`.
+
+The property an SDK must show: for **every** case it either defers to the server or returns
+exactly `expected`, and for every `must_local` case it answers locally with exactly `expected`.
+`counts.must_local` is the number of such cases, so an SDK that defers everything fails.
+
+Contexts are listed in their key order, which matters: the server flattens nested objects
+first-writer-wins. No context relies on the order of integer-like keys, which JavaScript objects
+reorder.
+
+`backend/tests/unit/services/test_sdk_ruleset_vectors.py` fails when the file is stale (it
+regenerates it in-process, with no database and no `.git`), pins the counts and the operator list,
+and runs a reference local evaluator over the file. A change to the rules engine, the targeting
+adapter or the flag service that moves any answer fails there until the file is regenerated.
+
 ## 2. Live contract (against a running backend)
 
 `live/run_live_contract.py` runs every SDK's `contract_smoke` entry point against a real backend
 and checks the JSON it prints: a sticky assignment (`control` / `treatment`), a flag evaluation
 (`enabled: true`), one tracked event with an experiment key, and one key-less event that fans out
-to the cached assignment and flag.
+to the cached assignment and flag. Before the SDKs it checks `GET /api/v1/sdk/ruleset` once: the
+seed's plain key gets 403, its `sdk:ruleset` key gets the ruleset with `sdk_contract_flag` in it,
+and sending the ETag back gets 304 (the `ruleset (server)` row; `EXPERIMENTLY_LOCAL_API_KEY`
+overrides the scoped key).
 
 ```bash
 source venv/bin/activate
 export APP_ENV=development POSTGRES_SERVER=localhost POSTGRES_DB=experimentation POSTGRES_SCHEMA=experimentation
 
-python backend/scripts/seed_sdk_contract.py          # experiment sdk_contract_ab, flag sdk_contract_flag, API key -> live/.api_key
+python backend/scripts/seed_sdk_contract.py          # experiment sdk_contract_ab, flag sdk_contract_flag, API keys -> live/.api_key, live/.api_key_local (sdk:ruleset)
 uvicorn backend.app.main:app --port 8000 &            # or ./demo/setup-local.sh
 python tests/sdk-contract/live/run_live_contract.py   # all SDKs whose toolchain is installed
 python tests/sdk-contract/live/run_live_contract.py --sdk go --sdk python --strict

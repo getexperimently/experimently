@@ -41,6 +41,7 @@ from backend.app.api.v1.endpoints import (
     rollout_schedules,
     safety,
     scheduler_health,
+    sdk,
     segments,
     tracking,
     users,
@@ -160,6 +161,8 @@ def register_core_routers(router: APIRouter) -> APIRouter:
     )
     # EP-047: Edge SDK bootstrap endpoint (Cloudflare Workers / Vercel Edge / Deno Deploy)
     router.include_router(edge.router, prefix="/edge", tags=["Edge"])
+    # #226: the flag ruleset for server-side local evaluation (needs sdk:ruleset)
+    router.include_router(sdk.router, prefix="/sdk", tags=["SDK"])
     # EP-058: Real-time WebSocket Streaming Results
     router.include_router(
         websocket_results.router, prefix="", tags=["WebSocket Results"]

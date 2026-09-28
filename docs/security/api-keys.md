@@ -91,14 +91,15 @@ OpenFeature and edge bootstrap) accepts any active key, whatever its scopes. Nam
 `sdk:ruleset` is for a server that evaluates flags locally. These routes answer `403` to a
 key that does not carry it:
 
+- `GET /api/v1/sdk/ruleset` (beta), which returns every feature flag's targeting rules in the
+  form a server-side SDK evaluates locally;
 - `POST /api/v1/tracking/evaluations` (beta), where a server-side SDK reports how many times
   it evaluated each flag locally, so safety monitoring can still compute each flag's error
   rate.
 
-The server-side local-evaluation ruleset endpoint, once it ships, is intended to require it
-too. A key with `sdk:ruleset` will then be able to download every feature flag's targeting
-rules, including the values in them, so keep such a key on a server and never ship it to a
-browser or a mobile app.
+A key with `sdk:ruleset` can therefore download every feature flag's targeting rules,
+including the values in them, so keep such a key on a server and never ship it to a browser
+or a mobile app.
 
 - In the dashboard (**Admin → API Keys → Create API Key**), tick **Server-side local
   evaluation (sdk:ruleset)**. Leave it unticked for any other key; the key is then created

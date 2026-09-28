@@ -148,7 +148,7 @@ BOUNDARY 5: Analytics Pipeline — Internal
 - **Motivation:** Inject fraudulent events, bias experiment results, enumerate user assignments
 - **Capabilities:** Valid `eptk_*` API key (possibly stolen or leaked), SDK knowledge
 - **Access point:** `/api/v1/tracking/*` and `/evaluate/*` endpoints
-- **Constraints:** an API key authenticates only the API-key routes; it cannot call the JWT-authenticated admin APIs. A key's `scopes` column does not narrow what it can reach today
+- **Constraints:** an API key authenticates only the API-key routes; it cannot call the JWT-authenticated admin APIs. A key's `scopes` column narrows only the server-side local-evaluation routes: `GET /api/v1/sdk/ruleset` and `POST /api/v1/tracking/evaluations` require `sdk:ruleset`
 
 ### TA-4: Compromised AWS Account / Infrastructure Attacker
 
@@ -327,7 +327,7 @@ D
 | CORS allowlist | `main.py` + `settings.BACKEND_CORS_ORIGINS` | Only configured origins may make credentialed requests |
 | RBAC enforcement | `backend/app/core/permissions.py` | Role matrix applied to all endpoints via `check_permission()` |
 | bcrypt password hashing | `backend/app/core/security.py` | `CryptContext(schemes=["bcrypt"])` with auto-deprecation |
-| API key expiry and revocation | `backend/app/models/api_key.py`, `backend/app/api/deps.py` | `expires_at` and `is_active`, checked by `is_valid` on every API-key request. The `scopes` column does not limit a key today |
+| API key expiry and revocation | `backend/app/models/api_key.py`, `backend/app/api/deps.py` | `expires_at` and `is_active`, checked by `is_valid` on every API-key request. The `scopes` column limits a key only on `GET /api/v1/sdk/ruleset` and `POST /api/v1/tracking/evaluations`, which require `sdk:ruleset` (`backend/app/api/sdk_scope.py`) |
 | Audit logging | `backend/app/models/audit_log.py` | All CRUD actions on experiments, feature flags, users, permissions recorded |
 | Structured error responses | `backend/app/middleware/error_middleware.py` | No stack traces in production responses |
 | Server header removal | `backend/app/middleware/security_middleware.py` | `server` and `x-powered-by` headers stripped |

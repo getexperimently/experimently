@@ -350,6 +350,14 @@ class TestRateLimitConfig:
     def test_sdk_limit_is_configurable(self):
         assert resolve_rate_limit("/api/v1/tracking/batch", 42) == (42, 60)
 
+    def test_the_local_evaluation_ruleset_is_sdk_traffic(self):
+        """A fleet behind one NAT polls the ruleset from one address (#226)."""
+        assert resolve_rate_limit("/api/v1/sdk/ruleset", 42) == (42, 60)
+        assert resolve_rate_limit("/api/v1/sdk/ruleset") == (
+            DEFAULT_SDK_RATE_LIMIT_PER_MINUTE,
+            60,
+        )
+
     def test_exact_config_wins_over_prefix_and_default(self):
         assert (
             resolve_rate_limit("/api/v1/auth/token")

@@ -8,11 +8,17 @@ successful event tracking. This is the test that proves an SDK actually talks
 to the endpoints the backend serves (the golden-vector tests only cover
 hashing).
 
+Before the SDKs, it checks the local-evaluation ruleset endpoint
+(``GET /api/v1/sdk/ruleset``) once: the seed's plain key gets 403, its
+``sdk:ruleset`` key gets the ruleset with ``sdk_contract_flag`` in it, and
+sending the ETag back gets 304.
+
 Prerequisites
     1. A backend at ``$EXPERIMENTLY_API_URL`` (default http://localhost:8000)
        seeded with ``python backend/scripts/seed_sdk_contract.py`` (creates the
-       ``sdk_contract_ab`` experiment, the ``sdk_contract_flag`` flag and an API
-       key written to tests/sdk-contract/live/.api_key).
+       ``sdk_contract_ab`` experiment, the ``sdk_contract_flag`` flag and two API
+       keys, written to tests/sdk-contract/live/.api_key and, with the
+       ``sdk:ruleset`` scope, .api_key_local).
     2. The toolchains of the SDKs you want to run (missing ones are skipped
        unless ``--strict``).
 
@@ -31,11 +37,15 @@ import shutil
 import subprocess
 import sys
 import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 KEY_FILE = Path(__file__).resolve().parent / ".api_key"
+# The seed's second key, with the sdk:ruleset scope (server-side local evaluation).
+LOCAL_KEY_FILE = Path(__file__).resolve().parent / ".api_key_local"
+RULESET_PATH = "/api/v1/sdk/ruleset"
 
 # sdk name -> (shell command run from the repo root, required executables)
 MANIFEST: dict[str, tuple[str, tuple[str, ...]]] = {
@@ -105,6 +115,50 @@ def validate(sdk: str, payload: dict) -> list[str]:
     return problems
 
 
+def _ruleset_request(api_url: str, key: str, etag: str = "") -> tuple[int, dict, bytes]:
+    headers = {"X-API-Key": key}
+    if etag:
+        headers["If-None-Match"] = etag
+    request = urllib.request.Request(f"{api_url}{RULESET_PATH}", headers=headers)
+    try:
+        with urllib.request.urlopen(request, timeout=10) as resp:
+            return resp.status, {k.lower(): v for k, v in resp.headers.items()}, resp.read()
+    except urllib.error.HTTPError as exc:  # 304 and 4xx arrive here
+        return exc.code, {k.lower(): v for k, v in exc.headers.items()}, exc.read()
+
+
+def check_ruleset(api_url: str, plain_key: str, scoped_key: str, flag_key: str) -> tuple[str, str]:
+    """The server side of local evaluation, on the running stack.
+
+    The seed's unscoped key is refused (403); its sdk:ruleset key gets the
+    ruleset with the contract flag in it, and the ETag sent back answers 304.
+    """
+    problems: list[str] = []
+    status, _headers, _body = _ruleset_request(api_url, plain_key)
+    if status != 403:
+        problems.append(f"the unscoped key got {status} from {RULESET_PATH}, expected 403")
+    status, headers, body = _ruleset_request(api_url, scoped_key)
+    if status != 200:
+        problems.append(f"the sdk:ruleset key got {status} from {RULESET_PATH}, expected 200")
+        return "FAIL", "; ".join(problems)
+    doc = json.loads(body)
+    if doc.get("schema") != 1 or doc.get("bucketing") != "md5-mod100-v1":
+        problems.append(f"schema/bucketing are {doc.get('schema')!r}/{doc.get('bucketing')!r}")
+    etag = headers.get("etag", "")
+    if etag != f'"{doc.get("version")}"':
+        problems.append(f"ETag {etag!r} is not the body version")
+    flag = next((f for f in doc.get("flags", []) if f.get("key") == flag_key), None)
+    expected = {"active": True, "evaluation": "local", "rollout_percentage": 100}
+    if flag is None or any(flag.get(k) != v for k, v in expected.items()):
+        problems.append(f"flag {flag_key!r} is {flag!r}")
+    status, _headers, body = _ruleset_request(api_url, scoped_key, etag)
+    if status != 304 or body:
+        problems.append(f"If-None-Match with the current ETag got {status} ({len(body)} bytes), expected 304")
+    if problems:
+        return "FAIL", "; ".join(problems)
+    return "PASS", f"403 unscoped, 200 scoped ({len(doc['flags'])} flags), 304 on ETag"
+
+
 def run_one(sdk: str, command: str, env: dict[str, str], timeout: int) -> tuple[str, str]:
     """Return (status, detail) where status is PASS / FAIL."""
     started = time.time()
@@ -165,6 +219,19 @@ def main() -> int:
         return 2
 
     results: list[tuple[str, str, str]] = []
+
+    # The ruleset endpoint is checked once, before the SDKs, with the seed's two keys.
+    local_key = os.environ.get("EXPERIMENTLY_LOCAL_API_KEY") or (
+        LOCAL_KEY_FILE.read_text().strip() if LOCAL_KEY_FILE.exists() else ""
+    )
+    if local_key:
+        status, detail = check_ruleset(args.api_url, api_key, local_key, env["CONTRACT_FLAG_KEY"])
+    else:
+        status = "FAIL" if args.strict else "SKIP"
+        detail = "no sdk:ruleset key: set EXPERIMENTLY_LOCAL_API_KEY or run seed_sdk_contract.py"
+    results.append(("ruleset (server)", status, detail))
+    print(f"{status:4} {'ruleset (server)':<20} {detail}", flush=True)
+
     for sdk in selected:
         command, tools = MANIFEST[sdk]
         missing = [t for t in tools if shutil.which(t) is None]

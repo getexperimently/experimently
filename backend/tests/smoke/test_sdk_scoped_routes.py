@@ -20,6 +20,7 @@ pytestmark = [pytest.mark.smoke]
 
 #: Every (method, path) that requires an API key with ``sdk:ruleset``.
 SCOPED_ROUTES = {
+    ("GET", "/api/v1/sdk/ruleset"),
     ("POST", "/api/v1/tracking/evaluations"),
 }
 
@@ -55,3 +56,14 @@ def test_the_walk_sees_the_routes():
 
 def test_the_scoped_routes_are_exactly_these():
     assert _scoped(app) == SCOPED_ROUTES
+
+
+def test_every_route_under_the_sdk_prefix_requires_the_scope():
+    """``/api/v1/sdk/`` is the server-side SDK surface: nothing there is unscoped."""
+    sdk_routes = {
+        (method, path)
+        for method, path, _ctx in _contexts(app)
+        if path.startswith("/api/v1/sdk/") and method != "HEAD"
+    }
+    assert sdk_routes, "no route under /api/v1/sdk/"
+    assert sdk_routes <= _scoped(app)
