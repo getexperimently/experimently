@@ -56,7 +56,15 @@ EXIT_KEYS_UNAVAILABLE = 2
 
 @dataclass
 class RotationReport:
-    """What one rotation did: tokens re-encrypted, and the rows it could not."""
+    """What one rotation did.
+
+    The two counts are in different units, on purpose:
+
+    * ``rotated`` counts **tokens** (columns): a connection with a current and
+      a pending credential contributes 2;
+    * ``undecryptable`` lists **connections**: each id once, however many of
+      its tokens no key opens -- it is the list an operator acts on.
+    """
 
     rotated: int = 0
     undecryptable: list[UUID] = field(default_factory=list)

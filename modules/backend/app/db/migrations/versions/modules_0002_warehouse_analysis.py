@@ -22,12 +22,18 @@ the three tables from the models and *stamps* the heads.
 
 The earlier table
 -----------------
-It is recognised by its shape -- it has the column ``encrypted_credentials``,
-which the new table does not -- and then dropped: its rows and both of its
-indexes.  Nothing is copied or converted into the new table; connections saved
-through the endpoints removed in 0.9.0 are recreated by an ADMIN.  The shape
-test, rather than "the table exists", is what keeps a re-upgrade after a
-downgrade from dropping a new-shape table that already holds connections.
+A ``warehouse_connections`` that exists is classified by its full set of
+columns, names and types, and only one of three things happens:
+
+* **the new shape** (exactly this revision's columns) -- left alone, rows and
+  all.  That is a re-upgrade after a downgrade that did not own the table;
+* **the earlier shape** (exactly the columns core revision ``e181583b4b24``
+  created, with their types) -- dropped: its rows and both of its indexes.
+  Nothing is copied or converted into the new table; connections saved
+  through the endpoints removed in 0.9.0 are recreated by an ADMIN;
+* **anything else** -- the migration stops with an error naming the table and
+  drops nothing.  A table that merely resembles the earlier one is not
+  guessed at; the operator renames or removes it and runs the upgrade again.
 
 **Downgrade cannot bring those rows back.**  The supported way back from this
 revision is the database snapshot taken before upgrading to it.
@@ -74,6 +80,44 @@ _REQUIRED_CORE_TABLES = ("users", "experiments", "variants")
 
 #: A column only the earlier ``warehouse_connections`` has.
 _EARLIER_SHAPE_COLUMN = "encrypted_credentials"
+
+#: The earlier ``warehouse_connections``, column by column, exactly as core
+#: revision ``e181583b4b24`` (and the previous release's model) created it:
+#: name -> the type as PostgreSQL reflects it.
+_EARLIER_SHAPE = {
+    "id": "UUID",
+    "created_at": "TIMESTAMP",
+    "updated_at": "TIMESTAMP",
+    "name": "VARCHAR(200)",
+    "warehouse_type": "VARCHAR(50)",
+    _EARLIER_SHAPE_COLUMN: "TEXT",
+    "is_active": "BOOLEAN",
+    "owner_id": "UUID",
+}
+
+#: The columns of the ``warehouse_connections`` this revision creates.
+_NEW_SHAPE_COLUMNS = frozenset(
+    {
+        "id",
+        "created_at",
+        "updated_at",
+        "name",
+        "warehouse_type",
+        "parameters",
+        "credentials_ciphertext",
+        "pending_credentials_ciphertext",
+        "public_key_fingerprint",
+        "pending_public_key_fingerprint",
+        "external_id",
+        "query_timeout_seconds",
+        "max_bytes_per_query",
+        "max_runs_per_day",
+        "created_by",
+    }
+)
+
+NEW_SHAPE = "new"
+EARLIER_SHAPE = "earlier"
 
 CONNECTIONS = "warehouse_connections"
 SOURCES = "warehouse_sources"
@@ -363,9 +407,26 @@ def _create_earlier_connections() -> None:
     )
 
 
-def _has_earlier_shape(inspector) -> bool:
-    columns = inspector.get_columns(CONNECTIONS, schema=_SCHEMA)
-    return any(column["name"] == _EARLIER_SHAPE_COLUMN for column in columns)
+def _connections_shape(inspector) -> str:
+    """Which ``warehouse_connections`` this is: :data:`NEW_SHAPE` or
+    :data:`EARLIER_SHAPE`.  Anything else raises, and nothing is dropped.
+    """
+    columns = {
+        column["name"]: str(column["type"])
+        for column in inspector.get_columns(CONNECTIONS, schema=_SCHEMA)
+    }
+    if set(columns) == _NEW_SHAPE_COLUMNS:
+        return NEW_SHAPE
+    if columns == _EARLIER_SHAPE:
+        return EARLIER_SHAPE
+    raise RuntimeError(
+        f"modules_0002_warehouse_analysis: {_SCHEMA}.{CONNECTIONS} exists but "
+        "matches neither the table this release creates nor the one earlier "
+        "releases created, so the migration will not drop or change it. "
+        f"Rename it (ALTER TABLE {_SCHEMA}.{CONNECTIONS} RENAME TO ...) or "
+        "remove it yourself, then run the upgrade again. Columns found: "
+        f"{', '.join(sorted(columns))}."
+    )
 
 
 def _remove_earlier_connections() -> None:
@@ -411,7 +472,7 @@ def upgrade() -> None:
             "`python -m backend.app.db.bootstrap` on a fresh one."
         )
 
-    if CONNECTIONS in existing and _has_earlier_shape(inspector):
+    if CONNECTIONS in existing and _connections_shape(inspector) == EARLIER_SHAPE:
         _remove_earlier_connections()
         existing.discard(CONNECTIONS)
 

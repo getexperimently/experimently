@@ -384,6 +384,54 @@ def test_modules_0002_scrubs_legacy_rows(test_db, scratch_schema, full_tree):
 
 
 # ---------------------------------------------------------------------------
+# 3b. A table that only resembles the earlier one is refused, not dropped
+# ---------------------------------------------------------------------------
+@pytest.mark.regression
+@pytest.mark.parametrize(
+    "alteration",
+    [
+        pytest.param(
+            "ADD COLUMN customer_notes text", id="earlier-columns-plus-one-more"
+        ),
+        pytest.param("DROP COLUMN is_active", id="earlier-columns-minus-one"),
+        pytest.param(
+            "ALTER COLUMN name TYPE varchar(300)", id="earlier-columns-other-type"
+        ),
+    ],
+)
+def test_modules_0002_refuses_a_look_alike_table(
+    test_db, scratch_schema, full_tree, alteration
+):
+    """Only exactly the earlier table is dropped; anything else stops the upgrade.
+
+    Each variant still has ``encrypted_credentials``, so a test on that one
+    column would drop it.  The upgrade must instead fail, name the table, and
+    leave the table, its rows and ``alembic_version`` exactly as they were.
+    """
+    assert tree_profiles.bootstrap_schema(full_tree, scratch_schema).returncode == 0
+    planted = _make_previous_full_release_database(test_db, scratch_schema)
+    with test_db.begin() as conn:
+        conn.execute(
+            text(f'ALTER TABLE "{scratch_schema}"."{CONNECTIONS}" {alteration}')
+        )
+    columns_before = _columns(test_db, scratch_schema, CONNECTIONS)
+    assert EARLIER_SHAPE_COLUMN in columns_before
+
+    upgrade = tree_profiles.alembic(full_tree, scratch_schema, "upgrade", "heads")
+
+    assert upgrade.returncode != 0, upgrade.stdout[-2000:]
+    assert f"{scratch_schema}.{CONNECTIONS}" in upgrade.stderr
+    assert "matches neither" in upgrade.stderr
+    assert "legacy warehouse connection rows" not in upgrade.stderr
+    assert _rows(test_db, scratch_schema) == PREVIOUS_FULL_HEADS
+    assert _columns(test_db, scratch_schema, CONNECTIONS) == columns_before
+    assert _rows_mentioning(test_db, scratch_schema, SENTINEL) == {CONNECTIONS: planted}
+    assert not {"warehouse_sources", "warehouse_analysis_runs"} & _tables(
+        test_db, scratch_schema
+    )
+
+
+# ---------------------------------------------------------------------------
 # 4. Downgrade, then upgrade again: a new-shape table is kept
 # ---------------------------------------------------------------------------
 @pytest.mark.regression
