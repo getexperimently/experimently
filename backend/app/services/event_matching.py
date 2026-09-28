@@ -22,9 +22,10 @@ assigned users must use it (or, in raw SQL, ``CONVERTING_USERS_SQL``), so the
 numerator can never exceed the denominator.
 """
 
-from typing import Any, Iterable, List, Optional
+from typing import Any, Iterable, List, Optional, Set, Tuple
 
-from sqlalchemy import and_, distinct, func
+from sqlalchemy import String, and_, any_, bindparam, func
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Session
 
 from backend.app.models.assignment import Assignment
@@ -83,16 +84,68 @@ def any_conversion_event_filter(event_names: Iterable[Optional[str]]):
     )
 
 
-def _assigned_conversions(db: Session, *columns: Any) -> Any:
-    """Conversion events joined to the assignment of the same user and variant."""
-    return db.query(*columns).join(
-        Assignment,
-        and_(
-            Assignment.experiment_id == Event.experiment_id,
-            Assignment.user_id == Event.user_id,
-            Assignment.variant_id == Event.variant_id,
-        ),
+#: How many user ids one assignment lookup binds as a single array.
+ASSIGNMENT_LOOKUP_CHUNK = 10_000
+
+
+def _assigned_pairs(
+    db: Session, experiment_id: Any, user_ids: Iterable[str]
+) -> Set[Tuple[str, str]]:
+    """
+    ``(variant_id, user_id)`` of the assignments these users have in the experiment.
+
+    The conversion counts below never join ``events`` to ``assignments`` in
+    SQL.  Without planner statistics -- a freshly seeded database, before
+    autovacuum has analysed it -- PostgreSQL can run that join as a nested
+    loop over a sequential scan, which took more than 8 s on 30,000 users in
+    CI and blocked the live-results stream (#233).  Instead the converting
+    users are read from ``events`` alone, and their assignments are looked up
+    here by the unique ``(experiment_id, user_id)`` index, a bounded number of
+    ids at a time.
+    """
+    ids = list(user_ids)
+    pairs: Set[Tuple[str, str]] = set()
+    for i in range(0, len(ids), ASSIGNMENT_LOOKUP_CHUNK):
+        chunk = ids[i : i + ASSIGNMENT_LOOKUP_CHUNK]
+        rows = (
+            db.query(Assignment.variant_id, Assignment.user_id)
+            .filter(
+                Assignment.experiment_id == experiment_id,
+                Assignment.user_id
+                == any_(bindparam("user_ids", chunk, type_=ARRAY(String))),
+            )
+            .all()
+        )
+        pairs.update((str(variant_id), str(user_id)) for variant_id, user_id in rows)
+    return pairs
+
+
+def _converters(
+    db: Session, experiment_id: Any, variant_id: Any, event_name: Optional[str]
+) -> List[Tuple[str, Any]]:
+    """``(user_id, first conversion created_at)`` per user with a conversion event
+    tagged with ``variant_id``; read from ``events`` alone."""
+    rows = (
+        db.query(Event.user_id, func.min(Event.created_at))
+        .filter(
+            Event.experiment_id == experiment_id,
+            Event.variant_id == variant_id,
+            conversion_event_filter(event_name),
+        )
+        .group_by(Event.user_id)
+        .all()
     )
+    return [(str(user_id), first) for user_id, first in rows]
+
+
+def _assigned_converters(
+    db: Session, experiment_id: Any, variant_id: Any, event_name: Optional[str]
+) -> List[Tuple[str, Any]]:
+    """The converters of ``variant_id`` who are assigned to that variant."""
+    converters = _converters(db, experiment_id, variant_id, event_name)
+    pairs = _assigned_pairs(db, experiment_id, (user_id for user_id, _ in converters))
+    variant = str(variant_id)
+    return [(u, first) for u, first in converters if (variant, u) in pairs]
 
 
 def count_converting_users(
@@ -109,16 +162,7 @@ def count_converting_users(
     user with no assignment to that variant does not count, so the result is
     never larger than the variant's assignment count.
     """
-    return (
-        _assigned_conversions(db, func.count(distinct(Event.user_id)))
-        .filter(
-            Event.experiment_id == experiment_id,
-            Event.variant_id == variant_id,
-            conversion_event_filter(event_name),
-        )
-        .scalar()
-        or 0
-    )
+    return len(_assigned_converters(db, experiment_id, variant_id, event_name))
 
 
 def count_converting_users_any(
@@ -127,15 +171,18 @@ def count_converting_users_any(
     event_names: Iterable[Optional[str]],
 ) -> int:
     """Users in the experiment with a conversion on *any* of the given metrics."""
-    return (
-        _assigned_conversions(db, func.count(distinct(Event.user_id)))
+    rows = (
+        db.query(Event.variant_id, Event.user_id)
         .filter(
             Event.experiment_id == experiment_id,
             any_conversion_event_filter(event_names),
         )
-        .scalar()
-        or 0
+        .distinct()
+        .all()
     )
+    events = {(str(variant_id), str(user_id)) for variant_id, user_id in rows}
+    pairs = _assigned_pairs(db, experiment_id, {user_id for _, user_id in events})
+    return len({user_id for variant_id, user_id in events & pairs})
 
 
 def first_conversion_times(
@@ -151,14 +198,8 @@ def first_conversion_times(
     by day gives the users who converted for the first time that day, so the
     running sum of a daily series equals the converting-user total.
     """
-    rows = (
-        _assigned_conversions(db, func.min(Event.created_at))
-        .filter(
-            Event.experiment_id == experiment_id,
-            Event.variant_id == variant_id,
-            conversion_event_filter(event_name),
-        )
-        .group_by(Event.user_id)
-        .all()
-    )
-    return [row[0] for row in rows if row[0] is not None]
+    return [
+        first
+        for _, first in _assigned_converters(db, experiment_id, variant_id, event_name)
+        if first is not None
+    ]
