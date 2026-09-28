@@ -46,8 +46,15 @@ migration chain cannot be replayed from zero, so a fresh schema is created from
 the models and stamped:
 
 ```bash
-python -m backend.app.db.bootstrap
+ENVIRONMENT=production python -m backend.app.db.bootstrap
 ```
+
+Set `ENVIRONMENT` to the environment the database belongs to (`production`,
+`staging`, or `development` for a local trial). On a database with no users the
+bootstrap creates the first administrator from `FIRST_SUPERUSER` and
+`FIRST_SUPERUSER_PASSWORD`, and it refuses a password that is empty, shorter
+than 8 characters or a well-known default unless `ENVIRONMENT` is
+`development` or `test`.
 
 The bootstrap is also what the API container runs on start-up
 (`RUN_MIGRATIONS=true`, the default), and it is what makes a **profile switch**
@@ -318,7 +325,7 @@ copies the repository layout unchanged.
 
 The same database can be built by one profile and opened by the other. Both
 documented paths handle it the same way: `python -m backend.app.db.bootstrap`
-(what the API container runs on start-up) and `alembic upgrade heads` (what the
+with `ENVIRONMENT` set (what the API container runs on start-up) and `alembic upgrade heads` (what the
 migration task runs) share the repairs below, because `backend/app/db/migrations/env.py` calls
 them after a command-line upgrade.
 

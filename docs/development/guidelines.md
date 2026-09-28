@@ -61,6 +61,7 @@ This document outlines the development standards, workflows, and best practices 
 
     ```bash
     # from the repository root
+    export ENVIRONMENT=development
     python -m backend.app.db.bootstrap
     uvicorn backend.app.main:app --reload
     ```

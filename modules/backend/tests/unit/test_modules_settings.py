@@ -386,3 +386,15 @@ class TestTheEnvFile:
             env_file_for_environment("production")
             == ProdSettings.model_config["env_file"]
         )
+
+
+@pytest.mark.regression
+def test_a_refused_modules_configuration_does_not_echo_the_audit_key():
+    """The error names AUDIT_HMAC_KEY; it must not print the value it refused."""
+    distinctive = "zq7-distinctive-input-4411"
+    with pytest.raises(ValidationError) as refused:
+        ModulesSettings(ENVIRONMENT="production", AUDIT_HMAC_KEY=distinctive)
+    rendered = str(refused.value)
+    assert "AUDIT_HMAC_KEY" in rendered
+    assert "distinctive" not in rendered
+    assert "input_value" not in rendered

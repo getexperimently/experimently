@@ -23,6 +23,7 @@ from backend.app.core.metrics_scheduler import metrics_scheduler
 from backend.app.core.rollout_scheduler import rollout_scheduler
 from backend.app.core.safety_scheduler import safety_scheduler
 from backend.app.core.scheduler import experiment_scheduler
+from backend.app.core.settings_rules import ENVIRONMENT_NOT_SET_MESSAGE
 from backend.app.middleware.rate_limiter import RateLimitMiddleware
 from backend.app.middleware.relative_redirect_middleware import (
     RelativeSlashRedirectMiddleware,
@@ -98,6 +99,10 @@ if settings.dev_auth_bypass_active:
 MAX_REQUEST_BODY_SIZE: int = 1_048_576  # 1 MB
 
 
+class EnvironmentNotSet(RuntimeError):
+    """The API was started without ENVIRONMENT (see :func:`lifespan`)."""
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage background scheduler lifecycle for the FastAPI app.
@@ -107,7 +112,16 @@ async def lifespan(app: FastAPI):
     database in the middle of unrelated tests (they patch the same service
     functions, and the ticks open and drop connections). Scheduler behaviour
     is covered directly in ``backend/tests/unit/core/test_scheduler_*``.
+
+    First, it refuses to serve when ENVIRONMENT was never set: the settings
+    then default to development, whose relaxed rules a deployment must choose
+    rather than fall into. Importing the application (the OpenAPI dump, the
+    release's version check) is unaffected; only serving it is refused.
     """
+    if not settings.environment_explicit:
+        logger.error(ENVIRONMENT_NOT_SET_MESSAGE)
+        raise EnvironmentNotSet(ENVIRONMENT_NOT_SET_MESSAGE)
+
     if settings.is_test:
         logger.info("Test environment: background schedulers are not started")
         yield

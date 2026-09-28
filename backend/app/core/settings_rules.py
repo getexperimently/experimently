@@ -31,6 +31,24 @@ HARDENED_ENVIRONMENTS: tuple = ("staging", "production")
 #: The canonical environment names.
 CANONICAL_ENVIRONMENTS: tuple = ("development", "test", "staging", "production")
 
+#: Environments in which a weak first-administrator password is accepted, and
+#: then only when ENVIRONMENT was set rather than defaulted.
+WEAK_SUPERUSER_PASSWORD_ENVIRONMENTS: tuple = ("development", "test")
+
+#: What the API says, and then stops, when ENVIRONMENT was never set.
+ENVIRONMENT_NOT_SET_MESSAGE = (
+    "ENVIRONMENT is not set: set it to development, test, staging or "
+    "production before starting the API."
+)
+
+#: What the bootstrap says when it will not create the first administrator.
+WEAK_FIRST_SUPERUSER_PASSWORD_MESSAGE = (
+    "FIRST_SUPERUSER_PASSWORD is a well-known default or shorter than "
+    f"{MIN_SUPERUSER_PASSWORD_LENGTH} characters, which is accepted only with "
+    "ENVIRONMENT=development or ENVIRONMENT=test. Set a stronger "
+    "FIRST_SUPERUSER_PASSWORD, or set ENVIRONMENT."
+)
+
 #: Legacy spelling -> canonical spelling.
 LEGACY_ENVIRONMENT_ALIASES: Dict[str, str] = {
     "dev": "development",
