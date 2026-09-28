@@ -22,6 +22,9 @@ What lives here, by manifest group:
 * stored credentials: ``WAREHOUSE_CREDENTIALS_KEYS``, the Fernet keys
   ``modules.backend.app.core.credential_crypto`` encrypts stored credentials
   with.  Optional; when set in staging or production it must be well formed.
+* warehouse calls: ``WAREHOUSE_MAX_CONCURRENT_JOBS`` and
+  ``WAREHOUSE_MAX_CONCURRENT_RUNS``, the size of the warehouse executor
+  (``modules.backend.app.warehouse.executor``) and its per-organisation cap.
 
 Module code reads them as ``from modules.backend.app.settings import
 settings`` -- the same shape as the core singleton, so a test patches
@@ -41,7 +44,7 @@ from __future__ import annotations
 
 from typing import Any, List, Optional
 
-from pydantic import ValidationInfo, field_validator
+from pydantic import Field, ValidationInfo, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from backend.app.core.config import (
@@ -98,6 +101,14 @@ class ModulesSettings(BaseSettings):
     #: it refuses at use while it is unset
     #: (``credential_crypto.CredentialKeysUnavailable``).
     WAREHOUSE_CREDENTIALS_KEYS: Optional[str] = None
+
+    #: Threads in the warehouse executor, per process: how many warehouse
+    #: calls may run at once.  A call that finds every thread taken is refused
+    #: at once (429 ``warehouse_busy``); it never waits for one.
+    WAREHOUSE_MAX_CONCURRENT_JOBS: int = Field(default=4, ge=1, le=32)
+    #: Of those, how many analyses and previews one organisation (today: this
+    #: deployment) may have running at once.  Connection tests are not counted.
+    WAREHOUSE_MAX_CONCURRENT_RUNS: int = Field(default=2, ge=1, le=32)
 
     model_config = SettingsConfigDict(
         case_sensitive=True,

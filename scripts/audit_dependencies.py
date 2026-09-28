@@ -92,6 +92,9 @@ SHIPPED_FILES = (
 DEVELOPMENT_FILES = (
     Path("backend/requirements.txt"),
     Path("infrastructure/cdk/requirements.txt"),
+    # The modules' test-only pins (duckdb): installed by the jobs that run
+    # modules/backend/tests, never by an image. Absent in a core checkout.
+    Path("modules/requirements-test.txt"),
 )
 
 

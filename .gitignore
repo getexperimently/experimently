@@ -94,6 +94,9 @@ azure-credentials
 
 # Database dumps and backups
 *.sql
+# ...but not the warehouse query builder's golden statements, which are
+# generated SQL text the tests compare byte for byte, not data.
+!modules/backend/tests/unit/warehouse/golden/*.sql
 *.dump
 *.backup
 db-backup/

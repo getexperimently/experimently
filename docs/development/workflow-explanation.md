@@ -72,8 +72,8 @@ their summary job is.
 environment chosen when they are dispatched: they build and push the API image and roll it out
 through CodeDeploy, run the migration task, and roll back. None of them runs `cdk deploy`;
 the stacks are deployed by hand. Each is dispatched from `main` only, and refuses -- red, not
-skipped -- unless that GitHub environment has its `AWS_ACCOUNT_ID` variable and
-`AWS_ROLE_ARN` secret, so a fork or an unconfigured checkout never deploys anything. See
+skipped -- unless that GitHub environment has its `AWS_ACCOUNT_ID` and
+`AWS_ROLE_ARN` secrets, so a fork or an unconfigured checkout never deploys anything. See
 [docs/deployment](../deployment/README.md).
 
 ## Running the same checks locally
