@@ -13,15 +13,12 @@ alike, by walking the whole syntax tree -- so a check can ask the environment
 it runs in whether each one is there. The list is derived, not typed: an
 import added to one of these files is covered the day it is written.
 
-What is excluded, and why:
-
-* ``google.*`` -- the Gemini provider's SDK is not installed yet and is being
-  replaced separately (#196, the Gemini half). Excluding the prefix rather than
-  the one module means a second ``google.`` import does not slip past either
-  way: it is excluded until that work removes this exclusion.
-* relative imports -- there are none in these files, and a relative import
-  would need a package context this script does not have. One appearing is an
-  error, not something silently skipped.
+Nothing is excluded. The Gemini provider calls Google's REST API over the
+``httpx`` the API already pins (#275), so no ``google.*`` package is imported;
+one appearing is checked like any other import, and fails wherever it is not
+installed. A relative import is an error rather than something silently
+skipped: there are none in these files, and resolving one would need a package
+context this script does not have.
 
 The consumers are ``backend/tests/unit/scripts/test_llm_sdk_imports.py`` (the
 test virtualenv) and the ``Docker Smoke`` job in ``pr-qa-gate.yml`` (the built
@@ -52,16 +49,6 @@ SOURCES = (
     ROOT / "backend" / "app" / "services" / "llm_analytics_service.py",
 )
 
-#: Top-level packages left out, with the reason in the module docstring.
-EXCLUDED_PREFIXES = ("google",)
-
-
-def _excluded(module: str) -> bool:
-    return any(
-        module == prefix or module.startswith(prefix + ".")
-        for prefix in EXCLUDED_PREFIXES
-    )
-
 
 def imports_in(path: Path) -> set[str]:
     """Every absolute module ``path`` imports, anywhere in the file.
@@ -84,21 +71,12 @@ def imports_in(path: Path) -> set[str]:
     return found
 
 
-def _all_imports(sources: tuple[Path, ...]) -> set[str]:
+def derived_imports(sources: tuple[Path, ...] = SOURCES) -> list[str]:
+    """Every module the ``sources`` import, sorted."""
     modules: set[str] = set()
     for path in sources:
         modules |= imports_in(path)
-    return modules
-
-
-def derived_imports(sources: tuple[Path, ...] = SOURCES) -> list[str]:
-    """The modules to check, sorted, with the exclusions applied."""
-    return sorted(m for m in _all_imports(sources) if not _excluded(m))
-
-
-def excluded_imports(sources: tuple[Path, ...] = SOURCES) -> list[str]:
-    """What the exclusions removed, so it is reported rather than invisible."""
-    return sorted(m for m in _all_imports(sources) if _excluded(m))
+    return sorted(modules)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -107,7 +85,6 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
     modules = derived_imports()
     print(" ".join(modules) if args.oneline else "\n".join(modules))
-    print(f"excluded: {' '.join(excluded_imports()) or 'nothing'}", file=sys.stderr)
     return 0
 
 

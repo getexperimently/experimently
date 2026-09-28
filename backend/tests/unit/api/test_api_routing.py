@@ -116,7 +116,6 @@ class TestAPIRouting:
                 and "/export/" not in path
                 and "/segments/" not in path
                 and "/mutual-exclusion-groups/" not in path
-                and "/warehouse/" not in path
                 and "/ws/" not in path
             ):
                 for method in methods.values():

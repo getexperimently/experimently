@@ -80,14 +80,17 @@ class TestDerivedList:
             if (match := _PIN.match(raw.split("#", 1)[0].strip()))
         }
         assert declared - _pinned(CORE_LOCK) <= listed
-        # The five the hand-written list used to carry, so this is not weaker.
-        assert {
-            "python3-saml",
-            "authlib",
+        # The two the hand-written list used to carry that the modules still
+        # pin, so this is not weaker.
+        assert {"python3-saml", "authlib"} <= listed
+
+    def test_the_removed_database_drivers_are_not_listed(self):
+        """The full image no longer carries the three database drivers."""
+        assert not {
             "pymysql",
             "clickhouse-connect",
             "databricks-sql-connector",
-        } <= listed
+        } & set(names())
 
     @pytest.mark.regression
     @pytest.mark.parametrize("package", ["requests", "defusedxml"])

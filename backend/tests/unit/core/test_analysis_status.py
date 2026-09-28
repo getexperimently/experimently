@@ -50,9 +50,10 @@ EXPECTED_STATUS = {
     "cuped": "beta",
     "interactions": "beta",
     "novelty": "beta",
+    "sequential": "beta",
 }
 
-EXPECTED_ISSUE = {"cuped": 217, "interactions": 219, "novelty": 219}
+EXPECTED_ISSUE = {"cuped": 217, "interactions": 219, "novelty": 219, "sequential": 231}
 
 
 # ---------------------------------------------------------------------------

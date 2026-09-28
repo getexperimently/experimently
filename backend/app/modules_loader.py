@@ -80,12 +80,15 @@ _routers_failed: bool = False
 # ---------------------------------------------------------------------------
 # The first thing ``modules.register(hooks)`` does is build and validate the
 # modules' settings, so the likeliest failure here is a rejected secret -- a
-# too-short AUDIT_HMAC_KEY, say.  pydantic writes the rejected value into the
-# error as ``input_value='...'``, and it is there in all three renderings:
-# ``repr(exc)``, ``str(exc)`` and the formatted traceback.  Whatever this
-# module builds travels a long way -- the ERROR log, ``modules_failure()``,
-# the RuntimeError ``require_modules_or_absent()`` raises, and from there
-# ``pytest.exit()`` and CI output -- so none of the three may be used raw.
+# too-short AUDIT_HMAC_KEY, say.  By default pydantic writes the rejected
+# value into the error as ``input_value='...'``, in all three renderings:
+# ``repr(exc)``, ``str(exc)`` and the formatted traceback.  The core and
+# modules settings set ``hide_input_in_errors``, so theirs carry no value; the
+# redaction below is defence in depth for any model that does not.  Whatever
+# this module builds travels a long way -- the ERROR log,
+# ``modules_failure()``, the RuntimeError ``require_modules_or_absent()``
+# raises, and from there ``pytest.exit()`` and CI output -- so none of the
+# three may be used raw.
 
 
 def _validation_errors(exc: BaseException) -> Optional[list]:

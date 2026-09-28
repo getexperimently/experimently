@@ -155,9 +155,9 @@ jobs:
             modules/requirements.txt
 
       # Both sets: the modules import the backend, and modules/requirements.txt
-      # carries what only they import (python3-saml, PyMySQL, the warehouse
-      # drivers). Without the second install the connector tests would pass
-      # against a None module and prove nothing.
+      # carries what only they import (python3-saml, authlib). Without the
+      # second install the SSO tests would pass against a None module and
+      # prove nothing.
       - name: Install dependencies
         run: |
           pip install -r backend/requirements.txt
@@ -519,6 +519,7 @@ jobs:
         run: >-
           python -m pytest -p no:cov -q --tb=short
           backend/tests/unit/scripts/test_doc_examples.py
+          backend/tests/unit/scripts/test_guide_blocks.py
           backend/tests/unit/docs/
           backend/tests/smoke/test_openapi_snapshot.py
           backend/tests/smoke/test_version_sources.py
@@ -542,9 +543,8 @@ jobs:
         run: pip install -r backend/requirements.txt "reuse==${REUSE_VERSION}" "pip-licenses==${PIP_LICENSES_VERSION}"
 
       # The modules import packages backend/requirements.txt deliberately does
-      # not carry (python3-saml, PyMySQL, the warehouse drivers, and the
-      # defusedxml/requests the SSO service needs); every one of those imports
-      # is guarded, so without this the licence step would report them as
+      # not carry (python3-saml, authlib, and the defusedxml/requests the SSO
+      # service needs); without this the licence step would report them as
       # "pinned but not installed here".
       - name: Install module dependencies
         if: needs.changes.outputs.docs_only != 'true' && matrix.profile == 'full'
@@ -888,8 +888,7 @@ jobs:
 
       # The full image is what a self-hoster who runs the modules gets, and no
       # job built it: a module-only dependency missing from the image surfaced
-      # as a refused SAML login or a warehouse query blocking on retries in
-      # production, never as a red build. It is built in this job rather than
+      # as a refused SAML login in production, never as a red build. It is built in this job rather than
       # its own because the `builder` and `runtime` stages are already in this
       # job's layer cache from the core build above, so the extra work is one
       # pip install of the module closure -- a couple of minutes inside the
@@ -976,8 +975,8 @@ jobs:
       # install runtime.lock rather than backend/requirements.txt: a pin added
       # to one and not the other passes the unit test and fails this.
       # `import`, not find_spec, so an SDK whose own dependency is missing
-      # fails too. google.* is excluded by the script (the Gemini provider is
-      # separate work) and printed, so the exclusion is never silent.
+      # fails too. Nothing is excluded: the Gemini provider imports no
+      # google.* package (#275), so one appearing fails here.
       - name: LLM call paths import in both images
         run: |
           set -euo pipefail
@@ -1130,6 +1129,16 @@ jobs:
           expect_refusal experimently-api:full noenv.log
           grep -qxF "[preflight] ENVIRONMENT is not set. This image requires it: set ENVIRONMENT=production (or staging; development only for a local trial)." noenv.log
 
+          # The test runner's environment is not one the image runs in: one line.
+          expect_refusal experimently-api:full testenv.log -e ENVIRONMENT=test
+          grep -qxF "[preflight] ENVIRONMENT=test is for the test runner, not this image: set ENVIRONMENT=production (or staging; development only for a local trial)." testenv.log
+
+          # TESTING with production: refused in one line, even with every other
+          # setting good (the settings would otherwise refuse it only at import,
+          # after the database wait and the migrations).
+          expect_refusal experimently-api:full testing.log "${good[@]}" -e TESTING=true
+          grep -qxF "[preflight] TESTING is for the test runner and cannot be combined with ENVIRONMENT=production. Remove TESTING from this deployment's configuration." testing.log
+
           # The good set passes the check (`true` stands in for the server;
           # no database, so no wait and no bootstrap).
           docker run --rm "${good[@]}" -e WAIT_FOR_DB=false -e RUN_MIGRATIONS=false \
@@ -1138,7 +1147,7 @@ jobs:
           # definitions set instead of ENVIRONMENT.
           docker run --rm -e APP_ENV=dev -e WAIT_FOR_DB=false -e RUN_MIGRATIONS=false \
             experimently-api:core true
-          rm -f full.log core.log url.log noenv.log
+          rm -f full.log core.log url.log noenv.log testenv.log testing.log
           echo "start-up check: every refusal fired, and a good set starts"
 
       - name: Build dashboard image

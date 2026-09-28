@@ -26,7 +26,9 @@ PROD_SECRET = "p" * 64
 
 @pytest.fixture(autouse=True)
 def _no_env(monkeypatch):
-    for name in ("DASHBOARD_ORIGINS", "PUBLIC_BASE_URL", "ALLOWED_HOSTS"):
+    # TESTING: the suite exports it, and Settings refuses it with a staging or
+    # production environment, which `_prod` builds.
+    for name in ("DASHBOARD_ORIGINS", "PUBLIC_BASE_URL", "ALLOWED_HOSTS", "TESTING"):
         monkeypatch.delenv(name, raising=False)
 
 
@@ -48,6 +50,7 @@ def _prod(**kwargs):
     return ProdSettings(
         ENVIRONMENT=kwargs.pop("ENVIRONMENT", "production"),
         SECRET_KEY=PROD_SECRET,
+        FIRST_SUPERUSER_PASSWORD="Str0ng-first-admin",
         _env_file=None,
         **kwargs,
     )

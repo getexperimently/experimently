@@ -119,6 +119,27 @@ class TestGetAssignment:
             configuration={"button": "green"},
         )
 
+    def test_carries_assigned_true_and_reason(self, client, transport):
+        assign_route(transport, assigned=True, reason="assigned")
+        assignment = client.get_assignment("checkout_flow", "user-1")
+        assert assignment.assigned is True
+        assert assignment.reason == "assigned"
+
+    @pytest.mark.parametrize("reason", ["holdout", "mutual_exclusion", "targeting"])
+    def test_carries_assigned_false_and_reason_for_an_unenrolled_user(self, client, transport, reason):
+        assign_route(transport, variant_name="control", is_control=True, assigned=False, reason=reason)
+        assignment = client.get_assignment("checkout_flow", "user-1")
+        assert assignment.assigned is False
+        assert assignment.reason == reason
+        assert assignment.is_control is True
+
+    def test_assigned_and_reason_are_none_not_false_for_an_older_server(self, client, transport):
+        # ASSIGN_RESPONSE has neither field, as a server that predates them answers.
+        assign_route(transport)
+        assignment = client.get_assignment("checkout_flow", "user-1")
+        assert assignment.assigned is None
+        assert assignment.reason is None
+
     def test_control_variant_with_null_configuration(self, client, transport):
         assign_route(transport, variant_name="control", is_control=True, configuration=None)
         assignment = client.get_assignment("checkout_flow", "user-1")

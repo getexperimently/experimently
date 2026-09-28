@@ -55,7 +55,6 @@ The API is organized into resource-specific endpoint groups:
 | `/api/v1/notifications` | Slack and email alert preferences |
 | `/api/v1/rbac` | Role management and permission grants |
 | `/api/v1/bandit` | Multi-armed bandit state and weight management |
-| `/api/v1/warehouse` | Warehouse-native analytics connections and syncs |
 
 Interactive API documentation is available at `/docs` (Swagger UI) and `/redoc`.
 

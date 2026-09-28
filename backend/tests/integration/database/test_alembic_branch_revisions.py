@@ -75,6 +75,9 @@ def _run(
         if k not in ("APP_ENV", "TESTING", "ENVIRONMENT")
     }
     env.update({"PYTHONPATH": str(tree), "POSTGRES_SCHEMA": schema})
+    # A deployment sets ENVIRONMENT or a real first-administrator password;
+    # with neither, the bootstrap refuses the class-default "admin".
+    env.setdefault("FIRST_SUPERUSER_PASSWORD", "Subprocess-Deployment-Passw0rd")
     return subprocess.run(
         [sys.executable, *args],
         cwd=str(cwd),

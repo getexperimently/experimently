@@ -145,6 +145,9 @@ def run(
             "PYTHONDONTWRITEBYTECODE": "1",
         }
     )
+    # A deployment sets ENVIRONMENT or a real first-administrator password;
+    # with neither, the bootstrap refuses the class-default "admin".
+    env.setdefault("FIRST_SUPERUSER_PASSWORD", "Subprocess-Deployment-Passw0rd")
     env.update(extra_env or {})
     return subprocess.run(
         [sys.executable, *argv],

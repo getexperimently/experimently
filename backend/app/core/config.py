@@ -15,6 +15,7 @@ from pydantic import (
     EmailStr,
     Field,
     PostgresDsn,
+    PrivateAttr,
     RedisDsn,
     ValidationInfo,
     field_validator,
@@ -34,6 +35,7 @@ from backend.app.core.settings_rules import (
     public_base_url_error,
     secret_is_placeholder,
     superuser_password_is_weak,
+    testing_refusal,
 )
 from backend.app.core.settings_rules import (
     canonical_environment_quiet as _canonical_environment_quiet,
@@ -151,10 +153,14 @@ def _secret_is_placeholder(value: str) -> bool:
 
 
 def _hardening_required(info: ValidationInfo) -> bool:
-    """Secrets must be real in staging/production unless the test suite is running."""
+    """Secrets must be real in staging/production.
+
+    ``TESTING`` does not relax this: ``Settings`` refuses ``TESTING`` together
+    with a staging or production environment before any field is validated
+    (``refuse_testing_in_a_hardened_environment``).
+    """
     environment = (info.data or {}).get("ENVIRONMENT", "development")
-    is_testing = os.getenv("TESTING", "").lower() in ("1", "true", "yes")
-    return not is_testing and environment in HARDENED_ENVIRONMENTS
+    return environment in HARDENED_ENVIRONMENTS
 
 
 def canonical_environment(value: Any) -> Any:
@@ -228,6 +234,16 @@ def resolve_environment_from_process_env() -> str:
         logger.warning(message)
         return canonical_environment(legacy)
     return "development"
+
+
+def environment_is_set_in_process_env() -> bool:
+    """Whether the process environment names the environment at all.
+
+    ``ENVIRONMENT`` or the legacy ``APP_ENV``, non-empty. When neither is set
+    :func:`resolve_environment_from_process_env` falls back to development,
+    and this is how that fallback is told apart from a deliberate choice.
+    """
+    return bool(os.environ.get("ENVIRONMENT") or os.environ.get("APP_ENV"))
 
 
 def _postgres_url(data: Dict[str, Any]) -> str:
@@ -488,11 +504,36 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         case_sensitive=True,
         extra="ignore",  # Ignore unknown fields to catch typos
+        # A refused configuration says which setting and why, never the
+        # values it was given.
+        hide_input_in_errors=True,
     )
+
+    #: Whether ENVIRONMENT was chosen rather than defaulted, when the builder
+    #: of this instance knows better than ``model_fields_set`` does (the
+    #: module-level ``settings`` always passes the resolved name, so it
+    #: records what the process environment said). ``None``: ask
+    #: ``model_fields_set``.
+    _environment_explicit: Optional[bool] = PrivateAttr(default=None)
 
     # ------------------------------------------------------------------
     # Environment helpers
     # ------------------------------------------------------------------
+    @property
+    def environment_explicit(self) -> bool:
+        """True when ENVIRONMENT was set, False when it is the class default.
+
+        Set means the ENVIRONMENT variable (or, for the module-level
+        ``settings``, the legacy APP_ENV), a dotenv entry, or a keyword to the
+        constructor. The API refuses to serve when this is False
+        (``backend.app.main.lifespan``), and the bootstrap creates a first
+        administrator with a weak password only when this is True and the
+        environment is development or test.
+        """
+        if self._environment_explicit is not None:
+            return self._environment_explicit
+        return "ENVIRONMENT" in self.model_fields_set
+
     @property
     def is_production(self) -> bool:
         return self.ENVIRONMENT == "production"
@@ -650,6 +691,31 @@ class Settings(BaseSettings):
         """Accept legacy ``dev``/``prod`` spellings (with a deprecation warning)."""
         return canonical_environment(v)
 
+    @model_validator(mode="before")
+    @classmethod
+    def refuse_testing_in_a_hardened_environment(cls, data: Any) -> Any:
+        """``TESTING`` belongs to the test runner, never to staging or production.
+
+        The test suite sets ``TESTING=true`` (with ``APP_ENV=test``).  In a
+        staging or production process it is always a configuration mistake,
+        so it is refused outright rather than allowed to change what those
+        environments require.  A ``before`` validator so that this is the
+        message, not whichever setting it would otherwise have affected.
+        """
+        environment: Any = None
+        if isinstance(data, dict):
+            environment = data.get("ENVIRONMENT")
+        if environment is None:
+            environment = cls.model_fields["ENVIRONMENT"].default
+        if isinstance(environment, str):
+            environment = canonical_environment_quiet(environment)
+        # The rule and its message are settings_rules', which the container's
+        # start-up check applies too.
+        refusal = testing_refusal(environment, os.environ.get("TESTING"))
+        if refusal:
+            raise ValueError(refusal)
+        return data
+
     @model_validator(mode="after")
     def forbid_dev_auth_bypass_outside_dev(self) -> "Settings":
         """
@@ -800,8 +866,7 @@ class Settings(BaseSettings):
         the real settings against.
         """
         environment = getattr(self, "ENVIRONMENT", "development")
-        is_testing = os.getenv("TESTING", "").lower() in ("1", "true", "yes")
-        if is_testing or environment not in HARDENED_ENVIRONMENTS:
+        if environment not in HARDENED_ENVIRONMENTS:
             return self
         if "*" in self.ALLOWED_HOSTS:
             raise ValueError(
@@ -943,7 +1008,10 @@ class DevSettings(Settings):
     POSTGRES_DB: str = "experimentation"
 
     model_config = SettingsConfigDict(
-        env_file=ENV_FILES["development"], case_sensitive=True, extra="ignore"
+        env_file=ENV_FILES["development"],
+        case_sensitive=True,
+        extra="ignore",
+        hide_input_in_errors=True,
     )
 
 
@@ -970,7 +1038,10 @@ class TestSettings(Settings):
     CACHE_CONTROL: Dict[str, Any] = {"enabled": False, "redis": None, "ttl": 3600}
 
     model_config = SettingsConfigDict(
-        env_file=ENV_FILES["test"], case_sensitive=True, extra="ignore"
+        env_file=ENV_FILES["test"],
+        case_sensitive=True,
+        extra="ignore",
+        hide_input_in_errors=True,
     )
 
 
@@ -987,7 +1058,10 @@ class ProdSettings(Settings):
     CACHE_CONTROL: Dict[str, Any] = {"enabled": False, "redis": None, "ttl": 3600}
 
     model_config = SettingsConfigDict(
-        env_file=ENV_FILES["production"], case_sensitive=True, extra="ignore"
+        env_file=ENV_FILES["production"],
+        case_sensitive=True,
+        extra="ignore",
+        hide_input_in_errors=True,
     )
 
 
@@ -998,6 +1072,9 @@ class ProdSettings(Settings):
 # deprecation warning.  The resolved value is passed explicitly so the chosen
 # class always reports the canonical name (``APP_ENV=prod`` -> ``production``).
 _resolved_environment = resolve_environment_from_process_env()
+# Read before the APP_ENV mirror below writes to the process environment, after
+# which it would always look set.
+_environment_explicit = environment_is_set_in_process_env()
 
 # Mirror the legacy spelling back into APP_ENV for modules that still read it
 # directly (schema selection, rate-limiter enablement, bandit scheduler ...).
@@ -1011,6 +1088,9 @@ elif _resolved_environment == "test":
     settings = TestSettings(ENVIRONMENT=_resolved_environment)
 else:
     settings = DevSettings(ENVIRONMENT=_resolved_environment)
+# The resolved name is always passed, so that the class reports the canonical
+# spelling; whether it was chosen or defaulted is what the process said.
+settings._environment_explicit = _environment_explicit
 
 # Make settings accessible at module level
 __all__ = [
@@ -1025,6 +1105,7 @@ __all__ = [
     "TestSettings",
     "canonical_environment",
     "env_file_for_environment",
+    "environment_is_set_in_process_env",
     "resolve_environment_from_process_env",
     "settings",
 ]

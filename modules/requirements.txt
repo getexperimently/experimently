@@ -5,9 +5,7 @@
 # `modules-tests` CI jobs, and _platform.yml with `profile: full`. A core
 # checkout has no modules/ directory and therefore none of these packages.
 #
-# Nothing under backend/ imports any of them; every module that does guards
-# the import (`try: import pymysql / except ImportError: pymysql = None`), so
-# a full checkout still imports cleanly without them — it just cannot connect.
+# Nothing under backend/ imports any of them.
 #
 # Keep this list to what the modules import at RUNTIME. Test-only and
 # infrastructure tooling (pytest, moto, aws-cdk-lib, pyspark for the Glue
@@ -23,30 +21,5 @@ authlib==1.8.0         # AsyncOAuth2Client for the OIDC authorization-code flow
 defusedxml==0.7.1      # sso_service.py:32, SAML metadata parsing without the
                        # entity-expansion / external-entity holes in stdlib ElementTree
 requests==2.34.2       # sso_service.py:600,662 -- the OIDC token/userinfo fallback
-                       # when authlib is not importable.  A transitive dependency of
-                       # databricks-sql-connector as well, pinned here because a module
+                       # when authlib is not importable.  Pinned here because a module
                        # imports it directly.
-
-# EP-041: Databricks warehouse connector (modules/backend/app/services/databricks_connector.py)
-databricks-sql-connector[pyarrow]==4.5.0  # >=4.5 is what moves thrift to 0.24.0, which
-                                  # is the fix for PYSEC-2026-3925/3926/3927
-                                  # (issue #97): 3.7.5 pins thrift<0.21 and no
-                                  # 3.x release accepts a patched one, so the
-                                  # advisories could only be cleared by this
-                                  # major. 3.3 had pinned pandas<2.2; 4.5 does
-                                  # not constrain pandas at all.
-                                  #
-                                  # The [pyarrow] extra is NOT optional for us,
-                                  # despite being optional upstream: 3.7.5
-                                  # required pyarrow outright, 4.x made it an
-                                  # extra, and a bare `==4.5.0` therefore drops
-                                  # Arrow/CloudFetch -- the path the driver uses
-                                  # to return large result sets -- from the full
-                                  # image. A security bump must not quietly
-                                  # change what the connector can do, and every
-                                  # test of it patches `databricks_sql`, so
-                                  # nothing would have noticed.
-
-# EP-048: ClickHouse and MySQL warehouse connectors
-clickhouse-connect==1.8.0   # modules/backend/app/services/clickhouse_connector.py
-PyMySQL==1.2.3              # modules/backend/app/services/mysql_connector.py

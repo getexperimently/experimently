@@ -13,9 +13,9 @@ Transaction ownership
 on the caller's engine (``db.get_bind()``) and closed before it returns.  The
 request session is never committed or rolled back on its behalf.  This matters
 on the read endpoints: ``AnalysisService.compute_bayesian_results`` leaves
-``experiment.bayesian_decision`` *flushed but not committed* for the scheduler,
-so a ``db.commit()`` from an audit write would silently persist it from a GET,
-and the old failure path's ``db.rollback()`` would throw away whatever else the
+``experiment.bayesian_decision`` *flushed but not committed*, so a
+``db.commit()`` from an audit write would silently persist it from a GET, and
+the old failure path's ``db.rollback()`` would throw away whatever else the
 caller had pending.
 
 One row per experiment, kind and day
