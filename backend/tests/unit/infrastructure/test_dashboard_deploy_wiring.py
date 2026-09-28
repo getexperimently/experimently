@@ -664,7 +664,8 @@ def test_a_whole_successful_tail_is_green_and_says_so(runner):
     assert status == "success", [(k, c, o[-400:]) for k, c, o, _ in log if c]
     (summary,) = [s for k, _, _, s in log if k == "summary"]
     assert "| Dashboard rollout | completed |" in summary
-    assert f"| New dashboard revision | `{DASH_NEW}` |" in summary
+    # family:revision: the ARN names the account, and the summary is public.
+    assert f"| New dashboard revision | `{DASH_NEW.rsplit('/', 1)[-1]}` |" in summary
     assert (
         "Rollback: Actions → Rollback → environment=staging, "
         "task_definition_arn=experimentation-backend-staging:42, "
@@ -1485,9 +1486,10 @@ def test_the_rollback_summary_says_what_happened_to_the_dashboard(runner, given)
             in summary
         )
     else:
+        # The image without its registry host, which names the account.
         assert (
-            f"Dashboard not rolled back: it is serving experimentation-dashboard-staging:7 ({WEB_IMAGE})."
-            in summary
+            "Dashboard not rolled back: it is serving experimentation-dashboard-staging:7 "
+            f"({WEB_IMAGE.split('/', 1)[1]})." in summary
         )
 
 

@@ -66,15 +66,23 @@ jobs:
       FARGATE_STACK: experimentation-fargate-${{ inputs.environment }}
       DATABASE_STACK: experimentation-database-${{ inputs.environment }}
     steps:
-      # FIRST, and the only place the account variable is read (PE v1 C9).
+      # FIRST, and the only place the account ID is read (PE v1 C9). It is an
+      # environment SECRET, never a variable: a step's log header prints its
+      # evaluated `env:` before the step runs, so a variable's value would be
+      # public before anything could mask it; a secret is masked from the
+      # start of the job.
       - name: Refuse an environment that is not configured
         env:
-          ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+          ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
           ROLE_ARN_SET: ${{ secrets.AWS_ROLE_ARN != '' }}
         run: |
           set -euo pipefail
           if [ -z "$ACCOUNT_ID" ]; then
-            echo "::error title=Not configured::vars.AWS_ACCOUNT_ID is not set for the '${TARGET_ENV}' environment, so nothing was migrated. Set it under Settings → Environments → ${TARGET_ENV} → Variables. See docs/deployment/README.md#before-the-first-deploy"
+            echo "::error title=Not configured::secrets.AWS_ACCOUNT_ID is not set for the '${TARGET_ENV}' environment, so nothing was migrated. Set it as an environment secret under Settings → Environments → ${TARGET_ENV} → Environment secrets (gh secret set AWS_ACCOUNT_ID --env ${TARGET_ENV}); a variable of that name is not read. See docs/deployment/README.md#before-the-first-deploy"
+            exit 1
+          fi
+          if ! [[ "$ACCOUNT_ID" =~ ^[0-9]{12}$ ]]; then
+            echo "::error title=Not configured::secrets.AWS_ACCOUNT_ID for the '${TARGET_ENV}' environment is not a 12-digit AWS account id, so nothing was migrated. See docs/deployment/README.md#before-the-first-deploy"
             exit 1
           fi
           if [ "$ROLE_ARN_SET" != "true" ]; then
@@ -123,13 +131,18 @@ jobs:
           # timeout-minutes x 60 <= this <= the role's MaxSessionDuration (10800);
           # test_aws_session_duration.py. The default, 3600, expires mid-job.
           role-duration-seconds: 5400
+          # The ASSUMED account, which the wrong-account check below may find
+          # is not the configured one; the configured one is a secret already.
+          mask-aws-account-id: true
 
+      # Neither account ID is printed: the log is public.
       - name: Refuse the wrong AWS account
+        id: account
         run: |
           set -euo pipefail
           actual="$(aws sts get-caller-identity --query Account --output text)"
           if [ "$actual" != "$EXPECTED_ACCOUNT_ID" ]; then
-            echo "::error title=Wrong AWS account::environment=${TARGET_ENV} expects account ${EXPECTED_ACCOUNT_ID}; the assumed role is in ${actual}. Nothing has been changed."
+            echo "::error title=Wrong AWS account::environment=${TARGET_ENV}: the assumed role is not in the account in this environment's AWS_ACCOUNT_ID secret. Check that its AWS_ROLE_ARN secret names a role in that account. Nothing has been changed."
             exit 1
           fi
 
@@ -166,11 +179,13 @@ jobs:
           image="$(aws ecs describe-task-definition --task-definition "$td" \
                      --query "taskDefinition.containerDefinitions[?name=='backend'].image | [0]" --output text)"
           if [ -z "$image" ] || [ "$image" = "None" ]; then
-            echo "::error::$td, which is serving, has no container named 'backend'."
+            echo "::error::${td##*/}, which is serving, has no container named 'backend'."
             exit 1
           fi
           echo "image=$image" >> "$GITHUB_OUTPUT"
-          echo "serving: $td ($image)"
+          # family:revision and the image without its registry host: the
+          # log is public, and both full forms name the account.
+          echo "serving: ${td##*/} (${image#*/})"
 
       - name: Take a snapshot first
         id: snapshot
@@ -199,7 +214,7 @@ jobs:
           case "$IMAGE" in
             *@sha256:*) arn="$(bash scripts/register_task_definition.sh "$MIGRATE_TASK_FAMILY" "$IMAGE")" ;;
             *)
-              echo "::error::The serving image $IMAGE is not pinned by digest, so which bytes it names can change under this migration. Deploy a release first: Actions → Deploy."
+              echo "::error::The serving image ${IMAGE#*/} is not pinned by digest, so which bytes it names can change under this migration. Deploy a release first: Actions → Deploy."
               exit 1
               ;;
           esac
@@ -241,17 +256,26 @@ jobs:
           TASK_DEFINITION: ${{ steps.migrate-td.outputs.arn }}
           MIGRATION: ${{ steps.migrate.outcome }}
           JOB_STATUS: ${{ job.status }}
+          ACCOUNT_CHECK: ${{ steps.account.outcome }}
         run: |
+          # No account ID, no registry host, no full ARN: the summary is public.
+          image="${IMAGE#*/}"
+          task_definition="${TASK_DEFINITION##*/}"
+          case "$ACCOUNT_CHECK" in
+            success) account_cell="matches the environment's AWS_ACCOUNT_ID secret" ;;
+            failure) account_cell="does NOT match the environment's AWS_ACCOUNT_ID secret" ;;
+            *) account_cell="not checked" ;;
+          esac
           {
             echo "## Database migration on ${TARGET_ENV}: ${JOB_STATUS}"
             echo ""
             echo "| | |"
             echo "|---|---|"
             echo "| Environment | \`${TARGET_ENV}\` |"
-            echo "| Account / region | \`${EXPECTED_ACCOUNT_ID:-not checked}\` / \`${AWS_REGION}\` |"
+            echo "| Account / region | ${account_cell} / \`${AWS_REGION}\` |"
             echo "| Command | \`alembic ${DIRECTION} ${TARGET}\` |"
-            echo "| Image (serving) | \`${IMAGE:-not found}\` |"
-            echo "| Task definition | \`${TASK_DEFINITION:-not registered}\` |"
+            echo "| Image (serving) | \`${image:-not found}\` |"
+            echo "| Task definition | \`${task_definition:-not registered}\` |"
             echo "| Snapshot first | \`${SNAPSHOT:-none taken}\` |"
             echo "| Result | ${MIGRATION:-not run} |"
           } >> "$GITHUB_STEP_SUMMARY"
