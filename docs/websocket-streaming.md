@@ -73,38 +73,22 @@ keys:
 
 ```{.bash exec}
 set +e
-ws_pipe() {
-  local t0 t1 n
-  t0=$(date +%s.%N)
-  { curl -s -N --http1.1 --max-time 3 --trace-time -v \
-      -H 'Connection: Upgrade' \
-      -H 'Upgrade: websocket' \
-      -H 'Sec-WebSocket-Version: 13' \
-      -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' \
-      -H "Sec-WebSocket-Protocol: experimently.bearer, $TOKEN" \
-      localhost:8000/api/v1/ws/experiments/$EXP_ID/results 2>/tmp/ws-v.txt || [ $? -eq 28 ]; } \
-    | tee /tmp/ws-raw.bin | LC_ALL=C grep -aoE '"(event|status|key)": "[a-z_]*"' > /tmp/ws-grep.txt
-  echo "DIAG $1 pipe PIPESTATUS=${PIPESTATUS[*]} bytes=$(wc -c < /tmp/ws-raw.bin) matches=$(wc -l < /tmp/ws-grep.txt) start=$t0"
-  echo "DIAG $1 curl-v: $(grep -E 'Connected|HTTP/1.1 101|Operation timed|left intact|Recv' /tmp/ws-v.txt | cut -c1-90 | tr '\n' '|')"
-}
-ws_file() {
-  local rc=0
-  curl -s -N --http1.1 --max-time 3 -o /tmp/ws-file.bin \
+( curl -s -N --http1.1 --max-time 12 -o /tmp/ws-a.bin \
     -H 'Connection: Upgrade' \
     -H 'Upgrade: websocket' \
     -H 'Sec-WebSocket-Version: 13' \
     -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' \
     -H "Sec-WebSocket-Protocol: experimently.bearer, $TOKEN" \
-    localhost:8000/api/v1/ws/experiments/$EXP_ID/results || rc=$?
-  echo "DIAG $1 file rc=$rc bytes=$(wc -c < /tmp/ws-file.bin)"
-}
-ws_pipe 1
-ws_file 2
-ws_pipe 3
-ws_file 4
-ws_pipe 5
-echo "DIAG api log:"
-docker compose logs --no-color --timestamps api 2>&1 | grep -E 'WebSocket|snapshot|Error|error|Traceback|Bandit|Scheduler|seed' | grep -v health | tail -22 | cut -c1-200
+    localhost:8000/api/v1/ws/experiments/$EXP_ID/results ) &
+for i in 1 2 3 4; do
+  sleep 2
+  echo "DIAG t=$((i * 2))s ws-bytes=$(wc -c < /tmp/ws-a.bin 2>/dev/null || echo 0)"
+  docker compose exec -T postgres psql -U postgres -d experimentation -qAt -c "select 'DIAG pg', pid, state, coalesce(wait_event_type,'-'), coalesce(wait_event,'-'), round(extract(epoch from now()-query_start)::numeric,2), left(regexp_replace(query, '\s+', ' ', 'g'), 150) from pg_stat_activity where datname='experimentation' and pid <> pg_backend_pid() and state <> 'idle'" 2>&1 | head -6
+done
+docker compose exec -T postgres psql -U postgres -d experimentation -qAt -c "select 'DIAG stats', relname, reltuples, relpages, coalesce(last_autoanalyze::text,'never') from pg_class c join pg_stat_user_tables s on s.relid=c.oid where relname in ('events','assignments')" 2>&1 | head -4
+docker compose exec -T postgres psql -U postgres -d experimentation -qAt -c "select 'DIAG locks', l.pid, l.mode, l.granted, c.relname from pg_locks l left join pg_class c on c.oid=l.relation where not l.granted" 2>&1 | head -6
+wait
+echo "DIAG final ws-bytes=$(wc -c < /tmp/ws-a.bin 2>/dev/null || echo 0)"
 false
 ```
 <!-- expect: "event": "results_update" -->
