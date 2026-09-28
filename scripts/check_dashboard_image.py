@@ -32,7 +32,8 @@ refused by `run_aws` before a process is started.
 
     python3 scripts/check_dashboard_image.py --env staging [--expect sha256:<hex>]
     # then, with the value it printed:
-    cdk deploy experimentation-fargate-staging -c dashboard_image_tag=sha256:<hex> ...
+    ALARM_EMAIL=ops@your-domain.com cdk deploy experimentation-fargate-staging \\
+        -c dashboard_image_tag=sha256:<hex> ...
 
 Exit status: 0 printed (and, with --expect, it matches); 1 refused; 2 could
 not tell (an AWS call failed, or the service does not look like this

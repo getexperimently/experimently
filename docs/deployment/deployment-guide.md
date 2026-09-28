@@ -138,8 +138,23 @@ cdk bootstrap aws://<account>/us-west-2
 cd infrastructure/cdk
 export ENVIRONMENT=staging CDK_DEFAULT_REGION=us-west-2
 export CERTIFICATE_ARN=... PUBLIC_BASE_URL=https://app.<domain>
+export ALARM_EMAIL=ops@your-domain.com
 cdk deploy --all --require-approval never
 ```
+
+`ALARM_EMAIL` is **required** for `staging` and `prod`: the one address every
+alarm emails, including the two API 5xx alarms that roll a deployment back by
+themselves. Synth refuses a missing value, a malformed one, or one at
+`example.com`/`.net`/`.org`. Keep it exported for every later `cdk diff`,
+`cdk deploy` and `cdk destroy` too.
+
+**Confirm the subscription before the first release deploy.** SNS emails the
+address a confirmation link. Until it is confirmed no alarm reaches anyone. Do
+not click the link. Confirm the link's `Token=` value with
+`aws sns confirm-subscription --topic-arn "$TOPIC_ARN" --token "$TOKEN_FROM_THE_LINK" --authenticate-on-unsubscribe true`,
+then check the subscription is no longer `PendingConfirmation`
+([AWS CDK Deployment](../self-hosting/cdk.md#required-environment-variables)
+has the commands).
 
 `cdk deploy --all` is for standing an environment up. On one that is already
 running, deploy `experimentation-fargate-<env>` on its own, pinned to what is

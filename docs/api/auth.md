@@ -136,8 +136,10 @@ it securely. If you lose it, create a new key and delete the old one. See
 
 The request also accepts an optional `"scopes"` list. **Scopes do not limit what a key can do
 today:** any active key is accepted by every endpoint that takes an API key. The one scope
-intended to be enforced is `sdk:ruleset`, for server-side local evaluation; see
-[Scopes](../security/api-keys.md#scopes).
+intended to be enforced is `sdk:ruleset`, for server-side local evaluation. Only users who
+can change feature flags (ADMIN, DEVELOPER, or a superuser) can create a key with it; anyone
+else gets `403` and no key is created. Using such a key is intended to follow the same rule
+once the ruleset endpoint ships. See [Scopes](../security/api-keys.md#scopes).
 
 ### Using an API Key
 

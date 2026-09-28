@@ -220,6 +220,10 @@ monitoring_stack = MonitoringStack(
         analytics_stack.events_stream.stream_name if analytics_stack else None
     ),
     env_name=env_name,
+    # ALARM_EMAIL: the one address every alarm emails, the rollback alarms
+    # included (DECISIONS D21). Required for staging and prod, optional for dev
+    # and demo; stacks/alarm_email.py has what it refuses.
+    alarm_email=os.environ.get("ALARM_EMAIL"),
     env=env,
 )
 monitoring_stack.add_dependency(vpc_stack)
@@ -273,9 +277,14 @@ fargate_stack = FargateServiceStack(
     # speaks TLS to it (REDIS_SSL, set in the stack); there is no secret.
     redis_host=redis_stack.primary_host,
     redis_port=redis_stack.primary_port,
+    # The API's two 5xx alarms roll a deployment back by themselves; they
+    # announce it on the monitoring topic (DECISIONS D21). Monitoring depends
+    # only on vpc and (with the etl module) analytics, so there is no cycle.
+    alarm_topic=monitoring_stack.alerts_topic,
     env=env,
 )
 fargate_stack.add_dependency(compute_stack)
+fargate_stack.add_dependency(monitoring_stack)
 fargate_stack.add_dependency(database_stack)
 fargate_stack.add_dependency(redis_stack)
 
