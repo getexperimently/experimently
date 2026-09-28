@@ -24,6 +24,7 @@ from modules.backend.app.schemas.workspaces import (
     CreateAPIKeyResponse,
     CreateInviteRequest,
     CreateWorkspaceRequest,
+    InviteEmailMismatchResponse,
     UpdateMemberRoleRequest,
     UpdateWorkspaceRequest,
     WorkspaceAPIKeyResponse,
@@ -485,11 +486,11 @@ def get_invite(
     status_code=status.HTTP_201_CREATED,
     responses={
         403: {
+            "model": InviteEmailMismatchResponse,
             "description": (
-                "The signed-in account is not the invited address. The body is "
-                '`{"detail": {"code": "invite_email_mismatch", "message": "This '
-                'invite was sent to a different email address."}}`.'
-            )
+                "The signed-in account is not the invited address "
+                '(`detail.code` is `"invite_email_mismatch"`).'
+            ),
         }
     },
 )

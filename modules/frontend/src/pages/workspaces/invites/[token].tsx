@@ -40,7 +40,10 @@ function inviteEmailMatches(
   return a !== null && b !== null && a === b;
 }
 
-/** `alice@example.com` -> `a•••@example.com`: enough to recognise, not to read. */
+/**
+ * `alice@example.com` -> `a•••@example.com`, for display on this page only.
+ * The invite preview API still returns the full address; this does not hide it.
+ */
 function maskEmail(email: string): string {
   const trimmed = email.trim();
   const at = trimmed.lastIndexOf('@');
@@ -109,7 +112,7 @@ function AcceptInvitePage() {
     setSwitchingAccount(true);
     const next = `/workspaces/invites/${encodeURIComponent(token ?? '')}`;
     try {
-      await auth?.logout();
+      await auth?.logout().catch(() => undefined);
     } finally {
       void router.replace(`${LOGIN_PATH}?next=${encodeURIComponent(next)}`);
     }

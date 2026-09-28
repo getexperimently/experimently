@@ -16,7 +16,6 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from backend.app.models.user import User, UserRole
-from modules.backend.app.services.workspace_service import workspace_service
 
 HASHED_PASSWORD = "$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW"
 
@@ -331,19 +330,16 @@ class TestWorkspaceInvites:
         # to ws_b is irrelevant). Instead, we just test that the invite endpoint
         # works end-to-end:
         # Addressed to the accepting user, so the request reaches the
-        # membership check rather than the invited-address check. Written
-        # through the service: the fixture's ``.test`` address is a
-        # special-use domain the create route's EmailStr refuses.
-        invite = workspace_service.create_invite(
-            db_session,
-            workspace_id=uuid.UUID(ws_a["id"]),
-            email=admin_user.email,
-            role="ANALYST",
-            invited_by=admin_user.id,
+        # membership check rather than the invited-address check.
+        payload = {"email": admin_user.email, "role": "ANALYST"}
+        create_resp = admin_client.post(
+            f"/api/v1/workspaces/{ws_a['id']}/invites", json=payload
         )
+        assert create_resp.status_code == 201, create_resp.text
+        # The invite token exists — that is sufficient to verify the endpoint works.
         # Accepting it with the same admin_client would fail (already a member),
         # so we verify the accept endpoint returns 422 with the correct detail.
-        token = invite.token
+        token = create_resp.json()["token"]
         resp = admin_client.post(f"/api/v1/workspaces/invites/{token}/accept")
         # Admin is already a member: AlreadyMember is answered with 422
         assert resp.status_code == 422, resp.text
@@ -357,18 +353,13 @@ class TestWorkspaceInvites:
 
         ws = _create_workspace(admin_client, "-expinv")
         # Addressed to the accepting user, so the request reaches the expiry
-        # check rather than the invited-address check. Written through the
-        # service: the fixture's ``.test`` address is a special-use domain the
-        # create route's EmailStr refuses.
-        created = workspace_service.create_invite(
-            db_session,
-            workspace_id=uuid.UUID(ws["id"]),
-            email=developer_user.email,
-            role="VIEWER",
-            invited_by=developer_user.id,
+        # check rather than the invited-address check.
+        payload = {"email": developer_user.email, "role": "VIEWER"}
+        create_resp = admin_client.post(
+            f"/api/v1/workspaces/{ws['id']}/invites", json=payload
         )
-        inv_id = created.id
-        token = created.token
+        inv_id = create_resp.json()["id"]
+        token = create_resp.json()["token"]
         # Force expiry in DB
         from datetime import datetime, timedelta
 

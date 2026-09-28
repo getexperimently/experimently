@@ -152,6 +152,20 @@ describe('/workspaces/invites/[token]', () => {
     expect(acceptInvite).not.toHaveBeenCalled();
   });
 
+  it('"Use a different account" still returns to sign-in when sign-out fails', async () => {
+    signedInAs('bob@other.com');
+    mockLogout.mockRejectedValueOnce(new Error('network down'));
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Use a different account' }));
+
+    await waitFor(() =>
+      expect(mockReplace).toHaveBeenCalledWith(
+        `/login?next=${encodeURIComponent('/workspaces/invites/tok123')}`,
+      ),
+    );
+  });
+
   it('shows the mismatch state when the API answers 403 invite_email_mismatch', async () => {
     signedInAs(INVITED);
     acceptInvite.mockRejectedValue(

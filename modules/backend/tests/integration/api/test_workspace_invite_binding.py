@@ -289,8 +289,34 @@ def test_the_address_is_checked_before_expiry_and_prior_acceptance(
 @pytest.mark.regression
 @pytest.mark.parametrize(
     "email",
-    ["not-an-address", "kim@", "", KELVIN_SIGN + "im@corp-example.com"],
-    ids=["no-at", "no-domain", "empty", "non-ascii"],
+    [
+        "not-an-address",
+        "kim@",
+        "@corp-example.com",
+        "",
+        "   ",
+        "kim@@corp-example.com",
+        "kim@corp@example.com",
+        "kim smith@corp-example.com",
+        KELVIN_SIGN + "im@corp-example.com",
+        "k" * 244 + "@example.com",
+        123,
+        None,
+    ],
+    ids=[
+        "no-at",
+        "no-domain",
+        "no-local-part",
+        "empty",
+        "blank",
+        "double-at",
+        "two-ats",
+        "space",
+        "non-ascii",
+        "256-chars",
+        "number",
+        "null",
+    ],
 )
 def test_an_invite_needs_a_valid_ascii_address(db_session, owner, workspace, email):
     client = make_client_for_user(db_session, owner)
@@ -325,3 +351,62 @@ def test_an_invite_created_through_the_api_is_accepted_by_its_address(
 
     invitee = _user(db_session, f"kim.{s}@corp-example.com")
     assert _accept(db_session, invitee, resp.json()["token"]).status_code == 201
+
+
+def _create_through_api(db: Session, owner: User, workspace, email: str):
+    client = make_client_for_user(db, owner)
+    try:
+        return client.post(
+            f"/api/v1/workspaces/{workspace.id}/invites",
+            json={"email": email, "role": "VIEWER"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_the_longest_accepted_address_is_255_characters(db_session, owner, workspace):
+    email = "k" * 243 + "@example.com"
+    assert len(email) == 255
+    resp = _create_through_api(db_session, owner, workspace, email)
+    assert resp.status_code == 201, resp.text
+
+
+def test_an_address_is_stored_trimmed(db_session, owner, workspace):
+    s = uuid.uuid4().hex[:8]
+    resp = _create_through_api(db_session, owner, workspace, f"  kim.{s}@corp.local ")
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["email"] == f"kim.{s}@corp.local"
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize(
+    "domain",
+    ["corp.local", "int.test", "home.arpa", "intranet"],
+    ids=["local", "test", "home-arpa", "bare-host"],
+)
+def test_a_special_use_domain_can_be_invited_and_accept(
+    db_session, owner, workspace, domain
+):
+    """Accounts on special-use domains (SSO can provision them) can be invited."""
+    email = f"kim.{uuid.uuid4().hex[:8]}@{domain}"
+    invitee = _user(db_session, email, UserRole.DEVELOPER)
+
+    resp = _create_through_api(db_session, owner, workspace, email)
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["email"] == email
+
+    accepted = _accept(db_session, invitee, resp.json()["token"])
+    assert accepted.status_code == 201, accepted.text
+
+
+def test_the_accept_route_documents_its_403_body():
+    """The 403 in the OpenAPI document has the typed body's schema."""
+    spec = app.openapi()
+    op = spec["paths"]["/api/v1/workspaces/invites/{token}/accept"]["post"]
+    ref = op["responses"]["403"]["content"]["application/json"]["schema"]["$ref"]
+    body = spec["components"]["schemas"][ref.rsplit("/", 1)[-1]]
+    detail_ref = body["properties"]["detail"]["$ref"]
+    detail = spec["components"]["schemas"][detail_ref.rsplit("/", 1)[-1]]
+    assert body["required"] == ["detail"]
+    assert set(detail["properties"]) == {"code", "message"}
+    assert sorted(detail["required"]) == ["code", "message"]
