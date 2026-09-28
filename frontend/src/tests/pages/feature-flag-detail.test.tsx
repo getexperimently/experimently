@@ -255,6 +255,53 @@ describe('FeatureFlagDetailPage', () => {
     expect(checks).toBe(2);
   });
 
+  it('says the error rate cannot be computed, in text, when errors arrive with no evaluations', async () => {
+    install([
+      ...happyRoutes().filter((r) => !String(r.path).includes('/safety/')),
+      {
+        path: '/api/v1/safety/feature-flags/flag-1/check',
+        // What the API returns for a flag evaluated only locally before its SDK
+        // reported any counts: 0 / 0 reads as a 0% error rate and "healthy".
+        handler: () =>
+          safety({
+            is_healthy: true,
+            metrics: [{ name: 'error_rate', current_value: 0, threshold: 0.05, is_healthy: true }],
+            details: { feature_flag_key: 'checkout', error_count: 7, total_evaluations: 0, timeframe_minutes: 15 },
+          }),
+      },
+    ]);
+    render(<FeatureFlagDetailPage />);
+
+    const status = await screen.findByTestId('safety-status');
+    expect(status).toHaveTextContent('Error rate unknown');
+    expect(status).not.toHaveTextContent('Healthy');
+    expect(status).toHaveAttribute('data-healthy', 'unknown');
+    expect(status.className).not.toMatch(/green|red/);
+    expect(screen.getByTestId('safety-no-evaluations')).toHaveTextContent(
+      '7 errors reported, but no evaluations reported in the last 15 minutes: the error rate cannot be computed.',
+    );
+    // The error_rate row says so in words; it does not show a green "healthy" dot.
+    const metric = screen.getByTestId('safety-metric');
+    expect(within(metric).getByTestId('safety-metric-not-computed')).toHaveTextContent('not computed');
+    expect(within(metric).queryByLabelText('healthy')).not.toBeInTheDocument();
+  });
+
+  it('keeps Healthy when evaluations were recorded, and when there were no errors at all', async () => {
+    for (const details of [
+      { error_count: 7, total_evaluations: 1000, timeframe_minutes: 15 },
+      { error_count: 0, total_evaluations: 0, timeframe_minutes: 15 },
+    ]) {
+      install([
+        ...happyRoutes().filter((r) => !String(r.path).includes('/safety/')),
+        { path: '/api/v1/safety/feature-flags/flag-1/check', handler: () => safety({ details }) },
+      ]);
+      const { unmount } = render(<FeatureFlagDetailPage />);
+      expect(await screen.findByTestId('safety-status')).toHaveTextContent('Healthy');
+      expect(screen.queryByTestId('safety-no-evaluations')).not.toBeInTheDocument();
+      unmount();
+    }
+  });
+
   it('saves rollout percentage + targeting rules through PUT /feature-flags/{id}', async () => {
     install([
       ...happyRoutes(),

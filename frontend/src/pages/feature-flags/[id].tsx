@@ -47,6 +47,27 @@ function humanize(value: string): string {
   return value.replace(/_/g, ' ').replace(/^\w/, (c) => c.toUpperCase());
 }
 
+/** Metrics computed by dividing by the flag's recorded evaluations. */
+const RATE_METRICS = new Set(['error_rate']);
+
+/**
+ * Errors reported but no evaluations recorded in the check's window: the error
+ * rate has nothing to divide by and reads 0, which is not "healthy". Returns
+ * the counts to show, or null when the rate is measurable.
+ */
+export function unmeasuredErrorRate(
+  check: SafetyCheckResponse | null,
+): { errors: number; minutes: number } | null {
+  const details = check?.details;
+  if (!details) return null;
+  const errors = details.error_count;
+  const evaluations = details.total_evaluations;
+  if (typeof errors !== 'number' || typeof evaluations !== 'number') return null;
+  if (errors <= 0 || evaluations !== 0) return null;
+  const minutes = typeof details.timeframe_minutes === 'number' ? details.timeframe_minutes : 15;
+  return { errors, minutes };
+}
+
 /** Pick the schedule worth showing: active > paused > draft > most recent. */
 export function pickSchedule(items: RolloutSchedule[]): RolloutSchedule | null {
   if (items.length === 0) return null;
@@ -86,6 +107,7 @@ export default function FeatureFlagDetailPage() {
   const [safety, setSafety] = useState<SafetyCheckResponse | null>(null);
   const [safetyError, setSafetyError] = useState<string | null>(null);
   const [safetyLoading, setSafetyLoading] = useState(false);
+  const unmeasured = unmeasuredErrorRate(safety);
 
   const loadSafety = useCallback(async (flagId: string) => {
     setSafetyLoading(true);
@@ -368,7 +390,16 @@ export default function FeatureFlagDetailPage() {
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-base font-semibold text-slate-800">Safety check</h2>
               <div className="flex items-center gap-2">
-                {safety && (
+                {safety && unmeasured && (
+                  <span
+                    className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border border-slate-300 bg-white text-slate-800"
+                    data-testid="safety-status"
+                    data-healthy="unknown"
+                  >
+                    Error rate unknown
+                  </span>
+                )}
+                {safety && !unmeasured && (
                   <span
                     className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
                       safety.is_healthy ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
@@ -399,6 +430,13 @@ export default function FeatureFlagDetailPage() {
             )}
             {safety && (
               <div>
+                {unmeasured && (
+                  <p className="text-sm text-slate-700 mb-3" role="status" data-testid="safety-no-evaluations">
+                    {unmeasured.errors} {unmeasured.errors === 1 ? 'error' : 'errors'} reported, but no
+                    evaluations reported in the last {unmeasured.minutes} minutes: the error rate cannot be
+                    computed.
+                  </p>
+                )}
                 {safety.metrics.length === 0 ? (
                   <p className="text-sm text-slate-500">No safety metrics recorded yet.</p>
                 ) : (
@@ -416,10 +454,16 @@ export default function FeatureFlagDetailPage() {
                             {m.unit ? ` ${m.unit}` : ''}{' '}
                             <span className="text-slate-400">/ {m.threshold}{m.unit ? ` ${m.unit}` : ''}</span>
                           </span>
-                          <span
-                            className={`inline-block h-2 w-2 rounded-full ${m.is_healthy ? 'bg-green-500' : 'bg-red-500'}`}
-                            aria-label={m.is_healthy ? 'healthy' : 'unhealthy'}
-                          />
+                          {unmeasured && RATE_METRICS.has(m.name) ? (
+                            <span className="text-xs text-slate-700" data-testid="safety-metric-not-computed">
+                              not computed
+                            </span>
+                          ) : (
+                            <span
+                              className={`inline-block h-2 w-2 rounded-full ${m.is_healthy ? 'bg-green-500' : 'bg-red-500'}`}
+                              aria-label={m.is_healthy ? 'healthy' : 'unhealthy'}
+                            />
+                          )}
                         </span>
                       </li>
                     ))}

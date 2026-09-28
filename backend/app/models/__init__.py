@@ -112,6 +112,7 @@ CORE_MODEL_MODULES = (
     "rollout_schedule",
     "safety",
     "scheduler_run",
+    "sdk_evaluation_count",
     "seed_marker",
     "segment",
     "user",

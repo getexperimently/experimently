@@ -215,7 +215,7 @@ See [RBAC API Reference](../api/rbac.md) for the full role and permission manage
 
 ### How do API keys work?
 
-API keys are used for SDK authentication and server-to-server calls. Unlike JWT tokens (which are user-session credentials), API keys are long-lived. Any active key authenticates every API-key route (flag evaluation, tracking) as the user who created it; its `scopes` do not narrow that today.
+API keys are used for SDK authentication and server-to-server calls. Unlike JWT tokens (which are user-session credentials), API keys are long-lived. Any active key authenticates every API-key route (flag evaluation, tracking) as the user who created it; its `scopes` do not narrow that. The one exception is the server-side local-evaluation routes (`GET /api/v1/sdk/ruleset`, `POST /api/v1/tracking/evaluations`), which require the `sdk:ruleset` scope.
 
 Create an API key via `POST /api/v1/api-keys` with a name. The full key value is shown only once at creation time — store it securely. To use it, pass the key in the `X-API-Key: <key>` header on all SDK requests.
 

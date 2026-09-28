@@ -1129,6 +1129,12 @@
         "summary": "Get Run History"
       }
     },
+    "/api/v1/sdk/ruleset": {
+      "get": {
+        "operationId": "get_ruleset_api_v1_sdk_ruleset_get",
+        "summary": "Flag ruleset for server-side local evaluation (beta)"
+      }
+    },
     "/api/v1/segments": {
       "get": {
         "operationId": "list_segments_api_v1_segments_get",
@@ -1211,6 +1217,12 @@
       "post": {
         "operationId": "report_client_errors_batch_api_v1_tracking_errors_batch_post",
         "summary": "Report multiple client-side errors"
+      }
+    },
+    "/api/v1/tracking/evaluations": {
+      "post": {
+        "operationId": "report_flag_evaluations_api_v1_tracking_evaluations_post",
+        "summary": "Report flags evaluated locally by a server-side SDK (beta)"
       }
     },
     "/api/v1/tracking/events": {

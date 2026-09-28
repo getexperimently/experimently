@@ -5056,6 +5056,141 @@
         "title": "FlagChangeHistoryResponse",
         "type": "object"
       },
+      "FlagEvaluationCount": {
+        "description": "How many times one flag was evaluated locally in one window.",
+        "properties": {
+          "count": {
+            "description": "Evaluations made",
+            "maximum": 1000000.0,
+            "minimum": 1.0,
+            "title": "Count",
+            "type": "integer"
+          },
+          "enabled_count": {
+            "description": "How many of them returned enabled",
+            "minimum": 0.0,
+            "title": "Enabled Count",
+            "type": "integer"
+          },
+          "flag_key": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Flag Key",
+            "type": "string"
+          },
+          "window_end": {
+            "description": "End of the counting window",
+            "format": "date-time",
+            "title": "Window End",
+            "type": "string"
+          },
+          "window_start": {
+            "description": "Start of the counting window",
+            "format": "date-time",
+            "title": "Window Start",
+            "type": "string"
+          }
+        },
+        "required": [
+          "flag_key",
+          "count",
+          "enabled_count",
+          "window_start",
+          "window_end"
+        ],
+        "title": "FlagEvaluationCount",
+        "type": "object"
+      },
+      "FlagEvaluationError": {
+        "description": "A flag whose count was not, or not fully, recorded.",
+        "properties": {
+          "accepted": {
+            "title": "Accepted",
+            "type": "integer"
+          },
+          "code": {
+            "enum": [
+              "unknown_flag",
+              "ceiling"
+            ],
+            "title": "Code",
+            "type": "string"
+          },
+          "flag_key": {
+            "title": "Flag Key",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "requested": {
+            "title": "Requested",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "flag_key",
+          "code",
+          "message",
+          "requested",
+          "accepted"
+        ],
+        "title": "FlagEvaluationError",
+        "type": "object"
+      },
+      "FlagEvaluationReport": {
+        "description": "A batch of per-flag evaluation counts.",
+        "example": {
+          "evaluations": [
+            {
+              "count": 1200,
+              "enabled_count": 300,
+              "flag_key": "new-checkout",
+              "window_end": "2026-09-27T12:01:00Z",
+              "window_start": "2026-09-27T12:00:00Z"
+            }
+          ]
+        },
+        "properties": {
+          "evaluations": {
+            "items": {
+              "$ref": "#/components/schemas/FlagEvaluationCount"
+            },
+            "maxItems": 1000,
+            "minItems": 1,
+            "title": "Evaluations",
+            "type": "array"
+          }
+        },
+        "required": [
+          "evaluations"
+        ],
+        "title": "FlagEvaluationReport",
+        "type": "object"
+      },
+      "FlagEvaluationReportResponse": {
+        "description": "What was recorded.",
+        "properties": {
+          "accepted": {
+            "description": "Evaluations recorded, over all flags",
+            "title": "Accepted",
+            "type": "integer"
+          },
+          "errors": {
+            "items": {
+              "$ref": "#/components/schemas/FlagEvaluationError"
+            },
+            "title": "Errors",
+            "type": "array"
+          }
+        },
+        "required": [
+          "accepted"
+        ],
+        "title": "FlagEvaluationReportResponse",
+        "type": "object"
+      },
       "FlagEvaluationRequest": {
         "description": "Body for ``POST /feature-flags/evaluate/{flag_key}``.",
         "example": {
@@ -9261,6 +9396,213 @@
         ],
         "title": "SchedulerRunStatus",
         "type": "string"
+      },
+      "SdkRuleset": {
+        "description": "The flag ruleset for server-side local evaluation.",
+        "properties": {
+          "bucketing": {
+            "description": "The flag bucketing function: md5-mod100-v1 is int(md5(user_id + ':' + flag_key), 16) % 100 < percentage",
+            "title": "Bucketing",
+            "type": "string"
+          },
+          "flags": {
+            "items": {
+              "$ref": "#/components/schemas/SdkRulesetFlag"
+            },
+            "title": "Flags",
+            "type": "array"
+          },
+          "schema": {
+            "description": "Format version. An SDK that does not know it evaluates nothing locally.",
+            "title": "Schema",
+            "type": "integer"
+          },
+          "version": {
+            "description": "sha256 of the content; the same value as the ETag",
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema",
+          "version",
+          "bucketing",
+          "flags"
+        ],
+        "title": "SdkRuleset",
+        "type": "object"
+      },
+      "SdkRulesetCondition": {
+        "description": "One condition, with the engine's operator name.",
+        "properties": {
+          "attribute": {
+            "description": "Attribute name, as the rule wrote it",
+            "title": "Attribute",
+            "type": "string"
+          },
+          "operator": {
+            "description": "One of eq, neq, in, not_in, contains, not_contains, starts_with, ends_with, gt, gte, lt, lte, is_null, is_not_null",
+            "title": "Operator",
+            "type": "string"
+          },
+          "value": {
+            "description": "A string, a number, or a list of strings or of numbers; null for is_null and is_not_null",
+            "title": "Value"
+          }
+        },
+        "required": [
+          "attribute",
+          "operator"
+        ],
+        "title": "SdkRulesetCondition",
+        "type": "object"
+      },
+      "SdkRulesetDefaultRule": {
+        "description": "The rule the server applies when no rule matches (conditions not evaluated).",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "rollout_percentage": {
+            "title": "Rollout Percentage",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "rollout_percentage"
+        ],
+        "title": "SdkRulesetDefaultRule",
+        "type": "object"
+      },
+      "SdkRulesetFlag": {
+        "description": "One flag. Inactive flags carry only ``key`` and ``active``.",
+        "properties": {
+          "active": {
+            "title": "Active",
+            "type": "boolean"
+          },
+          "default_rule": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SdkRulesetDefaultRule"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "evaluation": {
+            "anyOf": [
+              {
+                "enum": [
+                  "local",
+                  "remote"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "local: the SDK may evaluate this flag; remote: it asks the server (no rules are included)",
+            "title": "Evaluation"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "rollout_percentage": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rollout Percentage"
+          },
+          "rules": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/SdkRulesetRule"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rules"
+          }
+        },
+        "required": [
+          "key",
+          "active"
+        ],
+        "title": "SdkRulesetFlag",
+        "type": "object"
+      },
+      "SdkRulesetGroup": {
+        "description": "Conditions and nested groups combined with ``op``.",
+        "properties": {
+          "conditions": {
+            "items": {
+              "$ref": "#/components/schemas/SdkRulesetCondition"
+            },
+            "title": "Conditions",
+            "type": "array"
+          },
+          "groups": {
+            "items": {
+              "$ref": "#/components/schemas/SdkRulesetGroup"
+            },
+            "title": "Groups",
+            "type": "array"
+          },
+          "op": {
+            "enum": [
+              "and",
+              "or",
+              "not"
+            ],
+            "title": "Op",
+            "type": "string"
+          }
+        },
+        "required": [
+          "op",
+          "conditions",
+          "groups"
+        ],
+        "title": "SdkRulesetGroup",
+        "type": "object"
+      },
+      "SdkRulesetRule": {
+        "description": "A targeting rule, in the order the server tries them.",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "match": {
+            "$ref": "#/components/schemas/SdkRulesetGroup"
+          },
+          "rollout_percentage": {
+            "title": "Rollout Percentage",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "rollout_percentage",
+          "match"
+        ],
+        "title": "SdkRulesetRule",
+        "type": "object"
       },
       "SegmentBreakdown": {
         "description": "Aggregated statistics for one segment value (e.g. 'ios', 'US', 'premium').",
@@ -22987,6 +23329,43 @@
         ]
       }
     },
+    "/api/v1/sdk/ruleset": {
+      "get": {
+        "description": "Every feature flag in the deployment, for a server-side SDK that evaluates\nflags locally.\n\n**Authentication**: an `X-API-Key` whose scopes include `sdk:ruleset`. A\nvalid key without it gets 403. The ruleset contains the values written in\ntargeting rules: keep such a key on a server.\n\n**Caching**: the response carries `ETag`. Send it back in `If-None-Match`\nand an unchanged ruleset answers 304 with no body.\n\nA flag the SDK may evaluate itself is `\"evaluation\": \"local\"` and carries\nits rollout percentage and rules; `\"remote\"` means ask\n`GET /api/v1/feature-flags/evaluate/{key}`; an inactive flag is\n`{\"key\", \"active\": false}`.",
+        "operationId": "get_ruleset_api_v1_sdk_ruleset_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SdkRuleset"
+                }
+              }
+            },
+            "description": "Every feature flag, normalised for local evaluation"
+          },
+          "304": {
+            "description": "If-None-Match names the current version; no body"
+          },
+          "401": {
+            "description": "Missing or invalid API key"
+          },
+          "403": {
+            "description": "The API key does not carry the sdk:ruleset scope"
+          }
+        },
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "summary": "Flag ruleset for server-side local evaluation (beta)",
+        "tags": [
+          "SDK"
+        ],
+        "x-stability": "beta"
+      }
+    },
     "/api/v1/segments": {
       "get": {
         "description": "Return a paginated list of audience segments. Accessible to all authenticated users.",
@@ -23773,6 +24152,54 @@
         "tags": [
           "Tracking"
         ]
+      }
+    },
+    "/api/v1/tracking/evaluations": {
+      "post": {
+        "description": "Record per-flag evaluation counts from an SDK that evaluates flags locally.\n\nEach accepted count is stored as flag evaluations stamped with the time the\nserver received the report (the windows are kept as metadata), so safety\nmonitoring counts them towards the flag's error-rate denominator at once.\n\nCounts are capped per API key, flag and minute (100,000) and per flag and\nminute across all keys (1,000,000); the excess is not recorded and is\nlisted in ``errors`` with code ``ceiling``. Unknown flag keys are skipped\nand listed with code ``unknown_flag``. Entries for the same flag are merged.\n\n**Authentication**: an API key with the ``sdk:ruleset`` scope in the\nX-API-Key header.\n\nRaises:\n    HTTPException 401: If the API key is missing or invalid\n    HTTPException 403: If the API key does not have the ``sdk:ruleset`` scope\n    HTTPException 422: If the report is malformed",
+        "operationId": "report_flag_evaluations_api_v1_tracking_evaluations_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FlagEvaluationReport"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FlagEvaluationReportResponse"
+                }
+              }
+            },
+            "description": "How many evaluations were recorded, and any not recorded"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "summary": "Report flags evaluated locally by a server-side SDK (beta)",
+        "tags": [
+          "Tracking"
+        ],
+        "x-stability": "beta"
       }
     },
     "/api/v1/tracking/events": {

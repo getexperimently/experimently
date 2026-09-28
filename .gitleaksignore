@@ -12,3 +12,9 @@
 9d0720af365c1f8ced74333b1826bd6d41402050:tests/sdk-contract/ruleset-vectors.json:generic-api-key:149
 9d0720af365c1f8ced74333b1826bd6d41402050:tests/sdk-contract/ruleset-vectors.json:generic-api-key:294
 9d0720af365c1f8ced74333b1826bd6d41402050:tests/sdk-contract/ruleset-vectors.json:generic-api-key:295
+# A tree scan (core_build.sh's secrets step: gitleaks with --no-git, run from inside the
+# copy) reports no commit, so each of the same findings needs its own path:rule:line line.
+tests/sdk-contract/ruleset-vectors.json:generic-api-key:148
+tests/sdk-contract/ruleset-vectors.json:generic-api-key:149
+tests/sdk-contract/ruleset-vectors.json:generic-api-key:294
+tests/sdk-contract/ruleset-vectors.json:generic-api-key:295

@@ -83,16 +83,23 @@ The request takes:
 
 ### Scopes
 
-**Scopes do not limit what a key can do today.** They are stored with the key and returned
-when you list keys. A key can call every endpoint that accepts an API key (tracking, flag
-evaluation, OpenFeature and edge bootstrap), whatever its scopes. Names such as `read`,
-`write` or `admin` on existing keys are labels only; nothing checks them.
+Scopes are stored with the key and returned when you list keys. **One scope is enforced:
+`sdk:ruleset`.** Every other endpoint that accepts an API key (tracking, flag evaluation,
+OpenFeature and edge bootstrap) accepts any active key, whatever its scopes. Names such as
+`read`, `write` or `admin` on existing keys are labels only; nothing checks them.
 
-One scope is intended to be enforced: **`sdk:ruleset`**. The server-side local-evaluation
-ruleset endpoint, once it ships, is intended to refuse any key that does not carry it. A key
-with `sdk:ruleset` will be able to download every feature flag's targeting rules, including
-the values in them, so keep such a key on a server and never ship it to a browser or a
-mobile app.
+`sdk:ruleset` is for a server that evaluates flags locally. These routes answer `403` to a
+key that does not carry it:
+
+- `GET /api/v1/sdk/ruleset` (beta), which returns every feature flag's targeting rules in the
+  form a server-side SDK evaluates locally;
+- `POST /api/v1/tracking/evaluations` (beta), where a server-side SDK reports how many times
+  it evaluated each flag locally, so safety monitoring can still compute each flag's error
+  rate.
+
+A key with `sdk:ruleset` can therefore download every feature flag's targeting rules,
+including the values in them, so keep such a key on a server and never ship it to a browser
+or a mobile app.
 
 - In the dashboard (**Admin → API Keys → Create API Key**), tick **Server-side local
   evaluation (sdk:ruleset)**. Leave it unticked for any other key; the key is then created
@@ -104,9 +111,9 @@ mobile app.
 the ADMIN and DEVELOPER roles, and superusers. For anyone else (ANALYST or VIEWER) the
 request is refused with `403 Forbidden`, whose message names the roles that may create such
 a key, and no key is created. Keys without that scope can be created by every role, as
-before. Using such a key is intended to follow the same rule: the ruleset endpoint, once it
-ships, is intended to accept a key with `sdk:ruleset` only while its owner can change feature
-flags.
+before. Using such a key follows the same rule: both routes above accept a key with
+`sdk:ruleset` only while its owner can change feature flags, checked on every request, so a
+key whose owner is moved to ANALYST or VIEWER is refused with `403` from then on.
 
 Scope names are matched exactly and case-sensitively: the stored list is split on commas and
 each entry is trimmed, so `"read, sdk:ruleset "` carries `sdk:ruleset`, while `SDK:RULESET`,
@@ -294,8 +301,8 @@ analytics-pipeline       → eptk_cccc…
 
 Give the `sdk:ruleset` scope only to a server that will evaluate flags locally. Every other
 key, including any key used in a browser or a mobile app, should be created without it.
-Because scopes do not otherwise limit a key, a separate key per service is what lets you
-revoke one integration without touching the others.
+Because no other scope limits a key, a separate key per service is what lets you revoke one
+integration without touching the others.
 
 ### Remember that a key acts as its owner
 

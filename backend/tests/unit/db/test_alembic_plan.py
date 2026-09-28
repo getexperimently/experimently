@@ -45,9 +45,12 @@ CORE_VERSIONS = REPO_ROOT / "backend" / "app" / "db" / "migrations" / "versions"
 
 pytestmark = pytest.mark.unit
 
-#: The core chain's head: a marker revision, the second child of the branch
-#: point, so that the core chain still has a head of its own.
-CORE_HEAD = "b8c9d0e1f2a3"
+#: The core chain's head: the SDK evaluation counters (#226), the first core
+#: revision after the marker.
+CORE_HEAD = "8fd44fb483a2"
+#: The marker revision: the second child of the branch point, so that the core
+#: chain has a line of its own after it (see its docstring).
+CORE_MARKER = "b8c9d0e1f2a3"
 #: The modules branch's FIRST revision: the child of the branch point, and the
 #: one that puts back the two ``workspace_id`` foreign keys.  Every assertion
 #: about the branch's *ordering against the core chain* is about this one.
@@ -91,15 +94,18 @@ CORE_PLAN = [
     "e5f6a7b8c9d0",
     "f6a7b8c9d0e1",
     "a7b8c9d0e1f2",
-    "b8c9d0e1f2a3",
+    CORE_MARKER,
+    CORE_HEAD,
 ]
 
 #: And on a **full** checkout: the same core chain with the modules branch
 #: spliced in after the branch point -- after ``a7b8c9d0e1f2``, which is the
-#: whole reason the edge exists, and before the core marker.
+#: whole reason the edge exists, and before the core marker and everything the
+#: core chain adds after it.
 FULL_PLAN = [
-    *CORE_PLAN[:-1],
+    *CORE_PLAN[:-2],
     *MODULES_BRANCH_PLAN,
+    CORE_MARKER,
     CORE_HEAD,
 ]
 
@@ -220,7 +226,8 @@ def test_unapplying_the_branch_is_one_revision_and_modules_at_base_is_all_of_the
     assert _downgrade_plan(script, UNAPPLY_WHOLE_MODULES_BRANCH) == list(
         reversed(MODULES_BRANCH_PLAN)
     )
-    assert len(_downgrade_plan(script, "modules@base")) == len(FULL_PLAN) == 27
+    # 28: the 26 core revisions (through 8fd44fb483a2, #226) and the branch's 2.
+    assert len(_downgrade_plan(script, "modules@base")) == len(FULL_PLAN) == 28
 
 
 #: A command line, not a mention of one: the three documents all warn about
