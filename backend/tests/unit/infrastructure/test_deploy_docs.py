@@ -358,7 +358,10 @@ def test_the_guide_has_the_ordered_checklist():
     assert headings == ["1.0", "1.1", "1.2", "1.3", "1.4", "1.5", "1.6"], headings
     text = GUIDE.read_text()
     # Protection before any variable or secret (EM C12).
-    assert text.index("required reviewer") < text.index("Variables `AWS_ACCOUNT_ID`")
+    assert text.index("required reviewer") < text.index("Secrets `AWS_ACCOUNT_ID`")
+    # The account ID is a secret (Stream I PE C1): the guide sets it as one.
+    assert "gh secret set AWS_ACCOUNT_ID --env <env>" in text
+    assert "gh variable set AWS_ACCOUNT_ID" not in text
     # The OIDC subject is decoded before the trust policy is written (PE C5).
     assert "Decode a\n  real token" in text or "decode a real token" in text.lower()
 
