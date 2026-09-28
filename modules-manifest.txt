@@ -333,6 +333,13 @@ modules/backend/tests/unit/test_modules_settings.py
 # WAREHOUSE_CREDENTIALS_KEYS, for any module that stores one.
 modules/backend/app/core/credential_crypto.py
 modules/backend/tests/unit/core/test_credential_crypto.py
+# The outbound layer the warehouse connectors are built on: the fixed error
+# codes, the time limits, the HTTP client and boto3 clients restricted to the
+# warehouses' published endpoints, and the executor warehouse calls run on.
+# Nothing in it is routed. httpx and boto3 are core pins; httpcore is httpx's
+# own transport, locked in backend/requirements/runtime.lock.
+modules/backend/app/warehouse
+modules/backend/tests/unit/warehouse
 
 # (Every entry in this file must exist -- test_every_manifest_path_exists
 # checks. There is no gate between the profiles: an installed module is
