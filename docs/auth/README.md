@@ -38,8 +38,8 @@ This directory contains documentation related to authentication and authorizatio
    - Mock configurations
    - Test data setup
 
-6. [SSO (SAML 2.0 / OIDC, the `sso` module)](sso.md)
-   - SAML 2.0 setup (Okta, Azure AD, OneLogin, Auth0)
+6. [SSO (OIDC, the `sso` module)](sso.md)
+   - SAML 2.0 sign-in is not available yet; use OIDC
    - OIDC setup (Google Workspace, GitHub, Microsoft, Auth0)
    - JIT user provisioning
    - Group-to-role mapping
@@ -64,8 +64,7 @@ This directory contains documentation related to authentication and authorizatio
    - [MFA Setup](auth-user-guide.md)
 
 4. **SSO (the `sso` module)**
-   - [Okta SAML Setup](sso.md#okta-saml-20)
-   - [Azure AD (SAML) Setup](sso.md#azure-active-directory-saml)
+   - SAML 2.0 sign-in is not available yet; use OIDC
    - [Google OIDC Setup](sso.md#google-workspace-oidc)
    - [GitHub OIDC Setup](sso.md#github-oidc)
    - [Okta OIDC Setup](sso.md#okta-oidc)

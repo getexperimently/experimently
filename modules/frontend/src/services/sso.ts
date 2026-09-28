@@ -282,7 +282,7 @@ export function ssoErrorMessage(params: SsoErrorParams, ctx: SsoCopyContext): st
     case 'sso_not_configured':
       return `Single sign-on isn't set up for ${domain}. Sign in with your password, or ask your administrator.`;
     case 'sso_saml_only':
-      return `${ctx.domain || 'Your domain'} signs in through your identity provider's portal. Start from there, or ask your administrator.`;
+      return `SAML sign-in isn't available yet. Ask your administrator to set up OIDC sign-in for ${ctx.domain || 'your domain'}.`;
     case 'sso_failed':
       return id
         ? `Sign-in with ${provider ?? 'your identity provider'} failed. Your administrator can find the details in the API log (Request ID: ${id}).`
