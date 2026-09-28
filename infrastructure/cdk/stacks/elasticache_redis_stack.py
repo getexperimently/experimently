@@ -163,7 +163,11 @@ class ElastiCacheRedisStack(Stack):
         if environment == "prod":
             return "cache.r6g.large"  # Memory optimized instances for production
         elif environment == "staging":
-            return "cache.m6g.large"  # Balanced instance type for staging
+            # One small node (Stream I, I-1d): staging exists to rehearse
+            # deploys, not Redis failover, and 2x cache.m6g.large was about
+            # 40% of its hourly cost. Pinned by
+            # infrastructure/tests/test_redis_sizing.py.
+            return "cache.t4g.small"
         else:  # dev, test, etc.
             return "cache.t4g.medium"  # Burstable instances for dev/test
 
@@ -174,7 +178,7 @@ class ElastiCacheRedisStack(Stack):
         if environment == "prod":
             return 3  # Primary + 2 replicas for high availability
         elif environment == "staging":
-            return 2  # Primary + 1 replica for testing HA
+            return 1  # One node: no replica, so no failover or Multi-AZ
         else:  # dev, test, etc.
             return 1  # Single node to save costs
 

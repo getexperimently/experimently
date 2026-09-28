@@ -50,7 +50,7 @@ aws sts get-caller-identity --query Account --output text
 
 ## Required Environment Variables
 
-`infrastructure/cdk/app.py` reads these from the environment. `cdk synth` and `cdk deploy` fail without the two marked required.
+`infrastructure/cdk/app.py` reads these from the environment. `cdk synth`, `cdk diff`, `cdk deploy` and `cdk destroy` fail without the ones marked required, and `ALARM_EMAIL` is required for `staging` and `prod` (below).
 
 **One region.** The Deploy, Rollback and Database Migration workflows act in
 `us-west-2` (`AWS_REGION` at the top of each), so deploy the stacks, the ECR
@@ -69,7 +69,47 @@ export CERTIFICATE_ARN=arn:aws:acm:us-west-2:123456789012:certificate/your-certi
 
 # Required: the absolute https:// origin users reach the platform at (one host, app.<domain>)
 export PUBLIC_BASE_URL=https://app.example.com
+
+export ALARM_EMAIL=ops@your-domain.com
 ```
+
+**`ALARM_EMAIL`** is the one address every CloudWatch alarm emails, through the
+SNS topic `experimentation-alerts-<env>`. That includes the API's two 5xx
+alarms: while either is in ALARM, CodeDeploy rolls a deployment back by itself,
+and this email is how you hear about it.
+
+- **Required for `staging` and `prod`.** Without it, synth stops with a
+  `ValueError` naming `ALARM_EMAIL` and saying how to set it.
+- **Optional for `dev` and `demo`.** Leave it unset and the topic gets no
+  subscriber at all, not a placeholder.
+- **Refused, in any environment,** when it is longer than 254 characters,
+  contains whitespace, has other than exactly one `@`, has a domain with no dot,
+  or is at `example.com`, `example.net` or `example.org`, or a subdomain of one
+  (in any case).
+- **Needed every time the app is synthesised.** That includes `cdk diff` and
+  `cdk destroy`, not only `cdk deploy`. Changing the value replaces the
+  subscription, which then has to be confirmed again.
+
+**The subscription does nothing until it is confirmed.** After the first
+`cdk deploy` of the monitoring stack, SNS emails a confirmation link to the
+address. Until it is confirmed, the alarms fire and nobody is told, and the
+link does not last for ever, so confirm it the same day. Do not just click it:
+a subscription confirmed that way can be cancelled by the unsubscribe link in
+any alarm email, by anyone the email reaches. Instead, copy the `Token=` value
+out of the link and confirm it with `--authenticate-on-unsubscribe true`, after
+which unsubscribing takes an authenticated AWS call:
+
+```bash
+TOPIC_ARN=$(aws sns list-topics --output text \
+  --query "Topics[?ends_with(TopicArn, ':experimentation-alerts-$ENVIRONMENT')].TopicArn")
+aws sns confirm-subscription --topic-arn "$TOPIC_ARN" \
+  --token "$TOKEN_FROM_THE_LINK" --authenticate-on-unsubscribe true
+aws sns list-subscriptions-by-topic --topic-arn "$TOPIC_ARN" \
+  --query "Subscriptions[].[Protocol,Endpoint,SubscriptionArn]" --output text
+```
+
+The last command must show the `email` subscription with a real ARN, not
+`PendingConfirmation`.
 
 The application's own secrets (database password, JWT secret and the rest) are
 not read from your shell. The task definition takes them from Secrets Manager
@@ -177,7 +217,7 @@ dashboard is still on `:bootstrap`.
 ### experimentation-database-<env> and experimentation-redis-<env>
 
 - **Aurora PostgreSQL** cluster: writer + 1 reader on `db.r5.large` for `prod`, a single `db.t3.medium` in every other environment
-- **ElastiCache Redis** replication group: 3 nodes on `cache.r6g.large` for `prod`, 2 on `cache.m6g.large` for `staging`, a single `cache.t4g.medium` otherwise
+- **ElastiCache Redis** replication group: 3 nodes on `cache.r6g.large` for `prod` (automatic failover, Multi-AZ); a single node elsewhere, `cache.t4g.small` for `staging` and `cache.t4g.medium` otherwise, with no replica and so no failover
 - Subnet groups and parameter groups
 - Redis snapshots kept 7 days in `prod`, 3 in `staging`, 1 otherwise
 
@@ -209,7 +249,10 @@ dashboard is still on `:bootstrap`.
 - CloudWatch log groups: `/experimentation-platform/api`, `/services`, `/errors`
 - CloudWatch dashboards: API latency, error rates, Lambda invocations, DynamoDB throughput
 - CloudWatch alarms: p99 latency, error rate, dead letter queue depth
-- SNS topic for alarm notifications
+- SNS topic for alarm notifications, `experimentation-alerts-<env>`, with one
+  email subscriber: `ALARM_EMAIL` (none in `dev` or `demo` without it). The
+  fargate stack's two API 5xx alarms, which roll a deployment back, publish to
+  it too. That is why `experimentation-fargate-<env>` depends on this stack.
 - With the `etl` module: a Kinesis widget and an iterator-age alarm on that
   module's event stream. A core deployment gets neither, rather than an alarm
   on a stream that does not exist.
@@ -283,7 +326,8 @@ below do not already keep: `pg_dump` the database, export audit logs
 `cdk destroy --all` destroys the stacks in dependency order. By hand, the same
 order is: a stack that imports from another, or depends on it, goes first --
 so monitoring and the Glue stack go before analytics, and fargate before
-compute.
+compute and monitoring. `cdk destroy` synthesises the app like any other
+command, so a `staging` or `prod` teardown needs `ALARM_EMAIL` set too.
 
 ```bash
 cdk destroy experimentation-migrations-<env>
@@ -409,8 +453,8 @@ sustained-load month lands nearer $940.
 
 For development/staging environments, you can significantly reduce costs by:
 - Non-prod environments already size down on their own: the CDK picks a
-  smaller Aurora instance, `cache.t4g.medium` for dev/test
-  (`cache.m6g.large` for staging), a single Aurora instance rather than a
+  smaller Aurora instance, a single Redis node (`cache.t4g.medium` for
+  dev/test, `cache.t4g.small` for staging), a single Aurora instance rather than a
   writer/reader pair, and one NAT gateway rather than two
 - Reducing Aurora to a single instance (disable the reader)
 - Using on-demand Lambda scaling instead of reserved capacity

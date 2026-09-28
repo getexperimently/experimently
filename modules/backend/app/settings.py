@@ -19,6 +19,9 @@ What lives here, by manifest group:
 * group 8, real-time counters: ``DYNAMODB_COUNTERS_TABLE``, read by
   ``DynamoDBCounterService`` when no table name is passed to it.
 * group 9, ETL: ``GLUE_*``.
+* stored credentials: ``WAREHOUSE_CREDENTIALS_KEYS``, the Fernet keys
+  ``modules.backend.app.core.credential_crypto`` encrypts stored credentials
+  with.  Optional; when set in staging or production it must be well formed.
 
 Module code reads them as ``from modules.backend.app.settings import
 settings`` -- the same shape as the core singleton, so a test patches
@@ -49,6 +52,7 @@ from backend.app.core.config import (
     canonical_environment,
     env_file_for_environment,
 )
+from backend.app.core.settings_rules import credential_keys_error
 
 
 class ModulesSettings(BaseSettings):
@@ -87,7 +91,20 @@ class ModulesSettings(BaseSettings):
     OIDC_MICROSOFT_CLIENT_ID: str = ""
     OIDC_MICROSOFT_CLIENT_SECRET: str = ""
 
-    model_config = SettingsConfigDict(case_sensitive=True, extra="ignore")
+    #: Operator-provided Fernet keys for encrypting stored credentials, as a
+    #: comma-separated list, newest first: the first key encrypts, every key
+    #: decrypts, so a new key is added in front and an old one removed once
+    #: nothing is encrypted under it.  Optional at boot; a feature that needs
+    #: it refuses at use while it is unset
+    #: (``credential_crypto.CredentialKeysUnavailable``).
+    WAREHOUSE_CREDENTIALS_KEYS: Optional[str] = None
+
+    model_config = SettingsConfigDict(
+        case_sensitive=True,
+        extra="ignore",
+        # A refused configuration names the setting, never its value.
+        hide_input_in_errors=True,
+    )
 
     @field_validator("ENVIRONMENT", mode="before")
     @classmethod
@@ -112,6 +129,23 @@ class ModulesSettings(BaseSettings):
                     "and must not be the dev default in staging/production. "
                     'Generate one with: python -c "import secrets; print(secrets.token_hex(32))"'
                 )
+        return v
+
+    @field_validator("WAREHOUSE_CREDENTIALS_KEYS")
+    @classmethod
+    def validate_credentials_keys(
+        cls, v: Optional[str], info: ValidationInfo
+    ) -> Optional[str]:
+        """Refuse a malformed or placeholder key list in staging/production.
+
+        Absent is allowed everywhere.  In development and test a malformed
+        value is not refused here; ``credential_crypto`` refuses it at use.
+        The message names the setting and the entry's position, never a key.
+        """
+        if _hardening_required(info):
+            error = credential_keys_error(v)
+            if error:
+                raise ValueError(error)
         return v
 
 
