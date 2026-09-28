@@ -24,6 +24,7 @@ from modules.backend.app.schemas.workspaces import (
     CreateAPIKeyResponse,
     CreateInviteRequest,
     CreateWorkspaceRequest,
+    InviteEmailMismatchResponse,
     UpdateMemberRoleRequest,
     UpdateWorkspaceRequest,
     WorkspaceAPIKeyResponse,
@@ -33,11 +34,14 @@ from modules.backend.app.schemas.workspaces import (
     WorkspaceWithStatsResponse,
 )
 from modules.backend.app.services.workspace_service import (
+    INVITE_EMAIL_MISMATCH_CODE,
+    INVITE_EMAIL_MISMATCH_MESSAGE,
     AlreadyMember,
     APIKeyNotFound,
     CannotDemoteLastOwner,
     CannotRemoveLastOwner,
     InviteAlreadyAccepted,
+    InviteEmailMismatch,
     InviteExpired,
     InviteNotFound,
     PlanLimitExceeded,
@@ -480,17 +484,41 @@ def get_invite(
     "/invites/{token}/accept",
     response_model=WorkspaceMemberResponse,
     status_code=status.HTTP_201_CREATED,
+    responses={
+        403: {
+            "model": InviteEmailMismatchResponse,
+            "description": (
+                "The signed-in account is not the invited address "
+                '(`detail.code` is `"invite_email_mismatch"`).'
+            ),
+        }
+    },
 )
 def accept_invite(
     token: str = Path(...),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
-    """Accept a workspace invite. The current user is added as a member."""
+    """Accept a workspace invite. The current user is added as a member.
+
+    Only the account whose email is the invited address may accept (compared
+    without regard to case); any other account gets 403 with code
+    ``invite_email_mismatch``.
+    """
     try:
-        member = workspace_service.accept_invite(db, token, current_user.id)
+        member = workspace_service.accept_invite(
+            db, token, current_user.id, current_user.email
+        )
     except InviteNotFound as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+    except InviteEmailMismatch:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": INVITE_EMAIL_MISMATCH_CODE,
+                "message": INVITE_EMAIL_MISMATCH_MESSAGE,
+            },
+        )
     except InviteExpired as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
     except InviteAlreadyAccepted as exc:

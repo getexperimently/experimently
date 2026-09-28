@@ -25,11 +25,16 @@ which lands the file here.  A core revision names the core head instead
 (`--head <id from alembic heads>`) and lands in
 backend/app/db/migrations/versions.
 
-Rolling back: `alembic downgrade modules@-1`, because a bare `-1` is ambiguous
-with two heads.  NOT `modules@base` -- this is not an alembic base any more,
-and with a single tree root alembic cannot filter a downgrade by branch label,
-so `modules@base` resolves to 26 revisions: the whole core chain to base, every
-table dropped.  modules_0001_rbac's downgrade drops only the objects its own
+The branch has two revisions: modules_0001_rbac and, after it,
+modules_0002_warehouse_analysis (the warehouse-analysis tables; it removes the
+earlier warehouse_connections table and its rows -- see its docstring).
+
+Rolling back: `alembic downgrade modules@-1` unapplies the newest revision,
+`modules@-2` the whole branch; a bare `-1` is ambiguous with two heads.  NOT
+`modules@base` -- modules_0001_rbac is not an alembic base any more, and with a
+single tree root alembic cannot filter a downgrade by branch label, so
+`modules@base` resolves to 27 revisions: the whole core chain to base, every
+table dropped.  Each revision's downgrade drops only the objects its own
 upgrade() created -- it marks each one with a PostgreSQL COMMENT -- so it never
 drops the tables a fresh full-profile bootstrap built from the models.
 

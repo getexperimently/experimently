@@ -166,11 +166,43 @@ class WorkspaceMemberResponse(BaseModel):
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+#: Longest address an invite accepts: the width of ``workspace_invites.email``
+#: (``String(255)``), so a longer one is a 422 rather than a database error.
+#: Checked before the shape pattern runs.
+INVITE_EMAIL_MAX_LENGTH = 255
+_INVITE_EMAIL_SHAPE = re.compile(r"^[^@\s]+@[^@\s]+$")
+
+
 class CreateInviteRequest(BaseModel):
-    """Payload for sending a workspace invite."""
+    """Payload for sending a workspace invite.
+
+    ``email`` is trimmed and must be ASCII, at most 255 characters (the column width) and shaped
+    ``local@domain`` (exactly one ``@``, no whitespace). Deliberately not
+    ``EmailStr``: that refuses special-use domains such as ``corp.local`` and
+    ``int.test``, which accounts can legitimately have. Who may accept the
+    invite is decided when it is accepted, not here.
+    """
 
     email: str
     role: str = "VIEWER"
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def validate_email(cls, v: object) -> str:
+        if not isinstance(v, str):
+            raise ValueError("email must be a string")
+        trimmed = v.strip()
+        # ASCII as sent: some non-ASCII characters lower-case to ASCII ones,
+        # and an address that is not ASCII can never accept an invite.
+        if not trimmed.isascii():
+            raise ValueError("email must contain only ASCII characters")
+        if len(trimmed) > INVITE_EMAIL_MAX_LENGTH:
+            raise ValueError(
+                f"email must be at most {INVITE_EMAIL_MAX_LENGTH} characters"
+            )
+        if not _INVITE_EMAIL_SHAPE.match(trimmed):
+            raise ValueError("email must be an address of the form name@domain")
+        return trimmed
 
     @field_validator("role")
     @classmethod
@@ -182,6 +214,19 @@ class CreateInviteRequest(BaseModel):
                 f"role must be one of {sorted(allowed)} (OWNER cannot be invited)"
             )
         return v.upper()
+
+
+class InviteEmailMismatchDetail(BaseModel):
+    """The ``detail`` of a refused invite accept."""
+
+    code: str
+    message: str
+
+
+class InviteEmailMismatchResponse(BaseModel):
+    """403 body: the signed-in account is not the invited address."""
+
+    detail: InviteEmailMismatchDetail
 
 
 class WorkspaceInviteResponse(BaseModel):

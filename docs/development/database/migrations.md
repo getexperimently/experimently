@@ -175,7 +175,7 @@ python -m alembic -c backend/app/db/alembic.ini upgrade heads
 # `downgrade -1` is ambiguous -- alembic warns and picks one -- so name the
 # branch: `modules@-1` for a module's, the revision id for a core one.
 # NOT `modules@base`: modules_0001_rbac is a child of core a7b8c9d0e1f2, not
-# an alembic base, and `modules@base` resolves to the whole core chain -- 26
+# an alembic base, and `modules@base` resolves to the whole core chain -- 27
 # revisions, every table dropped.
 alembic -c backend/app/db/alembic.ini downgrade modules@-1
 
@@ -188,6 +188,11 @@ alembic -c backend/app/db/alembic.ini current
 # Show migration history
 alembic -c backend/app/db/alembic.ini history
 ```
+
+The modules branch has two revisions, `modules_0001_rbac` and then
+`modules_0002_warehouse_analysis`: `downgrade modules@-1` unapplies
+`modules_0002_warehouse_analysis` only, and `downgrade modules@-2` the whole
+branch.
 
 ## Working with Experiments
 

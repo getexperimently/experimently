@@ -19,6 +19,14 @@
         "pattern": "^(\\*\\.)?[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)*$"
       }
     },
+    "corsOrigins": {
+      "type": "array",
+      "items": {
+        "description": "An origin: scheme and host, optional port, no path, no trailing slash. `*` is refused.",
+        "type": "string",
+        "pattern": "^https?://[^/*\\s]+$"
+      }
+    },
     "firstSuperuser": {
       "type": "string",
       "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$"

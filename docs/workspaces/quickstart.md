@@ -67,7 +67,8 @@ Content-Type: application/json
 ```
 
 Send the returned `token` to Alice.  Alice can accept the invite once she is
-logged into the platform:
+logged into the platform with `alice@example.com` (in any case); any other
+account gets `403` with code `invite_email_mismatch`:
 
 ```http
 POST /api/v1/workspaces/invites/{token}/accept

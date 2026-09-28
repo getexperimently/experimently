@@ -2357,7 +2357,7 @@
         "type": "object"
       },
       "CreateInviteRequest": {
-        "description": "Payload for sending a workspace invite.",
+        "description": "Payload for sending a workspace invite.\n\n``email`` is trimmed and must be ASCII, at most 255 characters (the column width) and shaped\n``local@domain`` (exactly one ``@``, no whitespace). Deliberately not\n``EmailStr``: that refuses special-use domains such as ``corp.local`` and\n``int.test``, which accounts can legitimately have. Who may accept the\ninvite is decided when it is accepted, not here.",
         "properties": {
           "email": {
             "title": "Email",
@@ -7021,6 +7021,38 @@
           "relative_improvement_pct"
         ],
         "title": "InterpretRequest",
+        "type": "object"
+      },
+      "InviteEmailMismatchDetail": {
+        "description": "The ``detail`` of a refused invite accept.",
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "InviteEmailMismatchDetail",
+        "type": "object"
+      },
+      "InviteEmailMismatchResponse": {
+        "description": "403 body: the signed-in account is not the invited address.",
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/InviteEmailMismatchDetail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "InviteEmailMismatchResponse",
         "type": "object"
       },
       "LLMCompleteRequest": {
@@ -30168,7 +30200,7 @@
     },
     "/api/v1/workspaces/invites/{token}/accept": {
       "post": {
-        "description": "Accept a workspace invite. The current user is added as a member.",
+        "description": "Accept a workspace invite. The current user is added as a member.\n\nOnly the account whose email is the invited address may accept (compared\nwithout regard to case); any other account gets 403 with code\n``invite_email_mismatch``.",
         "operationId": "accept_invite_api_v1_workspaces_invites__token__accept_post",
         "parameters": [
           {
@@ -30191,6 +30223,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InviteEmailMismatchResponse"
+                }
+              }
+            },
+            "description": "The signed-in account is not the invited address (`detail.code` is `\"invite_email_mismatch\"`)."
           },
           "422": {
             "content": {
@@ -31065,7 +31107,7 @@
       "name": "Integrations"
     },
     {
-      "description": "SAML 2.0 and OIDC single sign-on with just-in-time provisioning",
+      "description": "OIDC single sign-on with just-in-time provisioning. SAML 2.0 sign-in is not available yet.",
       "name": "SSO"
     },
     {

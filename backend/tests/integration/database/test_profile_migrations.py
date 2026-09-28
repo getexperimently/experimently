@@ -149,6 +149,13 @@ def _workspace_fks(engine, schema: str) -> set[str]:
 #: workspace foreign keys that ``modules_0001_rbac`` puts back.
 BRANCH_POINT = "a7b8c9d0e1f2"
 
+#: The modules branch's FIRST revision -- not its head since #312 added
+#: ``modules_0002_warehouse_analysis``.  Used below only where "first" is the
+#: meaning: the one revision a build from before the branch point's move had,
+#: and so the one a database that build left behind records.  Where a test
+#: means "at head" it compares against ``_heads(...)``, read from the files.
+MODULES_FIRST = "modules_0001_rbac"
+
 WORKSPACE_FKS = {"experiments_workspace_id_fkey", "feature_flags_workspace_id_fkey"}
 
 
@@ -348,7 +355,10 @@ def test_bootstrap_repairs_a_version_row_another_row_descends_from(
     the row; this test asserts it once per path.
     """
     assert _bootstrap(scratch_schema).returncode == 0
-    _record_revisions(test_db, scratch_schema, [BRANCH_POINT, "modules_0001_rbac"])
+    # FIRST: the previous build had one modules revision.  The database is
+    # therefore *behind* the modules head as well, and the upgrade below has to
+    # apply the rest of the branch -- which the `_heads` comparison checks.
+    _record_revisions(test_db, scratch_schema, [BRANCH_POINT, MODULES_FIRST])
 
     # Raw `alembic upgrade heads` prunes it and carries on ...
     upgraded = _alembic(scratch_schema, "upgrade", "heads")
@@ -361,7 +371,7 @@ def test_bootstrap_repairs_a_version_row_another_row_descends_from(
     )
 
     # ... and so does the bootstrap, from the same function.
-    _record_revisions(test_db, scratch_schema, [BRANCH_POINT, "modules_0001_rbac"])
+    _record_revisions(test_db, scratch_schema, [BRANCH_POINT, MODULES_FIRST])
     removed = bootstrap.prune_redundant_revisions(
         test_db, scratch_schema, _REAL_ALEMBIC_CONFIG()
     )
@@ -392,10 +402,19 @@ def test_pruning_leaves_a_healthy_version_table_alone(test_db, scratch_schema):
 # ---------------------------------------------------------------------------
 RBAC_TABLES = ("custom_roles", "user_custom_roles", "direct_permission_grants")
 
-#: Unapply the modules branch.  Not ``modules@base``: the branch is no longer
-#: an alembic *base*, and with a single tree root alembic cannot filter by
-#: branch label, so ``modules@base`` downgrades the whole core chain instead.
-UNAPPLY_MODULES_BRANCH = "modules@-1"
+#: Unapply the whole modules branch -- both of its revisions, so that
+#: ``modules_0001_rbac``'s own downgrade runs.  Not ``modules@base``: the branch
+#: is no longer an alembic *base*, and with a single tree root alembic cannot
+#: filter by branch label, so ``modules@base`` downgrades the whole core chain
+#: instead.  (``modules@-1`` unapplies only the head, modules_0002.)
+UNAPPLY_MODULES_BRANCH = "modules@-2"
+
+#: The tables ``modules_0002_warehouse_analysis`` owns.
+WAREHOUSE_TABLES = (
+    "warehouse_connections",
+    "warehouse_sources",
+    "warehouse_analysis_runs",
+)
 
 
 @pytest.mark.regression
@@ -407,6 +426,7 @@ def test_downgrade_keeps_the_tables_the_bootstrap_created(test_db, scratch_schem
     assert result.returncode == 0, result.stderr[-2000:]
 
     assert set(RBAC_TABLES) <= _tables(test_db, scratch_schema)
+    assert set(WAREHOUSE_TABLES) <= _tables(test_db, scratch_schema)
     assert _workspace_fks(test_db, scratch_schema) == {
         "experiments_workspace_id_fkey",
         "feature_flags_workspace_id_fkey",

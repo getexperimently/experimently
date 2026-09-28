@@ -412,6 +412,25 @@ def test_extra_allowed_hosts_keep_the_public_host():
     ]
 
 
+def test_no_cors_origins_by_default(docs):
+    config = one(docs, "ConfigMap", f"{FULLNAME}-config")["data"]
+    assert "CORS_ORIGINS" not in config, (
+        "the dashboard is served from publicBaseUrl and needs no CORS entry"
+    )
+
+
+def test_cors_origins_reach_the_api_as_one_list():
+    docs = render(
+        "core",
+        "--set-string",
+        "corsOrigins[0]=https://shop.example.com",
+        "--set-string",
+        "corsOrigins[1]=http://localhost:3100",
+    )
+    config = one(docs, "ConfigMap", f"{FULLNAME}-config")["data"]
+    assert config["CORS_ORIGINS"] == "https://shop.example.com,http://localhost:3100"
+
+
 @pytest.mark.parametrize(
     "url", ["http://10.0.0.5", "https://experimently.example.com:8443", "http://[::1]"]
 )
@@ -554,6 +573,17 @@ REFUSALS = [
         "allowedHosts *example.com",
         {"allowedHosts[0]": "*example.com"},
         "/allowedHosts/0",
+    ),
+    ("corsOrigins *", {"corsOrigins[0]": "*"}, "/corsOrigins/0"),
+    (
+        "corsOrigins wildcard host",
+        {"corsOrigins[0]": "https://*.example.com"},
+        "/corsOrigins/0",
+    ),
+    (
+        "corsOrigins with a path",
+        {"corsOrigins[0]": "https://shop.example.com/"},
+        "/corsOrigins/0",
     ),
     ("no first superuser", {"firstSuperuser": ""}, "/firstSuperuser"),
     (

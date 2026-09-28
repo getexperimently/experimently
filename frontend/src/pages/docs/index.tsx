@@ -107,7 +107,7 @@ const sections = [
       { label: 'Audit Logging', href: docsUrl('api/audit-logging'), desc: 'HMAC-SHA256 tamper-proof audit trail' },
       { label: 'RBAC', href: docsUrl('api/rbac'), desc: 'Role-based access control: Admin, Developer, Analyst, Viewer' },
       { label: 'API Key Management', href: docsUrl('security/api-keys'), desc: 'Scoped keys, rotation, revocation' },
-      { label: 'SSO / SAML / OIDC', href: docsUrl('auth/sso'), desc: 'SAML 2.0, OIDC/OAuth2 for Okta, Azure AD, Google Workspace, GitHub, and OneLogin.' },
+      { label: 'SSO / SAML / OIDC', href: docsUrl('auth/sso'), desc: 'OIDC/OAuth2 for Okta, Google Workspace and GitHub. SAML 2.0 sign-in is not available yet; use OIDC.' },
       { label: 'HIPAA Compliance', href: docsUrl('hipaa/overview'), desc: 'PHI encryption (Fernet AES-128-CBC), 6-year audit retention, BAA management, data residency.' },
     ],
   },

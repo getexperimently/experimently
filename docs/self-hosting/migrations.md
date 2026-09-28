@@ -167,9 +167,14 @@ Roll back the most recent migration **of one branch**. With two heads a bare
 `-1` is ambiguous — alembic warns and picks one, which may not be the branch you
 meant — so name the branch:
 
+The modules branch has two revisions: `modules_0001_rbac` and, after it,
+`modules_0002_warehouse_analysis`. `modules@-1` unapplies the newest one only;
+`modules@-2` unapplies both, newest first.
+
 ```bash
-# the modules branch, one revision back (its only one today: modules_0001_rbac)
+# the modules branch, one revision back (modules_0002_warehouse_analysis)
 python -m alembic -c backend/app/db/alembic.ini downgrade modules@-1
+python -m alembic -c backend/app/db/alembic.ini downgrade modules@-2
 
 # one step back on the core chain
 python -m alembic -c backend/app/db/alembic.ini downgrade <core revision id>
@@ -177,14 +182,32 @@ python -m alembic -c backend/app/db/alembic.ini downgrade <core revision id>
 
 **Not `modules@base`.** `modules_0001_rbac` is a child of the core revision
 `a7b8c9d0e1f2`, not an alembic base, and with a single tree root alembic cannot
-filter a downgrade by branch label: `downgrade modules@base` resolves to **26
+filter a downgrade by branch label: `downgrade modules@base` resolves to **27
 revisions** — the whole core chain to base — and drops every table in the
 schema.
 
-`modules_0001_rbac` downgrades only the objects its own `upgrade()` created (it
-marks them with a PostgreSQL COMMENT as it goes). On a database whose tables
-came from the bootstrap rather than from that migration, its downgrade is a
-no-op — it will not drop populated tables it never made.
+Each modules revision downgrades only the objects its own `upgrade()` created
+(it marks them with a PostgreSQL COMMENT as it goes). On a database whose
+tables came from the bootstrap rather than from those migrations, their
+downgrade is a no-op — it will not drop populated tables it never made.
+
+### `modules_0002_warehouse_analysis` removes saved warehouse connections
+
+This revision replaces the `warehouse_connections` table with a new one and
+adds `warehouse_sources` and `warehouse_analysis_runs`. **Every row of the
+earlier `warehouse_connections` is deleted** — connections saved through the
+warehouse endpoints removed in 0.9.0 — and nothing is copied into the new
+table. Recreate connections in Warehouse › Connections.
+
+Downgrading it cannot bring those rows back: `downgrade modules@-1` drops the
+three tables it created and puts back an **empty** table of the earlier shape.
+If you need the rows, take a snapshot of the database before upgrading to the
+release that carries this revision, and restore that snapshot to go back. The
+migration logs how many rows it removed:
+
+```text
+modules_0002: removing 3 legacy warehouse connection rows
+```
 
 Roll back to a specific revision:
 
@@ -347,7 +370,9 @@ leaves the rows untouched and logs a WARNING naming the foreign revisions (exit
 0); when the core chain is *behind* — a newer core image against a database the
 full image built — it refuses with a message naming them. `downgrade` and
 `stamp` do not skip: they fail with alembic's own "Can't locate revision
-identified by 'modules_0001_rbac'", and the schema is untouched.
+identified by 'modules_0002_warehouse_analysis'" (or `modules_0001_rbac`, on a
+database a release before the warehouse tables migrated), and the schema is
+untouched.
 
 The escape hatch, when you really do want the core image to own that database:
 take a backup, then from the core image

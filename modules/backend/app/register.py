@@ -3,7 +3,7 @@ The modules' registration entry point: ``modules.register(hooks)``.
 
 One ``register(hooks)`` that installs the optional modules into the core
 application through the seam in :mod:`backend.app.core.hooks`: the modules'
-settings, the seven model modules, the audit signer, the seven routers, the
+settings, the nine model modules, the audit signer, the seven routers, the
 OpenAPI tags, the five capabilities and the ten module names.
 ``backend/app/modules_loader.py`` calls it once per process, from whichever of
 ``modules.register`` and ``modules.backend.app.register`` it finds first
@@ -41,7 +41,7 @@ logger = logging.getLogger(__name__)
 
 #: The modules this registration provides -- every name in
 #: ``hooks.KNOWN_MODULES``, one per group of ``modules-manifest.txt``.
-#: ``warehouse`` provides only its model and table while warehouse analysis
+#: ``warehouse`` provides only its models and tables while warehouse analysis
 #: is rebuilt (#312); it mounts no routes.
 PROVIDED_MODULES: tuple[str, ...] = (
     "workspaces",
@@ -64,7 +64,9 @@ MODEL_MODULES: tuple[str, ...] = (
     "modules.backend.app.models.integration_config",
     "modules.backend.app.models.phi_audit_log",
     "modules.backend.app.models.sso_config",
+    "modules.backend.app.models.warehouse_analysis_run",
     "modules.backend.app.models.warehouse_connection",
+    "modules.backend.app.models.warehouse_source",
     "modules.backend.app.models.workspace",
 )
 
@@ -87,7 +89,10 @@ MODULE_TAGS: list[dict[str, str]] = [
     },
     {
         "name": "SSO",
-        "description": "SAML 2.0 and OIDC single sign-on with just-in-time provisioning",
+        "description": (
+            "OIDC single sign-on with just-in-time provisioning. "
+            "SAML 2.0 sign-in is not available yet."
+        ),
     },
     {
         "name": "Workspaces",
@@ -265,7 +270,7 @@ def register(hooks: Any, with_routers: bool = True) -> None:
     (bootstrap, alembic, the test conftest) refuse to build.
 
     Then the models, then everything that needs the API graph: the schema
-    builders call this too, and the seven model modules are cheap and
+    builders call this too, and the nine model modules are cheap and
     self-contained, while the endpoint modules pull in the whole service
     layer.  Ordering them this way keeps the part a schema tool needs ahead of
     the part most likely to fail on an endpoint-only dependency.
@@ -283,7 +288,7 @@ def register(hooks: Any, with_routers: bool = True) -> None:
 
     What a schema-only registration must still do is everything that decides
     what the *schema* is, and it does: the settings (so a bad secret is still
-    the registration's failure) and the seven model modules (so
+    the registration's failure) and the nine model modules (so
     ``Base.metadata`` holds the module tables and autogenerate does not
     propose dropping them).  The routers' own guarantee -- that an endpoint
     module which fails to import is caught by the loader rather than by

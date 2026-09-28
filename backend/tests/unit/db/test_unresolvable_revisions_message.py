@@ -24,6 +24,7 @@ revision and the bootstrap run as a subprocess, is
 from __future__ import annotations
 
 import re
+import shutil
 from pathlib import Path
 
 import pytest
@@ -40,7 +41,17 @@ SCHEMA = "rollback_probe"
 #: The core revision the modules branch starts from; recorded with the modules
 #: head, it is a full database whose core chain is behind this build's.
 BRANCH_POINT = "a7b8c9d0e1f2"
-MODULES_HEAD = "modules_0001_rbac"
+#: The core chain's head.
+CORE_HEAD = "8fd44fb483a2"
+#: The modules branch's first revision and its head.  A full database records
+#: whichever one the full release that migrated it had -- 0.9.x and earlier
+#: record the first, later releases the head -- and a core build must read
+#: either as "the other profile".
+MODULES_FIRST = "modules_0001_rbac"
+MODULES_HEAD = "modules_0002_warehouse_analysis"
+MODULES_REVISIONS = pytest.mark.parametrize(
+    "modules_revision", [MODULES_FIRST, MODULES_HEAD], ids=["first", "head"]
+)
 #: A core-chain id no build of this tree has: what a newer release records.
 NEWER_CORE_REVISION = "zz_newer_release_0001"
 
@@ -82,31 +93,78 @@ def test_an_older_core_build_on_a_newer_database_says_newer_release():
 
 
 @pytest.mark.regression
-def test_a_newer_database_with_the_modules_row_too_is_still_a_newer_release():
+@MODULES_REVISIONS
+def test_a_newer_database_with_the_modules_row_too_is_still_a_newer_release(
+    modules_revision,
+):
     """A core build meeting a full database a newer release migrated.
 
     One of the rows *is* from the other profile, but not all of them: the core
     row is one no release of this build has, so running "the full image" of
     this release would not help either.
     """
-    message = _refusal(_core_config(), {NEWER_CORE_REVISION, MODULES_HEAD})
+    message = _refusal(_core_config(), {NEWER_CORE_REVISION, modules_revision})
 
     _assert_no_remove_rows_advice(message)
     assert "migrated by a newer Experimently release" in message
     assert NEWER_CORE_REVISION in message
-    assert MODULES_HEAD in message
+    assert modules_revision in message
 
 
 @pytest.mark.regression
-def test_a_core_build_on_a_full_database_keeps_the_other_profile_diagnosis():
+@MODULES_REVISIONS
+def test_a_core_build_on_a_full_database_keeps_the_other_profile_diagnosis(
+    modules_revision,
+):
     """The core-on-full refusal: the other profile, and still no row removal."""
-    message = _refusal(_core_config(), {BRANCH_POINT, MODULES_HEAD})
+    message = _refusal(_core_config(), {BRANCH_POINT, modules_revision})
 
     _assert_no_remove_rows_advice(message)
     assert "full profile being opened by a core build" in message
     assert "Run the full image of this release against it" in message
-    assert MODULES_HEAD in message
+    assert modules_revision in message
     assert "newer" not in message
+
+
+@MODULES_REVISIONS
+def test_a_core_build_with_nothing_to_apply_skips_either_modules_revision(
+    modules_revision,
+):
+    """A full database at the core head: a core build has nothing to do."""
+    assert (
+        bootstrap.may_run_alembic(_core_config(), {CORE_HEAD, modules_revision}, SCHEMA)
+        is False
+    )
+
+
+@pytest.mark.regression
+@pytest.mark.modules
+def test_the_previous_full_release_on_a_database_at_the_modules_head_says_newer(
+    tmp_path,
+):
+    """A full build that has the branch's first revision but not its head.
+
+    That is the previous full release (0.9.x) put back onto a database this
+    release migrated.  Every row resolves except the head, which it has no
+    file for -- and it is a *full* build, so the diagnosis is a newer release,
+    never "the other profile".
+    """
+    previous = tmp_path / "previous-release-modules-versions"
+    previous.mkdir()
+    shutil.copy2(
+        bootstrap._VERSION_LOCATIONS[1] / f"{MODULES_FIRST}.py",
+        previous / f"{MODULES_FIRST}.py",
+    )
+    cfg = bootstrap.alembic_config()
+    # alembic.ini sets `path_separator = newline`.
+    cfg.set_main_option("version_locations", f"{CORE_VERSIONS}\n{previous}")
+
+    message = _refusal(cfg, {CORE_HEAD, MODULES_HEAD})
+
+    _assert_no_remove_rows_advice(message)
+    assert "migrated by a newer Experimently release" in message
+    assert MODULES_HEAD in message
+    assert "full profile being opened by a core build" not in message
 
 
 @pytest.mark.regression
@@ -114,9 +172,7 @@ def test_a_core_build_on_a_full_database_keeps_the_other_profile_diagnosis():
 def test_a_full_build_on_a_newer_modules_revision_says_newer_release():
     """A modules row a *full* build has no file for is not the other profile."""
     newer_modules_revision = "modules_9999_newer"
-    message = _refusal(
-        bootstrap.alembic_config(), {"b8c9d0e1f2a3", newer_modules_revision}
-    )
+    message = _refusal(bootstrap.alembic_config(), {CORE_HEAD, newer_modules_revision})
 
     _assert_no_remove_rows_advice(message)
     assert "migrated by a newer Experimently release" in message

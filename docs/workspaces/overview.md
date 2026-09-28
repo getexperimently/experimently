@@ -122,4 +122,9 @@ Workspace members can be added in two ways:
    token is valid for 7 days. When the recipient accepts the invite (while
    authenticated), they are added as a member with the invited role.
 
+Only a user signed in with the invited address (compared without regard to
+case) can accept it. Anyone else gets `403` with code `invite_email_mismatch`.
+The address must be ASCII, and an alias is a different address:
+`alice+work@example.com` does not accept an invite sent to `alice@example.com`.
+
 > An invitation cannot grant the `OWNER` role.

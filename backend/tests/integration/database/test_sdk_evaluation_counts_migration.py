@@ -36,11 +36,19 @@ pytestmark = [pytest.mark.integration]
 #: This revision, and the core revision it extends.
 REVISION = "8fd44fb483a2"
 PREVIOUS_CORE_HEAD = "b8c9d0e1f2a3"
-MODULES_HEAD = "modules_0001_rbac"
+#: The modules revision the previous full release (0.10.0) recorded, and the
+#: branch's head in this one.  This release also carries
+#: ``modules_0002_warehouse_analysis`` (#312), so a full database at the
+#: previous release has a revision to apply on each line.
+PREVIOUS_MODULES_REVISION = "modules_0001_rbac"
+MODULES_HEAD = "modules_0002_warehouse_analysis"
+#: Tables ``modules_0002_warehouse_analysis`` creates; the previous release has
+#: neither.
+WAREHOUSE_TABLES = {"warehouse_sources", "warehouse_analysis_runs"}
 
 #: What each profile's previous release recorded, and what this one records.
 PREVIOUS_CORE_ROWS = {PREVIOUS_CORE_HEAD}
-PREVIOUS_FULL_ROWS = {PREVIOUS_CORE_HEAD, MODULES_HEAD}
+PREVIOUS_FULL_ROWS = {PREVIOUS_CORE_HEAD, PREVIOUS_MODULES_REVISION}
 CORE_ROWS = {REVISION}
 FULL_ROWS = {REVISION, MODULES_HEAD}
 
@@ -100,6 +108,23 @@ def _at_previous_release(engine, schema: str, rows: set[str]) -> None:
     assert _rows(engine, schema) == rows
 
 
+def _modules_at_previous_release(engine, schema: str) -> None:
+    """Give a bootstrapped full *schema* the previous release's modules tables.
+
+    The builder ``test_modules_0002_transitions.py`` uses for exactly that
+    state: the two new warehouse tables gone and the earlier
+    ``warehouse_connections`` back, holding saved rows.  (``downgrade
+    modules@-1`` cannot do it here: it leaves tables the bootstrap built.)
+    ``_at_previous_release`` then sets the core row and removes this revision's
+    tables.
+    """
+    from backend.tests.integration.database.test_modules_0002_transitions import (
+        _make_previous_full_release_database,
+    )
+
+    _make_previous_full_release_database(engine, schema)
+
+
 def _assert_migrated(engine, schema: str, rows: set[str]) -> None:
     assert _rows(engine, schema) == rows
     assert TABLES <= _tables(engine, schema)
@@ -114,12 +139,16 @@ def test_a_full_database_at_the_previous_release_upgrades_with_heads(
     test_db, scratch_schema, full_tree
 ):
     assert tree_profiles.bootstrap_schema(full_tree, scratch_schema).returncode == 0
+    _modules_at_previous_release(test_db, scratch_schema)
     _at_previous_release(test_db, scratch_schema, PREVIOUS_FULL_ROWS)
+    assert not WAREHOUSE_TABLES & _tables(test_db, scratch_schema)
 
     upgrade = tree_profiles.alembic(full_tree, scratch_schema, "upgrade", "heads")
     assert upgrade.returncode == 0, upgrade.stderr[-3000:]
 
+    # Both lines moved: this revision and the modules branch's newest one.
     _assert_migrated(test_db, scratch_schema, FULL_ROWS)
+    assert WAREHOUSE_TABLES <= _tables(test_db, scratch_schema)
 
 
 # ---------------------------------------------------------------------------
@@ -153,7 +182,8 @@ def test_a_previous_core_database_switched_to_full_gets_both(
     assert upgrade.returncode == 0, upgrade.stderr[-3000:]
 
     _assert_migrated(test_db, scratch_schema, FULL_ROWS)
-    assert len(MODULE_TABLES & _tables(test_db, scratch_schema)) == 12
+    # 14: every module table, the two warehouse tables of #312 included.
+    assert len(MODULE_TABLES & _tables(test_db, scratch_schema)) == 14
 
 
 # ---------------------------------------------------------------------------
@@ -172,13 +202,14 @@ def test_a_core_image_refuses_a_previous_full_database_and_changes_nothing(
     (``test_profile_transitions.py`` case 4) -- and applies nothing.
     """
     assert tree_profiles.bootstrap_schema(full_tree, scratch_schema).returncode == 0
+    _modules_at_previous_release(test_db, scratch_schema)
     _at_previous_release(test_db, scratch_schema, PREVIOUS_FULL_ROWS)
     tables_before = _tables(test_db, scratch_schema)
 
     upgrade = tree_profiles.alembic(core_tree, scratch_schema, "upgrade", "heads")
 
     assert upgrade.returncode != 0, upgrade.stdout[-2000:]
-    assert MODULES_HEAD in upgrade.stderr
+    assert PREVIOUS_MODULES_REVISION in upgrade.stderr
     assert "Run the full image of this release against it" in upgrade.stderr
     assert _rows(test_db, scratch_schema) == PREVIOUS_FULL_ROWS
     assert _tables(test_db, scratch_schema) == tables_before
@@ -187,6 +218,7 @@ def test_a_core_image_refuses_a_previous_full_database_and_changes_nothing(
     finish = tree_profiles.alembic(full_tree, scratch_schema, "upgrade", "heads")
     assert finish.returncode == 0, finish.stderr[-3000:]
     _assert_migrated(test_db, scratch_schema, FULL_ROWS)
+    assert WAREHOUSE_TABLES <= _tables(test_db, scratch_schema)
 
 
 # ---------------------------------------------------------------------------
