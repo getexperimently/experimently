@@ -22,6 +22,7 @@ Rows created here are deleted in fixture teardown because the shared test
 database is not truncated between tests.
 """
 
+import asyncio
 import uuid
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
@@ -39,6 +40,7 @@ from backend.app.models.experiment import (
     Variant,
 )
 from backend.app.services.analysis_service import AnalysisService
+from backend.app.services.results_streaming_service import ResultsStreamingService
 from backend.app.services.sequential_testing_service import SequentialTestingService
 
 pytestmark = [pytest.mark.integration, pytest.mark.requires_db]
@@ -61,7 +63,7 @@ def _cleanup(db_session, exp):
     db_session.commit()
 
 
-def _new_experiment(db_session, make_experiment, label):
+def _new_experiment(db_session, make_experiment, label, **overrides):
     suffix = uuid.uuid4().hex[:8]
     start = datetime.now(timezone.utc).replace(
         hour=0, minute=0, second=0, microsecond=0
@@ -76,6 +78,7 @@ def _new_experiment(db_session, make_experiment, label):
         sequential_testing_config={"method": "msprt"},
         bayesian_enabled=True,
         bayesian_config={"prior_family": "beta", "alpha": 1.0, "beta": 1.0},
+        **overrides,
     )
     db_session.add_all(
         [
@@ -269,6 +272,30 @@ def _cumulative_counts(daily):
     return out
 
 
+class _SharedSession:
+    """The test session, handed to the streaming service; its close() is a no-op."""
+
+    def __init__(self, session):
+        self._session = session
+
+    def __getattr__(self, name):
+        return getattr(self._session, name)
+
+    def close(self):
+        pass
+
+
+def _streaming_counts(db_session, exp):
+    """``GET /ws/experiments/{id}/results``'s snapshot, computed on the test session."""
+    service = ResultsStreamingService(lambda: _SharedSession(db_session))
+    snapshot = asyncio.run(service.get_live_snapshot(str(exp.id)))
+    assert snapshot.get("event") == "results_update", snapshot
+    return {
+        v["name"]: {"n": v["participant_count"], "converted": v["conversion_count"]}
+        for v in snapshot["variants"]
+    }
+
+
 def _breakdown_conversions(results):
     """Converting users and users seen, summed over the ``country`` segments."""
     totals = {
@@ -313,6 +340,7 @@ def test_counts_agree_across_endpoints(admin_client, db_session, experiment):
     assert _bayesian_counts(_get(admin_client, f"{base}/bayesian")) == EXPECTED
     assert _bayesian_counts(results["bayesian_results"]) == EXPECTED
     assert _cumulative_counts(_get(admin_client, f"{base}/daily")) == EXPECTED
+    assert _streaming_counts(db_session, exp) == EXPECTED
 
     # /cuped with no variance_reduction_config is method "none": the
     # unadjusted means, i.e. converting users / assigned users.
@@ -384,3 +412,68 @@ def test_more_conversion_events_than_users_is_not_a_500(admin_client, over_conve
 
     assert _bayesian_counts(_get(admin_client, f"{base}/bayesian")) == want
     assert _sequential_inputs(admin_client, exp) == want
+
+
+@pytest.fixture
+def converts_outside_the_window(db_session, make_experiment):
+    """
+    A finished experiment (start: 5 days ago, end: 2 days ago) whose converting
+    users bought outside that window: control c0 before start_date, treatment
+    t0 after end_date, and treatment t1 on the middle day.
+    """
+    today = datetime.now(timezone.utc).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    exp, start = _new_experiment(
+        db_session,
+        make_experiment,
+        "Outside window",
+        end_date=today - timedelta(days=2, seconds=1),
+    )
+    exp.start_date = today - timedelta(days=5)
+    db_session.commit()
+    control, treatment = _variants(exp)
+    purchases = {
+        (control, 0): today - timedelta(days=9),  # before start_date
+        (treatment, 0): today - timedelta(hours=12),  # after end_date
+        (treatment, 1): today - timedelta(days=4, hours=-12),  # inside
+    }
+    rows = []
+    for variant in (control, treatment):
+        for i in range(2):
+            user_id = f"ow-{exp.key}-{variant.name}-{i}"
+            rows.append(
+                Assignment(experiment_id=exp.id, variant_id=variant.id, user_id=user_id)
+            )
+            at = purchases.get((variant, i))
+            if at is not None:
+                rows.append(_event(exp, variant, user_id, "purchase", "US", at))
+    db_session.add_all(rows)
+    db_session.commit()
+    db_session.refresh(exp)
+    yield exp
+    _cleanup(db_session, exp)
+
+
+def test_daily_series_ends_at_the_results_count_when_users_convert_outside_the_window(
+    admin_client, converts_outside_the_window
+):
+    """A first conversion before start_date lands on the first day, one after
+    end_date on the last day, so the cumulative series ends at /results'."""
+    exp = converts_outside_the_window
+    base = f"/api/v1/results/{exp.id}"
+
+    converted = {
+        name: counts["converted"]
+        for name, counts in _results_counts(_get(admin_client, base)).items()
+    }
+    assert converted == {"control": 1, "treatment": 2}
+
+    daily = _get(admin_client, f"{base}/daily")
+    by_name = {s["variant_name"]: s for s in daily["series"]}
+    assert {
+        name: s["cumulative"][-1]["conversions"] for name, s in by_name.items()
+    } == converted
+    per_day = {n: [p["conversions"] for p in s["values"]] for n, s in by_name.items()}
+    assert per_day["control"] == [1, 0, 0]
+    assert per_day["treatment"] == [0, 1, 1]

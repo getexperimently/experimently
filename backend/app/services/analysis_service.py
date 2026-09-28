@@ -658,7 +658,7 @@ class AnalysisService:
             if not metric_id or str(m.id) == str(metric_id)
         ]
 
-        if not metrics:
+        if not metrics or not dates:
             return []
 
         # Get daily assignments (can be optimized with a single query)
@@ -689,14 +689,19 @@ class AnalysisService:
 
             daily_assignments[date] = daily_variant_assignments
 
-        # First-conversion time of each converting user, per metric and
-        # variant.  A day's conversions are the users who converted for the
-        # first time that day, so the running sum over days is the
-        # converting-user count that /results reports.
-        first_conversions = {
-            (str(metric.id), str(variant.id)): first_conversion_times(
-                self.db, experiment.id, variant.id, metric.event_name
-            )
+        # The day (YYYY-MM-DD) of each converting user's first conversion,
+        # per metric and variant.  A day's conversions are the users who
+        # converted for the first time that day, so the running sum over days
+        # is the converting-user count that /results reports.  A first
+        # conversion before the first day or after the last one is clamped
+        # into that day, so the series still ends at the /results count.
+        first_conversion_days = {
+            (str(metric.id), str(variant.id)): [
+                min(max(first[:10], dates[0]), dates[-1])
+                for first in first_conversion_times(
+                    self.db, experiment.id, variant.id, metric.event_name
+                )
+            ]
             for metric in metrics
             for variant in experiment.variants
         }
@@ -714,20 +719,10 @@ class AnalysisService:
                 }
 
                 for variant in experiment.variants:
-                    # Convert date string to datetime range
-                    date_start = datetime.fromisoformat(f"{date}T00:00:00+00:00")
-                    date_end = datetime.fromisoformat(f"{date}T23:59:59+00:00")
-
                     # Users whose first conversion falls on this date
-                    day_from = date_start.isoformat()
-                    day_to = date_end.isoformat()
-                    conversions = sum(
-                        1
-                        for first in first_conversions[
-                            (str(metric.id), str(variant.id))
-                        ]
-                        if day_from <= first <= day_to
-                    )
+                    conversions = first_conversion_days[
+                        (str(metric.id), str(variant.id))
+                    ].count(date)
 
                     # Calculate conversion rate
                     assignments = daily_assignments[date][str(variant.id)]
