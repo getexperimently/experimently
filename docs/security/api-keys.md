@@ -96,8 +96,17 @@ mobile app.
 
 - In the dashboard (**Admin → API Keys → Create API Key**), tick **Server-side local
   evaluation (sdk:ruleset)**. Leave it unticked for any other key; the key is then created
-  with no scopes.
+  with no scopes. The checkbox is disabled, with the reason shown beside it, for a user who
+  cannot change feature flags.
 - Through the API, send `"scopes": ["sdk:ruleset"]`.
+
+**Only users who can change feature flags can create a key with the `sdk:ruleset` scope:**
+the ADMIN and DEVELOPER roles, and superusers. For anyone else (ANALYST or VIEWER) the
+request is refused with `403 Forbidden`, whose message names the roles that may create such
+a key, and no key is created. Keys without that scope can be created by every role, as
+before. Using such a key is intended to follow the same rule: the ruleset endpoint, once it
+ships, is intended to accept a key with `sdk:ruleset` only while its owner can change feature
+flags.
 
 Scope names are matched exactly and case-sensitively: the stored list is split on commas and
 each entry is trimmed, so `"read, sdk:ruleset "` carries `sdk:ruleset`, while `SDK:RULESET`,

@@ -240,11 +240,18 @@ cd infrastructure
 cdk bootstrap aws://YOUR_ACCOUNT_ID/YOUR_REGION
 
 # Deploy all stacks
+export ALARM_EMAIL=ops@your-domain.com
 cdk deploy --all
 
 # Deploy a specific stack (a stack id from `cdk list`)
 cdk deploy experimentation-fargate-prod
 ```
+
+`ALARM_EMAIL` is the address every alarm emails, including the API rollback
+alarms. It is required for `staging` and `prod`, and synth refuses to run
+without it. Confirm the subscription it creates from the inbox; see
+[AWS CDK Deployment](../self-hosting/cdk.md#required-environment-variables) for
+that and for the other required settings.
 
 ### Stacks Deployed
 

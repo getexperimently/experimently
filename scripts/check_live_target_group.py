@@ -35,7 +35,8 @@ READ-ONLY. It runs exactly four AWS CLI operations, all describe calls:
 
     python3 scripts/check_live_target_group.py --env staging [--expect blue]
     # then, with the value it printed:
-    cdk deploy experimentation-fargate-staging -c api_live_target_group=<blue|green>
+    ALARM_EMAIL=ops@your-domain.com cdk deploy experimentation-fargate-staging \\
+        -c api_live_target_group=<blue|green>
 
 Exit status: 0 safe to deploy with --expect; 1 refused; 2 could not tell
 (an AWS call failed, the stack does not look like this repository's, or the
