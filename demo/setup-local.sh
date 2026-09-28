@@ -122,6 +122,7 @@ pip install -r "$REPO_ROOT/backend/requirements.txt" -q
 # ---------------------------------------------------------------------------
 log "Running database migrations..."
 cd "$REPO_ROOT"
+export ENVIRONMENT=development
 export APP_ENV=development
 # Background jobs run every minute in the demo so rollouts, safety checks and
 # bandit refreshes are visible during a walkthrough (production defaults: 15/5/5).

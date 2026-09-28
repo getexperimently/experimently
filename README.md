@@ -263,7 +263,7 @@ the core through the registration hooks in `backend/app/core/`:
 | `sso` | SAML 2.0 and OIDC identity providers with just-in-time provisioning and role mapping |
 | `hipaa` | PHI encryption, six-year PHI audit retention, BAA records |
 | `compliance` | SOC 2 / ISO 27001 reports, signed audit exports |
-| `warehouse` | Query Snowflake, BigQuery, Redshift, Databricks, ClickHouse or MySQL in place |
+| `warehouse` | Being rebuilt (#312): no endpoints today |
 | `integrations` | Jira, Salesforce and GitHub |
 | `counters` | DynamoDB-backed live assignment and conversion counters |
 | `etl` | Glue crawlers, Athena partitions and scheduled jobs |

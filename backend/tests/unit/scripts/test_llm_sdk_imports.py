@@ -18,8 +18,9 @@ Two halves, because either can be true while the other is false:
   a pin nobody wrote down. The image itself is checked by the Docker Smoke job,
   with the same derived list.
 
-``google.*`` is excluded by the script (the Gemini half of #196 is separate);
-``test_exclusion_is_only_google`` pins that the exclusion stays that narrow.
+Nothing is excluded from the derived list. The Gemini provider calls the REST
+API over ``httpx`` (#275); ``test_no_call_path_imports_google`` pins that no
+``google.*`` package has come back, since none is pinned for the image.
 """
 
 from __future__ import annotations
@@ -99,10 +100,14 @@ def test_function_local_imports_are_found(tmp_path):
     assert llm.imports_in(source) == {"os", "typing", "somesdk.client", "othersdk"}
 
 
-def test_exclusion_is_only_google():
-    assert llm.EXCLUDED_PREFIXES == ("google",)
-    assert all(m == "google" or m.startswith("google.") for m in llm.excluded_imports())
-    assert not any(_top(m) == "google" for m in DERIVED)
+def test_no_call_path_imports_google():
+    """The Gemini provider speaks REST; the ``google-generativeai`` SDK it used
+    to import was never in the image, and every Gemini variant failed (#196)."""
+    google = [m for m in DERIVED if _top(m) == "google"]
+    assert not google, (
+        f"an LLM call path imports {google}; the Gemini provider calls the REST "
+        "API over httpx and the image ships no google.* package"
+    )
 
 
 @pytest.mark.parametrize("module", DERIVED)

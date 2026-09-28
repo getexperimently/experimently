@@ -145,8 +145,7 @@ updates:
         update-types: ["patch", "minor"]
 
   # The modules' own runtime dependencies (modules/requirements.txt): the SAML
-  # signature stack (python3-saml, which pulls xmlsec/lxml), authlib, and the
-  # Databricks / ClickHouse / MySQL warehouse drivers. They left
+  # signature stack (python3-saml, which pulls xmlsec/lxml) and authlib. They left
   # backend/requirements.txt when the modules moved under modules/ and were
   # then updated by nothing -- python3-saml/xmlsec verify SAML signatures, so
   # that gap was the one that mattered most. Dependabot edits

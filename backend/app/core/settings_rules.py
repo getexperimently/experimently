@@ -31,6 +31,24 @@ HARDENED_ENVIRONMENTS: tuple = ("staging", "production")
 #: The canonical environment names.
 CANONICAL_ENVIRONMENTS: tuple = ("development", "test", "staging", "production")
 
+#: Environments in which a weak first-administrator password is accepted, and
+#: then only when ENVIRONMENT was set rather than defaulted.
+WEAK_SUPERUSER_PASSWORD_ENVIRONMENTS: tuple = ("development", "test")
+
+#: What the API says, and then stops, when ENVIRONMENT was never set.
+ENVIRONMENT_NOT_SET_MESSAGE = (
+    "ENVIRONMENT is not set: set it to development, test, staging or "
+    "production before starting the API."
+)
+
+#: What the bootstrap says when it will not create the first administrator.
+WEAK_FIRST_SUPERUSER_PASSWORD_MESSAGE = (
+    "FIRST_SUPERUSER_PASSWORD is a well-known default or shorter than "
+    f"{MIN_SUPERUSER_PASSWORD_LENGTH} characters, which is accepted only with "
+    "ENVIRONMENT=development or ENVIRONMENT=test. Set a stronger "
+    "FIRST_SUPERUSER_PASSWORD, or set ENVIRONMENT."
+)
+
 #: Legacy spelling -> canonical spelling.
 LEGACY_ENVIRONMENT_ALIASES: Dict[str, str] = {
     "dev": "development",
@@ -85,6 +103,43 @@ WEAK_SUPERUSER_PASSWORDS: frozenset = frozenset(
 #: The example PUBLIC_BASE_URL every message gives: the dashboard's URL, which
 #: is also where the API is served (under /api).  Never an ``api.`` host.
 PUBLIC_BASE_URL_EXAMPLE = "https://experimently.example.com"
+
+
+#: The strings pydantic's ``bool`` reads as False (case-insensitive, exact).
+#: backend/tests/unit/core/test_settings_rules_testing_flag.py pins this
+#: against pydantic itself.
+_FALSE_WORDS: frozenset = frozenset({"0", "off", "f", "false", "n", "no"})
+
+
+def testing_flag_is_set(value: Optional[str]) -> bool:
+    """Whether a raw ``TESTING`` value turns the test runner's flag on.
+
+    Unset or empty is off, and so is anything pydantic's ``bool`` reads as
+    False (``0``, ``off``, ``f``, ``false``, ``n``, ``no``, in any case).
+    Everything else is on: what pydantic reads as True (``1``, ``true``,
+    ``on``, ``t``, ``y``, ``yes``, in any case) and, failing closed, any other
+    non-empty value, such as ``" true"`` or ``enabled``.
+    """
+    if value is None or value == "":
+        return False
+    return value.lower() not in _FALSE_WORDS
+
+
+def testing_refusal(environment: Any, testing: Optional[str]) -> Optional[str]:
+    """The refusal for ``TESTING`` with a staging/production environment, or None.
+
+    *environment* is the canonical name; *testing* the raw ``TESTING`` value
+    from the process environment. The settings (``config.Settings``) raise
+    with this message and the container's start-up check prints it, so the
+    two cannot disagree.
+    """
+    if environment not in HARDENED_ENVIRONMENTS or not testing_flag_is_set(testing):
+        return None
+    return (
+        f"TESTING is for the test runner and cannot be combined with "
+        f"ENVIRONMENT={environment}. Remove TESTING from this deployment's "
+        "configuration."
+    )
 
 
 def secret_is_placeholder(value: Optional[str]) -> bool:

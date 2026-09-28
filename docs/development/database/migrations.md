@@ -142,7 +142,7 @@ On a database with no tables at all, use the bootstrap instead: the historical
 migration chain cannot be replayed from zero.
 
 ```bash
-python -m backend.app.db.bootstrap
+ENVIRONMENT=development python -m backend.app.db.bootstrap
 ```
 
 ### Creating New Migrations

@@ -121,7 +121,7 @@ The architecture is designed to provide high-performance experiment evaluation, 
 -   **Amazon Kinesis**: Real-time data streaming for event collection
 -   **AWS EventBridge**: Event bus for internal service communication
 -   **Amazon OpenSearch Service**: Analytics engine for experiment results and dashboards
--   **AWS Glue & Athena**: ETL and ad-hoc query services for data analysis
+-   **AWS Glue & Athena**: ETL jobs, partitions and crawlers for the data lake
 
 ### 5. Supporting Services
 
@@ -344,7 +344,7 @@ The following capabilities were added after the initial platform release. See th
 
 | Component | Description | Doc |
 |-----------|-------------|-----|
-| Warehouse-Native Analytics (#26) | Snowflake, BigQuery, Redshift connectors; SQL-sanitized sync | [warehouse-analytics.md](../api/warehouse-analytics.md) |
+| Warehouse Analytics (#26) | Removed; being rebuilt (#312) | [warehouse-analytics.md](../api/warehouse-analytics.md) |
 | Real-time DynamoDB Counters (P2-B) | Atomic ADD operations, bulk counter updates, Lambda integration | [dynamodb-readme.md](../infrastructure/dynamodb-readme.md) |
 
 ### Platform Experience

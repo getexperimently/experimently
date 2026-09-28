@@ -32,8 +32,9 @@ python3.11 -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r backend/requirements.txt
 
-# Run development server (the package is backend.app)
-uvicorn backend.app.main:app --reload
+# Run development server (the package is backend.app). The API refuses to
+# start without ENVIRONMENT (or the legacy APP_ENV).
+ENVIRONMENT=development uvicorn backend.app.main:app --reload
 
 # Or use the Makefile: `make db && make dev`
 
@@ -133,7 +134,8 @@ The platform uses a modern microservices architecture:
   for a module's. A full checkout has two heads, so a bare `--autogenerate` fails with
   "Multiple heads are present"; alembic puts the new file beside the head it extends.
 - Set proper environment variables: `POSTGRES_DB=experimentation POSTGRES_SCHEMA=experimentation`
-- **Fresh database?** Run `python -m backend.app.db.bootstrap` from the repo root. It creates the
+- **Fresh database?** Run `ENVIRONMENT=development python -m backend.app.db.bootstrap` from the repo root
+  (without ENVIRONMENT set to development or test it will not create the first administrator with a weak password). It creates the
   schema from the models and stamps the alembic head (the historical migration chain cannot be
   replayed from an empty database). On an existing database it simply runs `alembic upgrade heads`.
 - `backend/tests/conftest.py`, alembic `env.py` and the bootstrap all read the same

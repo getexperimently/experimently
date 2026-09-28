@@ -217,7 +217,7 @@ dashboard is still on `:bootstrap`.
 ### experimentation-database-<env> and experimentation-redis-<env>
 
 - **Aurora PostgreSQL** cluster: writer + 1 reader on `db.r5.large` for `prod`, a single `db.t3.medium` in every other environment
-- **ElastiCache Redis** replication group: 3 nodes on `cache.r6g.large` for `prod`, 2 on `cache.m6g.large` for `staging`, a single `cache.t4g.medium` otherwise
+- **ElastiCache Redis** replication group: 3 nodes on `cache.r6g.large` for `prod` (automatic failover, Multi-AZ); a single node elsewhere, `cache.t4g.small` for `staging` and `cache.t4g.medium` otherwise, with no replica and so no failover
 - Subnet groups and parameter groups
 - Redis snapshots kept 7 days in `prod`, 3 in `staging`, 1 otherwise
 
@@ -453,8 +453,8 @@ sustained-load month lands nearer $940.
 
 For development/staging environments, you can significantly reduce costs by:
 - Non-prod environments already size down on their own: the CDK picks a
-  smaller Aurora instance, `cache.t4g.medium` for dev/test
-  (`cache.m6g.large` for staging), a single Aurora instance rather than a
+  smaller Aurora instance, a single Redis node (`cache.t4g.medium` for
+  dev/test, `cache.t4g.small` for staging), a single Aurora instance rather than a
   writer/reader pair, and one NAT gateway rather than two
 - Reducing Aurora to a single instance (disable the reader)
 - Using on-demand Lambda scaling instead of reserved capacity

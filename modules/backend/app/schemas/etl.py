@@ -3,7 +3,6 @@ ETL & Glue Job schemas for P3-A: ETL & Glue Jobs for S3 Data Lake.
 
 Provides Pydantic models for:
 - ETL job requests and responses (Glue job management)
-- Athena query execution and results
 - Glue partition management
 - Glue crawler status
 """
@@ -59,30 +58,6 @@ class ETLJobResponse(BaseModel):
     error_message: Optional[str] = None
     input_records: Optional[int] = None
     output_records: Optional[int] = None
-
-
-class AthenaQueryRequest(BaseModel):
-    """Request body for executing an Athena SQL query."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    sql: str = Field(..., min_length=10, max_length=10000)
-    database: str = "experimentation"
-    output_location: Optional[str] = None  # S3 path; defaults to settings value
-
-
-class AthenaQueryResult(BaseModel):
-    """Result of an Athena SQL query execution."""
-
-    model_config = ConfigDict(extra="ignore")
-
-    query_execution_id: str
-    status: str  # QUEUED, RUNNING, SUCCEEDED, FAILED, CANCELLED
-    rows: list[dict] = []
-    column_names: list[str] = []
-    rows_returned: int = 0
-    execution_time_ms: Optional[int] = None
-    data_scanned_bytes: Optional[int] = None
 
 
 class PartitionInfo(BaseModel):
