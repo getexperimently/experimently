@@ -1,15 +1,15 @@
 """The cross-SDK experiment-assignment hash.
 
 This is the hash ``tests/sdk-contract/golden-vectors.json`` pins and every SDK
-implements. The server uses it for experiment variant assignment and for the
-OpenFeature routes. It is NOT the feature-flag rollout function, and it is not
-the only bucketing hash in the platform.
+implements. The server uses it for experiment variant assignment. It is NOT
+the feature-flag rollout function, and it is not the only bucketing hash in the
+platform.
 
 WHERE BUCKETING HAPPENS, and with what:
 
     uses this module (first 4 bytes LE of MD5("{user}:{key}"), / 2^32)
       assignment_service._hash_user_to_variant   key = experiment.key (UUID fallback), bucket_of
-      endpoints/openfeature.py _evaluate_flag     key = flag.key, hash_user
+      (endpoints/openfeature.py _evaluate_flag used it too; that route was removed, #241)
 
     its own MD5("{user}:{flag.key}") read as the FULL 128-bit digest, % 100
       feature_flag_service._evaluate_percentage_rollout
@@ -39,7 +39,7 @@ moves to this module only as a deliberate, stated change.
 
 HISTORY. There were four experiment/flag hashes, and they disagreed (#81).
 
-    openfeature.py          MD5("{user}:{key}"), first 4 bytes LE, / 2^32
+    openfeature.py          MD5("{user}:{key}"), first 4 bytes LE, / 2^32 (removed, #241)
     assignment_service.py   MD5("{user}:{experiment.id}"), FULL digest, % 100
     global_holdout / MEG    MD5("{user}:{salt}"), first 4 bytes LE, % 100
     lambda/shared           MurmurHash3-ish of the user, salted "{key}_variant"
