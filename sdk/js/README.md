@@ -16,7 +16,7 @@ import { ExperimentationClient } from '@getexperimently/js-sdk';
 const client = new ExperimentationClient({ apiUrl: 'http://localhost:8000', apiKey: 'eptk_...' });
 const user = { userId: 'user-123', attributes: { plan: 'pro' } };
 
-const assignment = await client.getAssignment('checkout_flow', user); // { experimentKey, userId, variantId, variantName, isControl, configuration }
+const assignment = await client.getAssignment('checkout_flow', user); // { experimentKey, userId, variantId, variantName, isControl, configuration, assigned?, reason? }
 const variant = await client.getVariant('checkout_flow', user);       // variantName, 'control' on failure
 const { enabled, config, reason } = await client.evaluateFlag('new_search', user); // attributes sent as ?context=
 const on = await client.isFeatureEnabled('new_search', user);         // false on failure
@@ -50,13 +50,23 @@ retried once after `Retry-After`.
 (`country` also matches `user.country`; nested objects flatten to dotted keys such as `app.version`).
 Caches are keyed by user + key only — call `clearCache()` after changing a user's attributes.
 
+### Enrolment: `assigned` and `reason`
+
+An `Assignment` also carries `assigned` and `reason`. `assigned: false` means the server did not
+enrol the user (`reason` is `'holdout'`, `'mutual_exclusion'` or `'targeting'`) and returned the
+control variant so you render the default experience; no exposure was recorded. **When you export
+exposures to a warehouse, exclude assignments with `assigned: false`**: the user was not enrolled,
+and `reason` says why. A server that predates the fields sends neither, so `assigned` is
+`undefined` (never `false`). Decide deliberately how to treat those rows rather than dropping them
+with an `assigned === true` filter.
+
 ## Backend endpoints used
 
 Every request carries `X-API-Key`, `Content-Type: application/json`, `Accept: application/json`.
 
 | SDK call | Method and path | 200 response |
 |---|---|---|
-| `getAssignment`, `getVariant` | `POST /api/v1/tracking/assign` `{experiment_key, user_id, context?}` | `{experiment_key, user_id, variant_id, variant_name, is_control, configuration}` |
+| `getAssignment`, `getVariant` | `POST /api/v1/tracking/assign` `{experiment_key, user_id, context?}` | `{experiment_key, user_id, variant_id, variant_name, is_control, configuration, assigned, reason}` |
 | `evaluateFlag`, `isFeatureEnabled` | `GET /api/v1/feature-flags/evaluate/{flag_key}?user_id=…&context=<url-encoded JSON>` | `{key, enabled, config, reason}` |
 | `getAllFlags` | `GET /api/v1/feature-flags/user/{user_id}?context=<url-encoded JSON>` | `{"<flag_key>": bool}` |
 | `track` with a key | `POST /api/v1/tracking/track` | ignored |

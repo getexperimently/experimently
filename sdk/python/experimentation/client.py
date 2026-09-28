@@ -215,6 +215,11 @@ class ExperimentationClient:
             variant_name=data["variant_name"],
             is_control=bool(data.get("is_control", False)),
             configuration=data.get("configuration"),
+            # Only taken when the server sent them: a missing ``assigned`` stays
+            # None (unknown), never False, so older servers are not mistaken for
+            # "not enrolled".
+            assigned=data["assigned"] if isinstance(data.get("assigned"), bool) else None,
+            reason=data["reason"] if isinstance(data.get("reason"), str) else None,
         )
         self._assignments.set(user_id, experiment_key, assignment)
         return assignment
