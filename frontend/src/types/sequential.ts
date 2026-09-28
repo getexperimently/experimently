@@ -3,6 +3,8 @@
  * Matches backend schemas in backend/app/schemas/sequential.py
  */
 
+import { AnalysisStatusFields } from './analysis';
+
 export type SequentialTestingMethod = 'msprt' | 'always_valid';
 
 export type SpendingFunction = 'obrien_fleming' | 'pocock';
@@ -53,7 +55,7 @@ export interface LongRunningRisk {
   recommendation: string;
 }
 
-export interface SequentialTestingResponse {
+export interface SequentialTestingResponse extends AnalysisStatusFields {
   method: SequentialTestingMethod;
   msprt_result: MSPRTResult | null;
   confidence_sequence: ConfidenceSequence | null;
@@ -61,4 +63,9 @@ export interface SequentialTestingResponse {
   alpha_spending: AlphaSpendingBoundary[];
   long_running_risk: LongRunningRisk | null;
   recommended_action: RecommendedAction;
+  /**
+   * Advisory: running well past the expected duration or collecting samples
+   * slowly. Not a stopping rule and not evidence of no effect.
+   */
+  at_risk?: boolean | null;
 }
