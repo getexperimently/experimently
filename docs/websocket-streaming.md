@@ -72,14 +72,27 @@ code 28, which the block accepts. The snapshot arrives inside a binary WebSocket
 keys:
 
 ```{.bash exec}
-{ curl -s -N --http1.1 --max-time 3 \
+diag_ws() {
+  started=$(date +%s.%N)
+  rc=0
+  curl -sS -N --http1.1 --max-time "$1" -D /tmp/ws-headers.txt -o /tmp/ws-body.bin \
     -H 'Connection: Upgrade' \
     -H 'Upgrade: websocket' \
     -H 'Sec-WebSocket-Version: 13' \
     -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' \
     -H "Sec-WebSocket-Protocol: experimently.bearer, $TOKEN" \
-    localhost:8000/api/v1/ws/experiments/$EXP_ID/results || [ $? -eq 28 ]; } \
-  | LC_ALL=C grep -aoE '"(event|status|key)": "[a-z_]*"'
+    "localhost:8000/api/v1/ws/experiments/$EXP_ID/results" 2>/tmp/ws-err.txt || rc=$?
+  echo "DIAG max-time=$1 curl-rc=$rc secs=$(awk -v a="$started" -v b="$(date +%s.%N)" 'BEGIN{print b-a}') bytes=$(wc -c < /tmp/ws-body.bin)"
+  echo "DIAG headers: $(tr -d '\r' < /tmp/ws-headers.txt | tr '\n' '|')"
+  echo "DIAG stderr: $(cat /tmp/ws-err.txt)"
+  echo "DIAG body: $(LC_ALL=C tr -c '[:print:]' '.' < /tmp/ws-body.bin | cut -c1-400)"
+}
+diag_ws 3
+diag_ws 3
+diag_ws 20
+echo "DIAG api log:"
+docker compose logs --no-color --tail 25 api 2>&1 | cut -c1-220
+false
 ```
 <!-- expect: "event": "results_update" -->
 <!-- expect: "status": "active" -->
