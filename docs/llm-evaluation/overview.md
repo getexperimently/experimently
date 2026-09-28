@@ -50,7 +50,12 @@ OPENAI_API_KEY=sk-...
 `ANTHROPIC_BASE_URL` and `OPENAI_BASE_URL` point the SDKs at a proxy or gateway.
 The `LLM_ANTHROPIC_API_KEY`, `LLM_OPENAI_API_KEY` and `LLM_GOOGLE_API_KEY` settings
 that earlier versions of this page listed are not read by any provider call.
-The Google provider's SDK is not yet included in the API image.
+
+The Google provider needs no extra package: a `google` variant calls the Gemini REST
+API with the key in `GEMINI_API_KEY`, and `GEMINI_BASE_URL` (default
+`https://generativelanguage.googleapis.com`) points it at a proxy or gateway. With no
+`GEMINI_API_KEY`, that variant's `/complete` answers
+`502 {"detail":"LLM provider error: GEMINI_API_KEY is not set"}`.
 
 ---
 

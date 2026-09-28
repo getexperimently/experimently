@@ -130,6 +130,10 @@ export class ExperimentationClient {
         variantName: data.variant_name,
         isControl: Boolean(data.is_control),
         configuration: data.configuration ?? null,
+        // Only copied when the server sent them: a missing `assigned` stays undefined
+        // (unknown), never false, so older servers are not mistaken for "not enrolled".
+        ...(typeof data.assigned === 'boolean' ? { assigned: data.assigned } : {}),
+        ...(typeof data.reason === 'string' ? { reason: data.reason } : {}),
       };
       this.assignments.set(userId, experimentKey, assignment);
       return assignment;

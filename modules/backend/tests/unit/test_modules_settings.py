@@ -32,27 +32,7 @@ _MOVED_FIELDS = (
     "GLUE_METRICS_JOB_NAME",
     "GLUE_DATABASE",
     "GLUE_EVENTS_TABLE",
-    "ATHENA_OUTPUT_BUCKET",
     "GLUE_CRAWLER_NAME",
-    "DATABRICKS_HOST",
-    "DATABRICKS_HTTP_PATH",
-    "DATABRICKS_TOKEN",
-    "DATABRICKS_CATALOG",
-    "DATABRICKS_SCHEMA",
-    "DATABRICKS_TIMEOUT_SECONDS",
-    "CLICKHOUSE_HOST",
-    "CLICKHOUSE_PORT",
-    "CLICKHOUSE_DATABASE",
-    "CLICKHOUSE_USER",
-    "CLICKHOUSE_PASSWORD",
-    "CLICKHOUSE_SECURE",
-    "CLICKHOUSE_TIMEOUT_SECONDS",
-    "MYSQL_HOST",
-    "MYSQL_PORT",
-    "MYSQL_DATABASE",
-    "MYSQL_USER",
-    "MYSQL_PASSWORD",
-    "MYSQL_TIMEOUT_SECONDS",
     "SAML_SP_ENTITY_ID",
     "SAML_SP_ACS_URL",
     "OIDC_GOOGLE_CLIENT_ID",
@@ -73,6 +53,20 @@ class TestWhereTheFieldsLive:
     @pytest.mark.parametrize("name", ["SSO_ENABLED", "SSO_STATE_SECRET"])
     def test_unread_sso_fields_are_gone(self, name):
         """Nothing read either; deleted rather than moved (issue #91)."""
+        assert name not in ModulesSettings.model_fields
+        assert name not in Settings.model_fields
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "ATHENA_OUTPUT_BUCKET",
+            "DATABRICKS_HOST",
+            "CLICKHOUSE_HOST",
+            "MYSQL_HOST",
+        ],
+    )
+    def test_settings_of_removed_endpoints_are_gone(self, name):
+        """Read only by the removed warehouse connectors and ETL query."""
         assert name not in ModulesSettings.model_fields
         assert name not in Settings.model_fields
 
@@ -167,8 +161,6 @@ class TestTheProcessInstance:
         [
             ("modules.backend.app.services.audit_signing_service", "AUDIT_HMAC_KEY"),
             ("modules.backend.app.services.hipaa_service", "HIPAA_ALLOWED_REGIONS"),
-            ("modules.backend.app.services.clickhouse_connector", "CLICKHOUSE_HOST"),
-            ("modules.backend.app.services.mysql_connector", "MYSQL_HOST"),
             ("modules.backend.app.services.sso_service", "SAML_SP_ENTITY_ID"),
         ],
     )

@@ -607,6 +607,18 @@ describe('assignExperiment result', () => {
     expect(global.fetch).toHaveBeenCalledTimes(1);
   });
 
+  it.each(['holdout', 'mutual_exclusion', 'targeting'])(
+    'carries assigned: false and reason %s for a user the server did not enrol',
+    async reason => {
+      mockFetch({ ...controlAssignment, assigned: false, reason });
+      const client = new ExperimentationClient(baseConfig);
+      const result = await client.assignExperiment(user, 'checkout');
+      expect(result.assigned).toBe(false);
+      expect(result.reason).toBe(reason);
+      expect(result.isControl).toBe(true);
+    }
+  );
+
   it('marks control assignments with isControl: true', async () => {
     mockFetch(controlAssignment);
     const client = new ExperimentationClient(baseConfig);

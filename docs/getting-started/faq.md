@@ -61,7 +61,7 @@ The platform supports a range of statistical approaches:
 | Frequentist (z-test) | Standard two-sample proportion and mean comparison |
 | Sequential testing (mSPRT) | Continuous monitoring with valid p-values at any sample size |
 | Always-valid confidence intervals | Confidence sequences that are valid at every look |
-| Alpha spending (O'Brien-Fleming, Pocock) | Planned interim analyses with controlled false positive rate |
+| Alpha spending (O'Brien-Fleming, Pocock) | Not computed yet: the response's `alpha_spending` is empty; use the mSPRT, which is valid under continuous monitoring |
 | CUPED (beta) | Variance reduction; the covariate is not yet a pre-experiment metric, so it reduces almost no variance today (#217) |
 | Bayesian (Beta-Binomial) | Posterior credible intervals, Bayes factors, probability of superiority, ROPE |
 | Multi-armed bandit | Thompson Sampling, UCB1, and Epsilon-Greedy adaptive traffic allocation |
@@ -119,9 +119,7 @@ You can combine both: run a feature behind a flag during an experiment, then gra
 
 ### Can I use my own data warehouse?
 
-Yes. The warehouse-native analytics feature lets you connect to Snowflake, BigQuery, or Amazon Redshift and run experiment analysis directly against your existing data. This is useful when your source-of-truth metrics already live in the warehouse, or when you need to analyze large datasets.
-
-See the [Warehouse-Native Analytics API](../api/warehouse-analytics.md) for setup instructions.
+Not today. The warehouse endpoints have been removed, and warehouse analysis is being rebuilt (#312). See [Warehouse Analytics](../api/warehouse-analytics.md).
 
 ---
 

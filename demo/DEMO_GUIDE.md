@@ -226,7 +226,7 @@ See `demo/streampulse/README.md`.
 ## FAQ / Objections
 
 **"Can it connect to our data warehouse?"**
-> Yes. Snowflake, BigQuery, and Redshift are all supported via the warehouse-native analytics feature. You can query your existing event data without moving it.
+> Not today. Warehouse analysis is being rebuilt (#312).
 
 **"Is it SOC 2 compliant?"**
 > The platform is not certified and we do not claim it. What it gives you are controls that support your own program: an append-only audit log of every change in the core profile, and with the `compliance` module HMAC-SHA256 signed audit events with exportable report packs. Your auditor decides what they satisfy.

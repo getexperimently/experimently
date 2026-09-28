@@ -16,11 +16,9 @@ What lives here, by manifest group:
 * group 2, HIPAA: ``PHI_ENCRYPTION_KEY`` and ``HIPAA_*``.
 * group 4, SSO: ``SAML_SP_*`` and ``OIDC_*``.  ``SSO_ENABLED`` and
   ``SSO_STATE_SECRET`` are gone: nothing read either.
-* group 6, warehouse connectors: ``DATABRICKS_*``, ``CLICKHOUSE_*``,
-  ``MYSQL_*``.
 * group 8, real-time counters: ``DYNAMODB_COUNTERS_TABLE``, read by
   ``DynamoDBCounterService`` when no table name is passed to it.
-* group 9, ETL: ``GLUE_*`` and ``ATHENA_OUTPUT_BUCKET``.
+* group 9, ETL: ``GLUE_*``.
 
 Module code reads them as ``from modules.backend.app.settings import
 settings`` -- the same shape as the core singleton, so a test patches
@@ -77,33 +75,7 @@ class ModulesSettings(BaseSettings):
     GLUE_METRICS_JOB_NAME: str = "experimentation-metrics-etl"
     GLUE_DATABASE: str = "experimentation"
     GLUE_EVENTS_TABLE: str = "raw_events"
-    ATHENA_OUTPUT_BUCKET: str = "s3://experimentation-athena-results/"
     GLUE_CRAWLER_NAME: str = "experimentation-crawler"
-
-    # EP-041: Databricks warehouse connector
-    DATABRICKS_HOST: str = ""
-    DATABRICKS_HTTP_PATH: str = ""
-    DATABRICKS_TOKEN: str = ""
-    DATABRICKS_CATALOG: str = "main"
-    DATABRICKS_SCHEMA: str = "default"
-    DATABRICKS_TIMEOUT_SECONDS: int = 30
-
-    # EP-048: ClickHouse warehouse connector
-    CLICKHOUSE_HOST: str = "localhost"
-    CLICKHOUSE_PORT: int = 8123  # HTTP port (9000 for native)
-    CLICKHOUSE_DATABASE: str = "default"
-    CLICKHOUSE_USER: str = "default"
-    CLICKHOUSE_PASSWORD: str = ""
-    CLICKHOUSE_SECURE: bool = False
-    CLICKHOUSE_TIMEOUT_SECONDS: int = 30
-
-    # EP-048: MySQL warehouse connector
-    MYSQL_HOST: str = "localhost"
-    MYSQL_PORT: int = 3306
-    MYSQL_DATABASE: str = ""
-    MYSQL_USER: str = ""
-    MYSQL_PASSWORD: str = ""
-    MYSQL_TIMEOUT_SECONDS: int = 30
 
     # SSO / SAML / OIDC settings (EP-037)
     SAML_SP_ENTITY_ID: str = "https://experimently.example.com"
@@ -157,7 +129,7 @@ def build_modules_settings() -> ModulesSettings:
     (``.env.dev`` / ``.env.test`` / ``.env.prod``), which is the mechanism
     ``docs/getting-started/environment-setup.md`` documents for production.
     Without it every setting that moved off the core class -- AUDIT_HMAC_KEY,
-    PHI_ENCRYPTION_KEY, the OIDC/SAML/HIPAA/warehouse ones -- would quietly
+    PHI_ENCRYPTION_KEY, the OIDC/SAML/HIPAA ones -- would quietly
     stop being read from those files and fall back to its dev default.
 
     Raises ``pydantic.ValidationError`` when a hardened environment carries a

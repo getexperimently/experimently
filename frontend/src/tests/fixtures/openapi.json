@@ -1,7 +1,7 @@
 {
   "info": {
     "title": "Experimently",
-    "version": "0.7.0"
+    "version": "0.9.0"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -327,12 +327,6 @@
       "post": {
         "operationId": "add_partitions_api_v1_etl_partitions_add_post",
         "summary": "Add S3 partitions to the Glue catalog"
-      }
-    },
-    "/api/v1/etl/query": {
-      "post": {
-        "operationId": "run_athena_query_api_v1_etl_query_post",
-        "summary": "Run an Athena SQL query"
       }
     },
     "/api/v1/events/": {
@@ -1277,110 +1271,6 @@
       "post": {
         "operationId": "calculate_sample_size_api_v1_utils_utils_sample_size_post",
         "summary": "Calculate required sample size"
-      }
-    },
-    "/api/v1/warehouse/clickhouse/metrics/experiments/{experiment_id}": {
-      "get": {
-        "operationId": "get_experiment_metrics_api_v1_warehouse_clickhouse_metrics_experiments__experiment_id__get",
-        "summary": "Get experiment metrics from ClickHouse"
-      }
-    },
-    "/api/v1/warehouse/clickhouse/metrics/flags/{flag_id}": {
-      "get": {
-        "operationId": "get_feature_flag_metrics_api_v1_warehouse_clickhouse_metrics_flags__flag_id__get",
-        "summary": "Get feature flag metrics from ClickHouse"
-      }
-    },
-    "/api/v1/warehouse/clickhouse/query": {
-      "post": {
-        "operationId": "execute_query_api_v1_warehouse_clickhouse_query_post",
-        "summary": "Execute a read-only ClickHouse query"
-      }
-    },
-    "/api/v1/warehouse/clickhouse/test-connection": {
-      "post": {
-        "operationId": "test_connection_api_v1_warehouse_clickhouse_test_connection_post",
-        "summary": "Test ClickHouse connection"
-      }
-    },
-    "/api/v1/warehouse/connections": {
-      "get": {
-        "operationId": "list_connections_api_v1_warehouse_connections_get",
-        "summary": "List warehouse connections"
-      },
-      "post": {
-        "operationId": "create_connection_api_v1_warehouse_connections_post",
-        "summary": "Create warehouse connection"
-      }
-    },
-    "/api/v1/warehouse/connections/test": {
-      "post": {
-        "operationId": "test_connection_api_v1_warehouse_connections_test_post",
-        "summary": "Test warehouse connection"
-      }
-    },
-    "/api/v1/warehouse/connections/{connection_id}": {
-      "delete": {
-        "operationId": "delete_connection_api_v1_warehouse_connections__connection_id__delete",
-        "summary": "Delete warehouse connection"
-      },
-      "get": {
-        "operationId": "get_connection_api_v1_warehouse_connections__connection_id__get",
-        "summary": "Get warehouse connection"
-      }
-    },
-    "/api/v1/warehouse/databricks/metrics/experiments/{experiment_id}": {
-      "get": {
-        "operationId": "get_experiment_metrics_api_v1_warehouse_databricks_metrics_experiments__experiment_id__get",
-        "summary": "Get experiment metrics from Databricks"
-      }
-    },
-    "/api/v1/warehouse/databricks/metrics/flags/{flag_id}": {
-      "get": {
-        "operationId": "get_feature_flag_metrics_api_v1_warehouse_databricks_metrics_flags__flag_id__get",
-        "summary": "Get feature flag metrics from Databricks"
-      }
-    },
-    "/api/v1/warehouse/databricks/query": {
-      "post": {
-        "operationId": "execute_query_api_v1_warehouse_databricks_query_post",
-        "summary": "Execute a read-only Databricks query"
-      }
-    },
-    "/api/v1/warehouse/databricks/test-connection": {
-      "post": {
-        "operationId": "test_connection_api_v1_warehouse_databricks_test_connection_post",
-        "summary": "Test Databricks connection"
-      }
-    },
-    "/api/v1/warehouse/mysql/metrics/experiments/{experiment_id}": {
-      "get": {
-        "operationId": "get_experiment_metrics_api_v1_warehouse_mysql_metrics_experiments__experiment_id__get",
-        "summary": "Get experiment metrics from MySQL"
-      }
-    },
-    "/api/v1/warehouse/mysql/metrics/flags/{flag_id}": {
-      "get": {
-        "operationId": "get_feature_flag_metrics_api_v1_warehouse_mysql_metrics_flags__flag_id__get",
-        "summary": "Get feature flag metrics from MySQL"
-      }
-    },
-    "/api/v1/warehouse/mysql/query": {
-      "post": {
-        "operationId": "execute_query_api_v1_warehouse_mysql_query_post",
-        "summary": "Execute a read-only MySQL query"
-      }
-    },
-    "/api/v1/warehouse/mysql/test-connection": {
-      "post": {
-        "operationId": "test_connection_api_v1_warehouse_mysql_test_connection_post",
-        "summary": "Test MySQL connection"
-      }
-    },
-    "/api/v1/warehouse/sync/{experiment_id}": {
-      "post": {
-        "operationId": "sync_experiment_api_v1_warehouse_sync__experiment_id__post",
-        "summary": "Sync experiment results from warehouse"
       }
     },
     "/api/v1/wizard/drafts": {

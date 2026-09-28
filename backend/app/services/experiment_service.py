@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 from uuid import UUID
 
 from fastapi.encoders import jsonable_encoder
+from pydantic import BaseModel
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, joinedload
 
@@ -16,7 +17,13 @@ from backend.app.models.experiment import (
     MetricType,
     Variant,
 )
-from backend.app.schemas.experiment import ExperimentCreate, ExperimentUpdate
+from backend.app.schemas.bayesian import BayesianConfig
+from backend.app.schemas.experiment import (
+    ExperimentCreate,
+    ExperimentUpdate,
+    SequentialTestingConfigInput,
+)
+from backend.app.schemas.variance_reduction import VarianceReductionConfig
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +75,81 @@ def resolve_experiment_status(value: Any) -> Optional[ExperimentStatus]:
 def resolve_experiment_type(value: Any) -> Optional[ExperimentType]:
     """Return the ``ExperimentType`` for *value*, or ``None`` if unknown."""
     return _resolve_enum_member(ExperimentType, value)
+
+
+class AnalysisConfigError(ValueError):
+    """A create/update would leave an analysis config in a state it refuses.
+
+    ``field`` is the request field at fault; the API answers 422 naming it.
+    """
+
+    def __init__(self, field: str, message: str) -> None:
+        super().__init__(message)
+        self.field = field
+        self.message = message
+
+
+BAYESIAN_CONFIG_CLEAR_MESSAGE = (
+    "bayesian_config cannot be cleared while bayesian_enabled is true; "
+    "send bayesian_enabled: false to disable"
+)
+
+
+# The JSONB analysis-configuration columns and the schema each one holds.
+_ANALYSIS_CONFIG_SCHEMAS: Dict[str, type] = {
+    "bayesian_config": BayesianConfig,
+    "sequential_testing_config": SequentialTestingConfigInput,
+    "variance_reduction_config": VarianceReductionConfig,
+}
+
+
+def _normalise_analysis_configs(
+    data: Dict[str, Any], experiment: Optional[Experiment] = None
+) -> Dict[str, Any]:
+    """Prepare the analysis-configuration fields of a create/update for storage.
+
+    Each JSONB config is stored as ``model_dump(mode="json")`` of its schema, so
+    enums become their values and every default is written out.  Turning
+    Bayesian analysis on with no config -- neither in *data* nor already stored
+    on *experiment* -- stores the default ``BayesianConfig``, because the
+    analysis only runs for an experiment that has both.  An explicit
+    ``bayesian_enabled: null`` on an update is dropped rather than written to a
+    non-nullable column.
+
+    On an update (*experiment* given), an explicit ``bayesian_config: null``
+    while Bayesian analysis stays on raises :class:`AnalysisConfigError`
+    rather than silently replacing the stored config with the defaults.
+    Clearing it together with ``bayesian_enabled: false`` is allowed.
+
+    Raises:
+        AnalysisConfigError: the update would clear the config of an enabled
+            experiment.
+    """
+    for field, schema in _ANALYSIS_CONFIG_SCHEMAS.items():
+        value = data.get(field)
+        if isinstance(value, BaseModel):
+            data[field] = value.model_dump(mode="json")
+        elif isinstance(value, dict):
+            data[field] = schema.model_validate(value).model_dump(mode="json")
+
+    if "bayesian_enabled" in data and data["bayesian_enabled"] is None:
+        del data["bayesian_enabled"]
+
+    enabled = data.get(
+        "bayesian_enabled",
+        bool(getattr(experiment, "bayesian_enabled", False)),
+    )
+    config = (
+        data["bayesian_config"]
+        if "bayesian_config" in data
+        else getattr(experiment, "bayesian_config", None)
+    )
+    clears_config = "bayesian_config" in data and data["bayesian_config"] is None
+    if enabled and clears_config and experiment is not None:
+        raise AnalysisConfigError("bayesian_config", BAYESIAN_CONFIG_CLEAR_MESSAGE)
+    if enabled and not config:
+        data["bayesian_config"] = BayesianConfig().model_dump(mode="json")
+    return data
 
 
 class ExperimentService:
@@ -345,6 +427,7 @@ class ExperimentService:
             obj_data["experiment_type"] = ExperimentType.A_B
 
         obj_data["owner_id"] = str(user_id)
+        _normalise_analysis_configs(obj_data)
 
         # Create experiment
         experiment = Experiment(**obj_data)
@@ -404,7 +487,7 @@ class ExperimentService:
         if isinstance(experiment_in, dict):
             update_data = experiment_in
         else:
-            update_data = experiment_in.dict(exclude_unset=True)
+            update_data = experiment_in.model_dump(exclude_unset=True)
 
         # Handle string status values by converting to enum ("draft" or "DRAFT")
         if "status" in update_data and isinstance(update_data["status"], str):
@@ -434,6 +517,8 @@ class ExperimentService:
                 del update_data["experiment_type"]
             else:
                 update_data["experiment_type"] = resolved_type
+
+        _normalise_analysis_configs(update_data, experiment)
 
         # Extract nested objects if present
         variants_data = update_data.pop("variants", None)
@@ -998,6 +1083,10 @@ class ExperimentService:
                 if experiment.mutual_exclusion_group_id
                 else None
             ),
+            # Issue #216: Bayesian analysis; bayesian_decision is response-only.
+            "bayesian_enabled": bool(experiment.bayesian_enabled),
+            "bayesian_config": experiment.bayesian_config,
+            "bayesian_decision": experiment.bayesian_decision,
         }
 
         # Add variants if loaded

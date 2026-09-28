@@ -155,9 +155,9 @@ jobs:
             modules/requirements.txt
 
       # Both sets: the modules import the backend, and modules/requirements.txt
-      # carries what only they import (python3-saml, PyMySQL, the warehouse
-      # drivers). Without the second install the connector tests would pass
-      # against a None module and prove nothing.
+      # carries what only they import (python3-saml, authlib). Without the
+      # second install the SSO tests would pass against a None module and
+      # prove nothing.
       - name: Install dependencies
         run: |
           pip install -r backend/requirements.txt
@@ -519,6 +519,7 @@ jobs:
         run: >-
           python -m pytest -p no:cov -q --tb=short
           backend/tests/unit/scripts/test_doc_examples.py
+          backend/tests/unit/scripts/test_guide_blocks.py
           backend/tests/unit/docs/
           backend/tests/smoke/test_openapi_snapshot.py
           backend/tests/smoke/test_version_sources.py
@@ -542,9 +543,8 @@ jobs:
         run: pip install -r backend/requirements.txt "reuse==${REUSE_VERSION}" "pip-licenses==${PIP_LICENSES_VERSION}"
 
       # The modules import packages backend/requirements.txt deliberately does
-      # not carry (python3-saml, PyMySQL, the warehouse drivers, and the
-      # defusedxml/requests the SSO service needs); every one of those imports
-      # is guarded, so without this the licence step would report them as
+      # not carry (python3-saml, authlib, and the defusedxml/requests the SSO
+      # service needs); without this the licence step would report them as
       # "pinned but not installed here".
       - name: Install module dependencies
         if: needs.changes.outputs.docs_only != 'true' && matrix.profile == 'full'
@@ -888,8 +888,7 @@ jobs:
 
       # The full image is what a self-hoster who runs the modules gets, and no
       # job built it: a module-only dependency missing from the image surfaced
-      # as a refused SAML login or a warehouse query blocking on retries in
-      # production, never as a red build. It is built in this job rather than
+      # as a refused SAML login in production, never as a red build. It is built in this job rather than
       # its own because the `builder` and `runtime` stages are already in this
       # job's layer cache from the core build above, so the extra work is one
       # pip install of the module closure -- a couple of minutes inside the
@@ -976,8 +975,8 @@ jobs:
       # install runtime.lock rather than backend/requirements.txt: a pin added
       # to one and not the other passes the unit test and fails this.
       # `import`, not find_spec, so an SDK whose own dependency is missing
-      # fails too. google.* is excluded by the script (the Gemini provider is
-      # separate work) and printed, so the exclusion is never silent.
+      # fails too. Nothing is excluded: the Gemini provider imports no
+      # google.* package (#275), so one appearing fails here.
       - name: LLM call paths import in both images
         run: |
           set -euo pipefail

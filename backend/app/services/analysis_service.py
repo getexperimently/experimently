@@ -846,8 +846,9 @@ class AnalysisService:
     ) -> BayesianResultsResponse:
         """Read the primary-metric counts and run the Bayesian analysis.
 
-        Also persists ``experiment.bayesian_decision`` (flushed, not
-        committed) so the experiment scheduler can act on stopping rules.
+        Also records ``experiment.bayesian_decision`` (flushed, not
+        committed).  The decision is a recommendation: nothing stops the
+        experiment on it.
 
         Args:
             experiment: Experiment ORM object with variants and metrics loaded.

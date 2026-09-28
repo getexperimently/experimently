@@ -35,7 +35,7 @@
 | Doc | Description |
 |-----|-------------|
 | [Mutual Exclusion & Holdout](api/mutual-exclusion-groups.md) | Prevent experiment conflicts, global holdout configuration |
-| [Warehouse Analytics](api/warehouse-analytics.md) | Snowflake, BigQuery, Redshift connector setup and sync |
+| [Warehouse Analytics](api/warehouse-analytics.md) | Removed; being rebuilt (#312) |
 | [Audit Logging & Bulk Toggle](api/audit-logging.md) | Audit trail, SSE stream, bulk feature flag operations |
 | [Alerting](api/alerting.md) | Slack and email notifications for platform events |
 

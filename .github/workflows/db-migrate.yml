@@ -120,6 +120,9 @@ jobs:
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
+          # timeout-minutes x 60 <= this <= the role's MaxSessionDuration (10800);
+          # test_aws_session_duration.py. The default, 3600, expires mid-job.
+          role-duration-seconds: 5400
 
       - name: Refuse the wrong AWS account
         run: |
