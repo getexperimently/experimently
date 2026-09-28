@@ -82,7 +82,7 @@ The CORS middleware configuration was tightened:
 - `allow_methods` changed from `["*"]` to an explicit list: `["GET", "POST", "PUT", "DELETE", "PATCH"]`.  `OPTIONS` is handled automatically by the CORS middleware; `HEAD` and `TRACE` are not needed.
 - `allow_headers` changed from `["*"]` to an explicit list: `["Authorization", "Content-Type", "X-API-Key"]`.  Only headers the API actually uses are permitted.
 - `expose_headers` was added: `["X-Request-ID", "X-RateLimit-Limit", "X-RateLimit-Remaining"]` so clients can read these response headers cross-origin.
-- A safe fallback (`http://localhost:3000`) is applied if `BACKEND_CORS_ORIGINS` is empty, preventing inadvertent wildcard origins.
+- The allowed origins come from `BACKEND_CORS_ORIGINS`, else `CORS_ORIGINS`, plus any `DASHBOARD_ORIGINS`. With neither set, development and test fall back to the local apps' `http://localhost` origins, and staging and production allow no other origin (#130). Credentials are not allowed cross-origin.
 
 ### Why it matters
 

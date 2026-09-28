@@ -16,7 +16,7 @@ from fastapi.openapi.utils import get_openapi
 # Import routers and settings
 from backend.app.api.api import api_router, tags_metadata
 from backend.app.core.bandit_scheduler import bandit_scheduler_runner
-from backend.app.core.config import settings
+from backend.app.core.config import cors_start_up_messages, settings
 from backend.app.core.health import is_development_or_test
 from backend.app.core.health import router as health_router
 from backend.app.core.metrics_scheduler import metrics_scheduler
@@ -193,9 +193,13 @@ app = FastAPI(
 
 # CORS origins — resolved here, registered LAST (below), because the
 # registration order is what decides the nesting.
-# BACKEND_CORS_ORIGINS, else CORS_ORIGINS, else the dev defaults; every entry
-# normalised to the form a browser's Origin header takes (#126).
+# BACKEND_CORS_ORIGINS, else CORS_ORIGINS, else the localhost defaults in
+# development and test and nothing in staging/production (#130), plus any
+# DASHBOARD_ORIGINS; every entry normalised to the form a browser's Origin
+# header takes (#126).
 cors_origins = settings.cors_allowed_origins
+for _level, _message in cors_start_up_messages(settings):
+    logger.log(_level, _message)
 
 # An unhandled route exception becomes a 500 the browser can read (#72).
 # Registered FIRST, i.e. innermost of all the layers below, so its 500 passes
@@ -275,7 +279,10 @@ if _monitoring_imports_ok:
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
-    allow_credentials=True,
+    # No first-party client sends credentials cross-origin: the dashboard
+    # authenticates with a bearer header, and SSO's state cookie travels on a
+    # top-level navigation. Off, a `*` entry can never be combined with them.
+    allow_credentials=False,
     allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
     allow_headers=["Authorization", "Content-Type", "X-API-Key"],
     expose_headers=[

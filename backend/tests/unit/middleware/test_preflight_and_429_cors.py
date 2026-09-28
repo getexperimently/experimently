@@ -47,7 +47,7 @@ PREFLIGHT_HEADERS = {
 #: `Retry-After` disappearing from the real app.
 CORS_KWARGS = {
     "allow_origins": [ORIGIN],
-    "allow_credentials": True,
+    "allow_credentials": False,
     "allow_methods": ["GET", "POST", "PUT", "DELETE", "PATCH"],
     "allow_headers": ["Authorization", "Content-Type", "X-API-Key"],
     "expose_headers": [
