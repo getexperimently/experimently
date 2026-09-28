@@ -152,10 +152,19 @@ modules/backend/tests/integration/api/test_rbac_api.py
 # ─────────────────────────────────────────────────────────────────────────────
 # 6. Warehouse analytics  (Issue #26; being rebuilt, #312)
 # Core without it: yes. The endpoints and connectors were removed; what is
-# left is the model and its `warehouse_connections` table, which no route
-# reads.
+# left is the storage for the rebuild -- the `warehouse_connections`,
+# `warehouse_sources` and `warehouse_analysis_runs` tables, which no route
+# reads yet -- the command that re-encrypts stored credentials under a new
+# key, and the per-connection daily run count.
 # ─────────────────────────────────────────────────────────────────────────────
 modules/backend/app/models/warehouse_connection.py
+modules/backend/app/models/warehouse_source.py
+modules/backend/app/models/warehouse_analysis_run.py
+modules/backend/app/services/warehouse_run_accounting.py
+modules/backend/app/scripts
+modules/backend/tests/unit/models/test_warehouse_models.py
+modules/backend/tests/unit/services/test_warehouse_run_accounting.py
+modules/backend/tests/unit/test_rotate_warehouse_credentials.py
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 7. Third-party integrations — Jira / Salesforce / GitHub  (EP-034)
@@ -324,7 +333,7 @@ modules/backend/tests/unit/core/test_credential_crypto.py
 
 # =============================================================================
 # MODULE TABLES — the boundary test asserts Base.metadata.tables ∩ MODULE_TABLES == ∅
-# after models/__init__.py stops importing the modules' models. 12 tables:
+# after models/__init__.py stops importing the modules' models. 14 tables:
 # =============================================================================
 #   workspaces
 #   workspace_members
@@ -337,6 +346,8 @@ modules/backend/tests/unit/core/test_credential_crypto.py
 #   baa_configs
 #   phi_audit_logs
 #   warehouse_connections
+#   warehouse_sources
+#   warehouse_analysis_runs
 #   integration_configs
 #
 # NOT module tables, despite the name: audit_logs and audit_events_v2 are core

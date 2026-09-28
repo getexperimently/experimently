@@ -284,7 +284,7 @@ def _is_at_head(connection) -> bool:
     table and break the next step.  Only a database that is *at* its heads is
     one the models may be reconciled with.
 
-    A head this build does not have (``modules_0001_rbac`` under a core build)
+    A head this build does not have (the modules head under a core build)
     is not required to be recorded: this asks whether **our** chain is finished,
     which is the same question ``may_run_alembic`` asks above.
     """

@@ -34,6 +34,10 @@ ALEMBIC_INI = REPO_ROOT / "backend" / "app" / "db" / "alembic.ini"
 #: ``workspace_id`` foreign keys that ``modules_0001_rbac`` restores.
 BRANCH_POINT = "a7b8c9d0e1f2"
 MODULES_BRANCH = "modules"
+#: The branch's FIRST revision -- the one that restores the two keys.  Not its
+#: head (``modules_0002_warehouse_analysis`` since #312); this file never needs
+#: the head by id, because ``modules@head`` names it.
+MODULES_FIRST = "modules_0001_rbac"
 
 pytestmark = [pytest.mark.unit, pytest.mark.modules]
 
@@ -166,7 +170,7 @@ def test_only_the_modules_branch_re_adds_the_workspace_foreign_keys(script):
     """The core chain must not: a core database has no ``workspaces`` table to
     point at, and a core migration naming it re-couples the two profiles."""
     core_versions = _versions_dir(script, BRANCH_POINT)
-    modules_versions = _versions_dir(script, "modules_0001_rbac")
+    modules_versions = _versions_dir(script, MODULES_FIRST)
     assert core_versions != modules_versions
 
     core_offenders = sorted(
