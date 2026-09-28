@@ -341,6 +341,32 @@ curl -X POST "http://localhost:8000/api/v1/users/" \
   }
   ```
 
+### Update User
+- **Endpoint**: `PUT /api/v1/users/{user_id}`
+- **Description**: Update a user. A superuser may update any user and every
+  field. Anyone else may update only their own account (another user's is a
+  403), may not change its email address or username, and has `is_active`
+  and `is_superuser` ignored.
+- **Headers**: Authorization: Bearer {token}
+- **Request Body**: `username` and `email` are required. A user who is not a
+  superuser sends the account's current values; they are accepted only if the
+  username is exactly the stored one and the email address is the stored one
+  as `EmailStr` parses it (it lower-cases the domain, not the part before the
+  `@`), and they are not written.
+  ```json
+  {
+    "username": "string",
+    "email": "user@example.com",
+    "full_name": "string",
+    "password": "string"
+  }
+  ```
+- **Response**: 200 OK, the user as in Get User
+- **Errors**: 403 "Only an administrator can change an account's email address
+  or username." when a user who is not a superuser sends a different email
+  address or username. Administrators change them with
+  `PUT /api/v1/admin/users/{user_id}`.
+
 ## Experiment Endpoints
 
 ### List Experiments

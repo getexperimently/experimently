@@ -10,6 +10,28 @@ longer applies and release-please can generate this file directly. Until it
 does, entries below 0.2.2 are hand-written and the links in them are the
 reason why.
 
+## [0.10.0](https://github.com/getexperimently/experimently/compare/v0.9.0...v0.10.0) (2026-09-28)
+
+
+### ⚠ BREAKING CHANGES
+
+* **users:** Non-superusers now get 403 when a PUT /api/v1/users/{id} request changes email or username. Administrators change them through /api/v1/admin/users/{id}.
+
+### Features
+
+* **dashboard:** results show the beta notice the API sends ([#314](https://github.com/getexperimently/experimently/issues/314)) ([eceba3f](https://github.com/getexperimently/experimently/commit/eceba3f156324869a3be9389ffda5a6ea22f8c24))
+* **infra:** alarms email a required address, and the rollback alarms announce themselves ([#308](https://github.com/getexperimently/experimently/issues/308)) ([9e50305](https://github.com/getexperimently/experimently/commit/9e503053eb8a11044806e171b965c8ec5f403291))
+* **infra:** staging runs one small Redis node ([#301](https://github.com/getexperimently/experimently/issues/301)) ([c400adc](https://github.com/getexperimently/experimently/commit/c400adc5a35b853e7c8d5d2101138ee13772a7e4))
+* **modules:** a key-list setting and helper for encrypting stored credentials ([#317](https://github.com/getexperimently/experimently/issues/317)) ([4a08a34](https://github.com/getexperimently/experimently/commit/4a08a3487f261de760e8b5a7048d4902c884dbdf))
+* **sdk:** assignments carry whether the user was enrolled and why ([#315](https://github.com/getexperimently/experimently/issues/315)) ([c9b3023](https://github.com/getexperimently/experimently/commit/c9b3023e1ef8f38a223032bbb81ecd235275c1a1))
+
+
+### Bug Fixes
+
+* **api-keys:** only roles that can change flags can create server-side evaluation keys ([#305](https://github.com/getexperimently/experimently/issues/305)) ([3d459e2](https://github.com/getexperimently/experimently/commit/3d459e2cf156fd0776e71d1c0f8724ec00ae9194))
+* **config:** the API starts only with an explicit ENVIRONMENT, and a weak first-admin password is refused outside development ([#310](https://github.com/getexperimently/experimently/issues/310)) ([9d27c3f](https://github.com/getexperimently/experimently/commit/9d27c3f95cf8c2acca44a1a61f48f61dc1d232a9))
+* **users:** only a superuser can change a user's email or username ([#340](https://github.com/getexperimently/experimently/issues/340)) ([03b0c20](https://github.com/getexperimently/experimently/commit/03b0c2066d41bfeb1ea25720eec7c57362696b0c))
+
 ## [0.9.0](https://github.com/getexperimently/experimently/compare/v0.8.0...v0.9.0) (2026-09-28)
 
 

@@ -135,7 +135,9 @@ jobs:
           build-args: |
             VERSION=${{ steps.version.outputs.version }}
           load: true
-          tags: ${{ env.API_IMAGE }}
+          # env.API_IMAGE, written out: a `with:` value read from an image-named
+          # env var is refused (test_workflow_account_id_private.py).
+          tags: chart-kind-api:${{ matrix.profile }}
           cache-from: |
             type=gha,scope=api
             type=gha,scope=api-full
@@ -149,7 +151,8 @@ jobs:
             EXPERIMENTLY_PROFILE=${{ matrix.profile }}
             VERSION=${{ steps.version.outputs.version }}
           load: true
-          tags: ${{ env.WEB_IMAGE }}
+          # env.WEB_IMAGE, written out (see the API image above).
+          tags: chart-kind-web:${{ matrix.profile }}
           cache-from: |
             type=gha,scope=web
             type=gha,scope=web-full-kind
