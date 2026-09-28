@@ -41,16 +41,29 @@ pytestmark = [pytest.mark.integration]
 #: This tree's core head.  A literal, for the reason ``tree_profiles.CORE_HEAD``
 #: gives; ``backend/tests/unit/db/test_alembic_plan.py`` pins it to the files.
 CORE_HEAD = tree_profiles.CORE_HEAD
-MODULES_HEAD = "modules_0001_rbac"
+#: The modules branch's HEAD -- what a modules revision of release N+1 would
+#: extend.  Not its first revision (``modules_0001_rbac``): the branch has two.
+MODULES_HEAD = "modules_0002_warehouse_analysis"
 
-#: The revision release N+1 adds, and the table it creates.
+#: The revision release N+1 adds, and the table it creates.  On the core chain
+#: its id has no ``modules_`` prefix; on the modules branch it has, which is
+#: what a build reads as "the other profile" -- and must not, from a full build.
 NEXT_REVISION = "zz_next_release_0001"
+NEXT_MODULES_REVISION = "modules_9999_next_release_probe"
 NEXT_TABLE = "next_release_probe"
 
-_NEXT_RELEASE_REVISION = f'''"""A migration the next release carries (test fixture).
+#: Where N+1's revision goes: (revision id, the head it extends).
+CORE_CHAIN = "core_chain"
+MODULES_BRANCH = "modules_branch"
+_NEXT = {
+    CORE_CHAIN: (NEXT_REVISION, CORE_HEAD),
+    MODULES_BRANCH: (NEXT_MODULES_REVISION, MODULES_HEAD),
+}
 
-Revision ID: {NEXT_REVISION}
-Revises: {CORE_HEAD}
+_NEXT_RELEASE_REVISION = '''"""A migration the next release carries (test fixture).
+
+Revision ID: {revision}
+Revises: {down_revision}
 """
 
 import os
@@ -58,8 +71,8 @@ import os
 import sqlalchemy as sa
 from alembic import op
 
-revision = "{NEXT_REVISION}"
-down_revision = "{CORE_HEAD}"
+revision = "{revision}"
+down_revision = "{down_revision}"
 branch_labels = None
 depends_on = None
 
@@ -101,16 +114,24 @@ def _this_release(profile: str, tmp_path):
     return tree
 
 
-def _next_release(profile: str, tmp_path):
-    """Release N+1: a copy of this tree plus one core revision."""
+def _next_release(profile: str, tmp_path, chain: str = CORE_CHAIN):
+    """Release N+1: a copy of this tree plus one revision on *chain*."""
     destination = tmp_path / "release-n-plus-1"
     if profile == FULL:
         tree = tree_profiles.full_tree(destination)
     else:
         tree = tree_profiles.core_tree(destination)
-    versions = tree / "backend" / "app" / "db" / "migrations" / "versions"
-    (versions / f"{NEXT_REVISION}_next_release_probe.py").write_text(
-        _NEXT_RELEASE_REVISION, encoding="utf-8"
+    revision, down_revision = _NEXT[chain]
+    if chain == MODULES_BRANCH:
+        # Built from parts: see tree_profiles._ALEMBIC_INI_PARTS.
+        versions = tree.joinpath("modules", "backend", "app", "db", "migrations")
+    else:
+        versions = tree / "backend" / "app" / "db" / "migrations"
+    (versions / "versions" / f"{revision}.py").write_text(
+        _NEXT_RELEASE_REVISION.format(
+            revision=revision, down_revision=down_revision, NEXT_TABLE=NEXT_TABLE
+        ),
+        encoding="utf-8",
     )
     return tree
 
@@ -125,14 +146,24 @@ def _tables(engine, schema: str) -> set[str]:
 
 @pytest.mark.regression
 @pytest.mark.parametrize(
-    "profile",
-    [CORE, pytest.param(FULL, marks=pytest.mark.modules)],
+    ("profile", "chain"),
+    [
+        pytest.param(CORE, CORE_CHAIN, id="core"),
+        pytest.param(FULL, CORE_CHAIN, marks=pytest.mark.modules, id="full"),
+        # A newer *modules* revision met by a full build: the prefix says
+        # "modules", the build is full, so it is a newer release -- which is
+        # what the previous full image says to a database modules_0002 migrated.
+        pytest.param(
+            FULL, MODULES_BRANCH, marks=pytest.mark.modules, id=MODULES_BRANCH
+        ),
+    ],
 )
 def test_an_older_release_refuses_a_database_a_newer_release_migrated(
-    test_db, scratch_schema, tmp_path, profile
+    test_db, scratch_schema, tmp_path, profile, chain
 ):
+    next_revision = _NEXT[chain][0]
     release_n = _this_release(profile, tmp_path)
-    release_n_plus_1 = _next_release(profile, tmp_path)
+    release_n_plus_1 = _next_release(profile, tmp_path, chain)
     version = (tree_profiles.REPO_ROOT / "VERSION").read_text("utf-8").strip()
 
     # N builds the database; N+1 upgrades it and applies its migration.
@@ -142,7 +173,7 @@ def test_an_older_release_refuses_a_database_a_newer_release_migrated(
     assert upgraded.returncode == 0, upgraded.stderr[-3000:]
     assert NEXT_TABLE in _tables(test_db, scratch_schema)
     after_upgrade = _rows(test_db, scratch_schema)
-    assert NEXT_REVISION in after_upgrade
+    assert next_revision in after_upgrade
     tables_after_upgrade = _tables(test_db, scratch_schema)
 
     # The rollback: N again, by both documented paths.
@@ -154,7 +185,7 @@ def test_an_older_release_refuses_a_database_a_newer_release_migrated(
         assert "migrated by a newer Experimently release" in result.stderr, (
             result.stderr[-3000:]
         )
-        assert NEXT_REVISION in result.stderr
+        assert next_revision in result.stderr
         assert f"({version})" in result.stderr
         assert "restore the backup taken before that upgrade" in result.stderr
         assert "full profile being opened by a core build" not in result.stderr

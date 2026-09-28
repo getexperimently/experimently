@@ -17,19 +17,22 @@ by exactly these two, and an autogenerate that emitted them would put a
 reference to ``workspaces`` into a core migration, which then fails ``upgrade
 heads`` on every core database and silently re-couples the profiles.
 
-**The twelve module tables.**  Nine of them are created by revisions that sit
-in the *core* chain for historical reasons (``ep057_workspaces``, ``ep037``,
-``ep050``, ``ep034``, ``e181583b4b24``) and three by the modules branch, so a
-database can perfectly well hold all twelve while this build's
-``Base.metadata`` holds none of them -- a core checkout, or a full checkout
+**The fourteen module tables.**  Nine of them are created by revisions that
+sit in the *core* chain for historical reasons (``ep057_workspaces``,
+``ep037``, ``ep050``, ``ep034``, ``e181583b4b24``) and the other five by the
+modules branch (``modules_0002_warehouse_analysis`` also replaces the
+``warehouse_connections`` that ``e181583b4b24`` made), so a database can
+perfectly well hold all fourteen while this build's ``Base.metadata`` holds
+none of them -- a core checkout, or a full checkout
 whose registration was asked for core models only.  Since the move under
 ``modules/`` turned ``include_schemas=True`` on in ``migrations/env.py`` (main
 reflects only ``public`` and so never saw them), autogenerate reflects the
-application schema and sees them; without this filter it proposes twelve
-``op.drop_table`` calls (and their indexes), and applying that revision to a
+application schema and sees them; without this filter it proposes one
+``op.drop_table`` call per module table (and their indexes), and applying that revision to a
 full-profile database destroys every workspace, SSO configuration, BAA and PHI
 audit row.  Reproduced in review round 3: a core checkout, a database with the
-module tables, one ``alembic revision --autogenerate``, twelve drops.
+module tables, one ``alembic revision --autogenerate``, twelve drops (there
+were twelve module tables then).
 
 The alternative -- rely on the modules being loaded so the tables are in the
 metadata -- is what already failed: the loaded profile is a property of the
@@ -82,6 +85,8 @@ MODULE_TABLES = frozenset(
         "baa_configs",
         "phi_audit_logs",
         "warehouse_connections",
+        "warehouse_sources",
+        "warehouse_analysis_runs",
         "integration_configs",
     }
 )

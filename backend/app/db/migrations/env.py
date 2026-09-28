@@ -284,7 +284,7 @@ def _is_at_head(connection) -> bool:
     table and break the next step.  Only a database that is *at* its heads is
     one the models may be reconciled with.
 
-    A head this build does not have (``modules_0001_rbac`` under a core build)
+    A head this build does not have (the modules head under a core build)
     is not required to be recorded: this asks whether **our** chain is finished,
     which is the same question ``may_run_alembic`` asks above.
     """
@@ -347,8 +347,9 @@ def run_migrations_online() -> None:
         # build has no file for makes every alembic command fail before it
         # applies anything.  db/bootstrap.py has always handled that; raw
         # `alembic upgrade heads` -- what docs/self-hosting/migrations.md,
-        # deploy.yml and the CDK migration task run -- died with
-        # "Can't locate revision identified by 'modules_0001_rbac'".  Same
+        # deploy.yml and the CDK migration task run -- died with an error such
+        # as "Can't locate revision identified by 'modules_0001_rbac'" (it
+        # names whichever modules revision the database records).  Same
         # decision, same message, whichever way alembic was launched.
         # `upgrade` only (_SKIPPABLE_COMMANDS): `downgrade` and `stamp` get
         # alembic's own error instead of exiting 0 having changed nothing.

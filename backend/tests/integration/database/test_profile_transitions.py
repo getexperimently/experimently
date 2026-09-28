@@ -59,9 +59,16 @@ BRANCH_POINT = "a7b8c9d0e1f2"
 #: `backend/tests/unit/db/test_alembic_plan.py` is where these are pinned
 #: against the files, with the whole apply order.
 CORE_HEAD = "b8c9d0e1f2a3"
-MODULES_HEAD = "modules_0001_rbac"
+#: The modules branch's HEAD.  Every use below means "the modules revision a
+#: full database at head records" -- none means the branch's first revision,
+#: ``modules_0001_rbac``, which stopped being the head in #312.
+MODULES_HEAD = "modules_0002_warehouse_analysis"
 CORE_HEADS = {CORE_HEAD}
 FULL_HEADS = {CORE_HEAD, MODULES_HEAD}
+
+#: How many module tables a full-profile schema holds
+#: (``autogenerate_filters.MODULE_TABLES``, pinned to the manifest).
+MODULE_TABLE_COUNT = 14
 
 WORKSPACE_FKS = {"experiments_workspace_id_fkey", "feature_flags_workspace_id_fkey"}
 
@@ -138,7 +145,7 @@ def test_a_fresh_full_bootstrap(test_db, scratch_schema, full_tree):
     assert _rows(test_db, scratch_schema) == FULL_HEADS
     assert len(_rows(test_db, scratch_schema)) == 2
     assert _workspace_fks(test_db, scratch_schema) == WORKSPACE_FKS
-    assert len(_module_tables(test_db, scratch_schema)) == 12
+    assert len(_module_tables(test_db, scratch_schema)) == MODULE_TABLE_COUNT
 
 
 # ---------------------------------------------------------------------------
@@ -165,8 +172,9 @@ def test_a_core_database_switched_to_full_by_the_documented_command(
 
     assert _rows(test_db, scratch_schema) == FULL_HEADS
     assert _workspace_fks(test_db, scratch_schema) == WORKSPACE_FKS
-    assert len(_module_tables(test_db, scratch_schema)) == 12
-    # Exactly what a fresh full bootstrap builds: the twelve and nothing else.
+    assert len(_module_tables(test_db, scratch_schema)) == MODULE_TABLE_COUNT
+    # Exactly what a fresh full bootstrap builds: the module tables and nothing
+    # else.
     assert _tables(test_db, scratch_schema) - core_only == _module_tables(
         test_db, scratch_schema
     )
@@ -201,7 +209,7 @@ def test_a_partial_upgrade_does_not_reconcile(
         tree_profiles.alembic(full_tree, scratch_schema, "upgrade", "heads").returncode
         == 0
     )
-    assert len(_module_tables(test_db, scratch_schema)) == 12
+    assert len(_module_tables(test_db, scratch_schema)) == MODULE_TABLE_COUNT
 
 
 def test_the_switch_lands_where_a_fresh_full_bootstrap_lands(
@@ -252,7 +260,7 @@ def test_a_pre_release_database_upgraded_with_heads(test_db, scratch_schema, ful
 
     assert _rows(test_db, scratch_schema) == FULL_HEADS
     assert _workspace_fks(test_db, scratch_schema) == WORKSPACE_FKS
-    assert len(_module_tables(test_db, scratch_schema)) == 12
+    assert len(_module_tables(test_db, scratch_schema)) == MODULE_TABLE_COUNT
 
 
 # ---------------------------------------------------------------------------
@@ -316,7 +324,7 @@ def test_a_core_build_refuses_a_full_database_it_has_migrations_for(
         assert "delete" not in result.stderr[result.stderr.rindex("RuntimeError") :]
     # Nothing applied, nothing stamped, nothing dropped.
     assert _rows(test_db, scratch_schema) == {BRANCH_POINT, MODULES_HEAD}
-    assert len(_module_tables(test_db, scratch_schema)) == 12
+    assert len(_module_tables(test_db, scratch_schema)) == MODULE_TABLE_COUNT
 
 
 # ---------------------------------------------------------------------------

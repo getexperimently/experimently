@@ -37,6 +37,8 @@ import pytest
 from alembic.config import Config
 from alembic.script import ScriptDirectory
 
+from backend.app.db.bootstrap import MODULES_REVISION_PREFIX
+
 REPO_ROOT = Path(__file__).resolve().parents[4]
 ALEMBIC_INI = REPO_ROOT / "backend" / "app" / "db" / "alembic.ini"
 CORE_VERSIONS = REPO_ROOT / "backend" / "app" / "db" / "migrations" / "versions"
@@ -46,8 +48,17 @@ pytestmark = pytest.mark.unit
 #: The core chain's head: a marker revision, the second child of the branch
 #: point, so that the core chain still has a head of its own.
 CORE_HEAD = "b8c9d0e1f2a3"
-#: The modules branch's head.
-MODULES_HEAD = "modules_0001_rbac"
+#: The modules branch's FIRST revision: the child of the branch point, and the
+#: one that puts back the two ``workspace_id`` foreign keys.  Every assertion
+#: about the branch's *ordering against the core chain* is about this one.
+MODULES_FIRST = "modules_0001_rbac"
+#: The modules branch's HEAD: what ``heads`` names and ``modules@-1`` unapplies.
+#: Not the same revision as :data:`MODULES_FIRST` since the branch grew a second
+#: one (#312); an assertion that means "first" and says "head" silently changes
+#: meaning the day the branch grows, which is why the two are separate names.
+MODULES_HEAD = "modules_0002_warehouse_analysis"
+#: The modules branch, in apply order.
+MODULES_BRANCH_PLAN = [MODULES_FIRST, MODULES_HEAD]
 #: The core revision the branch must run *after*: it drops the two
 #: ``workspace_id`` foreign keys that ``modules_0001_rbac`` puts back.
 BRANCH_POINT = "a7b8c9d0e1f2"
@@ -88,7 +99,7 @@ CORE_PLAN = [
 #: whole reason the edge exists, and before the core marker.
 FULL_PLAN = [
     *CORE_PLAN[:-1],
-    MODULES_HEAD,
+    *MODULES_BRANCH_PLAN,
     CORE_HEAD,
 ]
 
@@ -141,12 +152,15 @@ def test_the_branch_runs_after_the_revision_it_undoes():
     """
     plan = _plan(_script())
 
-    assert plan.index(MODULES_HEAD) > plan.index(BRANCH_POINT), (
-        f"{MODULES_HEAD} restores the two workspace foreign keys and "
+    # FIRST, not HEAD: the revision that restores the keys is the branch's
+    # first one, and the head only follows it by ancestry.
+    assert plan.index(MODULES_FIRST) > plan.index(BRANCH_POINT), (
+        f"{MODULES_FIRST} restores the two workspace foreign keys and "
         f"{BRANCH_POINT} drops them; scheduled this way round, one "
         "`alembic upgrade heads` leaves them gone with nothing left to "
         "re-apply"
     )
+    assert plan.index(MODULES_HEAD) > plan.index(MODULES_FIRST)
 
 
 @pytest.mark.modules
@@ -160,14 +174,21 @@ def test_the_core_plan_is_the_full_plan_without_the_branch():
     full = _plan(_script())
     core = _plan(_script(version_locations=str(CORE_VERSIONS)))
 
-    assert [rev for rev in full if rev != MODULES_HEAD] == core
+    # Every modules revision, by the prefix the bootstrap tells the profiles
+    # apart by -- not by one revision id, which stopped being the whole branch
+    # when the branch grew a second revision.
+    branch = [rev for rev in full if rev.startswith(MODULES_REVISION_PREFIX)]
+    assert branch == MODULES_BRANCH_PLAN
+    assert [rev for rev in full if not rev.startswith(MODULES_REVISION_PREFIX)] == core
 
 
 # ---------------------------------------------------------------------------
 # Rolling the branch back
 # ---------------------------------------------------------------------------
-#: What the documentation tells an operator to type to unapply the branch.
+#: What the documentation tells an operator to type to unapply the branch's
+#: newest revision, and the whole branch.
 UNAPPLY_MODULES_BRANCH = "modules@-1"
+UNAPPLY_WHOLE_MODULES_BRANCH = "modules@-2"
 
 #: Every file that spells a rollback command for this branch.
 ROLLBACK_DOCS = (
@@ -195,7 +216,11 @@ def test_unapplying_the_branch_is_one_revision_and_modules_at_base_is_all_of_the
     script = _script()
 
     assert _downgrade_plan(script, UNAPPLY_MODULES_BRANCH) == [MODULES_HEAD]
-    assert len(_downgrade_plan(script, "modules@base")) == len(FULL_PLAN)
+    # The whole branch is its length back, newest first.
+    assert _downgrade_plan(script, UNAPPLY_WHOLE_MODULES_BRANCH) == list(
+        reversed(MODULES_BRANCH_PLAN)
+    )
+    assert len(_downgrade_plan(script, "modules@base")) == len(FULL_PLAN) == 27
 
 
 #: A command line, not a mention of one: the three documents all warn about

@@ -12,7 +12,7 @@ semantics put the module tables straight back on ``Base.metadata`` and
 quietly ships the modules' schema.
 
 Every assertion runs in a **fresh interpreter**.  It has to: this repository's
-own test suite loads the seven module model modules through the seam in
+own test suite loads the nine module model modules through the seam in
 ``backend/tests/conftest.py`` so the modules' suites have their tables, so
 ``Base.metadata`` inside a running pytest session is deliberately polluted.
 What matters is what ``import backend.app.models`` produces on its own, which
@@ -90,7 +90,7 @@ class TestCoreModelRegistry:
             "Find it with:\n"
             "  python -X importtime -c 'import backend.app.models' 2>&1 "
             "| grep -E 'workspace|custom_role|sso_config|baa_config|"
-            "phi_audit_log|warehouse_connection|integration_config'"
+            "phi_audit_log|warehouse_|integration_config'"
         )
 
     def test_mappers_configure_without_the_module_models(self):

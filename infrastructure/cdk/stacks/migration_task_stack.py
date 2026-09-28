@@ -66,8 +66,8 @@ MIGRATION_COMMAND = [
 # serving (`scripts/register_task_definition.sh`, #138). That is how the
 # migration and the API end up on the same build and the same **profile** --
 # which matters, because the two profiles do not read the same
-# `alembic_version`: a core image cannot resolve the `modules_0001_rbac` row a
-# full bootstrap records, and alembic reads every row before it does anything.
+# `alembic_version`: a core image cannot resolve the `modules_*` row a full
+# bootstrap records, and alembic reads every row before it does anything.
 #
 # This tag used to be `latest`, and the deploy pushed `:latest` so that the
 # family's newest revision would pull "the image being deployed". It pulled

@@ -57,7 +57,7 @@ the dashboard checks:
 | SSO / SAML / OIDC | `sso` | OIDC identity providers with just-in-time provisioning and role mapping. SAML 2.0 sign-in is not available yet; use OIDC |
 | HIPAA | `hipaa` | PHI encryption, six-year PHI audit retention, BAA records |
 | Compliance reporting | `compliance` | SOC 2 / ISO 27001 reports, signed audit exports |
-| Warehouse analytics | `warehouse` | Being rebuilt (#312): no endpoints today, only the `warehouse_connections` table |
+| Warehouse analytics | `warehouse` | Being rebuilt (#312): no endpoints today, only its tables (`warehouse_connections`, `warehouse_sources`, `warehouse_analysis_runs`) |
 | Third-party integrations | `integrations` | Jira, Salesforce and GitHub |
 | Real-time counters | `counters` | DynamoDB-backed live assignment and conversion counters |
 | ETL | `etl` | Glue crawlers, Athena partitions and scheduled jobs |
@@ -89,11 +89,11 @@ A core deployment does not carry the modules' code at all, so:
   notice saying the module is not installed in this deployment, with a link
   back here, instead of a 404. The admin sidebar and the "More" navigation
   group list only the pages the instance can serve.
-- The twelve module tables (`workspaces`, `workspace_members`,
+- The fourteen module tables (`workspaces`, `workspace_members`,
   `workspace_invites`, `workspace_api_keys`, `sso_configs`, `custom_roles`,
   `user_custom_roles`, `direct_permission_grants`, `baa_configs`,
-  `phi_audit_logs`, `warehouse_connections`, `integration_configs`) are not
-  created.
+  `phi_audit_logs`, `warehouse_connections`, `warehouse_sources`,
+  `warehouse_analysis_runs`, `integration_configs`) are not created.
 
 Everything else — experiments, flags, assignment, tracking, results — is
 identical in both profiles.
