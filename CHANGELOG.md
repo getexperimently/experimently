@@ -10,6 +10,32 @@ longer applies and release-please can generate this file directly. Until it
 does, entries below 0.2.2 are hand-written and the links in them are the
 reason why.
 
+## [0.11.0](https://github.com/getexperimently/experimently/compare/v0.10.0...v0.11.0) (2026-09-28)
+
+
+### ⚠ BREAKING CHANGES
+
+* **warehouse:** warehouse analysis tables; saved warehouse connections are removed ([#322](https://github.com/getexperimently/experimently/issues/322))
+* **api:** a staging or production API with neither `CORS_ORIGINS` nor `BACKEND_CORS_ORIGINS` set no longer allows the localhost origins. A browser client on another origin (a local dashboard or demo app, or a site running the browser SDK) needs its origin in `CORS_ORIGINS` (Helm: `corsOrigins`), or in `DASHBOARD_ORIGINS` for a dashboard on its own host. Cross-origin responses no longer carry `Access-Control-Allow-Credentials`. Development and test are unchanged.
+* **api:** POST /api/v1/openfeature/evaluate and POST /api/v1/openfeature/bulk-evaluate are removed and now answer 404. They could not evaluate an existing flag (they read a FeatureFlag.enabled attribute the model does not have), and neither provider called them. The OpenFeature providers use GET /api/v1/feature-flags/evaluate/{key} and are unaffected. GET /api/v1/openfeature/flags is deprecated and unchanged.
+
+### Features
+
+* **modules:** a bounded outbound layer for warehouse connectors ([#321](https://github.com/getexperimently/experimently/issues/321)) ([24b9958](https://github.com/getexperimently/experimently/commit/24b995842073fa52abdbc0cbb56bdd757125abdd))
+* **tracking:** record locally evaluated flags so safety monitoring keeps its denominator (beta) ([#226](https://github.com/getexperimently/experimently/issues/226)) ([#296](https://github.com/getexperimently/experimently/issues/296)) ([8a64d22](https://github.com/getexperimently/experimently/commit/8a64d22725c91e5ee144e52cb8d47f8d06cf54ae))
+* **warehouse:** warehouse analysis tables; saved warehouse connections are removed ([#322](https://github.com/getexperimently/experimently/issues/322)) ([5c5720f](https://github.com/getexperimently/experimently/commit/5c5720fd3776bc2867cf910f5ffdc850c2509401))
+
+
+### Bug Fixes
+
+* **analysis:** count converting users without joining events to assignments ([#356](https://github.com/getexperimently/experimently/issues/356)) ([bcd4a01](https://github.com/getexperimently/experimently/commit/bcd4a011bf4328b2ba3c7f14add9b2812556982b))
+* **analysis:** every endpoint counts converting users, not conversion events ([#337](https://github.com/getexperimently/experimently/issues/337)) ([ca3e7b9](https://github.com/getexperimently/experimently/commit/ca3e7b9dc8395e5ee3940ba2ba05bc49aa2c97bb))
+* **api:** remove the OpenFeature evaluate routes, which never returned a result, and deprecate /openfeature/flags ([#345](https://github.com/getexperimently/experimently/issues/345)) ([2373367](https://github.com/getexperimently/experimently/commit/2373367b8b8bbf18be9bf6b57cefafa2b4fb1be3))
+* **api:** staging and production allow only configured browser origins ([#349](https://github.com/getexperimently/experimently/issues/349)) ([07a408c](https://github.com/getexperimently/experimently/commit/07a408c9bcd481933867e28425e6f8893a412004))
+* **deploy:** workflow runs never print the AWS account ID ([#311](https://github.com/getexperimently/experimently/issues/311)) ([1812f6e](https://github.com/getexperimently/experimently/commit/1812f6e966a739f7b957ce88be63cc161dba1a1f))
+* **sso:** SAML sign-in errors carry a fixed message, and the docs say SAML sign-in is not available yet ([#346](https://github.com/getexperimently/experimently/issues/346)) ([91f7e0f](https://github.com/getexperimently/experimently/commit/91f7e0f515527db511325125afc6adc582ce333b))
+* **workspaces:** an invite can be accepted only by the account it was sent to ([#348](https://github.com/getexperimently/experimently/issues/348)) ([d5ec4ae](https://github.com/getexperimently/experimently/commit/d5ec4ae4efb8ff696203214f1e11e74b6c93de8b))
+
 ## [0.10.0](https://github.com/getexperimently/experimently/compare/v0.9.0...v0.10.0) (2026-09-28)
 
 
