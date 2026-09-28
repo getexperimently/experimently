@@ -165,8 +165,10 @@ class VariantResult(BaseModel):
     conversions: Optional[int] = Field(
         None,
         description=(
-            "Number of conversion events observed.  None for non-conversion "
-            "metric types (revenue, duration, custom)."
+            "Number of assigned users with at least one conversion event; a "
+            "user who converts several times counts once, so this never "
+            "exceeds sample_size.  None for non-conversion metric types "
+            "(revenue, duration, custom)."
         ),
     )
     mean: float = Field(
@@ -346,8 +348,9 @@ class ExperimentSummary(BaseModel):
     total_conversions: Optional[int] = Field(
         None,
         description=(
-            "Total conversion events across all variants.  None when the "
-            "experiment has no conversion metric."
+            "Number of assigned users, across all variants, with at least one "
+            "conversion event on any metric; each user counts once.  None "
+            "when the experiment has no conversion metric."
         ),
     )
     duration_days: Optional[int] = Field(
@@ -532,7 +535,8 @@ class DailyDataPoint(BaseModel):
     conversions: Optional[int] = Field(
         None,
         description=(
-            "Number of conversion events in this data point.  None for "
+            "Number of users whose first conversion falls in this data point "
+            "(daily), or users converted so far (cumulative).  None for "
             "non-conversion metric types."
         ),
     )

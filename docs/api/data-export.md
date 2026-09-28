@@ -148,7 +148,7 @@ Same as `/export/experiments` (`format`, `scope`, `start_date`, `end_date`).
 | `variant_name`              | string  | Variant name                                        |
 | `is_control`                | boolean | Whether this is the control variant                 |
 | `assignments`               | integer | Number of users assigned to this variant (`sample_size` in `/results`) |
-| `conversions`               | integer | Number of conversion events on the primary metric   |
+| `conversions`               | integer | Number of assigned users with at least one conversion on the primary metric (a repeat purchaser counts once) |
 | `conversion_rate`           | float   | Conversion rate [0, 1] (`mean` in `/results`)       |
 | `p_value`                   | float   | p-value against control; empty for the control      |
 | `is_significant`            | boolean | Whether the result is statistically significant     |
