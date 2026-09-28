@@ -172,38 +172,47 @@ def test_no_environment_is_named_outside_the_choice_list(path):
 @pytest.mark.regression
 @pytest.mark.parametrize("path", AWS_WORKFLOWS, ids=IDS)
 def test_the_account_variable_is_read_only_in_the_first_step(path):
-    """An environment-scoped variable is invisible to a job-level `if:`.
+    """An environment-scoped value is invisible to a job-level `if:`.
 
     The old `if: ... && vars.AWS_ACCOUNT_ID != ''` therefore skipped every job
     green for an environment configured the recommended way. The only read is
-    the first step of the environment-bound job, which fails loudly.
+    the first step of the environment-bound job, which fails loudly. The
+    account ID is an environment SECRET (Stream I PE C1): a variable's value
+    is printed in the step's log header before anything can mask it.
     """
     document = _load(path)
     text = path.read_text(encoding="utf-8")
-    assert "vars.AWS_ACCOUNT_ID" not in yaml.dump(document.get("env", {}))
+    assert "vars.AWS_ACCOUNT_ID" not in text
+    assert "secrets.AWS_ACCOUNT_ID" not in yaml.dump(document.get("env", {}))
     for name, job in document["jobs"].items():
         assert "vars." not in str(job.get("if", "")), f"job {name} has an if: on vars"
-        assert "vars.AWS_ACCOUNT_ID" not in yaml.dump(job.get("env", {})), name
+        assert "secrets." not in str(job.get("if", "")), name
+        assert "secrets.AWS_ACCOUNT_ID" not in yaml.dump(job.get("env", {})), name
 
     (bound,) = _environment_jobs(path).values()
     first = _steps(bound)[0]
     reads = [
         (name, index)
         for name, index, step in _all_steps(path)
-        if "vars.AWS_ACCOUNT_ID" in yaml.dump(step)
+        if "secrets.AWS_ACCOUNT_ID }}" in yaml.dump(step)
     ]
     assert reads == [(next(iter(_environment_jobs(path))), 0)], reads
-    expressions = re.findall(r"\$\{\{[^}]*\bvars\.AWS_ACCOUNT_ID\b[^}]*\}\}", text)
-    assert expressions == ["${{ vars.AWS_ACCOUNT_ID }}"], (
-        f"vars.AWS_ACCOUNT_ID is read {len(expressions)} times; only the first "
+    expressions = re.findall(r"\$\{\{[^}]*\bsecrets\.AWS_ACCOUNT_ID\b[^}]*\}\}", text)
+    assert expressions == ["${{ secrets.AWS_ACCOUNT_ID }}"], (
+        f"secrets.AWS_ACCOUNT_ID is read {len(expressions)} times; only the first "
         "step's env may read it"
     )
+    assert first["env"]["ACCOUNT_ID"] == "${{ secrets.AWS_ACCOUNT_ID }}"
     assert "exit 1" in first["run"] and "Not configured" in first["run"]
     assert (
-        "vars.AWS_ACCOUNT_ID is not set for the '${TARGET_ENV}' environment, so "
+        "secrets.AWS_ACCOUNT_ID is not set for the '${TARGET_ENV}' environment, so "
         "nothing was" in first["run"]
     )
-    assert "Settings → Environments → ${TARGET_ENV} → Variables" in first["run"]
+    assert (
+        "Settings → Environments → ${TARGET_ENV} → Environment secrets "
+        "(gh secret set AWS_ACCOUNT_ID --env ${TARGET_ENV})" in first["run"]
+    )
+    assert '[[ "$ACCOUNT_ID" =~ ^[0-9]{12}$ ]]' in first["run"]
 
 
 @pytest.mark.regression
@@ -514,19 +523,20 @@ def test_the_refusals_say_what_to_do():
     """UX section A, verbatim where it was specified."""
     runs = "\n".join(_run_of(s) for s in _steps(_deploy_job()))
     for copy in (
-        "::error title=Wrong AWS account::environment=${TARGET_ENV} expects account "
-        "${EXPECTED_ACCOUNT_ID}; the assumed role is in ${actual}. Nothing has been "
-        "built or changed.",
-        "::error::No ECS cluster ${ECS_CLUSTER} in ${AWS_REGION} (account "
-        "${EXPECTED_ACCOUNT_ID}). Run ENVIRONMENT=${TARGET_ENV} cdk deploy --all in "
+        "::error title=Wrong AWS account::environment=${TARGET_ENV}: the assumed "
+        "role is not in the account in this environment's AWS_ACCOUNT_ID secret. "
+        "Check that its AWS_ROLE_ARN secret names a role in that account. Nothing "
+        "has been built or changed.",
+        "::error::No ECS cluster ${ECS_CLUSTER} in ${AWS_REGION} of this "
+        "environment's account. Run ENVIRONMENT=${TARGET_ENV} cdk deploy --all in "
         "this account and region first: docs/self-hosting/cdk.md",
         "::error::profile=full, but task definition ${family} injects no "
         "AUDIT_HMAC_KEY: the stacks were deployed as core. Deploy profile=core, or "
         "redeploy the stacks from a full checkout.",
-        "the assumed role is in",
     ):
         assert copy in runs, copy
-    # The account check compares with the variable read in the first step.
+    # The account check compares with the secret read in the first step, and
+    # prints neither account ID.
     assert "aws sts get-caller-identity --query Account" in runs
     assert '"$actual" != "$EXPECTED_ACCOUNT_ID"' in runs
 

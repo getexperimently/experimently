@@ -302,7 +302,8 @@ def test_a_deploy_is_approved_on_healthy_targets_and_succeeds_when_serving(aws):
         "result": "serving",
         "live_target_group": "green",
     }
-    assert f"serving: {NEW} is the PRIMARY task set" in out
+    assert "serving: experimentation-backend-staging:43 is the PRIMARY task set" in out
+    assert "123456789012" not in out
     assert not [c for c in calls if "stop-deployment" in c]
 
 
@@ -633,9 +634,24 @@ def test_the_expected_colour_is_derived_not_defaulted(aws):
         (AFTER, _split(50, 50), NEW, 1),  # shifting
         (AFTER, RULES_BLUE, NEW, 3),  # unsplit, other group
         (AFTER, RULES_GREEN, OLD, 1),  # the ARN asked about is not PRIMARY
-        (AFTER, RULES_GREEN, "experimentation-backend-staging:43", 2),  # not an ARN
+        # family:n is what the workflows print (an ARN names the account):
+        # the PRIMARY's own revision is serving, another one is not.
+        (AFTER, RULES_GREEN, "experimentation-backend-staging:43", 0),
+        (AFTER, RULES_GREEN, "experimentation-backend-staging:42", 1),
+        # The same revision number in another family is not this revision.
+        (AFTER, RULES_GREEN, "experimentation-dashboard-staging:43", 1),
+        (AFTER, RULES_GREEN, "experimentation-backend-staging", 2),  # no revision
     ],
-    ids=["old-primary", "split", "wrong-group", "other-arn", "family-not-arn"],
+    ids=[
+        "old-primary",
+        "split",
+        "wrong-group",
+        "other-arn",
+        "family-revision",
+        "same-family-other-revision",
+        "other-family-same-revision",
+        "family-not-arn",
+    ],
 )
 def test_the_predicate_exit_codes(aws, services, rules, arn, expected):
     code, out, calls, _ = _serving(aws, services, rules, arn)
