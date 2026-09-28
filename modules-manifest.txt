@@ -154,8 +154,18 @@ modules/backend/tests/integration/api/test_rbac_api.py
 # Core without it: yes. The endpoints and connectors were removed; what is
 # left is the model and its `warehouse_connections` table, which no route
 # reads.
+# The analysis query builder (#312): the identifier and literal gate, the
+# per-dialect statements, the result checks and the source request schemas.
+# Nothing imports them yet; its only runtime dependency, sqlglot, is pinned in
+# modules/requirements.txt. Its tests run the statements on DuckDB, pinned in
+# modules/requirements-test.txt.
 # ─────────────────────────────────────────────────────────────────────────────
 modules/backend/app/models/warehouse_connection.py
+modules/backend/app/core/warehouse_identifiers.py
+modules/backend/app/services/warehouse_query_builder.py
+modules/backend/app/services/warehouse_sufficient_stats.py
+modules/backend/app/schemas/warehouse_sources.py
+modules/backend/tests/unit/warehouse
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 7. Third-party integrations — Jira / Salesforce / GitHub  (EP-034)
@@ -315,6 +325,13 @@ modules/backend/tests/unit/test_modules_settings.py
 # WAREHOUSE_CREDENTIALS_KEYS, for any module that stores one.
 modules/backend/app/core/credential_crypto.py
 modules/backend/tests/unit/core/test_credential_crypto.py
+# The outbound layer the warehouse connectors are built on: the fixed error
+# codes, the time limits, the HTTP client and boto3 clients restricted to the
+# warehouses' published endpoints, and the executor warehouse calls run on.
+# Nothing in it is routed. httpx and boto3 are core pins; httpcore is httpx's
+# own transport, locked in backend/requirements/runtime.lock.
+modules/backend/app/warehouse
+modules/backend/tests/unit/warehouse
 
 # (Every entry in this file must exist -- test_every_manifest_path_exists
 # checks. There is no gate between the profiles: an installed module is

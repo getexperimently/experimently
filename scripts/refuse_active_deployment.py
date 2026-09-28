@@ -35,6 +35,10 @@ import sys
 import time
 from collections.abc import Callable, Sequence
 from datetime import datetime, timezone
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from public_text import redact
 
 #: Every AWS CLI operation this script may run. Both of them read.
 OPERATIONS = frozenset(
@@ -205,7 +209,7 @@ def main(
     except (AwsError, ValueError) as exc:
         print(
             "::error title=Could not check for an active deployment::"
-            f"{exc}. Nothing has been built or changed."
+            f"{redact(exc)}. Nothing has been built or changed."
         )
         return UNKNOWN
     if status == OK:
@@ -217,7 +221,7 @@ def main(
             # while one is active, so the copy must not send anyone there.
             print(
                 "::error title=CodeDeploy is rolling back::"
-                f"{sentence} It is CodeDeploy's own rollback of {rolled_back}. "
+                f"{redact(sentence)} It is CodeDeploy's own rollback of {rolled_back}. "
                 "Nothing has been built or changed. Re-run this deploy once it "
                 "is no longer active. Do not use Rollback while it is active: "
                 "Rollback refuses while CodeDeploy's own rollback is active, "
@@ -227,7 +231,7 @@ def main(
             continue
         print(
             "::error title=A deployment is still active::"
-            f"{sentence} Nothing has been built or changed. Re-run this deploy "
+            f"{redact(sentence)} Nothing has been built or changed. Re-run this deploy "
             "once it is no longer active. If the release it deployed is bad, use "
             "Rollback instead: Rollback stops it. This workflow never stops a "
             "deployment itself, because stopping one whose traffic has shifted "

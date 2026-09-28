@@ -243,7 +243,14 @@ Per environment (`staging`, `prod`): Settings → Environments → *env*:
 - **required reviewer**, and **deployment branches: `main` only** -- set these
   first, before any variable or secret (a dispatch that names an environment
   that does not exist creates it, unprotected);
-- variables `AWS_ACCOUNT_ID` and `PUBLIC_BASE_URL`;
-- secret `AWS_ROLE_ARN` -- that environment's role.
+- secret `AWS_ACCOUNT_ID` -- that environment's account, 12 digits
+  (`gh secret set AWS_ACCOUNT_ID --env <env>`). A secret, not a variable: the
+  workflow logs are public, and a step's log header prints a variable's value
+  before anything can mask it. An `AWS_ACCOUNT_ID` *variable* is not read;
+  move it to a secret, then `gh variable delete AWS_ACCOUNT_ID --env <env>`;
+- secret `AWS_ROLE_ARN` -- that environment's role
+  (`gh secret set AWS_ROLE_ARN --env <env>`);
+- variable `PUBLIC_BASE_URL` -- the origin the stacks were deployed with
+  (`gh variable set PUBLIC_BASE_URL --env <env> --body https://app.<domain>`).
 
 `SLACK_BOT_TOKEN` may be a repository secret; it is optional.

@@ -1,0 +1,18 @@
+# Test-only dependencies of the modules' own suite (modules/backend/tests).
+#
+# Installed by the jobs that run that suite -- `module-tests` and the full
+# `full-build` -- on top of backend/requirements.txt and
+# modules/requirements.txt, and by a developer who runs `make test-modules`:
+#
+#     pip install -r modules/requirements.txt -r modules/requirements-test.txt
+#
+# Never by an image: no Dockerfile stage reads this file, and nothing under
+# modules/backend/app may import what it pins
+# (modules/backend/tests/unit/warehouse/test_dependencies.py). It is not in
+# backend/requirements.txt because only the modules' tests use it; a core
+# checkout, and every core test job, has no reason to install it.
+
+# Warehouse analysis (#312): an in-process SQL engine the tests run the
+# generated statements' semantics on (grain, windows, time zones, centred
+# sums), in place of a cloud warehouse.
+duckdb==1.5.5
