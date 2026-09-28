@@ -9,7 +9,7 @@ describe overlapping Python environments:
 * ``backend/requirements/runtime.txt`` (+ ``.lock``) -- the subset the core API
   image installs.
 * ``modules/requirements.txt`` (+ ``.lock``) -- what the ``full`` image adds on
-  top: python3-saml, authlib, the warehouse drivers.
+  top: python3-saml and authlib.
 
 The modules import a handful of packages *unguarded* (``defusedxml`` in
 ``sso_service``, deliberately -- an XXE-safe parser has no safe fallback), so a
@@ -73,7 +73,6 @@ MODULE_ROUTE_PREFIXES: tuple[str, ...] = (
     "/api/v1/rbac",
     "/api/v1/counters",
     "/api/v1/etl",
-    "/api/v1/warehouse",
     "/api/v1/integrations",
     "/api/v1/auth/sso",
     "/api/v1/workspaces",

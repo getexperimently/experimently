@@ -2,13 +2,12 @@
 Unit tests for ETL REST endpoints (P3-A TDD).
 
 All ETLService calls are mocked via dependency_overrides so tests run
-without AWS credentials or real Glue/Athena resources.
+without AWS credentials or real Glue resources.
 
 Coverage:
 - POST /api/v1/etl/jobs/run          — 202 for DEVELOPER, 403 for VIEWER
 - GET  /api/v1/etl/jobs/{id}/status  — returns job status JSON
-- POST /api/v1/etl/query             — 200 with rows for ANALYST
-- POST /api/v1/etl/query             — 403 for VIEWER
+- POST /api/v1/etl/query             — removed: 404 for every role
 - POST /api/v1/etl/partitions/add    — 201 for ADMIN, 403 for non-ADMIN
 - GET  /api/v1/etl/crawler/status    — returns crawler state
 - POST /api/v1/etl/crawler/run       — 202 for ADMIN, 403 for DEVELOPER
@@ -24,13 +23,13 @@ from backend.app.api import deps
 from backend.app.main import app
 from backend.app.models.user import User, UserRole
 from modules.backend.app.schemas.etl import (
-    AthenaQueryResult,
     ETLJobResponse,
     ETLJobType,
     GlueCrawlerStatus,
     GlueJobStatus,
     PartitionInfo,
 )
+from modules.backend.app.services.etl_service import ETLService
 
 # ---------------------------------------------------------------------------
 # User factories
@@ -82,21 +81,6 @@ def _mock_job_response(
     )
 
 
-def _mock_athena_result() -> AthenaQueryResult:
-    return AthenaQueryResult(
-        query_execution_id="qe-test-001",
-        status="SUCCEEDED",
-        rows=[
-            {"event_id": "e1", "event_type": "view"},
-            {"event_id": "e2", "event_type": "click"},
-        ],
-        column_names=["event_id", "event_type"],
-        rows_returned=2,
-        execution_time_ms=450,
-        data_scanned_bytes=1024,
-    )
-
-
 def _mock_partition_list() -> list:
     return [
         PartitionInfo(
@@ -136,7 +120,6 @@ def mock_etl_service():
     svc = MagicMock()
     svc.run_etl_job.return_value = _mock_job_response()
     svc.get_job_status.return_value = _mock_job_response(status=GlueJobStatus.RUNNING)
-    svc.run_athena_query.return_value = _mock_athena_result()
     svc.add_partitions.return_value = _mock_partition_list()
     svc.run_crawler.return_value = _mock_crawler_status()
     svc.get_crawler_status.return_value = _mock_crawler_status()
@@ -295,56 +278,26 @@ class TestGetJobStatusEndpoint:
 # ---------------------------------------------------------------------------
 
 
-class TestAthenaQueryEndpoint:
-    def test_analyst_can_run_query(self, client_as_analyst):
-        """ANALYST receives 200 with query results."""
-        payload = {
-            "sql": "SELECT COUNT(*) FROM raw_events WHERE year='2024'",
-            "database": "experimentation",
-        }
-        resp = client_as_analyst.post("/api/v1/etl/query", json=payload)
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["query_execution_id"] == "qe-test-001"
-        assert data["rows_returned"] == 2
-
-    def test_developer_can_run_query(self, client_as_developer):
-        """DEVELOPER receives 200 with query results."""
-        payload = {
-            "sql": "SELECT event_type, COUNT(*) FROM events GROUP BY event_type",
-        }
-        resp = client_as_developer.post("/api/v1/etl/query", json=payload)
-        assert resp.status_code == 200
-
-    def test_admin_can_run_query(self, client_as_admin):
-        """ADMIN receives 200 with query results."""
-        payload = {
-            "sql": "SELECT * FROM raw_events LIMIT 100",
-        }
-        resp = client_as_admin.post("/api/v1/etl/query", json=payload)
-        assert resp.status_code == 200
-
-    def test_viewer_cannot_run_query(self, client_as_viewer):
-        """VIEWER receives 403 when running Athena query."""
-        payload = {
-            "sql": "SELECT COUNT(*) FROM raw_events",
-        }
-        resp = client_as_viewer.post("/api/v1/etl/query", json=payload)
-        assert resp.status_code == 403
-
-    def test_query_response_includes_column_names(self, client_as_analyst):
-        """Query response includes column_names list."""
-        payload = {"sql": "SELECT event_id, event_type FROM raw_events LIMIT 5"}
-        resp = client_as_analyst.post("/api/v1/etl/query", json=payload)
-        data = resp.json()
-        assert "column_names" in data
-        assert isinstance(data["column_names"], list)
-
-    def test_short_sql_returns_422(self, client_as_analyst):
-        """SQL shorter than min_length returns 422."""
-        payload = {"sql": "SELECT 1"}  # too short
-        resp = client_as_analyst.post("/api/v1/etl/query", json=payload)
-        assert resp.status_code == 422
+class TestQueryEndpointRemoved:
+    @pytest.mark.regression
+    @pytest.mark.parametrize(
+        "client_fixture",
+        [
+            "client_as_admin",
+            "client_as_developer",
+            "client_as_analyst",
+            "client_as_viewer",
+        ],
+    )
+    def test_query_answers_404_for_every_role(
+        self, client_fixture, mock_etl_service, request
+    ):
+        """POST /etl/query is gone, and the service has no query method."""
+        client = request.getfixturevalue(client_fixture)
+        payload = {"sql": "SELECT COUNT(*) FROM raw_events WHERE year='2024'"}
+        resp = client.post("/api/v1/etl/query", json=payload)
+        assert resp.status_code == 404
+        assert not hasattr(ETLService, "run_athena_query")
 
 
 # ---------------------------------------------------------------------------

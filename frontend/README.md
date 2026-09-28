@@ -13,7 +13,7 @@ npm run dev          # http://localhost:3000, API at http://localhost:8000 by de
 ```
 
 The API must be running (`docker compose up -d --wait api` from the repository root, or
-`uvicorn backend.app.main:app --reload`). Sign in with the seeded administrator
+`ENVIRONMENT=development uvicorn backend.app.main:app --reload`). Sign in with the seeded administrator
 (`admin@demo.com` / `Demo1234!`).
 
 ## Test and build

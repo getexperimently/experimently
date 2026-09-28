@@ -79,7 +79,7 @@ is in.
 
 | Method | Returns | Failure behaviour |
 |---|---|---|
-| `get_assignment(experiment_key, user_id, user_attributes=None)` | `Assignment(experiment_key, user_id, variant_id, variant_name, is_control, configuration)` | raises `ExperimentationError` (`status == 404` when the experiment is not ACTIVE or unknown) |
+| `get_assignment(experiment_key, user_id, user_attributes=None)` | `Assignment(experiment_key, user_id, variant_id, variant_name, is_control, configuration, assigned, reason)` | raises `ExperimentationError` (`status == 404` when the experiment is not ACTIVE or unknown) |
 | `get_variant(experiment_key, user_id, user_attributes=None)` | `str` — the variant name | returns `default_variant` (`"control"`) |
 | `get_feature_flag(flag_key, user_id, user_attributes=None)` | `FlagEvaluation(key, enabled, config, reason)` | raises `ExperimentationError` (`status == 404` when the flag is not ACTIVE or unknown) |
 | `is_feature_enabled(flag_key, user_id, user_attributes=None)` | `bool` | returns `False` |
@@ -95,6 +95,16 @@ is in.
 `.status` (HTTP status, `None` for network errors and timeouts) and `.body` (raw response text).
 `FlagEvaluation.reason` (`"targeting_rule"`, `"rollout"`, `"inactive"` or `"error"`) says why the
 server decided; it is `None` when the server does not send one.
+
+### Enrolment: `assigned` and `reason`
+
+An `Assignment` also carries `assigned` and `reason`. `assigned is False` means the server did not
+enrol the user (`reason` is `"holdout"`, `"mutual_exclusion"` or `"targeting"`) and returned the
+control variant so you render the default experience; no exposure was recorded. **When you export
+exposures to a warehouse, exclude assignments with `assigned is False`**: the user was not enrolled,
+and `reason` says why. A server that predates the fields sends neither, so `assigned` is `None`
+(never `False`). Decide deliberately how to treat those rows rather than dropping them with an
+`assigned is True` filter.
 
 ### Targeting context
 
