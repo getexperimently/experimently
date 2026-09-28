@@ -9,7 +9,9 @@ each is best, the expected loss of choosing it, and a stopping recommendation.
 ## Overview
 
 The platform fits a **Beta-Binomial model** to each variant's conversions on the
-experiment's primary metric:
+experiment's primary metric. A conversion is a user: the users assigned to the variant
+with at least one conversion event, so a user who purchases three times counts once, as
+in `GET /results/{id}`.
 
 - **Posterior** parameters (`alpha`, `beta`), updated from the prior with the observed
   conversions and non-conversions, and the posterior mean.
