@@ -4,11 +4,13 @@ Unit tests for the logging middleware.
 These tests verify the request/response logging middleware functionality.
 """
 
+import contextlib
 import json
 import logging
 import os
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
+import boto3
 import pytest
 import watchtower
 from fastapi import FastAPI, HTTPException, Request, Response
@@ -343,12 +345,20 @@ def mock_cloudwatch_handler():
                         yield handler_instance
 
 
-class TestCloudWatchLogging:
-    """Tests for CloudWatch logging integration."""
+@contextlib.contextmanager
+def cloudwatch_logging_enabled():
+    """``setup_logging(enable_cloudwatch=True)`` under fake AWS credentials.
 
-    @pytest.fixture
-    def middleware(self, app):
-        """Create middleware with CloudWatch enabled."""
+    ``boto3.client`` is patched, as in ``mock_cloudwatch_handler``. Unpatched,
+    ``setup_logging`` calls the real ``boto3.client("logs")``, which creates
+    ``boto3.DEFAULT_SESSION`` and caches the fake credential in it; every later
+    ``boto3.client(...)`` in the session then signs with that credential instead
+    of the no-real-aws dummy, so which tests pass depends on collection order.
+    The default session and the root logger's handlers are restored on exit.
+    """
+    root = logging.getLogger()
+    handlers, level = root.handlers[:], root.level
+    try:
         with patch.dict(
             os.environ,
             {
@@ -358,8 +368,23 @@ class TestCloudWatchLogging:
                 "APP_ENV": "test",
             },
         ):
-            setup_logging(enable_cloudwatch=True)
-            return LoggingMiddleware(app)
+            with patch("boto3.client"):
+                setup_logging(enable_cloudwatch=True)
+                yield
+    finally:
+        boto3.DEFAULT_SESSION = None
+        root.handlers[:] = handlers
+        root.setLevel(level)
+
+
+class TestCloudWatchLogging:
+    """Tests for CloudWatch logging integration."""
+
+    @pytest.fixture
+    def middleware(self, app):
+        """Create middleware with CloudWatch enabled."""
+        with cloudwatch_logging_enabled():
+            yield LoggingMiddleware(app)
 
     @pytest.mark.asyncio
     async def test_successful_request(self, middleware, mock_cloudwatch_handler):
@@ -436,3 +461,39 @@ class TestCloudWatchLogging:
 
         assert response.status_code == 500
         assert mock_cloudwatch_handler.emit.called
+
+
+class _Blocked(Exception):
+    """Raised at before-send: the request never leaves the process."""
+
+
+@pytest.mark.regression
+def test_cloudwatch_logging_setup_leaves_no_default_session_behind(monkeypatch):
+    """Regression: the CloudWatch fixture leaked a boto3 default session.
+
+    Its setup created ``boto3.DEFAULT_SESSION`` holding the fixture's fake
+    credential. Under pytest 8+'s collection order that ran before
+    ``test_no_real_aws.py``, whose STS client then signed with ``test`` instead
+    of the no-real-aws dummy (#136).
+    """
+    from backend.tests import no_real_aws
+
+    monkeypatch.setattr(boto3, "DEFAULT_SESSION", None)
+    with cloudwatch_logging_enabled():
+        pass
+
+    sent: list[str] = []
+
+    def block(request, **kwargs):
+        sent.append(request.headers.get("Authorization", b"").decode())
+        raise _Blocked
+
+    client = boto3.client("sts", region_name="us-east-1")
+    client.meta.events.register("before-send.sts.GetCallerIdentity", block)
+    with pytest.raises(_Blocked):
+        client.get_caller_identity()
+
+    assert len(sent) == 1
+    # A bool, not the header: a failure must not print an access key id.
+    signed_with_dummy = f"Credential={no_real_aws.DUMMY_CREDENTIAL}/" in sent[0]
+    assert signed_with_dummy, "a later boto3 client inherited the fixture's credential"

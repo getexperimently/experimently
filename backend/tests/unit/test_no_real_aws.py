@@ -52,7 +52,13 @@ class _Blocked(Exception):
     """Raised at before-send: the request never leaves the process."""
 
 
-def test_boto3_sts_signs_with_the_dummy_and_returns_no_account() -> None:
+def test_boto3_sts_signs_with_the_dummy_and_returns_no_account(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # boto3.client() reuses boto3.DEFAULT_SESSION, whose credentials are cached
+    # from whenever an earlier test first created it. Start from no session so
+    # this checks the environment the gate sets, not what ran before (#136).
+    monkeypatch.setattr(boto3, "DEFAULT_SESSION", None)
     sent: list[str] = []
 
     def block(request, **kwargs):
