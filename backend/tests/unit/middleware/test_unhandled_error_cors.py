@@ -63,7 +63,8 @@ def test_an_unhandled_exception_is_a_500_the_browser_can_read(failing_db):
         "the 500 has no Access-Control-Allow-Origin, so a cross-origin dashboard "
         f"reports the API as unreachable; headers: {dict(response.headers)}"
     )
-    assert response.headers.get("access-control-allow-credentials") == "true"
+    # Credentials are never allowed cross-origin (#130).
+    assert "access-control-allow-credentials" not in response.headers
     assert response.headers.get("x-request-id"), (
         "an operator needs the id to find the log line"
     )
