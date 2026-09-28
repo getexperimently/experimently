@@ -45,8 +45,8 @@ IDENTIFIER_TAMPERS = [
     ("semicolon", ";"),
     ("line_comment", "--"),
     ("block_comment", "/*"),
-    ("line_separator", " "),
-    ("paragraph_separator", " "),
+    ("line_separator", "\u2028"),
+    ("paragraph_separator", "\u2029"),
     ("nul", "\x00"),
     ("newline_inside", "\nX"),
     ("carriage_return", "\r"),
@@ -165,7 +165,7 @@ LITERAL_TAMPERS = [
     ("block_comment", "paid/*"),
     ("backslash", "paid\\"),
     ("asterisk", "a*b"),
-    ("line_separator", "paid "),
+    ("line_separator", "paid\u2028"),
     ("nul", "paid\x00"),
     ("newline", "pa\nid"),
     ("carriage_return", "paid\r"),
@@ -199,6 +199,10 @@ def test_literals_render_without_escaping():
     assert gate.render_literal(2**63 - 1, "v") == str(2**63 - 1)
     with pytest.raises(WarehouseQueryRefused):
         gate.render_literal(2**63, "v")
+    # The int64 minimum is a valid value; one below it is not.
+    assert gate.render_literal(-(2**63), "v") == str(-(2**63))
+    with pytest.raises(WarehouseQueryRefused):
+        gate.render_literal(-(2**63) - 1, "v")
     for wrong_type in (1.5, None, b"paid", ["paid"]):
         with pytest.raises(WarehouseQueryRefused):
             gate.render_literal(wrong_type, "v")
@@ -215,7 +219,7 @@ def test_literals_render_without_escaping():
         "nl\n",
         "a" * 101,
         "comment--",
-        " x",
+        "\u2028x",
     ],
 )
 def test_experiment_key_revalidated(key):
@@ -374,3 +378,35 @@ def test_no_pattern_in_the_gate_carries_an_anchor():
             assert not value.pattern.startswith("^") and not value.pattern.endswith(
                 "$"
             ), name
+
+
+def test_float_literal_must_be_positive():
+    assert gate.render_float_literal(2.5, "cap_value") == "2.5"
+    assert gate.render_float_literal(500, "cap_value") == "500.0"
+    assert gate.render_float_literal(1e-05, "cap_value") == "1e-05"
+    for not_positive in (0, 0.0, -0.0, -1.5, -(10**6)):
+        with pytest.raises(WarehouseQueryRefused) as refused:
+            gate.render_float_literal(not_positive, "cap_value")
+        assert str(refused.value) == "cap_value must be above 0"
+    for not_a_number in (float("nan"), float("inf"), True, "2.5", None):
+        with pytest.raises(WarehouseQueryRefused) as refused:
+            gate.render_float_literal(not_a_number, "cap_value")
+        assert str(refused.value) == "cap_value must be a number"
+
+
+def test_no_source_file_holds_an_invisible_separator():
+    """U+2028/U+2029 are written as escapes, so a reader sees them."""
+    root = Path(gate.__file__).parents[1]
+    paths = [
+        root / "core" / "warehouse_identifiers.py",
+        root / "schemas" / "warehouse_sources.py",
+        root / "services" / "warehouse_query_builder.py",
+        root / "services" / "warehouse_sufficient_stats.py",
+        *Path(__file__).parent.glob("*.py"),
+    ]
+    offenders = [
+        p.name
+        for p in paths
+        if {"\u2028", "\u2029"} & set(p.read_text(encoding="utf-8"))
+    ]
+    assert offenders == []

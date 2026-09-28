@@ -149,3 +149,67 @@ def test_the_builder_never_transpiles():
         and node.value.id == "sqlglot"
     }
     assert used == {"parse"}
+
+
+def _other_table(dialect: str, built) -> str:
+    quote = SQL_DIALECTS[dialect].identifiers.quote_open
+    parts = ("otherdb", "secret", "t")[-len(next(iter(built.tables))) :]
+    return ".".join(f"{quote}{p}{quote}" for p in parts)
+
+
+#: Ways a further table could be read without appearing in the top-level
+#: FROM. Each rewrites the real metric statement; every one must be refused.
+EXTRA_READS = {
+    "correlated_scalar_subquery": lambda sql, other: sql.replace(
+        "COUNT(*) AS n,",
+        f"COUNT(*) AS n, (SELECT MAX(x.c) FROM {other} AS x"
+        " WHERE x.c = y.variant) AS m,",
+    ),
+    "unnest_of_array_agg": lambda sql, other: sql.replace(
+        "FROM y CROSS JOIN k",
+        f"FROM y CROSS JOIN UNNEST((SELECT ARRAY_AGG(x.c) FROM {other} AS x)) AS z"
+        " CROSS JOIN k",
+    ),
+    "comma_join": lambda sql, other: sql.replace(
+        "FROM y CROSS JOIN k", f"FROM y, {other} CROSS JOIN k"
+    ),
+    "extra_cte": lambda sql, other: sql.replace(
+        "WITH exposures AS (",
+        f"WITH extra AS (SELECT * FROM {other}),\nexposures AS (",
+        1,
+    ),
+    "external_query": lambda sql, other: sql.replace(
+        "FROM y CROSS JOIN k",
+        "FROM y CROSS JOIN EXTERNAL_QUERY('acme-prod.us.conn', 'SELECT 1') AS x"
+        " CROSS JOIN k",
+    ),
+}
+
+#: sqlglot 30.20 parses every pair (EXTERNAL_QUERY, BigQuery's, parses in all
+#: three as an unrecognised table function), so each refusal comes from the
+#: checks on the parsed tree and not from a parse error. A pair that stops
+#: parsing fails test_extra_read_cases_parse instead of silently testing a parse
+#: error.
+EXTRA_READ_CASES = [
+    (extra_read, dialect)
+    for extra_read in sorted(EXTRA_READS)
+    for dialect in sorted(SQL_DIALECTS)
+]
+
+
+def _with_extra_read(extra_read: str, dialect: str):
+    built = build_case(dialect, "metric_mean")
+    sql = EXTRA_READS[extra_read](built.sql, _other_table(dialect, built))
+    assert sql != built.sql
+    return replace(built, sql=sql)
+
+
+@pytest.mark.parametrize(("extra_read", "dialect"), EXTRA_READ_CASES)
+def test_extra_read_cases_parse(extra_read, dialect):
+    tampered = _with_extra_read(extra_read, dialect)
+    assert len(builder.sqlglot.parse(tampered.sql, read=dialect)) == 1
+
+
+@pytest.mark.parametrize(("extra_read", "dialect"), EXTRA_READ_CASES)
+def test_a_table_read_anywhere_in_the_statement_is_refused(extra_read, dialect):
+    assert _refused(_with_extra_read(extra_read, dialect)) == "internal"

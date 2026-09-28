@@ -40,8 +40,9 @@ FilterLiteral = Union[str, bool, int]
 
 MAX_FILTERS: Final = 5
 MAX_IN_VALUES: Final = 50
-#: The largest integer a filter literal may carry: a signed 64-bit value,
-#: the widest integer type all three warehouses share.
+#: The range a filter integer may carry: a signed 64-bit value, the widest
+#: integer type all three warehouses share.
+MIN_INT_LITERAL: Final = -(2**63)
 MAX_INT_LITERAL: Final = 2**63 - 1
 
 OPERATORS: Final = frozenset({"eq", "ne", "in", "not_in", "is_null", "is_not_null"})
@@ -214,7 +215,7 @@ def render_literal(value: object, field: str) -> str:
     if isinstance(value, bool):
         return "TRUE" if value else "FALSE"
     if type(value) is int:
-        if abs(value) > MAX_INT_LITERAL:
+        if not MIN_INT_LITERAL <= value <= MAX_INT_LITERAL:
             raise WarehouseQueryRefused(
                 "invalid_literal", field, f"{field} is outside the 64-bit range"
             )
@@ -230,7 +231,7 @@ def render_literal(value: object, field: str) -> str:
 
 
 def render_float_literal(value: object, field: str) -> str:
-    """A positive finite float, as a literal every dialect reads as a number."""
+    """A positive finite number, as a literal every dialect reads as a number."""
     if (
         isinstance(value, bool)
         or not isinstance(value, (int, float))
@@ -238,6 +239,10 @@ def render_float_literal(value: object, field: str) -> str:
     ):
         raise WarehouseQueryRefused(
             "invalid_literal", field, f"{field} must be a number"
+        )
+    if not value > 0:
+        raise WarehouseQueryRefused(
+            "invalid_literal", field, f"{field} must be above 0"
         )
     text = repr(float(value))
     if not _fully_matches(_FLOAT_TEXT, text):

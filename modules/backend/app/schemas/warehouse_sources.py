@@ -30,8 +30,10 @@ from pydantic import (
     model_validator,
 )
 
-#: Printable text with no control character and no line or paragraph separator.
-NAME_PATTERN = r"^[^\x00-\x1f\x7f  ]+$"
+#: Printable text with no control character (U+0000-U+001F, U+007F) and no
+#: line or paragraph separator (U+2028, U+2029, written as escapes so the
+#: pattern shows them).  Pydantic's regex engine reads the \uXXXX escapes.
+NAME_PATTERN = r"^[^\x00-\x1f\x7f\u2028\u2029]+$"
 #: The union of the three dialects' column characters; each dialect's own
 #: pattern is stricter and is applied by the identifier gate.
 IDENTIFIER_PATTERN = r"^[A-Za-z0-9_$]+$"
@@ -51,7 +53,8 @@ TableReference = Annotated[
 StringLiteral = Annotated[
     str, StringConstraints(min_length=1, max_length=256, pattern=LITERAL_PATTERN)
 ]
-IntLiteral = Annotated[StrictInt, Field(ge=-(2**63) + 1, le=2**63 - 1)]
+#: A signed 64-bit integer, -2**63 to 2**63 - 1 inclusive.
+IntLiteral = Annotated[StrictInt, Field(ge=-(2**63), le=2**63 - 1)]
 
 ScalarLiteral = Union[StrictBool, IntLiteral, StringLiteral]
 
@@ -137,9 +140,12 @@ class _MetricSourceBody(BaseModel):
     columns: MetricColumns
     metric_type: Literal["proportion", "mean"]
     conversion_window_hours: Annotated[StrictInt, Field(ge=1, le=8760)] = 168
-    cap_value: Optional[Annotated[float, Field(gt=0, le=1e15, allow_inf_nan=False)]] = (
-        None
-    )
+    #: Strict: a JSON number only.  An integer (500) is accepted as a float,
+    #: which is what JSON numbers are; a boolean or a string ("500") is refused
+    #: rather than coerced.
+    cap_value: Optional[
+        Annotated[float, Field(strict=True, gt=0, le=1e15, allow_inf_nan=False)]
+    ] = None
     filters: Filters = []
 
     @model_validator(mode="after")

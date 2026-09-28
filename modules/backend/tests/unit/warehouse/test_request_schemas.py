@@ -222,7 +222,7 @@ def test_valid_bodies_are_accepted():
 
 @pytest.mark.parametrize(
     "tamper",
-    ['"', "`", "'", ";", "--", "/*", " ", "\x00", "\n", "\r", " "],
+    ['"', "`", "'", ";", "--", "/*", "\u2028", "\x00", "\n", "\r", " "],
 )
 def test_schema_tampers_refused(tamper):
     for body in (
@@ -280,3 +280,35 @@ def test_schema_tampers_refused(tamper):
 def test_bodies_outside_the_contract_are_refused(body):
     with pytest.raises(ValidationError):
         ws.MetricSourceCreate.model_validate(body)
+
+
+@pytest.mark.parametrize("cap", [True, False, "1.0", "500", b"1", [1.0], {"v": 1}])
+def test_cap_value_is_strict(cap):
+    """A boolean or a string is refused, not coerced to a number."""
+    with pytest.raises(ValidationError) as refused:
+        ws.MetricSourceCreate.model_validate(_metric(cap_value=cap))
+    assert refused.value.errors()[0]["loc"][0] == "cap_value"
+
+
+@pytest.mark.parametrize("cap", [500, 500.5, 1e15, 1e-05])
+def test_cap_value_accepts_json_numbers(cap):
+    assert ws.MetricSourceCreate.model_validate(_metric(cap_value=cap)).cap_value == cap
+
+
+def test_filter_integers_span_int64():
+    for value in (-(2**63), 2**63 - 1, 0):
+        ws.SourceFilterIn.model_validate(
+            {"column": "c", "operator": "eq", "value": value}
+        )
+    for value in (-(2**63) - 1, 2**63):
+        with pytest.raises(ValidationError):
+            ws.SourceFilterIn.model_validate(
+                {"column": "c", "operator": "eq", "value": value}
+            )
+
+
+def test_source_names_refuse_line_and_paragraph_separators():
+    ws.MetricSourceCreate.model_validate(_metric(name="Umsatz pro Kunde é — EU"))
+    for bad in ("a\u2028b", "a\u2029b", "a\nb", "a\x7fb", "a\x00b"):
+        with pytest.raises(ValidationError):
+            ws.MetricSourceCreate.model_validate(_metric(name=bad))
