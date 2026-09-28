@@ -228,21 +228,29 @@ def test_boto_limits_follow_the_deadline():
 
 
 def test_boto_call_with_two_seconds_left_is_bounded_by_them(aws_env, monkeypatch):
-    """A call to an endpoint that never answers, with 2 s left on the deadline,
-    ends within a few seconds -- not the fixed 5 s + 30 s x 2 attempts.
+    """A call with 2 s left on the deadline gets 2 s limits and one attempt.
 
-    The deadline's clock is fake (it says 2 s are left); the wait is botocore's
-    own socket limits, which is what is under test.  Every name resolves to a
-    local listener that accepts and never answers; the address check is given a
-    public answer so the call reaches botocore's send.
+    The deadline's clock is fake (it says 2 s are left).  The call really
+    runs: every name resolves to a local listener that accepts and never
+    answers, and the address check is given a public answer so the call
+    reaches botocore's send.  What is asserted is deterministic: the limits
+    botocore applied to the socket (every ``settimeout`` on it) are
+    ``min(fixed, remaining)`` = 2 s, and exactly one connection was made.
     """
+    applied = []
+    real_settimeout = socket.socket.settimeout
+
+    def spy_settimeout(sock, value):
+        applied.append(value)
+        return real_settimeout(sock, value)
+
     server = _SilentServer()
     try:
         _resolve_everything_to(monkeypatch, "127.0.0.1", server.port)
         clock = FakeClock()
         deadline = Deadline(60, clock=clock)
         clock.advance(58)
-        started = time.monotonic()
+        monkeypatch.setattr(socket.socket, "settimeout", spy_settimeout)
         with pytest.raises(WarehouseError) as err:
             aws_call(
                 _session(),
@@ -252,18 +260,17 @@ def test_boto_call_with_two_seconds_left_is_bounded_by_them(aws_env, monkeypatch
                 deadline=deadline,
                 resolver=lambda host, port: [("93.184.216.34", port)],
             )
-        elapsed = time.monotonic() - started
+        monkeypatch.setattr(socket.socket, "settimeout", real_settimeout)
     finally:
         server.close()
     assert err.value.code in (
         WarehouseErrorCode.TIME_LIMIT,
         WarehouseErrorCode.UNREACHABLE,
     )
-    assert server.held, "the call never reached the listener"
-    # One attempt and one connection, each wait capped at the 2 s left
-    # (measured about 2.2 s); the fixed limits take over 60 s here.
-    assert len(server.held) == 1
-    assert elapsed < 5.0, f"took {elapsed:.1f} s with 2 s left"
+    limits = [value for value in applied if value is not None]
+    assert limits, "botocore applied no limit to the socket"
+    assert all(value == pytest.approx(2.0) for value in limits), limits
+    assert len(server.held) == 1, f"{len(server.held)} connections"
 
 
 def test_boto_client_errors_are_coded(aws_env, monkeypatch):
