@@ -94,24 +94,87 @@ def test_the_positive_control_routes_are_mounted(route_table):
     )
 
 
+def warehouse_routes(table) -> list[tuple[str, str]]:
+    """Every route under the warehouse prefix, in any letter case.
+
+    Starlette matches paths case-sensitively, so ``/api/v1/Warehouse/x`` is a
+    different route from ``/api/v1/warehouse/x`` -- and a case-sensitive
+    prefix check would let it through.  The comparison is on the lower-cased
+    path.
+    """
+    return sorted(
+        (method, path)
+        for method, path in table
+        if path.lower().startswith(WAREHOUSE_PREFIX)
+    )
+
+
+def etl_routes(table) -> set[tuple[str, str]]:
+    """Every route under the ETL prefix, in any letter case, as served.
+
+    Selected on the lower-cased path, compared as served: a case variant of
+    an ETL path (``/api/v1/ETL/query``, or even ``/api/v1/ETL/jobs/run``) is
+    selected and then fails the exact-set comparison.
+    """
+    return {
+        (method, path)
+        for method, path in table
+        if path.lower() == ETL_PREFIX or path.lower().startswith(ETL_PREFIX + "/")
+    }
+
+
 def test_no_route_under_the_warehouse_prefix(route_table):
     assert POSITIVE_CONTROL <= route_table, "positive control failed"
-    found = sorted(
-        (method, path)
-        for method, path in route_table
-        if path.startswith(WAREHOUSE_PREFIX)
-    )
-    assert found == [], f"routes under {WAREHOUSE_PREFIX}: {found}"
+    found = warehouse_routes(route_table)
+    assert found == [], f"routes under {WAREHOUSE_PREFIX} (any case): {found}"
 
 
 def test_the_etl_routes_are_exactly_the_five(route_table):
     assert POSITIVE_CONTROL <= route_table, "positive control failed"
-    etl = {
-        (method, path)
-        for method, path in route_table
-        if path == ETL_PREFIX or path.startswith(ETL_PREFIX + "/")
-    }
+    etl = etl_routes(route_table)
     assert etl == EXPECTED_ETL_ROUTES, (
         f"unexpected: {sorted(etl - EXPECTED_ETL_ROUTES)}; "
         f"missing: {sorted(EXPECTED_ETL_ROUTES - etl)}"
     )
+
+
+# ---------------------------------------------------------------------------
+# The checks' own tamper list: routes each check must catch.  They run against
+# a synthetic table (the expected one plus the planted route), so they prove
+# the selection logic without mounting anything.
+# ---------------------------------------------------------------------------
+
+_PLANTED_WAREHOUSE = [
+    ("GET", "/api/v1/warehouse/connections"),
+    ("GET", "/api/v1/warehouse"),
+    ("GET", "/api/v1/warehouses"),
+    ("GET", "/api/v1/Warehouse/x"),
+    ("POST", "/api/v1/WAREHOUSE/clickhouse/query"),
+]
+
+_PLANTED_ETL = [
+    ("POST", "/api/v1/etl/query"),
+    ("POST", "/api/v1/ETL/query"),
+    ("POST", "/api/v1/Etl/jobs/run"),
+    ("GET", "/api/v1/etl"),
+    ("DELETE", "/api/v1/etl/jobs/run"),
+]
+
+
+@pytest.mark.parametrize("planted", _PLANTED_WAREHOUSE)
+def test_the_warehouse_check_catches(planted):
+    table = set(EXPECTED_ETL_ROUTES) | set(POSITIVE_CONTROL) | {planted}
+    assert warehouse_routes(table) == [planted]
+
+
+@pytest.mark.parametrize("planted", _PLANTED_ETL)
+def test_the_etl_check_catches(planted):
+    table = set(EXPECTED_ETL_ROUTES) | set(POSITIVE_CONTROL) | {planted}
+    assert etl_routes(table) != EXPECTED_ETL_ROUTES
+    assert planted in etl_routes(table)
+
+
+def test_the_checks_pass_on_the_expected_table():
+    table = set(EXPECTED_ETL_ROUTES) | set(POSITIVE_CONTROL)
+    assert warehouse_routes(table) == []
+    assert etl_routes(table) == EXPECTED_ETL_ROUTES
