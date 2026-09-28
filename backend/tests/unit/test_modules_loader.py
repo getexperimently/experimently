@@ -122,7 +122,6 @@ class TestModulesRegistration:
             "/rbac",
             "/counters",
             "/etl",
-            "/warehouse",
             "/integrations",
             "/auth/sso",
             "/workspaces",
@@ -760,9 +759,9 @@ class TestBrokenModulesAbortStartup:
 class TestSchemaOnlyRegistration:
     """`require_modules_or_absent()` asks for a registration without routers.
 
-    Importing the eleven endpoint modules is ~99% of a registration's cost and
-    buys a schema tool nothing -- it pulls in FastAPI routers and warehouse
-    drivers that no ``Base.metadata`` and no migration touches.  Every
+    Importing the endpoint modules is ~99% of a registration's cost and
+    buys a schema tool nothing -- it pulls in FastAPI routers and client
+    libraries that no ``Base.metadata`` and no migration touches.  Every
     container start paid it inside the bootstrap's advisory lock, and so did
     every ``alembic upgrade``/``current``/``revision``.
     """
@@ -922,9 +921,7 @@ class TestMountingIsInsideTheGuard:
         """The path that mattered: `import backend.app.api.api` raised."""
         from backend.app.api import api
 
-        hooks.register_router(
-            lambda _router: (_ for _ in ()).throw(KeyError("warehouse_mysql"))
-        )
+        hooks.register_router(lambda _router: (_ for _ in ()).throw(KeyError("etl")))
 
         router = api.build_v1_router()
 

@@ -152,9 +152,6 @@ universe = [
     "docs/statistics/fdr-correction.md",
     "docs/statistics/post-stratification.md",
     "docs/statistics/power-analysis.md",
-    "docs/warehouse/clickhouse.md",
-    "docs/warehouse/databricks.md",
-    "docs/warehouse/mysql.md",
     "docs/websocket-streaming.md",
     "docs/workspaces/overview.md",
     "docs/workspaces/quickstart.md",
@@ -415,11 +412,10 @@ reason = "run on a kind cluster by the chart-kind workflow (scripts/chart_kind.s
 "backend/lambda/README.md" = { comments = 0, unlabelled = 1, syntax = 0 }
 "backend/lambda/event_processor/README.md" = { comments = 5, unlabelled = 1, syntax = 0 }
 "docs/api/compliance.md" = { comments = 2, unlabelled = 5, syntax = 0 }
-"docs/api/endpoints.md" = { comments = 24, unlabelled = 23, syntax = 1 }
+"docs/api/endpoints.md" = { comments = 24, unlabelled = 22, syntax = 1 }
 "docs/api/integrations.md" = { comments = 0, unlabelled = 8, syntax = 0 }
 "docs/api/rbac.md" = { comments = 5, unlabelled = 12, syntax = 0 }
 "docs/api/split-url.md" = { comments = 0, unlabelled = 3, syntax = 0 }
-"docs/api/warehouse-analytics.md" = { comments = 0, unlabelled = 0, syntax = 0 }
 "docs/architecture/models.md" = { comments = 2, unlabelled = 1, syntax = 1 }
 "docs/architecture/technical-guide.md" = { comments = 11, unlabelled = 5, syntax = 0 }
 "docs/auth/auth-environment-variables.md" = { comments = 0, unlabelled = 4, syntax = 0 }
@@ -475,9 +471,6 @@ reason = "run on a kind cluster by the chart-kind workflow (scripts/chart_kind.s
 "docs/self-hosting/migrations.md" = { comments = 12, unlabelled = 4, syntax = 1 }
 "docs/self-hosting/monitoring.md" = { comments = 5, unlabelled = 0, syntax = 0 }
 "docs/self-hosting/releases.md" = { comments = 1, unlabelled = 1, syntax = 0 }
-"docs/warehouse/clickhouse.md" = { comments = 1, unlabelled = 0, syntax = 0 }
-"docs/warehouse/databricks.md" = { comments = 0, unlabelled = 0, syntax = 0 }
-"docs/warehouse/mysql.md" = { comments = 1, unlabelled = 0, syntax = 0 }
 "frontend/README.md" = { comments = 7, unlabelled = 1, syntax = 0 }
 "sdk/android/README.md" = { comments = 3, unlabelled = 0, syntax = 0 }
 "sdk/dotnet/README.md" = { comments = 2, unlabelled = 2, syntax = 0 }

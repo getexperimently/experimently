@@ -1,9 +1,8 @@
 """
-Warehouse Connection model for Issue #26: POST-MVP Warehouse-Native Analytics.
+Warehouse Connection model for Issue #26.
 
-Stores encrypted credentials for Snowflake, BigQuery, and Redshift connections.
-Credentials are NEVER stored in plaintext — the `encrypted_credentials` column
-holds a base64-encoded (or KMS-encrypted in production) JSON blob.
+The table is kept, with no migration, while warehouse analysis is rebuilt
+(#312). No route reads or writes it: the endpoints that did were removed.
 """
 
 from sqlalchemy import Boolean, Column, ForeignKey, Index, String, Text
@@ -19,10 +18,8 @@ class WarehouseConnection(Base, BaseModel):
     """
     Represents a customer data warehouse connection configuration.
 
-    Supported warehouse types: snowflake | bigquery | redshift
-
-    Credentials are stored encrypted; never exposed in API responses.
-    Soft-delete is implemented via is_active=False.
+    Warehouse types: snowflake | bigquery | redshift. Soft-delete was
+    implemented via is_active=False.
     """
 
     __tablename__ = "warehouse_connections"

@@ -126,7 +126,7 @@ python-json-logger==4.2.0
 # Add psutil for system metrics collection
 psutil==5.9.8
 
-# The modules' own runtime dependencies (SAML/OIDC, the warehouse connectors)
-# are NOT here: they live in modules/requirements.txt, locked in
-# modules/requirements.lock, and are installed only by the full profile.
+# The modules' own runtime dependencies (SAML/OIDC) are NOT here: they live
+# in modules/requirements.txt, locked in modules/requirements.lock, and are
+# installed only by the full profile.
 # Nothing under backend/ imports them.

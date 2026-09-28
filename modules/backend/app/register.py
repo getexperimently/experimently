@@ -3,7 +3,7 @@ The modules' registration entry point: ``modules.register(hooks)``.
 
 One ``register(hooks)`` that installs the optional modules into the core
 application through the seam in :mod:`backend.app.core.hooks`: the modules'
-settings, the seven model modules, the audit signer, the eleven routers, the
+settings, the seven model modules, the audit signer, the seven routers, the
 OpenAPI tags, the five capabilities and the ten module names.
 ``backend/app/modules_loader.py`` calls it once per process, from whichever of
 ``modules.register`` and ``modules.backend.app.register`` it finds first
@@ -41,6 +41,8 @@ logger = logging.getLogger(__name__)
 
 #: The modules this registration provides -- every name in
 #: ``hooks.KNOWN_MODULES``, one per group of ``modules-manifest.txt``.
+#: ``warehouse`` provides only its model and table while warehouse analysis
+#: is rebuilt (#312); it mounts no routes.
 PROVIDED_MODULES: tuple[str, ...] = (
     "workspaces",
     "hipaa",
@@ -77,15 +79,7 @@ MODULE_TAGS: list[dict[str, str]] = [
     },
     {
         "name": "ETL",
-        "description": "Operations for managing AWS Glue ETL jobs, Athena queries, S3 partitions, and Glue crawlers",
-    },
-    {
-        "name": "Warehouse",
-        "description": (
-            "Warehouse-Native Analytics: manage Snowflake, BigQuery, and Redshift "
-            "connections, generate experiment analysis SQL, and sync results directly "
-            "from customer data warehouses. Credentials stored encrypted."
-        ),
+        "description": "Operations for managing AWS Glue ETL jobs, S3 partitions, and Glue crawlers",
     },
     {
         "name": "Integrations",
@@ -147,10 +141,6 @@ def mount_routers(router: Any) -> None:
     rbac = modules["rbac"]
     realtime_counters = modules["realtime_counters"]
     sso = modules["sso"]
-    warehouse = modules["warehouse"]
-    warehouse_clickhouse = modules["warehouse_clickhouse"]
-    warehouse_databricks = modules["warehouse_databricks"]
-    warehouse_mysql = modules["warehouse_mysql"]
     workspaces = modules["workspaces"]
 
     # P2-A: RBAC Post-MVP Enhancements
@@ -174,19 +164,9 @@ def mount_routers(router: Any) -> None:
         tags=["ETL"],
         dependencies=_authenticated(),
     )
-    # Issue #26 / EP-041 / EP-048: warehouse-native analytics and its connectors
-    for module, prefix in (
-        (warehouse, "/warehouse"),
-        (warehouse_databricks, "/warehouse/databricks"),
-        (warehouse_clickhouse, "/warehouse/clickhouse"),
-        (warehouse_mysql, "/warehouse/mysql"),
-    ):
-        router.include_router(
-            module.router,
-            prefix=prefix,
-            tags=["Warehouse"],
-            dependencies=_authenticated(),
-        )
+    # Warehouse analysis has no routes while it is rebuilt (#312); the
+    # warehouse module keeps only its model and table.
+
     # EP-034: Integration Config Management (Salesforce / Jira / GitHub)
     router.include_router(
         integrations.router,
@@ -244,10 +224,6 @@ ENDPOINT_MODULES: tuple[str, ...] = (
     "rbac",
     "realtime_counters",
     "sso",
-    "warehouse",
-    "warehouse_clickhouse",
-    "warehouse_databricks",
-    "warehouse_mysql",
     "workspaces",
 )
 
@@ -272,7 +248,7 @@ def _import_endpoint_modules() -> None:
     loader clears the registries and the process starts cleanly on the core
     profile.  A failure at mount time leaves a registration that succeeded
     standing and costs the deployment its module routes.  Importing the
-    eleven modules up front puts the likeliest failure -- an endpoint module
+    seven modules up front puts the likeliest failure -- an endpoint module
     that does not import -- on the side that rolls back.
     """
     _endpoint_modules()
@@ -297,10 +273,11 @@ def register(hooks: Any, with_routers: bool = True) -> None:
     ``with_routers=False`` stops before the API graph, and is what
     ``require_modules_or_absent()`` asks for on behalf of the three schema
     builders -- alembic's ``env.py``, ``db/bootstrap.py`` and the test
-    conftest.  Importing the eleven endpoint modules is ~99% of a
-    registration's cost (3.5 s here, against 0.03 s for the seven model
-    modules), and it buys a schema tool nothing: it pulls in FastAPI routers
-    and warehouse drivers that no ``Base.metadata`` and no migration touches.
+    conftest.  Importing the endpoint modules is ~99% of a registration's
+    cost (3.5 s here when there were eleven, against 0.03 s for the seven
+    model modules), and it buys a schema tool nothing: it pulls in FastAPI
+    routers and client libraries that no ``Base.metadata`` and no migration
+    touches.
     Every container start pays it inside the bootstrap's advisory lock, and so
     does every ``alembic upgrade``/``current``/``revision``.
 

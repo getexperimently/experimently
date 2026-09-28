@@ -1,190 +1,30 @@
-# Warehouse-Native Analytics
+# Warehouse Analytics
 
-!!! info "Part of the `warehouse` module"
-    Warehouse-native analytics is one of the optional modules -- present in the **full profile**, absent from the core one. A core deployment does not serve these routes. See [Modules and profiles](../getting-started/modules.md) for what each profile includes and how to run the full one.
+!!! warning "Removed in the full profile; being rebuilt"
+    The `/api/v1/warehouse` endpoints -- stored warehouse connections, sync,
+    and the ClickHouse, MySQL and Databricks connectors -- have been removed
+    and now answer 404. Warehouse analysis is being rebuilt
+    ([#312](https://github.com/getexperimently/experimently/issues/312)) and
+    will ship as new beta endpoints. Core deployments never served these
+    routes and are unchanged.
 
-Warehouse-native analytics lets you run experiment analysis directly against your existing data warehouse (Snowflake, BigQuery, or Redshift) instead of relying solely on events tracked through the platform's ingestion pipeline. This is useful when your source-of-truth metrics already live in the warehouse, or when you need to analyze large datasets that are impractical to re-ingest.
+## If you ran the full profile
 
----
+Stored warehouse connections are no longer read by anything. Delete every
+row in the `warehouse_connections` table, including inactive ones, and rotate
+every credential that was ever saved there:
 
-## Supported Warehouses
-
-| Warehouse | Type Key |
-|-----------|----------|
-| Snowflake | `snowflake` |
-| Google BigQuery | `bigquery` |
-| Amazon Redshift | `redshift` |
-
----
-
-## Setup Overview
-
-1. Create a warehouse connection (credentials stored encrypted)
-2. Test the connection
-3. Trigger a sync for a specific experiment to pull results from the warehouse
-4. View results through the standard results API
-
----
-
-## API Reference
-
-### POST /api/v1/warehouse/connections/test
-
-Test warehouse credentials without persisting them. Always run this before creating a connection.
-
-```bash
-curl -X POST "http://localhost:8000/api/v1/warehouse/connections/test" \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "Production Snowflake",
-    "warehouse_type": "snowflake",
-    "host": "myaccount.snowflakecomputing.com",
-    "database": "ANALYTICS",
-    "username": "EXP_PLATFORM_SVC",
-    "password": "••••••••"
-  }'
+```sql
+-- Replace experimentation with your POSTGRES_SCHEMA.
+DELETE FROM experimentation.warehouse_connections;
 ```
 
-**Response**
+Credentials sent to the connector endpoints as query parameters may be in
+your access logs: rotate those too.
 
-```json
-{
-  "success": true,
-  "latency_ms": 142,
-  "error": null
-}
-```
+The ClickHouse, MySQL and Databricks drivers are no longer installed in the
+full image, and the `DATABRICKS_*`, `CLICKHOUSE_*` and `MYSQL_*` settings are
+no longer read.
 
----
-
-### GET /api/v1/warehouse/connections
-
-List all active warehouse connections. Passwords and credentials are never returned.
-
----
-
-### POST /api/v1/warehouse/connections
-
-Create a new warehouse connection. Requires DEVELOPER or ADMIN role.
-
-**Snowflake Example**
-
-```json
-{
-  "name": "Production Snowflake",
-  "warehouse_type": "snowflake",
-  "host": "myaccount.snowflakecomputing.com",
-  "database": "ANALYTICS",
-  "username": "EXP_PLATFORM_SVC",
-  "password": "service_account_password"
-}
-```
-
-**BigQuery Example**
-
-```json
-{
-  "name": "BigQuery Analytics",
-  "warehouse_type": "bigquery",
-  "project_id": "my-gcp-project",
-  "database": "analytics_dataset",
-  "username": "service-account@project.iam.gserviceaccount.com"
-}
-```
-
-**Redshift Example**
-
-```json
-{
-  "name": "Production Redshift",
-  "warehouse_type": "redshift",
-  "host": "my-cluster.abc123.us-east-1.redshift.amazonaws.com",
-  "database": "analytics",
-  "username": "exp_platform"
-}
-```
-
----
-
-### GET /api/v1/warehouse/connections/{connection_id}
-
-Retrieve a specific connection (no credentials in response).
-
----
-
-### DELETE /api/v1/warehouse/connections/{connection_id}
-
-Soft-delete a connection. Requires DEVELOPER or ADMIN role.
-
----
-
-### POST /api/v1/warehouse/sync/{experiment_id}
-
-Trigger a warehouse sync for a specific experiment. The sync pulls assignment and metric data from the warehouse and updates the platform's results.
-
-```bash
-curl -X POST "http://localhost:8000/api/v1/warehouse/sync/exp-uuid" \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "connection_id": "conn-uuid",
-    "assignments_table": "analytics.exp_assignments",
-    "events_table": "analytics.exp_events",
-    "date_range_start": "2026-02-01",
-    "date_range_end": "2026-02-28"
-  }'
-```
-
-**Response**
-
-```json
-{
-  "sync_id": "sync-uuid",
-  "experiment_id": "exp-uuid",
-  "status": "running",
-  "rows_processed": 0,
-  "started_at": "2026-03-02T14:00:00Z"
-}
-```
-
-Poll `GET /api/v1/warehouse/sync/{sync_id}` for status updates.
-
----
-
-## SQL Safety
-
-All SQL generated by the warehouse sync engine is parameterized and validated before execution. Table and column names are allowlisted against a schema validation step to prevent SQL injection. User-supplied query fragments are not accepted.
-
----
-
-## Expected Table Schemas
-
-### Assignments Table
-
-| Column | Type | Description |
-|--------|------|-------------|
-| `user_id` | string | User identifier |
-| `experiment_id` | string | Experiment UUID or key |
-| `variant_id` | string | Variant UUID or key |
-| `assigned_at` | timestamp | Assignment timestamp |
-
-### Events Table
-
-| Column | Type | Description |
-|--------|------|-------------|
-| `user_id` | string | User identifier |
-| `event_type` | string | Event name (must match platform metric keys) |
-| `event_value` | float | Optional numeric value |
-| `occurred_at` | timestamp | Event timestamp |
-
----
-
-## Permissions
-
-| Action | Minimum Role |
-|--------|-------------|
-| List / view connections | DEVELOPER |
-| Create / delete connections | DEVELOPER |
-| Test connection | DEVELOPER |
-| Trigger sync | DEVELOPER |
+See [Modules and profiles](../getting-started/modules.md) for what each
+profile includes.
