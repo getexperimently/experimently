@@ -3638,63 +3638,6 @@
         "title": "ErrorLogResponse",
         "type": "object"
       },
-      "EvaluateRequest": {
-        "properties": {
-          "attributes": {
-            "additionalProperties": true,
-            "default": {},
-            "title": "Attributes",
-            "type": "object"
-          },
-          "flagKey": {
-            "title": "Flagkey",
-            "type": "string"
-          },
-          "userId": {
-            "default": "",
-            "title": "Userid",
-            "type": "string"
-          }
-        },
-        "required": [
-          "flagKey"
-        ],
-        "title": "EvaluateRequest",
-        "type": "object"
-      },
-      "EvaluateResponse": {
-        "properties": {
-          "flagKey": {
-            "title": "Flagkey",
-            "type": "string"
-          },
-          "reason": {
-            "title": "Reason",
-            "type": "string"
-          },
-          "value": {
-            "title": "Value"
-          },
-          "variant": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Variant"
-          }
-        },
-        "required": [
-          "value",
-          "reason",
-          "flagKey"
-        ],
-        "title": "EvaluateResponse",
-        "type": "object"
-      },
       "EventBatchRequest": {
         "description": "Model for batch tracking multiple events.",
         "example": {
@@ -25853,116 +25796,6 @@
         ]
       }
     },
-    "/api/v1/openfeature/bulk-evaluate": {
-      "post": {
-        "description": "Evaluates multiple feature flags in a single request, reducing round-trips for SDK clients that need to pre-load several flags.",
-        "operationId": "bulk_evaluate_openfeature_flags_api_v1_openfeature_bulk_evaluate_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "items": {
-                  "$ref": "#/components/schemas/EvaluateRequest"
-                },
-                "title": "Bodies",
-                "type": "array"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/EvaluateResponse"
-                  },
-                  "title": "Response Bulk Evaluate Openfeature Flags Api V1 Openfeature Bulk Evaluate Post",
-                  "type": "array"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "401": {
-            "description": "Missing or invalid API key"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "APIKeyHeader": []
-          }
-        ],
-        "summary": "Bulk server-side flag evaluation (OpenFeature)",
-        "tags": [
-          "OpenFeature",
-          "OpenFeature"
-        ]
-      }
-    },
-    "/api/v1/openfeature/evaluate": {
-      "post": {
-        "description": "Evaluates a single feature flag server-side for the given userId and attributes. Use this endpoint when the client cannot perform local evaluation (e.g., in restricted browser environments).",
-        "operationId": "evaluate_openfeature_flag_api_v1_openfeature_evaluate_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/EvaluateRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EvaluateResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "401": {
-            "description": "Missing or invalid API key"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "APIKeyHeader": []
-          }
-        ],
-        "summary": "Server-side flag evaluation (OpenFeature)",
-        "tags": [
-          "OpenFeature",
-          "OpenFeature"
-        ]
-      }
-    },
     "/api/v1/openfeature/flags": {
       "get": {
         "description": "Returns all feature flag definitions accessible to this API key. OpenFeature providers fetch this endpoint once on initialization to warm their local flag cache and perform client-side evaluation without a per-flag network round-trip.",
@@ -25991,7 +25824,8 @@
         "tags": [
           "OpenFeature",
           "OpenFeature"
-        ]
+        ],
+        "deprecated": true
       }
     },
     "/api/v1/power/curve": {

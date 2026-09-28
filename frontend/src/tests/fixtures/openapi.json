@@ -865,18 +865,6 @@
         "summary": "Send Test Notification"
       }
     },
-    "/api/v1/openfeature/bulk-evaluate": {
-      "post": {
-        "operationId": "bulk_evaluate_openfeature_flags_api_v1_openfeature_bulk_evaluate_post",
-        "summary": "Bulk server-side flag evaluation (OpenFeature)"
-      }
-    },
-    "/api/v1/openfeature/evaluate": {
-      "post": {
-        "operationId": "evaluate_openfeature_flag_api_v1_openfeature_evaluate_post",
-        "summary": "Server-side flag evaluation (OpenFeature)"
-      }
-    },
     "/api/v1/openfeature/flags": {
       "get": {
         "operationId": "get_openfeature_flags_api_v1_openfeature_flags_get",
