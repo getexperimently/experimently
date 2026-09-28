@@ -10,6 +10,8 @@ from alembic.script import ScriptDirectory
 from sqlalchemy import MetaData, Table, create_engine, inspect, text
 from sqlalchemy.orm import sessionmaker
 
+from backend.tests.conftest import _BASE_DB_URL
+
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -21,7 +23,7 @@ def test_db_url():
     # Use environment variable or default to a test database
     return os.environ.get(
         "TEST_DATABASE_URL",
-        "postgresql://postgres:postgres@localhost:5432/experimentation_migration_test",
+        f"{_BASE_DB_URL}/experimentation_migration_test",
     )
 
 
