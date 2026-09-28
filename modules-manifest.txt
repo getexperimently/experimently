@@ -298,7 +298,7 @@ modules/frontend
 #
 # modules/backend/app/register.py is `modules.register(hooks)` (re-exported by
 # modules/__init__.py): it validates the modules' settings, registers the
-# seven model modules, installs the audit signer, mounts the seven routers
+# nine model modules, installs the audit signer, mounts the seven routers
 # behind authentication, registers the five capabilities and passes the ten
 # module names to hooks.register_modules(). modules/backend/app/settings.py
 # holds `ModulesSettings` -- the audit signing key, HIPAA, SSO, ETL and
