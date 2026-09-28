@@ -144,7 +144,6 @@ class ResultsStreamingService:
         # Try to pull per-variant counts from DB
         try:
             from backend.app.models.assignment import Assignment
-            from backend.app.models.event import Event
 
             # Assignment counts per variant
             assignment_rows = (
@@ -170,23 +169,14 @@ class ResultsStreamingService:
                     else None,
                 )
 
-            from backend.app.services.event_matching import conversion_event_filter
+            from backend.app.services.event_matching import count_converting_users
 
-            conv_filter = [
-                Event.experiment_id == experiment_id,
-                conversion_event_filter(
-                    primary_metric.event_name if primary_metric else None
-                ),
-            ]
-
-            conversion_rows = (
-                db.query(Event.variant_id, func.count(Event.id).label("cnt"))
-                .filter(*conv_filter)
-                .group_by(Event.variant_id)
-                .all()
-            )
+            # Converting users per variant, as /results counts them (#233):
+            # a user with several conversion events counts once.
+            event_name = primary_metric.event_name if primary_metric else None
             conversion_map: Dict[str, int] = {
-                str(row.variant_id): int(row.cnt) for row in conversion_rows
+                str(v.id): count_converting_users(db, experiment_id, v.id, event_name)
+                for v in variants
             }
 
         except Exception as exc:
