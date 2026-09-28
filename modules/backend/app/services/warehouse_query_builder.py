@@ -260,7 +260,7 @@ def _exposures_cte(
     ]
     s = dialect.string_type
     return (
-        "exposures AS (\n"
+        "exposures AS (\n"  # nosec B608 - names pass render_column/render_table (fullmatch, then quoted), key and times are rendered literals, verify_generated_sql re-parses
         f"  SELECT CAST({unit} AS {s}) AS unit_id,\n"
         f"    SUBSTR(CAST({variant} AS {s}), 1, {LABEL_MAX_CHARS}) AS variant,\n"
         f"    {exposed} AS exposed_at\n"
@@ -372,7 +372,7 @@ def build_metric_query(
     sql = (
         "WITH "
         + _exposures_cte(dialect, assignment, experiment_key, start, end)
-        + ",\nunits AS (\n"
+        + ",\nunits AS (\n"  # nosec B608 - names pass render_column/render_table (fullmatch, then quoted), literals are rendered or refused, verify_generated_sql re-parses
         "  SELECT unit_id, MIN(variant) AS variant, MIN(exposed_at) AS first_exposed_at,\n"
         "    COUNT(DISTINCT variant) AS n_variants\n"
         "  FROM exposures\n"
@@ -444,7 +444,7 @@ def build_diagnostics_query(
     sql = (
         "WITH "
         + _exposures_cte(dialect, assignment, experiment_key, start, end)
-        + ",\nunits AS (\n"
+        + ",\nunits AS (\n"  # nosec B608 - only _exposures_cte output and fixed text, verify_generated_sql re-parses
         "  SELECT unit_id, COUNT(DISTINCT variant) AS n_variants\n"
         "  FROM exposures\n"
         "  WHERE unit_id IS NOT NULL AND variant IS NOT NULL\n"

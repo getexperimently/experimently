@@ -115,9 +115,17 @@ class TestDeclaredDependencies:
         assert script._canonical("ruamel.yaml") == "ruamel-yaml"
 
     @pytest.mark.modules
-    def test_the_shipped_modules_closure_includes_sqlglot(self, script):
+    def test_the_modules_lock_pins_sqlglot(self, script):
         """The warehouse query builder's parser ships in the full image
-        (modules/requirements.lock, absent from a core build)."""
+        (modules/requirements.lock, absent from a core build). Read from the
+        lock itself, so it holds in a job that installs only the core pins."""
+        assert "sqlglot" in script._declared_pins()
+
+    @pytest.mark.modules
+    def test_the_shipped_modules_closure_includes_sqlglot(self, script):
+        """The closure walks installed distributions only, so this half needs
+        the modules' pins installed (the Release Gate installs the core set)."""
+        pytest.importorskip("sqlglot")
         assert "sqlglot" in script.declared_python_dependencies()
 
 
