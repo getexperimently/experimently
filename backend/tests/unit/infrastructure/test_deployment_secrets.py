@@ -315,3 +315,172 @@ def test_without_the_database_host_the_start_up_check_refuses_the_task(name: str
         environment, full_profile=True, root=STACKS_DIR / "no-dotenv-here"
     )
     assert [p.split(" ", 1)[0] for p in problems] == ["POSTGRES_SERVER"]
+
+
+# ---------------------------------------------------------------------------
+# The browser origins each deployment allows (#130)
+# ---------------------------------------------------------------------------
+
+#: `(APP_ENV, PUBLIC_BASE_URL)` for the two hardened deployments the stacks
+#: make. Staging uses the URL it is published at; production the one above.
+DEPLOYMENTS = {
+    "staging": ("staging", "https://app.staging.getexperimently.com"),
+    "production": ("prod", _REALISTIC["PUBLIC_BASE_URL"]),
+}
+
+#: Imports the real app in the container's environment and reports the
+#: allow-list, what main.py logged at start-up, and the CORS headers on the
+#: wire. A core profile hides the modules package, as a core image has none.
+_CORS_PROBE = """
+import json, logging, sys
+
+if sys.argv[1] == "core":
+    sys.modules["modules"] = None
+
+logged = []
+
+
+class _Keep(logging.Handler):
+    def emit(self, record):
+        logged.append([record.levelname, record.getMessage()])
+
+
+logging.getLogger("backend.app.main").addHandler(_Keep(logging.INFO))
+
+from fastapi.testclient import TestClient
+
+import backend.app.core.config as config
+from backend.app.main import app
+from backend.app.modules_loader import modules_active
+
+client = TestClient(app, base_url=config.settings.PUBLIC_BASE_URL)
+wire = {}
+for origin in json.loads(sys.argv[2]):
+    preflight = client.options(
+        "/api/v1/experiments/",
+        headers={"Origin": origin, "Access-Control-Request-Method": "GET"},
+    )
+    simple = client.get("/health/live", headers={"Origin": origin})
+    wire[origin] = {
+        "preflight_status": preflight.status_code,
+        "preflight_acao": preflight.headers.get("access-control-allow-origin"),
+        "preflight_acac": preflight.headers.get("access-control-allow-credentials"),
+        "get_status": simple.status_code,
+        "get_acao": simple.headers.get("access-control-allow-origin"),
+        "get_acac": simple.headers.get("access-control-allow-credentials"),
+    }
+print("RESULT " + json.dumps({
+    "environment": config.settings.ENVIRONMENT,
+    "modules": modules_active(),
+    "allow_list": config.settings.cors_allowed_origins,
+    "logged": [entry for entry in logged if "CORS" in entry[1]],
+    "wire": wire,
+}))
+"""
+
+_OTHER_ORIGINS = [
+    "http://localhost:3000",
+    "http://localhost:3100",
+    "https://elsewhere.example",
+]
+
+
+def _run_argv(
+    environment: dict[str, str], script: str, *argv: str
+) -> subprocess.CompletedProcess:
+    """:func:`_run`, with arguments for *script*."""
+    env = {
+        "PATH": os.environ.get("PATH", ""),
+        "HOME": os.environ.get("HOME", ""),
+        "PYTHONPATH": str(REPO_ROOT),
+        **environment,
+    }
+    return subprocess.run(
+        [sys.executable, "-c", script, *argv],
+        cwd=REPO_ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+
+def _cors_probe(name: str, profile: str, deployment: str, **extra: str) -> dict:
+    import json
+
+    has_modules = (REPO_ROOT / "modules" / "backend" / "app").is_dir()
+    if profile == "full" and not has_modules:
+        pytest.skip("core checkout: no modules package")
+    app_env, public_base_url = DEPLOYMENTS[deployment]
+    environment = container_environment(STACKS[name], profile=profile)
+    configured = {"CORS_ORIGINS", "BACKEND_CORS_ORIGINS", "DASHBOARD_ORIGINS"}
+    assert not configured & set(environment), (
+        f"{STACKS[name].name} now sets {sorted(configured & set(environment))}; "
+        "these tests expect it to set none"
+    )
+    environment.update(APP_ENV=app_env, PUBLIC_BASE_URL=public_base_url, **extra)
+    result = _run_argv(environment, _CORS_PROBE, profile, json.dumps(_OTHER_ORIGINS))
+    lines = [ln for ln in result.stdout.splitlines() if ln.startswith("RESULT ")]
+    assert result.returncode == 0 and lines, (
+        f"{STACKS[name].name} ({profile}, {deployment}) did not start:\n"
+        f"{result.stderr[-3000:]}"
+    )
+    report = json.loads(lines[-1][len("RESULT ") :])
+    assert report["modules"] is (profile == "full"), report["modules"]
+    return report
+
+
+@pytest.mark.unit
+@pytest.mark.regression
+@pytest.mark.parametrize("deployment", sorted(DEPLOYMENTS))
+@pytest.mark.parametrize("profile", ["core", "full"])
+@pytest.mark.parametrize("name", sorted(STACKS))
+def test_the_task_definition_allows_no_other_browser_origin(
+    name: str, profile: str, deployment: str
+):
+    """Neither task definition sets a CORS setting, and its dashboard is served
+    from the API's own origin: the allow-list is exactly empty, the API still
+    starts and says so once, and a browser on any other origin gets no
+    Access-Control-Allow-Origin."""
+    result = _cors_probe(name, profile, deployment)
+    environment = "staging" if deployment == "staging" else "production"
+    assert result["environment"] == environment
+    assert result["allow_list"] == []
+    assert result["logged"] == [
+        [
+            "INFO",
+            f"CORS allow-list ({environment}): none: same-origin only. To let a "
+            "site on another origin call this API from a browser, add its origin "
+            "to CORS_ORIGINS.",
+        ]
+    ]
+    for origin, wire in result["wire"].items():
+        assert wire["preflight_status"] == 400, (origin, wire)
+        assert wire["preflight_acao"] is None, (origin, wire)
+        assert wire["get_status"] == 200, (origin, wire)
+        assert wire["get_acao"] is None, (origin, wire)
+        assert wire["preflight_acac"] is None, (origin, wire)
+        assert wire["get_acac"] is None, (origin, wire)
+
+
+@pytest.mark.unit
+@pytest.mark.regression
+@pytest.mark.parametrize("deployment", sorted(DEPLOYMENTS))
+@pytest.mark.parametrize("profile", ["core", "full"])
+@pytest.mark.parametrize("name", sorted(STACKS))
+def test_a_wildcard_is_logged_and_never_allows_credentials(
+    name: str, profile: str, deployment: str
+):
+    """The negative control: the same deployment with CORS_ORIGINS=* starts,
+    logs a WARNING, and answers every origin with `*` and no credentials."""
+    result = _cors_probe(name, profile, deployment, CORS_ORIGINS="*")
+    assert result["allow_list"] == ["*"]
+    assert [level for level, _ in result["logged"]] == ["INFO", "WARNING"]
+    assert result["logged"][1][1].startswith(
+        "The CORS allow-list contains '*', so every website can call this API"
+    )
+    for origin, wire in result["wire"].items():
+        assert wire["preflight_status"] == 200, (origin, wire)
+        assert wire["preflight_acao"] == "*", (origin, wire)
+        assert wire["get_acao"] == "*", (origin, wire)
+        assert wire["preflight_acac"] is None, (origin, wire)
+        assert wire["get_acac"] is None, (origin, wire)

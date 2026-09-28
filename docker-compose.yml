@@ -103,6 +103,8 @@ services:
       REDIS_PORT: "6379"
       REDIS_REQUIRED: ${REDIS_REQUIRED:-false}
       # --- http ---
+      # Development origins: the local dashboard and demo apps. In staging or
+      # production set CORS_ORIGINS to the sites that run the browser SDK.
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://localhost:3100,http://localhost:3200,http://localhost:3300}
       METRICS_TOKEN: ${METRICS_TOKEN:-}
       # --- demo profile: where the seeds write the demo apps' API keys and the

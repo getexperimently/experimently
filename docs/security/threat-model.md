@@ -65,7 +65,10 @@ BOUNDARY 3: Application Layer — Trusted with Auth
     Middleware stack, outermost first — the order is what decides which
     layers see a response that an inner one short-circuits, so it is stated
     as an order and pinned by backend/tests/unit/middleware/:
-      CORSMiddleware            → Origin allowlist from settings.BACKEND_CORS_ORIGINS.
+      CORSMiddleware            → Origin allowlist: settings.cors_allowed_origins
+                                  (CORS_ORIGINS/BACKEND_CORS_ORIGINS plus
+                                  DASHBOARD_ORIGINS; none in staging/production
+                                  unless configured). No credentials.
                                   Outermost, so a 429 the rate limiter returns
                                   without calling through still carries the
                                   CORS headers a browser needs before it will
@@ -324,7 +327,7 @@ D
 | Control | Where | What It Does |
 |---------|-------|--------------|
 | Security headers | `backend/app/middleware/security_middleware.py` | HSTS (1yr + preload), CSP (`default-src 'none'`), X-Frame-Options: DENY, X-Content-Type-Options: nosniff, Referrer-Policy, Permissions-Policy |
-| CORS allowlist | `main.py` + `settings.BACKEND_CORS_ORIGINS` | Only configured origins may make credentialed requests |
+| CORS allowlist | `main.py` + `settings.cors_allowed_origins` | Only configured origins (in development and test, the local apps when none is configured) may read responses cross-origin; credentials are never allowed cross-origin |
 | RBAC enforcement | `backend/app/core/permissions.py` | Role matrix applied to all endpoints via `check_permission()` |
 | bcrypt password hashing | `backend/app/core/security.py` | `CryptContext(schemes=["bcrypt"])` with auto-deprecation |
 | API key expiry and revocation | `backend/app/models/api_key.py`, `backend/app/api/deps.py` | `expires_at` and `is_active`, checked by `is_valid` on every API-key request. The `scopes` column does not limit a key today |
