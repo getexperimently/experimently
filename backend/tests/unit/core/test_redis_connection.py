@@ -18,7 +18,11 @@ The gate has three parts, and each is needed:
   (tests excluded) whose callee is ``Redis``, ``StrictRedis``,
   ``RedisCluster``, ``ConnectionPool`` or ``from_url`` is found by walking the
   AST. The only ones allowed are the two in the helper. A raw
-  ``redis.Redis(host=...)`` anywhere else fails here.
+  ``redis.Redis(host=...)`` anywhere else fails here. A call is skipped only
+  when the file imports the name it is made through from a package other than
+  ``redis`` (``httpcore.ConnectionPool``, or ``ConnectionPool`` imported from
+  ``httpcore``); one made through a ``redis`` import, or through a name of
+  unknown origin, is still counted.
 * **The call-site scan.** Every call of ``create_redis_client`` /
   ``create_async_redis_client`` must be in :data:`SITES`, with a driver.
 * **The drive.** Each site is executed against a recording stand-in for the
@@ -101,6 +105,69 @@ def _is_test_path(relative: Path) -> bool:
     )
 
 
+def _is_redis_module(module: str | None) -> bool:
+    return module is not None and (module == "redis" or module.startswith("redis."))
+
+
+def _import_origins(tree: ast.AST) -> dict[str, bool]:
+    """``{bound name: True if it comes from the redis package}`` for every import.
+
+    A name bound by more than one import counts as redis if any of them is.
+    """
+    origins: dict[str, bool] = {}
+
+    def bind(name: str, is_redis: bool) -> None:
+        origins[name] = origins.get(name, False) or is_redis
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.asname:
+                    bind(alias.asname, _is_redis_module(alias.name))
+                else:
+                    # ``import a.b`` binds ``a``.
+                    bind(alias.name.split(".")[0], _is_redis_module(alias.name))
+        elif isinstance(node, ast.ImportFrom):
+            from_redis = node.level == 0 and _is_redis_module(node.module)
+            for alias in node.names:
+                bind(alias.asname or alias.name, from_redis)
+    return origins
+
+
+def _redis_aliases(tree: ast.AST) -> dict[str, str]:
+    """``{local name: imported name}`` for ``from redis... import X as Y``."""
+    aliases: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.ImportFrom)
+            and node.level == 0
+            and _is_redis_module(node.module)
+        ):
+            for alias in node.names:
+                if alias.asname:
+                    aliases[alias.asname] = alias.name
+    return aliases
+
+
+def _root_name(expr: ast.expr) -> str | None:
+    """The name an attribute chain starts from (``a`` in ``a.b.c``), if any."""
+    while isinstance(expr, ast.Attribute):
+        expr = expr.value
+    return expr.id if isinstance(expr, ast.Name) else None
+
+
+def _made_through_another_package(call: ast.Call, origins: dict[str, bool]) -> bool:
+    """True only when the callee is reached through a non-redis import."""
+    root = (
+        call.func.id
+        if isinstance(call.func, ast.Name)
+        else _root_name(call.func.value)
+        if isinstance(call.func, ast.Attribute)
+        else None
+    )
+    return root is not None and origins.get(root) is False
+
+
 def _callee_name(call: ast.Call) -> str | None:
     if isinstance(call.func, ast.Attribute):
         return call.func.attr
@@ -124,8 +191,15 @@ def _calls_with_scope(tree: ast.AST):
     yield from visit(tree, [])
 
 
-def scan(names, roots=SCANNED_ROOTS) -> dict[tuple[str, str], tuple[int, str]]:
-    """``{(path, enclosing function): (line, callee)}`` for calls of ``names``."""
+def scan(
+    names, roots=SCANNED_ROOTS, *, redis_only: bool = False
+) -> dict[tuple[str, str], tuple[int, str]]:
+    """``{(path, enclosing function): (line, callee)}`` for calls of ``names``.
+
+    ``redis_only`` (the constructor scan) skips a call made through a name the
+    file imports from a package other than ``redis``; the helper scan keeps
+    every call, since the helpers are imported from ``backend``.
+    """
     found: dict[tuple[str, str], tuple[int, str]] = {}
     for root in roots:
         base = REPO_ROOT / root
@@ -136,9 +210,16 @@ def scan(names, roots=SCANNED_ROOTS) -> dict[tuple[str, str], tuple[int, str]]:
             if _is_test_path(relative) or "node_modules" in relative.parts:
                 continue
             tree = ast.parse(path.read_text(), filename=str(relative))
+            origins = _import_origins(tree)
+            aliases = _redis_aliases(tree) if redis_only else {}
             for scope, call in _calls_with_scope(tree):
                 callee = _callee_name(call)
-                if callee in names:
+                if isinstance(call.func, ast.Name):
+                    # ``from redis import Redis as R; R(...)`` is a Redis(...).
+                    callee = aliases.get(callee, callee)
+                if callee in names and not (
+                    redis_only and _made_through_another_package(call, origins)
+                ):
                     key = (relative.as_posix(), scope)
                     assert key not in found, f"two Redis client calls in {key}"
                     found[key] = (call.lineno, callee)
@@ -252,7 +333,7 @@ def _record(monkeypatch) -> tuple[Recorder, Recorder]:
 @pytest.mark.regression
 def test_redis_clients_are_constructed_only_in_the_helper():
     """A raw ``redis.Redis(...)`` outside redis_client.py fails here (#236)."""
-    found = scan(CONSTRUCTORS)
+    found = scan(CONSTRUCTORS, redis_only=True)
     assert set(found) == ALLOWED_CONSTRUCTORS, (
         "A Redis client is constructed outside backend/app/core/redis_client.py. "
         "Build it with create_redis_client()/create_async_redis_client(), which "
@@ -294,17 +375,46 @@ def test_the_scans_are_not_blind(tmp_path, monkeypatch):
     module = tmp_path / "modules" / "backend" / "app" / "m.py"
     module.parent.mkdir(parents=True)
     module.write_text("import redis\ndef h():\n    redis.asyncio.Redis(host='h')\n")
+    # Each spelling that reaches the redis package is found, however imported.
+    spellings = tmp_path / "modules" / "backend" / "app" / "spellings.py"
+    spellings.write_text(
+        "from redis import ConnectionPool\n"
+        "from redis.asyncio import ConnectionPool as AsyncPool\n"
+        "from redis import asyncio as aioredis\n"
+        "import redis as r\n"
+        "import redis.asyncio\n"
+        "def p():\n    ConnectionPool(host='h')\n"
+        "def q():\n    AsyncPool(host='h')\n"
+        "def s():\n    aioredis.ConnectionPool(host='h')\n"
+        "def t():\n    r.Redis(host='h')\n"
+        "def u():\n    redis.asyncio.ConnectionPool(host='h')\n"
+        "def v(factory):\n    factory().from_url('redis://h')\n"
+    )
+    # A same-named constructor of another package is not a Redis client.
+    other = tmp_path / "modules" / "backend" / "app" / "other.py"
+    other.write_text(
+        "import httpcore\n"
+        "from httpcore import ConnectionPool\n"
+        "def w():\n    httpcore.ConnectionPool(retries=0)\n"
+        "def x():\n    ConnectionPool(retries=0)\n"
+    )
     ignored = tmp_path / "backend" / "tests" / "test_x.py"
     ignored.parent.mkdir(parents=True)
     ignored.write_text("import redis\nredis.Redis()\ncreate_redis_client()\n")
     monkeypatch.setattr(sys.modules[__name__], "REPO_ROOT", tmp_path)
-    assert set(scan(CONSTRUCTORS)) == {
+    assert set(scan(CONSTRUCTORS, redis_only=True)) == {
         ("backend/app/planted.py", "a"),
         ("backend/app/planted.py", "b"),
         ("backend/app/planted.py", "c"),
         ("backend/app/planted.py", "d"),
         ("backend/app/planted.py", "K.e"),
         ("modules/backend/app/m.py", "h"),
+        ("modules/backend/app/spellings.py", "p"),
+        ("modules/backend/app/spellings.py", "q"),
+        ("modules/backend/app/spellings.py", "s"),
+        ("modules/backend/app/spellings.py", "t"),
+        ("modules/backend/app/spellings.py", "u"),
+        ("modules/backend/app/spellings.py", "v"),
     }
     assert set(scan(HELPERS)) == {
         ("backend/app/planted.py", "f"),
