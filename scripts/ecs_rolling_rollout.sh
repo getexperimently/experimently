@@ -88,13 +88,13 @@ TASK_DEFINITION="$3"
 
 ARN_RE='^arn:aws[a-z-]*:ecs:[a-z0-9-]+:[0-9]{12}:task-definition/[A-Za-z0-9_-]+:[0-9]+$'
 if ! [[ "$TASK_DEFINITION" =~ $ARN_RE ]]; then
-  echo "::error::Refusing to roll $SERVICE out to '$TASK_DEFINITION': not a registered revision ARN. A family resolves to whatever registered last. Nothing was changed."
+  echo "::error::Refusing to roll $SERVICE out to '${TASK_DEFINITION##*/}': not a registered revision ARN. A family resolves to whatever registered last. Nothing was changed."
   exit 1
 fi
 # Given but empty is a caller whose "serving before" value went missing: that
 # must not quietly switch the guard off.
 if [ "$EXPECT_GIVEN" = 1 ] && ! [[ "$EXPECT_PRIMARY" =~ $ARN_RE ]]; then
-  echo "::error::Refusing to roll $SERVICE out: --expect-primary '$EXPECT_PRIMARY' is not a registered revision ARN. Nothing was changed."
+  echo "::error::Refusing to roll $SERVICE out: --expect-primary '${EXPECT_PRIMARY##*/}' is not a registered revision ARN. Nothing was changed."
   exit 1
 fi
 
@@ -103,6 +103,14 @@ describe() {
 }
 
 SVC=""
+# What this script prints is public (a workflow log): revisions are named
+# family:revision, images without their registry host, and free text from AWS
+# -- service events, a stopped task's reason -- has every run of twelve digits
+# (an account ID in an ARN or a registry host) replaced.
+scrub() {
+  sed -E 's/(^|[^0-9A-Za-z])[0-9]{12}([^0-9A-Za-z]|$)/\1<account>\2/g'
+}
+
 # The last 10 service events and one stopped task's reason, best effort: a
 # failure to read them must not change the verdict. The stopped task is one of
 # THIS revision's: the service's newest stopped tasks are read and filtered on
@@ -110,7 +118,7 @@ SVC=""
 # as this rollout's.
 diagnose() {
   echo "--- $SERVICE: last service events ---"
-  jq -r '[.events[]?][:10][] | "\(.createdAt // "")  \(.message // "")"' <<<"$SVC" || true
+  jq -r '[.events[]?][:10][] | "\(.createdAt // "")  \(.message // "")"' <<<"$SVC" | scrub || true
   local stopped reason
   stopped="$(aws ecs list-tasks --cluster "$CLUSTER" --service-name "$SERVICE" \
                --desired-status STOPPED --query 'taskArns[:20]' --output text 2>/dev/null)" || stopped=""
@@ -123,16 +131,23 @@ diagnose() {
   fi
   if [ -n "$reason" ] && [ "$reason" != "None" ]; then
     echo "--- one stopped task of ${TASK_DEFINITION##*/} ---"
-    echo "$reason"
+    scrub <<<"$reason"
   else
     echo "(no stopped task of ${TASK_DEFINITION##*/} could be read)"
   fi
   echo "---"
 }
 
+# The image without its registry host (<account>.dkr.ecr...).
 image_of() {
-  aws ecs describe-task-definition --task-definition "$1" \
-    --query 'taskDefinition.containerDefinitions[0].image' --output text 2>/dev/null || echo "image unknown"
+  local image=""
+  image="$(aws ecs describe-task-definition --task-definition "$1" \
+             --query 'taskDefinition.containerDefinitions[0].image' --output text 2>/dev/null)" || image=""
+  if [ -n "$image" ]; then
+    echo "${image#*/}"
+  else
+    echo "image unknown"
+  fi
 }
 
 # --- before any mutation ------------------------------------------------------
@@ -170,7 +185,7 @@ if [ -z "$BEFORE" ]; then
   echo "::error::$SERVICE does not have exactly one PRIMARY deployment; this run cannot tell what is serving. Nothing was changed."
   exit 1
 fi
-echo "$SERVICE: serving before this run: $BEFORE" >&2
+echo "$SERVICE: serving before this run: ${BEFORE##*/}" >&2
 
 if [ "$EXPECT_GIVEN" = 1 ] && [ "$BEFORE" != "$EXPECT_PRIMARY" ]; then
   echo "::error title=$SERVICE changed during this run::$SERVICE's PRIMARY deployment is ${BEFORE##*/}, not ${EXPECT_PRIMARY##*/}, which this run read earlier. A Rollback run, another Deploy or a cdk deploy changed it while this run worked; this run did not change it back, and did not roll ${TASK_DEFINITION##*/} out. Nothing was changed."

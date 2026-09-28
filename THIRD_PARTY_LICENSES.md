@@ -19,7 +19,7 @@ Everything the images install: `backend/requirements/runtime.lock` (the core pro
 
 Development-only dependencies — what `backend/requirements.txt` adds for test jobs and developer environments, and `infrastructure/cdk/requirements.txt` for the deployment toolchain — are **not** listed. They are not redistributed: nobody receives them from this project, they are fetched from PyPI when you build from source. They are audited for advisories separately, by `scripts/audit_dependencies.py` against `security/dependency-audit.toml`.
 
-#### MIT (32)
+#### MIT (33)
 
 | Package | Version |
 |---|---|
@@ -51,6 +51,7 @@ Development-only dependencies — what `backend/requirements.txt` adds for test 
 | `sendgrid` | 6.12.5 |
 | `six` | 1.17.0 |
 | `slack_sdk` | 3.44.1 |
+| `sqlglot` | 30.20.0 |
 | `truststore` | 0.10.4 |
 | `typing-inspection` | 0.4.4 |
 | `urllib3` | 2.7.0 |

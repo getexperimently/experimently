@@ -530,13 +530,37 @@ def environment_problems(allow_foreign_platform: bool = False) -> list[str]:
 
 def python_rows() -> list[tuple[str, str, str]]:
     raw = json.loads(run([sys.executable, "-m", "piplicenses", "--format=json"]))
-    declared = declared_python_dependencies()
+    return python_rows_from(raw, declared_python_dependencies())
+
+
+def python_rows_from(raw: list[dict], declared) -> list[tuple[str, str, str]]:
+    """The shipped packages' rows, refusing any whose licence came back blank.
+
+    A package that declares its licence only as a PEP 639
+    ``License-Expression`` (sqlglot, for one) shows an empty ``License``
+    field in ``pip show``; pip-licenses 5.5 reads the expression, but an
+    older one, or a package with no licence metadata at all, reports ``""``
+    or ``UNKNOWN``.  A blank row would render as a licence section with no
+    name and pass ``--check``, so it is refused instead, naming the package.
+    """
     rows = []
+    blank = []
     for pkg in raw:
         name = pkg["Name"]
         if _canonical(name) not in declared:
             continue
-        rows.append((name, pkg["Version"], normalise(pkg["License"])))
+        licence = normalise(pkg.get("License") or "")
+        if not licence or licence.upper() == "UNKNOWN":
+            blank.append(f"{name} {pkg.get('Version', '?')}")
+            continue
+        rows.append((name, pkg["Version"], licence))
+    if blank:
+        raise SystemExit(
+            "pip-licenses reported no licence for "
+            + ", ".join(sorted(blank))
+            + ". Read it from the package's own metadata or LICENSE file and fix the"
+            " environment (pip-licenses version) rather than writing a blank row."
+        )
     return rows
 
 

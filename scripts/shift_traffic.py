@@ -78,6 +78,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import api_serving
+from public_text import redact, short_arn
 
 #: Every AWS CLI operation this script may run. The one write is
 #: continue-deployment. A test pins the exact set, so stop-deployment cannot
@@ -148,7 +149,7 @@ def replacement_ready(
         if t.get("taskDefinition") == arn
     ]
     if len(task_sets) != 1:
-        return False, f"{len(task_sets)} task sets run {arn}; expected one"
+        return False, f"{len(task_sets)} task sets run {short_arn(arn)}; expected one"
     task_set = task_sets[0]
     desired = int(task_set.get("computedDesiredCount") or 0)
     if desired < 1:
@@ -163,9 +164,9 @@ def replacement_ready(
     states = Counter(t.get("TargetHealth", {}).get("State", "?") for t in targets)
     summary = ", ".join(f"{n} {state}" for state, n in sorted(states.items()))
     if states["healthy"] == len(targets) == desired:
-        return True, f"{desired} of {desired} targets healthy in {group}"
+        return True, f"{desired} of {desired} targets healthy in {short_arn(group)}"
     return False, (
-        f"{states['healthy']} of {desired} desired targets healthy in {group} "
+        f"{states['healthy']} of {desired} desired targets healthy in {short_arn(group)} "
         f"({summary or 'no targets registered'})"
     )
 
@@ -179,7 +180,7 @@ def _output(**values: str) -> None:
 
 
 def _fail(result: str, title: str, message: str, **outputs: str) -> int:
-    print(f"::error title={title}::{message}")
+    print(f"::error title={title}::{redact(message)}")
     _output(result=result, **outputs)
     return 1
 
@@ -249,7 +250,7 @@ def _alarm(
             "but CodeDeploy reports no rollback for it (no rollbackInfo), so this "
             "run cannot say the API is going back. This run stopped nothing. "
             "Check what is serving before anything else: python3 "
-            f"scripts/api_serving.py {cluster} {service} {arn} (exit 1: this "
+            f"scripts/api_serving.py {cluster} {service} {short_arn(arn)} (exit 1: this "
             "revision is not serving)."
         )
     return _fail(
@@ -399,7 +400,7 @@ def shift(
                     "Could not tell whether the API is serving",
                     f"{sentence}. Deployment {deployment_id} is {status} and was "
                     "not stopped; check it by hand: python3 scripts/api_serving.py "
-                    f"{cluster} {service} {arn}",
+                    f"{cluster} {service} {short_arn(arn)}",
                 )
             if status == "Succeeded":
                 return _fail(
