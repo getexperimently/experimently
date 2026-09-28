@@ -39,8 +39,11 @@ db: ## Start Postgres and Redis only
 	$(COMPOSE) up -d --wait postgres redis
 
 .PHONY: bootstrap
+# ENVIRONMENT is set here as on `dev`: the bootstrap creates a first
+# administrator with the development default password only when ENVIRONMENT
+# says development (or test), not when it was left unset.
 bootstrap: ## Create the schema and the first administrator (idempotent)
-	$(PY) -m backend.app.db.bootstrap
+	ENVIRONMENT=development $(PY) -m backend.app.db.bootstrap
 
 # ---------------------------------------------------------------------------
 # Run
@@ -49,7 +52,8 @@ bootstrap: ## Create the schema and the first administrator (idempotent)
 .PHONY: dev
 # ENVIRONMENT is declared on the `dev` recipe, not left to the default, so the
 # *process* environment says development (a value in .env.dev does not reach
-# os.environ, and the configuration validators read os.environ).
+# os.environ, and the configuration validators read os.environ). The API
+# refuses to start when ENVIRONMENT is not set at all.
 dev: db bootstrap ## Run the API (:8000) with reload; start the dashboard with `make web`
 	ENVIRONMENT=development AUTH_PROVIDER=local $(VENV)/bin/uvicorn backend.app.main:app --reload --port 8000
 

@@ -40,7 +40,7 @@ LaunchedEffect(Unit) {
 
 ## Running the Example
 
-1. Start the backend server from the repo root: `uvicorn backend.app.main:app --port 8000`
+1. Start the backend server from the repo root: `ENVIRONMENT=development uvicorn backend.app.main:app --port 8000`
    and create an API key (for example with `python backend/scripts/seed_sdk_contract.py`).
 2. Open the project in Android Studio and paste the key into `ExampleActivity.kt`.
 3. Run on an emulator (use `http://10.0.2.2:8000` to reach localhost).

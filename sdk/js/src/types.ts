@@ -43,6 +43,19 @@ export interface Assignment {
   variantName: string;
   isControl: boolean;
   configuration: Record<string, unknown> | null;
+  /**
+   * `true` when the server enrolled the user in the experiment; `false` when it did not
+   * (global holdout, mutual exclusion group or targeting rules) and returned the control
+   * variant so you render the default experience, with no exposure recorded.
+   * `undefined` when the server predates the field: such a server cannot tell you, so do
+   * not read `undefined` as either answer.
+   */
+  assigned?: boolean;
+  /**
+   * Why the server decided as it did: `'assigned'`, `'holdout'`, `'mutual_exclusion'` or
+   * `'targeting'`. `undefined` when the server did not send one.
+   */
+  reason?: string;
 }
 
 /** Result of `GET /api/v1/feature-flags/evaluate/{flag_key}?user_id=…[&context=…]`. */
@@ -99,6 +112,10 @@ export interface AssignResponse {
   variant_name: string;
   is_control?: boolean;
   configuration?: Record<string, unknown> | null;
+  /** `false` when the user was not enrolled (control returned); absent on older servers. */
+  assigned?: boolean;
+  /** `assigned` | `holdout` | `mutual_exclusion` | `targeting`; absent on older servers. */
+  reason?: string;
 }
 
 /** `GET /api/v1/feature-flags/evaluate/{flag_key}?user_id=…[&context=<url-encoded JSON>]` */
