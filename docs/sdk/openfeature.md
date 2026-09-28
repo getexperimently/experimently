@@ -337,10 +337,16 @@ python -m pytest sdk/openfeature-python/tests -q -o addopts="" -p no:cacheprovid
 ## Backend API endpoints
 
 Both providers are thin adapters over the platform SDKs and use the same public endpoints as every
-other SDK. There are **no OpenFeature-specific endpoints in the SDK contract**: the former
-`/api/v1/openfeature/flags`, `/api/v1/openfeature/evaluate` and `/api/v1/openfeature/bulk-evaluate`
-routes are no longer used by either provider, no flag definitions are downloaded, and no evaluation
-happens locally.
+other SDK. There are **no OpenFeature-specific endpoints in the SDK contract**: no flag definitions
+are downloaded, and no evaluation happens locally.
+
+- `POST /api/v1/openfeature/evaluate` and `POST /api/v1/openfeature/bulk-evaluate` have been
+  **removed**. They could not evaluate an existing flag (they read a `FeatureFlag.enabled`
+  attribute the model does not have), and neither provider called them. To evaluate a flag,
+  call `GET /api/v1/feature-flags/evaluate/{flag_key}?user_id=…` with your API key, as the
+  table below shows.
+- `GET /api/v1/openfeature/flags` is **deprecated** and still answers as before. Neither provider
+  calls it, and it may be removed in a later release; do not build on it.
 
 Base URL = origin only (e.g. `http://localhost:8000`); the SDK appends `/api/v1/...`. Every request
 carries `X-API-Key: <key>`, `Content-Type: application/json`, `Accept: application/json`.

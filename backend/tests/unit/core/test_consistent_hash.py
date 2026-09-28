@@ -2,7 +2,7 @@
 
 #81: four bucketing implementations, none compared to any other.
 
-    openfeature.py          MD5("{user}:{key}"), first 4 bytes LE, / 2^32
+    openfeature.py          MD5("{user}:{key}"), first 4 bytes LE, / 2^32 (removed, #241)
     assignment_service.py   MD5("{user}:{experiment.id}"), FULL digest, % 100
     global_holdout / MEG    MD5("{user}:{salt}"), first 4 bytes LE, % 100
     lambda/shared           MurmurHash3-ish, salted "{key}_variant"
