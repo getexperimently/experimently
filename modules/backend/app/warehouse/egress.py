@@ -19,9 +19,11 @@ own:
    and link-local (fe80::/10) addresses and any IPv6 address that embeds one of
    the refused IPv4 addresses (IPv4-mapped, NAT64, 6to4, Teredo).  TLS still
    verifies the certificate against the original host name.
-3. **The answer**: a 3xx is ``redirect_refused`` and is never followed; the
-   body is read in chunks, with the total deadline checked before every read,
-   and refused past :data:`MAX_RESPONSE_BYTES`.
+3. **The answer**: a 3xx is ``redirect_refused`` and is never followed.  Every
+   request asks for ``Accept-Encoding: identity``, an answer with any other
+   ``Content-Encoding`` is ``result_invalid``, and the body is read as it
+   arrives on the wire (never decoded), with the total deadline checked before
+   every read and a limit of :data:`MAX_RESPONSE_BYTES` counted on those bytes.
 
 The client ignores the environment (``trust_env=False``): no proxy variable can
 route a request around the address check.
@@ -285,9 +287,9 @@ class GuardedTransport(httpx.HTTPTransport):
         self.network_backend = GuardedBackend(
             deadline, resolver=resolver, inner=network_backend
         )
-        # httpx.HTTPTransport takes no network backend of its own; the pool it
-        # built is replaced by the same pool over the guarded backend.
-        # test_transport_uses_the_guarded_backend pins that this took effect.
+        # httpx.HTTPTransport takes no network backend of its own, so this
+        # replaces its private ``_pool`` with the same pool over the guarded
+        # backend; test_transport_uses_the_guarded_backend pins that it took.
         self._pool.close()
         self._pool = httpcore.ConnectionPool(
             ssl_context=httpx.create_ssl_context(verify=True, trust_env=False),
@@ -398,15 +400,23 @@ class OutboundClient:
         failure: Optional[WarehouseError] = None
         try:
             timeout = self.deadline.http_timeout()
+            send_headers = {
+                name: value
+                for name, value in (headers or {}).items()
+                if name.lower() != "accept-encoding"
+            }
+            # Always last, so no caller header can ask for a compressed answer.
+            send_headers["Accept-Encoding"] = "identity"
             with self.http.stream(
                 method,
                 url,
-                headers=headers,
+                headers=send_headers,
                 params=params,
                 content=content,
                 json=json_body,
                 timeout=timeout,
             ) as response:
+                self._refuse_encoded(response)
                 body = self._read_body(response)
                 return OutboundResponse(
                     status_code=response.status_code,
@@ -429,10 +439,23 @@ class OutboundClient:
         )
         raise sanitised(failure)
 
+    @staticmethod
+    def _refuse_encoded(response: httpx.Response) -> None:
+        """``result_invalid`` for an answer with any encoding but ``identity``."""
+        encoding = response.headers.get("content-encoding", "").strip().lower()
+        if encoding not in ("", "identity"):
+            raise WarehouseError(WarehouseErrorCode.RESULT_INVALID)
+
     def _read_body(self, response: httpx.Response) -> bytes:
+        """The body exactly as sent, bounded.
+
+        The size limit is counted on the bytes read from the connection
+        (``iter_raw``), which are never decoded here, so the limit bounds what
+        is held in memory whatever the answer claims about itself.
+        """
         chunks: List[bytes] = []
         size = 0
-        for chunk in response.iter_bytes():
+        for chunk in response.iter_raw():
             size += len(chunk)
             if size > self._max_response_bytes:
                 raise WarehouseError(WarehouseErrorCode.RESULT_INVALID)

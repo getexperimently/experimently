@@ -132,8 +132,17 @@ class WarehouseExecutor:
             if key is not None:
                 self._keys.add(key)
 
+        released = False
+
         def release() -> None:
+            # Idempotent: runs when the job ends (in its thread) and again from
+            # the future's done-callback, which also covers a future cancelled
+            # before any thread picked it up.
+            nonlocal released
             with self._lock:
+                if released:
+                    return
+                released = True
                 self._admitted -= 1
                 if capped:
                     self._by_organisation[organisation] -= 1
@@ -143,10 +152,12 @@ class WarehouseExecutor:
                     self._keys.discard(key)
 
         try:
-            return self._pool.submit(self._run, job, total_seconds, kind, release)
+            future = self._pool.submit(self._run, job, total_seconds, kind, release)
         except BaseException:
             release()
             raise
+        future.add_done_callback(lambda _future: release())
+        return future
 
     def _run(
         self,

@@ -256,6 +256,32 @@ def test_executor_threads_are_not_the_request_pool():
     assert name.startswith("warehouse")
 
 
+def test_a_job_cancelled_before_it_starts_gives_its_slot_back():
+    """shutdown(cancel_futures=True) cancels a job no thread has picked up; its
+    slot, key and organisation count must still be released.  (Slots equal
+    threads, so the test occupies the pool's only thread from outside to leave
+    the admitted job queued.)"""
+    executor = WarehouseExecutor(2, per_organisation=2)
+    occupier_release = threading.Event()
+    executor._pool.shutdown(wait=False)
+    executor._pool = ThreadPoolExecutor(1)
+    executor._pool.submit(occupier_release.wait, 10)
+    ran = []
+    try:
+        future = executor.try_submit(
+            lambda d: ran.append(1), total_seconds=10, kind=JobKind.ANALYSIS, key="c1"
+        )
+        assert executor.admitted == 1
+        executor.shutdown(wait=False)
+        assert future.cancelled()
+        assert ran == []
+        assert executor.admitted == 0
+        assert executor._keys == set()
+        assert not executor._by_organisation
+    finally:
+        occupier_release.set()
+
+
 def test_executor_needs_a_slot():
     with pytest.raises(ValueError):
         WarehouseExecutor(0, per_organisation=1)

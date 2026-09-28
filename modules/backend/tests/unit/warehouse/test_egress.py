@@ -376,3 +376,80 @@ def test_httpx_timeout_type_is_what_the_client_passes():
     # Guard against an httpx upgrade that changes the Timeout shape the client
     # and Deadline.http_timeout rely on.
     assert isinstance(Deadline(30).http_timeout(), httpx.Timeout)
+
+
+# --- Encoded answers: never decoded, the limit counted on the wire -------------
+
+_EXPANDED_BYTES = 50_000_000
+
+
+@pytest.fixture(scope="module")
+def gzip_body() -> bytes:
+    """About 50 KB on the wire that would be 50 MB once decoded."""
+    import gzip
+
+    return gzip.compress(b"\0" * _EXPANDED_BYTES, compresslevel=9)
+
+
+@pytest.fixture
+def decoder_calls(monkeypatch):
+    """Records the size of every output of httpx's gzip decoder."""
+    from httpx import _decoders
+
+    calls = []
+    original = _decoders.GZipDecoder.decode
+
+    def spy(self, data):
+        out = original(self, data)
+        calls.append(len(out))
+        return out
+
+    monkeypatch.setattr(_decoders.GZipDecoder, "decode", spy)
+    return calls
+
+
+def test_requests_ask_for_identity_encoding():
+    """Every request says Accept-Encoding: identity, whatever the caller passed."""
+    inner = FakeBackend([http_answer(200, b"{}")])
+    with OutboundClient(
+        Deadline(30), resolver=public_resolver(), network_backend=inner
+    ) as client:
+        client.request(
+            "GET",
+            "https://bigquery.googleapis.com/x",
+            headers={"Accept-Encoding": "gzip, br", "X-Other": "1"},
+        )
+    sent = b"".join(inner.requests_written).lower()
+    assert b"accept-encoding: identity\r\n" in sent
+    assert b"gzip" not in sent
+    assert b"x-other: 1\r\n" in sent
+
+
+def test_encoded_answer_refused_before_decoding(gzip_body, decoder_calls):
+    """An answer with Content-Encoding: gzip is result_invalid; nothing is decoded."""
+    assert len(gzip_body) < 100_000
+    inner = FakeBackend(
+        [http_answer(200, gzip_body, headers=[("Content-Encoding", "gzip")])]
+    )
+    with OutboundClient(
+        Deadline(30), resolver=public_resolver(), network_backend=inner
+    ) as client:
+        with pytest.raises(WarehouseError) as err:
+            client.request("GET", "https://bigquery.googleapis.com/x")
+    assert err.value.code is WarehouseErrorCode.RESULT_INVALID
+    assert decoder_calls == []
+
+
+def test_body_limit_counts_bytes_on_the_wire(gzip_body, decoder_calls):
+    """The body reader never decodes: it returns the bytes as sent, so a small
+    encoded body cannot become a large one in memory.  Checked here on the
+    reader alone, without the encoding refusal in front of it."""
+    response = httpx.Response(
+        200,
+        headers={"Content-Encoding": "gzip"},
+        stream=httpx.ByteStream(gzip_body),
+    )
+    with OutboundClient(Deadline(30), max_response_bytes=1_000_000) as client:
+        body = client._read_body(response)
+    assert decoder_calls == []
+    assert body == gzip_body

@@ -8,7 +8,10 @@
   whose resolved endpoint is anything but ``https://<service>.<region>.amazonaws.com``
   (an ``AWS_ENDPOINT_URL`` variable, a FIPS or dual-stack setting) is refused;
 * no environment proxy (``proxies={}``);
-* :func:`boto_config`'s fixed limits;
+* :func:`boto_config`'s limits: connect 5 s and each read 30 s, two attempts --
+  and, under a :class:`~.deadlines.Deadline`, each limit capped at what the
+  deadline has left and a single attempt unless two fit.  The limits are fixed
+  when the client is built, so :func:`call` builds one per call;
 * a ``before-send`` hook (:class:`BeforeSendGuard`) that refuses the call
   unless the request's host is that endpoint, every address it resolves to is
   public (the same rule as :func:`.egress.refused_address`), and the
@@ -21,6 +24,12 @@ from typing import Any, Optional
 from urllib.parse import urlsplit
 
 from botocore.config import Config
+from botocore.exceptions import (
+    BotoCoreError,
+    ClientError,
+    ConnectTimeoutError,
+    ReadTimeoutError,
+)
 
 from modules.backend.app.warehouse.deadlines import (
     CONNECT_SECONDS,
@@ -32,7 +41,12 @@ from modules.backend.app.warehouse.egress import (
     refused_address,
     system_resolver,
 )
-from modules.backend.app.warehouse.errors import WarehouseError, WarehouseErrorCode
+from modules.backend.app.warehouse.errors import (
+    WarehouseError,
+    WarehouseErrorCode,
+    error_for_status,
+    sanitised,
+)
 
 #: The services a connector may call.
 AWS_SERVICES = frozenset({"sts", "athena", "glue"})
@@ -88,12 +102,31 @@ def aws_endpoint_host(service: str, region: str) -> str:
     return f"{service}.{region}.amazonaws.com"
 
 
-def boto_config() -> Config:
-    """Connect within 5 s, each read within 30 s, two attempts, no proxies."""
+#: Attempts per call, the first included, when the budget allows two.
+MAX_ATTEMPTS = 2
+
+
+def boto_config(deadline: Optional[Deadline] = None) -> Config:
+    """Connect within 5 s, each read within 30 s, two attempts, no proxies.
+
+    Under ``deadline`` each limit is ``min(fixed, remaining)``, and there is a
+    single attempt unless two whole attempts (2 x (5 + 30) s) still fit, so
+    retries cannot run past what is left.  ``time_limit`` if nothing is left.
+    """
+    connect, read, attempts = CONNECT_SECONDS, READ_SECONDS, MAX_ATTEMPTS
+    if deadline is not None:
+        remaining = deadline.check()
+        connect = min(CONNECT_SECONDS, remaining)
+        read = min(READ_SECONDS, remaining)
+        if remaining < MAX_ATTEMPTS * (CONNECT_SECONDS + READ_SECONDS):
+            attempts = 1
     return Config(
-        connect_timeout=CONNECT_SECONDS,
-        read_timeout=READ_SECONDS,
-        retries={"max_attempts": 2, "mode": "standard"},
+        connect_timeout=connect,
+        read_timeout=read,
+        # total_max_attempts counts the first attempt; botocore's
+        # max_attempts counts retries only (measured: max_attempts=1 made two
+        # connections).
+        retries={"total_max_attempts": attempts, "mode": "standard"},
         proxies={},
     )
 
@@ -151,10 +184,11 @@ def make_client(
     """A boto3 client for ``service`` in ``region`` with the guard installed.
 
     ``session`` is a ``boto3.session.Session``; the caller decides whose
-    credentials it holds.
+    credentials it holds.  Under ``deadline`` the client's limits are what the
+    deadline has left *now*; for a later call, build a new client (:func:`call`).
     """
     host = aws_endpoint_host(service, region)
-    client = session.client(service, region_name=region, config=boto_config())
+    client = session.client(service, region_name=region, config=boto_config(deadline))
     if client.meta.endpoint_url.rstrip("/") != f"https://{host}":
         raise WarehouseError(
             WarehouseErrorCode.DESTINATION_NOT_ALLOWED, warehouse="athena"
@@ -165,11 +199,57 @@ def make_client(
     return client
 
 
+def call(
+    session: Any,
+    service: str,
+    region: str,
+    operation: str,
+    *,
+    deadline: Deadline,
+    resolver: Optional[Resolver] = None,
+    **params: Any,
+) -> Any:
+    """One boto3 call under ``deadline``, on a client built for it, errors coded.
+
+    The client is built for this call, so its connect and read limits and its
+    attempts are sized from what the deadline has left at this moment.  AWS
+    errors map by their structured ``Code`` and HTTP status; a connect or read
+    limit is ``time_limit``; any other botocore failure is ``unreachable``.
+    """
+    client = make_client(session, service, region, deadline=deadline, resolver=resolver)
+    failure: Optional[WarehouseError] = None
+    try:
+        return getattr(client, operation)(**params)
+    except WarehouseError as exc:
+        failure = exc
+    except ClientError as exc:
+        error = exc.response.get("Error", {}) if isinstance(exc.response, dict) else {}
+        meta = (
+            exc.response.get("ResponseMetadata", {})
+            if isinstance(exc.response, dict)
+            else {}
+        )
+        failure = error_for_status(
+            meta.get("HTTPStatusCode") or 0,
+            warehouse="athena",
+            vendor_code=error.get("Code"),
+            request_id=meta.get("RequestId"),
+        )
+    except (ConnectTimeoutError, ReadTimeoutError):
+        failure = WarehouseError(WarehouseErrorCode.TIME_LIMIT, warehouse="athena")
+    except BotoCoreError:
+        failure = WarehouseError(WarehouseErrorCode.UNREACHABLE, warehouse="athena")
+    # Outside the handlers: nothing from botocore is chained onto this.
+    assert failure is not None
+    raise sanitised(failure)
+
+
 __all__ = [
     "AWS_REGIONS",
     "AWS_SERVICES",
     "BeforeSendGuard",
     "aws_endpoint_host",
     "boto_config",
+    "call",
     "make_client",
 ]
