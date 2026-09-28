@@ -167,6 +167,36 @@ describe('getAssignment', () => {
     });
   });
 
+  it('carries assigned: true and reason from a server that enrolled the user', async () => {
+    mockFetch({ ...assignment, assigned: true, reason: 'assigned' });
+    const client = new ExperimentationClient(baseConfig);
+    const result = await client.getAssignment('checkout', user);
+    expect(result.assigned).toBe(true);
+    expect(result.reason).toBe('assigned');
+  });
+
+  it.each(['holdout', 'mutual_exclusion', 'targeting'])(
+    'carries assigned: false and reason %s for a user the server did not enrol',
+    async reason => {
+      mockFetch({ ...controlAssignment, assigned: false, reason });
+      const client = new ExperimentationClient(baseConfig);
+      const result = await client.getAssignment('checkout', user);
+      expect(result.assigned).toBe(false);
+      expect(result.reason).toBe(reason);
+      expect(result.isControl).toBe(true);
+    }
+  );
+
+  it('leaves assigned and reason undefined (not false) when an older server omits them', async () => {
+    mockFetch(assignment);
+    const client = new ExperimentationClient(baseConfig);
+    const result = await client.getAssignment('checkout', user);
+    expect(result.assigned).toBeUndefined();
+    expect(result.reason).toBeUndefined();
+    expect(result).not.toHaveProperty('assigned');
+    expect(result).not.toHaveProperty('reason');
+  });
+
   it('normalises missing variant_id / is_control / configuration', async () => {
     mockFetch({ experiment_key: 'checkout', user_id: 'user-123', variant_name: 'x' });
     const client = new ExperimentationClient(baseConfig);

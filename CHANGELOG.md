@@ -10,6 +10,18 @@ longer applies and release-please can generate this file directly. Until it
 does, entries below 0.2.2 are hand-written and the links in them are the
 reason why.
 
+## [0.9.0](https://github.com/getexperimently/experimently/compare/v0.8.0...v0.9.0) (2026-09-28)
+
+
+### ⚠ BREAKING CHANGES
+
+* **modules:** remove the warehouse endpoints and the ad-hoc ETL query endpoint ([#318](https://github.com/getexperimently/experimently/issues/318))
+
+### Bug Fixes
+
+* **deploy:** workflow AWS sessions last as long as the job can ([#302](https://github.com/getexperimently/experimently/issues/302)) ([cbf1db8](https://github.com/getexperimently/experimently/commit/cbf1db81b7c7a6c85d60e3333a4080b474681467))
+* **modules:** remove the warehouse endpoints and the ad-hoc ETL query endpoint ([#318](https://github.com/getexperimently/experimently/issues/318)) ([fdfae20](https://github.com/getexperimently/experimently/commit/fdfae2047f7a48df27a06e2f3bc46c15be071685))
+
 ## [0.8.0](https://github.com/getexperimently/experimently/compare/v0.7.0...v0.8.0) (2026-09-27)
 
 

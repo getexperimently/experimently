@@ -5,8 +5,8 @@ that import a module's model or service directly.  They lived there marked
 ``@pytest.mark.modules`` while the modules were still in ``backend/``; after
 the move (issue #89) an import of ``modules.backend.app.models.workspace``
 from a core file is exactly the crossing ``test_core_boundary.py`` gates, so
-they live here instead.  The OpenAPI-path checks (workspaces and warehouse
-routes present in the schema) stay in the core file: they import nothing
+they live here instead.  The OpenAPI-path checks (workspaces routes present
+in the schema) stay in the core file: they import nothing
 from the modules package and are skipped there in a core build.
 
 Usage:

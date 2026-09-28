@@ -19,13 +19,12 @@ Everything the images install: `backend/requirements/runtime.lock` (the core pro
 
 Development-only dependencies — what `backend/requirements.txt` adds for test jobs and developer environments, and `infrastructure/cdk/requirements.txt` for the deployment toolchain — are **not** listed. They are not redistributed: nobody receives them from this project, they are fetched from PyPI when you build from source. They are audited for advisories separately, by `scripts/audit_dependencies.py` against `security/dependency-audit.toml`.
 
-#### MIT (35)
+#### MIT (32)
 
 | Package | Version |
 |---|---|
 | `Mako` | 1.4.1 |
 | `PyJWT` | 2.14.0 |
-| `PyMySQL` | 1.2.3 |
 | `SQLAlchemy` | 2.0.54 |
 | `alembic` | 1.20.0 |
 | `annotated-doc` | 0.0.5 |
@@ -34,7 +33,6 @@ Development-only dependencies — what `backend/requirements.txt` adds for test 
 | `anyio` | 4.15.1 |
 | `charset-normalizer` | 3.5.1 |
 | `docstring_parser` | 0.18.0 |
-| `et_xmlfile` | 2.0.0 |
 | `fastapi` | 0.141.1 |
 | `formulaic` | 1.2.2 |
 | `h11` | 0.16.0 |
@@ -43,7 +41,6 @@ Development-only dependencies — what `backend/requirements.txt` adds for test 
 | `jmespath` | 1.1.0 |
 | `loguru` | 0.7.3 |
 | `narwhals` | 2.26.0 |
-| `openpyxl` | 3.1.5 |
 | `pydantic` | 2.13.5 |
 | `pydantic-settings` | 2.15.0 |
 | `pydantic_core` | 2.46.5 |
@@ -59,26 +56,7 @@ Development-only dependencies — what `backend/requirements.txt` adds for test 
 | `urllib3` | 2.7.0 |
 | `xmlsec` | 1.3.17 |
 
-#### BSD (14)
-
-| Package | Version |
-|---|---|
-| `Authlib` | 1.8.0 |
-| `google-re2` | 1.1.20251105 |
-| `httpx` | 0.28.1 |
-| `isodate` | 0.7.2 |
-| `joserfc` | 1.7.5 |
-| `lz4` | 4.4.5 |
-| `numpy` | 1.26.4 |
-| `pandas` | 2.3.3 |
-| `patsy` | 1.0.3 |
-| `psutil` | 5.9.8 |
-| `pybreaker` | 1.4.1 |
-| `scipy` | 1.17.1 |
-| `semver` | 3.1.0 |
-| `websockets` | 15.0.1 |
-
-#### BSD-3-Clause (14)
+#### BSD-3-Clause (13)
 
 | Package | Version |
 |---|---|
@@ -90,38 +68,42 @@ Development-only dependencies — what `backend/requirements.txt` adds for test 
 | `httpx2` | 2.13.1 |
 | `idna` | 3.19 |
 | `lxml` | 6.1.3 |
-| `oauthlib` | 3.3.1 |
 | `pycparser` | 3.0 |
 | `python-dotenv` | 1.2.3 |
 | `starlette` | 1.6.0 |
 | `statsmodels` | 0.15.0 |
 | `uvicorn` | 0.53.0 |
 
-#### Apache-2.0 (13)
+#### BSD (12)
+
+| Package | Version |
+|---|---|
+| `Authlib` | 1.8.0 |
+| `google-re2` | 1.1.20251105 |
+| `httpx` | 0.28.1 |
+| `isodate` | 0.7.2 |
+| `joserfc` | 1.7.5 |
+| `numpy` | 1.26.4 |
+| `pandas` | 2.3.3 |
+| `patsy` | 1.0.3 |
+| `psutil` | 5.9.8 |
+| `scipy` | 1.17.1 |
+| `semver` | 3.1.0 |
+| `websockets` | 15.0.1 |
+
+#### Apache-2.0 (9)
 
 | Package | Version |
 |---|---|
 | `bcrypt` | 5.0.0 |
 | `boto3` | 1.43.99 |
 | `botocore` | 1.43.99 |
-| `clickhouse-connect` | 1.8.0 |
-| `databricks-sql-connector` | 4.5.0 |
 | `openai` | 3.19.2 |
-| `pyarrow` | 25.0.1 |
 | `python-multipart` | 0.0.32 |
 | `requests` | 2.34.2 |
 | `s3transfer` | 0.19.2 |
-| `thrift` | 0.24.0 |
 | `tzdata` | 2026.4 |
 | `watchtower` | 3.4.0 |
-
-#### PSF-2.0 (3)
-
-| Package | Version |
-|---|---|
-| `backports.zstd` | 1.7.0 |
-| `defusedxml` | 0.7.1 |
-| `typing_extensions` | 4.16.0 |
 
 #### BSD-2-Clause (2)
 
@@ -129,6 +111,13 @@ Development-only dependencies — what `backend/requirements.txt` adds for test 
 |---|---|
 | `python-json-logger` | 4.2.0 |
 | `wrapt` | 2.4.1 |
+
+#### PSF-2.0 (2)
+
+| Package | Version |
+|---|---|
+| `defusedxml` | 0.7.1 |
+| `typing_extensions` | 4.16.0 |
 
 #### Apache-2.0 AND BSD-2-Clause (1)
 

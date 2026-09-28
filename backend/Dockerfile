@@ -207,10 +207,8 @@ RUN rm -f /modules/runtime.lock /modules/backend/runtime.lock \
 # Stage 3b: builder-full — the builder venv plus the module-only dependencies.
 #
 # The modules import packages the core profile never does (python3-saml/xmlsec,
-# authlib, PyMySQL, clickhouse-connect, databricks-sql-connector and their
-# closure). Every one of those imports is guarded in the module that needs it,
-# so a `full` image without them still boots and serves every route — and then
-# refuses the SAML flow and blocks on warehouse retries. They must be in the
+# authlib and their closure). A `full` image without them still boots and
+# serves every route — and then refuses the SAML flow. They must be in the
 # image, and only in the `full` one.
 #
 # modules/requirements.lock is the hashed closure of modules/requirements.txt

@@ -2,6 +2,7 @@ import React from 'react';
 import { SequentialTestingResponse } from '@/types/sequential';
 import { EarlyStoppingBanner } from './EarlyStoppingBanner';
 import { EvidenceRatioChart } from './EvidenceRatioChart';
+import { AnalysisNotice } from '@/components/results/shared/AnalysisNotice';
 
 interface SequentialMonitorProps {
   data: SequentialTestingResponse;
@@ -10,8 +11,14 @@ interface SequentialMonitorProps {
 export function SequentialMonitor({ data }: SequentialMonitorProps) {
   const boundary = data.msprt_result?.boundary ?? 1 / 0.05; // default 20
 
+  // `at_risk` is the top-level advisory flag; older responses carry only
+  // `long_running_risk.is_at_risk`.
+  const atRisk = data.at_risk ?? data.long_running_risk?.is_at_risk ?? false;
+
   return (
     <div data-testid="sequential-monitor" className="space-y-6">
+      <AnalysisNotice status={data.analysis_status} notice={data.analysis_notice} />
+
       {/* Stopping banner */}
       <EarlyStoppingBanner
         msprtResult={data.msprt_result}
@@ -68,21 +75,28 @@ export function SequentialMonitor({ data }: SequentialMonitorProps) {
         </section>
       )}
 
-      {/* Long-running risk */}
-      {data.long_running_risk && data.long_running_risk.is_at_risk && (
+      {/* Long-running risk: an advisory note, not a stop recommendation. The
+          stop/continue decision is the banner above (#286). */}
+      {atRisk && (
         <div
           data-testid="long-running-risk"
-          className="bg-red-50 border border-red-200 rounded-lg p-4"
-          role="alert"
+          className="bg-slate-50 border border-slate-300 rounded-lg p-4"
+          role="note"
         >
-          <p className="text-sm font-semibold text-red-800">
-            Long-Running Experiment Risk
+          <p className="text-sm font-semibold text-slate-800">
+            Note: running longer than planned
           </p>
-          <p className="text-xs text-red-700 mt-1">
-            Running {data.long_running_risk.actual_duration_days} of{' '}
-            {data.long_running_risk.expected_duration_days} expected days (
-            {(data.long_running_risk.risk_ratio * 100).toFixed(0)}%).{' '}
-            {data.long_running_risk.recommendation}
+          {data.long_running_risk && (
+            <p className="text-xs text-slate-700 mt-1">
+              Running {data.long_running_risk.actual_duration_days} of{' '}
+              {data.long_running_risk.expected_duration_days} expected days (
+              {(data.long_running_risk.risk_ratio * 100).toFixed(0)}%).{' '}
+              {data.long_running_risk.recommendation}
+            </p>
+          )}
+          <p className="text-xs text-slate-700 mt-1">
+            This is advisory: running long is not a reason to stop and not
+            evidence of no effect.
           </p>
         </div>
       )}
