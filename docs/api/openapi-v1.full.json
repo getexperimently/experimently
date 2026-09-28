@@ -2800,7 +2800,7 @@
                 "type": "null"
               }
             ],
-            "description": "Number of conversion events in this data point.  None for non-conversion metric types.",
+            "description": "Number of users whose first conversion falls in this data point (daily), or users converted so far (cumulative).  None for non-conversion metric types.",
             "title": "Conversions"
           },
           "date": {
@@ -12075,7 +12075,7 @@
                 "type": "null"
               }
             ],
-            "description": "Number of conversion events in this variant within the segment.",
+            "description": "Number of users in this variant within the segment with at least one conversion event; a user who converts several times counts once.",
             "title": "Conversions"
           },
           "is_control": {
@@ -13553,7 +13553,7 @@
                 "type": "null"
               }
             ],
-            "description": "Number of conversion events observed.  None for non-conversion metric types (revenue, duration, custom).",
+            "description": "Number of assigned users with at least one conversion event; a user who converts several times counts once, so this never exceeds sample_size.  None for non-conversion metric types (revenue, duration, custom).",
             "title": "Conversions"
           },
           "effect_size": {
@@ -14916,7 +14916,7 @@
                 "type": "null"
               }
             ],
-            "description": "Total conversion events across all variants.  None when the experiment has no conversion metric.",
+            "description": "Number of assigned users, across all variants, with at least one conversion event on any metric; each user counts once.  None when the experiment has no conversion metric.",
             "title": "Total Conversions"
           },
           "total_events": {
