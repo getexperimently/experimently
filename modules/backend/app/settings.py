@@ -99,7 +99,12 @@ class ModulesSettings(BaseSettings):
     #: (``credential_crypto.CredentialKeysUnavailable``).
     WAREHOUSE_CREDENTIALS_KEYS: Optional[str] = None
 
-    model_config = SettingsConfigDict(case_sensitive=True, extra="ignore")
+    model_config = SettingsConfigDict(
+        case_sensitive=True,
+        extra="ignore",
+        # A refused configuration names the setting, never its value.
+        hide_input_in_errors=True,
+    )
 
     @field_validator("ENVIRONMENT", mode="before")
     @classmethod

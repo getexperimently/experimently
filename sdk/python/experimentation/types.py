@@ -35,7 +35,15 @@ class ExperimentationError(Exception):
 
 @dataclass(frozen=True)
 class Assignment:
-    """A user's (sticky) variant assignment, from ``POST /api/v1/tracking/assign``."""
+    """A user's (sticky) variant assignment, from ``POST /api/v1/tracking/assign``.
+
+    ``assigned`` is ``True`` when the server enrolled the user and ``False`` when
+    it did not (global holdout, mutual exclusion group or targeting rules) and
+    returned the control variant instead, with no exposure recorded. ``reason``
+    says why: ``"assigned"``, ``"holdout"``, ``"mutual_exclusion"`` or
+    ``"targeting"``. Both are ``None`` when the server predates the fields; such
+    a server cannot tell you, so do not read ``None`` as either answer.
+    """
 
     experiment_key: str
     user_id: str
@@ -43,6 +51,8 @@ class Assignment:
     variant_name: str
     is_control: bool
     configuration: Optional[Dict[str, Any]]
+    assigned: Optional[bool] = None
+    reason: Optional[str] = None
 
 
 @dataclass(frozen=True)

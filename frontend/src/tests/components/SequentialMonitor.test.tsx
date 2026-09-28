@@ -77,14 +77,53 @@ describe('SequentialMonitor', () => {
     expect(screen.getByTestId('ci-n')).toHaveTextContent('5,000');
   });
 
-  it('renders long-running risk alert when at risk', () => {
+  it('renders long-running risk as an advisory note when at risk', () => {
     render(<SequentialMonitor data={fullData} />);
     const risk = screen.getByTestId('long-running-risk');
     expect(risk).toBeInTheDocument();
     expect(risk).toHaveTextContent('21');
     expect(risk).toHaveTextContent('14');
     expect(risk).toHaveTextContent('150%');
-    expect(risk).toHaveAttribute('role', 'alert');
+    expect(risk).toHaveTextContent(/not a reason to stop/i);
+    expect(risk).toHaveAttribute('role', 'note');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('shows the at-risk note from the top-level at_risk flag', () => {
+    render(<SequentialMonitor data={{ ...minimalData, at_risk: true }} />);
+    expect(screen.getByTestId('long-running-risk')).toHaveTextContent(
+      /running longer than planned/i
+    );
+  });
+
+  it('lets a top-level at_risk of false win over long_running_risk', () => {
+    render(<SequentialMonitor data={{ ...fullData, at_risk: false }} />);
+    expect(screen.queryByTestId('long-running-risk')).not.toBeInTheDocument();
+  });
+
+  it('shows the beta notice when the analysis is beta', () => {
+    render(
+      <SequentialMonitor
+        data={{
+          ...minimalData,
+          analysis_status: 'beta',
+          analysis_notice:
+            'Beta: the confidence sequence is being corrected. https://github.com/getexperimently/experimently/issues/231',
+        }}
+      />
+    );
+    expect(screen.getByTestId('analysis-notice')).toHaveTextContent(
+      /confidence sequence is being corrected/i
+    );
+  });
+
+  it('shows no beta notice when the analysis is ga or the fields are absent', () => {
+    const { rerender } = render(
+      <SequentialMonitor data={{ ...minimalData, analysis_status: 'ga', analysis_notice: null }} />
+    );
+    expect(screen.queryByTestId('analysis-notice')).not.toBeInTheDocument();
+    rerender(<SequentialMonitor data={minimalData} />);
+    expect(screen.queryByTestId('analysis-notice')).not.toBeInTheDocument();
   });
 
   it('renders alpha spending table', () => {
