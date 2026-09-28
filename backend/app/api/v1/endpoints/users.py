@@ -6,8 +6,10 @@ such as creating, retrieving, updating, and deleting users.
 """
 
 import uuid
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import EmailStr, TypeAdapter, ValidationError
 from sqlalchemy.orm import Session
 
 from backend.app.api import deps
@@ -21,6 +23,45 @@ from backend.app.schemas.user import (
 )
 
 router = APIRouter()
+
+#: The answer when a non-superuser's request would change an account's email
+#: address or username. An administrator changes those through
+#: ``/api/v1/admin/users/{id}``.
+ADMIN_ONLY_IDENTITY_DETAIL = (
+    "Only an administrator can change an account's email address or username."
+)
+
+#: The same parser ``UserUpdate.email`` applies to the request body.
+_EMAIL = TypeAdapter(EmailStr)
+
+
+def _parsed_email(value: Optional[str]) -> Optional[str]:
+    """``value`` as ``UserUpdate.email`` would parse it; None if it cannot be."""
+    if value is None:
+        return None
+    try:
+        return _EMAIL.validate_python(value)
+    except ValidationError:
+        return None
+
+
+def _identity_unchanged(user: User, user_in: UserUpdate) -> bool:
+    """True when the request resends the stored email address and username.
+
+    The request's email has been through EmailStr, which lower-cases the
+    domain (among other things) but keeps the case of the local part. The
+    stored value is put through the same parser and the two are compared
+    as they are: no lower-casing or other folding of either side, so a change
+    of case in the local part, or a look-alike character, is a change. A
+    stored address that is missing or cannot be parsed never matches. The
+    username is compared exactly.
+    """
+    stored_email = _parsed_email(user.email)
+    return (
+        stored_email is not None
+        and stored_email == user_in.email
+        and user_in.username == user.username
+    )
 
 
 @router.get("/", response_model=UserListResponse)
@@ -289,8 +330,20 @@ async def update_user(
     # Convert input model to dict, excluding unset fields
     update_data = user_in.model_dump(exclude_unset=True)
 
-    # Regular users cannot change is_superuser or is_active
     if not current_user.is_superuser:
+        # Only a superuser changes an account's email address or username,
+        # whatever the caller's role. Anyone else must resend the stored
+        # values; they are then dropped, so this branch never writes either
+        # column -- not even the parser's spelling of an unchanged address.
+        if not _identity_unchanged(user, user_in):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=ADMIN_ONLY_IDENTITY_DETAIL,
+            )
+        update_data.pop("email", None)
+        update_data.pop("username", None)
+
+        # Regular users cannot change is_superuser or is_active
         update_data.pop("is_superuser", None)
         update_data.pop("is_active", None)
 
