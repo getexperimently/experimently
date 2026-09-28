@@ -9,8 +9,9 @@ OpenFeature provider calls it: both evaluate through
 ``GET /api/v1/feature-flags/evaluate/{key}`` (see docs/sdk/openfeature.md).
 
 ``POST /api/v1/openfeature/evaluate`` and ``POST /api/v1/openfeature/bulk-evaluate``
-were removed (#241): they never returned a successful response, because they
-read a ``FeatureFlag.enabled`` attribute the model does not have.
+were removed (#241): they could not evaluate an existing flag (they read a
+``FeatureFlag.enabled`` attribute the model does not have), and neither provider
+called them.
 ``backend/tests/smoke/test_openfeature_routes.py`` pins the exact route set.
 
 Authentication:
