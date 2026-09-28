@@ -190,7 +190,7 @@ def test_repr_carries_no_parameters_or_credentials():
     "overrides",
     [
         pytest.param({"warehouse_type": "redshift"}, id="unknown-type"),
-        pytest.param({"query_timeout_seconds": 9}, id="timeout-below-10"),
+        pytest.param({"query_timeout_seconds": 9}, id="query-limit-below-10"),
         pytest.param({"max_runs_per_day": 0}, id="no-runs-per-day"),
         pytest.param({"max_bytes_per_query": 10_000_000}, id="snowflake-byte-cap"),
         pytest.param({"warehouse_type": "bigquery"}, id="bigquery-no-byte-cap"),
@@ -332,7 +332,7 @@ def test_source_names_are_unique_per_connection_and_kind(db_session, connection)
         pytest.param({"kind": "sync"}, id="unknown-kind"),
         pytest.param({"status": "done"}, id="unknown-status"),
         pytest.param({"status": "failed"}, id="failed-without-a-code"),
-        pytest.param({"error_code": "internal"}, id="a-code-without-failing"),
+        pytest.param({"error_code": "time_limit"}, id="a-code-without-failing"),
         pytest.param({"connection_name": None}, id="no-connection-name"),
         pytest.param({"request": None}, id="no-request"),
         pytest.param(

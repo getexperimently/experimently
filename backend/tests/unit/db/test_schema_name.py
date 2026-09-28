@@ -115,7 +115,7 @@ def test_export_publishes_the_resolved_schema(env, expected, process_env):
     """Revision modules read ``POSTGRES_SCHEMA`` when alembic imports them.
 
     ``a7b8c9d0e1f2``, ``ep057_workspaces``, ``ep046_llm_experiments``,
-    ``modules_0001_rbac`` and three more do
+    ``modules_0001_rbac``, ``modules_0002_warehouse_analysis`` and three more do
     ``os.environ.get("POSTGRES_SCHEMA", "experimentation")`` at module level, so
     the variable has to carry the resolved answer before a script directory is
     walked -- their defaults must never be reachable.
