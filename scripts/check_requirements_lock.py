@@ -73,7 +73,7 @@ PAIRS = [
 #: install.  ``every_pin`` additionally requires the subset's *whole* pin list
 #: to be present in the superset: true for runtime.txt, which is by definition
 #: a subset of backend/requirements.txt, and false for modules/requirements.txt,
-#: whose own pins (python3-saml, the warehouse drivers) are module-only and
+#: whose own pins (python3-saml, authlib) are module-only and
 #: belong nowhere else.
 SUPERSETS = [
     (

@@ -64,7 +64,7 @@ class TestTheSupersetCheck:
         assert "watchtower" in problems[0]
 
     def test_module_only_pins_are_allowed_to_be_module_only(self, checker, tmp_path):
-        """python3-saml and the warehouse drivers belong nowhere but
+        """python3-saml and authlib belong nowhere but
         modules/requirements.txt, so that pair compares shared pins only."""
         subset = self._write(
             tmp_path, "modules.txt", "python3-saml==1.16.0\nrequests==2.34.2\n"

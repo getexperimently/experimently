@@ -119,9 +119,6 @@ nav:
 - Integrations:
   - AWS: integrations/aws.md
   - Data Warehouses: api/warehouse-analytics.md
-  - Databricks: warehouse/databricks.md
-  - ClickHouse: warehouse/clickhouse.md
-  - MySQL: warehouse/mysql.md
   - Salesforce: integrations/salesforce.md
   - GitHub: integrations/github.md
   - Slack & Email: api/alerting.md
