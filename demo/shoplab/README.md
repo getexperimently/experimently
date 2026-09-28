@@ -146,7 +146,7 @@ source venv/bin/activate && python -m pytest demo/shoplab/simulator/test_traffic
 | Panel shows `error` for every experiment; network tab shows **401** | Wrong or missing `NEXT_PUBLIC_EXPERIMENTLY_API_KEY`. Re-run the seed script (it rewrites `.env.local` and `.api_key`), then restart `npm run dev` (env vars are read at startup). |
 | **404** on `/tracking/assign` or `/feature-flags/evaluate/...` | The ShopLab experiments/flags are not seeded or not ACTIVE. Run the seed script. |
 | Browser console: **CORS** error from `localhost:3200` | Port 3200 is not in the backend's CORS allow-list. The development defaults (`DEFAULT_CORS_ORIGINS` in `backend/app/core/config.py`) include it; if you set `CORS_ORIGINS` or `BACKEND_CORS_ORIGINS` yourself, add `http://localhost:3200` and restart the API. |
-| Every visitor is `control` and nothing loads | Backend not running on `NEXT_PUBLIC_EXPERIMENTLY_API_URL`. Start it from the repository root: `uvicorn backend.app.main:app --reload`. |
+| Every visitor is `control` and nothing loads | Backend not running on `NEXT_PUBLIC_EXPERIMENTLY_API_URL`. Start it from the repository root: `ENVIRONMENT=development uvicorn backend.app.main:app --reload`. |
 | "Invalid hook call" in the browser | Two React copies. `next.config.js` aliases `react`/`react-dom` to this app's `node_modules`; make sure you ran `npm install` inside `demo/shoplab`. |
 | Simulator exits with code 2 / 3 / 4 | 2 = API key rejected or missing, 3 = experiments not seeded (404), 4 = backend unreachable. |
 | `npm run typecheck` fails inside `sdk/react/src` | The app is written against React SDK v1.1.0's surface (`useExperiment`, `useTrackEvent`, `ExperimentAssignment.configuration`, ...). Make sure `sdk/react` is on that version. |

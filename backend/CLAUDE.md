@@ -11,7 +11,7 @@ source venv/bin/activate   # from the repository root
 # Run development server. Everything runs from the REPOSITORY ROOT: the code
 # imports `backend.app.*`, so `cd backend && uvicorn app.main:app` puts the
 # wrong directory on sys.path and the imports fail.
-uvicorn backend.app.main:app --reload --host 0.0.0.0 --port 8000
+ENVIRONMENT=development uvicorn backend.app.main:app --reload --host 0.0.0.0 --port 8000
 
 # Run tests
 export APP_ENV=test TESTING=true

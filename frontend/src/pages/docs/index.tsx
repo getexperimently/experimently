@@ -91,10 +91,6 @@ const sections = [
     description: 'Connect Experimently to your existing data stack.',
     links: [
       { label: 'AWS', href: docsUrl('integrations/aws'), desc: 'ECS, Lambda, CloudFront, DynamoDB' },
-      { label: 'Data Warehouses', href: docsUrl('api/warehouse-analytics'), desc: 'Snowflake, BigQuery, Redshift — warehouse-native analytics' },
-      { label: 'Databricks', href: docsUrl('warehouse/databricks'), desc: 'Databricks SQL warehouse connector — read-only analytics via Unity Catalog' },
-      { label: 'ClickHouse', href: docsUrl('warehouse/clickhouse'), desc: 'ClickHouse columnar analytics connector — blazing fast OLAP queries' },
-      { label: 'MySQL', href: docsUrl('warehouse/mysql'), desc: 'MySQL / MariaDB connector — parameterised read-only analytics queries' },
       { label: 'Jira', href: docsUrl('api/integrations'), desc: 'Sync experiment status, auto-create issues' },
       { label: 'Salesforce', href: docsUrl('integrations/salesforce'), desc: 'OAuth2 integration, webhook sync' },
       { label: 'GitHub', href: docsUrl('integrations/github'), desc: 'HMAC-signed webhooks, PR linking' },
@@ -134,7 +130,6 @@ const sections = [
     links: [
       { label: 'Your First A/B Test', href: docsUrl('guides/user-guide'), desc: 'End-to-end experiment walkthrough' },
       { label: 'Bayesian Experimentation', href: docsUrl('api/bayesian'), desc: 'Beta-Binomial posteriors and stopping rules' },
-      { label: 'Warehouse-Native Analytics', href: docsUrl('api/warehouse-analytics'), desc: 'Query Snowflake/BigQuery directly' },
       { label: 'Guided Experiment Builder', href: docsUrl('guides/experiment-wizard'), desc: '5-step draft-and-submit API' },
       { label: 'Interaction Detection', href: docsUrl('api/interaction-detection'), desc: 'Beta: find experiments that share users' },
     ],
