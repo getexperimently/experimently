@@ -52,8 +52,12 @@ CORE_STACKS = {
 }
 
 
+#: The ALARM_EMAIL every synth here gets (``_app_environment``).
+TEST_ALARM_EMAIL = "alerts@experimently.test"
+
+
 @contextmanager
-def _app_environment(cdk_dir: Path, **overrides: str):
+def _app_environment(cdk_dir: Path, **overrides: str | None):
     saved_env = dict(os.environ)
     saved_path = list(sys.path)
     saved_modules = {
@@ -76,9 +80,19 @@ def _app_environment(cdk_dir: Path, **overrides: str):
         # reach the service at, because the application refuses to START
         # without it in staging/production (#220). Never resolved at synth.
         PUBLIC_BASE_URL="https://api.example.com",
+        # Required at synth in staging and prod (DECISIONS D21): the address
+        # every alarm emails. Not an example.* domain, which is refused; `.test`
+        # is reserved (RFC 2606) and delivers nowhere, but the rule accepts it.
+        # Nothing is sent at synth.
+        ALARM_EMAIL=TEST_ALARM_EMAIL,
     )
     os.environ.pop("EXPERIMENTLY_PROFILE", None)
-    os.environ.update(overrides)
+    # An override of None removes the variable (e.g. ALARM_EMAIL=None: unset).
+    for name, value in overrides.items():
+        if value is None:
+            os.environ.pop(name, None)
+        else:
+            os.environ[name] = value
     sys.path.insert(0, str(cdk_dir))
     for name in list(sys.modules):
         if name.split(".")[0] == "stacks":

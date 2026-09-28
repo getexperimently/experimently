@@ -9,6 +9,7 @@ from aws_cdk import (
     aws_elasticloadbalancingv2 as elbv2,
     aws_codedeploy as codedeploy,
     aws_cloudwatch as cloudwatch,
+    aws_cloudwatch_actions as cloudwatch_actions,
     aws_secretsmanager as secretsmanager,
     aws_logs as logs,
 )
@@ -117,10 +118,18 @@ class FargateServiceStack(Stack):
         db_security_group=None,
         redis_host: str = None,
         redis_port: str = None,
+        alarm_topic=None,
         **kwargs,
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
         require_database("FargateServiceStack", db_host, db_credentials)
+        if alarm_topic is None:
+            raise ValueError(
+                "FargateServiceStack requires alarm_topic: the monitoring "
+                "stack's topic (monitoring_stack.alerts_topic). The API's two "
+                "5xx alarms roll a deployment back by themselves, and without "
+                "an action on the topic that rollback tells nobody."
+            )
         if db_security_group is None:
             raise ValueError(
                 "FargateServiceStack requires db_security_group: Aurora's "
@@ -754,33 +763,36 @@ class FargateServiceStack(Stack):
                 statistic="Sum",
                 period=Duration.seconds(60),
             )
-            self.api_5xx_alarms.append(
-                cloudwatch.Alarm(
-                    self,
-                    f"Api5xx{colour.capitalize()}",
-                    alarm_name=api_5xx_alarm_name(env_name, colour),
-                    alarm_description=(
-                        f"The API's {colour} target group answers 5xx: at least "
-                        "5 target 5xx and at least 5% of its requests in a "
-                        "minute, for 2 of 3 minutes. While this is in ALARM, "
-                        "CodeDeploy stops and rolls back any API deployment "
-                        "(docs/deployment/rollback-runbook.md)."
-                    ),
-                    metric=cloudwatch.MathExpression(
-                        expression=API_5XX_EXPRESSION,
-                        using_metrics={"e": errors, "r": requests},
-                        period=Duration.seconds(60),
-                        label=f"{colour} target 5xx rate",
-                    ),
-                    threshold=API_5XX_RATE_THRESHOLD,
-                    comparison_operator=(
-                        cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD
-                    ),
-                    evaluation_periods=3,
-                    datapoints_to_alarm=2,
-                    treat_missing_data=cloudwatch.TreatMissingData.NOT_BREACHING,
-                )
+            alarm = cloudwatch.Alarm(
+                self,
+                f"Api5xx{colour.capitalize()}",
+                alarm_name=api_5xx_alarm_name(env_name, colour),
+                alarm_description=(
+                    f"The API's {colour} target group answers 5xx: at least "
+                    "5 target 5xx and at least 5% of its requests in a "
+                    "minute, for 2 of 3 minutes. While this is in ALARM, "
+                    "CodeDeploy stops and rolls back any API deployment "
+                    "(docs/deployment/rollback-runbook.md)."
+                ),
+                metric=cloudwatch.MathExpression(
+                    expression=API_5XX_EXPRESSION,
+                    using_metrics={"e": errors, "r": requests},
+                    period=Duration.seconds(60),
+                    label=f"{colour} target 5xx rate",
+                ),
+                threshold=API_5XX_RATE_THRESHOLD,
+                comparison_operator=(
+                    cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD
+                ),
+                evaluation_periods=3,
+                datapoints_to_alarm=2,
+                treat_missing_data=cloudwatch.TreatMissingData.NOT_BREACHING,
             )
+            # Announce it (DECISIONS D21): while in ALARM this rolls a
+            # deployment back by itself, and without an action nobody is told.
+            # ALARM only -- no OK or INSUFFICIENT_DATA action.
+            alarm.add_alarm_action(cloudwatch_actions.SnsAction(alarm_topic))
+            self.api_5xx_alarms.append(alarm)
 
         # --- CodeDeploy Application ---
         self.codedeploy_app = codedeploy.EcsApplication(
