@@ -7,7 +7,10 @@ flag evaluation, OpenFeature, edge bootstrap ...) as the owning user via
 create endpoint; only its SHA-256 hash is persisted (``APIKey.key``).
 
 * ``GET /``            — the caller's keys; ADMIN may pass ``?all=true``.
-* ``POST /``           — create; 201 with the plaintext ``key``.
+* ``POST /``           — create; 201 with the plaintext ``key``. A key with the
+  ``sdk:ruleset`` scope is for server-side evaluation, and only a user who can
+  change feature flags (ADMIN, DEVELOPER or a superuser) may create one;
+  anyone else gets 403 and no key is written.
 * ``DELETE /{key_id}`` — owner or ADMIN; 204.
 
 Workspace-scoped keys (the workspaces module) live under
@@ -21,7 +24,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
 
 from backend.app.api import deps
-from backend.app.core.api_key_scopes import format_scopes, parse_scopes
+from backend.app.core.api_key_scopes import (
+    SDK_RULESET_SCOPE,
+    format_scopes,
+    has_scope,
+    parse_scopes,
+)
 from backend.app.core.permissions import (
     Action,
     ResourceType,
@@ -38,6 +46,12 @@ from backend.app.schemas.api_key import (
 )
 
 router = APIRouter()
+
+SDK_RULESET_CREATE_FORBIDDEN = (
+    "Only users who can change feature flags (the ADMIN and DEVELOPER roles, "
+    f"or a superuser) can create an API key with the {SDK_RULESET_SCOPE} scope. "
+    "Create the key without that scope, or ask someone with one of those roles."
+)
 
 
 def _may_act_on_others_keys(user: User, action: Action) -> bool:
@@ -108,6 +122,15 @@ def create_api_key(
     the key can be recognised later.
     """
     scopes = format_scopes(body.scopes)
+    # Server-side evaluation keys are for roles that can change flags. The
+    # check runs before anything is written.
+    if has_scope(scopes, SDK_RULESET_SCOPE) and not check_permission(
+        current_user, ResourceType.FEATURE_FLAG, Action.UPDATE
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=SDK_RULESET_CREATE_FORBIDDEN,
+        )
     api_key, plaintext = APIKey.create_for_user(
         db,
         user_id=current_user.id,
