@@ -34,14 +34,7 @@ from backend.app.models.experiment import (
 from backend.app.models.feature_flag import FeatureFlag, FeatureFlagStatus
 from backend.app.models.user import User, UserRole
 
-DEFAULT_TEST_DB_URL = (
-    "postgresql://postgres:postgres@localhost:5432/experimentation_test"
-)
-
 HASHED_PASSWORD = "$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW"
-DEFAULT_TEST_DB_URL = (
-    "postgresql://postgres:postgres@localhost:5432/experimentation_test"
-)
 
 
 # ---------------------------------------------------------------------------
