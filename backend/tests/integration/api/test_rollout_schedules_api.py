@@ -53,6 +53,7 @@ from backend.app.models.rollout_schedule import (
     TriggerType,
 )
 from backend.app.models.user import User, UserRole
+from backend.tests.conftest import DEFAULT_TEST_DB_URL
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -60,9 +61,9 @@ from backend.app.models.user import User, UserRole
 
 HASHED_PASSWORD = "$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW"
 SCHEMA = "test_experimentation"
-# Use the same dynamic per-process DB name as conftest.py
-_PID = os.getpid()
-DB_URL = f"postgresql://postgres:postgres@localhost:5432/experimentation_test_{_PID}"
+# The per-process test database the root conftest builds, on the host, port and
+# credentials it reads from POSTGRES_SERVER/PORT/USER/PASSWORD (#283).
+DB_URL = DEFAULT_TEST_DB_URL
 
 
 # ---------------------------------------------------------------------------
