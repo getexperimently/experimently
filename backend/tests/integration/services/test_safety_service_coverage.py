@@ -516,6 +516,97 @@ class TestGetErrorMetrics:
         assert result["error_types"] == {}
 
 
+@pytest.fixture
+def error_log_rows_unloadable(monkeypatch):
+    """Make any query that loads whole ``ErrorLog`` rows raise.
+
+    Aggregate queries over ``ErrorLog`` columns are unaffected.
+    """
+    from sqlalchemy.orm import Query
+
+    def loads_error_logs(query) -> bool:
+        return any(d.get("type") is ErrorLog for d in query.column_descriptions)
+
+    original_all = Query.all
+    original_iter = Query.__iter__
+
+    def guarded_all(self):
+        if loads_error_logs(self):
+            raise AssertionError("ErrorLog rows were loaded with .all()")
+        return original_all(self)
+
+    def guarded_iter(self):
+        if loads_error_logs(self):
+            raise AssertionError("ErrorLog rows were loaded by iteration")
+        return original_iter(self)
+
+    monkeypatch.setattr(Query, "all", guarded_all)
+    monkeypatch.setattr(Query, "__iter__", guarded_iter)
+
+
+@pytest.mark.regression
+class TestGetErrorMetricsAggregates:
+    """``get_error_metrics`` counts and groups errors in the database."""
+
+    def test_counts_without_loading_error_rows(
+        self, db_session, make_feature_flag, error_log_rows_unloadable
+    ):
+        """The count and the breakdown are right with row loading disabled."""
+        flag = make_feature_flag()
+        for error_type, n in (("crash", 5), ("timeout", 2), ("api_error", 1)):
+            for _ in range(n):
+                _add_error_log(db_session, flag, error_type=error_type)
+        _add_error_log(
+            db_session,
+            flag,
+            error_type="old",
+            timestamp=datetime.utcnow() - timedelta(hours=2),
+        )
+        _add_evaluations(db_session, flag, n=16)
+        db_session.commit()
+
+        # The guard is live: loading the rows directly raises.
+        with pytest.raises(AssertionError, match="ErrorLog rows were loaded"):
+            db_session.query(ErrorLog).filter(ErrorLog.feature_flag_id == flag.id).all()
+        with pytest.raises(AssertionError, match="ErrorLog rows were loaded"):
+            list(db_session.query(ErrorLog).filter(ErrorLog.feature_flag_id == flag.id))
+
+        result = SafetyService(db_session).get_error_metrics(db_session, flag.id)
+
+        assert result["error_count"] == 8
+        assert result["total_evaluations"] == 16
+        assert result["error_rate"] == pytest.approx(0.5)
+        assert result["error_types"] == {"crash": 5, "timeout": 2, "api_error": 1}
+        assert set(result) == {
+            "error_count",
+            "total_evaluations",
+            "error_rate",
+            "error_types",
+            "timeframe_minutes",
+            "start_time",
+            "end_time",
+        }
+
+    def test_breakdown_lists_the_most_frequent_types_and_counts_all(
+        self, db_session, make_feature_flag, monkeypatch, error_log_rows_unloadable
+    ):
+        """Past the breakdown limit, the most frequent types are listed and every
+        error is still counted."""
+        from backend.app.services import safety_service
+
+        monkeypatch.setattr(safety_service, "ERROR_TYPE_BREAKDOWN_LIMIT", 2)
+        flag = make_feature_flag()
+        for error_type, n in (("a", 3), ("b", 2), ("c", 1), ("d", 1)):
+            for _ in range(n):
+                _add_error_log(db_session, flag, error_type=error_type)
+        db_session.commit()
+
+        result = SafetyService(db_session).get_error_metrics(db_session, flag.id)
+
+        assert result["error_count"] == 7
+        assert result["error_types"] == {"a": 3, "b": 2}
+
+
 class TestGetLatencyMetrics:
     def test_raises_for_missing_flag(self, db_session):
         service = SafetyService(db_session)

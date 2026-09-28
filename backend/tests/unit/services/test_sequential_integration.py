@@ -3,8 +3,14 @@ Integration tests for EP-021 Sequential Testing Service (Batch 5).
 
 Tests the end-to-end orchestration of SequentialTestingService.run_sequential_analysis()
 including correct sub-method wiring, result structure completeness, edge cases,
-recommended_action logic, alpha spending monotonicity, evidence trajectory ordering,
-and confidence sequence narrowing.
+recommended_action logic, evidence trajectory ordering, and confidence sequence
+narrowing.
+
+Contract change (#232/#222, PR-E1): ``alpha_spending`` is always ``[]`` -- no
+planned-looks table is computed -- and ``stop_for_futility`` is no longer emitted
+on time grounds (the advisory ``at_risk`` replaces it).  The assertions that
+pinned the old table and the time-based futility rule were changed to the new
+contract, not relaxed.
 
 All tests are pure computation -- no database or mocking required.
 """
@@ -14,7 +20,6 @@ import math
 import pytest
 
 from backend.app.services.sequential_testing_service import (
-    AlphaSpendingBoundary,
     ConfidenceSequence,
     EvidencePoint,
     EvidenceStrength,
@@ -78,9 +83,9 @@ class TestRunSequentialAnalysisOrchestration:
         assert isinstance(result.evidence_trajectory, list)
         assert len(result.evidence_trajectory) >= 1
         assert isinstance(result.evidence_trajectory[0], EvidencePoint)
-        assert isinstance(result.alpha_spending, list)
-        assert len(result.alpha_spending) == default_config["current_look"]
-        assert all(isinstance(b, AlphaSpendingBoundary) for b in result.alpha_spending)
+        # Contract change (#232): no planned-looks table is computed, whatever
+        # current_look/planned_looks the config carries.
+        assert result.alpha_spending == []
         assert result.long_running_risk is not None
         assert isinstance(result.long_running_risk, LongRunningRisk)
         assert result.recommended_action in (
@@ -279,11 +284,11 @@ class TestAlwaysValidMethod:
             config=config,
         )
         assert isinstance(result, SequentialAnalysis)
-        # Single look should produce exactly 1 alpha spending boundary
-        assert len(result.alpha_spending) == 1
-        # With a single look, the OBF boundary z = z_{alpha/2}/sqrt(1) = z_{alpha/2}
-        # so the boundary_p should approximate alpha
-        assert result.alpha_spending[0].boundary_p == pytest.approx(0.05, abs=0.001)
+        # Contract change (#232): the analysis is mSPRT, and no alpha-spending
+        # boundary is reported even for a single planned look.
+        assert result.method == SequentialTestingMethod.MSPRT
+        assert result.alpha_spending == []
+        assert result.msprt_result.boundary == pytest.approx(20.0)
 
 
 # ---------------------------------------------------------------------------
@@ -339,9 +344,15 @@ class TestRecommendedAction:
         assert result.long_running_risk.is_at_risk is False
         assert result.recommended_action == "continue"
 
-    def test_stop_for_futility_when_at_risk_and_weak_evidence(self, service):
-        """When experiment is at risk and evidence is inconclusive/null,
-        recommended action should be stop_for_futility."""
+    @pytest.mark.regression
+    def test_time_based_risk_is_at_risk_not_futility(self, service):
+        """An experiment that has run long with inconclusive evidence is
+        flagged ``at_risk`` and told to continue.
+
+        Contract change (#222): on main this case returned
+        ``stop_for_futility``, a time-based rule that is not a statistical
+        futility boundary.  The mSPRT has none, so the analysis continues.
+        """
         config = {
             "tau_squared": 0.001,
             "alpha": 0.05,
@@ -361,47 +372,20 @@ class TestRecommendedAction:
             treatment_total=2000,
             config=config,
         )
-        assert result.long_running_risk.is_at_risk is True
+        assert result.recommended_action == "continue"
         assert result.msprt_result.can_stop is False
-        assert result.recommended_action == "stop_for_futility"
+        assert result.long_running_risk.is_at_risk is True
+        assert result.at_risk is True
 
 
 # ---------------------------------------------------------------------------
-# 5. Alpha spending monotonicity
+# 5. Alpha spending: not computed
 # ---------------------------------------------------------------------------
-
-
-class TestAlphaSpendingMonotonicity:
-    """Cumulative alpha must be monotonically non-decreasing across looks."""
-
-    def test_obf_cumulative_alpha_monotonically_increasing(self, service):
-        """O'Brien-Fleming cumulative alpha must increase at each look."""
-        boundaries = service.compute_alpha_spending(
-            current_look=5,
-            planned_looks=5,
-            alpha=0.05,
-            spending_function=SpendingFunction.OBRIEN_FLEMING,
-        )
-        cumulative_alphas = [b.cumulative_alpha for b in boundaries]
-        for i in range(len(cumulative_alphas) - 1):
-            assert cumulative_alphas[i + 1] >= cumulative_alphas[i], (
-                f"Cumulative alpha decreased from look {i + 1} ({cumulative_alphas[i]}) "
-                f"to look {i + 2} ({cumulative_alphas[i + 1]})"
-            )
-
-    def test_pocock_cumulative_alpha_monotonically_increasing(self, service):
-        """Pocock cumulative alpha must increase at each look."""
-        boundaries = service.compute_alpha_spending(
-            current_look=10,
-            planned_looks=10,
-            alpha=0.05,
-            spending_function=SpendingFunction.POCOCK,
-        )
-        cumulative_alphas = [b.cumulative_alpha for b in boundaries]
-        for i in range(len(cumulative_alphas) - 1):
-            assert cumulative_alphas[i + 1] > cumulative_alphas[i], (
-                f"Cumulative alpha did not increase from look {i + 1} to look {i + 2}"
-            )
+# Contract change (#232): the O'Brien-Fleming and Pocock boundaries did not
+# hold their stated significance level, and nothing counted the looks they
+# were indexed by.  compute_alpha_spending was removed with them, so its
+# monotonicity tests went too; alpha_spending == [] is pinned above and in
+# backend/tests/unit/api/test_sequential_contract.py.
 
 
 # ---------------------------------------------------------------------------

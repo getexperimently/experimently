@@ -246,14 +246,18 @@ class TestSecurityMisconfiguration:
             "redoc_url should be None — use custom route instead"
         )
 
-    def test_debug_disabled_in_production(self):
+    def test_debug_disabled_in_production(self, monkeypatch):
         """DEBUG must be False in production settings."""
         from backend.app.core.config import ProdSettings
 
+        # The suite's TESTING=true is refused with a production environment.
+        monkeypatch.delenv("TESTING", raising=False)
         # ProdSettings inherits DEBUG=False from base
         s = ProdSettings(
             SECRET_KEY="a" * 64,
             FIRST_SUPERUSER_PASSWORD="StrongProd1!",
+            PUBLIC_BASE_URL="https://experimently.example.com",
+            _env_file=None,
         )
         assert s.DEBUG is False, "DEBUG must be False in production"
 

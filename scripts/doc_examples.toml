@@ -13,7 +13,7 @@
 
 [meta]
 documents = 32
-exec = 155
+exec = 157
 universe = [
     ".github/pull_request_template.md",
     "CHANGELOG.md",
@@ -145,6 +145,7 @@ universe = [
     "docs/security/security-policies.md",
     "docs/security/threat-model.md",
     "docs/self-hosting/cdk.md",
+    "docs/self-hosting/kubernetes.md",
     "docs/self-hosting/migrations.md",
     "docs/self-hosting/monitoring.md",
     "docs/self-hosting/releases.md",
@@ -321,9 +322,9 @@ expects = 18
 [[document]]
 path = "docs/api/bayesian.md"
 environment = "stack"
-exec = 2
-skip = 2
-expects = 3
+exec = 4
+skip = 0
+expects = 9
 
 [[document]]
 path = "docs/api/cuped.md"
@@ -358,7 +359,7 @@ path = "docs/api/sequential-testing.md"
 environment = "stack"
 exec = 3
 skip = 0
-expects = 6
+expects = 10
 
 [[document]]
 path = "docs/statistics/fdr-correction.md"
@@ -404,11 +405,17 @@ exec = 0
 skip = 7
 expects = 0
 
+# Its blocks need a Kubernetes cluster: the chart-kind job extracts and runs
+# them (scripts/guide_blocks.py), so they carry that job's markers, not tags.
+[[exempt]]
+path = "docs/self-hosting/kubernetes.md"
+reason = "run on a kind cluster by the chart-kind workflow (scripts/chart_kind.sh), which extracts its marked blocks"
+
 [pending]
 "backend/lambda/README.md" = { comments = 0, unlabelled = 1, syntax = 0 }
 "backend/lambda/event_processor/README.md" = { comments = 5, unlabelled = 1, syntax = 0 }
 "docs/api/compliance.md" = { comments = 2, unlabelled = 5, syntax = 0 }
-"docs/api/endpoints.md" = { comments = 24, unlabelled = 24, syntax = 1 }
+"docs/api/endpoints.md" = { comments = 24, unlabelled = 23, syntax = 1 }
 "docs/api/integrations.md" = { comments = 0, unlabelled = 8, syntax = 0 }
 "docs/api/rbac.md" = { comments = 5, unlabelled = 12, syntax = 0 }
 "docs/api/split-url.md" = { comments = 0, unlabelled = 3, syntax = 0 }

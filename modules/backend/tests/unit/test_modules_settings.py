@@ -118,14 +118,23 @@ class TestHardenedAuditKey:
         monkeypatch.delenv("TESTING", raising=False)
         assert ModulesSettings(_env_file=None, ENVIRONMENT=env).ENVIRONMENT == env
 
-    def test_testing_flag_relaxes_the_check(self, monkeypatch):
+    @pytest.mark.regression
+    @pytest.mark.parametrize("env", ["staging", "production"])
+    def test_testing_flag_does_not_relax_the_check(self, env, monkeypatch):
+        """TESTING used to switch this check off. The core settings now refuse
+        TESTING with a hardened environment, and the check here no longer
+        looks at it."""
         monkeypatch.setenv("TESTING", "true")
-        ModulesSettings(_env_file=None, ENVIRONMENT="production")
+        with pytest.raises(ValidationError, match="AUDIT_HMAC_KEY"):
+            ModulesSettings(_env_file=None, ENVIRONMENT=env)
 
-    def test_legacy_environment_spellings_are_canonicalised(self):
+    def test_legacy_environment_spellings_are_canonicalised(self, monkeypatch):
+        monkeypatch.delenv("TESTING", raising=False)
         with pytest.warns(DeprecationWarning):
             assert (
-                ModulesSettings(_env_file=None, ENVIRONMENT="prod").ENVIRONMENT
+                ModulesSettings(
+                    _env_file=None, ENVIRONMENT="prod", **_STRONG
+                ).ENVIRONMENT
                 == "production"
             )
 

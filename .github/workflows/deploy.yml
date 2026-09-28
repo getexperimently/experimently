@@ -357,6 +357,9 @@ jobs:
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
+          # timeout-minutes x 60 <= this <= the role's MaxSessionDuration (10800);
+          # test_aws_session_duration.py. The default, 3600, expires mid-job.
+          role-duration-seconds: 9000
 
       # DECISIONS D7: each environment is its own account. A role ARN pasted
       # into the wrong environment would otherwise deploy staging into prod.

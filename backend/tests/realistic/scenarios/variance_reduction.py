@@ -7,9 +7,10 @@ Validates the mathematical correctness of:
   3. Winsorization of outliers
   4. mSPRT (mixture Sequential Probability Ratio Test) computation
   5. Always-valid confidence intervals
-  6. Alpha spending functions (O'Brien-Fleming, Pocock)
-  7. Evidence trajectory tracking
-  8. Long-running experiment risk detection
+  6. Evidence trajectory tracking
+  7. Long-running experiment risk detection
+
+(Alpha spending is no longer computed: #232.)
 
 These tests use numpy directly with known inputs and do NOT require a running
 platform.
@@ -329,59 +330,11 @@ class TestAlwaysValidCI:
         assert cs.width > 0
 
 
-class TestAlphaSpending:
-    """Validate alpha spending boundaries."""
-
-    def test_obrien_fleming_boundaries_decrease(self):
-        from backend.app.services.sequential_testing_service import (
-            SequentialTestingService,
-            SpendingFunction,
-        )
-
-        service = SequentialTestingService()
-        boundaries = service.compute_alpha_spending(
-            current_look=5,
-            planned_looks=5,
-            alpha=0.05,
-            spending_function=SpendingFunction.OBRIEN_FLEMING,
-        )
-        assert len(boundaries) == 5
-        # O'Brien-Fleming: early boundaries should be higher (harder to reject)
-        assert boundaries[0].boundary_z > boundaries[-1].boundary_z
-
-    def test_pocock_boundaries_roughly_constant(self):
-        from backend.app.services.sequential_testing_service import (
-            SequentialTestingService,
-            SpendingFunction,
-        )
-
-        service = SequentialTestingService()
-        boundaries = service.compute_alpha_spending(
-            current_look=5,
-            planned_looks=5,
-            alpha=0.05,
-            spending_function=SpendingFunction.POCOCK,
-        )
-        z_values = [b.boundary_z for b in boundaries]
-        # Pocock boundaries should be approximately equal
-        z_range = max(z_values) - min(z_values)
-        assert z_range < 1.0, (
-            f"Pocock boundaries should be roughly constant, range={z_range}"
-        )
-
-    def test_cumulative_alpha_does_not_exceed_total(self):
-        from backend.app.services.sequential_testing_service import (
-            SequentialTestingService,
-        )
-
-        service = SequentialTestingService()
-        boundaries = service.compute_alpha_spending(
-            current_look=10,
-            planned_looks=10,
-            alpha=0.05,
-        )
-        max_alpha = boundaries[-1].cumulative_alpha
-        assert max_alpha <= 0.05 + 1e-6, f"Cumulative alpha {max_alpha} exceeds 0.05"
+# Contract change (#232): TestAlphaSpending validated compute_alpha_spending's
+# O'Brien-Fleming and Pocock boundaries, which did not hold their stated
+# significance level.  The method was removed and the sequential analysis
+# reports alpha_spending == [] (pinned in
+# backend/tests/unit/api/test_sequential_contract.py), so the class went too.
 
 
 class TestEvidenceTrajectory:

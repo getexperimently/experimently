@@ -5,7 +5,8 @@
 #   0. python -m backend.app.core.preflight: the settings check. Every problem
 #      it finds is printed in one list and the container exits 78 (EX_CONFIG)
 #      before anything else runs. It always requires ENVIRONMENT (or the
-#      legacy APP_ENV); in staging/production it also requires the secrets,
+#      legacy APP_ENV), and refuses `test`, which is the test runner's; in
+#      staging/production it also requires the secrets,
 #      PUBLIC_BASE_URL and POSTGRES_SERVER, and refuses DATABASE_URL/_URI.
 #   1. Wait for PostgreSQL (POSTGRES_SERVER/POSTGRES_PORT) to accept connections.
 #   2. RUN_MIGRATIONS=true (default)  ->  python -m backend.app.db.bootstrap
