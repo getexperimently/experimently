@@ -218,8 +218,23 @@ class TestOwnerRole:
     def test_only_an_owner_who_can_change_flags_is_served(
         self, client, db_session, role, superuser, expected
     ):
-        user = _make_user(db_session, role, is_superuser=superuser)
-        key = _key(client, user, ["sdk:ruleset"])["key"]
+        if expected == 200:
+            user = _make_user(db_session, role, is_superuser=superuser)
+            key = _key(client, user, ["sdk:ruleset"])["key"]
+        else:
+            # ANALYST and VIEWER cannot create an sdk:ruleset key (#305), so
+            # the key is made the way a demotion leaves one: created by a
+            # DEVELOPER through the API, then the owner's role changed.
+            user = _make_user(db_session, UserRole.DEVELOPER)
+            key = _key(client, user, ["sdk:ruleset"])["key"]
+            user.role = role
+            db_session.commit()
+            refused = client.post(
+                KEYS,
+                json={"name": "ruleset-refused", "scopes": ["sdk:ruleset"]},
+                headers=_auth(user),
+            )
+            assert refused.status_code == 403, refused.text
         response = _get(client, key)
         assert response.status_code == expected
         if expected == 403:
