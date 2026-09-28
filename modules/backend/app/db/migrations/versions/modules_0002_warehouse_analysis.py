@@ -432,10 +432,11 @@ def _connections_shape(inspector) -> str:
 def _remove_earlier_connections() -> None:
     """Drop the earlier ``warehouse_connections``: every row, both indexes."""
     bind = op.get_bind()
-    # _SCHEMA comes from the deployment's environment and the table name is a
-    # module constant; nothing here comes from a request.
+    # Built with SQLAlchemy Core, so the dialect quotes the schema and table.
     rows = bind.execute(
-        sa.text(f'SELECT count(*) FROM "{_SCHEMA}"."{CONNECTIONS}"')
+        sa.select(sa.func.count()).select_from(
+            sa.table(CONNECTIONS, schema=_SCHEMA)
+        )
     ).scalar_one()
     logger.warning(
         "modules_0002: removing %d legacy warehouse connection rows", rows
