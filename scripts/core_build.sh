@@ -420,8 +420,11 @@ step_secrets() {
     report="$COPY/../$(basename "$COPY").gitleaks.json"
     # --no-git: the copy has no .git; every file is scanned as-is, which is the
     # tarball view.  The repository's .gitleaks.toml carries the allowlist.
-    gitleaks detect --no-git --source "$COPY" --config "$COPY/.gitleaks.toml" \
-        --redact --exit-code 1 --report-format json --report-path "$report" \
+    # Scanned from inside the copy with --source . so a finding's fingerprint
+    # is the repository-relative path:rule:line, which a .gitleaksignore line
+    # can name; with --source "$COPY" it carries the copy's random mktemp path.
+    (cd "$COPY" && gitleaks detect --no-git --source . --config .gitleaks.toml \
+        --redact --exit-code 1 --report-format json --report-path "$report") \
         || die "gitleaks found secrets in the $PROFILE tree (report: $report)"
     rm -f "$report"
 }
