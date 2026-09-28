@@ -42,6 +42,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from backend.app.core.config import settings as core_settings
+from backend.app.core.logger import get_log_context
 from backend.app.models.user import User, UserRole
 from modules.backend.app.models.sso_config import SSOConfig
 from modules.backend.app.settings import settings
@@ -122,6 +123,45 @@ class SSORefusal(HTTPException):
         super().__init__(status_code=status_code, detail=detail)
         self.sso_error = sso_error if sso_error in SSO_ERROR_CODES else SSO_FAILED
         self.idp_error = idp_error
+
+
+#: The shape a request id must have to be shown to a user: in a redirect URL
+#: or in a refusal's detail.
+REQUEST_ID_PATTERN = re.compile(r"[A-Za-z0-9._:-]{1,128}")
+
+
+def current_request_id() -> Optional[str]:
+    """This request's id (the one on its `X-Request-ID`), if it is safe to show."""
+    value = get_log_context().get("request_id")
+    if isinstance(value, str) and REQUEST_ID_PATTERN.fullmatch(value):
+        return value
+    return None
+
+
+#: The ACS's answer to a SAML response it cannot read. Fixed text, plus the
+#: request id an administrator searches the API log for; the reason is logged.
+SAML_PARSE_FAILED_DETAIL = "Failed to parse SAML response"
+#: The same, from the development and test stand-in.
+SAML_DECODE_FAILED_DETAIL = "Cannot decode SAML response"
+#: How much of the reason the log line keeps.
+SAML_LOG_REASON_LIMIT = 200
+
+
+def _saml_unreadable(detail: str, exc: BaseException) -> HTTPException:
+    """A 400 with *detail* and the request id; the reason goes to the log only."""
+    request_id = current_request_id()
+    reason = str(exc)[:SAML_LOG_REASON_LIMIT]
+    logger.warning(
+        "SAML response refused: %s: %s reason=%r request_id=%s",
+        detail,
+        type(exc).__name__,
+        reason,
+        request_id,
+    )
+    return HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail=f"{detail} (request ID: {request_id})" if request_id else detail,
+    )
 
 
 #: Refusal used by every SAML route when ``python3-saml`` is not installed and
@@ -554,11 +594,7 @@ def _parse_saml_response_with_library(
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error("SAML parsing error: %s", exc)
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Failed to parse SAML response: {exc}",
-        )
+        raise _saml_unreadable(SAML_PARSE_FAILED_DETAIL, exc) from None
 
 
 def _parse_saml_response_stub(
@@ -584,10 +620,7 @@ def _parse_saml_response_stub(
         xml_bytes = base64.b64decode(saml_response_b64)
         root = ET.fromstring(xml_bytes)
     except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Cannot decode SAML response: {exc}",
-        )
+        raise _saml_unreadable(SAML_DECODE_FAILED_DETAIL, exc) from None
 
     # Find NameID
     ns = {

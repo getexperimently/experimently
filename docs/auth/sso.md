@@ -3,7 +3,10 @@
 !!! info "Part of the `sso` module"
     SSO / SAML / OIDC is one of the optional modules -- present in the **full profile**, absent from the core one. A core deployment does not serve these routes. See [Modules and profiles](../getting-started/modules.md) for what each profile includes and how to run the full one.
 
-The `sso` module adds Single Sign-On (SSO) through OpenID Connect (OIDC) and OAuth 2 providers, and through SAML 2.0; it is part of the full profile and, like every module, Apache-2.0. An administrator creates one **SSO configuration** per email domain; users of that domain then sign in through the identity provider (IdP) instead of with a password.
+The `sso` module adds Single Sign-On (SSO) through OpenID Connect (OIDC) and OAuth 2 providers; it is part of the full profile and, like every module, Apache-2.0. An administrator creates one **SSO configuration** per email domain; users of that domain then sign in through the identity provider (IdP) instead of with a password.
+
+!!! warning "SAML 2.0 sign-in is not available yet; use OIDC"
+    A SAML configuration can be created, and its metadata and ACS are served, but a SAML sign-in does not give the user a session. Use an OIDC configuration (`okta`, `google` or `github`) for sign-in.
 
 ---
 
@@ -16,10 +19,10 @@ A configuration's `provider_type` is one of `saml`, `google`, `github`, `okta`, 
 | `okta` | OpenID Connect | the dashboard's **Sign in with SSO** | the `groups` claim of Okta's user info |
 | `google` | OpenID Connect | the dashboard's **Sign in with SSO** | none |
 | `github` | OAuth 2 | the dashboard's **Sign in with SSO** | none |
-| `saml` | SAML 2.0 | the identity provider (IdP-initiated) | the `groups` attribute of the assertion |
+| `saml` | SAML 2.0 | **not available yet**: use OIDC | the `groups` attribute of the assertion |
 | `microsoft`, `azure_ad`, `onelogin` | -- | **not supported yet** | -- |
 
-The providers `microsoft`, `azure_ad` and `onelogin` are **not supported yet**: signing in through a configuration of one of those types is refused. A SAML configuration (`provider_type: "saml"`) for the same identity provider is not affected -- Okta, Microsoft Entra ID (Azure AD) and OneLogin can all be used through SAML.
+The providers `microsoft`, `azure_ad` and `onelogin` are **not supported yet**: signing in through a configuration of one of those types is refused. SAML 2.0 sign-in is not available yet; use OIDC (for Okta, the `okta` provider type).
 
 Google and GitHub send no groups, so a `role_mapping` has no effect on their sign-ins: see [Group-to-Role Mapping](#group-to-role-mapping).
 
@@ -27,7 +30,7 @@ Google and GitHub send no groups, so a `role_mapping` has no effect on their sig
 
 ## Overview
 
-1. A user signs in: from the dashboard for an OIDC or OAuth 2 provider, or from the identity provider's own portal for SAML.
+1. A user signs in from the dashboard, through an OIDC or OAuth 2 provider. (SAML 2.0 sign-in is not available yet; use OIDC.)
 2. The platform checks what comes back: that an OIDC sign-in was started in this browser and its ID token, or a SAML assertion's signature.
 3. It takes an email address the provider vouches for, and accepts it only in the configuration's own domain.
 4. It finds the account with that email address, or creates one (JIT provisioning), and applies `role_mapping`.
@@ -103,7 +106,7 @@ A callback that arrives without the sign-in's cookie, or with a cookie the API d
 
 The older `GET /api/v1/auth/sso/oidc/{provider}/login` still works without `return_to`, for API and CLI callers. Its optional `org_domain` parameter is compared with the stored `org_domain` exactly, so pass it lower-case; without it, the first active configuration of that provider is used. Its callback answers JSON: `access_token`, `token_type`, `user_id`, `email`, `role` and `provider`.
 
-A SAML sign-in starts at the identity provider, which POSTs the assertion to the ACS. The ACS answers that POST with JSON (`access_token`, `token_type`, `user_id`, `email`, `role`); it does not redirect to the dashboard.
+**SAML 2.0 sign-in is not available yet; use OIDC.** The identity provider POSTs a SAML assertion to the ACS, which checks it and creates or updates the account, but the JSON it answers with (`access_token`, `token_type`, `user_id`, `email`, `role`) is not a session: neither the API nor the dashboard accepts that token. The ACS does not redirect to the dashboard. A deactivated account is refused with 400 `Inactive user`, as the OIDC sign-in refuses it.
 
 ---
 
@@ -196,6 +199,8 @@ curl -X POST https://app.example.com/api/v1/auth/sso/configs \
 
 ### Okta SAML 2.0
 
+SAML 2.0 sign-in is not available yet; use OIDC: see [Okta (OIDC)](#okta-oidc). The steps below register the SAML application for when SAML sign-in is available.
+
 1. In Okta, go to **Applications → Create App Integration → SAML 2.0**.
 2. Create the configuration first (with a placeholder certificate if you do not have Okta's yet), to learn its `id`.
 3. In Okta, set:
@@ -216,7 +221,7 @@ curl -X POST https://app.example.com/api/v1/auth/sso/configs \
 
 ### Azure Active Directory (SAML)
 
-Microsoft Entra ID (Azure AD) is used through SAML; its OIDC provider types are not supported yet.
+SAML 2.0 sign-in is not available yet; use OIDC, and Microsoft Entra ID's (Azure AD's) OIDC provider types are not supported yet, so Entra ID cannot be used for sign-in today. The steps below register the SAML application for when SAML sign-in is available.
 
 1. In Azure, go to **Enterprise Applications → New Application → Create your own application → Integrate any other application you don't find in the gallery**.
 2. Under **Single sign-on → SAML**, set:
@@ -389,7 +394,7 @@ SAML_SP_ACS_URL=https://app.example.com/api/v1/auth/sso/saml/3f1c2b9e-0000-4000-
 
 ### "This single sign-on provider is not supported yet"
 
-- The configuration's `provider_type` is `microsoft`, `azure_ad` or `onelogin`. Use SAML for that identity provider.
+- The configuration's `provider_type` is `microsoft`, `azure_ad` or `onelogin`. Use a supported provider type: `okta`, `google` or `github` (SAML 2.0 sign-in is not available yet; use OIDC).
 
 ### "The identity provider has not verified this account's email address" (`sso_unverified`)
 
@@ -403,14 +408,18 @@ SAML_SP_ACS_URL=https://app.example.com/api/v1/auth/sso/saml/3f1c2b9e-0000-4000-
 
 - Another configuration has the same `org_domain`, ignoring case, surrounding spaces and a leading `@`. List the configurations and update or delete that one.
 
-### "SAML validation failed: invalid_response"
+### "SAML validation failed: …"
 
-The library refused the assertion. Check, in this order:
+The library refused the assertion; the codes after the colon are python3-saml's, for example `invalid_response`. Check, in this order:
 
 - `x509_certificate` is the IdP's current signing certificate, and the IdP signs the response or the assertion.
 - `entity_id` is exactly the `Issuer` the IdP sends.
 - `SAML_SP_ACS_URL` is the ACS URL the IdP posts to, and `SAML_SP_ENTITY_ID` the audience it sends.
 - The API's clock is right: more than 5 minutes of skew fails.
+
+### "Failed to parse SAML response"
+
+- The ACS could not read the `SAMLResponse` form field: it is not base64, or not a SAML response. The message ends with a request ID; search the API log for it. The log line starts `SAML response refused:` and carries the parser's reason.
 
 ### "SAML single sign-on is not available in this deployment: …"
 
@@ -431,4 +440,4 @@ The library refused the assertion. Check, in this order:
 
 - `org_domain` must be exactly the domain part of their email address; there are no wildcards.
 - The configuration must be active (`is_active: true`): `GET /api/v1/auth/sso/configs/{config_id}`.
-- A SAML-only domain signs in from the IdP's portal, not from the dashboard.
+- A SAML-only domain cannot sign in: SAML 2.0 sign-in is not available yet; use OIDC.
