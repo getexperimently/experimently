@@ -11,6 +11,8 @@ from aws_cdk import (
 )
 from constructs import Construct
 
+from stacks.alarm_email import resolve_alarm_email
+
 
 class MonitoringStack(Stack):
     """Dashboard, alarms and SNS topic for the platform.
@@ -23,6 +25,10 @@ class MonitoringStack(Stack):
     INSUFFICIENT_DATA for ever.  The name is passed in rather than written out
     here because the stream names itself ``exp-events-<id>``, not the
     ``experimentation-events`` this stack used to watch.
+
+    ``alarm_email`` is ``ALARM_EMAIL`` (``app.py`` reads it), the topic's one
+    email subscriber; ``stacks/alarm_email.py`` has what is required where and
+    what is refused.
     """
 
     def __init__(
@@ -32,6 +38,7 @@ class MonitoringStack(Stack):
         vpc,
         events_stream_name: str | None = None,
         env_name: str = "dev",
+        alarm_email: str | None = None,
         **kwargs,
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
@@ -50,10 +57,14 @@ class MonitoringStack(Stack):
             topic_name="experimentation-alerts" + suffix,
         )
 
-        # Add an email subscription (replace with actual email)
-        self.alerts_topic.add_subscription(
-            sns_subscriptions.EmailSubscription("alerts@example.com")
-        )
+        # The one subscriber: ALARM_EMAIL (stacks/alarm_email.py, DECISIONS
+        # D21). Required in staging and prod; in dev and demo, no value means
+        # no subscription rather than a placeholder that mails nobody.
+        address = resolve_alarm_email(alarm_email, env_name)
+        if address is not None:
+            self.alerts_topic.add_subscription(
+                sns_subscriptions.EmailSubscription(address)
+            )
 
         # Create a CloudWatch Dashboard
         dashboard = cloudwatch.Dashboard(

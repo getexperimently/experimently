@@ -358,9 +358,15 @@ These are stack **ids** — what `cdk deploy` takes, and what `cdk list` prints.
 With `modules/` present, three more: `experimentation-dynamodb-counters-<env>`,
 `experimentation-analytics-<env>` and `experimentation-glue-etl-<env>`.
 
-Standing an environment up for the first time (CDK handles ordering):
+Standing an environment up for the first time (CDK handles ordering), with
+`CERTIFICATE_ARN`, `PUBLIC_BASE_URL` and `ALARM_EMAIL` exported as
+[deployment guide §1.6](deployment-guide.md#16-the-stacks) shows. `ALARM_EMAIL`
+is required for staging and prod: synth refuses to run without it. Confirm the
+SNS subscription it creates from the inbox afterwards, or no alarm reaches
+anyone:
 ```bash
 cd infrastructure/cdk
+export ALARM_EMAIL=ops@your-domain.com
 ENVIRONMENT=staging cdk deploy --all --require-approval never
 ```
 
