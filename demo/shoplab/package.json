@@ -13,12 +13,12 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "next": "^16.3.5",
+    "next": "^16.3.6",
     "react": "^19.3.0",
     "react-dom": "^19.3.0"
   },
   "devDependencies": {
-    "@next/eslint-plugin-next": "^16.3.4",
+    "@next/eslint-plugin-next": "^16.3.6",
     "@testing-library/dom": "^10.4.2",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.3",
@@ -36,7 +36,7 @@
     "jest-environment-jsdom": "^30.5.2",
     "postcss": "^8.4.38",
     "tailwindcss": "^3.4.0",
-    "ts-jest": "^29.4.12",
+    "ts-jest": "^29.4.13",
     "typescript": "^5.3.0"
   }
 }
