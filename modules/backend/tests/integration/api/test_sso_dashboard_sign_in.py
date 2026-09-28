@@ -1025,3 +1025,93 @@ def test_no_cookie_and_no_dashboard_origin_is_the_json_400(
     assert resp.json()["detail"] == (
         "OIDC sign-in was not started in this browser, or its cookie was not sent"
     )
+
+
+# ---------------------------------------------------------------------------
+# An account's email address is changed only by an administrator
+# ---------------------------------------------------------------------------
+
+MEMBER_PASSWORD = "Str0ng-Passw0rd"
+
+
+def _member_with_token(browser: TestClient, db_session: Session):
+    """A local VIEWER (not a superuser) and a real bearer token for them."""
+    import bcrypt
+
+    suffix = uuid.uuid4().hex[:8]
+    member = User(
+        username=f"member-{suffix}",
+        email=f"member-{suffix}@example.org",
+        hashed_password=bcrypt.hashpw(
+            MEMBER_PASSWORD.encode("utf-8"), bcrypt.gensalt(rounds=4)
+        ).decode(),
+        is_active=True,
+        is_superuser=False,
+        role=UserRole.VIEWER,
+    )
+    db_session.add(member)
+    db_session.commit()
+    db_session.refresh(member)
+    login = browser.post(
+        "/api/v1/auth/login",
+        json={"email": member.email, "password": MEMBER_PASSWORD},
+    )
+    assert login.status_code == 200, login.text
+    return member, login.json()["access_token"]
+
+
+def _change_email(browser: TestClient, member: User, token: str, new_email: str):
+    return browser.put(
+        f"/api/v1/users/{member.id}",
+        json={"username": member.username, "email": new_email},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+
+def _exchange(browser: TestClient, resp) -> Dict:
+    exchanged = browser.post(EXCHANGE, json={"code": _code_of(resp), "secret": SECRET})
+    assert exchanged.status_code == 200, exchanged.text
+    return exchanged.json()["user"]
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("role_mapping", [{"g": "admin"}])
+@pytest.mark.parametrize("groups", ["g"])
+def test_a_user_cannot_change_their_email_to_an_address_sso_signs_in(
+    browser, config, dashboard, db_session, email, role_mapping, groups
+):
+    """The first SSO sign-in for an address gets an account of its own.
+
+    Before that sign-in, a local non-superuser tries to change their own
+    email to the address. The change is refused, so the sign-in creates a
+    new account with the mapped role, and the local account keeps its email
+    address and its role.
+    """
+    member, token = _member_with_token(browser, db_session)
+    changed = _change_email(browser, member, token, email)
+
+    signed_in = _exchange(browser, _sign_in(browser, config.org_domain))
+    assert signed_in["id"] != str(member.id)
+    assert signed_in["email"] == email
+    assert signed_in["role"] == "ADMIN"
+
+    db_session.expire_all()
+    row = db_session.query(User).filter(User.id == member.id).one()
+    assert (row.email, row.role) == (member.email, UserRole.VIEWER)
+    assert changed.status_code == 403, changed.text
+
+
+@pytest.mark.regression
+def test_a_case_variant_email_change_does_not_stop_the_next_sso_sign_in(
+    browser, config, dashboard, db_session, email
+):
+    """Once an address has signed in with SSO, a local user cannot take the
+    upper-case copy of it; the next SSO sign-in finds exactly one account."""
+    first = _exchange(browser, _sign_in(browser, config.org_domain))
+
+    member, token = _member_with_token(browser, db_session)
+    changed = _change_email(browser, member, token, email.upper())
+
+    again = _exchange(browser, _sign_in(browser, config.org_domain))
+    assert again["id"] == first["id"]
+    assert changed.status_code == 403, changed.text
