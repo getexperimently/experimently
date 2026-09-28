@@ -78,12 +78,55 @@ class InviteAlreadyAccepted(WorkspaceError):
     """Raised when attempting to accept an already-accepted invite."""
 
 
+#: The typed code and fixed message of a refused accept. The message names
+#: neither address.
+INVITE_EMAIL_MISMATCH_CODE = "invite_email_mismatch"
+INVITE_EMAIL_MISMATCH_MESSAGE = "This invite was sent to a different email address."
+
+
+class InviteEmailMismatch(WorkspaceError):
+    """Raised when the accepting account's email is not the invited address."""
+
+    def __init__(self) -> None:
+        super().__init__(INVITE_EMAIL_MISMATCH_MESSAGE)
+
+
 class PlanLimitExceeded(WorkspaceError):
     """Raised when a plan resource limit would be exceeded."""
 
 
 class APIKeyNotFound(WorkspaceError):
     """Raised when a workspace API key cannot be found."""
+
+
+def _comparable_email(value: Optional[str]) -> Optional[str]:
+    """An address as invites compare it: trimmed, ASCII, lower-cased.
+
+    ``None`` when there is no address or it is not ASCII. ASCII is checked
+    before lower-casing, on the value as stored: ``str.lower`` folds some
+    non-ASCII characters into ASCII ones (U+212A KELVIN SIGN becomes ``k``), so
+    lower-casing first would make a different address compare equal. The same
+    rule as ``_sso_email`` in the SSO service.
+    """
+    if not isinstance(value, str):
+        return None
+    trimmed = value.strip()
+    if not trimmed or not trimmed.isascii():
+        return None
+    return trimmed.lower()
+
+
+def invite_email_matches(
+    invite_email: Optional[str], user_email: Optional[str]
+) -> bool:
+    """Whether ``user_email`` is the address ``invite_email`` was sent to.
+
+    Both must be present and ASCII after trimming, and equal after
+    lower-casing. No alias rules: ``a+x@`` and ``a@`` are different addresses.
+    """
+    invited = _comparable_email(invite_email)
+    accepting = _comparable_email(user_email)
+    return invited is not None and accepting is not None and invited == accepting
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -497,10 +540,20 @@ class WorkspaceService:
         db: Session,
         token: str,
         user_id: uuid.UUID,
+        user_email: Optional[str],
     ) -> WorkspaceMember:
-        """Accept an invite and add the user to the workspace."""
+        """Accept an invite and add the user to the workspace.
+
+        Only the account the invite was sent to may accept it: ``user_email``
+        (the accepting account's stored email) must match the invite's address
+        under :func:`invite_email_matches`, or :class:`InviteEmailMismatch` is
+        raised. That applies to every account, superusers included, and is
+        checked before expiry and prior acceptance.
+        """
         invite = self.get_invite_by_token(db, token)
 
+        if not invite_email_matches(invite.email, user_email):
+            raise InviteEmailMismatch()
         if invite.is_expired:
             raise InviteExpired("This invite has expired.")
         if invite.is_accepted:
