@@ -350,7 +350,10 @@ aws rds wait db-cluster-available \
 
 # Step 3: Deploy CDK stacks in us-east-1
 cd infrastructure/cdk
-cdk deploy --all --context env=prod --context region=us-east-1
+export ENVIRONMENT=prod CDK_DEFAULT_REGION=us-east-1 AWS_REGION=us-east-1
+export CERTIFICATE_ARN="$US_EAST_1_CERTIFICATE_ARN" PUBLIC_BASE_URL="https://app.$DOMAIN"
+export ALARM_EMAIL=ops@your-domain.com
+cdk deploy --all
 
 # Step 4: Update DNS to point to us-east-1 ALB
 # (Update Route53 record for api.experimentation.example.com)
@@ -371,6 +374,16 @@ aws route53 change-resource-record-sets \
 # Step 5: Verify services are running in us-east-1
 curl -f https://api.experimentation.example.com/health
 ```
+
+Step 3 synthesises the app like any other deploy, so it needs the same settings
+as the primary region, read from the environment (not `--context`):
+`ENVIRONMENT=prod`, the us-east-1 region, an ACM certificate **issued in
+us-east-1** (a certificate is regional), `PUBLIC_BASE_URL`, and `ALARM_EMAIL`.
+Without `ALARM_EMAIL` synth stops with a `ValueError` naming it. The new
+region's alarm topic gets a new subscription, which stays unconfirmed until
+someone confirms it from the inbox
+([AWS CDK Deployment](../self-hosting/cdk.md#required-environment-variables)).
+Until then, no alarm in the failover region reaches anyone.
 
 ### Communication
 

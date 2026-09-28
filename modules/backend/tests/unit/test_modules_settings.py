@@ -32,27 +32,7 @@ _MOVED_FIELDS = (
     "GLUE_METRICS_JOB_NAME",
     "GLUE_DATABASE",
     "GLUE_EVENTS_TABLE",
-    "ATHENA_OUTPUT_BUCKET",
     "GLUE_CRAWLER_NAME",
-    "DATABRICKS_HOST",
-    "DATABRICKS_HTTP_PATH",
-    "DATABRICKS_TOKEN",
-    "DATABRICKS_CATALOG",
-    "DATABRICKS_SCHEMA",
-    "DATABRICKS_TIMEOUT_SECONDS",
-    "CLICKHOUSE_HOST",
-    "CLICKHOUSE_PORT",
-    "CLICKHOUSE_DATABASE",
-    "CLICKHOUSE_USER",
-    "CLICKHOUSE_PASSWORD",
-    "CLICKHOUSE_SECURE",
-    "CLICKHOUSE_TIMEOUT_SECONDS",
-    "MYSQL_HOST",
-    "MYSQL_PORT",
-    "MYSQL_DATABASE",
-    "MYSQL_USER",
-    "MYSQL_PASSWORD",
-    "MYSQL_TIMEOUT_SECONDS",
     "SAML_SP_ENTITY_ID",
     "SAML_SP_ACS_URL",
     "OIDC_GOOGLE_CLIENT_ID",
@@ -73,6 +53,20 @@ class TestWhereTheFieldsLive:
     @pytest.mark.parametrize("name", ["SSO_ENABLED", "SSO_STATE_SECRET"])
     def test_unread_sso_fields_are_gone(self, name):
         """Nothing read either; deleted rather than moved (issue #91)."""
+        assert name not in ModulesSettings.model_fields
+        assert name not in Settings.model_fields
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "ATHENA_OUTPUT_BUCKET",
+            "DATABRICKS_HOST",
+            "CLICKHOUSE_HOST",
+            "MYSQL_HOST",
+        ],
+    )
+    def test_settings_of_removed_endpoints_are_gone(self, name):
+        """Read only by the removed warehouse connectors and ETL query."""
         assert name not in ModulesSettings.model_fields
         assert name not in Settings.model_fields
 
@@ -118,14 +112,23 @@ class TestHardenedAuditKey:
         monkeypatch.delenv("TESTING", raising=False)
         assert ModulesSettings(_env_file=None, ENVIRONMENT=env).ENVIRONMENT == env
 
-    def test_testing_flag_relaxes_the_check(self, monkeypatch):
+    @pytest.mark.regression
+    @pytest.mark.parametrize("env", ["staging", "production"])
+    def test_testing_flag_does_not_relax_the_check(self, env, monkeypatch):
+        """TESTING used to switch this check off. The core settings now refuse
+        TESTING with a hardened environment, and the check here no longer
+        looks at it."""
         monkeypatch.setenv("TESTING", "true")
-        ModulesSettings(_env_file=None, ENVIRONMENT="production")
+        with pytest.raises(ValidationError, match="AUDIT_HMAC_KEY"):
+            ModulesSettings(_env_file=None, ENVIRONMENT=env)
 
-    def test_legacy_environment_spellings_are_canonicalised(self):
+    def test_legacy_environment_spellings_are_canonicalised(self, monkeypatch):
+        monkeypatch.delenv("TESTING", raising=False)
         with pytest.warns(DeprecationWarning):
             assert (
-                ModulesSettings(_env_file=None, ENVIRONMENT="prod").ENVIRONMENT
+                ModulesSettings(
+                    _env_file=None, ENVIRONMENT="prod", **_STRONG
+                ).ENVIRONMENT
                 == "production"
             )
 
@@ -158,8 +161,6 @@ class TestTheProcessInstance:
         [
             ("modules.backend.app.services.audit_signing_service", "AUDIT_HMAC_KEY"),
             ("modules.backend.app.services.hipaa_service", "HIPAA_ALLOWED_REGIONS"),
-            ("modules.backend.app.services.clickhouse_connector", "CLICKHOUSE_HOST"),
-            ("modules.backend.app.services.mysql_connector", "MYSQL_HOST"),
             ("modules.backend.app.services.sso_service", "SAML_SP_ENTITY_ID"),
         ],
     )
@@ -241,6 +242,34 @@ class TestRegistrationValidates:
             assert hooks.capability_names() == ()
             with pytest.raises(RuntimeError, match="refusing to build a schema"):
                 modules_loader.require_modules_or_absent()
+        finally:
+            monkeypatch.undo()
+            modules_settings.load_modules_settings(force=True)
+
+    @pytest.mark.regression
+    def test_malformed_credential_keys_in_production_fail_the_registration(
+        self, fresh_hooks, monkeypatch
+    ):
+        """``WAREHOUSE_CREDENTIALS_KEYS`` is optional, but a value that is not
+        a list of Fernet keys stops a production full profile: the
+        registration fails, naming the setting and not the value, and the
+        bootstrap's ``require_modules_or_absent`` then refuses to start."""
+        from backend.app.core.config import settings as core
+
+        rejected = "SENTINEL-not-a-fernet-key-4b1d"
+        monkeypatch.delenv("TESTING", raising=False)
+        monkeypatch.setenv("AUDIT_HMAC_KEY", "c" * 64)
+        monkeypatch.setenv("WAREHOUSE_CREDENTIALS_KEYS", rejected)
+        monkeypatch.setattr(core, "ENVIRONMENT", "production")
+        monkeypatch.setattr(modules_settings, "_instance", None)
+        try:
+            assert modules_loader.load_modules(force=True) is False
+            failure = modules_loader.modules_failure() or ""
+            assert "WAREHOUSE_CREDENTIALS_KEYS" in failure, failure
+            assert rejected not in failure
+            with pytest.raises(RuntimeError) as excinfo:
+                modules_loader.require_modules_or_absent()
+            assert rejected not in str(excinfo.value)
         finally:
             monkeypatch.undo()
             modules_settings.load_modules_settings(force=True)
@@ -385,3 +414,15 @@ class TestTheEnvFile:
             env_file_for_environment("production")
             == ProdSettings.model_config["env_file"]
         )
+
+
+@pytest.mark.regression
+def test_a_refused_modules_configuration_does_not_echo_the_audit_key():
+    """The error names AUDIT_HMAC_KEY; it must not print the value it refused."""
+    distinctive = "zq7-distinctive-input-4411"
+    with pytest.raises(ValidationError) as refused:
+        ModulesSettings(ENVIRONMENT="production", AUDIT_HMAC_KEY=distinctive)
+    rendered = str(refused.value)
+    assert "AUDIT_HMAC_KEY" in rendered
+    assert "distinctive" not in rendered
+    assert "input_value" not in rendered

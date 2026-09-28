@@ -85,9 +85,10 @@ In a second shell, `make web` serves the dashboard on :3100:
 make web
 ```
 
-`make dev` runs `AUTH_PROVIDER=local uvicorn backend.app.main:app` after
-`docker compose up -d --wait postgres redis` and
-`python -m backend.app.db.bootstrap`. Bootstrap is idempotent: it creates the
+`make dev` runs `ENVIRONMENT=development AUTH_PROVIDER=local uvicorn backend.app.main:app`
+after `docker compose up -d --wait postgres redis` and
+`ENVIRONMENT=development python -m backend.app.db.bootstrap`. The API does not
+start without `ENVIRONMENT`. Bootstrap is idempotent: it creates the
 schema from the models and stamps the alembic heads on a fresh database, and runs
 `alembic upgrade heads` on an existing one. Do not run `alembic upgrade heads` on
 an empty database — the historical migration chain cannot replay from nothing.

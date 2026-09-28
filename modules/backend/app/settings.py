@@ -16,11 +16,12 @@ What lives here, by manifest group:
 * group 2, HIPAA: ``PHI_ENCRYPTION_KEY`` and ``HIPAA_*``.
 * group 4, SSO: ``SAML_SP_*`` and ``OIDC_*``.  ``SSO_ENABLED`` and
   ``SSO_STATE_SECRET`` are gone: nothing read either.
-* group 6, warehouse connectors: ``DATABRICKS_*``, ``CLICKHOUSE_*``,
-  ``MYSQL_*``.
 * group 8, real-time counters: ``DYNAMODB_COUNTERS_TABLE``, read by
   ``DynamoDBCounterService`` when no table name is passed to it.
-* group 9, ETL: ``GLUE_*`` and ``ATHENA_OUTPUT_BUCKET``.
+* group 9, ETL: ``GLUE_*``.
+* stored credentials: ``WAREHOUSE_CREDENTIALS_KEYS``, the Fernet keys
+  ``modules.backend.app.core.credential_crypto`` encrypts stored credentials
+  with.  Optional; when set in staging or production it must be well formed.
 
 Module code reads them as ``from modules.backend.app.settings import
 settings`` -- the same shape as the core singleton, so a test patches
@@ -51,6 +52,7 @@ from backend.app.core.config import (
     canonical_environment,
     env_file_for_environment,
 )
+from backend.app.core.settings_rules import credential_keys_error
 
 
 class ModulesSettings(BaseSettings):
@@ -77,33 +79,7 @@ class ModulesSettings(BaseSettings):
     GLUE_METRICS_JOB_NAME: str = "experimentation-metrics-etl"
     GLUE_DATABASE: str = "experimentation"
     GLUE_EVENTS_TABLE: str = "raw_events"
-    ATHENA_OUTPUT_BUCKET: str = "s3://experimentation-athena-results/"
     GLUE_CRAWLER_NAME: str = "experimentation-crawler"
-
-    # EP-041: Databricks warehouse connector
-    DATABRICKS_HOST: str = ""
-    DATABRICKS_HTTP_PATH: str = ""
-    DATABRICKS_TOKEN: str = ""
-    DATABRICKS_CATALOG: str = "main"
-    DATABRICKS_SCHEMA: str = "default"
-    DATABRICKS_TIMEOUT_SECONDS: int = 30
-
-    # EP-048: ClickHouse warehouse connector
-    CLICKHOUSE_HOST: str = "localhost"
-    CLICKHOUSE_PORT: int = 8123  # HTTP port (9000 for native)
-    CLICKHOUSE_DATABASE: str = "default"
-    CLICKHOUSE_USER: str = "default"
-    CLICKHOUSE_PASSWORD: str = ""
-    CLICKHOUSE_SECURE: bool = False
-    CLICKHOUSE_TIMEOUT_SECONDS: int = 30
-
-    # EP-048: MySQL warehouse connector
-    MYSQL_HOST: str = "localhost"
-    MYSQL_PORT: int = 3306
-    MYSQL_DATABASE: str = ""
-    MYSQL_USER: str = ""
-    MYSQL_PASSWORD: str = ""
-    MYSQL_TIMEOUT_SECONDS: int = 30
 
     # SSO / SAML / OIDC settings (EP-037)
     SAML_SP_ENTITY_ID: str = "https://experimently.example.com"
@@ -115,7 +91,20 @@ class ModulesSettings(BaseSettings):
     OIDC_MICROSOFT_CLIENT_ID: str = ""
     OIDC_MICROSOFT_CLIENT_SECRET: str = ""
 
-    model_config = SettingsConfigDict(case_sensitive=True, extra="ignore")
+    #: Operator-provided Fernet keys for encrypting stored credentials, as a
+    #: comma-separated list, newest first: the first key encrypts, every key
+    #: decrypts, so a new key is added in front and an old one removed once
+    #: nothing is encrypted under it.  Optional at boot; a feature that needs
+    #: it refuses at use while it is unset
+    #: (``credential_crypto.CredentialKeysUnavailable``).
+    WAREHOUSE_CREDENTIALS_KEYS: Optional[str] = None
+
+    model_config = SettingsConfigDict(
+        case_sensitive=True,
+        extra="ignore",
+        # A refused configuration names the setting, never its value.
+        hide_input_in_errors=True,
+    )
 
     @field_validator("ENVIRONMENT", mode="before")
     @classmethod
@@ -142,6 +131,23 @@ class ModulesSettings(BaseSettings):
                 )
         return v
 
+    @field_validator("WAREHOUSE_CREDENTIALS_KEYS")
+    @classmethod
+    def validate_credentials_keys(
+        cls, v: Optional[str], info: ValidationInfo
+    ) -> Optional[str]:
+        """Refuse a malformed or placeholder key list in staging/production.
+
+        Absent is allowed everywhere.  In development and test a malformed
+        value is not refused here; ``credential_crypto`` refuses it at use.
+        The message names the setting and the entry's position, never a key.
+        """
+        if _hardening_required(info):
+            error = credential_keys_error(v)
+            if error:
+                raise ValueError(error)
+        return v
+
 
 def build_modules_settings() -> ModulesSettings:
     """A fresh, validated :class:`ModulesSettings` for this process.
@@ -152,7 +158,7 @@ def build_modules_settings() -> ModulesSettings:
     (``.env.dev`` / ``.env.test`` / ``.env.prod``), which is the mechanism
     ``docs/getting-started/environment-setup.md`` documents for production.
     Without it every setting that moved off the core class -- AUDIT_HMAC_KEY,
-    PHI_ENCRYPTION_KEY, the OIDC/SAML/HIPAA/warehouse ones -- would quietly
+    PHI_ENCRYPTION_KEY, the OIDC/SAML/HIPAA ones -- would quietly
     stop being read from those files and fall back to its dev default.
 
     Raises ``pydantic.ValidationError`` when a hardened environment carries a

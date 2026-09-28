@@ -86,7 +86,7 @@ The following permissions are enforced by `backend/app/core/permissions.py`:
 - Every key must have an `expires_at` date set; keys without expiry are prohibited in production
 - Apart from `sdk:ruleset` (below), keys are not scoped: any active key authenticates every other API-key route (flag evaluation, tracking) as the user who created it, whatever its `scopes` field says. Issue one key per service so each can be revoked on its own, and keep every server-side key secret
 - A key shipped to a browser or a mobile app is visible to end users; use a dedicated key for that SDK traffic and nothing else
-- The `sdk:ruleset` scope is for server-side local evaluation. It is required by `GET /api/v1/sdk/ruleset` and `POST /api/v1/tracking/evaluations` (both beta), and it allows downloading every flag's targeting rules, so grant it only to server-side keys
+- The `sdk:ruleset` scope is for server-side local evaluation. It is required by `GET /api/v1/sdk/ruleset` and `POST /api/v1/tracking/evaluations` (both beta), and it allows downloading every flag's targeting rules, so grant it only to server-side keys. Only users who can change feature flags (ADMIN, DEVELOPER, or a superuser) can create a key with it, and those routes accept it only while its owner still can
 
 **Usage:**
 - API keys are passed via `X-API-Key` header for all tracking and evaluation endpoints

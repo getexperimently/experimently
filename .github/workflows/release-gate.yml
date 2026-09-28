@@ -93,10 +93,9 @@ jobs:
         run: pip install bandit
 
       # Both trees: 58 files moved under modules/backend/app in the physical
-      # move (SAML parsing, PHI encryption, the SQL-building warehouse
-      # connectors, the inbound webhooks) and `-r backend/app` scanned none of
-      # them. modules/ is absent in a core checkout, so it is passed only when
-      # it is there.
+      # move (SAML parsing, PHI encryption, the inbound webhooks) and
+      # `-r backend/app` scanned none of them. modules/ is absent in a core
+      # checkout, so it is passed only when it is there.
       - name: Run Bandit high severity checks
         run: |
           targets=backend/app

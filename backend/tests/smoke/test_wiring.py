@@ -503,19 +503,6 @@ class TestAppStartup:
             "No /llm-experiments/* paths in OpenAPI schema — EP-046 router not registered"
         )
 
-    @pytest.mark.modules
-    def test_openapi_schema_includes_warehouse_connectors(self, client):
-        """Verify warehouse routers (Databricks, ClickHouse, MySQL) are wired."""
-        from backend.app.core.config import settings
-
-        resp = client.get(f"{settings.API_V1_STR}/openapi.json")
-        data = resp.json()
-        paths = data.get("paths", {})
-        warehouse_paths = [p for p in paths if "/warehouse/" in p]
-        assert warehouse_paths, (
-            "No /warehouse/* paths in OpenAPI schema — warehouse routers not registered"
-        )
-
     def test_openapi_schema_includes_power_calculator(self, client):
         """Verify EP-056 power calculator endpoints are wired."""
         from backend.app.core.config import settings

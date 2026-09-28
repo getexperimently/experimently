@@ -12,14 +12,19 @@ not read cost a 120-second wait on ``localhost`` before anything was said.
 
 What it refuses:
 
-* always -- neither ``ENVIRONMENT`` nor the legacy ``APP_ENV`` set, or an
-  environment name the settings do not know.  The image requires ENVIRONMENT
-  to be set.  Also an ``ALLOWED_HOSTS`` entry that can never match
+* always -- neither ``ENVIRONMENT`` nor the legacy ``APP_ENV`` set, an
+  environment name the settings do not know, or ``test``, which is the test
+  runner's environment and not one the image runs in.  The image requires
+  ENVIRONMENT to be set.  Also an ``ALLOWED_HOSTS`` entry that can never match
   (``*example.com``), which the settings refuse in every environment.
-* in staging and production -- ``SECRET_KEY``, ``FIRST_SUPERUSER_PASSWORD``
+* in staging and production -- ``TESTING`` set (the test runner's flag; one
+  line, and nothing else is listed, as the settings refuse it outright);
+  ``SECRET_KEY``, ``FIRST_SUPERUSER_PASSWORD``
   and (full profile) ``AUDIT_HMAC_KEY`` missing, too short or a published
-  placeholder; ``PUBLIC_BASE_URL`` missing (unless ``ALLOWED_HOSTS`` names the
-  hosts) or malformed; ``ALLOWED_HOSTS=*``; ``POSTGRES_SERVER`` (or
+  placeholder; (full profile) ``WAREHOUSE_CREDENTIALS_KEYS`` set but not a
+  list of Fernet keys, or holding a placeholder (it may be absent);
+  ``PUBLIC_BASE_URL`` missing (unless ``ALLOWED_HOSTS`` names the hosts) or
+  malformed; ``ALLOWED_HOSTS=*``; ``POSTGRES_SERVER`` (or
   ``POSTGRES_HOST``) not set; ``DATABASE_URL`` or ``DATABASE_URI`` set.
 
 The secret rules are ``settings_rules``', the ones ``config.py`` and the
@@ -42,6 +47,7 @@ from typing import Callable, Dict, List, Mapping, Optional
 
 from backend.app.core.settings_rules import (
     CANONICAL_ENVIRONMENTS,
+    CREDENTIAL_KEYS_SETTING,
     ENV_FILES,
     HARDENED_ENVIRONMENTS,
     MIN_SECRET_KEY_LENGTH,
@@ -49,10 +55,12 @@ from backend.app.core.settings_rules import (
     PUBLIC_BASE_URL_EXAMPLE,
     allowed_host_pattern_error,
     canonical_environment_quiet,
+    credential_keys_error,
     parse_allowed_hosts,
     public_base_url_error,
     secret_is_weak,
     superuser_password_is_weak,
+    testing_refusal,
 )
 
 #: ``EX_CONFIG`` from sysexits.h: "something was found in an unconfigured or
@@ -64,10 +72,32 @@ PREFIX = "[preflight]"
 GENERATE_SECRET = "Generate one: openssl rand -hex 32"
 GENERATE_PASSWORD = "Generate one: openssl rand -base64 18"
 
+#: What to set instead, shared by the one-line environment refusals.
+_ENVIRONMENT_ADVICE = (
+    "set ENVIRONMENT=production (or staging; development only for a local trial)."
+)
+
 #: The one line printed when no environment is named at all.
 ENVIRONMENT_UNSET = (
-    "ENVIRONMENT is not set. This image requires it: set ENVIRONMENT=production "
-    "(or staging; development only for a local trial)."
+    f"ENVIRONMENT is not set. This image requires it: {_ENVIRONMENT_ADVICE}"
+)
+
+#: The environments this image runs in: every canonical one but ``test``,
+#: which belongs to the test runner (pytest, from source).
+IMAGE_ENVIRONMENTS = tuple(e for e in CANONICAL_ENVIRONMENTS if e != "test")
+
+
+def environment_is_test(name: str) -> str:
+    """The one line printed when *name* (ENVIRONMENT or APP_ENV) says ``test``."""
+    return f"{name}=test is for the test runner, not this image: {_ENVIRONMENT_ADVICE}"
+
+
+#: Refusals printed as a bare line rather than as a one-item list.
+_ONE_LINE_REFUSALS = (
+    ENVIRONMENT_UNSET,
+    environment_is_test("ENVIRONMENT"),
+    environment_is_test("APP_ENV"),
+    *(testing_refusal(environment, "true") for environment in HARDENED_ENVIRONMENTS),
 )
 
 _POSTGRES_SETTINGS = (
@@ -128,11 +158,19 @@ def check(
         return [ENVIRONMENT_UNSET]
     name = "ENVIRONMENT" if raw_environment else "APP_ENV"
     environment = canonical_environment_quiet(raw_environment or legacy)
-    if environment not in CANONICAL_ENVIRONMENTS:
+    if environment == "test":
+        return [environment_is_test(name)]
+    if environment not in IMAGE_ENVIRONMENTS:
         return [
             f"{name}={_truncate(raw_environment or legacy)!r} is not an environment "
-            f"this image knows. Use one of: {', '.join(CANONICAL_ENVIRONMENTS)}."
+            f"this image knows. Use one of: {', '.join(IMAGE_ENVIRONMENTS)}."
         ]
+    # TESTING with staging/production: the settings refuse it outright
+    # (settings_rules.testing_refusal, the process environment only, as the
+    # settings read it), so nothing else is worth listing.
+    refusal = testing_refusal(environment, environ.get("TESTING"))
+    if refusal:
+        return [refusal]
     from_file = _dotenv(environment, root if root is not None else Path.cwd())
 
     def value(key: str) -> str:
@@ -213,6 +251,11 @@ def check(
             f"shorter than {MIN_SECRET_KEY_LENGTH} characters or a published placeholder",
             GENERATE_SECRET,
         )
+        # Optional, but when it is set it must be usable: the modules'
+        # settings refuse the same values (settings_rules).
+        keys_error = credential_keys_error(value(CREDENTIAL_KEYS_SETTING))
+        if keys_error:
+            problems.append(keys_error)
 
     # The entrypoint's database wait reads the process environment only, and
     # falls back from POSTGRES_SERVER to POSTGRES_HOST to localhost.
@@ -235,8 +278,8 @@ def check(
 
 def render(problems: List[str]) -> str:
     """The text printed for *problems* (non-empty)."""
-    if len(problems) == 1 and problems[0] == ENVIRONMENT_UNSET:
-        return f"{PREFIX} {ENVIRONMENT_UNSET}"
+    if len(problems) == 1 and problems[0] in _ONE_LINE_REFUSALS:
+        return f"{PREFIX} {problems[0]}"
     noun = "setting needs" if len(problems) == 1 else "settings need"
     lines = [f"{PREFIX} Experimently cannot start: {len(problems)} {noun} attention."]
     lines.extend(f"  - {problem}" for problem in problems)

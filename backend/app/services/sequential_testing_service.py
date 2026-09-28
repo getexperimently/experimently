@@ -7,9 +7,14 @@ methods that maintain valid error rates even with repeated peeking.
 Key methods:
 - mSPRT (mixture Sequential Probability Ratio Test)
 - Always-valid confidence intervals (confidence sequences)
-- Alpha spending functions (O'Brien-Fleming, Pocock)
 - Evidence trajectory tracking
-- Long-running experiment risk detection
+- Long-running experiment risk detection (advisory: ``at_risk``)
+
+There is no group-sequential (alpha-spending) mode: ``alpha_spending`` is always
+an empty list.  The O'Brien-Fleming and Pocock boundaries this service used to
+report did not hold their stated significance level (#232), and nothing counted
+the looks they were indexed by.  The stop/continue decision is mSPRT alone,
+which stays valid however often the results are read.
 """
 
 import logging
@@ -17,8 +22,6 @@ import math
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Dict, List, Optional
-
-from scipy import stats
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +77,11 @@ class ConfidenceSequence:
 
 @dataclass
 class AlphaSpendingBoundary:
-    """A single boundary in an alpha spending schedule."""
+    """A single boundary in an alpha spending schedule.
+
+    Kept as the element type of ``SequentialAnalysis.alpha_spending``, which is
+    always empty until a group-sequential mode exists.
+    """
 
     look_number: int
     cumulative_alpha: float
@@ -111,9 +118,19 @@ class SequentialAnalysis:
     msprt_result: Optional[MSPRTResult]
     confidence_sequence: Optional[ConfidenceSequence]
     evidence_trajectory: List[EvidencePoint]
-    alpha_spending: List[AlphaSpendingBoundary]
+    alpha_spending: List[AlphaSpendingBoundary]  # always [] (see module docstring)
     long_running_risk: Optional[LongRunningRisk]
-    recommended_action: str  # "stop_for_effect", "stop_for_futility", "continue"
+    # One of "stop_for_effect", "stop_for_futility", "continue".  This service
+    # emits only "stop_for_effect" and "continue": running long is not evidence
+    # of no effect, so it is reported as ``at_risk`` instead.
+    recommended_action: str
+
+    @property
+    def at_risk(self) -> Optional[bool]:
+        """Advisory: the experiment is running long or collecting slowly."""
+        if self.long_running_risk is None:
+            return None
+        return self.long_running_risk.is_at_risk
 
 
 # ---------------------------------------------------------------------------
@@ -125,9 +142,8 @@ class SequentialTestingService:
     """
     Service for sequential testing of A/B experiments.
 
-    Provides statistically valid early stopping decisions using the mSPRT
-    framework, always-valid confidence intervals, and alpha spending
-    functions for group sequential designs.
+    Provides early stopping decisions using the mSPRT framework, with
+    always-valid confidence intervals alongside.
     """
 
     def compute_msprt(
@@ -268,36 +284,6 @@ class SequentialTestingService:
             sample_size=sample_size,
         )
 
-    def compute_alpha_spending(
-        self,
-        current_look: int,
-        planned_looks: int,
-        alpha: float = 0.05,
-        spending_function: SpendingFunction = SpendingFunction.OBRIEN_FLEMING,
-    ) -> List[AlphaSpendingBoundary]:
-        """
-        Compute alpha spending boundaries for a group sequential design.
-
-        Args:
-            current_look: How many looks have been taken so far.
-            planned_looks: Total number of planned looks (analyses).
-            alpha: Overall significance level to spend.
-            spending_function: Which spending function to use.
-
-        Returns:
-            List of AlphaSpendingBoundary, one per look up to current_look.
-        """
-        boundaries: List[AlphaSpendingBoundary] = []
-
-        if spending_function == SpendingFunction.POCOCK:
-            boundaries = self._pocock_spending(current_look, planned_looks, alpha)
-        else:
-            boundaries = self._obrien_fleming_spending(
-                current_look, planned_looks, alpha
-            )
-
-        return boundaries
-
     def compute_evidence_trajectory(
         self,
         control_successes_over_time: List[int],
@@ -387,8 +373,9 @@ class SequentialTestingService:
 
         if duration_exceeded:
             recommendation = (
-                "Experiment has exceeded 1.5x its expected duration. "
-                "Consider stopping for futility or increasing traffic allocation."
+                "Experiment has exceeded 1.5x its expected duration. Running long "
+                "is not evidence of no effect; consider increasing traffic "
+                "allocation or revisiting the expected duration."
             )
         elif slow_collection:
             recommendation = (
@@ -424,22 +411,18 @@ class SequentialTestingService:
             treatment_total: Total observations in treatment group.
             config: Dictionary with:
                 - tau_squared (float): Mixing distribution variance
-                - alpha (float): Significance level
-                - spending_function (SpendingFunction): Alpha spending type
-                - planned_looks (int): Total planned analyses
-                - current_look (int): Current analysis number
+                - alpha (float): Significance level; the mSPRT boundary is 1/alpha
                 - actual_days (int): Days the experiment has been running
                 - expected_days (int): Expected experiment duration in days
                 - required_sample_size (int): Total required sample size
+                Any other key (``spending_function``, ``planned_looks``,
+                ``current_look``) is ignored: no alpha-spending table is computed.
 
         Returns:
             SequentialAnalysis with all component results and recommendation.
         """
         tau_squared = config.get("tau_squared", 0.001)
         alpha = config.get("alpha", 0.05)
-        spending_fn = config.get("spending_function", SpendingFunction.OBRIEN_FLEMING)
-        planned_looks = config.get("planned_looks", 5)
-        current_look = config.get("current_look", 1)
         actual_days = config.get("actual_days", 0)
         expected_days = config.get("expected_days", 14)
         required_sample_size = config.get("required_sample_size", 10000)
@@ -464,15 +447,7 @@ class SequentialTestingService:
             tau_squared=tau_squared,
         )
 
-        # 3. Alpha spending boundaries
-        alpha_spending = self.compute_alpha_spending(
-            current_look=current_look,
-            planned_looks=planned_looks,
-            alpha=alpha,
-            spending_function=spending_fn,
-        )
-
-        # 4. Long-running risk
+        # 3. Long-running risk (advisory; never a stopping rule)
         total_sample = control_total + treatment_total
         long_running_risk = self.estimate_long_running_risk(
             actual_days=actual_days,
@@ -481,7 +456,7 @@ class SequentialTestingService:
             required_sample_size=required_sample_size,
         )
 
-        # 5. Evidence trajectory (single point for current data)
+        # 4. Evidence trajectory (single point for current data)
         evidence_trajectory = [
             EvidencePoint(
                 sample_size=total_sample,
@@ -491,19 +466,15 @@ class SequentialTestingService:
             )
         ]
 
-        # 6. Determine recommended action
-        recommended_action = self._determine_action(
-            msprt_result=msprt_result,
-            confidence_sequence=confidence_sequence,
-            long_running_risk=long_running_risk,
-        )
+        # 5. Determine recommended action (mSPRT alone)
+        recommended_action = self._determine_action(msprt_result=msprt_result)
 
         return SequentialAnalysis(
             method=SequentialTestingMethod.MSPRT,
             msprt_result=msprt_result,
             confidence_sequence=confidence_sequence,
             evidence_trajectory=evidence_trajectory,
-            alpha_spending=alpha_spending,
+            alpha_spending=[],
             long_running_risk=long_running_risk,
             recommended_action=recommended_action,
         )
@@ -538,112 +509,17 @@ class SequentialTestingService:
         return EvidenceStrength.INCONCLUSIVE
 
     @staticmethod
-    def _obrien_fleming_spending(
-        current_look: int,
-        planned_looks: int,
-        alpha: float,
-    ) -> List[AlphaSpendingBoundary]:
+    def _determine_action(msprt_result: MSPRTResult) -> str:
         """
-        Compute O'Brien-Fleming alpha spending boundaries.
+        Determine the recommended action from the mSPRT result.
 
-        The OBF spending function is:
-            alpha*(t) = 2 * (1 - Phi(z_{alpha/2} / sqrt(t)))
+        - mSPRT crosses its boundary (Lambda >= 1/alpha) -> ``stop_for_effect``
+        - otherwise -> ``continue``
 
-        where t = i / planned_looks is the information fraction at look i.
-        The incremental spend at each look is alpha*(t_i) - alpha*(t_{i-1}).
-        """
-        z_alpha_half = stats.norm.ppf(1 - alpha / 2.0)
-        boundaries: List[AlphaSpendingBoundary] = []
-
-        for i in range(1, current_look + 1):
-            t_i = i / planned_looks
-            # Cumulative alpha spent through look i
-            cumulative_alpha = 2.0 * (
-                1.0 - stats.norm.cdf(z_alpha_half / math.sqrt(t_i))
-            )
-            # Ensure we don't exceed the total alpha budget
-            cumulative_alpha = min(cumulative_alpha, alpha)
-
-            # Convert cumulative alpha to a z-boundary for this look
-            # Two-sided: boundary_p = cumulative spend at this look (incremental)
-            # For OBF we derive the boundary from the spending function directly
-            boundary_z = z_alpha_half / math.sqrt(t_i)
-            boundary_p = 2.0 * (1.0 - stats.norm.cdf(boundary_z))
-
-            boundaries.append(
-                AlphaSpendingBoundary(
-                    look_number=i,
-                    cumulative_alpha=cumulative_alpha,
-                    boundary_z=boundary_z,
-                    boundary_p=boundary_p,
-                )
-            )
-
-        return boundaries
-
-    @staticmethod
-    def _pocock_spending(
-        current_look: int,
-        planned_looks: int,
-        alpha: float,
-    ) -> List[AlphaSpendingBoundary]:
-        """
-        Compute Pocock alpha spending boundaries.
-
-        Pocock uses equal alpha spending at each look:
-            incremental_alpha = alpha / planned_looks
-
-        All boundaries use the same z-value.
-        """
-        incremental_alpha = alpha / planned_looks
-        # The z-boundary is the same at every look (Pocock property)
-        boundary_z = stats.norm.ppf(1.0 - incremental_alpha / 2.0)
-        boundary_p = 2.0 * (1.0 - stats.norm.cdf(boundary_z))
-
-        boundaries: List[AlphaSpendingBoundary] = []
-        for i in range(1, current_look + 1):
-            cumulative_alpha = incremental_alpha * i
-            boundaries.append(
-                AlphaSpendingBoundary(
-                    look_number=i,
-                    cumulative_alpha=cumulative_alpha,
-                    boundary_z=boundary_z,
-                    boundary_p=boundary_p,
-                )
-            )
-
-        return boundaries
-
-    @staticmethod
-    def _determine_action(
-        msprt_result: MSPRTResult,
-        confidence_sequence: ConfidenceSequence,
-        long_running_risk: LongRunningRisk,
-    ) -> str:
-        """
-        Determine the recommended action based on all analysis results.
-
-        Decision logic:
-        1. If mSPRT can_stop and CI doesn't contain 0 -> stop_for_effect
-        2. If experiment is at risk and evidence is weak -> stop_for_futility
-        3. Otherwise -> continue
+        ``stop_for_futility`` stays in the response's value set but is not
+        emitted: the mSPRT has no futility boundary, and an experiment that
+        runs long is reported through the advisory ``at_risk`` flag instead.
         """
         if msprt_result.can_stop:
-            # Check if the CI excludes zero (i.e. the effect is real)
-            ci_excludes_zero = (
-                confidence_sequence.lower > 0 or confidence_sequence.upper < 0
-            )
-            if ci_excludes_zero:
-                return "stop_for_effect"
-            # mSPRT says stop but CI includes zero — still flag effect
             return "stop_for_effect"
-
-        # Check for futility: long running with weak evidence
-        if long_running_risk.is_at_risk and msprt_result.evidence_strength in (
-            EvidenceStrength.INCONCLUSIVE,
-            EvidenceStrength.MODERATE_FOR_NULL,
-            EvidenceStrength.STRONG_FOR_NULL,
-        ):
-            return "stop_for_futility"
-
         return "continue"

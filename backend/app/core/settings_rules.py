@@ -15,6 +15,8 @@ decided whether the environment is fit to start.
 
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
@@ -30,6 +32,24 @@ HARDENED_ENVIRONMENTS: tuple = ("staging", "production")
 
 #: The canonical environment names.
 CANONICAL_ENVIRONMENTS: tuple = ("development", "test", "staging", "production")
+
+#: Environments in which a weak first-administrator password is accepted, and
+#: then only when ENVIRONMENT was set rather than defaulted.
+WEAK_SUPERUSER_PASSWORD_ENVIRONMENTS: tuple = ("development", "test")
+
+#: What the API says, and then stops, when ENVIRONMENT was never set.
+ENVIRONMENT_NOT_SET_MESSAGE = (
+    "ENVIRONMENT is not set: set it to development, test, staging or "
+    "production before starting the API."
+)
+
+#: What the bootstrap says when it will not create the first administrator.
+WEAK_FIRST_SUPERUSER_PASSWORD_MESSAGE = (
+    "FIRST_SUPERUSER_PASSWORD is a well-known default or shorter than "
+    f"{MIN_SUPERUSER_PASSWORD_LENGTH} characters, which is accepted only with "
+    "ENVIRONMENT=development or ENVIRONMENT=test. Set a stronger "
+    "FIRST_SUPERUSER_PASSWORD, or set ENVIRONMENT."
+)
 
 #: Legacy spelling -> canonical spelling.
 LEGACY_ENVIRONMENT_ALIASES: Dict[str, str] = {
@@ -87,12 +107,110 @@ WEAK_SUPERUSER_PASSWORDS: frozenset = frozenset(
 PUBLIC_BASE_URL_EXAMPLE = "https://experimently.example.com"
 
 
+#: The strings pydantic's ``bool`` reads as False (case-insensitive, exact).
+#: backend/tests/unit/core/test_settings_rules_testing_flag.py pins this
+#: against pydantic itself.
+_FALSE_WORDS: frozenset = frozenset({"0", "off", "f", "false", "n", "no"})
+
+
+def testing_flag_is_set(value: Optional[str]) -> bool:
+    """Whether a raw ``TESTING`` value turns the test runner's flag on.
+
+    Unset or empty is off, and so is anything pydantic's ``bool`` reads as
+    False (``0``, ``off``, ``f``, ``false``, ``n``, ``no``, in any case).
+    Everything else is on: what pydantic reads as True (``1``, ``true``,
+    ``on``, ``t``, ``y``, ``yes``, in any case) and, failing closed, any other
+    non-empty value, such as ``" true"`` or ``enabled``.
+    """
+    if value is None or value == "":
+        return False
+    return value.lower() not in _FALSE_WORDS
+
+
+def testing_refusal(environment: Any, testing: Optional[str]) -> Optional[str]:
+    """The refusal for ``TESTING`` with a staging/production environment, or None.
+
+    *environment* is the canonical name; *testing* the raw ``TESTING`` value
+    from the process environment. The settings (``config.Settings``) raise
+    with this message and the container's start-up check prints it, so the
+    two cannot disagree.
+    """
+    if environment not in HARDENED_ENVIRONMENTS or not testing_flag_is_set(testing):
+        return None
+    return (
+        f"TESTING is for the test runner and cannot be combined with "
+        f"ENVIRONMENT={environment}. Remove TESTING from this deployment's "
+        "configuration."
+    )
+
+
 def secret_is_placeholder(value: Optional[str]) -> bool:
     """True when *value* is a committed/well-known placeholder secret."""
     normalised = (value or "").strip().lower()
     if normalised in PLACEHOLDER_SECRETS:
         return True
     return any(normalised.startswith(prefix) for prefix in PLACEHOLDER_SECRET_PREFIXES)
+
+
+#: The setting that holds the keys stored credentials are encrypted with.
+CREDENTIAL_KEYS_SETTING = "WAREHOUSE_CREDENTIALS_KEYS"
+
+#: How to make one key, given in every message about the setting.
+GENERATE_FERNET_KEY = (
+    "Generate one with: python -c "
+    '"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"'
+)
+
+
+def split_key_list(value: Optional[str]) -> List[str]:
+    """The entries of a comma-separated key list, stripped; ``[]`` when blank."""
+    if value is None or not value.strip():
+        return []
+    return [entry.strip() for entry in value.split(",")]
+
+
+def fernet_key_is_well_formed(key: str) -> bool:
+    """Whether *key* is 32 bytes in URL-safe base64, as Fernet requires.
+
+    Stricter than ``Fernet()`` itself, which discards characters outside the
+    alphabet before decoding: anything this accepts, ``Fernet()`` accepts.
+    """
+    try:
+        decoded = base64.b64decode(key.encode("ascii"), altchars=b"-_", validate=True)
+    except (binascii.Error, UnicodeEncodeError, ValueError):
+        return False
+    return len(decoded) == 32
+
+
+def credential_keys_error(value: Optional[str]) -> Optional[str]:
+    """Why *value* is not a usable ``WAREHOUSE_CREDENTIALS_KEYS``, or ``None``.
+
+    Blank or absent is not an error here: the setting is optional, and a
+    feature that needs it refuses at use.  A value that is set must be a
+    comma-separated list of Fernet keys with no empty entry and no published
+    placeholder.  The message names the setting and the position of the bad
+    entry, never a key.
+    """
+    entries = split_key_list(value)
+    if not entries:
+        return None
+    for position, entry in enumerate(entries, start=1):
+        if not entry:
+            return (
+                f"{CREDENTIAL_KEYS_SETTING} has an empty entry (key {position}). "
+                "It is a comma-separated list of Fernet keys, newest first."
+            )
+        if secret_is_placeholder(entry):
+            return (
+                f"{CREDENTIAL_KEYS_SETTING} key {position} is a published placeholder. "
+                f"{GENERATE_FERNET_KEY}"
+            )
+        if not fernet_key_is_well_formed(entry):
+            return (
+                f"{CREDENTIAL_KEYS_SETTING} key {position} is not a Fernet key "
+                f"(32 bytes, URL-safe base64). {GENERATE_FERNET_KEY}"
+            )
+    return None
 
 
 def secret_is_weak(value: Optional[str]) -> bool:

@@ -194,10 +194,9 @@ jobs:
         run: pip install -r backend/requirements.txt
 
       # The modules import packages backend/requirements.txt deliberately does
-      # not carry (python3-saml, PyMySQL, the warehouse drivers). Every one of
-      # those imports is guarded, so without this install the module code loads
-      # and then refuses at the first call -- which is exactly the failure this
-      # file must not hide.
+      # not carry (python3-saml, authlib). Without this install the module code
+      # loads and then refuses at the first call -- which is exactly the failure
+      # this file must not hide.
       - name: Install module dependencies
         if: ${{ !inputs.skip && inputs.profile == 'full' }}
         run: pip install -r modules/requirements.txt

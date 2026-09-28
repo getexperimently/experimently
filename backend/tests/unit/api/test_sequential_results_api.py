@@ -453,10 +453,16 @@ class TestGetSequentialResults:
         assert data["evidence_trajectory"][0]["sample_size"] == 2000
 
     @pytest.mark.unit
-    def test_sequential_endpoint_returns_alpha_spending(
+    def test_sequential_endpoint_returns_no_alpha_spending(
         self, client, mock_sequential_analysis
     ):
-        """Alpha spending boundaries should be included."""
+        """The route reports no planned-looks table, even if the service had one.
+
+        Contract change (#232): this test used to assert two boundaries passed
+        through from the service.  The boundaries did not hold their stated
+        significance level, and the route now always answers ``[]`` with a
+        notice.
+        """
         with patch(
             "backend.app.api.v1.endpoints.results.SequentialTestingService"
         ) as MockService:
@@ -486,8 +492,9 @@ class TestGetSequentialResults:
 
         assert response.status_code == 200
         data = response.json()
-        assert len(data["alpha_spending"]) == 2
-        assert data["alpha_spending"][0]["look_number"] == 1
+        assert data["alpha_spending"] == []
+        assert data["analysis_status"] == "beta"
+        assert "alpha_spending is always empty" in data["analysis_notice"]
 
     @pytest.mark.unit
     def test_sequential_endpoint_returns_404_for_missing_experiment(self, client):

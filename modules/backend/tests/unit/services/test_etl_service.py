@@ -2,14 +2,11 @@
 Unit tests for ETLService (P3-A TDD).
 
 All AWS interactions are mocked via moto so tests run without real credentials.
-Uses moto 4.2.2 decorator-style mocking for Glue, Athena, and S3.
+Uses moto 4.2.2 decorator-style mocking for Glue.
 
 Coverage:
 - run_etl_job: maps boto3 Glue response to ETLJobResponse
 - get_job_status: returns correct GlueJobStatus enum value
-- run_athena_query: polls and returns results on SUCCEEDED
-- run_athena_query: raises HTTPException on FAILED status
-- run_athena_query: returns empty rows with column_names populated
 - add_partitions: creates correct year/month/day/hour partition values
 - run_crawler: starts crawler and returns RUNNING state
 - get_crawler_status: returns current crawler state
@@ -22,11 +19,9 @@ from unittest.mock import MagicMock, patch
 
 import boto3
 import pytest
-from moto import mock_athena, mock_glue, mock_s3
+from moto import mock_glue
 
 from modules.backend.app.schemas.etl import (
-    AthenaQueryRequest,
-    AthenaQueryResult,
     ETLJobRequest,
     ETLJobResponse,
     ETLJobType,
@@ -42,20 +37,11 @@ AWS_REGION = "us-east-1"
 GLUE_ETL_JOB_NAME = "experimentation-events-etl"
 GLUE_METRICS_JOB_NAME = "experimentation-metrics-etl"
 GLUE_DATABASE = "experimentation"
-ATHENA_OUTPUT_BUCKET = "s3://experimentation-athena-results/"
 GLUE_CRAWLER_NAME = "experimentation-crawler"
 
 
 def _make_glue_client():
     return boto3.client("glue", region_name=AWS_REGION)
-
-
-def _make_athena_client():
-    return boto3.client("athena", region_name=AWS_REGION)
-
-
-def _make_s3_client():
-    return boto3.client("s3", region_name=AWS_REGION)
 
 
 # ---------------------------------------------------------------------------
@@ -77,7 +63,6 @@ def mock_settings(monkeypatch):
             GLUE_METRICS_JOB_NAME=GLUE_METRICS_JOB_NAME,
             GLUE_DATABASE=GLUE_DATABASE,
             GLUE_EVENTS_TABLE="raw_events",
-            ATHENA_OUTPUT_BUCKET=ATHENA_OUTPUT_BUCKET,
             GLUE_CRAWLER_NAME=GLUE_CRAWLER_NAME,
         ),
     )
@@ -245,75 +230,6 @@ class TestGetJobStatus:
         )
 
         assert resp.job_type == ETLJobType.EVENTS_TO_PARQUET
-
-
-# ---------------------------------------------------------------------------
-# run_athena_query tests
-# ---------------------------------------------------------------------------
-
-
-class TestRunAthenaQuery:
-    @mock_athena
-    @mock_s3
-    def test_run_athena_query_succeeded(self, mock_settings):
-        """run_athena_query returns AthenaQueryResult on SUCCEEDED."""
-        from modules.backend.app.services.etl_service import ETLService
-
-        # Create output bucket for Athena results
-        s3 = _make_s3_client()
-        s3.create_bucket(Bucket="experimentation-athena-results")
-
-        svc = ETLService()
-        req = AthenaQueryRequest(
-            sql="SELECT COUNT(*) as cnt FROM raw_events WHERE year='2024'",
-            database=GLUE_DATABASE,
-            output_location=ATHENA_OUTPUT_BUCKET,
-        )
-        result = svc.run_athena_query(req)
-
-        assert isinstance(result, AthenaQueryResult)
-        assert result.query_execution_id
-        # moto returns SUCCEEDED immediately
-        assert result.status in {"SUCCEEDED", "QUEUED", "RUNNING"}
-
-    @mock_athena
-    @mock_s3
-    def test_run_athena_query_returns_column_names(self, mock_settings):
-        """run_athena_query populates column_names from result metadata."""
-        from modules.backend.app.services.etl_service import ETLService
-
-        s3 = _make_s3_client()
-        s3.create_bucket(Bucket="experimentation-athena-results")
-
-        svc = ETLService()
-        req = AthenaQueryRequest(
-            sql="SELECT event_id, event_type FROM raw_events LIMIT 5",
-            database=GLUE_DATABASE,
-        )
-        result = svc.run_athena_query(req)
-
-        assert isinstance(result, AthenaQueryResult)
-        assert isinstance(result.column_names, list)
-        assert isinstance(result.rows, list)
-
-    @mock_athena
-    @mock_s3
-    def test_run_athena_query_uses_default_output_location(self, mock_settings):
-        """run_athena_query uses settings.ATHENA_OUTPUT_BUCKET when output_location is None."""
-        from modules.backend.app.services.etl_service import ETLService
-
-        s3 = _make_s3_client()
-        s3.create_bucket(Bucket="experimentation-athena-results")
-
-        svc = ETLService()
-        req = AthenaQueryRequest(
-            sql="SELECT COUNT(*) FROM raw_events",
-            database=GLUE_DATABASE,
-            output_location=None,  # should fall back to settings
-        )
-        result = svc.run_athena_query(req)
-
-        assert result.query_execution_id
 
 
 # ---------------------------------------------------------------------------

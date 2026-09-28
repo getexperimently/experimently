@@ -70,7 +70,7 @@ pip install -r backend/requirements.txt
 
 # Start the backend API server (in a separate terminal)
 # from the repository root
-uvicorn backend.app.main:app --reload --host 0.0.0.0 --port 8000
+ENVIRONMENT=development uvicorn backend.app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 ### Option A: Locust Web UI (interactive)

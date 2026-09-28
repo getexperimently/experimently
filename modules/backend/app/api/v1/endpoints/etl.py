@@ -1,13 +1,12 @@
 """
 ETL & Glue Job REST endpoints (P3-A).
 
-Provides endpoints for managing AWS Glue ETL jobs, Athena queries,
-S3 partition registration, and Glue crawler management.
+Provides endpoints for managing AWS Glue ETL jobs, S3 partition
+registration, and Glue crawler management.
 
 Endpoints:
     POST /api/v1/etl/jobs/run              — trigger ETL job (ADMIN/DEVELOPER)
     GET  /api/v1/etl/jobs/{run_id}/status  — get job run status (any authenticated user)
-    POST /api/v1/etl/query                 — run Athena SQL query (ANALYST+)
     POST /api/v1/etl/partitions/add        — add S3 partitions to Glue catalog (ADMIN)
     GET  /api/v1/etl/crawler/status        — get crawler state (any authenticated user)
     POST /api/v1/etl/crawler/run           — trigger crawler (ADMIN)
@@ -21,8 +20,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from backend.app.api import deps
 from backend.app.models.user import User, UserRole
 from modules.backend.app.schemas.etl import (
-    AthenaQueryRequest,
-    AthenaQueryResult,
     ETLJobRequest,
     ETLJobResponse,
     ETLJobType,
@@ -66,15 +63,6 @@ def _require_admin_or_developer(current_user: User) -> None:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only ADMIN or DEVELOPER users can perform this action.",
-        )
-
-
-def _require_analyst_or_above(current_user: User) -> None:
-    """Raise 403 if the user is a VIEWER (below ANALYST)."""
-    if current_user.role == UserRole.VIEWER and not current_user.is_superuser:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only ANALYST, DEVELOPER, or ADMIN users can perform this action.",
         )
 
 
@@ -152,41 +140,6 @@ def get_job_status(
         job_name=job_name,
         job_type=job_type,
     )
-
-
-# ---------------------------------------------------------------------------
-# POST /query — run Athena SQL query
-# ---------------------------------------------------------------------------
-
-
-@router.post(
-    "/query",
-    response_model=AthenaQueryResult,
-    summary="Run an Athena SQL query",
-    description=(
-        "Execute a SQL query against the Glue/Athena data catalog. "
-        "Requires ANALYST, DEVELOPER, or ADMIN role."
-    ),
-    responses={
-        200: {"description": "Query results returned"},
-        400: {"description": "Query failed or was cancelled"},
-        403: {"description": "Insufficient permissions"},
-        422: {"description": "Invalid SQL"},
-        500: {"description": "Failed to execute query"},
-    },
-)
-def run_athena_query(
-    request: AthenaQueryRequest,
-    current_user: User = Depends(deps.get_current_active_user),
-    svc: ETLService = Depends(get_etl_service),
-) -> AthenaQueryResult:
-    """Execute an Athena SQL query and return results."""
-    _require_analyst_or_above(current_user)
-
-    logger.info(
-        f"User {current_user.username} running Athena query on db={request.database}"
-    )
-    return svc.run_athena_query(request)
 
 
 # ---------------------------------------------------------------------------

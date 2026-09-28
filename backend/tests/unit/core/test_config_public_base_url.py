@@ -76,19 +76,25 @@ class TestPublicBaseUrl:
         with pytest.raises(ValidationError, match="PUBLIC_BASE_URL"):
             Settings(_env_file=None), why
 
-    def test_it_is_not_required_in_production(self):
-        """Deliberately optional, and this pins that it stays so in THIS change.
+    def test_it_is_not_required_in_production_when_allowed_hosts_names_the_hosts(
+        self, monkeypatch
+    ):
+        """Optional in production only when ALLOWED_HOSTS names the hosts.
 
-        Making a new setting mandatory in a hardened environment is a separate
-        decision with a deploy dependency attached -- the task definition has to
-        carry the value before the application can demand it, and nothing in
-        `deploy.yml` runs `cdk deploy`. That is why it is not bundled here.
+        Since #220 a hardened start must know what hostname it answers on, and
+        PUBLIC_BASE_URL is the usual way to say so; ALLOWED_HOSTS stands in
+        for a service with several names. (This test used to build production
+        settings with neither, which only passed because the suite's
+        ``TESTING=true`` switched the host check off; ``Settings`` now refuses
+        TESTING with a hardened environment.)
         """
+        monkeypatch.delenv("TESTING", raising=False)
         s = Settings(
             _env_file=None,
             ENVIRONMENT="production",
             SECRET_KEY="a" * 64,
             FIRST_SUPERUSER_PASSWORD="aV3ry-Str0ng-Passw0rd!",
+            ALLOWED_HOSTS="a.example.com,b.example.com",
         )
         assert s.PUBLIC_BASE_URL is None
         assert s.is_production

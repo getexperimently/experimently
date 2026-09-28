@@ -32,9 +32,16 @@ pytestmark = [pytest.mark.unit, pytest.mark.regression]
 @pytest.fixture
 def prod_settings(monkeypatch):
     # The defaults under test: nothing in the environment may set them.
-    for name in ("CACHE_ENABLED", "CACHE_CONTROL"):
+    # TESTING too: the suite exports it, and staging refuses it.
+    for name in ("CACHE_ENABLED", "CACHE_CONTROL", "TESTING"):
         monkeypatch.delenv(name, raising=False)
-    return ProdSettings(ENVIRONMENT="staging", _env_file=None)
+    return ProdSettings(
+        ENVIRONMENT="staging",
+        SECRET_KEY="s" * 64,
+        FIRST_SUPERUSER_PASSWORD="Str0ng-first-admin",
+        PUBLIC_BASE_URL="https://experimently.example.com",
+        _env_file=None,
+    )
 
 
 @pytest.fixture

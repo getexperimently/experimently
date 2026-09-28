@@ -10,6 +10,7 @@ setting wrong in an otherwise good environment, and the check must name it.
 
 from __future__ import annotations
 
+import base64
 import os
 import subprocess
 import sys
@@ -205,16 +206,95 @@ def test_the_legacy_app_env_names_the_environment(app_env, hardened):
 def test_an_unknown_environment_name_is_refused(name):
     (message,) = check({"ENVIRONMENT": name})
     assert message.startswith("ENVIRONMENT=")
-    assert "development, test, staging, production" in message
+    assert message.endswith("Use one of: development, staging, production.")
 
 
-@pytest.mark.parametrize("environment", ["development", "test"])
-def test_development_and_test_need_nothing_else(environment):
+def test_development_needs_nothing_else():
     """Docker Smoke and the dev compose: placeholder secrets, SEED=demo."""
     assert (
-        check({"ENVIRONMENT": environment, "SECRET_KEY": "ci-only-x", "SEED": "demo"})
+        check({"ENVIRONMENT": "development", "SECRET_KEY": "ci-only-x", "SEED": "demo"})
         == []
     )
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize(
+    "environ, name",
+    [
+        ({"ENVIRONMENT": "test"}, "ENVIRONMENT"),
+        ({"ENVIRONMENT": " Test "}, "ENVIRONMENT"),
+        ({"APP_ENV": "test"}, "APP_ENV"),
+        # A good production set does not rescue it: the name alone decides.
+        (with_(ENVIRONMENT="test"), "ENVIRONMENT"),
+    ],
+)
+def test_the_test_environment_is_refused_in_one_line(environ, name):
+    """``test`` is the test runner's environment (pytest, from source). The
+    image used to start in it, with the test settings' placeholder secrets
+    and first-administrator password."""
+    problems = check(environ)
+    assert problems == [preflight.environment_is_test(name)]
+    text = preflight.render(problems)
+    assert text == (
+        f"[preflight] {name}=test is for the test runner, not this image: set "
+        "ENVIRONMENT=production (or staging; development only for a local trial)."
+    )
+    assert "\n" not in text
+
+
+_TESTING_REFUSAL = (
+    "TESTING is for the test runner and cannot be combined with "
+    "ENVIRONMENT={}. Remove TESTING from this deployment's configuration."
+)
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("environment", ["production", "staging"])
+@pytest.mark.parametrize("flag", ["true", "1", "on", "T", "Y", "yes", "enabled"])
+def test_testing_with_a_hardened_environment_is_refused_in_one_line(environment, flag):
+    """The settings refuse TESTING with staging/production at import. The
+    check must refuse it first, before the database wait and the migrations,
+    even when every other setting is good."""
+    problems = check(with_(ENVIRONMENT=environment, TESTING=flag))
+    expected = _TESTING_REFUSAL.format(environment)
+    assert problems == [expected]
+    assert preflight.render(problems) == f"[preflight] {expected}"
+
+
+def test_testing_through_the_legacy_app_env_is_refused_too():
+    problems = check(with_(ENVIRONMENT=None, APP_ENV="prod", TESTING="true"))
+    assert problems == [_TESTING_REFUSAL.format("production")]
+
+
+@pytest.mark.parametrize("flag", ["", "false", "0", "off", "N"])
+def test_an_empty_or_false_testing_flag_is_not_refused(flag):
+    assert check(with_(TESTING=flag)) == []
+
+
+def test_testing_in_development_is_not_refused():
+    assert check({"ENVIRONMENT": "development", "TESTING": "true"}) == []
+
+
+@pytest.mark.regression
+def test_main_exits_78_for_testing_in_production(capsys):
+    assert preflight.main(with_(TESTING="true")) == preflight.EX_CONFIG
+    err = capsys.readouterr().err
+    assert err == f"[preflight] {_TESTING_REFUSAL.format('production')}\n"
+
+
+@pytest.mark.regression
+def test_what_the_check_refuses_for_testing_the_settings_refuse_too():
+    env = with_(TESTING="on")
+    assert check(env)
+    result = _settings_build(env)
+    assert result.returncode != 0, result.stdout
+    assert "TESTING is for the test runner" in result.stderr, result.stderr[-2000:]
+
+
+@pytest.mark.regression
+def test_main_exits_78_for_the_test_environment(capsys):
+    assert preflight.main({"ENVIRONMENT": "test"}) == preflight.EX_CONFIG
+    assert "ENVIRONMENT=test is for the test runner" in capsys.readouterr().err
 
 
 def test_values_in_the_settings_dotenv_file_count(tmp_path):
@@ -359,6 +439,68 @@ def test_the_audit_key_is_judged_as_the_modules_settings_judge_it(audit_key, ref
     assert (result.returncode != 0) is refused, result.stderr[-2000:]
     if refused:
         assert "AUDIT_HMAC_KEY" in result.stderr
+    else:
+        assert "modules settings built" in result.stdout
+
+
+# ---------------------------------------------------------------------------
+# WAREHOUSE_CREDENTIALS_KEYS: optional, but usable when set (full profile)
+# ---------------------------------------------------------------------------
+
+_FERNET_A = base64.urlsafe_b64encode(b"a" * 32).decode()
+_FERNET_B = base64.urlsafe_b64encode(b"b" * 32).decode()
+
+_CREDENTIAL_KEYS_CASES = [
+    (None, False),
+    ("", False),
+    (_FERNET_A, False),
+    (f"{_FERNET_B},{_FERNET_A}", False),
+    ("not-a-fernet-key", True),
+    (base64.urlsafe_b64encode(b"a" * 31).decode(), True),
+    (f"{_FERNET_A},", True),
+    (f"{_FERNET_A},changeme", True),
+    ("changeme", True),
+    ("test-credentials-key", True),
+]
+
+
+@pytest.mark.parametrize("keys, refused", _CREDENTIAL_KEYS_CASES)
+def test_credential_keys_are_checked_in_the_full_profile(keys, refused):
+    problems = check(with_(WAREHOUSE_CREDENTIALS_KEYS=keys), full_profile=True)
+    if refused:
+        only_problem(problems, "WAREHOUSE_CREDENTIALS_KEYS")
+        assert keys not in problems[0]
+    else:
+        assert problems == []
+
+
+def test_credential_keys_are_not_checked_in_the_core_profile():
+    env = with_(AUDIT_HMAC_KEY=None, WAREHOUSE_CREDENTIALS_KEYS="not-a-fernet-key")
+    assert check(env, full_profile=False) == []
+
+
+def test_credential_keys_are_not_checked_in_development():
+    env = {"ENVIRONMENT": "development", "WAREHOUSE_CREDENTIALS_KEYS": "junk"}
+    assert check(env, full_profile=True) == []
+
+
+@pytest.mark.regression
+@pytest.mark.skipif(not _HAS_MODULES, reason="core checkout: no modules package")
+@pytest.mark.parametrize("keys, refused", _CREDENTIAL_KEYS_CASES)
+def test_credential_keys_are_judged_as_the_modules_settings_judge_them(keys, refused):
+    env = with_(WAREHOUSE_CREDENTIALS_KEYS=keys)
+    assert bool(check(env, full_profile=True)) is refused
+    result = subprocess.run(
+        [sys.executable, "-c", _BUILD_MODULE_SETTINGS],
+        cwd=REPO_ROOT,
+        env={"PATH": os.environ.get("PATH", ""), "PYTHONPATH": str(REPO_ROOT), **env},
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert (result.returncode != 0) is refused, result.stderr[-2000:]
+    if refused:
+        assert "WAREHOUSE_CREDENTIALS_KEYS" in result.stderr
     else:
         assert "modules settings built" in result.stdout
 

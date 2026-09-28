@@ -150,31 +150,12 @@ modules/backend/tests/unit/schemas/test_rbac_schemas.py
 modules/backend/tests/integration/api/test_rbac_api.py
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 6. Warehouse-native analytics  (Issue #26, EP-041, EP-048)
-# Core without it: yes. All four connector modules guard their driver import
-# in try/except, and none of databricks-sql-connector / clickhouse-connect /
-# PyMySQL is in requirements/runtime.txt — the core image already ships
-# without them.
+# 6. Warehouse analytics  (Issue #26; being rebuilt, #312)
+# Core without it: yes. The endpoints and connectors were removed; what is
+# left is the model and its `warehouse_connections` table, which no route
+# reads.
 # ─────────────────────────────────────────────────────────────────────────────
-modules/backend/app/api/v1/endpoints/warehouse.py
-modules/backend/app/api/v1/endpoints/warehouse_clickhouse.py
-modules/backend/app/api/v1/endpoints/warehouse_databricks.py
-modules/backend/app/api/v1/endpoints/warehouse_mysql.py
-modules/backend/app/services/warehouse_service.py
-modules/backend/app/services/clickhouse_connector.py
-modules/backend/app/services/databricks_connector.py
-modules/backend/app/services/mysql_connector.py
 modules/backend/app/models/warehouse_connection.py
-modules/backend/app/schemas/warehouse.py
-modules/backend/tests/unit/api/test_warehouse_endpoints.py
-modules/backend/tests/unit/schemas/test_warehouse_schemas.py
-modules/backend/tests/unit/services/test_warehouse_service.py
-modules/backend/tests/unit/services/test_clickhouse_connector.py
-modules/backend/tests/unit/services/test_databricks_connector.py
-modules/backend/tests/unit/services/test_mysql_connector.py
-modules/backend/tests/integration/api/test_clickhouse_api.py
-modules/backend/tests/integration/api/test_databricks_api.py
-modules/backend/tests/integration/api/test_mysql_api.py
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 7. Third-party integrations — Jira / Salesforce / GitHub  (EP-034)
@@ -308,11 +289,11 @@ modules/frontend
 #
 # modules/backend/app/register.py is `modules.register(hooks)` (re-exported by
 # modules/__init__.py): it validates the modules' settings, registers the
-# seven model modules, installs the audit signer, mounts the eleven routers
+# seven model modules, installs the audit signer, mounts the seven routers
 # behind authentication, registers the five capabilities and passes the ten
 # module names to hooks.register_modules(). modules/backend/app/settings.py
-# holds `ModulesSettings` -- the audit signing key, HIPAA, SSO, warehouse,
-# ETL and counter settings that left the core `Settings` in issue #91 -- and
+# holds `ModulesSettings` -- the audit signing key, HIPAA, SSO, ETL and
+# counter settings that left the core `Settings` in issue #91 -- and
 # modules/backend/app/db/ the modules' alembic branch (label `modules`, first
 # revision modules_0001_rbac, which branches off the core revision
 # a7b8c9d0e1f2 and must run after it) that env.py includes when `modules` is
@@ -326,9 +307,14 @@ modules/backend/tests/unit/conftest.py
 modules/backend/tests/integration/conftest.py
 modules/backend/tests/smoke/conftest.py
 modules/backend/tests/smoke/test_modules_wiring.py
+modules/backend/tests/smoke/test_module_route_table.py
 modules/backend/tests/unit/services/test_bandit_scheduler_counters.py
 modules/backend/tests/unit/db/test_autogenerate_filters_names.py
 modules/backend/tests/unit/test_modules_settings.py
+# The helper that encrypts stored credentials with the operator's
+# WAREHOUSE_CREDENTIALS_KEYS, for any module that stores one.
+modules/backend/app/core/credential_crypto.py
+modules/backend/tests/unit/core/test_credential_crypto.py
 
 # (Every entry in this file must exist -- test_every_manifest_path_exists
 # checks. There is no gate between the profiles: an installed module is
