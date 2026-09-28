@@ -24,7 +24,10 @@ class SegmentVariantResult(BaseModel):
     )
     conversions: Optional[int] = Field(
         None,
-        description="Number of conversion events in this variant within the segment.",
+        description=(
+            "Number of users in this variant within the segment with at least "
+            "one conversion event; a user who converts several times counts once."
+        ),
     )
     mean: float = Field(
         ...,

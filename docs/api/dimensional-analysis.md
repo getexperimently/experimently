@@ -136,7 +136,9 @@ It prints the dimension, `"is_exploratory": true`, the corrected threshold and t
 segments: `desktop`, `mobile`, and `unknown` for the users' assignment events, which carry
 no `device`. With three segments the threshold is 0.05 / 3, about `0.0167`.
 
-Every segment lists every variant of the experiment by name, with zero counts where the
+A variant's `conversions` in a segment are users, as in the rest of `/results`: the
+users assigned to it with at least one conversion event in that segment, each counted
+once. Every segment lists every variant of the experiment by name, with zero counts where the
 segment has none of its users, and `is_control` is the flag the experiment gives the
 variant. The control comes first:
 
