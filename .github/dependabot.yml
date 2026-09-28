@@ -150,7 +150,10 @@ updates:
   # then updated by nothing -- python3-saml/xmlsec verify SAML signatures, so
   # that gap was the one that mattered most. Dependabot edits
   # modules/requirements.txt; the lock check stays red until
-  # `make lock-modules` regenerates modules/requirements.lock.
+  # `make lock-modules` regenerates modules/requirements.lock. sqlglot (the
+  # warehouse query builder) is one of these pins. The test-only
+  # modules/requirements-test.txt (duckdb, not locked) sits in the same
+  # directory, which is intended to put it under this entry too.
   - package-ecosystem: "pip"
     directory: "/modules"
     commit-message:

@@ -5,8 +5,9 @@
 
 Exits 0 only when both of these hold:
 
-1. the API service's PRIMARY task set runs exactly that revision (the ARN,
-   compared as a string: a family or `family:n` is refused); and
+1. the API service's PRIMARY task set runs exactly that revision: the ARN,
+   compared as a string, or `family:n`, compared with the ARN's last part
+   (a bare family is refused); and
 2. `scripts/check_live_target_group.py`, run with `--expect` set to the
    colour of that task set's target group, passes. The colour is read from
    the task set, never defaulted (PE v2 C8). That check reads the HTTPS
@@ -53,6 +54,7 @@ from pathlib import Path
 # scripts/ is already sys.path[0]; imported from a test, it may not be.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import check_live_target_group as live
+from public_text import redact, short_arn
 
 SERVING, NOT_YET, UNKNOWN, WRONG = 0, 1, 2, 3
 
@@ -63,6 +65,15 @@ _CLUSTER = re.compile(r"experimentation-(dev|staging|prod|demo)")
 _ARN = re.compile(
     r"arn:aws[a-z-]*:ecs:[a-z0-9-]+:[0-9]{12}:task-definition/[A-Za-z0-9_-]+:[0-9]+"
 )
+#: `family:n`, which is what the workflows print: the ARN names the account.
+_REVISION = re.compile(r"[A-Za-z0-9_-]+:[0-9]+")
+
+
+def _same(serving: str | None, arn: str) -> bool:
+    """The PRIMARY task set's ARN is ``arn``, or ends in ``/<family:n>``."""
+    if _ARN.fullmatch(arn):
+        return serving == arn
+    return str(serving or "").rsplit("/", 1)[-1] == arn and bool(serving)
 
 
 def verdict(
@@ -80,8 +91,13 @@ def verdict(
             f"(experimentation-backend-{env})",
             None,
         )
-    if not _ARN.fullmatch(arn):
-        return UNKNOWN, f"{arn!r} is not a task-definition revision ARN", None
+    if not (_ARN.fullmatch(arn) or _REVISION.fullmatch(arn)):
+        return (
+            UNKNOWN,
+            f"{short_arn(arn)!r} is not a task-definition revision ARN or family:n",
+            None,
+        )
+    shown = short_arn(arn)
 
     try:
         services = aws(
@@ -95,8 +111,12 @@ def verdict(
         if len(primary) != 1:
             return UNKNOWN, f"{service} has {len(primary)} PRIMARY task sets", None
         serving = primary[0].get("taskDefinition")
-        if serving != arn:
-            return NOT_YET, f"the PRIMARY task set runs {serving}, not {arn}", None
+        if not _same(serving, arn):
+            return (
+                NOT_YET,
+                f"the PRIMARY task set runs {short_arn(serving)}, not {shown}",
+                None,
+            )
 
         stack = f"experimentation-fargate-{env}"
         resources = aws(
@@ -119,14 +139,14 @@ def verdict(
         # Derived, not defaulted: --expect is the PRIMARY task set's colour.
         live.check(aws, env, colour)
     except live.Shifting as exc:
-        return NOT_YET, f"the PRIMARY task set runs {arn}; {exc}", None
+        return NOT_YET, f"the PRIMARY task set runs {shown}; {exc}", None
     except live.Refused as exc:
-        return WRONG, f"the PRIMARY task set runs {arn}, but {exc}", None
+        return WRONG, f"the PRIMARY task set runs {shown}, but {exc}", None
     except (live.Unknown, live.AwsError, KeyError, ValueError) as exc:
         return UNKNOWN, f"could not tell: {exc}", None
     return (
         SERVING,
-        f"{arn} is the PRIMARY task set and the /api/* rule forwards to {colour} alone",
+        f"{shown} is the PRIMARY task set and the /api/* rule forwards to {colour} alone",
         colour,
     )
 
@@ -148,14 +168,14 @@ def main(argv: Sequence[str] | None = None, aws: live.Runner = live.run_aws) -> 
             None,
         )
     if status == SERVING:
-        print(f"serving: {sentence}")
+        print(f"serving: {redact(sentence)}")
         print(
             f"live API target group: {colour}; the next cdk deploy of the Fargate "
             f"stack takes -c {live.CONTEXT_KEY}={colour}"
         )
     else:
         label = {NOT_YET: "NOT YET", UNKNOWN: "UNKNOWN", WRONG: "WRONG"}[status]
-        print(f"{label}: {sentence}", file=sys.stderr)
+        print(f"{label}: {redact(sentence)}", file=sys.stderr)
     return status
 
 

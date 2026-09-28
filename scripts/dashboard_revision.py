@@ -56,6 +56,7 @@ from pathlib import Path
 # The sibling script, from the same checkout (as api_serving.py does).
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import check_dashboard_image as dash
+from public_text import redact, short_arn, short_image
 
 OK, REFUSED, UNKNOWN = 0, 1, 2
 BOOTSTRAP_TAG = "bootstrap"
@@ -131,7 +132,7 @@ def _image_of(aws: dash.Runner, arn: str) -> str:
     images = _dashboard_images(_task_definition(aws, arn))
     if len(images) != 1 or not images[0]:
         raise Unknown(
-            f"{arn} has {len(images)} containers named {dash.CONTAINER!r} with an "
+            f"{short_arn(arn)} has {len(images)} containers named {dash.CONTAINER!r} with an "
             "image: is this the dashboard's task definition?"
         )
     return images[0]
@@ -204,14 +205,14 @@ def serving(
     arn = str(primary["taskDefinition"])
     image = _image_of(aws, arn)
     release = is_release_image(image)
-    notices = [f"{service_name} is serving {arn.rsplit('/', 1)[-1]} ({image})"]
+    notices = [f"{service_name} is serving {short_arn(arn)} ({short_image(image)})"]
     repo, tag, _ = dash.split_image(image)
     if not release and not (repo == dash.REPOSITORY and tag == BOOTSTRAP_TAG):
         # EM v1 condition 4: a revision CloudFormation registered from a tag --
         # a `cdk deploy` without the digest pin after a release reverted it.
         notices.append(
             f"::warning title=Dashboard not on a release::{service_name} is serving "
-            f"{image}, which is neither a release (a digest) nor the bootstrap "
+            f"{short_image(image)}, which is neither a release (a digest) nor the bootstrap "
             "placeholder. A `cdk deploy` without `-c dashboard_image_tag=sha256:"
             "<digest>` re-points the dashboard at a tag; check it with "
             "`python3 scripts/check_dashboard_image.py` before the next one "
@@ -243,7 +244,7 @@ def target(
         answer = aws(["ecs", "describe-task-definition", "--task-definition", revision])
     except dash.AwsError as exc:
         raise Refused(
-            f"{revision} is not a task definition revision ECS knows here "
+            f"{short_arn(revision)} is not a task definition revision ECS knows here "
             f"({exc}).{nothing}"
         ) from exc
     task_definition = answer.get("taskDefinition", {})
@@ -251,14 +252,14 @@ def target(
     short = arn.rsplit("/", 1)[-1]
     if not revision.rsplit("/", 1)[-1].partition(":")[2].isdigit():
         raise Refused(
-            f"{revision} names a family with no revision. It would resolve to the "
+            f"{short_arn(revision)} names a family with no revision. It would resolve to the "
             "newest ACTIVE revision, which during an incident may be the one you "
             f"are rolling back from. Pass {short} instead.{nothing}"
         )
     status = task_definition.get("status")
     if status != "ACTIVE":
         raise Refused(
-            f"{arn} is {status}, not ACTIVE. A deregistered revision cannot be "
+            f"{short} is {status}, not ACTIVE. A deregistered revision cannot be "
             f"deployed.{nothing}"
         )
     got = str(task_definition.get("family", ""))
@@ -284,17 +285,17 @@ def target(
                 f"dashboard_task_definition_arn. Re-run with environment={other}."
                 f"{nothing}"
             )
-        raise Refused(f"{arn} belongs to family {got}, not {family}.{nothing}")
+        raise Refused(f"{short} belongs to family {got}, not {family}.{nothing}")
     images = _dashboard_images(task_definition)
     if len(images) != 1:
         raise Refused(
-            f"{arn} has no container named '{dash.CONTAINER}' (it has: "
+            f"{short} has no container named '{dash.CONTAINER}' (it has: "
             f"{_names(task_definition)}).{nothing}"
         )
     (image,) = images
     if not is_release_image(image):
         raise Refused(
-            f"{arn} runs {image}, which is not a release: a deploy registers the "
+            f"{short} runs {short_image(image)}, which is not a release: a deploy registers the "
             f"dashboard by digest ({dash.REPOSITORY}@sha256:...). A tag, or "
             "`:bootstrap`, is a revision CloudFormation registered. Pick a "
             "revision a deploy registered; docs/deployment/rollback-runbook.md "
@@ -311,8 +312,8 @@ def target(
         )
     expect = str(primary["taskDefinition"])
     notices = [
-        f"dashboard: rolling back to {short} ({image}); it is serving "
-        f"{expect.rsplit('/', 1)[-1]} now"
+        f"dashboard: rolling back to {short} ({short_image(image)}); it is serving "
+        f"{short_arn(expect)} now"
     ]
     return {"arn": arn, "image": image, "expect": expect}, notices
 
@@ -353,13 +354,13 @@ def main(argv: Sequence[str] | None = None, aws: dash.Runner = dash.run_aws) -> 
                 args.revision,
             )
     except Refused as exc:
-        print(f"::error::{exc}")
+        print(f"::error::{redact(exc)}")
         return REFUSED
     except (Unknown, dash.Unknown, dash.AwsError) as exc:
-        print(f"::error::could not tell what the dashboard is serving: {exc}")
+        print(f"::error::could not tell what the dashboard is serving: {redact(exc)}")
         return UNKNOWN
     for line in notices:
-        print(line)
+        print(redact(line))
     if args.github_output:
         with open(args.github_output, "a", encoding="utf-8") as out:
             for key, value in outputs.items():
