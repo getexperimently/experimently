@@ -1,29 +1,29 @@
 # API Framework
 fastapi==0.141.1
-uvicorn==0.53.0
+uvicorn==0.54.0
 websockets==15.0.1     # uvicorn WebSocket support (/api/v1/ws/...); the image has no wsproto
 pydantic==2.13.5
 pydantic-settings==2.15.0
 email-validator==2.3.0
 python-multipart==0.0.32
-PyJWT==2.14.0
+PyJWT==2.15.0
 bcrypt==5.0.0
 
 # Database & ORM
-SQLAlchemy==2.0.54
+SQLAlchemy==2.1.0
 alembic==1.20.0
 psycopg2-binary==2.9.13
 asyncpg==0.31.0
 aioredis==2.0.1
 redis==8.1.0
-boto3==1.43.99
-boto3-stubs==1.43.99
+boto3==1.43.102
+boto3-stubs==1.43.102
 mypy-boto3-dynamodb==1.43.64
 mypy-boto3-ssm==1.43.53
 
 # Scheduling & Background Tasks
 APScheduler==3.11.3
-pytz==2026.3.post1
+pytz==2026.4
 
 # AWS
 aws-cdk-lib==2.270.0
@@ -109,7 +109,7 @@ opentelemetry-exporter-otlp==1.44.0
 prometheus-client==0.26.0
 
 # Development
-ruff==0.16.8          # lint + format; replaced black, isort and flake8
+ruff==0.16.9          # lint + format; replaced black, isort and flake8
 mypy==1.20.2
 pre-commit==3.8.0
 
