@@ -2357,9 +2357,10 @@
         "type": "object"
       },
       "CreateInviteRequest": {
-        "description": "Payload for sending a workspace invite.",
+        "description": "Payload for sending a workspace invite.\n\n``email`` must be a valid address and ASCII: only an account signed in\nwith that address can accept the invite, and a non-ASCII address could\nnever match one.",
         "properties": {
           "email": {
+            "format": "email",
             "title": "Email",
             "type": "string"
           },
@@ -29907,7 +29908,7 @@
     },
     "/api/v1/workspaces/invites/{token}/accept": {
       "post": {
-        "description": "Accept a workspace invite. The current user is added as a member.",
+        "description": "Accept a workspace invite. The current user is added as a member.\n\nOnly the account whose email is the invited address may accept (compared\nwithout regard to case); any other account gets 403 with code\n``invite_email_mismatch``.",
         "operationId": "accept_invite_api_v1_workspaces_invites__token__accept_post",
         "parameters": [
           {
@@ -29930,6 +29931,9 @@
               }
             },
             "description": "Successful Response"
+          },
+          "403": {
+            "description": "The signed-in account is not the invited address. The body is `{\"detail\": {\"code\": \"invite_email_mismatch\", \"message\": \"This invite was sent to a different email address.\"}}`."
           },
           "422": {
             "content": {

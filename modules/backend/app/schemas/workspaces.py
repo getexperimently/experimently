@@ -6,7 +6,7 @@ import re
 from datetime import datetime
 from typing import List, Optional
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, field_validator
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Workspace
@@ -167,10 +167,24 @@ class WorkspaceMemberResponse(BaseModel):
 
 
 class CreateInviteRequest(BaseModel):
-    """Payload for sending a workspace invite."""
+    """Payload for sending a workspace invite.
 
-    email: str
+    ``email`` must be a valid address and ASCII: only an account signed in
+    with that address can accept the invite, and a non-ASCII address could
+    never match one.
+    """
+
+    email: EmailStr
     role: str = "VIEWER"
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def email_is_ascii(cls, v: object) -> object:
+        # Checked on the value as sent, before EmailStr normalises it: that
+        # normalisation can turn a non-ASCII character into an ASCII one.
+        if isinstance(v, str) and not v.strip().isascii():
+            raise ValueError("email must contain only ASCII characters")
+        return v
 
     @field_validator("role")
     @classmethod

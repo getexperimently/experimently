@@ -33,6 +33,7 @@ from modules.backend.app.services.workspace_service import (
     CannotDemoteLastOwner,
     CannotRemoveLastOwner,
     InviteAlreadyAccepted,
+    InviteEmailMismatch,
     InviteExpired,
     InviteNotFound,
     PlanLimitExceeded,
@@ -43,6 +44,7 @@ from modules.backend.app.services.workspace_service import (
     WorkspaceSlugTaken,
     _generate_api_key,
     _hash_key,
+    invite_email_matches,
 )
 
 HASHED_PASSWORD = "$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW"
@@ -548,7 +550,9 @@ class TestAcceptInvite:
         invite = svc.create_invite(
             db_session, workspace.id, "new@ex.com", "DEVELOPER", user_id
         )
-        member = svc.accept_invite(db_session, invite.token, other_user_id)
+        member = svc.accept_invite(
+            db_session, invite.token, other_user_id, "new@ex.com"
+        )
         assert member.role == WorkspaceMemberRole.DEVELOPER
         assert member.user_id == other_user_id
 
@@ -567,7 +571,7 @@ class TestAcceptInvite:
         invite.expires_at = datetime.utcnow() - timedelta(hours=1)
         db_session.commit()
         with pytest.raises(InviteExpired):
-            svc.accept_invite(db_session, invite.token, other_user_id)
+            svc.accept_invite(db_session, invite.token, other_user_id, "exp@ex.com")
 
     def test_accept_already_accepted_invite_raises_error(
         self,
@@ -580,15 +584,73 @@ class TestAcceptInvite:
             db_session, workspace.id, "aa@ex.com", "VIEWER", user_id
         )
         uid_a = _make_user(db_session).id
-        svc.accept_invite(db_session, invite.token, uid_a)
+        svc.accept_invite(db_session, invite.token, uid_a, "aa@ex.com")
         with pytest.raises(InviteAlreadyAccepted):
-            svc.accept_invite(db_session, invite.token, _make_user(db_session).id)
+            svc.accept_invite(
+                db_session, invite.token, _make_user(db_session).id, "aa@ex.com"
+            )
 
     def test_get_invite_by_token_not_found(
         self, db_session: Session, svc: WorkspaceService
     ):
         with pytest.raises(InviteNotFound):
             svc.get_invite_by_token(db_session, "nonexistent-token")
+
+    @pytest.mark.regression
+    def test_another_address_is_refused_before_expiry_and_leaves_the_invite(
+        self,
+        db_session: Session,
+        svc: WorkspaceService,
+        workspace: Workspace,
+        other_user_id: uuid.UUID,
+        user_id: uuid.UUID,
+    ):
+        invite = svc.create_invite(
+            db_session, workspace.id, "only@ex.com", "VIEWER", user_id
+        )
+        invite.expires_at = datetime.utcnow() - timedelta(hours=1)
+        db_session.commit()
+        with pytest.raises(InviteEmailMismatch):
+            svc.accept_invite(db_session, invite.token, other_user_id, "else@ex.com")
+        db_session.refresh(invite)
+        assert invite.accepted_at is None
+
+
+KELVIN = "K"  # lower-cases to ASCII "k"
+
+
+class TestInviteEmailMatches:
+    @pytest.mark.parametrize(
+        "invited, accepting",
+        [
+            ("kim@ex.com", "kim@ex.com"),
+            ("Kim@Ex.com", "kim@ex.com"),
+            ("kim@ex.com", "KIM@EX.COM"),
+            ("  kim@ex.com\t", "kim@ex.com "),
+        ],
+    )
+    def test_the_same_address_matches(self, invited, accepting):
+        assert invite_email_matches(invited, accepting) is True
+
+    @pytest.mark.regression
+    @pytest.mark.parametrize(
+        "invited, accepting",
+        [
+            ("kim@ex.com", "tim@ex.com"),
+            ("kim@ex.com", "kim+x@ex.com"),
+            ("kim@ex.com", None),
+            (None, "kim@ex.com"),
+            (None, None),
+            ("", ""),
+            ("  ", "  "),
+            ("kim@ex.com", KELVIN + "im@ex.com"),
+            (KELVIN + "im@ex.com", "kim@ex.com"),
+            (KELVIN + "im@ex.com", KELVIN + "im@ex.com"),
+            ("kim@ex.com", "kim@ex.coᴍ"),
+        ],
+    )
+    def test_anything_else_does_not(self, invited, accepting):
+        assert invite_email_matches(invited, accepting) is False
 
 
 # ─────────────────────────────────────────────────────────────────────────────

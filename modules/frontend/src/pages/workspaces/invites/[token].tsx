@@ -4,15 +4,55 @@ import { MODULES } from '@/services/modules';
 import { PageTitle } from '@/components/PageTitle';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
+import { useOptionalAuth } from '@/contexts/AuthContext';
+import { LOGIN_PATH, isApiError } from '@/services/api';
 import { WorkspaceInvite, workspaceService } from '@modules/services/workspaces';
+
+/** The typed code of the API's 403 when the signed-in account is not the invitee. */
+const INVITE_EMAIL_MISMATCH_CODE = 'invite_email_mismatch';
 
 function isTokenExpired(invite: WorkspaceInvite): boolean {
   return new Date(invite.expires_at) < new Date();
 }
 
+/**
+ * An address as the API compares it: trimmed, ASCII only, lower-cased.
+ * `null` when there is none or it is not ASCII (the API refuses those).
+ */
+function comparableEmail(value: string | null | undefined): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  // eslint-disable-next-line no-control-regex
+  if (!trimmed || !/^[\x00-\x7f]*$/.test(trimmed)) return null;
+  return trimmed.toLowerCase();
+}
+
+/**
+ * Whether the signed-in address is the invited one. Presentation only: the
+ * API decides, and a 403 from it shows the same state.
+ */
+function inviteEmailMatches(
+  invited: string | null | undefined,
+  signedIn: string | null | undefined,
+): boolean {
+  const a = comparableEmail(invited);
+  const b = comparableEmail(signedIn);
+  return a !== null && b !== null && a === b;
+}
+
+/** `alice@example.com` -> `a•••@example.com`: enough to recognise, not to read. */
+function maskEmail(email: string): string {
+  const trimmed = email.trim();
+  const at = trimmed.lastIndexOf('@');
+  if (at <= 0) return '•••';
+  return `${Array.from(trimmed)[0]}•••${trimmed.slice(at)}`;
+}
+
 function AcceptInvitePage() {
   const router = useRouter();
   const { token } = router.query as { token: string };
+  const auth = useOptionalAuth();
+  const user = auth?.user ?? null;
 
   const [invite, setInvite] = useState<WorkspaceInvite | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -20,6 +60,14 @@ function AcceptInvitePage() {
   const [accepting, setAccepting] = useState(false);
   const [acceptError, setAcceptError] = useState<string | null>(null);
   const [accepted, setAccepted] = useState(false);
+  const [serverMismatch, setServerMismatch] = useState(false);
+  const [switchingAccount, setSwitchingAccount] = useState(false);
+
+  // Decided from the signed-in account when it is known; a 403 with the typed
+  // code from the API decides it too (for example after an email change in
+  // another tab).
+  const mismatch =
+    serverMismatch || (!!invite && !!user && !inviteEmailMatches(invite.email, user.email));
 
   useEffect(() => {
     if (!token) return;
@@ -47,9 +95,23 @@ function AcceptInvitePage() {
         router.push(`/workspaces/${result.workspace_id}`);
       }, 1500);
     } catch (err) {
-      setAcceptError(err instanceof Error ? err.message : 'Failed to accept invitation');
+      if (isApiError(err) && err.code === INVITE_EMAIL_MISMATCH_CODE) {
+        setServerMismatch(true);
+      } else {
+        setAcceptError(err instanceof Error ? err.message : 'Failed to accept invitation');
+      }
     } finally {
       setAccepting(false);
+    }
+  }
+
+  async function handleUseDifferentAccount() {
+    setSwitchingAccount(true);
+    const next = `/workspaces/invites/${encodeURIComponent(token ?? '')}`;
+    try {
+      await auth?.logout();
+    } finally {
+      void router.replace(`${LOGIN_PATH}?next=${encodeURIComponent(next)}`);
     }
   }
 
@@ -119,8 +181,40 @@ function AcceptInvitePage() {
               </div>
             )}
 
+            {/* Signed in as someone other than the invitee */}
+            {!isLoading && !fetchError && invite && !isTokenExpired(invite) && mismatch && (
+              <div className="bg-white rounded-xl border border-amber-200 p-8 text-center">
+                <h2 className="text-lg font-semibold text-slate-900 mb-2">
+                  This invitation is for a different account
+                </h2>
+                <p role="alert" className="text-sm text-slate-600 mb-6">
+                  It was sent to <span className="font-medium">{maskEmail(invite.email)}</span>
+                  {user?.email ? (
+                    <>
+                      , and you are signed in as{' '}
+                      <span className="font-medium">{user.email}</span>. Sign in with the invited
+                      address to accept it, or ask a workspace admin to invite {user.email}.
+                    </>
+                  ) : (
+                    <>
+                      , and the account you are signed in with has no email address. Sign in with
+                      the invited address to accept it, or ask a workspace admin to invite you.
+                    </>
+                  )}
+                </p>
+                <button
+                  type="button"
+                  onClick={handleUseDifferentAccount}
+                  disabled={switchingAccount}
+                  className="w-full px-4 py-2.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  Use a different account
+                </button>
+              </div>
+            )}
+
             {/* Valid invite */}
-            {!isLoading && !fetchError && invite && !isTokenExpired(invite) && (
+            {!isLoading && !fetchError && invite && !isTokenExpired(invite) && !mismatch && (
               <div className="bg-white rounded-xl border border-slate-200 p-8 text-center">
                 {accepted ? (
                   <>
@@ -160,7 +254,7 @@ function AcceptInvitePage() {
                     </div>
 
                     {acceptError && (
-                      <div className="mb-4 rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700">
+                      <div role="alert" className="mb-4 rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700">
                         {acceptError}
                       </div>
                     )}
