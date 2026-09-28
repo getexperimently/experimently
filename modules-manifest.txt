@@ -154,8 +154,18 @@ modules/backend/tests/integration/api/test_rbac_api.py
 # Core without it: yes. The endpoints and connectors were removed; what is
 # left is the model and its `warehouse_connections` table, which no route
 # reads.
+# The analysis query builder (#312): the identifier and literal gate, the
+# per-dialect statements, the result checks and the source request schemas.
+# Nothing imports them yet; its only runtime dependency, sqlglot, is pinned in
+# modules/requirements.txt. Its tests run the statements on DuckDB, pinned in
+# modules/requirements-test.txt.
 # ─────────────────────────────────────────────────────────────────────────────
 modules/backend/app/models/warehouse_connection.py
+modules/backend/app/core/warehouse_identifiers.py
+modules/backend/app/services/warehouse_query_builder.py
+modules/backend/app/services/warehouse_sufficient_stats.py
+modules/backend/app/schemas/warehouse_sources.py
+modules/backend/tests/unit/warehouse
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 7. Third-party integrations — Jira / Salesforce / GitHub  (EP-034)

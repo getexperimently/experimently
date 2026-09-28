@@ -114,6 +114,39 @@ class TestDeclaredDependencies:
         assert script._canonical("Typing_Extensions") == "typing-extensions"
         assert script._canonical("ruamel.yaml") == "ruamel-yaml"
 
+    @pytest.mark.modules
+    def test_the_shipped_modules_closure_includes_sqlglot(self, script):
+        """The warehouse query builder's parser ships in the full image
+        (modules/requirements.lock, absent from a core build)."""
+        assert "sqlglot" in script.declared_python_dependencies()
+
+
+class TestBlankLicence:
+    """A package whose licence metadata comes back empty is refused, not
+    written as a nameless row (sqlglot declares only License-Expression)."""
+
+    DECLARED = {"sqlglot", "fastapi"}
+
+    def test_an_expression_only_package_reads_as_its_licence(self, script):
+        rows = script.python_rows_from(
+            [
+                {"Name": "sqlglot", "Version": "30.20.0", "License": "MIT"},
+                {"Name": "fastapi", "Version": "1", "License": "MIT License"},
+                {"Name": "not-shipped", "Version": "1", "License": ""},
+            ],
+            self.DECLARED,
+        )
+        assert rows == [("sqlglot", "30.20.0", "MIT"), ("fastapi", "1", "MIT")]
+
+    @pytest.mark.parametrize("blank", ["", "  ", "UNKNOWN", None])
+    def test_a_blank_licence_is_refused_and_named(self, script, blank):
+        with pytest.raises(SystemExit) as refused:
+            script.python_rows_from(
+                [{"Name": "sqlglot", "Version": "30.20.0", "License": blank}],
+                self.DECLARED,
+            )
+        assert "sqlglot 30.20.0" in str(refused.value)
+
 
 # ---------------------------------------------------------------------------
 # The gate itself (#170, #215 review)

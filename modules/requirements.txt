@@ -23,3 +23,9 @@ defusedxml==0.7.1      # sso_service.py:32, SAML metadata parsing without the
 requests==2.34.2       # sso_service.py:600,662 -- the OIDC token/userinfo fallback
                        # when authlib is not importable.  Pinned here because a module
                        # imports it directly.
+
+# Warehouse analysis (#312): the query builder parses every statement it
+# generates again before it is sent (modules/backend/app/services/
+# warehouse_query_builder.py, verify_generated_sql). The import is guarded and
+# fails closed, so without this pin every warehouse query is refused.
+sqlglot==30.20.0

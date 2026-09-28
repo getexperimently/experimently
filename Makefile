@@ -107,7 +107,7 @@ test-integration: ## Backend integration tests (needs Postgres on localhost:5432
 # (exit 4), which `test` depends on, so `make test` was red on every core
 # checkout.  backend/tests/unit/scripts/test_makefile_guards.py runs both
 # targets in a tree with no modules/ and fails on the old shape.
-test-modules: ## The modules' own tests (needs modules/ and modules/requirements.txt installed)
+test-modules: ## The modules' own tests (needs modules/, modules/requirements.txt and modules/requirements-test.txt installed)
 	@if [ -d modules/backend/tests ]; then \
 		echo 'APP_ENV=test TESTING=true $(PYTEST) modules/backend/tests -q'; \
 		APP_ENV=test TESTING=true $(PYTEST) modules/backend/tests -q; \
