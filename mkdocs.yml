@@ -133,6 +133,7 @@ nav:
   - HIPAA Compliance: hipaa/overview.md
 - Self-Hosting:
   - AWS CDK Deployment: self-hosting/cdk.md
+  - Kubernetes (Helm): self-hosting/kubernetes.md
   - Docker Compose: getting-started/docker-guide.md
   - The Compose File: getting-started/docker-compose-file.md
   - Environment Variables: getting-started/environment-setup.md
