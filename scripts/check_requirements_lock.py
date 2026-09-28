@@ -88,6 +88,21 @@ SUPERSETS = [
         False,
         False,
     ),
+    # The modules' test-only pins (duckdb) are installed on top of both of
+    # those in the jobs that run the modules' suite, so a package they share
+    # with either must name the same version.
+    (
+        ROOT / "modules" / "requirements-test.txt",
+        ROOT / "backend" / "requirements.txt",
+        False,
+        False,
+    ),
+    (
+        ROOT / "modules" / "requirements-test.txt",
+        ROOT / "modules" / "requirements.lock",
+        False,
+        False,
+    ),
 ]
 
 _PIN = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*)(\[[^\]]*\])?==([^\s;\\]+)")
