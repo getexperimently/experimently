@@ -73,24 +73,38 @@ keys:
 
 ```{.bash exec}
 set +e
-{ curl -s -N --http1.1 --max-time 3 \
+ws_pipe() {
+  local t0 t1 n
+  t0=$(date +%s.%N)
+  { curl -s -N --http1.1 --max-time 3 --trace-time -v \
+      -H 'Connection: Upgrade' \
+      -H 'Upgrade: websocket' \
+      -H 'Sec-WebSocket-Version: 13' \
+      -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' \
+      -H "Sec-WebSocket-Protocol: experimently.bearer, $TOKEN" \
+      localhost:8000/api/v1/ws/experiments/$EXP_ID/results 2>/tmp/ws-v.txt || [ $? -eq 28 ]; } \
+    | tee /tmp/ws-raw.bin | LC_ALL=C grep -aoE '"(event|status|key)": "[a-z_]*"' > /tmp/ws-grep.txt
+  echo "DIAG $1 pipe PIPESTATUS=${PIPESTATUS[*]} bytes=$(wc -c < /tmp/ws-raw.bin) matches=$(wc -l < /tmp/ws-grep.txt) start=$t0"
+  echo "DIAG $1 curl-v: $(grep -E 'Connected|HTTP/1.1 101|Operation timed|left intact|Recv' /tmp/ws-v.txt | cut -c1-90 | tr '\n' '|')"
+}
+ws_file() {
+  local rc=0
+  curl -s -N --http1.1 --max-time 3 -o /tmp/ws-file.bin \
     -H 'Connection: Upgrade' \
     -H 'Upgrade: websocket' \
     -H 'Sec-WebSocket-Version: 13' \
     -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' \
     -H "Sec-WebSocket-Protocol: experimently.bearer, $TOKEN" \
-    localhost:8000/api/v1/ws/experiments/$EXP_ID/results || [ $? -eq 28 ]; } \
-  | tee /tmp/ws-raw.bin | LC_ALL=C grep -aoE '"(event|status|key)": "[a-z_]*"'
-echo "DIAG PIPESTATUS=${PIPESTATUS[*]}"
-echo "DIAG bytes=$(wc -c < /tmp/ws-raw.bin)"
-od -A d -t x1 /tmp/ws-raw.bin | head -3
-LC_ALL=C grep -aoE '"(event|status|key)": "[a-z_]*"' /tmp/ws-raw.bin
-echo "DIAG grep-on-file=$?"
-LC_ALL=C grep -acE 'event' /tmp/ws-raw.bin
-echo "DIAG grep-c=$?"
-grep --version | head -1
-curl --version | head -1
-echo "DIAG tail: $(tail -c 120 /tmp/ws-raw.bin | LC_ALL=C tr -c '[:print:]' '.')"
+    localhost:8000/api/v1/ws/experiments/$EXP_ID/results || rc=$?
+  echo "DIAG $1 file rc=$rc bytes=$(wc -c < /tmp/ws-file.bin)"
+}
+ws_pipe 1
+ws_file 2
+ws_pipe 3
+ws_file 4
+ws_pipe 5
+echo "DIAG api log:"
+docker compose logs --no-color --timestamps api 2>&1 | grep -E 'WebSocket|snapshot|Error|error|Traceback|Bandit|Scheduler|seed' | grep -v health | tail -22 | cut -c1-200
 false
 ```
 <!-- expect: "event": "results_update" -->
