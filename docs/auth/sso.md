@@ -98,7 +98,7 @@ For `sso_failed` and `sso_account` the page shows a Request ID when the API sent
 
 The CORS list is not used here, because it also names the demo apps and any site running an SDK.
 
-**Set `DASHBOARD_ORIGINS` when the dashboard is not served from `PUBLIC_BASE_URL`**, for example when `PUBLIC_BASE_URL` is `https://api.example.com` and the dashboard is `https://app.example.com`. Otherwise every dashboard sign-in is refused with 400. In staging and production, the API logs a warning at startup when `DASHBOARD_ORIGINS` is empty and `PUBLIC_BASE_URL`'s host starts with `api.`.
+**Set `DASHBOARD_ORIGINS` when the dashboard is not served from `PUBLIC_BASE_URL`**, for example when `PUBLIC_BASE_URL` is `https://api.example.com` and the dashboard is `https://app.example.com`. Otherwise every dashboard sign-in is refused with 400. Every `DASHBOARD_ORIGINS` entry is also added to the CORS allow-list, so the dashboard's own API calls work from that origin. In staging and production, the API logs a warning at startup when `DASHBOARD_ORIGINS` is empty and `PUBLIC_BASE_URL`'s host starts with `api.`.
 
 A callback that arrives without the sign-in's cookie, or with a cookie the API did not issue, cannot say which dashboard it came from. It is sent to the primary dashboard origin (the first `DASHBOARD_ORIGINS` entry, otherwise `PUBLIC_BASE_URL`'s origin) at `/login?sso_error=sso_state`. **Development only:** when neither `DASHBOARD_ORIGINS` nor `PUBLIC_BASE_URL` is set, there is no primary origin, and such a callback is answered with a JSON 400 instead of a redirect.
 

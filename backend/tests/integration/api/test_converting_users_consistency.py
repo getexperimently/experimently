@@ -28,6 +28,7 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 import pytest
+from sqlalchemy import event
 
 from backend.app.models.analysis_snapshot import AnalysisSnapshot
 from backend.app.models.assignment import Assignment
@@ -40,6 +41,11 @@ from backend.app.models.experiment import (
     Variant,
 )
 from backend.app.services.analysis_service import AnalysisService
+from backend.app.services.event_matching import (
+    count_converting_users,
+    count_converting_users_any,
+    first_conversion_times,
+)
 from backend.app.services.results_streaming_service import ResultsStreamingService
 from backend.app.services.sequential_testing_service import SequentialTestingService
 
@@ -477,3 +483,48 @@ def test_daily_series_ends_at_the_results_count_when_users_convert_outside_the_w
     per_day = {n: [p["conversions"] for p in s["values"]] for n, s in by_name.items()}
     assert per_day["control"] == [1, 0, 0]
     assert per_day["treatment"] == [0, 1, 1]
+
+
+@pytest.mark.regression
+def test_conversion_counts_never_join_events_to_assignments_in_sql(
+    db_session, experiment
+):
+    """
+    #233 follow-up: on a freshly seeded database (no planner statistics yet)
+    PostgreSQL ran the events-to-assignments join as a nested loop over a
+    sequential scan: more than 8 s for the demo data in CI, on the event loop
+    of the live-results stream, so docs/websocket-streaming.md's snapshot
+    never arrived.  The counts are now read from ``events`` alone and the
+    assignments looked up by id, so no statement touches both tables.
+    """
+    exp = experiment
+    control, treatment = _variants(exp)
+    statements = []
+    engine = db_session.get_bind()
+
+    def record(conn, cursor, statement, parameters, context, executemany):
+        statements.append(statement)
+
+    event.listen(engine, "before_cursor_execute", record)
+    try:
+        counts = {
+            v.name: count_converting_users(db_session, exp.id, v.id, "purchase")
+            for v in (control, treatment)
+        }
+        firsts = {
+            v.name: len(first_conversion_times(db_session, exp.id, v.id, "purchase"))
+            for v in (control, treatment)
+        }
+        total = count_converting_users_any(db_session, exp.id, ["purchase"])
+        streamed = _streaming_counts(db_session, exp)
+    finally:
+        event.remove(engine, "before_cursor_execute", record)
+
+    converted = {k: v["converted"] for k, v in EXPECTED.items()}
+    assert counts == converted
+    assert firsts == converted
+    assert total == 5
+    assert streamed == EXPECTED
+    joined = [s for s in statements if ".events" in s and ".assignments" in s]
+    assert statements, "no SQL was captured"
+    assert joined == [], joined

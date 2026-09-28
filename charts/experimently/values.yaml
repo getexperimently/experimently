@@ -20,6 +20,12 @@ profile: core
 # `example.com` or `*.example.com`.
 allowedHosts: []
 
+# -- Browser origins other than publicBaseUrl that may call the API, such as a
+# site running the browser SDK: `https://shop.example.com`. Set as CORS_ORIGINS.
+# The dashboard is served from publicBaseUrl and needs no entry. Empty, the API
+# allows no other origin. `*` is refused: list the sites instead.
+corsOrigins: []
+
 # -- Email of the first administrator, created once when the users table is empty.
 firstSuperuser: ""
 
