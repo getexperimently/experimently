@@ -21,8 +21,10 @@ What it refuses:
   line, and nothing else is listed, as the settings refuse it outright);
   ``SECRET_KEY``, ``FIRST_SUPERUSER_PASSWORD``
   and (full profile) ``AUDIT_HMAC_KEY`` missing, too short or a published
-  placeholder; ``PUBLIC_BASE_URL`` missing (unless ``ALLOWED_HOSTS`` names the
-  hosts) or malformed; ``ALLOWED_HOSTS=*``; ``POSTGRES_SERVER`` (or
+  placeholder; (full profile) ``WAREHOUSE_CREDENTIALS_KEYS`` set but not a
+  list of Fernet keys, or holding a placeholder (it may be absent);
+  ``PUBLIC_BASE_URL`` missing (unless ``ALLOWED_HOSTS`` names the hosts) or
+  malformed; ``ALLOWED_HOSTS=*``; ``POSTGRES_SERVER`` (or
   ``POSTGRES_HOST``) not set; ``DATABASE_URL`` or ``DATABASE_URI`` set.
 
 The secret rules are ``settings_rules``', the ones ``config.py`` and the
@@ -45,6 +47,7 @@ from typing import Callable, Dict, List, Mapping, Optional
 
 from backend.app.core.settings_rules import (
     CANONICAL_ENVIRONMENTS,
+    CREDENTIAL_KEYS_SETTING,
     ENV_FILES,
     HARDENED_ENVIRONMENTS,
     MIN_SECRET_KEY_LENGTH,
@@ -52,6 +55,7 @@ from backend.app.core.settings_rules import (
     PUBLIC_BASE_URL_EXAMPLE,
     allowed_host_pattern_error,
     canonical_environment_quiet,
+    credential_keys_error,
     parse_allowed_hosts,
     public_base_url_error,
     secret_is_weak,
@@ -247,6 +251,11 @@ def check(
             f"shorter than {MIN_SECRET_KEY_LENGTH} characters or a published placeholder",
             GENERATE_SECRET,
         )
+        # Optional, but when it is set it must be usable: the modules'
+        # settings refuse the same values (settings_rules).
+        keys_error = credential_keys_error(value(CREDENTIAL_KEYS_SETTING))
+        if keys_error:
+            problems.append(keys_error)
 
     # The entrypoint's database wait reads the process environment only, and
     # falls back from POSTGRES_SERVER to POSTGRES_HOST to localhost.

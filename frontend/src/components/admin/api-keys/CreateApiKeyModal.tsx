@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { apiFetch } from '@/services/api';
+import { apiFetch, UserMe } from '@/services/api';
+import { useOptionalAuth } from '@/contexts/AuthContext';
 
 /**
  * `POST /api/v1/api-keys` response. The plaintext key is returned once as
@@ -33,7 +34,23 @@ interface CreateApiKeyModalProps {
  */
 export const SDK_RULESET_SCOPE = 'sdk:ruleset';
 
+/**
+ * Server-side evaluation keys are for roles that can change flags: the API
+ * refuses `sdk:ruleset` with 403 for anyone else, so the option is disabled
+ * here for the same users, with the reason shown. No signed-in user (no
+ * AuthProvider) is treated as not allowed.
+ */
+export function canCreateRulesetKey(user: UserMe | null | undefined): boolean {
+  if (!user) return false;
+  return user.is_superuser || user.role === 'ADMIN' || user.role === 'DEVELOPER';
+}
+
+export const RULESET_SCOPE_ROLE_REASON =
+  'Only users who can change feature flags (the ADMIN and DEVELOPER roles, or a superuser) can create a key with this scope.';
+
 export function CreateApiKeyModal({ isOpen, onClose, onSuccess }: CreateApiKeyModalProps) {
+  const auth = useOptionalAuth();
+  const rulesetAllowed = canCreateRulesetKey(auth?.user);
   const [name, setName] = useState('');
   const [rulesetScope, setRulesetScope] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -52,7 +69,7 @@ export function CreateApiKeyModal({ isOpen, onClose, onSuccess }: CreateApiKeyMo
     try {
       const data = await apiFetch<CreatedApiKey>('/api/v1/api-keys', {
         method: 'POST',
-        json: rulesetScope
+        json: rulesetScope && rulesetAllowed
           ? { name: name.trim(), scopes: [SDK_RULESET_SCOPE] }
           : { name: name.trim() },
       });
@@ -149,14 +166,19 @@ export function CreateApiKeyModal({ isOpen, onClose, onSuccess }: CreateApiKeyMo
                   id="api-key-ruleset-scope"
                   data-testid="api-key-ruleset-scope"
                   type="checkbox"
-                  checked={rulesetScope}
+                  checked={rulesetScope && rulesetAllowed}
+                  disabled={!rulesetAllowed}
                   onChange={(e) => setRulesetScope(e.target.checked)}
-                  aria-describedby="api-key-ruleset-scope-help"
-                  className="mt-0.5 h-4 w-4 rounded border-slate-300 text-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  aria-describedby={
+                    rulesetAllowed
+                      ? 'api-key-ruleset-scope-help'
+                      : 'api-key-ruleset-scope-help api-key-ruleset-scope-reason'
+                  }
+                  className="mt-0.5 h-4 w-4 rounded border-slate-300 text-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
                 />
                 <label
                   htmlFor="api-key-ruleset-scope"
-                  className="text-sm font-medium text-slate-700"
+                  className={`text-sm font-medium ${rulesetAllowed ? 'text-slate-700' : 'text-slate-600'}`}
                 >
                   Server-side local evaluation (sdk:ruleset)
                 </label>
@@ -169,6 +191,15 @@ export function CreateApiKeyModal({ isOpen, onClose, onSuccess }: CreateApiKeyMo
                 For server-side SDKs that evaluate flags locally. A key with this scope will be
                 able to download every flag&apos;s targeting rules, so keep it on a server.
               </p>
+              {!rulesetAllowed && (
+                <p
+                  id="api-key-ruleset-scope-reason"
+                  data-testid="api-key-ruleset-scope-reason"
+                  className="mt-1 ml-6 text-sm text-slate-700"
+                >
+                  {RULESET_SCOPE_ROLE_REASON}
+                </p>
+              )}
             </div>
 
             {/* Error */}
