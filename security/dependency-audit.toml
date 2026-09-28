@@ -14,16 +14,9 @@
 #
 # Adding one is a review decision. Say why, and set `review_by`.
 
-[[ignore]]
-id = "PYSEC-2026-1845"
-package = "pytest"
-reason = """
-Test runner. Fixed in 9.0.3; this tree pins 7.4.2 and the jump is two major
-versions across ~3,500 tests, which is its own change with its own review, not
-a security patch to slip into a CI gate. pytest is not in runtime.txt or
-either lock, so nothing it affects is deployed or distributed.
-"""
-review_by = "2026-12-31"
+# PYSEC-2026-1845 (pytest, GHSA-6w46-j5rx-g56g) was listed here and has been
+# removed: pytest moved from 7.4.4 to 9.0.3, the fixed release (#136). Left in,
+# it would have failed the stale-exception check.
 
 # PYSEC-2026-1325 (ecdsa) was listed here and has been removed. It never
 # belonged: it reached the audit only because the first version of

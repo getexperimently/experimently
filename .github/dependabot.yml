@@ -10,7 +10,7 @@ version: 2
 #         update-types: ["version-update:semver-major"]
 #
 # because a major in this repository is a migration, not a bump, and the
-# evidence is that it was never once merged as one: #225 records 21 major pull
+# evidence is that it was never once merged as one: #74 records 21 major pull
 # requests closed as "each a real migration rather than a bump" -- typescript
 # 5 -> 7 across five packages, pytest 7 -> 9 across ~3,500 tests, moto's
 # decorator rename, a Spring Boot major, a slack-github-action major that would
@@ -26,9 +26,9 @@ version: 2
 # does NOT silence Dependabot security ALERTS, which still fire on the
 # Security tab, and it does not affect `security-scan.yml` (pip-audit, npm
 # audit, trivy, CodeQL). But it does mean a major that only a major fixes will
-# not arrive as a pull request -- pytest 7 -> 9 is the live example, since it
-# carries the accepted advisory PYSEC-2026-1845 in
-# security/dependency-audit.toml. **#225 is the tracker; work it deliberately.**
+# not arrive as a pull request -- pytest 7 -> 9 was the example: it carried
+# the advisory PYSEC-2026-1845 until it was done by hand (#136). A major that
+# a security fix needs is opened as an issue and worked deliberately.
 #
 # Schedules: the ten weekly entries are staggered two per weekday. The nine SDK
 # ecosystems we rarely touch are monthly -- which reduces their frequency but
@@ -126,19 +126,6 @@ updates:
       # added, so the same bump came back and failed 13 checks. They move when
       # aws-cdk-lib moves, which is a major migration someone does by hand.
       - dependency-name: "aws-cdk.*"
-      # pytest is ANCHORED at 7.4 until the 7 -> 9 migration (#294), and these
-      # two declare a floor above it, so a minor bump of either makes the file
-      # unresolvable:
-      #
-      #   pytest-asyncio 0.26.0 depends on pytest<9 and >=8.2   (#304)
-      #   locust 2.40+ requires pytest>=8.3                     (already noted
-      #                                                          beside the pin)
-      #
-      # They move when pytest moves.
-      - dependency-name: "pytest-asyncio"
-        update-types: ["version-update:semver-minor"]
-      - dependency-name: "locust"
-        update-types: ["version-update:semver-minor"]
     labels: ["dependencies", "python", "infrastructure"]
     groups:
       patch-and-minor:
