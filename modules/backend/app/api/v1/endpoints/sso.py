@@ -47,7 +47,6 @@ from sqlalchemy.orm import Session
 from backend.app.api import deps
 from backend.app.api.v1.endpoints.auth import user_to_me
 from backend.app.core.config import normalise_origin, settings
-from backend.app.core.logger import get_log_context
 from backend.app.core.security import create_local_access_token
 from backend.app.models.user import User, UserRole
 from backend.app.schemas.auth import UserMe
@@ -305,6 +304,10 @@ def saml_acs(
 
     user_info = sso_service.parse_saml_response(config, saml_response_b64)
     user = sso_service.provision_user(db, user_info, config)
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Inactive user"
+        )
     token = _issue_jwt(user)
 
     return SAMLLoginResponse(
@@ -406,8 +409,6 @@ def _redirect_to_provider(
 # Sign-in from the dashboard (C2b): redirect mode and the hand-off
 # ---------------------------------------------------------------------------
 
-#: The shape a request id must have to be put in a redirect URL.
-_REQUEST_ID = re.compile(r"[A-Za-z0-9._:-]{1,128}")
 #: An OAuth `error` code as the dashboard may show it; anything else is dropped.
 _IDP_ERROR = re.compile(r"[a-z_]{1,64}")
 _PROVIDER_NAMES = frozenset(p.value for p in SSOProviderType)
@@ -421,10 +422,7 @@ EXCHANGE_BODY_DETAIL = sso_service.HANDOFF_REFUSED_DETAIL
 
 def _request_id() -> Optional[str]:
     """This request's id (the one on its `X-Request-ID`), if it is safe to show."""
-    value = get_log_context().get("request_id")
-    if isinstance(value, str) and _REQUEST_ID.fullmatch(value):
-        return value
-    return None
+    return sso_service.current_request_id()
 
 
 def _login_error_url(

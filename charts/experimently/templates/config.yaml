@@ -13,6 +13,9 @@ data:
   # carries that host as well as the extra names.
   ALLOWED_HOSTS: {{ prepend . (include "experimently.publicHost" $) | join "," | quote }}
   {{- end }}
+  {{- with .Values.corsOrigins }}
+  CORS_ORIGINS: {{ join "," . | quote }}
+  {{- end }}
   AUTH_PROVIDER: local
   LOG_FORMAT: json
   WEB_CONCURRENCY: "1"

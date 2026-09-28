@@ -102,7 +102,10 @@ def test_with_neither_setting_the_output_is_unchanged(cls):
     settings = cls.model_construct()
     settings.BACKEND_CORS_ORIGINS = []
     settings.CORS_ORIGINS = cls.model_fields["CORS_ORIGINS"].default
-    assert settings.cors_allowed_origins == _today(settings)
+    # The one intended change (#130): production no longer falls back to the
+    # localhost defaults. Development and test keep today's output.
+    expected = [] if cls is ProdSettings else _today(settings)
+    assert settings.cors_allowed_origins == expected
 
 
 @pytest.mark.parametrize(

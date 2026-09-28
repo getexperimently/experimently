@@ -8,7 +8,7 @@ and sensible defaults.
 import logging
 import os
 import warnings
-from typing import Annotated, Any, Dict, List, Literal, Optional, Union
+from typing import Annotated, Any, Dict, List, Literal, Optional, Tuple, Union
 from urllib.parse import urlparse
 
 from pydantic import (
@@ -45,8 +45,9 @@ from backend.app.db.url import postgres_url
 
 logger = logging.getLogger(__name__)
 
-#: The allow-list when neither CORS setting is given (#130 tracks limiting it
-#: to development).
+#: The allow-list when neither CORS setting is given, in development and test
+#: only. Staging and production allow no other origin unless one is configured
+#: (#130): their dashboard is served from the API's own origin and needs none.
 DEFAULT_CORS_ORIGINS = (
     "http://localhost:3100",
     "http://localhost:3000",
@@ -555,11 +556,28 @@ class Settings(BaseSettings):
         """The origins CORSMiddleware allows, normalised.
 
         `BACKEND_CORS_ORIGINS` if it has a usable entry, else `CORS_ORIGINS`,
-        else `DEFAULT_CORS_ORIGINS` -- the order main.py has always used. An
-        entry that is not an origin (see `normalise_origin`) is dropped with an
-        ERROR log, never an exception: a bad entry matched no request before,
-        and must not stop the API starting now.
+        else -- in development and test only -- `DEFAULT_CORS_ORIGINS`; a
+        staging or production API with neither set allows no other origin
+        (#130). Every configured `DASHBOARD_ORIGINS` entry is then added, so a
+        dashboard on its own host is named once. An entry that is not an
+        origin (see `normalise_origin`) is dropped with an ERROR log, never an
+        exception: a bad entry matched no request before, and must not stop
+        the API starting now.
         """
+        origins = self._configured_cors_origins()
+        if origins is None:
+            if self.ENVIRONMENT in HARDENED_ENVIRONMENTS:
+                origins = []
+            else:
+                origins = list(DEFAULT_CORS_ORIGINS)
+        for origin in self._configured_dashboard_origins():
+            if origin not in origins:
+                origins.append(origin)
+        return origins
+
+    def _configured_cors_origins(self) -> Optional[List[str]]:
+        """The first of `BACKEND_CORS_ORIGINS`/`CORS_ORIGINS` with a usable
+        entry, normalised; None when neither has one."""
         for name in ("BACKEND_CORS_ORIGINS", "CORS_ORIGINS"):
             kept: List[str] = []
             for entry in getattr(self, name) or []:
@@ -576,7 +594,7 @@ class Settings(BaseSettings):
                     kept.append(origin)
             if kept:
                 return kept
-        return list(DEFAULT_CORS_ORIGINS)
+        return None
 
     def _configured_dashboard_origins(self) -> List[str]:
         """`DASHBOARD_ORIGINS`, normalised; an entry that is not an origin is
@@ -978,9 +996,45 @@ def dashboard_origins_warning(config: "Settings") -> Optional[str]:
     return (
         f"PUBLIC_BASE_URL={config.PUBLIC_BASE_URL} looks like the API's own origin "
         "and DASHBOARD_ORIGINS is empty, so no dashboard origin is known: SSO "
-        "sign-in from the dashboard will be refused (400). Set DASHBOARD_ORIGINS "
-        "to the dashboard's origin, e.g. https://app.example.com."
+        "sign-in from the dashboard will be refused (400), and a browser refuses "
+        "the dashboard's API calls unless its origin is in CORS_ORIGINS. Set "
+        "DASHBOARD_ORIGINS to the dashboard's origin, e.g. https://app.example.com "
+        "(it is added to the CORS allow-list too), or at least add that origin "
+        "to CORS_ORIGINS."
     )
+
+
+def cors_start_up_messages(config: "Settings") -> List[Tuple[int, str]]:
+    """The `(level, message)` lines main.py logs once at start-up about CORS.
+
+    Staging and production only: one INFO line naming the effective allow-list
+    (or saying there is none), and a WARNING when it contains `*`. Nothing is
+    refused: credentials are never allowed cross-origin (main.py), so a `*`
+    entry is reported rather than stopping an upgraded deployment starting.
+    """
+    if config.ENVIRONMENT not in HARDENED_ENVIRONMENTS:
+        return []
+    origins = config.cors_allowed_origins
+    listed = ", ".join(origins) if origins else "none: same-origin only"
+    messages: List[Tuple[int, str]] = [
+        (
+            logging.INFO,
+            f"CORS allow-list ({config.ENVIRONMENT}): {listed}. To let a site on "
+            "another origin call this API from a browser, add its origin to "
+            "CORS_ORIGINS.",
+        )
+    ]
+    if "*" in origins:
+        messages.append(
+            (
+                logging.WARNING,
+                "The CORS allow-list contains '*', so every website can call this "
+                "API from a browser (without credentials, which are never allowed "
+                "cross-origin). List the sites that need access in CORS_ORIGINS "
+                "instead.",
+            )
+        )
+    return messages
 
 
 class DevSettings(Settings):

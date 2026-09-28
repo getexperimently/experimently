@@ -54,7 +54,7 @@ the dashboard checks:
 | --- | --- | --- |
 | Team workspaces | `workspaces` | Group users into teams, with workspace roles and email invites. Grouping only: access to experiments and flags is by platform role |
 | Custom roles | `rbac` | Roles beyond the built-in four, and permissions granted directly to a user |
-| SSO / SAML / OIDC | `sso` | External identity providers with just-in-time provisioning and role mapping |
+| SSO / SAML / OIDC | `sso` | OIDC identity providers with just-in-time provisioning and role mapping. SAML 2.0 sign-in is not available yet; use OIDC |
 | HIPAA | `hipaa` | PHI encryption, six-year PHI audit retention, BAA records |
 | Compliance reporting | `compliance` | SOC 2 / ISO 27001 reports, signed audit exports |
 | Warehouse analytics | `warehouse` | Being rebuilt (#312): no endpoints today, only its tables (`warehouse_connections`, `warehouse_sources`, `warehouse_analysis_runs`) |

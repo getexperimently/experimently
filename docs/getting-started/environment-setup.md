@@ -85,10 +85,21 @@ CORS_ORIGINS=http://localhost:3100,http://localhost:3200,http://localhost:8000
 SDK_RATE_LIMIT_PER_MINUTE=6000
 ```
 
-- CORS takes either of two forms. `CORS_ORIGINS` is a plain comma-separated list;
-  `BACKEND_CORS_ORIGINS` must be a JSON array of URLs, such as
-  `BACKEND_CORS_ORIGINS=["https://app.example.com"]`. When both are empty the development
-  defaults (localhost ports 3000, 3001, 3100, 3200 and 8000) are used.
+- `CORS_ORIGINS` lists the browser origins, other than the API's own, that may call the
+  API: a comma-separated list or a JSON array, such as
+  `CORS_ORIGINS=https://shop.example.com,https://www.example.com`. `BACKEND_CORS_ORIGINS`
+  is also accepted, in either form, and wins when both are set. Every origin in
+  `DASHBOARD_ORIGINS` is added as well.
+- When neither is set, development and test allow the local apps: `http://localhost`
+  ports 3100, 3000, 3001, 3200 and 3300 (development's own default adds port 8000).
+  Staging and production allow no other origin:
+  the dashboard is served from the API's own origin and needs none. To call a staging or
+  production API from a browser on another origin -- a site running the browser SDK, a
+  demo app, or a local dashboard -- add that origin to `CORS_ORIGINS`.
+- Credentials (cookies) are never allowed on a cross-origin request. `CORS_ORIGINS=*` in
+  staging or production is accepted, allows every origin without credentials, and is
+  reported with a WARNING at start-up; every staging or production start-up logs the
+  effective list in one INFO line.
 - `SDK_RATE_LIMIT_PER_MINUTE` is the per-IP ceiling for SDK traffic (`/api/v1/tracking/*`
   and flag evaluation). The default is 6000 a minute.
 

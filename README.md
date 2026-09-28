@@ -260,7 +260,7 @@ the core through the registration hooks in `backend/app/core/`:
 |---|---|
 | `workspaces` | Group users into teams, with workspace roles and email invites. Grouping only: access to experiments and flags is by platform role |
 | `rbac` | Roles beyond the built-in four, and permissions granted directly to a user |
-| `sso` | SAML 2.0 and OIDC identity providers with just-in-time provisioning and role mapping |
+| `sso` | OIDC identity providers with just-in-time provisioning and role mapping. SAML 2.0 sign-in is not available yet; use OIDC |
 | `hipaa` | PHI encryption, six-year PHI audit retention, BAA records |
 | `compliance` | SOC 2 / ISO 27001 reports, signed audit exports |
 | `warehouse` | Being rebuilt (#312): no endpoints today |

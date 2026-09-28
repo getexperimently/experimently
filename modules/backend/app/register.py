@@ -89,7 +89,10 @@ MODULE_TAGS: list[dict[str, str]] = [
     },
     {
         "name": "SSO",
-        "description": "SAML 2.0 and OIDC single sign-on with just-in-time provisioning",
+        "description": (
+            "OIDC single sign-on with just-in-time provisioning. "
+            "SAML 2.0 sign-in is not available yet."
+        ),
     },
     {
         "name": "Workspaces",
